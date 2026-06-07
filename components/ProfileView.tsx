@@ -18,7 +18,7 @@ export default function ProfileView({ userId, posts }: ProfileViewProps) {
           </div>
           <div>
             <h2 className="font-bold text-sm text-white">{userId}</h2>
-            <span className="text-[10px] text-gray-500">登録: たった今 (kusaモバイルポートフォリオ)</span>
+            <span className="text-[10px] text-gray-500">登録: たった今 (うんｊレゼポートフォリオ)</span>
           </div>
         </div>
         <p className="text-xs text-gray-400 leading-relaxed">

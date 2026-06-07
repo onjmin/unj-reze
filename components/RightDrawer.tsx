@@ -110,7 +110,7 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
           <div className="h-px bg-gray-800" />
 
           <div className="space-y-2 text-xs text-gray-400">
-            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">kusaのステータス</label>
+            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">うんｊレゼのステータス</label>
             <div className="bg-gray-100/5 rounded-xl p-3 border border-gray-800 space-y-2">
               <div className="flex justify-between">
                 <span>ユーザーレベル</span>
@@ -129,7 +129,7 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
         </div>
 
         <div className="p-4 border-t border-gray-800 bg-[#0b0e14] text-center text-[10px] text-gray-600">
-          <span>🌱 kusa Mobile Core v1.4.2 🥺</span>
+          <span>うんｊレゼ v0.1.0</span>
         </div>
       </div>
     </>

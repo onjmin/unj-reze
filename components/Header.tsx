@@ -26,7 +26,7 @@ export default function Header({ userId, server, bbsMode, onOpenDrawer }: Header
     <header className="flex flex-col border-b border-gray-800 px-3 py-2 shrink-0 bg-[#0b0e14]/90 backdrop-blur z-20">
       <div className="flex justify-between items-center mb-1.5">
         <div className="flex items-center space-x-2">
-          <span className="text-[#a3e635] font-bold text-xl tracking-tight">🌱kusa🥺</span>
+          <span className="text-[#a3e635] font-bold text-xl tracking-tight">うんｊレゼ</span>
         </div>
         <div className="flex items-center space-x-2.5 text-xs">
           <span className="text-[#a3e635] border border-[#a3e635]/30 rounded px-2 py-0.5 font-bold bg-[#a3e635]/5">

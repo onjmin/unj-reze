@@ -142,7 +142,7 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
           </button>
           <div>
             <h2 className="font-bold text-xs leading-tight text-white">さとるのちんぽ escape</h2>
-            <p className="text-[10px] text-gray-500 mt-0.5">kusaサンドボックス実行コンテキスト</p>
+            <p className="text-[10px] text-gray-500 mt-0.5">うんｊレゼ サンドボックス</p>
           </div>
         </div>
       </div>
