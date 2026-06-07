@@ -29,9 +29,9 @@ export default function FeedList({ posts, activeTab, rankCategory, onLike, onDis
       displayPosts.sort((a, b) => b.heartsTotal - a.heartsTotal);
     }
   } else if (activeTab === 'game') {
-    displayPosts = displayPosts.filter(p => p.hasGame || p.content.includes('#ゲーム') || p.id === 3);
+    displayPosts = displayPosts.filter(p => p.hasGame || p.content.includes('#ゲーム'));
   } else if (activeTab === 'following') {
-    displayPosts = displayPosts.filter(p => p.id === 1 || p.id === 3);
+    displayPosts = displayPosts.filter(p => p.id === 3 || p.id === 6);
   }
 
   return (

@@ -3,7 +3,7 @@
 import { Search } from 'lucide-react';
 
 export default function SearchView() {
-  const trends = ["#お絵描き", "ねるネルねるね", "さとるのちんぽ", "キョン風呂", "名無しBBS", "低遅延モード"];
+  const trends = ["#お絵描き", "#ゲーム制作", "ドット絵講座", "作業用BGM", "名無しBBS", "春のイラスト祭", "青空フォト", "lofi beats"];
   return (
     <div className="p-4 space-y-4">
       <div className="relative">

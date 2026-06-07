@@ -5,8 +5,9 @@ import { Plus } from 'lucide-react';
 
 export default function MessageView() {
   const [messages, setMessages] = useState([
-    { id: 1, sender: "管理人のちんぽ", text: "ようこそ！改変可能なクリエイティブBBSへ！", time: "昨日" },
-    { id: 2, sender: "名無しdbF", text: "コラボのお絵描きバグってないかな？", time: "2時間前" }
+    { id: 1, sender: "名無しLm8", text: "おはよう！今日の雪写真見た？", time: "7時間前" },
+    { id: 2, sender: "名無しXz9", text: "イラストまとめ見てくれてありがとう！", time: "2日前" },
+    { id: 3, sender: "名無しQp7", text: "ドット絵のコツ教えてくれる？", time: "1日前" }
   ]);
   const [msgInput, setMsgInput] = useState('');
 
