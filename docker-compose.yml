@@ -1,0 +1,17 @@
+services:
+  db:
+    image: neondatabase/neon_local:latest
+    ports:
+      - "5432:5432"
+    environment:
+      NEON_API_KEY: ${NEON_API_KEY}
+      NEON_PROJECT_ID: ${NEON_PROJECT_ID}
+      # 既存ブランチに接続する場合: BRANCH_ID を指定
+      # BRANCH_ID: ${BRANCH_ID}
+      # エフェメラルブランチを作成する場合: PARENT_BRANCH_ID を指定
+      PARENT_BRANCH_ID: ${PARENT_BRANCH_ID}
+      # ブランチを永続化 (デフォルト: true=コンテナ停止時に削除)
+      DELETE_BRANCH: "false"
+    volumes:
+      - ./.neon_local/:/tmp/.neon_local
+      - ./.git/HEAD:/tmp/.git/HEAD:ro,consistent
