@@ -11,11 +11,13 @@ interface FeedListProps {
   onDislike: (id: number) => void;
   onRepost: (id: number) => void;
   onAddReply: (id: number, text: string) => void;
+  onQuickPost: () => void;
   openGame: () => void;
   openDrawing: () => void;
+  openMml: () => void;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, onLike, onDislike, onRepost, onAddReply, openGame, openDrawing }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, onLike, onDislike, onRepost, onAddReply, onQuickPost, openGame, openDrawing, openMml }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -47,8 +49,10 @@ export default function FeedList({ posts, activeTab, rankCategory, onLike, onDis
           onDislike={onDislike}
           onRepost={onRepost}
           onAddReply={onAddReply}
+          onQuickPost={onQuickPost}
           openGame={openGame}
           openDrawing={openDrawing}
+          openMml={openMml}
         />
       ))}
       <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">

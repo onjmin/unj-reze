@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pen, PlaySquare, X } from 'lucide-react';
+import { Pen, PlaySquare, Music, X } from 'lucide-react';
 
 import { Post } from '@/lib/types';
 import { INITIAL_POSTS } from '@/lib/data';
@@ -14,6 +14,8 @@ import BottomNav from '@/components/BottomNav';
 import FAB from '@/components/FAB';
 import DrawingEditor from '@/components/DrawingEditor';
 import GamePlayer from '@/components/GamePlayer';
+import MmlEditor from '@/components/MmlEditor';
+import PostComposer from '@/components/PostComposer';
 import SearchView from '@/components/SearchView';
 import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
@@ -25,13 +27,17 @@ export default function App() {
   const [topTab, setTopTab] = useState('everyone');
   const [rankCategory, setRankCategory] = useState('イイ');
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
-  const [fabOpen, setFabOpen] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
   const [server, setServer] = useState('/main');
   const [bbsMode, setBbsMode] = useState('掲示板モード');
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+
+  const handleQuickPost = () => {
+    setComposerOpen(true);
+  };
 
   const handleLike = (postId: number) => {
     setPosts(posts.map(p => {
@@ -128,6 +134,11 @@ export default function App() {
     setInputText("#お絵描き 自作イラスト完成！");
   };
 
+  const handleSaveMml = (mml: string) => {
+    setActiveScreen(null);
+    setInputText(`#MML作曲 ${mml}`);
+  };
+
   return (
     <div className="bg-[#0b0e14] text-gray-100 h-screen w-full flex flex-col overflow-hidden select-none font-sans relative sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-800 shadow-2xl">
       <RightDrawer
@@ -154,6 +165,12 @@ export default function App() {
             setInputText(`🎮『さとるのちんぽ escape』で ${score} 点を獲得したぞ！ #ゲーム`);
             setActiveScreen(null);
           }}
+        />
+      )}
+      {activeScreen === 'mml' && (
+        <MmlEditor
+          onClose={() => setActiveScreen(null)}
+          onSave={handleSaveMml}
         />
       )}
 
@@ -223,6 +240,13 @@ export default function App() {
                         >
                           <PlaySquare size={18} />
                         </button>
+                        <button
+                          onClick={() => setActiveScreen('mml')}
+                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-pink-400 transition-colors"
+                          title="MML作曲"
+                        >
+                          <Music size={18} />
+                        </button>
                       </div>
                       <button
                         onClick={handleCreatePost}
@@ -250,8 +274,10 @@ export default function App() {
                   onDislike={handleDislike}
                   onRepost={handleRepost}
                   onAddReply={handleAddReply}
+                  onQuickPost={handleQuickPost}
                   openGame={() => setActiveScreen('game')}
                   openDrawing={() => setActiveScreen('drawing')}
+                  openMml={() => setActiveScreen('mml')}
                 />
               </>
             )}
@@ -264,14 +290,23 @@ export default function App() {
 
           <BottomNav current={currentNav} set={setCurrentNav} />
 
-          <FAB
-            open={fabOpen}
-            setOpen={setFabOpen}
-            openDrawing={() => { setFabOpen(false); setActiveScreen('drawing'); }}
-            openGame={() => { setFabOpen(false); setActiveScreen('game'); }}
-            openText={() => { setFabOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-          />
+          <FAB openText={handleQuickPost} />
         </>
+      )}
+
+      {composerOpen && (
+        <PostComposer
+          userId={userId}
+          text={inputText}
+          setText={setInputText}
+          image={attachedImage}
+          setImage={setAttachedImage}
+          onClose={() => setComposerOpen(false)}
+          onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
+          onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}
+          onOpenGame={() => { setComposerOpen(false); setActiveScreen('game'); }}
+          onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
+        />
       )}
     </div>
   );

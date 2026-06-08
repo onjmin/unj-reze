@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Plus, MoreHorizontal, ThumbsUp, ThumbsDown,
-  MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare
+  MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare, Copy, UserPlus, Ban, Flag
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
+import { extractMmlFromContent } from '@/lib/mml';
+import { extractChordsFromContent } from '@/lib/chord';
+import MmlPlayer from './MmlPlayer';
+import ChordPlayer from './ChordPlayer';
 
 interface PostContainerProps {
   post: Post;
@@ -16,13 +21,66 @@ interface PostContainerProps {
   onDislike: (id: number) => void;
   onRepost: (id: number) => void;
   onAddReply: (id: number, text: string) => void;
+  onQuickPost: () => void;
   openGame: () => void;
   openDrawing: () => void;
+  openMml: () => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onAddReply, openGame, openDrawing }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onAddReply, onQuickPost, openGame, openDrawing, openMml }: PostContainerProps) {
+  const router = useRouter();
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const toggleMenu = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setMenuOpen(v => !v);
+  }, []);
+
+  const handleMenuCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(post.content);
+    setMenuOpen(false);
+  }, [post.content]);
+
+  const handleMenuFollow = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFollowing(v => !v);
+    setMenuOpen(false);
+  }, []);
+
+  const handleMenuBlock = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBlocked(v => !v);
+    setMenuOpen(false);
+  }, []);
+
+  const handleMenuReport = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const handlePostClick = useCallback((e: React.MouseEvent) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]')) return;
+    router.push(`/post/${post.id}`);
+  }, [router, post.id]);
 
   const getRankScoreDisplay = () => {
     if (rankCategory === 'イイ') return `${post.likes} いいね`;
@@ -55,31 +113,71 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
       <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
         <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative`}>
           {post.name.substring(3, 5) || "名無"}
-          <div className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full p-0.5 border border-gray-800">
+          <button
+            onClick={(e) => { e.stopPropagation(); onQuickPost(); }}
+            className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full p-0.5 border border-gray-800 hover:bg-blue-600 transition-colors cursor-pointer"
+          >
             <Plus size={8} className="text-gray-400" />
-          </div>
+          </button>
         </div>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={handlePostClick}>
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
               <span className="font-bold text-xs text-gray-200">{post.name}</span>
               <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
             </div>
-            <MoreHorizontal size={14} className="text-gray-500 hover:text-gray-300 cursor-pointer" />
+            <div ref={menuRef} className="relative">
+              <button onClick={toggleMenu} className="p-0.5 -mr-0.5 rounded hover:bg-gray-100/10 transition-colors">
+                <MoreHorizontal size={14} className="text-gray-500 hover:text-gray-300" />
+              </button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-6 z-50 w-48 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1 text-xs"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button role="menuitem" onClick={handleMenuCopy} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Copy size={12} className="shrink-0" />
+                    <span>テキストをコピー</span>
+                  </button>
+                  <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <UserPlus size={12} className="shrink-0" />
+                    <span>{following ? 'フォロー中' : `${post.name}さんをフォロー`}</span>
+                  </button>
+                  <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Ban size={12} className="shrink-0" />
+                    <span>{blocked ? 'ブロック中' : `${post.name}さんをブロック`}</span>
+                  </button>
+                  <div className="border-t border-gray-800 my-1" />
+                  <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                    <Flag size={12} className="shrink-0" />
+                    <span>ポストを通報</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
-            {post.content.split('\n').map((line, lIdx) => (
-              <span key={lIdx} className="block">
-                {line.split(' ').map((word, wIdx) => {
-                  if (word.startsWith('#')) {
-                    return <span key={wIdx} className="text-blue-400 mr-1 cursor-pointer hover:underline">{word}</span>;
-                  }
-                  return <span key={wIdx}>{word} </span>;
-                })}
-              </span>
-            ))}
+            {(() => {
+              const allLines = post.content.split('\n');
+              const mmlIdx = allLines.findIndex(l => l.includes('#MML作曲'));
+              const chordRes = extractChordsFromContent(post.content);
+              const chordStartLine = chordRes?.startLine ?? Infinity;
+              const cutIdx = Math.min(mmlIdx >= 0 ? mmlIdx : Infinity, chordStartLine);
+              const lines = cutIdx < Infinity ? allLines.slice(0, cutIdx) : allLines;
+              return lines.map((line, lIdx) => (
+                <span key={lIdx} className="block">
+                  {line.split(' ').map((word, wIdx) => {
+                    if (word.startsWith('#')) {
+                      return <span key={wIdx} className="text-blue-400 mr-1 cursor-pointer hover:underline">{word}</span>;
+                    }
+                    return <span key={wIdx}>{word} </span>;
+                  })}
+                </span>
+              ));
+            })()}
           </p>
 
           {post.hasImage && (
@@ -123,6 +221,13 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               </div>
             </div>
           )}
+
+          {(() => {
+            const mmlCode = extractMmlFromContent(post.content);
+            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            const chordRes = extractChordsFromContent(post.content);
+            return chordRes ? <ChordPlayer chords={chordRes.chords} /> : null;
+          })()}
 
           <div className="flex justify-between items-center text-gray-500 mt-1 max-w-[280px]">
             <button
