@@ -1,0 +1,6 @@
+1:"$Sreact.fragment"
+2:I[64267,["/unj-reze/_next/static/chunks/2qwbb0hlrvk7_.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js","/unj-reze/_next/static/chunks/14tuf80gi5rgt.js"],"default"]
+3:I[62991,["/unj-reze/_next/static/chunks/2qwbb0hlrvk7_.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js"],"OutletBoundary"]
+4:"$Sreact.suspense"
+0:{"rsc":["$","$1","c",{"children":[["$","div",null,{"className":"bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-800","children":["$","$L2",null,{"post":{"id":2,"name":"名無しR9k","time":"5時間前","content":"今週の #ゲーム 進捗\nステージ3のボス戦やっと実装できた\nあとは調整だけどバグが取れない…","likes":18,"dislikes":3,"liked":false,"disliked":false,"repliesCount":7,"reposts":1,"reposted":false,"hasGame":true,"avatarColor":"from-red-500 to-rose-600","hasCollabButton":true,"heartsTotal":95,"replies":[{"id":103,"name":"名無しTp4","content":"デバッグ頑張って！","time":"4時間前"}]}}]}],[["$","script","script-0",{"src":"/unj-reze/_next/static/chunks/14tuf80gi5rgt.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"DVC9z3TV1k1C473mrhdLE"}
+5:null

@@ -1,0 +1,6 @@
+1:"$Sreact.fragment"
+2:I[64267,["/unj-reze/_next/static/chunks/2qwbb0hlrvk7_.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js","/unj-reze/_next/static/chunks/14tuf80gi5rgt.js"],"default"]
+3:I[62991,["/unj-reze/_next/static/chunks/2qwbb0hlrvk7_.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js"],"OutletBoundary"]
+4:"$Sreact.suspense"
+0:{"rsc":["$","$1","c",{"children":[["$","div",null,{"className":"bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-800","children":["$","$L2",null,{"post":{"id":11,"name":"名無しJk8","time":"10分前","content":"# chord\n# t185\n# Bメロ\n|Am7(b5)/G|F6|Dm7|Gm\n|Cm7Dm7|EbDm7|EbF/Eb|D7F/G\n\n# サビ\n|Gm|F6|Eb|Gm7\n|Cm6D|DmGm7|Cm6Dm7|GM7\n\n|Eb|F|Dm7|Gm7\n|EbM7|F|Gm7|G","likes":15,"dislikes":0,"liked":false,"disliked":false,"repliesCount":3,"reposts":2,"reposted":false,"avatarColor":"from-rose-400 to-pink-600","hasCollabButton":false,"heartsTotal":45,"replies":[]}}]}],[["$","script","script-0",{"src":"/unj-reze/_next/static/chunks/14tuf80gi5rgt.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"DVC9z3TV1k1C473mrhdLE"}
+5:null
