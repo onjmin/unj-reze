@@ -136,11 +136,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
             {(() => {
-              const allLines = post.content.split('\n');
-              const mmlIdx = allLines.findIndex(l => l.includes('#MML作曲'));
-              const chordStartLine = chordRes?.startLine ?? Infinity;
-              const cutIdx = Math.min(mmlIdx >= 0 ? mmlIdx : Infinity, chordStartLine);
-              const lines = cutIdx < Infinity ? allLines.slice(0, cutIdx) : allLines;
+              const markers = ['#mml', '#chord',];
+              const markerPos = markers.reduce((best, kw) => {
+                const p = post.content.indexOf(kw);
+                return p >= 0 ? Math.min(best, p) : best;
+              }, Infinity);
+              const displayText = markerPos < Infinity ? post.content.slice(0, markerPos).trimEnd() : post.content;
+              const lines = displayText ? displayText.split('\n') : [];
               return lines.map((line, lIdx) => (
                 <span key={lIdx} className="block">
                   {line.split(' ').map((word, wIdx) => (

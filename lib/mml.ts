@@ -129,9 +129,18 @@ function countToMmlDiv(count: number): string {
 }
 
 export function extractMmlFromContent(content: string): string | null {
-  const idx = content.indexOf('#MML作曲');
+  const markers = ['#mml'];
+  let idx = -1;
+  let markerLen = 0;
+  for (const m of markers) {
+    const p = content.indexOf(m);
+    if (p !== -1 && (idx === -1 || p < idx)) {
+      idx = p;
+      markerLen = m.length;
+    }
+  }
   if (idx === -1) return null;
-  return content.slice(idx + '#MML作曲'.length).trim();
+  return content.slice(idx + markerLen).trim();
 }
 
 function parseSingleTrack(body: string): GridNote[] {
