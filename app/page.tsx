@@ -160,9 +160,9 @@ export default function App() {
       )}
       {activeScreen === 'game' && (
         <GamePlayer
-          onClose={() => setActiveScreen(null)}
+          onClose={() => { setActiveScreen(null); setTopTab('everyone'); }}
           onPostScore={(score) => {
-            setInputText(`🎮『さとるのちんぽ escape』で ${score} 点を獲得したぞ！ #ゲーム`);
+            setInputText(`🎮 スコア: ${score} 点を獲得したぞ！ #ゲーム`);
             setActiveScreen(null);
           }}
         />
@@ -188,6 +188,8 @@ export default function App() {
               activeTab={topTab}
               setActiveTab={(tab) => {
                 setTopTab(tab);
+                if (tab === 'game') { setActiveScreen('game'); }
+                else { setActiveScreen(null); }
                 if (tab === 'ranking') {
                   setRankCategory('イイ');
                 }
