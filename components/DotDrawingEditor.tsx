@@ -188,7 +188,8 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
       }
 
       if (px === null) { px = x; py = y; }
-      const points = oekaki.lerp(x, y, px, py!);
+      if (py === null) { py = y; }
+      const points = oekaki.lerp(x, y, px, py);
       if (toolRef.current === 'pen') {
         for (const [cx, cy] of points) active.drawByDot(cx, cy);
       } else if (toolRef.current === 'eraser') {

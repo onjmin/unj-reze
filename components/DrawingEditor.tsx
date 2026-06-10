@@ -185,6 +185,7 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
       }
 
       if (px === null) { px = x; py = y; }
+      if (py === null) { py = y; }
 
       if (toolRef.current === 'brush') {
         active.drawLine(x, y, px, py);
