@@ -150,7 +150,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   {line.split(' ').map((word, wIdx) => (
                     word.startsWith('#')
                       ? <span key={wIdx} className="text-blue-400 mr-1">{word}</span>
-                      : <span key={wIdx}>{word} </span>
+                      : /^https?:\/\//.test(word)
+                        ? <a key={wIdx} href={word} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mr-1">{word}</a>
+                        : <span key={wIdx}>{word} </span>
                   ))}
                 </span>
               ));

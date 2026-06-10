@@ -14,32 +14,10 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
   const { requestFocus, releaseFocus } = useAudioFocus();
   const [closed, setClosed] = useState(false);
   const [stopped, setStopped] = useState(() => embed && embed.type !== 'image');
-  const [width, setWidth] = useState(0);
-  const [height, setHeight] = useState(0);
   const embedRef = useRef<HTMLDivElement>(null);
 
   const handleExternalStop = useCallback(() => {
     setStopped(true);
-  }, []);
-
-  useEffect(() => {
-    const onResize = () => {
-      const w = window.innerWidth * 0.7;
-      const h = window.innerHeight * 0.7;
-      let w2: number, h2: number;
-      if (w < h) {
-        w2 = w;
-        h2 = w2 * (9 / 16);
-      } else {
-        h2 = h * 0.6;
-        w2 = h2 * (16 / 9);
-      }
-      setWidth(w2 | 0);
-      setHeight(h2 | 0);
-    };
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   useEffect(() => {
@@ -100,45 +78,51 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
       )}
 
       {embed.type === 'video' && (
-        <div className="flex justify-center">
-          <iframe
-            title="embed"
-            src={stopped ? 'about:blank' : embed.embedUrl}
-            width={width}
-            height={height}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            className="rounded-b-xl"
-            style={{ border: 'none' }}
-          />
+        <div className="aspect-video">
+          {stopped ? (
+            <div className="w-full h-full bg-gray-900 rounded-b-xl" />
+          ) : (
+            <iframe
+              title="embed"
+              src={embed.embedUrl}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="w-full h-full rounded-b-xl"
+              style={{ border: 'none' }}
+            />
+          )}
         </div>
       )}
 
       {embed.type === 'audio' && (
-        <div className="flex justify-center p-2">
-          <iframe
-            title="embed"
-            src={stopped ? 'about:blank' : embed.embedUrl}
-            width={width}
-            height={height || 166}
-            allow="autoplay"
-            className="rounded-b-xl"
-            style={{ border: 'none' }}
-          />
+        <div className="h-[166px]">
+          {stopped ? (
+            <div className="w-full h-full bg-gray-900 rounded-b-xl" />
+          ) : (
+            <iframe
+              title="embed"
+              src={embed.embedUrl}
+              allow="autoplay"
+              className="w-full h-full rounded-b-xl"
+              style={{ border: 'none' }}
+            />
+          )}
         </div>
       )}
 
       {embed.type === 'game' && (
-        <div className="flex justify-center">
-          <iframe
-            title="embed"
-            src={stopped ? 'about:blank' : embed.embedUrl}
-            width={width}
-            height={height}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            className="rounded-b-xl"
-            style={{ border: 'none' }}
-          />
+        <div className="aspect-video">
+          {stopped ? (
+            <div className="w-full h-full bg-gray-900 rounded-b-xl" />
+          ) : (
+            <iframe
+              title="embed"
+              src={embed.embedUrl}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              className="w-full h-full rounded-b-xl"
+              style={{ border: 'none' }}
+            />
+          )}
         </div>
       )}
     </div>

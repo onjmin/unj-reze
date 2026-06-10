@@ -176,6 +176,9 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                     if (word.startsWith('#')) {
                       return <span key={wIdx} className="text-blue-400 mr-1 cursor-pointer hover:underline">{word}</span>;
                     }
+                    if (/^https?:\/\//.test(word)) {
+                      return <a key={wIdx} href={word} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mr-1">{word}</a>;
+                    }
                     return <span key={wIdx}>{word} </span>;
                   })}
                 </span>

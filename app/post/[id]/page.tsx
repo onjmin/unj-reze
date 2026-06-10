@@ -20,8 +20,10 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
   }
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-800">
-      <PostDetail post={post} />
+    <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col">
+      <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
+        <PostDetail post={post} />
+      </div>
     </div>
   );
 }

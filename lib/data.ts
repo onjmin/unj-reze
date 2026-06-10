@@ -2,6 +2,29 @@ import { Post } from "./types";
 
 export const INITIAL_POSTS: Post[] = [
   {
+    id: 12,
+    name: "名無しvFZ",
+    time: "1分前",
+    content: `https://www.youtube.com/watch?v=nHyQq2FUxig
+
+こんなアレンジ見つけたよ
+[東方風アレンジ] サマータイム・ラプソディ・オブ・ア・ディイング・ワールド (東方眠世界)
+FanTouhouMusic`,
+    likes: 8,
+    dislikes: 0,
+    liked: false,
+    disliked: false,
+    repliesCount: 2,
+    reposts: 1,
+    reposted: false,
+    avatarColor: "from-purple-500 to-pink-600",
+    hasCollabButton: false,
+    heartsTotal: 34,
+    replies: [
+      { id: 115, name: "名無しLz9", content: "このアレンジ良すぎる", time: "たった今" }
+    ]
+  },
+  {
     id: 1,
     name: "名無しaB3",
     time: "3時間前",
