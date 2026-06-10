@@ -48,7 +48,6 @@ body {
 }
 
 .unj-canvas-grid .upper-canvas {
-  opacity: 0.4;
   background-image:
     linear-gradient(to right, rgba(255,255,255,0.3) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255,255,255,0.3) 1px, transparent 1px);

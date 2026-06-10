@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
-  Grid3x3, Trash2, Undo, Redo, Save
+  Grid3x3, Trash2, Undo, Redo, Save, Layers
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
+import LayerPanel from './LayerPanel';
+import type { LayerEntry } from './LayerPanel';
 
 interface DrawingEditorProps {
   onClose: () => void;
@@ -30,6 +32,12 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
   const [brushSize, setBrushSize] = useState(12);
   const [eraserSize, setEraserSize] = useState(20);
   const [showGrid, setShowGrid] = useState(false);
+  const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
+  const [activeLayerIndex, setActiveLayerIndex] = useState(0);
+  const [showLayerPanel, setShowLayerPanel] = useState(false);
+  const layerCounterRef = useRef(1);
+  const layerEntriesRef = useRef<LayerEntry[]>([]);
+  const activeLayerIndexRef = useRef(0);
   const [, forceRender] = useState(0);
 
   toolRef.current = tool;
@@ -55,18 +63,36 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
     const h = Math.min(availH, cap) | 0;
     el.innerHTML = '';
     oekaki.init(el, w, h);
-    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background', 'lower-canvas');
+
+    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
     oekaki.color.value = colorRef.current;
     oekaki.penSize.value = penSize;
     oekaki.brushSize.value = brushSize;
     oekaki.eraserSize.value = eraserSize;
 
+    // g_layers is empty after init — create initial user layers
+    const bgLayer = new oekaki.LayeredCanvas('白背景');
+    bgLayer.fill('#FFF');
+    bgLayer.trace();
+    new oekaki.LayeredCanvas('レイヤー #1');
+    layerCounterRef.current = 2;
+
+    // populate layer entries (topmost first)
+    const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
+      instance: inst,
+      name: inst.name,
+    })).reverse();
+    setLayerEntries(initEntries);
+    layerEntriesRef.current = initEntries;
+    setActiveLayerIndex(0);
+    activeLayerIndexRef.current = 0;
+
     let px: number | null = null;
     let py: number | null = null;
 
     oekaki.onDraw((x, y, buttons) => {
-      const active = oekaki.upperLayer.value;
+      const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (!active?.editable) return;
 
       if (toolRef.current === 'dropper' || (buttons & 2) !== 0) {
@@ -99,7 +125,7 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
 
     oekaki.onDrawn((x, y) => {
       px = null; py = null;
-      const active = oekaki.upperLayer.value;
+      const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (active?.modified()) active.trace();
 
       if (toolRef.current === 'fill') {
@@ -130,15 +156,86 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
   }, [penSize, brushSize, eraserSize]);
 
   const clearCanvas = () => {
-    const active = oekaki.upperLayer.value;
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
     if (!active) return;
     active.clear();
     active.trace();
     forceRender(n => n + 1);
   };
 
-  const handleUndo = () => { oekaki.upperLayer.value?.undo(); forceRender(n => n + 1); };
-  const handleRedo = () => { oekaki.upperLayer.value?.redo(); forceRender(n => n + 1); };
+  const handleUndo = () => {
+    layerEntriesRef.current[activeLayerIndexRef.current]?.instance.undo();
+    forceRender(n => n + 1);
+  };
+  const handleRedo = () => {
+    layerEntriesRef.current[activeLayerIndexRef.current]?.instance.redo();
+    forceRender(n => n + 1);
+  };
+
+  const selectLayer = (i: number) => {
+    setActiveLayerIndex(i);
+    activeLayerIndexRef.current = i;
+  };
+
+  const addLayer = () => {
+    const name = `Layer ${layerCounterRef.current++}`;
+    const newLayer = new oekaki.LayeredCanvas(name);
+    const newEntry: LayerEntry = { instance: newLayer, name };
+    const entries = [newEntry, ...layerEntriesRef.current];
+    setLayerEntries(entries);
+    layerEntriesRef.current = entries;
+    setActiveLayerIndex(0);
+    activeLayerIndexRef.current = 0;
+  };
+
+  const deleteLayer = (i: number) => {
+    const entry = layerEntriesRef.current[i];
+    if (!entry) return;
+    entry.instance.delete();
+    const entries = layerEntriesRef.current.filter((_, idx) => idx !== i);
+    setLayerEntries(entries);
+    layerEntriesRef.current = entries;
+    let newIdx = activeLayerIndexRef.current;
+    if (newIdx >= entries.length) newIdx = entries.length - 1;
+    if (i < activeLayerIndexRef.current) newIdx--;
+    if (newIdx < 0) newIdx = 0;
+    setActiveLayerIndex(newIdx);
+    activeLayerIndexRef.current = newIdx;
+  };
+
+  const reorderLayers = (from: number, to: number) => {
+    const entries = [...layerEntriesRef.current];
+    const [moved] = entries.splice(from, 1);
+    entries.splice(to, 0, moved);
+    setLayerEntries(entries);
+    layerEntriesRef.current = entries;
+    const gLayers = [...entries].reverse().map(e => e.instance);
+    oekaki.setLayers(gLayers);
+    let newIdx = activeLayerIndexRef.current;
+    if (from === newIdx) {
+      newIdx = to;
+    } else if (from < newIdx && to >= newIdx) {
+      newIdx--;
+    } else if (from > newIdx && to <= newIdx) {
+      newIdx++;
+    }
+    setActiveLayerIndex(newIdx);
+    activeLayerIndexRef.current = newIdx;
+  };
+
+  const toggleVisibility = (i: number) => {
+    const entry = layerEntriesRef.current[i];
+    if (!entry) return;
+    entry.instance.visible = !entry.instance.visible;
+    forceRender(n => n + 1);
+  };
+
+  const toggleLock = (i: number) => {
+    const entry = layerEntriesRef.current[i];
+    if (!entry) return;
+    entry.instance.locked = !entry.instance.locked;
+    forceRender(n => n + 1);
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -206,6 +303,13 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
             title="グリッド (G)"
           >
             <Grid3x3 size={15} />
+          </button>
+          <button
+            onClick={() => setShowLayerPanel(v => !v)}
+            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${showLayerPanel ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+            title="レイヤー"
+          >
+            <Layers size={15} />
           </button>
         </div>
 
@@ -284,6 +388,19 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
           </button>
         </div>
       </div>
+      {showLayerPanel && (
+        <LayerPanel
+          layers={layerEntries}
+          activeIndex={activeLayerIndex}
+          onSelect={selectLayer}
+          onReorder={reorderLayers}
+          onToggleVisibility={toggleVisibility}
+          onToggleLock={toggleLock}
+          onAdd={addLayer}
+          onDelete={deleteLayer}
+          onClose={() => setShowLayerPanel(false)}
+        />
+      )}
     </div>
   );
 }
