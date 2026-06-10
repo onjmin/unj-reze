@@ -1,14 +1,15 @@
 'use client';
 
 import { Heart } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 export default function NotificationView() {
-  const notifs = [
-    { id: 1, user: "名無しXz9", action: "がいいねしました", target: "青空の写真", time: "3分前" },
-    { id: 2, user: "名無しLm8", action: "がリポストしました", target: "ドット絵の練習中", time: "8分前" },
-    { id: 3, user: "名無しBn5", action: "が返信しました", target: "作業用BGM何聴いてる？", time: "15分前" },
-    { id: 4, user: "名無しVc1", action: "がフォローしました", target: "", time: "1時間前" }
-  ];
+  const [notifs, setNotifs] = useState<{ id: number; user: string; action: string; target: string; time: string }[]>([]);
+
+  useEffect(() => {
+    api.notifications.list().then(setNotifs);
+  }, []);
   return (
     <div className="divide-y divide-gray-800">
       {notifs.map(n => (

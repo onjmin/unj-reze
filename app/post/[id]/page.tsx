@@ -1,14 +1,15 @@
-import { INITIAL_POSTS } from '@/lib/data';
+import { db } from '@/lib/mock-db';
 import PostDetail from '@/components/PostDetail';
 import Link from 'next/link';
 
 export function generateStaticParams() {
-  return INITIAL_POSTS.map(post => ({ id: post.id.toString() }));
+  return db.getPosts().map(post => ({ id: post.id.toString() }));
 }
 
 export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const post = INITIAL_POSTS.find(p => p.id === parseInt(id));
+  const post = db.getPost(parseInt(id));
+  const allPosts = db.getPosts();
 
   if (!post) {
     return (
@@ -22,7 +23,7 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
   return (
     <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col">
       <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
-        <PostDetail post={post} allPosts={INITIAL_POSTS} />
+        <PostDetail post={post} allPosts={allPosts} />
       </div>
     </div>
   );

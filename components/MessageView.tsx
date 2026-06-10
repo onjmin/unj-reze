@@ -1,19 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
+import { api } from '@/lib/api';
 
 export default function MessageView() {
-  const [messages, setMessages] = useState([
-    { id: 1, sender: "名無しLm8", text: "おはよう！今日の雪写真見た？", time: "7時間前" },
-    { id: 2, sender: "名無しXz9", text: "イラストまとめ見てくれてありがとう！", time: "2日前" },
-    { id: 3, sender: "名無しQp7", text: "ドット絵のコツ教えてくれる？", time: "1日前" }
-  ]);
+  const [messages, setMessages] = useState<{ id: number; sender: string; text: string; time: string }[]>([]);
   const [msgInput, setMsgInput] = useState('');
 
-  const sendMsg = () => {
+  useEffect(() => {
+    api.messages.list().then(setMessages);
+  }, []);
+
+  const sendMsg = async () => {
     if (!msgInput.trim()) return;
-    setMessages([...messages, { id: Date.now(), sender: "あなた", text: msgInput, time: "たった今" }]);
+    const msg = await api.messages.send({ sender: 'あなた', text: msgInput });
+    setMessages([...messages, msg]);
     setMsgInput('');
   };
 

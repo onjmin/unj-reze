@@ -1,9 +1,15 @@
 'use client';
 
 import { Search } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 export default function SearchView() {
-  const trends = ["#お絵描き", "#ゲーム制作", "ドット絵講座", "作業用BGM", "名無しBBS", "春のイラスト祭", "青空フォト", "lofi beats"];
+  const [trends, setTrends] = useState<{ keyword: string; count: number }[]>([]);
+
+  useEffect(() => {
+    api.search.trends().then(setTrends);
+  }, []);
   return (
     <div className="p-4 space-y-4">
       <div className="relative">
@@ -18,12 +24,12 @@ export default function SearchView() {
         <h3 className="font-bold text-xs text-gray-400 mb-2 pl-1">急上昇キーワード</h3>
         <div className="bg-gray-100/5 border border-gray-800 rounded-xl divide-y divide-gray-800/65">
           {trends.map((trend, idx) => (
-            <div key={trend} className="p-3 flex justify-between items-center hover:bg-gray-100/5 transition-colors cursor-pointer text-xs">
+            <div key={trend.keyword} className="p-3 flex justify-between items-center hover:bg-gray-100/5 transition-colors cursor-pointer text-xs">
               <div>
                 <span className="text-gray-500 mr-2.5 font-bold">{idx + 1}</span>
-                <span className="font-bold text-gray-200">{trend}</span>
+                <span className="font-bold text-gray-200">{trend.keyword}</span>
               </div>
-              <span className="text-[10px] text-gray-600">{(150 - idx * 25)}k スレッド</span>
+              <span className="text-[10px] text-gray-600">{trend.count}k スレッド</span>
             </div>
           ))}
         </div>

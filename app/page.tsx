@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
 import { Post } from '@/lib/types';
-import { INITIAL_POSTS } from '@/lib/data';
+import { api } from '@/lib/api';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
 import RankingSubTabs from '@/components/RankingSubTabs';
@@ -24,7 +24,8 @@ import MessageView from '@/components/MessageView';
 import ProfileView from '@/components/ProfileView';
 
 export default function App() {
-  const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentNav, setCurrentNav] = useState('home');
   const [topTab, setTopTab] = useState('everyone');
   const [rankCategory, setRankCategory] = useState('イイ');
@@ -37,107 +38,81 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
 
+  const fetchPosts = useCallback(async () => {
+    try {
+      const data = await api.posts.list();
+      setPosts(data);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
+
   const handleQuickPost = () => {
     setComposerOpen(true);
   };
 
-  const handleLike = (postId: number) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        const liked = !p.liked;
-        return {
-          ...p,
-          liked,
-          likes: liked ? p.likes + 1 : p.likes - 1,
-          disliked: liked ? false : p.disliked,
-          dislikes: (liked && p.disliked) ? p.dislikes - 1 : p.dislikes
-        };
-      }
-      return p;
-    }));
+  const handleLike = async (postId: number) => {
+    const updated = await api.posts.like(postId);
+    setPosts(posts.map(p => p.id === postId ? updated : p));
   };
 
-  const handleDislike = (postId: number) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        const disliked = !p.disliked;
-        return {
-          ...p,
-          disliked,
-          dislikes: disliked ? p.dislikes + 1 : p.dislikes - 1,
-          liked: disliked ? false : p.liked,
-          likes: (disliked && p.liked) ? p.likes - 1 : p.likes
-        };
-      }
-      return p;
-    }));
+  const handleDislike = async (postId: number) => {
+    const updated = await api.posts.dislike(postId);
+    setPosts(posts.map(p => p.id === postId ? updated : p));
   };
 
-  const handleRepost = (postId: number) => {
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        const reposted = !p.reposted;
-        return {
-          ...p,
-          reposted,
-          reposts: reposted ? p.reposts + 1 : p.reposts - 1
-        };
-      }
-      return p;
-    }));
+  const handleRepost = async (postId: number) => {
+    const updated = await api.posts.repost(postId);
+    setPosts(posts.map(p => p.id === postId ? updated : p));
   };
 
-  const handleAddReply = (postId: number, replyText: string) => {
+  const handleAddReply = async (postId: number, replyText: string) => {
     if (!replyText.trim()) return;
-    const now = Date.now();
-    const newReply: Post = {
-      id: now,
+    const reply = await api.posts.replies.create(postId, {
       name: userId,
-      time: "たった今",
       content: replyText,
+    });
+    const post = posts.find(p => p.id === postId);
+    if (post) {
+      setPosts(posts.map(p => {
+        if (p.id === postId) {
+          return {
+            ...p,
+            repliesCount: p.repliesCount + 1,
+            replies: [...p.replies, reply],
+          };
+        }
+        return p;
+      }));
+    }
+    const replyAsPost: Post = {
+      id: reply.id,
+      name: reply.name,
+      time: reply.time,
+      content: reply.content,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: "from-blue-500 to-indigo-600",
       heartsTotal: 0, replies: [],
       replyTo: postId,
     };
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        return {
-          ...p,
-          repliesCount: p.repliesCount + 1,
-          replies: [
-            ...p.replies,
-            { id: now, name: userId, content: replyText, time: "たった今" }
-          ]
-        };
-      }
-      return p;
-    }).concat([newReply]));
+    setPosts(prev => [...prev, replyAsPost]);
   };
 
-  const handleCreatePost = () => {
+  const handleCreatePost = async () => {
     if (!inputText.trim() && !attachedImage) return;
-    const newPost: Post = {
-      id: Date.now(),
+    const post = await api.posts.create({
       name: userId,
-      time: "たった今",
       content: inputText,
-      likes: 0,
-      dislikes: 0,
-      liked: false,
-      disliked: false,
-      repliesCount: 0,
-      reposts: 0,
-      reposted: false,
       hasImage: !!attachedImage,
       imageSrc: attachedImage || undefined,
       avatarColor: "from-blue-500 to-indigo-600",
-      hasCollabButton: true,
-      heartsTotal: 0,
-      replies: []
-    };
-    setPosts([newPost, ...posts]);
+    });
+    setPosts([post, ...posts]);
     setInputText('');
     setAttachedImage(null);
   };
