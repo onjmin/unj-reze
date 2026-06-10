@@ -7,6 +7,7 @@ on:
       - main
 
 env:
+  GITHUB_ACTIONS: true
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
