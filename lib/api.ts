@@ -3,7 +3,7 @@ import { db } from './mock-db';
 import type { Notification, Message, Trend } from './mock-db';
 
 const BASE = '/api';
-const useStaticMockData = process.env.GITHUB_ACTIONS === 'true' || process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true';
+const useStaticMockData = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
 async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {

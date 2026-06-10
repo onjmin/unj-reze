@@ -8,6 +8,7 @@ on:
 
 env:
   GITHUB_ACTIONS: true
+  NEXT_PUBLIC_STATIC_EXPORT: true
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
