@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pen, PlaySquare, Music, X } from 'lucide-react';
+import { Pen, PlaySquare, Music, X, Wrench } from 'lucide-react';
 
 import { Post } from '@/lib/types';
 import { INITIAL_POSTS } from '@/lib/data';
@@ -14,6 +14,7 @@ import BottomNav from '@/components/BottomNav';
 import FAB from '@/components/FAB';
 import DrawingEditor from '@/components/DrawingEditor';
 import GamePlayer from '@/components/GamePlayer';
+import GameMaker from '@/components/GameMaker';
 import MmlEditor from '@/components/MmlEditor';
 import PostComposer from '@/components/PostComposer';
 import SearchView from '@/components/SearchView';
@@ -140,7 +141,7 @@ export default function App() {
   };
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 h-screen w-full flex flex-col overflow-hidden select-none font-sans relative sm:max-w-md sm:mx-auto sm:border-x sm:border-gray-800 shadow-2xl">
+    <div className="bg-[#0b0e14] text-gray-100 h-screen w-full flex flex-col overflow-hidden select-none font-sans relative">
       <RightDrawer
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -167,6 +168,9 @@ export default function App() {
           }}
         />
       )}
+      {activeScreen === 'gamemaker' && (
+        <GameMaker onClose={() => setActiveScreen(null)} />
+      )}
       {activeScreen === 'mml' && (
         <MmlEditor
           onClose={() => setActiveScreen(null)}
@@ -174,7 +178,8 @@ export default function App() {
         />
       )}
 
-      {!activeScreen && (
+      <div className="relative w-full max-w-2xl mx-auto border-x border-gray-800 h-screen flex flex-col shrink-0">
+        {!activeScreen && (
         <>
           <Header
             userId={userId}
@@ -249,6 +254,13 @@ export default function App() {
                         >
                           <Music size={18} />
                         </button>
+                        <button
+                          onClick={() => setActiveScreen('gamemaker')}
+                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
+                          title="ゲーム作成"
+                        >
+                          <Wrench size={18} />
+                        </button>
                       </div>
                       <button
                         onClick={handleCreatePost}
@@ -308,8 +320,10 @@ export default function App() {
           onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}
           onOpenGame={() => { setComposerOpen(false); setActiveScreen('game'); }}
           onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
+          onOpenGameMaker={() => { setComposerOpen(false); setActiveScreen('gamemaker'); }}
         />
       )}
+      </div>
     </div>
   );
 }

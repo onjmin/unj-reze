@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
-import { X, Pen, PlaySquare, Music } from 'lucide-react';
+import { X, Pen, PlaySquare, Music, Wrench } from 'lucide-react';
 
 interface PostComposerProps {
   userId: string;
@@ -14,9 +14,10 @@ interface PostComposerProps {
   onOpenDrawing: () => void;
   onOpenGame: () => void;
   onOpenMml: () => void;
+  onOpenGameMaker: () => void;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, onClose, onSubmit, onOpenDrawing, onOpenGame, onOpenMml }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, onClose, onSubmit, onOpenDrawing, onOpenGame, onOpenMml, onOpenGameMaker }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
   return (
     <div className="fixed inset-0 z-50 flex flex-col">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative mt-12 mx-3 bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-3 flex flex-col space-y-2 animate-fade-in-up">
+      <div className="relative mt-12 mx-3 md:mx-auto md:max-w-2xl bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-3 flex flex-col space-y-2 animate-fade-in-up">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-bold text-gray-400">新規ポスト</span>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/10 transition-colors">
@@ -80,6 +81,13 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
               title="MML作曲"
             >
               <Music size={18} />
+            </button>
+            <button
+              onClick={onOpenGameMaker}
+              className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
+              title="ゲーム作成"
+            >
+              <Wrench size={18} />
             </button>
           </div>
           <button
