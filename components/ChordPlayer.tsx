@@ -139,7 +139,8 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
     if (activeEl && lane) {
       const elCenter = activeEl.offsetLeft + activeEl.offsetWidth / 2;
       const containerCenter = lane.clientWidth / 2;
-      lane.scrollLeft = Math.max(0, elCenter - containerCenter);
+      const maxScroll = lane.scrollWidth - lane.clientWidth;
+      lane.scrollLeft = Math.max(0, Math.min(elCenter - containerCenter, Math.max(0, maxScroll)));
     }
   }, [activeIndex, isPlaying]);
 
@@ -167,7 +168,7 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
         </span>
       </div>
 
-      <div ref={scrollRef} className="px-2.5 pb-2.5 overflow-x-auto scrollbar-none">
+      <div ref={scrollRef} className="px-2.5 pb-2.5 overflow-x-auto scrollbar-none relative">
         {displayLines.map((dl, li) => {
           const color = SECTION_COLORS[dl.colorIdx % SECTION_COLORS.length];
           if (dl.type === 'section') {

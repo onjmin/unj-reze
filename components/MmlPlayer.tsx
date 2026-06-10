@@ -136,8 +136,9 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
             // ハイライト要素の中央をコンテナの中央に持ってくる
             const elementCenter = el.offsetLeft + el.offsetWidth / 2;
             const containerCenter = lane.clientWidth / 2;
-            const newScrollLeft = elementCenter - containerCenter;
-            lane.scrollLeft = Math.max(0, newScrollLeft);
+            const maxScroll = lane.scrollWidth - lane.clientWidth;
+            const newScrollLeft = Math.max(0, Math.min(elementCenter - containerCenter, Math.max(0, maxScroll)));
+            lane.scrollLeft = newScrollLeft;
           }
           break;
         }
@@ -188,7 +189,7 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
               </div>
               <div
                 ref={el => { if (el) scrollRefs.current.set(id, el); }}
-                className="flex-1 overflow-x-auto scrollbar-none rounded bg-[#07090f] p-2 text-nowrap"
+                className="flex-1 overflow-x-auto scrollbar-none rounded bg-[#07090f] p-2 text-nowrap relative"
               >
                 {tokens.map((tok, i) => {
                   const key = `${id}-${tok.col}`;

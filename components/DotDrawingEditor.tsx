@@ -3,11 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Eraser, PaintBucket, Pipette,
-  Trash2, Undo, Redo, Save, Maximize2, Layers
+  Trash2, Undo, Redo, Save, Maximize2, Layers, Film
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
 import type { LayerEntry } from './LayerPanel';
+import AnimationBar from './AnimationBar';
+import type { FrameData } from './AnimationBar';
 
 interface DotDrawingEditorProps {
   onClose: () => void;
@@ -43,13 +45,26 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
   const [gridW, setGridW] = useState(32);
   const [gridH, setGridH] = useState(32);
   const [showPresets, setShowPresets] = useState(false);
+  const [recentColors, setRecentColors] = useState<string[]>([]);
   const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
   const [activeLayerIndex, setActiveLayerIndex] = useState(0);
   const [showLayerPanel, setShowLayerPanel] = useState(false);
   const layerCounterRef = useRef(1);
   const layerEntriesRef = useRef<LayerEntry[]>([]);
   const activeLayerIndexRef = useRef(0);
+  const [animMode, setAnimMode] = useState(false);
+  const framesRef = useRef<FrameData[]>([]);
+  const currentFrameRef = useRef(0);
+  const fpsRef = useRef(8);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
+  const playTimerRef = useRef<number | null>(null);
   const [, forceRender] = useState(0);
+  const onionSkinRef = useRef(false);
+  const onionSkinOpacityRef = useRef(20);
+  const onionCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [onionSkin, setOnionSkin] = useState(false);
+  const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
 
   toolRef.current = tool;
   colorRef.current = color;
@@ -59,9 +74,54 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
     oekaki.color.value = c;
     setTool('pen');
     toolRef.current = 'pen';
+    setRecentColors(prev => {
+      const filtered = prev.filter(x => x !== c);
+      return [c, ...filtered].slice(0, 8);
+    });
   };
 
   const CANVAS_SIZE = 384;
+
+  const toggleOnionSkin = () => {
+    const next = !onionSkinRef.current;
+    onionSkinRef.current = next;
+    setOnionSkin(next);
+    if (onionCanvasRef.current) {
+      onionCanvasRef.current.style.display = next ? 'block' : 'none';
+    }
+    if (next) updateOnionSkin();
+  };
+
+  const handleOnionSkinOpacityChange = (opacity: number) => {
+    onionSkinOpacityRef.current = opacity;
+    setOnionSkinOpacity(opacity);
+    updateOnionSkin();
+  };
+
+  const updateOnionSkin = () => {
+    const canvas = onionCanvasRef.current;
+    if (!canvas || !onionSkinRef.current) return;
+    const idx = currentFrameRef.current - 1;
+    if (idx < 0 || !framesRef.current[idx]) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    const prev = framesRef.current[idx];
+    const w = canvas.width, h = canvas.height;
+    const temp = document.createElement('canvas');
+    temp.width = w; temp.height = h;
+    const tempCtx = temp.getContext('2d')!;
+    for (const l of prev.layers) {
+      if (!l.visible) continue;
+      tempCtx.putImageData(new ImageData(new Uint8ClampedArray(l.data), w, h), 0, 0);
+    }
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalAlpha = onionSkinOpacityRef.current / 100;
+    ctx.drawImage(temp, 0, 0);
+    ctx.globalAlpha = 1;
+  };
 
   useEffect(() => {
     const el = mountRef.current;
@@ -90,6 +150,22 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
     layerEntriesRef.current = initEntries;
     setActiveLayerIndex(0);
     activeLayerIndexRef.current = 0;
+
+    // onion skin canvas
+    const onionCanvas = document.createElement('canvas');
+    onionCanvas.width = CANVAS_SIZE;
+    onionCanvas.height = CANVAS_SIZE;
+    onionCanvas.style.position = 'absolute';
+    onionCanvas.style.zIndex = '2';
+    onionCanvas.style.left = '0';
+    onionCanvas.style.top = '0';
+    onionCanvas.style.pointerEvents = 'none';
+    onionCanvas.style.display = 'none';
+    const container = el.firstChild as HTMLElement;
+    if (container && container.children.length >= 2) {
+      container.insertBefore(onionCanvas, container.children[1]);
+    }
+    onionCanvasRef.current = onionCanvas;
 
     let px: number | null = null;
     let py: number | null = null;
@@ -135,10 +211,14 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
         if (result) active.data = result;
         active.trace();
       }
+      updateOnionSkin();
       forceRender(n => n + 1);
     });
 
-    return () => { if (mountRef.current) mountRef.current.innerHTML = ''; };
+    return () => {
+      onionCanvasRef.current = null;
+      if (mountRef.current) mountRef.current.innerHTML = '';
+    };
   }, [gridW, gridH]);
 
   const changeSize = (w: number, h: number) => {
@@ -240,6 +320,152 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
     forceRender(n => n + 1);
   };
 
+  // ── Animation ──
+
+  const syncLayerEntries = () => {
+    const entries = oekaki.getLayers().map(inst => ({
+      instance: inst,
+      name: inst.name,
+    })).reverse();
+    setLayerEntries(entries);
+    layerEntriesRef.current = entries;
+  };
+
+  const captureFrame = (): FrameData => ({
+    layers: oekaki.getLayers().map(l => ({
+      name: l.name,
+      visible: l.visible,
+      locked: l.locked,
+      data: new Uint8ClampedArray(l.data),
+    })),
+  });
+
+  const applyFrame = (frame: FrameData) => {
+    for (const l of oekaki.getLayers()) l.delete();
+    oekaki.refresh();
+    for (const { name, visible, locked, data } of frame.layers) {
+      const l = new oekaki.LayeredCanvas(name);
+      l.visible = visible;
+      l.locked = locked;
+      l.data = new Uint8ClampedArray(data);
+    }
+    syncLayerEntries();
+  };
+
+  const selectFrame = (i: number) => {
+    framesRef.current[currentFrameRef.current] = captureFrame();
+    currentFrameRef.current = i;
+    applyFrame(framesRef.current[i]);
+    updateOnionSkin();
+    forceRender(n => n + 1);
+  };
+
+  const addFrame = () => {
+    framesRef.current[currentFrameRef.current] = captureFrame();
+    const blank: FrameData = {
+      layers: oekaki.getLayers().map(l => ({
+        name: l.name,
+        visible: l.visible,
+        locked: l.locked,
+        data: new Uint8ClampedArray(l.canvas.width * l.canvas.height * 4),
+      })),
+    };
+    const idx = currentFrameRef.current + 1;
+    framesRef.current.splice(idx, 0, blank);
+    currentFrameRef.current = idx;
+    applyFrame(blank);
+    updateOnionSkin();
+    forceRender(n => n + 1);
+  };
+
+  const deleteFrame = () => {
+    if (framesRef.current.length <= 1) return;
+    framesRef.current.splice(currentFrameRef.current, 1);
+    if (currentFrameRef.current >= framesRef.current.length)
+      currentFrameRef.current = framesRef.current.length - 1;
+    applyFrame(framesRef.current[currentFrameRef.current]);
+    updateOnionSkin();
+    forceRender(n => n + 1);
+  };
+
+  const duplicateFrame = () => {
+    framesRef.current[currentFrameRef.current] = captureFrame();
+    const src = framesRef.current[currentFrameRef.current];
+    const dup: FrameData = { layers: src.layers.map(l => ({ ...l, data: new Uint8ClampedArray(l.data) })) };
+    const idx = currentFrameRef.current + 1;
+    framesRef.current.splice(idx, 0, dup);
+    currentFrameRef.current = idx;
+    applyFrame(dup);
+    updateOnionSkin();
+    forceRender(n => n + 1);
+  };
+
+  const togglePlay = () => {
+    if (isPlayingRef.current) {
+      if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+      playTimerRef.current = null;
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+    } else {
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+      playTimerRef.current = window.setInterval(() => {
+        const next = (currentFrameRef.current + 1) % framesRef.current.length;
+        framesRef.current[currentFrameRef.current] = captureFrame();
+        currentFrameRef.current = next;
+        applyFrame(framesRef.current[next]);
+        updateOnionSkin();
+        forceRender(n => n + 1);
+      }, 1000 / fpsRef.current);
+    }
+  };
+
+  const handleFpsChange = (fps: number) => {
+    fpsRef.current = fps;
+    if (isPlayingRef.current) {
+      if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+      playTimerRef.current = window.setInterval(() => {
+        const next = (currentFrameRef.current + 1) % framesRef.current.length;
+        framesRef.current[currentFrameRef.current] = captureFrame();
+        currentFrameRef.current = next;
+        applyFrame(framesRef.current[next]);
+        updateOnionSkin();
+        forceRender(n => n + 1);
+      }, 1000 / fpsRef.current);
+    }
+  };
+
+  const enterAnimMode = () => {
+    stopPlayback();
+    framesRef.current = [captureFrame()];
+    currentFrameRef.current = 0;
+    setAnimMode(true);
+  };
+
+  const exitAnimMode = () => {
+    stopPlayback();
+    if (framesRef.current.length > 1) {
+      framesRef.current[currentFrameRef.current] = captureFrame();
+      currentFrameRef.current = 0;
+      applyFrame(framesRef.current[0]);
+    }
+    onionSkinRef.current = false;
+    setOnionSkin(false);
+    if (onionCanvasRef.current) onionCanvasRef.current.style.display = 'none';
+    setAnimMode(false);
+  };
+
+  const stopPlayback = () => {
+    if (playTimerRef.current !== null) clearInterval(playTimerRef.current);
+    playTimerRef.current = null;
+    isPlayingRef.current = false;
+    setIsPlaying(false);
+  };
+
+  useEffect(() => {
+    return () => { if (playTimerRef.current !== null) clearInterval(playTimerRef.current); };
+  }, []);
+
   const handleSave = () => {
     const canvas = oekaki.render();
     onSave(canvas.toDataURL('image/png'));
@@ -316,6 +542,26 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
         <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})` }} />
       </div>
 
+      {animMode && (
+        <AnimationBar
+          frameCount={framesRef.current.length}
+          currentFrame={currentFrameRef.current}
+          fps={fpsRef.current}
+          isPlaying={isPlaying}
+          onSelectFrame={selectFrame}
+          onAddFrame={addFrame}
+          onDeleteFrame={deleteFrame}
+          onDuplicateFrame={duplicateFrame}
+          onTogglePlay={togglePlay}
+          onFpsChange={handleFpsChange}
+          onionSkin={onionSkin}
+          onionSkinOpacity={onionSkinOpacity}
+          onToggleOnionSkin={toggleOnionSkin}
+          onOnionSkinOpacityChange={handleOnionSkinOpacityChange}
+          onExit={exitAnimMode}
+        />
+      )}
+
       <div className="px-3.5 pb-4 pt-2.5 space-y-2.5 shrink-0 bg-[#0f0f11] border-t border-gray-900">
         <div className="flex items-center space-x-1.5">
           {toolBtn('pen', <Pen size={13} />, 'ペン (1)')}
@@ -341,6 +587,13 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
           >
             <Layers size={13} />
           </button>
+          <button
+            onClick={() => animMode ? exitAnimMode() : enterAnimMode()}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${animMode ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+            title="アニメーション"
+          >
+            <Film size={13} />
+          </button>
         </div>
 
         <div className="flex items-center space-x-1.5">
@@ -362,6 +615,21 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
             ))}
           </div>
         </div>
+        {recentColors.length > 0 && (
+          <div className="flex items-center space-x-1.5">
+            <span className="text-[9px] text-gray-600 shrink-0">履歴</span>
+            <div className="flex flex-wrap gap-0.5">
+              {recentColors.map(c => (
+                <button
+                  key={c}
+                  className="w-4 h-4 rounded-sm border border-gray-700/50 hover:scale-110 transition-transform"
+                  style={{ backgroundColor: c }}
+                  onClick={() => applyColor(c)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex justify-between items-center">
           <div className="flex space-x-1.5">

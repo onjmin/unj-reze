@@ -218,9 +218,10 @@ export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
 
   useEffect(() => {
     if (playCol < 0 || !wrapRef.current) return;
-    const targetX = KEY_W + playCol * CELL_W;
+    const targetX = KEY_W + playCol * CELL_W + CELL_W / 2;
     const halfW = wrapRef.current.clientWidth / 2;
-    const scrollTo = Math.max(0, targetX - halfW);
+    const maxScroll = wrapRef.current.scrollWidth - wrapRef.current.clientWidth;
+    const scrollTo = Math.max(0, Math.min(targetX - halfW, maxScroll));
     wrapRef.current.scrollLeft = scrollTo;
   }, [playCol]);
 
