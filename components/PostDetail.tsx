@@ -6,8 +6,10 @@ import Link from 'next/link';
 import { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
+import { extractFirstEmbed } from '@/lib/embed';
 import MmlPlayer from './MmlPlayer';
 import ChordPlayer from './ChordPlayer';
+import EmbedPart from './EmbedPart';
 
 interface PostDetailProps {
   post: Post;
@@ -161,7 +163,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             </div>
           )}
 
-          {mmlCode ? <MmlPlayer mml={mmlCode} /> : chordRes ? <ChordPlayer chords={chordRes.chords} /> : null}
+          {(() => {
+            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+            if (post.hasImage) return null;
+            const embed = extractFirstEmbed(post.content);
+            return embed ? <EmbedPart embed={embed} /> : null;
+          })()}
 
           <div className="flex justify-between items-center text-gray-500 mt-2 max-w-[280px]">
             <button onClick={handleLike} className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${post.liked ? 'text-blue-400 font-bold' : ''}`}>

@@ -278,6 +278,7 @@ export function playChordProgression(
 
 export function extractChordsFromContent(content: string): { chords: string; startLine: number } | null {
   const idx = content.indexOf('#chord');
+  if (idx === -1) return null;
   const before = content.slice(0, idx);
   const startLine = before.split('\n').length - 1;
   const after = content.slice(idx + '#chord'.length).trim();

@@ -9,8 +9,10 @@ import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
+import { extractFirstEmbed } from '@/lib/embed';
 import MmlPlayer from './MmlPlayer';
 import ChordPlayer from './ChordPlayer';
+import EmbedPart from './EmbedPart';
 
 interface PostContainerProps {
   post: Post;
@@ -227,7 +229,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             const mmlCode = extractMmlFromContent(post.content);
             if (mmlCode) return <MmlPlayer mml={mmlCode} />;
             const chordRes = extractChordsFromContent(post.content);
-            return chordRes ? <ChordPlayer chords={chordRes.chords} /> : null;
+            if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+            if (post.hasImage || post.hasGame) return null;
+            const embed = extractFirstEmbed(post.content);
+            return embed ? <EmbedPart embed={embed} /> : null;
           })()}
 
           <div className="flex justify-between items-center text-gray-500 mt-1 max-w-[280px]">
