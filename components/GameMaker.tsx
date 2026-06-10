@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Play, Pause, RotateCcw, Music, Youtube, Code, Smartphone } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Music, Code, Smartphone } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 
 const TILE_SIZE = 32;
