@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
-import { X, Pen, PlaySquare, Music, Wrench } from 'lucide-react';
+import { X, Pen, Grid3x3, Music, Gamepad2 } from 'lucide-react';
 
 interface PostComposerProps {
   userId: string;
@@ -12,12 +12,12 @@ interface PostComposerProps {
   onClose: () => void;
   onSubmit: () => void;
   onOpenDrawing: () => void;
-  onOpenGame: () => void;
+  onOpenDotDrawing: () => void;
   onOpenMml: () => void;
   onOpenGameMaker: () => void;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, onClose, onSubmit, onOpenDrawing, onOpenGame, onOpenMml, onOpenGameMaker }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -64,16 +64,16 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
             <button
               onClick={onOpenDrawing}
               className="p-2 hover:bg-gray-100/10 rounded-full hover:text-[#a3e635] transition-colors"
-              title="イラストを描く"
+              title="お絵描き"
             >
               <Pen size={18} />
             </button>
             <button
-              onClick={onOpenGame}
-              className="p-2 hover:bg-gray-100/10 rounded-full hover:text-purple-400 transition-colors"
-              title="ゲームを起動"
+              onClick={onOpenDotDrawing}
+              className="p-2 hover:bg-gray-100/10 rounded-full hover:text-orange-400 transition-colors"
+              title="ドット絵専用お絵描き"
             >
-              <PlaySquare size={18} />
+              <Grid3x3 size={18} />
             </button>
             <button
               onClick={onOpenMml}
@@ -87,7 +87,7 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
               className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
               title="ゲーム作成"
             >
-              <Wrench size={18} />
+              <Gamepad2 size={18} />
             </button>
           </div>
           <button

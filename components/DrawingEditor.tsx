@@ -2,122 +2,180 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-  X, Pen, Eraser, Minus, Triangle, PaintBucket,
-  Layers, Trash2, Undo, Redo
+  X, Pen, Brush, Eraser, PaintBucket, Pipette,
+  Grid3x3, Trash2, Undo, Redo, Save
 } from 'lucide-react';
+import * as oekaki from '@onjmin/oekaki';
 
 interface DrawingEditorProps {
   onClose: () => void;
   onSave: (data: string) => void;
 }
 
+type Tool = 'pen' | 'brush' | 'eraser' | 'dropper' | 'fill';
+
+const PRESET_COLORS = [
+  '#000000', '#ffffff', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6',
+  '#6b7280', '#ec4899', '#f43f5e', '#14b8a6', '#facc15', '#fed7aa', '#60a5fa', '#a855f7',
+  '#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#f8fafc', '#dc2626', '#ea580c', '#ca8a04',
+];
+
 export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [tool, setTool] = useState<'pen' | 'eraser'>('pen');
-  const [currentColor, setCurrentColor] = useState('#ffffff');
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
+  const mountRef = useRef<HTMLDivElement>(null);
+  const toolRef = useRef<Tool>('pen');
+  const colorRef = useRef('#ffffff');
+  const [tool, setTool] = useState<Tool>('pen');
+  const [color, setColor] = useState('#000000');
+  const [penSize, setPenSize] = useState(4);
+  const [brushSize, setBrushSize] = useState(12);
+  const [eraserSize, setEraserSize] = useState(20);
+  const [showGrid, setShowGrid] = useState(false);
+  const [, forceRender] = useState(0);
+
+  toolRef.current = tool;
+  colorRef.current = color;
+
+  const currentSize = tool === 'brush' ? brushSize : tool === 'eraser' ? eraserSize : penSize;
+
+  const applyColor = (c: string) => {
+    setColor(c);
+    oekaki.color.value = c;
+    setTool('pen');
+    toolRef.current = 'pen';
+  };
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    canvas.width = canvas.parentElement!.clientWidth;
-    canvas.height = canvas.parentElement!.clientHeight || 320;
+    const el = mountRef.current;
+    if (!el) return;
+    const parent = el.parentElement;
+    const availW = parent ? parent.clientWidth : 640;
+    const availH = parent ? parent.clientHeight : 480;
+    const cap = 1024;
+    const w = Math.min(availW, cap) | 0;
+    const h = Math.min(availH, cap) | 0;
+    el.innerHTML = '';
+    oekaki.init(el, w, h);
+    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background', 'lower-canvas');
+    oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
+    oekaki.color.value = colorRef.current;
+    oekaki.penSize.value = penSize;
+    oekaki.brushSize.value = brushSize;
+    oekaki.eraserSize.value = eraserSize;
 
-    ctx.fillStyle = '#1a1b26';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    saveHistory(canvas);
+    let px: number | null = null;
+    let py: number | null = null;
+
+    oekaki.onDraw((x, y, buttons) => {
+      const active = oekaki.upperLayer.value;
+      if (!active?.editable) return;
+
+      if (toolRef.current === 'dropper' || (buttons & 2) !== 0) {
+        const result = oekaki.dropper(x, y);
+        if (result) {
+          const [r, g, b, a] = result;
+          if (a) {
+            const hex = `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+            applyColor(hex);
+          }
+        }
+        px = null; py = null;
+        return;
+      }
+
+      if (px === null) { px = x; py = y; }
+
+      if (toolRef.current === 'brush') {
+        active.drawLine(x, y, px, py);
+      } else {
+        const points = oekaki.lerp(x, y, px, py);
+        if (toolRef.current === 'pen') {
+          for (const [cx, cy] of points) active.draw(cx, cy);
+        } else if (toolRef.current === 'eraser') {
+          for (const [cx, cy] of points) active.erase(cx, cy);
+        }
+      }
+      px = x; py = y;
+    });
+
+    oekaki.onDrawn((x, y) => {
+      px = null; py = null;
+      const active = oekaki.upperLayer.value;
+      if (active?.modified()) active.trace();
+
+      if (toolRef.current === 'fill') {
+        const rgb = colorRef.current.slice(1).match(/.{2}/g)?.map(v => parseInt(v, 16));
+        if (!rgb || !active) return;
+        const w = active.canvas.width;
+        const h = active.canvas.height;
+        const result = oekaki.floodFill(active.data, w, h, x, y, [rgb[0], rgb[1], rgb[2], 255]);
+        if (result) active.data = result;
+        active.trace();
+      }
+      forceRender(n => n + 1);
+    });
+
+    return () => { if (mountRef.current) mountRef.current.innerHTML = ''; };
   }, []);
 
-  const saveHistory = (canvas: HTMLCanvasElement) => {
-    const dataUrl = canvas.toDataURL();
-    const newHistory = history.slice(0, historyIndex + 1);
-    newHistory.push(dataUrl);
-    setHistory(newHistory);
-    setHistoryIndex(newHistory.length - 1);
-  };
-
-  const getCoordinates = (e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
-    };
-  };
-
-  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
-    const coords = getCoordinates(e);
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d')!;
-
-    ctx.beginPath();
-    ctx.moveTo(coords.x, coords.y);
-    ctx.lineWidth = tool === 'eraser' ? 24 : 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = tool === 'eraser' ? '#1a1b26' : currentColor;
-    setIsDrawing(true);
-  };
-
-  const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
-    const coords = getCoordinates(e);
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d')!;
-    ctx.lineTo(coords.x, coords.y);
-    ctx.stroke();
-  };
-
-  const stopDrawing = () => {
-    if (isDrawing) {
-      setIsDrawing(false);
-      saveHistory(canvasRef.current!);
+  useEffect(() => {
+    if (mountRef.current) {
+      mountRef.current.className = showGrid ? 'unj-canvas-grid' : '';
     }
-  };
+  }, [showGrid]);
 
-  const handleUndo = () => {
-    if (historyIndex > 0) {
-      const idx = historyIndex - 1;
-      setHistoryIndex(idx);
-      restoreFromHistory(history[idx]);
-    }
-  };
-
-  const handleRedo = () => {
-    if (historyIndex < history.length - 1) {
-      const idx = historyIndex + 1;
-      setHistoryIndex(idx);
-      restoreFromHistory(history[idx]);
-    }
-  };
-
-  const restoreFromHistory = (dataUrl: string) => {
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d')!;
-    const img = new Image();
-    img.src = dataUrl;
-    img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-    };
-  };
+  useEffect(() => {
+    oekaki.penSize.value = penSize;
+    oekaki.brushSize.value = brushSize;
+    oekaki.eraserSize.value = eraserSize;
+  }, [penSize, brushSize, eraserSize]);
 
   const clearCanvas = () => {
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#1a1b26';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    saveHistory(canvas);
+    const active = oekaki.upperLayer.value;
+    if (!active) return;
+    active.clear();
+    active.trace();
+    forceRender(n => n + 1);
   };
 
-  const colorsRow1 = ['#000000', '#ffffff', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6'];
-  const colorsRow2 = ['#6b7280', '#ec4899', '#f43f5e', '#14b8a6', '#facc15', '#fed7aa', '#60a5fa', '#a855f7'];
+  const handleUndo = () => { oekaki.upperLayer.value?.undo(); forceRender(n => n + 1); };
+  const handleRedo = () => { oekaki.upperLayer.value?.redo(); forceRender(n => n + 1); };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey) {
+        switch (e.key) {
+          case 'z': e.preventDefault(); handleUndo(); break;
+          case 'Z': e.preventDefault(); handleRedo(); break;
+          case 's': e.preventDefault(); handleSave(); break;
+        }
+        return;
+      }
+      switch (e.key) {
+        case '1': setTool('pen'); toolRef.current = 'pen'; break;
+        case '2': setTool('brush'); toolRef.current = 'brush'; break;
+        case '3': setTool('eraser'); toolRef.current = 'eraser'; break;
+        case '4': setTool('dropper'); toolRef.current = 'dropper'; break;
+        case '5': setTool('fill'); toolRef.current = 'fill'; break;
+        case 'g': setShowGrid(v => !v); break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  });
+
+  const handleSave = () => {
+    onSave(oekaki.render().toDataURL());
+  };
+
+  const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
+    <button
+      onClick={() => { setTool(t); toolRef.current = t; }}
+      className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${tool === t ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+      title={label}
+    >
+      {icon}
+    </button>
+  );
 
   return (
     <div className="absolute inset-0 bg-[#0f0f11] z-50 flex flex-col select-none">
@@ -130,76 +188,101 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
         <span className="text-gray-400 text-xs">お絵かきツール</span>
       </div>
 
-      <div className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative">
-        <canvas
-          ref={canvasRef}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
-          onTouchStart={startDrawing}
-          onTouchMove={draw}
-          onTouchEnd={stopDrawing}
-          className="w-full h-full block cursor-crosshair"
-        />
-        <div className="absolute bottom-2 left-2.5 bg-black/60 px-2 py-0.5 rounded text-[10px] text-gray-500 pointer-events-none">
-          キャンバスに触れて描画
-        </div>
+      <div className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center">
+        <div ref={mountRef} className="w-full h-full" />
       </div>
 
       <div className="px-3.5 pb-4 pt-2.5 space-y-2.5 shrink-0 bg-[#0f0f11] border-t border-gray-900">
-        <div className="flex space-x-1.5 overflow-x-auto pb-1 scrollbar-none">
+        <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {toolBtn('pen', <Pen size={15} />, 'ペン (1)')}
+          {toolBtn('brush', <Brush size={15} />, 'ブラシ (2)')}
+          {toolBtn('eraser', <Eraser size={15} />, '消しゴム (3)')}
+          {toolBtn('dropper', <Pipette size={15} />, 'スポイト (4)')}
+          {toolBtn('fill', <PaintBucket size={15} />, '塗りつぶし (5)')}
+          <div className="w-px h-6 bg-gray-800 mx-1" />
           <button
-            onClick={() => setTool('pen')}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${tool === 'pen' ? 'bg-blue-600 text-white' : 'bg-gray-100/10 text-gray-300'}`}
+            onClick={() => setShowGrid(v => !v)}
+            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${showGrid ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+            title="グリッド (G)"
           >
-            <Pen size={15} />
+            <Grid3x3 size={15} />
           </button>
-          <button
-            onClick={() => setTool('eraser')}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${tool === 'eraser' ? 'bg-blue-600 text-white' : 'bg-gray-100/10 text-gray-300'}`}
-          >
-            <Eraser size={15} />
-          </button>
-          <div className="w-px h-6 bg-gray-800 self-center"></div>
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300"><Minus size={15} className="rotate-45" /></button>
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300"><Triangle size={15} /></button>
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300"><PaintBucket size={15} /></button>
-          <button className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300"><Layers size={15} /></button>
         </div>
 
-        <div className="flex justify-between items-center text-xs">
-          <span className="bg-gray-100/5 px-2.5 py-1 rounded border border-gray-800 font-bold text-[9px] text-gray-400">
-            {tool === 'pen' ? '🖋️ ペンモード' : '🧼 消しゴムモード'}
-          </span>
+        <div className="flex items-center space-x-3">
+          {(tool === 'pen' || tool === 'brush') && (
+            <div className="flex-1 flex items-center space-x-2">
+              <span className="text-[10px] text-gray-500 w-12 shrink-0">{tool === 'brush' ? 'ブラシ' : 'ペン'}サイズ</span>
+              <input
+                type="range"
+                min={1}
+                max={tool === 'brush' ? 60 : 20}
+                value={currentSize}
+                onChange={e => tool === 'brush' ? setBrushSize(Number(e.target.value)) : setPenSize(Number(e.target.value))}
+                className="flex-1 h-1 accent-blue-500"
+              />
+              <span className="text-[10px] text-gray-400 w-6 text-right">{currentSize}px</span>
+            </div>
+          )}
+          {tool === 'eraser' && (
+            <div className="flex-1 flex items-center space-x-2">
+              <span className="text-[10px] text-gray-500 w-16 shrink-0">消しゴムサイズ</span>
+              <input
+                type="range"
+                min={4}
+                max={80}
+                value={eraserSize}
+                onChange={e => setEraserSize(Number(e.target.value))}
+                className="flex-1 h-1 accent-blue-500"
+              />
+              <span className="text-[10px] text-gray-400 w-6 text-right">{eraserSize}px</span>
+            </div>
+          )}
+          {(tool === 'dropper' || tool === 'fill') && (
+            <span className="text-[10px] text-gray-500">キャンバスをクリック</span>
+          )}
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <div className="relative shrink-0 w-8 h-8 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: color }} />
+          <input
+            type="color"
+            value={color}
+            onChange={e => applyColor(e.target.value)}
+            className="w-8 h-8 rounded border border-gray-700 cursor-pointer bg-transparent"
+          />
+          <div className="flex-1 flex flex-wrap gap-0.5">
+            {PRESET_COLORS.map(c => (
+              <button
+                key={c}
+                className={`w-5 h-5 rounded-sm border ${color === c ? 'border-white scale-110' : 'border-gray-700/50'} transition-transform`}
+                style={{ backgroundColor: c }}
+                onClick={() => applyColor(c)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center">
           <div className="flex space-x-1.5">
-            <button onClick={clearCanvas} className="w-7 h-7 rounded bg-red-950/20 text-red-400 border border-red-900/30 flex items-center justify-center">
-              <Trash2 size={13} />
+            <button onClick={clearCanvas} className="px-2 h-7 rounded bg-red-950/20 text-red-400 border border-red-900/30 flex items-center space-x-1 text-[10px]">
+              <Trash2 size={11} />
+              <span>クリア</span>
             </button>
-            <button onClick={handleUndo} disabled={historyIndex <= 0} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center disabled:opacity-40">
-              <Undo size={11} className="mr-1" /> 進む
+            <button onClick={handleUndo} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40">
+              <Undo size={11} />
+              <span>戻る</span>
             </button>
-            <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center disabled:opacity-40">
-              <Redo size={11} className="mr-1" /> 戻る
+            <button onClick={handleRedo} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40">
+              <Redo size={11} />
+              <span>進む</span>
             </button>
           </div>
+          <button onClick={handleSave} className="h-7 rounded bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold flex items-center space-x-1.5 px-3 text-[10px] transition-colors">
+            <Save size={11} />
+            <span>投稿する</span>
+          </button>
         </div>
-
-        <div className="flex items-center space-x-3 pt-0.5">
-          <div className="relative w-9 h-9 shrink-0 rounded border border-gray-700 overflow-hidden" style={{ backgroundColor: currentColor }} />
-          <div className="flex-1 flex flex-col space-y-1">
-            <div className="flex justify-between space-x-1">
-              {colorsRow1.map(c => <button key={c} className={`h-5 flex-1 rounded-sm border ${currentColor === c ? 'border-white' : 'border-gray-700/50'}`} style={{ backgroundColor: c }} onClick={() => { setCurrentColor(c); setTool('pen'); }} />)}
-            </div>
-            <div className="flex justify-between space-x-1">
-              {colorsRow2.map(c => <button key={c} className={`h-5 flex-1 rounded-sm border ${currentColor === c ? 'border-white' : 'border-gray-700/50'}`} style={{ backgroundColor: c }} onClick={() => { setCurrentColor(c); setTool('pen'); }} />)}
-            </div>
-          </div>
-        </div>
-
-        <button onClick={() => onSave(canvasRef.current!.toDataURL())} className="w-full bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold py-2.5 rounded-lg shadow-lg mt-1 transition-colors text-xs">
-          この絵を投稿に添付する 🌱
-        </button>
       </div>
     </div>
   );

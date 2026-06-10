@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Pen, PlaySquare, Music, X, Wrench } from 'lucide-react';
+import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
 import { Post } from '@/lib/types';
 import { INITIAL_POSTS } from '@/lib/data';
@@ -13,7 +13,7 @@ import FeedList from '@/components/FeedList';
 import BottomNav from '@/components/BottomNav';
 import FAB from '@/components/FAB';
 import DrawingEditor from '@/components/DrawingEditor';
-import GamePlayer from '@/components/GamePlayer';
+import DotDrawingEditor from '@/components/DotDrawingEditor';
 import GameMaker from '@/components/GameMaker';
 import MmlEditor from '@/components/MmlEditor';
 import PostComposer from '@/components/PostComposer';
@@ -135,6 +135,12 @@ export default function App() {
     setInputText("#お絵描き 自作イラスト完成！");
   };
 
+  const handleSaveDotDrawing = (canvasData: string) => {
+    setAttachedImage(canvasData);
+    setActiveScreen(null);
+    setInputText("#ドット絵 自作ドット絵完成！");
+  };
+
   const handleSaveMml = (mml: string) => {
     setActiveScreen(null);
     setInputText(`#MML作曲 ${mml}`);
@@ -159,13 +165,10 @@ export default function App() {
           onSave={handleSaveDrawing}
         />
       )}
-      {activeScreen === 'game' && (
-        <GamePlayer
-          onClose={() => { setActiveScreen(null); setTopTab('everyone'); }}
-          onPostScore={(score) => {
-            setInputText(`🎮 スコア: ${score} 点を獲得したぞ！ #ゲーム`);
-            setActiveScreen(null);
-          }}
+      {activeScreen === 'dotdrawing' && (
+        <DotDrawingEditor
+          onClose={() => setActiveScreen(null)}
+          onSave={handleSaveDotDrawing}
         />
       )}
       {activeScreen === 'gamemaker' && (
@@ -236,16 +239,16 @@ export default function App() {
                         <button
                           onClick={() => setActiveScreen('drawing')}
                           className="p-2 hover:bg-gray-100/10 rounded-full hover:text-[#a3e635] transition-colors"
-                          title="イラストを描く"
+                          title="お絵描き"
                         >
                           <Pen size={18} />
                         </button>
                         <button
-                          onClick={() => setActiveScreen('game')}
-                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-purple-400 transition-colors"
-                          title="ゲームを起動"
+                          onClick={() => setActiveScreen('dotdrawing')}
+                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-orange-400 transition-colors"
+                          title="ドット絵専用お絵描き"
                         >
-                          <PlaySquare size={18} />
+                          <Grid3x3 size={18} />
                         </button>
                         <button
                           onClick={() => setActiveScreen('mml')}
@@ -259,7 +262,7 @@ export default function App() {
                           className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
                           title="ゲーム作成"
                         >
-                          <Wrench size={18} />
+                          <Gamepad2 size={18} />
                         </button>
                       </div>
                       <button
@@ -318,7 +321,7 @@ export default function App() {
           onClose={() => setComposerOpen(false)}
           onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
           onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}
-          onOpenGame={() => { setComposerOpen(false); setActiveScreen('game'); }}
+          onOpenDotDrawing={() => { setComposerOpen(false); setActiveScreen('dotdrawing'); }}
           onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
           onOpenGameMaker={() => { setComposerOpen(false); setActiveScreen('gamemaker'); }}
         />
