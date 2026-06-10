@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useId } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import { EmbeddedMedia } from '@/lib/embed';
 import { useAudioFocus } from '@/lib/audio-focus-context';
@@ -16,10 +16,6 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
   const [stopped, setStopped] = useState(() => embed && embed.type !== 'image');
   const embedRef = useRef<HTMLDivElement>(null);
 
-  const handleExternalStop = useCallback(() => {
-    setStopped(true);
-  }, []);
-
   useEffect(() => {
     if (!embed || embed.type === 'image') return;
     const el = embedRef.current;
@@ -27,20 +23,20 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
 
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) {
-        requestFocus(id, handleExternalStop);
+        requestFocus(id, () => {});
         setStopped(false);
       } else {
         setStopped(true);
         releaseFocus(id);
       }
-    }, { rootMargin: '200px 0px' });
+    }, { rootMargin: '1500px 0px 200px 0px' });
 
     observer.observe(el);
     return () => {
       observer.disconnect();
       releaseFocus(id);
     };
-  }, [embed, id, requestFocus, releaseFocus, handleExternalStop]);
+  }, [embed, id, requestFocus, releaseFocus]);
 
   if (!embed || closed) return null;
 

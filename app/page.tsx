@@ -14,6 +14,7 @@ import BottomNav from '@/components/BottomNav';
 import FAB from '@/components/FAB';
 import DrawingEditor from '@/components/DrawingEditor';
 import DotDrawingEditor from '@/components/DotDrawingEditor';
+import GamePlayer from '@/components/GamePlayer';
 import GameMaker from '@/components/GameMaker';
 import MmlEditor from '@/components/MmlEditor';
 import PostComposer from '@/components/PostComposer';
@@ -185,6 +186,9 @@ export default function App() {
       )}
       {activeScreen === 'gamemaker' && (
         <GameMaker onClose={() => setActiveScreen(null)} />
+      )}
+      {activeScreen === 'game' && (
+        <GamePlayer onClose={() => setActiveScreen(null)} />
       )}
       {activeScreen === 'mml' && (
         <MmlEditor
