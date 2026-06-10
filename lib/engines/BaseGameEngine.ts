@@ -58,6 +58,10 @@ export abstract class BaseGameEngine {
 
   protected onDestroy() { }
 
+  setInputState(state: Partial<InputState>) {
+    Object.assign(this.input, state);
+  }
+
   protected abstract loop(): void;
 
   protected worldToScreen(wx: number, wy: number, camX: number, camY: number) {

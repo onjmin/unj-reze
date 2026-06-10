@@ -46,13 +46,7 @@ export class EngineRunner {
 
   setInput(input: { left?: boolean; right?: boolean; up?: boolean; down?: boolean; action1?: boolean; action2?: boolean }) {
     if (!this.engine) return;
-    const e = this.engine;
-    if (input.left !== undefined) e.input.left = input.left;
-    if (input.right !== undefined) e.input.right = input.right;
-    if (input.up !== undefined) e.input.up = input.up;
-    if (input.down !== undefined) e.input.down = input.down;
-    if (input.action1 !== undefined) e.input.action1 = input.action1;
-    if (input.action2 !== undefined) e.input.action2 = input.action2;
+    this.engine.setInputState(input);
   }
 
   private unloadEngine() {

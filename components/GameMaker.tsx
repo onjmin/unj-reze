@@ -216,9 +216,10 @@ export default function GameMaker({ onClose }: GameMakerProps) {
           let hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
             getTile(p.x + 2, p.y + pData.h - 2), getTile(p.x + pData.w - 2, p.y + pData.h - 2)]
             .filter(t => t && !t.info.passable);
-          if (hits.length) {
-            if (p.vx > 0) p.x = hits[0].rect.x - pData.w;
-            else if (p.vx < 0) p.x = hits[0].rect.x + TILE_SIZE;
+          const tile = hits[0];
+          if (tile) {
+            if (p.vx > 0) p.x = tile.rect.x - pData.w;
+            else if (p.vx < 0) p.x = tile.rect.x + TILE_SIZE;
             p.vx = 0;
           }
 
@@ -226,9 +227,10 @@ export default function GameMaker({ onClose }: GameMakerProps) {
           hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
             getTile(p.x + 2, p.y + pData.h), getTile(p.x + pData.w - 2, p.y + pData.h)]
             .filter(t => t && !t.info.passable);
-          if (hits.length) {
-            if (p.vy > 0) { p.y = hits[0].rect.y - pData.h; p.isGrounded = true; }
-            else if (p.vy < 0) p.y = hits[0].rect.y + TILE_SIZE;
+          const tile2 = hits[0];
+          if (tile2) {
+            if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; }
+            else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE;
             p.vy = 0;
           }
           if (p.y > ROWS * TILE_SIZE) resetGame(presetId);

@@ -57,7 +57,7 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
   const dpadDown = (key: string) => {
     const r = runnerRef.current;
     if (!r) return;
-    const map: Record<string, { prop: 'left' | 'right' | 'up' | 'down'; on: boolean }> = {
+    const map: Record<string, { prop: 'left' | 'right' | 'up' | 'down' | 'action1'; on: boolean }> = {
       ArrowLeft: { prop: 'left', on: true },
       ArrowRight: { prop: 'right', on: true },
       ArrowUp: { prop: 'up', on: true },
