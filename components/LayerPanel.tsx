@@ -2,9 +2,10 @@
 
 import { useRef, useState } from 'react';
 import { Eye, EyeOff, Lock, Unlock, Plus, Trash2, GripVertical, X } from 'lucide-react';
+import type { LayeredCanvas } from '@onjmin/oekaki';
 
 interface LayerEntry {
-  instance: { canvas: HTMLCanvasElement; visible: boolean; locked: boolean; uuid: string; name: string };
+  instance: LayeredCanvas;
   name: string;
 }
 
