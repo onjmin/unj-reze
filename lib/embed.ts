@@ -1,5 +1,5 @@
 export interface EmbeddedMedia {
-  type: 'image' | 'video' | 'audio' | 'game';
+  type: 'image' | 'video' | 'audio' | 'game' | 'video_file';
   embedUrl: string;
   siteId: number;
   siteName: string;
@@ -133,10 +133,15 @@ export const parseGameEmbedRPGEN = (url: URL): string | undefined => {
   return `https://rpgen.org/dq/?map=${id}`;
 };
 
+const parseVideoFileEmbed = (url: URL): string | undefined => {
+  if (!url.pathname.match(/\.(mp4|webm|ogg)$/i)) return;
+  return url.href;
+};
+
 interface SiteInfo {
   id: number;
   name: string;
-  type: 'image' | 'video' | 'audio' | 'game';
+  type: 'image' | 'video' | 'audio' | 'game' | 'video_file';
   parser: (url: URL) => string | undefined;
 }
 
@@ -163,6 +168,7 @@ const sites: SiteInfo[] = [
   { id: 3202, name: 'Spotify', type: 'audio', parser: parseAudioEmbedSpotify },
   { id: 3203, name: 'Suno', type: 'audio', parser: parseAudioEmbedSuno },
   { id: 6401, name: 'RPGEN', type: 'game', parser: parseGameEmbedRPGEN },
+  { id: 2001, name: 'Karotter', type: 'video_file', parser: parseVideoFileEmbed },
 ];
 
 function matchSite(url: URL): SiteInfo | undefined {
@@ -195,6 +201,7 @@ function matchSite(url: URL): SiteInfo | undefined {
     'open.spotify.com': [3202],
     'suno.com': [3203],
     'rpgen.org': [6401],
+    'api.karotter.com': [2001],
   };
   const ids = hostMap[host];
   if (!ids) return;

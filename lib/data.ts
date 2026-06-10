@@ -25,6 +25,119 @@ FanTouhouMusic`,
     ]
   },
   {
+    id: 13,
+    name: "名無しKt1",
+    time: "たった今",
+    content: `https://api.karotter.com/uploads/posts/346ec30c-dcb6-41d7-8cf7-7ef5ef7e92dc.mp4
+
+作曲したコード進行の動画です
+Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行`,
+    likes: 3,
+    dislikes: 0,
+    liked: false,
+    disliked: false,
+    repliesCount: 1,
+    reposts: 0,
+    reposted: false,
+    avatarColor: "from-green-400 to-teal-500",
+    hasCollabButton: false,
+    heartsTotal: 12,
+    replyTo: 11,
+    replies: [
+      { id: 301, name: "名無しQm9", content: "7thとdimの組み合わせがオシャレすぎる", time: "たった今" }
+    ]
+  },
+  {
+    id: 14,
+    name: "名無しWk2",
+    time: "30秒前",
+    content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる",
+    likes: 5,
+    dislikes: 0,
+    liked: false,
+    disliked: false,
+    repliesCount: 0,
+    reposts: 0,
+    reposted: false,
+    avatarColor: "from-orange-400 to-red-500",
+    hasCollabButton: false,
+    heartsTotal: 8,
+    replyTo: 11,
+    replies: []
+  },
+  {
+    id: 15,
+    name: "名無しQm9",
+    time: "たった今",
+    content: "7thとdimの組み合わせがオシャレすぎる",
+    likes: 2,
+    dislikes: 0,
+    liked: false,
+    disliked: false,
+    repliesCount: 0,
+    reposts: 0,
+    reposted: false,
+    avatarColor: "from-teal-400 to-cyan-500",
+    hasCollabButton: false,
+    heartsTotal: 3,
+    replyTo: 13,
+    replies: []
+  },
+  {
+    id: 16,
+    name: "名無しRf6",
+    time: "2時間前",
+    content: "外スケッチいいな！私も今度やってみよう",
+    likes: 8,
+    dislikes: 1,
+    liked: false,
+    disliked: false,
+    repliesCount: 0,
+    reposts: 0,
+    reposted: false,
+    avatarColor: "from-sky-400 to-indigo-500",
+    hasCollabButton: false,
+    heartsTotal: 14,
+    replyTo: 1,
+    replies: []
+  },
+  {
+    id: 17,
+    name: "名無しHn3",
+    time: "15分前",
+    content: "lofiは作業効率上がるよね、自分も愛用してる",
+    likes: 4,
+    dislikes: 0,
+    liked: false,
+    disliked: false,
+    repliesCount: 0,
+    reposts: 0,
+    reposted: false,
+    avatarColor: "from-lime-400 to-green-500",
+    hasCollabButton: false,
+    heartsTotal: 6,
+    replyTo: 5,
+    replies: []
+  },
+  {
+    id: 18,
+    name: "名無しPz5",
+    time: "5時間前",
+    content: "こちらはもう桜が咲き始めましたよ〜春ですね",
+    likes: 11,
+    dislikes: 0,
+    liked: false,
+    disliked: false,
+    repliesCount: 0,
+    reposts: 1,
+    reposted: false,
+    avatarColor: "from-pink-300 to-rose-400",
+    hasCollabButton: false,
+    heartsTotal: 28,
+    replyTo: 3,
+    replies: []
+  },
+  {
     id: 1,
     name: "名無しaB3",
     time: "3時間前",
@@ -44,7 +157,8 @@ FanTouhouMusic`,
     heartsTotal: 320,
     replies: [
       { id: 101, name: "名無しxY7", content: "いい感じ！色使いが好き", time: "2時間前" },
-      { id: 102, name: "名無しQw3", content: "外で描くの気持ちいいよね", time: "1時間前" }
+      { id: 102, name: "名無しQw3", content: "外で描くの気持ちいいよね", time: "1時間前" },
+      { id: 401, name: "名無しRf6", content: "外スケッチいいな！私も今度やってみよう", time: "2時間前" }
     ]
   },
   {
@@ -92,13 +206,16 @@ FanTouhouMusic`,
     dislikes: 0,
     liked: false,
     disliked: false,
-    repliesCount: 3,
+    repliesCount: 2,
     reposts: 2,
     reposted: false,
     avatarColor: "from-rose-400 to-pink-600",
     hasCollabButton: false,
     heartsTotal: 45,
-    replies: []
+    replies: [
+      { id: 201, name: "名無しKt1", content: "作曲したコード進行の動画です Aメロ→Bメロ→サビの構成", time: "たった今" },
+      { id: 202, name: "名無しWk2", content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる", time: "30秒前" }
+    ]
   },
   {
     id: 2,
@@ -141,7 +258,8 @@ FanTouhouMusic`,
     replies: [
       { id: 104, name: "名無しDf2", content: "こっちはもう桜咲きそう", time: "7時間前" },
       { id: 105, name: "名無しGh6", content: "地域によって違うよね〜", time: "6時間前" },
-      { id: 106, name: "名無しJk9", content: "写真綺麗！", time: "5時間前" }
+      { id: 106, name: "名無しJk9", content: "写真綺麗！", time: "5時間前" },
+      { id: 601, name: "名無しPz5", content: "こちらはもう桜が咲き始めましたよ〜春ですね", time: "5時間前" }
     ]
   },
   {
@@ -181,7 +299,8 @@ FanTouhouMusic`,
     heartsTotal: 45,
     replies: [
       { id: 107, name: "名無しWx8", content: "自分は環境音派", time: "20時間前" },
-      { id: 108, name: "名無しYz2", content: "シティポップおすすめ", time: "18時間前" }
+      { id: 108, name: "名無しYz2", content: "シティポップおすすめ", time: "18時間前" },
+      { id: 501, name: "名無しHn3", content: "lofiは作業効率上がるよね、自分も愛用してる", time: "15分前" }
     ]
   },
   {

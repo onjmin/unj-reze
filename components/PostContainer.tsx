@@ -6,7 +6,7 @@ import {
   MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare, Copy, UserPlus, Ban, Flag
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Post } from '@/lib/types';
+import { Post, Reply } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -282,17 +282,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           </div>
 
           {post.replies.length > 0 && (
-            <div className="mt-2 pl-2.5 border-l-2 border-gray-800 space-y-1.5">
-              {post.replies.map(reply => (
-                <div key={reply.id} className="text-[11px] bg-gray-100/5 p-2 rounded-lg border border-gray-800/40">
-                  <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
-                    <span>{reply.name}</span>
-                    <span>{reply.time}</span>
-                  </div>
-                  <p className="text-gray-300">{reply.content}</p>
-                </div>
-              ))}
-            </div>
+            <ReplyPreview replies={post.replies} postId={post.id} />
           )}
 
           {showReplyInput && (
@@ -324,6 +314,77 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const AVATAR_COLORS = [
+  'from-blue-400 to-indigo-500',
+  'from-pink-400 to-rose-500',
+  'from-green-400 to-teal-500',
+  'from-orange-400 to-red-500',
+  'from-purple-400 to-violet-500',
+  'from-cyan-400 to-blue-500',
+  'from-amber-400 to-yellow-500',
+  'from-lime-400 to-green-500',
+  'from-emerald-400 to-teal-500',
+  'from-sky-400 to-indigo-500',
+];
+
+function nameToColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function nameToInitials(name: string): string {
+  return name.substring(3, 5) || '名無';
+}
+
+function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number }) {
+  const router = useRouter();
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    if (replies.length < 2) return;
+    const timer = setInterval(() => {
+      setIndex(i => (i + 1) % replies.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [replies.length]);
+
+  const reply = replies[index];
+  const maxAvatars = Math.min(replies.length, 5);
+  const extraCount = replies.length - maxAvatars;
+
+  return (
+    <div
+      onClick={() => router.push(`/post/${postId}`)}
+      className="mt-2 pl-2.5 cursor-pointer hover:opacity-80 transition-opacity"
+    >
+      <div className="flex items-center gap-1.5 py-1">
+        <div className="flex items-center shrink-0 -space-x-1.5">
+          {replies.slice(0, maxAvatars).map((r, i) => (
+            <div
+              key={r.id}
+              className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.name)} border border-gray-900 flex items-center justify-center text-[7px] font-bold text-white shrink-0`}
+              style={{ zIndex: maxAvatars - i }}
+            >
+              {nameToInitials(r.name)}
+            </div>
+          ))}
+          {extraCount > 0 && (
+            <div className="w-5 h-5 rounded-full bg-gray-800 border border-gray-900 flex items-center justify-center text-[7px] text-gray-400 font-bold shrink-0">
+              +{extraCount}
+            </div>
+          )}
+        </div>
+        <span className="text-[11px] text-gray-400 truncate">
+          <span className="text-gray-300 font-bold">{reply.name}</span>
+          <span className="text-gray-500 ml-1">{reply.content}</span>
+          <span className="text-gray-600 ml-1.5 shrink-0">{reply.time}</span>
+        </span>
       </div>
     </div>
   );

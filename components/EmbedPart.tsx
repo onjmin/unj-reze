@@ -33,7 +33,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
         setStopped(true);
         releaseFocus(id);
       }
-    }, { threshold: 0.1 });
+    }, { rootMargin: '200px 0px' });
 
     observer.observe(el);
     return () => {
@@ -105,6 +105,21 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
               allow="autoplay"
               className="w-full h-full rounded-b-xl"
               style={{ border: 'none' }}
+            />
+          )}
+        </div>
+      )}
+
+      {embed.type === 'video_file' && (
+        <div className="aspect-video">
+          {stopped ? (
+            <div className="w-full h-full bg-gray-900 rounded-b-xl" />
+          ) : (
+            <video
+              src={embed.embedUrl}
+              controls
+              playsInline
+              className="w-full h-full rounded-b-xl"
             />
           )}
         </div>

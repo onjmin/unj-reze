@@ -88,6 +88,18 @@ export default function App() {
 
   const handleAddReply = (postId: number, replyText: string) => {
     if (!replyText.trim()) return;
+    const now = Date.now();
+    const newReply: Post = {
+      id: now,
+      name: userId,
+      time: "たった今",
+      content: replyText,
+      likes: 0, dislikes: 0, liked: false, disliked: false,
+      repliesCount: 0, reposts: 0, reposted: false,
+      avatarColor: "from-blue-500 to-indigo-600",
+      heartsTotal: 0, replies: [],
+      replyTo: postId,
+    };
     setPosts(posts.map(p => {
       if (p.id === postId) {
         return {
@@ -95,12 +107,12 @@ export default function App() {
           repliesCount: p.repliesCount + 1,
           replies: [
             ...p.replies,
-            { id: Date.now(), name: userId, content: replyText, time: "たった今" }
+            { id: now, name: userId, content: replyText, time: "たった今" }
           ]
         };
       }
       return p;
-    }));
+    }).concat([newReply]));
   };
 
   const handleCreatePost = () => {

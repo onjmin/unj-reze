@@ -24,6 +24,7 @@ export interface Post {
   hasCollabButton?: boolean;
   heartsTotal: number;
   hasGame?: boolean;
+  replyTo?: number;
   replies: Reply[];
 }
 

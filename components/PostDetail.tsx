@@ -13,10 +13,12 @@ import EmbedPart from './EmbedPart';
 
 interface PostDetailProps {
   post: Post;
+  allPosts: Post[];
 }
 
-export default function PostDetail({ post: initial }: PostDetailProps) {
+export default function PostDetail({ post: initial, allPosts: allInitial }: PostDetailProps) {
   const [post, setPost] = useState<Post>(initial);
+  const [allPosts, setAllPosts] = useState<Post[]>(allInitial);
   const [replyText, setReplyText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [following, setFollowing] = useState(false);
@@ -78,7 +80,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const handleAddReply = () => {
     if (!replyText.trim()) return;
-    setPostField(p => ({ ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, { id: Date.now(), name: userId, content: replyText, time: "たった今" }] }));
+    const now = Date.now();
+    setPostField(p => ({ ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, { id: now, name: userId, content: replyText, time: "たった今" }] }));
+    setAllPosts(prev => [...prev, {
+      id: now, name: userId, time: "たった今", content: replyText,
+      likes: 0, dislikes: 0, liked: false, disliked: false,
+      repliesCount: 0, reposts: 0, reposted: false,
+      avatarColor: "from-blue-500 to-indigo-600",
+      heartsTotal: 0, replies: [],
+      replyTo: post.id,
+    }]);
     setReplyText('');
   };
 
@@ -197,20 +208,28 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         </div>
       </div>
 
-      {post.replies.length > 0 && (
-        <div className="border-t border-gray-800 px-3 py-3 space-y-2">
-          <span className="text-[11px] text-gray-500 font-bold">返信</span>
-          {post.replies.map(reply => (
-            <div key={reply.id} className="text-[12px] bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
-              <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
-                <span>{reply.name}</span>
-                <span>{reply.time}</span>
+      {(() => {
+        const directReplies = allPosts.filter(p => p.replyTo === post.id);
+        const hasReplies = post.replies.length > 0 || directReplies.length > 0;
+        if (!hasReplies) return null;
+        return (
+          <div className="border-t border-gray-800 px-3 py-3 space-y-2">
+            <span className="text-[11px] text-gray-500 font-bold">返信</span>
+            {post.replies.map(reply => (
+              <div key={reply.id} className="text-[12px] bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
+                <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
+                  <span>{reply.name}</span>
+                  <span>{reply.time}</span>
+                </div>
+                <p className="text-gray-300">{reply.content}</p>
               </div>
-              <p className="text-gray-300">{reply.content}</p>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+            {directReplies.map(rp => (
+              <ReplyTreeItem key={rp.id} post={rp} allPosts={allPosts} depth={0} />
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="border-t border-gray-800 px-3 py-3 flex items-center space-x-2 bg-gray-100/5 rounded-lg mx-3 mb-4 mt-2">
         <input
@@ -224,5 +243,28 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <button onClick={handleAddReply} className="text-blue-500 hover:text-blue-400 text-xs font-bold px-1">送信</button>
       </div>
     </>
+  );
+}
+
+function ReplyTreeItem({ post, allPosts, depth }: { post: Post; allPosts: Post[]; depth: number }) {
+  const children = allPosts.filter(p => p.replyTo === post.id);
+
+  return (
+    <div className={`text-[12px] ${depth > 0 ? 'ml-4 pl-3 border-l-2 border-gray-800/60' : ''}`}>
+      <div className="bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
+        <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
+          <span>{post.name}</span>
+          <span>{post.time}</span>
+        </div>
+        <p className="text-gray-300 whitespace-pre-wrap">{post.content.length > 120 ? post.content.slice(0, 120) + '…' : post.content}</p>
+      </div>
+      {children.length > 0 && (
+        <div className="mt-1.5 space-y-1.5">
+          {children.map(child => (
+            <ReplyTreeItem key={child.id} post={child} allPosts={allPosts} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
