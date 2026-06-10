@@ -1,7 +1,9 @@
 import { Post, Reply } from './types';
+import { db } from './mock-db';
 import type { Notification, Message, Trend } from './mock-db';
 
 const BASE = '/api';
+const useStaticMockData = process.env.GITHUB_ACTIONS === 'true' || process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true';
 
 async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
@@ -15,7 +17,60 @@ async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export const api = {
+const staticApi = {
+  posts: {
+    list: async () => db.getPosts(),
+    get: async (id: number) => {
+      const post = db.getPost(id);
+      if (!post) throw new Error('Post not found');
+      return post;
+    },
+    create: async (data: { name: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
+      db.createPost(data),
+    like: async (id: number) => {
+      const post = db.likePost(id);
+      if (!post) throw new Error('Post not found');
+      return post;
+    },
+    dislike: async (id: number) => {
+      const post = db.dislikePost(id);
+      if (!post) throw new Error('Post not found');
+      return post;
+    },
+    repost: async (id: number) => {
+      const post = db.repostPost(id);
+      if (!post) throw new Error('Post not found');
+      return post;
+    },
+    replies: {
+      list: async (postId: number) => db.getReplies(postId),
+      create: async (postId: number, data: { name: string; content: string }) => {
+        const reply = db.addReply(postId, data);
+        if (!reply) throw new Error('Post not found');
+        return reply;
+      },
+    },
+  },
+  notifications: {
+    list: async () => db.getNotifications(),
+  },
+  messages: {
+    list: async () => db.getMessages(),
+    send: async (data: { sender: string; text: string }) => db.addMessage(data),
+  },
+  search: {
+    trends: async () => db.getTrends(),
+  },
+  users: {
+    profile: async (id: string) => ({
+      id,
+      posts: db.getPosts().filter(post => post.name === id),
+      postCount: db.getPosts().filter(post => post.name === id).length,
+    }),
+  },
+};
+
+const liveApi = {
   posts: {
     list: () => fetcher<Post[]>('/posts'),
     get: (id: number) => fetcher<Post>(`/posts/${id}`),
@@ -45,3 +100,5 @@ export const api = {
     profile: (id: string) => fetcher<{ id: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}`),
   },
 };
+
+export const api = useStaticMockData ? staticApi : liveApi;
