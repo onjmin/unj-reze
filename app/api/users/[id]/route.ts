@@ -6,10 +6,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const posts = db.getPosts().filter(p => p.name === id || p.name.includes('あなた'));
+  const posts = db.getUserPostsBySlug(id);
+  const displayName = db.getUserDisplayName(id) || id;
 
   return NextResponse.json({
     id,
+    displayName,
     posts,
     postCount: posts.length,
   });

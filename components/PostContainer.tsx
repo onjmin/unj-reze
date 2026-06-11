@@ -113,8 +113,11 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
       )}
 
       <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
-        <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative`}>
-          {post.name.substring(3, 5) || "名無"}
+        <div
+          onClick={(e) => { e.stopPropagation(); router.push(`/user/${post.slug || post.displayName}`); }}
+          className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity`}
+        >
+          {post.displayName.substring(3, 5) || "名無"}
           <button
             onClick={(e) => { e.stopPropagation(); onQuickPost(); }}
             className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full p-0.5 border border-gray-800 hover:bg-blue-600 transition-colors cursor-pointer"
@@ -126,7 +129,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
         <div className="flex-1 min-w-0 cursor-pointer" onClick={handlePostClick}>
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
-              <span className="font-bold text-xs text-gray-200">{post.name}</span>
+              <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
               <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
             </div>
             <div ref={menuRef} className="relative">
@@ -145,11 +148,11 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                   </button>
                   <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <UserPlus size={12} className="shrink-0" />
-                    <span>{following ? 'フォロー中' : `${post.name}さんをフォロー`}</span>
+                    <span>{following ? 'フォロー中' : `${post.displayName}さんをフォロー`}</span>
                   </button>
                   <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Ban size={12} className="shrink-0" />
-                    <span>{blocked ? 'ブロック中' : `${post.name}さんをブロック`}</span>
+                    <span>{blocked ? 'ブロック中' : `${post.displayName}さんをブロック`}</span>
                   </button>
                   <div className="border-t border-gray-800 my-1" />
                   <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
@@ -368,10 +371,10 @@ function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number })
           {replies.slice(0, maxAvatars).map((r, i) => (
             <div
               key={r.id}
-              className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.name)} border border-gray-900 flex items-center justify-center text-[7px] font-bold text-white shrink-0`}
+              className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} border border-gray-900 flex items-center justify-center text-[7px] font-bold text-white shrink-0`}
               style={{ zIndex: maxAvatars - i }}
             >
-              {nameToInitials(r.name)}
+              {nameToInitials(r.displayName)}
             </div>
           ))}
           {extraCount > 0 && (
@@ -381,7 +384,7 @@ function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number })
           )}
         </div>
         <span className="text-[11px] text-gray-400 truncate">
-          <span className="text-gray-300 font-bold">{reply.name}</span>
+          <span className="text-gray-300 font-bold">{reply.displayName}</span>
           <span className="text-gray-500 ml-1">{reply.content}</span>
           <span className="text-gray-600 ml-1.5 shrink-0">{reply.time}</span>
         </span>

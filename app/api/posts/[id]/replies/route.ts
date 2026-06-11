@@ -16,16 +16,16 @@ export async function POST(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const { name, content } = body;
+  const { displayName, content } = body;
 
-  if (!name || !content) {
+  if (!displayName || !content) {
     return NextResponse.json(
-      { error: 'name and content are required' },
+      { error: 'displayName and content are required' },
       { status: 400 }
     );
   }
 
-  const reply = db.addReply(parseInt(id), { name, content });
+  const reply = db.addReply(parseInt(id), { displayName, content });
   if (!reply) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }

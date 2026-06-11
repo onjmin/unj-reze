@@ -39,6 +39,11 @@ const NOTIFICATIONS: Notification[] = [
   { id: 4, user: "名無しVc1", action: "がフォローしました", target: "", time: "1時間前" },
 ];
 
+function deriveSlug(fullName: string): string {
+  const match = fullName.match(/[a-zA-Z0-9]+$/);
+  return match ? match[0] : fullName;
+}
+
 const MESSAGES: Message[] = [
   { id: 1, sender: "名無しLm8", text: "おはよう！今日の雪写真見た？", time: "7時間前" },
   { id: 2, sender: "名無しXz9", text: "イラストまとめ見てくれてありがとう！", time: "2日前" },
@@ -53,6 +58,12 @@ class MockDB {
 
   constructor() {
     this.posts = JSON.parse(JSON.stringify(INITIAL_POSTS));
+    for (const post of this.posts) {
+      if (!post.slug) post.slug = deriveSlug(post.displayName);
+      for (const reply of post.replies) {
+        if (!reply.slug) reply.slug = deriveSlug(reply.displayName);
+      }
+    }
     this.notifications = [...NOTIFICATIONS];
     this.messages = [...MESSAGES];
     this.trends = [...TRENDS];
@@ -70,21 +81,32 @@ class MockDB {
     return this.posts;
   }
 
+  getUserPostsBySlug(slug: string): Post[] {
+    return this.posts.filter(p => p.slug === slug);
+  }
+
+  getUserDisplayName(slug: string): string | undefined {
+    const post = this.posts.find(p => p.slug === slug);
+    return post?.displayName;
+  }
+
   getPost(id: number): Post | undefined {
     return this.posts.find(p => p.id === id);
   }
 
   createPost(data: {
-    name: string;
+    displayName: string;
     content: string;
     hasImage?: boolean;
     imageSrc?: string;
     imageAlt?: string;
     avatarColor?: string;
+    slug?: string;
   }): Post {
     const post: Post = {
       id: this.genId(),
-      name: data.name,
+      displayName: data.displayName,
+      slug: data.slug || deriveSlug(data.displayName),
       time: this.now(),
       content: data.content,
       likes: 0,
@@ -140,12 +162,12 @@ class MockDB {
     return post;
   }
 
-  addReply(postId: number, data: { name: string; content: string }): Reply | null {
+  addReply(postId: number, data: { displayName: string; content: string }): Reply | null {
     const post = this.posts.find(p => p.id === postId);
     if (!post) return null;
     const reply: Reply = {
       id: this.genId(),
-      name: data.name,
+      displayName: data.displayName,
       content: data.content,
       time: this.now(),
     };

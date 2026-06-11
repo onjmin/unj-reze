@@ -25,7 +25,7 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return post;
     },
-    create: async (data: { name: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
       db.createPost(data),
     like: async (id: number) => {
       const post = db.likePost(id);
@@ -44,7 +44,7 @@ const staticApi = {
     },
     replies: {
       list: async (postId: number) => db.getReplies(postId),
-      create: async (postId: number, data: { name: string; content: string }) => {
+      create: async (postId: number, data: { displayName: string; content: string }) => {
         const reply = db.addReply(postId, data);
         if (!reply) throw new Error('Post not found');
         return reply;
@@ -62,11 +62,11 @@ const staticApi = {
     trends: async () => db.getTrends(),
   },
   users: {
-    profile: async (id: string) => ({
-      id,
-      posts: db.getPosts().filter(post => post.name === id),
-      postCount: db.getPosts().filter(post => post.name === id).length,
-    }),
+    profile: async (id: string) => {
+      const posts = db.getUserPostsBySlug(id);
+      const displayName = db.getUserDisplayName(id) || id;
+      return { id, displayName, posts, postCount: posts.length };
+    },
   },
 };
 
@@ -74,14 +74,14 @@ const liveApi = {
   posts: {
     list: () => fetcher<Post[]>('/posts'),
     get: (id: number) => fetcher<Post>(`/posts/${id}`),
-    create: (data: { name: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
+    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
       fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
     like: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like' }) }),
     dislike: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike' }) }),
     repost: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
     replies: {
       list: (postId: number) => fetcher<Reply[]>(`/posts/${postId}/replies`),
-      create: (postId: number, data: { name: string; content: string }) =>
+      create: (postId: number, data: { displayName: string; content: string }) =>
         fetcher<Reply>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
     },
   },
@@ -97,7 +97,7 @@ const liveApi = {
     trends: () => fetcher<Trend[]>('/search/trends'),
   },
   users: {
-    profile: (id: string) => fetcher<{ id: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}`),
+    profile: (id: string) => fetcher<{ id: string; displayName: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}`),
   },
 };
 

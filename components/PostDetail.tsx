@@ -81,9 +81,9 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
   const handleAddReply = () => {
     if (!replyText.trim()) return;
     const now = Date.now();
-    setPostField(p => ({ ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, { id: now, name: userId, content: replyText, time: "たった今" }] }));
+    setPostField(p => ({ ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, { id: now, displayName: userId, content: replyText, time: "たった今" }] }));
     setAllPosts(prev => [...prev, {
-      id: now, name: userId, time: "たった今", content: replyText,
+      id: now, displayName: userId, time: "たった今", content: replyText,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: "from-blue-500 to-indigo-600",
@@ -120,11 +120,11 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
                 </button>
                 <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                   <UserPlus size={12} className="shrink-0" />
-                  <span>{following ? 'フォロー中' : `${post.name}さんをフォロー`}</span>
+                  <span>{following ? 'フォロー中' : `${post.displayName}さんをフォロー`}</span>
                 </button>
                 <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                   <Ban size={12} className="shrink-0" />
-                  <span>{blocked ? 'ブロック中' : `${post.name}さんをブロック`}</span>
+                  <span>{blocked ? 'ブロック中' : `${post.displayName}さんをブロック`}</span>
                 </button>
                 <div className="border-t border-gray-800 my-1" />
                 <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
@@ -138,12 +138,15 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
       </div>
 
       <div className="flex p-3 space-x-2.5">
-        <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white`}>
-          {post.name.substring(3, 5) || "名無"}
-        </div>
+        <Link
+          href={`/user/${post.slug || post.displayName}`}
+          className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity`}
+        >
+          {post.displayName.substring(3, 5) || "名無"}
+        </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
-            <span className="font-bold text-xs text-gray-200">{post.name}</span>
+            <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
             <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
           </div>
 
@@ -218,7 +221,7 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
             {post.replies.map(reply => (
               <div key={reply.id} className="text-[12px] bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
                 <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
-                  <span>{reply.name}</span>
+                  <span>{reply.displayName}</span>
                   <span>{reply.time}</span>
                 </div>
                 <p className="text-gray-300">{reply.content}</p>
@@ -253,7 +256,7 @@ function ReplyTreeItem({ post, allPosts, depth }: { post: Post; allPosts: Post[]
     <div className={`text-[12px] ${depth > 0 ? 'ml-4 pl-3 border-l-2 border-gray-800/60' : ''}`}>
       <div className="bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
         <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
-          <span>{post.name}</span>
+          <span>{post.displayName}</span>
           <span>{post.time}</span>
         </div>
         <p className="text-gray-300 whitespace-pre-wrap">{post.content.length > 120 ? post.content.slice(0, 120) + '…' : post.content}</p>

@@ -8,15 +8,15 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { name, content, hasImage, imageSrc, imageAlt, avatarColor } = body;
+  const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor } = body;
 
-  if (!name || !content) {
+  if (!displayName || !content) {
     return NextResponse.json(
-      { error: 'name and content are required' },
+      { error: 'displayName and content are required' },
       { status: 400 }
     );
   }
 
-  const post = db.createPost({ name, content, hasImage, imageSrc, imageAlt, avatarColor });
+  const post = db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor });
   return NextResponse.json(post, { status: 201 });
 }

@@ -4,20 +4,28 @@ import { Post } from '@/lib/types';
 
 interface ProfileViewProps {
   userId: string;
+  displayName?: string;
   posts: Post[];
 }
 
-export default function ProfileView({ userId, posts }: ProfileViewProps) {
-  const myPosts = posts.filter(p => p.name === userId || p.name.includes("あなた"));
+function nameToInitials(name: string): string {
+  return name.substring(3, 5) || name.substring(0, 2) || "--";
+}
+
+export default function ProfileView({ userId, displayName, posts }: ProfileViewProps) {
+  const myPosts = posts.filter(p =>
+    p.slug === userId || p.displayName === userId || p.displayName.includes("あなた")
+  );
+  const resolvedName = displayName || myPosts[0]?.displayName || userId;
   return (
     <div className="flex flex-col">
       <div className="p-4 border-b border-gray-800 bg-gradient-to-b from-gray-100/5 to-transparent">
         <div className="flex items-center space-x-3.5 mb-2.5">
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-bold text-base text-white border border-gray-700">
-            {userId.substring(3, 5) || "vF"}
+            {nameToInitials(resolvedName)}
           </div>
           <div>
-            <h2 className="font-bold text-sm text-white">{userId}</h2>
+            <h2 className="font-bold text-sm text-white">{resolvedName}</h2>
             <span className="text-[10px] text-gray-500">登録: たった今 (うんｊレゼポートフォリオ)</span>
           </div>
         </div>

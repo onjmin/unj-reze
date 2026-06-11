@@ -1,13 +1,15 @@
 export interface Reply {
   id: number;
-  name: string;
+  displayName: string;
+  slug?: string;
   content: string;
   time: string;
 }
 
 export interface Post {
   id: number;
-  name: string;
+  displayName: string;
+  slug?: string;
   time: string;
   content: string;
   likes: number;

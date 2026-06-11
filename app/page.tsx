@@ -73,7 +73,7 @@ export default function App() {
   const handleAddReply = async (postId: number, replyText: string) => {
     if (!replyText.trim()) return;
     const reply = await api.posts.replies.create(postId, {
-      name: userId,
+      displayName: userId,
       content: replyText,
     });
     const post = posts.find(p => p.id === postId);
@@ -91,7 +91,7 @@ export default function App() {
     }
     const replyAsPost: Post = {
       id: reply.id,
-      name: reply.name,
+      displayName: reply.displayName,
       time: reply.time,
       content: reply.content,
       likes: 0, dislikes: 0, liked: false, disliked: false,
@@ -106,7 +106,7 @@ export default function App() {
   const handleCreatePost = async () => {
     if (!inputText.trim() && !attachedImage) return;
     const post = await api.posts.create({
-      name: userId,
+      displayName: userId,
       content: inputText,
       hasImage: !!attachedImage,
       imageSrc: attachedImage || undefined,
@@ -293,7 +293,7 @@ export default function App() {
             {currentNav === 'search' && <SearchView />}
             {currentNav === 'notifications' && <NotificationView />}
             {currentNav === 'messages' && <MessageView />}
-            {currentNav === 'profile' && <ProfileView userId={userId} posts={posts} />}
+            {currentNav === 'profile' && <ProfileView userId={userId} displayName={userId} posts={posts} />}
           </div>
 
           <BottomNav current={currentNav} set={setCurrentNav} />
