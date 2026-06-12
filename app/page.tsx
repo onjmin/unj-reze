@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
 import { Post } from '@/lib/types';
@@ -38,14 +38,21 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
 
+  const heartQueue = useRef<Map<number, number>>(new Map());
+  const heartTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const likeParity = useRef<Map<number, number>>(new Map());
+  const likeTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const dislikeParity = useRef<Map<number, number>>(new Map());
+  const dislikeTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
   const fetchPosts = useCallback(async () => {
     try {
-      const data = await api.posts.list();
+      const data = await api.posts.list(userId);
       setPosts(data);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     fetchPosts();
@@ -55,19 +62,67 @@ export default function App() {
     setComposerOpen(true);
   };
 
-  const handleLike = async (postId: number) => {
-    const updated = await api.posts.like(postId);
-    setPosts(posts.map(p => p.id === postId ? updated : p));
+  const handleLike = (postId: number) => {
+    setPosts(prev => prev.map(p => p.id !== postId ? p : {
+      ...p, liked: !p.liked,
+      likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
+      disliked: p.liked ? p.disliked : false,
+      dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
+    }));
+    const parity = (likeParity.current.get(postId) || 0) + 1;
+    likeParity.current.set(postId, parity);
+    if (likeTimers.current.has(postId)) clearTimeout(likeTimers.current.get(postId)!);
+    likeTimers.current.set(postId, setTimeout(async () => {
+      const p = likeParity.current.get(postId) || 0;
+      likeParity.current.delete(postId);
+      likeTimers.current.delete(postId);
+      if (p % 2 === 0) return;
+      const updated = await api.posts.like(postId, userId);
+      setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+    }, 2000));
   };
 
-  const handleDislike = async (postId: number) => {
-    const updated = await api.posts.dislike(postId);
-    setPosts(posts.map(p => p.id === postId ? updated : p));
+  const handleDislike = (postId: number) => {
+    setPosts(prev => prev.map(p => p.id !== postId ? p : {
+      ...p, disliked: !p.disliked,
+      dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
+      liked: p.disliked ? p.liked : false,
+      likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
+    }));
+    const parity = (dislikeParity.current.get(postId) || 0) + 1;
+    dislikeParity.current.set(postId, parity);
+    if (dislikeTimers.current.has(postId)) clearTimeout(dislikeTimers.current.get(postId)!);
+    dislikeTimers.current.set(postId, setTimeout(async () => {
+      const p = dislikeParity.current.get(postId) || 0;
+      dislikeParity.current.delete(postId);
+      dislikeTimers.current.delete(postId);
+      if (p % 2 === 0) return;
+      const updated = await api.posts.dislike(postId, userId);
+      setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+    }, 2000));
   };
 
   const handleRepost = async (postId: number) => {
+    setPosts(prev => prev.map(p => p.id !== postId ? p : {
+      ...p, reposted: !p.reposted,
+      reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
+    }));
     const updated = await api.posts.repost(postId);
-    setPosts(posts.map(p => p.id === postId ? updated : p));
+    setPosts(prev => prev.map(p => p.id === postId ? updated : p));
+  };
+
+  const handleHeart = (postId: number) => {
+    setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, heartsTotal: p.heartsTotal + 1 }));
+    const current = heartQueue.current.get(postId) || 0;
+    heartQueue.current.set(postId, current + 1);
+    if (heartTimers.current.has(postId)) clearTimeout(heartTimers.current.get(postId)!);
+    heartTimers.current.set(postId, setTimeout(async () => {
+      const count = heartQueue.current.get(postId) || 0;
+      heartQueue.current.delete(postId);
+      heartTimers.current.delete(postId);
+      const updated = await api.posts.heart(postId, userId, count);
+      setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+    }, 2000));
   };
 
   const handleAddReply = async (postId: number, replyText: string) => {
@@ -282,6 +337,7 @@ export default function App() {
                   onLike={handleLike}
                   onDislike={handleDislike}
                   onRepost={handleRepost}
+                  onHeart={handleHeart}
                   onAddReply={handleAddReply}
                   onQuickPost={handleQuickPost}
                   openGame={() => setActiveScreen('game')}

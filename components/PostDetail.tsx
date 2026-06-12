@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag } from 'lucide-react';
 import Link from 'next/link';
 import { Post } from '@/lib/types';
+import { api } from '@/lib/api';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -25,6 +26,12 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
   const [blocked, setBlocked] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const userId = '名無しvFZ';
+  const heartQueue = useRef(0);
+  const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const likeParity = useRef(0);
+  const likeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dislikeParity = useRef(0);
+  const dislikeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -61,22 +68,63 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
-  const setPostField = (fn: (p: Post) => Post) => setPost(fn(post));
+  const handleLike = useCallback(() => {
+    const postId = post.id;
+    setPost(p => ({
+      ...p, liked: !p.liked,
+      likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
+      disliked: p.liked ? p.disliked : false,
+      dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
+    }));
+    likeParity.current += 1;
+    if (likeTimer.current) clearTimeout(likeTimer.current);
+    likeTimer.current = setTimeout(async () => {
+      if (likeParity.current % 2 === 0) { likeParity.current = 0; return; }
+      likeParity.current = 0;
+      const updated = await api.posts.like(postId, userId);
+      setPost(updated);
+    }, 2000);
+  }, [post.id, userId]);
 
-  const handleLike = () => setPostField(p => {
-    const liked = !p.liked;
-    return { ...p, liked, likes: liked ? p.likes + 1 : p.likes - 1, disliked: liked ? false : p.disliked, dislikes: (liked && p.disliked) ? p.dislikes - 1 : p.dislikes };
-  });
+  const handleDislike = useCallback(() => {
+    const postId = post.id;
+    setPost(p => ({
+      ...p, disliked: !p.disliked,
+      dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
+      liked: p.disliked ? p.liked : false,
+      likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
+    }));
+    dislikeParity.current += 1;
+    if (dislikeTimer.current) clearTimeout(dislikeTimer.current);
+    dislikeTimer.current = setTimeout(async () => {
+      if (dislikeParity.current % 2 === 0) { dislikeParity.current = 0; return; }
+      dislikeParity.current = 0;
+      const updated = await api.posts.dislike(postId, userId);
+      setPost(updated);
+    }, 2000);
+  }, [post.id, userId]);
 
-  const handleDislike = () => setPostField(p => {
-    const disliked = !p.disliked;
-    return { ...p, disliked, dislikes: disliked ? p.dislikes + 1 : p.dislikes - 1, liked: disliked ? false : p.liked, likes: (disliked && p.liked) ? p.likes - 1 : p.likes };
-  });
+  const handleRepost = useCallback(async () => {
+    setPost(p => ({
+      ...p, reposted: !p.reposted,
+      reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
+    }));
+    const updated = await api.posts.repost(post.id);
+    setPost(updated);
+  }, [post.id]);
 
-  const handleRepost = () => setPostField(p => {
-    const reposted = !p.reposted;
-    return { ...p, reposted, reposts: reposted ? p.reposts + 1 : p.reposts - 1 };
-  });
+  const handleHeart = useCallback(() => {
+    const postId = post.id;
+    setPost(p => ({ ...p, heartsTotal: p.heartsTotal + 1 }));
+    heartQueue.current += 1;
+    if (heartTimer.current) clearTimeout(heartTimer.current);
+    heartTimer.current = setTimeout(async () => {
+      const count = heartQueue.current;
+      heartQueue.current = 0;
+      const updated = await api.posts.heart(postId, userId, count);
+      setPost(updated);
+    }, 2000);
+  }, [post.id, userId]);
 
   const handleAddReply = () => {
     if (!replyText.trim()) return;
@@ -203,10 +251,10 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
             <button className="flex items-center hover:text-blue-400 transition-colors">
               <Mail size={14} />
             </button>
-            <div className="flex items-center space-x-1 text-gray-600">
+            <button onClick={handleHeart} className="flex items-center space-x-1 hover:text-pink-400 transition-colors">
               <Heart size={12} className="fill-current text-pink-600/65" />
               <span className="text-[10px]">{post.heartsTotal || '0'}</span>
-            </div>
+            </button>
           </div>
         </div>
       </div>

@@ -1,30 +1,29 @@
 import { db as mockDb } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
 
-function deriveSlug(fullName: string): string {
-  const match = fullName.match(/[a-zA-Z0-9]+$/);
-  return match ? match[0] : fullName;
-}
-
 export const mockStore: DataStore = {
-  async getPosts() {
-    return mockDb.getPosts();
+  async getPosts(userId?: string) {
+    return mockDb.getPosts(userId);
   },
 
-  async getPost(id: number) {
-    return mockDb.getPost(id) ?? null;
+  async getPost(id: number, userId?: string) {
+    return mockDb.getPost(id, userId) ?? null;
   },
 
   async createPost(data: CreatePostParams) {
     return mockDb.createPost(data);
   },
 
-  async likePost(id: number) {
-    return mockDb.likePost(id);
+  async likePost(id: number, userId: string) {
+    return mockDb.likePost(id, userId);
   },
 
-  async dislikePost(id: number) {
-    return mockDb.dislikePost(id);
+  async dislikePost(id: number, userId: string) {
+    return mockDb.dislikePost(id, userId);
+  },
+
+  async heartPost(id: number, userId: string, count?: number) {
+    return mockDb.heartPost(id, userId, count);
   },
 
   async repostPost(id: number) {
@@ -39,8 +38,8 @@ export const mockStore: DataStore = {
     return mockDb.addReply(postId, data);
   },
 
-  async getUserPostsBySlug(slug: string) {
-    return mockDb.getUserPostsBySlug(slug);
+  async getUserPostsBySlug(slug: string, userId?: string) {
+    return mockDb.getUserPostsBySlug(slug, userId);
   },
 
   async getUserDisplayName(slug: string) {

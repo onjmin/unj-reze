@@ -73,7 +73,7 @@ function rowToPost(row: any): Post {
     imageAlt: row.image_alt ?? undefined,
     avatarColor: row.avatar_color,
     hasCollabButton: !!row.has_collab_button,
-    heartsTotal: row.hearts_total,
+    heartsTotal: row.hearts_total ?? 0,
     hasGame: !!row.has_game,
     replyTo: row.reply_to ?? undefined,
     replies: [],
@@ -97,32 +97,56 @@ function deriveSlugSqlite(fullName: string): string {
   return match ? match[0] : fullName;
 }
 
-export const sqliteStore: DataStore = {
-  async getPosts() {
-    const d = await getDb();
-    const posts = d.exec('SELECT * FROM posts ORDER BY id DESC');
-    if (posts.length === 0 || posts[0].values.length === 0) return [];
-    const cols = posts[0].columns;
-    const rows = posts[0].values.map((v: any[]) => {
-      const obj: any = {};
-      cols.forEach((c, i) => { obj[c] = v[i]; });
-      return obj;
-    });
-    const postIds = rows.map(r => r.id);
-    if (postIds.length === 0) return [];
+function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[] {
+  const result = d.exec(sql, params);
+  if (result.length === 0 || result[0].values.length === 0) return [];
+  const cols = result[0].columns;
+  return result[0].values.map((v: any[]) => {
+    const obj: any = {};
+    cols.forEach((c, i) => { obj[c] = v[i]; });
+    return obj;
+  });
+}
 
+const VOTED_SELECT = `
+  SELECT p.*,
+    COALESCE((SELECT vote_type FROM post_votes pv WHERE pv.post_id = p.id AND pv.user_id = ?), '') as vote_type,
+    (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+  FROM posts p
+`;
+
+function applyVoteRow(obj: any, userId?: string): any {
+  if (userId) {
+    obj.liked = obj.vote_type === 'like' ? 1 : 0;
+    obj.disliked = obj.vote_type === 'dislike' ? 1 : 0;
+  } else {
+    obj.liked = 0;
+    obj.disliked = 0;
+  }
+  delete obj.vote_type;
+  return obj;
+}
+
+export const sqliteStore: DataStore = {
+  async getPosts(userId?: string) {
+    const d = await getDb();
+    let rows;
+    if (userId) {
+      rows = rowsToObjects(d, `${VOTED_SELECT} ORDER BY p.id DESC`, [userId]);
+    } else {
+      rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p ORDER BY p.id DESC`);
+    }
+    if (rows.length === 0) return [];
+    rows.forEach(r => applyVoteRow(r, userId));
+
+    const postIds = rows.map(r => r.id);
     const placeholders = postIds.map(() => '?').join(',');
-    const repliesResult = d.exec(`SELECT * FROM replies WHERE post_id IN (${placeholders}) ORDER BY id`, postIds);
+    const repliesRows = rowsToObjects(d, `SELECT * FROM replies WHERE post_id IN (${placeholders}) ORDER BY id`, postIds);
     const repliesByPost: Record<number, Reply[]> = {};
-    if (repliesResult.length > 0) {
-      const rCols = repliesResult[0].columns;
-      repliesResult[0].values.forEach((v: any[]) => {
-        const obj: any = {};
-        rCols.forEach((c, i) => { obj[c] = v[i]; });
-        const pid = obj.post_id;
-        if (!repliesByPost[pid]) repliesByPost[pid] = [];
-        repliesByPost[pid].push(rowToReply(obj));
-      });
+    for (const r of repliesRows) {
+      const pid = r.post_id;
+      if (!repliesByPost[pid]) repliesByPost[pid] = [];
+      repliesByPost[pid].push(rowToReply(r));
     }
 
     return rows.map(r => ({
@@ -131,24 +155,19 @@ export const sqliteStore: DataStore = {
     }));
   },
 
-  async getPost(id: number) {
+  async getPost(id: number, userId?: string) {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM posts WHERE id = ?', [id]);
-    if (result.length === 0 || result[0].values.length === 0) return null;
-    const cols = result[0].columns;
-    const obj: any = {};
-    cols.forEach((c, i) => { obj[c] = result[0].values[0][i]; });
-    const post = rowToPost(obj);
-
-    const repliesResult = d.exec('SELECT * FROM replies WHERE post_id = ? ORDER BY id', [id]);
-    if (repliesResult.length > 0) {
-      const rCols = repliesResult[0].columns;
-      post.replies = repliesResult[0].values.map((v: any[]) => {
-        const robj: any = {};
-        rCols.forEach((c, i) => { robj[c] = v[i]; });
-        return rowToReply(robj);
-      });
+    let rows;
+    if (userId) {
+      rows = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);
+    } else {
+      rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`, [id]);
     }
+    if (rows.length === 0) return null;
+    applyVoteRow(rows[0], userId);
+    const post = rowToPost(rows[0]);
+    const repliesRows = rowsToObjects(d, 'SELECT * FROM replies WHERE post_id = ? ORDER BY id', [id]);
+    post.replies = repliesRows.map(rowToReply);
     return post;
   },
 
@@ -167,56 +186,65 @@ export const sqliteStore: DataStore = {
     return { ...rowToPost({ id, display_name: data.displayName, slug, created_at: now, content: data.content, likes: 0, dislikes: 0, liked: 0, disliked: 0, replies_count: 0, reposts: 0, reposted: 0, has_image: data.hasImage ? 1 : 0, image_src: data.imageSrc || null, image_alt: data.imageAlt || null, avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600', has_collab_button: 1, hearts_total: 0, has_game: 0, reply_to: null }), replies: [] };
   },
 
-  async likePost(id: number) {
+  async likePost(id: number, userId: string) {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM posts WHERE id = ?', [id]);
-    if (result.length === 0 || result[0].values.length === 0) return null;
-    const cols = result[0].columns;
-    const obj: any = {};
-    cols.forEach((c, i) => { obj[c] = result[0].values[0][i]; });
+    const voteRows = rowsToObjects(d, 'SELECT vote_type FROM post_votes WHERE post_id = ? AND user_id = ?', [id, userId]);
+    const existingVote = voteRows.length > 0 ? voteRows[0].vote_type : null;
 
-    const newLiked = !obj.liked;
-    const likeDelta = newLiked ? 1 : -1;
-    const dislikeDelta = newLiked && obj.disliked ? -1 : 0;
-
-    d.run(
-      `UPDATE posts SET liked = ?, likes = likes + ?, disliked = CASE WHEN ? THEN 0 ELSE disliked END, dislikes = MAX(dislikes + ?, 0) WHERE id = ?`,
-      [newLiked ? 1 : 0, likeDelta, newLiked && obj.disliked ? 1 : 0, dislikeDelta, id]
-    );
+    if (existingVote === 'like') {
+      d.run('DELETE FROM post_votes WHERE post_id = ? AND user_id = ?', [id, userId]);
+      d.run('UPDATE posts SET likes = MAX(likes - 1, 0) WHERE id = ?', [id]);
+    } else if (existingVote === 'dislike') {
+      d.run('UPDATE post_votes SET vote_type = ? WHERE post_id = ? AND user_id = ?', ['like', id, userId]);
+      d.run('UPDATE posts SET likes = likes + 1, dislikes = MAX(dislikes - 1, 0) WHERE id = ?', [id]);
+    } else {
+      d.run('INSERT INTO post_votes (post_id, user_id, vote_type) VALUES (?, ?, ?)', [id, userId, 'like']);
+      d.run('UPDATE posts SET likes = likes + 1 WHERE id = ?', [id]);
+    }
     saveDb();
 
-    const updated = d.exec('SELECT * FROM posts WHERE id = ?', [id]);
-    if (updated.length === 0) return null;
-    const ucols = updated[0].columns;
-    const uobj: any = {};
-    ucols.forEach((c, i) => { uobj[c] = updated[0].values[0][i]; });
-    return rowToPost(uobj);
+    const rows = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);
+    if (rows.length === 0) return null;
+    applyVoteRow(rows[0], userId);
+    return rowToPost(rows[0]);
   },
 
-  async dislikePost(id: number) {
+  async dislikePost(id: number, userId: string) {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM posts WHERE id = ?', [id]);
-    if (result.length === 0 || result[0].values.length === 0) return null;
-    const cols = result[0].columns;
-    const obj: any = {};
-    cols.forEach((c, i) => { obj[c] = result[0].values[0][i]; });
+    const voteRows = rowsToObjects(d, 'SELECT vote_type FROM post_votes WHERE post_id = ? AND user_id = ?', [id, userId]);
+    const existingVote = voteRows.length > 0 ? voteRows[0].vote_type : null;
 
-    const newDisliked = !obj.disliked;
-    const dislikeDelta = newDisliked ? 1 : -1;
-    const likeDelta = newDisliked && obj.liked ? -1 : 0;
-
-    d.run(
-      `UPDATE posts SET disliked = ?, dislikes = dislikes + ?, liked = CASE WHEN ? THEN 0 ELSE liked END, likes = MAX(likes + ?, 0) WHERE id = ?`,
-      [newDisliked ? 1 : 0, dislikeDelta, newDisliked && obj.liked ? 1 : 0, likeDelta, id]
-    );
+    if (existingVote === 'dislike') {
+      d.run('DELETE FROM post_votes WHERE post_id = ? AND user_id = ?', [id, userId]);
+      d.run('UPDATE posts SET dislikes = MAX(dislikes - 1, 0) WHERE id = ?', [id]);
+    } else if (existingVote === 'like') {
+      d.run('UPDATE post_votes SET vote_type = ? WHERE post_id = ? AND user_id = ?', ['dislike', id, userId]);
+      d.run('UPDATE posts SET dislikes = dislikes + 1, likes = MAX(likes - 1, 0) WHERE id = ?', [id]);
+    } else {
+      d.run('INSERT INTO post_votes (post_id, user_id, vote_type) VALUES (?, ?, ?)', [id, userId, 'dislike']);
+      d.run('UPDATE posts SET dislikes = dislikes + 1 WHERE id = ?', [id]);
+    }
     saveDb();
 
-    const updated = d.exec('SELECT * FROM posts WHERE id = ?', [id]);
-    if (updated.length === 0) return null;
-    const ucols = updated[0].columns;
-    const uobj: any = {};
-    ucols.forEach((c, i) => { uobj[c] = updated[0].values[0][i]; });
-    return rowToPost(uobj);
+    const rows = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);
+    if (rows.length === 0) return null;
+    applyVoteRow(rows[0], userId);
+    return rowToPost(rows[0]);
+  },
+
+  async heartPost(id: number, userId: string, count: number = 1) {
+    const d = await getDb();
+    const postRows = rowsToObjects(d, 'SELECT id FROM posts WHERE id = ?', [id]);
+    if (postRows.length === 0) return null;
+
+    for (let i = 0; i < count; i++) {
+      d.run('INSERT INTO post_hearts (post_id, user_id) VALUES (?, ?)', [id, userId]);
+    }
+    saveDb();
+
+    const rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`, [id]);
+    if (rows.length === 0) return null;
+    return rowToPost(rows[0]);
   },
 
   async repostPost(id: number) {
@@ -236,14 +264,8 @@ export const sqliteStore: DataStore = {
 
   async getReplies(postId: number) {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM replies WHERE post_id = ? ORDER BY id', [postId]);
-    if (result.length === 0) return [];
-    const cols = result[0].columns;
-    return result[0].values.map((v: any[]) => {
-      const obj: any = {};
-      cols.forEach((c, i) => { obj[c] = v[i]; });
-      return rowToReply(obj);
-    });
+    const rows = rowsToObjects(d, 'SELECT * FROM replies WHERE post_id = ? ORDER BY id', [postId]);
+    return rows.map(rowToReply);
   },
 
   async addReply(postId: number, data: ReplyParams) {
@@ -260,47 +282,34 @@ export const sqliteStore: DataStore = {
     return { id, displayName: data.displayName, slug, content: data.content, createdAt: now, time: formatRelativeTime(now) };
   },
 
-  async getUserPostsBySlug(slug: string) {
+  async getUserPostsBySlug(slug: string, userId?: string) {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM posts WHERE slug = ? ORDER BY id DESC', [slug]);
-    if (result.length === 0 || result[0].values.length === 0) return [];
-    const cols = result[0].columns;
-    return result[0].values.map((v: any[]) => {
-      const obj: any = {};
-      cols.forEach((c, i) => { obj[c] = v[i]; });
-      return rowToPost(obj);
-    });
+    let rows;
+    if (userId) {
+      rows = rowsToObjects(d, `${VOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC`, [userId, slug]);
+    } else {
+      rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.slug = ? ORDER BY p.id DESC`, [slug]);
+    }
+    rows.forEach(r => applyVoteRow(r, userId));
+    return rows.map(rowToPost);
   },
 
   async getUserDisplayName(slug: string) {
     const d = await getDb();
-    const result = d.exec('SELECT display_name FROM posts WHERE slug = ? LIMIT 1', [slug]);
-    if (result.length === 0 || result[0].values.length === 0) return undefined;
-    return result[0].values[0][0] as string;
+    const rows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE slug = ? LIMIT 1', [slug]);
+    return rows.length > 0 ? rows[0].display_name : undefined;
   },
 
   async getNotifications() {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM notifications ORDER BY id');
-    if (result.length === 0) return [];
-    const cols = result[0].columns;
-    return result[0].values.map((v: any[]) => {
-      const obj: any = {};
-      cols.forEach((c, i) => { obj[c] = v[i]; });
-      return { id: obj.id, user: obj.user_name, action: obj.action, target: obj.target, createdAt: obj.created_at, time: formatRelativeTime(obj.created_at) } as Notification;
-    });
+    const rows = rowsToObjects(d, 'SELECT * FROM notifications ORDER BY id');
+    return rows.map(r => ({ id: r.id, user: r.user_name, action: r.action, target: r.target, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Notification));
   },
 
   async getMessages() {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM messages ORDER BY id');
-    if (result.length === 0) return [];
-    const cols = result[0].columns;
-    return result[0].values.map((v: any[]) => {
-      const obj: any = {};
-      cols.forEach((c, i) => { obj[c] = v[i]; });
-      return { id: obj.id, sender: obj.sender, text: obj.text, createdAt: obj.created_at, time: formatRelativeTime(obj.created_at) } as Message;
-    });
+    const rows = rowsToObjects(d, 'SELECT * FROM messages ORDER BY id');
+    return rows.map(r => ({ id: r.id, sender: r.sender, text: r.text, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
   },
 
   async addMessage(data: MessageParams) {
@@ -317,13 +326,7 @@ export const sqliteStore: DataStore = {
 
   async getTrends() {
     const d = await getDb();
-    const result = d.exec('SELECT * FROM trends ORDER BY id');
-    if (result.length === 0) return [];
-    const cols = result[0].columns;
-    return result[0].values.map((v: any[]) => {
-      const obj: any = {};
-      cols.forEach((c, i) => { obj[c] = v[i]; });
-      return { keyword: obj.keyword, count: obj.count } as Trend;
-    });
+    const rows = rowsToObjects(d, 'SELECT * FROM trends ORDER BY id');
+    return rows.map(r => ({ keyword: r.keyword, count: r.count } as Trend));
   },
 };

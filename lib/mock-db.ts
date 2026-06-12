@@ -72,12 +72,15 @@ class MockDB {
   private notifications: Notification[];
   private messages: Message[];
   private trends: Trend[];
+  private votes: Map<string, 'like' | 'dislike'> = new Map();
+  private heartCounts: Map<number, number> = new Map();
 
   constructor() {
     this.posts = JSON.parse(JSON.stringify(INITIAL_POSTS));
     for (const post of this.posts) {
       if (!post.slug) post.slug = deriveSlug(post.displayName);
       if (!post.createdAt) post.createdAt = parseRelativeTime(post.time);
+      this.heartCounts.set(post.id, post.heartsTotal);
       for (const reply of post.replies) {
         if (!reply.slug) reply.slug = deriveSlug(reply.displayName);
         if (!reply.createdAt) reply.createdAt = parseRelativeTime(reply.time);
@@ -104,12 +107,26 @@ class MockDB {
     return nowISO();
   }
 
-  getPosts(): Post[] {
-    return this.posts;
+  private applyUserState(post: Post, userId?: string): Post {
+    if (userId) {
+      const likeKey = `${post.id}:${userId}:like`;
+      const dislikeKey = `${post.id}:${userId}:dislike`;
+      post.liked = this.votes.get(likeKey) === 'like';
+      post.disliked = this.votes.get(dislikeKey) === 'dislike';
+    } else {
+      post.liked = false;
+      post.disliked = false;
+    }
+    post.heartsTotal = this.heartCounts.get(post.id) ?? post.heartsTotal;
+    return post;
   }
 
-  getUserPostsBySlug(slug: string): Post[] {
-    return this.posts.filter(p => p.slug === slug);
+  getPosts(userId?: string): Post[] {
+    return this.posts.map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+  }
+
+  getUserPostsBySlug(slug: string, userId?: string): Post[] {
+    return this.posts.filter(p => p.slug === slug).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
   }
 
   getUserDisplayName(slug: string): string | undefined {
@@ -117,8 +134,10 @@ class MockDB {
     return post?.displayName;
   }
 
-  getPost(id: number): Post | undefined {
-    return this.posts.find(p => p.id === id);
+  getPost(id: number, userId?: string): Post | undefined {
+    const post = this.posts.find(p => p.id === id);
+    if (!post) return undefined;
+    return this.applyUserState({ ...post, replies: [...post.replies] }, userId);
   }
 
   createPost(data: {
@@ -153,34 +172,57 @@ class MockDB {
       heartsTotal: 0,
       replies: [],
     };
+    this.heartCounts.set(post.id, 0);
     this.posts.unshift(post);
     return post;
   }
 
-  likePost(id: number): Post | null {
+  likePost(id: number, userId: string): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post) return null;
-    const liked = !post.liked;
-    post.liked = liked;
-    post.likes = liked ? post.likes + 1 : post.likes - 1;
-    if (liked && post.disliked) {
-      post.disliked = false;
-      post.dislikes -= 1;
+    const likeKey = `${id}:${userId}:like`;
+    const dislikeKey = `${id}:${userId}:dislike`;
+    const alreadyLiked = this.votes.get(likeKey) === 'like';
+    if (alreadyLiked) {
+      this.votes.delete(likeKey);
+      post.likes -= 1;
+    } else {
+      if (this.votes.get(dislikeKey) === 'dislike') {
+        this.votes.delete(dislikeKey);
+        post.dislikes -= 1;
+      }
+      this.votes.set(likeKey, 'like');
+      post.likes += 1;
     }
-    return post;
+    return this.getPost(id, userId) ?? null;
   }
 
-  dislikePost(id: number): Post | null {
+  dislikePost(id: number, userId: string): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post) return null;
-    const disliked = !post.disliked;
-    post.disliked = disliked;
-    post.dislikes = disliked ? post.dislikes + 1 : post.dislikes - 1;
-    if (disliked && post.liked) {
-      post.liked = false;
-      post.likes -= 1;
+    const likeKey = `${id}:${userId}:like`;
+    const dislikeKey = `${id}:${userId}:dislike`;
+    const alreadyDisliked = this.votes.get(dislikeKey) === 'dislike';
+    if (alreadyDisliked) {
+      this.votes.delete(dislikeKey);
+      post.dislikes -= 1;
+    } else {
+      if (this.votes.get(likeKey) === 'like') {
+        this.votes.delete(likeKey);
+        post.likes -= 1;
+      }
+      this.votes.set(dislikeKey, 'dislike');
+      post.dislikes += 1;
     }
-    return post;
+    return this.getPost(id, userId) ?? null;
+  }
+
+  heartPost(id: number, _userId: string, count: number = 1): Post | null {
+    const post = this.posts.find(p => p.id === id);
+    if (!post) return null;
+    const current = this.heartCounts.get(id) ?? 0;
+    this.heartCounts.set(id, current + count);
+    return this.getPost(id) ?? null;
   }
 
   repostPost(id: number): Post | null {

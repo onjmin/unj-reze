@@ -58,6 +58,24 @@ CREATE TABLE IF NOT EXISTS replies (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- いいね/わるい 投票テーブル (1ユーザー1投票)
+CREATE TABLE IF NOT EXISTS post_votes (
+  id INTEGER PRIMARY KEY,
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  vote_type TEXT NOT NULL CHECK (vote_type IN ('like', 'dislike')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (post_id, user_id)
+);
+
+-- ハートテーブル (無制限投票)
+CREATE TABLE IF NOT EXISTS post_hearts (
+  id INTEGER PRIMARY KEY,
+  post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- === 通知データ ===
 INSERT INTO notifications (id, user_name, action, target, created_at) VALUES
   (1, '名無しXz9', 'がいいねしました', '青空の写真', NOW() - INTERVAL '3 minutes'),

@@ -22,15 +22,16 @@ export interface MessageParams {
 }
 
 export interface DataStore {
-  getPosts(): Promise<Post[]>;
-  getPost(id: number): Promise<Post | null>;
+  getPosts(userId?: string): Promise<Post[]>;
+  getPost(id: number, userId?: string): Promise<Post | null>;
   createPost(data: CreatePostParams): Promise<Post>;
-  likePost(id: number): Promise<Post | null>;
-  dislikePost(id: number): Promise<Post | null>;
+  likePost(id: number, userId: string): Promise<Post | null>;
+  dislikePost(id: number, userId: string): Promise<Post | null>;
+  heartPost(id: number, userId: string, count?: number): Promise<Post | null>;
   repostPost(id: number): Promise<Post | null>;
   getReplies(postId: number): Promise<Reply[]>;
   addReply(postId: number, data: ReplyParams): Promise<Reply | null>;
-  getUserPostsBySlug(slug: string): Promise<Post[]>;
+  getUserPostsBySlug(slug: string, userId?: string): Promise<Post[]>;
   getUserDisplayName(slug: string): Promise<string | undefined>;
   getNotifications(): Promise<Notification[]>;
   getMessages(): Promise<Message[]>;

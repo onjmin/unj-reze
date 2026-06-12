@@ -5,6 +5,30 @@ import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './
 import { formatRelativeTime } from '../time';
 
 let pool: Pool | null = null;
+let initialized = false;
+
+async function ensureTables(client: any) {
+  if (initialized) return;
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS post_votes (
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      vote_type TEXT NOT NULL CHECK (vote_type IN ('like', 'dislike')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (post_id, user_id)
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS post_hearts (
+      id SERIAL PRIMARY KEY,
+      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  initialized = true;
+}
 
 function getPool(): Pool {
   if (!pool) {
@@ -28,8 +52,8 @@ function rowToPost(row: any): Post {
     content: row.content,
     likes: row.likes,
     dislikes: row.dislikes,
-    liked: row.liked,
-    disliked: row.disliked,
+    liked: row.liked ?? false,
+    disliked: row.disliked ?? false,
     repliesCount: row.replies_count,
     reposts: row.reposts,
     reposted: row.reposted,
@@ -38,7 +62,7 @@ function rowToPost(row: any): Post {
     imageAlt: row.image_alt ?? undefined,
     avatarColor: row.avatar_color,
     hasCollabButton: row.has_collab_button,
-    heartsTotal: row.hearts_total,
+    heartsTotal: row.hearts_total ?? 0,
     hasGame: row.has_game,
     replyTo: row.reply_to ?? undefined,
     replies: [],
@@ -59,44 +83,96 @@ function rowToReply(row: any): Reply {
   };
 }
 
+async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> {
+  await ensureTables(client);
+  let result;
+  if (userId) {
+    result = await client.query(`
+      SELECT p.*,
+        COALESCE(pv.vote_type = 'like', false) as liked,
+        COALESCE(pv.vote_type = 'dislike', false) as disliked,
+        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+      FROM posts p
+      LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
+      ORDER BY p.id DESC
+    `, [userId]);
+  } else {
+    result = await client.query(`
+      SELECT p.*,
+        false as liked,
+        false as disliked,
+        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+      FROM posts p
+      ORDER BY p.id DESC
+    `);
+  }
+
+  const rows = result.rows;
+  const postIds = rows.map(r => r.id);
+  if (postIds.length === 0) return [];
+
+  const repliesResult = await client.query(
+    'SELECT * FROM replies WHERE post_id = ANY($1::int[]) ORDER BY id',
+    [postIds]
+  );
+  const repliesByPost: Record<number, Reply[]> = {};
+  for (const r of repliesResult.rows) {
+    const pid = r.post_id;
+    if (!repliesByPost[pid]) repliesByPost[pid] = [];
+    repliesByPost[pid].push(rowToReply(r));
+  }
+
+  return rows.map(r => ({
+    ...rowToPost(r),
+    replies: repliesByPost[r.id] || [],
+  }));
+}
+
+async function getPostWithVotes(client: any, id: number, userId?: string): Promise<Post | null> {
+  await ensureTables(client);
+  let result;
+  if (userId) {
+    result = await client.query(`
+      SELECT p.*,
+        COALESCE(pv.vote_type = 'like', false) as liked,
+        COALESCE(pv.vote_type = 'dislike', false) as disliked,
+        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+      FROM posts p
+      LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
+      WHERE p.id = $2
+    `, [userId, id]);
+  } else {
+    result = await client.query(`
+      SELECT p.*,
+        false as liked,
+        false as disliked,
+        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+      FROM posts p
+      WHERE p.id = $1
+    `, [id]);
+  }
+
+  if (result.rows.length === 0) return null;
+  const post = rowToPost(result.rows[0]);
+  const repliesResult = await client.query('SELECT * FROM replies WHERE post_id = $1 ORDER BY id', [id]);
+  post.replies = repliesResult.rows.map(rowToReply);
+  return post;
+}
+
 export const pgStore: DataStore = {
-  async getPosts() {
+  async getPosts(userId?: string) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM posts ORDER BY id DESC');
-      const rows = result.rows;
-      const postIds = rows.map(r => r.id);
-      if (postIds.length === 0) return [];
-
-      const repliesResult = await client.query(
-        'SELECT * FROM replies WHERE post_id = ANY($1::int[]) ORDER BY id',
-        [postIds]
-      );
-      const repliesByPost: Record<number, Reply[]> = {};
-      for (const r of repliesResult.rows) {
-        const pid = r.post_id;
-        if (!repliesByPost[pid]) repliesByPost[pid] = [];
-        repliesByPost[pid].push(rowToReply(r));
-      }
-
-      return rows.map(r => ({
-        ...rowToPost(r),
-        replies: repliesByPost[r.id] || [],
-      }));
+      return await getPostsWithVotes(client, userId);
     } finally {
       client.release();
     }
   },
 
-  async getPost(id: number) {
+  async getPost(id: number, userId?: string) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM posts WHERE id = $1', [id]);
-      if (result.rows.length === 0) return null;
-      const post = rowToPost(result.rows[0]);
-      const repliesResult = await client.query('SELECT * FROM replies WHERE post_id = $1 ORDER BY id', [id]);
-      post.replies = repliesResult.rows.map(rowToReply);
-      return post;
+      return await getPostWithVotes(client, id, userId);
     } finally {
       client.release();
     }
@@ -119,27 +195,42 @@ export const pgStore: DataStore = {
     }
   },
 
-  async likePost(id: number) {
+  async likePost(id: number, userId: string) {
     const client = await getPool().connect();
     try {
+      await ensureTables(client);
       await client.query('BEGIN');
-      const post = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
-      if (post.rows.length === 0) {
+      const postResult = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
+      if (postResult.rows.length === 0) {
         await client.query('ROLLBACK');
         return null;
       }
-      const current = post.rows[0];
-      const newLiked = !current.liked;
-      const likeDelta = newLiked ? 1 : -1;
-      const dislikeDelta = current.disliked && newLiked ? -1 : 0;
 
-      const result = await client.query(
-        `UPDATE posts SET liked = $1, likes = likes + $2, disliked = CASE WHEN $3 THEN false ELSE disliked END, dislikes = GREATEST(dislikes + $4, 0)
-         WHERE id = $5 RETURNING *`,
-        [newLiked, likeDelta, newLiked && current.disliked, dislikeDelta, id]
+      const voteResult = await client.query(
+        'SELECT vote_type FROM post_votes WHERE post_id = $1 AND user_id = $2 FOR UPDATE',
+        [id, userId]
       );
+      const existingVote = voteResult.rows[0]?.vote_type;
+
+      if (existingVote === 'like') {
+        await client.query('DELETE FROM post_votes WHERE post_id = $1 AND user_id = $2', [id, userId]);
+        await client.query('UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
+      } else if (existingVote === 'dislike') {
+        await client.query(
+          'UPDATE post_votes SET vote_type = $1 WHERE post_id = $2 AND user_id = $3',
+          ['like', id, userId]
+        );
+        await client.query('UPDATE posts SET likes = likes + 1, dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
+      } else {
+        await client.query(
+          'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
+          [id, userId, 'like']
+        );
+        await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
+      }
+
       await client.query('COMMIT');
-      return rowToPost(result.rows[0]);
+      return await getPostWithVotes(client, id, userId);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -148,30 +239,64 @@ export const pgStore: DataStore = {
     }
   },
 
-  async dislikePost(id: number) {
+  async dislikePost(id: number, userId: string) {
     const client = await getPool().connect();
     try {
+      await ensureTables(client);
       await client.query('BEGIN');
-      const post = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
-      if (post.rows.length === 0) {
+      const postResult = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
+      if (postResult.rows.length === 0) {
         await client.query('ROLLBACK');
         return null;
       }
-      const current = post.rows[0];
-      const newDisliked = !current.disliked;
-      const dislikeDelta = newDisliked ? 1 : -1;
-      const likeDelta = current.liked && newDisliked ? -1 : 0;
 
-      const result = await client.query(
-        `UPDATE posts SET disliked = $1, dislikes = dislikes + $2, liked = CASE WHEN $3 THEN false ELSE liked END, likes = GREATEST(likes + $4, 0)
-         WHERE id = $5 RETURNING *`,
-        [newDisliked, dislikeDelta, newDisliked && current.liked, likeDelta, id]
+      const voteResult = await client.query(
+        'SELECT vote_type FROM post_votes WHERE post_id = $1 AND user_id = $2 FOR UPDATE',
+        [id, userId]
       );
+      const existingVote = voteResult.rows[0]?.vote_type;
+
+      if (existingVote === 'dislike') {
+        await client.query('DELETE FROM post_votes WHERE post_id = $1 AND user_id = $2', [id, userId]);
+        await client.query('UPDATE posts SET dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
+      } else if (existingVote === 'like') {
+        await client.query(
+          'UPDATE post_votes SET vote_type = $1 WHERE post_id = $2 AND user_id = $3',
+          ['dislike', id, userId]
+        );
+        await client.query('UPDATE posts SET dislikes = dislikes + 1, likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
+      } else {
+        await client.query(
+          'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
+          [id, userId, 'dislike']
+        );
+        await client.query('UPDATE posts SET dislikes = dislikes + 1 WHERE id = $1', [id]);
+      }
+
       await client.query('COMMIT');
-      return rowToPost(result.rows[0]);
+      return await getPostWithVotes(client, id, userId);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
+    } finally {
+      client.release();
+    }
+  },
+
+  async heartPost(id: number, userId: string, count: number = 1) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const postResult = await client.query('SELECT id FROM posts WHERE id = $1', [id]);
+      if (postResult.rows.length === 0) return null;
+
+      for (let i = 0; i < count; i++) {
+        await client.query(
+          'INSERT INTO post_hearts (post_id, user_id) VALUES ($1, $2)',
+          [id, userId]
+        );
+      }
+      return await getPostWithVotes(client, id);
     } finally {
       client.release();
     }
@@ -221,10 +346,33 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getUserPostsBySlug(slug: string) {
+  async getUserPostsBySlug(slug: string, userId?: string) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM posts WHERE slug = $1 ORDER BY id DESC', [slug]);
+      await ensureTables(client);
+      let result;
+      if (userId) {
+        result = await client.query(`
+          SELECT p.*,
+            COALESCE(pv.vote_type = 'like', false) as liked,
+            COALESCE(pv.vote_type = 'dislike', false) as disliked,
+            (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          FROM posts p
+          LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
+          WHERE p.slug = $2
+          ORDER BY p.id DESC
+        `, [userId, slug]);
+      } else {
+        result = await client.query(`
+          SELECT p.*,
+            false as liked,
+            false as disliked,
+            (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          FROM posts p
+          WHERE p.slug = $1
+          ORDER BY p.id DESC
+        `, [slug]);
+      }
       return result.rows.map(rowToPost);
     } finally {
       client.release();

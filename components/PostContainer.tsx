@@ -22,6 +22,7 @@ interface PostContainerProps {
   onLike: (id: number) => void;
   onDislike: (id: number) => void;
   onRepost: (id: number) => void;
+  onHeart: (id: number) => void;
   onAddReply: (id: number, text: string) => void;
   onQuickPost: () => void;
   openGame: () => void;
@@ -29,7 +30,7 @@ interface PostContainerProps {
   openMml: () => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onAddReply, onQuickPost, openGame, openDrawing, openMml }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openDrawing, openMml }: PostContainerProps) {
   const router = useRouter();
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText] = useState('');
@@ -80,7 +81,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
   const handlePostClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
-    if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]')) return;
+    if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]') || t.closest('video')) return;
     router.push(`/post/${post.id}`);
   }, [router, post.id]);
 
@@ -278,10 +279,13 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               <Mail size={14} />
             </button>
 
-            <div className="flex items-center space-x-1 text-gray-600">
+            <button
+              onClick={() => onHeart(post.id)}
+              className="flex items-center space-x-1 hover:text-pink-400 transition-colors"
+            >
               <Heart size={12} className="fill-current text-pink-600/65" />
               <span className="text-[10px]">{post.heartsTotal || '0'}</span>
-            </div>
+            </button>
           </div>
 
           {post.replies.length > 0 && (

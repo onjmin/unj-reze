@@ -8,8 +8,9 @@ export function generateStaticParams() {
 
 export default async function PostPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const post = db.getPost(parseInt(id));
-  const allPosts = db.getPosts();
+  const userId = '名無しvFZ';
+  const post = db.getPost(parseInt(id), userId);
+  const allPosts = db.getPosts(userId);
 
   if (!post) {
     return (
