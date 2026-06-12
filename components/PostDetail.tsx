@@ -114,7 +114,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const handleHeart = useCallback(() => {
     const postId = post.id;
-    setPost(p => ({ ...p, heartsTotal: p.heartsTotal + 1 }));
+    setPost(p => ({ ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
     heartQueue.current += 1;
     if (heartTimer.current) clearTimeout(heartTimer.current);
     heartTimer.current = setTimeout(async () => {
@@ -130,7 +130,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     const now = Date.now();
     const targetParent = replyTo ?? post;
     const newReply: Post = {
-      id: now, displayName: userId, time: "たった今", content: replyText,
+      id: now, displayName: userId, createdAt: new Date(now).toISOString(), time: "たった今", content: replyText,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: "from-blue-500 to-indigo-600",
@@ -332,7 +332,7 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
 
   const handleHeart = useCallback(() => {
     const id = localPost.id;
-    setLocalPost(p => ({ ...p, heartsTotal: p.heartsTotal + 1 }));
+    setLocalPost(p => ({ ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
     api.posts.heart(id, userId, 1).then(setLocalPost);
   }, [localPost.id, userId]);
 

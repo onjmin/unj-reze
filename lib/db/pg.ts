@@ -106,7 +106,7 @@ async function rowToPost(row: any): Promise<Post> {
 
   return {
     id: row.id,
-    displayName: row.display_name,
+    displayName: row.display_name ?? '名無し',
     slug: row.slug ?? undefined,
     createdAt,
     time: formatRelativeTime(createdAt),
@@ -175,10 +175,10 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
   const rows = result.rows;
   if (rows.length === 0) return [];
 
-  const threadIds = rows.map(r => r.id);
+  const threadIds = rows.map((r: any) => r.id);
   const repliesMap = await getThreadReplies(client, threadIds);
 
-  return Promise.all(rows.map(async r => ({
+  return Promise.all(rows.map(async (r: any) => ({
     ...(await rowToPost(r)),
     replies: repliesMap.get(r.id) || [],
   })));
@@ -397,7 +397,7 @@ export const pgStore: DataStore = {
         'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
         [postId]
       );
-      return result.rows.map(rowToPost);
+      return Promise.all(result.rows.map(rowToPost));
     } finally {
       client.release();
     }
@@ -452,7 +452,7 @@ export const pgStore: DataStore = {
           ORDER BY p.id DESC
         `, [slug]);
       }
-      return result.rows.map(rowToPost);
+      return Promise.all(result.rows.map(rowToPost));
     } finally {
       client.release();
     }

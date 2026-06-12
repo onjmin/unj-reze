@@ -114,7 +114,7 @@ export default function App() {
   };
 
   const handleHeart = (postId: number) => {
-    setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, heartsTotal: p.heartsTotal + 1 }));
+    setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
     const current = heartQueue.current.get(postId) || 0;
     heartQueue.current.set(postId, current + 1);
     if (heartTimers.current.has(postId)) clearTimeout(heartTimers.current.get(postId)!);

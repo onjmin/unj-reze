@@ -339,13 +339,15 @@ const AVATAR_COLORS = [
   'from-sky-400 to-indigo-500',
 ];
 
-function nameToColor(name: string): string {
+function nameToColor(name: string | null | undefined): string {
+  if (!name) return 'from-gray-400 to-gray-500';
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function nameToInitials(name: string): string {
+function nameToInitials(name: string | null | undefined): string {
+  if (!name) return '名無';
   return name.substring(3, 5) || '名無';
 }
 

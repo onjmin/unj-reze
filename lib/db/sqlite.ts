@@ -56,7 +56,7 @@ function rowToPost(row: any): Post {
   const createdAt = row.created_at;
   return {
     id: row.id,
-    displayName: row.display_name,
+    displayName: row.display_name ?? '名無し',
     slug: row.slug ?? undefined,
     createdAt,
     time: formatRelativeTime(createdAt),
