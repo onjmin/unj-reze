@@ -130,33 +130,18 @@ export default function App() {
     const reply = await api.posts.replies.create(postId, {
       displayName: userId,
       content: replyText,
+      parentPostId: postId,
     });
-    const post = posts.find(p => p.id === postId);
-    if (post) {
-      setPosts(posts.map(p => {
-        if (p.id === postId) {
-          return {
-            ...p,
-            repliesCount: p.repliesCount + 1,
-            replies: [...p.replies, reply],
-          };
-        }
-        return p;
-      }));
-    }
-    const replyAsPost: Post = {
-      id: reply.id,
-      displayName: reply.displayName,
-      createdAt: reply.createdAt,
-      time: reply.time,
-      content: reply.content,
-      likes: 0, dislikes: 0, liked: false, disliked: false,
-      repliesCount: 0, reposts: 0, reposted: false,
-      avatarColor: "from-blue-500 to-indigo-600",
-      heartsTotal: 0, replies: [],
-      replyTo: postId,
-    };
-    setPosts(prev => [...prev, replyAsPost]);
+    setPosts(posts.map(p => {
+      if (p.id === postId) {
+        return {
+          ...p,
+          repliesCount: p.repliesCount + 1,
+          replies: [...p.replies, reply],
+        };
+      }
+      return p;
+    }));
   };
 
   const handleCreatePost = async () => {

@@ -1,4 +1,4 @@
-import { Post, Reply } from './types';
+import { Post } from './types';
 import { db } from './mock-db';
 import type { Notification, Message, Trend } from './mock-db';
 
@@ -49,7 +49,7 @@ const staticApi = {
     },
     replies: {
       list: async (postId: number) => db.getReplies(postId),
-      create: async (postId: number, data: { displayName: string; content: string }) => {
+      create: async (postId: number, data: { displayName: string; content: string; parentPostId?: number }) => {
         const reply = db.addReply(postId, data);
         if (!reply) throw new Error('Post not found');
         return reply;
@@ -92,9 +92,9 @@ const liveApi = {
     heart: (id: number, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
     repost: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
     replies: {
-      list: (postId: number) => fetcher<Reply[]>(`/posts/${postId}/replies`),
-      create: (postId: number, data: { displayName: string; content: string }) =>
-        fetcher<Reply>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
+      list: (postId: number) => fetcher<Post[]>(`/posts/${postId}/replies`),
+      create: (postId: number, data: { displayName: string; content: string; parentPostId?: number }) =>
+        fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
     },
   },
   notifications: {

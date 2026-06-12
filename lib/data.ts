@@ -21,128 +21,10 @@ FanTouhouMusic`,
     avatarColor: "from-purple-500 to-pink-600",
     hasCollabButton: false,
     heartsTotal: 34,
+    threadId: 12, parentPostId: 12,
     replies: [
-      { id: 115, displayName: "名無しLz9", content: "このアレンジ良すぎる", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今" }
+      { id: 115, displayName: "名無しLz9", slug: "Lz9", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今", content: "このアレンジ良すぎる", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 12, parentPostId: 12, replies: [] }
     ]
-  },
-  {
-    id: 13,
-    displayName: "名無しKt1",
-    createdAt: "2026-06-11T12:00:00.000Z",
-    time: "たった今",
-    content: `https://api.karotter.com/uploads/posts/346ec30c-dcb6-41d7-8cf7-7ef5ef7e92dc.mp4
-
-作曲したコード進行の動画です
-Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行`,
-    likes: 3,
-    dislikes: 0,
-    liked: false,
-    disliked: false,
-    repliesCount: 1,
-    reposts: 0,
-    reposted: false,
-    avatarColor: "from-green-400 to-teal-500",
-    hasCollabButton: false,
-    heartsTotal: 12,
-    replyTo: 11,
-    replies: [
-      { id: 301, displayName: "名無しQm9", content: "7thとdimの組み合わせがオシャレすぎる", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今" }
-    ]
-  },
-  {
-    id: 14,
-    displayName: "名無しWk2",
-    createdAt: "2026-06-11T11:59:30.000Z",
-    time: "30秒前",
-    content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる",
-    likes: 5,
-    dislikes: 0,
-    liked: false,
-    disliked: false,
-    repliesCount: 0,
-    reposts: 0,
-    reposted: false,
-    avatarColor: "from-orange-400 to-red-500",
-    hasCollabButton: false,
-    heartsTotal: 8,
-    replyTo: 11,
-    replies: []
-  },
-  {
-    id: 15,
-    displayName: "名無しQm9",
-    createdAt: "2026-06-11T12:00:00.000Z",
-    time: "たった今",
-    content: "7thとdimの組み合わせがオシャレすぎる",
-    likes: 2,
-    dislikes: 0,
-    liked: false,
-    disliked: false,
-    repliesCount: 0,
-    reposts: 0,
-    reposted: false,
-    avatarColor: "from-teal-400 to-cyan-500",
-    hasCollabButton: false,
-    heartsTotal: 3,
-    replyTo: 13,
-    replies: []
-  },
-  {
-    id: 16,
-    displayName: "名無しRf6",
-    createdAt: "2026-06-11T10:00:00.000Z",
-    time: "2時間前",
-    content: "外スケッチいいな！私も今度やってみよう",
-    likes: 8,
-    dislikes: 1,
-    liked: false,
-    disliked: false,
-    repliesCount: 0,
-    reposts: 0,
-    reposted: false,
-    avatarColor: "from-sky-400 to-indigo-500",
-    hasCollabButton: false,
-    heartsTotal: 14,
-    replyTo: 1,
-    replies: []
-  },
-  {
-    id: 17,
-    displayName: "名無しHn3",
-    createdAt: "2026-06-11T11:45:00.000Z",
-    time: "15分前",
-    content: "lofiは作業効率上がるよね、自分も愛用してる",
-    likes: 4,
-    dislikes: 0,
-    liked: false,
-    disliked: false,
-    repliesCount: 0,
-    reposts: 0,
-    reposted: false,
-    avatarColor: "from-lime-400 to-green-500",
-    hasCollabButton: false,
-    heartsTotal: 6,
-    replyTo: 5,
-    replies: []
-  },
-  {
-    id: 18,
-    displayName: "名無しPz5",
-    createdAt: "2026-06-11T07:00:00.000Z",
-    time: "5時間前",
-    content: "こちらはもう桜が咲き始めましたよ〜春ですね",
-    likes: 11,
-    dislikes: 0,
-    liked: false,
-    disliked: false,
-    repliesCount: 0,
-    reposts: 1,
-    reposted: false,
-    avatarColor: "from-pink-300 to-rose-400",
-    hasCollabButton: false,
-    heartsTotal: 28,
-    replyTo: 3,
-    replies: []
   },
   {
     id: 1,
@@ -163,10 +45,11 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-sky-400 to-blue-500",
     hasCollabButton: true,
     heartsTotal: 320,
+    threadId: 1, parentPostId: 1,
     replies: [
-      { id: 101, displayName: "名無しxY7", content: "いい感じ！色使いが好き", createdAt: "2026-06-11T10:00:00.000Z", time: "2時間前" },
-      { id: 102, displayName: "名無しQw3", content: "外で描くの気持ちいいよね", createdAt: "2026-06-11T11:00:00.000Z", time: "1時間前" },
-      { id: 401, displayName: "名無しRf6", content: "外スケッチいいな！私も今度やってみよう", createdAt: "2026-06-11T10:00:00.000Z", time: "2時間前" }
+      { id: 101, displayName: "名無しxY7", slug: "xY7", createdAt: "2026-06-11T10:00:00.000Z", time: "2時間前", content: "いい感じ！色使いが好き", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 1, parentPostId: 1, replies: [] },
+      { id: 102, displayName: "名無しQw3", slug: "Qw3", createdAt: "2026-06-11T11:00:00.000Z", time: "1時間前", content: "外で描くの気持ちいいよね", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 1, parentPostId: 1, replies: [] },
+      { id: 401, displayName: "名無しRf6", slug: "Rf6", createdAt: "2026-06-11T10:00:00.000Z", time: "2時間前", content: "外スケッチいいな！私も今度やってみよう", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 1, parentPostId: 1, replies: [] }
     ]
   },
   {
@@ -185,8 +68,9 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-pink-400 to-rose-500",
     hasCollabButton: false,
     heartsTotal: 88,
+    threadId: 9, parentPostId: 9,
     replies: [
-      { id: 114, displayName: "名無しJk3", content: "かっこいい！コード進行いいね", createdAt: "2026-06-11T11:00:00.000Z", time: "1時間前" }
+      { id: 114, displayName: "名無しJk3", slug: "Jk3", createdAt: "2026-06-11T11:00:00.000Z", time: "1時間前", content: "かっこいい！コード進行いいね", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 9, parentPostId: 9, replies: [] }
     ]
   },
   {
@@ -205,6 +89,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-cyan-400 to-blue-500",
     hasCollabButton: false,
     heartsTotal: 23,
+    threadId: 10, parentPostId: 10,
     replies: []
   },
   {
@@ -223,9 +108,10 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-rose-400 to-pink-600",
     hasCollabButton: false,
     heartsTotal: 45,
+    threadId: 11, parentPostId: 11,
     replies: [
-      { id: 201, displayName: "名無しKt1", content: "作曲したコード進行の動画です Aメロ→Bメロ→サビの構成", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今" },
-      { id: 202, displayName: "名無しWk2", content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる", createdAt: "2026-06-11T11:59:30.000Z", time: "30秒前" }
+      { id: 201, displayName: "名無しKt1", slug: "Kt1", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今", content: "作曲したコード進行の動画です Aメロ→Bメロ→サビの構成", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 11, parentPostId: 11, replies: [] },
+      { id: 202, displayName: "名無しWk2", slug: "Wk2", createdAt: "2026-06-11T11:59:30.000Z", time: "30秒前", content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 11, parentPostId: 11, replies: [] }
     ]
   },
   {
@@ -245,8 +131,9 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-red-500 to-rose-600",
     hasCollabButton: true,
     heartsTotal: 95,
+    threadId: 2, parentPostId: 2,
     replies: [
-      { id: 103, displayName: "名無しTp4", content: "デバッグ頑張って！", createdAt: "2026-06-11T08:00:00.000Z", time: "4時間前" }
+      { id: 103, displayName: "名無しTp4", slug: "Tp4", createdAt: "2026-06-11T08:00:00.000Z", time: "4時間前", content: "デバッグ頑張って！", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 2, parentPostId: 2, replies: [] }
     ]
   },
   {
@@ -268,11 +155,12 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-gray-300 to-slate-400",
     hasCollabButton: false,
     heartsTotal: 612,
+    threadId: 3, parentPostId: 3,
     replies: [
-      { id: 104, displayName: "名無しDf2", content: "こっちはもう桜咲きそう", createdAt: "2026-06-11T05:00:00.000Z", time: "7時間前" },
-      { id: 105, displayName: "名無しGh6", content: "地域によって違うよね〜", createdAt: "2026-06-11T06:00:00.000Z", time: "6時間前" },
-      { id: 106, displayName: "名無しJk9", content: "写真綺麗！", createdAt: "2026-06-11T07:00:00.000Z", time: "5時間前" },
-      { id: 601, displayName: "名無しPz5", content: "こちらはもう桜が咲き始めましたよ〜春ですね", createdAt: "2026-06-11T07:00:00.000Z", time: "5時間前" }
+      { id: 104, displayName: "名無しDf2", slug: "Df2", createdAt: "2026-06-11T05:00:00.000Z", time: "7時間前", content: "こっちはもう桜咲きそう", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 3, parentPostId: 3, replies: [] },
+      { id: 105, displayName: "名無しGh6", slug: "Gh6", createdAt: "2026-06-11T06:00:00.000Z", time: "6時間前", content: "地域によって違うよね〜", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 3, parentPostId: 3, replies: [] },
+      { id: 106, displayName: "名無しJk9", slug: "Jk9", createdAt: "2026-06-11T07:00:00.000Z", time: "5時間前", content: "写真綺麗！", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 3, parentPostId: 3, replies: [] },
+      { id: 601, displayName: "名無しPz5", slug: "Pz5", createdAt: "2026-06-11T07:00:00.000Z", time: "5時間前", content: "こちらはもう桜が咲き始めましたよ〜春ですね", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 3, parentPostId: 3, replies: [] }
     ]
   },
   {
@@ -294,6 +182,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-purple-400 to-violet-500",
     hasCollabButton: true,
     heartsTotal: 278,
+    threadId: 4, parentPostId: 4,
     replies: []
   },
   {
@@ -312,10 +201,11 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-emerald-400 to-teal-500",
     hasCollabButton: false,
     heartsTotal: 45,
+    threadId: 5, parentPostId: 5,
     replies: [
-      { id: 107, displayName: "名無しWx8", content: "自分は環境音派", createdAt: "2026-06-10T16:00:00.000Z", time: "20時間前" },
-      { id: 108, displayName: "名無しYz2", content: "シティポップおすすめ", createdAt: "2026-06-10T18:00:00.000Z", time: "18時間前" },
-      { id: 501, displayName: "名無しHn3", content: "lofiは作業効率上がるよね、自分も愛用してる", createdAt: "2026-06-11T11:45:00.000Z", time: "15分前" }
+      { id: 107, displayName: "名無しWx8", slug: "Wx8", createdAt: "2026-06-10T16:00:00.000Z", time: "20時間前", content: "自分は環境音派", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 5, parentPostId: 5, replies: [] },
+      { id: 108, displayName: "名無しYz2", slug: "Yz2", createdAt: "2026-06-10T18:00:00.000Z", time: "18時間前", content: "シティポップおすすめ", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 5, parentPostId: 5, replies: [] },
+      { id: 501, displayName: "名無しHn3", slug: "Hn3", createdAt: "2026-06-11T11:45:00.000Z", time: "15分前", content: "lofiは作業効率上がるよね、自分も愛用してる", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 5, parentPostId: 5, replies: [] }
     ]
   },
   {
@@ -337,9 +227,10 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-amber-400 to-yellow-500",
     hasCollabButton: true,
     heartsTotal: 890,
+    threadId: 6, parentPostId: 6,
     replies: [
-      { id: 109, displayName: "名無しRt3", content: "かわいい！使っていい？", createdAt: "2026-06-10T12:00:00.000Z", time: "1日前" },
-      { id: 110, displayName: "名無しUv6", content: "ドット絵いいな、僕も始めよう", createdAt: "2026-06-10T12:00:00.000Z", time: "1日前" }
+      { id: 109, displayName: "名無しRt3", slug: "Rt3", createdAt: "2026-06-10T12:00:00.000Z", time: "1日前", content: "かわいい！使っていい？", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 6, parentPostId: 6, replies: [] },
+      { id: 110, displayName: "名無しUv6", slug: "Uv6", createdAt: "2026-06-10T12:00:00.000Z", time: "1日前", content: "ドット絵いいな、僕も始めよう", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 6, parentPostId: 6, replies: [] }
     ]
   },
   {
@@ -361,6 +252,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-cyan-400 to-indigo-500",
     hasCollabButton: true,
     heartsTotal: 67,
+    threadId: 7, parentPostId: 7,
     replies: []
   },
   {
@@ -382,10 +274,11 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     avatarColor: "from-pink-400 to-rose-500",
     hasCollabButton: true,
     heartsTotal: 1250,
+    threadId: 8, parentPostId: 8,
     replies: [
-      { id: 111, displayName: "名無しAs5", content: "全部素敵！特に3枚目が好き", createdAt: "2026-06-08T12:00:00.000Z", time: "3日前" },
-      { id: 112, displayName: "名無しDf9", content: "ペースすごいな、尊敬する", createdAt: "2026-06-08T12:00:00.000Z", time: "3日前" },
-      { id: 113, displayName: "名無しGh2", content: "もっと見たいです！", createdAt: "2026-06-09T12:00:00.000Z", time: "2日前" }
+      { id: 111, displayName: "名無しAs5", slug: "As5", createdAt: "2026-06-08T12:00:00.000Z", time: "3日前", content: "全部素敵！特に3枚目が好き", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 8, parentPostId: 8, replies: [] },
+      { id: 112, displayName: "名無しDf9", slug: "Df9", createdAt: "2026-06-08T12:00:00.000Z", time: "3日前", content: "ペースすごいな、尊敬する", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 8, parentPostId: 8, replies: [] },
+      { id: 113, displayName: "名無しGh2", slug: "Gh2", createdAt: "2026-06-09T12:00:00.000Z", time: "2日前", content: "もっと見たいです！", likes: 0, dislikes: 0, liked: false, disliked: false, repliesCount: 0, reposts: 0, reposted: false, avatarColor: "from-blue-400 to-indigo-500", hasCollabButton: false, heartsTotal: 0, threadId: 8, parentPostId: 8, replies: [] }
     ]
   }
 ];

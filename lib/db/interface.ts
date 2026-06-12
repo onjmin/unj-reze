@@ -1,4 +1,4 @@
-import { Post, Reply } from '../types';
+import { Post } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 
 export interface CreatePostParams {
@@ -14,6 +14,7 @@ export interface CreatePostParams {
 export interface ReplyParams {
   displayName: string;
   content: string;
+  parentPostId?: number;
 }
 
 export interface MessageParams {
@@ -29,8 +30,8 @@ export interface DataStore {
   dislikePost(id: number, userId: string): Promise<Post | null>;
   heartPost(id: number, userId: string, count?: number): Promise<Post | null>;
   repostPost(id: number): Promise<Post | null>;
-  getReplies(postId: number): Promise<Reply[]>;
-  addReply(postId: number, data: ReplyParams): Promise<Reply | null>;
+  getReplies(postId: number): Promise<Post[]>;
+  addReply(postId: number, data: ReplyParams): Promise<Post | null>;
   getUserPostsBySlug(slug: string, userId?: string): Promise<Post[]>;
   getUserDisplayName(slug: string): Promise<string | undefined>;
   getNotifications(): Promise<Notification[]>;

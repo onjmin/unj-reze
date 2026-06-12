@@ -1,18 +1,19 @@
-import { db } from '@/lib/mock-db';
+import { db } from '@/lib/db';
+import { db as mockDb } from '@/lib/mock-db';
 import ProfileView from '@/components/ProfileView';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
 export function generateStaticParams() {
-  const slugs = new Set(db.getPosts().map(p => p.slug));
+  const slugs = new Set(mockDb.getPosts().map(p => p.slug));
   return Array.from(slugs).map(slug => ({ id: slug! }));
 }
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const allPosts = db.getPosts();
-  const userPosts = db.getUserPostsBySlug(id);
-  const displayName = db.getUserDisplayName(id);
+  const allPosts = await db.getPosts();
+  const userPosts = await db.getUserPostsBySlug(id);
+  const displayName = await db.getUserDisplayName(id);
 
   if (userPosts.length === 0) {
     return (

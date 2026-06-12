@@ -16,7 +16,7 @@ export async function POST(
 ) {
   const { id } = await params;
   const body = await request.json();
-  const { displayName, content } = body;
+  const { displayName, content, parentPostId } = body;
 
   if (!displayName || !content) {
     return NextResponse.json(
@@ -25,7 +25,7 @@ export async function POST(
     );
   }
 
-  const reply = await db.addReply(parseInt(id), { displayName, content });
+  const reply = await db.addReply(parseInt(id), { displayName, content, parentPostId });
   if (!reply) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }

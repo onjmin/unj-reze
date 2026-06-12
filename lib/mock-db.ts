@@ -1,4 +1,4 @@
-import { Post, Reply } from './types';
+import { Post } from './types';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
 
@@ -122,7 +122,7 @@ class MockDB {
   }
 
   getPosts(userId?: string): Post[] {
-    return this.posts.map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return this.posts.filter(p => p.id === p.threadId).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
   }
 
   getUserPostsBySlug(slug: string, userId?: string): Post[] {
@@ -170,8 +170,10 @@ class MockDB {
       avatarColor: data.avatarColor || "from-blue-500 to-indigo-600",
       hasCollabButton: true,
       heartsTotal: 0,
+      threadId: this.genId(),
       replies: [],
     };
+    post.threadId = post.id;
     this.heartCounts.set(post.id, 0);
     this.posts.unshift(post);
     return post;
@@ -233,23 +235,25 @@ class MockDB {
     return post;
   }
 
-  addReply(postId: number, data: { displayName: string; content: string }): Reply | null {
+  addReply(postId: number, data: { displayName: string; content: string; parentPostId?: number }): Post | null {
     const post = this.posts.find(p => p.id === postId);
     if (!post) return null;
-    const createdAt = this.now();
-    const reply: Reply = {
-      id: this.genId(),
-      displayName: data.displayName,
-      content: data.content,
-      createdAt,
-      time: formatRelativeTime(createdAt),
+    const id = Math.max(0, ...this.posts.map(p => p.id)) + 1;
+    const reply: Post = {
+      id, displayName: data.displayName, slug: data.displayName, createdAt: new Date().toISOString(), time: "たった今",
+      content: data.content, likes: 0, dislikes: 0, liked: false, disliked: false,
+      repliesCount: 0, reposts: 0, reposted: false,
+      avatarColor: 'from-blue-400 to-indigo-500', heartsTotal: 0, replies: [],
+      threadId: post.threadId === post.id ? post.id : post.threadId,
+      parentPostId: data.parentPostId ?? post.id,
     };
-    post.replies.push(reply);
-    post.repliesCount = post.replies.length;
+    this.posts.push(reply);
+    post.repliesCount += 1;
+    if (post.replies) post.replies.push(reply);
     return reply;
   }
 
-  getReplies(postId: number): Reply[] {
+  getReplies(postId: number): Post[] {
     const post = this.posts.find(p => p.id === postId);
     return post?.replies ?? [];
   }

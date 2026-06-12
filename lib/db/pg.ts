@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { Post, Reply } from '../types';
+import { Post } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -9,6 +9,29 @@ let initialized = false;
 
 async function ensureTables(client: any) {
   if (initialized) return;
+
+  // Migration: add sequences for tables created with INTEGER PRIMARY KEY (not SERIAL)
+  const tables = ['notifications', 'messages', 'trends', 'posts', 'post_votes', 'post_hearts'];
+  for (const table of tables) {
+    await client.query(`
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '${table}') THEN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_attrdef
+            JOIN pg_class ON pg_attrdef.adrelid = pg_class.oid
+            JOIN pg_attribute ON pg_attrdef.adrelid = pg_attribute.attrelid AND pg_attrdef.adnum = pg_attribute.attnum
+            WHERE pg_class.relname = '${table}' AND pg_attribute.attname = 'id'
+          ) THEN
+            CREATE SEQUENCE IF NOT EXISTS ${table}_id_seq;
+            ALTER TABLE ${table} ALTER COLUMN id SET DEFAULT nextval('${table}_id_seq');
+            ALTER SEQUENCE ${table}_id_seq OWNED BY ${table}.id;
+            PERFORM setval('${table}_id_seq', COALESCE((SELECT MAX(id) FROM ${table}), 0));
+          END IF;
+        END IF;
+      END $$;
+    `);
+  }
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS post_votes (
       id SERIAL PRIMARY KEY,
@@ -64,23 +87,25 @@ function rowToPost(row: any): Post {
     hasCollabButton: row.has_collab_button,
     heartsTotal: row.hearts_total ?? 0,
     hasGame: row.has_game,
-    replyTo: row.reply_to ?? undefined,
+    threadId: row.thread_id,
+    parentPostId: row.parent_post_id ?? undefined,
     replies: [],
   };
 }
 
-function rowToReply(row: any): Reply {
-  const createdAt = typeof row.created_at === 'object' && row.created_at?.toISOString
-    ? row.created_at.toISOString()
-    : String(row.created_at);
-  return {
-    id: row.id,
-    displayName: row.display_name,
-    slug: row.slug ?? undefined,
-    content: row.content,
-    createdAt,
-    time: formatRelativeTime(createdAt),
-  };
+async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<number, Post[]>> {
+  if (threadIds.length === 0) return new Map();
+  const result = await client.query(
+    `SELECT * FROM posts WHERE thread_id = ANY($1::int[]) AND id != thread_id ORDER BY id`,
+    [threadIds]
+  );
+  const map = new Map<number, Post[]>();
+  for (const row of result.rows) {
+    const pid = row.thread_id;
+    if (!map.has(pid)) map.set(pid, []);
+    map.get(pid)!.push(rowToPost(row));
+  }
+  return map;
 }
 
 async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> {
@@ -94,6 +119,7 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
         (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
       FROM posts p
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
+      WHERE p.thread_id = p.id
       ORDER BY p.id DESC
     `, [userId]);
   } else {
@@ -103,28 +129,20 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
         false as disliked,
         (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
       FROM posts p
+      WHERE p.thread_id = p.id
       ORDER BY p.id DESC
     `);
   }
 
   const rows = result.rows;
-  const postIds = rows.map(r => r.id);
-  if (postIds.length === 0) return [];
+  if (rows.length === 0) return [];
 
-  const repliesResult = await client.query(
-    'SELECT * FROM replies WHERE post_id = ANY($1::int[]) ORDER BY id',
-    [postIds]
-  );
-  const repliesByPost: Record<number, Reply[]> = {};
-  for (const r of repliesResult.rows) {
-    const pid = r.post_id;
-    if (!repliesByPost[pid]) repliesByPost[pid] = [];
-    repliesByPost[pid].push(rowToReply(r));
-  }
+  const threadIds = rows.map(r => r.id);
+  const repliesMap = await getThreadReplies(client, threadIds);
 
   return rows.map(r => ({
     ...rowToPost(r),
-    replies: repliesByPost[r.id] || [],
+    replies: repliesMap.get(r.id) || [],
   }));
 }
 
@@ -154,8 +172,16 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
 
   if (result.rows.length === 0) return null;
   const post = rowToPost(result.rows[0]);
-  const repliesResult = await client.query('SELECT * FROM replies WHERE post_id = $1 ORDER BY id', [id]);
-  post.replies = repliesResult.rows.map(rowToReply);
+
+  if (post.threadId === post.id) {
+    // It's a thread, load replies
+    const repliesResult = await client.query(
+      'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
+      [id]
+    );
+    post.replies = repliesResult.rows.map(rowToPost);
+  }
+
   return post;
 }
 
@@ -181,14 +207,18 @@ export const pgStore: DataStore = {
   async createPost(data: CreatePostParams) {
     const client = await getPool().connect();
     try {
+      await ensureTables(client);
       const slug = data.slug || deriveSlugPg(data.displayName);
-      const result = await client.query(
+      const insertResult = await client.query(
         `INSERT INTO posts (display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
          VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, true)
-         RETURNING *`,
+         RETURNING id`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null]
       );
+      const newId = insertResult.rows[0].id;
+      await client.query('UPDATE posts SET thread_id = $1 WHERE id = $1', [newId]);
+      const result = await client.query('SELECT * FROM posts WHERE id = $1', [newId]);
       return { ...rowToPost(result.rows[0]), replies: [] };
     } finally {
       client.release();
@@ -320,8 +350,11 @@ export const pgStore: DataStore = {
   async getReplies(postId: number) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM replies WHERE post_id = $1 ORDER BY id', [postId]);
-      return result.rows.map(rowToReply);
+      const result = await client.query(
+        'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
+        [postId]
+      );
+      return result.rows.map(rowToPost);
     } finally {
       client.release();
     }
@@ -330,17 +363,20 @@ export const pgStore: DataStore = {
   async addReply(postId: number, data: ReplyParams) {
     const client = await getPool().connect();
     try {
+      await ensureTables(client);
       const slug = deriveSlugPg(data.displayName);
+      const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
-        `INSERT INTO replies (post_id, display_name, slug, content, created_at)
-         VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
-        [postId, data.displayName, slug, data.content]
+        `INSERT INTO posts (thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color)
+         VALUES ($1, $2, $3, $4, $5, NOW(), 'from-blue-500 to-indigo-600')
+         RETURNING *`,
+        [postId, parentPostId, data.displayName, slug, data.content]
       );
       await client.query(
         'UPDATE posts SET replies_count = replies_count + 1 WHERE id = $1',
         [postId]
       );
-      return rowToReply(result.rows[0]);
+      return rowToPost(result.rows[0]);
     } finally {
       client.release();
     }
@@ -359,7 +395,7 @@ export const pgStore: DataStore = {
             (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
           FROM posts p
           LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
-          WHERE p.slug = $2
+          WHERE p.slug = $2 AND p.thread_id = p.id
           ORDER BY p.id DESC
         `, [userId, slug]);
       } else {
@@ -369,7 +405,7 @@ export const pgStore: DataStore = {
             false as disliked,
             (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
           FROM posts p
-          WHERE p.slug = $1
+          WHERE p.slug = $1 AND p.thread_id = p.id
           ORDER BY p.id DESC
         `, [slug]);
       }

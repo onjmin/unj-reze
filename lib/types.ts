@@ -1,12 +1,3 @@
-export interface Reply {
-  id: number;
-  displayName: string;
-  slug?: string;
-  content: string;
-  createdAt: string;
-  time: string;
-}
-
 export interface Post {
   id: number;
   displayName: string;
@@ -28,9 +19,12 @@ export interface Post {
   hasCollabButton?: boolean;
   heartsTotal: number;
   hasGame?: boolean;
-  replyTo?: number;
-  replies: Reply[];
+  threadId: number;
+  parentPostId?: number;
+  replies: Post[];
 }
+
+export type Reply = Post;
 
 export interface Obstacle {
   x: number;

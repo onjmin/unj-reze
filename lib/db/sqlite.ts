@@ -1,7 +1,7 @@
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
-import { Post, Reply } from '../types';
+import { Post } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -75,20 +75,9 @@ function rowToPost(row: any): Post {
     hasCollabButton: !!row.has_collab_button,
     heartsTotal: row.hearts_total ?? 0,
     hasGame: !!row.has_game,
-    replyTo: row.reply_to ?? undefined,
+    threadId: row.thread_id,
+    parentPostId: row.parent_post_id ?? undefined,
     replies: [],
-  };
-}
-
-function rowToReply(row: any): Reply {
-  const createdAt = row.created_at;
-  return {
-    id: row.id,
-    displayName: row.display_name,
-    slug: row.slug ?? undefined,
-    content: row.content,
-    createdAt,
-    time: formatRelativeTime(createdAt),
   };
 }
 
@@ -127,31 +116,48 @@ function applyVoteRow(obj: any, userId?: string): any {
   return obj;
 }
 
+async function getThreadRepliesSqlite(d: SqlJsDatabase, threadIds: number[]): Promise<Map<number, Post[]>> {
+  if (threadIds.length === 0) return new Map();
+  const placeholders = threadIds.map(() => '?').join(',');
+  const rows = rowsToObjects(
+    d,
+    `SELECT * FROM posts WHERE thread_id IN (${placeholders}) AND id != thread_id ORDER BY id`,
+    threadIds
+  );
+  const map = new Map<number, Post[]>();
+  for (const row of rows) {
+    const pid = row.thread_id;
+    if (!map.has(pid)) map.set(pid, []);
+    map.get(pid)!.push(rowToPost(row));
+  }
+  return map;
+}
+
 export const sqliteStore: DataStore = {
   async getPosts(userId?: string) {
     const d = await getDb();
     let rows;
     if (userId) {
-      rows = rowsToObjects(d, `${VOTED_SELECT} ORDER BY p.id DESC`, [userId]);
+      rows = rowsToObjects(
+        d,
+        `${VOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC`,
+        [userId]
+      );
     } else {
-      rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p ORDER BY p.id DESC`);
+      rows = rowsToObjects(
+        d,
+        `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.thread_id = p.id ORDER BY p.id DESC`
+      );
     }
     if (rows.length === 0) return [];
     rows.forEach(r => applyVoteRow(r, userId));
 
-    const postIds = rows.map(r => r.id);
-    const placeholders = postIds.map(() => '?').join(',');
-    const repliesRows = rowsToObjects(d, `SELECT * FROM replies WHERE post_id IN (${placeholders}) ORDER BY id`, postIds);
-    const repliesByPost: Record<number, Reply[]> = {};
-    for (const r of repliesRows) {
-      const pid = r.post_id;
-      if (!repliesByPost[pid]) repliesByPost[pid] = [];
-      repliesByPost[pid].push(rowToReply(r));
-    }
+    const threadIds = rows.map(r => r.id);
+    const repliesMap = await getThreadRepliesSqlite(d, threadIds);
 
     return rows.map(r => ({
       ...rowToPost(r),
-      replies: repliesByPost[r.id] || [],
+      replies: repliesMap.get(r.id) || [],
     }));
   },
 
@@ -161,13 +167,25 @@ export const sqliteStore: DataStore = {
     if (userId) {
       rows = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);
     } else {
-      rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`, [id]);
+      rows = rowsToObjects(
+        d,
+        `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`,
+        [id]
+      );
     }
     if (rows.length === 0) return null;
     applyVoteRow(rows[0], userId);
     const post = rowToPost(rows[0]);
-    const repliesRows = rowsToObjects(d, 'SELECT * FROM replies WHERE post_id = ? ORDER BY id', [id]);
-    post.replies = repliesRows.map(rowToReply);
+
+    if (post.threadId === post.id) {
+      const repliesRows = rowsToObjects(
+        d,
+        'SELECT * FROM posts WHERE thread_id = ? AND id != thread_id ORDER BY id',
+        [id]
+      );
+      post.replies = repliesRows.map(rowToPost);
+    }
+
     return post;
   },
 
@@ -177,13 +195,25 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO posts (id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      [id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null]
     );
     saveDb();
-    return { ...rowToPost({ id, display_name: data.displayName, slug, created_at: now, content: data.content, likes: 0, dislikes: 0, liked: 0, disliked: 0, replies_count: 0, reposts: 0, reposted: 0, has_image: data.hasImage ? 1 : 0, image_src: data.imageSrc || null, image_alt: data.imageAlt || null, avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600', has_collab_button: 1, hearts_total: 0, has_game: 0, reply_to: null }), replies: [] };
+    return {
+      ...rowToPost({
+        id, thread_id: id, display_name: data.displayName, slug,
+        created_at: now, content: data.content,
+        likes: 0, dislikes: 0, liked: 0, disliked: 0,
+        replies_count: 0, reposts: 0, reposted: 0,
+        has_image: data.hasImage ? 1 : 0,
+        image_src: data.imageSrc || null, image_alt: data.imageAlt || null,
+        avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
+        has_collab_button: 1, hearts_total: 0, has_game: 0,
+      }),
+      replies: []
+    };
   },
 
   async likePost(id: number, userId: string) {
@@ -242,7 +272,11 @@ export const sqliteStore: DataStore = {
     }
     saveDb();
 
-    const rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`, [id]);
+    const rows = rowsToObjects(
+      d,
+      `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`,
+      [id]
+    );
     if (rows.length === 0) return null;
     return rowToPost(rows[0]);
   },
@@ -264,8 +298,12 @@ export const sqliteStore: DataStore = {
 
   async getReplies(postId: number) {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT * FROM replies WHERE post_id = ? ORDER BY id', [postId]);
-    return rows.map(rowToReply);
+    const rows = rowsToObjects(
+      d,
+      'SELECT * FROM posts WHERE thread_id = ? AND id != thread_id ORDER BY id',
+      [postId]
+    );
+    return rows.map(rowToPost);
   },
 
   async addReply(postId: number, data: ReplyParams) {
@@ -273,22 +311,43 @@ export const sqliteStore: DataStore = {
     const slug = deriveSlugSqlite(data.displayName);
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
+    const parentPostId = data.parentPostId ?? postId;
     d.run(
-      `INSERT INTO replies (id, post_id, display_name, slug, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, postId, data.displayName, slug, data.content, now]
+      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'from-blue-500 to-indigo-600')`,
+      [id, postId, parentPostId, data.displayName, slug, data.content, now]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
     saveDb();
-    return { id, displayName: data.displayName, slug, content: data.content, createdAt: now, time: formatRelativeTime(now) };
+    return {
+      ...rowToPost({
+        id, thread_id: postId, display_name: data.displayName, slug,
+        created_at: now, content: data.content,
+        likes: 0, dislikes: 0, liked: 0, disliked: 0,
+        replies_count: 0, reposts: 0, reposted: 0,
+        has_image: 0, image_src: null, image_alt: null,
+        avatar_color: 'from-blue-500 to-indigo-600',
+        has_collab_button: 0, hearts_total: 0, has_game: 0,
+      }),
+      replies: [],
+    };
   },
 
   async getUserPostsBySlug(slug: string, userId?: string) {
     const d = await getDb();
     let rows;
     if (userId) {
-      rows = rowsToObjects(d, `${VOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC`, [userId, slug]);
+      rows = rowsToObjects(
+        d,
+        `${VOTED_SELECT} WHERE p.slug = ? AND p.thread_id = p.id ORDER BY p.id DESC`,
+        [userId, slug]
+      );
     } else {
-      rows = rowsToObjects(d, `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.slug = ? ORDER BY p.id DESC`, [slug]);
+      rows = rowsToObjects(
+        d,
+        `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.slug = ? AND p.thread_id = p.id ORDER BY p.id DESC`,
+        [slug]
+      );
     }
     rows.forEach(r => applyVoteRow(r, userId));
     return rows.map(rowToPost);

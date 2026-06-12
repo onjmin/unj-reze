@@ -6,7 +6,7 @@ import {
   MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare, Copy, UserPlus, Ban, Flag
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Post, Reply } from '@/lib/types';
+import { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -349,7 +349,7 @@ function nameToInitials(name: string): string {
   return name.substring(3, 5) || '名無';
 }
 
-function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number }) {
+function ReplyPreview({ replies, postId }: { replies: Post[]; postId: number }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
   const [pop, setPop] = useState(false);

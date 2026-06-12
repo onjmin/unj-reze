@@ -14,13 +14,12 @@ import EmbedPart from './EmbedPart';
 
 interface PostDetailProps {
   post: Post;
-  allPosts: Post[];
 }
 
-export default function PostDetail({ post: initial, allPosts: allInitial }: PostDetailProps) {
+export default function PostDetail({ post: initial }: PostDetailProps) {
   const [post, setPost] = useState<Post>(initial);
-  const [allPosts, setAllPosts] = useState<Post[]>(allInitial);
   const [replyText, setReplyText] = useState('');
+  const [replyTo, setReplyTo] = useState<Post | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [following, setFollowing] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -129,16 +128,19 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
   const handleAddReply = () => {
     if (!replyText.trim()) return;
     const now = Date.now();
-    setPostField(p => ({ ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, { id: now, displayName: userId, content: replyText, time: "たった今" }] }));
-    setAllPosts(prev => [...prev, {
+    const targetParent = replyTo ?? post;
+    const newReply: Post = {
       id: now, displayName: userId, time: "たった今", content: replyText,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: "from-blue-500 to-indigo-600",
       heartsTotal: 0, replies: [],
-      replyTo: post.id,
-    }]);
+      threadId: post.threadId === post.id ? post.id : post.threadId,
+      parentPostId: targetParent.id,
+    };
+    setPost(p => ({ ...p, replies: [...p.replies, newReply], repliesCount: p.repliesCount + 1 }));
     setReplyText('');
+    setReplyTo(null);
   };
 
   const mmlCode = extractMmlFromContent(post.content);
@@ -259,60 +261,172 @@ export default function PostDetail({ post: initial, allPosts: allInitial }: Post
         </div>
       </div>
 
-      {(() => {
-        const directReplies = allPosts.filter(p => p.replyTo === post.id);
-        const hasReplies = post.replies.length > 0 || directReplies.length > 0;
-        if (!hasReplies) return null;
-        return (
-          <div className="border-t border-gray-800 px-3 py-3 space-y-2">
-            <span className="text-[11px] text-gray-500 font-bold">返信</span>
-            {post.replies.map(reply => (
-              <div key={reply.id} className="text-[12px] bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
-                <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
-                  <span>{reply.displayName}</span>
-                  <span>{reply.time}</span>
-                </div>
-                <p className="text-gray-300">{reply.content}</p>
-              </div>
-            ))}
-            {directReplies.map(rp => (
-              <ReplyTreeItem key={rp.id} post={rp} allPosts={allPosts} depth={0} />
-            ))}
-          </div>
-        );
-      })()}
+      {post.replies.length > 0 && (
+        <div className="border-t border-gray-800 px-3 py-3 space-y-2">
+          <span className="text-[11px] text-gray-500 font-bold">返信</span>
+          {post.replies.filter(r => r.parentPostId === post.id).map(reply => (
+            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} />
+          ))}
+        </div>
+      )}
 
-      <div className="border-t border-gray-800 px-3 py-3 flex items-center space-x-2 bg-gray-100/5 rounded-lg mx-3 mb-4 mt-2">
-        <input
-          type="text"
-          placeholder="返信を書き込む..."
-          value={replyText}
-          onChange={(e) => setReplyText(e.target.value)}
-          className="bg-transparent flex-1 text-xs outline-none text-gray-100 placeholder:text-gray-600"
-          onKeyDown={(e) => { if (e.key === 'Enter') handleAddReply(); }}
-        />
-        <button onClick={handleAddReply} className="text-blue-500 hover:text-blue-400 text-xs font-bold px-1">送信</button>
+      <div className="border-t border-gray-800 px-3 pt-1 pb-3 space-y-1 mx-3 mb-4 mt-2">
+        {replyTo && (
+          <div className="flex items-center justify-between text-[10px] text-gray-500 px-1">
+            <span><span className="text-blue-400">@{replyTo.displayName}</span> に返信</span>
+            <button onClick={() => setReplyTo(null)} className="text-gray-600 hover:text-gray-400">取消</button>
+          </div>
+        )}
+        <div className="flex items-center space-x-2 bg-gray-100/5 rounded-lg px-3 py-2">
+          <input
+            type="text"
+            placeholder={replyTo ? `@${replyTo.displayName} に返信...` : "返信を書き込む..."}
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            className="bg-transparent flex-1 text-xs outline-none text-gray-100 placeholder:text-gray-600"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddReply(); }}
+          />
+          <button onClick={handleAddReply} className="text-blue-500 hover:text-blue-400 text-xs font-bold px-1">送信</button>
+        </div>
       </div>
     </>
   );
 }
 
-function ReplyTreeItem({ post, allPosts, depth }: { post: Post; allPosts: Post[]; depth: number }) {
-  const children = allPosts.filter(p => p.replyTo === post.id);
+function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void }) {
+  const children = replies.filter(r => r.parentPostId === post.id);
+  const [collapsed, setCollapsed] = useState<boolean>(false);
+  const [localPost, setLocalPost] = useState<Post>(post);
+  const userId = '名無しvFZ';
+
+  const handleLike = useCallback(() => {
+    const id = localPost.id;
+    setLocalPost(p => ({
+      ...p, liked: !p.liked,
+      likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
+      disliked: p.liked ? p.disliked : false,
+      dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
+    }));
+    api.posts.like(id, userId).then(setLocalPost);
+  }, [localPost.id, userId]);
+
+  const handleDislike = useCallback(() => {
+    const id = localPost.id;
+    setLocalPost(p => ({
+      ...p, disliked: !p.disliked,
+      dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
+      liked: p.disliked ? p.liked : false,
+      likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
+    }));
+    api.posts.dislike(id, userId).then(setLocalPost);
+  }, [localPost.id, userId]);
+
+  const handleRepost = useCallback(async () => {
+    setLocalPost(p => ({
+      ...p, reposted: !p.reposted,
+      reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
+    }));
+    const updated = await api.posts.repost(localPost.id);
+    setLocalPost(updated);
+  }, [localPost.id]);
+
+  const handleHeart = useCallback(() => {
+    const id = localPost.id;
+    setLocalPost(p => ({ ...p, heartsTotal: p.heartsTotal + 1 }));
+    api.posts.heart(id, userId, 1).then(setLocalPost);
+  }, [localPost.id, userId]);
+
+  const mmlCode = extractMmlFromContent(localPost.content);
+  const chordRes = extractChordsFromContent(localPost.content);
 
   return (
-    <div className={`text-[12px] ${depth > 0 ? 'ml-4 pl-3 border-l-2 border-gray-800/60' : ''}`}>
-      <div className="bg-gray-100/5 p-2.5 rounded-lg border border-gray-800/40">
-        <div className="flex justify-between text-gray-500 mb-0.5 font-bold">
-          <span>{post.displayName}</span>
-          <span>{post.time}</span>
+    <div style={{ marginLeft: depth * 12 }} className={depth > 0 ? 'pl-3 border-l-2 border-gray-800/40' : ''}>
+      <div className="flex p-3 space-x-2.5">
+        <Link
+          href={`/user/${localPost.slug || localPost.displayName}`}
+          className={`w-9 h-9 rounded-full bg-gradient-to-br ${localPost.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity`}
+        >
+          {localPost.displayName.substring(3, 5) || "名無"}
+        </Link>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline space-x-1.5 mb-0.5">
+            <span className="font-bold text-xs text-gray-200">{localPost.displayName}</span>
+            <span className="text-gray-500 text-[10px] font-medium">{localPost.time}</span>
+          </div>
+
+          <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
+            {(() => {
+              const markers = ['#mml', '#chord',];
+              const markerPos = markers.reduce((best, kw) => {
+                const p = localPost.content.indexOf(kw);
+                return p >= 0 ? Math.min(best, p) : best;
+              }, Infinity);
+              const displayText = markerPos < Infinity ? localPost.content.slice(0, markerPos).trimEnd() : localPost.content;
+              const lines = displayText ? displayText.split('\n') : [];
+              return lines.map((line, lIdx) => (
+                <span key={lIdx} className="block">
+                  {line.split(' ').map((word, wIdx) => (
+                    word.startsWith('#')
+                      ? <span key={wIdx} className="text-blue-400 mr-1">{word}</span>
+                      : /^https?:\/\//.test(word)
+                        ? <a key={wIdx} href={word} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mr-1">{word}</a>
+                        : <span key={wIdx}>{word} </span>
+                  ))}
+                </span>
+              ));
+            })()}
+          </p>
+
+          {localPost.hasImage && (
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] max-h-[220px]">
+              <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="w-full h-auto object-cover max-h-[220px]" />
+            </div>
+          )}
+
+          {(() => {
+            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+            if (localPost.hasImage) return null;
+            const embed = extractFirstEmbed(localPost.content);
+            return embed ? <EmbedPart embed={embed} /> : null;
+          })()}
+
+          <div className="flex justify-between items-center text-gray-500 mt-2 max-w-[280px]">
+            <button onClick={handleLike} className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${localPost.liked ? 'text-blue-400 font-bold' : ''}`}>
+              <ThumbsUp size={14} /><span className="text-[11px]">{localPost.likes || ''}</span>
+            </button>
+            <button onClick={handleDislike} className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${localPost.disliked ? 'text-red-500 font-bold' : ''}`}>
+              <ThumbsDown size={14} /><span className="text-[11px]">{localPost.dislikes || ''}</span>
+            </button>
+            <button className="flex items-center space-x-1 hover:text-green-400 transition-colors">
+              <MessageCircle size={14} /><span className="text-[11px]">{localPost.repliesCount || ''}</span>
+            </button>
+            <button onClick={handleRepost} className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? 'text-purple-400' : ''}`}>
+              <Repeat size={14} /><span className="text-[11px]">{localPost.reposts || ''}</span>
+            </button>
+            <button className="flex items-center hover:text-blue-400 transition-colors">
+              <Mail size={14} />
+            </button>
+            <button onClick={handleHeart} className="flex items-center space-x-1 hover:text-pink-400 transition-colors">
+              <Heart size={12} className="fill-current text-pink-600/65" />
+              <span className="text-[10px]">{localPost.heartsTotal || '0'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 mt-1">
+            <button onClick={() => onReply(localPost)} className="text-[10px] text-gray-600 hover:text-blue-400 transition-colors">返信</button>
+            {children.length > 0 && (
+              <button onClick={() => setCollapsed(v => !v)} className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors">
+                {collapsed ? `▸ ${children.length}件` : `▾ 折り畳む`}
+              </button>
+            )}
+          </div>
         </div>
-        <p className="text-gray-300 whitespace-pre-wrap">{post.content.length > 120 ? post.content.slice(0, 120) + '…' : post.content}</p>
       </div>
-      {children.length > 0 && (
-        <div className="mt-1.5 space-y-1.5">
+      {!collapsed && children.length > 0 && (
+        <div>
           {children.map(child => (
-            <ReplyTreeItem key={child.id} post={child} allPosts={allPosts} depth={depth + 1} />
+            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} />
           ))}
         </div>
       )}
