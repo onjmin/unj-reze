@@ -1,17 +1,22 @@
 services:
-  db:
-    image: neondatabase/neon_local:latest
+  # Neon互換 PostgreSQL
+  # 使用時: DATABASE_PROVIDER=neon, DATABASE_URL=postgresql://neon:neon@localhost:5432/unj_reze
+  db-neon:
+    image: postgres:16-alpine
     ports:
       - "5432:5432"
     environment:
-      NEON_API_KEY: ${NEON_API_KEY}
-      NEON_PROJECT_ID: ${NEON_PROJECT_ID}
-      # 既存ブランチに接続する場合: BRANCH_ID を指定
-      # BRANCH_ID: ${BRANCH_ID}
-      # エフェメラルブランチを作成する場合: PARENT_BRANCH_ID を指定
-      PARENT_BRANCH_ID: ${PARENT_BRANCH_ID}
-      # ブランチを永続化 (デフォルト: true=コンテナ停止時に削除)
-      DELETE_BRANCH: "false"
+      POSTGRES_USER: neon
+      POSTGRES_PASSWORD: neon
+      POSTGRES_DB: unj_reze
     volumes:
-      - ./.neon_local/:/tmp/.neon_local
-      - ./.git/HEAD:/tmp/.git/HEAD:ro,consistent
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neon -d unj_reze"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

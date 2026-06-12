@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/mock-db';
+import { db } from '@/lib/db';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const post = db.getPost(parseInt(id));
+  const post = await db.getPost(parseInt(id));
   if (!post) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
@@ -22,17 +22,17 @@ export async function PUT(
   const { action } = body;
   const postId = parseInt(id);
 
-  let result: ReturnType<typeof db.likePost> = null;
+  let result;
 
   switch (action) {
     case 'like':
-      result = db.likePost(postId);
+      result = await db.likePost(postId);
       break;
     case 'dislike':
-      result = db.dislikePost(postId);
+      result = await db.dislikePost(postId);
       break;
     case 'repost':
-      result = db.repostPost(postId);
+      result = await db.repostPost(postId);
       break;
     default:
       return NextResponse.json(

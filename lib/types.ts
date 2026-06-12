@@ -3,6 +3,7 @@ export interface Reply {
   displayName: string;
   slug?: string;
   content: string;
+  createdAt: string;
   time: string;
 }
 
@@ -10,6 +11,7 @@ export interface Post {
   id: number;
   displayName: string;
   slug?: string;
+  createdAt: string;
   time: string;
   content: string;
   likes: number;

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/mock-db';
+import { db } from '@/lib/db';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const replies = db.getReplies(parseInt(id));
+  const replies = await db.getReplies(parseInt(id));
   return NextResponse.json(replies);
 }
 
@@ -25,7 +25,7 @@ export async function POST(
     );
   }
 
-  const reply = db.addReply(parseInt(id), { displayName, content });
+  const reply = await db.addReply(parseInt(id), { displayName, content });
   if (!reply) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }

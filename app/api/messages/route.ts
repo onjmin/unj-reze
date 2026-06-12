@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/mock-db';
+import { db } from '@/lib/db';
 
 export async function GET() {
-  const messages = db.getMessages();
+  const messages = await db.getMessages();
   return NextResponse.json(messages);
 }
 
@@ -17,6 +17,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const message = db.addMessage({ sender, text });
+  const message = await db.addMessage({ sender, text });
   return NextResponse.json(message, { status: 201 });
 }

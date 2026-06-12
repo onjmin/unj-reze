@@ -92,6 +92,7 @@ export default function App() {
     const replyAsPost: Post = {
       id: reply.id,
       displayName: reply.displayName,
+      createdAt: reply.createdAt,
       time: reply.time,
       content: reply.content,
       likes: 0, dislikes: 0, liked: false, disliked: false,

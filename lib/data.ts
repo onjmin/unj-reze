@@ -4,6 +4,7 @@ export const INITIAL_POSTS: Post[] = [
   {
     id: 12,
     displayName: "名無しvFZ",
+    createdAt: "2026-06-11T11:59:00.000Z",
     time: "1分前",
     content: `https://www.youtube.com/watch?v=nHyQq2FUxig
 
@@ -21,12 +22,13 @@ FanTouhouMusic`,
     hasCollabButton: false,
     heartsTotal: 34,
     replies: [
-      { id: 115, displayName: "名無しLz9", content: "このアレンジ良すぎる", time: "たった今" }
+      { id: 115, displayName: "名無しLz9", content: "このアレンジ良すぎる", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今" }
     ]
   },
   {
     id: 13,
     displayName: "名無しKt1",
+    createdAt: "2026-06-11T12:00:00.000Z",
     time: "たった今",
     content: `https://api.karotter.com/uploads/posts/346ec30c-dcb6-41d7-8cf7-7ef5ef7e92dc.mp4
 
@@ -44,12 +46,13 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     heartsTotal: 12,
     replyTo: 11,
     replies: [
-      { id: 301, displayName: "名無しQm9", content: "7thとdimの組み合わせがオシャレすぎる", time: "たった今" }
+      { id: 301, displayName: "名無しQm9", content: "7thとdimの組み合わせがオシャレすぎる", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今" }
     ]
   },
   {
     id: 14,
     displayName: "名無しWk2",
+    createdAt: "2026-06-11T11:59:30.000Z",
     time: "30秒前",
     content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる",
     likes: 5,
@@ -68,6 +71,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 15,
     displayName: "名無しQm9",
+    createdAt: "2026-06-11T12:00:00.000Z",
     time: "たった今",
     content: "7thとdimの組み合わせがオシャレすぎる",
     likes: 2,
@@ -86,6 +90,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 16,
     displayName: "名無しRf6",
+    createdAt: "2026-06-11T10:00:00.000Z",
     time: "2時間前",
     content: "外スケッチいいな！私も今度やってみよう",
     likes: 8,
@@ -104,6 +109,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 17,
     displayName: "名無しHn3",
+    createdAt: "2026-06-11T11:45:00.000Z",
     time: "15分前",
     content: "lofiは作業効率上がるよね、自分も愛用してる",
     likes: 4,
@@ -122,6 +128,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 18,
     displayName: "名無しPz5",
+    createdAt: "2026-06-11T07:00:00.000Z",
     time: "5時間前",
     content: "こちらはもう桜が咲き始めましたよ〜春ですね",
     likes: 11,
@@ -140,6 +147,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 1,
     displayName: "名無しaB3",
+    createdAt: "2026-06-11T09:00:00.000Z",
     time: "3時間前",
     content: "#お絵描き\n今日の落書き 天気いいから外でスケッチした",
     likes: 42,
@@ -156,14 +164,15 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: true,
     heartsTotal: 320,
     replies: [
-      { id: 101, displayName: "名無しxY7", content: "いい感じ！色使いが好き", time: "2時間前" },
-      { id: 102, displayName: "名無しQw3", content: "外で描くの気持ちいいよね", time: "1時間前" },
-      { id: 401, displayName: "名無しRf6", content: "外スケッチいいな！私も今度やってみよう", time: "2時間前" }
+      { id: 101, displayName: "名無しxY7", content: "いい感じ！色使いが好き", createdAt: "2026-06-11T10:00:00.000Z", time: "2時間前" },
+      { id: 102, displayName: "名無しQw3", content: "外で描くの気持ちいいよね", createdAt: "2026-06-11T11:00:00.000Z", time: "1時間前" },
+      { id: 401, displayName: "名無しRf6", content: "外スケッチいいな！私も今度やってみよう", createdAt: "2026-06-11T10:00:00.000Z", time: "2時間前" }
     ]
   },
   {
     id: 9,
     displayName: "名無しMm1",
+    createdAt: "2026-06-11T10:00:00.000Z",
     time: "2時間前",
     content: "てすや\n#mml @0t135q50v100r8o4d+8e8r8f+8r8d+8c8c+8<b8>c+8f+8g+8r8f+8e8f+8r8e8c+8d+8e8d+8c8c+8r4<b8>c+8d+8e8d+8r8e8g+8r8f+8r8b8r8f+8g+8f+8d+8e8r8c+8d+8e8r8d+8c8d+8e8d+8c8c+8r4r8;@1t135q50v95;@2t135q50v88;@3t135q50v76[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2",
     likes: 15,
@@ -177,12 +186,13 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: false,
     heartsTotal: 88,
     replies: [
-      { id: 114, displayName: "名無しJk3", content: "かっこいい！コード進行いいね", time: "1時間前" }
+      { id: 114, displayName: "名無しJk3", content: "かっこいい！コード進行いいね", createdAt: "2026-06-11T11:00:00.000Z", time: "1時間前" }
     ]
   },
   {
     id: 10,
     displayName: "名無しTb7",
+    createdAt: "2026-06-11T11:30:00.000Z",
     time: "30分前",
     content: "#mml @0 t135 q50 v100 r2 r2 o4e8 r8 e8 e8 g+8 r8 f+8 r8 c8 b8 b8 b8 g+8 r8 e8 g+8 >e8 r4 e8 e8 r8 d+8 c+8 <b8 >c+8 <b8 a8 g+8 r8 d8 r8 e8 e8 e8 e8 c+8 c+8 a8 f+8 g+8 f+8 e8 g+8 f+8 c8 g+8 f+8 e8 r8 e8 e8 c+8 r8 f+8 r8 g+8 f+8 e8 g+8 e8 r8 c+8 d+8 e8 r8 e8 e8 g+8 r8 f+8 r8 c8 b8 b8 b8 g+8 r8 e8 g+8 >e8 r4 e8 e8 r8 d+8 c+8 <b8 >c+8 <b8 a8 g+8 r8 d8 r8 e8 e8 e8 e8 c+8 c+8 a8 f+8 g+8 f+8 e8 g+8 f+8 c8 g+8 f+8 e8 r8 e8 e8 c+8 r8 f+8 r8 g+8 f+8 e8 g+8 e8 r8 c+8 d+8;@1 t135 q50 v95 r2 r2 r2 r2 r2 r2 r2 r2 r4 r8 o6e8 b8 a24 b24 a24 g+8 f+8 g+8 r4 r8 r2 r2 r2 r2 r2 r8 e8 f+8 g8 g+8 f+24 g+24 f+24 e8 g+8 e8 r4 r8 r2 r2 r2 r2 r2 r4 r8 e8 b8 a24 b24 a24 g+8 f+8 g+8 r4 r8 r2 r2 r2 r2 r2 r8 e8 f+8 g8 g+8 f+24 g+24 f+24 e8 g+8 e8 r4 r8;@2 t135 q50 v88 r2 r2 o2f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <g+8 >g+8 <g+8 >g+8 <g+8 >g+8 r16 <g+16 >g+8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <g+8 >g+8 <g+8 >g+8 <g+8 >g+8 <g+8 >g+8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <a8 >a8 <a8 >a8 <a8 >a8 <a8 >a8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <g+8 >g+8 <g+8 >g+8 <g+8 >g+8 r16 <g+16 >g+8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <f+8 >f+8 <g+8 >g+8 <g+8 >g+8 <g+8 >g+8 <g+8 >g+8 <e8 >e8 <e8 >e8 <e8 >e8 <e8 >e8 <a8 >a8 <a8 >a8 <a8 >a8 <a8 >a8;@3 t135 q50 v76 r2 r2 [o3f+o3ao4c+o4e]2 r2 [o3g+o4co4d+o4f+o5e]2 r2 [o3c+o3eo3g+o3b]2 r2 [o3eo3g+o3bo4d]2 r2 [o3f+o3ao4c+o4e]2 r2 [o3g+o4co4d+o4f+o5e]2 r2 [o3c+o3eo3g+o3b]2 r2 [o3f+o3ao4g+o4c+]2 [o4eo3ao3f+]2 [o3f+o3ao4c+o4e]2 r2 [o3g+o4co4d+o4f+o5e]2 r2 [o3c+o3eo3g+o3b]2 r2 [o3eo3g+o3bo4d]2 r2 [o3f+o3ao4c+o4e]2 r2 [o3g+o4co4d+o4f+o5e]2 r2 [o3c+o3eo3g+o3b]2 r2 [o3f+o3ao4g+o4c+]2 [o4eo3ao3f+]2",
     likes: 7,
@@ -200,6 +210,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 11,
     displayName: "名無しJk8",
+    createdAt: "2026-06-11T11:50:00.000Z",
     time: "10分前",
     content: "#chord\n# t185\n# Bメロ\n|Am7(b5)/G|F6|Dm7|Gm\n|Cm7Dm7|EbDm7|EbF/Eb|D7F/G\n\n# サビ\n|Gm|F6|Eb|Gm7\n|Cm6D|DmGm7|Cm6Dm7|GM7\n\n|Eb|F|Dm7|Gm7\n|EbM7|F|Gm7|G",
     likes: 15,
@@ -213,13 +224,14 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: false,
     heartsTotal: 45,
     replies: [
-      { id: 201, displayName: "名無しKt1", content: "作曲したコード進行の動画です Aメロ→Bメロ→サビの構成", time: "たった今" },
-      { id: 202, displayName: "名無しWk2", content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる", time: "30秒前" }
+      { id: 201, displayName: "名無しKt1", content: "作曲したコード進行の動画です Aメロ→Bメロ→サビの構成", createdAt: "2026-06-11T12:00:00.000Z", time: "たった今" },
+      { id: 202, displayName: "名無しWk2", content: "このコード進行ほんとおしゃれ…BメロのAm7(b5)が効いてる", createdAt: "2026-06-11T11:59:30.000Z", time: "30秒前" }
     ]
   },
   {
     id: 2,
     displayName: "名無しR9k",
+    createdAt: "2026-06-11T07:00:00.000Z",
     time: "5時間前",
     content: "今週の #ゲーム 進捗\nステージ3のボス戦やっと実装できた\nあとは調整だけどバグが取れない…",
     likes: 18,
@@ -234,12 +246,13 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: true,
     heartsTotal: 95,
     replies: [
-      { id: 103, displayName: "名無しTp4", content: "デバッグ頑張って！", time: "4時間前" }
+      { id: 103, displayName: "名無しTp4", content: "デバッグ頑張って！", createdAt: "2026-06-11T08:00:00.000Z", time: "4時間前" }
     ]
   },
   {
     id: 3,
     displayName: "名無しLm8",
+    createdAt: "2026-06-11T04:00:00.000Z",
     time: "8時間前",
     content: "朝起きたら雪積もっててびっくりした\nもう春だと思ってたのに",
     likes: 56,
@@ -256,15 +269,16 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: false,
     heartsTotal: 612,
     replies: [
-      { id: 104, displayName: "名無しDf2", content: "こっちはもう桜咲きそう", time: "7時間前" },
-      { id: 105, displayName: "名無しGh6", content: "地域によって違うよね〜", time: "6時間前" },
-      { id: 106, displayName: "名無しJk9", content: "写真綺麗！", time: "5時間前" },
-      { id: 601, displayName: "名無しPz5", content: "こちらはもう桜が咲き始めましたよ〜春ですね", time: "5時間前" }
+      { id: 104, displayName: "名無しDf2", content: "こっちはもう桜咲きそう", createdAt: "2026-06-11T05:00:00.000Z", time: "7時間前" },
+      { id: 105, displayName: "名無しGh6", content: "地域によって違うよね〜", createdAt: "2026-06-11T06:00:00.000Z", time: "6時間前" },
+      { id: 106, displayName: "名無しJk9", content: "写真綺麗！", createdAt: "2026-06-11T07:00:00.000Z", time: "5時間前" },
+      { id: 601, displayName: "名無しPz5", content: "こちらはもう桜が咲き始めましたよ〜春ですね", createdAt: "2026-06-11T07:00:00.000Z", time: "5時間前" }
     ]
   },
   {
     id: 4,
     displayName: "名無しVc1",
+    createdAt: "2026-06-11T00:00:00.000Z",
     time: "12時間前",
     content: "#お絵描き\n久しぶりに描いた 練習帳",
     likes: 33,
@@ -285,6 +299,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 5,
     displayName: "名無しBn5",
+    createdAt: "2026-06-10T12:00:00.000Z",
     time: "1日前",
     content: "作業用BGM何聴いてる？\n最近はlofiばかり",
     likes: 21,
@@ -298,14 +313,15 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: false,
     heartsTotal: 45,
     replies: [
-      { id: 107, displayName: "名無しWx8", content: "自分は環境音派", time: "20時間前" },
-      { id: 108, displayName: "名無しYz2", content: "シティポップおすすめ", time: "18時間前" },
-      { id: 501, displayName: "名無しHn3", content: "lofiは作業効率上がるよね、自分も愛用してる", time: "15分前" }
+      { id: 107, displayName: "名無しWx8", content: "自分は環境音派", createdAt: "2026-06-10T16:00:00.000Z", time: "20時間前" },
+      { id: 108, displayName: "名無しYz2", content: "シティポップおすすめ", createdAt: "2026-06-10T18:00:00.000Z", time: "18時間前" },
+      { id: 501, displayName: "名無しHn3", content: "lofiは作業効率上がるよね、自分も愛用してる", createdAt: "2026-06-11T11:45:00.000Z", time: "15分前" }
     ]
   },
   {
     id: 6,
     displayName: "名無しQp7",
+    createdAt: "2026-06-09T12:00:00.000Z",
     time: "2日前",
     content: "#お絵描き #ゲーム\nドット絵の練習中\nキャラチップ自作すると愛着湧くね",
     likes: 67,
@@ -322,13 +338,14 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: true,
     heartsTotal: 890,
     replies: [
-      { id: 109, displayName: "名無しRt3", content: "かわいい！使っていい？", time: "1日前" },
-      { id: 110, displayName: "名無しUv6", content: "ドット絵いいな、僕も始めよう", time: "1日前" }
+      { id: 109, displayName: "名無しRt3", content: "かわいい！使っていい？", createdAt: "2026-06-10T12:00:00.000Z", time: "1日前" },
+      { id: 110, displayName: "名無しUv6", content: "ドット絵いいな、僕も始めよう", createdAt: "2026-06-10T12:00:00.000Z", time: "1日前" }
     ]
   },
   {
     id: 7,
     displayName: "名無しNe4",
+    createdAt: "2026-06-08T12:00:00.000Z",
     time: "3日前",
     content: "今週のお題「青空」に参加\nみんなの投稿も見に行こう",
     likes: 12,
@@ -349,6 +366,7 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
   {
     id: 8,
     displayName: "名無しXz9",
+    createdAt: "2026-06-07T12:00:00.000Z",
     time: "4日前",
     content: "#お絵描き\n描きためたイラストまとめ\n今月は10枚描けたぞ",
     likes: 89,
@@ -365,9 +383,9 @@ Aメロ→Bメロ→サビの構成、7thやdimを交えたおしゃれめ進行
     hasCollabButton: true,
     heartsTotal: 1250,
     replies: [
-      { id: 111, displayName: "名無しAs5", content: "全部素敵！特に3枚目が好き", time: "3日前" },
-      { id: 112, displayName: "名無しDf9", content: "ペースすごいな、尊敬する", time: "3日前" },
-      { id: 113, displayName: "名無しGh2", content: "もっと見たいです！", time: "2日前" }
+      { id: 111, displayName: "名無しAs5", content: "全部素敵！特に3枚目が好き", createdAt: "2026-06-08T12:00:00.000Z", time: "3日前" },
+      { id: 112, displayName: "名無しDf9", content: "ペースすごいな、尊敬する", createdAt: "2026-06-08T12:00:00.000Z", time: "3日前" },
+      { id: 113, displayName: "名無しGh2", content: "もっと見たいです！", createdAt: "2026-06-09T12:00:00.000Z", time: "2日前" }
     ]
   }
 ];
