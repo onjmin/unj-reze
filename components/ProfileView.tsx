@@ -2,13 +2,24 @@
 
 import { useState, useMemo } from 'react';
 import { Post } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText } from 'lucide-react';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { extractMmlFromContent } from '@/lib/mml';
+import { extractChordsFromContent } from '@/lib/chord';
+import { extractFirstEmbed } from '@/lib/embed';
+import MmlPlayer from './MmlPlayer';
+import ChordPlayer from './ChordPlayer';
+import EmbedPart from './EmbedPart';
 
 interface ProfileViewProps {
   userId: string;
   displayName?: string;
   posts: Post[];
+  onLike?: (id: number) => void;
+  onDislike?: (id: number) => void;
+  onHeart?: (id: number) => void;
+  onAddReply?: (id: number, text: string) => void;
+  onRepost?: (id: number) => void;
 }
 
 function nameToInitials(name: string): string {
@@ -24,7 +35,7 @@ const tabs = [
   { id: 'media', label: 'メディア', icon: Image },
 ];
 
-export default function ProfileView({ userId, displayName, posts }: ProfileViewProps) {
+export default function ProfileView({ userId, displayName, posts, onLike, onDislike, onHeart, onAddReply, onRepost }: ProfileViewProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('threads');
 
@@ -37,9 +48,9 @@ export default function ProfileView({ userId, displayName, posts }: ProfileViewP
   const replies = useMemo(() => myPosts.filter(p => p.id !== p.threadId), [myPosts]);
   const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage), [myPosts]);
 
-  const totalHearts = useMemo(() => myPosts.reduce((s, p) => s + p.heartsTotal, 0), [myPosts]);
-  const totalLikes = useMemo(() => myPosts.reduce((s, p) => s + p.likes, 0), [myPosts]);
-  const totalDislikes = useMemo(() => myPosts.reduce((s, p) => s + p.dislikes, 0), [myPosts]);
+  const totalHearts = useMemo(() => myPosts.reduce((s, p) => s + Number(p.heartsTotal), 0), [myPosts]);
+  const totalLikes = useMemo(() => myPosts.reduce((s, p) => s + Number(p.likes), 0), [myPosts]);
+  const totalDislikes = useMemo(() => myPosts.reduce((s, p) => s + Number(p.dislikes), 0), [myPosts]);
 
   const stats = [
     { id: 'threads', label: 'スレ', value: threads.length },
@@ -117,49 +128,138 @@ export default function ProfileView({ userId, displayName, posts }: ProfileViewP
         })}
       </div>
 
-      <div className="flex border-b border-gray-800 overflow-x-auto scrollbar-none bg-gray-100/[0.02]">
-        {tabs.map(t => {
-          const isActive = activeTab === t.id;
-          const Icon = t.icon;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
-              className={`flex items-center justify-center gap-1.5 flex-1 min-w-0 py-2.5 px-2 text-xs font-bold transition-colors ${isActive ? 'text-[#a3e635] border-b-2 border-[#a3e635]' : 'text-gray-500 hover:text-gray-300'}`}
-            >
-              <Icon size={14} strokeWidth={isActive ? 2.5 : 2} />
-              <span className="whitespace-nowrap">{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="flex-1 overflow-y-auto divide-y divide-gray-800">
+      <div className="flex-1 overflow-y-auto divide-y divide-gray-800/80">
         {filteredPosts.length > 0 ? (
           filteredPosts.map(p => (
-            <div
-              key={p.id}
-              onClick={() => handlePostClick(p.id)}
-              className="p-3 text-xs hover:bg-gray-100/5 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center justify-between text-gray-500 mb-1">
-                <div className="flex items-center space-x-2">
-                  {p.id === p.threadId ? (
-                    <FileText size={12} className="shrink-0 text-blue-400" />
-                  ) : (
-                    <MessageCircle size={12} className="shrink-0 text-green-400" />
-                  )}
-                  <span>{p.time}</span>
-                  {p.hasImage && <Image size={12} className="text-orange-400" />}
+            <div key={p.id} className="flex relative transition-all hover:bg-gray-100/5">
+              <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
+                <div
+                  onClick={(e) => { e.stopPropagation(); router.push(`/user/${p.slug || p.displayName}`); }}
+                  className={`w-9 h-9 rounded-full bg-gradient-to-br ${p.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity`}
+                >
+                  {nameToInitials(p.displayName)}
                 </div>
-                <div className="flex items-center space-x-2.5">
-                  <span className="flex items-center gap-0.5"><ThumbsUp size={10} />{p.likes}</span>
-                  <span className="flex items-center gap-0.5"><ThumbsDown size={10} />{p.dislikes}</span>
-                  <span className="flex items-center gap-0.5"><Heart size={10} className="text-pink-500" />{p.heartsTotal}</span>
-                  <span className="flex items-center gap-0.5"><MessageCircle size={10} />{p.repliesCount}</span>
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handlePostClick(p.id)}>
+                  <div className="flex justify-between items-baseline mb-0.5">
+                    <div className="flex items-baseline space-x-1.5">
+                      <span className="font-bold text-xs text-gray-200">{p.displayName}</span>
+                      <span className="text-gray-500 text-[10px] font-medium">{p.time}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
+                    {(() => {
+                      const markers = ['#mml', '#chord'];
+                      const markerPos = markers.reduce((best, kw) => {
+                        const pos = p.content.indexOf(kw);
+                        return pos >= 0 ? Math.min(best, pos) : best;
+                      }, Infinity);
+                      const displayText = markerPos < Infinity ? p.content.slice(0, markerPos).trimEnd() : p.content;
+                      const lines = displayText ? displayText.split('\n') : [];
+                      return lines.map((line, lIdx) => (
+                        <span key={lIdx} className="block">
+                          {line.split(' ').map((word, wIdx) => {
+                            if (word.startsWith('#')) {
+                              return <span key={wIdx} className="text-blue-400 mr-1 cursor-pointer hover:underline">{word}</span>;
+                            }
+                            if (/^https?:\/\//.test(word)) {
+                              return <a key={wIdx} href={word} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mr-1">{word}</a>;
+                            }
+                            return <span key={wIdx}>{word} </span>;
+                          })}
+                        </span>
+                      ));
+                    })()}
+                  </p>
+
+                  {p.hasImage && (
+                    <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] max-h-[220px]">
+                      <img
+                        src={p.imageSrc}
+                        alt={p.imageAlt || "ユーザーアート"}
+                        className="w-full h-auto object-cover max-h-[220px]"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;
+                        }}
+                      />
+                      {p.hasCollabButton && (
+                        <button className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all">
+                          <Edit3 size={11} />
+                          <span>コラボ</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {p.hasGame && (
+                    <div className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner">
+                      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
+                      <div className="z-10 flex flex-col items-center space-y-1">
+                        <div className="bg-red-600 p-3 rounded-full shadow-[0_0_15px_rgba(220,38,38,0.5)] group-hover:scale-110 transition-transform">
+                          <PlaySquare size={28} className="text-white ml-0.5" />
+                        </div>
+                        <span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">TAP TO PLAY GAME</span>
+                      </div>
+                      <div className="absolute bottom-2 left-2.5 z-10 flex items-center space-x-1.5">
+                        <span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">escape_the_mushroom</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {(() => {
+                    const mmlCode = extractMmlFromContent(p.content);
+                    if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+                    const chordRes = extractChordsFromContent(p.content);
+                    if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+                    if (p.hasImage || p.hasGame) return null;
+                    const embed = extractFirstEmbed(p.content);
+                    return embed ? <EmbedPart embed={embed} /> : null;
+                  })()}
+
+                  <div className="flex justify-between items-center text-gray-500 mt-1 max-w-[280px]">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onLike?.(p.id); }}
+                      className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${p.liked ? 'text-blue-400 font-bold' : ''}`}
+                    >
+                      <ThumbsUp size={14} />
+                      <span className="text-[11px]">{p.likes || ''}</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDislike?.(p.id); }}
+                      className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${p.disliked ? 'text-red-500 font-bold' : ''}`}
+                    >
+                      <ThumbsDown size={14} />
+                      <span className="text-[11px]">{p.dislikes || ''}</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); }}
+                      className="flex items-center space-x-1 hover:text-green-400 transition-colors"
+                    >
+                      <MessageCircle size={14} />
+                      <span className="text-[11px]">{p.repliesCount || ''}</span>
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onRepost?.(p.id); }}
+                      className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${p.reposted ? 'text-purple-400' : ''}`}
+                    >
+                      <Repeat size={14} />
+                      <span className="text-[11px]">{p.reposts || ''}</span>
+                    </button>
+                    <button onClick={(e) => e.stopPropagation()} className="flex items-center hover:text-blue-400 transition-colors">
+                      <Mail size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onHeart?.(p.id); }}
+                      className="flex items-center space-x-1 hover:text-pink-400 transition-colors"
+                    >
+                      <Heart size={12} className="fill-current text-pink-600/65" />
+                      <span className="text-[10px]">{p.heartsTotal || '0'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-              <p className="text-gray-300 line-clamp-2 leading-relaxed">{p.content}</p>
             </div>
           ))
         ) : (

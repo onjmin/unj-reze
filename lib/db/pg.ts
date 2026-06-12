@@ -544,6 +544,27 @@ export const pgStore: DataStore = {
       client.release();
     }
   },
+
+  async searchPosts(query: string) {
+    if (!query.trim()) return [];
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(`
+        SELECT p.*,
+          false as liked,
+          false as disliked,
+          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        FROM posts p
+        WHERE p.thread_id = p.id
+          AND (p.content ILIKE $1 OR p.display_name ILIKE $1)
+        ORDER BY p.id DESC
+      `, [`%${query}%`]);
+      return Promise.all(result.rows.map(rowToPost));
+    } finally {
+      client.release();
+    }
+  },
 };
 
 function deriveSlugPg(fullName: string): string {

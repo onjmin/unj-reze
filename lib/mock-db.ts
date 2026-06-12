@@ -288,6 +288,15 @@ class MockDB {
     return msg;
   }
 
+  searchPosts(query: string): Post[] {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    return this.posts
+      .filter(p => p.id === p.threadId)
+      .filter(p => p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))
+      .map(p => this.applyUserState({ ...p, replies: [...p.replies] }));
+  }
+
   getTrends(): Trend[] {
     return this.trends;
   }

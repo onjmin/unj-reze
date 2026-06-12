@@ -68,6 +68,10 @@ const staticApi = {
   },
   search: {
     trends: async () => db.getTrends(),
+    posts: async (query: string) => {
+      if (!query.trim()) return [];
+      return db.searchPosts(query);
+    },
   },
   users: {
     profile: async (id: string, userId?: string) => {
@@ -114,6 +118,7 @@ const liveApi = {
   },
   search: {
     trends: () => fetcher<Trend[]>('/search/trends'),
+    posts: (query: string) => fetcher<Post[]>(`/search?q=${encodeURIComponent(query)}`),
   },
   users: {
     profile: (id: string, userId?: string) => {

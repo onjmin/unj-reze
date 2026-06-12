@@ -38,4 +38,5 @@ export interface DataStore {
   getMessages(): Promise<Message[]>;
   addMessage(data: MessageParams): Promise<Message>;
   getTrends(): Promise<Trend[]>;
+  searchPosts(query: string): Promise<Post[]>;
 }

@@ -191,11 +191,11 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           </p>
 
           {post.hasImage && (
-            <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] max-h-[220px]">
+            <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
               <img
                 src={post.imageSrc}
                 alt={post.imageAlt || "ユーザーアート"}
-                className="w-full h-auto object-cover max-h-[220px]"
+                className="max-w-full h-auto max-h-[220px] block mx-auto"
                 onError={(e) => {
                   const target = e.currentTarget;
                   target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;

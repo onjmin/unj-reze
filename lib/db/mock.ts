@@ -61,4 +61,8 @@ export const mockStore: DataStore = {
   async getTrends() {
     return mockDb.getTrends();
   },
+
+  async searchPosts(query: string) {
+    return mockDb.searchPosts(query);
+  },
 };

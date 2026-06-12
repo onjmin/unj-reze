@@ -388,4 +388,22 @@ export const sqliteStore: DataStore = {
     const rows = rowsToObjects(d, 'SELECT * FROM trends ORDER BY id');
     return rows.map(r => ({ keyword: r.keyword, count: r.count } as Trend));
   },
+
+  async searchPosts(query: string) {
+    if (!query.trim()) return [];
+    const d = await getDb();
+    const rows = rowsToObjects(
+      d,
+      `SELECT p.*,
+        0 as liked,
+        0 as disliked,
+        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+      FROM posts p
+      WHERE p.thread_id = p.id
+        AND (p.content LIKE ? OR p.display_name LIKE ?)
+      ORDER BY p.id DESC`,
+      [`%${query}%`, `%${query}%`]
+    );
+    return rows.map(rowToPost);
+  },
 };

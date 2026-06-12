@@ -345,10 +345,22 @@ export default function App() {
               </>
             )}
 
-            {currentNav === 'search' && <SearchView />}
+            {currentNav === 'search' && (
+              <SearchView
+                onLike={handleLike}
+                onDislike={handleDislike}
+                onRepost={handleRepost}
+                onHeart={handleHeart}
+                onAddReply={handleAddReply}
+                onQuickPost={handleQuickPost}
+                openGame={() => setActiveScreen('game')}
+                openDrawing={() => setActiveScreen('drawing')}
+                openMml={() => setActiveScreen('mml')}
+              />
+            )}
             {currentNav === 'notifications' && <NotificationView />}
             {currentNav === 'messages' && <MessageView />}
-            {currentNav === 'profile' && <ProfileView userId={userId} displayName={userId} posts={posts} />}
+            {currentNav === 'profile' && <ProfileView userId={userId} displayName={userId} posts={posts} onLike={handleLike} onDislike={handleDislike} onHeart={handleHeart} onRepost={handleRepost} />}
           </div>
 
           <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} />
