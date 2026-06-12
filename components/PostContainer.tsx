@@ -352,6 +352,7 @@ function nameToInitials(name: string): string {
 function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
+  const [pop, setPop] = useState(false);
 
   useEffect(() => {
     if (replies.length < 2) return;
@@ -360,6 +361,12 @@ function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number })
     }, 4000);
     return () => clearInterval(timer);
   }, [replies.length]);
+
+  useEffect(() => {
+    setPop(true);
+    const timeout = setTimeout(() => setPop(false), 350);
+    return () => clearTimeout(timeout);
+  }, [index]);
 
   const reply = replies[index];
   const maxAvatars = Math.min(replies.length, 5);
@@ -372,25 +379,34 @@ function ReplyPreview({ replies, postId }: { replies: Reply[]; postId: number })
     >
       <div className="flex items-center gap-1.5 py-1">
         <div className="flex items-center shrink-0 -space-x-1.5">
-          {replies.slice(0, maxAvatars).map((r, i) => (
-            <div
-              key={r.id}
-              className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} border border-gray-900 flex items-center justify-center text-[7px] font-bold text-white shrink-0`}
-              style={{ zIndex: maxAvatars - i }}
-            >
-              {nameToInitials(r.displayName)}
-            </div>
-          ))}
+          {replies.slice(0, maxAvatars).map((r, i) => {
+            const isActive = r.id === reply.id;
+            return (
+              <div
+                key={r.id}
+                className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${
+                  isActive
+                    ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
+                    : 'border border-gray-900'
+                }`}
+                style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i }}
+              >
+                {nameToInitials(r.displayName)}
+              </div>
+            );
+          })}
           {extraCount > 0 && (
             <div className="w-5 h-5 rounded-full bg-gray-800 border border-gray-900 flex items-center justify-center text-[7px] text-gray-400 font-bold shrink-0">
               +{extraCount}
             </div>
           )}
         </div>
-        <span className="text-[11px] text-gray-400 truncate">
-          <span className="text-gray-300 font-bold">{reply.displayName}</span>
-          <span className="text-gray-500 ml-1">{reply.content}</span>
-          <span className="text-gray-600 ml-1.5 shrink-0">{reply.time}</span>
+        <span key={index} className="flex items-center min-w-0 animate-fade-in-up">
+          <span className="truncate text-[11px] text-gray-400">
+            <span className="text-gray-300 font-bold">{reply.displayName}</span>
+            <span className="text-gray-500 ml-1">{reply.content}</span>
+          </span>
+          <span className="text-[11px] text-gray-600 shrink-0 ml-1.5">{reply.time}</span>
         </span>
       </div>
     </div>
