@@ -14,6 +14,7 @@ import type { FrameData } from './AnimationBar';
 interface DrawingEditorProps {
   onClose: () => void;
   onSave: (data: string) => void;
+  collabImageUrl?: string;
 }
 
 type Tool = 'pen' | 'brush' | 'eraser' | 'dropper' | 'fill';
@@ -24,10 +25,11 @@ const PRESET_COLORS = [
   '#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#f8fafc', '#dc2626', '#ea580c', '#ca8a04',
 ];
 
-export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
+export default function DrawingEditor({ onClose, onSave, collabImageUrl }: DrawingEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const toolRef = useRef<Tool>('pen');
   const colorRef = useRef('#ffffff');
+  const collabRef = useRef(collabImageUrl);
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState('#000000');
   const [penSize, setPenSize] = useState(4);
@@ -137,6 +139,35 @@ export default function DrawingEditor({ onClose, onSave }: DrawingEditorProps) {
     bgLayer.trace();
     new oekaki.LayeredCanvas('レイヤー #1');
     layerCounterRef.current = 2;
+
+    // collaboration: load existing image as base layer
+    if (collabRef.current) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = collabRef.current;
+      img.onload = () => {
+        // remove white background layer, paste image on first layer
+        bgLayer.delete();
+        const layers = oekaki.getLayers();
+        const target = layers[0];
+        if (target) {
+          target.name = 'コラボ';
+          target.paste(img);
+          target.trace();
+          new oekaki.LayeredCanvas('レイヤー #2');
+          layerCounterRef.current = 3;
+        }
+        // re-populate layer entries
+        const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
+          instance: inst,
+          name: inst.name,
+        })).reverse();
+        setLayerEntries(updated);
+        layerEntriesRef.current = updated;
+        setActiveLayerIndex(0);
+        activeLayerIndexRef.current = 0;
+      };
+    }
 
     // populate layer entries (topmost first)
     const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({

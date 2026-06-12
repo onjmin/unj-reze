@@ -26,11 +26,11 @@ interface PostContainerProps {
   onAddReply: (id: number, text: string) => void;
   onQuickPost: () => void;
   openGame: () => void;
-  openDrawing: () => void;
+  openCollab: (post: Post) => void;
   openMml: () => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openDrawing, openMml }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml }: PostContainerProps) {
   const router = useRouter();
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText] = useState('');
@@ -203,7 +203,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               />
               {post.hasCollabButton && (
                 <button
-                  onClick={openDrawing}
+                  onClick={() => openCollab(post)}
                   className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
                 >
                   <Edit3 size={11} />
@@ -386,11 +386,10 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: number }) 
             return (
               <div
                 key={r.id}
-                className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${
-                  isActive
+                className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${isActive
                     ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
                     : 'border border-gray-900'
-                }`}
+                  }`}
                 style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i }}
               >
                 {nameToInitials(r.displayName)}

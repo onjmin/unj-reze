@@ -39,6 +39,7 @@ export default function App() {
   const [messageCount, setMessageCount] = useState(1);
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
 
   const heartQueue = useRef<Map<number, number>>(new Map());
   const heartTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -171,6 +172,13 @@ export default function App() {
     setAttachedImage(null);
   };
 
+  const isDotDrawingPost = useCallback((post: Post) => /#ドット絵|ドット絵/i.test(post.content), []);
+
+  const handleOpenCollab = useCallback((post: Post) => {
+    setCollabImageUrl(post.imageSrc);
+    setActiveScreen(isDotDrawingPost(post) ? 'dotdrawing' : 'drawing');
+  }, [isDotDrawingPost]);
+
   const handleSaveDrawing = (canvasData: string) => {
     setAttachedImage(canvasData);
     setActiveScreen(null);
@@ -203,13 +211,14 @@ export default function App() {
 
       {activeScreen === 'drawing' && (
         <DrawingEditor
-          onClose={() => setActiveScreen(null)}
+          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
           onSave={handleSaveDrawing}
+          collabImageUrl={collabImageUrl}
         />
       )}
       {activeScreen === 'dotdrawing' && (
         <DotDrawingEditor
-          onClose={() => setActiveScreen(null)}
+          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
           onSave={handleSaveDotDrawing}
         />
       )}
@@ -228,110 +237,125 @@ export default function App() {
 
       <div className="relative w-full max-w-2xl mx-auto border-x border-gray-800 h-screen flex flex-col shrink-0">
         {!activeScreen && (
-        <>
-          <Header
-            userId={userId}
-            server={server}
-            bbsMode={bbsMode}
-            onOpenDrawer={() => setDrawerOpen(true)}
-          />
-
-          {currentNav === 'home' && (
-            <TopTabs
-              activeTab={topTab}
-              setActiveTab={(tab) => {
-                setTopTab(tab);
-                if (tab === 'game') { setActiveScreen('game'); }
-                else { setActiveScreen(null); }
-                if (tab === 'ranking') {
-                  setRankCategory('イイ');
-                }
-              }}
+          <>
+            <Header
+              userId={userId}
+              server={server}
+              bbsMode={bbsMode}
+              onOpenDrawer={() => setDrawerOpen(true)}
             />
-          )}
 
-          <div className="flex-1 overflow-y-auto pb-20 scrollbar-none">
             {currentNav === 'home' && (
-              <>
-                {topTab !== 'ranking' && topTab !== 'game' && (
-                  <div className="p-3 border-b border-gray-800/80 flex flex-col space-y-2">
-                    <div className="flex items-start space-x-3">
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white">
-                        {userId.substring(3, 5) || "vF"}
-                      </div>
-                      <div className="flex-1">
-                        <textarea
-                          value={inputText}
-                          onChange={(e) => setInputText(e.target.value)}
-                          className="w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none h-20 text-gray-100"
-                          placeholder="いまどうしてる？ #お絵描き #ゲーム"
-                        />
-                        {attachedImage && (
-                          <div className="relative mt-2 rounded-lg overflow-hidden border border-gray-800 max-w-[180px]">
-                            <img src={attachedImage} alt="添付お絵描き" className="w-full h-auto" />
-                            <button
-                              onClick={() => setAttachedImage(null)}
-                              className="absolute top-1 right-1 bg-black/85 p-1 rounded-full text-white hover:bg-red-500"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex justify-between items-center pl-12">
-                      <div className="flex space-x-2 text-gray-500">
-                        <button
-                          onClick={() => setActiveScreen('drawing')}
-                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-[#a3e635] transition-colors"
-                          title="お絵描き"
-                        >
-                          <Pen size={18} />
-                        </button>
-                        <button
-                          onClick={() => setActiveScreen('dotdrawing')}
-                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-orange-400 transition-colors"
-                          title="ドット絵専用お絵描き"
-                        >
-                          <Grid3x3 size={18} />
-                        </button>
-                        <button
-                          onClick={() => setActiveScreen('mml')}
-                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-pink-400 transition-colors"
-                          title="MML作曲"
-                        >
-                          <Music size={18} />
-                        </button>
-                        <button
-                          onClick={() => setActiveScreen('gamemaker')}
-                          className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
-                          title="ゲーム作成"
-                        >
-                          <Gamepad2 size={18} />
-                        </button>
-                      </div>
-                      <button
-                        onClick={handleCreatePost}
-                        disabled={!inputText.trim() && !attachedImage}
-                        className="bg-blue-600 text-white font-bold px-4 py-1.5 rounded-full text-xs hover:bg-blue-500 disabled:opacity-50 transition-colors"
-                      >
-                        投稿
-                      </button>
-                    </div>
-                  </div>
-                )}
+              <TopTabs
+                activeTab={topTab}
+                setActiveTab={(tab) => {
+                  setTopTab(tab);
+                  if (tab === 'game') { setActiveScreen('game'); }
+                  else { setActiveScreen(null); }
+                  if (tab === 'ranking') {
+                    setRankCategory('イイ');
+                  }
+                }}
+              />
+            )}
 
-                {topTab === 'ranking' && (
-                  <RankingSubTabs
-                    activeCategory={rankCategory}
-                    setActiveCategory={setRankCategory}
+            <div className="flex-1 overflow-y-auto pb-20 scrollbar-none">
+              {currentNav === 'home' && (
+                <>
+                  {topTab !== 'ranking' && topTab !== 'game' && (
+                    <div className="p-3 border-b border-gray-800/80 flex flex-col space-y-2">
+                      <div className="flex items-start space-x-3">
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white">
+                          {userId.substring(3, 5) || "vF"}
+                        </div>
+                        <div className="flex-1">
+                          <textarea
+                            value={inputText}
+                            onChange={(e) => setInputText(e.target.value)}
+                            className="w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none h-20 text-gray-100"
+                            placeholder="いまどうしてる？ #お絵描き #ゲーム"
+                          />
+                          {attachedImage && (
+                            <div className="relative mt-2 rounded-lg overflow-hidden border border-gray-800 max-w-[180px]">
+                              <img src={attachedImage} alt="添付お絵描き" className="w-full h-auto" />
+                              <button
+                                onClick={() => setAttachedImage(null)}
+                                className="absolute top-1 right-1 bg-black/85 p-1 rounded-full text-white hover:bg-red-500"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center pl-12">
+                        <div className="flex space-x-2 text-gray-500">
+                          <button
+                            onClick={() => { setCollabImageUrl(undefined); setActiveScreen('drawing'); }}
+                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-[#a3e635] transition-colors"
+                            title="お絵描き"
+                          >
+                            <Pen size={18} />
+                          </button>
+                          <button
+                            onClick={() => setActiveScreen('dotdrawing')}
+                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-orange-400 transition-colors"
+                            title="ドット絵専用お絵描き"
+                          >
+                            <Grid3x3 size={18} />
+                          </button>
+                          <button
+                            onClick={() => setActiveScreen('mml')}
+                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-pink-400 transition-colors"
+                            title="MML作曲"
+                          >
+                            <Music size={18} />
+                          </button>
+                          <button
+                            onClick={() => setActiveScreen('gamemaker')}
+                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
+                            title="ゲーム作成"
+                          >
+                            <Gamepad2 size={18} />
+                          </button>
+                        </div>
+                        <button
+                          onClick={handleCreatePost}
+                          disabled={!inputText.trim() && !attachedImage}
+                          className="bg-blue-600 text-white font-bold px-4 py-1.5 rounded-full text-xs hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                        >
+                          投稿
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {topTab === 'ranking' && (
+                    <RankingSubTabs
+                      activeCategory={rankCategory}
+                      setActiveCategory={setRankCategory}
+                    />
+                  )}
+
+                  <FeedList
+                    posts={posts}
+                    activeTab={topTab}
+                    rankCategory={rankCategory}
+                    onLike={handleLike}
+                    onDislike={handleDislike}
+                    onRepost={handleRepost}
+                    onHeart={handleHeart}
+                    onAddReply={handleAddReply}
+                    onQuickPost={handleQuickPost}
+                    openGame={() => setActiveScreen('game')}
+                    openCollab={handleOpenCollab}
+                    openMml={() => setActiveScreen('mml')}
                   />
-                )}
+                </>
+              )}
 
-                <FeedList
-                  posts={posts}
-                  activeTab={topTab}
-                  rankCategory={rankCategory}
+              {currentNav === 'search' && (
+                <SearchView
                   onLike={handleLike}
                   onDislike={handleDislike}
                   onRepost={handleRepost}
@@ -339,51 +363,47 @@ export default function App() {
                   onAddReply={handleAddReply}
                   onQuickPost={handleQuickPost}
                   openGame={() => setActiveScreen('game')}
-                  openDrawing={() => setActiveScreen('drawing')}
+                  openCollab={handleOpenCollab}
                   openMml={() => setActiveScreen('mml')}
                 />
-              </>
-            )}
+              )}
+              {currentNav === 'notifications' && <NotificationView />}
+              {currentNav === 'messages' && <MessageView />}
+              {currentNav === 'profile' && (
+                <ProfileView
+                  userId={userId}
+                  displayName={userId}
+                  posts={posts}
+                  onLike={handleLike}
+                  onDislike={handleDislike}
+                  onHeart={handleHeart}
+                  onRepost={handleRepost}
+                  openCollab={handleOpenCollab}
+                />
+              )}
+            </div>
 
-            {currentNav === 'search' && (
-              <SearchView
-                onLike={handleLike}
-                onDislike={handleDislike}
-                onRepost={handleRepost}
-                onHeart={handleHeart}
-                onAddReply={handleAddReply}
-                onQuickPost={handleQuickPost}
-                openGame={() => setActiveScreen('game')}
-                openDrawing={() => setActiveScreen('drawing')}
-                openMml={() => setActiveScreen('mml')}
-              />
-            )}
-            {currentNav === 'notifications' && <NotificationView />}
-            {currentNav === 'messages' && <MessageView />}
-            {currentNav === 'profile' && <ProfileView userId={userId} displayName={userId} posts={posts} onLike={handleLike} onDislike={handleDislike} onHeart={handleHeart} onRepost={handleRepost} />}
-          </div>
+            <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} />
 
-          <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} />
+            <FAB openText={handleQuickPost} />
+          </>
+        )}
 
-          <FAB openText={handleQuickPost} />
-        </>
-      )}
-
-      {composerOpen && (
-        <PostComposer
-          userId={userId}
-          text={inputText}
-          setText={setInputText}
-          image={attachedImage}
-          setImage={setAttachedImage}
-          onClose={() => setComposerOpen(false)}
-          onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
-          onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}
-          onOpenDotDrawing={() => { setComposerOpen(false); setActiveScreen('dotdrawing'); }}
-          onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
-          onOpenGameMaker={() => { setComposerOpen(false); setActiveScreen('gamemaker'); }}
-        />
-      )}
+        {composerOpen && (
+          <PostComposer
+            userId={userId}
+            text={inputText}
+            setText={setInputText}
+            image={attachedImage}
+            setImage={setAttachedImage}
+            onClose={() => setComposerOpen(false)}
+            onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
+            onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}
+            onOpenDotDrawing={() => { setComposerOpen(false); setActiveScreen('dotdrawing'); }}
+            onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
+            onOpenGameMaker={() => { setComposerOpen(false); setActiveScreen('gamemaker'); }}
+          />
+        )}
       </div>
     </div>
   );

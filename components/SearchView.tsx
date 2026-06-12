@@ -14,7 +14,7 @@ interface SearchViewProps {
   onAddReply: (id: number, text: string) => void;
   onQuickPost: () => void;
   openGame: () => void;
-  openDrawing: () => void;
+  openCollab: (post: Post) => void;
   openMml: () => void;
 }
 
@@ -99,7 +99,7 @@ export default function SearchView(props: SearchViewProps) {
               onAddReply={props.onAddReply}
               onQuickPost={props.onQuickPost}
               openGame={props.openGame}
-              openDrawing={props.openDrawing}
+              openCollab={props.openCollab}
               openMml={props.openMml}
             />
           ))}

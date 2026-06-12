@@ -224,8 +224,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           </p>
 
           {post.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] max-h-[220px]">
-              <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="w-full h-auto object-cover max-h-[220px]" />
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+              <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}
 
@@ -378,8 +378,8 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
           </p>
 
           {localPost.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] max-h-[220px]">
-              <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="w-full h-auto object-cover max-h-[220px]" />
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+              <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}
 
