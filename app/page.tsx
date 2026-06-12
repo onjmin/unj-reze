@@ -35,6 +35,8 @@ export default function App() {
   const [userId, setUserId] = useState('名無しvFZ');
   const [server, setServer] = useState('/main');
   const [bbsMode, setBbsMode] = useState('掲示板モード');
+  const [notifCount, setNotifCount] = useState(3);
+  const [messageCount, setMessageCount] = useState(1);
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
 
@@ -144,13 +146,24 @@ export default function App() {
     }));
   };
 
+  const handleNavigate = (id: string) => {
+    setCurrentNav(id);
+    if (id === 'notifications') setNotifCount(0);
+    if (id === 'messages') setMessageCount(0);
+  };
+
   const handleCreatePost = async () => {
     if (!inputText.trim() && !attachedImage) return;
+    let imageSrc: string | undefined;
+    if (attachedImage) {
+      const result = await api.upload.image({ image: attachedImage });
+      imageSrc = result.url;
+    }
     const post = await api.posts.create({
       displayName: userId,
       content: inputText,
       hasImage: !!attachedImage,
-      imageSrc: attachedImage || undefined,
+      imageSrc,
       avatarColor: "from-blue-500 to-indigo-600",
     });
     setPosts([post, ...posts]);
@@ -338,7 +351,7 @@ export default function App() {
             {currentNav === 'profile' && <ProfileView userId={userId} displayName={userId} posts={posts} />}
           </div>
 
-          <BottomNav current={currentNav} set={setCurrentNav} />
+          <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} />
 
           <FAB openText={handleQuickPost} />
         </>

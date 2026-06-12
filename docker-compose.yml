@@ -18,5 +18,32 @@ services:
       timeout: 5s
       retries: 5
 
+  # MinIO (Cloudflare R2代替) - 本番構成用
+  # 開発時は public/uploads/ にファイル保存するため不要
+  # 有効化するには .env に S3_* の設定も必要
+  # minio:
+  #   image: minio/minio:latest
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   volumes:
+  #     - miniodata:/data
+  #   command: server /data --console-address ":9001"
+
+  # Redis (Cloudflare KV代替) - 本番構成用
+  # 開発時はインメモリKVで代用するため不要
+  # 有効化するには .env に REDIS_* の設定と package.json への ioredis 追加が必要
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redisdata:/data
+
 volumes:
   pgdata:
+  # miniodata:    # MinIO 有効化時にコメント解除
+  # redisdata:    # Redis 有効化時にコメント解除

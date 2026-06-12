@@ -3,6 +3,7 @@ import { Post } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
 import { formatRelativeTime } from '../time';
+import { kvIncr, kvDecr, kvGet } from '../kv';
 
 let pool: Pool | null = null;
 let initialized = false;
@@ -31,6 +32,33 @@ async function ensureTables(client: any) {
       END $$;
     `);
   }
+
+  // Migration: add columns to notifications table for navigation links
+  for (const col of ['type', 'post_id', 'target_user']) {
+    await client.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'notifications' AND column_name = '${col}'
+        ) THEN
+          ALTER TABLE notifications ADD COLUMN ${col} ${col === 'type' ? 'TEXT NOT NULL DEFAULT \'like\'' : col === 'post_id' ? 'INTEGER' : 'TEXT'};
+        END IF;
+      END $$;
+    `);
+  }
+  // Migration: set type/post_id/target_user for existing seed rows
+  await client.query(`
+    UPDATE notifications SET type = 'like', post_id = 7 WHERE id = 1 AND type = 'like' AND post_id IS NULL
+  `);
+  await client.query(`
+    UPDATE notifications SET type = 'repost', post_id = 6 WHERE id = 2 AND type = 'like' AND post_id IS NULL
+  `);
+  await client.query(`
+    UPDATE notifications SET type = 'reply', post_id = 5 WHERE id = 3 AND type = 'like' AND post_id IS NULL
+  `);
+  await client.query(`
+    UPDATE notifications SET type = 'follow', target_user = '名無しvFZ' WHERE id = 4 AND type = 'like' AND target_user IS NULL
+  `);
 
   await client.query(`
     CREATE TABLE IF NOT EXISTS post_votes (
@@ -62,10 +90,20 @@ function getPool(): Pool {
   return pool;
 }
 
-function rowToPost(row: any): Post {
+async function rowToPost(row: any): Promise<Post> {
   const createdAt = typeof row.created_at === 'object' && row.created_at?.toISOString
     ? row.created_at.toISOString()
     : String(row.created_at);
+
+  let likes = row.likes;
+  let dislikes = row.dislikes;
+  try {
+    const kvLikes = await kvGet(`post:${row.id}:likes`);
+    const kvDislikes = await kvGet(`post:${row.id}:dislikes`);
+    if (kvLikes !== null) likes = parseInt(kvLikes, 10);
+    if (kvDislikes !== null) dislikes = parseInt(kvDislikes, 10);
+  } catch {}
+
   return {
     id: row.id,
     displayName: row.display_name,
@@ -73,8 +111,8 @@ function rowToPost(row: any): Post {
     createdAt,
     time: formatRelativeTime(createdAt),
     content: row.content,
-    likes: row.likes,
-    dislikes: row.dislikes,
+    likes,
+    dislikes,
     liked: row.liked ?? false,
     disliked: row.disliked ?? false,
     repliesCount: row.replies_count,
@@ -103,7 +141,7 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
   for (const row of result.rows) {
     const pid = row.thread_id;
     if (!map.has(pid)) map.set(pid, []);
-    map.get(pid)!.push(rowToPost(row));
+    map.get(pid)!.push(await rowToPost(row));
   }
   return map;
 }
@@ -140,10 +178,10 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
   const threadIds = rows.map(r => r.id);
   const repliesMap = await getThreadReplies(client, threadIds);
 
-  return rows.map(r => ({
-    ...rowToPost(r),
+  return Promise.all(rows.map(async r => ({
+    ...(await rowToPost(r)),
     replies: repliesMap.get(r.id) || [],
-  }));
+  })));
 }
 
 async function getPostWithVotes(client: any, id: number, userId?: string): Promise<Post | null> {
@@ -171,7 +209,7 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
   }
 
   if (result.rows.length === 0) return null;
-  const post = rowToPost(result.rows[0]);
+  const post = await rowToPost(result.rows[0]);
 
   if (post.threadId === post.id) {
     // It's a thread, load replies
@@ -210,16 +248,15 @@ export const pgStore: DataStore = {
       await ensureTables(client);
       const slug = data.slug || deriveSlugPg(data.displayName);
       const insertResult = await client.query(
-        `INSERT INTO posts (display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
-         VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, true)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true)
          RETURNING id`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null]
       );
       const newId = insertResult.rows[0].id;
-      await client.query('UPDATE posts SET thread_id = $1 WHERE id = $1', [newId]);
       const result = await client.query('SELECT * FROM posts WHERE id = $1', [newId]);
-      return { ...rowToPost(result.rows[0]), replies: [] };
+      return { ...(await rowToPost(result.rows[0])), replies: [] };
     } finally {
       client.release();
     }
@@ -245,18 +282,21 @@ export const pgStore: DataStore = {
       if (existingVote === 'like') {
         await client.query('DELETE FROM post_votes WHERE post_id = $1 AND user_id = $2', [id, userId]);
         await client.query('UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
+        try { await kvDecr(`post:${id}:likes`); } catch {}
       } else if (existingVote === 'dislike') {
         await client.query(
           'UPDATE post_votes SET vote_type = $1 WHERE post_id = $2 AND user_id = $3',
           ['like', id, userId]
         );
         await client.query('UPDATE posts SET likes = likes + 1, dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
+        try { await kvIncr(`post:${id}:likes`); await kvDecr(`post:${id}:dislikes`); } catch {}
       } else {
         await client.query(
           'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
           [id, userId, 'like']
         );
         await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
+        try { await kvIncr(`post:${id}:likes`); } catch {}
       }
 
       await client.query('COMMIT');
@@ -289,18 +329,21 @@ export const pgStore: DataStore = {
       if (existingVote === 'dislike') {
         await client.query('DELETE FROM post_votes WHERE post_id = $1 AND user_id = $2', [id, userId]);
         await client.query('UPDATE posts SET dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
+        try { await kvDecr(`post:${id}:dislikes`); } catch {}
       } else if (existingVote === 'like') {
         await client.query(
           'UPDATE post_votes SET vote_type = $1 WHERE post_id = $2 AND user_id = $3',
           ['dislike', id, userId]
         );
         await client.query('UPDATE posts SET dislikes = dislikes + 1, likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
+        try { await kvIncr(`post:${id}:dislikes`); await kvDecr(`post:${id}:likes`); } catch {}
       } else {
         await client.query(
           'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
           [id, userId, 'dislike']
         );
         await client.query('UPDATE posts SET dislikes = dislikes + 1 WHERE id = $1', [id]);
+        try { await kvIncr(`post:${id}:dislikes`); } catch {}
       }
 
       await client.query('COMMIT');
@@ -341,7 +384,7 @@ export const pgStore: DataStore = {
         [id]
       );
       if (result.rows.length === 0) return null;
-      return rowToPost(result.rows[0]);
+      return await rowToPost(result.rows[0]);
     } finally {
       client.release();
     }
@@ -367,8 +410,8 @@ export const pgStore: DataStore = {
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
-        `INSERT INTO posts (thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color)
-         VALUES ($1, $2, $3, $4, $5, NOW(), 'from-blue-500 to-indigo-600')
+        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), 'from-blue-500 to-indigo-600')
          RETURNING *`,
         [postId, parentPostId, data.displayName, slug, data.content]
       );
@@ -376,7 +419,7 @@ export const pgStore: DataStore = {
         'UPDATE posts SET replies_count = replies_count + 1 WHERE id = $1',
         [postId]
       );
-      return rowToPost(result.rows[0]);
+      return await rowToPost(result.rows[0]);
     } finally {
       client.release();
     }
@@ -428,7 +471,7 @@ export const pgStore: DataStore = {
   async getNotifications() {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM notifications ORDER BY id');
+      const result = await client.query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20');
       return result.rows.map(r => {
         const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
           ? r.created_at.toISOString()
@@ -438,6 +481,9 @@ export const pgStore: DataStore = {
           user: r.user_name,
           action: r.action,
           target: r.target,
+          type: r.type || 'like',
+          postId: r.post_id ?? undefined,
+          targetUser: r.target_user ?? undefined,
           createdAt,
           time: formatRelativeTime(createdAt),
         } as Notification;
@@ -450,7 +496,7 @@ export const pgStore: DataStore = {
   async getMessages() {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM messages ORDER BY id');
+      const result = await client.query('SELECT * FROM messages ORDER BY created_at DESC LIMIT 20');
       return result.rows.map(r => {
         const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
           ? r.created_at.toISOString()
@@ -472,7 +518,8 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       const result = await client.query(
-        `INSERT INTO messages (sender, text, created_at) VALUES ($1, $2, NOW()) RETURNING *`,
+        `INSERT INTO messages (id, sender, text, created_at)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM messages), $1, $2, NOW()) RETURNING *`,
         [data.sender, data.text]
       );
       const r = result.rows[0];
@@ -488,7 +535,7 @@ export const pgStore: DataStore = {
   async getTrends() {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM trends ORDER BY id');
+      const result = await client.query('SELECT * FROM trends ORDER BY count DESC LIMIT 10');
       return result.rows.map(r => ({
         keyword: r.keyword,
         count: r.count,

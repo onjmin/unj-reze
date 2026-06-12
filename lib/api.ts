@@ -18,6 +18,9 @@ async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const staticApi = {
+  upload: {
+    image: async (data: { image: string; filename?: string }) => ({ url: data.image }),
+  },
   posts: {
     list: async (userId?: string) => db.getPosts(userId),
     get: async (id: number, userId?: string) => {
@@ -76,6 +79,10 @@ const staticApi = {
 };
 
 const liveApi = {
+  upload: {
+    image: (data: { image: string; filename?: string }) =>
+      fetcher<{ url: string }>('/upload', { method: 'POST', body: JSON.stringify(data) }),
+  },
   posts: {
     list: (userId?: string) => {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';

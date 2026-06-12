@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS notifications (
   user_name TEXT NOT NULL,
   action TEXT NOT NULL,
   target TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT 'like',
+  post_id INTEGER,
+  target_user TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -68,11 +71,11 @@ CREATE TABLE IF NOT EXISTS post_hearts (
 );
 
 -- === 通知データ ===
-INSERT INTO notifications (id, user_name, action, target, created_at) VALUES
-  (1, '名無しXz9', 'がいいねしました', '青空の写真', NOW() - INTERVAL '3 minutes'),
-  (2, '名無しLm8', 'がリポストしました', 'ドット絵の練習中', NOW() - INTERVAL '8 minutes'),
-  (3, '名無しBn5', 'が返信しました', '作業用BGM何聴いてる？', NOW() - INTERVAL '15 minutes'),
-  (4, '名無しVc1', 'がフォローしました', '', NOW() - INTERVAL '1 hour');
+INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, created_at) VALUES
+  (1, '名無しXz9', 'がいいねしました', '青空の写真', 'like', 7, NULL, NOW() - INTERVAL '3 minutes'),
+  (2, '名無しLm8', 'がリポストしました', 'ドット絵の練習中', 'repost', 6, NULL, NOW() - INTERVAL '8 minutes'),
+  (3, '名無しBn5', 'が返信しました', '作業用BGM何聴いてる？', 'reply', 5, NULL, NOW() - INTERVAL '15 minutes'),
+  (4, '名無しVc1', 'がフォローしました', '', 'follow', NULL, '名無しvFZ', NOW() - INTERVAL '1 hour');
 
 -- === メッセージデータ ===
 INSERT INTO messages (id, sender, text, created_at) VALUES
@@ -94,21 +97,21 @@ INSERT INTO trends (id, keyword, count) VALUES
 -- === 投稿データ（スレッド＋返信一括） ===
 -- thread_id = id はスレッド, thread_id != id は返信
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
-  (1, 1, NULL, '名無しaB3', 'aB3', NOW() - INTERVAL '3 hours', E'#お絵描き\n今日の落書き 天気いいから外でスケッチした', 42, 0, false, false, 12, 5, false, true, 'sketch_01.png', '公園のベンチで描いたスケッチ', 'from-sky-400 to-blue-500', true, 320, false);
+  (1, 1, NULL, '名無しaB3', 'aB3', NOW() - INTERVAL '3 hours', E'#お絵描き\n今日の落書き 天気いいから外でスケッチした', 42, 0, false, false, 12, 5, false, false, NULL, NULL, 'from-sky-400 to-blue-500', true, 320, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
   (2, 2, NULL, '名無しR9k', 'R9k', NOW() - INTERVAL '5 hours', E'今週の #ゲーム 進捗\nステージ3のボス戦やっと実装できた\nあとは調整だけどバグが取れない…', 18, 3, false, false, 7, 1, false, false, NULL, NULL, 'from-red-500 to-rose-600', true, 95, true);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
-  (3, 3, NULL, '名無しLm8', 'Lm8', NOW() - INTERVAL '8 hours', E'朝起きたら雪積もっててびっくりした\nもう春だと思ってたのに', 56, 2, false, false, 19, 8, false, true, 'snow_morning.jpg', '朝の雪景色', 'from-gray-300 to-slate-400', false, 612, false);
+  (3, 3, NULL, '名無しLm8', 'Lm8', NOW() - INTERVAL '8 hours', E'朝起きたら雪積もっててびっくりした\nもう春だと思ってたのに', 56, 2, false, false, 19, 8, false, false, NULL, NULL, 'from-gray-300 to-slate-400', false, 612, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
-  (4, 4, NULL, '名無しVc1', 'Vc1', NOW() - INTERVAL '12 hours', E'#お絵描き\n久しぶりに描いた 練習帳', 33, 1, false, false, 9, 3, false, true, 'practice_sketch.png', 'キャラクターの表情練習', 'from-purple-400 to-violet-500', true, 278, false);
+  (4, 4, NULL, '名無しVc1', 'Vc1', NOW() - INTERVAL '12 hours', E'#お絵描き\n久しぶりに描いた 練習帳', 33, 1, false, false, 9, 3, false, false, NULL, NULL, 'from-purple-400 to-violet-500', true, 278, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
   (5, 5, NULL, '名無しBn5', 'Bn5', NOW() - INTERVAL '1 day', E'作業用BGM何聴いてる？\n最近はlofiばかり', 21, 0, false, false, 31, 2, false, false, NULL, NULL, 'from-emerald-400 to-teal-500', false, 45, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
-  (6, 6, NULL, '名無しQp7', 'Qp7', NOW() - INTERVAL '2 days', E'#お絵描き #ゲーム\nドット絵の練習中\nキャラチップ自作すると愛着湧くね', 67, 4, false, false, 15, 12, false, true, 'dot_character.png', '自作のドット絵キャラクター', 'from-amber-400 to-yellow-500', true, 890, false);
+  (6, 6, NULL, '名無しQp7', 'Qp7', NOW() - INTERVAL '2 days', E'#お絵描き #ゲーム\nドット絵の練習中\nキャラチップ自作すると愛着湧くね', 67, 4, false, false, 15, 12, false, false, NULL, NULL, 'from-amber-400 to-yellow-500', true, 890, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
-  (7, 7, NULL, '名無しNe4', 'Ne4', NOW() - INTERVAL '3 days', E'今週のお題「青空」に参加\nみんなの投稿も見に行こう', 12, 0, false, false, 4, 0, false, true, 'blue_sky.jpg', '青空と雲の写真', 'from-cyan-400 to-indigo-500', true, 67, false);
+  (7, 7, NULL, '名無しNe4', 'Ne4', NOW() - INTERVAL '3 days', E'今週のお題「青空」に参加\nみんなの投稿も見に行こう', 12, 0, false, false, 4, 0, false, false, NULL, NULL, 'from-cyan-400 to-indigo-500', true, 67, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
-  (8, 8, NULL, '名無しXz9', 'Xz9', NOW() - INTERVAL '4 days', E'#お絵描き\n描きためたイラストまとめ\n今月は10枚描けたぞ', 89, 2, false, false, 22, 15, false, true, 'illust_summary.png', '今月描いたイラスト集', 'from-pink-400 to-rose-500', true, 1250, false);
+  (8, 8, NULL, '名無しXz9', 'Xz9', NOW() - INTERVAL '4 days', E'#お絵描き\n描きためたイラストまとめ\n今月は10枚描けたぞ', 89, 2, false, false, 22, 15, false, false, NULL, NULL, 'from-pink-400 to-rose-500', true, 1250, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
   (9, 9, NULL, '名無しMm1', 'Mm1', NOW() - INTERVAL '2 hours', E'てすや\n#mml @0t135q50v100r8o4d+8e8r8f+8r8d+8c8c+8<b8>c+8f+8g+8r8f+8e8f+8r8e8c+8d+8e8d+8c8c+8r4<b8>c+8d+8e8d+8r8e8g+8r8f+8r8b8r8f+8g+8f+8d+8e8r8c+8d+8e8r8d+8c8d+8e8d+8c8c+8r4r8;@1t135q50v95;@2t135q50v88;@3t135q50v76[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2[o3f+o3ao4c+o4eo4g+]2[o3g+o4co4d+o4f+o5e]2[o3c+o3eo3g+o3bo4d+]2[o3bo4d+o4f+o4ao5c+o5eo5g+]2', 15, 0, false, false, 3, 2, false, false, NULL, NULL, 'from-pink-400 to-rose-500', false, 88, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
@@ -172,3 +175,9 @@ INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at
   (17, 5, 5, '名無しHn3', 'Hn3', NOW() - INTERVAL '15 minutes', E'lofiは作業効率上がるよね、自分も愛用してる', 4, 0, false, false, 0, 0, false, false, NULL, NULL, 'from-lime-400 to-green-500', false, 6, false);
 INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
   (18, 3, 3, '名無しPz5', 'Pz5', NOW() - INTERVAL '5 hours', E'こちらはもう桜が咲き始めましたよ〜春ですね', 11, 0, false, false, 0, 1, false, false, NULL, NULL, 'from-pink-300 to-rose-400', false, 28, false);
+
+-- シーケンスを手動INSERTした最大値に合わせる
+SELECT setval('notifications_id_seq', (SELECT MAX(id) FROM notifications));
+SELECT setval('messages_id_seq', (SELECT MAX(id) FROM messages));
+SELECT setval('trends_id_seq', (SELECT MAX(id) FROM trends));
+SELECT setval('posts_id_seq', (SELECT MAX(id) FROM posts));

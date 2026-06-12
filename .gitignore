@@ -48,3 +48,6 @@ next-env.d.ts
 
 # local SQLite (D1) data
 /data/
+
+# uploaded images (local file storage for MinIO/R2 dev)
+/public/uploads/

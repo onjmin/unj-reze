@@ -7,6 +7,9 @@ export interface Notification {
   user: string;
   action: string;
   target: string;
+  type: string;
+  postId?: number;
+  targetUser?: string;
   createdAt: string;
   time: string;
 }
@@ -35,11 +38,11 @@ const TRENDS: Trend[] = [
   { keyword: 'lofi beats', count: 25 },
 ];
 
-const NOTIFICATION_INFOS: { user: string; action: string; target: string; time: string }[] = [
-  { user: "名無しXz9", action: "がいいねしました", target: "青空の写真", time: "3分前" },
-  { user: "名無しLm8", action: "がリポストしました", target: "ドット絵の練習中", time: "8分前" },
-  { user: "名無しBn5", action: "が返信しました", target: "作業用BGM何聴いてる？", time: "15分前" },
-  { user: "名無しVc1", action: "がフォローしました", target: "", time: "1時間前" },
+const NOTIFICATION_INFOS: { user: string; action: string; target: string; type: string; postId?: number; targetUser?: string; time: string }[] = [
+  { user: "名無しXz9", action: "がいいねしました", target: "青空の写真", type: "like", postId: 7, time: "3分前" },
+  { user: "名無しLm8", action: "がリポストしました", target: "ドット絵の練習中", type: "repost", postId: 6, time: "8分前" },
+  { user: "名無しBn5", action: "が返信しました", target: "作業用BGM何聴いてる？", type: "reply", postId: 5, time: "15分前" },
+  { user: "名無しVc1", action: "がフォローしました", target: "", type: "follow", targetUser: "名無しvFZ", time: "1時間前" },
 ];
 
 function deriveSlug(fullName: string): string {
@@ -88,7 +91,13 @@ class MockDB {
     }
     this.notifications = NOTIFICATION_INFOS.map((n, i) => ({
       id: i + 1,
-      ...n,
+      user: n.user,
+      action: n.action,
+      target: n.target,
+      type: n.type,
+      postId: n.postId,
+      targetUser: n.targetUser,
+      time: n.time,
       createdAt: parseRelativeTime(n.time),
     }));
     this.messages = MESSAGE_INFOS.map((m, i) => ({
