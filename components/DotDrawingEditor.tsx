@@ -3,13 +3,16 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Eraser, PaintBucket, Pipette,
-  Trash2, Undo, Redo, Save, Maximize2, Layers, Film
+  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
 import type { LayerEntry } from './LayerPanel';
 import AnimationBar from './AnimationBar';
 import type { FrameData } from './AnimationBar';
+import WalkCyclePanel from './WalkCyclePanel';
+import ImportDialog from './ImportDialog';
+import { presets as walkPresets, detectPreset, type WalkPreset } from '@/lib/walk-cycle';
 
 interface DotDrawingEditorProps {
   onClose: () => void;
@@ -41,6 +44,15 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const toolRef = useRef<Tool>('pen');
   const colorRef = useRef('#000000');
   const collabRef = useRef(collabImageUrl);
+  const [walkMode, setWalkMode] = useState(false);
+  const [walkPreset, setWalkPreset] = useState<WalkPreset>(walkPresets[1]);
+  const [walkActiveIndex, setWalkActiveIndex] = useState(0);
+  const [initKey, setInitKey] = useState(0);
+  const walkDataRef = useRef<Map<number, string>>(new Map());
+  const walkLayersRef = useRef<Map<number, { layers: { name: string; visible: boolean; locked: boolean; data: Uint8ClampedArray }[] }>>(new Map());
+  const walkModeRef = useRef(walkMode);
+  const walkPresetRef = useRef(walkPreset);
+  const walkActiveIndexRef = useRef(0);
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
@@ -67,9 +79,13 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const onionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [onionSkin, setOnionSkin] = useState(false);
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
+  const [isDragover, setIsDragover] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   toolRef.current = tool;
   colorRef.current = color;
+  walkModeRef.current = walkMode;
+  walkPresetRef.current = walkPreset;
 
   const applyColor = (c: string) => {
     setColor(c);
@@ -83,6 +99,144 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   };
 
   const CANVAS_SIZE = 384;
+
+  const notDrawing = (e: Event) => {
+    const target = e.target as HTMLElement;
+    return (
+      !window.getSelection()?.isCollapsed ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable
+    );
+  };
+
+  const pasteImage = async (blob: Blob, pasteOpacity = 1) => {
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    if (!active?.editable) return;
+    const dotSize = oekaki.getDotSize();
+    const isWalk = walkModeRef.current;
+    const cw = active.canvas.width;
+    const ch = active.canvas.height;
+    const gw = isWalk ? walkPresetRef.current.w : Math.round(cw / dotSize);
+    const gh = isWalk ? walkPresetRef.current.h : Math.round(ch / dotSize);
+    const bitmap = await createImageBitmap(blob);
+    const temp = document.createElement('canvas');
+    temp.width = gw;
+    temp.height = gh;
+    const ctx = temp.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = false;
+    const srcW = bitmap.width;
+    const srcH = bitmap.height;
+    const ratio = Math.min(gw / srcW, gh / srcH);
+    const dstW = srcW * ratio;
+    const dstH = srcH * ratio;
+    const ox = (gw - dstW) / 2;
+    const oy = (gh - dstH) / 2;
+    ctx.drawImage(bitmap, ox, oy, dstW, dstH);
+    const { data } = ctx.getImageData(0, 0, gw, gh);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        const i = (y * gw + x) * 4;
+        const [r, g, b, a] = data.subarray(i, i + 4);
+        if (!a) continue;
+        oekaki.color.value = `rgba(${r},${g},${b},${a / 255 * pasteOpacity})`;
+        active.drawByDot(x * dotSize, y * dotSize);
+        active.used = true;
+      }
+    }
+    active.trace();
+    forceRender(n => n + 1);
+  };
+
+  const handleImport = async (image: HTMLImageElement, opts: { opacity: number; simple: boolean }) => {
+    if (walkMode && !opts.simple) {
+      const preset = detectPreset(image.naturalWidth, image.naturalHeight, walkPresets);
+      if (preset) {
+        const dotSize = Math.floor(CANVAS_SIZE / preset.h);
+        const canvasW = preset.w * dotSize;
+        const canvasH = preset.h * dotSize;
+        const temp = document.createElement('canvas');
+        temp.width = preset.w;
+        temp.height = preset.h;
+        const ctx = temp.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.imageSmoothingEnabled = false;
+        const total = preset.frames * preset.ways.length;
+        const newMap = new Map<number, { layers: { name: string; visible: boolean; locked: boolean; data: Uint8ClampedArray }[] }>();
+        for (let i = 0; i < total; i++) {
+          const cellX = i % preset.frames;
+          const cellY = Math.floor(i / preset.frames);
+          ctx.clearRect(0, 0, preset.w, preset.h);
+          ctx.drawImage(image, cellX * preset.w, cellY * preset.h, preset.w, preset.h, 0, 0, preset.w, preset.h);
+          const { data: pixelData } = ctx.getImageData(0, 0, preset.w, preset.h);
+          const buf = new Uint8ClampedArray(canvasW * canvasH * 4);
+          for (let y = 0; y < preset.h; y++) {
+            for (let x = 0; x < preset.w; x++) {
+              const srcIdx = (y * preset.w + x) * 4;
+              const a = pixelData[srcIdx + 3];
+              if (!a) continue;
+              const r = pixelData[srcIdx];
+              const g = pixelData[srcIdx + 1];
+              const b = pixelData[srcIdx + 2];
+              const aa = Math.round(a * opts.opacity);
+              for (let dy = 0; dy < dotSize; dy++) {
+                for (let dx = 0; dx < dotSize; dx++) {
+                  const dstIdx = ((y * dotSize + dy) * canvasW + (x * dotSize + dx)) * 4;
+                  buf[dstIdx] = r;
+                  buf[dstIdx + 1] = g;
+                  buf[dstIdx + 2] = b;
+                  buf[dstIdx + 3] = aa;
+                }
+              }
+            }
+          }
+          newMap.set(i, { layers: [{ name: 'レイヤー #1', visible: true, locked: false, data: buf }] });
+        }
+        walkDataRef.current.clear();
+        for (let i = 0; i < total; i++) {
+          const w = canvasW;
+          const h = canvasH;
+          const c = document.createElement('canvas');
+          c.width = w;
+          c.height = h;
+          const cx = c.getContext('2d');
+          if (cx) {
+            const id = cx.createImageData(w, h);
+            id.data.set(newMap.get(i)!.layers[0].data);
+            cx.putImageData(id, 0, 0);
+            walkDataRef.current.set(i, c.toDataURL('image/png'));
+          }
+        }
+        walkLayersRef.current = newMap;
+        setWalkPreset(preset);
+        setWalkActiveIndex(0);
+        walkActiveIndexRef.current = 0;
+        setWalkMode(true);
+        setInitKey(k => k + 1);
+        return;
+      }
+    }
+    const blob = await new Promise<Blob | null>(r => image.toBlob(r));
+    if (blob) pasteImage(blob, opts.opacity);
+  };
+
+  const handlePaste = (e: ClipboardEvent) => {
+    if (notDrawing(e)) return;
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    if (!active?.editable) return;
+    let imageItem: DataTransferItem | null = null;
+    for (const v of e.clipboardData?.items ?? []) {
+      if (v.kind === 'file' && v.type.startsWith('image/')) {
+        imageItem = v;
+        break;
+      }
+    }
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (file) pasteImage(file);
+  };
 
   const toggleOnionSkin = () => {
     const next = !onionSkinRef.current;
@@ -103,6 +257,34 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const updateOnionSkin = () => {
     const canvas = onionCanvasRef.current;
     if (!canvas || !onionSkinRef.current) return;
+    const w = canvas.width, h = canvas.height;
+    if (walkModeRef.current) {
+      const idx = walkActiveIndexRef.current - 1;
+      if (idx < 0) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, w, h);
+        return;
+      }
+      const cellData = walkLayersRef.current.get(idx);
+      if (!cellData || cellData.layers.length === 0) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, w, h);
+        return;
+      }
+      const temp = document.createElement('canvas');
+      temp.width = w; temp.height = h;
+      const tempCtx = temp.getContext('2d')!;
+      for (const l of cellData.layers) {
+        if (!l.visible) continue;
+        tempCtx.putImageData(new ImageData(new Uint8ClampedArray(l.data), w, h), 0, 0);
+      }
+      const ctx = canvas.getContext('2d')!;
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalAlpha = onionSkinOpacityRef.current / 100;
+      ctx.drawImage(temp, 0, 0);
+      ctx.globalAlpha = 1;
+      return;
+    }
     const idx = currentFrameRef.current - 1;
     if (idx < 0 || !framesRef.current[idx]) {
       const ctx = canvas.getContext('2d');
@@ -110,7 +292,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       return;
     }
     const prev = framesRef.current[idx];
-    const w = canvas.width, h = canvas.height;
     const temp = document.createElement('canvas');
     temp.width = w; temp.height = h;
     const tempCtx = temp.getContext('2d')!;
@@ -125,49 +306,102 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     ctx.globalAlpha = 1;
   };
 
+  const nudge = (dx: number, dy: number) => {
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    if (!active) return;
+    const dotSize = oekaki.getDotSize();
+    const w = active.canvas.width;
+    const h = active.canvas.height;
+    const src = new Uint8ClampedArray(active.data);
+    const dst = new Uint8ClampedArray(src.length);
+    const px = dx * dotSize;
+    const py = dy * dotSize;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const sx = x - px;
+        const sy = y - py;
+        if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+        const si = (sy * w + sx) * 4;
+        const di = (y * w + x) * 4;
+        dst[di] = src[si];
+        dst[di + 1] = src[si + 1];
+        dst[di + 2] = src[si + 2];
+        dst[di + 3] = src[si + 3];
+      }
+    }
+    active.data = dst;
+    active.trace();
+    if (walkModeRef.current) {
+      walkDataRef.current.set(walkActiveIndexRef.current, oekaki.render().toDataURL('image/png'));
+    }
+    updateOnionSkin();
+    forceRender(n => n + 1);
+  };
+
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
     el.innerHTML = '';
-    oekaki.init(el, CANVAS_SIZE, CANVAS_SIZE);
-    oekaki.setDotSize(1, gridH);
+
+    const isWalk = walkModeRef.current;
+    const canvasW = isWalk ? Math.floor(CANVAS_SIZE * (walkPresetRef.current.w / walkPresetRef.current.h)) : CANVAS_SIZE;
+    const canvasH = CANVAS_SIZE;
+    oekaki.init(el, canvasW, canvasH);
+    if (isWalk) {
+      oekaki.setDotSize(1, walkPresetRef.current.h);
+    } else {
+      oekaki.setDotSize(1, gridH);
+    }
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
     oekaki.color.value = colorRef.current;
 
-    // g_layers is empty after init — create initial user layers
-    const bgLayer = new oekaki.LayeredCanvas('白背景');
-    bgLayer.fill('#FFF');
-    bgLayer.trace();
-    new oekaki.LayeredCanvas('レイヤー #1');
-    layerCounterRef.current = 2;
-
-    // collaboration: load existing image as base layer
-    if (collabRef.current) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = collabRef.current;
-      img.onload = () => {
-        bgLayer.delete();
-        const layers = oekaki.getLayers();
-        const target = layers[0];
-        if (target) {
-          target.name = 'コラボ';
-          target.paste(img);
-          target.trace();
-          new oekaki.LayeredCanvas('レイヤー #2');
-          layerCounterRef.current = 3;
+    if (isWalk) {
+      const cellData = walkLayersRef.current.get(walkActiveIndexRef.current);
+      if (cellData && cellData.layers.length > 0) {
+        for (const { name, visible, locked, data } of cellData.layers) {
+          const l = new oekaki.LayeredCanvas(name);
+          l.visible = visible;
+          l.locked = locked;
+          l.data = new Uint8ClampedArray(data);
         }
-        const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
-          instance: inst,
-          name: inst.name,
-        })).reverse();
-        setLayerEntries(updated);
-        layerEntriesRef.current = updated;
-        setActiveLayerIndex(0);
-        activeLayerIndexRef.current = 0;
-      };
+      } else {
+        new oekaki.LayeredCanvas('レイヤー #1');
+      }
+      layerCounterRef.current = 2;
+    } else {
+      const bgLayer = new oekaki.LayeredCanvas('白背景');
+      bgLayer.fill('#FFF');
+      bgLayer.trace();
+      new oekaki.LayeredCanvas('レイヤー #1');
+      layerCounterRef.current = 2;
+
+      if (collabRef.current) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = collabRef.current;
+        img.onload = () => {
+          bgLayer.delete();
+          const layers = oekaki.getLayers();
+          const target = layers[0];
+          if (target) {
+            target.name = 'コラボ';
+            target.paste(img);
+            target.trace();
+            new oekaki.LayeredCanvas('レイヤー #2');
+            layerCounterRef.current = 3;
+          }
+          const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
+            instance: inst,
+            name: inst.name,
+          })).reverse();
+          setLayerEntries(updated);
+          layerEntriesRef.current = updated;
+          setActiveLayerIndex(0);
+          activeLayerIndexRef.current = 0;
+        };
+      }
     }
 
     const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
@@ -179,16 +413,15 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     setActiveLayerIndex(0);
     activeLayerIndexRef.current = 0;
 
-    // onion skin canvas
     const onionCanvas = document.createElement('canvas');
-    onionCanvas.width = CANVAS_SIZE;
-    onionCanvas.height = CANVAS_SIZE;
+    onionCanvas.width = canvasW;
+    onionCanvas.height = canvasH;
     onionCanvas.style.position = 'absolute';
     onionCanvas.style.zIndex = '2';
     onionCanvas.style.left = '0';
     onionCanvas.style.top = '0';
     onionCanvas.style.pointerEvents = 'none';
-    onionCanvas.style.display = 'none';
+    onionCanvas.style.display = onionSkinRef.current ? 'block' : 'none';
     const container = el.firstChild as HTMLElement;
     if (container && container.children.length >= 2) {
       container.insertBefore(onionCanvas, container.children[1]);
@@ -236,11 +469,16 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         if (!rgb) return;
         const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
         if (!active) return;
-        const result = oekaki.floodFill(active.data, CANVAS_SIZE, CANVAS_SIZE, x, y, [rgb[0], rgb[1], rgb[2], 255]);
+        const fw = active.canvas.width;
+        const fh = active.canvas.height;
+        const result = oekaki.floodFill(active.data, fw, fh, x, y, [rgb[0], rgb[1], rgb[2], 255]);
         if (result) active.data = result;
         active.trace();
       }
       updateOnionSkin();
+      if (walkModeRef.current) {
+        walkDataRef.current.set(walkActiveIndexRef.current, oekaki.render().toDataURL('image/png'));
+      }
       forceRender(n => n + 1);
     });
 
@@ -248,9 +486,10 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       onionCanvasRef.current = null;
       if (mountRef.current) mountRef.current.innerHTML = '';
     };
-  }, []);
+  }, [initKey]);
 
   useEffect(() => {
+    if (walkModeRef.current) return;
     oekaki.setDotSize(1, gridH);
     document.documentElement.style.setProperty('--grid-cell-size', `${oekaki.getDotSize()}px`);
   }, [gridW, gridH]);
@@ -259,6 +498,73 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     setGridW(w);
     setGridH(h);
     setShowPresets(false);
+  };
+
+  useEffect(() => {
+    if (!walkMode) return;
+    if (walkActiveIndex === walkActiveIndexRef.current) return;
+    const prev = walkActiveIndexRef.current;
+    const prevLayers = oekaki.getLayers();
+    walkLayersRef.current.set(prev, {
+      layers: prevLayers.map(l => ({
+        name: l.name,
+        visible: l.visible,
+        locked: l.locked,
+        data: new Uint8ClampedArray(l.data),
+      }))
+    });
+    walkActiveIndexRef.current = walkActiveIndex;
+    for (const l of oekaki.getLayers()) l.delete();
+    oekaki.refresh();
+    const cellData = walkLayersRef.current.get(walkActiveIndex);
+    if (cellData && cellData.layers.length > 0) {
+      for (const { name, visible, locked, data } of cellData.layers) {
+        const l = new oekaki.LayeredCanvas(name);
+        l.visible = visible;
+        l.locked = locked;
+        l.data = new Uint8ClampedArray(data);
+      }
+    } else {
+      new oekaki.LayeredCanvas('レイヤー #1');
+    }
+    syncLayerEntries();
+    updateOnionSkin();
+  }, [walkActiveIndex, walkMode]);
+
+  const enterWalkMode = () => {
+    if (animMode) exitAnimMode();
+    setWalkPreset(walkPresets[1]);
+    setWalkActiveIndex(0);
+    walkActiveIndexRef.current = 0;
+    setWalkMode(true);
+    setInitKey(k => k + 1);
+  };
+
+  const exitWalkMode = () => {
+    walkLayersRef.current.set(walkActiveIndex, {
+      layers: oekaki.getLayers().map(l => ({
+        name: l.name,
+        visible: l.visible,
+        locked: l.locked,
+        data: new Uint8ClampedArray(l.data),
+      }))
+    });
+    walkDataRef.current.clear();
+    setWalkMode(false);
+    setInitKey(k => k + 1);
+  };
+
+  const selectWalkCell = (index: number) => {
+    setWalkActiveIndex(index);
+  };
+
+  const handleChangeWalkPreset = (preset: WalkPreset) => {
+    walkLayersRef.current.clear();
+    walkDataRef.current.clear();
+    setWalkPreset(preset);
+    setWalkActiveIndex(0);
+    walkActiveIndexRef.current = 0;
+    setInitKey(k => k + 1);
   };
 
   const clearCanvas = () => {
@@ -460,6 +766,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   };
 
   const enterAnimMode = () => {
+    if (walkMode) exitWalkMode();
     stopPlayback();
     framesRef.current = [captureFrame()];
     currentFrameRef.current = 0;
@@ -490,6 +797,33 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     return () => { if (playTimerRef.current !== null) clearInterval(playTimerRef.current); };
   }, []);
 
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el) return;
+    const onDragOver = (e: DragEvent) => {
+      if (!(e.dataTransfer?.types ?? []).some(t => t === 'Files')) return;
+      e.preventDefault();
+      setIsDragover(true);
+    };
+    const onDragLeave = () => setIsDragover(false);
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setIsDragover(false);
+      const file = e.dataTransfer?.files[0];
+      if (file && (file.type.startsWith('image/') || file.name.endsWith('.cur'))) {
+        pasteImage(file);
+      }
+    };
+    el.addEventListener('dragover', onDragOver);
+    el.addEventListener('dragleave', onDragLeave);
+    el.addEventListener('drop', onDrop);
+    return () => {
+      el.removeEventListener('dragover', onDragOver);
+      el.removeEventListener('dragleave', onDragLeave);
+      el.removeEventListener('drop', onDrop);
+    };
+  });
+
   const handleSave = () => {
     const canvas = oekaki.render();
     onSave(canvas.toDataURL('image/png'));
@@ -518,13 +852,17 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       }
     };
     window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener('paste', handlePaste);
+    };
   });
 
   const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
     <button
       onClick={() => { setTool(t); toolRef.current = t; }}
-      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${tool === t ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+      className={'w-8 h-8 rounded-lg flex items-center justify-center transition-colors ' + (tool === t ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
       title={label}
     >
       {icon}
@@ -533,28 +871,47 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
 
   return (
     <div className="absolute inset-0 bg-[#0f0f11] z-50 flex flex-col select-none">
-      <div className="flex items-center px-3.5 py-2.5 border-b border-gray-800 shrink-0 bg-[#0f0f11]">
-        <button onClick={onClose} className="mr-2 text-gray-400 hover:bg-gray-100/10 p-1.5 rounded transition-colors">
+      <div className="flex items-center px-3.5 py-2 border-b border-gray-800 shrink-0 bg-[#0f0f11] gap-2">
+        <button onClick={onClose} className="text-gray-400 hover:bg-gray-100/10 p-1.5 rounded transition-colors">
           <X size={20} />
         </button>
         <span className="font-bold text-xs text-gray-300">キャンセル</span>
-        <span className="text-gray-600 mx-1.5 text-[10px]">›</span>
-        <span className="text-gray-400 text-xs">ドット絵エディタ</span>
+        <span className="text-gray-600 text-[10px]">›</span>
+        <div className="flex items-center bg-gray-800 rounded-lg p-0.5 gap-0.5">
+          <button
+            onClick={() => { if (animMode) exitAnimMode(); if (walkMode) exitWalkMode(); }}
+            className={'px-3 py-1 rounded-md text-[11px] font-medium transition-colors ' + (!animMode && !walkMode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200')}
+          >一枚絵</button>
+          <button
+            onClick={() => { if (walkMode) exitWalkMode(); enterAnimMode(); }}
+            className={'px-3 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ' + (animMode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200')}
+          ><Film size={12} />アニメ</button>
+          <button
+            onClick={() => { if (animMode) exitAnimMode(); enterWalkMode(); }}
+            className={'px-3 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ' + (walkMode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200')}
+          ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M13 4a1 1 0 1 0-2 0 1 1 0 0 0 2 0Z" /><path d="M4 20h3l2-6 3-2 2 6 3 3" /><path d="M8 5 6 9l2 3" /><path d="M16 5l2 3-1 4" /></svg>歩行グラ</button>
+        </div>
         <div className="ml-auto flex items-center space-x-2">
-          <span className="text-[9px] text-gray-600">{gridW}×{gridH}</span>
-          <button onClick={() => setShowPresets(v => !v)} className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/20">
-            <Maximize2 size={12} />
-          </button>
+          {walkMode ? (
+            <span className="text-[9px] text-gray-600">{walkPreset.w}×{walkPreset.h} / {walkPreset.frames}fr / {walkPreset.ways.length}方向</span>
+          ) : (
+            <>
+              <span className="text-[9px] text-gray-600">{gridW}×{gridH}</span>
+              <button onClick={() => setShowPresets(v => !v)} className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/20">
+                <Maximize2 size={12} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      {showPresets && (
+      {!walkMode && showPresets && (
         <div className="absolute top-10 right-3 z-50 bg-[#1a1b26] border border-gray-700 rounded-lg shadow-xl p-2 grid grid-cols-4 gap-1">
           {SIZE_PRESETS.map(p => (
             <button
               key={p.label}
               onClick={() => changeSize(p.w, p.h)}
-              className={`px-2 py-1.5 rounded text-[10px] transition-colors ${gridW === p.w && gridH === p.h ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-100/10'}`}
+              className={'px-2 py-1.5 rounded text-[10px] transition-colors ' + (gridW === p.w && gridH === p.h ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-100/10')}
             >
               {p.label}
             </button>
@@ -562,7 +919,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         </div>
       )}
 
-      <div className="flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4">
+      <div className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' outline outline-4 outline-blue-400/60' : '')}>
         <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})` }} />
       </div>
 
@@ -586,6 +943,21 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         />
       )}
 
+      {walkMode && (
+        <WalkCyclePanel
+          preset={walkPreset}
+          activeIndex={walkActiveIndex}
+          dataUrlByIndex={walkDataRef.current}
+          onSelectCell={selectWalkCell}
+          onChangePreset={handleChangeWalkPreset}
+          onionSkin={onionSkin}
+          onionSkinOpacity={onionSkinOpacity}
+          onToggleOnionSkin={toggleOnionSkin}
+          onOnionSkinOpacityChange={handleOnionSkinOpacityChange}
+          onNudge={nudge}
+        />
+      )}
+
       <div className="px-3.5 pb-4 pt-2.5 space-y-2.5 shrink-0 bg-[#0f0f11] border-t border-gray-900">
         <div className="flex items-center space-x-1.5">
           {toolBtn('pen', <Pen size={13} />, 'ペン (1)')}
@@ -606,17 +978,10 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           >+</button>
           <button
             onClick={() => setShowLayerPanel(v => !v)}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${showLayerPanel ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+            className={'w-8 h-8 rounded-lg flex items-center justify-center transition-colors ' + (showLayerPanel ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
             title="レイヤー"
           >
             <Layers size={13} />
-          </button>
-          <button
-            onClick={() => animMode ? exitAnimMode() : enterAnimMode()}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${animMode ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
-            title="アニメーション"
-          >
-            <Film size={13} />
           </button>
         </div>
 
@@ -632,7 +997,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
             {PALETTE_PICO8.map(c => (
               <button
                 key={c}
-                className={`w-4 h-4 rounded-sm border ${color === c ? 'border-white scale-110' : 'border-gray-700/50'} transition-transform`}
+                className={'w-4 h-4 rounded-sm border ' + (color === c ? 'border-white scale-110' : 'border-gray-700/50') + ' transition-transform'}
                 style={{ backgroundColor: c }}
                 onClick={() => applyColor(c)}
               />
@@ -660,6 +1025,10 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
             <button onClick={clearCanvas} className="px-2 h-6 rounded bg-red-950/20 text-red-400 border border-red-900/30 flex items-center space-x-1 text-[9px]">
               <Trash2 size={10} />
               <span>クリア</span>
+            </button>
+            <button onClick={() => setShowImport(true)} className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20">
+              <Upload size={10} />
+              <span>読込</span>
             </button>
             <button onClick={handleUndo} className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40">
               <Undo size={10} />
@@ -689,6 +1058,13 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           onClose={() => setShowLayerPanel(false)}
         />
       )}
+      <ImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={handleImport}
+        walkMode={walkMode}
+        walkPresets={walkPresets}
+      />
     </div>
   );
 }

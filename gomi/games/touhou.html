@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <meta name="theme-color" content="#111" />
+    <title>東方風ボス戦 - Mobile First</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #0a0a0a;
+            --fg: #eaeaea;
+            --accent: #5bd1ff;
+            --warn: #ff6584;
+            --grid: #1b1b1b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+        }
+
+        header {
+            padding: 12px 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #181818;
+            position: sticky;
+            top: 0;
+            background: linear-gradient(180deg, rgba(10, 10, 10, 0.96), rgba(10, 10, 10, 0.86));
+            backdrop-filter: blur(8px);
+            z-index: 5;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: .02em;
+        }
+
+        .hud {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            appearance: none;
+            border: 1px solid #2b2b2b;
+            border-radius: 10px;
+            background: #121212;
+            color: var(--fg);
+            padding: 10px 14px;
+            font-size: 14px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 2px 0 #000 inset, 0 1px 8px rgba(0, 0, 0, .25);
+            touch-action: manipulation;
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        #wrap {
+            display: grid;
+            grid-template-rows: 1fr auto;
+            height: 100dvh;
+        }
+
+        #stageWrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px;
+        }
+
+        #stage {
+            width: 100%;
+            height: min(88dvh, 88vw*1.333);
+            /* 3:4 aspect target */
+            max-width: 680px;
+            aspect-ratio: 3/4;
+            background:
+                radial-gradient(100% 100% at 100% 0%, rgba(91, 209, 255, 0.08), transparent 60%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.08)),
+                repeating-linear-gradient(0deg, var(--grid), var(--grid) 1px, transparent 1px, transparent 24px),
+                repeating-linear-gradient(90deg, var(--grid), var(--grid) 1px, transparent 1px, transparent 24px),
+                #0d0f12;
+            border: 1px solid #222;
+            border-radius: 12px;
+            position: relative;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+        }
+
+        #ui {
+            padding: 8px 10px 12px;
+            display: grid;
+            gap: 10px;
+            grid-template-columns: 1fr;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .slider {
+            width: 100%;
+        }
+
+        #miniScript {
+            width: 100%;
+            min-height: 160px;
+            background: #0e0e10;
+            color: #e6f7ff;
+            border: 1px solid #232323;
+            border-radius: 10px;
+            padding: 10px;
+            font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+            resize: vertical;
+        }
+
+        .pill {
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #121212;
+            border: 1px solid #2b2b2b;
+            font-size: 12px;
+        }
+
+        .stat {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: .02em;
+        }
+
+        .badge {
+            color: var(--accent);
+        }
+
+        .hpbar {
+            height: 10px;
+            border: 1px solid #2b2b2b;
+            border-radius: 999px;
+            overflow: hidden;
+            background: #141414;
+        }
+
+        .hpbar>div {
+            height: 100%;
+            background: linear-gradient(90deg, #5bd1ff, #7a8cff);
+            width: 100%;
+            transition: width .12s ease;
+        }
+
+        .hint {
+            color: #9aa4ad;
+            font-size: 12px;
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace;
+        }
+
+        .kbd {
+            padding: 2px 6px;
+            border: 1px solid #2b2b2b;
+            border-radius: 6px;
+            background: #121212;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="wrap">
+        <header>
+            <h1>東方風ボス戦・Mobile First</h1>
+            <div class="hud">
+                <span class="pill stat">FPS: <b id="fps">0</b></span>
+                <span class="pill stat">Bullets: <b id="bullets">0</b></span>
+                <button id="btnStart" class="btn">▶ Start</button>
+                <button id="btnPause" class="btn">⏸ Pause</button>
+                <button id="btnReset" class="btn">⟲ Reset</button>
+            </div>
+        </header>
+
+        <div id="stageWrap">
+            <div id="stage" aria-label="ゲームステージ">
+                <canvas id="game"></canvas>
+                <div
+                    style="position:absolute; left:10px; top:10px; right:10px; display:grid; gap:8px; pointer-events:none;">
+                    <div class="hpbar" aria-label="ボスHP">
+                        <div id="hpFill"></div>
+                    </div>
+                    <div style="display:flex; gap:8px; justify-content:space-between; align-items:center;">
+                        <span class="pill">Spell: <b id="spellName" class="badge">-</b></span>
+                        <span class="pill">Time: <b id="timer" class="stat">00.0</b></span>
+                    </div>
+                </div>
+                <!-- Mobile thumb control area -->
+                <div id="thumb" style="position:absolute; left:0; bottom:0; right:0; height: 28%; pointer-events:auto;">
+                </div>
+            </div>
+        </div>
+
+        <section id="ui">
+            <div class="row">
+                <label class="pill">難易度</label>
+                <input id="difficulty" class="slider" type="range" min="1" max="5" step="1" value="3" />
+                <span class="pill">x<span id="diffLabel">3</span></span>
+            </div>
+
+            <details open>
+                <summary class="btn" style="width:max-content;">MiniScript（弾幕スクリプト）</summary>
+                <p class="hint">
+                    ・1文1行。if/while/for/end if/end while/end for に対応。<br />
+                    ・関数やクラスも簡易対応。// でコメント。<br />
+                    ・API: shotA/shot2A/shotB, setType, setColor, setScale, setAngle, moveBoss, setBossLife,
+                    setBossVisible, rand, randF, getAngle, getPlayerAngle, resetFrame, setFlag, sound, effect, time,
+                    wait, range など。
+                </p>
+                <textarea id="miniScript" spellcheck="false"></textarea>
+                <div class="row">
+                    <button id="btnCompile" class="btn">⚙ Compile</button>
+                    <button id="btnRun" class="btn">✦ Run Pattern</button>
+                    <span class="pill">Compile: <b id="compileStat">-</b></span>
+                </div>
+                <p class="hint">
+                    例: 12-way 放射と加速変調<br />
+                    <span class="mono">
+                        // 開幕ボス移動<br />
+                        moveBoss(-200, -900, 60)<br />
+                        setBossLife(8000)<br />
+                        name = "氷符「ブルーフロストオーロラ」"<br />
+                        timeLimit = 45<br />
+                        // ループ弾幕<br />
+                        for t in range(0, 900, 6)<br />
+                        base = t*4<br />
+                        for i in range(0, 12, 1)<br />
+                        ang = base + i*30<br />
+                        id = shotA(0, 5, ang, 3.0, 0)<br />
+                        setColor(id, 5)<br />
+                        setScale(id, 0.9)<br />
+                        end for<br />
+                        // プレイヤー狙いサブ<br />
+                        a2 = getPlayerAngle()<br />
+                        id2 = shot2A(0, 3, a2 + rand(-10,10), 2.2, 0.05, 90)<br />
+                        setColor(id2, 4)<br />
+                        end for
+                    </span>
+                </p>
+            </details>
+            <p class="hint">操作: 画面ドラッグで移動 / ダブルタップで低速切替 / <span class="kbd">Start</span>で開始</p>
+            <p class="hint">Rakuten AI on web / Android / iOS: https://ai.rakuten.co.jp/download</p>
+        </section>
+    </div>
+
+    <script>
+        /* =========================
+           Core Types and Utilities
+           ========================= */
+        const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+        const TAU = Math.PI * 2;
+        const DEG = Math.PI / 180;
+
+        class RNG {
+            constructor(seed = 0x12345678) { this.s = seed >>> 0; }
+            next() { // xorshift32
+                let x = this.s;
+                x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+                this.s = x >>> 0;
+                return (this.s & 0xffffffff) / 0x100000000;
+            }
+            rangei(min, max) { return Math.floor(this.next() * (max - min + 1)) + min; }
+            rangef(min, max) { return this.next() * (max - min) + min; }
+        }
+
+        const input = {
+            x: 0, y: 0, slow: false, touching: false
+        };
+
+        class Player {
+            constructor(stage) {
+                this.stage = stage;
+                this.x = 0; this.y = 320;
+                this.radius = 2.5;
+                this.speed = 4.2;
+            }
+            update() {
+                const sp = input.slow ? this.speed * 0.45 : this.speed;
+                const t = 0.25;
+                this.x += (input.x - this.x) * t;
+                this.y += (input.y - this.y) * t;
+                const pad = 10;
+                this.x = clamp(this.x, -this.stage.w / 2 + pad, this.stage.w / 2 - pad);
+                this.y = clamp(this.y, -this.stage.h / 2 + pad, this.stage.h / 2 - pad);
+            }
+            draw(g) {
+                g.save();
+                g.translate(this.x, this.y);
+                g.fillStyle = "#fff";
+                g.beginPath();
+                g.arc(0, 0, 3.5, 0, TAU);
+                g.fill();
+                if (input.slow) {
+                    g.strokeStyle = "rgba(255,255,255,.35)";
+                    g.beginPath(); g.arc(0, 0, 14, 0, TAU); g.stroke();
+                }
+                g.restore();
+            }
+        }
+
+        class Boss {
+            constructor() {
+                this.x = 0; this.y = -360;
+                this.hp = 5000; this.hpMax = 5000;
+                this.visible = true;
+                this.moveT = 0; this.moveDur = 0; this.moveSx = 0; this.moveSy = 0; this.moveTx = 0; this.moveTy = 0;
+                this.name = "Spell";
+            }
+            moveTo(x, y, dur) {
+                this.moveSx = this.x; this.moveSy = this.y;
+                this.moveTx = x; this.moveTy = y;
+                this.moveDur = Math.max(1, dur | 0);
+                this.moveT = 0;
+            }
+            update() {
+                if (this.moveT < this.moveDur) {
+                    this.moveT++;
+                    const t = this.moveT / this.moveDur;
+                    const e = t * (2 - t); // easeOutQuad
+                    this.x = this.moveSx + (this.moveTx - this.moveSx) * e;
+                    this.y = this.moveSy + (this.moveTy - this.moveSy) * e;
+                }
+            }
+            draw(g) {
+                if (!this.visible) return;
+                g.save();
+                g.translate(this.x, this.y);
+                const grd = g.createRadialGradient(0, 0, 4, 0, 0, 26);
+                grd.addColorStop(0, "rgba(123,194,255,1)");
+                grd.addColorStop(1, "rgba(123,194,255,0)");
+                g.fillStyle = grd;
+                g.beginPath(); g.arc(0, 0, 26, 0, TAU); g.fill();
+                g.strokeStyle = "rgba(180,220,255,.6)";
+                g.beginPath(); g.arc(0, 0, 18, 0, TAU); g.stroke();
+                g.restore();
+            }
+        }
+
+        class Bullet {
+            constructor(id, x, y, angleDeg, speed, type = 0, color = 0) {
+                this.id = id;
+                this.x = x; this.y = y;
+                this.a = angleDeg; // deg
+                this.s = speed;
+                this.ax = 0; this.ay = 0; // acceleration in px/frame^2 along components
+                this.da = 0;            // angular velocity (deg/frame)
+                this.scale = 1.0;
+                this.color = color | 0;
+                this.type = type | 0;
+                this.alive = true;
+                this.reflectMask = 0; // 1: L, 2: U, 4: R, 8: D
+            }
+            setAngle(deg) { this.a = deg; }
+            setSpeed(sp) { this.s = sp; }
+            setAccel(ax, ay) { this.ax = ax; this.ay = ay; }
+            setAngularVelocity(d) { this.da = d; }
+            inBounds(stage) {
+                return this.x > -stage.w / 2 - 32 && this.x < stage.w / 2 + 32 && this.y > -stage.h / 2 - 32 && this.y < stage.h / 2 + 32;
+            }
+            update(stage) {
+                this.a += this.da;
+                const rad = this.a * DEG;
+                let vx = Math.cos(rad) * this.s;
+                let vy = Math.sin(rad) * this.s;
+                vx += this.ax; vy += this.ay;
+                this.x += vx; this.y += vy;
+                // reflect if any
+                const L = -stage.w / 2 + 4, R = stage.w / 2 - 4, T = -stage.h / 2 + 4, B = stage.h / 2 - 4;
+                if (this.reflectMask) {
+                    if ((this.reflectMask & 1) && this.x < L) { this.x = L; this.a = 180 - this.a; }
+                    if ((this.reflectMask & 4) && this.x > R) { this.x = R; this.a = 180 - this.a; }
+                    if ((this.reflectMask & 2) && this.y < T) { this.y = T; this.a = -this.a; }
+                    if ((this.reflectMask & 8) && this.y > B) { this.y = B; this.a = -this.a; }
+                }
+            }
+            draw(g) {
+                if (!this.alive) return;
+                g.save();
+                g.translate(this.x, this.y);
+                g.rotate(this.a * DEG);
+                const palette = [
+                    "#f7f7f7", "#111", "#ff5c5c", "#c76bff", "#4f63ff",
+                    "#6ed2ff", "#61e294", "#ffd84d", "#ff9940"
+                ];
+                const col = palette[this.color % palette.length] || "#fff";
+                g.fillStyle = col;
+                g.strokeStyle = "rgba(0,0,0,.35)";
+                const s = 3.0 * this.scale;
+                // simple diamond bullet
+                g.beginPath();
+                g.moveTo(s * 1.2, 0);
+                g.lineTo(0, -s * 0.9);
+                g.lineTo(-s * 1.2, 0);
+                g.lineTo(0, s * 0.9);
+                g.closePath();
+                g.fill();
+                g.stroke();
+                g.restore();
+            }
+        }
+
+        class Stage {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.g = canvas.getContext('2d');
+                this.w = 360; this.h = 480; // logical size
+                this.time = 0; // frames
+                this.rng = new RNG(0xC0FFEE);
+                this.player = new Player(this);
+                this.boss = new Boss();
+                this.bullets = new Map(); // id -> Bullet
+                this._nextBulletId = 1;
+                this.flags = new Map(); // string -> number/bool
+                this.running = false;
+                this.paused = false;
+                this.timeLimit = 60; // seconds
+                this.frameRate = 60;
+            }
+            resize() {
+                const rect = this.canvas.getBoundingClientRect();
+                const dpr = Math.min(2, window.devicePixelRatio || 1);
+                this.canvas.width = Math.floor(rect.width * dpr);
+                this.canvas.height = Math.floor(rect.height * dpr);
+                this.g.setTransform(1, 0, 0, 1, 0, 0);
+                this.g.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.g.scale(dpr, dpr);
+                // center origin
+                this.g.translate(rect.width / 2, rect.height / 2);
+                const scale = Math.min(rect.width / this.w, rect.height / this.h);
+                this.g.scale(scale, scale);
+            }
+            start() { this.running = true; this.paused = false; }
+            pause(p = true) { this.paused = p; }
+            reset() {
+                this.time = 0; this.bullets.clear();
+                this._nextBulletId = 1;
+                this.flags.clear();
+                this.boss = new Boss();
+                this.timeLimit = 60;
+            }
+            newBullet(x, y, ang, speed, type = 0, color = 0) {
+                const id = this._nextBulletId++;
+                const b = new Bullet(id, x, y, ang, speed, type, color);
+                this.bullets.set(id, b);
+                return id;
+            }
+            removeBullet(id) { this.bullets.delete(id); }
+            findBullet(id) { return this.bullets.get(id); }
+            step() {
+                if (!this.running || this.paused) return;
+                this.time++;
+                this.player.update();
+                this.boss.update();
+                for (const [id, b] of this.bullets) {
+                    b.update(this);
+                    // kill if out
+                    if (!b.inBounds(this)) this.bullets.delete(id);
+                }
+            }
+            render() {
+                const g = this.g;
+                g.save();
+                g.clearRect(-this.canvas.width, -this.canvas.height, this.canvas.width * 2, this.canvas.height * 2);
+                // draw arena frame
+                g.strokeStyle = "rgba(80,120,160,.3)";
+                g.lineWidth = 1.5;
+                g.strokeRect(-this.w / 2, -this.h / 2, this.w, this.h);
+                // draw entities
+                this.boss.draw(g);
+                for (const b of this.bullets.values()) b.draw(g);
+                this.player.draw(g);
+                g.restore();
+            }
+        }
+
+        /* =========================
+           MiniScript Parser/VM
+           =========================
+           We implement a compact interpreter with:
+           - numbers, strings, lists [a,b], maps {k:v}, identifiers
+           - ops: + - * / % ^, == != > >= < <=, and or not
+           - control: if/else if/else/end if, while/end while, for/end for over range() or list
+           - assignment: x=expr
+           - function() ... end function with return
+           - intrinsic functions as per API subset
+        */
+        function createMiniVM(stage) {
+            const env = {
+                // Numeric
+                abs: Math.abs,
+                ceil: Math.ceil,
+                floor: Math.floor,
+                round: (x, d = 0) => Number(Math.round(x * 10 ** d) / 10 ** d),
+                sqrt: Math.sqrt,
+                sin: (r) => Math.sin(r),
+                cos: (r) => Math.cos(r),
+                tan: (r) => Math.tan(r),
+                asin: Math.asin,
+                acos: Math.acos,
+                atan: (y, x) => Math.atan2(y, x),
+                log: (x, b = Math.E) => Math.log(x) / Math.log(b),
+                pi: Math.PI,
+                rnd: (seed) => seed == null ? stage.rng.next() : (stage.rng = new RNG(seed >>> 0), 0),
+
+                // String helpers (minimal)
+                str: (x) => String(x),
+
+                // List/Map helpers (subset)
+                range: (from, to, step = 1) => {
+                    const out = []; if (step === 0) step = 1;
+                    if ((to >= from && step > 0) || (to <= from && step < 0)) {
+                        for (let i = from; (step > 0 ? i <= to : i >= to); i += step) out.push(i);
+                    }
+                    return out;
+                },
+
+                // Time helpers
+                time: () => stage.time / stage.frameRate,
+                wait: (sec) => new Promise(res => setTimeout(res, sec * 1000)),
+
+                // Random and angles
+                rand: (min, max) => stage.rng.rangei(min | 0, max | 0),
+                randF: (min, max) => stage.rng.rangef(+min, +max),
+                getAngle: (x1, y1, x2, y2) => Math.atan2(y2 - y1, x2 - x1) / DEG,
+                getPlayerAngle: () => Math.atan2(stage.player.y - stage.boss.y, stage.player.x - stage.boss.x) / DEG,
+
+                // Flags
+                setFlag: (k, v = 1) => { stage.flags.set(String(k), v); return v; },
+                getFlag: (k) => stage.flags.get(String(k)) ?? 0,
+
+                // Boss controls
+                moveBoss: (x, y, frames) => { stage.boss.moveTo(+x, +y, Math.max(1, frames | 0)); return 1; },
+                setBossLife: (hp) => { stage.boss.hp = stage.boss.hpMax = Math.max(1, hp | 0); return stage.boss.hp; },
+                setBossVisible: (vis) => { stage.boss.visible = !!vis; return vis ? 1 : 0; },
+
+                // Shots
+                shotA: (type, color, angle, speed, reflect = 0) => {
+                    const id = stage.newBullet(stage.boss.x, stage.boss.y, +angle, +speed, type | 0, color | 0);
+                    const b = stage.findBullet(id); b.reflectMask = reflect | 0; return id;
+                },
+                shot2A: (type, color, angle, speed, accel = 0, life = 0) => {
+                    const id = stage.newBullet(stage.boss.x, stage.boss.y, +angle, +speed, type | 0, color | 0);
+                    const b = stage.findBullet(id);
+                    // apply forward accel along heading per frame (approx via component)
+                    const r = angle * DEG;
+                    b.ax = Math.cos(r) * (+accel);
+                    b.ay = Math.sin(r) * (+accel);
+                    if (life > 0) { // timed life frames
+                        const killAt = stage.time + (life | 0);
+                        // schedule removal via hook in main loop observer
+                        schedule(() => stage.time >= killAt, () => stage.removeBullet(id));
+                    }
+                    return id;
+                },
+                shotB: (x, y, type, color, angle, speed, reflect = 0) => {
+                    const id = stage.newBullet(+x, +y, +angle, +speed, type | 0, color | 0);
+                    const b = stage.findBullet(id); b.reflectMask = reflect | 0; return id;
+                },
+                setType: (id, type) => { const b = stage.findBullet(id | 0); if (b) b.type = type | 0; return 1; },
+                setColor: (id, color) => { const b = stage.findBullet(id | 0); if (b) b.color = color | 0; return 1; },
+                setScale: (id, sc) => { const b = stage.findBullet(id | 0); if (b) b.scale = +sc; return 1; },
+                setAngle: (id, ang) => { const b = stage.findBullet(id | 0); if (b) b.a = +ang; return 1; },
+                setSpeed: (id, sp) => { const b = stage.findBullet(id | 0); if (b) b.s = +sp; return 1; },
+
+                sound: (id) => { /* no-op placeholder */ return id; },
+                effect: (id, x, y) => { /* no-op placeholder */ return id; },
+
+                // Script meta
+                resetFrame: () => { stage.time = 0; return 0; },
+            };
+
+            // Minimal expression evaluator:
+            function evalExpr(src, scope) {
+                // extremely small and safe evaluator by translating to JS with whitelist
+                // Replace identifiers with scope lookups
+                // This is a pragmatic approach; for production use a proper parser.
+                const allow = /[A-Za-z_][A-Za-z0-9_]*/g;
+                const safe = src.replace(/\/\/.*$/, '').trim();
+                const tokens = new Set();
+                (safe.match(allow) || []).forEach(t => tokens.add(t));
+                const builtins = new Set(Object.keys(env));
+                const locals = new Set(Object.keys(scope));
+                const reserved = new Set([
+                    "true", "false", "null", "undefined", "NaN", "Infinity", "if", "else", "for", "while", "return", "function", "end", "then", "and", "or", "not"
+                ]);
+                let code = safe
+                    .replace(/\band\b/g, "&&")
+                    .replace(/\bor\b/g, "||")
+                    .replace(/\bnot\b/g, "!");
+                const getters = [];
+                tokens.forEach(t => {
+                    if (reserved.has(t)) return;
+                    if (/^\d/.test(t)) return;
+                    if (builtins.has(t)) { getters.push(`const ${t} = __env.${t};`); return; }
+                    if (locals.has(t)) { getters.push(`let ${t} = __scope["${t}"];`); return; }
+                    // implicit numeric/string variable
+                    getters.push(`let ${t} = __scope["${t}"];`);
+                });
+                const js = `(function(__env,__scope){ ${getters.join("\n")} return (${code}); })`;
+                try {
+                    return Function(`return ${js}`)()(env, scope);
+                } catch (e) {
+                    throw new Error("ExprError: " + e.message + " in `" + src + "`");
+                }
+            }
+
+            function parseLines(src) {
+                const raw = src.split(/\r?\n/);
+                const lines = [];
+                for (let line of raw) {
+                    // strip comments
+                    const i = line.indexOf("//");
+                    if (i >= 0) line = line.slice(0, i);
+                    const s = line.trim();
+                    if (!s) continue;
+                    lines.push(s);
+                }
+                return lines;
+            }
+
+            // Very small statement interpreter supporting if/while/for blocks.
+            async function run(lines, scope = {}) {
+                // Shared UI mappings
+                const ui = {
+                    setName: (s) => { document.getElementById("spellName").textContent = String(s || "Spell"); },
+                    setTimeLimit: (sec) => { stage.timeLimit = Math.max(1, +sec | 0); },
+                };
+                // Pre-scan for simple assignments to special names
+                for (const l of lines) {
+                    if (l.startsWith("name")) {
+                        const m = l.match(/^name\s*=\s*(.+)$/);
+                        if (m) { const v = evalExpr(m[1], scope); stage.boss.name = String(v); ui.setName(v); }
+                    } else if (l.startsWith("timeLimit")) {
+                        const m = l.match(/^timeLimit\s*=\s*(.+)$/);
+                        if (m) { const v = +evalExpr(m[1], scope); ui.setTimeLimit(v); }
+                    }
+                }
+
+                // Execution with control structures
+                let ip = 0;
+                const stk = [];
+                const getBlockEnd = (start, kind) => {
+                    let depth = 0;
+                    for (let i = start; i < lines.length; i++) {
+                        const s = lines[i];
+                        if (kind === "if") {
+                            if (/^if\b/.test(s)) depth++;
+                            if (/^end if\b/.test(s)) { depth--; if (depth === 0) return i; }
+                        } else if (kind === "while") {
+                            if (/^while\b/.test(s)) depth++;
+                            if (/^end while\b/.test(s)) { depth--; if (depth === 0) return i; }
+                        } else if (kind === "for") {
+                            if (/^for\b/.test(s)) depth++;
+                            if (/^end for\b/.test(s)) { depth--; if (depth === 0) return i; }
+                        }
+                    }
+                    throw new Error("Block not closed: " + kind);
+                };
+
+                while (ip < lines.length) {
+                    const line = lines[ip];
+
+                    // if / else if / else
+                    if (/^if\b/.test(line)) {
+                        const end = getBlockEnd(ip, "if");
+                        // collect branches
+                        const branches = [];
+                        let j = ip;
+                        while (j <= end) {
+                            const s = lines[j];
+                            if (/^if\b/.test(s) || /^else if\b/.test(s)) {
+                                const condSrc = s.replace(/^(if|else if)\s*/, '').replace(/\s*then$/, '');
+                                // find next control line or end if
+                                let k = j + 1; let next = end;
+                                for (; k <= end; k++) {
+                                    const t = lines[k];
+                                    if (/^(else if|else|end if)\b/.test(t)) { next = k - 1; break; }
+                                }
+                                branches.push({ type: "if", cond: condSrc, start: j + 1, end: next });
+                                j = k;
+                            } else if (/^else\b/.test(s)) {
+                                let k = j + 1; let next = end - 1;
+                                branches.push({ type: "else", start: j + 1, end: next });
+                                j = end;
+                            } else { j++; }
+                        }
+                        // evaluate
+                        let executed = false;
+                        for (const b of branches) {
+                            if (b.type === "if") {
+                                const ok = !!evalExpr(b.cond, scope);
+                                if (ok) {
+                                    await run(lines.slice(b.start, b.end + 1), scope);
+                                    executed = true; break;
+                                }
+                            } else {
+                                await run(lines.slice(b.start, b.end + 1), scope);
+                                executed = true; break;
+                            }
+                        }
+                        ip = end + 1;
+                        continue;
+                    }
+
+                    // while
+                    if (/^while\b/.test(line)) {
+                        const condSrc = line.replace(/^while\s*/, '');
+                        const end = getBlockEnd(ip, "while");
+                        while (true) {
+                            const ok = !!evalExpr(condSrc, scope);
+                            if (!ok) break;
+                            await run(lines.slice(ip + 1, end), scope);
+                        }
+                        ip = end + 1;
+                        continue;
+                    }
+
+                    // for
+                    if (/^for\b/.test(line)) {
+                        // Syntax: for i in range(10,1)  OR for v in [1,2,3]
+                        const m = line.match(/^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+)$/);
+                        if (!m) throw new Error("Invalid for syntax: " + line);
+                        const varName = m[1];
+                        const iterExpr = m[2];
+                        const end = getBlockEnd(ip, "for");
+                        const list = evalExpr(iterExpr, scope);
+                        if (!Array.isArray(list)) throw new Error("for expects list/range: " + iterExpr);
+                        for (let idx = 0; idx < list.length; idx++) {
+                            scope[varName] = list[idx];
+                            await run(lines.slice(ip + 1, end), scope);
+                        }
+                        ip = end + 1;
+                        continue;
+                    }
+
+                    // assignment
+                    if (/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) {
+                        const [lhs, rhs] = line.split("=").map(s => s.trim());
+                        scope[lhs] = evalExpr(rhs, scope);
+                        if (lhs === "name") { stage.boss.name = String(scope[lhs]); document.getElementById("spellName").textContent = stage.boss.name; }
+                        if (lhs === "timeLimit") { stage.timeLimit = Math.max(1, +scope[lhs] | 0); }
+                        ip++; continue;
+                    }
+
+                    // function call: name(args)
+                    if (/^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)) {
+                        const call = line.trim();
+                        const m = call.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$/);
+                        if (!m) throw new Error("Bad call: " + call);
+                        const fn = m[1];
+                        const argsStr = m[2].trim();
+                        const args = argsStr.length ? splitArgs(argsStr).map(s => evalExpr(s, scope)) : [];
+                        const f = env[fn];
+                        if (typeof f !== "function") throw new Error("Unknown function: " + fn);
+                        const r = f(...args);
+                        // await if promise (for wait)
+                        if (r && typeof r.then === "function") await r;
+                        ip++; continue;
+                    }
+
+                    // end tokens just skip
+                    if (/^end (if|while|for|function)\b/.test(line) || /^else(\s+if)?\b/.test(line)) {
+                        ip++; continue;
+                    }
+
+                    // fallback: expression statement
+                    evalExpr(line, scope);
+                    ip++;
+                }
+            }
+
+            function splitArgs(s) {
+                const args = [];
+                let cur = "", depth = 0, inStr = false, strQ = '"';
+                for (let i = 0; i < s.length; i++) {
+                    const c = s[i];
+                    if (inStr) {
+                        cur += c;
+                        if (c === strQ && s[i - 1] !== "\\") inStr = false;
+                        continue;
+                    }
+                    if (c === '"' || c === "'") { inStr = true; strQ = c; cur += c; continue; }
+                    if (c === '(' || c === '[' || c === '{') { depth++; cur += c; continue; }
+                    if (c === ')' || c === ']' || c === '}') { depth--; cur += c; continue; }
+                    if (c === ',' && depth === 0) { args.push(cur.trim()); cur = ""; continue; }
+                    cur += c;
+                }
+                if (cur.trim().length) args.push(cur.trim());
+                return args;
+            }
+
+            return { env, parseLines, run };
+        }
+
+        /* =========================
+           Scheduler utilities
+           ========================= */
+        const sched = [];
+        function schedule(pred, fn) { sched.push({ pred, fn, done: false }); }
+        function pumpSchedule() {
+            for (const t of sched) {
+                if (!t.done && t.pred()) { try { t.fn(); } catch (e) { } t.done = true; }
+            }
+        }
+
+        /* =========================
+           Game Loop
+           ========================= */
+        const canvas = document.getElementById('game');
+        const stage = new Stage(canvas);
+        const vm = createMiniVM(stage);
+
+        let last = performance.now(), acc = 0;
+        let fpsAcc = 0, fpsCnt = 0, fpsTime = performance.now(), fpsDisp = 0;
+        function loop(now) {
+            const dt = now - last; last = now; acc += dt;
+            const stepMs = 1000 / 60;
+
+            while (acc >= stepMs) {
+                stage.step();
+                pumpSchedule();
+                acc -= stepMs;
+            }
+
+            stage.render();
+
+            // HUD
+            fpsAcc += 1;
+            if (now - fpsTime > 500) { fpsDisp = Math.round((fpsAcc * 1000) / (now - fpsTime)); fpsAcc = 0; fpsTime = now; }
+            document.getElementById('fps').textContent = String(fpsDisp);
+            document.getElementById('bullets').textContent = String(stage.bullets.size);
+            const tRemain = Math.max(0, stage.timeLimit - stage.time / stage.frameRate);
+            document.getElementById('timer').textContent = tRemain.toFixed(1);
+            const hpFill = document.getElementById('hpFill');
+            const w = clamp(stage.boss.hp / Math.max(1, stage.boss.hpMax), 0, 1) * 100;
+            hpFill.style.width = w.toFixed(1) + "%";
+            requestAnimationFrame(loop);
+        }
+        function init() {
+            stage.resize();
+            // default script
+            const demo = [
+                'name = "氷符「ブルーフロストオーロラ」"',
+                'timeLimit = 45',
+                'moveBoss(0, -180, 60)',
+                'setBossLife(8000)',
+                '',
+                '// 渦巻き放射: ステップ毎に回転位相+狙い撃ち',
+                'for t in range(0, 1200, 5)',
+                '  base = t*5',
+                '  a0 = base',
+                '  for i in range(0, 11, 1)',
+                '    ang = a0 + i*30',
+                '    id = shotA(0, 5, ang, 2.6, 0)',
+                '    setScale(id, 0.9)',
+                '  end for',
+                '  aim = getPlayerAngle()',
+                '  s = 2.1 + (t % 120)/240',
+                '  id2 = shot2A(0, 4, aim + rand(-8,8), s, 0.03, 0)',
+                '  setScale(id2, 1.05)',
+                'end for',
+            ].join("\n");
+            document.getElementById('miniScript').value = demo;
+
+            // mobile input
+            const stageEl = document.getElementById('stage');
+            const thumb = document.getElementById('thumb');
+            const toLocal = (clientX, clientY) => {
+                const rect = stageEl.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const y = clientY - rect.top;
+                // convert to logical
+                const scale = Math.min(rect.width / stage.w, rect.height / stage.h);
+                const cx = x - rect.width / 2;
+                const cy = y - rect.height / 2;
+                return { x: cx / scale, y: cy / scale };
+            };
+            const setTarget = (cx, cy) => {
+                const p = toLocal(cx, cy);
+                input.x = clamp(p.x, -stage.w / 2 + 6, stage.w / 2 - 6);
+                input.y = clamp(p.y, -stage.h / 2 + 6, stage.h / 2 - 6);
+            };
+            let lastTap = 0;
+            thumb.addEventListener('pointerdown', (e) => { input.touching = true; setTarget(e.clientX, e.clientY); thumb.setPointerCapture(e.pointerId); });
+            thumb.addEventListener('pointermove', (e) => { if (!input.touching) return; setTarget(e.clientX, e.clientY); });
+            thumb.addEventListener('pointerup', (e) => { input.touching = false; const now = performance.now(); if (now - lastTap < 300) input.slow = !input.slow; lastTap = now; });
+
+            // buttons
+            document.getElementById('btnStart').onclick = () => stage.start();
+            document.getElementById('btnPause').onclick = () => stage.pause(!stage.paused);
+            document.getElementById('btnReset').onclick = () => { stage.reset(); stage.start(); compileAndRun(); };
+
+            // difficulty affects RNG and maybe later patterns
+            const diff = document.getElementById('difficulty');
+            const diffLabel = document.getElementById('diffLabel');
+            diff.addEventListener('input', () => {
+                diffLabel.textContent = diff.value;
+                stage.rng = new RNG(0xC0FFEE ^ (diff.value | 0) * 1337);
+            });
+
+            // script actions
+            document.getElementById('btnCompile').onclick = compileOnly;
+            document.getElementById('btnRun').onclick = compileAndRun;
+
+            // start loop
+            requestAnimationFrame(loop);
+            window.addEventListener('resize', () => stage.resize());
+        }
+        window.addEventListener('load', init);
+
+        async function compileOnly() {
+            const code = document.getElementById('miniScript').value;
+            try {
+                const lines = vm.parseLines(code);
+                // dry run parse to find blocks
+                await vm.run(lines.slice(0, Math.min(lines.length, 1)), {});
+                document.getElementById('compileStat').textContent = "OK";
+            } catch (e) {
+                document.getElementById('compileStat').textContent = "Error";
+                console.error(e);
+                alert("Compile error: " + e.message);
+            }
+        }
+        async function compileAndRun() {
+            const code = document.getElementById('miniScript').value;
+            try {
+                const lines = vm.parseLines(code);
+                document.getElementById('compileStat').textContent = "OK";
+                // run asynchronously without blocking render
+                (async () => {
+                    await vm.run(lines, {});
+                })();
+            } catch (e) {
+                document.getElementById('compileStat').textContent = "Error";
+                console.error(e);
+                alert("Compile error: " + e.message);
+            }
+        }
+    </script>
+</body>
+
+</html>

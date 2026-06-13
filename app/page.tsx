@@ -16,7 +16,7 @@ import DrawingEditor from '@/components/DrawingEditor';
 import DotDrawingEditor from '@/components/DotDrawingEditor';
 import CollabSelector from '@/components/CollabSelector';
 import GamePlayer from '@/components/GamePlayer';
-import GameMaker from '@/components/GameMaker';
+import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
 import MmlEditor from '@/components/MmlEditor';
 import PostComposer from '@/components/PostComposer';
 import SearchView from '@/components/SearchView';
@@ -43,6 +43,7 @@ export default function App() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
+  const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
 
   const heartQueue = useRef<Map<number, number>>(new Map());
   const heartTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -208,6 +209,7 @@ export default function App() {
     setPosts([post, ...posts]);
     setInputText('');
     setAttachedImage(null);
+    setGameDraft(null);
   };
 
   const handleOpenCollab = useCallback((post: Post) => {
@@ -249,6 +251,12 @@ export default function App() {
     setInputText(`#MML作曲 ${mml}`);
   };
 
+  const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
+    setGameDraft({ manifest, title: meta.title, preset: meta.preset });
+    setActiveScreen(null);
+    setInputText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
+  };
+
   return (
     <div className="bg-[#0b0e14] text-gray-100 h-screen w-full flex flex-col overflow-hidden select-none font-sans relative">
       <RightDrawer
@@ -278,7 +286,7 @@ export default function App() {
         />
       )}
       {activeScreen === 'gamemaker' && (
-        <GameMaker onClose={() => setActiveScreen(null)} />
+        <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} />
       )}
       {activeScreen === 'game' && (
         <GamePlayer onClose={() => setActiveScreen(null)} />
@@ -345,6 +353,21 @@ export default function App() {
                               <button
                                 onClick={() => setAttachedImage(null)}
                                 className="absolute top-1 right-1 bg-black/85 p-1 rounded-full text-white hover:bg-red-500"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          )}
+                          {gameDraft && (
+                            <div className="relative mt-2 flex items-center gap-2 rounded-lg border border-yellow-700/50 bg-yellow-500/10 px-3 py-2 max-w-[280px]">
+                              <Gamepad2 size={16} className="text-yellow-400 shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-yellow-200 truncate">{gameDraft.title}</p>
+                                <p className="text-[10px] text-yellow-400/70">ゲームを添付中</p>
+                              </div>
+                              <button
+                                onClick={() => setGameDraft(null)}
+                                className="ml-auto text-yellow-300/70 hover:text-red-400 shrink-0"
                               >
                                 <X size={14} />
                               </button>

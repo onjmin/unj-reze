@@ -1,0 +1,245 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2 } from 'lucide-react';
+import { api } from '@/lib/api';
+import type { Post } from '@/lib/types';
+import { extractMmlFromContent } from '@/lib/mml';
+import { youtubeRefFromUrl } from '@/lib/asset-ref';
+
+export interface PickResult {
+  ref: string;
+  url?: string;
+  rawMml?: string;
+  label: string;
+}
+
+interface ContentPickerProps {
+  mode: 'image' | 'bgm';
+  userId: string;
+  onPick: (result: PickResult) => void;
+  onClose: () => void;
+}
+
+type ImageTab = 'posts' | 'walk' | 'url';
+type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw';
+
+export default function ContentPicker({ mode, userId, onPick, onClose }: ContentPickerProps) {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [imageTab, setImageTab] = useState<ImageTab>('posts');
+  const [bgmTab, setBgmTab] = useState<BgmTab>('youtube');
+  const [urlInput, setUrlInput] = useState('');
+  const [mmlInput, setMmlInput] = useState('T120 o4 c d e f g a b');
+
+  useEffect(() => {
+    let alive = true;
+    api.posts.list(userId)
+      .then(data => { if (alive) setPosts(data); })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [userId]);
+
+  const q = query.trim().toLowerCase();
+  const imagePosts = posts.filter(p => p.hasImage && p.imageSrc &&
+    (!q || p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q)));
+  // 歩行グラ: #歩行グラ タグ付きの画像投稿を優先候補に
+  const walkPosts = posts.filter(p => p.hasImage && p.imageSrc &&
+    /歩行|walk|スプライト|sprite/i.test(p.content) &&
+    (!q || p.content.toLowerCase().includes(q)));
+  const mmlPosts = posts.filter(p => {
+    const mml = extractMmlFromContent(p.content);
+    return !!mml && (!q || p.content.toLowerCase().includes(q));
+  });
+
+  const pickImagePost = (p: Post, scheme: 'post' | 'walk') => {
+    onPick({
+      ref: scheme === 'post' ? `post:${p.id}` : `walk:${p.id}`,
+      url: p.imageSrc,
+      label: `${scheme === 'post' ? '画像' : '歩行グラ'} #${p.id}`,
+    });
+  };
+
+  const pickUrl = () => {
+    const v = urlInput.trim();
+    if (!v) return;
+    onPick({ ref: `url:${v}`, url: v, label: v.slice(0, 26) });
+  };
+
+  const pickYoutube = () => {
+    const v = urlInput.trim();
+    if (!v) return;
+    onPick({ ref: youtubeRefFromUrl(v), url: v, label: 'YouTube BGM' });
+  };
+
+  const pickMmlPost = (p: Post) => {
+    const mml = extractMmlFromContent(p.content) || '';
+    onPick({ ref: `mml:post:${p.id}`, rawMml: mml, label: `MML投稿 #${p.id}` });
+  };
+
+  const pickMmlRaw = () => {
+    const v = mmlInput.trim();
+    if (!v) return;
+    onPick({ ref: `mml:${v}`, rawMml: v, label: 'MML' });
+  };
+
+  const tabBtn = (active: boolean) =>
+    `flex-1 py-2 text-[11px] font-bold rounded-md transition flex items-center justify-center gap-1 ${active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-100/10'}`;
+
+  return (
+    <div className="absolute inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="bg-[#0b0e14] w-full sm:w-[420px] sm:rounded-2xl rounded-t-2xl border border-gray-800 shadow-2xl flex flex-col max-h-[85vh] animate-fade-in-up"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+          <span className="text-xs font-bold text-gray-200">
+            {mode === 'image' ? '画像を参照' : 'BGM / 音を参照'}
+          </span>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 p-1 rounded-full hover:bg-gray-100/10">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
+          {mode === 'image' ? (
+            <>
+              <button className={tabBtn(imageTab === 'posts')} onClick={() => setImageTab('posts')}><ImageIcon size={12} />画像投稿</button>
+              <button className={tabBtn(imageTab === 'walk')} onClick={() => setImageTab('walk')}>🚶 歩行グラ</button>
+              <button className={tabBtn(imageTab === 'url')} onClick={() => setImageTab('url')}><Link2 size={12} />URL</button>
+            </>
+          ) : (
+            <>
+              <button className={tabBtn(bgmTab === 'youtube')} onClick={() => setBgmTab('youtube')}><Video size={12} />YouTube</button>
+              <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => setBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
+              <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => setBgmTab('mmlRaw')}>♪ 直接</button>
+            </>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 scrollbar-none">
+          {/* Image: posts / walk */}
+          {mode === 'image' && (imageTab === 'posts' || imageTab === 'walk') && (
+            <>
+              <div className="relative mb-2">
+                <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="投稿を検索"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
+                />
+              </div>
+              {loading ? (
+                <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-500" /></div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {(imageTab === 'posts' ? imagePosts : walkPosts).map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => pickImagePost(p, imageTab === 'posts' ? 'post' : 'walk')}
+                      className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.imageSrc} alt="" className="w-full h-full object-cover" style={{ imageRendering: imageTab === 'walk' ? 'pixelated' : 'auto' }} />
+                      <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">#{p.id}</span>
+                    </button>
+                  ))}
+                  {(imageTab === 'posts' ? imagePosts : walkPosts).length === 0 && (
+                    <p className="col-span-3 text-center text-[11px] text-gray-600 py-8">該当する投稿がありません</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Image: url */}
+          {mode === 'image' && imageTab === 'url' && (
+            <div className="space-y-2">
+              <label className="block text-[10px] text-gray-500">画像URL（直リンク / imgur 等）</label>
+              <input
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                placeholder="https://i.imgur.com/xxxx.png"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
+              />
+              {urlInput.trim() && (
+                <div className="rounded-lg border border-gray-700 overflow-hidden max-h-40 flex items-center justify-center bg-black/40">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={urlInput} alt="" className="max-w-full max-h-40 object-contain" />
+                </div>
+              )}
+              <button onClick={pickUrl} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">この画像を使う</button>
+            </div>
+          )}
+
+          {/* BGM: youtube */}
+          {mode === 'bgm' && bgmTab === 'youtube' && (
+            <div className="space-y-2">
+              <label className="block text-[10px] text-gray-500">YouTube URL</label>
+              <input
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                placeholder="https://www.youtube.com/watch?v=..."
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
+              />
+              <p className="text-[10px] text-gray-600">動画をBGMとしてループ再生します（容量ゼロ）。</p>
+              <button onClick={pickYoutube} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このBGMを使う</button>
+            </div>
+          )}
+
+          {/* BGM: mml post */}
+          {mode === 'bgm' && bgmTab === 'mmlPost' && (
+            <>
+              <div className="relative mb-2">
+                <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="MML投稿を検索"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
+                />
+              </div>
+              {loading ? (
+                <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-500" /></div>
+              ) : (
+                <div className="space-y-1.5">
+                  {mmlPosts.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => pickMmlPost(p)}
+                      className="w-full text-left p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900"
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <Music size={11} className="text-pink-400 shrink-0" />
+                        <span className="text-[11px] text-gray-300 font-bold truncate">{p.displayName} #{p.id}</span>
+                      </div>
+                      <p className="text-[10px] text-gray-500 font-mono truncate">{extractMmlFromContent(p.content)}</p>
+                    </button>
+                  ))}
+                  {mmlPosts.length === 0 && <p className="text-center text-[11px] text-gray-600 py-8">MML投稿がありません</p>}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* BGM: raw mml */}
+          {mode === 'bgm' && bgmTab === 'mmlRaw' && (
+            <div className="space-y-2">
+              <label className="block text-[10px] text-gray-500">MML（短い効果音/メロディ向け）</label>
+              <textarea
+                value={mmlInput}
+                onChange={e => setMmlInput(e.target.value)}
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500 h-20 font-mono resize-none"
+              />
+              <button onClick={pickMmlRaw} disabled={!mmlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このMMLを使う</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,1425 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ポケモン対戦</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --card: #0f3460;
+    --accent: #e94560;
+    --text: #eaeaea;
+    --muted: #a0a0b0;
+    --hp-green: #4caf50;
+    --hp-yellow: #ffeb3b;
+    --hp-red: #f44336;
+    --radius: 12px;
+  }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* ===== SCREENS ===== */
+  .screen { display: none; flex-direction: column; height: 100%; }
+  .screen.active { display: flex; }
+
+  /* ===== TITLE SCREEN ===== */
+  #title-screen {
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    background: radial-gradient(ellipse at center, #0f3460 0%, #1a1a2e 70%);
+  }
+  .title-logo {
+    font-size: 2.8rem;
+    font-weight: 900;
+    letter-spacing: 2px;
+    background: linear-gradient(135deg, #ffeb3b, #ff9800, #e94560);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+    text-shadow: none;
+    filter: drop-shadow(0 0 20px rgba(233,69,96,0.5));
+  }
+  .title-sub { color: var(--muted); font-size: 0.9rem; }
+  .pokeball-icon {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    border: 6px solid var(--text);
+    position: relative;
+    animation: spin 4s linear infinite;
+    background: linear-gradient(180deg, var(--accent) 50%, #fff 50%);
+  }
+  .pokeball-icon::before {
+    content: '';
+    position: absolute;
+    width: 100%; height: 6px;
+    background: var(--text);
+    top: 50%; transform: translateY(-50%);
+    left: 0;
+  }
+  .pokeball-icon::after {
+    content: '';
+    position: absolute;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    border: 4px solid var(--text);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #c62a47);
+    border: none;
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 700;
+    padding: 14px 48px;
+    border-radius: 50px;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(233,69,96,0.4);
+    transition: transform 0.1s, box-shadow 0.1s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-primary:active { transform: scale(0.96); box-shadow: 0 2px 10px rgba(233,69,96,0.3); }
+
+  /* ===== PARTY SELECT ===== */
+  #party-screen { padding: 0; overflow-y: auto; }
+  .party-header {
+    padding: 16px;
+    background: var(--surface);
+    border-bottom: 2px solid var(--card);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .party-header h2 { font-size: 1.1rem; margin-bottom: 4px; }
+  .party-header p { font-size: 0.8rem; color: var(--muted); }
+  .selected-count {
+    display: inline-block;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .pokemon-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+  .poke-card {
+    background: var(--surface);
+    border: 2px solid var(--card);
+    border-radius: var(--radius);
+    padding: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    overflow: hidden;
+  }
+  .poke-card.selected {
+    border-color: var(--accent);
+    background: rgba(233,69,96,0.1);
+  }
+  .poke-card:active { transform: scale(0.97); }
+  .poke-card .check {
+    position: absolute;
+    top: 6px; right: 8px;
+    font-size: 1.2rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .poke-card.selected .check { opacity: 1; }
+  .poke-sprite {
+    font-size: 3rem;
+    display: block;
+    text-align: center;
+    line-height: 1;
+    margin-bottom: 6px;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+  }
+  .poke-name { font-weight: 700; font-size: 0.95rem; text-align: center; }
+  .poke-types { display: flex; gap: 4px; justify-content: center; margin-top: 4px; flex-wrap: wrap; }
+  .type-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .poke-stats-mini {
+    margin-top: 6px;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-align: center;
+  }
+  .party-confirm {
+    padding: 12px;
+    background: var(--surface);
+    border-top: 2px solid var(--card);
+    position: sticky; bottom: 0;
+  }
+  .party-confirm .btn-primary { width: 100%; }
+
+  /* ===== BATTLE SCREEN ===== */
+  #battle-screen { overflow: hidden; }
+  .battle-field {
+    flex: 1;
+    background: linear-gradient(180deg, #1a3a5c 0%, #2d1b4e 50%, #1a1a2e 100%);
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .battle-field::before {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 35%;
+    background: linear-gradient(180deg, transparent, rgba(0,0,0,0.3));
+  }
+
+  /* Enemy side */
+  .enemy-side {
+    position: absolute;
+    top: 8px; left: 0; right: 0;
+    padding: 0 12px;
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
+  }
+  .enemy-info {
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    min-width: 180px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .fighter-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 2px; }
+  .fighter-level { font-size: 0.7rem; color: var(--muted); }
+  .hp-bar-wrap { margin-top: 4px; }
+  .hp-label { font-size: 0.65rem; color: var(--muted); margin-bottom: 2px; display: flex; justify-content: space-between; }
+  .hp-bar-bg {
+    height: 8px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .hp-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.6s ease, background-color 0.6s ease;
+    background: var(--hp-green);
+  }
+  .status-badge {
+    display: inline-block;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    margin-top: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Enemy sprite */
+  .enemy-sprite-wrap {
+    position: absolute;
+    right: 20px;
+    top: 20%;
+    transform: translateY(-50%);
+    text-align: right;
+  }
+  .enemy-sprite {
+    font-size: 5rem;
+    display: block;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+    animation: float 3s ease-in-out infinite;
+    transform: scaleX(-1);
+  }
+  @keyframes float {
+    0%, 100% { transform: scaleX(-1) translateY(0); }
+    50% { transform: scaleX(-1) translateY(-8px); }
+  }
+
+  /* Player side */
+  .player-side {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 0 12px 4px;
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+    gap: 8px;
+  }
+  .player-info {
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    min-width: 180px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .player-info .hp-label { justify-content: space-between; }
+  .player-sprite-wrap {
+    position: absolute;
+    left: 20px;
+    bottom: 30%;
+    text-align: left;
+  }
+  .player-sprite {
+    font-size: 5rem;
+    display: block;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+    animation: float2 3s ease-in-out infinite 0.5s;
+  }
+  @keyframes float2 {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+
+  /* Party indicators */
+  .party-dots {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .party-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.4);
+  }
+  .party-dot.alive { background: var(--hp-green); }
+  .party-dot.fainted { background: #555; }
+  .party-dot.active { background: #fff; }
+
+  /* Battle log + controls */
+  .battle-bottom {
+    background: var(--surface);
+    border-top: 2px solid var(--card);
+    flex-shrink: 0;
+  }
+  .battle-log {
+    padding: 10px 14px;
+    min-height: 60px;
+    max-height: 80px;
+    overflow-y: auto;
+    border-bottom: 1px solid var(--card);
+  }
+  .log-line {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    opacity: 0;
+    animation: fadeIn 0.3s forwards;
+  }
+  .log-line:last-child { color: var(--text); }
+  .log-line:not(:last-child) { color: var(--muted); font-size: 0.78rem; }
+  @keyframes fadeIn { to { opacity: 1; } }
+
+  .battle-controls { padding: 8px; }
+
+  /* Move buttons */
+  .moves-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .move-btn {
+    border: 2px solid transparent;
+    border-radius: var(--radius);
+    padding: 10px 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+    transition: transform 0.1s, opacity 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    text-align: left;
+    position: relative;
+    overflow: hidden;
+  }
+  .move-btn:active { transform: scale(0.97); }
+  .move-btn:disabled { opacity: 0.4; cursor: default; }
+  .move-btn .move-name { display: block; }
+  .move-btn .move-meta { font-size: 0.65rem; font-weight: 400; opacity: 0.8; margin-top: 1px; display: flex; justify-content: space-between; }
+  .move-btn .pp-count { font-size: 0.65rem; opacity: 0.8; }
+
+  /* Action buttons (switch/bag) */
+  .action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .action-btn {
+    background: var(--card);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius);
+    padding: 10px;
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.1s;
+  }
+  .action-btn:active { transform: scale(0.97); }
+  .action-btn:disabled { opacity: 0.4; }
+
+  /* Switch panel */
+  .switch-panel {
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .switch-panel.visible { display: flex; }
+  .switch-poke-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border: 2px solid transparent;
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    cursor: pointer;
+    color: var(--text);
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .switch-poke-btn:active { transform: scale(0.97); }
+  .switch-poke-btn:disabled { opacity: 0.4; }
+  .switch-poke-btn .sp-sprite { font-size: 1.8rem; }
+  .switch-poke-btn .sp-info { flex: 1; text-align: left; }
+  .switch-poke-btn .sp-name { font-weight: 700; font-size: 0.9rem; }
+  .switch-poke-btn .sp-hp { font-size: 0.72rem; color: var(--muted); }
+  .switch-poke-btn.active-poke { border-color: var(--accent); }
+  .back-btn {
+    background: transparent;
+    border: 1px solid var(--muted);
+    border-radius: var(--radius);
+    padding: 8px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ===== RESULT SCREEN ===== */
+  #result-screen {
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 24px;
+    background: radial-gradient(ellipse at center, #0f3460 0%, #1a1a2e 70%);
+    text-align: center;
+  }
+  .result-title {
+    font-size: 2.5rem;
+    font-weight: 900;
+  }
+  .result-title.win {
+    background: linear-gradient(135deg, #ffeb3b, #ff9800);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 20px rgba(255,235,59,0.6));
+  }
+  .result-title.lose {
+    background: linear-gradient(135deg, #90a4ae, #607d8b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .result-msg { color: var(--muted); font-size: 0.95rem; line-height: 1.6; }
+
+  /* ===== ANIMATIONS ===== */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-6px); }
+    80% { transform: translateX(6px); }
+  }
+  @keyframes hitFlash {
+    0%, 100% { filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5)); }
+    50% { filter: drop-shadow(0 0 20px #fff) brightness(3); }
+  }
+  @keyframes faint {
+    to { transform: translateY(60px) scaleY(0.1); opacity: 0; }
+  }
+  .anim-shake { animation: shake 0.4s ease !important; }
+  .anim-hit { animation: hitFlash 0.3s ease !important; }
+  .anim-faint { animation: faint 0.5s ease forwards !important; }
+
+  /* ===== TYPE COLORS ===== */
+  .type-normal { background: #a8a878; }
+  .type-fire { background: #f08030; }
+  .type-water { background: #6890f0; }
+  .type-grass { background: #78c850; }
+  .type-electric { background: #f8d030; color: #333; }
+  .type-ice { background: #98d8d8; color: #333; }
+  .type-fighting { background: #c03028; }
+  .type-poison { background: #a040a0; }
+  .type-ground { background: #e0c068; color: #333; }
+  .type-flying { background: #a890f0; }
+  .type-psychic { background: #f85888; }
+  .type-bug { background: #a8b820; }
+  .type-rock { background: #b8a038; }
+  .type-ghost { background: #705898; }
+  .type-dragon { background: #7038f8; }
+  .type-dark { background: #705848; }
+  .type-steel { background: #b8b8d0; color: #333; }
+  .type-fairy { background: #f0b6bc; color: #333; }
+</style>
+</head>
+<body>
+
+<!-- ===== TITLE SCREEN ===== -->
+<div id="title-screen" class="screen active">
+  <div class="pokeball-icon"></div>
+  <div class="title-logo">ポケモン<br>対戦</div>
+  <div class="title-sub">6体から3体を選んで戦え！</div>
+  <button class="btn-primary" onclick="showPartySelect()">はじめる</button>
+</div>
+
+<!-- ===== PARTY SELECT ===== -->
+<div id="party-screen" class="screen">
+  <div class="party-header">
+    <h2>パーティを選ぶ <span class="selected-count" id="sel-count">0 / 3</span></h2>
+    <p>3体選んでください</p>
+  </div>
+  <div class="pokemon-grid" id="pokemon-grid"></div>
+  <div class="party-confirm">
+    <button class="btn-primary" id="confirm-btn" onclick="startBattle()" disabled>対戦開始！</button>
+  </div>
+</div>
+
+<!-- ===== BATTLE SCREEN ===== -->
+<div id="battle-screen" class="screen">
+  <div class="battle-field" id="battle-field">
+    <!-- Enemy -->
+    <div class="enemy-side">
+      <div class="enemy-info">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div class="fighter-name" id="enemy-name">?</div>
+          <div class="fighter-level" id="enemy-level">Lv.50</div>
+        </div>
+        <div class="party-dots" id="enemy-dots"></div>
+        <div class="hp-bar-wrap">
+          <div class="hp-label">
+            <span>HP</span>
+            <span id="enemy-hp-num">?</span>
+          </div>
+          <div class="hp-bar-bg"><div class="hp-bar" id="enemy-hp-bar" style="width:100%"></div></div>
+        </div>
+        <div id="enemy-status"></div>
+      </div>
+    </div>
+    <div class="enemy-sprite-wrap">
+      <span class="enemy-sprite" id="enemy-sprite">🐉</span>
+    </div>
+
+    <!-- Player -->
+    <div class="player-sprite-wrap">
+      <span class="player-sprite" id="player-sprite">🐢</span>
+    </div>
+    <div class="player-side">
+      <div class="player-info">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <div class="fighter-name" id="player-name">?</div>
+          <div class="fighter-level" id="player-level">Lv.50</div>
+        </div>
+        <div class="party-dots" id="player-dots"></div>
+        <div class="hp-bar-wrap">
+          <div class="hp-label">
+            <span>HP</span>
+            <span id="player-hp-num">?</span>
+          </div>
+          <div class="hp-bar-bg"><div class="hp-bar" id="player-hp-bar" style="width:100%"></div></div>
+        </div>
+        <div id="player-status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log + Controls -->
+  <div class="battle-bottom">
+    <div class="battle-log" id="battle-log"></div>
+    <div class="battle-controls">
+      <!-- Main: moves -->
+      <div id="main-controls">
+        <div class="moves-grid" id="moves-grid"></div>
+        <div class="action-row">
+          <button class="action-btn" onclick="openSwitch()">🔄 ポケモン</button>
+          <button class="action-btn" id="run-btn" onclick="tryRun()">🏃 にげる</button>
+        </div>
+      </div>
+      <!-- Switch panel -->
+      <div class="switch-panel" id="switch-panel">
+        <div id="switch-list"></div>
+        <button class="back-btn" onclick="closeSwitch()">← もどる</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== RESULT SCREEN ===== -->
+<div id="result-screen" class="screen">
+  <div class="pokeball-icon" style="animation-play-state:paused"></div>
+  <div class="result-title" id="result-title">勝利！</div>
+  <div class="result-msg" id="result-msg"></div>
+  <button class="btn-primary" onclick="showPartySelect()">もういちど</button>
+</div>
+
+<script>
+// ===== DATA =====
+const TYPE_CHART = {
+  fire:    { grass:2, ice:2, bug:2, steel:2, water:0.5, rock:0.5, fire:0.5, dragon:0.5 },
+  water:   { fire:2, ground:2, rock:2, water:0.5, grass:0.5, dragon:0.5 },
+  grass:   { water:2, ground:2, rock:2, fire:0.5, grass:0.5, poison:0.5, flying:0.5, bug:0.5, dragon:0.5, steel:0.5 },
+  electric:{ water:2, flying:2, grass:0.5, electric:0.5, dragon:0.5, ground:0 },
+  ice:     { grass:2, ground:2, flying:2, dragon:2, steel:0.5, water:0.5, ice:0.5, fire:0.5 },
+  fighting:{ normal:2, ice:2, rock:2, dark:2, steel:2, poison:0.5, flying:0.5, psychic:0.5, bug:0.5, fairy:0.5, ghost:0 },
+  poison:  { grass:2, fairy:2, poison:0.5, ground:0.5, rock:0.5, ghost:0.5, steel:0 },
+  ground:  { fire:2, electric:2, poison:2, rock:2, steel:2, grass:0.5, bug:0.5, flying:0 },
+  flying:  { grass:2, fighting:2, bug:2, electric:0.5, rock:0.5, steel:0.5 },
+  psychic: { fighting:2, poison:2, psychic:0.5, steel:0.5, dark:0, ghost:0 },
+  bug:     { grass:2, psychic:2, dark:2, fire:0.5, fighting:0.5, poison:0.5, flying:0.5, ghost:0.5, steel:0.5, fairy:0.5 },
+  rock:    { fire:2, ice:2, flying:2, bug:2, fighting:0.5, ground:0.5, steel:0.5 },
+  ghost:   { psychic:2, ghost:2, normal:0, dark:0.5 },
+  dragon:  { dragon:2, steel:0.5, fairy:0 },
+  dark:    { psychic:2, ghost:2, fighting:0.5, dark:0.5, fairy:0.5 },
+  steel:   { ice:2, rock:2, fairy:2, fire:0.5, water:0.5, electric:0.5, steel:0.5 },
+  fairy:   { fighting:2, dragon:2, dark:2, fire:0.5, poison:0.5, steel:0.5 },
+  normal:  {},
+};
+
+function typeEff(atkType, defTypes) {
+  let mult = 1;
+  for (const dt of defTypes) {
+    mult *= (TYPE_CHART[atkType]?.[dt] ?? 1);
+  }
+  return mult;
+}
+
+const STATUS = {
+  burn:   { label: '🔥やけど', color: '#f08030', dot: 'rgba(240,128,48,0.8)' },
+  poison: { label: '🟣どく',   color: '#a040a0', dot: 'rgba(160,64,160,0.8)' },
+  para:   { label: '⚡まひ',   color: '#f8d030', dot: 'rgba(248,208,48,0.8)' },
+  sleep:  { label: '💤ねむり', color: '#6890a0', dot: 'rgba(104,144,160,0.8)' },
+  freeze: { label: '🧊こおり', color: '#98d8d8', dot: 'rgba(152,216,216,0.8)' },
+};
+
+const MOVES_DB = {
+  // Fire
+  flamethrower: { name: 'かえんほうしゃ', type: 'fire', cat: 'sp', power: 90, acc: 100, pp: 15, effect: null },
+  fireBlast:    { name: 'だいもんじ',     type: 'fire', cat: 'sp', power: 110, acc: 85, pp: 5,  effect: { chance: 10, status: 'burn' } },
+  ember:        { name: 'ひのこ',         type: 'fire', cat: 'sp', power: 40,  acc: 100, pp: 25, effect: { chance: 10, status: 'burn' } },
+  willOWisp:    { name: 'おにび',         type: 'fire', cat: 'st', power: 0,   acc: 85, pp: 15, effect: { status: 'burn', always: true } },
+  // Water
+  waterGun:     { name: 'みずでっぽう',   type: 'water', cat: 'sp', power: 40, acc: 100, pp: 25, effect: null },
+  surf:         { name: 'なみのり',       type: 'water', cat: 'sp', power: 90, acc: 100, pp: 15, effect: null },
+  hydropump:    { name: 'ハイドロポンプ', type: 'water', cat: 'sp', power: 110, acc: 80, pp: 5, effect: null },
+  aquaTail:     { name: 'アクアテール',   type: 'water', cat: 'ph', power: 90, acc: 90, pp: 10, effect: null },
+  // Grass
+  razorLeaf:    { name: 'はっぱカッター', type: 'grass', cat: 'ph', power: 55, acc: 95, pp: 25, effect: null },
+  solarBeam:    { name: 'ソーラービーム', type: 'grass', cat: 'sp', power: 120, acc: 100, pp: 10, effect: null },
+  leafBlade:    { name: 'リーフブレード', type: 'grass', cat: 'ph', power: 90, acc: 100, pp: 15, effect: null },
+  spore:        { name: 'キノコのほうし', type: 'grass', cat: 'st', power: 0,  acc: 100, pp: 15, effect: { status: 'sleep', always: true } },
+  // Electric
+  thunderbolt:  { name: '10まんボルト',   type: 'electric', cat: 'sp', power: 90, acc: 100, pp: 15, effect: { chance: 10, status: 'para' } },
+  thunder:      { name: 'かみなり',       type: 'electric', cat: 'sp', power: 110, acc: 70, pp: 10, effect: { chance: 30, status: 'para' } },
+  spark:        { name: 'スパーク',       type: 'electric', cat: 'ph', power: 65, acc: 100, pp: 20, effect: { chance: 30, status: 'para' } },
+  thunderwave:  { name: 'でんじは',       type: 'electric', cat: 'st', power: 0, acc: 90, pp: 20, effect: { status: 'para', always: true } },
+  // Ice
+  iceBeam:      { name: 'れいとうビーム', type: 'ice', cat: 'sp', power: 90, acc: 100, pp: 10, effect: { chance: 10, status: 'freeze' } },
+  blizzard:     { name: 'ふぶき',         type: 'ice', cat: 'sp', power: 110, acc: 70, pp: 5,  effect: { chance: 10, status: 'freeze' } },
+  icicle:       { name: 'つらら針',       type: 'ice', cat: 'ph', power: 25, acc: 100, pp: 30, effect: null, multi: [2,5] },
+  // Fighting
+  closeCombat:  { name: 'インファイト',   type: 'fighting', cat: 'ph', power: 120, acc: 100, pp: 5, effect: null },
+  brickBreak:   { name: 'かわらわり',     type: 'fighting', cat: 'ph', power: 75, acc: 100, pp: 15, effect: null },
+  // Psychic
+  psychic:      { name: 'サイコキネシス', type: 'psychic', cat: 'sp', power: 90, acc: 100, pp: 10, effect: null },
+  confusion:    { name: 'ねんりき',       type: 'psychic', cat: 'sp', power: 50, acc: 100, pp: 25, effect: null },
+  // Dragon
+  dragonClaw:   { name: 'ドラゴンクロー', type: 'dragon', cat: 'ph', power: 80, acc: 100, pp: 15, effect: null },
+  dragonPulse:  { name: 'りゅうのはどう', type: 'dragon', cat: 'sp', power: 85, acc: 100, pp: 10, effect: null },
+  // Normal
+  tackle:       { name: 'たいあたり',     type: 'normal', cat: 'ph', power: 40, acc: 100, pp: 35, effect: null },
+  hyperBeam:    { name: 'はかいこうせん', type: 'normal', cat: 'sp', power: 150, acc: 90, pp: 5,  effect: null },
+  bodySlam:     { name: 'のしかかり',     type: 'normal', cat: 'ph', power: 85, acc: 100, pp: 15, effect: { chance: 30, status: 'para' } },
+  // Shadow
+  shadowBall:   { name: 'シャドーボール', type: 'ghost', cat: 'sp', power: 80, acc: 100, pp: 15, effect: null },
+  // Poison
+  sludgeBomb:   { name: 'ヘドロばくだん', type: 'poison', cat: 'sp', power: 90, acc: 100, pp: 10, effect: { chance: 30, status: 'poison' } },
+  // Rock
+  rockSlide:    { name: 'いわなだれ',     type: 'rock', cat: 'ph', power: 75, acc: 90, pp: 10, effect: null },
+  // Ground
+  earthquake:   { name: 'じしん',         type: 'ground', cat: 'ph', power: 100, acc: 100, pp: 10, effect: null },
+  // Steel
+  flashCannon:  { name: 'ラスターカノン', type: 'steel', cat: 'sp', power: 80, acc: 100, pp: 10, effect: null },
+  // Fairy
+  moonblast:    { name: 'ムーンフォース', type: 'fairy', cat: 'sp', power: 95, acc: 100, pp: 15, effect: null },
+  // Dark
+  darkPulse:    { name: 'あくのはどう',   type: 'dark', cat: 'sp', power: 80, acc: 100, pp: 15, effect: null },
+  crunch:       { name: 'かみくだく',     type: 'dark', cat: 'ph', power: 80, acc: 100, pp: 15, effect: null },
+  // Bug
+  bugBuzz:      { name: 'むしのさざめき', type: 'bug', cat: 'sp', power: 90, acc: 100, pp: 10, effect: null },
+  // Flying
+  airSlash:     { name: 'エアスラッシュ', type: 'flying', cat: 'sp', power: 75, acc: 95, pp: 15, effect: null },
+  bravebird:    { name: 'ブレイブバード', type: 'flying', cat: 'ph', power: 120, acc: 100, pp: 15, effect: { recoil: 3 } },
+};
+
+const POKEDEX = [
+  {
+    id: 6, name: 'リザードン', sprite: '🦎', types: ['fire','flying'],
+    hp: 78, atk: 84, def: 78, spa: 109, spd: 85, spe: 100,
+    moves: ['flamethrower','fireBlast','airSlash','dragonClaw'],
+    desc: 'ほのお・ひこう',
+  },
+  {
+    id: 9, name: 'カメックス', sprite: '🐢', types: ['water'],
+    hp: 79, atk: 83, def: 100, spa: 85, spd: 105, spe: 78,
+    moves: ['hydropump','surf','aquaTail','flashCannon'],
+    desc: 'みず',
+  },
+  {
+    id: 3, name: 'フシギバナ', sprite: '🌿', types: ['grass','poison'],
+    hp: 80, atk: 82, def: 83, spa: 100, spd: 100, spe: 80,
+    moves: ['solarBeam','leafBlade','sludgeBomb','spore'],
+    desc: 'くさ・どく',
+  },
+  {
+    id: 25, name: 'ピカチュウ', sprite: '⚡', types: ['electric'],
+    hp: 60, atk: 55, def: 40, spa: 50, spd: 50, spe: 110,
+    moves: ['thunderbolt','thunder','spark','thunderwave'],
+    desc: 'でんき',
+  },
+  {
+    id: 149, name: 'カイリュー', sprite: '🐲', types: ['dragon','flying'],
+    hp: 91, atk: 134, def: 95, spa: 100, spd: 100, spe: 80,
+    moves: ['dragonPulse','dragonClaw','hyperBeam','bodySlam'],
+    desc: 'ドラゴン・ひこう',
+  },
+  {
+    id: 130, name: 'ギャラドス', sprite: '🌊', types: ['water','flying'],
+    hp: 95, atk: 125, def: 79, spa: 60, spd: 100, spe: 81,
+    moves: ['aquaTail','crunch','waterGun','tackle'],
+    desc: 'みず・ひこう',
+  },
+  {
+    id: 65, name: 'フーディン', sprite: '🔮', types: ['psychic'],
+    hp: 55, atk: 50, def: 45, spa: 135, spd: 95, spe: 120,
+    moves: ['psychic','confusion','shadowBall','thunderwave'],
+    desc: 'エスパー',
+  },
+  {
+    id: 94, name: 'ゲンガー', sprite: '👻', types: ['ghost','poison'],
+    hp: 60, atk: 65, def: 60, spa: 130, spd: 75, spe: 110,
+    moves: ['shadowBall','sludgeBomb','darkPulse','willOWisp'],
+    desc: 'ゴースト・どく',
+  },
+  {
+    id: 143, name: 'カビゴン', sprite: '🍖', types: ['normal'],
+    hp: 160, atk: 110, def: 65, spa: 65, spd: 110, spe: 30,
+    moves: ['bodySlam','earthquake','hyperBeam','tackle'],
+    desc: 'ノーマル',
+  },
+  {
+    id: 248, name: 'バンギラス', sprite: '🦕', types: ['rock','dark'],
+    hp: 100, atk: 134, def: 110, spa: 95, spd: 100, spe: 61,
+    moves: ['rockSlide','crunch','earthquake','darkPulse'],
+    desc: 'いわ・あく',
+  },
+  {
+    id: 257, name: 'バシャーモ', sprite: '🔥', types: ['fire','fighting'],
+    hp: 80, atk: 120, def: 70, spa: 110, spd: 70, spe: 80,
+    moves: ['closeCombat','flamethrower','brickBreak','rockSlide'],
+    desc: 'ほのお・かくとう',
+  },
+  {
+    id: 282, name: 'サーナイト', sprite: '🧚', types: ['psychic','fairy'],
+    hp: 68, atk: 65, def: 65, spa: 125, spd: 115, spe: 80,
+    moves: ['moonblast','psychic','shadowBall','confusion'],
+    desc: 'エスパー・フェアリー',
+  },
+  {
+    id: 373, name: 'ボーマンダ', sprite: '🐉', types: ['dragon','flying'],
+    hp: 95, atk: 135, def: 80, spa: 110, spd: 80, spe: 100,
+    moves: ['dragonClaw','dragonPulse','airSlash','fireBlast'],
+    desc: 'ドラゴン・ひこう',
+  },
+  {
+    id: 445, name: 'ガブリアス', sprite: '🦷', types: ['dragon','ground'],
+    hp: 108, atk: 130, def: 95, spa: 80, spd: 85, spe: 102,
+    moves: ['earthquake','dragonClaw','rockSlide','crunch'],
+    desc: 'ドラゴン・じめん',
+  },
+  {
+    id: 484, name: 'パルキア', sprite: '🌀', types: ['water','dragon'],
+    hp: 90, atk: 120, def: 100, spa: 150, spd: 120, spe: 100,
+    moves: ['hydropump','dragonPulse','hyperBeam','aquaTail'],
+    desc: 'みず・ドラゴン',
+  },
+  {
+    id: 196, name: 'エーフィ', sprite: '🔮', types: ['psychic'],
+    hp: 65, atk: 65, def: 60, spa: 130, spd: 95, spe: 110,
+    moves: ['psychic','moonblast','shadowBall','confusion'],
+    desc: 'エスパー',
+  },
+  {
+    id: 260, name: 'ラグラージ', sprite: '💧', types: ['water','ground'],
+    hp: 100, atk: 110, def: 90, spa: 85, spd: 90, spe: 60,
+    moves: ['earthquake','surf','aquaTail','rockSlide'],
+    desc: 'みず・じめん',
+  },
+  {
+    id: 385, name: 'ジラーチ', sprite: '⭐', types: ['steel','psychic'],
+    hp: 100, atk: 100, def: 100, spa: 100, spd: 100, spe: 100,
+    moves: ['flashCannon','psychic','moonblast','bodySlam'],
+    desc: 'はがね・エスパー',
+  },
+];
+
+const TYPE_COLORS = {
+  fire:'#f08030',water:'#6890f0',grass:'#78c850',electric:'#f8d030',
+  ice:'#98d8d8',fighting:'#c03028',poison:'#a040a0',ground:'#e0c068',
+  flying:'#a890f0',psychic:'#f85888',bug:'#a8b820',rock:'#b8a038',
+  ghost:'#705898',dragon:'#7038f8',dark:'#705848',steel:'#b8b8d0',
+  fairy:'#f0b6bc',normal:'#a8a878',
+};
+
+function moveColor(type) {
+  const base = TYPE_COLORS[type] || '#888';
+  return `background: linear-gradient(135deg, ${base}dd, ${base}88); border-color: ${base};`;
+}
+
+// ===== STATE =====
+let selectedIds = [];
+let playerParty = [], enemyParty = [];
+let playerActive = 0, enemyActive = 0;
+let busy = false;
+let turnCount = 0;
+
+// ===== HELPERS =====
+function calcMaxHp(base, level = 50) {
+  return Math.floor((2 * base * level) / 100 + level + 10);
+}
+function calcStat(base, level = 50) {
+  return Math.floor((2 * base * level) / 100 + 5);
+}
+
+function createFighter(pokeData) {
+  const lv = 50;
+  const maxHp = calcMaxHp(pokeData.hp, lv);
+  return {
+    ...pokeData,
+    level: lv,
+    currentHp: maxHp,
+    maxHp,
+    atkStat: calcStat(pokeData.atk, lv),
+    defStat: calcStat(pokeData.def, lv),
+    spaStat: calcStat(pokeData.spa, lv),
+    spdStat: calcStat(pokeData.spd, lv),
+    speStat: calcStat(pokeData.spe, lv),
+    status: null,
+    sleepTurns: 0,
+    pp: Object.fromEntries(pokeData.moves.map(m => [m, MOVES_DB[m].pp])),
+  };
+}
+
+function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+function calcDamage(attacker, defender, moveId) {
+  const move = MOVES_DB[moveId];
+  if (!move.power) return 0;
+  const isPhysical = move.cat === 'ph';
+  const atk = isPhysical ? attacker.atkStat : attacker.spaStat;
+  const def = isPhysical ? defender.defStat : defender.spdStat;
+  // Burn halves physical attack
+  const burnMod = (attacker.status === 'burn' && isPhysical) ? 0.5 : 1;
+  const lvl = attacker.level;
+  let dmg = Math.floor((Math.floor(2 * lvl / 5 + 2) * move.power * atk / def) / 50 + 2);
+  // Random 85-100%
+  dmg = Math.floor(dmg * rand(85, 100) / 100);
+  // STAB
+  if (attacker.types.includes(move.type)) dmg = Math.floor(dmg * 1.5);
+  // Type effectiveness
+  const eff = typeEff(move.type, defender.types);
+  dmg = Math.floor(dmg * eff * burnMod);
+  return { dmg, eff };
+}
+
+function effMsg(eff) {
+  if (eff === 0) return 'こうかなし！';
+  if (eff >= 4) return 'こうかはばつぐんだ！（×4）';
+  if (eff >= 2) return 'こうかはばつぐんだ！';
+  if (eff <= 0.25) return 'こうかはいまひとつのようだ…（×1/4）';
+  if (eff < 1) return 'こうかはいまひとつのようだ…';
+  return null;
+}
+
+// ===== SCREEN SWITCHING =====
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+function showPartySelect() {
+  selectedIds = [];
+  renderPartySelect();
+  showScreen('party-screen');
+}
+
+// ===== PARTY SELECT =====
+function renderPartySelect() {
+  const grid = document.getElementById('pokemon-grid');
+  grid.innerHTML = '';
+  POKEDEX.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'poke-card' + (selectedIds.includes(p.id) ? ' selected' : '');
+    div.innerHTML = `
+      <span class="check">✓</span>
+      <span class="poke-sprite">${p.sprite}</span>
+      <div class="poke-name">${p.name}</div>
+      <div class="poke-types">${p.types.map(t=>`<span class="type-badge type-${t}">${t}</span>`).join('')}</div>
+      <div class="poke-stats-mini">HP:${calcMaxHp(p.hp)} / 速:${calcStat(p.spe)}</div>
+    `;
+    div.onclick = () => toggleSelect(p.id, div);
+    grid.appendChild(div);
+  });
+  updateSelCount();
+}
+
+function toggleSelect(id, card) {
+  const idx = selectedIds.indexOf(id);
+  if (idx >= 0) {
+    selectedIds.splice(idx, 1);
+    card.classList.remove('selected');
+  } else {
+    if (selectedIds.length >= 3) return;
+    selectedIds.push(id);
+    card.classList.add('selected');
+  }
+  updateSelCount();
+}
+
+function updateSelCount() {
+  document.getElementById('sel-count').textContent = `${selectedIds.length} / 3`;
+  document.getElementById('confirm-btn').disabled = selectedIds.length !== 3;
+}
+
+// ===== BATTLE START =====
+function startBattle() {
+  playerParty = selectedIds.map(id => createFighter(POKEDEX.find(p => p.id === id)));
+  // Enemy picks random 3
+  const shuffled = [...POKEDEX].sort(() => Math.random() - 0.5);
+  enemyParty = shuffled.slice(0, 3).map(p => createFighter(p));
+  playerActive = 0;
+  enemyActive = 0;
+  busy = false;
+  turnCount = 0;
+  document.getElementById('battle-log').innerHTML = '';
+  showScreen('battle-screen');
+  renderBattle();
+  addLog(`${playerParty[0].name}、いけ！`);
+  addLog(`あいては${enemyParty[0].name}を出してきた！`);
+}
+
+// ===== RENDER =====
+function renderBattle() {
+  const pf = playerParty[playerActive];
+  const ef = enemyParty[enemyActive];
+
+  // Sprites
+  document.getElementById('player-sprite').textContent = pf.sprite;
+  document.getElementById('enemy-sprite').textContent = ef.sprite;
+
+  // Names / levels
+  document.getElementById('player-name').textContent = pf.name;
+  document.getElementById('enemy-name').textContent = ef.name;
+  document.getElementById('player-level').textContent = `Lv.${pf.level}`;
+  document.getElementById('enemy-level').textContent = `Lv.${ef.level}`;
+
+  // HP
+  updateHpBar('player', pf);
+  updateHpBar('enemy', ef);
+
+  // Status badges
+  renderStatus('player', pf);
+  renderStatus('enemy', ef);
+
+  // Party dots
+  renderDots('player', playerParty, playerActive);
+  renderDots('enemy', enemyParty, enemyActive);
+
+  // Moves
+  renderMoves(pf);
+
+  closeSwitch();
+}
+
+function updateHpBar(side, fighter) {
+  const pct = Math.max(0, fighter.currentHp / fighter.maxHp * 100);
+  const bar = document.getElementById(`${side}-hp-bar`);
+  bar.style.width = pct + '%';
+  bar.style.background = pct > 50 ? 'var(--hp-green)' : pct > 20 ? 'var(--hp-yellow)' : 'var(--hp-red)';
+  document.getElementById(`${side}-hp-num`).textContent = `${Math.max(0,fighter.currentHp)}/${fighter.maxHp}`;
+}
+
+function renderStatus(side, fighter) {
+  const el = document.getElementById(`${side}-status`);
+  if (fighter.status) {
+    const s = STATUS[fighter.status];
+    el.innerHTML = `<span class="status-badge" style="background:${s.dot}">${s.label}</span>`;
+  } else {
+    el.innerHTML = '';
+  }
+}
+
+function renderDots(side, party, activeIdx) {
+  const el = document.getElementById(`${side}-dots`);
+  el.innerHTML = party.map((p,i) =>
+    `<div class="party-dot ${i === activeIdx ? 'active' : p.currentHp > 0 ? 'alive' : 'fainted'}"></div>`
+  ).join('');
+}
+
+function renderMoves(fighter) {
+  const grid = document.getElementById('moves-grid');
+  grid.innerHTML = '';
+  fighter.moves.forEach(moveId => {
+    const move = MOVES_DB[moveId];
+    const pp = fighter.pp[moveId];
+    const btn = document.createElement('button');
+    btn.className = 'move-btn';
+    btn.setAttribute('style', moveColor(move.type));
+    btn.disabled = pp === 0 || busy;
+    btn.innerHTML = `
+      <span class="move-name">${move.name}</span>
+      <span class="move-meta">
+        <span>${move.type.toUpperCase()}</span>
+        <span>PP ${pp}/${move.pp}</span>
+      </span>
+    `;
+    btn.onclick = () => playerUsesMove(moveId);
+    grid.appendChild(btn);
+  });
+}
+
+// ===== BATTLE LOG =====
+function addLog(msg) {
+  const log = document.getElementById('battle-log');
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+  // Keep max 8 lines
+  while (log.children.length > 8) log.removeChild(log.firstChild);
+}
+
+// ===== ANIMATIONS =====
+function animHit(side) {
+  const el = document.getElementById(`${side}-sprite`);
+  el.classList.remove('anim-hit', 'anim-shake');
+  void el.offsetWidth;
+  el.classList.add('anim-hit');
+  setTimeout(() => el.classList.remove('anim-hit'), 400);
+}
+
+function animShake(side) {
+  const el = document.getElementById(`${side}-sprite`);
+  el.classList.remove('anim-shake');
+  void el.offsetWidth;
+  el.classList.add('anim-shake');
+  setTimeout(() => el.classList.remove('anim-shake'), 500);
+}
+
+function animFaint(side) {
+  return new Promise(res => {
+    const el = document.getElementById(`${side}-sprite`);
+    el.classList.add('anim-faint');
+    setTimeout(() => { el.classList.remove('anim-faint'); res(); }, 600);
+  });
+}
+
+// ===== DELAY =====
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ===== TURN ENGINE =====
+async function playerUsesMove(moveId) {
+  if (busy) return;
+  busy = true;
+  setButtonsDisabled(true);
+
+  const pf = playerParty[playerActive];
+  const ef = enemyParty[enemyActive];
+
+  // Check player status
+  const canAct = await checkStatus(pf, 'player');
+
+  if (canAct) {
+    await executeMove(pf, ef, moveId, 'player', 'enemy');
+    if (ef.currentHp <= 0) {
+      await handleFaint('enemy');
+      busy = false;
+      return;
+    }
+  }
+
+  // Enemy turn
+  await delay(400);
+  const ef2 = enemyParty[enemyActive];
+  const pf2 = playerParty[playerActive];
+  const canEnemyAct = await checkStatus(ef2, 'enemy');
+  if (canEnemyAct) {
+    const enemyMove = pickEnemyMove(ef2, pf2);
+    await executeMove(ef2, pf2, enemyMove, 'enemy', 'player');
+    if (pf2.currentHp <= 0) {
+      await handleFaint('player');
+      busy = false;
+      return;
+    }
+  }
+
+  // End of turn status damage
+  await endOfTurnEffects();
+
+  turnCount++;
+  busy = false;
+  setButtonsDisabled(false);
+  renderMoves(playerParty[playerActive]);
+}
+
+async function checkStatus(fighter, side) {
+  if (!fighter.status) return true;
+  const s = fighter.status;
+
+  if (s === 'sleep') {
+    fighter.sleepTurns = (fighter.sleepTurns || 0) + 1;
+    if (fighter.sleepTurns >= rand(2, 5)) {
+      fighter.status = null;
+      fighter.sleepTurns = 0;
+      addLog(`${fighter.name}は目を覚ました！`);
+      renderStatus(side, fighter);
+      return true;
+    }
+    addLog(`${fighter.name}はぐっすり眠っている…`);
+    animShake(side);
+    await delay(600);
+    return false;
+  }
+  if (s === 'freeze') {
+    if (Math.random() < 0.2) {
+      fighter.status = null;
+      addLog(`${fighter.name}のこおりが溶けた！`);
+      renderStatus(side, fighter);
+      return true;
+    }
+    addLog(`${fighter.name}はこおっている！`);
+    animShake(side);
+    await delay(600);
+    return false;
+  }
+  if (s === 'para') {
+    if (Math.random() < 0.25) {
+      addLog(`${fighter.name}はしびれて動けない！`);
+      animShake(side);
+      await delay(600);
+      return false;
+    }
+  }
+  return true;
+}
+
+async function executeMove(attacker, defender, moveId, atkSide, defSide) {
+  const move = MOVES_DB[moveId];
+  attacker.pp[moveId] = Math.max(0, attacker.pp[moveId] - 1);
+  addLog(`${attacker.name}の${move.name}！`);
+  await delay(300);
+
+  // Accuracy check
+  if (move.acc < 100 && Math.random() * 100 > move.acc) {
+    addLog('外れた！');
+    animShake(atkSide);
+    await delay(400);
+    return;
+  }
+
+  // Status move
+  if (move.cat === 'st') {
+    const effect = move.effect;
+    if (effect && effect.always) {
+      if (defender.status) {
+        addLog(`${defender.name}はすでに状態異常だ！`);
+      } else if (effect.status === 'burn' && defender.types.includes('fire')) {
+        addLog(`こうかなし！`);
+      } else if (effect.status === 'para' && defender.types.includes('electric')) {
+        addLog(`こうかなし！`);
+      } else if (effect.status === 'poison' && (defender.types.includes('poison') || defender.types.includes('steel'))) {
+        addLog(`こうかなし！`);
+      } else {
+        defender.status = effect.status;
+        const sLabel = STATUS[effect.status].label;
+        addLog(`${defender.name}は${sLabel}になった！`);
+        renderStatus(defSide, defender);
+        animHit(defSide);
+      }
+    }
+    await delay(400);
+    return;
+  }
+
+  // Damage
+  const { dmg, eff } = calcDamage(attacker, defender, moveId);
+  if (eff === 0) {
+    addLog('こうかなし！');
+    await delay(400);
+    return;
+  }
+  const actualDmg = Math.max(1, dmg);
+  defender.currentHp = Math.max(0, defender.currentHp - actualDmg);
+  animHit(defSide);
+  updateHpBar(defSide, defender);
+
+  const effM = effMsg(eff);
+  if (effM) { await delay(200); addLog(effM); }
+
+  // Recoil
+  if (move.effect?.recoil) {
+    const recoilDmg = Math.max(1, Math.floor(actualDmg / move.effect.recoil));
+    attacker.currentHp = Math.max(0, attacker.currentHp - recoilDmg);
+    updateHpBar(atkSide, attacker);
+    addLog(`${attacker.name}はその反動でダメージを受けた！`);
+  }
+
+  await delay(400);
+
+  // Secondary effect
+  if (move.effect && move.effect.chance) {
+    if (!defender.status && Math.random() * 100 < move.effect.chance) {
+      defender.status = move.effect.status;
+      const sLabel = STATUS[move.effect.status].label;
+      addLog(`${defender.name}は${sLabel}になった！`);
+      renderStatus(defSide, defender);
+    }
+  }
+}
+
+async function endOfTurnEffects() {
+  const sides = [
+    { fighter: playerParty[playerActive], side: 'player' },
+    { fighter: enemyParty[enemyActive], side: 'enemy' },
+  ];
+  for (const { fighter, side } of sides) {
+    if (fighter.currentHp <= 0) continue;
+    if (fighter.status === 'burn') {
+      const dmg = Math.max(1, Math.floor(fighter.maxHp / 16));
+      fighter.currentHp = Math.max(0, fighter.currentHp - dmg);
+      updateHpBar(side, fighter);
+      addLog(`${fighter.name}はやけどのダメージを受けた！`);
+      animHit(side);
+      await delay(300);
+    } else if (fighter.status === 'poison') {
+      const dmg = Math.max(1, Math.floor(fighter.maxHp / 8));
+      fighter.currentHp = Math.max(0, fighter.currentHp - dmg);
+      updateHpBar(side, fighter);
+      addLog(`${fighter.name}はどくのダメージを受けた！`);
+      animHit(side);
+      await delay(300);
+    }
+  }
+}
+
+// ===== FAINT HANDLING =====
+async function handleFaint(side) {
+  const party = side === 'player' ? playerParty : enemyParty;
+  const activeIdx = side === 'player' ? playerActive : enemyActive;
+  addLog(`${party[activeIdx].name}はたおれた！`);
+  await animFaint(side);
+  renderDots(side, party, activeIdx);
+
+  const nextIdx = party.findIndex((p, i) => i !== activeIdx && p.currentHp > 0);
+
+  if (nextIdx === -1) {
+    // All fainted
+    await delay(400);
+    showResult(side === 'player' ? 'lose' : 'win');
+    return;
+  }
+
+  if (side === 'enemy') {
+    enemyActive = nextIdx;
+    addLog(`あいては${party[nextIdx].name}を出してきた！`);
+    renderBattle();
+    busy = false;
+    setButtonsDisabled(false);
+  } else {
+    // Force switch
+    renderBattle();
+    addLog('ポケモンを選んでください！');
+    openSwitch(true);
+    busy = false;
+  }
+}
+
+// ===== ENEMY AI =====
+function pickEnemyMove(ef, pf) {
+  // Simple AI: pick highest expected damage, prefer moves with PP
+  const available = ef.moves.filter(m => ef.pp[m] > 0 && MOVES_DB[m].cat !== 'st');
+  if (available.length === 0) {
+    // Use status or whatever has PP
+    const any = ef.moves.find(m => ef.pp[m] > 0);
+    return any || ef.moves[0];
+  }
+  // Score each move
+  let best = available[0], bestScore = -1;
+  for (const m of available) {
+    const move = MOVES_DB[m];
+    const { dmg } = calcDamage(ef, pf, m);
+    const score = dmg * (move.acc / 100);
+    if (score > bestScore) { bestScore = score; best = m; }
+  }
+  // 20% chance to pick random
+  if (Math.random() < 0.2) return available[rand(0, available.length - 1)];
+  return best;
+}
+
+// ===== SWITCH =====
+let forcedSwitch = false;
+function openSwitch(forced = false) {
+  forcedSwitch = forced;
+  const list = document.getElementById('switch-list');
+  list.innerHTML = '';
+  playerParty.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'switch-poke-btn' + (i === playerActive ? ' active-poke' : '');
+    btn.disabled = p.currentHp <= 0 || i === playerActive;
+    const hpPct = Math.round(p.currentHp / p.maxHp * 100);
+    btn.innerHTML = `
+      <span class="sp-sprite">${p.sprite}</span>
+      <div class="sp-info">
+        <div class="sp-name">${p.name}</div>
+        <div class="sp-hp">HP: ${p.currentHp}/${p.maxHp} (${hpPct}%)</div>
+      </div>
+    `;
+    btn.onclick = () => switchTo(i);
+    list.appendChild(btn);
+  });
+
+  document.getElementById('main-controls').style.display = 'none';
+  document.getElementById('switch-panel').classList.add('visible');
+  document.querySelector('.back-btn').style.display = forced ? 'none' : '';
+}
+
+function closeSwitch() {
+  document.getElementById('main-controls').style.display = '';
+  document.getElementById('switch-panel').classList.remove('visible');
+  forcedSwitch = false;
+}
+
+async function switchTo(idx) {
+  if (idx === playerActive) return;
+  const old = playerParty[playerActive];
+  playerActive = idx;
+  const nw = playerParty[playerActive];
+  addLog(`${old.name}、もどれ！`);
+  await delay(200);
+  addLog(`${nw.name}、いけ！`);
+  renderBattle();
+
+  if (!forcedSwitch) {
+    // Enemy gets a free turn after switch
+    closeSwitch();
+    busy = true;
+    setButtonsDisabled(true);
+    await delay(400);
+    const ef = enemyParty[enemyActive];
+    const canAct = await checkStatus(ef, 'enemy');
+    if (canAct) {
+      const mv = pickEnemyMove(ef, playerParty[playerActive]);
+      await executeMove(ef, playerParty[playerActive], mv, 'enemy', 'player');
+      if (playerParty[playerActive].currentHp <= 0) {
+        await handleFaint('player');
+        return;
+      }
+    }
+    await endOfTurnEffects();
+    busy = false;
+    setButtonsDisabled(false);
+    renderMoves(playerParty[playerActive]);
+  } else {
+    closeSwitch();
+    busy = false;
+    setButtonsDisabled(false);
+    renderMoves(playerParty[playerActive]);
+  }
+}
+
+// ===== RUN =====
+async function tryRun() {
+  if (busy) return;
+  if (Math.random() < 0.5) {
+    addLog('うまく逃げられた！');
+    await delay(600);
+    showResult('run');
+  } else {
+    addLog('逃げられなかった！');
+    busy = true;
+    setButtonsDisabled(true);
+    await delay(400);
+    const ef = enemyParty[enemyActive];
+    const canAct = await checkStatus(ef, 'enemy');
+    if (canAct) {
+      const mv = pickEnemyMove(ef, playerParty[playerActive]);
+      await executeMove(ef, playerParty[playerActive], mv, 'enemy', 'player');
+      if (playerParty[playerActive].currentHp <= 0) {
+        await handleFaint('player');
+        return;
+      }
+    }
+    busy = false;
+    setButtonsDisabled(false);
+    renderMoves(playerParty[playerActive]);
+  }
+}
+
+function setButtonsDisabled(disabled) {
+  document.querySelectorAll('.move-btn, .action-btn').forEach(b => b.disabled = disabled);
+}
+
+// ===== RESULT =====
+function showResult(outcome) {
+  const title = document.getElementById('result-title');
+  const msg = document.getElementById('result-msg');
+  if (outcome === 'win') {
+    title.textContent = '勝利！';
+    title.className = 'result-title win';
+    msg.textContent = `${turnCount}ターンで相手を全滅させた！\nポケモンマスターへの道は続く…`;
+  } else if (outcome === 'lose') {
+    title.textContent = '敗北…';
+    title.className = 'result-title lose';
+    msg.textContent = '全てのポケモンがたおれた。\n次は勝てるように鍛え直そう！';
+  } else {
+    title.textContent = '逃げた！';
+    title.className = 'result-title lose';
+    msg.textContent = 'またいつかチャレンジしよう！';
+  }
+  showScreen('result-screen');
+}
+</script>
+</body>
+</html>

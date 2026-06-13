@@ -3,13 +3,14 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
-  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film
+  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
 import type { LayerEntry } from './LayerPanel';
 import AnimationBar from './AnimationBar';
 import type { FrameData } from './AnimationBar';
+import ImportDialog from './ImportDialog';
 
 interface DrawingEditorProps {
   onClose: () => void;
@@ -51,6 +52,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const isPlayingRef = useRef(false);
   const playTimerRef = useRef<number | null>(null);
   const [, forceRender] = useState(0);
+  const [showImport, setShowImport] = useState(false);
   const onionSkinRef = useRef(false);
   const onionSkinOpacityRef = useRef(20);
   const onionCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -518,6 +520,15 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     return () => window.removeEventListener('keydown', handler);
   });
 
+  const handleImport = async (image: HTMLImageElement, _opts: { opacity: number; simple: boolean }) => {
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    if (!active?.editable) return;
+    const bitmap = await createImageBitmap(image);
+    active.paste(bitmap);
+    active.trace();
+    forceRender(n => n + 1);
+  };
+
   const handleSave = () => {
     onSave(oekaki.render().toDataURL());
   };
@@ -525,7 +536,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
     <button
       onClick={() => { setTool(t); toolRef.current = t; }}
-      className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${tool === t ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+      className={'w-9 h-9 rounded-lg flex items-center justify-center transition-colors ' + (tool === t ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
       title={label}
     >
       {icon}
@@ -534,13 +545,22 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   return (
     <div className="absolute inset-0 bg-[#0f0f11] z-50 flex flex-col select-none">
-      <div className="flex items-center px-3.5 py-2.5 border-b border-gray-800 shrink-0 bg-[#0f0f11]">
-        <button onClick={onClose} className="mr-2 text-gray-400 hover:bg-gray-100/10 p-1.5 rounded transition-colors">
+      <div className="flex items-center px-3.5 py-2 border-b border-gray-800 shrink-0 bg-[#0f0f11] gap-2">
+        <button onClick={onClose} className="text-gray-400 hover:bg-gray-100/10 p-1.5 rounded transition-colors">
           <X size={20} />
         </button>
         <span className="font-bold text-xs text-gray-300">キャンセル</span>
-        <span className="text-gray-600 mx-1.5 text-[10px]">›</span>
-        <span className="text-gray-400 text-xs">お絵かきツール</span>
+        <span className="text-gray-600 text-[10px]">›</span>
+        <div className="flex items-center bg-gray-800 rounded-lg p-0.5 gap-0.5">
+          <button
+            onClick={() => { if (animMode) exitAnimMode(); }}
+            className={'px-3 py-1 rounded-md text-[11px] font-medium transition-colors ' + (!animMode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200')}
+          >一枚絵</button>
+          <button
+            onClick={() => enterAnimMode()}
+            className={'px-3 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ' + (animMode ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200')}
+          ><Film size={12} />アニメ</button>
+        </div>
       </div>
 
       <div className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center">
@@ -577,24 +597,17 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           <div className="w-px h-6 bg-gray-800 mx-1" />
           <button
             onClick={() => setShowGrid(v => !v)}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${showGrid ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+            className={'w-9 h-9 rounded-lg flex items-center justify-center transition-colors ' + (showGrid ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
             title="グリッド (G)"
           >
             <Grid3x3 size={15} />
           </button>
           <button
             onClick={() => setShowLayerPanel(v => !v)}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${showLayerPanel ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
+            className={'w-9 h-9 rounded-lg flex items-center justify-center transition-colors ' + (showLayerPanel ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
             title="レイヤー"
           >
             <Layers size={15} />
-          </button>
-          <button
-            onClick={() => animMode ? exitAnimMode() : enterAnimMode()}
-            className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${animMode ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20'}`}
-            title="アニメーション"
-          >
-            <Film size={15} />
           </button>
         </div>
 
@@ -644,7 +657,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
             {PRESET_COLORS.map(c => (
               <button
                 key={c}
-                className={`w-5 h-5 rounded-sm border ${color === c ? 'border-white scale-110' : 'border-gray-700/50'} transition-transform`}
+                className={'w-5 h-5 rounded-sm border ' + (color === c ? 'border-white scale-110' : 'border-gray-700/50') + ' transition-transform'}
                 style={{ backgroundColor: c }}
                 onClick={() => applyColor(c)}
               />
@@ -682,6 +695,10 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
               <span>進む</span>
             </button>
           </div>
+          <button onClick={() => setShowImport(true)} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20">
+            <Upload size={11} />
+            <span>読込</span>
+          </button>
           <button onClick={handleSave} className="h-7 rounded bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold flex items-center space-x-1.5 px-3 text-[10px] transition-colors">
             <Save size={11} />
             <span>投稿する</span>
@@ -701,6 +718,13 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           onClose={() => setShowLayerPanel(false)}
         />
       )}
+      <ImportDialog
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={handleImport}
+        walkMode={false}
+        walkPresets={[]}
+      />
     </div>
   );
 }

@@ -1,28 +1,84 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Play, Pause, RotateCcw, Music, Code, Smartphone } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
+import { bgmRefToAsset, refLabel } from '@/lib/asset-ref';
+import ContentPicker, { type PickResult } from './ContentPicker';
 
 const TILE_SIZE = 32;
 const COLS = 20;
 const ROWS = 15;
 
-type PresetId = 'action' | 'rpg' | 'touhou';
-type EditorTab = 'map' | 'char' | 'bgm';
+export type PresetId = 'dq' | 'pokemon' | 'mario' | 'rockman' | 'touhou';
+type EngineKind = 'action' | 'rpg' | 'touhou';
+type EditorTab = 'map' | 'char' | 'asset';
 
-interface TileDef { name: string; color: string; passable: boolean; special?: string; }
+interface TileDef { name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string; }
+interface PlayerDef {
+  emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number;
+  start: { x: number; y: number }; spriteRef?: string; spriteUrl?: string;
+}
+interface BgmState { ref: string; src?: string; type?: 'youtube' | 'mml'; }
 
 interface PresetData {
-  id: PresetId; name: string; gravity: number; friction: number;
-  player: { emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number } };
-  tiles: Record<number, TileDef>;
-  map: number[][];
+  id: PresetId; name: string; engine: EngineKind; gravity: number; friction: number;
+  player: PlayerDef; tiles: Record<number, TileDef>; map: number[][]; bgm?: BgmState;
 }
 
+/** ゲームのマニフェスト（保存用・テキスト/参照のみ）。docs/game-feature-design.md §4 */
+export interface GameManifestDraft {
+  preset: PresetId; engine: EngineKind; name: string;
+  gravity: number; friction: number;
+  player: { emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string };
+  tiles: Record<number, { name: string; color: string; passable: boolean; special?: string; imageRef?: string }>;
+  map: number[][];
+  bgm: string;
+}
+
+const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
+
 const PRESETS: Record<PresetId, PresetData> = {
-  action: {
-    id: 'action', name: 'アクション', gravity: 0.6, friction: 0.8,
+  dq: {
+    id: 'dq', name: 'ドラクエ', engine: 'rpg', gravity: 0, friction: 0,
+    player: { emoji: '🦸', color: '#4444ff', speed: 3, jumpPower: 0, w: 24, h: 24, start: { x: TILE_SIZE * 2, y: TILE_SIZE * 2 } },
+    tiles: {
+      0: { name: '平地', color: '#3a9a4a', passable: true },
+      1: { name: '壁/岩', color: '#6b5a3a', passable: false },
+      2: { name: '水', color: '#2a5acb', passable: false },
+      3: { name: '城(ゴール)', color: '#b0b0c0', passable: true, special: 'goal' },
+      4: { name: '宝箱', color: '#d4af37', passable: false, special: 'item' },
+    },
+    map: Array.from({ length: ROWS }, (_, y) =>
+      Array.from({ length: COLS }, (_, x) =>
+        x === 0 || x === COLS - 1 || y === 0 || y === ROWS - 1 ? 1
+          : x === 10 && y > 4 && y < 11 ? 2
+          : x === 16 && y === 3 ? 3
+          : x === 5 && y === 10 ? 4 : 0
+      )
+    ),
+  },
+  pokemon: {
+    id: 'pokemon', name: 'ポケモン', engine: 'rpg', gravity: 0, friction: 0,
+    player: { emoji: '🧢', color: '#e03030', speed: 3, jumpPower: 0, w: 24, h: 24, start: { x: TILE_SIZE * 2, y: TILE_SIZE * 2 } },
+    tiles: {
+      0: { name: '道', color: '#c8b88a', passable: true },
+      1: { name: '木', color: '#1f6b2f', passable: false },
+      2: { name: '草むら', color: '#5fbf5f', passable: true, special: 'grass' },
+      3: { name: 'ジム(ゴール)', color: '#9a5ad0', passable: true, special: 'goal' },
+      4: { name: '池', color: '#2a8acb', passable: false },
+    },
+    map: Array.from({ length: ROWS }, (_, y) =>
+      Array.from({ length: COLS }, (_, x) =>
+        x === 0 || x === COLS - 1 || y === 0 || y === ROWS - 1 ? 1
+          : (x > 6 && x < 13 && y > 7 && y < 12) ? 2
+          : x === 16 && y === 3 ? 3
+          : (x > 2 && x < 6 && y > 2 && y < 5) ? 4 : 0
+      )
+    ),
+  },
+  mario: {
+    id: 'mario', name: 'マリオ', engine: 'action', gravity: 0.6, friction: 0.8,
     player: { emoji: '🍄', color: '#ff4444', speed: 4, jumpPower: -12, w: 24, h: 24, start: { x: 50, y: 50 } },
     tiles: {
       0: { name: '空', color: '#87CEEB', passable: true },
@@ -32,27 +88,30 @@ const PRESETS: Record<PresetId, PresetData> = {
     },
     map: Array.from({ length: ROWS }, (_, y) =>
       Array.from({ length: COLS }, (_, x) =>
-        y > ROWS - 3 ? 1 : y === ROWS - 5 && x > 5 && x < 10 ? 1 : x === 18 && y === ROWS - 4 ? 3 : 0
+        y > ROWS - 3 ? 1 : y === ROWS - 5 && x > 5 && x < 10 ? 1 : x === 8 && y === ROWS - 6 ? 2 : x === 18 && y === ROWS - 4 ? 3 : 0
       )
     ),
   },
-  rpg: {
-    id: 'rpg', name: 'RPG', gravity: 0, friction: 0,
-    player: { emoji: '🗡️', color: '#4444ff', speed: 3, jumpPower: 0, w: 24, h: 24, start: { x: TILE_SIZE * 2, y: TILE_SIZE * 2 } },
+  rockman: {
+    id: 'rockman', name: 'ロックマン', engine: 'action', gravity: 0.6, friction: 0.8,
+    player: { emoji: '🤖', color: '#1e90ff', speed: 4, jumpPower: -12, w: 24, h: 24, start: { x: 50, y: 50 } },
     tiles: {
-      0: { name: '平地', color: '#90EE90', passable: true },
-      1: { name: '壁/木', color: '#228B22', passable: false },
-      2: { name: '水', color: '#4169E1', passable: false },
-      3: { name: '城', color: '#A9A9A9', passable: true, special: 'goal' },
+      0: { name: '空', color: '#0b1633', passable: true },
+      1: { name: '鉄床', color: '#5a6a7a', passable: false },
+      2: { name: 'トゲ', color: '#cf3030', passable: true, special: 'trap' },
+      3: { name: 'ゴール', color: '#30cfa0', passable: true, special: 'goal' },
     },
     map: Array.from({ length: ROWS }, (_, y) =>
       Array.from({ length: COLS }, (_, x) =>
-        x === 0 || x === COLS - 1 || y === 0 || y === ROWS - 1 ? 1 : x === 10 && y > 5 ? 2 : x === 15 && y === 5 ? 3 : 0
+        y > ROWS - 3 ? 1
+          : y === ROWS - 3 && (x === 7 || x === 12) ? 2
+          : y === ROWS - 6 && x > 9 && x < 13 ? 1
+          : x === 18 && y === ROWS - 4 ? 3 : 0
       )
     ),
   },
   touhou: {
-    id: 'touhou', name: '弾幕STG', gravity: 0, friction: 0,
+    id: 'touhou', name: '東方(弾幕)', engine: 'touhou', gravity: 0, friction: 0,
     player: { emoji: '🎀', color: '#ff0000', speed: 4.5, jumpPower: 0, w: 24, h: 24, start: { x: COLS * TILE_SIZE / 2 - 12, y: ROWS * TILE_SIZE - 60 } },
     tiles: {
       0: { name: '夜空', color: '#0B0B2A', passable: true },
@@ -71,6 +130,11 @@ const PRESETS: Record<PresetId, PresetData> = {
   },
 };
 
+const PRESET_ORDER: PresetId[] = ['dq', 'mario', 'touhou', 'pokemon', 'rockman'];
+const PRESET_EMOJI: Record<PresetId, string> = { dq: '🐉', mario: '🍄', touhou: '🎀', pokemon: '⚡', rockman: '🤖' };
+
+const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
+
 interface Enemy { x: number; y: number; type: string; hp: number; timer: number; w: number; h: number; emoji: string; }
 interface Bullet { x: number; y: number; w: number; h: number; vy: number; }
 interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; }
@@ -86,28 +150,50 @@ interface GameEngine {
   animId: number;
 }
 
-interface GameMakerProps { onClose: () => void; }
+interface GameMakerProps {
+  onClose: () => void;
+  userId: string;
+  onSave?: (manifest: GameManifestDraft, meta: { title: string; preset: PresetId }) => void;
+}
 
-export default function GameMaker({ onClose }: GameMakerProps) {
+export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [presetId, setPresetId] = useState<PresetId>('action');
-  const [gameData, setGameData] = useState<PresetData>(() => JSON.parse(JSON.stringify(PRESETS.action)));
+  const [presetId, setPresetId] = useState<PresetId>('dq');
+  const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.dq));
+  const [title, setTitle] = useState(PRESETS.dq.name);
   const [isPlaying, setIsPlaying] = useState(false);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
   const [selectedTileId, setSelectedTileId] = useState(1);
-  const [bgmSettings, setBgmSettings] = useState({ type: 'none' as 'none' | 'youtube' | 'mml', url: '', mml: 'C E G C5' });
   const [touchInputs, setTouchInputs] = useState({ up: false, down: false, left: false, right: false, action: false });
-  const [inputReady, setInputReady] = useState(false);
+  const [, setInputReady] = useState(false);
+  // ContentPicker: target が適用先
+  const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: 'player' | 'bgm' | number } | null>(null);
 
   const engineRef = useRef<GameEngine>({
     map: [], player: { x: 50, y: 50, vx: 0, vy: 0, isGrounded: false },
     keys: new Set(), bullets: [], enemyBullets: [], enemies: [], shotTimer: 0, animId: 0,
   });
+  const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
+
+  const ensureImage = useCallback((url?: string) => {
+    if (!url || imgCache.current.has(url)) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    imgCache.current.set(url, img);
+  }, []);
+
+  // 画像参照が変わったらキャッシュへ読み込み
+  useEffect(() => {
+    ensureImage(gameData.player.spriteUrl);
+    Object.values(gameData.tiles).forEach(t => ensureImage(t.imageUrl));
+  }, [gameData, ensureImage]);
 
   const resetGame = useCallback((id: PresetId) => {
-    const data = PRESETS[id];
+    const data = clone(PRESETS[id]);
     setPresetId(id);
-    setGameData(JSON.parse(JSON.stringify(data)));
+    setGameData(data);
+    setTitle(PRESETS[id].name);
     const eng = engineRef.current;
     eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
     eng.keys.clear();
@@ -117,8 +203,17 @@ export default function GameMaker({ onClose }: GameMakerProps) {
     setIsPlaying(false);
   }, []);
 
+  const restart = useCallback(() => {
+    const eng = engineRef.current;
+    eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
+    eng.keys.clear();
+    eng.bullets = []; eng.enemyBullets = []; eng.enemies = [];
+    setTouchInputs({ up: false, down: false, left: false, right: false, action: false });
+    setIsPlaying(false);
+  }, [gameData]);
+
   useEffect(() => {
-    resetGame('action');
+    resetGame('dq');
     const firstTouch = () => { setInputReady(true); window.removeEventListener('touchstart', firstTouch); };
     window.addEventListener('touchstart', firstTouch);
     return () => window.removeEventListener('touchstart', firstTouch);
@@ -126,17 +221,14 @@ export default function GameMaker({ onClose }: GameMakerProps) {
 
   // BGM
   useEffect(() => {
-    if (isPlaying && gameData) {
-      if (bgmSettings.type === 'youtube' && bgmSettings.url) {
-        bgmManager.play({
-          bgm: { type: 'youtube', src: bgmSettings.url },
-          tileset: {},
-        } as any);
-      } else if (bgmSettings.type === 'mml') {
-        bgmManager.play({
-          bgm: { type: 'mml', src: bgmSettings.mml },
-          tileset: {},
-        } as any);
+    if (isPlaying && gameData.bgm?.src) {
+      const asset = bgmRefToAsset(gameData.bgm.ref, gameData.bgm.type === 'mml' ? gameData.bgm.src : undefined);
+      const type = gameData.bgm.type;
+      const src = gameData.bgm.src;
+      if (type && src) {
+        bgmManager.play({ bgm: { type, src }, tileset: {} } as never);
+      } else if (asset) {
+        bgmManager.play({ bgm: asset, tileset: {} } as never);
       } else {
         bgmManager.stop();
       }
@@ -144,7 +236,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
       bgmManager.stop();
     }
     return () => bgmManager.stop();
-  }, [isPlaying, bgmSettings, gameData]);
+  }, [isPlaying, gameData.bgm]);
 
   // Init map + enemies when play state changes
   useEffect(() => {
@@ -152,7 +244,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
     if (isPlaying) {
       eng.bullets = []; eng.enemyBullets = []; eng.enemies = [];
       const workingMap = JSON.parse(JSON.stringify(gameData.map));
-      if (gameData.id === 'touhou') {
+      if (gameData.engine === 'touhou') {
         for (let y = 0; y < ROWS; y++) {
           for (let x = 0; x < COLS; x++) {
             const info = gameData.tiles[workingMap[y][x]];
@@ -169,6 +261,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
         }
       }
       eng.map = workingMap;
+      eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
     } else {
       eng.map = gameData.map;
     }
@@ -192,6 +285,16 @@ export default function GameMaker({ onClose }: GameMakerProps) {
       return { id, rect: { x: col * TILE_SIZE, y: row * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE }, info: gameData.tiles[id] };
     };
 
+    const drawSprite = (def: { emoji: string; spriteUrl?: string }, x: number, y: number, w: number, h: number) => {
+      const img = def.spriteUrl ? imgCache.current.get(def.spriteUrl) : undefined;
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, x, y, w, h);
+      } else {
+        ctx.font = `${w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(def.emoji, x + w / 2, y + h + 4);
+      }
+    };
+
     const loop = () => {
       const eng = engineRef.current;
       const p = eng.player;
@@ -206,7 +309,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
       const isAction = keys.has(' ') || keys.has('ArrowUp') || touch.action;
 
       if (isPlaying) {
-        if (gameData.id === 'action') {
+        if (gameData.engine === 'action') {
           if (isLeft) p.vx -= 1;
           if (isRight) p.vx += 1;
           p.vx *= gameData.friction; p.vy += gameData.gravity;
@@ -233,9 +336,9 @@ export default function GameMaker({ onClose }: GameMakerProps) {
             else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE;
             p.vy = 0;
           }
-          if (p.y > ROWS * TILE_SIZE) resetGame(presetId);
+          if (p.y > ROWS * TILE_SIZE) restart();
 
-        } else if (gameData.id === 'rpg') {
+        } else if (gameData.engine === 'rpg') {
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= pData.speed; if (isRight) nx += pData.speed;
           if (isUp) ny -= pData.speed; if (isDown) ny += pData.speed;
@@ -244,7 +347,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable) p.y = ny;
 
-        } else if (gameData.id === 'touhou') {
+        } else if (gameData.engine === 'touhou') {
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= pData.speed; if (isRight) nx += pData.speed;
           if (isUp) ny -= pData.speed; if (isDown) ny += pData.speed;
@@ -311,9 +414,10 @@ export default function GameMaker({ onClose }: GameMakerProps) {
           }
         }
 
-        if (gameData.id !== 'touhou') {
+        if (gameData.engine !== 'touhou') {
           const center = getTile(p.x + pData.w / 2, p.y + pData.h / 2);
           if (center?.info?.special === 'goal') setTimeout(() => { alert('クリア！'); setIsPlaying(false); }, 10);
+          else if (center?.info?.special === 'trap') restart();
         }
       }
 
@@ -325,15 +429,21 @@ export default function GameMaker({ onClose }: GameMakerProps) {
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           const tileId = map[y]?.[x] ?? 0;
-          if (tileId !== 0 && gameData.tiles[tileId]) {
-            ctx.fillStyle = gameData.tiles[tileId].color;
-            ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          const info = gameData.tiles[tileId];
+          if (tileId !== 0 && info) {
+            const img = info.imageUrl ? imgCache.current.get(info.imageUrl) : undefined;
+            if (img && img.complete && img.naturalWidth > 0) {
+              ctx.drawImage(img, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            } else {
+              ctx.fillStyle = info.color;
+              ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            }
             if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
           }
         }
       }
 
-      if (gameData.id === 'touhou' && isPlaying) {
+      if (gameData.engine === 'touhou' && isPlaying) {
         for (const e of eng.enemies) {
           ctx.font = `${e.w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
           ctx.fillText(e.emoji, e.x + e.w / 2, e.y + e.h);
@@ -347,15 +457,14 @@ export default function GameMaker({ onClose }: GameMakerProps) {
         }
       }
 
-      ctx.fillStyle = gameData.player.color;
-      if (gameData.id !== 'touhou') {
+      if (gameData.engine !== 'touhou') {
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
         ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + pData.h, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
-      ctx.font = `${pData.w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillText(pData.emoji, p.x + pData.w / 2, p.y + pData.h + 4);
+      ctx.fillStyle = gameData.player.color;
+      drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl }, p.x, p.y, pData.w, pData.h);
 
-      if (gameData.id === 'touhou' && isPlaying) {
+      if (gameData.engine === 'touhou' && isPlaying) {
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.beginPath(); ctx.arc(p.x + pData.w / 2, p.y + pData.h / 2, 3, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = 'red'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -375,7 +484,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
     const id = requestAnimationFrame(loop);
     engineRef.current.animId = id;
     return () => { cancelAnimationFrame(id); window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [gameData, isPlaying, presetId, resetGame, touchInputs]);
+  }, [gameData, isPlaying, restart, touchInputs]);
 
   // Map editing
   const handleCanvasAction = (e: React.MouseEvent | React.TouchEvent) => {
@@ -408,32 +517,80 @@ export default function GameMaker({ onClose }: GameMakerProps) {
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
   });
 
-  const togglePlay = () => {
-    setIsPlaying(p => !p);
+  // ContentPicker 結果の適用
+  const applyPick = (res: PickResult) => {
+    const target = picker?.target;
+    setPicker(null);
+    if (target === undefined) return;
+    if (target === 'player') {
+      setGameData(prev => ({ ...prev, player: { ...prev.player, spriteRef: res.ref, spriteUrl: res.url } }));
+    } else if (target === 'bgm') {
+      const type = res.ref.startsWith('mml:') ? 'mml' : 'youtube';
+      const src = type === 'mml' ? (res.rawMml || res.ref.replace(/^mml:/, '')) : res.url;
+      setGameData(prev => ({ ...prev, bgm: { ref: res.ref, src, type } }));
+    } else if (typeof target === 'number') {
+      setGameData(prev => ({
+        ...prev,
+        tiles: { ...prev.tiles, [target]: { ...prev.tiles[target], imageRef: res.ref, imageUrl: res.url } },
+      }));
+    }
+  };
+
+  const buildManifest = (): GameManifestDraft => ({
+    preset: gameData.id,
+    engine: gameData.engine,
+    name: title.trim() || gameData.name,
+    gravity: gameData.gravity,
+    friction: gameData.friction,
+    player: {
+      emoji: gameData.player.emoji, color: gameData.player.color, speed: gameData.player.speed,
+      jumpPower: gameData.player.jumpPower, w: gameData.player.w, h: gameData.player.h,
+      start: gameData.player.start, spriteRef: gameData.player.spriteRef,
+    },
+    tiles: Object.fromEntries(Object.entries(gameData.tiles).map(([k, t]) => [k, {
+      name: t.name, color: t.color, passable: t.passable, special: t.special, imageRef: t.imageRef,
+    }])),
+    map: gameData.map,
+    bgm: gameData.bgm?.ref || 'none',
+  });
+
+  const handleSave = () => {
+    onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
   };
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
-        <div className="flex items-center gap-2">
-          <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 rounded-full"><X size={16} /></button>
-          <span className="text-xs font-bold text-white">Game Maker</span>
-          <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
-            className="ml-1 bg-gray-700 text-xs text-white border-none rounded py-1 px-2 outline-none cursor-pointer font-bold appearance-none">
-            <option value="action">アクション</option>
-            <option value="rpg">RPG</option>
-            <option value="touhou">弾幕STG</option>
-          </select>
+        <div className="flex items-center gap-2 min-w-0">
+          <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 rounded-full shrink-0"><X size={16} /></button>
+          <span className="text-xs font-bold text-white shrink-0">ゲーム作成</span>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => resetGame(presetId)} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="初期化"><RotateCcw size={16} /></button>
-          <button onClick={togglePlay}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
+          <button onClick={() => setIsPlaying(p => !p)}
             className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
-            {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">エディット</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
+            {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
           </button>
+          {onSave && (
+            <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
+              <Save size={14} /><span className="hidden sm:inline">投稿に添付</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Preset selector */}
+      {!isPlaying && (
+        <div className="flex gap-1.5 px-3 py-2 bg-[#0a0a0d] border-b border-gray-800 overflow-x-auto scrollbar-none shrink-0">
+          {PRESET_ORDER.map(id => (
+            <button key={id} onClick={() => resetGame(id)}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${presetId === id ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+              <span>{PRESET_EMOJI[id]}</span>{PRESETS[id].name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Main */}
       <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
@@ -452,7 +609,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
         </div>
 
         {/* Sidebar */}
-        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${isPlaying ? 'w-full md:w-auto' : 'flex-1 md:w-72 md:flex-none'}`}>
+        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${isPlaying ? 'w-full md:w-auto' : 'flex-1 md:w-80 md:flex-none'}`}>
           {isPlaying ? (
             /* Touch controls */
             <div className="flex-1 flex flex-col justify-center p-4 select-none">
@@ -464,10 +621,10 @@ export default function GameMaker({ onClose }: GameMakerProps) {
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 w-12 h-10 bg-gray-600 rounded-r-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('right')}></div>
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-gray-700 pointer-events-none rounded"></div>
                 </div>
-                {(gameData.id === 'action' || gameData.id === 'touhou') && (
+                {(gameData.engine === 'action' || gameData.engine === 'touhou') && (
                   <button className="w-16 h-16 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
                     {...padProps('action')}>
-                    {gameData.id === 'touhou' ? 'SHOT' : 'JUMP'}
+                    {gameData.engine === 'touhou' ? 'SHOT' : 'JUMP'}
                   </button>
                 )}
               </div>
@@ -479,7 +636,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
                 {([
                   ['map', 'マップ'],
                   ['char', 'キャラ'],
-                  ['bgm', '音'],
+                  ['asset', 'アセット'],
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
                     className={`flex-1 py-2.5 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500'}`}>
@@ -492,12 +649,14 @@ export default function GameMaker({ onClose }: GameMakerProps) {
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 {editorTab === 'map' && (
                   <div className="space-y-3">
-                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> 選択して画面をタップ</p>
+                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> 選択して画面をタップ／ドラッグ</p>
                     <div className="grid grid-cols-2 gap-2">
                       {Object.entries(gameData.tiles).map(([id, tile]) => (
                         <button key={id} onClick={() => setSelectedTileId(Number(id))}
                           className={`flex items-center gap-2 p-2 rounded border-2 transition ${selectedTileId === Number(id) ? 'border-blue-500 bg-gray-800' : 'border-gray-700 bg-gray-900'}`}>
-                          <div className="w-5 h-5 shrink-0 rounded border border-gray-600" style={{ backgroundColor: tile.color }} />
+                          <div className="w-5 h-5 shrink-0 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: tile.color }}>
+                            {tile.imageUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={tile.imageUrl} alt="" className="w-full h-full object-cover" />}
+                          </div>
                           <span className="text-[10px] truncate">{tile.name}</span>
                         </button>
                       ))}
@@ -508,9 +667,22 @@ export default function GameMaker({ onClose }: GameMakerProps) {
                 {editorTab === 'char' && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[11px] text-gray-400 mb-1">見た目 (絵文字)</label>
-                      <input type="text" value={gameData.player.emoji} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, emoji: e.target.value.slice(0, 2) } }))}
-                        className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-center text-xl" />
+                      <label className="block text-[11px] text-gray-400 mb-1">見た目</label>
+                      <div className="flex items-center gap-2">
+                        <input type="text" value={gameData.player.emoji} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined } }))}
+                          className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-center text-xl" />
+                        <button onClick={() => setPicker({ mode: 'image', target: 'player' })}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
+                          <ImageIcon size={13} />画像/歩行グラを参照
+                        </button>
+                      </div>
+                      {gameData.player.spriteRef && (
+                        <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
+                          {gameData.player.spriteUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.player.spriteUrl} alt="" className="w-6 h-6 object-contain" style={{ imageRendering: 'pixelated' }} />}
+                          <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
+                          <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="text-gray-500 hover:text-red-400"><Trash2 size={12} /></button>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>移動速度</span><span className="text-blue-400">{gameData.player.speed}</span></label>
@@ -518,7 +690,7 @@ export default function GameMaker({ onClose }: GameMakerProps) {
                         onChange={e => setGameData(p => ({ ...p, player: { ...p.player, speed: Number(e.target.value) } }))}
                         className="w-full accent-blue-500" />
                     </div>
-                    {presetId === 'action' && (
+                    {gameData.engine === 'action' && (
                       <div>
                         <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>ジャンプ力</span><span className="text-blue-400">{gameData.player.jumpPower}</span></label>
                         <input type="range" min={-20} max={-5} step={1} value={gameData.player.jumpPower}
@@ -529,32 +701,44 @@ export default function GameMaker({ onClose }: GameMakerProps) {
                   </div>
                 )}
 
-                {editorTab === 'bgm' && (
-                  <div className="space-y-3">
-                    <div className="flex bg-gray-900 rounded-lg p-1 gap-1">
-                      {(['none', 'youtube', 'mml'] as const).map(type => (
-                        <button key={type} onClick={() => setBgmSettings(s => ({ ...s, type }))}
-                          className={`flex-1 py-1.5 text-[10px] rounded transition capitalize ${bgmSettings.type === type ? 'bg-blue-600 text-white' : 'text-gray-500'}`}>
-                          {type === 'none' ? 'なし' : type === 'youtube' ? 'YouTube' : 'MML'}
-                        </button>
-                      ))}
+                {editorTab === 'asset' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1">タイトル</label>
+                      <input type="text" value={title} onChange={e => setTitle(e.target.value)}
+                        className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200" />
                     </div>
-                    {bgmSettings.type === 'youtube' && (
-                      <div className="p-2 bg-gray-900 rounded border border-gray-700">
-                        <label className="block text-[10px] text-gray-400 mb-1">YouTube URL</label>
-                        <input type="text" placeholder="https://..." value={bgmSettings.url}
-                          onChange={e => setBgmSettings(s => ({ ...s, url: e.target.value }))}
-                          className="w-full bg-black border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300" />
+
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1 flex items-center gap-1"><Music size={12} />BGM</label>
+                      <button onClick={() => setPicker({ mode: 'bgm', target: 'bgm' })}
+                        className="w-full flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
+                        <span className="truncate">{gameData.bgm ? refLabel(gameData.bgm.ref) : 'BGMを選択（YouTube / MML投稿 / 直接）'}</span>
+                        <Music size={13} className="shrink-0 ml-1" />
+                      </button>
+                      {gameData.bgm && (
+                        <button onClick={() => setGameData(p => ({ ...p, bgm: undefined }))} className="mt-1 text-[10px] text-gray-500 hover:text-red-400 flex items-center gap-1"><Trash2 size={11} />BGMを外す</button>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] text-gray-400 mb-1.5 flex items-center gap-1"><ImageIcon size={12} />タイル画像（任意・参照のみ）</label>
+                      <div className="space-y-1.5">
+                        {Object.entries(gameData.tiles).filter(([id]) => Number(id) !== 0).map(([id, tile]) => (
+                          <div key={id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5 border border-gray-800">
+                            <div className="w-6 h-6 shrink-0 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: tile.color }}>
+                              {tile.imageUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={tile.imageUrl} alt="" className="w-full h-full object-cover" />}
+                            </div>
+                            <span className="text-[10px] text-gray-400 flex-1 truncate">{tile.name}</span>
+                            {tile.imageRef && (
+                              <button onClick={() => setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { ...p.tiles[Number(id)], imageRef: undefined, imageUrl: undefined } } }))} className="text-gray-500 hover:text-red-400"><Trash2 size={12} /></button>
+                            )}
+                            <button onClick={() => setPicker({ mode: 'image', target: Number(id) })} className="text-[10px] text-blue-400 hover:text-blue-300 shrink-0">参照</button>
+                          </div>
+                        ))}
                       </div>
-                    )}
-                    {bgmSettings.type === 'mml' && (
-                      <div className="p-2 bg-gray-900 rounded border border-gray-700">
-                        <label className="block text-[10px] text-gray-400 mb-1">簡易MML</label>
-                        <textarea value={bgmSettings.mml} onChange={e => setBgmSettings(s => ({ ...s, mml: e.target.value }))}
-                          className="w-full bg-black border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-300 h-16 font-mono resize-none"
-                          placeholder="C D E F G A B" />
-                      </div>
-                    )}
+                      <p className="text-[10px] text-gray-600 mt-1.5">画像は既存の投稿・歩行グラ・URLを参照（実体は保存しません）。</p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -562,6 +746,15 @@ export default function GameMaker({ onClose }: GameMakerProps) {
           )}
         </div>
       </div>
+
+      {picker && (
+        <ContentPicker
+          mode={picker.mode}
+          userId={userId}
+          onPick={applyPick}
+          onClose={() => setPicker(null)}
+        />
+      )}
     </div>
   );
 }
