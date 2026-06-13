@@ -498,8 +498,20 @@ export const sqliteStore: DataStore = {
 
   async getTrends() {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT * FROM trends ORDER BY id');
-    return rows.map(r => ({ keyword: r.keyword, count: r.count } as Trend));
+    const rows = rowsToObjects(d, 'SELECT content FROM posts');
+    const freq = new Map<string, number>();
+    for (const row of rows) {
+      const tags = row.content?.match(/#[^\s#]+/g);
+      if (tags) {
+        for (const tag of tags) {
+          freq.set(tag, (freq.get(tag) || 0) + 1);
+        }
+      }
+    }
+    return Array.from(freq.entries())
+      .map(([keyword, count]) => ({ keyword, count } as Trend))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
   },
 
   async searchPosts(query: string) {

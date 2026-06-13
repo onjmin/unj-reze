@@ -28,17 +28,6 @@ export interface Message {
   time: string;
 }
 
-const TRENDS: Trend[] = [
-  { keyword: '#お絵描き', count: 150 },
-  { keyword: '#ゲーム制作', count: 125 },
-  { keyword: 'ドット絵講座', count: 100 },
-  { keyword: '作業用BGM', count: 75 },
-  { keyword: '名無しBBS', count: 50 },
-  { keyword: '春のイラスト祭', count: 40 },
-  { keyword: '青空フォト', count: 30 },
-  { keyword: 'lofi beats', count: 25 },
-];
-
 const NOTIFICATION_INFOS: { user: string; action: string; target: string; type: string; postId?: number; targetUser?: string; time: string }[] = [
   { user: "名無しXz9", action: "がいいねしました", target: "青空の写真", type: "like", postId: 7, time: "3分前" },
   { user: "名無しLm8", action: "がリポストしました", target: "ドット絵の練習中", type: "repost", postId: 6, time: "8分前" },
@@ -104,7 +93,6 @@ class MockDB {
   private posts: Post[];
   private notifications: Notification[];
   private messages: Message[];
-  private trends: Trend[];
   private votes: Map<string, 'like' | 'dislike'> = new Map();
   private heartCounts: Map<number, number> = new Map();
   private heartEntries: { postId: number; userId: string }[] = [];
@@ -140,7 +128,6 @@ class MockDB {
       ...m,
       createdAt: parseRelativeTime(m.time),
     }));
-    this.trends = [...TRENDS];
   }
 
   private generateId(): string {
@@ -409,7 +396,22 @@ class MockDB {
   }
 
   getTrends(): Trend[] {
-    return this.trends;
+    const freq = new Map<string, number>();
+    const allContent = this.posts.map(p => p.content).concat(
+      this.posts.flatMap(p => p.replies.map(r => r.content))
+    );
+    for (const content of allContent) {
+      const hashtags = content.match(/#[^\s#]+/g);
+      if (hashtags) {
+        for (const tag of hashtags) {
+          freq.set(tag, (freq.get(tag) || 0) + 1);
+        }
+      }
+    }
+    return Array.from(freq.entries())
+      .map(([keyword, count]) => ({ keyword, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
   }
 
   followUser(followerId: string, followedId: string): void {

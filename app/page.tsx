@@ -14,6 +14,7 @@ import BottomNav from '@/components/BottomNav';
 import FAB from '@/components/FAB';
 import DrawingEditor from '@/components/DrawingEditor';
 import DotDrawingEditor from '@/components/DotDrawingEditor';
+import CollabSelector from '@/components/CollabSelector';
 import GamePlayer from '@/components/GamePlayer';
 import GameMaker from '@/components/GameMaker';
 import MmlEditor from '@/components/MmlEditor';
@@ -41,6 +42,7 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
+  const [showCollabSelector, setShowCollabSelector] = useState(false);
 
   const heartQueue = useRef<Map<number, number>>(new Map());
   const heartTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -208,22 +210,37 @@ export default function App() {
     setAttachedImage(null);
   };
 
-  const isDotDrawingPost = useCallback((post: Post) => /#ドット絵|ドット絵/i.test(post.content), []);
-
   const handleOpenCollab = useCallback((post: Post) => {
     setCollabImageUrl(post.imageSrc);
-    setActiveScreen(isDotDrawingPost(post) ? 'dotdrawing' : 'drawing');
-  }, [isDotDrawingPost]);
+    setShowCollabSelector(true);
+  }, []);
+
+  const handleCollabSelectDrawing = useCallback(() => {
+    setShowCollabSelector(false);
+    setActiveScreen('drawing');
+  }, []);
+
+  const handleCollabSelectDotDrawing = useCallback(() => {
+    setShowCollabSelector(false);
+    setActiveScreen('dotdrawing');
+  }, []);
+
+  const handleCloseCollabSelector = useCallback(() => {
+    setShowCollabSelector(false);
+    setCollabImageUrl(undefined);
+  }, []);
 
   const handleSaveDrawing = (canvasData: string) => {
     setAttachedImage(canvasData);
     setActiveScreen(null);
+    setCollabImageUrl(undefined);
     setInputText("#お絵描き 自作イラスト完成！");
   };
 
   const handleSaveDotDrawing = (canvasData: string) => {
     setAttachedImage(canvasData);
     setActiveScreen(null);
+    setCollabImageUrl(undefined);
     setInputText("#ドット絵 自作ドット絵完成！");
   };
 
@@ -257,6 +274,7 @@ export default function App() {
         <DotDrawingEditor
           onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
           onSave={handleSaveDotDrawing}
+          collabImageUrl={collabImageUrl}
         />
       )}
       {activeScreen === 'gamemaker' && (
@@ -269,6 +287,15 @@ export default function App() {
         <MmlEditor
           onClose={() => setActiveScreen(null)}
           onSave={handleSaveMml}
+        />
+      )}
+
+      {showCollabSelector && collabImageUrl && (
+        <CollabSelector
+          imageUrl={collabImageUrl}
+          onSelectDrawing={handleCollabSelectDrawing}
+          onSelectDotDrawing={handleCollabSelectDotDrawing}
+          onClose={handleCloseCollabSelector}
         />
       )}
 

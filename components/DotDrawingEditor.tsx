@@ -14,6 +14,7 @@ import type { FrameData } from './AnimationBar';
 interface DotDrawingEditorProps {
   onClose: () => void;
   onSave: (data: string) => void;
+  collabImageUrl?: string;
 }
 
 type Tool = 'pen' | 'eraser' | 'dropper' | 'fill';
@@ -35,10 +36,11 @@ const PALETTE_PICO8 = [
   '#29adff', '#83769c', '#ff77a8', '#ffccaa',
 ];
 
-export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorProps) {
+export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: DotDrawingEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const toolRef = useRef<Tool>('pen');
   const colorRef = useRef('#000000');
+  const collabRef = useRef(collabImageUrl);
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
@@ -132,7 +134,6 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
-    document.documentElement.style.setProperty('--grid-cell-size', `${oekaki.getDotSize()}px`);
     oekaki.color.value = colorRef.current;
 
     // g_layers is empty after init — create initial user layers
@@ -141,6 +142,33 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
     bgLayer.trace();
     new oekaki.LayeredCanvas('レイヤー #1');
     layerCounterRef.current = 2;
+
+    // collaboration: load existing image as base layer
+    if (collabRef.current) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = collabRef.current;
+      img.onload = () => {
+        bgLayer.delete();
+        const layers = oekaki.getLayers();
+        const target = layers[0];
+        if (target) {
+          target.name = 'コラボ';
+          target.paste(img);
+          target.trace();
+          new oekaki.LayeredCanvas('レイヤー #2');
+          layerCounterRef.current = 3;
+        }
+        const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
+          instance: inst,
+          name: inst.name,
+        })).reverse();
+        setLayerEntries(updated);
+        layerEntriesRef.current = updated;
+        setActiveLayerIndex(0);
+        activeLayerIndexRef.current = 0;
+      };
+    }
 
     const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
       instance: inst,
@@ -220,22 +248,17 @@ export default function DotDrawingEditor({ onClose, onSave }: DotDrawingEditorPr
       onionCanvasRef.current = null;
       if (mountRef.current) mountRef.current.innerHTML = '';
     };
+  }, []);
+
+  useEffect(() => {
+    oekaki.setDotSize(1, gridH);
+    document.documentElement.style.setProperty('--grid-cell-size', `${oekaki.getDotSize()}px`);
   }, [gridW, gridH]);
 
   const changeSize = (w: number, h: number) => {
-    const src = oekaki.render();
     setGridW(w);
     setGridH(h);
     setShowPresets(false);
-    setTimeout(() => {
-      const active = oekaki.upperLayer.value;
-      if (active) {
-        active.clear();
-        active.paste(src);
-        active.trace();
-      }
-      forceRender(n => n + 1);
-    }, 0);
   };
 
   const clearCanvas = () => {

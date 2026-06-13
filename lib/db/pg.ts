@@ -646,10 +646,21 @@ export const pgStore: DataStore = {
   async getTrends() {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM trends ORDER BY count DESC LIMIT 10');
+      let result;
+      try {
+        result = await client.query(`
+          SELECT m[1] AS keyword, COUNT(*) AS count
+          FROM posts p, LATERAL regexp_matches(p.content, '#[^\\s#]+', 'g') AS m
+          GROUP BY m[1]
+          ORDER BY count DESC
+          LIMIT 10
+        `);
+      } catch {
+        result = { rows: [] };
+      }
       return result.rows.map(r => ({
         keyword: r.keyword,
-        count: r.count,
+        count: parseInt(r.count, 10),
       } as Trend));
     } finally {
       client.release();
