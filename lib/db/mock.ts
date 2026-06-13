@@ -1,5 +1,7 @@
 import { db as mockDb } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, GameRecord, CreateGameParams } from './interface';
+
+const gameStore = new Map<number, GameRecord>();
 
 export const mockStore: DataStore = {
   async getPosts(userId?: string) {
@@ -100,5 +102,43 @@ export const mockStore: DataStore = {
 
   async getFollowCounts(userId: string) {
     return mockDb.getFollowCounts(userId);
+  },
+
+  async createGame(data: CreateGameParams): Promise<GameRecord> {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const record: GameRecord = { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: new Date().toISOString() };
+    gameStore.set(id, record);
+    return record;
+  },
+
+  async getGame(id: number): Promise<GameRecord | null> {
+    return gameStore.get(id) ?? null;
+  },
+
+  async listAllGames() {
+    return Array.from(gameStore.values());
+  },
+
+  async getLiveGameInfo(_ipAddress: string) {
+    const games = Array.from(gameStore.values());
+    const slot = new Date().toISOString().slice(0, 13);
+    const game = games[0] ?? null;
+    return {
+      gameId: game?.id ?? null,
+      gameTitle: game?.title ?? '',
+      gamePreset: game?.preset ?? '',
+      hourSlot: slot,
+      postId: null,
+      nextCandidates: games.map(g => ({ game: { id: g.id, preset: g.preset, title: g.title, createdAt: g.createdAt }, votes: 0 })),
+      myVote: null,
+    };
+  },
+
+  async voteGame(_gameId: number, _ipAddress: string) {},
+
+  async updatePlayerPosition(_sessionId: string, _gameId: number, _x: number, _y: number, _emoji: string) {},
+
+  async getGamePlayers(_gameId: number, _excludeSession: string) {
+    return [];
   },
 };

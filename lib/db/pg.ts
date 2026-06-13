@@ -115,6 +115,51 @@ async function ensureTables(client: any) {
       UNIQUE (follower_id, followed_id)
     )
   `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS games (
+      id BIGINT PRIMARY KEY,
+      preset TEXT NOT NULL,
+      title TEXT NOT NULL,
+      manifest TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'posts' AND column_name = 'game_id'
+      ) THEN
+        ALTER TABLE posts ADD COLUMN game_id BIGINT;
+      END IF;
+    END $$;
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS game_schedule (
+      hour_slot TEXT PRIMARY KEY,
+      game_id BIGINT NOT NULL
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS game_votes (
+      id SERIAL PRIMARY KEY,
+      game_id BIGINT NOT NULL,
+      ip_address TEXT NOT NULL,
+      hour_slot TEXT NOT NULL,
+      UNIQUE(ip_address, hour_slot)
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS game_players (
+      session_id TEXT NOT NULL,
+      game_id BIGINT NOT NULL,
+      x REAL NOT NULL DEFAULT 0,
+      y REAL NOT NULL DEFAULT 0,
+      emoji TEXT NOT NULL DEFAULT '🎮',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (session_id, game_id)
+    )
+  `);
   initialized = true;
 }
 
@@ -162,6 +207,7 @@ async function rowToPost(row: any): Promise<Post> {
     hasCollabButton: row.has_collab_button,
     heartsTotal: row.hearts_total ?? 0,
     hasGame: row.has_game,
+    gameId: row.game_id ?? undefined,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -285,11 +331,12 @@ export const pgStore: DataStore = {
       await ensureTables(client);
       const slug = data.slug || deriveSlugPg(data.displayName);
       const insertResult = await client.query(
-        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9)
          RETURNING id`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
-         data.hasImage || false, data.imageSrc || null, data.imageAlt || null]
+         data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
+         !!data.gameId, data.gameId || null]
       );
       const newId = insertResult.rows[0].id;
       const result = await client.query('SELECT * FROM posts WHERE id = $1', [newId]);
@@ -823,6 +870,130 @@ export const pgStore: DataStore = {
         followers: parseInt(result.rows[0].followers, 10),
         following: parseInt(result.rows[0].following, 10),
       };
+    } finally {
+      client.release();
+    }
+  },
+
+  async createGame(data) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const id = Date.now() + Math.floor(Math.random() * 1000);
+      const now = new Date().toISOString();
+      await client.query(
+        `INSERT INTO games (id, preset, title, manifest, created_at) VALUES ($1, $2, $3, $4, NOW())`,
+        [id, data.preset, data.title, JSON.stringify(data.manifest)]
+      );
+      return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now };
+    } finally {
+      client.release();
+    }
+  },
+
+  async getGame(id) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query('SELECT * FROM games WHERE id = $1', [id]);
+      if (result.rows.length === 0) return null;
+      const r = result.rows[0];
+      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt };
+    } finally {
+      client.release();
+    }
+  },
+
+  async listAllGames() {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query('SELECT * FROM games ORDER BY id DESC');
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+        return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt };
+      });
+    } finally {
+      client.release();
+    }
+  },
+
+  async getLiveGameInfo(ipAddress: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const slot = new Date().toISOString().slice(0, 13);
+      const schedResult = await client.query('SELECT game_id FROM game_schedule WHERE hour_slot = $1', [slot]);
+      let gameId: number | null = null;
+      if (schedResult.rows.length > 0) {
+        gameId = schedResult.rows[0].game_id;
+      } else {
+        const lastSlot = new Date(Date.now() - 3600000).toISOString().slice(0, 13);
+        const voteResult = await client.query('SELECT game_id, COUNT(*) as cnt FROM game_votes WHERE hour_slot = $1 GROUP BY game_id ORDER BY cnt DESC LIMIT 1', [lastSlot]);
+        if (voteResult.rows.length > 0) {
+          gameId = voteResult.rows[0].game_id;
+        } else {
+          const randResult = await client.query('SELECT id FROM games ORDER BY RANDOM() LIMIT 1');
+          if (randResult.rows.length > 0) gameId = randResult.rows[0].id;
+        }
+        if (gameId) {
+          await client.query('INSERT INTO game_schedule (hour_slot, game_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [slot, gameId]);
+        }
+      }
+      let gameTitle = '', gamePreset = '';
+      if (gameId) {
+        const gr = await client.query('SELECT preset, title FROM games WHERE id = $1', [gameId]);
+        if (gr.rows.length > 0) { gameTitle = gr.rows[0].title; gamePreset = gr.rows[0].preset; }
+      }
+      const allGames = await client.query('SELECT id, preset, title, created_at FROM games ORDER BY id DESC');
+      const vcResult = await client.query('SELECT game_id, COUNT(*) as cnt FROM game_votes WHERE hour_slot = $1 GROUP BY game_id', [slot]);
+      const voteCounts = new Map(vcResult.rows.map((r: any) => [String(r.game_id), Number(r.cnt)]));
+      const myVoteResult = await client.query('SELECT game_id FROM game_votes WHERE ip_address = $1 AND hour_slot = $2', [ipAddress, slot]);
+      const myVote = myVoteResult.rows.length > 0 ? myVoteResult.rows[0].game_id : null;
+      const nextCandidates = allGames.rows.map((g: any) => {
+        const createdAt = typeof g.created_at === 'object' ? g.created_at.toISOString() : String(g.created_at);
+        return { game: { id: g.id, preset: g.preset, title: g.title, createdAt }, votes: voteCounts.get(String(g.id)) ?? 0 };
+      }).sort((a: any, b: any) => b.votes - a.votes);
+      let postId: number | null = null;
+      if (gameId) {
+        const pr = await client.query('SELECT id FROM posts WHERE game_id = $1 ORDER BY id ASC LIMIT 1', [gameId]);
+        if (pr.rows.length > 0) postId = pr.rows[0].id;
+      }
+      return { gameId: gameId as number | null, gameTitle, gamePreset, hourSlot: slot, postId, nextCandidates, myVote };
+    } finally {
+      client.release();
+    }
+  },
+
+  async voteGame(gameId: number, ipAddress: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const slot = new Date().toISOString().slice(0, 13);
+      await client.query('INSERT INTO game_votes (game_id, ip_address, hour_slot) VALUES ($1, $2, $3) ON CONFLICT (ip_address, hour_slot) DO UPDATE SET game_id = $1', [gameId, ipAddress, slot]);
+    } finally {
+      client.release();
+    }
+  },
+
+  async updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query('INSERT INTO game_players (session_id, game_id, x, y, emoji, updated_at) VALUES ($1, $2, $3, $4, $5, NOW()) ON CONFLICT (session_id, game_id) DO UPDATE SET x=$3, y=$4, emoji=$5, updated_at=NOW()', [sessionId, gameId, x, y, emoji]);
+      await client.query("DELETE FROM game_players WHERE updated_at < NOW() - INTERVAL '15 seconds'");
+    } finally {
+      client.release();
+    }
+  },
+
+  async getGamePlayers(gameId: number, excludeSession: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query("SELECT * FROM game_players WHERE game_id = $1 AND session_id != $2 AND updated_at > NOW() - INTERVAL '10 seconds'", [gameId, excludeSession]);
+      return result.rows.map((r: any) => ({ sessionId: r.session_id, x: r.x, y: r.y, emoji: r.emoji, updatedAt: r.updated_at?.toISOString?.() }));
     } finally {
       client.release();
     }

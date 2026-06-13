@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS posts (
   has_game INTEGER NOT NULL DEFAULT 0
 );
 
+-- ゲームテーブル
+CREATE TABLE IF NOT EXISTS games (
+  id INTEGER PRIMARY KEY,
+  preset TEXT NOT NULL,
+  title TEXT NOT NULL,
+  manifest TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- いいね/わるい 投票テーブル (1ユーザー1投票)
 CREATE TABLE IF NOT EXISTS post_votes (
   id INTEGER PRIMARY KEY,

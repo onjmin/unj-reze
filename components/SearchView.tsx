@@ -13,7 +13,7 @@ interface SearchViewProps {
   onHeart: (id: number) => void;
   onAddReply: (id: number, text: string) => void;
   onQuickPost: () => void;
-  openGame: () => void;
+  openGame: (gameId?: number, postId?: number) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
 }

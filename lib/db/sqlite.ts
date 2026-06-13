@@ -82,6 +82,38 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!msgColNames.includes('recipient')) {
     d.run("ALTER TABLE messages ADD COLUMN recipient TEXT");
   }
+  d.run(`CREATE TABLE IF NOT EXISTS games (
+    id INTEGER PRIMARY KEY,
+    preset TEXT NOT NULL,
+    title TEXT NOT NULL,
+    manifest TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  d.run(`CREATE TABLE IF NOT EXISTS game_schedule (
+    hour_slot TEXT PRIMARY KEY,
+    game_id INTEGER NOT NULL
+  )`);
+  d.run(`CREATE TABLE IF NOT EXISTS game_votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id INTEGER NOT NULL,
+    ip_address TEXT NOT NULL,
+    hour_slot TEXT NOT NULL,
+    UNIQUE(ip_address, hour_slot)
+  )`);
+  d.run(`CREATE TABLE IF NOT EXISTS game_players (
+    session_id TEXT NOT NULL,
+    game_id INTEGER NOT NULL,
+    x REAL NOT NULL DEFAULT 0,
+    y REAL NOT NULL DEFAULT 0,
+    emoji TEXT NOT NULL DEFAULT '🎮',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (session_id, game_id)
+  )`);
+  const postCols = d.exec("PRAGMA table_info(posts)");
+  const postColNames = postCols.length > 0 ? postCols[0].values.map((v: any) => v[1]) : [];
+  if (!postColNames.includes('game_id')) {
+    d.run("ALTER TABLE posts ADD COLUMN game_id INTEGER");
+  }
 }
 
 function saveDb() {
@@ -118,6 +150,7 @@ function rowToPost(row: any): Post {
     hasCollabButton: !!row.has_collab_button,
     heartsTotal: row.hearts_total ?? 0,
     hasGame: !!row.has_game,
+    gameId: row.game_id ?? undefined,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -262,10 +295,11 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
-       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null]
+       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null,
+       data.gameId ? 1 : 0, data.gameId || null]
     );
     saveDb();
     return {
@@ -277,7 +311,8 @@ export const sqliteStore: DataStore = {
         has_image: data.hasImage ? 1 : 0,
         image_src: data.imageSrc || null, image_alt: data.imageAlt || null,
         avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
-        has_collab_button: 1, hearts_total: 0, has_game: 0,
+        has_collab_button: 1, hearts_total: 0, has_game: data.gameId ? 1 : 0,
+        game_id: data.gameId || null,
       }),
       replies: []
     };
@@ -636,5 +671,95 @@ export const sqliteStore: DataStore = {
       followers: followers[0]?.cnt ?? 0,
       following: following[0]?.cnt ?? 0,
     };
+  },
+
+  async createGame(data) {
+    const d = await getDb();
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const now = new Date().toISOString();
+    d.run(
+      `INSERT INTO games (id, preset, title, manifest, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [id, data.preset, data.title, JSON.stringify(data.manifest), now]
+    );
+    saveDb();
+    return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now };
+  },
+
+  async getGame(id) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM games WHERE id = ?', [id]);
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at };
+  },
+
+  async listAllGames() {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM games ORDER BY id DESC', []);
+    return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at }));
+  },
+
+  async getLiveGameInfo(ipAddress: string) {
+    const d = await getDb();
+    const slot = new Date().toISOString().slice(0, 13);
+    let schedRows = rowsToObjects(d, 'SELECT game_id FROM game_schedule WHERE hour_slot = ?', [slot]);
+    let gameId: number | null = null;
+    if (schedRows.length > 0) {
+      gameId = schedRows[0].game_id;
+    } else {
+      const lastSlot = new Date(Date.now() - 3600000).toISOString().slice(0, 13);
+      const voteRows = rowsToObjects(d, 'SELECT game_id, COUNT(*) as cnt FROM game_votes WHERE hour_slot = ? GROUP BY game_id ORDER BY cnt DESC LIMIT 1', [lastSlot]);
+      if (voteRows.length > 0) {
+        gameId = voteRows[0].game_id;
+      } else {
+        const allGames = rowsToObjects(d, 'SELECT id FROM games ORDER BY RANDOM() LIMIT 1', []);
+        if (allGames.length > 0) gameId = allGames[0].id;
+      }
+      if (gameId) {
+        d.run('INSERT OR IGNORE INTO game_schedule (hour_slot, game_id) VALUES (?, ?)', [slot, gameId]);
+        saveDb();
+      }
+    }
+    let gameTitle = '', gamePreset = '';
+    if (gameId) {
+      const gr = rowsToObjects(d, 'SELECT preset, title FROM games WHERE id = ?', [gameId]);
+      if (gr.length > 0) { gameTitle = gr[0].title; gamePreset = gr[0].preset; }
+    }
+    const allGames = rowsToObjects(d, 'SELECT id, preset, title, created_at FROM games ORDER BY id DESC', []);
+    const vcRows = rowsToObjects(d, 'SELECT game_id, COUNT(*) as cnt FROM game_votes WHERE hour_slot = ? GROUP BY game_id', [slot]);
+    const voteCounts = new Map(vcRows.map((r: any) => [r.game_id, Number(r.cnt)]));
+    const myVoteRows = rowsToObjects(d, 'SELECT game_id FROM game_votes WHERE ip_address = ? AND hour_slot = ?', [ipAddress, slot]);
+    const myVote = myVoteRows.length > 0 ? myVoteRows[0].game_id : null;
+    const nextCandidates = allGames.map((g: any) => ({
+      game: { id: g.id, preset: g.preset, title: g.title, createdAt: g.created_at },
+      votes: voteCounts.get(g.id) ?? 0,
+    })).sort((a: any, b: any) => b.votes - a.votes);
+    let postId: number | null = null;
+    if (gameId) {
+      const pr = rowsToObjects(d, 'SELECT id FROM posts WHERE game_id = ? ORDER BY id ASC LIMIT 1', [gameId]);
+      if (pr.length > 0) postId = pr[0].id;
+    }
+    return { gameId: gameId as number | null, gameTitle, gamePreset, hourSlot: slot, postId, nextCandidates, myVote };
+  },
+
+  async voteGame(gameId: number, ipAddress: string) {
+    const d = await getDb();
+    const slot = new Date().toISOString().slice(0, 13);
+    d.run('INSERT OR REPLACE INTO game_votes (game_id, ip_address, hour_slot) VALUES (?, ?, ?)', [gameId, ipAddress, slot]);
+    saveDb();
+  },
+
+  async updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string) {
+    const d = await getDb();
+    const now = new Date().toISOString();
+    d.run('INSERT OR REPLACE INTO game_players (session_id, game_id, x, y, emoji, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [sessionId, gameId, x, y, emoji, now]);
+    d.run("DELETE FROM game_players WHERE datetime(updated_at) < datetime('now', '-15 seconds')");
+    saveDb();
+  },
+
+  async getGamePlayers(gameId: number, excludeSession: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, "SELECT * FROM game_players WHERE game_id = ? AND session_id != ? AND datetime(updated_at) > datetime('now', '-10 seconds')", [gameId, excludeSession]);
+    return rows.map((r: any) => ({ sessionId: r.session_id, x: r.x, y: r.y, emoji: r.emoji, updatedAt: r.updated_at }));
   },
 };

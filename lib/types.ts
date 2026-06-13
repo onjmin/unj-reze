@@ -19,6 +19,7 @@ export interface Post {
   hasCollabButton?: boolean;
   heartsTotal: number;
   hasGame?: boolean;
+  gameId?: number;
   threadId: number;
   parentPostId?: number;
   replies: Post[];
@@ -32,6 +33,28 @@ export interface AnonymousUser {
   slug: string;
   avatarColor: string;
   createdAt: string;
+}
+
+export interface GhostPlayer {
+  sessionId: string;
+  x: number;
+  y: number;
+  emoji: string;
+  updatedAt?: string;
+}
+
+export interface GameVoteCandidate {
+  game: { id: number; preset: string; title: string; createdAt: string };
+  votes: number;
+}
+
+export interface LiveGameInfo {
+  gameId: number | null;
+  gameTitle: string;
+  gamePreset: string;
+  hourSlot: string;
+  nextCandidates: GameVoteCandidate[];
+  myVote: number | null;
 }
 
 export interface Obstacle {

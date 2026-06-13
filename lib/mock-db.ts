@@ -247,6 +247,7 @@ class MockDB {
     imageAlt?: string;
     avatarColor?: string;
     slug?: string;
+    gameId?: number;
   }): Post {
     const createdAt = this.now();
     const post: Post = {
@@ -269,6 +270,8 @@ class MockDB {
       avatarColor: data.avatarColor || "from-blue-500 to-indigo-600",
       hasCollabButton: true,
       heartsTotal: 0,
+      hasGame: !!data.gameId,
+      gameId: data.gameId,
       threadId: this.genId(),
       replies: [],
     };

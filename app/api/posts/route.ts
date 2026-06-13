@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor } = body;
+  const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId } = body;
 
   if (!displayName || !content) {
     return NextResponse.json(
@@ -19,6 +19,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor });
+  const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId });
   return NextResponse.json(post, { status: 201 });
 }

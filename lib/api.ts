@@ -36,7 +36,7 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return post;
     },
-    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number }) =>
       mockDbInstance.createPost(data),
     like: async (id: number, userId?: string) => {
       const post = mockDbInstance.likePost(id, userId || '');
@@ -127,7 +127,7 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
-    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
+    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number }) =>
       fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
     like: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
     dislike: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),

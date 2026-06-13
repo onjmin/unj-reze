@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@keyframes danmaku-slide {
+  from { left: 105%; }
+  to { left: -200%; }
+}
+.danmaku-comment {
+  animation: danmaku-slide 6s linear forwards;
+  position: absolute;
+  white-space: nowrap;
+  pointer-events: none;
+  font-weight: bold;
+  font-size: 13px;
+  line-height: 1;
+  text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

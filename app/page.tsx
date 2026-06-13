@@ -15,8 +15,8 @@ import FAB from '@/components/FAB';
 import DrawingEditor from '@/components/DrawingEditor';
 import DotDrawingEditor from '@/components/DotDrawingEditor';
 import CollabSelector from '@/components/CollabSelector';
-import GamePlayer from '@/components/GamePlayer';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
+import LiveGameView from '@/components/LiveGameView';
 import MmlEditor from '@/components/MmlEditor';
 import PostComposer from '@/components/PostComposer';
 import SearchView from '@/components/SearchView';
@@ -44,6 +44,9 @@ export default function App() {
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
+  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: number } | null>(null);
+  const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
+  const postGameLastIdRef = useRef(0);
 
   const heartQueue = useRef<Map<number, number>>(new Map());
   const heartTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -86,6 +89,26 @@ export default function App() {
       setUserId('名無しvFZ');
     });
   }, []);
+
+  useEffect(() => {
+    if (activeScreen !== 'postgame' || !playingGame?.postId) return;
+    const pid = playingGame.postId;
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/posts/${pid}/replies`);
+        if (!res.ok) return;
+        const replies: Post[] = await res.json();
+        const newOnes = replies.filter(r => r.id > postGameLastIdRef.current);
+        if (newOnes.length > 0) {
+          postGameLastIdRef.current = Math.max(...newOnes.map(r => r.id));
+          setPostGameDanmaku(prev => [...prev, ...newOnes.map(r => `${r.displayName}: ${r.content}`)]);
+        }
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, [activeScreen, playingGame?.postId]);
 
   const fetchPosts = useCallback(async () => {
     try {
@@ -199,12 +222,25 @@ export default function App() {
       const result = await api.upload.image({ image: attachedImage });
       imageSrc = result.url;
     }
+    let gameId: number | undefined;
+    if (gameDraft) {
+      const res = await fetch('/api/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest }),
+      });
+      if (res.ok) {
+        const savedGame = await res.json();
+        gameId = savedGame.id;
+      }
+    }
     const post = await api.posts.create({
       displayName: userId,
       content: inputText,
       hasImage: !!attachedImage,
       imageSrc,
       avatarColor: "from-blue-500 to-indigo-600",
+      gameId,
     });
     setPosts([post, ...posts]);
     setInputText('');
@@ -251,6 +287,18 @@ export default function App() {
     setInputText(`#MML作曲 ${mml}`);
   };
 
+  const handleOpenPostGame = async (gameId: number, postId?: number) => {
+    try {
+      const res = await fetch(`/api/games/${gameId}`);
+      if (!res.ok) return;
+      const game = await res.json();
+      setPostGameDanmaku([]);
+      postGameLastIdRef.current = 0;
+      setPlayingGame({ manifest: game.manifest, title: game.title, postId });
+      setActiveScreen('postgame');
+    } catch {}
+  };
+
   const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
     setGameDraft({ manifest, title: meta.title, preset: meta.preset });
     setActiveScreen(null);
@@ -288,8 +336,20 @@ export default function App() {
       {activeScreen === 'gamemaker' && (
         <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} />
       )}
-      {activeScreen === 'game' && (
-        <GamePlayer onClose={() => setActiveScreen(null)} />
+      {activeScreen === 'postgame' && playingGame && (
+        <GameMaker
+          onClose={() => { setActiveScreen(null); setPlayingGame(null); setPostGameDanmaku([]); }}
+          userId={userId}
+          initialManifest={playingGame.manifest}
+          playOnly
+          postId={playingGame.postId}
+          danmakuComments={postGameDanmaku}
+          onComment={async (text, displayName) => {
+            if (!playingGame.postId) return;
+            setPostGameDanmaku(prev => [...prev, `${displayName}: ${text}`]);
+            await api.posts.replies.create(playingGame.postId, { displayName, content: text, parentPostId: playingGame.postId });
+          }}
+        />
       )}
       {activeScreen === 'mml' && (
         <MmlEditor
@@ -322,8 +382,7 @@ export default function App() {
                 activeTab={topTab}
                 setActiveTab={(tab) => {
                   setTopTab(tab);
-                  if (tab === 'game') { setActiveScreen('game'); }
-                  else { setActiveScreen(null); }
+                  if (tab !== 'game') setActiveScreen(null);
                   if (tab === 'ranking') {
                     setRankCategory('イイ');
                   }
@@ -331,8 +390,14 @@ export default function App() {
               />
             )}
 
-            <div className="flex-1 overflow-y-auto pb-20 scrollbar-none">
-              {currentNav === 'home' && (
+            <div className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-20'}`}>
+              {currentNav === 'home' && topTab === 'game' && (
+                <LiveGameView
+                  userId={userId}
+                  sessionId={getCookie('unj_reze_session') || userId}
+                />
+              )}
+              {currentNav === 'home' && topTab !== 'game' && (
                 <>
                   {topTab !== 'ranking' && topTab !== 'game' && (
                     <div className="p-3 border-b border-gray-800/80 flex flex-col space-y-2">
@@ -434,7 +499,9 @@ export default function App() {
                     onHeart={handleHeart}
                     onAddReply={handleAddReply}
                     onQuickPost={handleQuickPost}
-                    openGame={() => setActiveScreen('game')}
+                    openGame={(gameId?: number, postId?: number) => {
+                      if (gameId) handleOpenPostGame(gameId, postId);
+                    }}
                     openCollab={handleOpenCollab}
                     openMml={() => setActiveScreen('mml')}
                   />
@@ -449,7 +516,9 @@ export default function App() {
                   onHeart={handleHeart}
                   onAddReply={handleAddReply}
                   onQuickPost={handleQuickPost}
-                  openGame={() => setActiveScreen('game')}
+                  openGame={(gameId?: number, postId?: number) => {
+                    if (gameId) handleOpenPostGame(gameId, postId);
+                  }}
                   openCollab={handleOpenCollab}
                   openMml={() => setActiveScreen('mml')}
                 />

@@ -13,7 +13,7 @@ interface FeedListProps {
   onHeart: (id: number) => void;
   onAddReply: (id: number, text: string) => void;
   onQuickPost: () => void;
-  openGame: () => void;
+  openGame: (gameId?: number, postId?: number) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
 }
@@ -31,8 +31,6 @@ export default function FeedList({ posts, activeTab, rankCategory, onLike, onDis
     } else {
       displayPosts.sort((a, b) => b.heartsTotal - a.heartsTotal);
     }
-  } else if (activeTab === 'game') {
-    displayPosts = displayPosts.filter(p => p.hasGame || p.content.includes('#ゲーム'));
   } else if (activeTab === 'following') {
     displayPosts = displayPosts.filter(p => p.id === 3 || p.id === 6);
   }

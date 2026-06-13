@@ -192,13 +192,25 @@ interface GameMakerProps {
   onClose: () => void;
   userId: string;
   onSave?: (manifest: GameManifestDraft, meta: { title: string; preset: PresetId }) => void;
+  initialManifest?: GameManifestDraft;
+  playOnly?: boolean;
+  /** 親コンテナに収める（absolute overlay ではなく h-full flex-col） */
+  embedded?: boolean;
+  ghostPlayers?: { sessionId: string; x: number; y: number; emoji: string }[];
+  onPositionChange?: (x: number, y: number, emoji: string) => void;
+  /** ゲームポストのID（コメント返信先） */
+  postId?: number;
+  /** ニコニコ風弾幕コメント（新しい文字列が追加されるたびに流れる） */
+  danmakuComments?: string[];
+  /** コメント送信コールバック */
+  onComment?: (text: string, displayName: string) => void;
 }
 
 type PickTarget =
   | { t: 'player' } | { t: 'bgm' } | { t: 'tile'; id: number }
   | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' };
 
-export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
+export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [presetId, setPresetId] = useState<PresetId>('dq');
   const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.dq));
@@ -208,7 +220,38 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
   const [selectedTileId, setSelectedTileId] = useState(1);
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
+  const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
+  const gameMsgReadyRef = useRef(false);
+  const gameMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewStopRef = useRef<(() => void) | null>(null);
+  const ghostPlayersRef = useRef(ghostPlayers || []);
+
+  // 弾幕コメント
+  interface DanmakuItem { id: number; text: string; row: number; color: string; }
+  const [danmakuItems, setDanmakuItems] = useState<DanmakuItem[]>([]);
+  const danmakuCounterRef = useRef(0);
+  const prevDanmakuLenRef = useRef(0);
+  const DANMAKU_COLORS = ['#fff', '#ffd700', '#00ff88', '#ff88ff', '#88ffff', '#ff8844', '#aaffaa', '#ff4444'];
+
+  useEffect(() => {
+    const comments = danmakuComments || [];
+    if (comments.length <= prevDanmakuLenRef.current) return;
+    const newTexts = comments.slice(prevDanmakuLenRef.current);
+    prevDanmakuLenRef.current = comments.length;
+    newTexts.forEach((text, i) => {
+      const id = ++danmakuCounterRef.current;
+      const row = (id + i) % 7;
+      const color = DANMAKU_COLORS[id % DANMAKU_COLORS.length];
+      setDanmakuItems(prev => [...prev, { id, text, row, color }]);
+      setTimeout(() => setDanmakuItems(prev => prev.filter(d => d.id !== id)), 6500);
+    });
+  }, [danmakuComments]);
+
+  // コメント入力
+  const [commentText, setCommentText] = useState('');
+  const onPositionChangeRef = useRef(onPositionChange);
+  ghostPlayersRef.current = ghostPlayers || [];
+  onPositionChangeRef.current = onPositionChange;
 
   const engineRef = useRef<GameEngine>({
     map: [], player: { x: 50, y: 50, vx: 0, vy: 0, isGrounded: false },
@@ -217,6 +260,30 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
   const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
   const sfxRef = useRef<PresetData['sfx']>({});
   sfxRef.current = gameData.sfx;
+
+  const showGameMsg = useCallback((text: string, mode: 'instant' | 'timed', onDismiss: () => void) => {
+    gameMsgReadyRef.current = mode === 'instant';
+    if (gameMsgTimerRef.current) clearTimeout(gameMsgTimerRef.current);
+    setGameMsg({ text, mode, onDismiss });
+    if (mode === 'timed') {
+      gameMsgTimerRef.current = setTimeout(() => {
+        gameMsgReadyRef.current = true;
+        setGameMsg(prev => prev ? { ...prev } : null); // force re-render for ▼
+      }, 2000);
+    }
+  }, []);
+
+  const dismissGameMsg = useCallback(() => {
+    if (!gameMsgReadyRef.current) return;
+    if (gameMsgTimerRef.current) { clearTimeout(gameMsgTimerRef.current); gameMsgTimerRef.current = null; }
+    setGameMsg(prev => {
+      if (prev) { prev.onDismiss(); }
+      return null;
+    });
+    gameMsgReadyRef.current = false;
+  }, []);
+
+  useEffect(() => () => { if (gameMsgTimerRef.current) clearTimeout(gameMsgTimerRef.current); }, []);
 
   const previewMmlAsset = useCallback((_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' }) => {
     previewStopRef.current?.();
@@ -268,8 +335,40 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
   }, [gameData]);
 
   useEffect(() => {
-    resetGame('dq');
-  }, [resetGame]);
+    if (initialManifest) {
+      // 既存ゲームを読み込む
+      const preset = PRESETS[initialManifest.preset] ? initialManifest.preset : 'dq';
+      const base = clone(PRESETS[preset]);
+      const data: PresetData = {
+        ...base,
+        engine: initialManifest.engine,
+        name: initialManifest.name,
+        gravity: initialManifest.gravity,
+        friction: initialManifest.friction,
+        player: { ...base.player, ...initialManifest.player, spriteUrl: undefined },
+        tiles: Object.fromEntries(
+          Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: undefined }])
+        ),
+        map: initialManifest.map,
+        objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: undefined })),
+        bgm: initialManifest.bgm && initialManifest.bgm !== 'none'
+          ? { ref: initialManifest.bgm }
+          : undefined,
+        sfx: Object.fromEntries(
+          Object.entries(initialManifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
+        ) as PresetData['sfx'],
+      };
+      setPresetId(preset);
+      setGameData(data);
+      setTitle(initialManifest.name);
+      const eng = engineRef.current;
+      eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
+      eng.map = JSON.parse(JSON.stringify(data.map));
+      if (playOnly) setIsPlaying(true);
+    } else {
+      resetGame('dq');
+    }
+  }, [initialManifest, playOnly, resetGame]);
 
   // BGM
   useEffect(() => {
@@ -332,8 +431,8 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
       }
     };
 
-    const win = () => { playSfx(sfxRef.current.clear); setTimeout(() => { alert('クリア！'); setIsPlaying(false); }, 10); };
-    const lose = (msg: string) => { playSfx(sfxRef.current.damage); setTimeout(() => { alert(msg); setIsPlaying(false); }, 10); };
+    const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false)); };
+    const lose = (msg: string) => { playSfx(sfxRef.current.damage); showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
 
     const loop = () => {
       const eng = engineRef.current;
@@ -373,7 +472,8 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
           if (tile2) { if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; } else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE; p.vy = 0; }
           if (p.y > PLAY_H) { lose('ミス！'); dead = true; }
         } else {
-          // rpg / touhou: 8-dir free move
+          // rpg / touhou: 8-dir free move — velocity unused, reset every frame to be safe
+          p.vx = 0; p.vy = 0;
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= pData.speed; if (isRight) nx += pData.speed;
           if (isUp) ny -= pData.speed; if (isDown) ny += pData.speed;
@@ -394,6 +494,9 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
             }
           }
         }
+
+        // 位置変化を通知（LiveGameView 側がスロットルしてサーバーへ送信）
+        if (onPositionChangeRef.current) onPositionChangeRef.current(p.x, p.y, pData.emoji);
 
         // ── entities (NPC / 敵 / 弾源) ──
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
@@ -453,7 +556,7 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
           const overlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
           if (overlap) {
             if (d.hazard) { lose('ミス！'); dead = true; break; }
-            else if (d.message && !e.talked) { e.talked = true; setTimeout(() => alert(d.message), 10); }
+            else if (d.message && !e.talked) { e.talked = true; showGameMsg(d.message, 'instant', () => {}); }
           } else if (!d.hazard) {
             e.talked = false;
           }
@@ -517,6 +620,14 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
           ctx.strokeStyle = o.hazard ? 'rgba(255,80,80,0.6)' : 'rgba(80,200,255,0.6)';
           ctx.lineWidth = 1.5; ctx.strokeRect(o.col * TILE_SIZE + 1, o.row * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
         }
+      }
+
+      // ghost players（他プレイヤー・当たり判定なし）
+      for (const ghost of ghostPlayersRef.current) {
+        ctx.globalAlpha = 0.45;
+        ctx.font = `${pData.w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillText(ghost.emoji, ghost.x + pData.w / 2, ghost.y + pData.h + 4);
+        ctx.globalAlpha = 1;
       }
 
       // player
@@ -651,12 +762,12 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
   const setTpl = (patch: Partial<ObjectDef>) => setObjTemplate(o => ({ ...o, ...patch }));
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden">
+    <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 rounded-full shrink-0"><X size={16} /></button>
-          <span className="text-xs font-bold text-white shrink-0">ゲーム作成</span>
+          {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 rounded-full shrink-0"><X size={16} /></button>}
+          <span className="text-xs font-bold text-white shrink-0">{embedded ? '▶ プレイ中' : 'ゲーム作成'}</span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
@@ -673,14 +784,18 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
       </div>
 
       {/* Preset selector */}
-      {!isPlaying && (
-        <div className="flex gap-1.5 px-3 py-2 bg-[#0a0a0d] border-b border-gray-800 overflow-x-auto scrollbar-none shrink-0">
-          {PRESET_ORDER.map(id => (
-            <button key={id} onClick={() => resetGame(id)}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-full text-[11px] font-bold whitespace-nowrap transition ${presetId === id ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-              <span>{PRESET_EMOJI[id]}</span>{PRESETS[id].name}
-            </button>
-          ))}
+      {!isPlaying && !playOnly && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-[#0a0a0d] border-b border-gray-800 shrink-0">
+          <span className="text-[10px] text-gray-500 shrink-0">プリセット</span>
+          <select
+            value={presetId}
+            onChange={e => resetGame(e.target.value as PresetId)}
+            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-[12px] text-gray-200 outline-none"
+          >
+            {PRESET_ORDER.map(id => (
+              <option key={id} value={id}>{PRESET_EMOJI[id]} {PRESETS[id].name}</option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -697,14 +812,49 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
               onMouseMove={e => editorTab !== 'object' && (e.buttons & 1) === 1 && handleCanvasAction(e)}
               onTouchStart={handleCanvasAction}
               onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)} />
+            {/* ニコニコ弾幕レイヤー */}
+            {danmakuItems.length > 0 && (
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                {danmakuItems.map(item => (
+                  <span
+                    key={item.id}
+                    className="danmaku-comment"
+                    style={{ top: item.row * 22 + 4, color: item.color }}
+                  >
+                    {item.text}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* ゲーム内メッセージ（DQ風） */}
+            {gameMsg && (
+              <div
+                className="absolute inset-x-2 bottom-2 cursor-pointer select-none"
+                onClick={dismissGameMsg}
+                onTouchEnd={e => { e.preventDefault(); dismissGameMsg(); }}
+              >
+                <div className="bg-[#1a1a2e] border-2 border-gray-400 rounded-lg px-4 py-3 shadow-2xl"
+                  style={{ fontFamily: 'monospace', imageRendering: 'pixelated' }}>
+                  <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{gameMsg.text}</p>
+                  <div className="flex justify-end mt-1.5 h-4">
+                    {gameMsgReadyRef.current
+                      ? <span className="text-yellow-300 text-xs animate-bounce">▼</span>
+                      : <span className="text-gray-500 text-[10px]">しばらくおまちください…</span>
+                    }
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Sidebar */}
-        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${isPlaying ? 'w-full md:w-auto' : 'flex-1 md:w-80 md:flex-none'}`}>
-          {isPlaying ? (
-            <div className="flex-1 flex flex-col justify-center p-4 select-none">
-              <div className="flex justify-between items-center max-w-xs mx-auto w-full gap-8">
+        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly) ? 'w-full md:w-auto' : 'flex-1 md:w-80 md:flex-none'}`}>
+          {(isPlaying || playOnly) ? (
+            <div className="flex-1 flex flex-col p-4 select-none">
+              <div className="flex-1 flex items-center justify-center">
+              <div className="flex justify-between items-center max-w-xs w-full gap-8">
                 <div className="relative w-28 h-28">
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-12 bg-gray-600 rounded-t-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('up')}></div>
                   <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-12 bg-gray-600 rounded-b-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('down')}></div>
@@ -719,6 +869,35 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
                   </button>
                 )}
               </div>
+              </div>
+              {/* コメント欄 */}
+              {postId && onComment && (
+                <form
+                  onSubmit={e => {
+                    e.preventDefault();
+                    const t = commentText.trim();
+                    if (!t) return;
+                    onComment(t, userId);
+                    setCommentText('');
+                  }}
+                  className="flex gap-1.5 mt-2"
+                >
+                  <input
+                    value={commentText}
+                    onChange={e => setCommentText(e.target.value)}
+                    placeholder="コメントを送る…"
+                    maxLength={50}
+                    className="flex-1 bg-gray-700/80 border border-gray-600 rounded-full px-3 py-1.5 text-xs text-white outline-none placeholder:text-gray-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!commentText.trim()}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-full text-xs text-white font-bold shrink-0"
+                  >
+                    送信
+                  </button>
+                </form>
+              )}
             </div>
           ) : (
             <>

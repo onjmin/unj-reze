@@ -25,7 +25,7 @@ interface PostContainerProps {
   onHeart: (id: number) => void;
   onAddReply: (id: number, text: string) => void;
   onQuickPost: () => void;
-  openGame: () => void;
+  openGame: (gameId?: number, postId?: number) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
 }
@@ -215,7 +215,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {post.hasGame && (
             <div
-              onClick={openGame}
+              onClick={() => openGame(post.gameId, post.id)}
               className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
             >
               <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
