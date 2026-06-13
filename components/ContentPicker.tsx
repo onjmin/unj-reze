@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
-import { extractMmlFromContent } from '@/lib/mml';
+import { extractMmlFromContent, mmlToNotes, playMml } from '@/lib/mml';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 
 export interface PickResult {
@@ -32,6 +32,21 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
   const [bgmTab, setBgmTab] = useState<BgmTab>('youtube');
   const [urlInput, setUrlInput] = useState('');
   const [mmlInput, setMmlInput] = useState('T120 o4 c d e f g a b');
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const stopRef = useRef<(() => void) | null>(null);
+
+  const previewMml = (key: string, mml: string) => {
+    stopRef.current?.();
+    stopRef.current = null;
+    if (previewKey === key) { setPreviewKey(null); return; }
+    const { tracks, tempo } = mmlToNotes(mml);
+    if (!tracks.some(t => t.notes.length > 0)) return;
+    const stop = playMml(tracks, tempo, undefined, () => { setPreviewKey(null); stopRef.current = null; });
+    stopRef.current = stop;
+    setPreviewKey(key);
+  };
+
+  useEffect(() => () => { stopRef.current?.(); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -207,19 +222,29 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
                 <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-500" /></div>
               ) : (
                 <div className="space-y-1.5">
-                  {mmlPosts.map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => pickMmlPost(p)}
-                      className="w-full text-left p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900"
-                    >
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        <Music size={11} className="text-pink-400 shrink-0" />
-                        <span className="text-[11px] text-gray-300 font-bold truncate">{p.displayName} #{p.id}</span>
+                  {mmlPosts.map(p => {
+                    const mml = extractMmlFromContent(p.content) || '';
+                    const key = `post-${p.id}`;
+                    const isPrev = previewKey === key;
+                    return (
+                      <div key={p.id} className="flex items-center gap-1.5 p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900">
+                        <button
+                          onClick={() => previewMml(key, mml)}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
+                          title={isPrev ? '停止' : '試聴'}
+                        >
+                          {isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
+                        </button>
+                        <button onClick={() => pickMmlPost(p)} className="flex-1 min-w-0 text-left">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <Music size={11} className="text-pink-400 shrink-0" />
+                            <span className="text-[11px] text-gray-300 font-bold truncate">{p.displayName} #{p.id}</span>
+                          </div>
+                          <p className="text-[10px] text-gray-500 font-mono truncate">{mml}</p>
+                        </button>
                       </div>
-                      <p className="text-[10px] text-gray-500 font-mono truncate">{extractMmlFromContent(p.content)}</p>
-                    </button>
-                  ))}
+                    );
+                  })}
                   {mmlPosts.length === 0 && <p className="text-center text-[11px] text-gray-600 py-8">MML投稿がありません</p>}
                 </div>
               )}
@@ -235,7 +260,13 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
                 onChange={e => setMmlInput(e.target.value)}
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500 h-20 font-mono resize-none"
               />
-              <button onClick={pickMmlRaw} disabled={!mmlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このMMLを使う</button>
+              <div className="flex gap-2">
+                <button onClick={() => previewMml('raw', mmlInput)} disabled={!mmlInput.trim()}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 ${previewKey === 'raw' ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}>
+                  {previewKey === 'raw' ? <Square size={12} /> : <Play size={12} />}試聴
+                </button>
+                <button onClick={pickMmlRaw} disabled={!mmlInput.trim()} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このMMLを使う</button>
+              </div>
             </div>
           )}
         </div>

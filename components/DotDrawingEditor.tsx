@@ -151,7 +151,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
 
   const handleImport = async (image: HTMLImageElement, opts: { opacity: number; simple: boolean }) => {
     if (walkMode && !opts.simple) {
-      const preset = detectPreset(image.naturalWidth, image.naturalHeight, walkPresets);
+      const preset = detectPreset(image.naturalWidth, image.naturalHeight);
       if (preset) {
         const dotSize = Math.floor(CANVAS_SIZE / preset.h);
         const canvasW = preset.w * dotSize;
@@ -217,7 +217,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         return;
       }
     }
-    const blob = await new Promise<Blob | null>(r => image.toBlob(r));
+    const blob = await fetch(image.src, { cache: 'no-store' }).then(r => r.blob()).catch(() => null);
     if (blob) pasteImage(blob, opts.opacity);
   };
 
@@ -919,7 +919,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         </div>
       )}
 
-      <div className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' outline outline-4 outline-blue-400/60' : '')}>
+      <div className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' ring-4 ring-blue-400/60' : '')}>
         <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})` }} />
       </div>
 

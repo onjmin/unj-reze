@@ -37,7 +37,7 @@ export default function ImportDialog({ open, onClose, onImport, walkMode, walkPr
   const onImgLoad = () => {
     const img = imageRef.current;
     if (!img || img.naturalWidth === 0) return;
-    if (walkMode) setDetected(detectPreset(img.naturalWidth, img.naturalHeight, walkPresets));
+    if (walkMode) setDetected(detectPreset(img.naturalWidth, img.naturalHeight));
   };
 
   const handleImport = () => {
@@ -48,8 +48,8 @@ export default function ImportDialog({ open, onClose, onImport, walkMode, walkPr
   if (!open) return null;
 
   return (
-    <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/50">
-      <div className="bg-[#1a1b26] rounded-xl border border-gray-700 shadow-2xl w-[360px] max-h-[90vh] overflow-y-auto">
+    <div className="absolute inset-0 z-60 flex items-center justify-center bg-black/50">
+      <div className="bg-[#1a1b26] rounded-xl border border-gray-700 shadow-2xl w-90 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
           <span className="text-xs font-bold text-gray-200">
             {walkMode ? '歩行グラを読み込み' : '画像を読み込み'}

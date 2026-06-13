@@ -98,10 +98,10 @@ const staticApi = {
     },
   },
   follow: {
-    getCounts: (userId: string) => mockDbInstance.getFollowCounts(userId),
-    isFollowing: (followerId: string, followedId: string) => mockDbInstance.isFollowing(followerId, followedId),
-    follow: (followerId: string, followedId: string) => { mockDbInstance.followUser(followerId, followedId); },
-    unfollow: (followerId: string, followedId: string) => { mockDbInstance.unfollowUser(followerId, followedId); },
+    getCounts: async (userId: string) => mockDbInstance.getFollowCounts(userId),
+    isFollowing: async (followerId: string, followedId: string) => ({ isFollowing: mockDbInstance.isFollowing(followerId, followedId) }),
+    follow: async (followerId: string, followedId: string) => { mockDbInstance.followUser(followerId, followedId); return { success: true }; },
+    unfollow: async (followerId: string, followedId: string) => { mockDbInstance.unfollowUser(followerId, followedId); return { success: true }; },
   },
 };
 
