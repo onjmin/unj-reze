@@ -23,14 +23,18 @@ const typeColors: Record<string, string> = {
   mention: 'text-yellow-500',
 };
 
-export default function NotificationView() {
+interface NotificationViewProps {
+  userId?: string;
+}
+
+export default function NotificationView({ userId }: NotificationViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState('すべて');
   const [notifs, setNotifs] = useState<{ id: number; user: string; action: string; target: string; time: string; type?: string; postId?: number; targetUser?: string }[]>([]);
 
   useEffect(() => {
-    api.notifications.list().then(setNotifs);
-  }, []);
+    api.notifications.list(userId).then(setNotifs);
+  }, [userId]);
 
   const handleClick = (n: typeof notifs[0]) => {
     if (n.type === 'follow' && n.targetUser) {

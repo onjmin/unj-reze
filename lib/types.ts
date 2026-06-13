@@ -26,6 +26,14 @@ export interface Post {
 
 export type Reply = Post;
 
+export interface AnonymousUser {
+  id: string;
+  displayName: string;
+  slug: string;
+  avatarColor: string;
+  createdAt: string;
+}
+
 export interface Obstacle {
   x: number;
   y: number;

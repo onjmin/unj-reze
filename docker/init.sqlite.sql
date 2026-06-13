@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS notifications (
   user_name TEXT NOT NULL,
   action TEXT NOT NULL,
   target TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT 'like',
+  post_id INTEGER,
+  target_user TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -13,6 +16,7 @@ CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY,
   sender TEXT NOT NULL,
   text TEXT NOT NULL,
+  recipient TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -62,6 +66,29 @@ CREATE TABLE IF NOT EXISTS post_hearts (
   post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 匿名ユーザーテーブル
+CREATE TABLE IF NOT EXISTS anonymous_users (
+  id TEXT PRIMARY KEY,
+  ip_address TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  slug TEXT,
+  avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_anonymous_users_ip ON anonymous_users(ip_address);
+CREATE INDEX IF NOT EXISTS idx_anonymous_users_session ON anonymous_users(session_id);
+
+-- フォローテーブル
+CREATE TABLE IF NOT EXISTS user_follows (
+  id INTEGER PRIMARY KEY,
+  follower_id TEXT NOT NULL,
+  followed_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (follower_id, followed_id)
 );
 
 -- 通知データ

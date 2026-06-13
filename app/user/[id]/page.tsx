@@ -11,7 +11,6 @@ export function generateStaticParams() {
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const allPosts = await db.getPosts();
   const userPosts = await db.getUserPostsBySlug(id);
   const displayName = await db.getUserDisplayName(id);
 
@@ -35,7 +34,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
             <span className="ml-3 font-bold text-sm text-gray-200">プロフィール</span>
           </div>
         </div>
-        <ProfileView userId={id} displayName={displayName} posts={allPosts} />
+        <ProfileView userId={id} displayName={displayName} />
       </div>
     </div>
   );

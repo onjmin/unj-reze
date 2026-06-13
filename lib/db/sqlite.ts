@@ -1,7 +1,7 @@
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
-import { Post } from '../types';
+import { Post, AnonymousUser } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -29,6 +29,8 @@ async function getDb(): Promise<SqlJsDatabase> {
     await runInitSql(db);
   }
 
+  ensureAnonymousUsersTable(db);
+  ensureTableMigrations(db);
   return db;
 }
 
@@ -38,6 +40,47 @@ async function runInitSql(database: SqlJsDatabase) {
     const sql = fs.readFileSync(initPath, 'utf-8');
     database.run(sql);
     saveDb();
+  }
+}
+
+function ensureAnonymousUsersTable(d: SqlJsDatabase) {
+  d.run(`CREATE TABLE IF NOT EXISTS anonymous_users (
+    id TEXT PRIMARY KEY,
+    ip_address TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    slug TEXT,
+    avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  d.run(`CREATE INDEX IF NOT EXISTS idx_anonymous_users_ip ON anonymous_users(ip_address)`);
+  d.run(`CREATE INDEX IF NOT EXISTS idx_anonymous_users_session ON anonymous_users(session_id)`);
+  d.run(`CREATE TABLE IF NOT EXISTS user_follows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    follower_id TEXT NOT NULL,
+    followed_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (follower_id, followed_id)
+  )`);
+}
+
+function ensureTableMigrations(d: SqlJsDatabase) {
+  const cols = d.exec("PRAGMA table_info(notifications)");
+  const colNames = cols.length > 0 ? cols[0].values.map((v: any) => v[1]) : [];
+  if (!colNames.includes('type')) {
+    d.run("ALTER TABLE notifications ADD COLUMN type TEXT NOT NULL DEFAULT 'like'");
+  }
+  if (!colNames.includes('post_id')) {
+    d.run("ALTER TABLE notifications ADD COLUMN post_id INTEGER");
+  }
+  if (!colNames.includes('target_user')) {
+    d.run("ALTER TABLE notifications ADD COLUMN target_user TEXT");
+  }
+  const msgCols = d.exec("PRAGMA table_info(messages)");
+  const msgColNames = msgCols.length > 0 ? msgCols[0].values.map((v: any) => v[1]) : [];
+  if (!msgColNames.includes('recipient')) {
+    d.run("ALTER TABLE messages ADD COLUMN recipient TEXT");
   }
 }
 
@@ -84,6 +127,30 @@ function rowToPost(row: any): Post {
 function deriveSlugSqlite(fullName: string): string {
   const match = fullName.match(/[a-zA-Z0-9]+$/);
   return match ? match[0] : fullName;
+}
+
+const AVATAR_GRADIENTS_SQLITE = [
+  'from-blue-500 to-indigo-600',
+  'from-red-500 to-rose-600',
+  'from-emerald-400 to-teal-500',
+  'from-purple-400 to-violet-500',
+  'from-amber-400 to-yellow-500',
+  'from-pink-400 to-rose-500',
+  'from-cyan-400 to-indigo-500',
+  'from-lime-400 to-green-500',
+  'from-orange-400 to-red-500',
+  'from-teal-400 to-cyan-500',
+];
+
+function generateDisplayNameSqlite(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let suffix = '';
+  for (let i = 0; i < 3; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  return `名無し${suffix}`;
+}
+
+function randomGradientSqlite(): string {
+  return AVATAR_GRADIENTS_SQLITE[Math.floor(Math.random() * AVATAR_GRADIENTS_SQLITE.length)];
 }
 
 function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[] {
@@ -333,6 +400,38 @@ export const sqliteStore: DataStore = {
     };
   },
 
+  async getLikedPosts(userId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(
+      d,
+      `${VOTED_SELECT} JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = ? AND pv.vote_type = 'like' ORDER BY p.id DESC`,
+      [userId]
+    );
+    rows.forEach(r => applyVoteRow(r, userId));
+    return rows.map(rowToPost);
+  },
+
+  async getDislikedPosts(userId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(
+      d,
+      `${VOTED_SELECT} JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = ? AND pv.vote_type = 'dislike' ORDER BY p.id DESC`,
+      [userId]
+    );
+    rows.forEach(r => applyVoteRow(r, userId));
+    return rows.map(rowToPost);
+  },
+
+  async getHeartedPosts(userId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(
+      d,
+      `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = ? ORDER BY p.id DESC`,
+      [userId]
+    );
+    return rows.map(rowToPost);
+  },
+
   async getUserPostsBySlug(slug: string, userId?: string) {
     const d = await getDb();
     let rows;
@@ -359,16 +458,30 @@ export const sqliteStore: DataStore = {
     return rows.length > 0 ? rows[0].display_name : undefined;
   },
 
-  async getNotifications() {
+  async getNotifications(userId?: string) {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT * FROM notifications ORDER BY id');
-    return rows.map(r => ({ id: r.id, user: r.user_name, action: r.action, target: r.target, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Notification));
+    let rows;
+    if (userId) {
+      rows = rowsToObjects(d, 'SELECT * FROM notifications WHERE target_user = ? ORDER BY id', [userId]);
+    } else {
+      rows = rowsToObjects(d, 'SELECT * FROM notifications ORDER BY id');
+    }
+    return rows.map(r => ({
+      id: r.id, user: r.user_name, action: r.action, target: r.target,
+      type: r.type || 'like', postId: r.post_id ?? undefined, targetUser: r.target_user ?? undefined,
+      createdAt: r.created_at, time: formatRelativeTime(r.created_at),
+    } as Notification));
   },
 
-  async getMessages() {
+  async getMessages(userId?: string) {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT * FROM messages ORDER BY id');
-    return rows.map(r => ({ id: r.id, sender: r.sender, text: r.text, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
+    let rows;
+    if (userId) {
+      rows = rowsToObjects(d, 'SELECT * FROM messages WHERE recipient IS NULL OR sender = ? OR recipient = ? ORDER BY id', [userId, userId]);
+    } else {
+      rows = rowsToObjects(d, 'SELECT * FROM messages ORDER BY id');
+    }
+    return rows.map(r => ({ id: r.id, sender: r.sender, text: r.text, recipient: r.recipient ?? undefined, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
   },
 
   async addMessage(data: MessageParams) {
@@ -376,11 +489,11 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO messages (id, sender, text, created_at) VALUES (?, ?, ?, ?)`,
-      [id, data.sender, data.text, now]
+      `INSERT INTO messages (id, sender, text, recipient, created_at) VALUES (?, ?, ?, ?, ?)`,
+      [id, data.sender, data.text, data.recipient || null, now]
     );
     saveDb();
-    return { id, sender: data.sender, text: data.text, createdAt: now, time: formatRelativeTime(now) };
+    return { id, sender: data.sender, text: data.text, recipient: data.recipient, createdAt: now, time: formatRelativeTime(now) } as Message;
   },
 
   async getTrends() {
@@ -405,5 +518,111 @@ export const sqliteStore: DataStore = {
       [`%${query}%`, `%${query}%`]
     );
     return rows.map(rowToPost);
+  },
+
+  async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
+    const d = await getDb();
+
+    const sessionRows = rowsToObjects(
+      d,
+      'SELECT * FROM anonymous_users WHERE session_id = ?',
+      [sessionId]
+    );
+    if (sessionRows.length > 0) {
+      const row = sessionRows[0];
+      d.run('UPDATE anonymous_users SET last_seen_at = ? WHERE id = ?', [new Date().toISOString(), row.id]);
+      saveDb();
+      return {
+        id: row.id,
+        displayName: row.display_name,
+        slug: row.slug,
+        avatarColor: row.avatar_color,
+        createdAt: row.created_at,
+      } as AnonymousUser;
+    }
+
+    const ipRows = rowsToObjects(
+      d,
+      'SELECT * FROM anonymous_users WHERE ip_address = ? ORDER BY last_seen_at DESC LIMIT 1',
+      [ipAddress]
+    );
+    if (ipRows.length > 0) {
+      const row = ipRows[0];
+      d.run(
+        'UPDATE anonymous_users SET session_id = ?, last_seen_at = ? WHERE id = ?',
+        [sessionId, new Date().toISOString(), row.id]
+      );
+      saveDb();
+      return {
+        id: row.id,
+        displayName: row.display_name,
+        slug: row.slug,
+        avatarColor: row.avatar_color,
+        createdAt: row.created_at,
+      } as AnonymousUser;
+    }
+
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const displayName = generateDisplayNameSqlite();
+    const slug = deriveSlugSqlite(displayName);
+    const avatarColor = randomGradientSqlite();
+    const now = new Date().toISOString();
+
+    d.run(
+      `INSERT INTO anonymous_users (id, ip_address, session_id, display_name, slug, avatar_color, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, ipAddress, sessionId, displayName, slug, avatarColor, now, now]
+    );
+    saveDb();
+
+    return { id, displayName, slug, avatarColor, createdAt: now } as AnonymousUser;
+  },
+
+  async updateUserDisplayName(userId: string, displayName: string) {
+    const d = await getDb();
+    const slug = deriveSlugSqlite(displayName);
+    d.run(
+      'UPDATE anonymous_users SET display_name = ?, slug = ? WHERE id = ?',
+      [displayName, slug, userId]
+    );
+    saveDb();
+  },
+
+  async followUser(followerId: string, followedId: string) {
+    const d = await getDb();
+    d.run(
+      'INSERT OR IGNORE INTO user_follows (follower_id, followed_id) VALUES (?, ?)',
+      [followerId, followedId]
+    );
+    saveDb();
+  },
+
+  async unfollowUser(followerId: string, followedId: string) {
+    const d = await getDb();
+    d.run(
+      'DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?',
+      [followerId, followedId]
+    );
+    saveDb();
+  },
+
+  async isFollowing(followerId: string, followedId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(
+      d,
+      'SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ? LIMIT 1',
+      [followerId, followedId]
+    );
+    return rows.length > 0;
+  },
+
+  async getFollowCounts(userId: string) {
+    const d = await getDb();
+    const followers = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM user_follows WHERE followed_id = ?', [userId]);
+    const following = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM user_follows WHERE follower_id = ?', [userId]);
+    return {
+      followers: followers[0]?.cnt ?? 0,
+      following: following[0]?.cnt ?? 0,
+    };
   },
 };

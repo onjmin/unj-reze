@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { Settings, X, Check } from 'lucide-react';
+import { AnonymousUser } from '@/lib/types';
+import { api } from '@/lib/api';
 
 interface RightDrawerProps {
   isOpen: boolean;
@@ -12,15 +14,19 @@ interface RightDrawerProps {
   setServer: (s: string) => void;
   bbsMode: string;
   setBbsMode: (m: string) => void;
+  currentUser?: AnonymousUser | null;
 }
 
-export default function RightDrawer({ isOpen, onClose, userId, setUserId, server, setServer, bbsMode, setBbsMode }: RightDrawerProps) {
+export default function RightDrawer({ isOpen, onClose, userId, setUserId, server, setServer, bbsMode, setBbsMode, currentUser }: RightDrawerProps) {
   const [editingId, setEditingId] = useState(userId);
 
   const handleIdChangeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (editingId.trim()) {
       setUserId(editingId.trim());
+      if (currentUser?.id) {
+        api.auth.updateDisplayName(currentUser.id, editingId.trim());
+      }
     }
   };
 

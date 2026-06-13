@@ -1,4 +1,4 @@
-import { Post } from './types';
+import { Post, AnonymousUser } from './types';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
 
@@ -23,6 +23,7 @@ export interface Message {
   id: number;
   sender: string;
   text: string;
+  recipient?: string;
   createdAt: string;
   time: string;
 }
@@ -50,7 +51,7 @@ function deriveSlug(fullName: string): string {
   return match ? match[0] : fullName;
 }
 
-const MESSAGE_INFOS: { sender: string; text: string; time: string }[] = [
+const MESSAGE_INFOS: { sender: string; text: string; recipient?: string; time: string }[] = [
   { sender: "名無しLm8", text: "おはよう！今日の雪写真見た？", time: "7時間前" },
   { sender: "名無しXz9", text: "イラストまとめ見てくれてありがとう！", time: "2日前" },
   { sender: "名無しQp7", text: "ドット絵のコツ教えてくれる？", time: "1日前" },
@@ -70,6 +71,35 @@ function parseRelativeTime(relative: string): string {
   return new Date(now - offset).toISOString();
 }
 
+const AVATAR_GRADIENTS = [
+  'from-blue-500 to-indigo-600',
+  'from-red-500 to-rose-600',
+  'from-emerald-400 to-teal-500',
+  'from-purple-400 to-violet-500',
+  'from-amber-400 to-yellow-500',
+  'from-pink-400 to-rose-500',
+  'from-cyan-400 to-indigo-500',
+  'from-lime-400 to-green-500',
+  'from-orange-400 to-red-500',
+  'from-teal-400 to-cyan-500',
+];
+
+function generateDisplayName(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let suffix = '';
+  for (let i = 0; i < 3; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  return `名無し${suffix}`;
+}
+
+function generateSlug(fullName: string): string {
+  const match = fullName.match(/[a-zA-Z0-9]+$/);
+  return match ? match[0] : fullName;
+}
+
+function randomGradient(): string {
+  return AVATAR_GRADIENTS[Math.floor(Math.random() * AVATAR_GRADIENTS.length)];
+}
+
 class MockDB {
   private posts: Post[];
   private notifications: Notification[];
@@ -77,6 +107,11 @@ class MockDB {
   private trends: Trend[];
   private votes: Map<string, 'like' | 'dislike'> = new Map();
   private heartCounts: Map<number, number> = new Map();
+  private heartEntries: { postId: number; userId: string }[] = [];
+  private anonUserData: Map<string, { id: string; ipAddress: string; sessionId: string; displayName: string; slug: string; avatarColor: string; createdAt: string; lastSeenAt: string }> = new Map();
+  private ipToUser: Map<string, string> = new Map();
+  private sessionToUser: Map<string, string> = new Map();
+  private follows: { followerId: string; followedId: string }[] = [];
 
   constructor() {
     this.posts = JSON.parse(JSON.stringify(INITIAL_POSTS));
@@ -108,6 +143,46 @@ class MockDB {
     this.trends = [...TRENDS];
   }
 
+  private generateId(): string {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  getOrCreateAnonymousUser(sessionId: string, ipAddress: string): AnonymousUser {
+    const existingBySession = this.sessionToUser.get(sessionId);
+    if (existingBySession) {
+      const stored = this.anonUserData.get(existingBySession)!;
+      stored.lastSeenAt = this.now();
+      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, createdAt: stored.createdAt };
+    }
+
+    const existingByIp = this.ipToUser.get(ipAddress);
+    if (existingByIp) {
+      const stored = this.anonUserData.get(existingByIp)!;
+      this.sessionToUser.set(sessionId, stored.id);
+      stored.lastSeenAt = this.now();
+      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, createdAt: stored.createdAt };
+    }
+
+    const id = this.generateId();
+    const displayName = generateDisplayName();
+    const slug = generateSlug(displayName);
+    const avatarColor = randomGradient();
+    const createdAt = this.now();
+    const stored = { id, ipAddress, sessionId, displayName, slug, avatarColor, createdAt, lastSeenAt: createdAt };
+    this.anonUserData.set(id, stored);
+    this.ipToUser.set(ipAddress, id);
+    this.sessionToUser.set(sessionId, id);
+    return { id, displayName, slug, avatarColor, createdAt };
+  }
+
+  updateUserDisplayName(userId: string, displayName: string): void {
+    const stored = this.anonUserData.get(userId);
+    if (stored) {
+      stored.displayName = displayName;
+      stored.slug = generateSlug(displayName);
+    }
+  }
+
   private genId(): number {
     return Date.now() + Math.floor(Math.random() * 1000);
   }
@@ -136,6 +211,34 @@ class MockDB {
 
   getUserPostsBySlug(slug: string, userId?: string): Post[] {
     return this.posts.filter(p => p.slug === slug).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+  }
+
+  getLikedPosts(userId: string): Post[] {
+    const likedIds = new Set<number>();
+    for (const [key, val] of this.votes) {
+      if (key.endsWith(`:${userId}:like`) && val === 'like') {
+        likedIds.add(parseInt(key.split(':')[0], 10));
+      }
+    }
+    return this.posts.filter(p => likedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+  }
+
+  getDislikedPosts(userId: string): Post[] {
+    const dislikedIds = new Set<number>();
+    for (const [key, val] of this.votes) {
+      if (key.endsWith(`:${userId}:dislike`) && val === 'dislike') {
+        dislikedIds.add(parseInt(key.split(':')[0], 10));
+      }
+    }
+    return this.posts.filter(p => dislikedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+  }
+
+  getHeartedPosts(userId: string): Post[] {
+    const heartedIds = new Set<number>();
+    for (const e of this.heartEntries) {
+      if (e.userId === userId) heartedIds.add(e.postId);
+    }
+    return this.posts.filter(p => heartedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
   }
 
   getUserDisplayName(slug: string): string | undefined {
@@ -228,9 +331,12 @@ class MockDB {
     return this.getPost(id, userId) ?? null;
   }
 
-  heartPost(id: number, _userId: string, count: number = 1): Post | null {
+  heartPost(id: number, userId: string, count: number = 1): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post) return null;
+    for (let i = 0; i < count; i++) {
+      this.heartEntries.push({ postId: id, userId });
+    }
     const current = this.heartCounts.get(id) ?? 0;
     this.heartCounts.set(id, current + count);
     return this.getPost(id) ?? null;
@@ -267,20 +373,25 @@ class MockDB {
     return post?.replies ?? [];
   }
 
-  getNotifications(): Notification[] {
-    return this.notifications;
+  getNotifications(userId?: string): Notification[] {
+    if (!userId) return this.notifications;
+    return this.notifications.filter(n => n.targetUser === userId);
   }
 
-  getMessages(): Message[] {
-    return this.messages;
+  getMessages(userId?: string): Message[] {
+    if (!userId) return this.messages;
+    return this.messages.filter(m =>
+      !m.recipient || m.sender === userId || m.recipient === userId
+    );
   }
 
-  addMessage(data: { sender: string; text: string }): Message {
+  addMessage(data: { sender: string; text: string; recipient?: string }): Message {
     const createdAt = this.now();
     const msg: Message = {
       id: this.genId(),
       sender: data.sender,
       text: data.text,
+      recipient: data.recipient,
       createdAt,
       time: formatRelativeTime(createdAt),
     };
@@ -299,6 +410,27 @@ class MockDB {
 
   getTrends(): Trend[] {
     return this.trends;
+  }
+
+  followUser(followerId: string, followedId: string): void {
+    if (followerId === followedId) return;
+    const exists = this.follows.some(f => f.followerId === followerId && f.followedId === followedId);
+    if (!exists) this.follows.push({ followerId, followedId });
+  }
+
+  unfollowUser(followerId: string, followedId: string): void {
+    this.follows = this.follows.filter(f => !(f.followerId === followerId && f.followedId === followedId));
+  }
+
+  isFollowing(followerId: string, followedId: string): boolean {
+    return this.follows.some(f => f.followerId === followerId && f.followedId === followedId);
+  }
+
+  getFollowCounts(userId: string): { followers: number; following: number } {
+    return {
+      followers: this.follows.filter(f => f.followedId === userId).length,
+      following: this.follows.filter(f => f.followerId === userId).length,
+    };
   }
 }
 

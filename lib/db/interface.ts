@@ -1,4 +1,4 @@
-import { Post } from '../types';
+import { Post, AnonymousUser } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 
 export interface CreatePostParams {
@@ -20,6 +20,7 @@ export interface ReplyParams {
 export interface MessageParams {
   sender: string;
   text: string;
+  recipient?: string;
 }
 
 export interface DataStore {
@@ -34,9 +35,18 @@ export interface DataStore {
   addReply(postId: number, data: ReplyParams): Promise<Post | null>;
   getUserPostsBySlug(slug: string, userId?: string): Promise<Post[]>;
   getUserDisplayName(slug: string): Promise<string | undefined>;
-  getNotifications(): Promise<Notification[]>;
-  getMessages(): Promise<Message[]>;
+  getLikedPosts(userId: string): Promise<Post[]>;
+  getDislikedPosts(userId: string): Promise<Post[]>;
+  getHeartedPosts(userId: string): Promise<Post[]>;
+  getNotifications(userId?: string): Promise<Notification[]>;
+  getMessages(userId?: string): Promise<Message[]>;
   addMessage(data: MessageParams): Promise<Message>;
   getTrends(): Promise<Trend[]>;
   searchPosts(query: string): Promise<Post[]>;
+  getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
+  updateUserDisplayName(userId: string, displayName: string): Promise<void>;
+  followUser(followerId: string, followedId: string): Promise<void>;
+  unfollowUser(followerId: string, followedId: string): Promise<void>;
+  isFollowing(followerId: string, followedId: string): Promise<boolean>;
+  getFollowCounts(userId: string): Promise<{ followers: number; following: number }>;
 }

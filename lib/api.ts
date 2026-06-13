@@ -1,5 +1,5 @@
-import { Post } from './types';
-import { db } from './mock-db';
+import { Post, AnonymousUser } from './types';
+import { db as mockDbInstance } from './mock-db';
 import type { Notification, Message, Trend } from './mock-db';
 
 const BASE = '/api';
@@ -18,71 +18,102 @@ async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const staticApi = {
+  auth: {
+    anonymous: async (sessionId: string, _ipAddress?: string) => {
+      return mockDbInstance.getOrCreateAnonymousUser(sessionId, _ipAddress || '127.0.0.1');
+    },
+    updateDisplayName: async (userId: string, displayName: string) => {
+      mockDbInstance.updateUserDisplayName(userId, displayName);
+    },
+  },
   upload: {
     image: async (data: { image: string; filename?: string }) => ({ url: data.image }),
   },
   posts: {
-    list: async (userId?: string) => db.getPosts(userId),
+    list: async (userId?: string) => mockDbInstance.getPosts(userId),
     get: async (id: number, userId?: string) => {
-      const post = db.getPost(id, userId);
+      const post = mockDbInstance.getPost(id, userId);
       if (!post) throw new Error('Post not found');
       return post;
     },
     create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string }) =>
-      db.createPost(data),
+      mockDbInstance.createPost(data),
     like: async (id: number, userId?: string) => {
-      const post = db.likePost(id, userId || '');
+      const post = mockDbInstance.likePost(id, userId || '');
       if (!post) throw new Error('Post not found');
       return post;
     },
     dislike: async (id: number, userId?: string) => {
-      const post = db.dislikePost(id, userId || '');
+      const post = mockDbInstance.dislikePost(id, userId || '');
       if (!post) throw new Error('Post not found');
       return post;
     },
     heart: async (id: number, userId?: string, count?: number) => {
-      const post = db.heartPost(id, userId || '', count);
+      const post = mockDbInstance.heartPost(id, userId || '', count);
       if (!post) throw new Error('Post not found');
       return post;
     },
     repost: async (id: number) => {
-      const post = db.repostPost(id);
+      const post = mockDbInstance.repostPost(id);
       if (!post) throw new Error('Post not found');
       return post;
     },
     replies: {
-      list: async (postId: number) => db.getReplies(postId),
+      list: async (postId: number) => mockDbInstance.getReplies(postId),
       create: async (postId: number, data: { displayName: string; content: string; parentPostId?: number }) => {
-        const reply = db.addReply(postId, data);
+        const reply = mockDbInstance.addReply(postId, data);
         if (!reply) throw new Error('Post not found');
         return reply;
       },
     },
   },
   notifications: {
-    list: async () => db.getNotifications(),
+    list: async (userId?: string) => mockDbInstance.getNotifications(userId),
   },
   messages: {
-    list: async () => db.getMessages(),
-    send: async (data: { sender: string; text: string }) => db.addMessage(data),
+    list: async (userId?: string) => mockDbInstance.getMessages(userId),
+    send: async (data: { sender: string; text: string; recipient?: string }) => mockDbInstance.addMessage(data),
   },
   search: {
-    trends: async () => db.getTrends(),
+    trends: async () => mockDbInstance.getTrends(),
     posts: async (query: string) => {
       if (!query.trim()) return [];
-      return db.searchPosts(query);
+      return mockDbInstance.searchPosts(query);
     },
   },
   users: {
-    profile: async (id: string, userId?: string) => {
-      const posts = db.getUserPostsBySlug(id, userId);
-      const displayName = db.getUserDisplayName(id) || id;
+    profile: async (id: string, userId?: string, tab?: string) => {
+      let posts: Post[];
+      if (tab === 'likes' && userId) {
+        posts = mockDbInstance.getLikedPosts(userId);
+      } else if (tab === 'dislikes' && userId) {
+        posts = mockDbInstance.getDislikedPosts(userId);
+      } else if (tab === 'hearts' && userId) {
+        posts = mockDbInstance.getHeartedPosts(userId);
+      } else {
+        posts = mockDbInstance.getUserPostsBySlug(id, userId);
+      }
+      const displayName = mockDbInstance.getUserDisplayName(id) || id;
       return { id, displayName, posts, postCount: posts.length };
     },
+  },
+  follow: {
+    getCounts: (userId: string) => mockDbInstance.getFollowCounts(userId),
+    isFollowing: (followerId: string, followedId: string) => mockDbInstance.isFollowing(followerId, followedId),
+    follow: (followerId: string, followedId: string) => { mockDbInstance.followUser(followerId, followedId); },
+    unfollow: (followerId: string, followedId: string) => { mockDbInstance.unfollowUser(followerId, followedId); },
   },
 };
 
 const liveApi = {
+  auth: {
+    anonymous: (sessionId: string) => {
+      const qs = `?sessionId=${encodeURIComponent(sessionId)}`;
+      return fetcher<AnonymousUser>(`/auth/anonymous${qs}`);
+    },
+    updateDisplayName: (userId: string, displayName: string) =>
+      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName }) }),
+  },
   upload: {
     image: (data: { image: string; filename?: string }) =>
       fetcher<{ url: string }>('/upload', { method: 'POST', body: JSON.stringify(data) }),
@@ -109,11 +140,17 @@ const liveApi = {
     },
   },
   notifications: {
-    list: () => fetcher<Notification[]>('/notifications'),
+    list: (userId?: string) => {
+      const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+      return fetcher<Notification[]>(`/notifications${qs}`);
+    },
   },
   messages: {
-    list: () => fetcher<Message[]>('/messages'),
-    send: (data: { sender: string; text: string }) =>
+    list: (userId?: string) => {
+      const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+      return fetcher<Message[]>(`/messages${qs}`);
+    },
+    send: (data: { sender: string; text: string; recipient?: string }) =>
       fetcher<Message>('/messages', { method: 'POST', body: JSON.stringify(data) }),
   },
   search: {
@@ -121,10 +158,19 @@ const liveApi = {
     posts: (query: string) => fetcher<Post[]>(`/search?q=${encodeURIComponent(query)}`),
   },
   users: {
-    profile: (id: string, userId?: string) => {
-      const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+    profile: (id: string, userId?: string, tab?: string) => {
+      const params = new URLSearchParams();
+      if (userId) params.set('userId', userId);
+      if (tab) params.set('tab', tab);
+      const qs = params.toString() ? `?${params.toString()}` : '';
       return fetcher<{ id: string; displayName: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}${qs}`);
     },
+  },
+  follow: {
+    getCounts: (userId: string) => fetcher<{ followers: number; following: number }>(`/follow?userId=${encodeURIComponent(userId)}`),
+    isFollowing: (followerId: string, followedId: string) => fetcher<{ isFollowing: boolean }>(`/follow?followerId=${encodeURIComponent(followerId)}&followedId=${encodeURIComponent(followedId)}`),
+    follow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'POST', body: JSON.stringify({ followerId, followedId }) }),
+    unfollow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'DELETE', body: JSON.stringify({ followerId, followedId }) }),
   },
 };
 

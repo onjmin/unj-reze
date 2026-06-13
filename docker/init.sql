@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS messages (
   id SERIAL PRIMARY KEY,
   sender TEXT NOT NULL,
   text TEXT NOT NULL,
+  recipient TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -68,6 +69,29 @@ CREATE TABLE IF NOT EXISTS post_hearts (
   post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 匿名ユーザーテーブル
+CREATE TABLE IF NOT EXISTS anonymous_users (
+  id TEXT PRIMARY KEY,
+  ip_address TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  slug TEXT,
+  avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_anonymous_users_ip ON anonymous_users(ip_address);
+CREATE INDEX IF NOT EXISTS idx_anonymous_users_session ON anonymous_users(session_id);
+
+-- フォローテーブル
+CREATE TABLE IF NOT EXISTS user_follows (
+  id SERIAL PRIMARY KEY,
+  follower_id TEXT NOT NULL,
+  followed_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (follower_id, followed_id)
 );
 
 -- === 通知データ ===

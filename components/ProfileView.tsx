@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Post } from '@/lib/types';
 import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { api } from '@/lib/api';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -14,7 +15,7 @@ import EmbedPart from './EmbedPart';
 interface ProfileViewProps {
   userId: string;
   displayName?: string;
-  posts: Post[];
+  currentUserId?: string;
   onLike?: (id: number) => void;
   onDislike?: (id: number) => void;
   onHeart?: (id: number) => void;
@@ -36,14 +37,69 @@ const tabs = [
   { id: 'media', label: 'メディア', icon: Image },
 ];
 
-export default function ProfileView({ userId, displayName, posts, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab }: ProfileViewProps) {
+export default function ProfileView({ userId, displayName, currentUserId, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab }: ProfileViewProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('threads');
+  const [myPosts, setMyPosts] = useState<Post[]>([]);
+  const [likedPosts, setLikedPosts] = useState<Post[]>([]);
+  const [dislikedPosts, setDislikedPosts] = useState<Post[]>([]);
+  const [heartedPosts, setHeartedPosts] = useState<Post[]>([]);
+  const [followers, setFollowers] = useState(0);
+  const [following, setFollowing] = useState(0);
+  const [isFollow, setIsFollow] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const myPosts = useMemo(() =>
-    posts.filter(p =>
-      p.slug === userId || p.displayName === userId
-    ), [posts, userId]);
+  const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
+  const isSelf = currentUserId === userId;
+
+  useEffect(() => {
+    setLoading(true);
+    const promises: Promise<any>[] = [
+      api.users.profile(slug, userId).then(data => setMyPosts(data.posts)).catch(() => setMyPosts([])),
+      api.follow.getCounts(userId).then(c => { setFollowers(c.followers); setFollowing(c.following); }).catch(() => {}),
+    ];
+    if (currentUserId && !isSelf) {
+      promises.push(
+        api.follow.isFollowing(currentUserId, userId).then(r => setIsFollow(r.isFollowing)).catch(() => {})
+      );
+    }
+    Promise.all(promises).finally(() => setLoading(false));
+  }, [userId, slug, currentUserId, isSelf]);
+
+  const handleFollow = async () => {
+    if (!currentUserId) return;
+    if (isFollow) {
+      await api.follow.unfollow(currentUserId, userId);
+      setIsFollow(false);
+      setFollowers(f => Math.max(0, f - 1));
+    } else {
+      await api.follow.follow(currentUserId, userId);
+      setIsFollow(true);
+      setFollowers(f => f + 1);
+    }
+  };
+
+  const fetchTabData = useCallback((tab: string) => {
+    setLoading(true);
+    api.users.profile(slug, userId, tab).then(data => {
+      if (tab === 'likes') setLikedPosts(data.posts);
+      else if (tab === 'dislikes') setDislikedPosts(data.posts);
+      else if (tab === 'hearts') setHeartedPosts(data.posts);
+    }).catch(() => {
+      if (tab === 'likes') setLikedPosts([]);
+      else if (tab === 'dislikes') setDislikedPosts([]);
+      else if (tab === 'hearts') setHeartedPosts([]);
+    }).finally(() => {
+      setLoading(false);
+    });
+  }, [slug, userId]);
+
+  const handleTabChange = (id: string) => {
+    setActiveTab(id);
+    if ((id === 'likes' || id === 'dislikes' || id === 'hearts') && userId) {
+      fetchTabData(id);
+    }
+  };
 
   const threads = useMemo(() => myPosts.filter(p => p.id === p.threadId), [myPosts]);
   const replies = useMemo(() => myPosts.filter(p => p.id !== p.threadId), [myPosts]);
@@ -66,19 +122,27 @@ export default function ProfileView({ userId, displayName, posts, onLike, onDisl
     switch (activeTab) {
       case 'threads': return threads;
       case 'replies': return replies;
-      case 'hearts': return [...myPosts].sort((a, b) => b.heartsTotal - a.heartsTotal);
-      case 'likes': return [...myPosts].sort((a, b) => b.likes - a.likes);
-      case 'dislikes': return [...myPosts].sort((a, b) => b.dislikes - a.dislikes);
+      case 'hearts': return heartedPosts;
+      case 'likes': return likedPosts;
+      case 'dislikes': return dislikedPosts;
       case 'media': return mediaPosts;
       default: return threads;
     }
-  }, [activeTab, myPosts, threads, replies, mediaPosts]);
+  }, [activeTab, threads, replies, heartedPosts, likedPosts, dislikedPosts, mediaPosts]);
 
   const resolvedName = displayName || myPosts[0]?.displayName || userId;
 
   const handlePostClick = (postId: number) => {
     router.push(`/post/${postId}`);
   };
+
+  if (loading && myPosts.length === 0 && likedPosts.length === 0 && dislikedPosts.length === 0 && heartedPosts.length === 0) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center">
+        <div className="text-xs text-gray-500">読み込み中...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -104,11 +168,23 @@ export default function ProfileView({ userId, displayName, posts, onLike, onDisl
             <span className="font-bold text-white">{myPosts.length}</span>{' '}投稿
           </button>
           <button className="text-gray-400 hover:text-white transition-colors">
-            <span className="font-bold text-white">12</span>{' '}フォロー
+            <span className="font-bold text-white">{following}</span>{' '}フォロー
           </button>
           <button className="text-gray-400 hover:text-white transition-colors">
-            <span className="font-bold text-white">8</span>{' '}フォロワー
+            <span className="font-bold text-white">{followers}</span>{' '}フォロワー
           </button>
+          {currentUserId && !isSelf && (
+            <button
+              onClick={handleFollow}
+              className={`ml-auto px-3 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                isFollow
+                  ? 'border-gray-600 text-gray-400 hover:border-red-500 hover:text-red-400'
+                  : 'border-[#a3e635] text-[#a3e635] hover:bg-[#a3e635]/10'
+              }`}
+            >
+              {isFollow ? 'フォロー中' : 'フォロー'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -118,7 +194,7 @@ export default function ProfileView({ userId, displayName, posts, onLike, onDisl
           return (
             <button
               key={s.id}
-              onClick={() => setActiveTab(s.id)}
+              onClick={() => handleTabChange(s.id)}
               className={`flex flex-col items-center justify-center flex-1 min-w-0 py-2.5 px-1 transition-colors relative ${isActive ? 'text-white' : 'text-gray-500 hover:text-gray-300'}`}
             >
               <span className="text-[15px] font-extrabold leading-none">{s.value}</span>
@@ -130,7 +206,9 @@ export default function ProfileView({ userId, displayName, posts, onLike, onDisl
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-gray-800/80">
-        {filteredPosts.length > 0 ? (
+        {loading ? (
+          <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
+        ) : filteredPosts.length > 0 ? (
           filteredPosts.map(p => (
             <div key={p.id} className="flex relative transition-all hover:bg-gray-100/5">
               <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">

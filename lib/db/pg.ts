@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { Post } from '../types';
+import { Post, AnonymousUser } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -76,6 +76,43 @@ async function ensureTables(client: any) {
       post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'messages' AND column_name = 'recipient'
+      ) THEN
+        ALTER TABLE messages ADD COLUMN recipient TEXT;
+      END IF;
+    END $$;
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS anonymous_users (
+      id TEXT PRIMARY KEY,
+      ip_address TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      slug TEXT,
+      avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS idx_anonymous_users_ip ON anonymous_users(ip_address)
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS idx_anonymous_users_session ON anonymous_users(session_id)
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS user_follows (
+      id SERIAL PRIMARY KEY,
+      follower_id TEXT NOT NULL,
+      followed_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (follower_id, followed_id)
     )
   `);
   initialized = true;
@@ -425,6 +462,63 @@ export const pgStore: DataStore = {
     }
   },
 
+  async getLikedPosts(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(`
+        SELECT p.*,
+          COALESCE(pv.vote_type = 'like', false) as liked,
+          COALESCE(pv.vote_type = 'dislike', false) as disliked,
+          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        FROM posts p
+        JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'like'
+        ORDER BY p.id DESC
+      `, [userId]);
+      return Promise.all(result.rows.map(rowToPost));
+    } finally {
+      client.release();
+    }
+  },
+
+  async getDislikedPosts(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(`
+        SELECT p.*,
+          COALESCE(pv.vote_type = 'like', false) as liked,
+          COALESCE(pv.vote_type = 'dislike', false) as disliked,
+          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        FROM posts p
+        JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'dislike'
+        ORDER BY p.id DESC
+      `, [userId]);
+      return Promise.all(result.rows.map(rowToPost));
+    } finally {
+      client.release();
+    }
+  },
+
+  async getHeartedPosts(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(`
+        SELECT p.*,
+          false as liked,
+          false as disliked,
+          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        FROM posts p
+        JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = $1
+        ORDER BY p.id DESC
+      `, [userId]);
+      return Promise.all(result.rows.map(rowToPost));
+    } finally {
+      client.release();
+    }
+  },
+
   async getUserPostsBySlug(slug: string, userId?: string) {
     const client = await getPool().connect();
     try {
@@ -468,10 +562,18 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getNotifications() {
+  async getNotifications(userId?: string) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20');
+      let result;
+      if (userId) {
+        result = await client.query(
+          'SELECT * FROM notifications WHERE target_user = $1 ORDER BY created_at DESC LIMIT 20',
+          [userId]
+        );
+      } else {
+        result = await client.query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20');
+      }
       return result.rows.map(r => {
         const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
           ? r.created_at.toISOString()
@@ -493,10 +595,18 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getMessages() {
+  async getMessages(userId?: string) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM messages ORDER BY created_at DESC LIMIT 20');
+      let result;
+      if (userId) {
+        result = await client.query(
+          'SELECT * FROM messages WHERE recipient IS NULL OR sender = $1 OR recipient = $1 ORDER BY created_at DESC LIMIT 20',
+          [userId]
+        );
+      } else {
+        result = await client.query('SELECT * FROM messages ORDER BY created_at DESC LIMIT 20');
+      }
       return result.rows.map(r => {
         const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
           ? r.created_at.toISOString()
@@ -505,6 +615,7 @@ export const pgStore: DataStore = {
           id: r.id,
           sender: r.sender,
           text: r.text,
+          recipient: r.recipient ?? undefined,
           createdAt,
           time: formatRelativeTime(createdAt),
         } as Message;
@@ -518,15 +629,15 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       const result = await client.query(
-        `INSERT INTO messages (id, sender, text, created_at)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM messages), $1, $2, NOW()) RETURNING *`,
-        [data.sender, data.text]
+        `INSERT INTO messages (id, sender, text, recipient, created_at)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM messages), $1, $2, $3, NOW()) RETURNING *`,
+        [data.sender, data.text, data.recipient || null]
       );
       const r = result.rows[0];
       const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
         ? r.created_at.toISOString()
         : String(r.created_at);
-      return { id: r.id, sender: r.sender, text: r.text, createdAt, time: formatRelativeTime(createdAt) } as Message;
+      return { id: r.id, sender: r.sender, text: r.text, recipient: r.recipient ?? undefined, createdAt, time: formatRelativeTime(createdAt) } as Message;
     } finally {
       client.release();
     }
@@ -565,9 +676,173 @@ export const pgStore: DataStore = {
       client.release();
     }
   },
+
+  async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+
+      const sessionResult = await client.query(
+        'SELECT * FROM anonymous_users WHERE session_id = $1',
+        [sessionId]
+      );
+      if (sessionResult.rows.length > 0) {
+        const row = sessionResult.rows[0];
+        await client.query(
+          'UPDATE anonymous_users SET last_seen_at = NOW() WHERE id = $1',
+          [row.id]
+        );
+        return {
+          id: row.id,
+          displayName: row.display_name,
+          slug: row.slug,
+          avatarColor: row.avatar_color,
+          createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
+            ? row.created_at.toISOString() : String(row.created_at),
+        } as AnonymousUser;
+      }
+
+      const ipResult = await client.query(
+        'SELECT * FROM anonymous_users WHERE ip_address = $1 ORDER BY last_seen_at DESC LIMIT 1',
+        [ipAddress]
+      );
+      if (ipResult.rows.length > 0) {
+        const row = ipResult.rows[0];
+        await client.query(
+          'UPDATE anonymous_users SET session_id = $1, last_seen_at = NOW() WHERE id = $2',
+          [sessionId, row.id]
+        );
+        return {
+          id: row.id,
+          displayName: row.display_name,
+          slug: row.slug,
+          avatarColor: row.avatar_color,
+          createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
+            ? row.created_at.toISOString() : String(row.created_at),
+        } as AnonymousUser;
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const displayName = generateDisplayNamePg();
+      const slug = deriveSlugPg(displayName);
+      const avatarColor = randomGradientPg();
+
+      await client.query(
+        `INSERT INTO anonymous_users (id, ip_address, session_id, display_name, slug, avatar_color, created_at, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
+        [id, ipAddress, sessionId, displayName, slug, avatarColor]
+      );
+
+      return {
+        id,
+        displayName,
+        slug,
+        avatarColor,
+        createdAt: new Date().toISOString(),
+      } as AnonymousUser;
+    } finally {
+      client.release();
+    }
+  },
+
+  async updateUserDisplayName(userId: string, displayName: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const slug = deriveSlugPg(displayName);
+      await client.query(
+        'UPDATE anonymous_users SET display_name = $1, slug = $2 WHERE id = $3',
+        [displayName, slug, userId]
+      );
+    } finally {
+      client.release();
+    }
+  },
+
+  async followUser(followerId: string, followedId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query(
+        'INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [followerId, followedId]
+      );
+    } finally {
+      client.release();
+    }
+  },
+
+  async unfollowUser(followerId: string, followedId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query(
+        'DELETE FROM user_follows WHERE follower_id = $1 AND followed_id = $2',
+        [followerId, followedId]
+      );
+    } finally {
+      client.release();
+    }
+  },
+
+  async isFollowing(followerId: string, followedId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(
+        'SELECT 1 FROM user_follows WHERE follower_id = $1 AND followed_id = $2 LIMIT 1',
+        [followerId, followedId]
+      );
+      return result.rows.length > 0;
+    } finally {
+      client.release();
+    }
+  },
+
+  async getFollowCounts(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(`
+        SELECT
+          (SELECT COUNT(*) FROM user_follows WHERE followed_id = $1) AS followers,
+          (SELECT COUNT(*) FROM user_follows WHERE follower_id = $1) AS following
+      `, [userId]);
+      return {
+        followers: parseInt(result.rows[0].followers, 10),
+        following: parseInt(result.rows[0].following, 10),
+      };
+    } finally {
+      client.release();
+    }
+  },
 };
 
 function deriveSlugPg(fullName: string): string {
   const match = fullName.match(/[a-zA-Z0-9]+$/);
   return match ? match[0] : fullName;
+}
+
+const AVATAR_GRADIENTS_PG = [
+  'from-blue-500 to-indigo-600',
+  'from-red-500 to-rose-600',
+  'from-emerald-400 to-teal-500',
+  'from-purple-400 to-violet-500',
+  'from-amber-400 to-yellow-500',
+  'from-pink-400 to-rose-500',
+  'from-cyan-400 to-indigo-500',
+  'from-lime-400 to-green-500',
+  'from-orange-400 to-red-500',
+  'from-teal-400 to-cyan-500',
+];
+
+function generateDisplayNamePg(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let suffix = '';
+  for (let i = 0; i < 3; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+  return `名無し${suffix}`;
+}
+
+function randomGradientPg(): string {
+  return AVATAR_GRADIENTS_PG[Math.floor(Math.random() * AVATAR_GRADIENTS_PG.length)];
 }

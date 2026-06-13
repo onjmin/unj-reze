@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
-import { Post } from '@/lib/types';
+import { Post, AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
@@ -32,11 +32,12 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [userId, setUserId] = useState('名無しvFZ');
+  const [userId, setUserId] = useState('');
+  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [server, setServer] = useState('/main');
   const [bbsMode, setBbsMode] = useState('掲示板モード');
-  const [notifCount, setNotifCount] = useState(3);
-  const [messageCount, setMessageCount] = useState(1);
+  const [notifCount, setNotifCount] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
@@ -47,6 +48,41 @@ export default function App() {
   const likeTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const dislikeParity = useRef<Map<number, number>>(new Map());
   const dislikeTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const sessionInitialized = useRef(false);
+
+  function getCookie(name: string): string | undefined {
+    if (typeof document === 'undefined') return undefined;
+    const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
+    return match ? decodeURIComponent(match[1]) : undefined;
+  }
+
+  function setCookie(name: string, value: string, days: number) {
+    if (typeof document === 'undefined') return;
+    const expires = new Date(Date.now() + days * 864e5).toUTCString();
+    document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax`;
+  }
+
+  useEffect(() => {
+    if (sessionInitialized.current) return;
+    sessionInitialized.current = true;
+    let sessionId = getCookie('unj_reze_session');
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      setCookie('unj_reze_session', sessionId, 365);
+    }
+    api.auth.anonymous(sessionId).then(user => {
+      setUserId(user.displayName);
+      setCurrentUser(user);
+      api.notifications.list(user.displayName).then(notifs => {
+        setNotifCount(notifs.length);
+      }).catch(() => {});
+      api.messages.list(user.displayName).then(msgs => {
+        setMessageCount(msgs.length);
+      }).catch(() => {});
+    }).catch(() => {
+      setUserId('名無しvFZ');
+    });
+  }, []);
 
   const fetchPosts = useCallback(async () => {
     try {
@@ -207,6 +243,7 @@ export default function App() {
         setServer={setServer}
         bbsMode={bbsMode}
         setBbsMode={setBbsMode}
+        currentUser={currentUser}
       />
 
       {activeScreen === 'drawing' && (
@@ -367,13 +404,13 @@ export default function App() {
                   openMml={() => setActiveScreen('mml')}
                 />
               )}
-              {currentNav === 'notifications' && <NotificationView />}
-              {currentNav === 'messages' && <MessageView />}
+              {currentNav === 'notifications' && <NotificationView userId={userId} />}
+              {currentNav === 'messages' && <MessageView userId={userId} />}
               {currentNav === 'profile' && (
                 <ProfileView
                   userId={userId}
                   displayName={userId}
-                  posts={posts}
+                  currentUserId={userId}
                   onLike={handleLike}
                   onDislike={handleDislike}
                   onHeart={handleHeart}

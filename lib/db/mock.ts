@@ -42,16 +42,28 @@ export const mockStore: DataStore = {
     return mockDb.getUserPostsBySlug(slug, userId);
   },
 
+  async getLikedPosts(userId: string) {
+    return mockDb.getLikedPosts(userId);
+  },
+
+  async getDislikedPosts(userId: string) {
+    return mockDb.getDislikedPosts(userId);
+  },
+
+  async getHeartedPosts(userId: string) {
+    return mockDb.getHeartedPosts(userId);
+  },
+
   async getUserDisplayName(slug: string) {
     return mockDb.getUserDisplayName(slug);
   },
 
-  async getNotifications() {
-    return mockDb.getNotifications();
+  async getNotifications(userId?: string) {
+    return mockDb.getNotifications(userId);
   },
 
-  async getMessages() {
-    return mockDb.getMessages();
+  async getMessages(userId?: string) {
+    return mockDb.getMessages(userId);
   },
 
   async addMessage(data: MessageParams) {
@@ -64,5 +76,29 @@ export const mockStore: DataStore = {
 
   async searchPosts(query: string) {
     return mockDb.searchPosts(query);
+  },
+
+  async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
+    return mockDb.getOrCreateAnonymousUser(sessionId, ipAddress);
+  },
+
+  async updateUserDisplayName(userId: string, displayName: string) {
+    return mockDb.updateUserDisplayName(userId, displayName);
+  },
+
+  async followUser(followerId: string, followedId: string) {
+    return mockDb.followUser(followerId, followedId);
+  },
+
+  async unfollowUser(followerId: string, followedId: string) {
+    return mockDb.unfollowUser(followerId, followedId);
+  },
+
+  async isFollowing(followerId: string, followedId: string) {
+    return mockDb.isFollowing(followerId, followedId);
+  },
+
+  async getFollowCounts(userId: string) {
+    return mockDb.getFollowCounts(userId);
   },
 };
