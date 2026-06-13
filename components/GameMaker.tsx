@@ -77,7 +77,7 @@ const PRESETS: Record<PresetId, PresetData> = {
       Array.from({ length: COLS }, (_, x) =>
         x === 0 || x === COLS - 1 || y === 0 || y === ROWS - 1 ? 1
           : x === 10 && y > 4 && y < 11 ? 2
-          : x === 16 && y === 3 ? 3 : 0
+            : x === 16 && y === 3 ? 3 : 0
       )
     ),
     objects: [newObject({ emoji: '👴', col: 5, row: 5, behavior: 'still', hazard: false, message: 'よくきたな勇者よ！' })],
@@ -96,7 +96,7 @@ const PRESETS: Record<PresetId, PresetData> = {
       Array.from({ length: COLS }, (_, x) =>
         x === 0 || x === COLS - 1 || y === 0 || y === ROWS - 1 ? 1
           : (x > 6 && x < 13 && y > 7 && y < 12) ? 2
-          : x === 16 && y === 3 ? 3 : 0
+            : x === 16 && y === 3 ? 3 : 0
       )
     ),
     objects: [newObject({ emoji: '🐭', col: 9, row: 9, behavior: 'random', hazard: true })],
@@ -132,8 +132,8 @@ const PRESETS: Record<PresetId, PresetData> = {
       Array.from({ length: COLS }, (_, x) =>
         y > ROWS - 3 ? 1
           : y === ROWS - 3 && (x === 7 || x === 12) ? 2
-          : y === ROWS - 6 && x > 9 && x < 13 ? 1
-          : x === 18 && y === ROWS - 4 ? 3 : 0
+            : y === ROWS - 6 && x > 9 && x < 13 ? 1
+              : x === 18 && y === ROWS - 4 ? 3 : 0
       )
     ),
     objects: [newObject({ emoji: '🛸', col: 14, row: 4, behavior: 'patrolH', speed: 1.2, bullet: 'aimed', fireRate: 90, hazard: true, hp: 3 })],
@@ -360,14 +360,14 @@ export default function GameMaker({ onClose, userId, onSave }: GameMakerProps) {
 
           p.x += p.vx;
           let hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
-            getTile(p.x + 2, p.y + pData.h - 2), getTile(p.x + pData.w - 2, p.y + pData.h - 2)]
+          getTile(p.x + 2, p.y + pData.h - 2), getTile(p.x + pData.w - 2, p.y + pData.h - 2)]
             .filter(t2 => t2 && !t2.info.passable);
           const tile = hits[0];
           if (tile) { if (p.vx > 0) p.x = tile.rect.x - pData.w; else if (p.vx < 0) p.x = tile.rect.x + TILE_SIZE; p.vx = 0; }
 
           p.y += p.vy; p.isGrounded = false;
           hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
-            getTile(p.x + 2, p.y + pData.h), getTile(p.x + pData.w - 2, p.y + pData.h)]
+          getTile(p.x + 2, p.y + pData.h), getTile(p.x + pData.w - 2, p.y + pData.h)]
             .filter(t2 => t2 && !t2.info.passable);
           const tile2 = hits[0];
           if (tile2) { if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; } else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE; p.vy = 0; }
