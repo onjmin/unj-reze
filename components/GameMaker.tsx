@@ -20,6 +20,7 @@ import {
   type ObjType, type WarpTarget,
   type BattleMove, type SwitchDef, type ItemDef,
   type EventCommand, type EventPage, type EventCondition,
+  type PartyBattleConfig, type PkmnMoveDef, type PkmnSpeciesDef,
 } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
@@ -30,7 +31,8 @@ import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 
 export type { PresetId };
 
-type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound';
+type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound' | 'pkmn';
+type PkmnSubTab = 'config' | 'dex' | 'moves';
 
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
@@ -381,6 +383,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
+  // ── pkmn エディタ ──
+  const [pkmnSubTab, setPkmnSubTab] = useState<PkmnSubTab>('config');
+  const [selPokemon, setSelPokemon] = useState<number | null>(null);
+  const [selMove, setSelMove] = useState<number | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
   selectedObjIdRef.current = selectedObjId;
   // ── イベントランタイム ──
@@ -455,6 +461,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
   const livesRef = useRef(3);            // 残機数
   const scoreRef = useRef(0);            // スコア
+  const actionDirRef = useRef<1 | -1>(1);     // action エンジン：プレイヤー向き
+  const actionShootCoolRef = useRef(0);        // action エンジン：射撃クールダウン
 
   const bossDefeatedRef = useRef(false);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
@@ -905,10 +913,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setPresetId(id);
     setGameData(data);
     setTitle(PRESETS[id].name);
+    setEditorTab(data.engine === 'pkmn' ? 'pkmn' : 'map');
     const eng = engineRef.current;
     eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
     eng.keys.clear();
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+    actionDirRef.current = 1; actionShootCoolRef.current = 0;
     eng.map = JSON.parse(JSON.stringify(data.map));
     const sw = data.scroll?.worldCols ?? COLS; const sh = data.scroll?.worldRows ?? ROWS;
     setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - PLAY_W, data.player.start.x + data.player.w / 2 - PLAY_W / 2)));
@@ -921,6 +931,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
     eng.keys.clear();
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+    actionDirRef.current = 1; actionShootCoolRef.current = 0;
     setIsPlaying(false); setSelectedObjId(null);
   }, [gameData]);
 
@@ -1171,6 +1182,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const tile2 = hits[0];
           if (tile2) { if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; } else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE; p.vy = 0; }
           if (p.y > worldH && isPlaying && !debugInvincibleRef.current) { lose('ミス！'); dead = true; }
+          // プレイヤー向き更新
+          if (isLeft) actionDirRef.current = -1;
+          else if (isRight) actionDirRef.current = 1;
+          // 射撃（X キーまたはタッチ SHOT ボタン）
+          if (actionShootCoolRef.current > 0) actionShootCoolRef.current--;
+          const isShoot = keys.has('x') || keys.has('X') || touchRef.current.shoot;
+          if (isPlaying && !dead && isShoot && actionShootCoolRef.current <= 0) {
+            const dir = actionDirRef.current;
+            const bw = 8, bh = 6;
+            eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - bw, y: p.y + pData.h / 2 - bh / 2, w: bw, h: bh, vx: dir * 10, vy: 0 });
+            actionShootCoolRef.current = 12;
+            playSfx(sfxRef.current.shot);
+          }
+          // プレイヤー弾移動・範囲外削除
+          for (let i = eng.bullets.length - 1; i >= 0; i--) {
+            const b = eng.bullets[i];
+            b.x += b.vx ?? 0; b.y += b.vy ?? 0;
+            if (b.x < -16 || b.x > worldW + 16 || b.y < -16 || b.y > worldH + 16) eng.bullets.splice(i, 1);
+          }
         } else {
           // rpg / touhou: 8-dir free move
           p.vx = 0; p.vy = 0;
@@ -1851,6 +1881,26 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       }
 
+      // ── action ボスHPバー ──
+      if (isPlaying && gameData.engine === 'action') {
+        const boss = eng.entities.find(e => e.def.isBoss);
+        if (boss && boss.def.hp > 1) {
+          const barX = 10, barY = 8, barW = PLAY_W - 20, barH = 10;
+          const pct = Math.max(0, boss.hp / boss.def.hp);
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(barX, barY, barW, barH);
+          const grd2 = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+          grd2.addColorStop(0, '#ff4444'); grd2.addColorStop(1, '#ff8844');
+          ctx.fillStyle = grd2;
+          ctx.fillRect(barX, barY, barW * pct, barH);
+          ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
+          ctx.strokeRect(barX, barY, barW, barH);
+          ctx.fillStyle = '#ff8888'; ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+          ctx.fillText(`BOSS: ${boss.def.name ?? boss.def.emoji}`, barX + 4, barY + barH + 12);
+        }
+      }
+
       // ── 戦闘プレイヤーHUD（Lv / HP / MP）──
       if (isPlaying && gameData.engine === 'rpg' && gameData.battle) {
         const pr = progressRef.current;
@@ -1873,7 +1923,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, [gameData, isPlaying, restart, editorTab, editSpeedMult]);
 
   // touch state via ref to avoid re-running the loop effect
-  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false });
+  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false, shoot: false });
   const prevActionRef = useRef(false);
   const prevZRef = useRef(false);
   const prevXRef = useRef(false);
@@ -2343,10 +2393,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-gray-700 pointer-events-none rounded"></div>
                 </div>
                 {gameData.engine === 'action' && (
-                  <button className="w-16 h-16 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
-                    {...padProps('action')}>
-                    JUMP
-                  </button>
+                  <div className="flex gap-3">
+                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-cyan-600 active:bg-cyan-500 touch-none cursor-pointer select-none"
+                      {...padProps('shoot')}>
+                      SHOT
+                    </button>
+                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
+                      {...padProps('action')}>
+                      JUMP
+                    </button>
+                  </div>
                 )}
                 {gameData.engine === 'touhou' && (
                   <div className="flex flex-col items-center gap-2">
@@ -2403,7 +2459,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ) : (
             <>
               <div className="flex border-b border-gray-800 shrink-0 overflow-x-auto">
-                {([
+                {(gameData.engine === 'pkmn' ? [
+                  ['sound', 'サウンド'], ['asset', 'アセット'], ['pkmn', 'ポケモン'],
+                ] as [EditorTab, string][] : [
                   ['map', 'マップ'], ['object', 'オブジェクト'], ['char', 'キャラ'], ['asset', 'アセット'], ['sound', 'サウンド'],
                   ...(gameData.engine === 'touhou' ? [['spell', '会話']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
@@ -3235,6 +3293,238 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </div>
                   </div>
                 )}
+
+                {/* ── PKMN（パーティバトル編集）── */}
+                {editorTab === 'pkmn' && gameData.partyBattle && (() => {
+                  const pb = gameData.partyBattle!;
+                  const setPb = (patch: Partial<PartyBattleConfig>) =>
+                    setGameData(p => ({ ...p, partyBattle: { ...p.partyBattle!, ...patch } }));
+                  const typeKeys = Object.keys(pb.typeColors);
+
+                  return (
+                    <div className="space-y-3">
+                      {/* サブタブ */}
+                      <div className="flex gap-1 border-b border-gray-700 pb-1">
+                        {(['config', 'dex', 'moves'] as PkmnSubTab[]).map(t => (
+                          <button key={t} onClick={() => setPkmnSubTab(t)}
+                            className={`px-2 py-1 text-[10px] rounded-t font-bold transition ${pkmnSubTab === t ? 'bg-gray-700 text-yellow-300' : 'text-gray-500 hover:text-gray-300'}`}>
+                            {t === 'config' ? '設定' : t === 'dex' ? `図鑑(${pb.pokedex.length})` : `技(${pb.moves.length})`}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* ── 設定 ── */}
+                      {pkmnSubTab === 'config' && (
+                        <div className="space-y-3">
+                          <label className="block text-[11px] text-gray-400">タイトル
+                            <input type="text" value={pb.title}
+                              onChange={e => setPb({ title: e.target.value })}
+                              className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                          </label>
+                          <label className="block text-[11px] text-gray-400">サブタイトル
+                            <input type="text" value={pb.subtitle ?? ''}
+                              onChange={e => setPb({ subtitle: e.target.value || undefined })}
+                              placeholder="（省略可）"
+                              className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                          </label>
+                          <div>
+                            <label className="flex justify-between text-[11px] text-gray-400 mb-1">
+                              <span>選出数</span><span className="text-yellow-400">{pb.teamSize}</span>
+                            </label>
+                            <input type="range" min={1} max={6} step={1} value={pb.teamSize}
+                              onChange={e => setPb({ teamSize: Number(e.target.value) })}
+                              className="w-full accent-yellow-500" />
+                            <p className="text-[10px] text-gray-500 mt-0.5">図鑑から何体を選んで対戦するか（1〜6）</p>
+                          </div>
+                          <div>
+                            <label className="flex justify-between text-[11px] text-gray-400 mb-1">
+                              <span>固定レベル</span><span className="text-yellow-400">{pb.level}</span>
+                            </label>
+                            <input type="range" min={1} max={100} step={1} value={pb.level}
+                              onChange={e => setPb({ level: Number(e.target.value) })}
+                              className="w-full accent-yellow-500" />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── 図鑑 ── */}
+                      {pkmnSubTab === 'dex' && (
+                        <div className="space-y-2">
+                          {/* リスト */}
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {pb.pokedex.map((sp, i) => (
+                              <button key={sp.id} onClick={() => setSelPokemon(selPokemon === i ? null : i)}
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-left transition ${selPokemon === i ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/40'}`}>
+                                <span className="text-base">{sp.sprite}</span>
+                                <span className="flex-1 truncate font-bold">{sp.name}</span>
+                                <span className="text-[9px] text-gray-500">{sp.types.map(t => pb.typeLabels?.[t] ?? t).join('/')}</span>
+                                <button onClick={e => { e.stopPropagation(); const arr = pb.pokedex.filter((_, j) => j !== i); setPb({ pokedex: arr }); if (selPokemon === i) setSelPokemon(null); }}
+                                  className="text-red-500 hover:text-red-300 ml-1 shrink-0">×</button>
+                              </button>
+                            ))}
+                          </div>
+                          <button onClick={() => {
+                            const newSp: PkmnSpeciesDef = {
+                              id: Date.now(), name: `ポケモン${pb.pokedex.length + 1}`, sprite: '❓',
+                              types: [typeKeys[0] ?? 'normal'],
+                              hp: 80, atk: 80, def: 80, spa: 80, spd: 80, spe: 80,
+                              moves: pb.moves.slice(0, 4).map(m => m.id),
+                            };
+                            setPb({ pokedex: [...pb.pokedex, newSp] });
+                            setSelPokemon(pb.pokedex.length);
+                          }} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-yellow-700 text-[10px] text-yellow-600 hover:bg-yellow-900/20">
+                            <Plus size={11} />ポケモン追加
+                          </button>
+
+                          {/* 選択中のポケモン編集 */}
+                          {selPokemon !== null && pb.pokedex[selPokemon] && (() => {
+                            const sp = pb.pokedex[selPokemon];
+                            const updSp = (patch: Partial<PkmnSpeciesDef>) => {
+                              const arr = pb.pokedex.map((x, i) => i === selPokemon ? { ...x, ...patch } : x);
+                              setPb({ pokedex: arr });
+                            };
+                            return (
+                              <div className="rounded-lg border border-yellow-800/50 bg-gray-900/60 p-2.5 space-y-2.5">
+                                <p className="text-[10px] text-yellow-400 font-bold">編集: {sp.name}</p>
+                                <div className="flex gap-2">
+                                  <label className="text-[10px] text-gray-400 shrink-0">スプライト
+                                    <input type="text" value={sp.sprite} onChange={e => updSp({ sprite: e.target.value.slice(0, 2) })}
+                                      className="w-10 block mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-center text-base outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-gray-400 flex-1">なまえ
+                                    <input type="text" value={sp.name} onChange={e => updSp({ name: e.target.value })}
+                                      className="w-full block mt-0.5 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                                  </label>
+                                </div>
+                                {/* タイプ */}
+                                <div>
+                                  <p className="text-[10px] text-gray-400 mb-1">タイプ（最大2）</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {typeKeys.map(tk => {
+                                      const active = sp.types.includes(tk);
+                                      return (
+                                        <button key={tk} onClick={() => {
+                                          const cur = sp.types;
+                                          if (active) { updSp({ types: cur.filter(t => t !== tk) }); }
+                                          else if (cur.length < 2) { updSp({ types: [...cur, tk] }); }
+                                        }}
+                                          className="px-1.5 py-0.5 rounded text-[9px] font-bold transition"
+                                          style={{ background: active ? (pb.typeColors[tk] ?? '#555') : '#374151', color: active ? '#fff' : '#9ca3af' }}>
+                                          {pb.typeLabels?.[tk] ?? tk}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                                {/* 種族値 */}
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {(['hp', 'atk', 'def', 'spa', 'spd', 'spe'] as const).map(stat => (
+                                    <label key={stat} className="text-[9px] text-gray-400">
+                                      {stat.toUpperCase()}
+                                      <input type="number" min={1} max={255} value={sp[stat]}
+                                        onChange={e => updSp({ [stat]: Math.max(1, Math.min(255, Number(e.target.value))) })}
+                                        className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none text-center" />
+                                    </label>
+                                  ))}
+                                </div>
+                                {/* 技スロット */}
+                                <div>
+                                  <p className="text-[10px] text-gray-400 mb-1">技（最大4）</p>
+                                  {[0, 1, 2, 3].map(slot => (
+                                    <div key={slot} className="flex items-center gap-1 mb-1">
+                                      <span className="text-[9px] text-gray-600 w-3">{slot + 1}</span>
+                                      <select value={sp.moves[slot] ?? ''}
+                                        onChange={e => {
+                                          const mv = [...sp.moves];
+                                          if (e.target.value) { mv[slot] = e.target.value; } else { mv.splice(slot, 1); }
+                                          updSp({ moves: mv.filter(Boolean) });
+                                        }}
+                                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none">
+                                        <option value="">（なし）</option>
+                                        {pb.moves.map(m => <option key={m.id} value={m.id}>{m.name}（{pb.typeLabels?.[m.type] ?? m.type}）</option>)}
+                                      </select>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+
+                      {/* ── 技 ── */}
+                      {pkmnSubTab === 'moves' && (
+                        <div className="space-y-2">
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {pb.moves.map((mv, i) => (
+                              <button key={mv.id} onClick={() => setSelMove(selMove === i ? null : i)}
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-left transition ${selMove === i ? 'bg-blue-900/40 text-blue-200' : 'bg-gray-800/50 text-gray-400 hover:bg-gray-700/40'}`}>
+                                <span className="flex-1 font-bold">{mv.name}</span>
+                                <span className="text-[9px]" style={{ color: pb.typeColors[mv.type] ?? '#aaa' }}>{pb.typeLabels?.[mv.type] ?? mv.type}</span>
+                                <span className="text-[9px] text-gray-500">{mv.cat === 'ph' ? '物理' : mv.cat === 'sp' ? '特殊' : '変化'}</span>
+                                <span className="text-[9px] text-gray-500">P{mv.power}</span>
+                                <button onClick={e => { e.stopPropagation(); const arr = pb.moves.filter((_, j) => j !== i); setPb({ moves: arr }); if (selMove === i) setSelMove(null); }}
+                                  className="text-red-500 hover:text-red-300 ml-1 shrink-0">×</button>
+                              </button>
+                            ))}
+                          </div>
+                          <button onClick={() => {
+                            const newMv: PkmnMoveDef = {
+                              id: `move_${Date.now()}`, name: `わざ${pb.moves.length + 1}`,
+                              type: typeKeys[0] ?? 'normal', cat: 'ph', power: 60, acc: 100, pp: 15,
+                            };
+                            setPb({ moves: [...pb.moves, newMv] });
+                            setSelMove(pb.moves.length);
+                          }} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-blue-700 text-[10px] text-blue-600 hover:bg-blue-900/20">
+                            <Plus size={11} />技追加
+                          </button>
+
+                          {selMove !== null && pb.moves[selMove] && (() => {
+                            const mv = pb.moves[selMove];
+                            const updMv = (patch: Partial<PkmnMoveDef>) => {
+                              const arr = pb.moves.map((x, i) => i === selMove ? { ...x, ...patch } : x);
+                              setPb({ moves: arr });
+                            };
+                            return (
+                              <div className="rounded-lg border border-blue-800/50 bg-gray-900/60 p-2.5 space-y-2">
+                                <p className="text-[10px] text-blue-400 font-bold">編集: {mv.name}</p>
+                                <label className="block text-[10px] text-gray-400">技名
+                                  <input type="text" value={mv.name} onChange={e => updMv({ name: e.target.value })}
+                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="text-[10px] text-gray-400">タイプ
+                                    <select value={mv.type} onChange={e => updMv({ type: e.target.value })}
+                                      className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none">
+                                      {typeKeys.map(tk => <option key={tk} value={tk}>{pb.typeLabels?.[tk] ?? tk}</option>)}
+                                    </select>
+                                  </label>
+                                  <label className="text-[10px] text-gray-400">分類
+                                    <select value={mv.cat} onChange={e => updMv({ cat: e.target.value as PkmnMoveDef['cat'] })}
+                                      className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none">
+                                      <option value="ph">物理</option>
+                                      <option value="sp">特殊</option>
+                                      <option value="st">変化</option>
+                                    </select>
+                                  </label>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {([['power', '威力', 0, 250], ['acc', '命中', 1, 100], ['pp', 'PP', 1, 64]] as [keyof PkmnMoveDef, string, number, number][]).map(([key, label, mn, mx]) => (
+                                    <label key={key} className="text-[10px] text-gray-400">{label}
+                                      <input type="number" min={mn} max={mx} value={mv[key] as number}
+                                        onChange={e => updMv({ [key]: Math.max(mn, Math.min(mx, Number(e.target.value))) })}
+                                        className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none text-center" />
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── ASSET ── */}
                 {editorTab === 'asset' && (
