@@ -6,7 +6,7 @@ export const ROWS = 15;
 export const PLAY_W = COLS * TILE_SIZE;
 export const PLAY_H = ROWS * TILE_SIZE;
 
-export type PresetId = 'dq' | 'pokemon' | 'mario' | 'rockman' | 'touhou';
+export type PresetId = 'dq' | 'pokemon' | 'mario' | 'rockman' | 'touhou' | 'zelda';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'pkmn';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
