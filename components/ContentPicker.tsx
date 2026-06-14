@@ -22,7 +22,7 @@ interface ContentPickerProps {
 }
 
 type ImageTab = 'posts' | 'walk' | 'url';
-type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw';
+type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct';
 
 export default function ContentPicker({ mode, userId, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -100,6 +100,12 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
     onPick({ ref: `mml:${v}`, rawMml: v, label: 'MML' });
   };
 
+  const pickDirect = () => {
+    const v = urlInput.trim();
+    if (!v) return;
+    onPick({ ref: `direct:${v}`, url: v, label: v.length > 28 ? v.slice(0, 26) + '…' : v });
+  };
+
   const tabBtn = (active: boolean) =>
     `flex-1 py-2 text-[11px] font-bold rounded-md transition flex items-center justify-center gap-1 ${active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-100/10'}`;
 
@@ -131,6 +137,7 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
               <button className={tabBtn(bgmTab === 'youtube')} onClick={() => setBgmTab('youtube')}><Video size={12} />YouTube</button>
               <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => setBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
               <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => setBgmTab('mmlRaw')}>♪ 直接</button>
+              <button className={tabBtn(bgmTab === 'direct')} onClick={() => setBgmTab('direct')}>🔗 URL</button>
             </>
           )}
         </div>
@@ -267,6 +274,21 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
                 </button>
                 <button onClick={pickMmlRaw} disabled={!mmlInput.trim()} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このMMLを使う</button>
               </div>
+            </div>
+          )}
+
+          {/* SE: direct URL (MP3/WAV) */}
+          {mode === 'bgm' && bgmTab === 'direct' && (
+            <div className="space-y-2">
+              <label className="block text-[10px] text-gray-500">音声URL（MP3 / WAV 直リンク）</label>
+              <input
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                placeholder="https://example.com/sound.mp3"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
+              />
+              <p className="text-[10px] text-gray-600">MP3/WAV の直リンクURLを入力。効果音に向いています。</p>
+              <button onClick={pickDirect} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このURLを使う</button>
             </div>
           )}
         </div>

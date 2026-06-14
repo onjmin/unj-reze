@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { type DialogueLine, PLAY_W, PLAY_H } from './game-presets/shared';
 
 const keyOf = (l: DialogueLine) => l.imageSrc ?? l.emoji ?? l.speaker;
@@ -70,7 +70,11 @@ interface Props {
   onComplete: () => void;
 }
 
-export default function DialogueCutscene({ lines, onComplete }: Props) {
+export interface DialogueCutsceneHandle {
+  advance: () => void;
+}
+
+const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function DialogueCutscene({ lines, onComplete }, ref) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [uiScale, setUiScale] = useState(1);
   useLayoutEffect(() => {
@@ -84,8 +88,6 @@ export default function DialogueCutscene({ lines, onComplete }: Props) {
   }, []);
 
   const [index, setIndex] = useState(0);
-  // キャラごとに最新の DialogueLine を保持（imageSrc or speaker をキーに）
-  // ★ 初期表示は最初に喋るキャラのみ。advance() で順次追加される。
   const [portraitMap, setPortraitMap] = useState<Record<string, DialogueLine>>(() => {
     const m: Record<string, DialogueLine> = {};
     if (lines.length > 0) m[keyOf(lines[0])] = lines[0];
@@ -93,8 +95,6 @@ export default function DialogueCutscene({ lines, onComplete }: Props) {
   });
   const [textVisible, setTextVisible] = useState(true);
 
-  // lines prop が変わったとき、既存エントリのデータだけ更新（新キャラを先行追加しない）
-  // プレビュー用途（lines=[singleLine] が毎フレーム変化）に対応するため必要
   useEffect(() => {
     setPortraitMap(prev => {
       const next = { ...prev };
@@ -121,6 +121,25 @@ export default function DialogueCutscene({ lines, onComplete }: Props) {
       onComplete();
     }
   };
+
+  // forwardRef 経由で advance を外部に公開（モバイル「次へ」ボタン用）
+  const advanceRef = useRef<() => void>(advance);
+  advanceRef.current = advance;
+  useImperativeHandle(ref, () => ({ advance: () => advanceRef.current() }), []);
+
+  // Z キー / Enter キーでセリフ送り
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'z' || e.key === 'Z' || e.key === 'Enter') {
+        e.preventDefault();
+        advanceRef.current();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const isLast = index === lines.length - 1;
 
@@ -168,4 +187,6 @@ export default function DialogueCutscene({ lines, onComplete }: Props) {
       </div>
     </div>
   );
-}
+});
+
+export default DialogueCutscene;

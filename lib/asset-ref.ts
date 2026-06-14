@@ -26,7 +26,7 @@ export function parseRef(raw: string): ParsedRef | null {
   if (idx === -1) return { scheme: 'url', value: raw, raw };
   const scheme = raw.slice(0, idx);
   const value = raw.slice(idx + 1);
-  const known = ['post', 'walk', 'url', 'tile', 'emoji', 'youtube', 'mml', 'none'];
+  const known = ['post', 'walk', 'url', 'tile', 'emoji', 'youtube', 'mml', 'none', 'direct'];
   if (!known.includes(scheme)) return { scheme: 'url', value: raw, raw };
   return { scheme, value, raw };
 }
@@ -82,6 +82,7 @@ export function refLabel(raw: string): string {
     case 'emoji': return ref.value;
     case 'youtube': return 'YouTube BGM';
     case 'mml': return ref.value.startsWith('post:') ? `MML投稿 #${ref.value.slice(5)}` : 'MML';
+    case 'direct': return ref.value.length > 28 ? ref.value.slice(0, 26) + '…' : ref.value;
     default: return ref.raw;
   }
 }

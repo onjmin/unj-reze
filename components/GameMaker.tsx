@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2 } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import { bgmRefToAsset, refLabel } from '@/lib/asset-ref';
 import { mmlToNotes, playMml } from '@/lib/mml';
@@ -14,6 +14,7 @@ import {
   type SpellBlock,
   type DialogueLine,
   type StagePhase,
+  type SpellCardDef,
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
@@ -22,21 +23,26 @@ import {
 } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
-import DialogueCutscene from './DialogueCutscene';
+import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
+import SpellCutscene from './SpellCutscene';
+import PokemonBattle from './PokemonBattle';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 
 export type { PresetId };
 
-type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell';
+type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound';
 
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
   preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
-  player: { emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string };
+  player: { emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string;
+    bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number; };
   tiles: Record<number, { name: string; color: string; passable: boolean; special?: string; imageRef?: string }>;
   map: number[][];
   objects: Array<Omit<ObjectDef, 'spriteUrl'>>;
   bgm: string;
+  battleBgm?: string;
+  bossBgm?: string;
   sfx: Partial<Record<SfxTrigger, string>>;
   scroll?: { worldCols: number; worldRows?: number };
   switches?: SwitchDef[];
@@ -50,7 +56,7 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード' };
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
@@ -66,7 +72,12 @@ const resizeWorld = (d: PresetData, cols: number): PresetData => {
 };
 
 function playSfx(s?: SfxRef) {
-  if (!s || !s.src || s.type !== 'mml') return; // youtube SFXは即時再生に不向きなので参照保持のみ
+  if (!s || !s.src) return;
+  if (s.type === 'direct') {
+    const a = new Audio(s.src); a.volume = 0.7; a.play().catch(() => {});
+    return;
+  }
+  if (s.type !== 'mml') return; // youtube は即時再生に不向きなので無視
   const { tracks, tempo } = mmlToNotes(s.src);
   if (tracks.some(t => t.notes.length > 0)) playMml(tracks, tempo);
 }
@@ -83,8 +94,40 @@ interface Entity {
   moveTarget?: MoveTarget;
   scriptCtx?: { cancelled: boolean };
 }
-interface Bullet { x: number; y: number; w: number; h: number; vy: number; }
-interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; }
+interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; }
+interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean; }
+
+// ── 空間グリッド（弾幕当たり判定高速化）────────────────────────────────────
+// セルサイズを最大弾半径の2倍以上に設定することで漏れなし保証。
+const GRID_CELL = 48;
+class BulletGrid {
+  private cells = new Map<number, EnemyBullet[]>();
+  private cols: number;
+  constructor(worldW: number) { this.cols = Math.ceil(worldW / GRID_CELL) + 1; }
+  clear() { this.cells.clear(); }
+  insert(b: EnemyBullet) {
+    const key = this.key(b.x, b.y);
+    let cell = this.cells.get(key);
+    if (!cell) { cell = []; this.cells.set(key, cell); }
+    cell.push(b);
+  }
+  /** 半径 radius 以内に存在する可能性がある弾を返す（偽陽性あり・漏れなし） */
+  query(x: number, y: number, radius: number): EnemyBullet[] {
+    const r = Math.ceil(radius / GRID_CELL);
+    const cx0 = Math.floor(x / GRID_CELL), cy0 = Math.floor(y / GRID_CELL);
+    const result: EnemyBullet[] = [];
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        const cell = this.cells.get((cx0 + dx) + (cy0 + dy) * this.cols);
+        if (cell) for (const b of cell) result.push(b);
+      }
+    }
+    return result;
+  }
+  private key(x: number, y: number) {
+    return Math.floor(x / GRID_CELL) + Math.floor(y / GRID_CELL) * this.cols;
+  }
+}
 
 /** 弾幕スクリプトを 1 ステップ進める（game loop から毎フレーム呼ぶ）。 */
 function stepSpell(
@@ -324,7 +367,7 @@ interface GameMakerProps {
 }
 
 type PickTarget =
-  | { t: 'player' } | { t: 'bgm' } | { t: 'tile'; id: number }
+  | { t: 'player' } | { t: 'bgm' } | { t: 'battleBgm' } | { t: 'bossBgm' } | { t: 'tile'; id: number }
   | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' };
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
@@ -418,6 +461,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
   const phaseIndexRef = useRef(-1);
+
+  // ── 弾幕空間グリッド ──
+  const bulletGridRef = useRef(new BulletGrid(PLAY_W));
+
+  // ── 設定パネル ──
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) setSettingsOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [settingsOpen]);
+
+  // ── デバッグ無敵 ──
+  const [debugInvincible, setDebugInvincible] = useState(false);
+  const debugInvincibleRef = useRef(false);
+  useEffect(() => { debugInvincibleRef.current = debugInvincible; }, [debugInvincible]);
+
+  // ── バトル/ボス戦 BGM ──
+  const bossBgmActiveRef = useRef(false);
+  const battleBgmActiveRef = useRef<'none' | 'battle' | 'boss'>('none');
+  const gameDataRef = useRef(gameData);
+  gameDataRef.current = gameData;
+
+  // ── グレイズ ──
+  const grazeRef = useRef(0);
+  const grazeFlashRef = useRef(0); // グレイズ時の発光フレーム数
+
+  // ── DialogueCutscene ハンドル（モバイル「次へ」ボタン用）──
+  const dialogueCutsceneRef = useRef<DialogueCutsceneHandle>(null);
+
+  // ── ボム / スペルカード ──
+  const bombCountRef = useRef(3);
+  const bombInvulnRef = useRef(0);    // ボム無敵フレーム数
+  const bombCooldownRef = useRef(0);  // ボム連打防止クールダウン
+  const bombPickupsRef = useRef<Array<{ x: number; y: number; life: number }>>([]);
+  const spellCardTriggeredRef = useRef<Set<string>>(new Set()); // 発動済みカード {defId-cardIdx}
+  const activeSpellCardNameRef = useRef<string | null>(null);   // 現在発動中のカード名
+  const spellCutinKeyCountRef = useRef(0);
+  const [spellCutin, setSpellCutin] = useState<{
+    key: number; mode: 'boss' | 'player';
+    charName: string; spellName: string;
+    imageUrl?: string; imageX?: number; imageY?: number; imageScale?: number;
+  } | null>(null);
   /** 次に開始するフェーズ（dialogue 完了後に spawn する）。-1=クリア（outro後）*/
   const pendingPhaseRef = useRef<number | null>(null);
   /** true のとき、完了した dialogue は outro（フェーズクリア後）だったことを示す */
@@ -428,11 +518,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** ループから state を読むための ref */
   const activeDialogueRef = useRef<DialogueLine[] | null>(null);
   activeDialogueRef.current = activeDialogue;
+  const afterDialogueRef = useRef<(() => void) | null>(null);
   const [, forceHud] = useState(0);
 
   const calcDmg = (atk: number, def: number) => Math.max(1, Math.round((atk - def / 2) * (0.85 + Math.random() * 0.3)));
   const appendLog = (line: string, patch: Partial<BattleView> = {}) =>
     setBattle(v => (v ? { ...v, enemyHp: battleRef.current.enemyHp, log: [...v.log, line].slice(-6), ...patch } : v));
+
+  /** BGM を即時切り替えるヘルパー。src がなければ停止。 */
+  const switchBgm = (bgm?: { src?: string; type?: 'youtube' | 'mml' | 'direct' }) => {
+    if (bgm?.src && bgm.type !== 'direct') {
+      bgmManager.play({ bgm: { type: bgm.type ?? 'youtube', src: bgm.src }, tileset: {} } as never);
+    } else {
+      bgmManager.stop();
+    }
+  };
 
   const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; moves?: { name: string; power: number; heal?: boolean }[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     battleRef.current = {
@@ -441,6 +541,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     };
     bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
     setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemyHp: opts.hp, enemyMaxHp: opts.hp, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
+    // バトルBGM切り替え
+    if (opts.isBoss && gameDataRef.current.bossBgm?.src) {
+      battleBgmActiveRef.current = 'boss';
+      switchBgm(gameDataRef.current.bossBgm);
+    } else if (!opts.isBoss && gameDataRef.current.battleBgm?.src) {
+      battleBgmActiveRef.current = 'battle';
+      switchBgm(gameDataRef.current.battleBgm);
+    }
   };
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
@@ -461,6 +569,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const b = battleRef.current; const pr = progressRef.current; const eng = engineRef.current;
     if (result === 'lose') {
       battleRef.current.active = false; setBattle(null);
+      battleBgmActiveRef.current = 'none';
       playSfx(sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => setIsPlaying(false));
       return;
     }
@@ -477,6 +586,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     invulnRef.current = 60; forceHud(n => n + 1);
     setTimeout(() => {
       battleRef.current.active = false; battleRef.current.entity = null; setBattle(null); forceHud(n => n + 1);
+      // バトルBGM終了 → フィールドBGMに戻す
+      if (battleBgmActiveRef.current !== 'none') {
+        battleBgmActiveRef.current = 'none';
+        switchBgm(gameDataRef.current.bgm);
+      }
       if (result === 'win' && wasBoss) {
         const outro = bossOutroRef.current;
         if (outro?.length) {
@@ -571,20 +685,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const onDialogueComplete = useCallback(() => {
     setActiveDialogue(null);
     activeDialogueRef.current = null;
+    const cb = afterDialogueRef.current;
+    afterDialogueRef.current = null;
+    cb?.();
     const pending = pendingPhaseRef.current;
     const wasOutro = outroModeRef.current;
     outroModeRef.current = false;
     if (pending === null) return;
-    pendingPhaseRef.current = null;
     const eng = engineRef.current;
     eng.bullets = []; eng.enemyBullets = [];
 
     // outro 完了後の -1 → クリア
+    // pendingPhaseRef は -1 のまま残す（null に戻すとゲームループが再トリガーするため）
     if (pending === -1) {
       playSfx(sfxRef.current.clear);
       showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false));
       return;
     }
+    pendingPhaseRef.current = null;
 
     // outro 完了後の通常フェーズ → 次フェーズの intro を流してから spawn
     if (wasOutro) {
@@ -599,6 +717,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
 
     // intro 完了 or intro なし → spawn
+    // ボス戦BGM切り替え
+    const curPhase = gameData.phases?.[pending];
+    const isBossPhase = !!(curPhase?.kind === 'boss' && !curPhase?.noBossBgm);
+    const bossBgm = gameData.bossBgm;
+    if (isBossPhase && bossBgm?.src && !bossBgmActiveRef.current) {
+      bossBgmActiveRef.current = true;
+      bgmManager.play({ bgm: { type: bossBgm.type ?? 'youtube', src: bossBgm.src }, tileset: {} } as never);
+    } else if (!isBossPhase && bossBgmActiveRef.current) {
+      bossBgmActiveRef.current = false;
+      const normal = gameData.bgm;
+      if (normal?.src) bgmManager.play({ bgm: { type: normal.type ?? 'youtube', src: normal.src }, tileset: {} } as never);
+      else bgmManager.stop();
+    }
+
     const entities: Entity[] = (gameData.objects ?? [])
       .filter(o => (o.phase ?? 0) === pending)
       .map(o => ({
@@ -734,10 +866,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return false;
   }, [findActivePage, runEventCommands]);
 
-  const previewMmlAsset = useCallback((_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' }) => {
+  const previewMmlAsset = useCallback((_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' }) => {
     previewStopRef.current?.();
     previewStopRef.current = null;
-    if (!asset?.src || asset.type !== 'mml') return;
+    if (!asset?.src) return;
+    if (asset.type === 'direct') {
+      const a = new Audio(asset.src); a.volume = 0.7; a.play().catch(() => {});
+      previewStopRef.current = () => { a.pause(); a.currentTime = 0; };
+      return;
+    }
+    if (asset.type !== 'mml') return;
     const { tracks, tempo } = mmlToNotes(asset.src);
     if (!tracks.some(t => t.notes.length > 0)) return;
     previewStopRef.current = playMml(tracks, tempo, undefined, () => {
@@ -806,9 +944,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         scroll: initialManifest.scroll ?? base.scroll,
         phases: initialManifest.phases ?? base.phases,
         battle: base.battle,
-        bgm: initialManifest.bgm && initialManifest.bgm !== 'none'
-          ? { ref: initialManifest.bgm }
-          : undefined,
+        bgm: initialManifest.bgm && initialManifest.bgm !== 'none' ? { ref: initialManifest.bgm } : undefined,
+        battleBgm: initialManifest.battleBgm ? { ref: initialManifest.battleBgm } : undefined,
+        bossBgm: initialManifest.bossBgm ? { ref: initialManifest.bossBgm } : undefined,
         sfx: Object.fromEntries(
           Object.entries(initialManifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
         ) as PresetData['sfx'],
@@ -893,6 +1031,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false };
       invulnRef.current = 0; isPlayerDeadRef.current = false; livesRef.current = 3; scoreRef.current = 0;
       bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false;
+      bombCountRef.current = gameData.player.bombCount ?? 3;
+      bombInvulnRef.current = 0; bombCooldownRef.current = 0;
+      bombPickupsRef.current = []; spellCardTriggeredRef.current = new Set();
+      activeSpellCardNameRef.current = null; setSpellCutin(null);
+      grazeRef.current = 0; grazeFlashRef.current = 0;
+      bossBgmActiveRef.current = false;
       setActiveDialogue(null);
       setBattle(null);
       setSwitchVals({}); switchValsRef.current = {};
@@ -995,6 +1139,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       let dead = false;
       if (invulnRef.current > 0) invulnRef.current--;
+      if (bombInvulnRef.current > 0) bombInvulnRef.current--;
+      if (bombCooldownRef.current > 0) bombCooldownRef.current--;
 
       // ── player movement (both modes, paused during battle) ──
       if (!battleRef.current.active) {
@@ -1024,7 +1170,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             .filter(t2 => t2 && !t2.info.passable);
           const tile2 = hits[0];
           if (tile2) { if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; } else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE; p.vy = 0; }
-          if (p.y > worldH && isPlaying) { lose('ミス！'); dead = true; }
+          if (p.y > worldH && isPlaying && !debugInvincibleRef.current) { lose('ミス！'); dead = true; }
         } else {
           // rpg / touhou: 8-dir free move
           p.vx = 0; p.vy = 0;
@@ -1038,16 +1184,42 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h) p.y = ny;
 
-          // touhou shooting: play mode only（死亡中は撃たない）
+          // touhou shooting + bomb: play mode only（死亡中は撃たない）
           if (!dead && !isPlayerDeadRef.current && gameData.engine === 'touhou') {
             eng.shotTimer++;
             if (eng.shotTimer > 6) {
-              eng.bullets.push({ x: p.x + pData.w / 2 - 4, y: p.y, w: 8, h: 16, vy: -12 });
+              eng.bullets.push({ x: p.x + pData.w / 2 - 4, y: p.y, w: 8, h: 16, vy: -12, vx: 0 });
               eng.shotTimer = 0; playSfx(sfxRef.current.shot);
             }
+            // ── ボム入力（X キーまたはタッチ BOMB ボタン）──
+            const isBombKey = keys.has('x') || keys.has('X') || touchRef.current.bomb;
+            if (isPlaying && isBombKey && !prevBombRef.current && bombCountRef.current > 0 && bombCooldownRef.current <= 0) {
+              bombCountRef.current--;
+              bombInvulnRef.current = 240;
+              bombCooldownRef.current = 180;
+              eng.enemyBullets = [];
+              const pcxB = p.x + pData.w / 2, pcyB = p.y + pData.h / 2;
+              for (let a = 0; a < 24; a++) {
+                const ang = (a / 24) * Math.PI * 2;
+                eng.bullets.push({ x: pcxB, y: pcyB, w: 6, h: 6, vy: Math.sin(ang) * 9, vx: Math.cos(ang) * 9 });
+              }
+              const k = ++spellCutinKeyCountRef.current;
+              setSpellCutin({ key: k, mode: 'player',
+                charName: pData.bombCutinCharName ?? '魔理沙',
+                spellName: pData.bombSpellName ?? '恋符「マスタースパーク」',
+                imageUrl: pData.bombCutinImageUrl,
+                imageX: pData.bombCutinImageX, imageY: pData.bombCutinImageY, imageScale: pData.bombCutinScale,
+              });
+            }
+            prevBombRef.current = isBombKey;
+            // 弾移動・範囲外削除
             for (let i = eng.bullets.length - 1; i >= 0; i--) {
+              eng.bullets[i].x += eng.bullets[i].vx ?? 0;
               eng.bullets[i].y += eng.bullets[i].vy;
-              if (eng.bullets[i].y < 0) eng.bullets.splice(i, 1);
+              if (eng.bullets[i].y < -16 || eng.bullets[i].y > PLAY_H + 16 ||
+                  eng.bullets[i].x < -16 || eng.bullets[i].x > PLAY_W + 16) {
+                eng.bullets.splice(i, 1);
+              }
             }
           }
         }
@@ -1159,13 +1331,55 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               e.hp--; eng.bullets.splice(j, 1);
               if (e.hp <= 0) {
                 if (e.scriptCtx) e.scriptCtx.cancelled = true;
-                // スコア加算（ボス100点、雑魚10点）
                 scoreRef.current += d.isBoss ? 100 : 10;
+                if (gameData.engine === 'touhou' && d.bombDrop && Math.random() < d.bombDrop) {
+                  bombPickupsRef.current.push({ x: ecx, y: ecy, life: 300 });
+                }
+                if (d.isBoss) activeSpellCardNameRef.current = null;
                 eng.entities.splice(ei, 1); break;
               }
             }
           }
           if (e.hp <= 0) continue;
+
+          // ── スペルカード発動チェック（ボス・touhou） ──
+          if (isPlaying && gameData.engine === 'touhou' && d.isBoss && d.spellCards?.length) {
+            for (let sci = 0; sci < d.spellCards.length; sci++) {
+              const card = d.spellCards[sci];
+              const cardKey = `${d.id}-${sci}`;
+              if (!spellCardTriggeredRef.current.has(cardKey) && e.hp <= card.triggerHp) {
+                spellCardTriggeredRef.current.add(cardKey);
+                activeSpellCardNameRef.current = card.name;
+                playSfx(sfxRef.current.spellcard);
+                if (e.scriptCtx) e.scriptCtx.cancelled = true;
+                eng.enemyBullets = [];
+                const triggerCutin = () => {
+                  const k = ++spellCutinKeyCountRef.current;
+                  setSpellCutin({ key: k, mode: 'boss',
+                    charName: card.cutinCharName ?? d.name ?? d.emoji,
+                    spellName: card.name,
+                    imageUrl: card.cutinImageUrl, imageX: card.cutinImageX,
+                    imageY: card.cutinImageY, imageScale: card.cutinScale,
+                  });
+                  if (card.miniScript) {
+                    const capturedE = e, capturedEng = eng, capturedScript = card.miniScript;
+                    setTimeout(() => {
+                      if (!capturedEng.entities.includes(capturedE)) return;
+                      if (capturedE.scriptCtx) capturedE.scriptCtx.cancelled = true;
+                      runEntityScript(capturedScript, capturedE, capturedEng, () => capturedEng.player);
+                    }, 1500);
+                  }
+                };
+                if (card.dialogue?.length) {
+                  afterDialogueRef.current = triggerCutin;
+                  setActiveDialogue(card.dialogue);
+                } else {
+                  triggerCutin();
+                }
+                break;
+              }
+            }
+          }
 
           const overlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
           if (overlap) {
@@ -1197,9 +1411,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               break;
             }
             if (d.hazard) {
-              if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { startBattle(e); dead = true; } break; }
-              if (gameData.engine === 'touhou') { if (!isPlayerDeadRef.current && invulnRef.current <= 0) { handlePlayerDeath(); dead = true; } break; }
-              lose('ミス！'); dead = true; break;
+              if (!debugInvincibleRef.current) {
+                if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { startBattle(e); dead = true; } break; }
+                if (gameData.engine === 'touhou') { if (!isPlayerDeadRef.current && invulnRef.current <= 0) { handlePlayerDeath(); dead = true; } break; }
+                lose('ミス！'); dead = true;
+              }
+              break;
             }
             else if (d.message && !e.talked) { e.talked = true; showGameMsg(d.message, 'instant', () => {}); }
           } else if (!d.hazard && !d.pages) { e.talked = false; }
@@ -1207,19 +1424,60 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
         if (!dead) {
           const core = gameData.engine === 'touhou' ? 3 : 8;
+          if (grazeFlashRef.current > 0) grazeFlashRef.current--;
+
+          // ── 弾移動・画面外除去 ──
           for (let i = eng.enemyBullets.length - 1; i >= 0; i--) {
             const eb = eng.enemyBullets[i]; eb.x += eb.vx; eb.y += eb.vy;
-            if (eb.x < -10 || eb.x > worldW + 10 || eb.y < -10 || eb.y > worldH + 10) { eng.enemyBullets.splice(i, 1); continue; }
-            // 死亡中・無敵中は被弾しない
-            if (!isPlayerDeadRef.current && invulnRef.current <= 0 && Math.hypot(eb.x - pcx, eb.y - pcy) < eb.r + core) {
+            if (eb.x < -20 || eb.x > worldW + 20 || eb.y < -20 || eb.y > worldH + 20) eng.enemyBullets.splice(i, 1);
+          }
+
+          // ── 空間グリッドに登録 ──
+          const grid = bulletGridRef.current;
+          grid.clear();
+          for (const eb of eng.enemyBullets) grid.insert(eb);
+
+          // ── 当たり判定（グリッドで絞り込んでから距離チェック） ──
+          const checkRadius = 24 + core; // グレイズ検出最大距離
+          const candidates = grid.query(pcx, pcy, checkRadius);
+          for (const eb of candidates) {
+            const dist = Math.hypot(eb.x - pcx, eb.y - pcy);
+            // グレイズ判定
+            if (gameData.engine === 'touhou' && !eb.grazed && !isPlayerDeadRef.current &&
+                invulnRef.current <= 0 && bombInvulnRef.current <= 0 &&
+                dist < eb.r + 16 && dist >= eb.r + core) {
+              eb.grazed = true;
+              grazeRef.current++;
+              scoreRef.current += 10;
+              grazeFlashRef.current = 8;
+              playSfx(sfxRef.current.graze);
+            }
+            // 被弾判定
+            if (!debugInvincibleRef.current && !isPlayerDeadRef.current && invulnRef.current <= 0 && bombInvulnRef.current <= 0 && dist < eb.r + core) {
               if (gameData.engine === 'rpg' && gameData.battle) {
-                eng.enemyBullets.splice(i, 1);
+                const idx = eng.enemyBullets.indexOf(eb);
+                if (idx >= 0) eng.enemyBullets.splice(idx, 1);
                 progressRef.current.hp -= 6; invulnRef.current = 45; forceHud(n => n + 1);
                 if (progressRef.current.hp <= 0) { lose('やられた…'); dead = true; break; }
                 continue;
               }
               if (gameData.engine === 'touhou') { handlePlayerDeath(); dead = true; break; }
               lose('ミス！'); dead = true; break;
+            }
+          }
+        }
+
+        // ── ボムアイテム移動・回収 ──
+        if (!dead && gameData.engine === 'touhou') {
+          const pcxB = p.x + pData.w / 2, pcyB = p.y + pData.h / 2;
+          for (let i = bombPickupsRef.current.length - 1; i >= 0; i--) {
+            const bp = bombPickupsRef.current[i];
+            bp.y += 0.8;
+            bp.life--;
+            if (bp.life <= 0 || bp.y > PLAY_H + 16) { bombPickupsRef.current.splice(i, 1); continue; }
+            if (!isPlayerDeadRef.current && Math.hypot(bp.x - pcxB, bp.y - pcyB) < 16) {
+              bombCountRef.current++;
+              bombPickupsRef.current.splice(i, 1);
             }
           }
         }
@@ -1231,12 +1489,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else win();
             }
-            else if (center?.info?.special === 'trap') { lose('ミス！'); dead = true; }
+            else if (center?.info?.special === 'trap') { if (!debugInvincibleRef.current) { lose('ミス！'); dead = true; } }
             else bossWarnRef.current = false;
           } else if (gameData.engine === 'touhou') {
             // フェーズシステム（dialogue 表示中はエンティティが 0 でもスキップ）
@@ -1269,6 +1527,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   pendingPhaseRef.current = nextIdx < phases.length ? nextIdx : -1; // -1=クリア
                   setActiveDialogue(curPhase.outroDialogue);
                 } else if (nextIdx >= phases.length) {
+                  pendingPhaseRef.current = -1; // 再トリガー防止
                   win();
                 } else {
                   const nextPhase = phases[nextIdx];
@@ -1299,7 +1558,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       // ── action key: trigger event/message on overlapping object ──
-      if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current) {
+      if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
         const target = (isPlaying ? eng.entities : gameData.objects).find(o => {
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
@@ -1387,27 +1646,67 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         ctx.fillStyle = 'yellow';
         for (const b of eng.bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
-        for (const eb of eng.enemyBullets) {
-          if (gameData.engine === 'touhou') {
-            // touhou.html スタイルのダイヤモンド弾
-            ctx.save();
-            ctx.translate(eb.x, eb.y);
-            ctx.rotate(Math.atan2(eb.vy, eb.vx));
-            ctx.fillStyle = eb.color;
-            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-            ctx.lineWidth = 0.5;
-            const s = eb.r * 1.1;
-            ctx.beginPath();
-            ctx.moveTo(s * 1.2, 0); ctx.lineTo(0, -s * 0.85);
-            ctx.lineTo(-s * 1.2, 0); ctx.lineTo(0, s * 0.85);
-            ctx.closePath(); ctx.fill(); ctx.stroke();
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.beginPath(); ctx.arc(0, 0, s * 0.32, 0, Math.PI * 2); ctx.fill();
-            ctx.restore();
-          } else {
-            ctx.fillStyle = eb.color; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2); ctx.fill();
-            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r * 0.5, 0, Math.PI * 2); ctx.fill();
+        // ボムアイテム描画
+        if (gameData.engine === 'touhou' && bombPickupsRef.current.length > 0) {
+          ctx.font = '14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          for (const bp of bombPickupsRef.current) {
+            ctx.globalAlpha = bp.life < 60 ? bp.life / 60 : 1;
+            ctx.fillText('💣', bp.x, bp.y);
           }
+          ctx.globalAlpha = 1;
+        }
+        if (gameData.engine === 'touhou') {
+          // ── touhou 弾：色グループ別にまとめて描画（fillStyle 切り替えを最小化） ──
+          const byColor = new Map<string, EnemyBullet[]>();
+          for (const eb of eng.enemyBullets) {
+            let arr = byColor.get(eb.color);
+            if (!arr) { arr = []; byColor.set(eb.color, arr); }
+            arr.push(eb);
+          }
+          // パス1：ダイヤモンド本体（色ごとに一括）
+          for (const [color, bullets] of byColor) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            for (const eb of bullets) {
+              const angle = Math.atan2(eb.vy, eb.vx);
+              const cos = Math.cos(angle), sin = Math.sin(angle);
+              const s = eb.r * 1.1;
+              const x1 = s * 1.2, y2 = s * 0.85;
+              // 回転済み座標を手動計算（save/restoreなしで高速化）
+              ctx.moveTo(eb.x + cos * x1,              eb.y + sin * x1);
+              ctx.lineTo(eb.x + sin * (-y2),           eb.y + cos * (-y2));  // (0,-y2) 回転
+              ctx.lineTo(eb.x + cos * (-x1),           eb.y + sin * (-x1));
+              ctx.lineTo(eb.x - sin * (-y2),           eb.y - cos * (-y2));  // (0,+y2) 回転
+              ctx.closePath();
+            }
+            ctx.fill();
+          }
+          // パス2：白コアをまとめて一括描画
+          ctx.fillStyle = 'rgba(255,255,255,0.85)';
+          ctx.beginPath();
+          for (const eb of eng.enemyBullets) {
+            ctx.moveTo(eb.x + eb.r * 0.35, eb.y);
+            ctx.arc(eb.x, eb.y, eb.r * 0.35, 0, Math.PI * 2);
+          }
+          ctx.fill();
+        } else {
+          // 非 touhou：色グループ別に一括描画
+          const byColor = new Map<string, EnemyBullet[]>();
+          for (const eb of eng.enemyBullets) {
+            let arr = byColor.get(eb.color);
+            if (!arr) { arr = []; byColor.set(eb.color, arr); }
+            arr.push(eb);
+          }
+          for (const [color, bullets] of byColor) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            for (const eb of bullets) { ctx.moveTo(eb.x + eb.r, eb.y); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2); }
+            ctx.fill();
+          }
+          ctx.fillStyle = 'white';
+          ctx.beginPath();
+          for (const eb of eng.enemyBullets) { ctx.moveTo(eb.x + eb.r * 0.5, eb.y); ctx.arc(eb.x, eb.y, eb.r * 0.5, 0, Math.PI * 2); }
+          ctx.fill();
         }
       } else {
         for (const o of gameData.objects) {
@@ -1446,11 +1745,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (gameData.engine === 'touhou' && isPlaying) {
         const cx = p.x + pData.w / 2, cy = p.y + pData.h / 2;
         const isSlow2 = engineRef.current.keys.has('Shift') || touchRef.current.slow;
+        // グレイズ発光リング
+        if (grazeFlashRef.current > 0) {
+          const t = grazeFlashRef.current / 8;
+          ctx.strokeStyle = `rgba(255,220,80,${t * 0.9})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(cx, cy, 16 + (1 - t) * 6, 0, Math.PI * 2); ctx.stroke();
+        }
         if (isSlow2) {
           ctx.strokeStyle = 'rgba(255,255,255,0.3)';
           ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI * 2); ctx.stroke();
         }
+        // 当たり判定（赤点）
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = 'red'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -1486,6 +1793,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.fillStyle = '#ffd84d';
         ctx.fillText(`SCORE  ${sc.toLocaleString()}`, PLAY_W - 8, PLAY_H - 10);
       }
+      // ── touhou グレイズ HUD ──
+      if (isPlaying && gameData.engine === 'touhou') {
+        const gz = grazeRef.current;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(PLAY_W - 130, PLAY_H - 50, 122, 20);
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = gz > 0 ? '#fde68a' : '#666';
+        ctx.fillText(`GRAZE  ${gz}`, PLAY_W - 8, PLAY_H - 34);
+      }
 
       // ── touhou 残機 HUD ──
       if (isPlaying && gameData.engine === 'touhou') {
@@ -1497,6 +1814,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const hearts = '❤'.repeat(Math.max(0, lives));
         ctx.fillStyle = lives > 1 ? '#ff6b8a' : '#ff3333';
         ctx.fillText(hearts || '×0', 12, PLAY_H - 10);
+      }
+      // ── touhou ボム数 HUD ──
+      if (isPlaying && gameData.engine === 'touhou') {
+        const bc = bombCountRef.current;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(8, PLAY_H - 50, 100, 20);
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = bc > 0 ? '#c4b5fd' : '#555';
+        ctx.fillText('💣 ×' + bc, 12, PLAY_H - 34);
       }
 
       // ── touhou ボスHPバー（touhou.html スタイル） ──
@@ -1517,10 +1844,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // スペル名
           ctx.fillStyle = 'rgba(0,0,0,0.45)';
           ctx.fillRect(barX, barY + barH + 2, 200, 14);
-          ctx.fillStyle = '#5bd1ff';
+          ctx.fillStyle = activeSpellCardNameRef.current ? '#ffaa44' : '#5bd1ff';
           ctx.font = 'bold 10px monospace';
           ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-          ctx.fillText(boss.def.name ?? boss.def.emoji, barX + 4, barY + barH + 12);
+          ctx.fillText(activeSpellCardNameRef.current ?? boss.def.name ?? boss.def.emoji, barX + 4, barY + barH + 12);
         }
       }
 
@@ -1546,10 +1873,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, [gameData, isPlaying, restart, editorTab, editSpeedMult]);
 
   // touch state via ref to avoid re-running the loop effect
-  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false });
+  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false });
   const prevActionRef = useRef(false);
   const prevZRef = useRef(false);
   const prevXRef = useRef(false);
+  const prevBombRef = useRef(false);
   const [, force] = useState(0);
   const setTouch = (key: keyof typeof touchRef.current, v: boolean) => { touchRef.current[key] = v; force(n => n + 1); };
 
@@ -1604,13 +1932,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setPicker(null);
     if (!target) return;
     const bgmLike = () => {
-      const type = res.ref.startsWith('mml:') ? 'mml' as const : 'youtube' as const;
-      const src = type === 'mml' ? (res.rawMml || res.ref.replace(/^mml:/, '')) : res.url;
+      const type = res.ref.startsWith('mml:') ? 'mml' as const : res.ref.startsWith('direct:') ? 'direct' as const : 'youtube' as const;
+      const src = type === 'mml' ? (res.rawMml || res.ref.replace(/^mml:/, '')) : type === 'direct' ? res.ref.replace(/^direct:/, '') : res.url;
       return { ref: res.ref, src, type };
     };
     if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, spriteRef: res.ref, spriteUrl: res.url } }));
     else if (target.t === 'objsprite') setObjTemplate(o => ({ ...o, spriteRef: res.ref, spriteUrl: res.url }));
     else if (target.t === 'bgm') setGameData(p => ({ ...p, bgm: bgmLike() }));
+    else if (target.t === 'battleBgm') setGameData(p => ({ ...p, battleBgm: bgmLike() }));
+    else if (target.t === 'bossBgm') setGameData(p => ({ ...p, bossBgm: bgmLike() }));
     else if (target.t === 'sfx') setGameData(p => ({ ...p, sfx: { ...p.sfx, [target.trigger]: bgmLike() } }));
     else if (target.t === 'tile') setGameData(p => ({ ...p, tiles: { ...p.tiles, [target.id]: { ...p.tiles[target.id], imageRef: res.ref, imageUrl: res.url } } }));
   };
@@ -1641,6 +1971,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       emoji: gameData.player.emoji, color: gameData.player.color, speed: gameData.player.speed,
       jumpPower: gameData.player.jumpPower, w: gameData.player.w, h: gameData.player.h,
       start: gameData.player.start, spriteRef: gameData.player.spriteRef,
+      bombCount: gameData.player.bombCount,
+      bombSpellName: gameData.player.bombSpellName,
+      bombCutinCharName: gameData.player.bombCutinCharName,
+      bombCutinImageUrl: gameData.player.bombCutinImageUrl,
+      bombCutinImageX: gameData.player.bombCutinImageX,
+      bombCutinImageY: gameData.player.bombCutinImageY,
+      bombCutinScale: gameData.player.bombCutinScale,
     },
     tiles: Object.fromEntries(Object.entries(gameData.tiles).map(([k, t]) => [k, {
       name: t.name, color: t.color, passable: t.passable, special: t.special, imageRef: t.imageRef,
@@ -1649,6 +1986,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     objects: gameData.objects.map(({ spriteUrl, ...o }) => o),
     scroll: gameData.scroll,
     bgm: gameData.bgm?.ref || 'none',
+    battleBgm: gameData.battleBgm?.ref,
+    bossBgm: gameData.bossBgm?.ref,
     sfx: Object.fromEntries(Object.entries(gameData.sfx).map(([k, v]) => [k, v?.ref])) as Partial<Record<SfxTrigger, string>>,
     switches: gameData.switches,
     items: gameData.items,
@@ -1656,6 +1995,60 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   });
 
   const handleSave = () => onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
+
+  const handleExport = () => {
+    const json = JSON.stringify(buildManifest(), null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${(title.trim() || gameData.name).replace(/\s+/g, '_')}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const importFileRef = useRef<HTMLInputElement>(null);
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const manifest = JSON.parse(ev.target?.result as string) as GameManifestDraft;
+        const preset = PRESETS[manifest.preset] ? manifest.preset : 'dq';
+        const base = clone(PRESETS[preset]);
+        const data: PresetData = {
+          ...base,
+          engine: manifest.engine,
+          name: manifest.name,
+          gravity: manifest.gravity,
+          friction: manifest.friction,
+          player: { ...base.player, ...manifest.player, spriteUrl: undefined },
+          tiles: Object.fromEntries(
+            Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: undefined }])
+          ),
+          map: manifest.map,
+          objects: manifest.objects.map(o => ({ ...o, spriteUrl: undefined })),
+          scroll: manifest.scroll ?? base.scroll,
+          phases: manifest.phases ?? base.phases,
+          battle: base.battle,
+          bgm: manifest.bgm && manifest.bgm !== 'none' ? { ref: manifest.bgm } : undefined,
+          battleBgm: manifest.battleBgm ? { ref: manifest.battleBgm } : undefined,
+          bossBgm: manifest.bossBgm ? { ref: manifest.bossBgm } : undefined,
+          sfx: Object.fromEntries(
+            Object.entries(manifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
+          ) as PresetData['sfx'],
+        };
+        setPresetId(preset);
+        setGameData(data);
+        setTitle(manifest.name);
+        const eng = engineRef.current;
+        eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
+        eng.map = JSON.parse(JSON.stringify(data.map));
+        eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+        setIsPlaying(false); setSelectedObjId(null);
+      } catch { alert('JSONの解析に失敗しました'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const tpl = objTemplate;
   const setTpl = (patch: Partial<ObjectDef>) => setObjTemplate(o => ({ ...o, ...patch }));
@@ -1682,6 +2075,44 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* 設定ボタン */}
+          <div className="relative" ref={settingsRef}>
+            <button
+              onClick={() => setSettingsOpen(v => !v)}
+              className={`p-2 rounded-full ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-700/50 text-gray-400 hover:text-white'} ${debugInvincible ? 'ring-1 ring-yellow-400' : ''}`}
+              title="設定"
+            >
+              <Settings size={14} />
+            </button>
+            {settingsOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-2 space-y-1">
+                {/* 無敵モード */}
+                <button
+                  onClick={() => setDebugInvincible(v => !v)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition ${debugInvincible ? 'bg-yellow-500/20 text-yellow-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                >
+                  {debugInvincible ? <Shield size={13} /> : <ShieldOff size={13} />}
+                  無敵モード {debugInvincible ? 'ON' : 'OFF'}
+                </button>
+                <div className="border-t border-gray-700 my-1" />
+                {/* エクスポート */}
+                <button
+                  onClick={() => { handleExport(); setSettingsOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                >
+                  <Download size={13} />データをエクスポート (.json)
+                </button>
+                {/* インポート */}
+                <button
+                  onClick={() => { importFileRef.current?.click(); setSettingsOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                >
+                  <Upload size={13} />データをインポート (.json)
+                </button>
+                <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+              </div>
+            )}
+          </div>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
             if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - PLAY_W), pp.x + pw / 2 - PLAY_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - PLAY_H), pp.y + ph / 2 - PLAY_H / 2))); }
@@ -1712,6 +2143,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               onMouseMove={e => editorTab !== 'object' && (e.buttons & 1) === 1 && handleCanvasAction(e)}
               onTouchStart={handleCanvasAction}
               onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)} />
+            {/* ── パーティバトル（pkmn エンジン）── */}
+            {gameData.engine === 'pkmn' && gameData.partyBattle && (
+              isPlaying ? (
+                <div className="absolute inset-0 z-10">
+                  <PokemonBattle config={gameData.partyBattle} />
+                </div>
+              ) : (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#1a1a2e] text-center px-6"
+                  style={{ fontFamily: 'system-ui, sans-serif' }}>
+                  <div className="text-5xl">⚡</div>
+                  <div className="text-white text-sm font-bold">{gameData.name}</div>
+                  <div className="text-gray-400 text-xs leading-relaxed">
+                    6体から{gameData.partyBattle.teamSize}体を選んで戦うパーティバトルです。<br />
+                    「▶ プレイ」で対戦を開始します。
+                  </div>
+                </div>
+              )
+            )}
             {/* ニコニコ弾幕レイヤー */}
             {danmakuItems.length > 0 && (
               <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -1750,8 +2199,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             {/* ── セリフカットシーン（ゲーム中） ── */}
             {activeDialogue && (
               <DialogueCutscene
+                ref={dialogueCutsceneRef}
                 lines={activeDialogue}
                 onComplete={onDialogueComplete}
+              />
+            )}
+
+            {/* ── スペルカードカットイン ── */}
+            {spellCutin && (
+              <SpellCutscene
+                key={spellCutin.key}
+                mode={spellCutin.mode}
+                charName={spellCutin.charName}
+                spellName={spellCutin.spellName}
+                imageUrl={spellCutin.imageUrl}
+                imageX={spellCutin.imageX}
+                imageY={spellCutin.imageY}
+                imageScale={spellCutin.imageScale}
+                onComplete={() => setSpellCutin(null)}
               />
             )}
 
@@ -1884,13 +2349,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </button>
                 )}
                 {gameData.engine === 'touhou' && (
-                  <button className="w-14 h-12 rounded-full border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
-                    {...padProps('slow')}>
-                    低速
-                  </button>
+                  <div className="flex flex-col items-center gap-2">
+                    <button className="w-14 h-10 rounded-full border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
+                      {...padProps('slow')}>
+                      低速
+                    </button>
+                    <button className="w-14 h-10 rounded-lg border-2 border-violet-500 bg-violet-900/40 text-violet-200 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-violet-700/60"
+                      {...padProps('bomb')}>
+                      💣 BOMB
+                    </button>
+                  </div>
                 )}
               </div>
               </div>
+              {/* セリフ送りボタン（ダイアログ表示中のみ） */}
+              {activeDialogue && (
+                <button
+                  className="w-full py-3 mt-2 rounded-xl bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-bold text-sm active:bg-yellow-600 touch-none select-none"
+                  onPointerDown={e => { e.preventDefault(); dialogueCutsceneRef.current?.advance(); }}
+                >
+                  次へ ▼
+                </button>
+              )}
               {/* コメント欄 */}
               {postId && onComment && (
                 <form
@@ -1924,7 +2404,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             <>
               <div className="flex border-b border-gray-800 shrink-0 overflow-x-auto">
                 {([
-                  ['map', 'マップ'], ['object', 'オブジェクト'], ['char', 'キャラ'], ['asset', 'アセット'],
+                  ['map', 'マップ'], ['object', 'オブジェクト'], ['char', 'キャラ'], ['asset', 'アセット'], ['sound', 'サウンド'],
                   ...(gameData.engine === 'touhou' ? [['spell', '会話']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
@@ -2359,6 +2839,105 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   className="text-[10px] text-yellow-400 active:opacity-60">+ 撃破後セリフ追加</button>
                               </div>
                             )}
+                            {/* ── スペルカード（touhou ボス） ── */}
+                            {selObj.isBoss && gameData.engine === 'touhou' && (
+                              <div className="mt-3 space-y-2">
+                                <p className="text-[10px] text-red-400/80 font-bold">スペルカード</p>
+                                {(selObj.spellCards ?? []).map((card, ci) => (
+                                  <div key={ci} className="rounded-lg border border-red-800/60 bg-red-950/20 p-2 space-y-1.5">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[9px] text-red-400 shrink-0 font-bold">#{ci + 1}</span>
+                                      <input value={card.name}
+                                        onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, name: e.target.value } : c) })}
+                                        placeholder="スペルカード名"
+                                        className="flex-1 bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                      <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).filter((_, j) => j !== ci) })}
+                                        className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
+                                    </div>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-1 flex-wrap">
+                                      発動HP（以下）
+                                      <input type="text" inputMode="numeric" defaultValue={card.triggerHp}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, triggerHp: v } : c) }); }}
+                                        className="w-16 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                    {/* 発動前セリフ */}
+                                    <p className="text-[9px] text-gray-500">発動前セリフ（会話パート）</p>
+                                    {(card.dialogue ?? []).map((line, li) => (
+                                      <div key={li} className="rounded border border-gray-700 bg-gray-900 p-1.5 space-y-1">
+                                        <div className="flex gap-1">
+                                          <input value={line.speaker}
+                                            onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, speaker: e.target.value } : l) } : c) })}
+                                            placeholder="話者名"
+                                            className="w-20 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                          <input value={line.emoji ?? ''}
+                                            onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: e.target.value || undefined } : l) } : c) })}
+                                            placeholder="😊"
+                                            className="w-10 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                          <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).filter((_, k) => k !== li) } : c) })}
+                                            className="ml-auto text-red-500 text-[9px] px-0.5">✕</button>
+                                        </div>
+                                        <input value={line.imageSrc ?? ''}
+                                          onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, imageSrc: e.target.value || undefined } : l) } : c) })}
+                                          placeholder="立ち絵URL（省略可）"
+                                          className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                        <textarea value={line.text}
+                                          onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, text: e.target.value } : l) } : c) })}
+                                          placeholder="セリフ"
+                                          rows={2}
+                                          className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none resize-none" />
+                                      </div>
+                                    ))}
+                                    <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: [...(c.dialogue ?? []), { speaker: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] } : c) })}
+                                      className="text-[9px] text-purple-400 active:opacity-60">+ セリフ追加</button>
+                                    <p className="text-[9px] text-gray-500">弾幕スクリプト（MiniScript）</p>
+                                    <textarea value={card.miniScript}
+                                      onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })}
+                                      placeholder="// MiniScript 記述欄"
+                                      rows={3}
+                                      className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                    <p className="text-[9px] text-gray-500">カットイン設定</p>
+                                    <input value={card.cutinCharName ?? ''}
+                                      onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })}
+                                      placeholder="キャラクター名"
+                                      className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                    <input value={card.cutinImageUrl ?? ''}
+                                      onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })}
+                                      placeholder="立ち絵URL（省略可）"
+                                      className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                    <div className="flex gap-1 items-center flex-wrap">
+                                      <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                        X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 50}
+                                          onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); }}
+                                          className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                      </label>
+                                      <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                        Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? 0}
+                                          onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); }}
+                                          className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                      </label>
+                                      <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">
+                                        倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 4}
+                                          onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); }}
+                                          className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                      </label>
+                                    </div>
+                                  </div>
+                                ))}
+                                <button onClick={() => updObj({ spellCards: [...(selObj.spellCards ?? []), {
+                                  name: `スペルカード${(selObj.spellCards?.length ?? 0) + 1}`,
+                                  triggerHp: Math.floor(selObj.hp * 0.5),
+                                  miniScript: '// 弾幕パターンをMiniScriptで記述\nwait 60\naimed 2.0',
+                                } as SpellCardDef] })}
+                                  className="text-[10px] text-red-400 active:opacity-60">+ スペルカード追加</button>
+                                <label className="text-[9px] text-gray-500 flex items-center gap-1 mt-1">
+                                  ボムドロップ確率
+                                  <input type="text" inputMode="decimal" defaultValue={selObj.bombDrop ?? 0}
+                                    onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ bombDrop: Math.max(0, Math.min(1, v)) }); }}
+                                    className="w-14 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                  <span className="text-gray-600">（0〜1）</span>
+                                </label>
+                              </div>
+                            )}
                           </>
                         )}
                         {/* NPC 設定 */}
@@ -2520,6 +3099,140 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         <p className="text-[10px] text-gray-500 mt-0.5">{COLS} で1画面固定。増やすとカメラ追従の横スクロールになります。</p>
                       </div>
                     )}
+                    {/* ── ボム設定（touhou エンジン専用） ── */}
+                    {gameData.engine === 'touhou' && (
+                      <div className="space-y-3">
+                        <p className="text-[11px] text-violet-400 font-bold">ボム設定</p>
+                        <div>
+                          <label className="flex justify-between text-[11px] text-gray-400 mb-1">
+                            <span>初期ボム数</span><span className="text-violet-400">{gameData.player.bombCount ?? 3}</span>
+                          </label>
+                          <input type="range" min={0} max={9} step={1} value={gameData.player.bombCount ?? 3}
+                            onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCount: Number(e.target.value) } }))}
+                            className="w-full accent-violet-500" />
+                        </div>
+                        <label className="block text-[11px] text-gray-400">スペルカード名（カットイン表示）
+                          <input type="text" value={gameData.player.bombSpellName ?? ''}
+                            onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombSpellName: e.target.value || undefined } }))}
+                            placeholder="恋符「マスタースパーク」"
+                            className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="block text-[11px] text-gray-400">キャラクター名
+                          <input type="text" value={gameData.player.bombCutinCharName ?? ''}
+                            onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinCharName: e.target.value || undefined } }))}
+                            placeholder="魔理沙"
+                            className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="block text-[11px] text-gray-400">立ち絵URL（省略可）
+                          <input type="text" value={gameData.player.bombCutinImageUrl ?? ''}
+                            onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageUrl: e.target.value || undefined } }))}
+                            placeholder="https://..."
+                            className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <div className="flex gap-2 items-center flex-wrap">
+                          <label className="text-[10px] text-gray-400 flex items-center gap-1">X
+                            <input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageX ?? -150}
+                              onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageX: v } })); }}
+                              className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" />
+                          </label>
+                          <label className="text-[10px] text-gray-400 flex items-center gap-1">Y
+                            <input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageY ?? 80}
+                              onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageY: v } })); }}
+                              className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" />
+                          </label>
+                          <label className="text-[10px] text-gray-400 flex items-center gap-1">倍率
+                            <input type="text" inputMode="decimal" defaultValue={gameData.player.bombCutinScale ?? 2.5}
+                              onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinScale: v } })); }}
+                              className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── SOUND ── */}
+                {editorTab === 'sound' && (
+                  <div className="space-y-4">
+                    {/* 道中BGM */}
+                    <div>
+                      <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1">
+                        <Music size={12} />{gameData.engine === 'touhou' ? '道中BGM' : 'BGM'}
+                      </label>
+                      <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'bgm' } })}
+                        className="w-full flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
+                        <span className="truncate">{gameData.bgm ? refLabel(gameData.bgm.ref) : '未設定（YouTube / MML / URL）'}</span>
+                        <Music size={13} className="shrink-0 ml-1" />
+                      </button>
+                      {gameData.bgm && (
+                        <div className="mt-1 flex items-center gap-2">
+                          <button onClick={() => previewMmlAsset('bgm', gameData.bgm)} className="text-[10px] text-emerald-300 hover:text-emerald-200">試聴</button>
+                          <button onClick={() => setGameData(p => ({ ...p, bgm: undefined }))} className="text-[10px] text-gray-500 hover:text-red-400 flex items-center gap-1"><Trash2 size={11} />外す</button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 通常戦闘BGM（RPGのみ） */}
+                    {gameData.engine === 'rpg' && (
+                      <div>
+                        <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1">
+                          <Music size={12} />通常戦闘BGM
+                        </label>
+                        <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'battleBgm' } })}
+                          className="w-full flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
+                          <span className="truncate">{gameData.battleBgm ? refLabel(gameData.battleBgm.ref) : '未設定（空欄=マップBGMのまま）'}</span>
+                          <Music size={13} className="shrink-0 ml-1" />
+                        </button>
+                        {gameData.battleBgm && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <button onClick={() => previewMmlAsset('battleBgm', gameData.battleBgm)} className="text-[10px] text-emerald-300 hover:text-emerald-200">試聴</button>
+                            <button onClick={() => setGameData(p => ({ ...p, battleBgm: undefined }))} className="text-[10px] text-gray-500 hover:text-red-400 flex items-center gap-1"><Trash2 size={11} />外す</button>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-gray-600 mt-1">通常エンカウント開始時に切り替え。空欄ならマップBGMのまま。</p>
+                      </div>
+                    )}
+
+                    {/* ボス戦BGM（東方・RPG） */}
+                    {(gameData.engine === 'touhou' || gameData.engine === 'rpg') && (
+                      <div>
+                        <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1">
+                          <Music size={12} />ボス戦BGM
+                        </label>
+                        <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'bossBgm' } })}
+                          className="w-full flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
+                          <span className="truncate">{gameData.bossBgm ? refLabel(gameData.bossBgm.ref) : '未設定（空欄=通常戦闘と同じ）'}</span>
+                          <Music size={13} className="shrink-0 ml-1" />
+                        </button>
+                        {gameData.bossBgm && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <button onClick={() => previewMmlAsset('bossBgm', gameData.bossBgm)} className="text-[10px] text-emerald-300 hover:text-emerald-200">試聴</button>
+                            <button onClick={() => setGameData(p => ({ ...p, bossBgm: undefined }))} className="text-[10px] text-gray-500 hover:text-red-400 flex items-center gap-1"><Trash2 size={11} />外す</button>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-gray-600 mt-1">{gameData.engine === 'touhou' ? 'ボスフェーズ（kind: boss）開始時に自動切り替え。空欄なら道中BGMのまま。' : 'ボス戦開始時に切り替え。空欄なら通常戦闘BGMのまま。'}</p>
+                      </div>
+                    )}
+
+                    {/* 効果音 */}
+                    <div>
+                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1"><Volume2 size={12} />効果音(SE)</label>
+                      <div className="space-y-1.5">
+                        {(Object.keys(SFX_LABELS) as SfxTrigger[]).filter(trig => {
+                          // 東方専用SE は東方エンジンのときだけ表示
+                          if (trig === 'graze' || trig === 'spellcard') return gameData.engine === 'touhou';
+                          return true;
+                        }).map(trig => (
+                          <div key={trig} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5 border border-gray-800">
+                            <span className="text-[10px] text-gray-400 w-20 shrink-0">{SFX_LABELS[trig]}</span>
+                            <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'sfx', trigger: trig } })} className="flex-1 min-w-0 text-left text-[10px] text-gray-300 truncate">{gameData.sfx[trig] ? refLabel(gameData.sfx[trig]!.ref) : '未設定'}</button>
+                            {gameData.sfx[trig] && <button onClick={() => previewMmlAsset(`sfx-${trig}`, gameData.sfx[trig])} className="text-[10px] text-emerald-300 hover:text-emerald-200 shrink-0">試聴</button>}
+                            {gameData.sfx[trig] && <button onClick={() => setGameData(p => { const s = { ...p.sfx }; delete s[trig]; return { ...p, sfx: s }; })} className="text-gray-500 hover:text-red-400 shrink-0"><Trash2 size={12} /></button>}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-gray-600 mt-1.5">MML推奨（即時再生）。MP3直リンクはURLタブで入力。</p>
+                    </div>
                   </div>
                 )}
 
@@ -2529,31 +3242,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     <div>
                       <label className="block text-[11px] text-gray-400 mb-1">タイトル</label>
                       <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200" />
-                    </div>
-
-                    <div>
-                      <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1"><Music size={12} />BGM</label>
-                      <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'bgm' } })}
-                        className="w-full flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
-                        <span className="truncate">{gameData.bgm ? refLabel(gameData.bgm.ref) : 'BGMを選択（YouTube / MML投稿 / 直接）'}</span>
-                        <Music size={13} className="shrink-0 ml-1" />
-                      </button>
-                      {gameData.bgm && <div className="mt-1 flex items-center gap-2"> <button onClick={() => previewMmlAsset('bgm', gameData.bgm)} className="text-[10px] text-emerald-300 hover:text-emerald-200">試聴</button> <button onClick={() => setGameData(p => ({ ...p, bgm: undefined }))} className="text-[10px] text-gray-500 hover:text-red-400 flex items-center gap-1"><Trash2 size={11} />外す</button></div>}
-                    </div>
-
-                    <div>
-                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1"><Volume2 size={12} />効果音(SE)</label>
-                      <div className="space-y-1.5">
-                        {(Object.keys(SFX_LABELS) as SfxTrigger[]).map(trig => (
-                          <div key={trig} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5 border border-gray-800">
-                            <span className="text-[10px] text-gray-400 w-16 shrink-0">{SFX_LABELS[trig]}</span>
-                            <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'sfx', trigger: trig } })} className="flex-1 min-w-0 text-left text-[10px] text-gray-300 truncate">{gameData.sfx[trig] ? refLabel(gameData.sfx[trig]!.ref) : '未設定'}</button>
-                            {gameData.sfx[trig] && <button onClick={() => previewMmlAsset(`sfx-${trig}`, gameData.sfx[trig])} className="text-[10px] text-emerald-300 hover:text-emerald-200 shrink-0">試聴</button>}
-                            {gameData.sfx[trig] && <button onClick={() => setGameData(p => { const s = { ...p.sfx }; delete s[trig]; return { ...p, sfx: s }; })} className="text-gray-500 hover:text-red-400 shrink-0"><Trash2 size={12} /></button>}
-                          </div>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-gray-600 mt-1.5">SEはMML推奨（即時再生）。YouTube参照はBGM向け。</p>
                     </div>
 
                     {/* ── スイッチ一覧エディタ ── */}

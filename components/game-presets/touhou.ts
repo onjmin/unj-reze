@@ -28,6 +28,14 @@ moveTo(startX, 540, 70)
 exit()
 `.trim();
 
+// 道中BGM（YouTube）
+const DOCHU_BGM_URL = 'https://www.youtube.com/watch?v=tTEj519jm9k';
+// ボス戦BGM（YouTube）
+const BOSS_BGM_URL  = 'https://www.youtube.com/watch?v=Yf6CIacmFJo';
+
+/** YouTube URL → ref 文字列 */
+const ytRef = (url: string) => url;
+
 export const touhou: PresetData = {
   id: 'touhou', name: '東方(弾幕)', engine: 'touhou', gravity: 0, friction: 0,
   player: {
@@ -38,47 +46,44 @@ export const touhou: PresetData = {
     0: { name: '夜空', color: '#0B0B2A', passable: true },
     1: { name: '壁',  color: '#1a1a3a', passable: false },
   },
-  map: Array.from({ length: ROWS }, (_, y) =>
+  map: Array.from({ length: ROWS }, () =>
     Array.from({ length: COLS }, (_, x) => (x === 0 || x === COLS - 1 ? 1 : 0))
   ),
 
+  // ── BGM ──────────────────────────────────────────────────────────────────
+  bgm:     { ref: ytRef(DOCHU_BGM_URL), src: DOCHU_BGM_URL, type: 'youtube' },
+  bossBgm: { ref: ytRef(BOSS_BGM_URL),  src: BOSS_BGM_URL,  type: 'youtube' },
+
   // ─────────────────────────────────────────────────────────────────────────
-  // フェーズ定義：道中 → 中ボス → 後半道中 → ボス戦
+  // フェーズ定義
+  //   0: 道中前半  (wave)  - 雑魚敵、会話なし、BGM変わらず
+  //   1: 道中ボス  (boss)  - 中ボス敵、会話なし、BGM変わらず（noBossBgm: true）
+  //   2: 道中後半  (wave)  - 雑魚敵、会話なし、BGM変わらず
+  //   3: ボス戦    (boss)  - 会話あり、BGMをボス戦BGMに切り替え、スペルカードあり
   // ─────────────────────────────────────────────────────────────────────────
   phases: [
-    { id: 'wave1', kind: 'wave', label: '道中', scoreBonus: 500 },
     {
-      id: 'midboss', kind: 'boss', label: '中ボス',
-      scoreBonus: 3000,
-      dialogue: [
-        { speaker: '霊夢', emoji: '🎀', text: 'なんか変な気配がするわ…',
-          imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-        { speaker: 'ルーミア', emoji: '🌙', text: 'そーなのかー？（隙あり！）',
-          imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-        { speaker: '霊夢', emoji: '🎀', text: '来た！やっつけてやる！',
-          imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-      ],
-      outroDialogue: [
-        { speaker: 'ルーミア', emoji: '🌙', text: 'そーなのかー…（がくっ）',
-          imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-        { speaker: '霊夢', emoji: '🎀', text: 'まだ先があるわ、気を引き締めましょ！',
-          imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-      ],
+      id: 'wave1', kind: 'wave', label: '道中前半', scoreBonus: 500,
     },
-    { id: 'wave2', kind: 'wave', label: '後半道中', scoreBonus: 1000 },
     {
-      id: 'boss', kind: 'boss', label: 'ボス戦',
-      scoreBonus: 10000,
+      id: 'midboss', kind: 'boss', label: '中ボス', scoreBonus: 3000,
+      noBossBgm: true,  // 道中BGMのまま
+    },
+    {
+      id: 'wave2', kind: 'wave', label: '道中後半', scoreBonus: 1000,
+    },
+    {
+      id: 'boss', kind: 'boss', label: 'ボス戦', scoreBonus: 10000,
+      // ボス戦開始時の会話
       dialogue: [
         { speaker: '霊夢', emoji: '🎀', text: 'いよいよボスか…！気を引き締めなきゃ。',
           imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
         { speaker: 'チルノ', emoji: '🌸', text: '⑨の力、見せてあげるわ！',
           imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-        { speaker: '霊夢', emoji: '🎀', text: '氷符「ブルーフロストオーロラ」！受けて立つわ！',
+        { speaker: '霊夢', emoji: '🎀', text: '受けて立つわ！',
           imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-        { speaker: 'チルノ', emoji: '🌸', text: '泣いても知らないんだから！',
-          imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
       ],
+      // ボス撃破後の会話
       outroDialogue: [
         { speaker: 'チルノ', emoji: '🌸', text: 'う…⑨らしくない負け方だったわ…',
           imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
@@ -91,8 +96,7 @@ export const touhou: PresetData = {
   ],
 
   objects: [
-    // ── フェーズ 0：道中 ─────────────────────────────────────────────────
-    // col=X位置(0-19)、row=出現タイミング(0=先頭、1=少し遅れ、2=さらに遅れ)
+    // ── フェーズ 0：道中前半 ──────────────────────────────────────────────
     newObject({ emoji: '🧚', col: 4,  row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
       miniScript: waveMiniScript(3, 75, 2.5, 5, 10) }),
     newObject({ emoji: '🧚', col: 15, row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
@@ -104,7 +108,8 @@ export const touhou: PresetData = {
     newObject({ emoji: '🧚', col: 10, row: 2, phase: 0, speed: 0.8, hp: 2, bullet: 'none',
       miniScript: waveMiniScript(4, 70, 2.2, 6, 15) }),
 
-    // ── フェーズ 1：中ボス（ルーミア） ───────────────────────────────────
+    // ── フェーズ 1：道中ボス（ルーミア）────────────────────────────────────
+    // isBoss: true でHPバーを表示。スペルカードは定義しない（ジャブ的存在）。
     newObject({
       emoji: '🌙', col: 10, row: 1, phase: 1, hp: 60,
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
@@ -122,7 +127,7 @@ end while
 `.trim(),
     }),
 
-    // ── フェーズ 2：後半道中 ──────────────────────────────────────────────
+    // ── フェーズ 2：道中後半 ──────────────────────────────────────────────
     newObject({ emoji: '🧚', col: 3,  row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
       miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
     newObject({ emoji: '🧚', col: 16, row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
@@ -144,7 +149,7 @@ end for
 moveTo(startX + rand(-80, 80), 540, 65)
 exit()
 `.trim() }),
-    newObject({ emoji: '🧝', col: 13, row: 2, phase: 2, speed: 0.9, hp: 4, bullet: 'none',
+    newObject({ emoji: '🧝', col: 13, row: 2, speed: 0.9, hp: 4, bullet: 'none', phase: 2,
       miniScript: `
 wait(row * 25)
 moveTo(startX, 110, 45)
@@ -160,42 +165,57 @@ moveTo(startX + rand(-80, 80), 540, 65)
 exit()
 `.trim() }),
 
-    // ── フェーズ 3：ボス（チルノ） ─────────────────────────────────────────
+    // ── フェーズ 3：ボス戦（チルノ）────────────────────────────────────────
+    // 通常弾幕 + スペルカード2枚。HPが閾値を下回るとスペルカード発動。
     newObject({
       emoji: '🌸', col: 10, row: 1, phase: 3, hp: 200,
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
-      isBoss: true, name: '氷符「ブルーフロストオーロラ」',
+      isBoss: true, name: 'チルノ',
       miniScript: `
 moveTo(320, 80, 90)
-// スペルカード1：12way渦巻き＋狙い弾
-for t in range(0, 599, 5)
-  base = t * 5
+while true
+  for i in range(0, 5, 1)
+    shot(i * 72, 2.4, 4)
+  end for
+  shotPlayer(2.0, 4, 10)
+  wait(8)
+end while
+`.trim(),
+      spellCards: [
+        {
+          name: '氷符「パーフェクトフリーズ」',
+          triggerHp: 130,
+          miniScript: `
+moveTo(rand(200, 440), 80, 40)
+while true
   for i in range(0, 11, 1)
-    shot(base + i * 30, 2.6, 4)
+    shot(i * 30, 2.6, 4)
   end for
   shotPlayer(2.1, 3, 8)
   wait(5)
-end for
-// スペルカード2：16way全方位＋高速狙い
-moveTo(320, 70, 40)
-for t in range(0, 319, 4)
+end while
+`.trim(),
+        },
+        {
+          name: '氷符「ブルーフロストオーロラ」',
+          triggerHp: 60,
+          miniScript: `
+moveTo(320, 70, 30)
+while true
   for i in range(0, 15, 1)
-    shot(t * 10 + i * 24, 2.8, 1)
+    shot(frame * 10 + i * 24, 2.8, 1)
   end for
   shotPlayer(2.4, 6, 5)
   wait(4)
-end for
-// スペルカード3：超高速
-moveTo(rand(100, 540), 60, 30)
-for t in range(0, 399, 3)
-  for i in range(0, 5, 1)
-    shot(t * 8 + i * 60, 3.2, 2)
-  end for
-  shotPlayer(3.0, 8, 3)
-  wait(3)
-end for
+end while
 `.trim(),
+        },
+      ],
     }),
   ],
-  sfx: {},
+  sfx: {
+    graze:     { ref: 'direct:https://rpgen.org/dq/sound/res/1848.mp3', src: 'https://rpgen.org/dq/sound/res/1848.mp3', type: 'direct' as const },
+    damage:    { ref: 'direct:https://rpgen.org/dq/sound/res/1845.mp3', src: 'https://rpgen.org/dq/sound/res/1845.mp3', type: 'direct' as const },
+    spellcard: { ref: 'direct:https://rpgen.org/dq/sound/res/222.mp3',  src: 'https://rpgen.org/dq/sound/res/222.mp3',  type: 'direct' as const },
+  },
 };
