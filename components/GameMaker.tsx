@@ -10,6 +10,10 @@ import ContentPicker, { type PickResult } from './ContentPicker';
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
   uid, newObject,
+  SPELL_PALETTE,
+  type SpellBlock,
+  type DialogueLine,
+  type StagePhase,
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
@@ -17,10 +21,13 @@ import {
   type EventCommand, type EventPage, type EventCondition,
 } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER } from './game-presets';
+import SpellEditor, { defaultBlock } from './SpellEditor';
+import DialogueCutscene from './DialogueCutscene';
+import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 
 export type { PresetId };
 
-type EditorTab = 'map' | 'object' | 'char' | 'asset';
+type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell';
 
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
@@ -34,6 +41,7 @@ export interface GameManifestDraft {
   scroll?: { worldCols: number; worldRows?: number };
   switches?: SwitchDef[];
   items?: ItemDef[];
+  phases?: StagePhase[];
 }
 
 const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
@@ -63,9 +71,228 @@ function playSfx(s?: SfxRef) {
   if (tracks.some(t => t.notes.length > 0)) playMml(tracks, tempo);
 }
 
-interface Entity { def: ObjectDef; x: number; y: number; homeX: number; homeY: number; hp: number; timer: number; vx: number; vy: number; talked: boolean; }
+// ── 弾幕スクリプト実行状態 ──────────────────────────────────────────
+interface SpellFrame { script: SpellBlock[]; ip: number; timesLeft: number; }
+interface SpellExecState { stack: SpellFrame[]; frame: number; waitLeft: number; }
+
+interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; sx: number; sy: number; }
+interface Entity {
+  def: ObjectDef; x: number; y: number; homeX: number; homeY: number;
+  hp: number; timer: number; vx: number; vy: number; talked: boolean;
+  spellState?: SpellExecState;
+  moveTarget?: MoveTarget;
+  scriptCtx?: { cancelled: boolean };
+}
 interface Bullet { x: number; y: number; w: number; h: number; vy: number; }
 interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; }
+
+/** 弾幕スクリプトを 1 ステップ進める（game loop から毎フレーム呼ぶ）。 */
+function stepSpell(
+  state: SpellExecState,
+  enemyBullets: EnemyBullet[],
+  ecx: number, ecy: number,
+  pcx: number, pcy: number,
+) {
+  if (state.waitLeft > 0) { state.waitLeft--; state.frame++; return; }
+  if (state.stack.length === 0) return;
+
+  const frame = state.stack[state.stack.length - 1];
+  const block = frame.script[frame.ip];
+
+  if (!block) {
+    // このフレームのスクリプトが終了
+    if (frame.timesLeft !== 0) {
+      frame.ip = 0;
+      if (frame.timesLeft > 0) frame.timesLeft--;
+      // timesLeft === -1 は無限ループ（ルートスクリプト用）
+    } else {
+      state.stack.pop();
+    }
+    state.frame++;
+    return;
+  }
+
+  const col = SPELL_PALETTE[block.color % SPELL_PALETTE.length] ?? '#fff';
+
+  switch (block.kind) {
+    case 'wait':
+      state.waitLeft = Math.max(0, block.frames - 1);
+      frame.ip++;
+      break;
+    case 'nway': {
+      const n = Math.max(1, block.ways);
+      const sp = block.speed;
+      const baseA = block.angle * Math.PI / 180;
+      const totalSpread = block.spread * Math.PI / 180;
+      for (let i = 0; i < n; i++) {
+        const a = n === 1 ? baseA : baseA - totalSpread / 2 + totalSpread * i / (n - 1);
+        enemyBullets.push({ x: ecx, y: ecy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 5, color: col });
+      }
+      frame.ip++;
+      break;
+    }
+    case 'aimed': {
+      const base = Math.atan2(pcy - ecy, pcx - ecx);
+      const j = (block.jitter * Math.PI / 180) * (Math.random() * 2 - 1);
+      const sp = block.speed;
+      const a = base + j;
+      enemyBullets.push({ x: ecx, y: ecy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 5, color: col });
+      frame.ip++;
+      break;
+    }
+    case 'spiral': {
+      const ways = Math.max(1, block.ways);
+      const sp = block.speed;
+      const rotSpd = block.rotSpeed;
+      for (let i = 0; i < ways; i++) {
+        const a = (state.frame * rotSpd + i * 360 / ways) * Math.PI / 180;
+        enemyBullets.push({ x: ecx, y: ecy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: 5, color: col });
+      }
+      frame.ip++;
+      break;
+    }
+    case 'repeat': {
+      frame.ip++; // 親の ip を repeat の次へ進める
+      const body = block.body ?? [];
+      if (body.length > 0) {
+        state.stack.push({ script: body, ip: 0, timesLeft: Math.max(0, block.times - 1) });
+      }
+      break;
+    }
+    default:
+      frame.ip++;
+  }
+  state.frame++;
+}
+
+const DEG_TO_RAD = Math.PI / 180;
+
+/** MiniScript を非同期実行し、エンティティの動き・弾幕を制御する */
+function runEntityScript(
+  src: string,
+  entity: Entity,
+  eng: { enemyBullets: EnemyBullet[] },
+  getPlayer: () => { x: number; y: number },
+): void {
+  const ctx = { cancelled: false };
+  entity.scriptCtx = ctx;
+
+  const startX = entity.x + TILE_SIZE / 2;
+  const startY = entity.y + TILE_SIZE / 2;
+
+  // cancelled 時は resolve ではなく reject → while/for ループを async 例外で脱出
+  const CANCEL = Symbol('cancel');
+  const wait = (frames: number): Promise<void> =>
+    new Promise((res, rej) => {
+      if (ctx.cancelled) { rej(CANCEL); return; }
+      const target = entity.timer + Math.max(0, frames | 0);
+      const check = () => {
+        if (ctx.cancelled) { rej(CANCEL); return; }
+        if (entity.timer >= target) { res(); return; }
+        requestAnimationFrame(check);
+      };
+      requestAnimationFrame(check);
+    });
+
+  const pushBullet = (angle: number, speed: number, colorIdx: number) => {
+    if (ctx.cancelled) return;
+    const r = angle * DEG_TO_RAD;
+    const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+    eng.enemyBullets.push({
+      x: cx, y: cy,
+      vx: Math.cos(r) * speed, vy: Math.sin(r) * speed,
+      r: 5, color: SPELL_PALETTE[((colorIdx | 0) + 9) % 9],
+    });
+  };
+
+  const env: MiniEnv = {
+    // タイミング
+    wait,
+
+    // 位置取得（中心座標）
+    getX: () => entity.x + TILE_SIZE / 2,
+    getY: () => entity.y + TILE_SIZE / 2,
+
+    // 移動
+    move: (vx: unknown, vy: unknown) => { entity.vx = +(vx as number); entity.vy = +(vy as number); },
+    stop: () => { entity.vx = 0; entity.vy = 0; },
+    moveTo: (tx: unknown, ty: unknown, frames: unknown) => {
+      const f = Math.max(1, (frames as number) | 0);
+      entity.moveTarget = {
+        tx: +(tx as number) - TILE_SIZE / 2, ty: +(ty as number) - TILE_SIZE / 2,
+        frames: f, elapsed: 0, sx: entity.x, sy: entity.y,
+      };
+      entity.vx = 0; entity.vy = 0;
+      return wait(f);
+    },
+    moveBoss: (x: unknown, y: unknown, frames: unknown) =>
+      (env.moveTo as (x:unknown,y:unknown,f:unknown) => Promise<void>)(x, y, frames),
+
+    // 弾幕
+    shot: (angle: unknown, speed: unknown, color: unknown = 0) =>
+      pushBullet(+(angle as number), +(speed as number), (color as number) | 0),
+    shotN: (ways: unknown, baseAngle: unknown, spread: unknown, speed: unknown, color: unknown = 0) => {
+      const n = (ways as number) | 0;
+      for (let i = 0; i < n; i++) {
+        const a = +(baseAngle as number) + (n > 1 ? (i / (n - 1) - 0.5) * +(spread as number) : 0);
+        pushBullet(a, +(speed as number), (color as number) | 0);
+      }
+    },
+    shotPlayer: (speed: unknown, color: unknown = 0, jitter: unknown = 0) => {
+      const p = getPlayer();
+      const angle = Math.atan2(p.y - (entity.y + TILE_SIZE / 2), p.x - (entity.x + TILE_SIZE / 2)) / DEG_TO_RAD;
+      pushBullet(angle + (Math.random() * 2 - 1) * +(jitter as number), +(speed as number), (color as number) | 0);
+    },
+    shotSpiral: (ways: unknown, baseAngle: unknown, speed: unknown, color: unknown = 0) => {
+      const n = (ways as number) | 0;
+      for (let i = 0; i < n; i++) pushBullet(+(baseAngle as number) + i * (360 / n), +(speed as number), (color as number) | 0);
+    },
+
+    // プレイヤー情報
+    getPlayerAngle: () => {
+      const p = getPlayer();
+      return Math.atan2(p.y - (entity.y + TILE_SIZE / 2), p.x - (entity.x + TILE_SIZE / 2)) / DEG_TO_RAD;
+    },
+    getPlayerX: () => getPlayer().x,
+    getPlayerY: () => getPlayer().y,
+
+    // 自己制御
+    exit: () => { ctx.cancelled = true; entity.hp = 0; },
+
+    // ボス用
+    setSpellName: (name: unknown) => { if (entity.def.name !== undefined) entity.def.name = String(name); },
+
+    // 数学
+    abs: Math.abs, floor: Math.floor, ceil: Math.ceil,
+    round: (x: unknown, d: unknown = 0) => Number(Math.round(+(x as number) * 10 ** +(d as number)) / 10 ** +(d as number)),
+    sqrt: Math.sqrt, min: Math.min, max: Math.max,
+    sin: (d: unknown) => Math.sin(+(d as number) * DEG_TO_RAD),
+    cos: (d: unknown) => Math.cos(+(d as number) * DEG_TO_RAD),
+    pi: Math.PI,
+    rand: (mn: unknown, mx: unknown) => Math.floor(Math.random() * (+(mx as number) - +(mn as number) + 1)) + +(mn as number),
+    randF: (mn: unknown, mx: unknown) => Math.random() * (+(mx as number) - +(mn as number)) + +(mn as number),
+    range: (from: unknown, to: unknown, step: unknown = 1) => {
+      const out: number[] = [];
+      const s = +(step as number) || 1;
+      for (let i = +(from as number); s > 0 ? i <= +(to as number) : i >= +(to as number); i += s) out.push(i);
+      return out;
+    },
+
+    // エンティティ定数
+    col: entity.def.col,
+    row: entity.def.row,
+    startX,
+    startY,
+    W: PLAY_W,
+    H: PLAY_H,
+  };
+
+  const lines = parseMiniScript(src);
+  (async () => {
+    try { await runMiniScript(lines, env, {}); }
+    catch (e) { if (e !== CANCEL) console.warn('[MiniScript]', e); }
+  })();
+}
 
 interface GameEngine {
   map: number[][];
@@ -182,9 +409,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false });
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, level: 1, exp: 0, expNext: 10 });
   const invulnRef = useRef(0);
+  const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
+  const livesRef = useRef(3);            // 残機数
+  const scoreRef = useRef(0);            // スコア
 
   const bossDefeatedRef = useRef(false);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
+  /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
+  const phaseIndexRef = useRef(-1);
+  /** 次に開始するフェーズ（dialogue 完了後に spawn する）。-1=クリア（outro後）*/
+  const pendingPhaseRef = useRef<number | null>(null);
+  /** true のとき、完了した dialogue は outro（フェーズクリア後）だったことを示す */
+  const outroModeRef = useRef(false);
+  const [activeDialogue, setActiveDialogue] = useState<DialogueLine[] | null>(null);
+  // 「${phaseIdx}-${lineIdx}」形式。常に最後に操作した行を保持し消えない
+  const [activePreviewKey, setActivePreviewKey] = useState<string | null>(null);
+  /** ループから state を読むための ref */
+  const activeDialogueRef = useRef<DialogueLine[] | null>(null);
+  activeDialogueRef.current = activeDialogue;
   const [, forceHud] = useState(0);
 
   const calcDmg = (atk: number, def: number) => Math.max(1, Math.round((atk - def / 2) * (0.85 + Math.random() * 0.3)));
@@ -313,6 +555,54 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, []);
 
   useEffect(() => () => { if (gameMsgTimerRef.current) clearTimeout(gameMsgTimerRef.current); }, []);
+
+  /** セリフ完了 → pending フェーズをスポーン */
+  const onDialogueComplete = useCallback(() => {
+    setActiveDialogue(null);
+    activeDialogueRef.current = null;
+    const pending = pendingPhaseRef.current;
+    const wasOutro = outroModeRef.current;
+    outroModeRef.current = false;
+    if (pending === null) return;
+    pendingPhaseRef.current = null;
+    const eng = engineRef.current;
+    eng.bullets = []; eng.enemyBullets = [];
+
+    // outro 完了後の -1 → クリア
+    if (pending === -1) {
+      playSfx(sfxRef.current.clear);
+      showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false));
+      return;
+    }
+
+    // outro 完了後の通常フェーズ → 次フェーズの intro を流してから spawn
+    if (wasOutro) {
+      const phases = gameData.phases;
+      const nextPhase = phases?.[pending];
+      if (nextPhase?.dialogue?.length) {
+        // intro を流す（outroMode は false のまま）
+        pendingPhaseRef.current = pending;
+        setActiveDialogue(nextPhase.dialogue);
+        return;
+      }
+    }
+
+    // intro 完了 or intro なし → spawn
+    const entities: Entity[] = (gameData.objects ?? [])
+      .filter(o => (o.phase ?? 0) === pending)
+      .map(o => ({
+        def: o, x: o.col * TILE_SIZE,
+        y: (gameData.engine === 'touhou' && !o.isBoss) ? -TILE_SIZE * 2 : o.row * TILE_SIZE,
+        homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
+        hp: o.hp, timer: 0, vx: 0, vy: 0, talked: false,
+        spellState: o.spellScript?.length
+          ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 }], frame: 0, waitLeft: 0 }
+          : undefined,
+      }));
+    entities.forEach(e => { if (e.def.miniScript) runEntityScript(e.def.miniScript, e, eng, () => eng.player); });
+    eng.entities = entities;
+    phaseIndexRef.current = pending;
+  }, [gameData, playSfx, showGameMsg]);
 
   // ── イベントインタプリタ ──
   const findActivePage = useCallback((obj: ObjectDef): EventPage | null => {
@@ -503,6 +793,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         map: initialManifest.map,
         objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: undefined })),
         scroll: initialManifest.scroll ?? base.scroll,
+        phases: initialManifest.phases ?? base.phases,
         battle: base.battle,
         bgm: initialManifest.bgm && initialManifest.bgm !== 'none'
           ? { ref: initialManifest.bgm }
@@ -544,18 +835,54 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const eng = engineRef.current;
     if (isPlaying) {
       eng.bullets = []; eng.enemyBullets = [];
-      eng.entities = gameData.objects.map(o => ({
-        def: o, x: o.col * TILE_SIZE, y: o.row * TILE_SIZE,
+      const isTouhouWave = (o: ObjectDef) => gameData.engine === 'touhou' && !o.isBoss;
+      const makeEntity = (o: ObjectDef): Entity => ({
+        def: o, x: o.col * TILE_SIZE,
+        y: isTouhouWave(o) ? -TILE_SIZE * 2 : o.row * TILE_SIZE,
         homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
-        hp: o.hp, timer: Math.random() * 60, vx: 0, vy: 0, talked: false,
-      }));
+        hp: o.hp, timer: 0, vx: 0, vy: 0, talked: false,
+        spellState: o.spellScript?.length
+          ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number }, ], frame: 0, waitLeft: 0 }
+          : undefined,
+      });
+      const spawnEntities = (entities: Entity[]) => {
+        if (gameData.engine === 'touhou') {
+          entities.forEach(e => {
+            if (e.def.miniScript) runEntityScript(e.def.miniScript, e, eng, () => eng.player);
+          });
+        }
+        return entities;
+      };
+      if (gameData.engine === 'touhou' && gameData.phases?.length) {
+        // フェーズシステム：フェーズ 0 から開始
+        phaseIndexRef.current = -1;
+        pendingPhaseRef.current = null;
+        const phase0 = gameData.phases[0];
+        if (phase0?.dialogue?.length) {
+          eng.entities = [];
+          pendingPhaseRef.current = 0;
+          setActiveDialogue(phase0.dialogue);
+        } else {
+          eng.entities = spawnEntities(gameData.objects.filter(o => (o.phase ?? 0) === 0).map(makeEntity));
+          phaseIndexRef.current = 0;
+        }
+      } else {
+        // レガシー：全オブジェクトをスポーン（touhou の isBoss は除外）
+        const stageObjs = gameData.engine === 'touhou'
+          ? gameData.objects.filter(o => !o.isBoss)
+          : gameData.objects;
+        eng.entities = spawnEntities(stageObjs.map(makeEntity));
+        phaseIndexRef.current = 0;
+      }
       eng.map = JSON.parse(JSON.stringify(gameData.map));
       eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
       if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, level: 1, exp: 0, expNext: 10 };
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false };
-      invulnRef.current = 0; bossDefeatedRef.current = false; bossWarnRef.current = false;
+      invulnRef.current = 0; isPlayerDeadRef.current = false; livesRef.current = 3; scoreRef.current = 0;
+      bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false;
+      setActiveDialogue(null);
       setBattle(null);
       setSwitchVals({}); switchValsRef.current = {};
       setInventory({}); inventoryRef.current = {};
@@ -584,8 +911,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const camMax = Math.max(0, worldW - PLAY_W);
     const camMaxY = Math.max(0, worldH - PLAY_H);
 
-    const handleKeyDown = (e: KeyboardEvent) => { engineRef.current.keys.add(e.key); if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault(); if (e.key === 'f' || e.key === 'F') { setEditSpeedMult(prev => { const speeds = [1, 2, 4]; return speeds[(speeds.indexOf(prev) + 1) % speeds.length]; }); e.preventDefault(); } };
-    const handleKeyUp = (e: KeyboardEvent) => { engineRef.current.keys.delete(e.key); };
+    const isInputTarget = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isInputTarget(e)) return;
+      engineRef.current.keys.add(e.key);
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      if (e.key === 'f' || e.key === 'F') { setEditSpeedMult(prev => { const speeds = [1, 2, 4]; return speeds[(speeds.indexOf(prev) + 1) % speeds.length]; }); e.preventDefault(); }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => { if (isInputTarget(e)) return; engineRef.current.keys.delete(e.key); };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
@@ -608,6 +944,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
     const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false)); };
     const lose = (msg: string) => { playSfx(sfxRef.current.damage); showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
+
+    // 残機制：touhou 専用の死亡ハンドラ
+    const handlePlayerDeath = () => {
+      const eng = engineRef.current;
+      isPlayerDeadRef.current = true;
+      eng.bullets = []; // 自機弾を即消去
+      livesRef.current--;
+      forceHud(n => n + 1);
+      if (livesRef.current <= 0) {
+        lose('ゲームオーバー…');
+      } else {
+        // 1.5 秒後に復帰
+        setTimeout(() => {
+          const p2 = engineRef.current.player;
+          p2.x = gameData.player.start.x; p2.y = gameData.player.start.y;
+          p2.vx = 0; p2.vy = 0;
+          engineRef.current.bullets = [];
+          engineRef.current.enemyBullets = [];
+          invulnRef.current = 180; // 3 秒間点滅無敵
+          isPlayerDeadRef.current = false;
+          forceHud(n => n + 1);
+        }, 1500);
+      }
+    };
 
     const loop = () => {
       const eng = engineRef.current;
@@ -657,18 +1017,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         } else {
           // rpg / touhou: 8-dir free move
           p.vx = 0; p.vy = 0;
+          const isSlow = gameData.engine === 'touhou' && (keys.has('Shift') || touchRef.current.slow);
+          const moveSpd = isSlow ? pData.speed * 0.45 : pData.speed;
           let nx = p.x, ny = p.y;
-          if (isLeft) nx -= pData.speed; if (isRight) nx += pData.speed;
-          if (isUp) ny -= pData.speed; if (isDown) ny += pData.speed;
+          if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
+          if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
           let t1 = getTile(nx, p.y), t2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h) p.y = ny;
 
-          // touhou shooting: play mode only
-          if (!dead && gameData.engine === 'touhou') {
+          // touhou shooting: play mode only（死亡中は撃たない）
+          if (!dead && !isPlayerDeadRef.current && gameData.engine === 'touhou') {
             eng.shotTimer++;
-            if (isAction && eng.shotTimer > 6) {
+            if (eng.shotTimer > 6) {
               eng.bullets.push({ x: p.x + pData.w / 2 - 4, y: p.y, w: 8, h: 16, vy: -12 });
               eng.shotTimer = 0; playSfx(sfxRef.current.shot);
             }
@@ -691,26 +1053,78 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
 
           const sp = d.speed;
-          if (d.behavior === 'random') {
-            if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
-            e.x += e.vx; e.y += e.vy;
-          } else if (d.behavior === 'chase' || d.behavior === 'flee') {
-            const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
-            const s = (d.behavior === 'chase' ? 1 : -1) * sp;
-            e.x += (dx / dist) * s; e.y += (dy / dist) * s;
-          } else if (d.behavior === 'patrolH') {
-            if (e.vx === 0) e.vx = sp; e.x += e.vx;
-            if (e.x < e.homeX - TILE_SIZE * 3 || e.x > e.homeX + TILE_SIZE * 3) e.vx *= -1;
-            if (e.x < TILE_SIZE || e.x > worldW - TILE_SIZE * 2) e.vx *= -1;
-          } else if (d.behavior === 'patrolV') {
-            if (e.vy === 0) e.vy = sp; e.y += e.vy;
-            if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
-            if (e.y < TILE_SIZE || e.y > worldH - TILE_SIZE * 2) e.vy *= -1;
+          if (gameData.engine === 'touhou') {
+            if (d.miniScript) {
+              // MiniScript 制御：moveTarget (lerp) または vx/vy で移動
+              if (e.moveTarget) {
+                const mt = e.moveTarget;
+                mt.elapsed++;
+                const t = Math.min(1, mt.elapsed / mt.frames);
+                const ease = t * (2 - t); // easeOutQuad
+                e.x = mt.sx + (mt.tx - mt.sx) * ease;
+                e.y = mt.sy + (mt.ty - mt.sy) * ease;
+                if (mt.elapsed >= mt.frames) e.moveTarget = undefined;
+              } else {
+                e.x += e.vx; e.y += e.vy;
+              }
+              if (!d.isBoss) {
+                if (e.y > PLAY_H + 64) {
+                  if (e.scriptCtx) e.scriptCtx.cancelled = true;
+                  eng.entities.splice(ei, 1); continue;
+                }
+              } else {
+                e.x = Math.max(TILE_SIZE, Math.min(PLAY_W - TILE_SIZE * 2, e.x));
+                e.y = Math.max(TILE_SIZE, Math.min(PLAY_H * 0.55, e.y));
+              }
+            } else if (!d.isBoss) {
+              // Xevious フォールバック（miniScript なし wave 敵）
+              e.y += sp;
+              e.x = e.homeX + Math.sin(e.timer * 0.045) * 45;
+              e.x = Math.max(TILE_SIZE, Math.min(PLAY_W - TILE_SIZE * 2, e.x));
+              if (e.y > PLAY_H + 64) { eng.entities.splice(ei, 1); continue; }
+            } else {
+              // ボス（miniScript なし）: patrolH
+              if (d.behavior === 'patrolH') {
+                if (e.vx === 0) e.vx = sp; e.x += e.vx;
+                if (e.x < TILE_SIZE * 2 || e.x > PLAY_W - TILE_SIZE * 3) e.vx *= -1;
+              } else if (d.behavior === 'patrolV') {
+                if (e.vy === 0) e.vy = sp; e.y += e.vy;
+              }
+              e.x = Math.max(TILE_SIZE, Math.min(PLAY_W - TILE_SIZE * 2, e.x));
+              e.y = Math.max(TILE_SIZE, Math.min(PLAY_H * 0.4, e.y));
+            }
+          } else {
+            if (d.behavior === 'random') {
+              if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
+              e.x += e.vx; e.y += e.vy;
+            } else if (d.behavior === 'chase' || d.behavior === 'flee') {
+              const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
+              const s = (d.behavior === 'chase' ? 1 : -1) * sp;
+              e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+            } else if (d.behavior === 'patrolH') {
+              if (e.vx === 0) e.vx = sp; e.x += e.vx;
+              if (e.x < e.homeX - TILE_SIZE * 3 || e.x > e.homeX + TILE_SIZE * 3) e.vx *= -1;
+              if (e.x < TILE_SIZE || e.x > worldW - TILE_SIZE * 2) e.vx *= -1;
+            } else if (d.behavior === 'patrolV') {
+              if (e.vy === 0) e.vy = sp; e.y += e.vy;
+              if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
+              if (e.y < TILE_SIZE || e.y > worldH - TILE_SIZE * 2) e.vy *= -1;
+            }
+            e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
+            e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
           }
-          e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
-          e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
 
-          if (d.bullet !== 'none' && e.timer % Math.max(1, Math.round(d.fireRate)) === 0) {
+          // hp が 0 以下なら即除去（exit() による非同期死亡に対応）
+          if (e.hp <= 0) {
+            if (e.scriptCtx) e.scriptCtx.cancelled = true;
+            eng.entities.splice(ei, 1); continue;
+          }
+
+          // 弾幕スクリプトがあれば stepSpell、なければ従来の bullet システム
+          // touhou 雑魚は画面内に入ってから発射
+          if (e.spellState && e.y >= 0) {
+            stepSpell(e.spellState, eng.enemyBullets, ecx, ecy, pcx, pcy);
+          } else if (e.y >= 0 && d.bullet !== 'none' && e.timer % Math.max(1, Math.round(d.fireRate)) === 0) {
             const spd = d.bulletSpeed;
             if (d.bullet === 'aimed') {
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
@@ -732,7 +1146,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const b = eng.bullets[j];
             if (b.x < e.x + TILE_SIZE && b.x + b.w > e.x && b.y < e.y + TILE_SIZE && b.y + b.h > e.y) {
               e.hp--; eng.bullets.splice(j, 1);
-              if (e.hp <= 0) { eng.entities.splice(ei, 1); break; }
+              if (e.hp <= 0) {
+                if (e.scriptCtx) e.scriptCtx.cancelled = true;
+                // スコア加算（ボス100点、雑魚10点）
+                scoreRef.current += d.isBoss ? 100 : 10;
+                eng.entities.splice(ei, 1); break;
+              }
             }
           }
           if (e.hp <= 0) continue;
@@ -768,6 +1187,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             if (d.hazard) {
               if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { startBattle(e); dead = true; } break; }
+              if (gameData.engine === 'touhou') { if (!isPlayerDeadRef.current && invulnRef.current <= 0) { handlePlayerDeath(); dead = true; } break; }
               lose('ミス！'); dead = true; break;
             }
             else if (d.message && !e.talked) { e.talked = true; showGameMsg(d.message, 'instant', () => {}); }
@@ -779,16 +1199,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           for (let i = eng.enemyBullets.length - 1; i >= 0; i--) {
             const eb = eng.enemyBullets[i]; eb.x += eb.vx; eb.y += eb.vy;
             if (eb.x < -10 || eb.x > worldW + 10 || eb.y < -10 || eb.y > worldH + 10) { eng.enemyBullets.splice(i, 1); continue; }
-            if (Math.hypot(eb.x - pcx, eb.y - pcy) < eb.r + core) {
+            // 死亡中・無敵中は被弾しない
+            if (!isPlayerDeadRef.current && invulnRef.current <= 0 && Math.hypot(eb.x - pcx, eb.y - pcy) < eb.r + core) {
               if (gameData.engine === 'rpg' && gameData.battle) {
                 eng.enemyBullets.splice(i, 1);
-                if (invulnRef.current <= 0) {
-                  progressRef.current.hp -= 6; invulnRef.current = 45; forceHud(n => n + 1);
-                  if (progressRef.current.hp <= 0) { lose('やられた…'); dead = true; break; }
-                }
+                progressRef.current.hp -= 6; invulnRef.current = 45; forceHud(n => n + 1);
+                if (progressRef.current.hp <= 0) { lose('やられた…'); dead = true; break; }
                 continue;
               }
-              lose(gameData.engine === 'touhou' ? 'ピチューン (被弾)' : 'ミス！'); dead = true; break;
+              if (gameData.engine === 'touhou') { handlePlayerDeath(); dead = true; break; }
+              lose('ミス！'); dead = true; break;
             }
           }
         }
@@ -807,7 +1227,63 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             else if (center?.info?.special === 'trap') { lose('ミス！'); dead = true; }
             else bossWarnRef.current = false;
-          } else if (eng.entities.length === 0 && gameData.objects.length > 0) { win(); }
+          } else if (gameData.engine === 'touhou') {
+            // フェーズシステム（dialogue 表示中はエンティティが 0 でもスキップ）
+            const phases = gameData.phases;
+            if (
+              eng.entities.length === 0 &&
+              phaseIndexRef.current >= 0 &&
+              pendingPhaseRef.current === null &&
+              !activeDialogueRef.current
+            ) {
+              if (!phases?.length) {
+                // phases 未定義：レガシー2フェーズ（旧互換）
+                win();
+              } else {
+                const curPhaseIdx = phaseIndexRef.current;
+                const curPhase = phases[curPhaseIdx];
+                const nextIdx = curPhaseIdx + 1;
+
+                // フェーズクリアボーナス
+                if (curPhase?.scoreBonus) {
+                  scoreRef.current += curPhase.scoreBonus;
+                  forceHud(n => n + 1);
+                }
+
+                eng.bullets = []; eng.enemyBullets = [];
+
+                // outroDialogue があれば先に流す（pendingPhase は nextIdx に保持）
+                if (curPhase?.outroDialogue?.length) {
+                  outroModeRef.current = true;
+                  pendingPhaseRef.current = nextIdx < phases.length ? nextIdx : -1; // -1=クリア
+                  setActiveDialogue(curPhase.outroDialogue);
+                } else if (nextIdx >= phases.length) {
+                  win();
+                } else {
+                  const nextPhase = phases[nextIdx];
+                  if (nextPhase?.dialogue?.length) {
+                    pendingPhaseRef.current = nextIdx;
+                    setActiveDialogue(nextPhase.dialogue);
+                  } else {
+                    const nextEntities: Entity[] = gameData.objects
+                      .filter(o => (o.phase ?? 0) === nextIdx)
+                      .map(o => ({
+                        def: o, x: o.col * TILE_SIZE,
+                        y: (gameData.engine === 'touhou' && !o.isBoss) ? -TILE_SIZE * 2 : o.row * TILE_SIZE,
+                        homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
+                        hp: o.hp, timer: 0, vx: 0, vy: 0, talked: false,
+                        spellState: o.spellScript?.length
+                          ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 }], frame: 0, waitLeft: 0 }
+                          : undefined,
+                      }));
+                    nextEntities.forEach(e => { if (e.def.miniScript) runEntityScript(e.def.miniScript, e, eng, () => eng.player); });
+                    eng.entities = nextEntities;
+                    phaseIndexRef.current = nextIdx;
+                  }
+                }
+              }
+            }
+          }
         }
       }
 
@@ -901,8 +1377,26 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.fillStyle = 'yellow';
         for (const b of eng.bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
         for (const eb of eng.enemyBullets) {
-          ctx.fillStyle = eb.color; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2); ctx.fill();
-          ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r * 0.5, 0, Math.PI * 2); ctx.fill();
+          if (gameData.engine === 'touhou') {
+            // touhou.html スタイルのダイヤモンド弾
+            ctx.save();
+            ctx.translate(eb.x, eb.y);
+            ctx.rotate(Math.atan2(eb.vy, eb.vx));
+            ctx.fillStyle = eb.color;
+            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+            ctx.lineWidth = 0.5;
+            const s = eb.r * 1.1;
+            ctx.beginPath();
+            ctx.moveTo(s * 1.2, 0); ctx.lineTo(0, -s * 0.85);
+            ctx.lineTo(-s * 1.2, 0); ctx.lineTo(0, s * 0.85);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.beginPath(); ctx.arc(0, 0, s * 0.32, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+          } else {
+            ctx.fillStyle = eb.color; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(eb.x, eb.y, eb.r * 0.5, 0, Math.PI * 2); ctx.fill();
+          }
         }
       } else {
         for (const o of gameData.objects) {
@@ -934,17 +1428,90 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + pData.h, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
       ctx.fillStyle = gameData.player.color;
-      // 被弾後の無敵中は点滅
-      if (!(invulnRef.current > 0 && Math.floor(invulnRef.current / 4) % 2 === 0)) {
+      // 死亡中は非表示。無敵中（復帰点滅）は 4f 周期で点滅
+      if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / 4) % 2 === 0)) {
         drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl }, p.x, p.y, pData.w, pData.h);
       }
       if (gameData.engine === 'touhou' && isPlaying) {
+        const cx = p.x + pData.w / 2, cy = p.y + pData.h / 2;
+        const isSlow2 = engineRef.current.keys.has('Shift') || touchRef.current.slow;
+        if (isSlow2) {
+          ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(cx, cy, 14, 0, Math.PI * 2); ctx.stroke();
+        }
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
-        ctx.beginPath(); ctx.arc(p.x + pData.w / 2, p.y + pData.h / 2, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = 'red'; ctx.lineWidth = 1.5; ctx.stroke();
       }
 
       ctx.restore();
+
+      // ── touhou フェーズ HUD ──
+      if (isPlaying && gameData.engine === 'touhou' && phaseIndexRef.current >= 0) {
+        const phases = gameData.phases;
+        const curPhase = phases?.[phaseIndexRef.current];
+        const label = curPhase?.label ?? '道中';
+        const remaining = eng.entities.filter(e => !e.def.isBoss).length + eng.entities.filter(e => !!e.def.isBoss).length;
+        const text = curPhase?.kind === 'boss'
+          ? label
+          : `${label}  敵 ×${eng.entities.length}`;
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(PLAY_W - 110, 8, 102, 18);
+        ctx.fillStyle = curPhase?.kind === 'boss' ? '#ff9940' : '#ffd84d';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, PLAY_W - 8, 22);
+        void remaining;
+      }
+
+      // ── touhou スコア HUD ──
+      if (isPlaying && gameData.engine === 'touhou') {
+        const sc = scoreRef.current;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(PLAY_W - 130, PLAY_H - 26, 122, 20);
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = '#ffd84d';
+        ctx.fillText(`SCORE  ${sc.toLocaleString()}`, PLAY_W - 8, PLAY_H - 10);
+      }
+
+      // ── touhou 残機 HUD ──
+      if (isPlaying && gameData.engine === 'touhou') {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(8, PLAY_H - 26, 90, 20);
+        ctx.font = 'bold 13px monospace';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        const lives = livesRef.current;
+        const hearts = '❤'.repeat(Math.max(0, lives));
+        ctx.fillStyle = lives > 1 ? '#ff6b8a' : '#ff3333';
+        ctx.fillText(hearts || '×0', 12, PLAY_H - 10);
+      }
+
+      // ── touhou ボスHPバー（touhou.html スタイル） ──
+      if (isPlaying && gameData.engine === 'touhou') {
+        const boss = eng.entities.find(e => e.def.isBoss);
+        if (boss && boss.def.hp > 1) {
+          const barX = 10, barY = 8, barW = PLAY_W - 20, barH = 10;
+          const pct = Math.max(0, boss.hp / boss.def.hp);
+          ctx.fillStyle = 'rgba(0,0,0,0.55)';
+          ctx.fillRect(barX, barY, barW, barH);
+          const grd = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+          grd.addColorStop(0, '#5bd1ff'); grd.addColorStop(1, '#7a8cff');
+          ctx.fillStyle = grd;
+          ctx.fillRect(barX, barY, barW * pct, barH);
+          ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(barX, barY, barW, barH);
+          // スペル名
+          ctx.fillStyle = 'rgba(0,0,0,0.45)';
+          ctx.fillRect(barX, barY + barH + 2, 200, 14);
+          ctx.fillStyle = '#5bd1ff';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+          ctx.fillText(boss.def.name ?? boss.def.emoji, barX + 4, barY + barH + 12);
+        }
+      }
 
       // ── 戦闘プレイヤーHUD（Lv / HP / MP）──
       if (isPlaying && gameData.engine === 'rpg' && gameData.battle) {
@@ -968,7 +1535,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, [gameData, isPlaying, restart, editorTab, editSpeedMult]);
 
   // touch state via ref to avoid re-running the loop effect
-  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false });
+  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false });
   const prevActionRef = useRef(false);
   const prevZRef = useRef(false);
   const prevXRef = useRef(false);
@@ -1074,6 +1641,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     sfx: Object.fromEntries(Object.entries(gameData.sfx).map(([k, v]) => [k, v?.ref])) as Partial<Record<SfxTrigger, string>>,
     switches: gameData.switches,
     items: gameData.items,
+    phases: gameData.phases,
   });
 
   const handleSave = () => onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
@@ -1106,6 +1674,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
             if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - PLAY_W), pp.x + pw / 2 - PLAY_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - PLAY_H), pp.y + ph / 2 - PLAY_H / 2))); }
+            if (!isPlaying) setActivePreviewKey(null);
             setIsPlaying(p => !p);
           }}
             className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
@@ -1166,6 +1735,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 </div>
               </div>
             )}
+
+            {/* ── セリフカットシーン（ゲーム中） ── */}
+            {activeDialogue && (
+              <DialogueCutscene
+                lines={activeDialogue}
+                onComplete={onDialogueComplete}
+              />
+            )}
+
+            {/* ── セリフプレビュー（最後に操作した行を常に表示） ── */}
+            {(() => {
+              if (!activePreviewKey) return null;
+              const [piStr, diStr] = activePreviewKey.split('-');
+              const line = gameData.phases?.[+piStr]?.dialogue?.[+diStr];
+              return line ? (
+                <DialogueCutscene
+                  key={activePreviewKey}
+                  lines={[line]}
+                  onComplete={() => setActivePreviewKey(null)}
+                />
+              ) : null;
+            })()}
 
             {/* ── イベント選択肢 ── */}
             {eventChoice && !battle && (
@@ -1265,10 +1856,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 w-12 h-10 bg-gray-600 rounded-r-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('right')}></div>
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-gray-700 pointer-events-none rounded"></div>
                 </div>
-                {(gameData.engine === 'action' || gameData.engine === 'touhou') && (
+                {gameData.engine === 'action' && (
                   <button className="w-16 h-16 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
                     {...padProps('action')}>
-                    {gameData.engine === 'touhou' ? 'SHOT' : 'JUMP'}
+                    JUMP
+                  </button>
+                )}
+                {gameData.engine === 'touhou' && (
+                  <button className="w-14 h-12 rounded-full border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
+                    {...padProps('slow')}>
+                    低速
                   </button>
                 )}
               </div>
@@ -1304,10 +1901,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             </div>
           ) : (
             <>
-              <div className="flex border-b border-gray-800 shrink-0">
-                {([['map', 'マップ'], ['object', 'オブジェクト'], ['char', 'キャラ'], ['asset', 'アセット']] as [EditorTab, string][]).map(([id, label]) => (
+              <div className="flex border-b border-gray-800 shrink-0 overflow-x-auto">
+                {([
+                  ['map', 'マップ'], ['object', 'オブジェクト'], ['char', 'キャラ'], ['asset', 'アセット'],
+                  ...(gameData.engine === 'touhou' ? [['spell', '会話']] : []),
+                ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
-                    className={`flex-1 py-2.5 text-[10px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500'}`}>
+                    className={`flex-none py-2.5 px-2 text-[10px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500'}`}>
                     {label}
                   </button>
                 ))}
@@ -1318,6 +1918,166 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
 
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {/* ── SPELL（弾幕スクリプト） ── */}
+                {editorTab === 'spell' && (
+                  <div className="space-y-3">
+                    {/* ── フェーズ構成エディタ ── */}
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-bold text-yellow-300">フェーズ構成</p>
+                        <button
+                          onClick={() => {
+                            const newPhase: StagePhase = { id: uid(), kind: 'wave', label: `フェーズ ${(gameData.phases?.length ?? 0)}` };
+                            setGameData(p => ({ ...p, phases: [...(p.phases ?? []), newPhase] }));
+                          }}
+                          className="text-[10px] text-blue-400 border border-blue-700 rounded px-1.5 py-0.5 active:opacity-60">
+                          + 追加
+                        </button>
+                      </div>
+                      {(gameData.phases ?? []).length === 0 && (
+                        <p className="text-[10px] text-gray-600">フェーズ未定義（自動2フェーズ）</p>
+                      )}
+                      {(gameData.phases ?? []).map((ph, pi) => (
+                        <div key={ph.id} className="rounded border border-gray-700 bg-gray-800 p-2 space-y-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-gray-500 w-4">{pi}</span>
+                            <input value={ph.label ?? ''}
+                              onChange={e => setGameData(p => ({ ...p, phases: p.phases!.map((x, i) => i === pi ? { ...x, label: e.target.value } : x) }))}
+                              placeholder="ラベル"
+                              className="flex-1 bg-gray-700 rounded px-1.5 py-1 text-[11px] text-white outline-none" />
+                            <select value={ph.kind}
+                              onChange={e => setGameData(p => ({ ...p, phases: p.phases!.map((x, i) => i === pi ? { ...x, kind: e.target.value as 'wave'|'boss' } : x) }))}
+                              className="bg-gray-700 text-[11px] rounded px-1 py-1 text-white outline-none">
+                              <option value="wave">雑魚戦</option>
+                              <option value="boss">ボス戦</option>
+                            </select>
+                            <button onClick={() => setGameData(p => ({ ...p, phases: p.phases!.filter((_, i) => i !== pi) }))}
+                              className="text-red-500 text-[11px] px-1 active:opacity-60">✕</button>
+                          </div>
+                          {/* セリフ行 */}
+                          <div className="space-y-2">
+                            {(ph.dialogue ?? []).map((dl, di) => {
+                              const previewKey = `${pi}-${di}`;
+                              const isActive = activePreviewKey === previewKey;
+                              const activatePreview = () => setActivePreviewKey(previewKey);
+                              const updDl = (patch: Partial<DialogueLine>) => {
+                                setGameData(p => ({
+                                  ...p,
+                                  phases: p.phases!.map((x, i) => i !== pi ? x : {
+                                    ...x, dialogue: x.dialogue!.map((d, j) => j === di ? { ...d, ...patch } : d)
+                                  })
+                                }));
+                                setActivePreviewKey(previewKey);
+                              };
+                              return (
+                                <div key={di}
+                                  className={`rounded-lg border p-2 space-y-1.5 transition-colors ${isActive ? 'border-blue-500 bg-blue-950/30' : 'border-gray-600 bg-gray-800'}`}>
+                                  {/* 1行目：絵文字・話者・削除 */}
+                                  <div className="flex gap-1 items-center">
+                                    <input value={dl.emoji ?? ''} placeholder="🎀"
+                                      onChange={e => updDl({ emoji: e.target.value })}
+                                      onFocus={activatePreview}
+                                      className="w-8 bg-gray-700 rounded px-1 py-0.5 text-[11px] text-center text-white outline-none" />
+                                    <input value={dl.speaker}
+                                      onChange={e => updDl({ speaker: e.target.value })}
+                                      onFocus={activatePreview}
+                                      placeholder="話者名"
+                                      className="flex-1 bg-gray-700 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                    <button onClick={() => {
+                                      if (isActive) setActivePreviewKey(null);
+                                      setGameData(p => ({
+                                        ...p,
+                                        phases: p.phases!.map((x, i) => i !== pi ? x : { ...x, dialogue: x.dialogue!.filter((_, j) => j !== di) })
+                                      }));
+                                    }} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
+                                  </div>
+                                  {/* 2行目：立ち絵 URL */}
+                                  <input value={dl.imageSrc ?? ''}
+                                    onChange={e => updDl({ imageSrc: e.target.value || undefined })}
+                                    onFocus={activatePreview}
+                                    placeholder="立ち絵URL (省略でemoji)"
+                                    className="w-full bg-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                  {/* 3行目：位置・倍率（changeイベントで反映） */}
+                                  <div className="flex gap-1 items-center flex-wrap">
+                                    <span className="text-[9px] text-gray-500 shrink-0">位置</span>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                      X<input type="text" inputMode="numeric" defaultValue={dl.imageX ?? 0}
+                                        onFocus={activatePreview}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updDl({ imageX: v }); }}
+                                        className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                      Y<input type="text" inputMode="numeric" defaultValue={dl.imageY ?? 0}
+                                        onFocus={activatePreview}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updDl({ imageY: v }); }}
+                                        className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-2">
+                                      倍率<input type="text" inputMode="decimal" defaultValue={dl.imageScale ?? 1}
+                                        onFocus={activatePreview}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updDl({ imageScale: v }); }}
+                                        className="w-14 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                  </div>
+                                  {/* 4行目：セリフ textarea（最下部） */}
+                                  <textarea value={dl.text}
+                                    onChange={e => updDl({ text: e.target.value })}
+                                    onFocus={activatePreview}
+                                    placeholder="セリフテキスト（改行可）"
+                                    rows={2}
+                                    className="w-full bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none resize-y" />
+                                </div>
+                              );
+                            })}
+                            <button onClick={() => {
+                              const newLine: DialogueLine = { speaker: '', emoji: '', text: '', imageX: 0, imageY: 0, imageScale: 1 };
+                              setGameData(p => ({
+                                ...p,
+                                phases: p.phases!.map((x, i) => i !== pi ? x : {
+                                  ...x, dialogue: [...(x.dialogue ?? []), newLine]
+                                })
+                              }));
+                            }} className="text-[10px] text-blue-400 active:opacity-60">+ セリフ追加</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* ── MiniScript エディタ（選択オブジェクト） ── */}
+                    {selObj ? (
+                      <>
+                        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                          <span className="font-bold text-white">{selObj.emoji} {selObj.name || 'オブジェクト'}</span>
+                          <span>フェーズ:</span>
+                          <input type="number" min={0} max={20} value={selObj.phase ?? 0}
+                            onChange={e => updObj({ phase: Number(e.target.value) })}
+                            className="w-12 bg-gray-700 rounded px-1.5 py-0.5 text-white text-center outline-none text-[11px]" />
+                        </div>
+                        <div className="text-[9px] text-gray-500 leading-relaxed bg-gray-800/60 rounded p-2">
+                          <span className="text-gray-400 font-bold">API:</span>{' '}
+                          wait(f) / moveTo(x,y,f) / move(vx,vy) / stop() / exit()<br />
+                          shot(deg,spd,color) / shotN(n,base,spread,spd,color) / shotPlayer(spd,color,jitter) / shotSpiral(n,base,spd,color)<br />
+                          getPlayerAngle() / getX() / getY() / rand(a,b) / range(a,b,step)<br />
+                          <span className="text-yellow-400">定数:</span> col row startX startY W H
+                        </div>
+                        <textarea
+                          value={selObj.miniScript ?? ''}
+                          onChange={e => updObj({ miniScript: e.target.value, bullet: 'none' })}
+                          spellCheck={false}
+                          rows={14}
+                          placeholder={'// wave 敵の例\nwait(row * 25)\nmoveTo(startX, 96, 50)\nfor t in range(0, 3, 1)\n  shotPlayer(2.5, 5, 10)\n  wait(80)\nend for\nmoveTo(startX, 520, 70)\nexit()'}
+                          className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-2 text-[11px] text-green-300 font-mono resize-y outline-none leading-relaxed"
+                          style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}
+                        />
+                      </>
+                    ) : (
+                      <div className="text-center py-4 space-y-1">
+                        <p className="text-2xl">📝</p>
+                        <p className="text-xs text-gray-500">オブジェクトを選択すると MiniScript を編集できます</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* ── MAP ── */}
                 {editorTab === 'map' && (
                   <div className="space-y-3">
@@ -1362,7 +2122,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <div className="space-y-3">
                     {/* ── 選択中オブジェクト or 新規テンプレート ── */}
                     {selObj ? (<>
-                      <div className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
+                      <div key={selObj.id} className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-yellow-400 font-bold flex items-center gap-1">
                             <Smartphone size={11} /> 選択中
@@ -1406,33 +2166,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               </label>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                              <label className="text-[10px] text-gray-400 flex justify-between items-center">HP<span className="text-blue-400">{selObj.hp}</span>
-                                <input type="range" min={1} max={200} value={selObj.hp} onChange={e => updObj({ hp: Number(e.target.value) })} className="w-full accent-blue-500" />
+                              <label className="text-[10px] text-gray-400">HP
+                                <input type="text" inputMode="numeric" defaultValue={selObj.hp} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ hp: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                               </label>
-                              <label className="text-[10px] text-gray-400 flex justify-between items-center">速さ<span className="text-blue-400">{selObj.speed}</span>
-                                <input type="range" min={0} max={5} step={0.5} value={selObj.speed} onChange={e => updObj({ speed: Number(e.target.value) })} className="w-full accent-blue-500" />
+                              <label className="text-[10px] text-gray-400">速さ
+                                <input type="text" inputMode="decimal" defaultValue={selObj.speed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ speed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                               </label>
                             </div>
                             {gameData.battle && (
                               <div className="grid grid-cols-3 gap-2">
                                 <label className="text-[10px] text-gray-400">攻撃
-                                  <input type="number" value={selObj.atk ?? Math.round(selObj.hp)} onChange={e => updObj({ atk: Number(e.target.value) })}
+                                  <input type="text" inputMode="numeric" defaultValue={selObj.atk ?? Math.round(selObj.hp)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ atk: v }); }}
                                     className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                                 </label>
                                 <label className="text-[10px] text-gray-400">防御
-                                  <input type="number" value={selObj.def ?? Math.round(selObj.hp * 0.4)} onChange={e => updObj({ def: Number(e.target.value) })}
+                                  <input type="text" inputMode="numeric" defaultValue={selObj.def ?? Math.round(selObj.hp * 0.4)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ def: v }); }}
                                     className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                                 </label>
                                 <label className="text-[10px] text-gray-400">経験値
-                                  <input type="number" value={selObj.exp ?? Math.round(selObj.hp * 1.5)} onChange={e => updObj({ exp: Number(e.target.value) })}
+                                  <input type="text" inputMode="numeric" defaultValue={selObj.exp ?? Math.round(selObj.hp * 1.5)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ exp: v }); }}
                                     className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                                 </label>
                               </div>
                             )}
                             {selObj.bullet !== 'none' && (
-                              <div className="grid grid-cols-2 gap-2 items-center">
-                                <label className="text-[10px] text-gray-400 flex justify-between items-center">発射間隔<span className="text-blue-400">{selObj.fireRate}</span>
-                                  <input type="range" min={4} max={120} value={selObj.fireRate} onChange={e => updObj({ fireRate: Number(e.target.value) })} className="w-full accent-blue-500" />
+                              <div className="grid grid-cols-3 gap-2 items-end">
+                                <label className="text-[10px] text-gray-400">発射間隔(f)
+                                  <input type="text" inputMode="numeric" defaultValue={selObj.fireRate} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ fireRate: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                </label>
+                                <label className="text-[10px] text-gray-400">弾速
+                                  <input type="text" inputMode="decimal" defaultValue={selObj.bulletSpeed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ bulletSpeed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                                 </label>
                                 <label className="text-[10px] text-gray-400 flex items-center gap-1">弾色<input type="color" value={selObj.bulletColor} onChange={e => updObj({ bulletColor: e.target.value })} className="w-6 h-6 rounded border border-gray-700 bg-transparent" /></label>
                               </div>
@@ -1512,19 +2275,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </label>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                          <label className="text-[10px] text-gray-400 flex justify-between items-center">HP<span className="text-blue-400">{tpl.hp}</span>
-                            <input type="range" min={1} max={200} value={tpl.hp} onChange={e => setTpl({ hp: Number(e.target.value) })} className="w-full accent-blue-500" />
+                          <label className="text-[10px] text-gray-400">HP
+                            <input type="text" inputMode="numeric" defaultValue={tpl.hp} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setTpl({ hp: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                           </label>
-                          <label className="text-[10px] text-gray-400 flex justify-between items-center">速さ<span className="text-blue-400">{tpl.speed}</span>
-                            <input type="range" min={0} max={5} step={0.5} value={tpl.speed} onChange={e => setTpl({ speed: Number(e.target.value) })} className="w-full accent-blue-500" />
+                          <label className="text-[10px] text-gray-400">速さ
+                            <input type="text" inputMode="decimal" defaultValue={tpl.speed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setTpl({ speed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                           </label>
                         </div>
                         {(tpl.objType ?? 'enemy') === 'enemy' && (
                           <>
                             {tpl.bullet !== 'none' && (
-                              <div className="grid grid-cols-2 gap-2 items-center">
-                                <label className="text-[10px] text-gray-400 flex justify-between items-center">発射間隔<span className="text-blue-400">{tpl.fireRate}</span>
-                                  <input type="range" min={4} max={120} value={tpl.fireRate} onChange={e => setTpl({ fireRate: Number(e.target.value) })} className="w-full accent-blue-500" />
+                              <div className="grid grid-cols-3 gap-2 items-end">
+                                <label className="text-[10px] text-gray-400">発射間隔(f)
+                                  <input type="text" inputMode="numeric" defaultValue={tpl.fireRate} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setTpl({ fireRate: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                </label>
+                                <label className="text-[10px] text-gray-400">弾速
+                                  <input type="text" inputMode="decimal" defaultValue={tpl.bulletSpeed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setTpl({ bulletSpeed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                                 </label>
                                 <label className="text-[10px] text-gray-400 flex items-center gap-1">弾色<input type="color" value={tpl.bulletColor} onChange={e => setTpl({ bulletColor: e.target.value })} className="w-6 h-6 rounded border border-gray-700 bg-transparent" /></label>
                               </div>

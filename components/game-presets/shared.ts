@@ -58,6 +58,69 @@ export interface BgmState { ref: string; src?: string; type?: 'youtube' | 'mml';
 export interface SfxRef { ref: string; src?: string; type?: 'youtube' | 'mml'; }
 export interface WarpTarget { col: number; row: number; }
 
+// ── セリフ・カットシーン ──────────────────────────────────────────────
+export interface DialogueLine {
+  speaker: string;
+  emoji?: string;
+  side?: 'left' | 'right';  // 画面上のキャラ位置（デフォルト left）
+  text: string;
+  /** 立ち絵画像URL（省略時はemojiにフォールバック） */
+  imageSrc?: string;
+  /** side 基準の水平オフセット px（デフォルト 10） */
+  imageX?: number;
+  /** 下端からの垂直オフセット px（デフォルト 85） */
+  imageY?: number;
+  /** 拡大率（ドット絵は pixelated 補間で拡大） */
+  imageScale?: number;
+}
+
+/** ステージのフェーズ定義。phases 配列の順に進行する。 */
+export interface StagePhase {
+  id: string;
+  kind: 'wave' | 'boss';   // wave=雑魚戦、boss=ボス（HP バー表示）
+  label?: string;           // HUD 表示名
+  /** このフェーズ開始前に流すセリフ */
+  dialogue?: DialogueLine[];
+  /** このフェーズクリア後に流すセリフ（ボス撃破後など） */
+  outroDialogue?: DialogueLine[];
+  /** このフェーズクリア時のスコアボーナス */
+  scoreBonus?: number;
+}
+
+// ── 弾幕スクリプト（SpellBlock） ──────────────────────────────────────
+/** touhou.html の弾幕パターンをビジュアルブロックで表現。 */
+export type SpellBlockKind = 'wait' | 'nway' | 'aimed' | 'spiral' | 'repeat';
+
+/** 全フィールドを持つ（未使用フィールドはデフォルト値で埋める）。JSON シリアライズ可能。 */
+export interface SpellBlock {
+  id: string;
+  kind: SpellBlockKind;
+  frames: number;     // wait: 待機フレーム数
+  ways: number;       // nway: 方向数 / spiral: 腕数 / repeat: 繰返し回数に使う
+  speed: number;      // 弾速 (px/frame)
+  color: number;      // SPELL_PALETTE インデックス 0-8
+  spread: number;     // nway: 拡散角度 (度)
+  jitter: number;     // aimed: ランダムブレ (度)
+  rotSpeed: number;   // spiral: 1フレームあたり回転角 (度)
+  angle: number;      // nway: 基準角度 (度, 0=右, 90=下)
+  times: number;      // repeat: 繰返し回数
+  body: SpellBlock[]; // repeat: 子ブロック
+}
+
+/** touhou.html の弾色パレット（9色） */
+export const SPELL_PALETTE = [
+  '#f7f7f7', '#ff5c5c', '#c76bff', '#4f63ff',
+  '#6ed2ff', '#61e294', '#ffd84d', '#ff9940', '#ff88ff',
+] as const;
+
+/** SpellBlock のファクトリ（デフォルト値 + 上書き）。 */
+export const mkSpell = (kind: SpellBlockKind, over: Partial<SpellBlock> = {}): SpellBlock => ({
+  id: uid(), kind,
+  frames: 30, ways: 6, speed: 2.5, color: 4, spread: 360,
+  jitter: 10, rotSpeed: 5, angle: 90, times: 3, body: [],
+  ...over,
+});
+
 export interface ObjectDef {
   id: string; kind: ObjectKind;
   emoji: string; spriteRef?: string; spriteUrl?: string;
@@ -78,6 +141,12 @@ export interface ObjectDef {
   itemId?: string;
   /** イベントページ。持つ場合は objType によらずイベントとして動作。 */
   pages?: EventPage[];
+  /** 弾幕スクリプト（touhou エンジン・旧ビジュアルブロック方式、後方互換用）。 */
+  spellScript?: SpellBlock[];
+  /** MiniScript（touhou エンジン）。wave 敵の動き全般・ボスの弾幕パターンを記述する。 */
+  miniScript?: string;
+  /** 所属フェーズ番号（touhou エンジン、phases 使用時）。未指定=0。 */
+  phase?: number;
 }
 
 /** スクロール設定。worldCols/worldRows が画面（COLS/ROWS）より大きいとカメラが追従する。
@@ -116,6 +185,8 @@ export interface PresetData {
   battle?: BattleConfig;
   switches?: SwitchDef[];
   items?: ItemDef[];
+  /** フェーズ定義（touhou エンジン）。定義するとフェーズ順に進行する。 */
+  phases?: StagePhase[];
 }
 
 export const uid = () => `o${Math.random().toString(36).slice(2, 9)}`;
