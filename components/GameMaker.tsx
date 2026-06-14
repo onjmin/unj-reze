@@ -16,7 +16,7 @@ import {
   type BattleMove, type SwitchDef, type ItemDef,
   type EventCommand, type EventPage, type EventCondition,
 } from './game-presets/shared';
-import { PRESETS, PRESET_ORDER, PRESET_EMOJI } from './game-presets';
+import { PRESETS, PRESET_ORDER } from './game-presets';
 
 export type { PresetId };
 
@@ -955,13 +955,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.fillStyle = '#7fd0ff'; ctx.fillText(`MP ${pr.mp}/${pr.maxMp}`, 12, 52);
       }
 
-      if (!isPlaying) {
-        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = 'white'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
-        ctx.fillText('矢印キー・スワイプで移動　Space/↑で決定してイベント', canvas.width / 2, canvas.height / 2 - 8);
-        ctx.font = '12px sans-serif';
-        ctx.fillText('サイドバーの「オブジェクト」タブで編集', canvas.width / 2, canvas.height / 2 + 16);
-      }
+
 
       eng.animId = requestAnimationFrame(loop);
     };
@@ -1097,6 +1091,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         <div className="flex items-center gap-2 min-w-0">
           {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 rounded-full shrink-0"><X size={16} /></button>}
           <span className="text-xs font-bold text-white shrink-0">{embedded ? '▶ プレイ中' : 'ゲーム作成'}</span>
+          {!isPlaying && !playOnly && (
+            <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
+              {PRESET_ORDER.map(id => (
+                <option key={id} value={id}>{PRESETS[id].name}</option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
@@ -1112,27 +1114,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         </div>
       </div>
 
-      {/* Preset selector */}
-      {!isPlaying && !playOnly && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-[#0a0a0d] border-b border-gray-800 shrink-0">
-          <span className="text-[10px] text-gray-500 shrink-0">プリセット</span>
-          <select
-            value={presetId}
-            onChange={e => resetGame(e.target.value as PresetId)}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-[12px] text-gray-200 outline-none"
-          >
-            {PRESET_ORDER.map(id => (
-              <option key={id} value={id}>{PRESET_EMOJI[id]} {PRESETS[id].name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
       {/* Main */}
       <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
         {/* Canvas */}
-        <div className={`flex flex-col items-center justify-center bg-black p-2 overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1'}`}>
-          <div className="relative w-full mx-auto rounded-lg overflow-hidden ring-2 ring-gray-700 touch-none"
+        <div className={`flex flex-col items-center justify-center bg-black overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1 portrait:flex-none'}`}>
+          <div className="relative w-full mx-auto rounded-lg overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
             style={{ aspectRatio: `${PLAY_W}/${PLAY_H}`, maxWidth: PLAY_W + 'px' }}>
             <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
               className={`block w-full h-full ${!isPlaying ? 'cursor-crosshair' : ''}`}
@@ -1225,26 +1211,44 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 </div>
               </div>
             )}
+            {!isPlaying && (
+              <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute bottom-2 left-1 pointer-events-auto touch-none select-none opacity-90">
+                  <div className="relative w-16 h-16">
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 rounded-t active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('up')}>▲</div>
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 rounded-b active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('down')}>▼</div>
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 rounded-l active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('left')}>◀</div>
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 rounded-r active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('right')}>▶</div>
+                  </div>
+                </div>
+                <div className="absolute bottom-2 right-1 pointer-events-auto touch-none select-none opacity-90">
+                  <div className="relative w-14 h-16">
+                    <button onClick={placeObj}
+                      className="absolute right-0 bottom-0 w-10 h-10 rounded-full bg-green-600 active:bg-green-500 shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
+                      title="Zキー">PUT</button>
+                    <button onClick={() => { if (selectedObjIdRef.current) { setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) })); setSelectedObjId(null); }}}
+                      className="absolute left-0 top-1 w-9 h-9 rounded-full bg-red-700 active:bg-red-600 shadow-lg border-b-4 border-red-900 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
+                      title="Xキー">DEL</button>
+                  </div>
+                </div>
+                <div className="absolute top-1 left-1/2 -translate-x-1/2 pointer-events-auto touch-none select-none opacity-90">
+                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-black/50 text-[10px]">
+                    <span className="text-gray-300">速度:</span>
+                    {[1, 2, 4].map(m => (
+                      <button key={m} onClick={() => setEditSpeedMult(m)}
+                        className={`px-2 py-0.5 rounded font-bold transition ${editSpeedMult === m ? 'bg-blue-600 text-white' : 'bg-gray-700/70 text-gray-400 hover:bg-gray-600'}`}>
+                        {m}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          {/* スクロール編集：ワールドが画面より広い/高いプリセットのみ表示 */}
-          {!isPlaying && (gameData.scroll?.worldCols ?? COLS) > COLS && (
-            <div className="w-full mx-auto mt-2 flex items-center gap-2" style={{ maxWidth: PLAY_W + 'px' }}>
-              <span className="text-[10px] text-gray-500 shrink-0">◀ 横 ▶</span>
-              <input type="range" min={0} max={Math.max(0, (gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - PLAY_W)} step={TILE_SIZE}
-                value={editScroll} onChange={e => setEditScroll(Number(e.target.value))} className="flex-1 accent-blue-500" />
-            </div>
-          )}
-          {!isPlaying && (gameData.scroll?.worldRows ?? ROWS) > ROWS && (
-            <div className="w-full mx-auto mt-1 flex items-center gap-2" style={{ maxWidth: PLAY_W + 'px' }}>
-              <span className="text-[10px] text-gray-500 shrink-0">▲ 縦 ▼</span>
-              <input type="range" min={0} max={Math.max(0, (gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - PLAY_H)} step={TILE_SIZE}
-                value={editScrollY} onChange={e => setEditScrollY(Number(e.target.value))} className="flex-1 accent-blue-500" />
-            </div>
-          )}
         </div>
 
         {/* Sidebar */}
-        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly) ? 'w-full md:w-auto' : 'flex-1 md:w-80 md:flex-none'}`}>
+        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly) ? 'w-full md:w-auto' : 'portrait:flex-1 flex-none max-h-[40vh] md:max-h-none overflow-y-auto md:w-80 md:flex-none'}`}>
           {(isPlaying || playOnly) ? (
             <div className="flex-1 flex flex-col p-4 select-none">
               <div className="flex-1 flex items-center justify-center">
@@ -1304,34 +1308,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 ))}
               </div>
 
-              {/* 編集中も移動用のゲームコントローラ風十字キー + ABボタン */}
-              <div className="flex items-center justify-center gap-4 py-2 border-b border-gray-800 shrink-0 touch-none select-none">
-                <div className="relative w-20 h-20">
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-7 h-8 bg-gray-600/60 rounded-t active:bg-gray-500" {...padProps('up')}></div>
-                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-7 h-8 bg-gray-600/60 rounded-b active:bg-gray-500" {...padProps('down')}></div>
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-8 h-7 bg-gray-600/60 rounded-l active:bg-gray-500" {...padProps('left')}></div>
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-7 bg-gray-600/60 rounded-r active:bg-gray-500" {...padProps('right')}></div>
-                </div>
-                <div className="relative w-16 h-20">
-                  <button onClick={placeObj}
-                    className="absolute right-0 bottom-1 w-12 h-12 rounded-full bg-green-600 active:bg-green-500 shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 text-white font-bold text-[9px] flex items-center justify-center"
-                    title="Zキー">設置</button>
-                  <button onClick={() => { if (selectedObjIdRef.current) { setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) })); setSelectedObjId(null); }}}
-                    className="absolute left-0 top-1 w-11 h-11 rounded-full bg-red-700 active:bg-red-600 shadow-lg border-b-4 border-red-900 active:border-b-0 active:translate-y-1 text-white font-bold text-[9px] flex items-center justify-center"
-                    title="Xキー">削除</button>
-                </div>
-              </div>
 
-              {/* 編集モード速度切替 */}
-              <div className="flex items-center justify-center gap-2 pb-2 border-b border-gray-800 shrink-0 text-[10px]">
-                <span className="text-gray-500">速度:</span>
-                {[1, 2, 4].map(m => (
-                  <button key={m} onClick={() => setEditSpeedMult(m)}
-                    className={`px-2.5 py-1 rounded font-bold transition ${editSpeedMult === m ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}>
-                    {m}x
-                  </button>
-                ))}
-              </div>
+
+
 
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 {/* ── MAP ── */}
