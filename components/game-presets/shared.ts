@@ -135,6 +135,8 @@ export interface ObjectDef {
   moves?: EnemyMove[];
   /** シンボルエンカウントのボス。倒すまでゴールでクリアにならない。 */
   isBoss?: boolean;
+  /** ボス撃破後に流すセリフ（isBoss=true のとき使用）。 */
+  outroDialogue?: DialogueLine[];
   /** ワープ先。objType=warp のとき使用。 */
   warpTarget?: WarpTarget;
   /** アイテムID。objType=item のとき、プレイヤー接触でこのアイテムを入手。未指定なら name をID扱い。 */
@@ -173,6 +175,8 @@ export interface BattleConfig {
   labels: { attack: string; move: string; flee: string };
   /** ゴール（城/ジム）到達時に戦うボス。倒すとクリア。 */
   boss?: EncounterEnemy;
+  /** ゴールボス撃破後に流すセリフ。 */
+  outroDialogue?: DialogueLine[];
 }
 
 export interface PresetData {

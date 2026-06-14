@@ -1,6 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
-import { type DialogueLine } from './game-presets/shared';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { type DialogueLine, PLAY_W, PLAY_H } from './game-presets/shared';
 
 const keyOf = (l: DialogueLine) => l.imageSrc ?? l.emoji ?? l.speaker;
 
@@ -71,6 +71,18 @@ interface Props {
 }
 
 export default function DialogueCutscene({ lines, onComplete }: Props) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [uiScale, setUiScale] = useState(1);
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const update = () => setUiScale((el.offsetWidth || PLAY_W) / PLAY_W);
+    update();
+    const obs = new ResizeObserver(update);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
   const [index, setIndex] = useState(0);
   // キャラごとに最新の DialogueLine を保持（imageSrc or speaker をキーに）
   // ★ 初期表示は最初に喋るキャラのみ。advance() で順次追加される。
@@ -114,13 +126,26 @@ export default function DialogueCutscene({ lines, onComplete }: Props) {
 
   return (
     <div
+      ref={rootRef}
       className="absolute inset-0 z-30"
       style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.72) 55%, transparent)' }}
       onClick={advance}
     >
-      {Object.entries(portraitMap).map(([k, pl]) => (
-        <Portrait key={k} line={pl} active={k === currentKey} />
-      ))}
+      {/* 設計座標空間（PLAY_W×PLAY_H）をuiScaleで縮小し、立ち絵の値をそのまま使える */}
+      <div style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        width: PLAY_W,
+        height: PLAY_H,
+        transform: `scale(${uiScale})`,
+        transformOrigin: 'bottom left',
+        pointerEvents: 'none',
+      }}>
+        {Object.entries(portraitMap).map(([k, pl]) => (
+          <Portrait key={k} line={pl} active={k === currentKey} />
+        ))}
+      </div>
 
       <div className="absolute bottom-0 left-0 right-0 mx-2 mb-2">
         <div

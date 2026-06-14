@@ -21,6 +21,8 @@ export class PlatformerEngine extends BaseGameEngine {
 
   protected loop() {
     if (!this.running) return;
+    this.updateCanvasScale();
+    const sc = this.canvasScale;
 
     let dx = 0;
     if (this.input.left) dx = -1;
@@ -29,12 +31,12 @@ export class PlatformerEngine extends BaseGameEngine {
     else if (dx < 0) this.dir = 'left';
 
     if (this.input.action1 && this.onGround) {
-      this.vy = this.jumpPower;
+      this.vy = this.jumpPower * sc;
       this.onGround = false;
     }
 
-    this.vy += this.gravity;
-    let nx = this.px + dx * this.speed;
+    this.vy += this.gravity * sc;
+    let nx = this.px + dx * this.speed * sc;
     let ny = this.py + this.vy;
 
     const col = Math.floor(nx / this.ts);

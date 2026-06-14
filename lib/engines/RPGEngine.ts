@@ -17,6 +17,8 @@ export class RPGEngine extends BaseGameEngine {
 
   protected loop() {
     if (!this.running) return;
+    this.updateCanvasScale();
+    const sc = this.canvasScale;
 
     let dx = 0, dy = 0;
     if (this.input.left) dx = -1;
@@ -26,8 +28,8 @@ export class RPGEngine extends BaseGameEngine {
     if (dx && dy) { dx *= 0.707; dy *= 0.707; }
 
     if (dx || dy) {
-      const nx = this.px + dx * this.speed;
-      const ny = this.py + dy * this.speed;
+      const nx = this.px + dx * this.speed * sc;
+      const ny = this.py + dy * this.speed * sc;
       const col = Math.floor(nx / this.ts);
       const row = Math.floor(ny / this.ts);
       if (this.isWalkable(col, row)) {

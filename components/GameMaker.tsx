@@ -415,6 +415,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const bossDefeatedRef = useRef(false);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
+  const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
   const phaseIndexRef = useRef(-1);
   /** 次に開始するフェーズ（dialogue 完了後に spawn する）。-1=クリア（outro後）*/
@@ -433,17 +434,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const appendLog = (line: string, patch: Partial<BattleView> = {}) =>
     setBattle(v => (v ? { ...v, enemyHp: battleRef.current.enemyHp, log: [...v.log, line].slice(-6), ...patch } : v));
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; moves?: { name: string; power: number; heal?: boolean }[]; entity?: Entity | null; isBoss?: boolean }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; moves?: { name: string; power: number; heal?: boolean }[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
       enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp, isBoss: !!opts.isBoss,
     };
+    bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
     setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemyHp: opts.hp, enemyMaxHp: opts.hp, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
   };
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), moves: d.moves, entity: e, isBoss: d.isBoss });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), moves: d.moves, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
   };
 
   const nudgePlayer = () => {
@@ -475,7 +477,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     invulnRef.current = 60; forceHud(n => n + 1);
     setTimeout(() => {
       battleRef.current.active = false; battleRef.current.entity = null; setBattle(null); forceHud(n => n + 1);
-      if (result === 'win' && wasBoss) { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false)); }
+      if (result === 'win' && wasBoss) {
+        const outro = bossOutroRef.current;
+        if (outro?.length) {
+          outroModeRef.current = true;
+          pendingPhaseRef.current = -1;
+          setActiveDialogue(outro);
+        } else {
+          playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false));
+        }
+      }
     }, result === 'win' ? 1100 : 500);
   };
 
@@ -1220,7 +1231,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, entity: null, isBoss: true }); dead = true; }
+                if (invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else win();
@@ -1747,8 +1758,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             {/* ── セリフプレビュー（最後に操作した行を常に表示） ── */}
             {(() => {
               if (!activePreviewKey) return null;
-              const [piStr, diStr] = activePreviewKey.split('-');
-              const line = gameData.phases?.[+piStr]?.dialogue?.[+diStr];
+              let line: DialogueLine | undefined;
+              if (activePreviewKey.startsWith('outro-')) {
+                const [, piStr, diStr] = activePreviewKey.split('-');
+                line = gameData.phases?.[+piStr]?.outroDialogue?.[+diStr];
+              } else if (activePreviewKey.startsWith('boss-outro-')) {
+                const [,, , idxStr] = activePreviewKey.split('-');
+                const obj = gameData.objects.find(o => o.id === selectedObjId);
+                line = obj?.outroDialogue?.[+idxStr];
+              } else {
+                const [piStr, diStr] = activePreviewKey.split('-');
+                line = gameData.phases?.[+piStr]?.dialogue?.[+diStr];
+              }
               return line ? (
                 <DialogueCutscene
                   key={activePreviewKey}
@@ -2039,6 +2060,88 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               }));
                             }} className="text-[10px] text-blue-400 active:opacity-60">+ セリフ追加</button>
                           </div>
+                          {/* ── アウトロセリフ（フェーズクリア後） ── */}
+                          <div className="mt-2 space-y-2">
+                            <p className="text-[10px] text-yellow-400/80 font-bold">撃破後セリフ</p>
+                            {(ph.outroDialogue ?? []).map((dl, di) => {
+                              const previewKey = `outro-${pi}-${di}`;
+                              const isActive = activePreviewKey === previewKey;
+                              const activatePreview = () => setActivePreviewKey(previewKey);
+                              const updODl = (patch: Partial<DialogueLine>) => {
+                                setGameData(p => ({
+                                  ...p,
+                                  phases: p.phases!.map((x, i) => i !== pi ? x : {
+                                    ...x, outroDialogue: (x.outroDialogue ?? []).map((d, j) => j === di ? { ...d, ...patch } : d)
+                                  })
+                                }));
+                                setActivePreviewKey(previewKey);
+                              };
+                              return (
+                                <div key={di}
+                                  className={`rounded-lg border p-2 space-y-1.5 transition-colors ${isActive ? 'border-yellow-500 bg-yellow-950/30' : 'border-gray-600 bg-gray-800'}`}>
+                                  <div className="flex gap-1 items-center">
+                                    <input value={dl.emoji ?? ''} placeholder="🎀"
+                                      onChange={e => updODl({ emoji: e.target.value })}
+                                      onFocus={activatePreview}
+                                      className="w-8 bg-gray-700 rounded px-1 py-0.5 text-[11px] text-center text-white outline-none" />
+                                    <input value={dl.speaker}
+                                      onChange={e => updODl({ speaker: e.target.value })}
+                                      onFocus={activatePreview}
+                                      placeholder="話者名"
+                                      className="flex-1 bg-gray-700 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                    <button onClick={() => {
+                                      if (isActive) setActivePreviewKey(null);
+                                      setGameData(p => ({
+                                        ...p,
+                                        phases: p.phases!.map((x, i) => i !== pi ? x : { ...x, outroDialogue: (x.outroDialogue ?? []).filter((_, j) => j !== di) })
+                                      }));
+                                    }} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
+                                  </div>
+                                  <input value={dl.imageSrc ?? ''}
+                                    onChange={e => updODl({ imageSrc: e.target.value || undefined })}
+                                    onFocus={activatePreview}
+                                    placeholder="立ち絵URL (省略でemoji)"
+                                    className="w-full bg-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                  <div className="flex gap-1 items-center flex-wrap">
+                                    <span className="text-[9px] text-gray-500 shrink-0">位置</span>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                      X<input type="text" inputMode="numeric" defaultValue={dl.imageX ?? 0}
+                                        onFocus={activatePreview}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updODl({ imageX: v }); }}
+                                        className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                      Y<input type="text" inputMode="numeric" defaultValue={dl.imageY ?? 0}
+                                        onFocus={activatePreview}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updODl({ imageY: v }); }}
+                                        className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                    <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-2">
+                                      倍率<input type="text" inputMode="decimal" defaultValue={dl.imageScale ?? 1}
+                                        onFocus={activatePreview}
+                                        onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updODl({ imageScale: v }); }}
+                                        className="w-14 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                    </label>
+                                  </div>
+                                  <textarea value={dl.text}
+                                    onChange={e => updODl({ text: e.target.value })}
+                                    onFocus={activatePreview}
+                                    placeholder="セリフテキスト（改行可）"
+                                    rows={2}
+                                    className="w-full bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none resize-y" />
+                                </div>
+                              );
+                            })}
+                            <button onClick={() => {
+                              const newLine: DialogueLine = { speaker: '', emoji: '', text: '', imageX: 0, imageY: 0, imageScale: 1 };
+                              setGameData(p => ({
+                                ...p,
+                                phases: p.phases!.map((x, i) => i !== pi ? x : {
+                                  ...x, outroDialogue: [...(x.outroDialogue ?? []), newLine]
+                                })
+                              }));
+                            }} className="text-[10px] text-yellow-400 active:opacity-60">+ 撃破後セリフ追加</button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -2201,6 +2304,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               </div>
                             )}
                             <label className="flex items-center gap-1 text-[10px] text-gray-400"><input type="checkbox" checked={selObj.hazard} onChange={e => updObj({ hazard: e.target.checked })} className="accent-red-500" />接触でミス(敵)</label>
+                            <label className="flex items-center gap-1 text-[10px] text-gray-400"><input type="checkbox" checked={!!selObj.isBoss} onChange={e => updObj({ isBoss: e.target.checked || undefined })} className="accent-yellow-500" />ボス（倒すまでクリア不可）</label>
+                            {selObj.isBoss && (
+                              <div className="mt-1 space-y-2">
+                                <p className="text-[10px] text-yellow-400/80 font-bold">撃破後セリフ</p>
+                                {(selObj.outroDialogue ?? []).map((dl, di) => {
+                                  const previewKey = `boss-outro-${di}`;
+                                  const isActive = activePreviewKey === previewKey;
+                                  const activatePv = () => setActivePreviewKey(previewKey);
+                                  const updBODl = (patch: Partial<DialogueLine>) => {
+                                    updObj({ outroDialogue: (selObj.outroDialogue ?? []).map((d, j) => j === di ? { ...d, ...patch } : d) });
+                                    setActivePreviewKey(previewKey);
+                                  };
+                                  return (
+                                    <div key={di} className={`rounded-lg border p-2 space-y-1.5 transition-colors ${isActive ? 'border-yellow-500 bg-yellow-950/30' : 'border-gray-600 bg-gray-800'}`}>
+                                      <div className="flex gap-1 items-center">
+                                        <input value={dl.emoji ?? ''} placeholder="🎀"
+                                          onChange={e => updBODl({ emoji: e.target.value })} onFocus={activatePv}
+                                          className="w-8 bg-gray-700 rounded px-1 py-0.5 text-[11px] text-center text-white outline-none" />
+                                        <input value={dl.speaker} onChange={e => updBODl({ speaker: e.target.value })} onFocus={activatePv}
+                                          placeholder="話者名" className="flex-1 bg-gray-700 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                        <button onClick={() => {
+                                          if (isActive) setActivePreviewKey(null);
+                                          updObj({ outroDialogue: (selObj.outroDialogue ?? []).filter((_, j) => j !== di) });
+                                        }} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
+                                      </div>
+                                      <input value={dl.imageSrc ?? ''} onChange={e => updBODl({ imageSrc: e.target.value || undefined })} onFocus={activatePv}
+                                        placeholder="立ち絵URL (省略でemoji)" className="w-full bg-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                      <div className="flex gap-1 items-center flex-wrap">
+                                        <span className="text-[9px] text-gray-500 shrink-0">位置</span>
+                                        <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                          X<input type="text" inputMode="numeric" defaultValue={dl.imageX ?? 0} onFocus={activatePv}
+                                            onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updBODl({ imageX: v }); }}
+                                            className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                        </label>
+                                        <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
+                                          Y<input type="text" inputMode="numeric" defaultValue={dl.imageY ?? 0} onFocus={activatePv}
+                                            onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updBODl({ imageY: v }); }}
+                                            className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                        </label>
+                                        <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-2">
+                                          倍率<input type="text" inputMode="decimal" defaultValue={dl.imageScale ?? 1} onFocus={activatePv}
+                                            onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updBODl({ imageScale: v }); }}
+                                            className="w-14 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                        </label>
+                                      </div>
+                                      <textarea value={dl.text} onChange={e => updBODl({ text: e.target.value })} onFocus={activatePv}
+                                        placeholder="セリフテキスト" rows={2}
+                                        className="w-full bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none resize-y" />
+                                    </div>
+                                  );
+                                })}
+                                <button onClick={() => updObj({ outroDialogue: [...(selObj.outroDialogue ?? []), { speaker: '', emoji: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] })}
+                                  className="text-[10px] text-yellow-400 active:opacity-60">+ 撃破後セリフ追加</button>
+                              </div>
+                            )}
                           </>
                         )}
                         {/* NPC 設定 */}

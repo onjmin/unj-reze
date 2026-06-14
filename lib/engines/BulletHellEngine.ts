@@ -23,6 +23,8 @@ export class BulletHellEngine extends BaseGameEngine {
 
   protected loop() {
     if (!this.running) return;
+    this.updateCanvasScale();
+    const sc = this.canvasScale;
 
     this.time++;
 
@@ -33,8 +35,8 @@ export class BulletHellEngine extends BaseGameEngine {
     if (this.input.down) dy = 1;
     if (dx && dy) { dx *= 0.707; dy *= 0.707; }
 
-    const nx = this.px + dx * this.speed;
-    const ny = this.py + dy * this.speed;
+    const nx = this.px + dx * this.speed * sc;
+    const ny = this.py + dy * this.speed * sc;
     const col = Math.floor(nx / this.ts);
     const row = Math.floor(ny / this.ts);
     if (this.isWalkable(col, row)) {
@@ -43,7 +45,7 @@ export class BulletHellEngine extends BaseGameEngine {
     }
 
     if (this.input.action1 && this.time % 8 === 0) {
-      this.bullets.push({ x: this.px, y: this.py, vx: 0, vy: -4, life: 120 });
+      this.bullets.push({ x: this.px, y: this.py, vx: 0, vy: -4 * sc, life: 120 });
     }
 
     for (let i = this.bullets.length - 1; i >= 0; i--) {
@@ -62,7 +64,7 @@ export class BulletHellEngine extends BaseGameEngine {
       const cx = centerCol * this.ts;
       const cy = centerRow * this.ts;
       const angle = Math.random() * Math.PI * 2;
-      const spd = 1.5;
+      const spd = 1.5 * sc;
       this.bullets.push({
         x: cx, y: cy,
         vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,

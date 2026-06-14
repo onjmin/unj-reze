@@ -26,6 +26,11 @@ export abstract class BaseGameEngine {
   protected animId = 0;
   protected running = false;
   protected ts = 32;
+  /** キャンバスの初期論理幅（デザイン基準）。init() 時に確定する。 */
+  private _nominalW = 0;
+  /** 現在のキャンバス幅 / デザイン基準幅。動的リサイズに追従する。 */
+  protected canvasScale = 1;
+  private _resizeObserver?: ResizeObserver;
 
   abstract get genre(): string;
 
@@ -36,7 +41,18 @@ export abstract class BaseGameEngine {
     this.scene = opts.manifest.scene;
     this.assets = opts.assets;
     this.ts = (this.scene.tileSize || 16) * 2;
+    this._nominalW = opts.canvas.width;
+    this.canvasScale = 1;
+    this._resizeObserver = new ResizeObserver(() => this.updateCanvasScale());
+    this._resizeObserver.observe(opts.canvas);
     this.onInit();
+  }
+
+  /** canvas.width が変わった際に canvasScale を再計算する。loop の先頭でも呼ぶこと。 */
+  protected updateCanvasScale() {
+    if (this._nominalW > 0 && this.canvas.width > 0) {
+      this.canvasScale = this.canvas.width / this._nominalW;
+    }
   }
 
   protected onInit() { }
@@ -53,6 +69,7 @@ export abstract class BaseGameEngine {
 
   destroy() {
     this.stop();
+    this._resizeObserver?.disconnect();
     this.onDestroy();
   }
 
