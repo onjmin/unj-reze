@@ -12,6 +12,11 @@ export interface SpellCutsceneConfig {
   /** 立ち絵の垂直オフセット px（設計座標、画面中央基準） */
   imageY?: number;
   imageScale?: number;
+  /** 敵側立ち絵 */
+  enemyImageUrl?: string;
+  enemyImageX?: number;
+  enemyImageY?: number;
+  enemyImageScale?: number;
 }
 
 interface Props extends SpellCutsceneConfig {
@@ -22,7 +27,9 @@ const DURATION = 3500;
 
 export default function SpellCutscene({
   mode, charName, spellName, imageUrl,
-  imageX, imageY, imageScale, onComplete,
+  imageX, imageY, imageScale,
+  enemyImageUrl, enemyImageX, enemyImageY, enemyImageScale,
+  onComplete,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [uiScale, setUiScale] = useState(1);
@@ -48,6 +55,9 @@ export default function SpellCutscene({
   const sx = (imageX ?? (isBoss ? 50 : -150)) * uiScale;
   const sy = (imageY ?? (isBoss ? 0 : 80)) * uiScale;
   const sc = (imageScale ?? (isBoss ? 4 : 2.5)) * uiScale;
+  const ex = (enemyImageX ?? 350) * uiScale;
+  const ey = (enemyImageY ?? 100) * uiScale;
+  const ec = (enemyImageScale ?? 0.5) * uiScale;
 
   const css = `
     @keyframes ${id}-dim {
@@ -80,6 +90,12 @@ export default function SpellCutscene({
       90%  { transform: translateX(0); opacity: 1; }
       100% { transform: translateX(-100%); opacity: 0; }
     }
+    @keyframes ${id}-enemy-char {
+      0%   { transform: translate(calc(-50% + ${ex + 80 * uiScale}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 0; filter: brightness(2) drop-shadow(0 0 10px rgba(255,255,255,0.8)); }
+      10%  { transform: translate(calc(-50% + ${ex}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 1; filter: brightness(1); }
+      90%  { transform: translate(calc(-50% + ${ex - 30 * uiScale}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 1; }
+      100% { transform: translate(calc(-50% + ${ex - 80 * uiScale}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 0; }
+    }
   `;
 
   const textShadow = '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000';
@@ -103,6 +119,18 @@ export default function SpellCutscene({
           style={{
             position: 'absolute', top: '50%', left: '50%',
             animation: `${id}-${isBoss ? 'boss' : 'player'}-char ${DURATION}ms cubic-bezier(0.2,0.8,0.2,1) forwards`,
+            imageRendering: 'pixelated',
+          }}
+        />
+      )}
+      {/* 敵側立ち絵 */}
+      {enemyImageUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={enemyImageUrl} alt=""
+          style={{
+            position: 'absolute', top: '50%', left: '50%',
+            animation: `${id}-enemy-char ${DURATION}ms cubic-bezier(0.2,0.8,0.2,1) forwards`,
             imageRendering: 'pixelated',
           }}
         />

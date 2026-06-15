@@ -6,8 +6,8 @@ export const ROWS = 15;
 export const PLAY_W = COLS * TILE_SIZE;
 export const PLAY_H = ROWS * TILE_SIZE;
 
-export type PresetId = 'dq' | 'pokemon' | 'mario' | 'rockman' | 'touhou' | 'zelda';
-export type EngineKind = 'action' | 'rpg' | 'touhou' | 'pkmn';
+export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze';
+export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
 export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard';
@@ -53,6 +53,8 @@ export interface TileDef { name: string; color: string; passable: boolean; speci
 export interface PlayerDef {
   emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number;
   start: { x: number; y: number }; spriteRef?: string; spriteUrl?: string;
+  /** onjReze: 初期ハート数（1ハート=2HP）。デフォルト 3 */
+  hearts?: number;
   /** touhou: 初期ボム数（デフォルト 3） */
   bombCount?: number;
   /** touhou: ボム発動時のスペルカード名 */
@@ -101,6 +103,9 @@ export interface StagePhase {
   scoreBonus?: number;
   /** true のとき、kind=boss でもボス戦BGMに切り替えない（道中ボス用） */
   noBossBgm?: boolean;
+  /** wave 出現スクリプト（touhou・kind=wave）。spawn(敵名, x, y) と wait() で
+   *  雑魚の数・タイミング・配置を記述する（ゼビウス風）。未指定なら全敵を一斉配置。 */
+  spawnScript?: string;
 }
 
 // ── 弾幕スクリプト（SpellBlock） ──────────────────────────────────────
@@ -181,7 +186,7 @@ export interface SpellCardDef {
   miniScript: string;
   /** カットインのキャラクター名 */
   cutinCharName?: string;
-  /** カットインの立ち絵URL */
+  /** カットインの立ち絵URL（プレイヤー側） */
   cutinImageUrl?: string;
   /** 立ち絵水平オフセット px（設計座標、画面中央基準） */
   cutinImageX?: number;
@@ -189,8 +194,25 @@ export interface SpellCardDef {
   cutinImageY?: number;
   /** 立ち絵拡大率 */
   cutinScale?: number;
+  /** カットインの敵側立ち絵URL */
+  cutinEnemyImageUrl?: string;
+  /** 敵側立ち絵水平オフセット px */
+  cutinEnemyImageX?: number;
+  /** 敵側立ち絵垂直オフセット px */
+  cutinEnemyImageY?: number;
+  /** 敵側立ち絵拡大率 */
+  cutinEnemyImageScale?: number;
   /** カットイン前に流す会話（立ち絵＋セリフ、クリックで進む） */
   dialogue?: DialogueLine[];
+}
+
+/** onjReze: 陣地ゲームのルール。陣取り(paper.io 型)とスプラ(塗り)を独立に ON/OFF できる。
+ *  両方 true なら併用、両方 false なら純粋なボムアクションになる。 */
+export interface OnjRezeModes {
+  /** 陣取り：自陣の外でトレイルを引き、自陣に戻ると囲んだ範囲を占領。トレイルを敵に切られると失う。 */
+  territory: boolean;
+  /** スプラ：移動・爆発で地面を自分の色に塗る。塗った面積を占有率としてカウント。 */
+  paint: boolean;
 }
 
 /** スクロール設定。worldCols/worldRows が画面（COLS/ROWS）より大きいとカメラが追従する。
@@ -221,102 +243,23 @@ export interface BattleConfig {
   outroDialogue?: DialogueLine[];
 }
 
-// ── パーティバトル（pkmn エンジン：gomi/games/pokemon.html 相当） ───────────
-// 6体から teamSize 体を選んで対戦するタイプ相性バトル。ポケモン固有のデータ
-// （図鑑・技・タイプ相性表）はプリセット側（pokemon.ts）に PartyBattleConfig として持たせ、
-// エンジン（PokemonBattle.tsx）はそれを汎用的に解釈する。
-
-/** 技カテゴリ：物理 / 特殊 / 変化 */
-export type PkmnMoveCat = 'ph' | 'sp' | 'st';
-
-/** 技の追加効果。 */
-export interface PkmnMoveEffect {
-  /** 命中時にこの % で status を付与（2次効果）。 */
-  chance?: number;
-  /** 付与する状態異常キー（statuses[].key）。 */
-  status?: string;
-  /** 変化技：必中で status を付与する。 */
-  always?: boolean;
-  /** 与ダメージの 1/recoil を反動で受ける。 */
-  recoil?: number;
-}
-
-/** 技定義。 */
-export interface PkmnMoveDef {
-  /** 一意キー（pokedex の moves から参照）。 */
-  id: string;
-  name: string;
-  /** タイプ（typeChart / typeColors のキー）。 */
-  type: string;
-  cat: PkmnMoveCat;
-  power: number;
-  /** 命中率（100=必中）。 */
-  acc: number;
-  pp: number;
-  effect?: PkmnMoveEffect | null;
-}
-
-/** 図鑑エントリ（種族データ）。 */
-export interface PkmnSpeciesDef {
-  id: number;
-  name: string;
-  /** 表示スプライト（emoji）。 */
-  sprite: string;
-  types: string[];
-  /** 種族値。 */
-  hp: number; atk: number; def: number; spa: number; spd: number; spe: number;
-  /** 覚えている技（PkmnMoveDef.id、最大4）。 */
-  moves: string[];
-  desc?: string;
-}
-
-/** 状態異常定義。 */
-export interface PkmnStatusDef {
-  /** キー（move.effect.status から参照）。 */
-  key: string;
-  /** 表示ラベル（例 '🔥やけど'）。 */
-  label: string;
-  /** バッジ背景色。 */
-  badgeColor: string;
-}
-
-/** パーティバトル設定。pokemon.ts に図鑑・技・タイプ相性を持たせる。 */
-export interface PartyBattleConfig {
-  /** タイトルロゴ（改行可）。 */
-  title: string;
-  subtitle?: string;
-  /** 選出数（pokemon.html=3）。 */
-  teamSize: number;
-  /** 固定レベル（pokemon.html=50）。 */
-  level: number;
-  /** タイプ相性表 attackType -> (defType -> 倍率)。未掲載は等倍(1)。 */
-  typeChart: Record<string, Record<string, number>>;
-  /** タイプ別の色（技ボタン/バッジ）。 */
-  typeColors: Record<string, string>;
-  /** タイプの表示名（省略時はキーの大文字）。 */
-  typeLabels?: Record<string, string>;
-  /** 全技定義。 */
-  moves: PkmnMoveDef[];
-  /** 図鑑（選択候補）。 */
-  pokedex: PkmnSpeciesDef[];
-  /** 状態異常定義。 */
-  statuses: PkmnStatusDef[];
-}
 
 export interface PresetData {
   id: PresetId; name: string; engine: EngineKind; gravity: number; friction: number;
   player: PlayerDef; tiles: Record<number, TileDef>; map: number[][];
   objects: ObjectDef[]; bgm?: BgmState; battleBgm?: BgmState; bossBgm?: BgmState; sfx: Partial<Record<SfxTrigger, SfxRef>>;
+  /** マップ背景画像（静止画/GIF）。参照キーと解決済みURL。 */
+  mapBgRef?: string; mapBgUrl?: string;
   /** 未指定なら 1 画面固定（worldCols = COLS）。 */
   scroll?: ScrollConfig;
   /** 指定すると rpg エンジンで敵接触時にターン制戦闘になる。 */
   battle?: BattleConfig;
-  /** パーティバトル設定（pkmn エンジン）。指定すると 6体選出→タイプ相性対戦になる。 */
-  partyBattle?: PartyBattleConfig;
   switches?: SwitchDef[];
   items?: ItemDef[];
   /** フェーズ定義（touhou エンジン）。定義するとフェーズ順に進行する。 */
   phases?: StagePhase[];
+  /** onjReze エンジン：陣取り／スプラ塗りの有効設定。未指定なら両方 OFF。 */
+  onjReze?: OnjRezeModes;
 }
 
 export const uid = () => `o${Math.random().toString(36).slice(2, 9)}`;

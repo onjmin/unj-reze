@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Play, Pause } from 'lucide-react';
+import { X, Play, Pause, ArrowUp, ArrowDown, ArrowLeft, ArrowRight } from 'lucide-react';
 import { EngineRunner } from '@/lib/EngineRunner';
 import { MockAssetProvider } from '@/lib/AssetProvider';
 import { GAME_PRESETS, findPreset } from '@/lib/game-presets';
@@ -151,7 +151,7 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
               onMouseLeave={() => dpadUp('ArrowUp')}
               className="w-10 h-10 bg-gray-100/10 rounded-lg border border-gray-800 flex items-center justify-center text-white text-xs active:bg-gray-100/20 select-none"
             >
-              ▲
+              <ArrowUp size={16} />
             </button>
             <div />
             <button
@@ -163,7 +163,7 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
               onMouseLeave={() => dpadUp('ArrowLeft')}
               className="w-10 h-10 bg-gray-100/10 rounded-lg border border-gray-800 flex items-center justify-center text-white text-xs active:bg-gray-100/20 select-none"
             >
-              ◀
+              <ArrowLeft size={16} />
             </button>
             <button
               onTouchStart={(e) => { e.preventDefault(); dpadDown('ArrowDown'); }}
@@ -174,7 +174,7 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
               onMouseLeave={() => dpadUp('ArrowDown')}
               className="w-10 h-10 bg-gray-100/10 rounded-lg border border-gray-800 flex items-center justify-center text-white text-xs active:bg-gray-100/20 select-none"
             >
-              ▼
+              <ArrowDown size={16} />
             </button>
             <button
               onTouchStart={(e) => { e.preventDefault(); dpadDown('ArrowRight'); }}
@@ -185,7 +185,7 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
               onMouseLeave={() => dpadUp('ArrowRight')}
               className="w-10 h-10 bg-gray-100/10 rounded-lg border border-gray-800 flex items-center justify-center text-white text-xs active:bg-gray-100/20 select-none"
             >
-              ▶
+              <ArrowRight size={16} />
             </button>
           </div>
           <span className="text-[10px] text-gray-600 select-none">矢印/WASD/スペース</span>

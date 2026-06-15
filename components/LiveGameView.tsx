@@ -21,7 +21,7 @@ interface Props {
   sessionId: string;
 }
 
-const PRESET_EMOJI: Record<string, string> = { dq: '🐉', mario: '🍄', touhou: '🎀', pokemon: '⚡', rockman: '🤖' };
+const PRESET_EMOJI: Record<string, string> = { dq: '🐉', mario: '🍄', touhou: '🎀', rockman: '🤖', onjReze: '💣' };
 
 export default function LiveGameView({ userId, sessionId }: Props) {
   const [info, setInfo] = useState<LiveInfo | null>(null);
