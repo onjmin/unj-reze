@@ -186,7 +186,7 @@ export interface SpellCardDef {
   miniScript: string;
   /** カットインのキャラクター名 */
   cutinCharName?: string;
-  /** カットインの立ち絵URL（プレイヤー側） */
+  /** カットインの立ち絵URL */
   cutinImageUrl?: string;
   /** 立ち絵水平オフセット px（設計座標、画面中央基準） */
   cutinImageX?: number;
@@ -194,14 +194,6 @@ export interface SpellCardDef {
   cutinImageY?: number;
   /** 立ち絵拡大率 */
   cutinScale?: number;
-  /** カットインの敵側立ち絵URL */
-  cutinEnemyImageUrl?: string;
-  /** 敵側立ち絵水平オフセット px */
-  cutinEnemyImageX?: number;
-  /** 敵側立ち絵垂直オフセット px */
-  cutinEnemyImageY?: number;
-  /** 敵側立ち絵拡大率 */
-  cutinEnemyImageScale?: number;
   /** カットイン前に流す会話（立ち絵＋セリフ、クリックで進む） */
   dialogue?: DialogueLine[];
 }
@@ -219,6 +211,34 @@ export interface OnjRezeModes {
  *  action は横（worldCols）、rpg は上下左右（worldCols+worldRows）に使う。
  *  プリセット固有パラメータはこの形で各ファイルに記述し、エディタは該当時だけ UI を出す。 */
 export interface ScrollConfig { worldCols: number; worldRows?: number; }
+
+// ── タイトル画面／エンディング画面 ──────────────────────────────────────
+/** タイトル画面のメニュー項目。
+ *  newGame=はじめから、continue=つづきから（現状はスタブ＝はじめからと同じ挙動）、
+ *  nameInput=名前入力欄（入力した名前をゲーム内で使用）。 */
+export type ScreenMenuKind = 'newGame' | 'continue' | 'nameInput';
+export interface ScreenMenuItem { kind: ScreenMenuKind; label: string; }
+
+/** タイトル画面設定（東方以外のエンジンで使用）。enabled=true でプレイ開始前に表示。 */
+export interface TitleScreenConfig {
+  enabled: boolean;
+  heading: string;        // 大見出し（ゲームタイトル）
+  subtitle?: string;      // 小見出し
+  bgRef?: string; bgUrl?: string;  // 背景画像（asset-ref / 解決済みURL）
+  bgmRef?: string;        // BGM 参照
+  textColor?: string;     // 文字色
+  menu: ScreenMenuItem[]; // 表示するメニュー項目（順番通り）
+}
+
+/** エンディング画面設定。enabled=true でクリア時に表示。 */
+export interface EndingScreenConfig {
+  enabled: boolean;
+  heading: string;        // 大見出し（例: THE END）
+  message?: string;       // 本文
+  bgRef?: string; bgUrl?: string;
+  bgmRef?: string;
+  textColor?: string;
+}
 
 /** ターン制戦闘の技/呪文。heal=true のとき power 分だけ自分のHPを回復。 */
 export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; }
@@ -260,7 +280,33 @@ export interface PresetData {
   phases?: StagePhase[];
   /** onjReze エンジン：陣取り／スプラ塗りの有効設定。未指定なら両方 OFF。 */
   onjReze?: OnjRezeModes;
+  /** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
+  titleScreen?: TitleScreenConfig;
+  /** エンディング画面（東方以外）。enabled=true でクリア時に表示。 */
+  ending?: EndingScreenConfig;
 }
+
+/** タイトル画面のデフォルト設定（エディタで「有効化」したとき生成）。 */
+export const defaultTitleScreen = (name: string): TitleScreenConfig => ({
+  enabled: true,
+  heading: name,
+  subtitle: '',
+  textColor: '#ffffff',
+  menu: [{ kind: 'newGame', label: 'はじめから' }],
+});
+
+/** エンディング画面のデフォルト設定。 */
+export const defaultEndingScreen = (): EndingScreenConfig => ({
+  enabled: true,
+  heading: 'THE END',
+  message: 'クリアおめでとう！',
+  textColor: '#ffffff',
+});
+
+/** メニュー項目の種別ラベル。 */
+export const SCREEN_MENU_LABELS: Record<ScreenMenuKind, string> = {
+  newGame: 'はじめから', continue: 'つづきから', nameInput: '名前入力欄',
+};
 
 export const uid = () => `o${Math.random().toString(36).slice(2, 9)}`;
 

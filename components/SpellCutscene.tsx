@@ -7,16 +7,9 @@ export interface SpellCutsceneConfig {
   charName: string;
   spellName: string;
   imageUrl?: string;
-  /** 立ち絵の水平オフセット px（設計座標、画面中央基準） */
   imageX?: number;
-  /** 立ち絵の垂直オフセット px（設計座標、画面中央基準） */
   imageY?: number;
   imageScale?: number;
-  /** 敵側立ち絵 */
-  enemyImageUrl?: string;
-  enemyImageX?: number;
-  enemyImageY?: number;
-  enemyImageScale?: number;
 }
 
 interface Props extends SpellCutsceneConfig {
@@ -28,7 +21,6 @@ const DURATION = 3500;
 export default function SpellCutscene({
   mode, charName, spellName, imageUrl,
   imageX, imageY, imageScale,
-  enemyImageUrl, enemyImageX, enemyImageY, enemyImageScale,
   onComplete,
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -52,12 +44,9 @@ export default function SpellCutscene({
   }, [onComplete]);
 
   const isBoss = mode === 'boss';
-  const sx = (imageX ?? (isBoss ? 50 : -150)) * uiScale;
-  const sy = (imageY ?? (isBoss ? 0 : 80)) * uiScale;
-  const sc = (imageScale ?? (isBoss ? 4 : 2.5)) * uiScale;
-  const ex = (enemyImageX ?? 350) * uiScale;
-  const ey = (enemyImageY ?? 100) * uiScale;
-  const ec = (enemyImageScale ?? 0.5) * uiScale;
+  const sx = (imageX ?? 0) * uiScale;
+  const sy = (imageY ?? 0) * uiScale;
+  const sc = (imageScale ?? 1) * uiScale;
 
   const css = `
     @keyframes ${id}-dim {
@@ -67,16 +56,16 @@ export default function SpellCutscene({
       100% { opacity: 0 }
     }
     @keyframes ${id}-boss-char {
-      0%   { transform: translate(calc(-50% + ${sx - 100 * uiScale}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 0; filter: brightness(2) drop-shadow(0 0 10px rgba(255,255,255,0.8)); }
+      0%   { transform: translate(calc(-50% + ${sx - 80 * uiScale}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 0; filter: brightness(2) drop-shadow(0 0 10px rgba(255,255,255,0.8)); }
       10%  { transform: translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 1; filter: brightness(1); }
-      90%  { transform: translate(calc(-50% + ${sx + 50 * uiScale}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 1; }
-      100% { transform: translate(calc(-50% + ${sx + 100 * uiScale}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 0; }
+      90%  { transform: translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 1; }
+      100% { transform: translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 0; }
     }
     @keyframes ${id}-player-char {
       0%   { transform: translate(calc(-50% + ${sx - 50 * uiScale}px), calc(-50% + ${sy + 30 * uiScale}px)) scale(${sc}); opacity: 0; filter: brightness(2); }
       10%  { transform: translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 1; filter: brightness(1); }
-      90%  { transform: translate(calc(-50% + ${sx + 20 * uiScale}px), calc(-50% + ${sy - 10 * uiScale}px)) scale(${sc}); opacity: 1; }
-      100% { transform: translate(calc(-50% + ${sx + 50 * uiScale}px), calc(-50% + ${sy - 30 * uiScale}px)) scale(${sc}); opacity: 0; }
+      90%  { transform: translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 1; }
+      100% { transform: translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(${sc}); opacity: 0; }
     }
     @keyframes ${id}-boss-banner {
       0%   { transform: translateX(100%) skewX(-15deg); opacity: 0; }
@@ -89,12 +78,6 @@ export default function SpellCutscene({
       10%  { transform: translateX(0); opacity: 1; }
       90%  { transform: translateX(0); opacity: 1; }
       100% { transform: translateX(-100%); opacity: 0; }
-    }
-    @keyframes ${id}-enemy-char {
-      0%   { transform: translate(calc(-50% + ${ex + 80 * uiScale}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 0; filter: brightness(2) drop-shadow(0 0 10px rgba(255,255,255,0.8)); }
-      10%  { transform: translate(calc(-50% + ${ex}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 1; filter: brightness(1); }
-      90%  { transform: translate(calc(-50% + ${ex - 30 * uiScale}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 1; }
-      100% { transform: translate(calc(-50% + ${ex - 80 * uiScale}px), calc(-50% + ${ey}px)) scale(${ec}); opacity: 0; }
     }
   `;
 
@@ -123,19 +106,6 @@ export default function SpellCutscene({
           }}
         />
       )}
-      {/* 敵側立ち絵 */}
-      {enemyImageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={enemyImageUrl} alt=""
-          style={{
-            position: 'absolute', top: '50%', left: '50%',
-            animation: `${id}-enemy-char ${DURATION}ms cubic-bezier(0.2,0.8,0.2,1) forwards`,
-            imageRendering: 'pixelated',
-          }}
-        />
-      )}
-
       {/* スペルカード宣言帯 */}
       {isBoss ? (
         <div style={{

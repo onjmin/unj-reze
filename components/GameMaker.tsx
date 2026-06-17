@@ -20,6 +20,8 @@ import {
   type ObjType, type WarpTarget,
   type BattleMove, type SwitchDef, type ItemDef,
   type EventCommand, type EventPage, type EventCondition,
+  type TitleScreenConfig, type EndingScreenConfig, type ScreenMenuKind,
+  defaultTitleScreen, defaultEndingScreen, SCREEN_MENU_LABELS,
 } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
@@ -29,7 +31,7 @@ import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 
 export type { PresetId };
 
-type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound';
+type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound' | 'screen';
 
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
@@ -49,6 +51,8 @@ export interface GameManifestDraft {
   items?: ItemDef[];
   phases?: StagePhase[];
   onjReze?: { territory: boolean; paint: boolean };
+  titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
+  ending?: Omit<EndingScreenConfig, 'bgUrl'>;
 }
 
 const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
@@ -61,15 +65,23 @@ const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: '�
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
-/** ワールド幅（列数）を変更する。各行を拡縮し、scroll を更新。COLS と同じなら scroll を外す。 */
-const resizeWorld = (d: PresetData, cols: number): PresetData => {
+/** 現在のワールド幅／高さ（タイル数）。scroll 優先、無ければマップ実寸。 */
+const curWorldCols = (d: PresetData): number => d.scroll?.worldCols ?? d.map[0]?.length ?? COLS;
+const curWorldRows = (d: PresetData): number => d.scroll?.worldRows ?? d.map.length ?? ROWS;
+
+/** ワールドサイズ（幅・高さ＝タイル数）を変更する。マップを拡縮し、scroll を更新。
+ *  画面サイズ（COLS×ROWS）と同じなら scroll を外して 1 画面固定に戻す。 */
+const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData => {
   const w = Math.max(COLS, Math.round(cols));
-  const map = d.map.map(row => {
+  const h = Math.max(ROWS, Math.round(rows));
+  let map = d.map.map(row => {
     const next = row.slice(0, w);
     while (next.length < w) next.push(0);
     return next;
   });
-  return { ...d, map, scroll: w > COLS ? { worldCols: w } : undefined };
+  map = map.slice(0, h);
+  while (map.length < h) map.push(new Array(w).fill(0));
+  return { ...d, map, scroll: (w > COLS || h > ROWS) ? { worldCols: w, worldRows: h } : undefined };
 };
 
 function playSfx(s?: SfxRef) {
@@ -508,15 +520,27 @@ interface GameMakerProps {
 
 type PickTarget =
   | { t: 'player' } | { t: 'bgm' } | { t: 'battleBgm' } | { t: 'bossBgm' } | { t: 'tile'; id: number }
-  | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' } | { t: 'selObjSprite' } | { t: 'mapBg' };
+  | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' } | { t: 'selObjSprite' } | { t: 'mapBg' }
+  | { t: 'titleBg' } | { t: 'endingBg' } | { t: 'titleBgm' } | { t: 'endingBgm' };
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [presetId, setPresetId] = useState<PresetId>('dq');
-  const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.dq));
-  const [title, setTitle] = useState(PRESETS.dq.name);
+  const [presetId, setPresetId] = useState<PresetId>('onjReze');
+  const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.onjReze));
+  const [title, setTitle] = useState(PRESETS.onjReze.name);
   const [isPlaying, setIsPlaying] = useState(false);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
+  /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
+  const [mapTool] = useState<'tile'>('tile');
+  const isDraggingStartRef = useRef(false);
+  // ── タイトル／エンディング画面ランタイム ──
+  const [showTitle, setShowTitle] = useState(false);
+  const [showEnding, setShowEnding] = useState(false);
+  const [playerName, setPlayerName] = useState('');
+  const playerNameRef = useRef('');
+  playerNameRef.current = playerName;
+  const endingRef = useRef<EndingScreenConfig | undefined>(undefined);
+  endingRef.current = gameData.ending;
   const [selectedTileId, setSelectedTileId] = useState(1);
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
@@ -674,13 +698,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     key: number; mode: 'boss' | 'player';
     charName: string; spellName: string;
     imageUrl?: string; imageX?: number; imageY?: number; imageScale?: number;
-    enemyImageUrl?: string; enemyImageX?: number; enemyImageY?: number; enemyImageScale?: number;
   } | null>(null);
   const [spellCutinPreview, setSpellCutinPreview] = useState<{
     key: number; mode: 'boss' | 'player';
     charName: string; spellName: string;
     imageUrl?: string; imageX?: number; imageY?: number; imageScale?: number;
-    enemyImageUrl?: string; enemyImageX?: number; enemyImageY?: number; enemyImageScale?: number;
   } | null>(null);
   /** 次に開始するフェーズ（dialogue 完了後に spawn する）。-1=クリア（outro後）*/
   const pendingPhaseRef = useRef<number | null>(null);
@@ -772,7 +794,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           pendingPhaseRef.current = -1;
           setActiveDialogue(outro);
         } else {
-          playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false));
+          playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); });
         }
       }
     }, result === 'win' ? 1100 : 500);
@@ -803,7 +825,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const b = battleRef.current; const pr = progressRef.current;
     const dmg = calcDmg(pr.atk, b.enemyDef);
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
-    appendLog(`${gameData.battle?.playerName ?? '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
+    appendLog(`${playerNameRef.current || gameData.battle?.playerName || '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     setTimeout(enemyTurn, 750);
   };
@@ -873,7 +895,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // pendingPhaseRef は -1 のまま残す（null に戻すとゲームループが再トリガーするため）
     if (pending === -1) {
       playSfx(sfxRef.current.clear);
-      showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false));
+      showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); });
       return;
     }
     pendingPhaseRef.current = null;
@@ -1061,6 +1083,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     gameData.objects.forEach(o => ensureImage(o.spriteUrl));
     ensureImage(objTemplate.spriteUrl);
     ensureImage(gameData.mapBgUrl);
+    ensureImage(gameData.titleScreen?.bgUrl);
+    ensureImage(gameData.ending?.bgUrl);
   }, [gameData, objTemplate, ensureImage]);
 
   const resetGame = useCallback((id: PresetId) => {
@@ -1079,6 +1103,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - PLAY_W, data.player.start.x + data.player.w / 2 - PLAY_W / 2)));
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - PLAY_H, data.player.start.y + data.player.h / 2 - PLAY_H / 2)));
     setIsPlaying(false); setSelectedObjId(null);
+    setShowTitle(false); setShowEnding(false);
   }, []);
 
   const restart = useCallback(() => {
@@ -1088,6 +1113,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
     actionDirRef.current = 1; actionShootCoolRef.current = 0;
     setIsPlaying(false); setSelectedObjId(null);
+    setShowEnding(false);
   }, [gameData]);
 
   useEffect(() => {
@@ -1110,6 +1136,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         scroll: initialManifest.scroll ?? base.scroll,
         phases: initialManifest.phases ?? base.phases,
         onjReze: initialManifest.onjReze ?? base.onjReze,
+        titleScreen: initialManifest.titleScreen ?? base.titleScreen,
+        ending: initialManifest.ending ?? base.ending,
         battle: base.battle,
         bgm: initialManifest.bgm && initialManifest.bgm !== 'none' ? { ref: initialManifest.bgm } : undefined,
         battleBgm: initialManifest.battleBgm ? { ref: initialManifest.battleBgm } : undefined,
@@ -1126,9 +1154,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const eng = engineRef.current;
       eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
       eng.map = JSON.parse(JSON.stringify(data.map));
-      if (playOnly) setIsPlaying(true);
+      if (playOnly) {
+        if (data.titleScreen?.enabled) setShowTitle(true);
+        else setIsPlaying(true);
+      }
     } else {
-      resetGame('dq');
+      resetGame('onjReze');
     }
   }, [initialManifest, playOnly, resetGame]);
 
@@ -1147,6 +1178,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     return () => bgmManager.stop();
   }, [isPlaying, gameData.bgm]);
+
+  // タイトル／エンディング画面の BGM（プレイ中の BGM とは独立）
+  useEffect(() => {
+    const ref = showTitle ? gameData.titleScreen?.bgmRef : showEnding ? gameData.ending?.bgmRef : undefined;
+    if (ref) {
+      const asset = bgmRefToAsset(ref);
+      if (asset) bgmManager.play({ bgm: asset, tileset: {} } as never);
+      return () => bgmManager.stop();
+    }
+  }, [showTitle, showEnding, gameData.titleScreen?.bgmRef, gameData.ending?.bgmRef]);
 
   // Spawn entities on play
   useEffect(() => {
@@ -1303,12 +1344,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
     };
 
-    const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => setIsPlaying(false)); };
-    const lose = (msg: string) => { playSfx(sfxRef.current.damage); showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
+    const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); }); };
+    const lose = (msg: string) => { showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
 
     // 残機制：touhou 専用の死亡ハンドラ
     const handlePlayerDeath = () => {
       const eng = engineRef.current;
+      playSfx(sfxRef.current.damage);
       isPlayerDeadRef.current = true;
       eng.bullets = []; // 自機弾を即消去
       livesRef.current--;
@@ -1316,13 +1358,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (livesRef.current <= 0) {
         lose('ゲームオーバー…');
       } else {
-        // 1.5 秒後に復帰
+          // 1.5 秒後に復帰
         setTimeout(() => {
           const p2 = engineRef.current.player;
           p2.x = gameData.player.start.x; p2.y = gameData.player.start.y;
           p2.vx = 0; p2.vy = 0;
           engineRef.current.bullets = [];
-          engineRef.current.enemyBullets = [];
           invulnRef.current = 180; // 3 秒間点滅無敵
           isPlayerDeadRef.current = false;
           forceHud(n => n + 1);
@@ -1591,8 +1632,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               setSpellCutin({ key: k, mode: 'player',
                 charName: pData.bombCutinCharName ?? '魔理沙',
                 spellName: pData.bombSpellName ?? '恋符「マスタースパーク」',
-                imageUrl: pData.bombCutinImageUrl,
-                imageX: pData.bombCutinImageX, imageY: pData.bombCutinImageY, imageScale: pData.bombCutinScale,
+                imageUrl: pData.bombCutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png',
+                imageX: pData.bombCutinImageX ?? 0, imageY: pData.bombCutinImageY ?? -50, imageScale: pData.bombCutinScale ?? 1,
               });
             }
             prevBombRef.current = isBombKey;
@@ -1764,8 +1805,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     spellName: card.name,
                     imageUrl: card.cutinImageUrl, imageX: card.cutinImageX,
                     imageY: card.cutinImageY, imageScale: card.cutinScale,
-                    enemyImageUrl: card.cutinEnemyImageUrl, enemyImageX: card.cutinEnemyImageX,
-                    enemyImageY: card.cutinEnemyImageY, enemyImageScale: card.cutinEnemyImageScale,
                   });
                   if (card.miniScript) {
                     const capturedE = e, capturedEng = eng, capturedScript = card.miniScript;
@@ -1833,7 +1872,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   }
                   break;
                 }
-                lose('ミス！'); dead = true;
+                playSfx(sfxRef.current.damage); lose('ミス！'); dead = true;
               }
               break;
             }
@@ -1877,7 +1916,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const idx = eng.enemyBullets.indexOf(eb);
                 if (idx >= 0) eng.enemyBullets.splice(idx, 1);
                 progressRef.current.hp -= 6; invulnRef.current = 45; forceHud(n => n + 1);
-                if (progressRef.current.hp <= 0) { lose('やられた…'); dead = true; break; }
+                if (progressRef.current.hp <= 0) { playSfx(sfxRef.current.damage); lose('やられた…'); dead = true; break; }
                 continue;
               }
               if (gameData.engine === 'touhou') { handlePlayerDeath(); dead = true; break; }
@@ -2175,6 +2214,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             ctx.fillRect(o.col * TILE_SIZE, o.row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           }
         }
+        // プレイヤー初期位置を常時表示（🏁ドラッグで移動可能）
+        if (editorTab === 'map') {
+          const sx = gameData.player.start.x, sy = gameData.player.start.y;
+          ctx.strokeStyle = 'rgba(80,255,140,0.95)'; ctx.lineWidth = 2;
+          ctx.strokeRect(sx, sy, gameData.player.w, gameData.player.h);
+          ctx.font = '14px Arial'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+          ctx.fillText('🏁', sx, sy);
+        }
       }
 
       // ghost players（他プレイヤー・当たり判定なし）
@@ -2388,7 +2435,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(6, 6, 150, 50);
         ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(6, 6, 150, 50);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-        ctx.fillText(`Lv ${pr.level}  ${gameData.battle.playerName}`, 12, 22);
+        ctx.fillText(`Lv ${pr.level}  ${playerNameRef.current || gameData.battle.playerName}`, 12, 22);
         ctx.fillText(`HP ${Math.max(0, pr.hp)}/${pr.maxHp}`, 12, 38);
         ctx.fillStyle = '#7fd0ff'; ctx.fillText(`MP ${pr.mp}/${pr.maxMp}`, 12, 52);
       }
@@ -2464,6 +2511,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (col < 0 || col >= worldCols || row < 0 || row >= worldRows) return;
 
     if (editorTab === 'map') {
+      // 🏁マーカー付近クリック → 初期位置ドラッグ開始
+      const startCol = Math.floor(gameData.player.start.x / TILE_SIZE);
+      const startRow = Math.floor(gameData.player.start.y / TILE_SIZE);
+      const isPointerDown = ('buttons' in e ? (e as React.MouseEvent).buttons === 1 : true);
+      if (isPointerDown && !isDraggingStartRef.current && Math.abs(col - startCol) <= 1 && Math.abs(row - startRow) <= 1) {
+        isDraggingStartRef.current = true;
+      }
+      if (isDraggingStartRef.current) {
+        const sx = col * TILE_SIZE, sy = row * TILE_SIZE;
+        setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
+        engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
+        setEditScroll(Math.max(0, Math.min(worldCols * TILE_SIZE - PLAY_W, sx + gameData.player.w / 2 - PLAY_W / 2)));
+        setEditScrollY(Math.max(0, Math.min(worldRows * TILE_SIZE - PLAY_H, sy + gameData.player.h / 2 - PLAY_H / 2)));
+        return;
+      }
       setGameData(prev => {
         const newMap = prev.map.map(r => [...r]);
         newMap[row][col] = selectedTileId;
@@ -2501,6 +2563,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     else if (target.t === 'bossBgm') setGameData(p => ({ ...p, bossBgm: bgmLike() }));
     else if (target.t === 'sfx') setGameData(p => ({ ...p, sfx: { ...p.sfx, [target.trigger]: bgmLike() } }));
     else if (target.t === 'tile') setGameData(p => ({ ...p, tiles: { ...p.tiles, [target.id]: { ...p.tiles[target.id], imageRef: res.ref, imageUrl: res.url } } }));
+    else if (target.t === 'titleBg') { ensureImage(res.url); setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, bgRef: res.ref, bgUrl: res.url } }) : p); }
+    else if (target.t === 'endingBg') { ensureImage(res.url); setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, bgRef: res.ref, bgUrl: res.url } }) : p); }
+    else if (target.t === 'titleBgm') setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, bgmRef: bgmLike().ref } }) : p);
+    else if (target.t === 'endingBgm') setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, bgmRef: bgmLike().ref } }) : p);
   };
 
   const addTile = () => {
@@ -2552,6 +2618,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     items: gameData.items,
     phases: gameData.phases,
     onjReze: gameData.onjReze,
+    titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
+    ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
   });
 
   const handleSave = () => onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
@@ -2591,6 +2659,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           scroll: manifest.scroll ?? base.scroll,
           phases: manifest.phases ?? base.phases,
           onjReze: manifest.onjReze ?? base.onjReze,
+          titleScreen: manifest.titleScreen ?? base.titleScreen,
+          ending: manifest.ending ?? base.ending,
           battle: base.battle,
           bgm: manifest.bgm && manifest.bgm !== 'none' ? { ref: manifest.bgm } : undefined,
           battleBgm: manifest.battleBgm ? { ref: manifest.battleBgm } : undefined,
@@ -2620,6 +2690,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const delObj = () => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjId) })); setSelectedObjId(null); };
   const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
   const placeObj = () => { const p = engineRef.current.player; setGameData(prev => ({ ...prev, objects: [...prev.objects, { ...objTemplate, id: uid(), col: Math.floor((p.x + 12) / TILE_SIZE), row: Math.floor((p.y + 12) / TILE_SIZE) }] })); };
+
+  // ── タイトル／エンディング画面の更新ヘルパ ──
+  const updTitle = (patch: Partial<TitleScreenConfig>) => setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, ...patch } }) : p);
+  const updEnding = (patch: Partial<EndingScreenConfig>) => setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, ...patch } }) : p);
+  const addMenuItem = (kind: ScreenMenuKind) => setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, menu: [...p.titleScreen.menu, { kind, label: SCREEN_MENU_LABELS[kind] }] } }) : p);
+  /** タイトルメニュー項目を選んだときの挙動。newGame/continue=プレイ開始（continue は現状スタブ）。 */
+  const startFromTitle = () => { setShowTitle(false); setIsPlaying(true); };
 
   return (
     <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}>
@@ -2696,8 +2773,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
             if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - PLAY_W), pp.x + pw / 2 - PLAY_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - PLAY_H), pp.y + ph / 2 - PLAY_H / 2))); }
-            if (!isPlaying) setActivePreviewKey(null);
-            setIsPlaying(p => !p);
+            if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
+            setActivePreviewKey(null);
+            if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
+            setIsPlaying(true);
           }}
             className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
             {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
@@ -2721,8 +2800,60 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               style={{ imageRendering: 'pixelated' }}
               onMouseDown={handleCanvasAction}
               onMouseMove={e => editorTab !== 'object' && (e.buttons & 1) === 1 && handleCanvasAction(e)}
+              onMouseUp={() => { isDraggingStartRef.current = false; }}
               onTouchStart={handleCanvasAction}
-              onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)} />
+              onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
+              onTouchEnd={() => { isDraggingStartRef.current = false; }} />
+
+            {/* ── タイトル画面オーバーレイ ── */}
+            {showTitle && gameData.titleScreen && (
+              <div className="absolute inset-0 z-40 overflow-hidden" style={{ background: 'linear-gradient(160deg,#0b1020,#1a1030)' }}>
+                {gameData.titleScreen.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ (
+                  <img src={gameData.titleScreen.bgUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                )}
+                {!embedded && (
+                  <button onClick={() => setShowTitle(false)} className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-black/50 text-white/80 hover:text-white"><X size={16} /></button>
+                )}
+                <div className="relative z-10 w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center select-none"
+                  style={{ color: gameData.titleScreen.textColor ?? '#ffffff' }}>
+                  <h1 className="text-2xl sm:text-4xl font-black" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.heading}</h1>
+                  {gameData.titleScreen.subtitle && <p className="text-sm opacity-90" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.subtitle}</p>}
+                  {playerName && <p className="text-xs opacity-80" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>ようこそ {playerName} さん</p>}
+                  <div className="flex flex-col gap-2 mt-2 w-52 max-w-full">
+                    {gameData.titleScreen.menu.map((mi, i) => mi.kind === 'nameInput' ? (
+                      <input key={i} value={playerName} onChange={e => setPlayerName(e.target.value.slice(0, 16))} placeholder={mi.label}
+                        className="px-3 py-2 rounded-lg bg-black/45 border border-white/30 text-white text-sm text-center outline-none placeholder-white/50" />
+                    ) : (
+                      <button key={i} onClick={startFromTitle}
+                        className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">{mi.label}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── エンディング画面オーバーレイ ── */}
+            {showEnding && gameData.ending && (
+              <div className="absolute inset-0 z-40 overflow-hidden" style={{ background: 'linear-gradient(160deg,#100b1a,#05080f)' }}>
+                {gameData.ending.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ (
+                  <img src={gameData.ending.bgUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                )}
+                <div className="relative z-10 w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center select-none"
+                  style={{ color: gameData.ending.textColor ?? '#ffffff' }}>
+                  <h1 className="text-2xl sm:text-4xl font-black" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.ending.heading}</h1>
+                  {gameData.ending.message && <p className="text-sm opacity-90 whitespace-pre-wrap" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.ending.message}</p>}
+                  <div className="flex gap-2 mt-3">
+                    {gameData.titleScreen && (
+                      <button onClick={() => { setShowEnding(false); setShowTitle(true); }}
+                        className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">タイトルへ</button>
+                    )}
+                    <button onClick={() => setShowEnding(false)}
+                      className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">とじる</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ニコニコ弾幕レイヤー */}
             {danmakuItems.length > 0 && (
               <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -2778,10 +2909,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 imageX={spellCutin.imageX}
                 imageY={spellCutin.imageY}
                 imageScale={spellCutin.imageScale}
-                enemyImageUrl={spellCutin.enemyImageUrl}
-                enemyImageX={spellCutin.enemyImageX}
-                enemyImageY={spellCutin.enemyImageY}
-                enemyImageScale={spellCutin.enemyImageScale}
                 onComplete={() => setSpellCutin(null)}
               />
             )}
@@ -2821,10 +2948,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 imageX={spellCutinPreview.imageX}
                 imageY={spellCutinPreview.imageY}
                 imageScale={spellCutinPreview.imageScale}
-                enemyImageUrl={spellCutinPreview.enemyImageUrl}
-                enemyImageX={spellCutinPreview.enemyImageX}
-                enemyImageY={spellCutinPreview.enemyImageY}
-                enemyImageScale={spellCutinPreview.enemyImageScale}
                 onComplete={() => setSpellCutinPreview(null)}
               />
             )}
@@ -3016,6 +3139,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               <div className="flex border-b border-gray-800 shrink-0 overflow-x-auto">
                 {([
                   ['map', 'マップ'], ...(gameData.engine !== 'touhou' ? [['object', 'オブジェクト']] : []), ['char', 'キャラ'], ['asset', 'アセット'], ['sound', 'サウンド'],
+                  ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
                   ...(gameData.engine === 'touhou' ? [['spell', '会話']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
@@ -3275,7 +3399,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── MAP ── */}
                 {editorTab === 'map' && (
                   <div className="space-y-3">
-                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> 選択して画面をタップ／ドラッグ</p>
+                    {/* ── マップサイズ（自由拡張・東方以外）── */}
+                    {gameData.engine !== 'touhou' && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[11px] font-bold text-gray-300">マップサイズ</p>
+                        <label className="flex items-center justify-between text-[10px] text-gray-400">
+                          <span>横幅（タイル数・{COLS}以上）</span>
+                          <input type="text" inputMode="numeric" key={`mw-${presetId}-${curWorldCols(gameData)}`} defaultValue={curWorldCols(gameData)}
+                            onBlur={e => { const v = Math.max(COLS, Math.round(Number(e.target.value) || COLS)); e.target.value = String(v); setGameData(p => applyWorldSize(p, v, curWorldRows(p))); }}
+                            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                        </label>
+                        <label className="flex items-center justify-between text-[10px] text-gray-400">
+                          <span>高さ（タイル数・{ROWS}以上）</span>
+                          <input type="text" inputMode="numeric" key={`mh-${presetId}-${curWorldRows(gameData)}`} defaultValue={curWorldRows(gameData)}
+                            onBlur={e => { const v = Math.max(ROWS, Math.round(Number(e.target.value) || ROWS)); e.target.value = String(v); setGameData(p => applyWorldSize(p, curWorldCols(p), v)); }}
+                            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                        </label>
+                        <p className="text-[10px] text-gray-500">{COLS}×{ROWS} で1画面固定。広げるとカメラが追従します。</p>
+                      </div>
+                    )}
+
+                    {/* ── タイル塗りヒント ── */}
+                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> タイルを選択して画面をタップ／ドラッグ</p>
+                    <p className="text-[10px] text-green-400 flex items-center gap-1">🏁 マーカーをドラッグしてプレイヤーの初期位置を変更</p>
                     <div className="space-y-1.5">
                       {Object.entries(gameData.tiles).map(([idStr, tile]) => {
                         const id = Number(idStr);
@@ -3321,6 +3467,105 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {gameData.mapBgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.mapBgUrl} alt="" className="w-8 h-8 object-cover rounded shrink-0" />}
                           <span className="truncate flex-1">{refLabel(gameData.mapBgRef)}</span>
                           <button onClick={() => setGameData(p => ({ ...p, mapBgRef: undefined, mapBgUrl: undefined }))} className="text-gray-500 hover:text-red-400 shrink-0"><Trash2 size={12} /></button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── SCREEN（タイトル / エンディング画面）── */}
+                {editorTab === 'screen' && (
+                  <div className="space-y-4">
+                    {/* ── タイトル画面 ── */}
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[12px] font-bold text-gray-200">🏯 タイトル画面</p>
+                        {gameData.titleScreen && (
+                          <button onClick={() => setGameData(p => ({ ...p, titleScreen: undefined }))} className="text-gray-500 hover:text-red-400"><Trash2 size={13} /></button>
+                        )}
+                      </div>
+                      {!gameData.titleScreen ? (
+                        <button onClick={() => setGameData(p => ({ ...p, titleScreen: { ...defaultTitleScreen(title.trim() || p.name) } }))}
+                          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />タイトル画面を追加</button>
+                      ) : (
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 text-[11px] text-gray-300"><input type="checkbox" checked={gameData.titleScreen.enabled} onChange={e => updTitle({ enabled: e.target.checked })} className="accent-blue-500" />有効（プレイ開始前に表示）</label>
+                          <input value={gameData.titleScreen.heading} onChange={e => updTitle({ heading: e.target.value })} placeholder="ゲームタイトル"
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[12px] text-gray-100 outline-none" />
+                          <input value={gameData.titleScreen.subtitle ?? ''} onChange={e => updTitle({ subtitle: e.target.value })} placeholder="サブタイトル（任意）"
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 outline-none" />
+                          <label className="flex items-center gap-2 text-[10px] text-gray-400">文字色<input type="color" value={gameData.titleScreen.textColor ?? '#ffffff'} onChange={e => updTitle({ textColor: e.target.value })} className="w-6 h-6 rounded border border-gray-700 bg-transparent" /></label>
+                          {/* 背景画像 */}
+                          <button onClick={() => setPicker({ mode: 'image', target: { t: 'titleBg' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />背景画像を参照</button>
+                          {gameData.titleScreen.bgRef && (
+                            <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
+                              {gameData.titleScreen.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.titleScreen.bgUrl} alt="" className="w-7 h-7 object-cover rounded shrink-0" />}
+                              <span className="truncate flex-1">{refLabel(gameData.titleScreen.bgRef)}</span>
+                              <button onClick={() => updTitle({ bgRef: undefined, bgUrl: undefined })} className="text-gray-500 hover:text-red-400"><Trash2 size={10} /></button>
+                            </div>
+                          )}
+                          {/* BGM */}
+                          <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'titleBgm' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><Music size={12} />BGMを参照</button>
+                          {gameData.titleScreen.bgmRef && (
+                            <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
+                              <span className="truncate flex-1">{refLabel(gameData.titleScreen.bgmRef)}</span>
+                              <button onClick={() => updTitle({ bgmRef: undefined })} className="text-gray-500 hover:text-red-400"><Trash2 size={10} /></button>
+                            </div>
+                          )}
+                          {/* メニュー項目 */}
+                          <p className="text-[10px] text-gray-400 font-bold mt-1">メニュー項目</p>
+                          {gameData.titleScreen.menu.map((mi, i) => (
+                            <div key={i} className="flex items-center gap-1">
+                              <span className="text-[9px] text-gray-500 w-14 shrink-0">{SCREEN_MENU_LABELS[mi.kind]}</span>
+                              <input value={mi.label} onChange={e => updTitle({ menu: gameData.titleScreen!.menu.map((m, j) => j === i ? { ...m, label: e.target.value } : m) })}
+                                className="flex-1 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none" />
+                              <button onClick={() => updTitle({ menu: gameData.titleScreen!.menu.filter((_, j) => j !== i) })} className="text-red-500 text-[10px] px-0.5">✕</button>
+                            </div>
+                          ))}
+                          <div className="flex gap-1 flex-wrap">
+                            {(['newGame', 'continue', 'nameInput'] as ScreenMenuKind[]).map(k => (
+                              <button key={k} onClick={() => addMenuItem(k)} className="text-[10px] text-blue-400 border border-blue-500/40 rounded px-1.5 py-0.5 hover:bg-blue-500/10">+ {SCREEN_MENU_LABELS[k]}</button>
+                            ))}
+                          </div>
+                          <p className="text-[9px] text-gray-500">※「つづきから」は現状スタブ（はじめからと同じ挙動）です。</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── エンディング画面 ── */}
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[12px] font-bold text-gray-200">🎬 エンディング画面</p>
+                        {gameData.ending && (
+                          <button onClick={() => setGameData(p => ({ ...p, ending: undefined }))} className="text-gray-500 hover:text-red-400"><Trash2 size={13} /></button>
+                        )}
+                      </div>
+                      {!gameData.ending ? (
+                        <button onClick={() => setGameData(p => ({ ...p, ending: { ...defaultEndingScreen() } }))}
+                          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />エンディング画面を追加</button>
+                      ) : (
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 text-[11px] text-gray-300"><input type="checkbox" checked={gameData.ending.enabled} onChange={e => updEnding({ enabled: e.target.checked })} className="accent-blue-500" />有効（クリア時に表示）</label>
+                          <input value={gameData.ending.heading} onChange={e => updEnding({ heading: e.target.value })} placeholder="見出し（例: THE END）"
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[12px] text-gray-100 outline-none" />
+                          <textarea value={gameData.ending.message ?? ''} onChange={e => updEnding({ message: e.target.value })} placeholder="本文（任意）" rows={2}
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 outline-none resize-y" />
+                          <label className="flex items-center gap-2 text-[10px] text-gray-400">文字色<input type="color" value={gameData.ending.textColor ?? '#ffffff'} onChange={e => updEnding({ textColor: e.target.value })} className="w-6 h-6 rounded border border-gray-700 bg-transparent" /></label>
+                          <button onClick={() => setPicker({ mode: 'image', target: { t: 'endingBg' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />背景画像を参照</button>
+                          {gameData.ending.bgRef && (
+                            <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
+                              {gameData.ending.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.ending.bgUrl} alt="" className="w-7 h-7 object-cover rounded shrink-0" />}
+                              <span className="truncate flex-1">{refLabel(gameData.ending.bgRef)}</span>
+                              <button onClick={() => updEnding({ bgRef: undefined, bgUrl: undefined })} className="text-gray-500 hover:text-red-400"><Trash2 size={10} /></button>
+                            </div>
+                          )}
+                          <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'endingBgm' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><Music size={12} />BGMを参照</button>
+                          {gameData.ending.bgmRef && (
+                            <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
+                              <span className="truncate flex-1">{refLabel(gameData.ending.bgmRef)}</span>
+                              <button onClick={() => updEnding({ bgmRef: undefined })} className="text-gray-500 hover:text-red-400"><Trash2 size={10} /></button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -3524,14 +3769,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                       className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
                                     <p className="text-[9px] text-gray-500">カットイン設定</p>
                                     {(() => {
-                                      const firePreview = () => setSpellCutinPreview({
-                                        key: Date.now(), mode: 'boss',
+                                      const firePreview = (overrides?: Partial<typeof spellCutinPreview>) => setSpellCutinPreview({
+                                        key: Date.now(), mode: 'player',
                                         charName: card.cutinCharName ?? selObj.name ?? selObj.emoji,
                                         spellName: card.name,
                                         imageUrl: card.cutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png',
                                         imageX: card.cutinImageX ?? 0, imageY: card.cutinImageY ?? -50, imageScale: card.cutinScale ?? 1,
-                                        enemyImageUrl: card.cutinEnemyImageUrl ?? 'https://i.imgur.com/lf3x8xR.png',
-                                        enemyImageX: card.cutinEnemyImageX ?? 350, enemyImageY: card.cutinEnemyImageY ?? 100, enemyImageScale: card.cutinEnemyImageScale ?? 0.5,
+                                        ...overrides,
                                       });
                                       return (
                                         <>
@@ -3540,8 +3784,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                             onFocus={firePreview}
                                             placeholder="キャラクター名"
                                             className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
-                                          {/* プレイヤー側立ち絵 */}
-                                          <p className="text-[9px] text-blue-400/80">プレイヤー側立ち絵</p>
+                                          <p className="text-[9px] text-blue-400/80">立ち絵</p>
                                           <input value={card.cutinImageUrl ?? ''}
                                             onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })}
                                             onFocus={firePreview}
@@ -3551,46 +3794,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
                                               X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 0}
                                                 onFocus={firePreview}
-                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); }}
+                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); firePreview({ imageX: v }); }}
                                                 className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             </label>
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
                                               Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? -50}
                                                 onFocus={firePreview}
-                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); }}
+                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); firePreview({ imageY: v }); }}
                                                 className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             </label>
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">
                                               倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 1}
                                                 onFocus={firePreview}
-                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); }}
-                                                className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                            </label>
-                                          </div>
-                                          {/* 敵側立ち絵 */}
-                                          <p className="text-[9px] text-red-400/80">敵側立ち絵</p>
-                                          <input value={card.cutinEnemyImageUrl ?? ''}
-                                            onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageUrl: e.target.value || undefined } : c) })}
-                                            onFocus={firePreview}
-                                            placeholder={'https://i.imgur.com/lf3x8xR.png'}
-                                            className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
-                                          <div className="flex gap-1 items-center flex-wrap">
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
-                                              X<input type="text" inputMode="numeric" defaultValue={card.cutinEnemyImageX ?? 350}
-                                                onFocus={firePreview}
-                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageX: v } : c) }); }}
-                                                className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                            </label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
-                                              Y<input type="text" inputMode="numeric" defaultValue={card.cutinEnemyImageY ?? 100}
-                                                onFocus={firePreview}
-                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageY: v } : c) }); }}
-                                                className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                            </label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">
-                                              倍率<input type="text" inputMode="decimal" defaultValue={card.cutinEnemyImageScale ?? 0.5}
-                                                onFocus={firePreview}
-                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageScale: v } : c) }); }}
+                                                onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); firePreview({ imageScale: v }); }}
                                                 className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             </label>
                                           </div>
@@ -3758,24 +3974,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       )}
                     </div>
-                    <div>
-                      <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>移動速度</span><span className="text-blue-400">{gameData.player.speed}</span></label>
-                      <input type="range" min={1} max={10} step={0.5} value={gameData.player.speed} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, speed: Number(e.target.value) } }))} className="w-full accent-blue-500" />
-                    </div>
+                    <label className="flex items-center justify-between text-[11px] text-gray-400">
+                      <span>移動速度</span>
+                      <input type="text" inputMode="decimal" key={`spd-${presetId}`} defaultValue={gameData.player.speed}
+                        onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, speed: v } })); }}
+                        className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                    </label>
                     {gameData.engine === 'action' && (
-                      <div>
-                        <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>ジャンプ力</span><span className="text-blue-400">{gameData.player.jumpPower}</span></label>
-                        <input type="range" min={-20} max={-5} step={1} value={gameData.player.jumpPower} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, jumpPower: Number(e.target.value) } }))} className="w-full accent-blue-500" />
-                      </div>
+                      <label className="flex items-center justify-between text-[11px] text-gray-400">
+                        <span>ジャンプ力（負で上向き）</span>
+                        <input type="text" inputMode="numeric" key={`jmp-${presetId}`} defaultValue={gameData.player.jumpPower}
+                          onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, jumpPower: v } })); }}
+                          className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                      </label>
                     )}
-                    {gameData.engine === 'action' && (
-                      <div>
-                        <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>ワールド幅（横スクロール / タイル数）</span><span className="text-blue-400">{gameData.scroll?.worldCols ?? COLS}</span></label>
-                        <input type="range" min={COLS} max={80} step={1} value={gameData.scroll?.worldCols ?? COLS}
-                          onChange={e => { const v = Number(e.target.value); setEditScroll(0); setGameData(p => resizeWorld(p, v)); }} className="w-full accent-blue-500" />
-                        <p className="text-[10px] text-gray-500 mt-0.5">{COLS} で1画面固定。増やすとカメラ追従の横スクロールになります。</p>
-                      </div>
-                    )}
+                    <p className="text-[10px] text-gray-500">マップの広さやプレイヤー初期位置は「マップ」タブで設定できます。</p>
                   </div>
                 )}
 
@@ -3783,12 +3996,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {editorTab === 'char' && gameData.engine === 'touhou' && (() => {
                   const phases = gameData.phases ?? [];
                   const midPhase = Math.floor(phases.length / 2);
-                  const isBossPhase = (ph: number) => !phases.length || phases[ph]?.kind === 'boss';
+                  const bossPhases = phases.map((p, i) => ({ p, i })).filter(({ p }) => p.kind === 'boss');
+                  const lastBossPhaseIdx = bossPhases.length > 0 ? bossPhases[bossPhases.length - 1].i : -1;
+                  const isBossPhase = (ph: number) => ph === lastBossPhaseIdx;
                   const bossList = gameData.objects.filter(o => o.isBoss && isBossPhase(o.phase ?? 0));
-                  const midBossList = gameData.objects.filter(o => !!o.isBoss && phases.length > 0 && !isBossPhase(o.phase ?? 0));
+                  const midBossList = gameData.objects.filter(o => !!o.isBoss && phases.length > 0 && !isBossPhase(o.phase ?? 0) && phases[o.phase ?? 0]?.kind === 'boss');
                   const zenhanList = gameData.objects.filter(o => !o.isBoss && (phases.length === 0 || (o.phase ?? 0) < midPhase));
                   const kohanList = gameData.objects.filter(o => !o.isBoss && phases.length > 0 && (o.phase ?? 0) >= midPhase);
-                  const SUB_LABELS = { jiki: '自機', boss: 'ボス', midboss: '中ボス', zenhan: '前半道中', kohan: '後半道中' } as const;
+                  const SUB_LABELS = { jiki: '自機', zenhan: '前半道中', midboss: '中ボス', kohan: '後半道中', boss: 'ボス' } as const;
                   const curList: typeof bossList = charSubTab === 'boss' ? bossList : charSubTab === 'midboss' ? midBossList : charSubTab === 'zenhan' ? zenhanList : charSubTab === 'kohan' ? kohanList : [];
                   const activeSelObj = selObj && curList.some(o => o.id === selObj.id) ? selObj : null;
 
@@ -3837,16 +4052,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               </div>
                             )}
                           </div>
-                          <div>
-                            <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>移動速度</span><span className="text-blue-400">{gameData.player.speed}</span></label>
-                            <input type="range" min={1} max={10} step={0.5} value={gameData.player.speed} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, speed: Number(e.target.value) } }))} className="w-full accent-blue-500" />
-                          </div>
+                          <label className="flex items-center justify-between text-[11px] text-gray-400">
+                            <span>移動速度</span>
+                            <input type="text" inputMode="decimal" key={`spd-t-${presetId}`} defaultValue={gameData.player.speed}
+                              onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, speed: v } })); }}
+                              className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                          </label>
                           <div className="space-y-3">
                             <p className="text-[11px] text-violet-400 font-bold">ボム（カットイン）設定</p>
-                            <div>
-                              <label className="flex justify-between text-[11px] text-gray-400 mb-1"><span>初期ボム数</span><span className="text-violet-400">{gameData.player.bombCount ?? 3}</span></label>
-                              <input type="range" min={0} max={9} step={1} value={gameData.player.bombCount ?? 3} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCount: Number(e.target.value) } }))} className="w-full accent-violet-500" />
-                            </div>
+                            <label className="flex items-center justify-between text-[11px] text-gray-400">
+                              <span>初期ボム数</span>
+                              <input type="text" inputMode="numeric" key={`bomb-${presetId}`} defaultValue={gameData.player.bombCount ?? 3}
+                                onChange={e => { const v = Math.max(0, Math.round(parseFloat(e.target.value))); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCount: v } })); }}
+                                className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                            </label>
                             <label className="block text-[11px] text-gray-400">スペルカード名
                               <input type="text" value={gameData.player.bombSpellName ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombSpellName: e.target.value || undefined } }))}
                                 placeholder="恋符「マスタースパーク」" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
@@ -3855,71 +4074,72 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               <input type="text" value={gameData.player.bombCutinCharName ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinCharName: e.target.value || undefined } }))}
                                 placeholder="魔理沙" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
                             </label>
-                            <label className="block text-[11px] text-gray-400">立ち絵URL
-                              <input type="text" value={gameData.player.bombCutinImageUrl ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageUrl: e.target.value || undefined } }))}
-                                placeholder="https://..." className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                              <label className="block text-[11px] text-gray-400">立ち絵URL
+                              <input type="text" value={gameData.player.bombCutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png'} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageUrl: e.target.value || undefined } }))}
+                                placeholder="https://i.imgur.com/4M92pLV.png" className="w-full mt-0.5 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
                             </label>
                             <div className="flex gap-2 items-center flex-wrap">
-                              <label className="text-[10px] text-gray-400 flex items-center gap-1">X<input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageX ?? -150} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageX: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
-                              <label className="text-[10px] text-gray-400 flex items-center gap-1">Y<input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageY ?? 80} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageY: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
-                              <label className="text-[10px] text-gray-400 flex items-center gap-1">倍率<input type="text" inputMode="decimal" defaultValue={gameData.player.bombCutinScale ?? 2.5} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinScale: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
+                              <label className="text-[10px] text-gray-400 flex items-center gap-1">X<input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageX ?? 0} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageX: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
+                              <label className="text-[10px] text-gray-400 flex items-center gap-1">Y<input type="text" inputMode="numeric" defaultValue={gameData.player.bombCutinImageY ?? -50} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinImageY: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
+                              <label className="text-[10px] text-gray-400 flex items-center gap-1">倍率<input type="text" inputMode="decimal" defaultValue={gameData.player.bombCutinScale ?? 1} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, bombCutinScale: v } })); }} className="w-16 ml-0.5 bg-gray-900 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none" /></label>
                             </div>
                           </div>
                         </div>
                       )}
 
                       {/* ── ボス / 中ボス ── */}
-                      {(charSubTab === 'boss' || charSubTab === 'midboss') && (
+                      {(charSubTab === 'boss' || charSubTab === 'midboss') && (() => {
+                        const ph = charSubTab === 'boss'
+                          ? (lastBossPhaseIdx >= 0 ? lastBossPhaseIdx : 0)
+                          : (bossPhases.length > 0 ? bossPhases[0].i : Math.max(0, midPhase - 1));
+                        const omit = curList.length === 0;
+                        return (
                         <div className="space-y-2">
-                          <div className="space-y-1">
-                            {curList.map(o => (
-                              <button key={o.id} onClick={() => setSelectedObjId(o.id)}
-                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-left border ${activeSelObj?.id === o.id ? 'bg-yellow-800/40 border-yellow-600/50 text-yellow-200' : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:bg-gray-700/40'}`}>
-                                {o.spriteUrl ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={o.spriteUrl} alt="" className="w-5 h-5 object-contain shrink-0" style={{ imageRendering: 'pixelated' }} /> : <span className="text-lg leading-none shrink-0">{o.emoji}</span>}
-                                <span className="truncate flex-1 font-bold">{o.name || SUB_LABELS[charSubTab]}</span>
-                                <span className="text-gray-600 text-[9px]">HP:{o.hp}</span>
-                              </button>
-                            ))}
-                          </div>
-                          <button onClick={() => {
-                            const ph = charSubTab === 'boss'
-                              ? (phases.findIndex(p => p.kind === 'boss') >= 0 ? phases.findIndex(p => p.kind === 'boss') : 0)
-                              : Math.max(0, midPhase - 1);
-                            const o = newObject({ isBoss: true, bullet: 'none', hp: 200, speed: 0, behavior: 'still', phase: ph });
-                            setGameData(p => ({ ...p, objects: [...p.objects, o] }));
-                            setSelectedObjId(o.id);
-                          }} className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-red-700/50 text-[10px] text-red-400 hover:bg-red-950/20">
-                            <Plus size={11} />{SUB_LABELS[charSubTab]}追加
-                          </button>
-                          {activeSelObj && (
-                            <div key={activeSelObj.id} className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
+                          <label className="flex items-center gap-2 text-[11px] text-gray-300 cursor-pointer">
+                            <input type="checkbox" checked={!omit} onChange={e => {
+                              if (e.target.checked) {
+                                const o = newObject({ isBoss: true, bullet: 'none', hp: 200, speed: 0, behavior: 'still', phase: ph });
+                                setGameData(p => ({ ...p, objects: [...p.objects, o] }));
+                                setSelectedObjId(o.id);
+                              } else {
+                                curList.forEach(o => { setGameData(p => ({ ...p, objects: p.objects.filter(x => x.id !== o.id) })); });
+                                setSelectedObjId(null);
+                              }
+                            }} className="accent-red-500" />
+                            {SUB_LABELS[charSubTab]}を使う
+                          </label>
+                          {!omit && curList[0] && (
+                            <div key={curList[0].id} className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
                               <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-yellow-400 font-bold">選択中: {activeSelObj.name || SUB_LABELS[charSubTab]}</span>
-                                <button onClick={delObj} className="px-1.5 py-0.5 bg-red-800 hover:bg-red-700 rounded text-[9px] text-white">削除</button>
+                                <span className="text-[10px] text-yellow-400 font-bold">{curList[0].name || SUB_LABELS[charSubTab]} <span className="text-gray-500 font-normal">HP:{curList[0].hp}</span></span>
+                                <button onClick={() => {
+                                  setGameData(p => ({ ...p, objects: p.objects.filter(x => x.id !== curList[0].id) }));
+                                  setSelectedObjId(null);
+                                }} className="px-1.5 py-0.5 bg-red-800 hover:bg-red-700 rounded text-[9px] text-white">削除</button>
                               </div>
                               <div className="flex items-center gap-2">
-                                <input value={activeSelObj.emoji} onChange={e => updObj({ emoji: e.target.value.slice(0, 2) })} className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-center text-lg" />
-                                <input value={activeSelObj.name ?? ''} onChange={e => updObj({ name: e.target.value || undefined })} placeholder="名前" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none" />
+                                <input value={curList[0].emoji} onChange={e => updObj({ emoji: e.target.value.slice(0, 2) })} className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-center text-lg" />
+                                <input value={curList[0].name ?? ''} onChange={e => updObj({ name: e.target.value || undefined })} placeholder="名前" className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none" />
                               </div>
-                              <SpriteRow obj={activeSelObj} />
+                              <SpriteRow obj={curList[0]} />
                               <div className="grid grid-cols-2 gap-2">
-                                <label className="text-[10px] text-gray-400">HP<input type="text" inputMode="numeric" defaultValue={activeSelObj.hp} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ hp: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" /></label>
-                                <label className="text-[10px] text-gray-400">速さ<input type="text" inputMode="decimal" defaultValue={activeSelObj.speed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ speed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" /></label>
+                                <label className="text-[10px] text-gray-400">HP<input type="text" inputMode="numeric" defaultValue={curList[0].hp} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ hp: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" /></label>
+                                <label className="text-[10px] text-gray-400">速さ<input type="text" inputMode="decimal" defaultValue={curList[0].speed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ speed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" /></label>
                               </div>
                               {/* 撃破後セリフ */}
                               <div className="space-y-2">
                                 <p className="text-[10px] text-yellow-400/80 font-bold">撃破後セリフ</p>
-                                {(selObj!.outroDialogue ?? []).map((dl, di) => {
+                                {(curList[0].outroDialogue ?? []).map((dl, di) => {
                                   const previewKey = `boss-outro-${di}`;
                                   const isActive = activePreviewKey === previewKey;
                                   const activatePv = () => setActivePreviewKey(previewKey);
-                                  const updBODl = (patch: Partial<DialogueLine>) => { updObj({ outroDialogue: (selObj!.outroDialogue ?? []).map((d, j) => j === di ? { ...d, ...patch } : d) }); setActivePreviewKey(previewKey); };
+                                  const updBODl = (patch: Partial<DialogueLine>) => { updObj({ outroDialogue: (curList[0].outroDialogue ?? []).map((d, j) => j === di ? { ...d, ...patch } : d) }); setActivePreviewKey(previewKey); };
                                   return (
                                     <div key={di} className={`rounded-lg border p-2 space-y-1.5 ${isActive ? 'border-yellow-500 bg-yellow-950/30' : 'border-gray-600 bg-gray-800'}`}>
                                       <div className="flex gap-1 items-center">
                                         <input value={dl.emoji ?? ''} placeholder="🎀" onChange={e => updBODl({ emoji: e.target.value })} onFocus={activatePv} className="w-8 bg-gray-700 rounded px-1 py-0.5 text-[11px] text-center text-white outline-none" />
                                         <input value={dl.speaker} onChange={e => updBODl({ speaker: e.target.value })} onFocus={activatePv} placeholder="話者名" className="flex-1 bg-gray-700 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
-                                        <button onClick={() => { if (isActive) setActivePreviewKey(null); updObj({ outroDialogue: (selObj!.outroDialogue ?? []).filter((_, j) => j !== di) }); }} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
+                                        <button onClick={() => { if (isActive) setActivePreviewKey(null); updObj({ outroDialogue: (curList[0].outroDialogue ?? []).filter((_, j) => j !== di) }); }} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
                                       </div>
                                       <input value={dl.imageSrc ?? ''} onChange={e => updBODl({ imageSrc: e.target.value || undefined })} onFocus={activatePv} placeholder="立ち絵URL" className="w-full bg-gray-700 rounded px-1.5 py-0.5 text-[9px] text-gray-300 outline-none" />
                                       <div className="flex gap-1 items-center flex-wrap">
@@ -3931,63 +4151,55 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     </div>
                                   );
                                 })}
-                                <button onClick={() => updObj({ outroDialogue: [...(selObj!.outroDialogue ?? []), { speaker: '', emoji: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] })} className="text-[10px] text-yellow-400 active:opacity-60">+ セリフ追加</button>
+                                <button onClick={() => updObj({ outroDialogue: [...(curList[0].outroDialogue ?? []), { speaker: '', emoji: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] })} className="text-[10px] text-yellow-400 active:opacity-60">+ セリフ追加</button>
                               </div>
                               {/* スペルカード */}
                               <div className="mt-1 space-y-2">
                                 <p className="text-[10px] text-red-400/80 font-bold">スペルカード</p>
-                                {(selObj!.spellCards ?? []).map((card, ci) => (
+                                {(curList[0].spellCards ?? []).map((card, ci) => (
                                   <div key={ci} className="rounded-lg border border-red-800/60 bg-red-950/20 p-2 space-y-1.5">
                                     <div className="flex items-center gap-1">
                                       <span className="text-[9px] text-red-400 shrink-0 font-bold">#{ci + 1}</span>
-                                      <input value={card.name} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, name: e.target.value } : c) })} placeholder="スペルカード名" className="flex-1 bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
-                                      <button onClick={() => updObj({ spellCards: (selObj!.spellCards ?? []).filter((_, j) => j !== ci) })} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
+                                      <input value={card.name} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, name: e.target.value } : c) })} placeholder="スペルカード名" className="flex-1 bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                      <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).filter((_, j) => j !== ci) })} className="text-red-500 text-[10px] px-0.5 shrink-0">✕</button>
                                     </div>
                                     <label className="text-[9px] text-gray-400 flex items-center gap-1 flex-wrap">発動HP（以下）
-                                      <input type="text" inputMode="numeric" defaultValue={card.triggerHp} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, triggerHp: v } : c) }); }} className="w-16 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                      <input type="text" inputMode="numeric" defaultValue={card.triggerHp} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, triggerHp: v } : c) }); }} className="w-16 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                     </label>
                                     <p className="text-[9px] text-gray-500">発動前セリフ</p>
                                     {(card.dialogue ?? []).map((line, li) => (
                                       <div key={li} className="rounded border border-gray-700 bg-gray-900 p-1.5 space-y-1">
                                         <div className="flex gap-1">
-                                          <input value={line.speaker} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, speaker: e.target.value } : l) } : c) })} placeholder="話者名" className="w-20 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                          <input value={line.emoji ?? ''} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: e.target.value || undefined } : l) } : c) })} placeholder="😊" className="w-10 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
-                                          <button onClick={() => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).filter((_, k) => k !== li) } : c) })} className="ml-auto text-red-500 text-[9px] px-0.5">✕</button>
+                                          <input value={line.speaker} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, speaker: e.target.value } : l) } : c) })} placeholder="話者名" className="w-20 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                          <input value={line.emoji ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, emoji: e.target.value || undefined } : l) } : c) })} placeholder="😊" className="w-10 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                          <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).filter((_, k) => k !== li) } : c) })} className="ml-auto text-red-500 text-[9px] px-0.5">✕</button>
                                         </div>
-                                        <input value={line.imageSrc ?? ''} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, imageSrc: e.target.value || undefined } : l) } : c) })} placeholder="立ち絵URL（省略可）" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
-                                        <textarea value={line.text} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, text: e.target.value } : l) } : c) })} placeholder="セリフ" rows={2} className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none resize-none" />
+                                        <input value={line.imageSrc ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, imageSrc: e.target.value || undefined } : l) } : c) })} placeholder="立ち絵URL（省略可）" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                        <textarea value={line.text} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: (c.dialogue ?? []).map((l, k) => k === li ? { ...l, text: e.target.value } : l) } : c) })} placeholder="セリフ" rows={2} className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none resize-none" />
                                       </div>
                                     ))}
-                                    <button onClick={() => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: [...(c.dialogue ?? []), { speaker: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] } : c) })} className="text-[9px] text-purple-400 active:opacity-60">+ セリフ追加</button>
+                                    <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: [...(c.dialogue ?? []), { speaker: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] } : c) })} className="text-[9px] text-purple-400 active:opacity-60">+ セリフ追加</button>
                                     <p className="text-[9px] text-gray-500">弾幕スクリプト（MiniScript）</p>
-                                    <textarea value={card.miniScript} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })} placeholder="// MiniScript 記述欄" rows={3} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                    <textarea value={card.miniScript} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })} placeholder="// MiniScript 記述欄" rows={3} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
                                     <p className="text-[9px] text-gray-500">カットイン設定</p>
                                     {(() => {
-                                      const firePreview = () => setSpellCutinPreview({
+                                      const firePreview = (overrides?: Partial<typeof spellCutinPreview>) => setSpellCutinPreview({
                                         key: Date.now(), mode: 'boss',
-                                        charName: card.cutinCharName ?? selObj!.name ?? selObj!.emoji,
+                                        charName: card.cutinCharName ?? curList[0].name ?? curList[0].emoji,
                                         spellName: card.name,
-                                        imageUrl: card.cutinImageUrl ?? 'https://i.imgur.com/4M92pLV.png',
-                                        imageX: card.cutinImageX ?? 0, imageY: card.cutinImageY ?? -50, imageScale: card.cutinScale ?? 1,
-                                        enemyImageUrl: card.cutinEnemyImageUrl ?? 'https://i.imgur.com/lf3x8xR.png',
-                                        enemyImageX: card.cutinEnemyImageX ?? 350, enemyImageY: card.cutinEnemyImageY ?? 100, enemyImageScale: card.cutinEnemyImageScale ?? 0.5,
+                                        imageUrl: card.cutinImageUrl ?? 'https://i.imgur.com/lf3x8xR.png',
+                                        imageX: card.cutinImageX ?? 350, imageY: card.cutinImageY ?? 100, imageScale: card.cutinScale ?? 0.5,
+                                        ...overrides,
                                       });
                                       return (
                                         <>
-                                          <input value={card.cutinCharName ?? ''} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="キャラクター名" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
-                                          <p className="text-[9px] text-blue-400/80">プレイヤー側立ち絵</p>
-                                          <input value={card.cutinImageUrl ?? ''} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="https://i.imgur.com/4M92pLV.png" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                          <input value={card.cutinCharName ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="キャラクター名" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                          <p className="text-[9px] text-blue-400/80">立ち絵</p>
+                                          <input value={card.cutinImageUrl ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="https://i.imgur.com/lf3x8xR.png" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
                                           <div className="flex gap-1 items-center flex-wrap">
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 0} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? -50} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 1} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                          </div>
-                                          <p className="text-[9px] text-red-400/80">敵側立ち絵</p>
-                                          <input value={card.cutinEnemyImageUrl ?? ''} onChange={e => updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageUrl: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="https://i.imgur.com/lf3x8xR.png" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
-                                          <div className="flex gap-1 items-center flex-wrap">
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">X<input type="text" inputMode="numeric" defaultValue={card.cutinEnemyImageX ?? 350} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageX: v } : c) }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">Y<input type="text" inputMode="numeric" defaultValue={card.cutinEnemyImageY ?? 100} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageY: v } : c) }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">倍率<input type="text" inputMode="decimal" defaultValue={card.cutinEnemyImageScale ?? 0.5} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj!.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinEnemyImageScale: v } : c) }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
+                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 350} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); firePreview({ imageX: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
+                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? 100} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); firePreview({ imageY: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
+                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 0.5} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); firePreview({ imageScale: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
                                           </div>
                                           <button onClick={firePreview} className="text-[9px] text-violet-400 hover:text-violet-300 active:opacity-60">▶ プレビュー</button>
                                         </>
@@ -3995,16 +4207,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     })()}
                                   </div>
                                 ))}
-                                <button onClick={() => updObj({ spellCards: [...(selObj!.spellCards ?? []), { name: `スペルカード${(selObj!.spellCards?.length ?? 0) + 1}`, triggerHp: Math.floor(selObj!.hp * 0.5), miniScript: '// 弾幕パターンをMiniScriptで記述\nwait 60\naimed 2.0' } as SpellCardDef] })} className="text-[10px] text-red-400 active:opacity-60">+ スペルカード追加</button>
+                                <button onClick={() => updObj({ spellCards: [...(curList[0].spellCards ?? []), { name: `スペルカード${(curList[0].spellCards?.length ?? 0) + 1}`, triggerHp: Math.floor(curList[0].hp * 0.5), miniScript: '// 弾幕パターンをMiniScriptで記述\nwait 60\naimed 2.0' } as SpellCardDef] })} className="text-[10px] text-red-400 active:opacity-60">+ スペルカード追加</button>
                                 <label className="text-[9px] text-gray-500 flex items-center gap-1 mt-1">ボムドロップ確率
-                                  <input type="text" inputMode="decimal" defaultValue={selObj!.bombDrop ?? 0} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ bombDrop: Math.max(0, Math.min(1, v)) }); }} className="w-14 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
+                                  <input type="text" inputMode="decimal" defaultValue={curList[0].bombDrop ?? 0} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ bombDrop: Math.max(0, Math.min(1, v)) }); }} className="w-14 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                   <span className="text-gray-600">（0〜1）</span>
                                 </label>
                               </div>
                             </div>
                           )}
                         </div>
-                      )}
+                        );
+                      })()}
 
                       {/* ── 前半道中 / 後半道中 ── */}
                       {(charSubTab === 'zenhan' || charSubTab === 'kohan') && (() => {
@@ -4016,13 +4229,47 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           ...curList.map(o => o.phase ?? 0),
                         ])).sort((a, b) => a - b);
                         const defaultPhase = charSubTab === 'kohan' ? Math.max(midPhase, 0) : 0;
+                        const hasContent = phases.length > 0 && groupIdxs.length > 0;
                         return (
                         <div className="space-y-3">
-                          {phases.length === 0 ? (
-                            <p className="text-[10px] text-gray-500 leading-relaxed bg-gray-900/60 rounded p-2 border border-gray-800">
-                              wave 出現スクリプトを使うには、まず「マップ」タブでフェーズ（wave）を追加してください。
-                            </p>
-                          ) : groupIdxs.map(idx => {
+                          <label className="flex items-center gap-2 text-[11px] text-gray-300 cursor-pointer">
+                            <input type="checkbox" checked={hasContent} onChange={e => {
+                              if (e.target.checked) {
+                                const newId = `${charSubTab}-${Date.now()}`;
+                                const label = charSubTab === 'zenhan' ? '道中前半' : '道中後半';
+                                const insertAt = charSubTab === 'kohan' ? Math.max(midPhase, 0) : 0;
+                                setGameData(p => {
+                                  const phs = p.phases ?? [];
+                                  const before = phs.slice(0, insertAt);
+                                  const after = phs.slice(insertAt);
+                                  // Shift object phase references for phases after insertion point
+                                  const shifted = p.objects.map(o => o.phase !== undefined && o.phase >= insertAt ? { ...o, phase: o.phase + 1 } : o);
+                                  return { ...p, phases: [...before, { id: newId, kind: 'wave' as const, label }, ...after], objects: [...shifted, newObject({ phase: insertAt })] };
+                                });
+                              } else {
+                                const removeIdxs = new Set(groupIdxs);
+                                const sorted = [...removeIdxs].sort((a, b) => a - b);
+                                setGameData(p => {
+                                  const keptPhases = p.phases?.filter((_, i) => !removeIdxs.has(i));
+                                  const keptObjects = p.objects.filter(o => {
+                                    const ph = o.phase ?? 0;
+                                    if (removeIdxs.has(ph)) return false;
+                                    return true;
+                                  }).map(o => {
+                                    const ph = o.phase ?? 0;
+                                    const shift = sorted.filter(i => i < ph).length;
+                                    return shift > 0 ? { ...o, phase: ph - shift } : o;
+                                  });
+                                  return { ...p, phases: keptPhases, objects: keptObjects };
+                                });
+                              }
+                            }} className="accent-cyan-500" />
+                            {SUB_LABELS[charSubTab]}を使う
+                          </label>
+                          {!hasContent && (
+                            <p className="text-[10px] text-gray-500">未設定（オミット）</p>
+                          )}
+                          {hasContent && groupIdxs.map(idx => {
                             const ph = phases[idx];
                             const isWave = ph?.kind !== 'boss';
                             const enemies = curList.filter(o => (o.phase ?? 0) === idx);
