@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent, mmlToNotes, playMml } from '@/lib/mml';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
+import RpgenAssetPanel from './RpgenAssetPanel';
 
 export interface PickResult {
   ref: string;
@@ -21,8 +22,8 @@ interface ContentPickerProps {
   onClose: () => void;
 }
 
-type ImageTab = 'posts' | 'walk' | 'url';
-type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct';
+type ImageTab = 'posts' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk';
+type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe';
 
 export default function ContentPicker({ mode, userId, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -107,7 +108,7 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
   };
 
   const tabBtn = (active: boolean) =>
-    `flex-1 py-2 text-[11px] font-bold rounded-md transition flex items-center justify-center gap-1 ${active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-100/10'}`;
+    `shrink-0 whitespace-nowrap px-2.5 py-2 text-[11px] font-bold rounded-md transition flex items-center justify-center gap-1 ${active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-100/10'}`;
 
   return (
     <div className="absolute inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60" onClick={onClose}>
@@ -125,17 +126,20 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
+        <div className="flex gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0 overflow-x-auto scrollbar-none">
           {mode === 'image' ? (
             <>
               <button className={tabBtn(imageTab === 'posts')} onClick={() => setImageTab('posts')}><ImageIcon size={12} />画像投稿</button>
-              <button className={tabBtn(imageTab === 'walk')} onClick={() => setImageTab('walk')}>🚶 歩行グラ</button>
+              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => setImageTab('rpgenSprite')}>🧩 素材</button>
+              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => setImageTab('rpgenWalk')}>🚶 歩行グラ</button>
+              <button className={tabBtn(imageTab === 'walk')} onClick={() => setImageTab('walk')}>📥 投稿グラ</button>
               <button className={tabBtn(imageTab === 'url')} onClick={() => setImageTab('url')}><Link2 size={12} />URL</button>
             </>
           ) : (
             <>
               <button className={tabBtn(bgmTab === 'youtube')} onClick={() => setBgmTab('youtube')}><Video size={12} />YouTube</button>
               <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => setBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
+              <button className={tabBtn(bgmTab === 'rpgenSe')} onClick={() => setBgmTab('rpgenSe')}>🔊 効果音</button>
               <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => setBgmTab('mmlRaw')}>♪ 直接</button>
               <button className={tabBtn(bgmTab === 'direct')} onClick={() => setBgmTab('direct')}>🔗 URL</button>
             </>
@@ -196,6 +200,14 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
               )}
               <button onClick={pickUrl} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">この画像を使う</button>
             </div>
+          )}
+
+          {/* Image: RPGen sprites / walk graphics */}
+          {mode === 'image' && imageTab === 'rpgenSprite' && (
+            <RpgenAssetPanel kind="sprite" onPick={onPick} />
+          )}
+          {mode === 'image' && imageTab === 'rpgenWalk' && (
+            <RpgenAssetPanel kind="walk" onPick={onPick} />
           )}
 
           {/* BGM: youtube */}
@@ -290,6 +302,11 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
               <p className="text-[10px] text-gray-600">MP3/WAV の直リンクURLを入力。効果音に向いています。</p>
               <button onClick={pickDirect} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このURLを使う</button>
             </div>
+          )}
+
+          {/* SE: RPGen sound library */}
+          {mode === 'bgm' && bgmTab === 'rpgenSe' && (
+            <RpgenAssetPanel kind="sound" onPick={onPick} />
           )}
         </div>
       </div>

@@ -42,7 +42,7 @@ export interface WinCondition {
 }
 
 export interface BgmAsset {
-  type: 'midi' | 'mml' | 'youtube';
+  type: 'midi' | 'mml' | 'youtube' | 'direct';
   src: string;
 }
 

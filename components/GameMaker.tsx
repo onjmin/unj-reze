@@ -3,7 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
-import { bgmRefToAsset, refLabel } from '@/lib/asset-ref';
+import { bgmRefToAsset, refLabel, parseWalkRef } from '@/lib/asset-ref';
+import {
+  detectStandard, standardById, animatedCell, dirFromDelta,
+  type WayKey, type WalkStandard,
+} from '@/lib/walk-sprite';
 import { mmlToNotes, playMml } from '@/lib/mml';
 import ContentPicker, { type PickResult } from './ContentPicker';
 
@@ -1334,10 +1338,51 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return { id, rect: { x: col * TILE_SIZE, y: row * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE }, info: gameData.tiles[id] };
     };
 
-    const drawSprite = (def: { emoji: string; spriteUrl?: string }, x: number, y: number, w: number, h: number) => {
+    // 歩行グラ用の状態: 規格の自動判定キャッシュ と 各インスタンスの向き/移動追跡。
+    const walkStdCache = new Map<string, WalkStandard>();
+    const walkInst = new Map<string, { px: number; py: number; dir: WayKey }>();
+    const horizontalEngine = gameData.engine === 'action'; // 横スク（マリオ系）は左右のみ
+
+    const drawSprite = (
+      def: { emoji: string; spriteUrl?: string; spriteRef?: string },
+      x: number, y: number, w: number, h: number,
+      animKey?: string,
+    ) => {
       const img = def.spriteUrl ? imgCache.current.get(def.spriteUrl) : undefined;
-      if (img && img.complete && img.naturalWidth > 0) {
-        ctx.drawImage(img, x, y, w, h);
+      const loaded = !!img && img.complete && img.naturalWidth > 0;
+      const walk = def.spriteRef ? parseWalkRef(def.spriteRef) : null;
+
+      if (loaded && walk && def.spriteUrl) {
+        // 規格を判定（auto は実寸から推定）してキャッシュ
+        let std = walkStdCache.get(def.spriteUrl);
+        if (!std) {
+          std = walk.stdId === 'auto'
+            ? detectStandard(img!.naturalWidth, img!.naturalHeight)
+            : standardById(walk.stdId);
+          walkStdCache.set(def.spriteUrl, std);
+        }
+        // 向き・移動を画面上の移動量から導出（エンジン非依存）
+        const key = animKey ?? def.spriteUrl;
+        const prev = walkInst.get(key);
+        let dx = 0, dy = 0;
+        if (prev) { dx = x - prev.px; dy = y - prev.py; }
+        let dir: WayKey = prev?.dir ?? 's';
+        const moving = Math.hypot(dx, dy) > 0.15;
+        if (moving) {
+          if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
+          else dir = dirFromDelta(dx, dy) ?? dir;
+        }
+        walkInst.set(key, { px: x, py: y, dir });
+
+        const cell = animatedCell(std, img!.naturalWidth, img!.naturalHeight, {
+          dir, moving, timeSec: performance.now() / 1000, fps: 7,
+        });
+        ctx.drawImage(img!, cell.sx, cell.sy, cell.sw, cell.sh, x, y, w, h);
+        return;
+      }
+
+      if (loaded) {
+        ctx.drawImage(img!, x, y, w, h);
       } else {
         ctx.font = `${w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(def.emoji, x + w / 2, y + h + 4);
@@ -2132,8 +2177,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // objects (play: from entities, edit: from data)
       if (isPlaying) {
-        for (const e of eng.entities) {
-          drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl }, e.x, e.y, TILE_SIZE, TILE_SIZE);
+        for (let ei = 0; ei < eng.entities.length; ei++) {
+          const e = eng.entities[ei];
+          drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, TILE_SIZE, TILE_SIZE, `ent${e.def.id}_${ei}`);
           if (e.def.hp > 1) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
         }
         ctx.fillStyle = 'yellow';
@@ -2202,7 +2248,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       } else {
         for (const o of gameData.objects) {
-          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl }, o.col * TILE_SIZE, o.row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, o.row * TILE_SIZE, TILE_SIZE, TILE_SIZE, `obj${o.id}`);
           const isSel = o.id === selectedObjIdRef.current;
           ctx.strokeStyle = o.hazard ? 'rgba(255,80,80,0.6)' : 'rgba(80,200,255,0.6)';
           ctx.lineWidth = isSel ? 3 : 1.5;
@@ -2240,7 +2286,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       ctx.fillStyle = gameData.player.color;
       // 死亡中は非表示。無敵中（復帰点滅）は 4f 周期で点滅
       if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / 4) % 2 === 0)) {
-        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl }, p.x, p.y, pData.w, pData.h);
+        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, p.x, p.y, pData.w, pData.h, 'player');
       }
       // onjReze：近接攻撃の描画（振っている間だけ向きに合わせて表示）
       if (gameData.engine === 'onjReze' && isPlaying && swordRef.current.active > 0) {

@@ -17,12 +17,26 @@ class BgmManager {
       this.playYoutube(manifest.bgm.src);
     } else if (manifest.bgm.type === 'mml') {
       this.playMml(manifest.bgm.src);
+    } else if (manifest.bgm.type === 'direct') {
+      this.playDirect(manifest.bgm.src);
     }
   }
 
   stop() {
     if (this.current) { try { this.current.stop(); } catch (e) { } this.current = null; }
     document.querySelectorAll('.bgm-youtube-container').forEach(el => el.remove());
+  }
+
+  // ── 直リンク音声（MP3/WAV）をループ再生 ──
+
+  private playDirect(url: string) {
+    const audio = new Audio(url);
+    audio.loop = true;
+    audio.volume = 0.6;
+    audio.play().catch(() => {});
+    this.current = {
+      stop: () => { try { audio.pause(); audio.src = ''; } catch (e) { } },
+    };
   }
 
   destroy() {

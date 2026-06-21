@@ -51,3 +51,5 @@ next-env.d.ts
 
 # uploaded images (local file storage for MinIO/R2 dev)
 /public/uploads/
+
+tmp

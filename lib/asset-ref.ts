@@ -40,8 +40,12 @@ export function imageRefToUrl(raw: string): string | null {
     case 'url': return ref.value;
     case 'tile': return null;   // 単色: 描画側で色塗り
     case 'emoji': return null;  // 絵文字: 描画側でfillText
-    case 'post':
-    case 'walk': return null;   // 投稿解決が必要
+    case 'walk': {
+      // URL由来の歩行グラはそのまま表示URLになる（投稿由来は解決が必要）。
+      const wr = parseWalkRef(raw);
+      return wr && wr.source.kind === 'url' ? wr.source.url : null;
+    }
+    case 'post': return null;   // 投稿解決が必要
     default: return null;
   }
 }
@@ -76,7 +80,11 @@ export function refLabel(raw: string): string {
   if (!ref || ref.scheme === 'none' || !ref.value) return 'なし';
   switch (ref.scheme) {
     case 'post': return `画像投稿 #${ref.value}`;
-    case 'walk': return `歩行グラ #${ref.value.split('#')[0]}`;
+    case 'walk': {
+      const wr = parseWalkRef(raw);
+      if (!wr) return '歩行グラ';
+      return wr.source.kind === 'post' ? `歩行グラ #${wr.source.postId}` : '歩行グラ';
+    }
     case 'url': return ref.value.length > 28 ? ref.value.slice(0, 26) + '…' : ref.value;
     case 'tile': return `色 ${ref.value}`;
     case 'emoji': return ref.value;
@@ -90,4 +98,54 @@ export function refLabel(raw: string): string {
 export function youtubeRefFromUrl(url: string): string {
   const m = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
   return m ? `youtube:${m[1]}` : `youtube:${url}`;
+}
+
+// ───────────────── 歩行グラ（アニメーション付きキャラチップ） ─────────────────
+//
+// 歩行グラは「シート画像 + 規格」で表す。規格(stdId)は省略時 'auto'（実寸から自動推定）。
+// 形式: walk:<stdId>:<source>
+//   stdId  = auto | rpgen | rm2k | rmxp | rmvx | rmmv
+//   source = u:<url>   直リンクのシート画像（RPGen素材など）
+//          = p:<postId> 既存の歩行グラ投稿（spriteUrl は選択時に解決してキャッシュ）
+//   例: walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/2158.png
+//       walk:rpgen:p:123
+// 後方互換: 旧 `walk:123`（=投稿123, 自動推定）も解釈する。
+
+export interface WalkRef {
+  stdId: string;            // 'auto' or a WALK_STANDARDS id
+  source: { kind: 'url'; url: string } | { kind: 'post'; postId: number };
+}
+
+const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv']);
+
+export function buildWalkRef(stdId: string, source: WalkRef['source']): string {
+  const src = source.kind === 'url' ? `u:${source.url}` : `p:${source.postId}`;
+  return `walk:${WALK_STD_IDS.has(stdId) ? stdId : 'auto'}:${src}`;
+}
+
+/** `walk:...` を構造化。歩行グラでなければ null。旧 `walk:123` も解釈。 */
+export function parseWalkRef(raw: string): WalkRef | null {
+  if (!raw || !raw.startsWith('walk:')) return null;
+  const rest = raw.slice('walk:'.length);
+  // 新形式: <stdId>:<source>
+  const colon = rest.indexOf(':');
+  if (colon !== -1) {
+    const maybeStd = rest.slice(0, colon);
+    if (WALK_STD_IDS.has(maybeStd)) {
+      const srcStr = rest.slice(colon + 1);
+      if (srcStr.startsWith('u:')) return { stdId: maybeStd, source: { kind: 'url', url: srcStr.slice(2) } };
+      if (srcStr.startsWith('p:')) {
+        const id = parseInt(srcStr.slice(2), 10);
+        if (!isNaN(id)) return { stdId: maybeStd, source: { kind: 'post', postId: id } };
+      }
+    }
+  }
+  // 後方互換: walk:123 / walk:123#s0
+  const legacyId = parseInt(rest, 10);
+  if (!isNaN(legacyId)) return { stdId: 'auto', source: { kind: 'post', postId: legacyId } };
+  return null;
+}
+
+export function isWalkRef(raw: string): boolean {
+  return !!parseWalkRef(raw);
 }
