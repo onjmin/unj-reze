@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const UPLOADS_DIR = path.join(process.cwd(), 'public', 'uploads');
+const UPLOADS_DIR = './public/uploads';
 
 function ensureDir() {
   if (!fs.existsSync(UPLOADS_DIR)) {

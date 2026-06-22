@@ -8,9 +8,11 @@ import { api } from '@/lib/api';
 import { extractMmlFromContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
-import MmlPlayer from './MmlPlayer';
+import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
+
+const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
 interface PostDetailProps {
   post: Post;

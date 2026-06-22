@@ -7,22 +7,24 @@ import { Post, AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
+import dynamic from 'next/dynamic';
 import RankingSubTabs from '@/components/RankingSubTabs';
 import RightDrawer from '@/components/RightDrawer';
 import FeedList from '@/components/FeedList';
 import BottomNav from '@/components/BottomNav';
 import FAB from '@/components/FAB';
-import DrawingEditor from '@/components/DrawingEditor';
-import DotDrawingEditor from '@/components/DotDrawingEditor';
 import CollabSelector from '@/components/CollabSelector';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
 import LiveGameView from '@/components/LiveGameView';
-import MmlEditor from '@/components/MmlEditor';
 import PostComposer from '@/components/PostComposer';
 import SearchView from '@/components/SearchView';
 import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
 import ProfileView from '@/components/ProfileView';
+
+const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
+const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
+const MmlEditor = dynamic(() => import('@/components/MmlEditor'), { ssr: false });
 
 export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);

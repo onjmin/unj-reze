@@ -7,6 +7,7 @@ import type { Post } from '@/lib/types';
 import { extractMmlFromContent, mmlToNotes, playMml } from '@/lib/mml';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
+import SpriteSheetBrowser from './SpriteSheetBrowser';
 
 export interface PickResult {
   ref: string;
@@ -202,9 +203,9 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
             </div>
           )}
 
-          {/* Image: RPGen sprites / walk graphics */}
+          {/* Image: RPGen sprites（人がまとめた素材集） / walk graphics */}
           {mode === 'image' && imageTab === 'rpgenSprite' && (
-            <RpgenAssetPanel kind="sprite" onPick={onPick} />
+            <SpriteSheetBrowser onPick={onPick} />
           )}
           {mode === 'image' && imageTab === 'rpgenWalk' && (
             <RpgenAssetPanel kind="walk" onPick={onPick} />

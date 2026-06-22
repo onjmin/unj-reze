@@ -12,7 +12,7 @@ async function getDb(): Promise<SqlJsDatabase> {
   if (db) return db;
 
   const SQL = await initSqlJs();
-  const dbPath = process.env.D1_DATABASE_PATH || path.join(process.cwd(), 'data', 'd1.sqlite');
+  const dbPath = process.env.D1_DATABASE_PATH || './data/d1.sqlite';
 
   try {
     if (fs.existsSync(dbPath)) {
@@ -35,7 +35,7 @@ async function getDb(): Promise<SqlJsDatabase> {
 }
 
 async function runInitSql(database: SqlJsDatabase) {
-  const initPath = path.join(process.cwd(), 'docker', 'init.sqlite.sql');
+  const initPath = './docker/init.sqlite.sql';
   if (fs.existsSync(initPath)) {
     const sql = fs.readFileSync(initPath, 'utf-8');
     database.run(sql);
@@ -117,7 +117,7 @@ function ensureTableMigrations(d: SqlJsDatabase) {
 }
 
 function saveDb() {
-  const dbPath = process.env.D1_DATABASE_PATH || path.join(process.cwd(), 'data', 'd1.sqlite');
+  const dbPath = process.env.D1_DATABASE_PATH || './data/d1.sqlite';
   if (db) {
     const data = db.export();
     const buffer = Buffer.from(data);

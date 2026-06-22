@@ -3827,36 +3827,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                         <>
                                           <input value={card.cutinCharName ?? ''}
                                             onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })}
-                                            onFocus={firePreview}
+                                            onFocus={() => firePreview()}
                                             placeholder="キャラクター名"
                                             className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
                                           <p className="text-[9px] text-blue-400/80">立ち絵</p>
                                           <input value={card.cutinImageUrl ?? ''}
                                             onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })}
-                                            onFocus={firePreview}
+                                            onFocus={() => firePreview()}
                                             placeholder={'https://i.imgur.com/4M92pLV.png'}
                                             className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
                                           <div className="flex gap-1 items-center flex-wrap">
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
                                               X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 0}
-                                                onFocus={firePreview}
+                                                onFocus={() => firePreview()}
                                                 onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); firePreview({ imageX: v }); }}
                                                 className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             </label>
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5">
                                               Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? -50}
-                                                onFocus={firePreview}
+                                                onFocus={() => firePreview()}
                                                 onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); firePreview({ imageY: v }); }}
                                                 className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             </label>
                                             <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">
                                               倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 1}
-                                                onFocus={firePreview}
+                                                onFocus={() => firePreview()}
                                                 onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); firePreview({ imageScale: v }); }}
                                                 className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                             </label>
                                           </div>
-                                          <button onClick={firePreview}
+                                          <button onClick={() => firePreview()}
                                             className="text-[9px] text-violet-400 hover:text-violet-300 active:opacity-60">▶ プレビュー</button>
                                         </>
                                       );
@@ -4239,15 +4239,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                       });
                                       return (
                                         <>
-                                          <input value={card.cutinCharName ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="キャラクター名" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
+                                          <input value={card.cutinCharName ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinCharName: e.target.value || undefined } : c) })} onFocus={() => firePreview()} placeholder="キャラクター名" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[10px] text-white outline-none" />
                                           <p className="text-[9px] text-blue-400/80">立ち絵</p>
-                                          <input value={card.cutinImageUrl ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })} onFocus={firePreview} placeholder="https://i.imgur.com/lf3x8xR.png" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
+                                          <input value={card.cutinImageUrl ?? ''} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageUrl: e.target.value || undefined } : c) })} onFocus={() => firePreview()} placeholder="https://i.imgur.com/lf3x8xR.png" className="w-full bg-gray-800 rounded px-1 py-0.5 text-[9px] text-gray-300 outline-none" />
                                           <div className="flex gap-1 items-center flex-wrap">
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 350} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); firePreview({ imageX: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? 100} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); firePreview({ imageY: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
-                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 0.5} onFocus={firePreview} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); firePreview({ imageScale: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
+                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">X<input type="text" inputMode="numeric" defaultValue={card.cutinImageX ?? 350} onFocus={() => firePreview()} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageX: v } : c) }); firePreview({ imageX: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
+                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5">Y<input type="text" inputMode="numeric" defaultValue={card.cutinImageY ?? 100} onFocus={() => firePreview()} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinImageY: v } : c) }); firePreview({ imageY: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
+                                            <label className="text-[9px] text-gray-400 flex items-center gap-0.5 ml-1">倍率<input type="text" inputMode="decimal" defaultValue={card.cutinScale ?? 0.5} onFocus={() => firePreview()} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, cutinScale: v } : c) }); firePreview({ imageScale: v }); }} className="w-12 ml-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white outline-none" /></label>
                                           </div>
-                                          <button onClick={firePreview} className="text-[9px] text-violet-400 hover:text-violet-300 active:opacity-60">▶ プレビュー</button>
+                                          <button onClick={() => firePreview()} className="text-[9px] text-violet-400 hover:text-violet-300 active:opacity-60">▶ プレビュー</button>
                                         </>
                                       );
                                     })()}

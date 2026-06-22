@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Music, Loader2 } from 'lucide-react';
-import { createDtmStudio, type DtmStudio, type DawInstance } from '@onjmin/dtm';
+import { createDtmStudio, type DtmStudio, type ModeSwitchInstance } from '@onjmin/dtm';
 
 interface MmlEditorProps {
   onClose: () => void;
@@ -28,13 +28,14 @@ async function loadEngine(url: string, name: string): Promise<unknown> {
   return mod[name] ?? mod.default;
 }
 
-// 編集UIは @onjmin/dtm の createDtmStudio().mountEditor() に差し替え。
-// ピアノロール・楽器プリセット・ドラム・MIDI読込・コード進行入力まで全部入りのDAWを使う。
-// アプリ側はオーバーレイの枠（キャンセル / 投稿ボタン）だけを担当する。
+// 編集UIは @onjmin/dtm の createDtmStudio().mountModeSwitch() に差し替え。
+// mountModeSwitch はシンプル/アドバンスのモード切替UIを差し込み、編集UI（mountEditor）の
+// マウント・再マウント（MML引き継ぎ）まで面倒を見る。ピアノロール・楽器プリセット・ドラム・
+// MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
 export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const studioRef = useRef<DtmStudio | null>(null);
-  const dawRef = useRef<DawInstance | null>(null);
+  const modeSwitchRef = useRef<ModeSwitchInstance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,7 +61,12 @@ export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
         }
         studioRef.current = studio;
         if (mountRef.current) {
-          dawRef.current = studio.mountEditor(mountRef.current);
+          // モード切替UI（シンプル/アドバンス）を差し込み、編集UIのマウントごと面倒を見る。
+          modeSwitchRef.current = studio.mountModeSwitch(mountRef.current, {
+            editorTarget: mountRef.current,
+            mode: 'simple',
+            position: 'prepend',
+          });
         }
         setLoading(false);
       } catch (e) {
@@ -74,15 +80,16 @@ export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
 
     return () => {
       disposed = true;
-      try { dawRef.current?.destroy(); } catch {}
+      try { modeSwitchRef.current?.destroy(); } catch {}
       try { studioRef.current?.dispose(); } catch {}
-      dawRef.current = null;
+      modeSwitchRef.current = null;
       studioRef.current = null;
     };
   }, []);
 
   const handleSave = useCallback(() => {
-    const daw = dawRef.current;
+    // モード切替で daw が差し替わるため、現在の DawInstance を都度取得する。
+    const daw = modeSwitchRef.current?.getDaw();
     if (!daw) return;
     const mml = daw.getMML().minified.trim();
     if (mml) onSave(mml);

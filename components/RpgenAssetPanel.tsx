@@ -3,15 +3,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Search, Loader2, Play, Square, Check } from 'lucide-react';
 import {
-  searchSprites, searchSpriteAnims, searchSounds,
-  spriteUrl, sAnimUrl, soundUrl,
-  type SpriteItem, type SpriteAnimItem, type SoundItem,
+  searchSpriteAnims, searchSounds,
+  sAnimUrl, soundUrl,
+  type SpriteAnimItem, type SoundItem,
 } from '@/lib/rpgen-assets';
 import { buildWalkRef } from '@/lib/asset-ref';
 import WalkSpritePreview from './WalkSpritePreview';
 import type { PickResult } from './ContentPicker';
 
-type Kind = 'sprite' | 'walk' | 'sound';
+type Kind = 'walk' | 'sound';
 
 interface RpgenAssetPanelProps {
   kind: Kind;
@@ -20,12 +20,13 @@ interface RpgenAssetPanelProps {
 
 const PER_PAGE = 48;
 
-// RPGen Search のアセット（ドット絵スプライト / 歩行グラ / 効果音）をブラウズして選ぶパネル。
+// RPGen Search の歩行グラ / 効果音をブラウズして選ぶパネル。
+// （素材ドット絵は人がまとめた SpriteSheetBrowser を使う）
 // ContentPicker のタブ内に埋め込んで使う。モバイルファースト・ドット絵想定。
 export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) {
   const [query, setQuery] = useState('');
   const [submitted, setSubmitted] = useState('');
-  const [items, setItems] = useState<(SpriteItem | SpriteAnimItem | SoundItem)[]>([]);
+  const [items, setItems] = useState<(SpriteAnimItem | SoundItem)[]>([]);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -36,7 +37,6 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
 
   const fetchPage = useCallback((q: string, p: number, signal: AbortSignal) => {
     const params = { q, page: p, limit: PER_PAGE, signal };
-    if (kind === 'sprite') return searchSprites(params);
     if (kind === 'walk') return searchSpriteAnims(params);
     return searchSounds(params);
   }, [kind]);
@@ -72,9 +72,6 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
     setPreviewNo(no);
   };
 
-  const pickSprite = (it: SpriteItem) =>
-    onPick({ ref: `url:${spriteUrl(it.no)}`, url: spriteUrl(it.no), label: `素材 #${it.no}` });
-
   const pickWalk = (it: SpriteAnimItem) => {
     const url = sAnimUrl(it.no);
     onPick({ ref: buildWalkRef('auto', { kind: 'url', url }), url, label: `歩行グラ #${it.no}` });
@@ -83,7 +80,7 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
   const pickSound = (it: SoundItem) =>
     onPick({ ref: `direct:${soundUrl(it.no)}`, url: soundUrl(it.no), label: it.title || `SE #${it.no}` });
 
-  const placeholder = kind === 'sound' ? '効果音を検索（例: 攻撃, ジャンプ）' : 'ドット絵を検索（例: 魔王, スライム）';
+  const placeholder = kind === 'sound' ? '効果音を検索（例: 攻撃, ジャンプ）' : '歩行グラを検索（例: 主人公, 敵）';
 
   return (
     <div className="flex flex-col gap-2">
@@ -132,30 +129,20 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
               ))}
             </div>
           ) : (
-            <div className={kind === 'walk' ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-4 gap-2'}>
-              {kind === 'walk'
-                ? (items as SpriteAnimItem[]).map((it) => (
-                    <button
-                      key={it.no}
-                      onClick={() => pickWalk(it)}
-                      className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
-                      title={`#${it.no} ${it.comment || ''}`}
-                    >
-                      <WalkSpritePreview url={sAnimUrl(it.no)} size={56} />
-                      <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-1 truncate">#{it.no}</span>
-                    </button>
-                  ))
-                : (items as SpriteItem[]).map((it) => (
-                    <button
-                      key={it.no}
-                      onClick={() => pickSprite(it)}
-                      className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center p-1"
-                      title={`#${it.no} ${it.comment || ''}`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spriteUrl(it.no)} alt="" className="max-w-full max-h-full" style={{ imageRendering: 'pixelated' }} loading="lazy" />
-                    </button>
-                  ))}
+            <div className="grid grid-cols-3 gap-2">
+              {(items as SpriteAnimItem[]).map((it) => (
+                <button
+                  key={it.no}
+                  onClick={() => pickWalk(it)}
+                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
+                  title={`#${it.no} ${it.comment || ''}`}
+                >
+                  <WalkSpritePreview url={sAnimUrl(it.no)} size={64} />
+                  <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-1 truncate">
+                    {it.comment && it.comment !== 'なし' ? it.comment : `#${it.no}`}
+                  </span>
+                </button>
+              ))}
             </div>
           )}
 

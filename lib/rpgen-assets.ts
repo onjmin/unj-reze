@@ -64,6 +64,15 @@ export interface SoundItem {
   file_size: number;
 }
 
+// 人間がまとめたスプライトのコレクション（カテゴリ）。sprite_ids がメンバーのスプライト番号。
+export interface SpriteSheetItem {
+  no: number;
+  name: string;
+  comment: string;
+  author_site?: string;
+  sprite_ids: number[];
+}
+
 export interface SearchParams {
   q?: string;
   page?: number;
@@ -90,3 +99,5 @@ async function get<T>(endpoint: string, params: SearchParams = {}): Promise<Rpge
 export const searchSprites = (p?: SearchParams) => get<SpriteItem>('sprites', p);
 export const searchSpriteAnims = (p?: SearchParams) => get<SpriteAnimItem>('sprite-anims', p);
 export const searchSounds = (p?: SearchParams) => get<SoundItem>('sounds', p);
+/** 人間がまとめたスプライトシート（カテゴリ）一覧。`/api/sheets/sprite` */
+export const searchSpriteSheets = (p?: SearchParams) => get<SpriteSheetItem>('sheets/sprite', p);
