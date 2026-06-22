@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
-import { extractMmlFromContent } from '@/lib/mml';
+import { extractMmlFromContent, EMBED_TEXT_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -169,7 +169,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
             {(() => {
-              const markers = ['#mml', '#chord',];
+              const markers = EMBED_TEXT_MARKERS;
               const markerPos = markers.reduce((best, kw) => {
                 const p = post.content.indexOf(kw);
                 return p >= 0 ? Math.min(best, p) : best;

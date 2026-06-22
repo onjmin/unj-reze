@@ -5,7 +5,7 @@ import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, Mo
 import Link from 'next/link';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
-import { extractMmlFromContent } from '@/lib/mml';
+import { extractMmlFromContent, EMBED_TEXT_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -204,7 +204,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
             {(() => {
-              const markers = ['#mml', '#chord',];
+              const markers = EMBED_TEXT_MARKERS;
               const markerPos = markers.reduce((best, kw) => {
                 const p = post.content.indexOf(kw);
                 return p >= 0 ? Math.min(best, p) : best;
@@ -358,7 +358,7 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
             {(() => {
-              const markers = ['#mml', '#chord',];
+              const markers = EMBED_TEXT_MARKERS;
               const markerPos = markers.reduce((best, kw) => {
                 const p = localPost.content.indexOf(kw);
                 return p >= 0 ? Math.min(best, p) : best;

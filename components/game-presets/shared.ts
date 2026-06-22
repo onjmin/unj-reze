@@ -8,7 +8,7 @@ export const PLAY_H = ROWS * TILE_SIZE;
 
 export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';
-export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV';
+export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
 export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard';
 export type ObjectKind = 'npc' | 'tile' | 'bullet';

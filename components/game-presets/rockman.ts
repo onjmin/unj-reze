@@ -59,9 +59,9 @@ export const rockman: PresetData = {
   ),
   objects: [
     // ── 雑魚敵（met: パトロール） ──
-    newObject({ emoji: '🪖', col: 5, row: ROWS - 6, behavior: 'patrolH', speed: 1.5, hazard: true, hp: 1, bullet: 'none' }),
-    newObject({ emoji: '🪖', col: 18, row: ROWS - 6, behavior: 'patrolH', speed: 1.5, hazard: true, hp: 1, bullet: 'none' }),
-    newObject({ emoji: '🪖', col: 35, row: ROWS - 6, behavior: 'patrolH', speed: 1.8, hazard: true, hp: 1, bullet: 'none' }),
+    newObject({ emoji: '🪖', col: 5, row: ROWS - 6, behavior: 'walker', speed: 1.5, hazard: true, hp: 1, bullet: 'none' }),
+    newObject({ emoji: '🪖', col: 18, row: ROWS - 6, behavior: 'walker', speed: 1.5, hazard: true, hp: 1, bullet: 'none' }),
+    newObject({ emoji: '🪖', col: 35, row: ROWS - 6, behavior: 'walker', speed: 1.8, hazard: true, hp: 1, bullet: 'none' }),
 
     // ── 砲台（aimed shot・固定） ──
     newObject({ emoji: '🔫', col: 10, row: ROWS - 9, behavior: 'still', speed: 0, hazard: true, hp: 2, bullet: 'aimed', fireRate: 80, bulletSpeed: 3.5, bulletColor: '#ff6644' }),
@@ -69,13 +69,13 @@ export const rockman: PresetData = {
     newObject({ emoji: '🔫', col: 29, row: ROWS - 9, behavior: 'still', speed: 0, hazard: true, hp: 2, bullet: 'aimed', fireRate: 75, bulletSpeed: 3.5, bulletColor: '#ff6644' }),
 
     // ── ピコピコ（パトロール・spread） ──
-    newObject({ emoji: '👾', col: 25, row: ROWS - 6, behavior: 'patrolH', speed: 1.8, hazard: true, hp: 2, bullet: 'spread', fireRate: 110, bulletColor: '#ff9900', bulletSpeed: 3 }),
-    newObject({ emoji: '👾', col: 41, row: ROWS - 6, behavior: 'patrolH', speed: 2, hazard: true, hp: 2, bullet: 'spread', fireRate: 100, bulletColor: '#ff9900', bulletSpeed: 3 }),
+    newObject({ emoji: '👾', col: 25, row: ROWS - 6, behavior: 'walker', speed: 1.8, hazard: true, hp: 2, bullet: 'spread', fireRate: 110, bulletColor: '#ff9900', bulletSpeed: 3 }),
+    newObject({ emoji: '👾', col: 41, row: ROWS - 6, behavior: 'walker', speed: 2, hazard: true, hp: 2, bullet: 'spread', fireRate: 100, bulletColor: '#ff9900', bulletSpeed: 3 }),
 
     // ── ボス：カットマン（isBoss=true → 倒すまでゴール不可） ──
     newObject({
       emoji: '✂️', col: WCOLS - 4, row: ROWS - 3,
-      behavior: 'patrolH', speed: 1.5, hazard: true,
+      behavior: 'walker', speed: 1.5, hazard: true,
       hp: 28, bullet: 'spread', fireRate: 55, bulletSpeed: 3.5, bulletColor: '#ff2222',
       isBoss: true, name: 'カットマン',
       outroDialogue: [

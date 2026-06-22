@@ -34,7 +34,7 @@ export const mario: PresetData = {
   objects: [
     newObject({ emoji: '🐛', col: 5, row: ROWS - 3, behavior: 'patrolH', speed: 1, hazard: true, hp: 1, bullet: 'none' }),
     newObject({ emoji: '🐛', col: 18, row: ROWS - 3, behavior: 'patrolH', speed: 1, hazard: true, hp: 1, bullet: 'none' }),
-    newObject({ emoji: '🐢', col: 24, row: ROWS - 3, behavior: 'patrolH', speed: 1.2, hazard: true, hp: 2, bullet: 'none' }),
+    newObject({ emoji: '🐢', col: 24, row: ROWS - 3, behavior: 'walker', speed: 1.2, hazard: true, hp: 2, bullet: 'none' }),
     newObject({ emoji: '🐛', col: 35, row: ROWS - 3, behavior: 'patrolH', speed: 1, hazard: true, hp: 1, bullet: 'none' }),
   ],
   sfx: {},

@@ -128,8 +128,14 @@ function countToMmlDiv(count: number): string {
   return best.div;
 }
 
+// MML本文の開始マーカー。投稿コンポーザは `#MML作曲 <mml>`、旧seedは `#mml <mml>` を使う。
+// 抽出・本文表示の双方でこの定義を共有し、マーカー不一致による埋め込み未認識を防ぐ。
+export const MML_MARKERS = ['#mml', '#MML作曲'];
+// 投稿本文から「埋め込みに置き換える」ために隠すマーカー（MML + コード）。
+export const EMBED_TEXT_MARKERS = [...MML_MARKERS, '#chord'];
+
 export function extractMmlFromContent(content: string): string | null {
-  const markers = ['#mml'];
+  const markers = MML_MARKERS;
   let idx = -1;
   let markerLen = 0;
   for (const m of markers) {
