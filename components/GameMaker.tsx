@@ -27,7 +27,7 @@ import {
   type TitleScreenConfig, type EndingScreenConfig, type ScreenMenuKind,
   defaultTitleScreen, defaultEndingScreen, SCREEN_MENU_LABELS,
 } from './game-presets/shared';
-import { PRESETS, PRESET_ORDER } from './game-presets';
+import { PRESETS, PRESET_ORDER, PRESET_EMOJI } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
@@ -534,6 +534,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.onjReze));
   const [title, setTitle] = useState(PRESETS.onjReze.name);
   const [isPlaying, setIsPlaying] = useState(false);
+  /** 新規作成時の入口ヒーロー（デモ再生＋あそぶ/改造の選択）。playOnly/編集再開/埋め込み時は出さない。 */
+  const [introOpen, setIntroOpen] = useState(!playOnly && !initialManifest && !embedded);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
@@ -1174,6 +1176,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       resetGame('onjReze');
     }
   }, [initialManifest, playOnly, resetGame]);
+
+  // ── 入口ヒーロー：開いた瞬間にデモ再生して「動くゲーム」で迎える ──
+  useEffect(() => {
+    if (introOpen) setIsPlaying(true);
+  }, [introOpen]);
+
+  /** ヒーローでプリセットを切り替えてデモを再生し直す（②ギャラリーの予告）。 */
+  const previewPresetInIntro = useCallback((id: PresetId) => {
+    resetGame(id);          // isPlaying=false にリセット
+    setIsPlaying(true);     // 同フレームで再生 → 新プリセットのデモが回る
+  }, [resetGame]);
+
+  /** ヒーローから「あそぶ」。タイトル画面があればそれを、なければ即プレイ。 */
+  const enterPlayFromIntro = useCallback(() => {
+    setIntroOpen(false);
+    setActivePreviewKey(null);
+    if (gameData.titleScreen?.enabled) { restart(); setShowTitle(true); return; }
+    restart();
+    setIsPlaying(true);
+  }, [gameData.titleScreen, restart]);
+
+  /** ヒーローから「改造する」。デモを止めてエディタへ。 */
+  const enterEditFromIntro = useCallback(() => {
+    setIntroOpen(false);
+    restart();              // デモ停止＋初期位置に戻す
+  }, [restart]);
 
   // BGM
   useEffect(() => {
@@ -2963,6 +2991,46 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     <button onClick={() => setShowEnding(false)}
                       className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">とじる</button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 入口ヒーロー：動くデモの上に「あそぶ / 改造する」を重ねる ── */}
+            {introOpen && (
+              <div className="absolute inset-0 z-[45] flex flex-col items-center justify-between py-4 px-4 text-center select-none"
+                style={{ background: 'linear-gradient(180deg,rgba(7,8,11,0.15) 0%,rgba(7,8,11,0.55) 45%,rgba(7,8,11,0.9) 100%)' }}>
+                {/* プリセット切り替え（②ギャラリーの予告） */}
+                <div className="flex items-center gap-1.5">
+                  {PRESET_ORDER.map(id => (
+                    <button key={id} onClick={() => previewPresetInIntro(id)}
+                      title={PRESETS[id].name}
+                      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg leading-none transition ${presetId === id ? 'bg-white/20 ring-2 ring-white/80 scale-110' : 'bg-black/40 ring-1 ring-white/20 hover:bg-white/10'}`}>
+                      {PRESET_EMOJI[id]}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 見出し */}
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[10px] font-black tracking-[0.3em] text-white/60">GAME MAKER</span>
+                  <h1 className="text-2xl sm:text-3xl font-black text-white" style={{ textShadow: '0 2px 12px rgba(0,0,0,0.9)' }}>
+                    {PRESET_EMOJI[presetId]} {gameData.name}
+                  </h1>
+                  <p className="text-[11px] text-white/70" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.9)' }}>
+                    完成ゲームを選んで、自分だけの作品に改造しよう
+                  </p>
+                </div>
+
+                {/* あそぶ / 改造する */}
+                <div className="flex flex-col gap-2 w-56 max-w-full">
+                  <button onClick={enterPlayFromIntro}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full font-black text-sm bg-green-500 text-green-950 hover:bg-green-400 active:scale-95 transition shadow-lg shadow-green-500/30">
+                    <Play size={16} /> このゲームをあそぶ
+                  </button>
+                  <button onClick={enterEditFromIntro}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm bg-white/10 text-white border border-white/30 hover:bg-white/20 active:scale-95 transition backdrop-blur-sm">
+                    ✏ 改造する
+                  </button>
                 </div>
               </div>
             )}
