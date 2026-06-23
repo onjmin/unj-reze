@@ -27,7 +27,7 @@ import {
   type TitleScreenConfig, type EndingScreenConfig, type ScreenMenuKind,
   defaultTitleScreen, defaultEndingScreen, SCREEN_MENU_LABELS,
 } from './game-presets/shared';
-import { PRESETS, PRESET_ORDER, PRESET_EMOJI } from './game-presets';
+import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
@@ -537,6 +537,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 新規作成時の入口ヒーロー（デモ再生＋あそぶ/改造の選択）。playOnly/編集再開/埋め込み時は出さない。 */
   const [introOpen, setIntroOpen] = useState(!playOnly && !initialManifest && !embedded);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
+  /** 詳細タブ（アセット・サウンド・画面・会話）の表示フラグ。初回は非表示で圧迫感を減らす。 */
+  const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
   const isDraggingStartRef = useRef(false);
@@ -624,6 +626,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false });
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, level: 1, exp: 0, expNext: 10 });
   const invulnRef = useRef(0);
+  /** 画面シェイク残フレーム数（0=なし）。ヒット・爆発・ゲームオーバー時にセット。 */
+  const shakeRef = useRef(0);
   const roundOverRef = useRef(false);    // ミス/ゲームオーバー/クリア演出中（操作・進行を凍結）
   const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
   const livesRef = useRef(3);            // 残機数
@@ -774,7 +778,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (result === 'lose') {
       battleRef.current.active = false; setBattle(null);
       battleBgmActiveRef.current = 'none';
-      playSfx(sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => setIsPlaying(false));
+      shakeRef.current = 18; playSfx(sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => setIsPlaying(false));
       return;
     }
     const wasBoss = b.isBoss;
@@ -1426,12 +1430,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     };
 
     const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); }); };
-    const lose = (msg: string) => { showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
+    const lose = (msg: string) => { shakeRef.current = 18; showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
+    const hitShake = () => { shakeRef.current = Math.max(shakeRef.current, 10); };
 
     // 残機制：touhou 専用の死亡ハンドラ
     const handlePlayerDeath = () => {
       const eng = engineRef.current;
-      playSfx(sfxRef.current.damage);
+      hitShake(); playSfx(sfxRef.current.damage);
       isPlayerDeadRef.current = true;
       eng.bullets = []; // 自機弾を即消去
       livesRef.current--;
@@ -1590,7 +1595,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (bm.fuse > 0) continue;
             onjBombsRef.current.splice(i, 1);
             onjBlastsRef.current.push({ x: bm.x, y: bm.y, life: B_BLAST, maxLife: B_BLAST, r: bm.r });
-            playSfx(sfxRef.current.damage);
+            hitShake(); playSfx(sfxRef.current.damage);
             for (let k = eng.entities.length - 1; k >= 0; k--) {
               const ent = eng.entities[k];
               const ex = ent.x + TILE_SIZE / 2, ey = ent.y + TILE_SIZE / 2;
@@ -1675,7 +1680,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     for (const ti of trailListRef.current) trailG[ti] = 0;
                     trailListRef.current = [];
                     if (!debugInvincibleRef.current && invulnRef.current <= 0) {
-                      onjRezeHpRef.current.hp -= 1; invulnRef.current = 60; playSfx(sfxRef.current.damage);
+                      onjRezeHpRef.current.hp -= 1; invulnRef.current = 60; hitShake(); playSfx(sfxRef.current.damage);
                       if (onjRezeHpRef.current.hp <= 0) { lose('トレイルを切られた…'); dead = true; }
                     }
                     break;
@@ -1710,6 +1715,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               bombCountRef.current--;
               bombInvulnRef.current = 240;
               bombCooldownRef.current = 180;
+              shakeRef.current = 14; // 爆弾爆発シェイク
               eng.enemyBullets = [];
               const pcxB = p.x + pData.w / 2, pcyB = p.y + pData.h / 2;
               for (let a = 0; a < 24; a++) {
@@ -2007,12 +2013,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     const kdx = pcx - ecx, kdy = pcy - ecy; const kd = Math.hypot(kdx, kdy) || 1;
                     p.x = Math.max(0, Math.min(worldW - pData.w, p.x + (kdx / kd) * 18));
                     p.y = Math.max(0, Math.min(worldH - pData.h, p.y + (kdy / kd) * 18));
-                    playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                    hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
                     if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
                   }
                   break;
                 }
-                playSfx(sfxRef.current.damage); lose('ミス！'); dead = true;
+                hitShake(); playSfx(sfxRef.current.damage); lose('ミス！'); dead = true;
               }
               break;
             }
@@ -2056,7 +2062,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const idx = eng.enemyBullets.indexOf(eb);
                 if (idx >= 0) eng.enemyBullets.splice(idx, 1);
                 progressRef.current.hp -= 6; invulnRef.current = 45; forceHud(n => n + 1);
-                if (progressRef.current.hp <= 0) { playSfx(sfxRef.current.damage); lose('やられた…'); dead = true; break; }
+                if (progressRef.current.hp <= 0) { hitShake(); playSfx(sfxRef.current.damage); lose('やられた…'); dead = true; break; }
                 continue;
               }
               if (gameData.engine === 'touhou') { handlePlayerDeath(); dead = true; break; }
@@ -2064,7 +2070,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const idx = eng.enemyBullets.indexOf(eb);
                 if (idx >= 0) eng.enemyBullets.splice(idx, 1);
                 onjRezeHpRef.current.hp -= 1; invulnRef.current = 60;
-                playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
                 if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; break; }
                 continue;
               }
@@ -2229,8 +2235,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         isPlaying || p.y !== gameData.player.start.y
           ? p.y + pData.h / 2 - PLAY_H / 2
           : editScrollYRef.current));
+      // 画面シェイク（ヒット・爆発・ゲームオーバー）
+      if (shakeRef.current > 0) shakeRef.current--;
+      const shakeMag = shakeRef.current > 0 ? Math.min(shakeRef.current, 8) * 0.7 : 0;
+      const shakeOx = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
+      const shakeOy = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
+
       ctx.save();
-      ctx.translate(-camX, -camY);
+      ctx.translate(shakeOx - camX, shakeOy - camY);
 
       const map = engineRef.current.map;
       const startCol = Math.max(0, Math.floor(camX / TILE_SIZE));
@@ -2997,38 +3009,50 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
             {/* ── 入口ヒーロー：動くデモの上に「あそぶ / 改造する」を重ねる ── */}
             {introOpen && (
-              <div className="absolute inset-0 z-[45] flex flex-col items-center justify-between py-4 px-4 text-center select-none"
-                style={{ background: 'linear-gradient(180deg,rgba(7,8,11,0.15) 0%,rgba(7,8,11,0.55) 45%,rgba(7,8,11,0.9) 100%)' }}>
-                {/* プリセット切り替え（②ギャラリーの予告） */}
-                <div className="flex items-center gap-1.5">
-                  {PRESET_ORDER.map(id => (
-                    <button key={id} onClick={() => previewPresetInIntro(id)}
-                      title={PRESETS[id].name}
-                      className={`w-9 h-9 rounded-full flex items-center justify-center text-lg leading-none transition ${presetId === id ? 'bg-white/20 ring-2 ring-white/80 scale-110' : 'bg-black/40 ring-1 ring-white/20 hover:bg-white/10'}`}>
-                      {PRESET_EMOJI[id]}
-                    </button>
-                  ))}
+              <div className="absolute inset-0 z-[45] flex flex-col overflow-y-auto select-none"
+                style={{ background: 'rgba(7,8,11,0.82)', backdropFilter: 'blur(2px)' }}>
+                {/* ヘッダー */}
+                <div className="shrink-0 pt-3 pb-1 px-4 text-center">
+                  <span className="text-[9px] font-black tracking-[0.35em] text-white/40">GAME MAKER</span>
+                  <p className="text-[11px] text-white/70 mt-0.5">完成ゲームを選んで改造しよう</p>
                 </div>
 
-                {/* 見出し */}
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-[10px] font-black tracking-[0.3em] text-white/60">GAME MAKER</span>
-                  <h1 className="text-2xl sm:text-3xl font-black text-white" style={{ textShadow: '0 2px 12px rgba(0,0,0,0.9)' }}>
-                    {PRESET_EMOJI[presetId]} {gameData.name}
-                  </h1>
-                  <p className="text-[11px] text-white/70" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.9)' }}>
-                    完成ゲームを選んで、自分だけの作品に改造しよう
-                  </p>
+                {/* ギャラリー：プリセットカード */}
+                <div className="flex-1 px-3 py-2 grid grid-cols-1 gap-2">
+                  {PRESET_ORDER.map(id => {
+                    const active = presetId === id;
+                    const p = PRESETS[id];
+                    return (
+                      <button key={id} onClick={() => previewPresetInIntro(id)}
+                        className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition active:scale-[0.98] ${active ? 'bg-white/15 ring-2 ring-white/60' : 'bg-white/5 ring-1 ring-white/10 hover:bg-white/10'}`}>
+                        {/* 絵文字アイコン */}
+                        <span className={`text-3xl leading-none shrink-0 transition-transform duration-200 ${active ? 'scale-110' : ''}`}>
+                          {PRESET_EMOJI[id]}
+                        </span>
+                        {/* テキスト */}
+                        <div className="min-w-0">
+                          <div className="font-black text-sm text-white">{p.name}</div>
+                          <div className="text-[10px] text-white/55 mt-0.5">{PRESET_TAGLINE[id]}</div>
+                        </div>
+                        {/* 選択インジケーター */}
+                        {active && (
+                          <span className="ml-auto shrink-0 text-[9px] font-black tracking-wider text-green-400 bg-green-400/15 rounded-full px-2 py-0.5">
+                            プレビュー中
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* あそぶ / 改造する */}
-                <div className="flex flex-col gap-2 w-56 max-w-full">
+                <div className="shrink-0 flex flex-col gap-2 px-4 pb-4 pt-1">
                   <button onClick={enterPlayFromIntro}
                     className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full font-black text-sm bg-green-500 text-green-950 hover:bg-green-400 active:scale-95 transition shadow-lg shadow-green-500/30">
-                    <Play size={16} /> このゲームをあそぶ
+                    <Play size={16} /> {PRESET_EMOJI[presetId]} をあそぶ
                   </button>
                   <button onClick={enterEditFromIntro}
-                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm bg-white/10 text-white border border-white/30 hover:bg-white/20 active:scale-95 transition backdrop-blur-sm">
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm bg-white/10 text-white border border-white/25 hover:bg-white/20 active:scale-95 transition">
                     ✏ 改造する
                   </button>
                 </div>
@@ -3317,17 +3341,44 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             </div>
           ) : (
             <>
+              {/* ── タブバー：基本3つ＋詳細▼ で圧迫感を抑える ── */}
               <div className="flex border-b border-gray-800 shrink-0 overflow-x-auto">
+                {/* 基本タブ（常時表示） */}
                 {([
-                  ['map', 'マップ'], ...(gameData.engine !== 'touhou' ? [['object', 'オブジェクト']] : []), ['char', 'キャラ'], ['asset', 'アセット'], ['sound', 'サウンド'],
+                  ['map', 'マップ'],
+                  ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ']] : []),
+                  ['char', 'キャラ'],
+                ] as [EditorTab, string][]).map(([id, label]) => (
+                  <button key={id} onClick={() => setEditorTab(id)}
+                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
+                    {label}
+                  </button>
+                ))}
+
+                {/* 詳細タブ（showAdvancedTabs=trueのとき表示） */}
+                {showAdvancedTabs && ([
+                  ['asset', 'アセット'], ['sound', 'サウンド'],
                   ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
                   ...(gameData.engine === 'touhou' ? [['spell', '会話']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
-                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500'}`}>
+                    className={`flex-none py-3 px-3 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-600 hover:text-gray-400'}`}>
                     {label}
                   </button>
                 ))}
+
+                {/* 詳細トグル */}
+                <button
+                  onClick={() => {
+                    setShowAdvancedTabs(v => {
+                      // 詳細を閉じるとき、詳細タブを選択中なら基本に戻す
+                      if (v && !['map', 'object', 'char'].includes(editorTab)) setEditorTab('map');
+                      return !v;
+                    });
+                  }}
+                  className="ml-auto flex-none py-3 px-3 text-[10px] font-bold text-gray-600 hover:text-gray-400 transition whitespace-nowrap">
+                  {showAdvancedTabs ? '詳細 ▲' : '詳細 ▼'}
+                </button>
               </div>
 
 
@@ -4139,6 +4190,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── CHAR (non-touhou) ── */}
                 {editorTab === 'char' && gameData.engine !== 'touhou' && (
                   <div className="space-y-4">
+                    {/* ④ 主人公を自分にする（最初の一手）導線 */}
+                    <button
+                      onClick={() => setPicker({ mode: 'image', target: { t: 'player' } })}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-gradient-to-r from-violet-900/60 to-blue-900/50 border border-violet-600/40 hover:border-violet-500/70 active:scale-[0.98] transition text-left">
+                      <span className="text-2xl shrink-0">
+                        {gameData.player.spriteUrl
+                          ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.player.spriteUrl} alt="" className="w-8 h-8 object-contain" style={{ imageRendering: 'pixelated' }} />
+                          : gameData.player.emoji}
+                      </span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-white">主人公を自分にする</div>
+                        <div className="text-[10px] text-violet-300/80 mt-0.5">投稿画像・歩行グラを選択して差し替え</div>
+                      </div>
+                      <ImageIcon size={16} className="ml-auto shrink-0 text-violet-400" />
+                    </button>
                     <div>
                       <label className="block text-[11px] text-gray-400 mb-1">見た目</label>
                       <div className="flex items-center gap-2">
