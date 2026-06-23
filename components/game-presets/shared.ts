@@ -162,8 +162,13 @@ export interface ObjectDef {
   spellCards?: SpellCardDef[];
   /** 撃破時にボムをドロップする確率 0〜1（touhou エンジン）。 */
   bombDrop?: number;
-  /** ワープ先。objType=warp のとき使用。 */
+  /** ワープ先（同一シーン内）。objType=warp のとき使用。 */
   warpTarget?: WarpTarget;
+  /** シーン間ワープ。触れるとフェード遷移で別シーンへ移動。土管・扉などに使用。 */
+  warpSceneId?: string;
+  /** シーン間ワープの入場位置（省略時はシーン開始位置）。 */
+  warpEntryCol?: number;
+  warpEntryRow?: number;
   /** アイテムID。objType=item のとき、プレイヤー接触でこのアイテムを入手。未指定なら name をID扱い。 */
   itemId?: string;
   /** イベントページ。持つ場合は objType によらずイベントとして動作。 */
@@ -264,10 +269,32 @@ export interface BattleConfig {
 }
 
 
+// ── シーン切り替え（ロックマン型・部屋遷移） ────────────────────────────────
+/** 各辺の出口先シーン ID。省略した辺はマップ端で止まる。 */
+export interface SceneExit {
+  right?: string;
+  left?: string;
+  up?: string;
+  down?: string;
+}
+
+/** 1シーン = 画面1枚分（COLS×ROWS 推奨）のマップ＋オブジェクト。 */
+export interface SceneDef {
+  id: string;
+  name?: string;
+  map: number[][];
+  objects: ObjectDef[];
+  exits?: SceneExit;
+  /** このシーン専用 BGM。省略時はゲーム共通 BGM を継続。 */
+  bgm?: BgmState;
+}
+
 export interface PresetData {
   id: PresetId; name: string; engine: EngineKind; gravity: number; friction: number;
   player: PlayerDef; tiles: Record<number, TileDef>; map: number[][];
   objects: ObjectDef[]; bgm?: BgmState; battleBgm?: BgmState; bossBgm?: BgmState; sfx: Partial<Record<SfxTrigger, SfxRef>>;
+  /** シーン切り替えモード。定義されていればマップ/オブジェクトは scenes[0] を初期シーンとして使う。 */
+  scenes?: SceneDef[];
   /** マップ背景画像（静止画/GIF）。参照キーと解決済みURL。 */
   mapBgRef?: string; mapBgUrl?: string;
   /** 未指定なら 1 画面固定（worldCols = COLS）。 */

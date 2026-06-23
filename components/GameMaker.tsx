@@ -27,6 +27,7 @@ import {
   type TitleScreenConfig, type EndingScreenConfig, type ScreenMenuKind,
   defaultTitleScreen, defaultEndingScreen, SCREEN_MENU_LABELS,
 } from './game-presets/shared';
+import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
@@ -57,7 +58,17 @@ export interface GameManifestDraft {
   onjReze?: { territory: boolean; paint: boolean };
   titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
   ending?: Omit<EndingScreenConfig, 'bgUrl'>;
+  /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
+  scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
 }
+
+/** ズームビューポート：画面に表示するタイル数。canvas は PLAY_W×PLAY_H px 固定のまま ctx.scale で拡大。 */
+const VIEW_COLS = 15;
+const VIEW_ROWS = 11;
+const VIEW_W = VIEW_COLS * TILE_SIZE;   // 480 px
+const VIEW_H = VIEW_ROWS * TILE_SIZE;   // 352 px
+const SCALE_X = PLAY_W / VIEW_W;        // 640/480 = 4/3
+const SCALE_Y = PLAY_H / VIEW_H;        // 480/352 = 15/11
 
 const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
 
@@ -344,8 +355,8 @@ function runEntityScript(
     row: entity.def.row,
     startX,
     startY,
-    W: PLAY_W,
-    H: PLAY_H,
+    W: VIEW_W,
+    H: VIEW_H,
   };
 
   const lines = parseMiniScript(src);
@@ -432,7 +443,7 @@ function runWaveScript(
   const env: MiniEnv = {
     wait,
     /** spawn(敵名 or 番号, x=中央, y=画面上端) */
-    spawn: (ref: unknown, x: unknown = PLAY_W / 2, y: unknown = -TILE_SIZE) => {
+    spawn: (ref: unknown, x: unknown = VIEW_W / 2, y: unknown = -TILE_SIZE) => {
       const t = findTemplate(ref);
       if (t) spawnOne(t, +(x as number), +(y as number));
       else console.warn('[WaveScript] 未知の敵参照:', ref);
@@ -461,7 +472,7 @@ function runWaveScript(
       for (let i = +(from as number); s > 0 ? i <= +(to as number) : i >= +(to as number); i += s) out.push(i);
       return out;
     },
-    W: PLAY_W, H: PLAY_H,
+    W: VIEW_W, H: VIEW_H,
   };
 
   (async () => {
@@ -628,6 +639,34 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const invulnRef = useRef(0);
   /** 画面シェイク残フレーム数（0=なし）。ヒット・爆発・ゲームオーバー時にセット。 */
   const shakeRef = useRef(0);
+  // ── シーン切り替え ────────────────────────────────────────────────────────
+  /** ゲームデータに紐付くシーン一覧（プレイ中はこちらを参照）。 */
+  const scenesRef = useRef<SceneDef[]>([]);
+  /** 現在プレイ中のシーンインデックス。 */
+  const activeSceneIdxRef = useRef(0);
+  /** エディタで選択中のシーンインデックス（UI用）。 */
+  const [editSceneIdx, setEditSceneIdx] = useState(0);
+  /** スライド遷移の状態。null なら遷移なし。 */
+  const sceneTransRef = useRef<{
+    dir: 'right' | 'left' | 'up' | 'down';
+    frame: number;          // 0 → TRANS_FRAMES
+    nextIdx: number;
+    /** 遷移後の2倍幅/高さ合成マップ（cols: 2*COLS or rows: 2*ROWS）。 */
+    wideMap: number[][];
+    /** 遷移完了後のプレイヤー位置。 */
+    entryX: number;
+    entryY: number;
+  } | null>(null);
+  const TRANS_FRAMES = 24;
+  /** オブジェクト触発フェード遷移（土管・扉など）。null なら非アクティブ。 */
+  const sceneFadeRef = useRef<{
+    phase: 'out' | 'in';
+    frame: number;
+    totalFrames: number;
+    nextSceneId: string;
+    entryX: number;
+    entryY: number;
+  } | null>(null);
   const roundOverRef = useRef(false);    // ミス/ゲームオーバー/クリア演出中（操作・進行を凍結）
   const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
   const livesRef = useRef(3);            // 残機数
@@ -666,7 +705,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const waveRunningRef = useRef(false);
 
   // ── 弾幕空間グリッド ──
-  const bulletGridRef = useRef(new BulletGrid(PLAY_W));
+  const bulletGridRef = useRef(new BulletGrid(VIEW_W));
 
   // ── 設定パネル ──
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -770,7 +809,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const dx = p.x - b.entity.x, dy = p.y - b.entity.y; const dist = Math.hypot(dx, dy) || 1;
     const worldW = (gameData.scroll?.worldCols ?? COLS) * TILE_SIZE;
     p.x = Math.max(0, Math.min(worldW - pData.w, p.x + (dx / dist) * TILE_SIZE * 1.3));
-    p.y = Math.max(0, Math.min(PLAY_H - pData.h, p.y + (dy / dist) * TILE_SIZE * 1.3));
+    p.y = Math.max(0, Math.min(VIEW_H - pData.h, p.y + (dy / dist) * TILE_SIZE * 1.3));
   };
 
   const endBattle = (result: 'win' | 'lose' | 'flee') => {
@@ -1107,10 +1146,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const resetGame = useCallback((id: PresetId) => {
     const data = clone(PRESETS[id]);
+    // シーンモードなら scenes[0] の map/objects を初期表示に使う
+    if (data.scenes?.length) {
+      data.map = JSON.parse(JSON.stringify(data.scenes[0].map));
+      data.objects = JSON.parse(JSON.stringify(data.scenes[0].objects));
+    }
     setPresetId(id);
     setGameData(data);
     setTitle(PRESETS[id].name);
     setEditorTab('map');
+    setEditSceneIdx(0);
     const eng = engineRef.current;
     eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
     eng.keys.clear();
@@ -1118,8 +1163,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     actionDirRef.current = 1; actionShootCoolRef.current = 0;
     eng.map = JSON.parse(JSON.stringify(data.map));
     const sw = data.scroll?.worldCols ?? COLS; const sh = data.scroll?.worldRows ?? ROWS;
-    setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - PLAY_W, data.player.start.x + data.player.w / 2 - PLAY_W / 2)));
-    setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - PLAY_H, data.player.start.y + data.player.h / 2 - PLAY_H / 2)));
+    setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - VIEW_W, data.player.start.x + data.player.w / 2 - VIEW_W / 2)));
+    setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
     setIsPlaying(false); setSelectedObjId(null);
     setShowTitle(false); setShowEnding(false);
   }, []);
@@ -1222,6 +1267,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     return () => bgmManager.stop();
   }, [isPlaying, gameData.bgm]);
+
+  // ── シーン切り替えモード：プレイ開始/リセット時にシーンデータを初期化 ──
+  useEffect(() => {
+    if (!isPlaying || !gameData.scenes?.length) { scenesRef.current = []; return; }
+    scenesRef.current = gameData.scenes.map(s => ({
+      ...s,
+      objects: s.objects.map(o => ({ ...o, spriteUrl: undefined })),
+    })) as SceneDef[];
+    activeSceneIdxRef.current = 0;
+    sceneTransRef.current = null;
+    // 初期シーンのマップ・エンティティをエンジンに反映
+    const first = scenesRef.current[0];
+    engineRef.current.map = JSON.parse(JSON.stringify(first.map));
+  }, [isPlaying, gameData.scenes]);
+
+  // プレイ開始時に sfx を音量極小で一瞬再生してブラウザにデコード・バッファさせる
+  useEffect(() => {
+    if (!isPlaying) return;
+    Object.values(gameData.sfx).forEach(s => {
+      if (!s?.src || s.type !== 'direct') return;
+      const a = new Audio(s.src);
+      a.volume = 0.00001;
+      a.play().then(() => { a.pause(); a.src = ''; }).catch(() => {});
+    });
+  }, [isPlaying, gameData.sfx]);
 
   // タイトル／エンディング画面の BGM（プレイ中の BGM とは独立）
   useEffect(() => {
@@ -1354,8 +1424,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const worldRows = gameData.scroll?.worldRows ?? ROWS;
     const worldW = worldCols * TILE_SIZE;
     const worldH = worldRows * TILE_SIZE;
-    const camMax = Math.max(0, worldW - PLAY_W);
-    const camMaxY = Math.max(0, worldH - PLAY_H);
+    const camMax = Math.max(0, worldW - VIEW_W);
+    const camMaxY = Math.max(0, worldH - VIEW_H);
 
     const isInputTarget = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -1387,6 +1457,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       def: { emoji: string; spriteUrl?: string; spriteRef?: string },
       x: number, y: number, w: number, h: number,
       animKey?: string,
+      overrideDir?: WayKey,
     ) => {
       const img = def.spriteUrl ? imgCache.current.get(def.spriteUrl) : undefined;
       const loaded = !!img && img.complete && img.naturalWidth > 0;
@@ -1406,13 +1477,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const prev = walkInst.get(key);
         let dx = 0, dy = 0;
         if (prev) { dx = x - prev.px; dy = y - prev.py; }
-        let dir: WayKey = prev?.dir ?? 's';
+        let dir: WayKey = overrideDir ?? prev?.dir ?? 's';
         const moving = Math.hypot(dx, dy) > 0.15;
-        if (moving) {
+        if (!overrideDir && moving) {
           if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
           else dir = dirFromDelta(dx, dy) ?? dir;
         }
-        walkInst.set(key, { px: x, py: y, dir });
+        walkInst.set(key, { px: x, py: y, dir: overrideDir ?? dir });
 
         const cell = animatedCell(std, img!.naturalWidth, img!.naturalHeight, {
           dir, moving, timeSec: performance.now() / 1000, fps: 7,
@@ -1432,6 +1503,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); }); };
     const lose = (msg: string) => { shakeRef.current = 18; showGameMsg(msg, 'timed', () => setIsPlaying(false)); };
     const hitShake = () => { shakeRef.current = Math.max(shakeRef.current, 10); };
+
+    // ── シーン遷移：プレイヤーがマップ端に到達したとき発火 ──────────────────
+    const trySceneTrans = () => {
+      if (sceneTransRef.current || !scenesRef.current.length || roundOverRef.current) return;
+      const scenes = scenesRef.current;
+      const cur = scenes[activeSceneIdxRef.current];
+      const exits = cur.exits;
+      if (!exits) return;
+      const ep = engineRef.current.player;
+      const pw = gameData.player.w, ph = gameData.player.h;
+      const scW = COLS * TILE_SIZE, scH = ROWS * TILE_SIZE;
+      let dir: 'right' | 'left' | 'up' | 'down' | null = null;
+      let exitId: string | undefined;
+      if (exits.right && ep.x + pw >= scW)   { dir = 'right'; exitId = exits.right; }
+      else if (exits.left  && ep.x <= 0)      { dir = 'left';  exitId = exits.left; }
+      else if (exits.down  && ep.y + ph >= scH) { dir = 'down'; exitId = exits.down; }
+      else if (exits.up    && ep.y <= 0)      { dir = 'up';    exitId = exits.up; }
+      if (!dir || !exitId) return;
+      const nextIdx = scenes.findIndex(s => s.id === exitId);
+      if (nextIdx < 0) return;
+
+      const next = scenes[nextIdx];
+      // 合成マップ（現在シーン＋次シーンを横/縦に並べる）
+      let wideMap: number[][];
+      let entryX: number, entryY: number;
+      if (dir === 'right') {
+        wideMap = Array.from({ length: ROWS }, (_, r) =>
+          [...(cur.map[r] ?? Array(COLS).fill(0)), ...(next.map[r] ?? Array(COLS).fill(0))]);
+        entryX = TILE_SIZE; entryY = ep.y;
+      } else if (dir === 'left') {
+        wideMap = Array.from({ length: ROWS }, (_, r) =>
+          [...(next.map[r] ?? Array(COLS).fill(0)), ...(cur.map[r] ?? Array(COLS).fill(0))]);
+        entryX = scW - pw - TILE_SIZE; entryY = ep.y;
+      } else if (dir === 'down') {
+        wideMap = [...Array.from({ length: ROWS }, (_, r) => (cur.map[r] ?? Array(COLS).fill(0))),
+                   ...Array.from({ length: ROWS }, (_, r) => (next.map[r] ?? Array(COLS).fill(0)))];
+        entryX = ep.x; entryY = TILE_SIZE;
+      } else { // up
+        wideMap = [...Array.from({ length: ROWS }, (_, r) => (next.map[r] ?? Array(COLS).fill(0))),
+                   ...Array.from({ length: ROWS }, (_, r) => (cur.map[r] ?? Array(COLS).fill(0)))];
+        entryX = ep.x; entryY = scH - ph - TILE_SIZE;
+      }
+      engineRef.current.map = wideMap;
+      if (dir === 'left') ep.x += scW;
+      if (dir === 'up')   ep.y += scH;
+      sceneTransRef.current = { dir, frame: 0, nextIdx, wideMap, entryX, entryY };
+    };
 
     // 残機制：touhou 専用の死亡ハンドラ
     const handlePlayerDeath = () => {
@@ -1477,7 +1595,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── player movement (both modes, paused during battle) ──
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current);
+      // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneTransRef.current || !!sceneFadeRef.current);
       if (!battleRef.current.active) {
         if (!isPlaying) {
           p.vx = 0; p.vy = 0; p.isGrounded = false;
@@ -1735,8 +1854,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             for (let i = eng.bullets.length - 1; i >= 0; i--) {
               eng.bullets[i].x += eng.bullets[i].vx ?? 0;
               eng.bullets[i].y += eng.bullets[i].vy;
-              if (eng.bullets[i].y < -16 || eng.bullets[i].y > PLAY_H + 16 ||
-                  eng.bullets[i].x < -16 || eng.bullets[i].x > PLAY_W + 16) {
+              if (eng.bullets[i].y < -16 || eng.bullets[i].y > VIEW_H + 16 ||
+                  eng.bullets[i].x < -16 || eng.bullets[i].x > VIEW_W + 16) {
                 eng.bullets.splice(i, 1);
               }
             }
@@ -1746,6 +1865,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // 位置変化を通知（play only）
       if (isPlaying && onPositionChangeRef.current) onPositionChangeRef.current(p.x, p.y, pData.emoji);
+
+      // ── シーン遷移チェック（action/rpg エンジン対象、プレイ中のみ）──
+      if (isPlaying && !roundOverRef.current && (gameData.engine === 'action' || gameData.engine === 'rpg')) {
+        trySceneTrans();
+      }
 
       // ── play mode: entities / combat / win ──
       // ラウンド終了演出中（roundOver）は敵・弾・当たり判定も止める（残機の死亡中は継続）
@@ -1771,30 +1895,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 e.x += e.vx; e.y += e.vy;
               }
               if (!d.isBoss) {
-                if (e.y > PLAY_H + 64) {
+                if (e.y > VIEW_H + 64) {
                   if (e.scriptCtx) e.scriptCtx.cancelled = true;
                   eng.entities.splice(ei, 1); continue;
                 }
               } else {
-                e.x = Math.max(TILE_SIZE, Math.min(PLAY_W - TILE_SIZE * 2, e.x));
-                e.y = Math.max(TILE_SIZE, Math.min(PLAY_H * 0.55, e.y));
+                e.x = Math.max(TILE_SIZE, Math.min(VIEW_W - TILE_SIZE * 2, e.x));
+                e.y = Math.max(TILE_SIZE, Math.min(VIEW_H * 0.55, e.y));
               }
             } else if (!d.isBoss) {
               // Xevious フォールバック（miniScript なし wave 敵）
               e.y += sp;
               e.x = e.homeX + Math.sin(e.timer * 0.045) * 45;
-              e.x = Math.max(TILE_SIZE, Math.min(PLAY_W - TILE_SIZE * 2, e.x));
-              if (e.y > PLAY_H + 64) { eng.entities.splice(ei, 1); continue; }
+              e.x = Math.max(TILE_SIZE, Math.min(VIEW_W - TILE_SIZE * 2, e.x));
+              if (e.y > VIEW_H + 64) { eng.entities.splice(ei, 1); continue; }
             } else {
               // ボス（miniScript なし）: patrolH
               if (d.behavior === 'patrolH') {
                 if (e.vx === 0) e.vx = sp; e.x += e.vx;
-                if (e.x < TILE_SIZE * 2 || e.x > PLAY_W - TILE_SIZE * 3) e.vx *= -1;
+                if (e.x < TILE_SIZE * 2 || e.x > VIEW_W - TILE_SIZE * 3) e.vx *= -1;
               } else if (d.behavior === 'patrolV') {
                 if (e.vy === 0) e.vy = sp; e.y += e.vy;
               }
-              e.x = Math.max(TILE_SIZE, Math.min(PLAY_W - TILE_SIZE * 2, e.x));
-              e.y = Math.max(TILE_SIZE, Math.min(PLAY_H * 0.4, e.y));
+              e.x = Math.max(TILE_SIZE, Math.min(VIEW_W - TILE_SIZE * 2, e.x));
+              e.y = Math.max(TILE_SIZE, Math.min(VIEW_H * 0.4, e.y));
             }
           } else if (gameData.engine === 'action') {
             // ── 横スク（マリオ/ロックマン）：重力・地面/壁判定つき敵AI ──
@@ -1982,6 +2106,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
               break;
             }
+            // シーン間ワープ（土管・扉など）：フェード遷移を開始
+            if (d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current) {
+              const tgtScene = scenesRef.current.find(s => s.id === d.warpSceneId);
+              if (tgtScene) {
+                const ex = (d.warpEntryCol ?? 1) * TILE_SIZE;
+                const ey = (d.warpEntryRow ?? 1) * TILE_SIZE;
+                sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: d.warpSceneId, entryX: ex, entryY: ey };
+              }
+              break;
+            }
             if (ot === 'item') {
               if (!eventRunningRef.current) {
                 const iid = d.itemId || d.name || d.id;
@@ -2086,7 +2220,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const bp = bombPickupsRef.current[i];
             bp.y += 0.8;
             bp.life--;
-            if (bp.life <= 0 || bp.y > PLAY_H + 16) { bombPickupsRef.current.splice(i, 1); continue; }
+            if (bp.life <= 0 || bp.y > VIEW_H + 16) { bombPickupsRef.current.splice(i, 1); continue; }
             if (!isPlayerDeadRef.current && Math.hypot(bp.x - pcxB, bp.y - pcyB) < 16) {
               bombCountRef.current++;
               bombPickupsRef.current.splice(i, 1);
@@ -2229,12 +2363,43 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // カメラ：プレイ中はプレイヤー中心に追従、編集中も同様（編集スクロールは初期位置用）
       const camX = Math.max(0, Math.min(camMax,
         isPlaying || p.x !== gameData.player.start.x
-          ? p.x + pData.w / 2 - PLAY_W / 2
+          ? p.x + pData.w / 2 - VIEW_W / 2
           : editScrollRef.current));
       const camY = Math.max(0, Math.min(camMaxY,
         isPlaying || p.y !== gameData.player.start.y
-          ? p.y + pData.h / 2 - PLAY_H / 2
+          ? p.y + pData.h / 2 - VIEW_H / 2
           : editScrollYRef.current));
+      // ── シーン遷移アニメーション（スライドカメラ） ────────────────────────
+      const trans = sceneTransRef.current;
+      let finalCamX = camX, finalCamY = camY;
+      if (trans) {
+        trans.frame++;
+        const t = Math.min(1, trans.frame / TRANS_FRAMES);
+        const ease = t * (2 - t); // easeOutQuad
+        // 遷移方向によってカメラをスライド
+        if (trans.dir === 'right')    finalCamX = ease * VIEW_W;
+        else if (trans.dir === 'left') finalCamX = VIEW_W - ease * VIEW_W;
+        else if (trans.dir === 'down') finalCamY = ease * VIEW_H;
+        else if (trans.dir === 'up')   finalCamY = VIEW_H - ease * VIEW_H;
+        // 遷移完了: 新シーンへ切り替え
+        if (trans.frame >= TRANS_FRAMES) {
+          const next = scenesRef.current[trans.nextIdx];
+          activeSceneIdxRef.current = trans.nextIdx;
+          eng.map = JSON.parse(JSON.stringify(next.map));
+          eng.entities = next.objects.map(o => ({
+            x: o.col * TILE_SIZE, y: o.row * TILE_SIZE,
+            homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
+            vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
+            def: { ...o, spriteUrl: undefined },
+          })) as unknown as Entity[];
+          eng.bullets = []; eng.enemyBullets = [];
+          p.x = trans.entryX; p.y = trans.entryY; p.vx = 0; p.vy = 0;
+          sceneTransRef.current = null;
+          // エディタ用にシーンインデックスも同期
+          setEditSceneIdx(trans.nextIdx);
+        }
+      }
+
       // 画面シェイク（ヒット・爆発・ゲームオーバー）
       if (shakeRef.current > 0) shakeRef.current--;
       const shakeMag = shakeRef.current > 0 ? Math.min(shakeRef.current, 8) * 0.7 : 0;
@@ -2242,13 +2407,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const shakeOy = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
 
       ctx.save();
-      ctx.translate(shakeOx - camX, shakeOy - camY);
+      ctx.scale(SCALE_X, SCALE_Y);
+      ctx.translate(shakeOx - finalCamX, shakeOy - finalCamY);
 
       const map = engineRef.current.map;
       const startCol = Math.max(0, Math.floor(camX / TILE_SIZE));
-      const endCol = Math.min(worldCols, startCol + COLS + 2);
+      const endCol = Math.min(worldCols, startCol + VIEW_COLS + 2);
       const startRow = Math.max(0, Math.floor(camY / TILE_SIZE));
-      const endRow = Math.min(worldRows, startRow + ROWS + 2);
+      const endRow = Math.min(worldRows, startRow + VIEW_ROWS + 2);
       for (let y = startRow; y < endRow; y++) {
         for (let x = startCol; x < endCol; x++) {
           const tileId = map[y]?.[x] ?? 0;
@@ -2393,7 +2559,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       ctx.fillStyle = gameData.player.color;
       // 死亡中は非表示。無敵中（復帰点滅）は 4f 周期で点滅
       if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / 4) % 2 === 0)) {
-        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, p.x, p.y, pData.w, pData.h, 'player');
+        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, p.x, p.y, pData.w, pData.h, 'player',
+          gameData.engine === 'touhou' ? 's' : undefined);
       }
       // onjReze：近接攻撃の描画（振っている間だけ向きに合わせて表示）
       if (gameData.engine === 'onjReze' && isPlaying && swordRef.current.active > 0) {
@@ -2475,6 +2642,41 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       ctx.restore();
+
+      // ── シーン間フェード遷移（土管・扉）──────────────────────────────────
+      const fade = sceneFadeRef.current;
+      if (fade) {
+        fade.frame++;
+        const alpha = fade.phase === 'out'
+          ? fade.frame / fade.totalFrames
+          : 1 - fade.frame / fade.totalFrames;
+        ctx.fillStyle = `rgba(0,0,0,${Math.min(1, alpha)})`;
+        ctx.fillRect(0, 0, PLAY_W, PLAY_H);
+        // フェードアウト完了 → シーン切り替え → フェードイン開始
+        if (fade.phase === 'out' && fade.frame >= fade.totalFrames) {
+          const nextIdx = scenesRef.current.findIndex(s => s.id === fade.nextSceneId);
+          if (nextIdx >= 0) {
+            const next = scenesRef.current[nextIdx];
+            activeSceneIdxRef.current = nextIdx;
+            eng.map = JSON.parse(JSON.stringify(next.map));
+            eng.entities = next.objects.map(o => ({
+              x: o.col * TILE_SIZE, y: o.row * TILE_SIZE,
+              homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
+              vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
+              def: { ...o, spriteUrl: undefined },
+            })) as unknown as Entity[];
+            eng.bullets = []; eng.enemyBullets = [];
+            eng.player.x = fade.entryX; eng.player.y = fade.entryY;
+            eng.player.vx = 0; eng.player.vy = 0;
+            setEditSceneIdx(nextIdx);
+          }
+          sceneFadeRef.current = { ...fade, phase: 'in', frame: 0 };
+        }
+        // フェードイン完了 → 解除
+        if (fade.phase === 'in' && fade.frame >= fade.totalFrames) {
+          sceneFadeRef.current = null;
+        }
+      }
 
       // ── touhou フェーズ HUD ──
       if (isPlaying && gameData.engine === 'touhou' && phaseIndexRef.current >= 0) {
@@ -2647,18 +2849,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     } else { const me = e as React.MouseEvent; clientX = me.clientX; clientY = me.clientY; }
     const canvas = canvasRef.current; if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = (clientX - rect.left) * (canvas.width / rect.width);
-    const y = (clientY - rect.top) * (canvas.height / rect.height);
+    // canvas px → world px（SCALE_X/SCALE_Y でズームしているため逆変換）
+    const x = (clientX - rect.left) * (canvas.width / rect.width) / SCALE_X;
+    const y = (clientY - rect.top) * (canvas.height / rect.height) / SCALE_Y;
     const worldCols = gameData.scroll?.worldCols ?? COLS;
     const worldRows = gameData.scroll?.worldRows ?? ROWS;
     // camera follows player in edit mode now
-    const camX = Math.max(0, Math.min((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - PLAY_W,
+    const camX = Math.max(0, Math.min((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W,
       engineRef.current.player.x !== gameData.player.start.x
-        ? engineRef.current.player.x + gameData.player.w / 2 - PLAY_W / 2
+        ? engineRef.current.player.x + gameData.player.w / 2 - VIEW_W / 2
         : editScrollRef.current));
-    const camY = Math.max(0, Math.min((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - PLAY_H,
+    const camY = Math.max(0, Math.min((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H,
       engineRef.current.player.y !== gameData.player.start.y
-        ? engineRef.current.player.y + gameData.player.h / 2 - PLAY_H / 2
+        ? engineRef.current.player.y + gameData.player.h / 2 - VIEW_H / 2
         : editScrollYRef.current));
     const col = Math.floor((x + camX) / TILE_SIZE); const row = Math.floor((y + camY) / TILE_SIZE);
     if (col < 0 || col >= worldCols || row < 0 || row >= worldRows) return;
@@ -2675,8 +2878,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const sx = col * TILE_SIZE, sy = row * TILE_SIZE;
         setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
         engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
-        setEditScroll(Math.max(0, Math.min(worldCols * TILE_SIZE - PLAY_W, sx + gameData.player.w / 2 - PLAY_W / 2)));
-        setEditScrollY(Math.max(0, Math.min(worldRows * TILE_SIZE - PLAY_H, sy + gameData.player.h / 2 - PLAY_H / 2)));
+        setEditScroll(Math.max(0, Math.min(worldCols * TILE_SIZE - VIEW_W, sx + gameData.player.w / 2 - VIEW_W / 2)));
+        setEditScrollY(Math.max(0, Math.min(worldRows * TILE_SIZE - VIEW_H, sy + gameData.player.h / 2 - VIEW_H / 2)));
         return;
       }
       setGameData(prev => {
@@ -2773,6 +2976,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     onjReze: gameData.onjReze,
     titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
     ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
+    scenes: gameData.scenes?.map(s => ({
+      id: s.id, name: s.name, exits: s.exits,
+      map: s.map,
+      objects: s.objects.map(({ spriteUrl, ...o }) => o),
+      bgm: s.bgm?.ref,
+    })),
   });
 
   const handleSave = () => onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
@@ -2815,6 +3024,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           titleScreen: manifest.titleScreen ?? base.titleScreen,
           ending: manifest.ending ?? base.ending,
           battle: base.battle,
+          scenes: manifest.scenes?.map(s => ({
+            ...s,
+            objects: s.objects.map(o => ({ ...o, spriteUrl: undefined })),
+            bgm: s.bgm ? { ref: s.bgm } : undefined,
+          })),
           bgm: manifest.bgm && manifest.bgm !== 'none' ? { ref: manifest.bgm } : undefined,
           battleBgm: manifest.battleBgm ? { ref: manifest.battleBgm } : undefined,
           bossBgm: manifest.bossBgm ? { ref: manifest.bossBgm } : undefined,
@@ -2835,6 +3049,80 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     reader.readAsText(file);
     e.target.value = '';
   };
+
+  // ── シーン管理ヘルパー ────────────────────────────────────────────────────
+  /** エディタで選択シーンを切り替える。現在の map/objects を scenes に書き戻してから切り替え。 */
+  const switchEditScene = useCallback((newIdx: number) => {
+    setGameData(prev => {
+      if (!prev.scenes) return prev;
+      const scenes = prev.scenes.map((s, i) =>
+        i === editSceneIdx ? { ...s, map: prev.map, objects: prev.objects } : s
+      );
+      const next = scenes[newIdx];
+      return { ...prev, scenes, map: next.map, objects: next.objects };
+    });
+    setEditSceneIdx(newIdx);
+    setSelectedObjId(null);
+    // エンジンにも反映
+    const next = gameData.scenes?.[newIdx];
+    if (next) {
+      engineRef.current.map = JSON.parse(JSON.stringify(next.map));
+      const startPos = gameData.player.start;
+      engineRef.current.player = { ...startPos, vx: 0, vy: 0, isGrounded: false };
+    }
+  }, [editSceneIdx, gameData.scenes, gameData.player.start]);
+
+  /** 現在の map/objects を scenes に書き戻す（タブ切替前に呼ぶ）。 */
+  const flushSceneEdits = useCallback(() => {
+    setGameData(prev => {
+      if (!prev.scenes) return prev;
+      const scenes = prev.scenes.map((s, i) =>
+        i === editSceneIdx ? { ...s, map: prev.map, objects: prev.objects } : s
+      );
+      return { ...prev, scenes };
+    });
+  }, [editSceneIdx]);
+
+  /** シーン追加。 */
+  const addScene = useCallback(() => {
+    const newId = uid();
+    const emptyMap = Array.from({ length: ROWS }, (_, y) =>
+      Array.from({ length: COLS }, (_, x) => (y >= ROWS - 2 ? 1 : 0))
+    );
+    const newScene: SceneDef = { id: newId, name: `シーン${(gameData.scenes?.length ?? 0) + 1}`, map: emptyMap, objects: [] };
+    flushSceneEdits();
+    setGameData(prev => {
+      const scenes = [...(prev.scenes ?? []), newScene];
+      return { ...prev, scenes, map: newScene.map, objects: newScene.objects };
+    });
+    setEditSceneIdx((gameData.scenes?.length ?? 0));
+    setSelectedObjId(null);
+  }, [gameData.scenes, flushSceneEdits]);
+
+  /** シーン削除（最後の1つは削除不可）。 */
+  const removeScene = useCallback((idx: number) => {
+    if ((gameData.scenes?.length ?? 0) <= 1) return;
+    setGameData(prev => {
+      if (!prev.scenes) return prev;
+      const scenes = prev.scenes.filter((_, i) => i !== idx);
+      const nextIdx = Math.min(editSceneIdx, scenes.length - 1);
+      return { ...prev, scenes, map: scenes[nextIdx].map, objects: scenes[nextIdx].objects };
+    });
+    setEditSceneIdx(prev => Math.max(0, prev - (idx <= editSceneIdx ? 1 : 0)));
+    setSelectedObjId(null);
+  }, [gameData.scenes, editSceneIdx]);
+
+  /** シーン出口を更新。 */
+  const updateSceneExit = useCallback((sceneId: string, dir: keyof SceneExit, targetId: string) => {
+    flushSceneEdits();
+    setGameData(prev => {
+      if (!prev.scenes) return prev;
+      const scenes = prev.scenes.map(s =>
+        s.id === sceneId ? { ...s, exits: { ...s.exits, [dir]: targetId || undefined } } : s
+      );
+      return { ...prev, scenes };
+    });
+  }, [flushSceneEdits]);
 
   const tpl = objTemplate;
   const setTpl = (patch: Partial<ObjectDef>) => setObjTemplate(o => ({ ...o, ...patch }));
@@ -2925,7 +3213,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           </div>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
-            if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - PLAY_W), pp.x + pw / 2 - PLAY_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - PLAY_H), pp.y + ph / 2 - PLAY_H / 2))); }
+            if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2))); }
             if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
             setActivePreviewKey(null);
             if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
@@ -3367,11 +3655,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </button>
                 ))}
 
-                {/* 詳細トグル */}
+                  {/* シーンタブ（scenes 定義済み preset のみ） */}
+                {gameData.scenes && (
+                  <button onClick={() => setEditorTab('scene' as EditorTab)}
+                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === ('scene' as EditorTab) ? 'text-violet-400 border-b-2 border-violet-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
+                    シーン
+                  </button>
+                )}
+
+              {/* 詳細トグル */}
                 <button
                   onClick={() => {
                     setShowAdvancedTabs(v => {
-                      // 詳細を閉じるとき、詳細タブを選択中なら基本に戻す
                       if (v && !['map', 'object', 'char'].includes(editorTab)) setEditorTab('map');
                       return !v;
                     });
@@ -4090,15 +4385,50 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         )}
                         {/* Warp 設定 */}
                         {(selObj.objType ?? 'enemy') === 'warp' && (
-                          <div className="grid grid-cols-2 gap-2">
-                            <label className="text-[10px] text-gray-400">ワープ先X(列)
-                              <input type="number" value={selObj.warpTarget?.col ?? 0} onChange={e => updObj({ warpTarget: { ...selObj.warpTarget ?? { col: 0, row: 0 }, col: Number(e.target.value) } })}
-                                className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                            <label className="text-[10px] text-gray-400">ワープ先Y(行)
-                              <input type="number" value={selObj.warpTarget?.row ?? 0} onChange={e => updObj({ warpTarget: { ...selObj.warpTarget ?? { col: 0, row: 0 }, row: Number(e.target.value) } })}
-                                className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
+                          <div className="space-y-2">
+                            {/* シーン間ワープ（シーンが複数あるときのみ表示） */}
+                            {(gameData.scenes?.length ?? 0) > 0 && (
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] text-gray-400 flex items-center gap-1">
+                                  🚪 遷移先シーン
+                                </label>
+                                <select value={selObj.warpSceneId ?? ''}
+                                  onChange={e => updObj({ warpSceneId: e.target.value || undefined })}
+                                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none">
+                                  <option value="">（同シーン内ワープ）</option>
+                                  {(gameData.scenes ?? []).map(s => (
+                                    <option key={s.id} value={s.id}>{s.name ?? s.id}</option>
+                                  ))}
+                                </select>
+                                {selObj.warpSceneId && (
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <label className="text-[10px] text-gray-400">入場X(列)
+                                      <input type="number" value={selObj.warpEntryCol ?? 1}
+                                        onChange={e => updObj({ warpEntryCol: Number(e.target.value) })}
+                                        className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                    </label>
+                                    <label className="text-[10px] text-gray-400">入場Y(行)
+                                      <input type="number" value={selObj.warpEntryRow ?? 1}
+                                        onChange={e => updObj({ warpEntryRow: Number(e.target.value) })}
+                                        className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                    </label>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {/* 同シーン内ワープ座標（シーン間ワープ未選択時のみ） */}
+                            {!selObj.warpSceneId && (
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="text-[10px] text-gray-400">ワープ先X(列)
+                                  <input type="number" value={selObj.warpTarget?.col ?? 0} onChange={e => updObj({ warpTarget: { ...selObj.warpTarget ?? { col: 0, row: 0 }, col: Number(e.target.value) } })}
+                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                </label>
+                                <label className="text-[10px] text-gray-400">ワープ先Y(行)
+                                  <input type="number" value={selObj.warpTarget?.row ?? 0} onChange={e => updObj({ warpTarget: { ...selObj.warpTarget ?? { col: 0, row: 0 }, row: Number(e.target.value) } })}
+                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                </label>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -4702,6 +5032,71 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 )}
 
                 {/* ── ASSET ── */}
+                {/* ── SCENE ── */}
+                {editorTab === ('scene' as EditorTab) && gameData.scenes && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-gray-400 font-bold">シーン一覧</span>
+                      <button onClick={addScene}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-violet-700 hover:bg-violet-600 text-[10px] text-white font-bold">
+                        <Plus size={11} />追加
+                      </button>
+                    </div>
+
+                    {gameData.scenes.map((sc, idx) => {
+                      const isActive = idx === editSceneIdx;
+                      return (
+                        <div key={sc.id}
+                          className={`rounded-xl border p-3 space-y-2 transition ${isActive ? 'border-violet-500 bg-violet-900/20' : 'border-gray-700 bg-gray-900/40'}`}>
+                          {/* ヘッダー */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-gray-500 font-mono shrink-0">{idx + 1}</span>
+                            <input value={sc.name ?? `シーン${idx + 1}`}
+                              onChange={e => setGameData(prev => ({
+                                ...prev,
+                                scenes: prev.scenes!.map((s, i) => i === idx ? { ...s, name: e.target.value } : s)
+                              }))}
+                              className="flex-1 bg-transparent border-b border-gray-700 focus:border-violet-500 text-[11px] text-white outline-none pb-0.5" />
+                            {isActive
+                              ? <span className="text-[9px] font-black text-violet-400 bg-violet-400/10 rounded px-1.5 py-0.5">編集中</span>
+                              : <button onClick={() => { flushSceneEdits(); switchEditScene(idx); }}
+                                  className="text-[9px] text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 rounded px-2 py-0.5 transition">選択</button>}
+                            {gameData.scenes!.length > 1 && (
+                              <button onClick={() => removeScene(idx)}
+                                className="text-gray-600 hover:text-red-400 transition"><X size={12} /></button>
+                            )}
+                          </div>
+
+                          {/* 出口設定 */}
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {(['right', 'left', 'down', 'up'] as (keyof SceneExit)[]).map(dir => {
+                              const label = { right: '右→', left: '←左', down: '下↓', up: '↑上' }[dir];
+                              return (
+                                <label key={dir} className="flex items-center gap-1 text-[10px] text-gray-500">
+                                  <span className="w-6 shrink-0">{label}</span>
+                                  <select value={sc.exits?.[dir] ?? ''}
+                                    onChange={e => updateSceneExit(sc.id, dir, e.target.value)}
+                                    className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none min-w-0">
+                                    <option value="">（なし）</option>
+                                    {gameData.scenes!.filter((_, i) => i !== idx).map(s2 => (
+                                      <option key={s2.id} value={s2.id}>{s2.name ?? `シーン${gameData.scenes!.indexOf(s2) + 1}`}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <p className="text-[9px] text-gray-600 leading-relaxed">
+                      シーンを選択するとマップ・オブジェクトタブで編集できます。<br />
+                      プレイ中に指定した辺に到達するとスライドで遷移します。
+                    </p>
+                  </div>
+                )}
+
                 {editorTab === 'asset' && (
                   <div className="space-y-4">
                     <div>

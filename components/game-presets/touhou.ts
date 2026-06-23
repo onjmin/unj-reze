@@ -36,15 +36,24 @@ const BOSS_BGM_URL  = 'https://www.youtube.com/watch?v=Yf6CIacmFJo';
 /** YouTube URL → ref 文字列 */
 const ytRef = (url: string) => url;
 
+const sp = (no: number) => `/api/rpgen/data/images/sprites/${no}.png`;
+const sa = (no: number) => `/api/rpgen/data/images/sAnims/${no}.png`;
+const walkRef = (no: number) => `walk:auto:u:${sa(no)}`;
+const ir = (no: number) => `url:${sp(no)}`;
+
 export const touhou: PresetData = {
   id: 'touhou', name: '東方(弾幕)', engine: 'touhou', gravity: 0, friction: 0,
   player: {
     emoji: '🎀', color: '#ff0000', speed: 4.5, jumpPower: 0, w: 24, h: 24,
     start: { x: PLAY_W / 2 - 12, y: PLAY_H - 60 },
+    // 東方Projectシート (sheet no 17) の先頭キャラ
+    spriteRef: walkRef(602),
+    spriteUrl: sa(602),
   },
   tiles: {
-    0: { name: '夜空', color: '#0B0B2A', passable: true },
-    1: { name: '壁',  color: '#1a1a3a', passable: false },
+    // sp.626 暗灰背景 (r=51,51,51)  sp.160 青灰壁 (r=72,72,112)
+    0: { name: '夜空', color: '#0B0B2A', passable: true,  imageRef: ir(626), imageUrl: sp(626) },
+    1: { name: '壁',   color: '#1a1a3a', passable: false, imageRef: ir(160), imageUrl: sp(160) },
   },
   map: Array.from({ length: ROWS }, () =>
     Array.from({ length: COLS }, (_, x) => (x === 0 || x === COLS - 1 ? 1 : 0))
@@ -97,23 +106,24 @@ export const touhou: PresetData = {
 
   objects: [
     // ── フェーズ 0：道中前半 ──────────────────────────────────────────────
+    // 道中雑魚：東方Projectシート sa.1186, 1881 (妖精系)
     newObject({ emoji: '🧚', col: 4,  row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
-      miniScript: waveMiniScript(3, 75, 2.5, 5, 10) }),
+      miniScript: waveMiniScript(3, 75, 2.5, 5, 10), spriteRef: walkRef(1186), spriteUrl: sa(1186) }),
     newObject({ emoji: '🧚', col: 15, row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
-      miniScript: waveMiniScript(3, 75, 2.5, 5, 10) }),
+      miniScript: waveMiniScript(3, 75, 2.5, 5, 10), spriteRef: walkRef(1186), spriteUrl: sa(1186) }),
     newObject({ emoji: '🧚', col: 7,  row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
-      miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8) }),
+      miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8), spriteRef: walkRef(1881), spriteUrl: sa(1881) }),
     newObject({ emoji: '🧚', col: 12, row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
-      miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8) }),
+      miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8), spriteRef: walkRef(1881), spriteUrl: sa(1881) }),
     newObject({ emoji: '🧚', col: 10, row: 2, phase: 0, speed: 0.8, hp: 2, bullet: 'none',
-      miniScript: waveMiniScript(4, 70, 2.2, 6, 15) }),
+      miniScript: waveMiniScript(4, 70, 2.2, 6, 15), spriteRef: walkRef(1186), spriteUrl: sa(1186) }),
 
     // ── フェーズ 1：道中ボス（ルーミア）────────────────────────────────────
     // isBoss: true でHPバーを表示。スペルカードは定義しない（ジャブ的存在）。
     newObject({
       emoji: '🌙', col: 10, row: 1, phase: 1, hp: 60,
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
-      isBoss: true, name: 'ルーミア',
+      isBoss: true, name: 'ルーミア', spriteRef: walkRef(720), spriteUrl: sa(720),
       miniScript: `
 moveTo(320, 90, 70)
 while true
@@ -171,6 +181,9 @@ exit()
       emoji: '🌸', col: 10, row: 1, phase: 3, hp: 200,
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
       isBoss: true, name: 'チルノ',
+      // スプライト（静止画） no.1962
+      spriteRef: 'url:/api/rpgen/data/images/sprites/1962.png',
+      spriteUrl: '/api/rpgen/data/images/sprites/1962.png',
       miniScript: `
 moveTo(320, 80, 90)
 while true
