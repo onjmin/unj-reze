@@ -15,7 +15,7 @@ export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
-export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard';
+export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn';
 export type ObjectKind = 'npc' | 'tile' | 'bullet';
 export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event';
 
@@ -23,7 +23,7 @@ export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event';
 export interface SwitchDef { id: number; name: string; }
 
 /** アイテム定義。id は一意キー（英字推奨）。 */
-export interface ItemDef { id: string; name: string; emoji: string; description?: string; }
+export interface ItemDef { id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; }
 
 /** イベントページの発生条件。すべて AND。 */
 export interface EventCondition {
@@ -38,10 +38,14 @@ export type EventCommand =
   | { type: 'choice'; text: string; choices: { label: string; commands: EventCommand[] }[]; cancelIndex?: number }
   | { type: 'ifSwitch'; switchId: number; value: boolean; then: EventCommand[]; else?: EventCommand[] }
   | { type: 'ifItem'; itemId: string; has: boolean; then: EventCommand[]; else?: EventCommand[] }
+  | { type: 'ifGold'; amount: number; then: EventCommand[]; else?: EventCommand[] }
   | { type: 'setSwitch'; switchId: number; value: boolean }
   | { type: 'setSelfSwitch'; id: string; value: boolean }
   | { type: 'giveItem'; itemId: string; count: number }
   | { type: 'removeItem'; itemId: string; count: number }
+  | { type: 'changeGold'; amount: number }
+  | { type: 'restoreHp'; amount?: number }
+  | { type: 'restoreMp'; amount?: number }
   | { type: 'warp'; col: number; row: number }
   | { type: 'wait'; frames: number }
   | { type: 'comment'; text: string }
@@ -66,6 +70,8 @@ export interface PlayerDef {
   bombSpellName?: string;
   /** touhou: ボムカットインのキャラクター名 */
   bombCutinCharName?: string;
+  /** action: 武器スロット（武器IDの配列） */
+  weapons?: string[];
   /** touhou: ボムカットインの立ち絵URL */
   bombCutinImageUrl?: string;
   /** touhou: 立ち絵水平オフセット px（設計座標、画面中央基準） */
@@ -176,8 +182,12 @@ export interface ObjectDef {
   warpEntryRow?: number;
   /** アイテムID。objType=item のとき、プレイヤー接触でこのアイテムを入手。未指定なら name をID扱い。 */
   itemId?: string;
+  /** ショップ販売リスト。持つ場合、話しかけるとショップUIを開く。 */
+  shopItems?: ShopItem[];
   /** イベントページ。持つ場合は objType によらずイベントとして動作。 */
   pages?: EventPage[];
+  /** 弾幕の弾形状（touhou エンジン）。未指定は circle。 */
+  bulletShape?: 'circle' | 'diamond' | 'oval' | 'arrow';
   /** 弾幕スクリプト（touhou エンジン・旧ビジュアルブロック方式、後方互換用）。 */
   spellScript?: SpellBlock[];
   /** MiniScript（touhou エンジン）。wave 敵の動き全般・ボスの弾幕パターンを記述する。 */
@@ -250,6 +260,12 @@ export interface EndingScreenConfig {
   textColor?: string;
 }
 
+/** レベルアップ時のステータス成長テーブル。exp 以上になったとき適用。 */
+export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?: number; atk?: number; def?: number; }
+
+/** ショップ販売アイテム定義。 */
+export interface ShopItem { itemId: string; price: number; }
+
 /** ターン制戦闘の技/呪文。heal=true のとき power 分だけ自分のHPを回復。 */
 export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; }
 
@@ -267,6 +283,10 @@ export interface BattleConfig {
   moves: BattleMove[];
   /** コマンドの表示名（テーマ差し替え）。 */
   labels: { attack: string; move: string; flee: string };
+  /** 初期所持金。 */
+  gold?: number;
+  /** レベルアップテーブル。exp 到達時に対応ステータスへ上書き。 */
+  levelTable?: LevelEntry[];
   /** ゴール（城/ジム）到達時に戦うボス。倒すとクリア。 */
   boss?: EncounterEnemy;
   /** ゴールボス撃破後に流すセリフ。 */
@@ -292,6 +312,10 @@ export interface SceneDef {
   exits?: SceneExit;
   /** このシーン専用 BGM。省略時はゲーム共通 BGM を継続。 */
   bgm?: BgmState;
+  /** ランダムエンカウント敵テーブル（rpg エンジン）。フィールド歩行中に抽選して戦闘に入る。 */
+  randomEncounters?: EncounterEnemy[];
+  /** ランダムエンカウント発生ステップ数（デフォルト 16）。 */
+  encounterRate?: number;
 }
 
 export interface PresetData {

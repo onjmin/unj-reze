@@ -124,7 +124,7 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿屋' };
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
@@ -322,7 +322,8 @@ function runEntityScript(
       x: cx, y: cy,
       vx: Math.cos(r) * speed, vy: Math.sin(r) * speed,
       r: 5, color: SPELL_PALETTE[((colorIdx | 0) + 9) % 9],
-    });
+      shape: entity.def.bulletShape ?? 'circle',
+    } as typeof eng.enemyBullets[0]);
   };
 
   const env: MiniEnv = {
@@ -621,6 +622,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const switchValsRef = useRef<Record<number, boolean>>({});
   switchValsRef.current = switchVals;
   const [inventory, setInventory] = useState<Record<string, number>>({});
+  const [shopModal, setShopModal] = useState<{ npcId: string; items: import('./game-presets/shared').ShopItem[] } | null>(null);
+  const [equipment, setEquipment] = useState<{ weapon?: string; armor?: string }>({});
+  const equipmentRef = useRef<{ weapon?: string; armor?: string }>({});
   const inventoryRef = useRef<Record<string, number>>({});
   inventoryRef.current = inventory;
   const selfSwitchesRef = useRef<Record<string, Record<string, boolean>>>({});
@@ -684,7 +688,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [battle, setBattle] = useState<BattleView | null>(null);
   const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean }[]; exp: number; isBoss: boolean }>(
     { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false });
-  const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, level: 1, exp: 0, expNext: 10 });
+  const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
   /** 画面シェイク残フレーム数（0=なし）。ヒット・爆発・ゲームオーバー時にセット。 */
   const shakeRef = useRef(0);
@@ -724,11 +728,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const scoreRef = useRef(0);            // スコア
   const actionDirRef = useRef<1 | -1>(1);     // action エンジン：プレイヤー向き
   const actionShootCoolRef = useRef(0);        // action エンジン：射撃クールダウン
+  const actionWeaponsRef = useRef<string[]>([]);
+  const actionWeaponIdxRef = useRef<number>(0);
+  const actionWeaponEnergyRef = useRef<Record<string, number>>({});
+  const MAX_WEAPON_ENERGY = 28;
+  const prevNextWeaponRef = useRef(false);
   // ── onjReze エンジン（トップビュー・アクションRPG）──
   const onjRezeDirRef = useRef<{ x: number; y: number }>({ x: 0, y: 1 });  // プレイヤーの向き（4方向）
   const swordRef = useRef<{ active: number; cool: number; dir: { x: number; y: number }; hit: Set<string> }>(
     { active: 0, cool: 0, dir: { x: 0, y: 1 }, hit: new Set() });        // 剣の振り状態
   const onjRezeHpRef = useRef<{ hp: number; max: number }>({ hp: 6, max: 6 }); // ハート（1ハート=2HP）
+  const checkpointRef = useRef<{ x: number; y: number } | null>(null);
   // onjReze: 原作のボム挙動の再現（💣設置・🎯投げ・💀首爆弾・爆発）。すべてフレーム単位（60fps想定）。
   const onjBombsRef = useRef<{ x: number; y: number; fuse: number; maxFuse: number; r: number; dmg: number; head: boolean }[]>([]);   // 着地済み・導火線カウント中のボム（中心座標）
   const onjFliesRef = useRef<{ fx: number; fy: number; tx: number; ty: number; t: number; dur: number; fuse: number; r: number; dmg: number; head: boolean }[]>([]); // 放物線で飛行中のボム/首
@@ -948,7 +958,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (b.entity) { const idx = eng.entities.indexOf(b.entity); if (idx >= 0) eng.entities.splice(idx, 1); }
       pr.exp += b.exp;
       let lvUp = '';
-      while (pr.exp >= pr.expNext) { pr.exp -= pr.expNext; pr.level++; pr.maxHp += 6; pr.maxMp += 3; pr.atk += 2; pr.def += 1; pr.hp = pr.maxHp; pr.mp = pr.maxMp; pr.expNext = pr.level * 10; lvUp = `レベルが ${pr.level} に あがった！`; }
+      {
+        const levelTable = gameDataRef.current.battle?.levelTable ?? [];
+        while (true) {
+          const nextEntry = levelTable.find(e => e.level === pr.level + 1);
+          const nextExpNeeded = nextEntry?.exp ?? pr.expNext;
+          if (pr.exp < nextExpNeeded) break;
+          pr.exp -= nextExpNeeded;
+          pr.level++;
+          if (nextEntry) {
+            if (nextEntry.maxHp != null) pr.maxHp = nextEntry.maxHp;
+            if (nextEntry.maxMp != null) pr.maxMp = nextEntry.maxMp;
+            if (nextEntry.atk != null) pr.atk = nextEntry.atk;
+            if (nextEntry.def != null) pr.def = nextEntry.def;
+            pr.hp = pr.maxHp; pr.mp = pr.maxMp;
+          } else {
+            pr.maxHp += 6; pr.maxMp += 3; pr.atk += 2; pr.def += 1; pr.hp = pr.maxHp; pr.mp = pr.maxMp;
+          }
+          const nextNext = levelTable.find(e => e.level === pr.level + 1);
+          pr.expNext = nextNext?.exp ?? pr.level * 10;
+          lvUp = `レベルが ${pr.level} に あがった！`;
+          playSfx(sfxRef.current.levelup);
+        }
+      }
       setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を たおした！${b.exp > 0 ? ` EXP+${b.exp}` : ''}`, ...(lvUp ? [lvUp] : [])].slice(-6) } : v));
       if (wasBoss) bossDefeatedRef.current = true;
     }
@@ -1127,6 +1159,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return null;
   }, []);
 
+  const applyEquipment = useCallback((eq: { weapon?: string; armor?: string }) => {
+    equipmentRef.current = eq;
+    const b = gameDataRef.current.battle;
+    if (!b) return;
+    const pr = progressRef.current;
+    const items = gameDataRef.current.items ?? [];
+    let atkBonus = 0, defBonus = 0;
+    if (eq.weapon) { const it = items.find(i => i.id === eq.weapon); atkBonus += it?.atkBonus ?? 0; }
+    if (eq.armor) { const it = items.find(i => i.id === eq.armor); defBonus += it?.defBonus ?? 0; }
+    pr.atk = b.atk + atkBonus;
+    pr.def = b.def + defBonus;
+    forceHud(n => n + 1);
+  }, []);
+
   const runEventCommands = useCallback((objId: string, commands: EventCommand[], onDone?: () => void) => {
     if (eventRunningRef.current && !onDone) return;
     let index = 0;
@@ -1186,6 +1232,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'giveItem':
           setInventory(p => { const n = { ...p }; n[cmd.itemId] = (n[cmd.itemId] ?? 0) + cmd.count; return n; });
+          {
+            const newItem = (gameDataRef.current.items ?? []).find(it => it.id === cmd.itemId);
+            if (newItem?.category === 'weapon' || newItem?.category === 'armor') {
+              const eq = { ...equipmentRef.current };
+              if (newItem.category === 'weapon') eq.weapon = newItem.id;
+              if (newItem.category === 'armor') eq.armor = newItem.id;
+              setEquipment(eq);
+              applyEquipment(eq);
+            }
+          }
           setTimeout(advance, 30);
           break;
         case 'removeItem':
@@ -1210,6 +1266,38 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const found = cmds.findIndex((c, i) => c.type === 'label' && c.name === cmd.label);
           if (found >= 0) index = found;
           setTimeout(advance, 0);
+          break;
+        }
+        case 'changeGold':
+          progressRef.current.gold = (progressRef.current.gold ?? 0) + cmd.amount;
+          forceHud(n => n + 1);
+          setTimeout(advance, 30);
+          break;
+        case 'restoreHp': {
+          const amt = cmd.amount;
+          if (gameDataRef.current.engine === 'rpg') {
+            const pr2 = progressRef.current;
+            pr2.hp = amt != null ? Math.min(pr2.maxHp, pr2.hp + amt) : pr2.maxHp;
+          } else {
+            const z = onjRezeHpRef.current;
+            z.hp = amt != null ? Math.min(z.max, z.hp + amt) : z.max;
+          }
+          forceHud(n => n + 1);
+          setTimeout(advance, 30);
+          break;
+        }
+        case 'restoreMp': {
+          const pr3 = progressRef.current;
+          pr3.mp = cmd.amount != null ? Math.min(pr3.maxMp, pr3.mp + (cmd.amount ?? 0)) : pr3.maxMp;
+          forceHud(n => n + 1);
+          setTimeout(advance, 30);
+          break;
+        }
+        case 'ifGold': {
+          const condG = (progressRef.current.gold ?? 0) >= cmd.amount;
+          const subG = condG ? cmd.then : (cmd.else ?? []);
+          cmds = [...cmds.slice(0, index), ...subG, ...cmds.slice(index + 1)];
+          setTimeout(runNext, 0);
           break;
         }
         default:
@@ -1512,16 +1600,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
-      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, level: 1, exp: 0, expNext: 10 };
+      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, level: 1, exp: 0, expNext: b.levelTable?.[0]?.exp ?? 10, gold: b.gold ?? 0 };
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false };
       invulnRef.current = 0; isPlayerDeadRef.current = false; roundOverRef.current = false; livesRef.current = 3; scoreRef.current = 0;
       // onjReze：ハート・向き・剣の初期化
       const zMax = Math.max(1, gameData.player.hearts ?? 3) * 2;
       onjRezeHpRef.current = { hp: zMax, max: zMax };
+      checkpointRef.current = null;
       onjRezeDirRef.current = { x: 0, y: 1 };
       swordRef.current = { active: 0, cool: 0, dir: { x: 0, y: 1 }, hit: new Set() };
       onjBombsRef.current = []; onjFliesRef.current = []; onjBlastsRef.current = [];
       onjBombCoolRef.current = 0; onjThrowCoolRef.current = 0;
+      // action エンジン：武器スロット初期化
+      actionWeaponsRef.current = [...(gameData.player.weapons ?? [])];
+      actionWeaponIdxRef.current = 0;
+      actionWeaponEnergyRef.current = {};
+      actionWeaponsRef.current.forEach(w => { actionWeaponEnergyRef.current[w] = MAX_WEAPON_ENERGY; });
       // onjReze：陣取り（ポリゴン）／スプラ（グリッド）初期化
       {
         const gw = gameData.scroll?.worldCols ?? COLS;
@@ -1665,6 +1759,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (paintGridRef.current) { paintGridRef.current.fill(0); paintCountRef.current = 0; }
     };
     const lose = (msg: string) => {
+      if (gameData.engine === 'action' && checkpointRef.current && !debugInvincibleRef.current) {
+        const p2 = engineRef.current.player;
+        p2.x = checkpointRef.current.x;
+        p2.y = checkpointRef.current.y;
+        p2.vx = 0; p2.vy = 0; p2.isGrounded = false;
+        onjRezeHpRef.current.hp = Math.ceil(onjRezeHpRef.current.max / 2);
+        invulnRef.current = 120;
+        shakeRef.current = 8;
+        forceHud(n => n + 1);
+        return;
+      }
       if (gameData.engine === 'onjReze') clearOnjTerritory();
       shakeRef.current = 18; showGameMsg(msg, 'timed', () => setGameOverResult({ score: scoreRef.current }));
     };
@@ -1757,8 +1862,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         } else if (gameData.engine === 'action') {
           if (isLeft) p.vx -= 1;
           if (isRight) p.vx += 1;
-          p.vx *= gameData.friction; p.vy += gameData.gravity;
+          p.vx *= gameData.friction;
+          // はしご：プレイヤー中心がはしごタイルにいるとき重力キャンセル＆上下移動
+          const onLadder = isAction && (() => {
+            const pcxL = p.x + pData.w / 2, pcyL = p.y + pData.h / 2;
+            return getTile(pcxL, pcyL)?.info?.special === 'ladder';
+          })();
+          if (onLadder) {
+            p.vy = 0;
+            if (isUp) p.y -= pData.speed;
+            if (isDown) p.y += pData.speed;
+          }
+          if (!onLadder) p.vy += gameData.gravity;
           if (isAction && !prevActionRef.current && p.isGrounded) { p.vy = gameData.player.jumpPower; p.isGrounded = false; playSfx(sfxRef.current.jump); }
+          // 武器切り替え
+          const isNextWeapon = keys.has('e') || keys.has('E');
+          const isPrevWeapon = keys.has('q') || keys.has('Q');
+          if (isNextWeapon && !prevNextWeaponRef.current) {
+            if (actionWeaponsRef.current.length > 1)
+              actionWeaponIdxRef.current = (actionWeaponIdxRef.current + 1) % actionWeaponsRef.current.length;
+          }
+          void isPrevWeapon;
+          prevNextWeaponRef.current = isNextWeapon;
 
           p.x += p.vx;
           let hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
@@ -1782,8 +1907,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const isShoot = keys.has('x') || keys.has('X') || touchRef.current.shoot;
           if (isPlaying && !dead && isShoot && actionShootCoolRef.current <= 0) {
             const dir = actionDirRef.current;
-            const bw = 8, bh = 6;
-            eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - bw, y: p.y + pData.h / 2 - bh / 2, w: bw, h: bh, vx: dir * 10, vy: 0 });
+            const currentWeapon = actionWeaponsRef.current[actionWeaponIdxRef.current];
+            const energy = actionWeaponEnergyRef.current;
+            if (currentWeapon && (energy[currentWeapon] ?? 0) > 0) {
+              energy[currentWeapon] = Math.max(0, (energy[currentWeapon] ?? 0) - 1);
+              if (currentWeapon === 'airShooter') {
+                [-15, 0, 15].forEach(offset => {
+                  eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 9, vy: Math.sin(offset * Math.PI / 180) * 3, color: '#88ffcc' } as typeof eng.bullets[0]);
+                });
+              } else if (currentWeapon === 'metalBlade') {
+                for (let di = 0; di < 8; di++) {
+                  const a = di * 45 * Math.PI / 180;
+                  eng.bullets.push({ x: p.x + pData.w / 2 - 4, y: p.y + pData.h / 2 - 4, w: 8, h: 8, vx: Math.cos(a) * 8, vy: Math.sin(a) * 8, color: '#aaaaaa' } as typeof eng.bullets[0]);
+                }
+              } else if (currentWeapon === 'crashBomb') {
+                eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 8, vx: dir * 5, vy: 0, color: '#ff6600' } as typeof eng.bullets[0]);
+              } else {
+                eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 10, vy: 0 });
+              }
+            } else {
+              eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 8, y: p.y + pData.h / 2 - 3, w: 8, h: 6, vx: dir * 10, vy: 0 });
+            }
             actionShootCoolRef.current = 12;
             playSfx(sfxRef.current.shot);
           }
@@ -2345,6 +2489,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
               break;
             }
+            if (d.shopItems?.length && !eventRunningRef.current) {
+              setShopModal({ npcId: d.id, items: d.shopItems });
+              break;
+            }
             if (d.pages && d.pages.length > 0) {
               if (!eventRunningRef.current) {
                 const page = findActivePage(d);
@@ -2477,7 +2625,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               } else win();
             }
             else if (center?.info?.special === 'trap') { if (!debugInvincibleRef.current) { lose('ミス！'); dead = true; } }
+            else if (center?.info?.special === 'lava') {
+              if (!debugInvincibleRef.current) { lose('溶岩に落ちた！'); dead = true; }
+            }
+            else if (center?.info?.special === 'checkpoint' && isAction) {
+              if (!checkpointRef.current || checkpointRef.current.x !== p.x || checkpointRef.current.y !== p.y) {
+                checkpointRef.current = { x: p.x, y: Math.max(0, p.y) };
+                showGameMsg('チェックポイント！', 'timed', () => {});
+              }
+            }
             else bossWarnRef.current = false;
+            // 音符ブロック：着地時に強制スーパージャンプ
+            if (isAction) {
+              const below = getTile(p.x + pData.w / 2, p.y + pData.h + 2);
+              if (below?.info?.special === 'bounce' && p.isGrounded && p.vy === 0) {
+                p.vy = gameData.player.jumpPower * 1.6;
+                p.isGrounded = false;
+              }
+            }
             // onjReze：ダンジョンボスを倒したらクリア（ゴールタイル不要）
             if (gameData.engine === 'onjReze' && !bossDefeatedRef.current) {
               const bossDef = gameData.objects.find(o => o.isBoss);
@@ -2759,7 +2924,26 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           for (const [color, bullets] of byColor) {
             ctx.fillStyle = color;
             ctx.beginPath();
-            for (const eb of bullets) { ctx.moveTo(eb.x + eb.r, eb.y); ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2); }
+            for (const eb of bullets) {
+              const shape = (eb as { shape?: string }).shape ?? 'circle';
+              if (shape === 'diamond') {
+                ctx.moveTo(eb.x, eb.y - eb.r * 1.4);
+                ctx.lineTo(eb.x + eb.r, eb.y);
+                ctx.lineTo(eb.x, eb.y + eb.r * 1.4);
+                ctx.lineTo(eb.x - eb.r, eb.y);
+                ctx.closePath();
+              } else if (shape === 'oval') {
+                ctx.ellipse(eb.x, eb.y, eb.r * 1.6, eb.r * 0.7, 0, 0, Math.PI * 2);
+              } else if (shape === 'arrow') {
+                const hr = eb.r * 1.2;
+                ctx.moveTo(eb.x, eb.y - hr);
+                ctx.lineTo(eb.x + hr * 0.6, eb.y + hr * 0.5);
+                ctx.lineTo(eb.x - hr * 0.6, eb.y + hr * 0.5);
+                ctx.closePath();
+              } else {
+                ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2);
+              }
+            }
             ctx.fill();
           }
           ctx.fillStyle = 'white';
@@ -2956,6 +3140,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             eng.player.x = fade.entryX; eng.player.y = fade.entryY;
             eng.player.vx = 0; eng.player.vy = 0;
             setEditSceneIdx(nextIdx);
+            // シーン別BGM切り替え
+            if (next.bgm) switchBgm(next.bgm);
+            else if (battleBgmActiveRef.current === 'none') switchBgm(gameDataRef.current.bgm);
           }
           sceneFadeRef.current = { ...fade, phase: 'in', frame: 0 };
         }
@@ -3074,12 +3261,35 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // ── 戦闘プレイヤーHUD（Lv / HP / MP）──
       if (isPlaying && gameData.engine === 'rpg' && gameData.battle) {
         const pr = progressRef.current;
-        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(6, 6, 150, 50);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(6, 6, 150, 50);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(6, 6, 150, 68);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(6, 6, 150, 68);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         ctx.fillText(`Lv ${pr.level}  ${playerNameRef.current || gameData.battle.playerName}`, 12, 22);
         ctx.fillText(`HP ${Math.max(0, pr.hp)}/${pr.maxHp}`, 12, 38);
         ctx.fillStyle = '#7fd0ff'; ctx.fillText(`MP ${pr.mp}/${pr.maxMp}`, 12, 52);
+        ctx.fillStyle = '#fde68a'; ctx.fillText(`G: ${pr.gold ?? 0}`, 12, 66);
+      }
+
+      // ── action 武器エネルギーゲージ ──
+      if (isPlaying && gameData.engine === 'action' && actionWeaponsRef.current.length > 1) {
+        const wIdx = actionWeaponIdxRef.current;
+        const wId = actionWeaponsRef.current[wIdx];
+        const en = actionWeaponEnergyRef.current[wId] ?? MAX_WEAPON_ENERGY;
+        const segH = 4, segW = 12, segGap = 1;
+        const segs = MAX_WEAPON_ENERGY;
+        const filled = en;
+        const gaugeH = segs * (segH + segGap);
+        const gx2 = 28, gy2 = VIEW_H / 2 - gaugeH / 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(gx2 - 2, gy2 - 2, segW + 4, gaugeH + 4);
+        for (let i = 0; i < segs; i++) {
+          const sy = gy2 + (segs - 1 - i) * (segH + segGap);
+          ctx.fillStyle = i < filled ? '#ff8800' : '#2a1a00';
+          ctx.fillRect(gx2, sy, segW, segH);
+        }
+        const wItem = (gameDataRef.current.items ?? []).find(it => it.id === wId);
+        ctx.fillStyle = '#ffaa44'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText(wItem?.emoji ?? wId.slice(0, 3), gx2, gy2 - 6);
       }
 
       // ── action ライフゲージ（ロックマン風縦型） ──
@@ -3833,6 +4043,42 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 </div>
               </div>
             )}
+
+            {/* ── ショップモーダル ── */}
+            {shopModal && (
+              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30">
+                <div className="bg-gray-900 border border-yellow-600 rounded-xl p-4 w-full max-w-xs mx-3">
+                  <div className="text-yellow-400 font-bold text-sm mb-2">🏪 お店</div>
+                  <div className="text-yellow-300 text-xs mb-3">所持金: {progressRef.current.gold ?? 0} G</div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {shopModal.items.map(si => {
+                      const itemDef = (gameData.items ?? []).find(it => it.id === si.itemId);
+                      const canAfford = (progressRef.current.gold ?? 0) >= si.price;
+                      return (
+                        <button
+                          key={si.itemId}
+                          disabled={!canAfford}
+                          onClick={() => {
+                            progressRef.current.gold = (progressRef.current.gold ?? 0) - si.price;
+                            setInventory(p => { const n = { ...p }; n[si.itemId] = (n[si.itemId] ?? 0) + 1; return n; });
+                            playSfx(sfxRef.current.purchase);
+                            showGameMsg(`${itemDef?.emoji ?? '?'} ${itemDef?.name ?? si.itemId} を買った！`, 'timed', () => {});
+                            setShopModal(null);
+                            forceHud(n => n + 1);
+                          }}
+                          className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-xs ${canAfford ? 'bg-gray-700 text-white active:bg-yellow-600/30' : 'bg-gray-800 text-gray-500'}`}
+                        >
+                          <span>{itemDef?.emoji ?? '?'} {itemDef?.name ?? si.itemId}</span>
+                          <span className={canAfford ? 'text-yellow-400' : 'text-gray-600'}>{si.price} G</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => setShopModal(null)} className="mt-3 w-full py-2 rounded-lg bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                </div>
+              </div>
+            )}
+
             {!isPlaying && (
               <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute bottom-2 left-1 pointer-events-auto touch-none select-none opacity-90">
@@ -5531,7 +5777,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
 const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   message: 'メッセージ', choice: '選択肢', ifSwitch: 'スイッチ条件分岐', ifItem: 'アイテム条件分岐',
-  setSwitch: 'スイッチ変更', setSelfSwitch: 'セルフスイッチ', giveItem: 'アイテム入手', removeItem: 'アイテム削除',
+  ifGold: 'ゴールド条件分岐', setSwitch: 'スイッチ変更', setSelfSwitch: 'セルフスイッチ', giveItem: 'アイテム入手', removeItem: 'アイテム削除',
+  changeGold: 'ゴールド変更', restoreHp: 'HP回復', restoreMp: 'MP回復',
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
 };
 
@@ -5653,6 +5900,10 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         case 'setSelfSwitch': return { type: 'setSelfSwitch', id: 'A', value: true };
         case 'giveItem': return { type: 'giveItem', itemId: '', count: 1 };
         case 'removeItem': return { type: 'removeItem', itemId: '', count: 1 };
+        case 'changeGold': return { type: 'changeGold', amount: 0 };
+        case 'restoreHp': return { type: 'restoreHp', amount: undefined };
+        case 'restoreMp': return { type: 'restoreMp', amount: undefined };
+        case 'ifGold': return { type: 'ifGold', amount: 0, then: [], else: undefined };
         case 'warp': return { type: 'warp', col: 0, row: 0 };
         case 'wait': return { type: 'wait', frames: 30 };
         case 'comment': return { type: 'comment', text: '' };
