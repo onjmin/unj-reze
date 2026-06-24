@@ -300,7 +300,7 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
       'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
       [id]
     );
-    post.replies = repliesResult.rows.map(rowToPost);
+    post.replies = await Promise.all(repliesResult.rows.map(rowToPost));
   }
 
   return post;

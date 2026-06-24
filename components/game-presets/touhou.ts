@@ -28,6 +28,34 @@ moveTo(startX, ${VIEW_H + 50}, 70)
 exit()
 `.trim();
 
+/** 加速弾：初速 initSpeed から毎フレーム accel ずつ速くなり maxSpeed で頭打ち。
+ *  vanishTime フレーム後に弾が自動消滅する。 */
+const waveAccelScript = (shots: number, fireInterval: number, initSpeed: number, accel: number, maxSpeed: number, vanishTime: number, color: number, jitter: number) => `
+wait(row * 25)
+moveTo(startX, 90, 50)
+wait(10)
+for t in range(0, ${shots - 1}, 1)
+  shotPlayerAccel(${initSpeed}, ${accel}, ${maxSpeed}, ${vanishTime}, ${color}, ${jitter})
+  wait(${fireInterval})
+end for
+moveTo(startX, ${VIEW_H + 50}, 70)
+exit()
+`.trim();
+
+/** リング＋スタック複合：半径方向に多重リングを速度差をつけて撃つ。
+ *  ringCount リング × stackCount 速度レイヤー。 */
+const ringStackScript = (ringCount: number, stackCount: number, baseSpeed: number, speedStep: number, color: number, interval: number) => `
+moveTo(${VIEW_W / 2}, 80, 60)
+while true
+  for s in range(0, ${stackCount - 1}, 1)
+    spd = ${baseSpeed} + s * ${speedStep}
+    shotRing(${ringCount}, spd, ${color})
+    wait(3)
+  end for
+  wait(${interval})
+end while
+`.trim();
+
 // 道中BGM（YouTube）
 const DOCHU_BGM_URL = 'https://www.youtube.com/watch?v=tTEj519jm9k';
 // ボス戦BGM（YouTube）
@@ -49,6 +77,14 @@ export const touhou: PresetData = {
     // 東方Projectシート (sheet no 17) の先頭キャラ
     spriteRef: walkRef(602),
     spriteUrl: sa(602),
+    // ボム設定
+    bombCount: 3,
+    bombSpellName: '霊符「夢想天生」',
+    bombCutinCharName: '博麗霊夢',
+    bombCutinImageUrl: 'https://i.imgur.com/4M92pLV.png',
+    bombCutinImageX: 0,
+    bombCutinImageY: -50,
+    bombCutinScale: 1,
   },
   tiles: {
     // sp.626 暗灰背景 (r=51,51,51)  sp.160 青灰壁 (r=72,72,112)
@@ -138,27 +174,18 @@ end while
     }),
 
     // ── フェーズ 2：道中後半 ──────────────────────────────────────────────
+    // 通常 aimed 弾
     newObject({ emoji: '🧚', col: 3,  row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
       miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
     newObject({ emoji: '🧚', col: 11, row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
       miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
+    // spread 弾
     newObject({ emoji: '🧚', col: 7,  row: 1, phase: 2, speed: 1.0, hp: 3, bullet: 'none',
       miniScript: waveSpreadScript(4, 65, 5, 40, 2.2, 8) }),
+    // 加速弾（初速遅め→急加速、120フレームで消滅）
     newObject({ emoji: '🧝', col: 4,  row: 2, phase: 2, speed: 0.9, hp: 4, bullet: 'none',
-      miniScript: `
-wait(row * 25)
-moveTo(startX, 110, 45)
-wait(10)
-for t in range(0, 3, 1)
-  base = t * 30
-  for i in range(0, 5, 1)
-    shot(base + i * 60, 2.0, 2)
-  end for
-  wait(50)
-end for
-moveTo(startX + rand(-60, 60), ${VIEW_H + 50}, 65)
-exit()
-`.trim() }),
+      miniScript: waveAccelScript(5, 60, 0.8, 0.06, 3.5, 120, 2, 12) }),
+    // リング弾（角度ずらし）
     newObject({ emoji: '🧝', col: 10, row: 2, speed: 0.9, hp: 4, bullet: 'none', phase: 2,
       miniScript: `
 wait(row * 25)
@@ -172,6 +199,23 @@ for t in range(0, 3, 1)
   wait(50)
 end for
 moveTo(startX + rand(-60, 60), ${VIEW_H + 50}, 65)
+exit()
+`.trim() }),
+    // リング＋スタック複合（道中後半ザコ上位）
+    newObject({ emoji: '🧙', col: 7, row: 0, phase: 2, speed: 0.6, hp: 6, bullet: 'none',
+      miniScript: `
+wait(row * 25)
+moveTo(startX, 130, 55)
+wait(20)
+for t in range(0, 2, 1)
+  shotRing(8, 1.8, 5)
+  wait(4)
+  shotRing(8, 2.4, 6)
+  wait(4)
+  shotRing(8, 3.0, 7)
+  wait(60)
+end for
+moveTo(startX, ${VIEW_H + 50}, 70)
 exit()
 `.trim() }),
 
@@ -198,13 +242,18 @@ end while
         {
           name: '氷符「パーフェクトフリーズ」',
           triggerHp: 130,
+          dialogue: [
+            { speaker: 'チルノ', emoji: '🌸', text: 'ふふん、スペルカードを使ってあげるわ！',
+              imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
+          ],
+          // 12方向リング + aimed 加速弾の複合
           miniScript: `
 moveTo(rand(80, ${VIEW_W - 80}), 80, 40)
 while true
   for i in range(0, 11, 1)
     shot(i * 30, 2.6, 4)
   end for
-  shotPlayer(2.1, 3, 8)
+  shotPlayerAccel(1.2, 0.08, 4.0, 150, 3, 6)
   wait(5)
 end while
 `.trim(),
@@ -212,13 +261,41 @@ end while
         {
           name: '氷符「ブルーフロストオーロラ」',
           triggerHp: 60,
+          dialogue: [
+            { speaker: 'チルノ', emoji: '🌸', text: '⑨の力、全部使ってやる！',
+              imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
+          ],
+          // 回転リング（frame で角度をずらし続けることで螺旋に見える）＋速度差リングスタック
           miniScript: `
 moveTo(${VIEW_W / 2}, 70, 30)
 while true
   for i in range(0, 15, 1)
     shot(frame * 10 + i * 24, 2.8, 1)
   end for
+  shotRing(8, 1.6, 4)
+  wait(3)
+  shotRing(8, 2.6, 3)
+  wait(3)
   shotPlayer(2.4, 6, 5)
+  wait(2)
+end while
+`.trim(),
+        },
+        {
+          name: '凍符「ダイヤモンドブリザード」',
+          triggerHp: 20,
+          dialogue: [
+            { speaker: 'チルノ', emoji: '🌸', text: 'これが⑨の本気よ！最強の弾幕を見せてあげる！',
+              imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
+          ],
+          // 加速弾 + spread 複合、180フレームで弾消滅
+          miniScript: `
+moveTo(${VIEW_W / 2}, 65, 25)
+while true
+  for i in range(0, 7, 1)
+    shotPlayerAccel(0.5, 0.12, 5.0, 180, 1, 4)
+  end for
+  shotN(6, getPlayerAngle(), 30, 3.2, 4)
   wait(4)
 end while
 `.trim(),

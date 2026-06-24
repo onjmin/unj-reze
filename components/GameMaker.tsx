@@ -124,7 +124,7 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿屋' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊' };
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
@@ -172,7 +172,7 @@ interface Entity {
   scriptCtx?: { cancelled: boolean };
 }
 interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; }
-interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean; }
+interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean; accel?: number; maxSpeed?: number; vanishIn?: number; }
 
 // ── 空間グリッド（弾幕当たり判定高速化）────────────────────────────────────
 // セルサイズを最大弾半径の2倍以上に設定することで漏れなし保証。
@@ -367,6 +367,30 @@ function runEntityScript(
     shotSpiral: (ways: unknown, baseAngle: unknown, speed: unknown, color: unknown = 0) => {
       const n = (ways as number) | 0;
       for (let i = 0; i < n; i++) pushBullet(+(baseAngle as number) + i * (360 / n), +(speed as number), (color as number) | 0);
+    },
+    /** 全方向均等リング弾 shotRing(ways, speed, color) */
+    shotRing: (ways: unknown, speed: unknown, color: unknown = 0) => {
+      const n = Math.max(1, (ways as number) | 0);
+      for (let i = 0; i < n; i++) pushBullet(i * (360 / n), +(speed as number), (color as number) | 0);
+    },
+    /** 加速弾：プレイヤー方向へ初速 initSpeed から accel ずつ加速し maxSpeed で頭打ち。vanishTime フレーム後自動消滅。 */
+    shotPlayerAccel: (initSpeed: unknown, accel: unknown, maxSpeed: unknown, vanishTime: unknown, color: unknown = 0, jitter: unknown = 0) => {
+      if (ctx.cancelled) return;
+      const p = getPlayer();
+      const angle = Math.atan2(p.y - (entity.y + TILE_SIZE / 2), p.x - (entity.x + TILE_SIZE / 2));
+      const jitterRad = (+(jitter as number)) * DEG_TO_RAD * (Math.random() * 2 - 1);
+      const a = angle + jitterRad;
+      const spd = +(initSpeed as number);
+      const col = SPELL_PALETTE[(((color as number) | 0) + 9) % 9];
+      const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+      eng.enemyBullets.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+        r: 5, color: col,
+        accel: +(accel as number),
+        maxSpeed: +(maxSpeed as number),
+        vanishIn: Math.max(1, (vanishTime as number) | 0),
+      });
     },
 
     // プレイヤー情報
@@ -2127,6 +2151,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h) p.y = ny;
+          // touhou: 画面外に出ないようクランプ（タイルチェックを抜けた場合の保険）
+          if (gameData.engine === 'touhou') {
+            p.x = Math.max(0, Math.min(VIEW_W - pData.w, p.x));
+            p.y = Math.max(0, Math.min(VIEW_H - pData.h, p.y));
+          }
 
           // touhou shooting + bomb: play mode only（死亡中は撃たない）
           if (!dead && !isPlayerDeadRef.current && gameData.engine === 'touhou') {
@@ -2542,7 +2571,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           // ── 弾移動・画面外除去 ──
           for (let i = eng.enemyBullets.length - 1; i >= 0; i--) {
-            const eb = eng.enemyBullets[i]; eb.x += eb.vx; eb.y += eb.vy;
+            const eb = eng.enemyBullets[i];
+            // 加速弾処理
+            if (eb.accel !== undefined && eb.maxSpeed !== undefined) {
+              const spd = Math.hypot(eb.vx, eb.vy);
+              if (spd < eb.maxSpeed) {
+                const newSpd = Math.min(spd + eb.accel, eb.maxSpeed);
+                const ratio = spd > 0 ? newSpd / spd : 0;
+                eb.vx *= ratio; eb.vy *= ratio;
+              }
+            }
+            eb.x += eb.vx; eb.y += eb.vy;
+            // 消滅タイマー
+            if (eb.vanishIn !== undefined) {
+              eb.vanishIn--;
+              if (eb.vanishIn <= 0) { eng.enemyBullets.splice(i, 1); continue; }
+            }
             if (eb.x < -20 || eb.x > worldW + 20 || eb.y < -20 || eb.y > worldH + 20) eng.enemyBullets.splice(i, 1);
           }
 
@@ -5777,8 +5821,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
 const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   message: 'メッセージ', choice: '選択肢', ifSwitch: 'スイッチ条件分岐', ifItem: 'アイテム条件分岐',
-  ifGold: 'ゴールド条件分岐', setSwitch: 'スイッチ変更', setSelfSwitch: 'セルフスイッチ', giveItem: 'アイテム入手', removeItem: 'アイテム削除',
-  changeGold: 'ゴールド変更', restoreHp: 'HP回復', restoreMp: 'MP回復',
+  ifGold: 'ゴールド条件分岐', setSwitch: 'スイッチ変更', setSelfSwitch: 'セルフスイッチ',
+  giveItem: 'アイテム入手', removeItem: 'アイテム削除', changeGold: 'ゴールド増減',
+  restoreHp: 'HP回復', restoreMp: 'MP回復',
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
 };
 
@@ -5909,6 +5954,10 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         case 'comment': return { type: 'comment', text: '' };
         case 'label': return { type: 'label', name: '' };
         case 'jump': return { type: 'jump', label: '' };
+        case 'ifGold': return { type: 'ifGold', amount: 0, then: [], else: undefined };
+        case 'changeGold': return { type: 'changeGold', amount: 0 };
+        case 'restoreHp': return { type: 'restoreHp' };
+        case 'restoreMp': return { type: 'restoreMp' };
       }
     })();
     onChange(base);
