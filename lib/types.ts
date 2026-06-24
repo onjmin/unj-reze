@@ -40,6 +40,7 @@ export interface GhostPlayer {
   x: number;
   y: number;
   emoji: string;
+  color?: string;
   updatedAt?: string;
 }
 
@@ -55,6 +56,13 @@ export interface LiveGameInfo {
   hourSlot: string;
   nextCandidates: GameVoteCandidate[];
   myVote: number | null;
+}
+
+/** sessionId（または任意の文字列）から一意な HSL 色を返す。陣取りのプレイヤー識別色に使用。 */
+export function colorFromId(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360}, 70%, 55%)`;
 }
 
 export interface Obstacle {

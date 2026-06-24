@@ -37,8 +37,8 @@ const fieldMap = Array.from({ length: H }, (_, y) =>
     if (x >= 13 && x <= 15 && y >= 10 && y <= 12) return 1;
     if (x >= 2 && x <= 3 && y >= 12 && y <= 14) return 1;
     // 村（南端）
-    if (x >= 3 && x <= 8 && y >= 19 && y <= 22 && !(x >= 4 && x <= 7 && y >= 20 && y <= 21)) return 6;
     if (x >= 5 && x <= 6 && y === 22) return 7;
+    if (x >= 3 && x <= 8 && y >= 19 && y <= 22 && !(x >= 4 && x <= 7 && y >= 20 && y <= 21)) return 6;
     // 洞窟入口
     if (x === 9 && (y === 13 || y === 14)) return 7;
     return 0;

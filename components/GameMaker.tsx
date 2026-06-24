@@ -37,6 +37,12 @@ import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 
 export type { PresetId };
 
+function colorFromId(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360}, 70%, 55%)`;
+}
+
 type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound' | 'screen';
 
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
@@ -566,7 +572,7 @@ interface GameMakerProps {
   playOnly?: boolean;
   /** 親コンテナに収める（absolute overlay ではなく h-full flex-col） */
   embedded?: boolean;
-  ghostPlayers?: { sessionId: string; x: number; y: number; emoji: string }[];
+  ghostPlayers?: { sessionId: string; x: number; y: number; emoji: string; color?: string }[];
   onPositionChange?: (x: number, y: number, emoji: string) => void;
   /** ゲームポストのID（コメント返信先） */
   postId?: number;
@@ -730,14 +736,34 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const onjBombCoolRef = useRef(0);   // 💣設置のクールダウン（長押し連打）
   const onjThrowCoolRef = useRef(0);  // 🎯投げ／💀首爆弾のクールダウン
   // onjReze: 陣取り(paper.io)／スプラ(塗り)のセル・グリッド。サイズ = worldCols * worldRows。
-  const paintGridRef = useRef<Uint8Array | null>(null);   // 1 = スプラで塗ったセル
-  const ownedGridRef = useRef<Uint8Array | null>(null);   // 1 = 占領済みの自陣セル
-  const trailGridRef = useRef<Uint8Array | null>(null);   // 1 = 現在のトレイル上のセル
-  const trailListRef = useRef<number[]>([]);              // トレイルのセル index（順序）
-  const territoryGridWRef = useRef(0);                     // グリッドの列数（index 復元用）
-  const paintCountRef = useRef(0);                         // 塗り済みセル数
-  const ownedCountRef = useRef(0);                         // 占領済みセル数
-  const groundCellsRef = useRef(1);                        // 占有率の母数（通行可セル数）
+  type Vec2 = { x: number; y: number };
+  // 陣取り：ポリゴン配列（初期矩形＋各囲み込みループを追加）
+  const territoryPolysRef = useRef<Vec2[][]>([]);
+  // 陣取り：現在引き中のトレイル（ポリライン）
+  const trailPointsRef = useRef<Vec2[]>([]);
+  // スプラ：グリッドはそのまま維持（塗りは格子でも問題なし）
+  const paintGridRef = useRef<Uint8Array | null>(null);
+  const paintCountRef = useRef(0);
+  const ownedAreaRef = useRef(0);   // 占領済み面積（px²）
+  const groundAreaRef = useRef(1);  // 占有率の母数（通行可面積 px²）
+
+  /** ポリゴン内外判定（Ray casting） */
+  const pointInPoly = (pts: Vec2[], px: number, py: number): boolean => {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+      if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  };
+  const inTerritory = (polys: Vec2[][], px: number, py: number) => polys.some(poly => pointInPoly(poly, px, py));
+
+  /** ポリゴン面積（Shoelace） */
+  const polyArea = (pts: Vec2[]): number => {
+    let a = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+    return Math.abs(a) / 2;
+  };
 
   const bossDefeatedRef = useRef(false);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
@@ -751,6 +777,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── 弾幕空間グリッド ──
   const bulletGridRef = useRef(new BulletGrid(VIEW_W));
+
+  // ── オンラインテストモード（疑似マルチプレイヤー） ──
+  interface FakePlayer {
+    sessionId: string; emoji: string; color: string;
+    x: number; y: number; vx: number; vy: number;
+    dirX: number; dirY: number; moveCool: number;
+    // onjReze 陣取り（ポリゴン＋ポリライン）
+    territoryPolys: Vec2[][]; trailPoints: Vec2[];
+    paint: Uint8Array | null; paintCount: number; ownedCount: number;
+  }
+  const [onlineTestMode, setOnlineTestMode] = useState(false);
+  const onlineTestModeRef = useRef(false);
+  onlineTestModeRef.current = onlineTestMode;
+  const fakePlayersRef = useRef<FakePlayer[]>([]);
 
   // ── 設定パネル ──
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -768,6 +808,44 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [debugInvincible, setDebugInvincible] = useState(false);
   const debugInvincibleRef = useRef(false);
   useEffect(() => { debugInvincibleRef.current = debugInvincible; }, [debugInvincible]);
+
+  // オンラインテストモード：疑似プレイヤーを初期化
+  const initFakePlayers = useCallback((data: PresetData, enabled: boolean) => {
+    if (!enabled) { fakePlayersRef.current = []; return; }
+    const gw = data.scroll?.worldCols ?? COLS;
+    const gh = data.scroll?.worldRows ?? ROWS;
+    const n = gw * gh;
+    const FAKE_EMOJIS = ['🐱', '🐸', '🐼', '🦊', '🐧', '🐨'];
+    const FAKE_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6'];
+    const isOnj = data.engine === 'onjReze';
+    fakePlayersRef.current = FAKE_EMOJIS.map((emoji, i) => {
+      // ランダムな通行可スポーン地点
+      let sx = Math.floor(Math.random() * gw), sy = Math.floor(Math.random() * gh);
+      for (let attempt = 0; attempt < 200; attempt++) {
+        const cx = Math.floor(Math.random() * gw), cy = Math.floor(Math.random() * gh);
+        if (data.tiles[data.map[cy]?.[cx] ?? 0]?.passable) { sx = cx; sy = cy; break; }
+      }
+      const spawnCx = (sx + 0.5) * TILE_SIZE, spawnCy = (sy + 0.5) * TILE_SIZE;
+      const hw = 2 * TILE_SIZE;
+      // 初期自陣：スポーン周辺の矩形ポリゴン
+      const initPoly: Vec2[] = isOnj ? [
+        { x: spawnCx - hw, y: spawnCy - hw }, { x: spawnCx + hw, y: spawnCy - hw },
+        { x: spawnCx + hw, y: spawnCy + hw }, { x: spawnCx - hw, y: spawnCy + hw },
+      ] : [];
+      const paint = isOnj ? new Uint8Array(n) : null;
+      return {
+        sessionId: `fake-${i}`, emoji, color: FAKE_COLORS[i % FAKE_COLORS.length],
+        x: sx * TILE_SIZE, y: sy * TILE_SIZE, vx: 0, vy: 0,
+        dirX: 0, dirY: 1, moveCool: Math.floor(Math.random() * 60),
+        territoryPolys: initPoly.length ? [initPoly] : [], trailPoints: [],
+        paint, paintCount: 0, ownedCount: isOnj ? 1 : 0,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    initFakePlayers(gameData, onlineTestMode);
+  }, [onlineTestMode, gameData.engine, initFakePlayers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── バトル/ボス戦 BGM ──
   const bossBgmActiveRef = useRef(false);
@@ -1444,33 +1522,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       swordRef.current = { active: 0, cool: 0, dir: { x: 0, y: 1 }, hit: new Set() };
       onjBombsRef.current = []; onjFliesRef.current = []; onjBlastsRef.current = [];
       onjBombCoolRef.current = 0; onjThrowCoolRef.current = 0;
-      // onjReze：陣取り／スプラのグリッド確保＋自陣（ホーム）の初期化
+      // onjReze：陣取り（ポリゴン）／スプラ（グリッド）初期化
       {
         const gw = gameData.scroll?.worldCols ?? COLS;
         const gh = gameData.scroll?.worldRows ?? ROWS;
         const n = gw * gh;
-        territoryGridWRef.current = gw;
         paintGridRef.current = new Uint8Array(n);
-        ownedGridRef.current = new Uint8Array(n);
-        trailGridRef.current = new Uint8Array(n);
-        trailListRef.current = [];
-        paintCountRef.current = 0; ownedCountRef.current = 0;
-        // 占有率の母数＝通行可セル数
+        paintCountRef.current = 0;
+        trailPointsRef.current = [];
+        // 占有率の母数＝通行可セル面積（px²）
         let ground = 0;
         for (let yy = 0; yy < gh; yy++) for (let xx = 0; xx < gw; xx++) {
           if (gameData.tiles[gameData.map[yy]?.[xx] ?? 0]?.passable) ground++;
         }
-        groundCellsRef.current = Math.max(1, ground);
-        // スポーン周辺 5×5 を初期自陣に（陣取りの起点）
-        const sc = Math.floor((gameData.player.start.x + gameData.player.w / 2) / TILE_SIZE);
-        const sr = Math.floor((gameData.player.start.y + gameData.player.h / 2) / TILE_SIZE);
-        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-          const cx = sc + dx, cy = sr + dy;
-          if (cx < 0 || cx >= gw || cy < 0 || cy >= gh) continue;
-          if (!gameData.tiles[gameData.map[cy]?.[cx] ?? 0]?.passable) continue;
-          const idx = cy * gw + cx;
-          if (!ownedGridRef.current[idx]) { ownedGridRef.current[idx] = 1; ownedCountRef.current++; }
-        }
+        groundAreaRef.current = Math.max(1, ground) * TILE_SIZE * TILE_SIZE;
+        // 初期自陣：スポーン周辺 5×5 タイル相当の矩形ポリゴン
+        const scx = gameData.player.start.x + gameData.player.w / 2;
+        const scy = gameData.player.start.y + gameData.player.h / 2;
+        const hw = 2.5 * TILE_SIZE;
+        const initPoly: Vec2[] = [
+          { x: scx - hw, y: scy - hw }, { x: scx + hw, y: scy - hw },
+          { x: scx + hw, y: scy + hw }, { x: scx - hw, y: scy + hw },
+        ];
+        territoryPolysRef.current = [initPoly];
+        ownedAreaRef.current = polyArea(initPoly);
       }
       bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false;
       bombCountRef.current = gameData.player.bombCount ?? 3;
@@ -1584,7 +1659,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     };
 
     const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); }); };
-    const lose = (msg: string) => { shakeRef.current = 18; showGameMsg(msg, 'timed', () => setGameOverResult({ score: scoreRef.current })); };
+    const clearOnjTerritory = () => {
+      territoryPolysRef.current = []; ownedAreaRef.current = 0;
+      trailPointsRef.current = [];
+      if (paintGridRef.current) { paintGridRef.current.fill(0); paintCountRef.current = 0; }
+    };
+    const lose = (msg: string) => {
+      if (gameData.engine === 'onjReze') clearOnjTerritory();
+      shakeRef.current = 18; showGameMsg(msg, 'timed', () => setGameOverResult({ score: scoreRef.current }));
+    };
     const hitShake = () => { shakeRef.current = Math.max(shakeRef.current, 10); };
 
     // ── シーン境界検出：ワールドマップ上でプレイヤーが別シーン領域に入ったら即切り替え ──
@@ -1799,23 +1882,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           // ── 陣取り(paper.io) ／ スプラ(塗り)。gameData.onjReze で各 ON/OFF ──
           const modes = gameData.onjReze;
-          const owned = ownedGridRef.current, paint = paintGridRef.current, trailG = trailGridRef.current;
+          const paint = paintGridRef.current;
           const gw = worldCols, gh = worldRows;
-          if (isPlaying && !dead && owned && paint && trailG && (modes?.territory || modes?.paint)) {
+          if (isPlaying && !dead && (modes?.territory || modes?.paint)) {
             const idxOf = (cx: number, cy: number) => cy * gw + cx;
             const inb = (cx: number, cy: number) => cx >= 0 && cx < gw && cy >= 0 && cy < gh;
             const passable = (cx: number, cy: number) => !!gameData.tiles[gameData.map[cy]?.[cx] ?? 0]?.passable;
             const pcol = Math.floor((p.x + pData.w / 2) / TILE_SIZE);
             const prow = Math.floor((p.y + pData.h / 2) / TILE_SIZE);
+            const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
+            const hitR = pData.w / 2;
 
             // スプラ：足元＋直近に発生した爆発の範囲を塗る（Splatoon 風）
-            if (modes?.paint) {
+            if (modes?.paint && paint) {
               const paintCell = (cx: number, cy: number) => {
                 if (inb(cx, cy) && passable(cx, cy)) { const id = idxOf(cx, cy); if (!paint[id]) { paint[id] = 1; paintCountRef.current++; } }
               };
               paintCell(pcol, prow);
               for (const bl of onjBlastsRef.current) {
-                if (bl.life !== bl.maxLife - 1) continue; // 今フレーム発生した爆発のみ
+                if (bl.life !== bl.maxLife - 1) continue;
                 const rc = Math.ceil(bl.r / TILE_SIZE);
                 const bcx = Math.floor(bl.x / TILE_SIZE), bcy = Math.floor(bl.y / TILE_SIZE);
                 for (let dy = -rc; dy <= rc; dy++) for (let dx = -rc; dx <= rc; dx++) if (dx * dx + dy * dy <= rc * rc) paintCell(bcx + dx, bcy + dy);
@@ -1824,49 +1909,63 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
             // 陣取り：自陣外でトレイルを引き、自陣に戻ると囲み込みで占領（paper.io）
             if (modes?.territory && inb(pcol, prow) && passable(pcol, prow)) {
-              const cell = idxOf(pcol, prow);
-              if (owned[cell]) {
-                if (trailListRef.current.length > 0) {
-                  // (1) トレイルを自陣化
-                  for (const ti of trailListRef.current) { trailG[ti] = 0; if (!owned[ti]) { owned[ti] = 1; ownedCountRef.current++; } }
-                  trailListRef.current = [];
-                  // (2) 外周から到達不能な通行可セル＝囲まれた内側 → 自陣化（フラッドフィル）
-                  // 連結判定は「自陣(owned)以外」を通す（壁も通す）。境界になるのは自分の陣地だけ。
-                  // ※ 通行不可セルでフラッドを止めると、外周が全部壁のマップで外側に種が撒けず
-                  //   reach が空になり「全域占領」になってしまう。通行可判定は最後の占領時だけ使う。
-                  const reach = new Uint8Array(gw * gh);
-                  const stack: number[] = [];
-                  const seed = (cx: number, cy: number) => { const id = idxOf(cx, cy); if (!owned[id] && !reach[id]) { reach[id] = 1; stack.push(id); } };
-                  for (let cx = 0; cx < gw; cx++) { seed(cx, 0); seed(cx, gh - 1); }
-                  for (let cy = 0; cy < gh; cy++) { seed(0, cy); seed(gw - 1, cy); }
-                  while (stack.length) {
-                    const id = stack.pop()!; const cx = id % gw, cy = (id / gw) | 0;
-                    if (inb(cx - 1, cy)) seed(cx - 1, cy);
-                    if (inb(cx + 1, cy)) seed(cx + 1, cy);
-                    if (inb(cx, cy - 1)) seed(cx, cy - 1);
-                    if (inb(cx, cy + 1)) seed(cx, cy + 1);
-                  }
-                  for (let cy = 0; cy < gh; cy++) for (let cx = 0; cx < gw; cx++) {
-                    if (!passable(cx, cy)) continue; const id = idxOf(cx, cy);
-                    if (!owned[id] && !reach[id]) { owned[id] = 1; ownedCountRef.current++; }
-                  }
+              const polys = territoryPolysRef.current;
+              const trail = trailPointsRef.current;
+              const onOwn = inTerritory(polys, pcx, pcy);
+
+              if (onOwn) {
+                if (trail.length > 1) {
+                  // トレイルを閉じてポリゴン化 → 陣地追加
+                  const loop: Vec2[] = [...trail];
+                  territoryPolysRef.current = [...polys, loop];
+                  ownedAreaRef.current += polyArea(loop);
+                  trailPointsRef.current = [];
                   playSfx(sfxRef.current.clear);
+                } else if (trail.length === 1) {
+                  trailPointsRef.current = [];
                 }
-              } else if (!trailG[cell]) {
-                trailG[cell] = 1; trailListRef.current.push(cell);
-              }
-              // 敵がトレイルを横切ったら切断（＋ダメージ）。原作の「軌跡を切られると死ぬ」を再現。
-              if (trailListRef.current.length > 0) {
-                for (const e2 of eng.entities) {
-                  const ecx = Math.floor((e2.x + TILE_SIZE / 2) / TILE_SIZE), ecy = Math.floor((e2.y + TILE_SIZE / 2) / TILE_SIZE);
-                  if (inb(ecx, ecy) && trailG[idxOf(ecx, ecy)]) {
-                    for (const ti of trailListRef.current) trailG[ti] = 0;
-                    trailListRef.current = [];
+              } else {
+                // 自分の線への自己衝突チェック（末尾 8 点は除外）
+                if (!debugInvincibleRef.current && invulnRef.current <= 0 && trail.length > 10) {
+                  const checkLen = trail.length - 8;
+                  for (let i = 0; i < checkLen; i++) {
+                    const dx = trail[i].x - pcx, dy = trail[i].y - pcy;
+                    if (dx * dx + dy * dy < hitR * hitR) { lose('自分の線を踏んだ…'); dead = true; break; }
+                  }
+                }
+                if (!dead) {
+                  // 敵エンティティがトレイル上を通ったら切断
+                  let cut = false;
+                  for (const e2 of eng.entities) {
+                    const ecx = e2.x + TILE_SIZE / 2, ecy = e2.y + TILE_SIZE / 2;
+                    for (let i = 0; i < trail.length; i++) {
+                      const dx = trail[i].x - ecx, dy = trail[i].y - ecy;
+                      if (dx * dx + dy * dy < (TILE_SIZE / 2) * (TILE_SIZE / 2)) { cut = true; break; }
+                    }
+                    if (cut) break;
+                  }
+                  // 疑似プレイヤーのトレイルがプレイヤーのトレイル上に触れたら切断
+                  if (!cut && onlineTestModeRef.current) {
+                    for (const fp of fakePlayersRef.current) {
+                      for (let i = 0; i < trail.length; i++) {
+                        const dx = trail[i].x - (fp.x + pData.w / 2), dy = trail[i].y - (fp.y + pData.h / 2);
+                        if (dx * dx + dy * dy < hitR * hitR) { cut = true; break; }
+                      }
+                      if (cut) break;
+                    }
+                  }
+                  if (cut) {
+                    trailPointsRef.current = [];
                     if (!debugInvincibleRef.current && invulnRef.current <= 0) {
                       onjRezeHpRef.current.hp -= 1; invulnRef.current = 60; hitShake(); playSfx(sfxRef.current.damage);
                       if (onjRezeHpRef.current.hp <= 0) { lose('トレイルを切られた…'); dead = true; }
                     }
-                    break;
+                  } else {
+                    // 新しいトレイル点を追加（最低 2px 移動した場合のみ）
+                    const last = trail[trail.length - 1];
+                    if (!last || (pcx - last.x) ** 2 + (pcy - last.y) ** 2 >= 4) {
+                      trailPointsRef.current = [...trail, { x: pcx, y: pcy }];
+                    }
                   }
                 }
               }
@@ -1929,6 +2028,62 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // 位置変化を通知（play only）
       if (isPlaying && onPositionChangeRef.current) onPositionChangeRef.current(p.x, p.y, pData.emoji);
+
+      // ── オンラインテストモード：疑似プレイヤー更新 ──
+      if (isPlaying && onlineTestModeRef.current) {
+        const fps = fakePlayersRef.current;
+        const gw = worldCols; const gh = worldRows;
+        const isOnj = gameData.engine === 'onjReze';
+        const modes = gameData.onjReze;
+        for (const fp of fps) {
+          // 移動方向切り替え（クールダウンが切れたらランダム）
+          if (fp.moveCool <= 0) {
+            const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+            const d = dirs[Math.floor(Math.random() * dirs.length)];
+            fp.dirX = d[0]; fp.dirY = d[1];
+            fp.moveCool = 30 + Math.floor(Math.random() * 60);
+          }
+          fp.moveCool--;
+          // 移動（pData.speed を流用）
+          const spd = pData.speed;
+          const nx = fp.x + fp.dirX * spd, ny = fp.y + fp.dirY * spd;
+          const ncol = Math.floor((nx + pData.w / 2) / TILE_SIZE);
+          const nrow = Math.floor((ny + pData.h / 2) / TILE_SIZE);
+          if (ncol >= 0 && ncol < gw && nrow >= 0 && nrow < gh && gameData.tiles[gameData.map[nrow]?.[ncol] ?? 0]?.passable) {
+            fp.x = nx; fp.y = ny;
+          } else {
+            fp.moveCool = 0; // 壁にぶつかったらすぐ方向転換
+          }
+          // onjReze：陣取り・スプラ塗り
+          if (isOnj && (modes?.territory || modes?.paint)) {
+            const fcol = Math.floor((fp.x + pData.w / 2) / TILE_SIZE);
+            const frow = Math.floor((fp.y + pData.h / 2) / TILE_SIZE);
+            const fcx = fp.x + pData.w / 2, fcy = fp.y + pData.h / 2;
+            if (fcol >= 0 && fcol < gw && frow >= 0 && frow < gh) {
+              if (modes?.paint && fp.paint) {
+                const id = frow * gw + fcol;
+                if (!fp.paint[id]) { fp.paint[id] = 1; fp.paintCount++; }
+              }
+              if (modes?.territory) {
+                const onOwn = inTerritory(fp.territoryPolys, fcx, fcy);
+                if (onOwn) {
+                  if (fp.trailPoints.length > 1) {
+                    const loop: Vec2[] = [...fp.trailPoints];
+                    fp.territoryPolys = [...fp.territoryPolys, loop];
+                    fp.ownedCount++;
+                  }
+                  fp.trailPoints = [];
+                } else {
+                  const last = fp.trailPoints[fp.trailPoints.length - 1];
+                  if (!last || (fcx - last.x) ** 2 + (fcy - last.y) ** 2 >= 4) {
+                    fp.trailPoints = [...fp.trailPoints, { x: fcx, y: fcy }];
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
 
       // ── シーン遷移チェック（action/rpg エンジン対象、プレイ中のみ）──
       if (isPlaying && !roundOverRef.current && (gameData.engine === 'action' || gameData.engine === 'rpg')) {
@@ -2481,24 +2636,64 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       }
 
-      // ── onjReze：陣取り(自陣/トレイル)・スプラ(塗り) のセル・オーバーレイ（敵の下に描画）──
+      // ── onjReze：陣取り（不定形ポリゴン）・スプラ（グリッド）オーバーレイ ──
       if (isPlaying && gameData.engine === 'onjReze') {
         const gw = worldCols;
         const showTerritory = !!gameData.onjReze?.territory;
         const showPaint = !!gameData.onjReze?.paint;
-        const owned = showTerritory ? ownedGridRef.current : null;
-        const trailG = showTerritory ? trailGridRef.current : null;
-        const paint = showPaint ? paintGridRef.current : null;
-        const pcol = gameData.player.color;
-        for (let y = startRow; y < endRow; y++) {
-          for (let x = startCol; x < endCol; x++) {
-            const id = y * gw + x;
-            if (paint && paint[id]) { ctx.fillStyle = pcol; ctx.globalAlpha = 0.3; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
-            if (owned && owned[id]) { ctx.fillStyle = '#3ecf3e'; ctx.globalAlpha = 0.42; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
-            if (trailG && trailG[id]) { ctx.fillStyle = pcol; ctx.globalAlpha = 0.85; ctx.fillRect(x * TILE_SIZE + 4, y * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8); }
+
+        const drawTerritoryPolys = (polys: Vec2[][], color: string, alpha: number) => {
+          if (!polys.length) return;
+          ctx.save(); ctx.fillStyle = color; ctx.globalAlpha = alpha;
+          for (const poly of polys) {
+            if (poly.length < 3) continue;
+            ctx.beginPath(); ctx.moveTo(poly[0].x, poly[0].y);
+            for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+            ctx.closePath(); ctx.fill();
+          }
+          ctx.restore();
+        };
+        const drawTrailLine = (pts: Vec2[], color: string) => {
+          if (pts.length < 2) return;
+          ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 4;
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalAlpha = 0.9;
+          ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.stroke(); ctx.restore();
+        };
+
+        // 疑似プレイヤーを先に描画（自分の陣地が上に重なる）
+        if (onlineTestModeRef.current) {
+          for (const fp of fakePlayersRef.current) {
+            if (showTerritory) {
+              drawTerritoryPolys(fp.territoryPolys, fp.color, 0.32);
+              drawTrailLine(fp.trailPoints, fp.color);
+            }
+            if (showPaint && fp.paint) {
+              ctx.fillStyle = fp.color;
+              for (let y = startRow; y < endRow; y++) for (let x = startCol; x < endCol; x++) {
+                const id = y * gw + x;
+                if (fp.paint[id]) { ctx.globalAlpha = 0.22; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+              }
+              ctx.globalAlpha = 1;
+            }
           }
         }
-        ctx.globalAlpha = 1;
+
+        const pcol = gameData.player.color;
+        if (showTerritory) {
+          drawTerritoryPolys(territoryPolysRef.current, pcol, 0.42);
+          drawTrailLine(trailPointsRef.current, pcol);
+        }
+        if (showPaint && paintGridRef.current) {
+          const paint = paintGridRef.current;
+          ctx.fillStyle = pcol;
+          for (let y = startRow; y < endRow; y++) for (let x = startCol; x < endCol; x++) {
+            const id = y * gw + x;
+            if (paint[id]) { ctx.globalAlpha = 0.3; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+          }
+          ctx.globalAlpha = 1;
+        }
       }
 
       // objects (play: from entities, edit: from data)
@@ -2598,9 +2793,47 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ghost players（他プレイヤー・当たり判定なし）
       for (const ghost of ghostPlayersRef.current) {
+        const ghostCol = ghost.color ?? colorFromId(ghost.sessionId);
         ctx.globalAlpha = 0.45;
         ctx.font = `${pData.w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(ghost.emoji, ghost.x + pData.w / 2, ghost.y + pData.h + 4);
+        // 名前タグ代わりに色ドット
+        ctx.fillStyle = ghostCol; ctx.globalAlpha = 0.7;
+        ctx.beginPath(); ctx.arc(ghost.x + pData.w / 2, ghost.y - 4, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      // オンラインテストモード：疑似プレイヤー描画
+      if (isPlaying && onlineTestModeRef.current) {
+        for (const fp of fakePlayersRef.current) {
+          const cx = fp.x + pData.w / 2;
+          // プレイヤースプライト（プリセットのキャラクターそのもの）
+          ctx.globalAlpha = 0.85;
+          drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, fp.x, fp.y, pData.w, pData.h, `fake_${fp.sessionId}`);
+          // 頭上ネームプレート（色帯＋ID文字）
+          const label = fp.sessionId;
+          ctx.font = 'bold 9px monospace';
+          const tw = ctx.measureText(label).width;
+          const bw = tw + 6, bh = 13;
+          const bx = cx - bw / 2, by = fp.y - bh - 6;
+          ctx.globalAlpha = 0.88;
+          ctx.fillStyle = fp.color;
+          ctx.beginPath();
+          const r = 3;
+          ctx.moveTo(bx + r, by); ctx.lineTo(bx + bw - r, by);
+          ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+          ctx.lineTo(bx + bw, by + bh - r);
+          ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+          ctx.lineTo(bx + r, by + bh);
+          ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+          ctx.lineTo(bx, by + r);
+          ctx.quadraticCurveTo(bx, by, bx + r, by);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = '#fff';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, cx, by + bh / 2);
+        }
         ctx.globalAlpha = 1;
       }
 
@@ -2881,10 +3114,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // 占有率 HUD（陣取り／スプラが有効なときのみ）
         const modes = gameData.onjReze;
         if (modes?.territory || modes?.paint) {
-          const total = groundCellsRef.current;
           const parts: string[] = [];
-          if (modes?.territory) parts.push(`占領 ${Math.round(ownedCountRef.current / total * 100)}%`);
-          if (modes?.paint) parts.push(`塗り ${Math.round(paintCountRef.current / total * 100)}%`);
+          if (modes?.territory) parts.push(`占領 ${Math.round(ownedAreaRef.current / groundAreaRef.current * 100)}%`);
+          if (modes?.paint) parts.push(`塗り ${Math.round(paintCountRef.current / (groundAreaRef.current / (TILE_SIZE * TILE_SIZE)) * 100)}%`);
           const label = parts.join('  ');
           ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           const wpx = ctx.measureText(label).width;
@@ -3245,6 +3477,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 >
                   {debugInvincible ? <Shield size={13} /> : <ShieldOff size={13} />}
                   無敵モード {debugInvincible ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => { setOnlineTestMode(v => !v); setSettingsOpen(false); }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                >
+                  🌐 オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
                 </button>
                 {gameData.engine === 'onjReze' && (
                   <>
