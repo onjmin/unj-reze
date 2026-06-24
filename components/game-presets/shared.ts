@@ -5,6 +5,11 @@ export const COLS = 20;
 export const ROWS = 15;
 export const PLAY_W = COLS * TILE_SIZE;
 export const PLAY_H = ROWS * TILE_SIZE;
+/** 東方など画面固定エンジン用のビューポート（15列×11行）。 */
+export const VIEW_COLS = 15;
+export const VIEW_ROWS = 11;
+export const VIEW_W = VIEW_COLS * TILE_SIZE;  // 480 px
+export const VIEW_H = VIEW_ROWS * TILE_SIZE;  // 352 px
 
 export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';

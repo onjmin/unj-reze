@@ -1,30 +1,30 @@
-import { type PresetData, newObject, COLS, ROWS, PLAY_W, PLAY_H } from './shared';
+import { type PresetData, newObject, COLS, ROWS, VIEW_COLS, VIEW_ROWS, VIEW_W, VIEW_H } from './shared';
 
 // ── MiniScript テンプレート ────────────────────────────────────────────────
 
 /** 道中 wave 敵共通：上から降下しながら弾を撃ち、下へ退場する */
 const waveMiniScript = (shots: number, fireInterval: number, speed: number, color: number, jitter: number) => `
 wait(row * 25)
-moveTo(startX, 96, 50)
+moveTo(startX, 90, 50)
 wait(10)
 for t in range(0, ${shots - 1}, 1)
   shotPlayer(${speed}, ${color}, ${jitter})
   wait(${fireInterval})
 end for
-moveTo(startX, 540, 70)
+moveTo(startX, ${VIEW_H + 50}, 70)
 exit()
 `.trim();
 
 /** 道中 wave 敵（spread 弾バージョン） */
 const waveSpreadScript = (shots: number, fireInterval: number, ways: number, spread: number, speed: number, color: number) => `
 wait(row * 25)
-moveTo(startX, 96, 50)
+moveTo(startX, 90, 50)
 wait(10)
 for t in range(0, ${shots - 1}, 1)
   shotN(${ways}, getPlayerAngle(), ${spread}, ${speed}, ${color})
   wait(${fireInterval})
 end for
-moveTo(startX, 540, 70)
+moveTo(startX, ${VIEW_H + 50}, 70)
 exit()
 `.trim();
 
@@ -45,7 +45,7 @@ export const touhou: PresetData = {
   id: 'touhou', name: '東方(弾幕)', engine: 'touhou', gravity: 0, friction: 0,
   player: {
     emoji: '🎀', color: '#ff0000', speed: 4.5, jumpPower: 0, w: 24, h: 24,
-    start: { x: PLAY_W / 2 - 12, y: PLAY_H - 60 },
+    start: { x: VIEW_W / 2 - 12, y: VIEW_H - 60 },
     // 東方Projectシート (sheet no 17) の先頭キャラ
     spriteRef: walkRef(602),
     spriteUrl: sa(602),
@@ -55,8 +55,8 @@ export const touhou: PresetData = {
     0: { name: '夜空', color: '#0B0B2A', passable: true,  imageRef: ir(626), imageUrl: sp(626) },
     1: { name: '壁',   color: '#1a1a3a', passable: false, imageRef: ir(160), imageUrl: sp(160) },
   },
-  map: Array.from({ length: ROWS }, () =>
-    Array.from({ length: COLS }, (_, x) => (x === 0 || x === COLS - 1 ? 1 : 0))
+  map: Array.from({ length: VIEW_ROWS }, () =>
+    Array.from({ length: VIEW_COLS }, (_, x) => (x === 0 || x === VIEW_COLS - 1 ? 1 : 0))
   ),
 
   // ── BGM ──────────────────────────────────────────────────────────────────
@@ -109,23 +109,23 @@ export const touhou: PresetData = {
     // 道中雑魚：東方Projectシート sa.1186, 1881 (妖精系)
     newObject({ emoji: '🧚', col: 4,  row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
       miniScript: waveMiniScript(3, 75, 2.5, 5, 10), spriteRef: walkRef(1186), spriteUrl: sa(1186) }),
-    newObject({ emoji: '🧚', col: 15, row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
+    newObject({ emoji: '🧚', col: 10, row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
       miniScript: waveMiniScript(3, 75, 2.5, 5, 10), spriteRef: walkRef(1186), spriteUrl: sa(1186) }),
-    newObject({ emoji: '🧚', col: 7,  row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
+    newObject({ emoji: '🧚', col: 5,  row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
       miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8), spriteRef: walkRef(1881), spriteUrl: sa(1881) }),
-    newObject({ emoji: '🧚', col: 12, row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
+    newObject({ emoji: '🧚', col: 9,  row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
       miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8), spriteRef: walkRef(1881), spriteUrl: sa(1881) }),
-    newObject({ emoji: '🧚', col: 10, row: 2, phase: 0, speed: 0.8, hp: 2, bullet: 'none',
+    newObject({ emoji: '🧚', col: 7,  row: 2, phase: 0, speed: 0.8, hp: 2, bullet: 'none',
       miniScript: waveMiniScript(4, 70, 2.2, 6, 15), spriteRef: walkRef(1186), spriteUrl: sa(1186) }),
 
     // ── フェーズ 1：道中ボス（ルーミア）────────────────────────────────────
     // isBoss: true でHPバーを表示。スペルカードは定義しない（ジャブ的存在）。
     newObject({
-      emoji: '🌙', col: 10, row: 1, phase: 1, hp: 60,
+      emoji: '🌙', col: 7, row: 1, phase: 1, hp: 60,
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
       isBoss: true, name: 'ルーミア', spriteRef: walkRef(720), spriteUrl: sa(720),
       miniScript: `
-moveTo(320, 90, 70)
+moveTo(${VIEW_W / 2}, 90, 70)
 while true
   for i in range(0, 7, 1)
     shot(i * 45, 2.2, 0)
@@ -140,11 +140,11 @@ end while
     // ── フェーズ 2：道中後半 ──────────────────────────────────────────────
     newObject({ emoji: '🧚', col: 3,  row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
       miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
-    newObject({ emoji: '🧚', col: 16, row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
+    newObject({ emoji: '🧚', col: 11, row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
       miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
-    newObject({ emoji: '🧚', col: 9,  row: 1, phase: 2, speed: 1.0, hp: 3, bullet: 'none',
+    newObject({ emoji: '🧚', col: 7,  row: 1, phase: 2, speed: 1.0, hp: 3, bullet: 'none',
       miniScript: waveSpreadScript(4, 65, 5, 40, 2.2, 8) }),
-    newObject({ emoji: '🧝', col: 6,  row: 2, phase: 2, speed: 0.9, hp: 4, bullet: 'none',
+    newObject({ emoji: '🧝', col: 4,  row: 2, phase: 2, speed: 0.9, hp: 4, bullet: 'none',
       miniScript: `
 wait(row * 25)
 moveTo(startX, 110, 45)
@@ -156,10 +156,10 @@ for t in range(0, 3, 1)
   end for
   wait(50)
 end for
-moveTo(startX + rand(-80, 80), 540, 65)
+moveTo(startX + rand(-60, 60), ${VIEW_H + 50}, 65)
 exit()
 `.trim() }),
-    newObject({ emoji: '🧝', col: 13, row: 2, speed: 0.9, hp: 4, bullet: 'none', phase: 2,
+    newObject({ emoji: '🧝', col: 10, row: 2, speed: 0.9, hp: 4, bullet: 'none', phase: 2,
       miniScript: `
 wait(row * 25)
 moveTo(startX, 110, 45)
@@ -171,21 +171,21 @@ for t in range(0, 3, 1)
   end for
   wait(50)
 end for
-moveTo(startX + rand(-80, 80), 540, 65)
+moveTo(startX + rand(-60, 60), ${VIEW_H + 50}, 65)
 exit()
 `.trim() }),
 
     // ── フェーズ 3：ボス戦（チルノ）────────────────────────────────────────
     // 通常弾幕 + スペルカード2枚。HPが閾値を下回るとスペルカード発動。
     newObject({
-      emoji: '🌸', col: 10, row: 1, phase: 3, hp: 200,
+      emoji: '🌸', col: 7, row: 1, phase: 3, hp: 200,
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
       isBoss: true, name: 'チルノ',
       // スプライト（静止画） no.1962
       spriteRef: 'url:/api/rpgen/data/images/sprites/1962.png',
       spriteUrl: '/api/rpgen/data/images/sprites/1962.png',
       miniScript: `
-moveTo(320, 80, 90)
+moveTo(${VIEW_W / 2}, 80, 90)
 while true
   for i in range(0, 5, 1)
     shot(i * 72, 2.4, 4)
@@ -199,7 +199,7 @@ end while
           name: '氷符「パーフェクトフリーズ」',
           triggerHp: 130,
           miniScript: `
-moveTo(rand(200, 440), 80, 40)
+moveTo(rand(80, ${VIEW_W - 80}), 80, 40)
 while true
   for i in range(0, 11, 1)
     shot(i * 30, 2.6, 4)
@@ -213,7 +213,7 @@ end while
           name: '氷符「ブルーフロストオーロラ」',
           triggerHp: 60,
           miniScript: `
-moveTo(320, 70, 30)
+moveTo(${VIEW_W / 2}, 70, 30)
 while true
   for i in range(0, 15, 1)
     shot(frame * 10 + i * 24, 2.8, 1)

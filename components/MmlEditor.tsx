@@ -2,30 +2,12 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Music, Loader2 } from 'lucide-react';
-import { createDtmStudio, type DtmStudio, type ModeSwitchInstance } from '@onjmin/dtm';
+import { type ModeSwitchInstance } from '@onjmin/dtm';
+import { getStudio } from '@/lib/dtm';
 
 interface MmlEditorProps {
   onClose: () => void;
   onSave: (mml: string) => void;
-}
-
-// SoundFont エンジンのCDN（@onjmin/dtm 既定値と同じ）。
-const SOUNDFONT_CDN = {
-  soundFont: 'https://rpgen3.github.io/soundfont/mjs/surikov/SoundFont.mjs',
-  soundFontDrum: 'https://rpgen3.github.io/soundfont/mjs/surikov/SoundFont_drum.mjs',
-  soundFontList: 'https://rpgen3.github.io/soundfont/mjs/surikov/SoundFont_list.mjs',
-};
-
-// Turbopack/Webpack は import(変数) を静的解析しようとして
-// 「Cannot find module as expression is too dynamic」で失敗する。
-// バンドラから不可視な動的 import を使い、外部CDNのエンジンを実行時に読み込む。
-const runtimeImport = new Function('url', 'return import(url)') as (
-  url: string,
-) => Promise<Record<string, unknown>>;
-
-async function loadEngine(url: string, name: string): Promise<unknown> {
-  const mod = await runtimeImport(url);
-  return mod[name] ?? mod.default;
 }
 
 // 編集UIは @onjmin/dtm の createDtmStudio().mountModeSwitch() に差し替え。
@@ -34,7 +16,6 @@ async function loadEngine(url: string, name: string): Promise<unknown> {
 // MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
 export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const studioRef = useRef<DtmStudio | null>(null);
   const modeSwitchRef = useRef<ModeSwitchInstance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,48 +23,28 @@ export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
   useEffect(() => {
     let disposed = false;
 
-    (async () => {
-      try {
-        // バンドラ非対応の動的 import を避けるため、エンジンは自前で読み込んで注入する。
-        const [SoundFont, SoundFont_drum, SoundFont_list] = await Promise.all([
-          loadEngine(SOUNDFONT_CDN.soundFont, 'SoundFont'),
-          loadEngine(SOUNDFONT_CDN.soundFontDrum, 'SoundFont_drum'),
-          loadEngine(SOUNDFONT_CDN.soundFontList, 'SoundFont_list'),
-        ]);
-        const studio = await createDtmStudio({
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          engines: { SoundFont, SoundFont_drum, SoundFont_list } as any,
+    getStudio().then((studio) => {
+      if (disposed) return;
+      if (mountRef.current) {
+        modeSwitchRef.current = studio.mountModeSwitch(mountRef.current, {
+          editorTarget: mountRef.current,
+          mode: 'simple',
+          position: 'prepend',
         });
-        // アンマウント済みなら即破棄して何もしない。
-        if (disposed) {
-          studio.dispose();
-          return;
-        }
-        studioRef.current = studio;
-        if (mountRef.current) {
-          // モード切替UI（シンプル/アドバンス）を差し込み、編集UIのマウントごと面倒を見る。
-          modeSwitchRef.current = studio.mountModeSwitch(mountRef.current, {
-            editorTarget: mountRef.current,
-            mode: 'simple',
-            position: 'prepend',
-          });
-        }
-        setLoading(false);
-      } catch (e) {
-        console.error('[MmlEditor] createDtmStudio failed', e);
-        if (!disposed) {
-          setError('音源の読み込みに失敗しました。通信環境をご確認ください。');
-          setLoading(false);
-        }
       }
-    })();
+      setLoading(false);
+    }).catch((e) => {
+      console.error('[MmlEditor] getStudio failed', e);
+      if (!disposed) {
+        setError('音源の読み込みに失敗しました。通信環境をご確認ください。');
+        setLoading(false);
+      }
+    });
 
     return () => {
       disposed = true;
       try { modeSwitchRef.current?.destroy(); } catch {}
-      try { studioRef.current?.dispose(); } catch {}
       modeSwitchRef.current = null;
-      studioRef.current = null;
     };
   }, []);
 
