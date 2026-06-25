@@ -1,28 +1,81 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS } from './shared';
 
-const sp  = (no: number) => `/api/rpgen/data/images/sprites/${no}.png`;
-const sa  = (no: number) => `/api/rpgen/data/images/sAnims/${no}.png`;
-const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
-const ir  = (no: number) => `url:${sp(no)}`;
+// SMC-released-sprites (Level-Share-Square/SMC-released-sprites) via jsDelivr CDN
+// ライセンス: 非商用無料、作者クレジット必須
+// Credit: Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, Smuglutena, TheCrushedJoycon, Tristaph
+const SMC_CDN = 'https://cdn.jsdelivr.net/gh/Level-Share-Square/SMC-released-sprites@main';
+const smc = (path: string) => `${SMC_CDN}/${path}`;
+
+// タイル用静止画 URL（#sx,sy,sw,sh クロップ付き）
+// SMC スプライトシートから 16px セル単位で単一タイルを切り出す
+const smcTile = (path: string, sx: number, sy: number, sw = 16, sh = 16) =>
+  `${smc(path)}#${sx},${sy},${sw},${sh}`;
+const smcRef  = (url: string) => `url:${url.split('#')[0]}`;   // imageRef 用(クロップなし参照)
+
+// walk:smc:u:<url>#sx,sy,cropW,cropH  (2フレーム水平ストリップ、左向き水平反転)
+const smcWalk = (path: string, sx: number, sy: number, sw: number, sh: number) =>
+  `walk:smc:u:${smc(path)}#${sx},${sy},${sw},${sh}`;
+
+// ── タイル用 SMC URL ──────────────────────────────────────────────────────
+//  Retro_SMB1_Blocks (384×144, 16px/cell): ? ブロック (0,0)
+//  Bricks            (448×208, 16px/cell): 茶レンガブロック (0,0)
+//  Castle            (384×352, 16px/cell): 石床 (0,0)
+//  Large_Pipes       (448×192, スプライトシート): 土管
+//  Flag_Pole         (448×112, スプライトシート): ゴール旗
+const T = {
+  brick:    smcTile('SMW/General%20tiles/Bricks.png',                        0, 0, 16, 16),
+  qBlock:   smcTile('SMW/Objects/Retro%20Skins/Retro_SMB1_Blocks.png',      0, 0, 16, 16),
+  stone:    smcTile('SMW/Tilesets/Castle.png',                               0, 0, 16, 16),
+  pipe:     smc('SMW/General%20tiles/Large_Pipes.png'),
+  goalFlag: smc('SMW/Objects/Goals%20%26%20Checkpoints/Flag_Pole.png'),
+};
+
+// ── 敵/NPC 用 SMC walk/static URL ────────────────────────────────────────
+// SMCスプライトはすべて 16×16px セル (448px幅 = 28列)
+// 走行アニメ: 先頭2フレーム水平ストリップ crop = (0, 0, 32, 16)
+//   Goombas     448×176  16px/cell  →  2フレーム (0,0,32,16)
+//   Beach_Koopa 448×128  16px/cell  →  (0,0,32,16)
+//   Bob-omb     448×144  16px/cell  →  (0,0,32,16)
+//   Dry_Bones   448× 96  16px/cell  →  (0,0,32,16)
+//   Blazin_Boos 448×272  16px/cell  →  (0,0,32,16)
+// 16px スプライトは TILE_SIZE=32 でレンダリングされるため 2倍拡大表示
+const E = {
+  goombaRef:   smcWalk('SMW/Enemies/Common%20Enemies/Goombas.png',          0, 0, 32, 16),
+  goombaUrl:   smc('SMW/Enemies/Common%20Enemies/Goombas.png'),
+  koopaRef:    smcWalk('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png',      0, 0, 32, 16),
+  koopaUrl:    smc('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png'),
+  bobOmbRef:   smcWalk('SMW/Enemies/Artillery/Bob-omb.png',                  0, 0, 32, 16),
+  bobOmbUrl:   smc('SMW/Enemies/Artillery/Bob-omb.png'),
+  dryBonesRef: smcWalk('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png',       0, 0, 32, 16),
+  dryBonesUrl: smc('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png'),
+  booRef:      smcWalk('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png',       0, 0, 32, 16),
+  booUrl:      smc('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png'),
+  toadUrl:     smc('SMW/Objects/NPCs/Toad_NPCs.png'),
+  princessUrl: smc('SMW/Objects/NPCs/Princesses.png'),
+};
+
+// プレイヤー (マリオ): SMC に基本歩行スプライトなし → RPGen #90 を維持
+const sa = (no: number) => `/api/rpgen/data/images/sAnims/${no}.png`;
+const wr = (no: number) => `walk:auto:u:${sa(no)}`;
+// 地下ネズミ: SMC に対応スプライトなし → RPGen #93 を維持
+const sa93 = sa(93);
+const wr93 = wr(93);
 
 // ── タイル定義 ─────────────────────────────────────────────────────────────
-// sp.342 茶金ブロック   sp.158 ?ブロック金橙   sp.377 濃緑パイプ
-// sp.17  目標/旗        sp.362 暖石床           sp.121 地下石床
-// sp.14  水             sp.6   茶レンガ
 const tiles: PresetData['tiles'] = {
-  0:  { name: '空',            color: '#5c94fc', passable: true  },
-  1:  { name: 'ブロック',       color: '#8B4513', passable: false, imageRef: ir(342), imageUrl: sp(342) },
-  2:  { name: 'ハテナ',         color: '#FFD700', passable: false, special: 'item',        imageRef: ir(158), imageUrl: sp(158) },
-  3:  { name: 'ゴール旗',       color: '#32CD32', passable: true,  special: 'goal',        imageRef: ir(17),  imageUrl: sp(17)  },
-  4:  { name: '土管',           color: '#2aa02a', passable: false, imageRef: ir(377), imageUrl: sp(377) },
-  5:  { name: '岩床',           color: '#555566', passable: false, imageRef: ir(362), imageUrl: sp(362) },
-  6:  { name: '音符ブロック',   color: '#e8b000', passable: false, special: 'bounce'       },   // ジャンプ力強化バウンド
-  7:  { name: 'チェックポイント', color: '#ff8800', passable: true, special: 'checkpoint'  },   // 中間フラグ
-  8:  { name: 'ツタ',           color: '#22aa22', passable: true,  special: 'vine',        imageRef: ir(377), imageUrl: sp(377) },
-  9:  { name: '水',             color: '#3a78f0', passable: true,  special: 'water',       imageRef: ir(14),  imageUrl: sp(14)  },
-  10: { name: '溶岩',           color: '#ff4400', passable: true,  special: 'lava'         },   // 即ミス
-  11: { name: '壊せるブロック', color: '#c08840', passable: false, special: 'destructible' },   // ショット/グラウンドパウンドで破壊
-  12: { name: 'P スイッチ',     color: '#4444ff', passable: false, special: 'pswitch'      },   // コインとブロックを入れ替え
+  0:  { name: '空',              color: '#5c94fc', passable: true  },
+  1:  { name: 'ブロック',         color: '#8B4513', passable: false, imageRef: smcRef(T.brick),    imageUrl: T.brick    },
+  2:  { name: 'ハテナ',           color: '#FFD700', passable: false, special: 'item',        imageRef: smcRef(T.qBlock),   imageUrl: T.qBlock   },
+  3:  { name: 'ゴール旗',         color: '#32CD32', passable: true,  special: 'goal',        imageRef: `url:${T.goalFlag}`, imageUrl: T.goalFlag },
+  4:  { name: '土管',             color: '#2aa02a', passable: false, imageRef: `url:${T.pipe}`,    imageUrl: T.pipe     },
+  5:  { name: '岩床',             color: '#555566', passable: false, imageRef: smcRef(T.stone),    imageUrl: T.stone    },
+  6:  { name: '音符ブロック',     color: '#e8b000', passable: false, special: 'bounce'       },
+  7:  { name: 'チェックポイント', color: '#ff8800', passable: true,  special: 'checkpoint'   },
+  8:  { name: 'ツタ',             color: '#22aa22', passable: true,  special: 'vine',        imageRef: `url:${T.pipe}`, imageUrl: T.pipe     },
+  9:  { name: '水',               color: '#3a78f0', passable: true,  special: 'water'        },
+  10: { name: '溶岩',             color: '#ff4400', passable: true,  special: 'lava'         },
+  11: { name: '壊せるブロック',   color: '#c08840', passable: false, special: 'destructible', imageRef: smcRef(T.brick), imageUrl: T.brick },
+  12: { name: 'P スイッチ',       color: '#4444ff', passable: false, special: 'pswitch'      },
 };
 
 // ── シーン1：地上ステージ ────────────────────────────────────────────────────
@@ -49,34 +102,34 @@ const scene1: SceneDef = {
   id: 'overworld', name: '地上ステージ',
   map: scene1Map,
   objects: [
-    // クリボー
+    // クリボー (SMC: Goombas.png walk:smc 2フレーム)
     newObject({ emoji: '🐛', col: 5,  row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      spriteRef: wr(91), spriteUrl: sa(91) }),
+      spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
     newObject({ emoji: '🐛', col: 18, row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      spriteRef: wr(91), spriteUrl: sa(91) }),
-    // ノコノコ
+      spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
+    // ノコノコ (SMC: Beach_Koopa.png walk:smc 2フレーム)
     newObject({ emoji: '🐢', col: 24, row: ROWS - 3, behavior: 'walker',  speed: 1.2, hazard: true,  hp: 2, bullet: 'none',
-      spriteRef: wr(92), spriteUrl: sa(92) }),
-    // キラー（左から右へ直進）
+      spriteRef: E.koopaRef, spriteUrl: E.koopaUrl }),
+    // キラー（SMC: Bob-omb.png 流用・直進）
     newObject({ emoji: '💣', col: 2,  row: ROWS - 4, behavior: 'walker',  speed: 2.5, hazard: true,  hp: 1, bullet: 'none',
-      name: 'キラー' }),
-    // ボム兵（爆発あり）
+      name: 'キラー', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
+    // ボム兵（爆発あり, SMC: Bob-omb.png walk:smc 2フレーム）
     newObject({ emoji: '💥', col: 28, row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      name: 'ボム兵' }),
-    // テレサ（近づくと動く）
+      name: 'ボム兵', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
+    // テレサ（近づくと動く, SMC: Blazin_Boos.png walk:smc 2フレーム）
     newObject({ emoji: '👻', col: 8,  row: ROWS - 8, behavior: 'chase',   speed: 0.8, hazard: true,  hp: 1, bullet: 'none',
-      name: 'テレサ' }),
+      name: 'テレサ', spriteRef: E.booRef, spriteUrl: E.booUrl }),
     // プクプク（水中）
     newObject({ emoji: '🐟', col: 12, row: ROWS - 4, behavior: 'patrolV', speed: 1.5, hazard: true,  hp: 1, bullet: 'none',
       name: 'プクプク' }),
-    // キノピオ NPC
+    // キノピオ NPC (SMC: Toad_NPCs.png 静止表示)
     newObject({ emoji: '🍄', col: 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'キノピオだよ！音符ブロックを下から叩くと高くジャンプできるよ！チェックポイントを踏むと途中から再開できるよ！',
-      spriteRef: wr(30), spriteUrl: sa(30) }),
-    // ピーチ姫（ゴール付近 NPC）
+      spriteUrl: E.toadUrl }),
+    // ピーチ姫（ゴール付近 NPC, SMC: Princesses.png 静止表示）
     newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！クッパをやっつけて！',
-      spriteRef: wr(25), spriteUrl: sa(25) }),
+      spriteUrl: E.princessUrl }),
     // 土管ワープ→地下
     newObject({ emoji: '🪣', col: 9,  row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'underground', warpEntryCol: 2, warpEntryRow: ROWS - 4 }),
@@ -117,13 +170,14 @@ const scene2: SceneDef = {
   id: 'underground', name: '地下ステージ1',
   map: scene2Map,
   objects: [
+    // 地下ネズミ（SMCに対応スプライトなし → RPGen維持）
     newObject({ emoji: '🐀', col: 5,  row: ROWS - 3, behavior: 'patrolH', speed: 1.2, hazard: true, hp: 1, bullet: 'none',
-      spriteRef: wr(93), spriteUrl: sa(93) }),
+      spriteRef: wr93, spriteUrl: sa93 }),
     newObject({ emoji: '🐀', col: 13, row: ROWS - 3, behavior: 'patrolH', speed: 1.4, hazard: true, hp: 1, bullet: 'none',
-      spriteRef: wr(93), spriteUrl: sa(93) }),
-    // ホネクッパ（再生する敵）
+      spriteRef: wr93, spriteUrl: sa93 }),
+    // ホネクッパ（SMC: Dry_Bones.png walk:smc 2フレーム 16px）
     newObject({ emoji: '💀', col: 10, row: ROWS - 6, behavior: 'patrolH', speed: 1, hazard: true, hp: 3, bullet: 'none',
-      name: 'ホネクッパ' }),
+      name: 'ホネクッパ', spriteRef: E.dryBonesRef, spriteUrl: E.dryBonesUrl }),
     // シャインかけら
     newObject({ emoji: '✨', col: 9,  row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'shineShard', message: '' }),

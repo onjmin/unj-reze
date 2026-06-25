@@ -1362,18 +1362,34 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   useEffect(() => () => { previewStopRef.current?.(); previewStopRef.current = null; }, []);
 
   const ensureImage = useCallback((url?: string) => {
-    if (!url || imgCache.current.has(url)) return;
+    if (!url) return;
+    // #sx,sy,sw,sh クロップ付き URL: ベースURLでロードし、フルURLをキーにキャッシュ
+    const hashIdx = url.indexOf('#');
+    const baseUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
+    if (imgCache.current.has(url)) return;
+    // ベースURLで既にロード済みならそのimgを再利用してフルURLキーで登録
+    const existing = imgCache.current.get(baseUrl);
+    if (existing) { imgCache.current.set(url, existing); return; }
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.src = url;
+    img.src = baseUrl;
     imgCache.current.set(url, img);
+    if (hashIdx !== -1) imgCache.current.set(baseUrl, img); // ベースURLでも登録
   }, []);
 
+  // spriteRef から URL を抽出して ensureImage する（Entity.def は spriteUrl を除外するため）
+  const ensureImageFromRef = useCallback((spriteRef?: string, spriteUrl?: string) => {
+    ensureImage(spriteUrl);
+    if (!spriteRef) return;
+    const walk = parseWalkRef(spriteRef);
+    if (walk?.source.kind === 'url') ensureImage(walk.source.url);
+  }, [ensureImage]);
+
   useEffect(() => {
-    ensureImage(gameData.player.spriteUrl);
+    ensureImageFromRef(gameData.player.spriteRef, gameData.player.spriteUrl);
     Object.values(gameData.tiles).forEach(t => ensureImage(t.imageUrl));
-    gameData.objects.forEach(o => ensureImage(o.spriteUrl));
-    ensureImage(objTemplate.spriteUrl);
+    gameData.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl));
+    ensureImageFromRef(objTemplate.spriteRef, objTemplate.spriteUrl);
     ensureImage(gameData.mapBgUrl);
     ensureImage(gameData.titleScreen?.bgUrl);
     ensureImage(gameData.ending?.bgUrl);
@@ -1524,10 +1540,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       worldLayoutRef.current = null;
       return;
     }
-    scenesRef.current = gameData.scenes.map(s => ({
-      ...s,
-      objects: s.objects.map(o => ({ ...o, spriteUrl: undefined })),
-    })) as SceneDef[];
+    scenesRef.current = gameData.scenes.map(s => ({ ...s })) as SceneDef[];
     activeSceneIdxRef.current = 0;
     sceneTransRef.current = null;
     // 全シーンを1枚のワールドマップに合成（事前ロードでシームレス遷移）
@@ -1549,11 +1562,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       homeX: (s0l.originX + o.col) * TILE_SIZE,
       homeY: (s0l.originY + o.row) * TILE_SIZE,
       vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
-      def: { ...o, spriteUrl: undefined },
+      def: o, // spriteUrl を保持する（SceneDef.objects は spriteUrl を含む ObjectDef）
     })) as unknown as Entity[];
-    // 全シーンのスプライト画像を事前ロード
-    scenesRef.current.forEach(s => s.objects.forEach(o => ensureImage(o.spriteUrl)));
-  }, [isPlaying, gameData.scenes, gameData.player.start, ensureImage]);
+    // 全シーンのスプライト画像を事前ロード（spriteUrl は Entity.def から除外されるため spriteRef も参照）
+    gameData.scenes?.forEach(s => s.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl)));
+  }, [isPlaying, gameData.scenes, gameData.player.start, ensureImage, ensureImageFromRef]);
 
   // プレイ開始時に sfx を音量極小で一瞬再生してブラウザにデコード・バッファさせる
   useEffect(() => {
@@ -1735,21 +1748,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       animKey?: string,
       overrideDir?: WayKey,
     ) => {
-      const img = def.spriteUrl ? imgCache.current.get(def.spriteUrl) : undefined;
-      const loaded = !!img && img.complete && img.naturalWidth > 0;
       const walk = def.spriteRef ? parseWalkRef(def.spriteRef) : null;
+      // spriteUrl が undefined の場合（Entity.def は spriteUrl を除外する型）、
+      // spriteRef の source URL を fallback として使う
+      const resolvedUrl = def.spriteUrl
+        ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+      const img = resolvedUrl ? imgCache.current.get(resolvedUrl) : undefined;
+      const loaded = !!img && img.complete && img.naturalWidth > 0;
 
-      if (loaded && walk && def.spriteUrl) {
+      if (loaded && walk && resolvedUrl) {
         // 規格を判定（auto は実寸から推定）してキャッシュ
-        let std = walkStdCache.get(def.spriteUrl);
+        let std = walkStdCache.get(resolvedUrl);
         if (!std) {
           std = walk.stdId === 'auto'
             ? detectStandard(img!.naturalWidth, img!.naturalHeight)
             : standardById(walk.stdId);
-          walkStdCache.set(def.spriteUrl, std);
+          walkStdCache.set(resolvedUrl, std);
         }
         // 向き・移動を画面上の移動量から導出（エンジン非依存）
-        const key = animKey ?? def.spriteUrl;
+        const key = animKey ?? resolvedUrl;
         const prev = walkInst.get(key);
         let dx = 0, dy = 0;
         if (prev) { dx = x - prev.px; dy = y - prev.py; }
@@ -1761,10 +1778,45 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         walkInst.set(key, { px: x, py: y, dir: overrideDir ?? dir });
 
-        const cell = animatedCell(std, img!.naturalWidth, img!.naturalHeight, {
-          dir, moving, timeSec: performance.now() / 1000, fps: 7,
+        // SMC形式: クロップ矩形を使ってアトラスから1行ストリップを切り出す
+        let srcImg: HTMLImageElement | ImageBitmap = img!;
+        let imgW = img!.naturalWidth;
+        let imgH = img!.naturalHeight;
+        if (walk.crop) {
+          const [csx, csy, csw, csh] = walk.crop;
+          imgW = csw; imgH = csh;
+          // animatedCell はクロップ後の論理サイズで計算し、drawImage で offset を加算
+          const cell = animatedCell(std, csw, csh, {
+            dir: std.flipH ? 'd' : dir, // flipH規格は常に右向き参照
+            moving, timeSec: performance.now() / 1000, fps: 7,
+          });
+          const flipLeft = std.flipH && dir === 'a';
+          if (flipLeft) {
+            ctx.save();
+            ctx.translate(x + w, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(img!, csx + cell.sx, csy + cell.sy, cell.sw, cell.sh, 0, y, w, h);
+            ctx.restore();
+          } else {
+            ctx.drawImage(img!, csx + cell.sx, csy + cell.sy, cell.sw, cell.sh, x, y, w, h);
+          }
+          return;
+        }
+
+        const cell = animatedCell(std, imgW, imgH, {
+          dir: std.flipH ? 'd' : dir,
+          moving, timeSec: performance.now() / 1000, fps: 7,
         });
-        ctx.drawImage(img!, cell.sx, cell.sy, cell.sw, cell.sh, x, y, w, h);
+        const flipLeft = std.flipH && dir === 'a';
+        if (flipLeft) {
+          ctx.save();
+          ctx.translate(x + w, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh, 0, y, w, h);
+          ctx.restore();
+        } else {
+          ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh, x, y, w, h);
+        }
         return;
       }
 
@@ -1818,7 +1870,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             homeX: (lay.originX + o.col) * TILE_SIZE,
             homeY: (lay.originY + o.row) * TILE_SIZE,
             vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
-            def: { ...o, spriteUrl: undefined },
+            def: o,
           })) as unknown as Entity[];
           engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
           setEditSceneIdx(lay.sceneIdx);
@@ -2240,16 +2292,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (modes?.territory) {
                 const onOwn = inTerritory(fp.territoryPolys, fcx, fcy);
                 if (onOwn) {
-                  if (fp.trailPoints.length > 1) {
-                    const loop: Vec2[] = [...fp.trailPoints];
-                    fp.territoryPolys = [...fp.territoryPolys, loop];
-                    fp.ownedCount++;
-                  }
+                  // 自陣に戻ったらトレイルをリセット（ランダムAIでは正確な囲い込みができないため多角形化しない）
                   fp.trailPoints = [];
                 } else {
-                  const last = fp.trailPoints[fp.trailPoints.length - 1];
-                  if (!last || (fcx - last.x) ** 2 + (fcy - last.y) ** 2 >= 4) {
-                    fp.trailPoints = [...fp.trailPoints, { x: fcx, y: fcy }];
+                  // トレイルは視覚表示用のみ。長くなりすぎたら切り捨て
+                  if (fp.trailPoints.length > 60) {
+                    fp.trailPoints = fp.trailPoints.slice(-60);
+                  } else {
+                    const last = fp.trailPoints[fp.trailPoints.length - 1];
+                    if (!last || (fcx - last.x) ** 2 + (fcy - last.y) ** 2 >= 4) {
+                      fp.trailPoints = [...fp.trailPoints, { x: fcx, y: fcy }];
+                    }
                   }
                 }
               }
@@ -2837,8 +2890,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const tileId = map[y]?.[x] ?? 0;
           const info = gameData.tiles[tileId];
           if (tileId !== 0 && info) {
-            const img = info.imageUrl ? imgCache.current.get(info.imageUrl) : undefined;
-            if (img && img.complete && img.naturalWidth > 0) ctx.drawImage(img, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            // imageUrl に #sx,sy,sw,sh が付いていればアトラスクロップ描画
+            const rawImgUrl = info.imageUrl ?? '';
+            const hashIdx = rawImgUrl.indexOf('#');
+            const baseImgUrl = hashIdx !== -1 ? rawImgUrl.slice(0, hashIdx) : rawImgUrl;
+            const imgCrop = hashIdx !== -1
+              ? rawImgUrl.slice(hashIdx + 1).split(',').map(Number) as [number,number,number,number]
+              : null;
+            const img = baseImgUrl ? (imgCache.current.get(rawImgUrl) ?? imgCache.current.get(baseImgUrl)) : undefined;
+            if (img && img.complete && img.naturalWidth > 0) {
+              if (imgCrop && imgCrop.length === 4)
+                ctx.drawImage(img, imgCrop[0], imgCrop[1], imgCrop[2], imgCrop[3], x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+              else ctx.drawImage(img, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            }
             else { ctx.fillStyle = info.color; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
             if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
           }
@@ -2985,6 +3049,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 ctx.lineTo(eb.x - hr * 0.6, eb.y + hr * 0.5);
                 ctx.closePath();
               } else {
+                ctx.moveTo(eb.x + eb.r, eb.y);
                 ctx.arc(eb.x, eb.y, eb.r, 0, Math.PI * 2);
               }
             }
@@ -3178,7 +3243,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               x: o.col * TILE_SIZE, y: o.row * TILE_SIZE,
               homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
               vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
-              def: { ...o, spriteUrl: undefined },
+              def: o,
             })) as unknown as Entity[];
             eng.bullets = []; eng.enemyBullets = [];
             eng.player.x = fade.entryX; eng.player.y = fade.entryY;
@@ -3771,6 +3836,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <Upload size={13} />データをインポート (.json)
                 </button>
                 <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+                {/* SMC素材クレジット（マリオプリセット使用時） */}
+                {gameData.id === 'mario' && (
+                  <>
+                    <div className="border-t border-gray-700 my-1" />
+                    <div className="px-3 py-2 text-[10px] text-gray-500 leading-relaxed">
+                      <div className="font-bold text-gray-400 mb-1">🎨 素材クレジット</div>
+                      <div>キャラクタースプライト:</div>
+                      <div>© Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph</div>
+                      <div className="mt-1">
+                        <a
+                          href="https://github.com/Level-Share-Square/SMC-released-sprites"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 underline"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          SMC-released-sprites
+                        </a>
+                        {' '}(非商用)
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -3809,6 +3897,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
               onTouchEnd={() => { isDraggingStartRef.current = false; }} />
 
+            {/* SMC素材クレジットバッジ（マリオプリセット プレイ中） */}
+            {isPlaying && gameData.id === 'mario' && (
+              <a
+                href="https://github.com/Level-Share-Square/SMC-released-sprites"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute bottom-1 right-1 z-30 bg-black/60 text-[8px] text-gray-400 hover:text-white px-1.5 py-0.5 rounded select-none leading-none"
+                title="Sprites: SMC-released-sprites © Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph (non-commercial)"
+                onClick={e => e.stopPropagation()}
+              >
+                🎨 SMC sprites
+              </a>
+            )}
             {/* ── タイトル画面オーバーレイ ── */}
             {showTitle && gameData.titleScreen && (
               <div className="absolute inset-0 z-40 overflow-hidden" style={{ background: 'linear-gradient(160deg,#0b1020,#1a1030)' }}>

@@ -129,13 +129,27 @@ export default function GamePlayer({ onClose, onPostScore }: GamePlayerProps) {
       </div>
 
       <div className="flex-1 flex items-center justify-center bg-[#07080b] p-2 min-h-0">
-        <canvas
-          ref={canvasRef}
-          width={480}
-          height={384}
-          className="border border-gray-800 max-w-full max-h-full"
-          style={{ imageRendering: 'pixelated', width: '100%', height: 'auto', maxWidth: '480px', aspectRatio: '480/384' }}
-        />
+        <div className="relative" style={{ maxWidth: '480px', width: '100%' }}>
+          <canvas
+            ref={canvasRef}
+            width={480}
+            height={384}
+            className="border border-gray-800 max-w-full max-h-full"
+            style={{ imageRendering: 'pixelated', width: '100%', height: 'auto', aspectRatio: '480/384' }}
+          />
+          {/* SMC素材クレジット表示 (マリオプリセット時) */}
+          {manifest.id === 'platformer-default' && (
+            <a
+              href="https://github.com/Level-Share-Square/SMC-released-sprites"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="absolute bottom-1 right-1 bg-black/60 text-[8px] text-gray-400 hover:text-white px-1.5 py-0.5 rounded pointer-events-auto select-none leading-none"
+              title="Sprites: SMC-released-sprites © Smuglutena et al. (non-commercial)"
+            >
+              🎨 SMC sprites
+            </a>
+          )}
+        </div>
       </div>
 
       <div className="bg-[#0f0f11] border-t border-gray-900 p-3 shrink-0">

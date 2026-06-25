@@ -34,6 +34,11 @@ export interface WalkStandard {
   frames: number;
   /** シートの行順（上から）。方向の並びは規格ごとに異なる */
   ways: Way[];
+  /**
+   * true の場合、左移動（'a'）のときにキャンバスを水平反転して描画する。
+   * SMC (Super Mario Construct) 形式: 右向きの1行ストリップのみ、左は反転。
+   */
+  flipH?: boolean;
 }
 
 // rpgen-walk/src/lib/anime.ts より移植
@@ -58,8 +63,19 @@ export const RPGMAKER_MV: WalkStandard = {
   ways: [WAY.s, WAY.a, WAY.d, WAY.w],
 };
 
+/**
+ * SMC (Super Mario Construct) 水平ストリップ規格。
+ * 右向き1行のみ持ち、左移動時は水平反転する。
+ * アトラス内のクロップは WalkRef.crop で指定する。
+ */
+export const SMC_STRIP: WalkStandard = {
+  id: 'smc', label: 'SMC (水平ストリップ)', w: 16, h: 16, frames: 2,
+  ways: [WAY.d],
+  flipH: true,
+};
+
 export const WALK_STANDARDS: WalkStandard[] = [
-  RPGEN, RPGMAKER_2000, RPGMAKER_XP, RPGMAKER_VX, RPGMAKER_MV,
+  RPGEN, RPGMAKER_2000, RPGMAKER_XP, RPGMAKER_VX, RPGMAKER_MV, SMC_STRIP,
 ];
 
 export function standardById(id: string): WalkStandard {

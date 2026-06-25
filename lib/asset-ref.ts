@@ -114,16 +114,28 @@ export function youtubeRefFromUrl(url: string): string {
 export interface WalkRef {
   stdId: string;            // 'auto' or a WALK_STANDARDS id
   source: { kind: 'url'; url: string } | { kind: 'post'; postId: number };
+  /**
+   * スプライトアトラス内のクロップ矩形 [sx, sy, sw, sh] (px)。
+   * 指定時は、この矩形を1行ストリップとして frames 分割してアニメーションする。
+   * SMC 形式アトラスで特定キャラのフレームを切り出す際に使用。
+   */
+  crop?: [number, number, number, number];
 }
 
-const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv']);
+const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc']);
 
 export function buildWalkRef(stdId: string, source: WalkRef['source']): string {
   const src = source.kind === 'url' ? `u:${source.url}` : `p:${source.postId}`;
   return `walk:${WALK_STD_IDS.has(stdId) ? stdId : 'auto'}:${src}`;
 }
 
-/** `walk:...` を構造化。歩行グラでなければ null。旧 `walk:123` も解釈。 */
+/**
+ * `walk:...` を構造化。歩行グラでなければ null。旧 `walk:123` も解釈。
+ *
+ * SMC アトラスのクロップ付き形式:
+ *   walk:smc:u:<url>#sx,sy,sw,sh
+ * 例: walk:smc:u:https://cdn.../Goombas.png#0,0,64,32
+ */
 export function parseWalkRef(raw: string): WalkRef | null {
   if (!raw || !raw.startsWith('walk:')) return null;
   const rest = raw.slice('walk:'.length);
@@ -133,7 +145,21 @@ export function parseWalkRef(raw: string): WalkRef | null {
     const maybeStd = rest.slice(0, colon);
     if (WALK_STD_IDS.has(maybeStd)) {
       const srcStr = rest.slice(colon + 1);
-      if (srcStr.startsWith('u:')) return { stdId: maybeStd, source: { kind: 'url', url: srcStr.slice(2) } };
+      if (srcStr.startsWith('u:')) {
+        const rawUrl = srcStr.slice(2);
+        // クロップ指定 (#sx,sy,sw,sh) をURLフラグメントとして解析
+        const hashIdx = rawUrl.indexOf('#');
+        let url = rawUrl;
+        let crop: [number, number, number, number] | undefined;
+        if (hashIdx !== -1) {
+          url = rawUrl.slice(0, hashIdx);
+          const parts = rawUrl.slice(hashIdx + 1).split(',').map(Number);
+          if (parts.length === 4 && parts.every(n => !isNaN(n))) {
+            crop = parts as [number, number, number, number];
+          }
+        }
+        return { stdId: maybeStd, source: { kind: 'url', url }, crop };
+      }
       if (srcStr.startsWith('p:')) {
         const id = parseInt(srcStr.slice(2), 10);
         if (!isNaN(id)) return { stdId: maybeStd, source: { kind: 'post', postId: id } };
