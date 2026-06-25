@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1067.0",
-    "@onjmin/dtm": "0.1.33",
+    "@onjmin/dtm": "0.1.35",
     "@onjmin/oekaki": "1.0.59",
     "lucide-react": "1.17.0",
     "next": "16.2.7",
