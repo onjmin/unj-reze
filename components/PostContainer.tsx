@@ -236,12 +236,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {(() => {
             const mmlCode = extractMmlFromContent(post.content);
-            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            if (mmlCode) return <div onClick={e => e.stopPropagation()}><MmlPlayer mml={mmlCode} /></div>;
             const chordRes = extractChordsFromContent(post.content);
-            if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+            if (chordRes) return <div onClick={e => e.stopPropagation()}><ChordPlayer chords={chordRes.chords} /></div>;
             if (post.hasImage || post.hasGame) return null;
             const embed = extractFirstEmbed(post.content);
-            return embed ? <EmbedPart embed={embed} /> : null;
+            return embed ? <div onClick={e => e.stopPropagation()}><EmbedPart embed={embed} /></div> : null;
           })()}
 
           <div className="flex justify-between items-center text-gray-500 mt-1 max-w-[280px]">
@@ -389,8 +389,8 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: number }) 
               <div
                 key={r.id}
                 className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${isActive
-                    ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
-                    : 'border border-gray-900'
+                  ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
+                  : 'border border-gray-900'
                   }`}
                 style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i }}
               >
