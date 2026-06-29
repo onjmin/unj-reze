@@ -228,7 +228,7 @@ const scene3: SceneDef = {
 export const mario: PresetData = {
   id: 'mario', name: 'マリオ', engine: 'action', gravity: 2.5, friction: 0.85,
   player: {
-    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -18, w: 24, h: 24,
+    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -18, w: 32, h: 32,
     start: { x: 50, y: 50 },
     hearts: 8,
     spriteRef: `walk:smc:u:${smc('SMW/Player%20%26%20Powerups/Tanooki_Suit.png')}#0,33,99,33,3`,

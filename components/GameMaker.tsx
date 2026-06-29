@@ -9,7 +9,7 @@ import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
 } from '@/lib/walk-sprite';
-import { smcFrameRect } from '@/lib/smc-sprite';
+import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
 import { mmlToNotes, playMml } from '@/lib/mml';
 import ContentPicker, { type PickResult } from './ContentPicker';
 
@@ -662,6 +662,100 @@ type PickTarget =
   | { t: 'player' } | { t: 'bgm' } | { t: 'battleBgm' } | { t: 'bossBgm' } | { t: 'tile'; id: number }
   | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' } | { t: 'selObjSprite' } | { t: 'mapBg' }
   | { t: 'titleBg' } | { t: 'endingBg' } | { t: 'titleBgm' } | { t: 'endingBgm' };
+
+const SpriteThumbnail = ({
+  spriteRef,
+  spriteUrl,
+  emoji,
+  size = 32,
+  className = '',
+  imgCache,
+  keyedCache,
+}: {
+  spriteRef?: string;
+  spriteUrl?: string;
+  emoji?: string;
+  size?: number;
+  className?: string;
+  imgCache: React.MutableRefObject<Map<string, HTMLImageElement>>;
+  keyedCache: React.MutableRefObject<Map<string, HTMLCanvasElement>>;
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const walk = spriteRef ? parseWalkRef(spriteRef) : null;
+  const resolvedUrl = spriteUrl ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+  const img = resolvedUrl ? imgCache.current.get(resolvedUrl) : undefined;
+  const loaded = !!img && img.complete && img.naturalWidth > 0;
+
+  useEffect(() => {
+    if (!loaded || !resolvedUrl || !img || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+    const srcImg = keyedCache.current.get(resolvedUrl) ?? img;
+
+    let sx = 0, sy = 0, sw = imgW, sh = imgH;
+
+    if (walk?.crop) {
+      const [csx, csy, csw, csh] = walk.crop;
+      const frames = smcFrameCount(walk.crop, walk.frames);
+      sw = csw / frames;
+      sh = csh;
+      sx = csx;
+      sy = csy;
+    } else {
+      const std = walk?.stdId === 'auto'
+        ? detectStandard(imgW, imgH)
+        : standardById(walk?.stdId ?? 'auto');
+      const cols = std.frames;
+      const rows = std.ways.length;
+      sw = imgW / cols;
+      sh = imgH / rows;
+      // VX/MV standard first frame might be down-facing, column 1
+      const idleCol = std.frames === 3 ? 1 : 0;
+      sx = idleCol * sw;
+      sy = 0;
+    }
+
+    ctx.clearRect(0, 0, size, size);
+    
+    // Calculate destination coordinates to fit inside the canvas
+    const zoom = Math.min(size / sw, size / sh);
+    const destW = sw * zoom;
+    const destH = sh * zoom;
+    const destX = (size - destW) / 2;
+    const destY = (size - destH) / 2;
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(srcImg, sx, sy, sw, sh, destX, destY, destW, destH);
+  }, [loaded, resolvedUrl, img, walk?.crop, walk?.stdId, walk?.frames, size]);
+
+  if (loaded && resolvedUrl) {
+    return (
+      <canvas
+        ref={canvasRef}
+        width={size}
+        height={size}
+        className={`shrink-0 ${className}`}
+        style={{ imageRendering: 'pixelated', width: `${size}px`, height: `${size}px` }}
+      />
+    );
+  }
+
+  if (emoji) {
+    return (
+      <div className={`shrink-0 flex items-center justify-center font-emoji text-lg ${className}`} style={{ width: `${size}px`, height: `${size}px` }}>
+        {emoji}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`shrink-0 bg-gray-800 rounded ${className}`} style={{ width: `${size}px`, height: `${size}px` }} />
+  );
+};
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1787,17 +1881,26 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const imgW = img!.naturalWidth;
         const imgH = img!.naturalHeight;
         if (walk.crop) {
-          // SMC専用ロジック（lib/smc-sprite.ts）: ストリップを正方形コマに分割（コマ数=幅/高さ）。
+          // SMC専用ロジック（lib/smc-sprite.ts）: ストリップを分割。
           // 右向き素材なので、左移動時は水平反転して描く。
           const rect = smcFrameRect(walk.crop, { moving, timeSec: performance.now() / 1000, fps: 7, frames: walk.frames });
+          
+          // アスペクト比を保ち、縦幅を h に合わせ、横幅をスケーリングして中央揃えにする。
+          const baseH = rect.sh;
+          const zoom = h / baseH;
+          const destW = rect.sw * zoom;
+          const destH = rect.sh * zoom;
+          const destX = x + (w - destW) / 2;
+          const destY = y + (h - destH); // 下端を合わせる
+
           if (dir === 'a') {
             ctx.save();
-            ctx.translate(x + w, 0);
+            ctx.translate(destX + destW, 0);
             ctx.scale(-1, 1);
-            ctx.drawImage(srcImg, rect.sx, rect.sy, rect.sw, rect.sh, 0, y, w, h);
+            ctx.drawImage(srcImg, rect.sx, rect.sy, rect.sw, rect.sh, 0, destY, destW, destH);
             ctx.restore();
           } else {
-            ctx.drawImage(srcImg, rect.sx, rect.sy, rect.sw, rect.sh, x, y, w, h);
+            ctx.drawImage(srcImg, rect.sx, rect.sy, rect.sw, rect.sh, destX, destY, destW, destH);
           }
           return;
         }
@@ -5085,11 +5188,7 @@ const lose = (msg: string) => {
                     <button
                       onClick={() => setPicker({ mode: 'image', target: { t: 'player' } })}
                       className="w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-gradient-to-r from-violet-900/60 to-blue-900/50 border border-violet-600/40 hover:border-violet-500/70 active:scale-[0.98] transition text-left">
-                      <span className="text-2xl shrink-0">
-                        {gameData.player.spriteUrl
-                          ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.player.spriteUrl} alt="" className="w-8 h-8 object-contain" style={{ imageRendering: 'pixelated' }} />
-                          : gameData.player.emoji}
-                      </span>
+                      <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={32} imgCache={imgCache} keyedCache={keyedCache} className="text-2xl" />
                       <div className="min-w-0">
                         <div className="text-xs font-black text-white">主人公を自分にする</div>
                         <div className="text-[10px] text-violet-300/80 mt-0.5">投稿画像・歩行グラを選択して差し替え</div>
@@ -5106,7 +5205,7 @@ const lose = (msg: string) => {
                       </div>
                       {gameData.player.spriteRef && (
                         <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
-                          {gameData.player.spriteUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.player.spriteUrl} alt="" className="w-6 h-6 object-contain" style={{ imageRendering: 'pixelated' }} />}
+                          <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} keyedCache={keyedCache} />
                           <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
                           <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
@@ -5151,7 +5250,7 @@ const lose = (msg: string) => {
                         className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />スプライト画像参照</button>
                       {obj.spriteRef && (
                         <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
-                          {obj.spriteUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={obj.spriteUrl} alt="" className="w-5 h-5 object-contain shrink-0" style={{ imageRendering: 'pixelated' }} />}
+                          <SpriteThumbnail spriteRef={obj.spriteRef} spriteUrl={obj.spriteUrl} emoji={obj.emoji} size={20} imgCache={imgCache} keyedCache={keyedCache} className="rounded" />
                           <span className="truncate flex-1">{refLabel(obj.spriteRef)}</span>
                           <button onClick={() => updObj({ spriteRef: undefined, spriteUrl: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
@@ -5184,7 +5283,7 @@ const lose = (msg: string) => {
                             </div>
                             {gameData.player.spriteRef && (
                               <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
-                                {gameData.player.spriteUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.player.spriteUrl} alt="" className="w-6 h-6 object-contain" style={{ imageRendering: 'pixelated' }} />}
+                                <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} keyedCache={keyedCache} />
                                 <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
                                 <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                               </div>
@@ -5419,7 +5518,7 @@ const lose = (msg: string) => {
                                   {enemies.map((o, ei) => (
                                     <button key={o.id} onClick={() => setSelectedObjId(o.id)}
                                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-left border ${activeSelObj?.id === o.id ? 'bg-blue-800/40 border-blue-600/50 text-blue-200' : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:bg-gray-700/40'}`}>
-                                      {o.spriteUrl ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={o.spriteUrl} alt="" className="w-5 h-5 object-contain shrink-0" style={{ imageRendering: 'pixelated' }} /> : <span className="text-base leading-none shrink-0">{o.emoji}</span>}
+                                      <SpriteThumbnail spriteRef={o.spriteRef} spriteUrl={o.spriteUrl} emoji={o.emoji} size={20} imgCache={imgCache} keyedCache={keyedCache} className="rounded" />
                                       <span className="truncate flex-1">{o.name || '敵'}</span>
                                       <code className="text-cyan-500/80 text-[9px] shrink-0">{o.name ? `"${o.name}"` : ei + 1}</code>
                                     </button>
