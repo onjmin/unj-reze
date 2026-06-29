@@ -59,7 +59,9 @@ const E = {
   dryBonesUrl: smc('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png'),
   booRef:      smcWalk('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png',       184, 0, 80, 16, 4),
   booUrl:      smc('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png'),
+  toadRef:     `walk:smc:u:${smc('SMW/Objects/NPCs/Toad_NPCs.png')}#0,0,32,64,1`,
   toadUrl:     smc('SMW/Objects/NPCs/Toad_NPCs.png'),
+  princessRef: `walk:smc:u:${smc('SMW/Objects/NPCs/Princesses.png')}#64,0,64,96,1`,
   princessUrl: smc('SMW/Objects/NPCs/Princesses.png'),
 };
 
@@ -136,11 +138,11 @@ const scene1: SceneDef = {
     // キノピオ NPC (SMC: Toad_NPCs.png 静止表示)
     newObject({ emoji: '🍄', col: 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'キノピオだよ！音符ブロックを下から叩くと高くジャンプできるよ！チェックポイントを踏むと途中から再開できるよ！',
-      spriteUrl: E.toadUrl }),
+      spriteRef: E.toadRef, spriteUrl: E.toadUrl }),
     // ピーチ姫（ゴール付近 NPC, SMC: Princesses.png 静止表示）
     newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！クッパをやっつけて！',
-      spriteUrl: E.princessUrl }),
+      w: 32, h: 64, spriteRef: E.princessRef, spriteUrl: E.princessUrl }),
     // 土管ワープ→地下
     newObject({ emoji: '🪣', col: 9,  row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'underground', warpEntryCol: 2, warpEntryRow: ROWS - 4 }),

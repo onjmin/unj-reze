@@ -2907,7 +2907,7 @@ const lose = (msg: string) => {
       if (isPlaying) {
         for (let ei = 0; ei < eng.entities.length; ei++) {
           const e = eng.entities[ei];
-          drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, TILE_SIZE, TILE_SIZE, `ent${e.def.id}_${ei}`);
+          drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
           if (e.def.hp > 1) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
         }
         ctx.fillStyle = 'yellow';
@@ -2996,7 +2996,7 @@ const lose = (msg: string) => {
         }
       } else {
         for (const o of gameData.objects) {
-          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, o.row * TILE_SIZE, TILE_SIZE, TILE_SIZE, `obj${o.id}`);
+          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, o.row * TILE_SIZE, o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `obj${o.id}`);
           const isSel = o.id === selectedObjIdRef.current;
           ctx.strokeStyle = o.hazard ? 'rgba(255,80,80,0.6)' : 'rgba(80,200,255,0.6)';
           ctx.lineWidth = isSel ? 3 : 1.5;

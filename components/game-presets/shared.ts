@@ -165,6 +165,7 @@ export interface ObjectDef {
   col: number; row: number; hp: number; speed: number;
   behavior: NpcBehavior; bullet: BulletType; bulletSpeed: number; bulletColor: string; fireRate: number;
   hazard: boolean; message: string;
+  w?: number; h?: number;
   /** オブジェクト種別（エディタで表示項目を切り替え）。未指定=enemy。 */
   objType?: ObjType;
   /** ターン制戦闘用ステータス（rpg + battle のとき使用。未指定なら hp から自動算出）。 */
