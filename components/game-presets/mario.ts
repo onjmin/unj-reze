@@ -13,9 +13,11 @@ const smcTile = (path: string, sx: number, sy: number, sw = 16, sh = 16) =>
   `${smc(path)}#${sx},${sy},${sw},${sh}`;
 const smcRef  = (url: string) => `url:${url.split('#')[0]}`;   // imageRef 用(クロップなし参照)
 
-// walk:smc:u:<url>#sx,sy,cropW,cropH  (2フレーム水平ストリップ、左向き水平反転)
-const smcWalk = (path: string, sx: number, sy: number, sw: number, sh: number) =>
-  `walk:smc:u:${smc(path)}#${sx},${sy},${sw},${sh}`;
+// walk:smc:u:<url>#sx,sy,cropW,cropH,frames (水平ストリップ、左向き水平反転)
+const smcWalk = (path: string, sx: number, sy: number, sw: number, sh: number, frames?: number) => {
+  const fSuffix = frames ? `,${frames}` : '';
+  return `walk:smc:u:${smc(path)}#${sx},${sy},${sw},${sh}${fSuffix}`;
+};
 
 // ── タイル用 SMC URL ──────────────────────────────────────────────────────
 //  すべてスプライトシート。#sx,sy,sw,sh で実スプライトを切り出す（クロップ無し＝シート丸ごと1枚絵、
@@ -39,24 +41,23 @@ const T = {
 };
 
 // ── 敵/NPC 用 SMC walk/static URL ────────────────────────────────────────
-// SMCスプライトはすべて 16×16px セル (448px幅 = 28列)
-// 走行アニメ: 先頭2フレーム水平ストリップ crop = (0, 0, 32, 16)
-//   Goombas     448×176  16px/cell  →  2フレーム (0,0,32,16)
-//   Beach_Koopa 448×128  16px/cell  →  (0,0,32,16)
-//   Bob-omb     448×144  16px/cell  →  (0,0,32,16)
-//   Dry_Bones   448× 96  16px/cell  →  (0,0,32,16)
-//   Blazin_Boos 448×272  16px/cell  →  (0,0,32,16)
-// 16px スプライトは TILE_SIZE=32 でレンダリングされるため 2倍拡大表示
+// SMCスプライトはすべて 16×16px または 32x32px セル
+// 走行アニメ: 水平ストリップ crop = (sx, sy, sw, sh, frames)
+//   Goombas     448×176  →  3フレーム (160,0,96,16,3)
+//   Beach_Koopa 448×128  →  2フレーム (200,0,32,32,2)
+//   Bob-omb     448×144  →  2フレーム (184,0,32,16,2)
+//   Dry_Bones   448× 96  →  2フレーム (176,0,48,32,2)
+//   Blazin_Boos 448×272  →  4フレーム (184,0,80,16,4)
 const E = {
-  goombaRef:   smcWalk('SMW/Enemies/Common%20Enemies/Goombas.png',          0, 0, 32, 16),
+  goombaRef:   smcWalk('SMW/Enemies/Common%20Enemies/Goombas.png',          160, 0, 96, 16, 3),
   goombaUrl:   smc('SMW/Enemies/Common%20Enemies/Goombas.png'),
-  koopaRef:    smcWalk('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png',      0, 0, 32, 16),
+  koopaRef:    smcWalk('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png',      200, 0, 32, 32, 2),
   koopaUrl:    smc('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png'),
-  bobOmbRef:   smcWalk('SMW/Enemies/Artillery/Bob-omb.png',                  0, 0, 32, 16),
+  bobOmbRef:   smcWalk('SMW/Enemies/Artillery/Bob-omb.png',                  184, 0, 32, 16, 2),
   bobOmbUrl:   smc('SMW/Enemies/Artillery/Bob-omb.png'),
-  dryBonesRef: smcWalk('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png',       0, 0, 32, 16),
+  dryBonesRef: smcWalk('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png',       176, 0, 48, 32, 2),
   dryBonesUrl: smc('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png'),
-  booRef:      smcWalk('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png',       0, 0, 32, 16),
+  booRef:      smcWalk('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png',       184, 0, 80, 16, 4),
   booUrl:      smc('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png'),
   toadUrl:     smc('SMW/Objects/NPCs/Toad_NPCs.png'),
   princessUrl: smc('SMW/Objects/NPCs/Princesses.png'),
@@ -227,10 +228,11 @@ const scene3: SceneDef = {
 export const mario: PresetData = {
   id: 'mario', name: 'マリオ', engine: 'action', gravity: 2.5, friction: 0.85,
   player: {
-    emoji: '🍄', color: '#ff4444', speed: 5, jumpPower: -18, w: 24, h: 24,
+    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -18, w: 24, h: 24,
     start: { x: 50, y: 50 },
     hearts: 8,
-    spriteRef: wr(90), spriteUrl: sa(90),
+    spriteRef: `walk:smc:u:${smc('SMW/Player%20%26%20Powerups/Tanooki_Suit.png')}#0,33,99,33,3`,
+    spriteUrl: smc('SMW/Player%20%26%20Powerups/Tanooki_Suit.png'),
   },
   tiles,
   map: JSON.parse(JSON.stringify(scene1Map)),
