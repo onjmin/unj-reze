@@ -218,14 +218,6 @@ export interface SpellCardDef {
   dialogue?: DialogueLine[];
 }
 
-/** onjReze: 陣地ゲームのルール。陣取り(paper.io 型)とスプラ(塗り)を独立に ON/OFF できる。
- *  両方 true なら併用、両方 false なら純粋なボムアクションになる。 */
-export interface OnjRezeModes {
-  /** 陣取り：自陣の外でトレイルを引き、自陣に戻ると囲んだ範囲を占領。トレイルを敵に切られると失う。 */
-  territory: boolean;
-  /** スプラ：移動・爆発で地面を自分の色に塗る。塗った面積を占有率としてカウント。 */
-  paint: boolean;
-}
 
 /** スクロール設定。worldCols/worldRows が画面（COLS/ROWS）より大きいとカメラが追従する。
  *  action は横（worldCols）、rpg は上下左右（worldCols+worldRows）に使う。
@@ -334,9 +326,7 @@ export interface PresetData {
   items?: ItemDef[];
   /** フェーズ定義（touhou エンジン）。定義するとフェーズ順に進行する。 */
   phases?: StagePhase[];
-  /** onjReze エンジン：陣取り／スプラ塗りの有効設定。未指定なら両方 OFF。 */
-  onjReze?: OnjRezeModes;
-  /** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
+/** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
   titleScreen?: TitleScreenConfig;
   /** エンディング画面（東方以外）。enabled=true でクリア時に表示。 */
   ending?: EndingScreenConfig;

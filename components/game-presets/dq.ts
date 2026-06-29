@@ -346,8 +346,8 @@ export const dq: PresetData = {
     message: '竜王を倒し、ローラ姫を救い出した！\n平和がラルス王国に戻ってきた。\n\nそなたの勇気と知恵は永遠に語り継がれるだろう。',
     textColor: '#ffee88',
   },
-  bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
-  battleBgm: { ref: 'https://www.youtube.com/watch?v=3z4L-AzLH0c', src: 'https://www.youtube.com/watch?v=3z4L-AzLH0c', type: 'youtube' },
+  bgm: { ref: 'https://www.youtube.com/watch?v=HYjTiY6RITE', src: 'https://www.youtube.com/watch?v=HYjTiY6RITE', type: 'youtube' },
+  battleBgm: { ref: 'https://www.youtube.com/watch?v=Str7rMSDhcI', src: 'https://www.youtube.com/watch?v=Str7rMSDhcI', type: 'youtube' },
   bossBgm:   { ref: 'https://www.youtube.com/watch?v=9QzO_4pMZPY', src: 'https://www.youtube.com/watch?v=9QzO_4pMZPY', type: 'youtube' },
   sfx: {
     levelup:  { ref: 'direct:https://rpgen.org/dq/sound/res/222.mp3', src: 'https://rpgen.org/dq/sound/res/222.mp3', type: 'direct' as const },

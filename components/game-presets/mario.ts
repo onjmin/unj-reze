@@ -253,7 +253,7 @@ export const mario: PresetData = {
     message: 'おめでとう！ピーチ姫を救出した！\nマリオ、あなたは本当のヒーローよ！',
     textColor: '#ffe000',
   },
-  bgm: { ref: 'https://www.youtube.com/watch?v=a9ZMbWHubKk', src: 'https://www.youtube.com/watch?v=a9ZMbWHubKk', type: 'youtube' },
+  bgm: { ref: 'https://www.youtube.com/watch?v=ps5akYt1WLQ', src: 'https://www.youtube.com/watch?v=ps5akYt1WLQ', type: 'youtube' },
   sfx: {
     jump:   { ref: 'jump' },
     clear:  { ref: 'clear' },

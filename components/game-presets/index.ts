@@ -13,7 +13,7 @@ export const PRESET_EMOJI: Record<PresetId, string> = { dq: '🐉', mario: '🍄
 
 /** ギャラリーで各プリセットの中身を一言で伝えるキャッチコピー。 */
 export const PRESET_TAGLINE: Record<PresetId, string> = {
-  onjReze: '爆弾で暴れる陣取りアクション',
+  onjReze: '爆弾で暴れるアクション',
   dq: 'コマンド戦闘の王道RPG',
   mario: '走って跳ぶ横スクロール',
   touhou: '弾幕をよけるシューティング',

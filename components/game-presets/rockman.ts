@@ -194,7 +194,7 @@ export const rockman: PresetData = {
     message: 'カットマンを撃破した！\nワイリー博士の野望はまだ続く…',
     textColor: '#4488ff',
   },
-  bgm:     { ref: 'https://www.youtube.com/watch?v=eDWc3fvCVAE', src: 'https://www.youtube.com/watch?v=eDWc3fvCVAE', type: 'youtube' },
+  bgm:     { ref: 'https://www.youtube.com/watch?v=wgP_PK_umKM', src: 'https://www.youtube.com/watch?v=wgP_PK_umKM', type: 'youtube' },
   bossBgm: { ref: 'https://www.youtube.com/watch?v=uB1kNcqPe2U', src: 'https://www.youtube.com/watch?v=uB1kNcqPe2U', type: 'youtube' },
   sfx: {
     shot:   { ref: 'shot' },
