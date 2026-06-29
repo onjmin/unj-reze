@@ -138,7 +138,7 @@ const scene1: SceneDef = {
     // キノピオ NPC (SMC: Toad_NPCs.png 静止表示)
     newObject({ emoji: '🍄', col: 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'キノピオだよ！音符ブロックを下から叩くと高くジャンプできるよ！チェックポイントを踏むと途中から再開できるよ！',
-      spriteRef: E.toadRef, spriteUrl: E.toadUrl }),
+      w: 32, h: 64, spriteRef: E.toadRef, spriteUrl: E.toadUrl }),
     // ピーチ姫（ゴール付近 NPC, SMC: Princesses.png 静止表示）
     newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！クッパをやっつけて！',
