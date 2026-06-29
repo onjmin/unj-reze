@@ -1441,6 +1441,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setIsPlaying(true);     // 同フレームで再生 → 新プリセットのデモが回る
   }, [resetGame]);
 
+  const [introAnim, setIntroAnim] = useState<'right' | 'left'>('right');
+  const navigateIntro = useCallback((dir: 1 | -1) => {
+    const idx = PRESET_ORDER.indexOf(presetId);
+    const next = PRESET_ORDER[(idx + dir + PRESET_ORDER.length) % PRESET_ORDER.length];
+    setIntroAnim(dir === 1 ? 'right' : 'left');
+    previewPresetInIntro(next);
+  }, [presetId, previewPresetInIntro]);
+
   /** ヒーローから「あそぶ」。タイトル画面があればそれを、なければ即プレイ。 */
   const enterPlayFromIntro = useCallback(() => {
     setIntroOpen(false);
@@ -3674,57 +3682,75 @@ const lose = (msg: string) => {
               </div>
             )}
 
-            {/* ── 入口ヒーロー：動くデモの上に「あそぶ / 改造する」を重ねる ── */}
-            {introOpen && (
-              <div className="absolute inset-0 z-[45] flex flex-col overflow-y-auto select-none"
-                style={{ background: 'rgba(7,8,11,0.82)', backdropFilter: 'blur(2px)' }}>
-                {/* ヘッダー */}
-                <div className="shrink-0 pt-3 pb-1 px-4 text-center">
-                  <span className="text-[9px] font-black tracking-[0.35em] text-white/40">GAME MAKER</span>
-                  <p className="text-[11px] text-white/70 mt-0.5">完成ゲームを選んで改造しよう</p>
-                </div>
+            {/* ── 入口ヒーロー：カルーセル式ゲーム選択 ── */}
+            {introOpen && (() => {
+              const PRESET_BOX_GRADIENT: Record<PresetId, string> = {
+                onjReze: 'from-orange-950 via-gray-900 to-gray-950',
+                dq:      'from-blue-950  via-gray-900 to-gray-950',
+                mario:   'from-red-950   via-gray-900 to-gray-950',
+                touhou:  'from-purple-950 via-gray-900 to-gray-950',
+                rockman: 'from-cyan-950  via-gray-900 to-gray-950',
+              };
+              const PRESET_RING: Record<PresetId, string> = {
+                onjReze: 'ring-orange-500/50',
+                dq:      'ring-blue-500/50',
+                mario:   'ring-red-500/50',
+                touhou:  'ring-purple-500/50',
+                rockman: 'ring-cyan-500/50',
+              };
+              return (
+                <div className="absolute inset-0 z-[45] flex flex-col select-none"
+                  style={{ background: 'rgba(7,8,11,0.78)', backdropFilter: 'blur(3px)' }}>
 
-                {/* ギャラリー：プリセットカード */}
-                <div className="flex-1 px-3 py-2 grid grid-cols-1 gap-2">
-                  {PRESET_ORDER.map(id => {
-                    const active = presetId === id;
-                    const p = PRESETS[id];
-                    return (
-                      <button key={id} onClick={() => previewPresetInIntro(id)}
-                        className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition active:scale-[0.98] ${active ? 'bg-white/15 ring-2 ring-white/60' : 'bg-white/5 ring-1 ring-white/10 hover:bg-white/10'}`}>
-                        {/* 絵文字アイコン */}
-                        <span className={`text-3xl leading-none shrink-0 transition-transform duration-200 ${active ? 'scale-110' : ''}`}>
-                          {PRESET_EMOJI[id]}
-                        </span>
-                        {/* テキスト */}
-                        <div className="min-w-0">
-                          <div className="font-black text-sm text-white">{p.name}</div>
-                          <div className="text-[10px] text-white/55 mt-0.5">{PRESET_TAGLINE[id]}</div>
-                        </div>
-                        {/* 選択インジケーター */}
-                        {active && (
-                          <span className="ml-auto shrink-0 text-[9px] font-black tracking-wider text-green-400 bg-green-400/15 rounded-full px-2 py-0.5">
-                            プレビュー中
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                  {/* ヘッダー */}
+                  <div className="shrink-0 pt-3 pb-1 px-4 text-center">
+                    <span className="text-[9px] font-black tracking-[0.35em] text-white/35">GAME MAKER</span>
+                    <p className="text-[10px] text-white/55 mt-0.5">ゲームを選んで改造しよう</p>
+                  </div>
 
-                {/* あそぶ / 改造する */}
-                <div className="shrink-0 flex flex-col gap-2 px-4 pb-4 pt-1">
-                  <button onClick={enterPlayFromIntro}
-                    className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full font-black text-sm bg-green-500 text-green-950 hover:bg-green-400 active:scale-95 transition shadow-lg shadow-green-500/30">
-                    <Play size={16} /> {PRESET_EMOJI[presetId]} をあそぶ
-                  </button>
-                  <button onClick={enterEditFromIntro}
-                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-full font-bold text-sm bg-white/10 text-white border border-white/25 hover:bg-white/20 active:scale-95 transition">
-                    ✏ 改造する
-                  </button>
+                  {/* カルーセル */}
+                  <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                    {/* 左矢印 */}
+                    <button onClick={() => navigateIntro(-1)}
+                      className="absolute left-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 text-3xl font-thin active:scale-90 transition">
+                      ‹
+                    </button>
+
+                    {/* ゲームボックス */}
+                    <div key={presetId}
+                      style={{ animation: `${introAnim === 'right' ? 'introCardInRight' : 'introCardInLeft'} 0.22s ease both` }}
+                      className="flex flex-col items-center gap-3 px-12">
+                      {/* パッケージ風カード */}
+                      <div className={`w-28 h-36 rounded-2xl bg-gradient-to-b ${PRESET_BOX_GRADIENT[presetId]} ring-2 ${PRESET_RING[presetId]} shadow-2xl flex flex-col items-center justify-center gap-2 relative overflow-hidden`}>
+                        <div className="absolute inset-0 opacity-10"
+                          style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fff 0, #fff 1px, transparent 0, transparent 50%)', backgroundSize: '6px 6px' }} />
+                        <span className="text-5xl leading-none relative z-10">{PRESET_EMOJI[presetId]}</span>
+                        <span className="text-[9px] font-black tracking-wider text-white/50 relative z-10">GAME</span>
+                      </div>
+                      {/* タイトル */}
+                      <div className="text-center">
+                        <div className="font-black text-base text-white leading-tight">{PRESETS[presetId].name}</div>
+                        <div className="text-[10px] text-white/50 mt-0.5">{PRESET_TAGLINE[presetId]}</div>
+                      </div>
+                    </div>
+
+                    {/* 右矢印 */}
+                    <button onClick={() => navigateIntro(1)}
+                      className="absolute right-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 text-3xl font-thin active:scale-90 transition">
+                      ›
+                    </button>
+                  </div>
+
+                  {/* ドットインジケーター */}
+                  <div className="shrink-0 flex justify-center gap-2 pb-3">
+                    {PRESET_ORDER.map(id => (
+                      <button key={id} onClick={() => { setIntroAnim('right'); previewPresetInIntro(id); }}
+                        className={`rounded-full transition-all duration-200 ${id === presetId ? 'w-5 h-2 bg-white' : 'w-2 h-2 bg-white/25 hover:bg-white/50'}`} />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ニコニコ弾幕レイヤー */}
             {danmakuItems.length > 0 && (
@@ -3988,7 +4014,18 @@ const lose = (msg: string) => {
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 w-12 h-10 bg-gray-600 rounded-r-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('right')}></div>
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-gray-700 pointer-events-none rounded"></div>
                 </div>
-                {gameData.engine === 'action' && (
+                {introOpen ? (
+                  <div className="flex flex-col gap-2.5 items-center">
+                    <button onClick={enterPlayFromIntro}
+                      className="w-28 h-14 rounded-full border-b-4 border-green-900 active:border-b-0 active:translate-y-1 bg-green-500 active:bg-green-400 text-green-950 font-black text-sm shadow-lg shadow-green-500/30 flex items-center justify-center gap-1.5 transition touch-none select-none">
+                      <Play size={14} /> あそぶ
+                    </button>
+                    <button onClick={enterEditFromIntro}
+                      className="w-28 h-10 rounded-full border border-white/25 bg-white/10 active:bg-white/20 text-white font-bold text-sm flex items-center justify-center gap-1.5 transition touch-none select-none">
+                      ✏ 改造する
+                    </button>
+                  </div>
+                ) : gameData.engine === 'action' ? (
                   <div className="flex gap-3">
                     <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-cyan-600 active:bg-cyan-500 touch-none cursor-pointer select-none"
                       {...padProps('shoot')}>
@@ -3999,8 +4036,8 @@ const lose = (msg: string) => {
                       JUMP
                     </button>
                   </div>
-                )}
-                {gameData.engine === 'onjReze' && (
+                ) : null}
+                {!introOpen && gameData.engine === 'onjReze' && (
                   <div className="grid grid-cols-2 gap-2">
                     <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-red-600 active:bg-red-500 touch-none cursor-pointer select-none"
                       {...padProps('action')}>
@@ -4020,7 +4057,7 @@ const lose = (msg: string) => {
                     </button>
                   </div>
                 )}
-                {gameData.engine === 'touhou' && (
+                {!introOpen && gameData.engine === 'touhou' && (
                   <div className="flex flex-col items-center gap-2">
                     <button className="w-14 h-10 rounded-full border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
                       {...padProps('slow')}>

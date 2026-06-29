@@ -1,4 +1,5 @@
 import { type PresetData, newObject, COLS, ROWS, VIEW_COLS, VIEW_ROWS, VIEW_W, VIEW_H } from './shared';
+import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
 
 // ── MiniScript テンプレート ────────────────────────────────────────────────
 
@@ -64,8 +65,6 @@ const BOSS_BGM_URL  = 'https://www.youtube.com/watch?v=Yf6CIacmFJo';
 /** YouTube URL → ref 文字列 */
 const ytRef = (url: string) => url;
 
-const sp = (no: number) => `/api/rpgen/data/images/sprites/${no}.png`;
-const sa = (no: number) => `/api/rpgen/data/images/sAnims/${no}.png`;
 const walkRef = (no: number) => `walk:auto:u:${sa(no)}`;
 const ir = (no: number) => `url:${sp(no)}`;
 
@@ -226,8 +225,8 @@ exit()
       bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
       isBoss: true, name: 'チルノ',
       // スプライト（静止画） no.1962
-      spriteRef: 'url:/api/rpgen/data/images/sprites/1962.png',
-      spriteUrl: '/api/rpgen/data/images/sprites/1962.png',
+      spriteRef: `url:${sp(1962)}`,
+      spriteUrl: sp(1962),
       miniScript: `
 moveTo(${VIEW_W / 2}, 80, 90)
 while true

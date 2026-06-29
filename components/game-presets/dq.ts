@@ -1,8 +1,5 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
-
-// RPGen アセットURL
-const sp  = (no: number) => `/api/rpgen/data/images/sprites/${no}.png`;
-const sa  = (no: number) => `/api/rpgen/data/images/sAnims/${no}.png`;
+import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
 const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
 const ir  = (no: number) => `url:${sp(no)}`;
 

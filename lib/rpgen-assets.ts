@@ -6,19 +6,19 @@
 // 参照: tmp/asset_collect_guide.md, rpgen-crawler/deploy/api
 
 const PROXY = '/api/rpgen';
+const CDN = 'https://rpgen-search.pages.dev';
 
 // ───────────────── アセット実体URL ─────────────────
-// 自前プロキシ(/api/rpgen/data/...)経由。上流CDNがCORSを返さないため、
-// 同一オリジン化して crossOrigin 画像・canvas書き出しを安全にする（route.ts 参照）。
+// rpgen-search.pages.dev はCORSヘッダーを返すため直リンクで安全に扱える。
 
 /** 単体スプライト（16x16 ドット絵）。`no` は /api/sprites の no。 */
-export const spriteUrl = (no: number) => `${PROXY}/data/images/sprites/${no}.png`;
+export const spriteUrl = (no: number) => `${CDN}/data/images/sprites/${no}.png`;
 
 /** スプライトアニメ/歩行シート（例 32x64 = 2フレーム×4方向）。`no` は /api/sprite-anims の no。 */
-export const sAnimUrl = (no: number) => `${PROXY}/data/images/sAnims/${no}.png`;
+export const sAnimUrl = (no: number) => `${CDN}/data/images/sAnims/${no}.png`;
 
 /** 効果音/BGM（mp3）。`no` は /api/sounds の no。 */
-export const soundUrl = (no: number) => `${PROXY}/data/audio/sound/${no}.mp3`;
+export const soundUrl = (no: number) => `${CDN}/data/audio/sound/${no}.mp3`;
 
 // ───────────────── 型 ─────────────────
 

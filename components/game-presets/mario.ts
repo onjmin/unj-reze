@@ -1,4 +1,5 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS } from './shared';
+import { sAnimUrl as sa } from '@/lib/rpgen-assets';
 
 // SMC-released-sprites (Level-Share-Square/SMC-released-sprites) via jsDelivr CDN
 // ライセンス: 非商用無料、作者クレジット必須
@@ -55,7 +56,6 @@ const E = {
 };
 
 // プレイヤー (マリオ): SMC に基本歩行スプライトなし → RPGen #90 を維持
-const sa = (no: number) => `/api/rpgen/data/images/sAnims/${no}.png`;
 const wr = (no: number) => `walk:auto:u:${sa(no)}`;
 // 地下ネズミ: SMC に対応スプライトなし → RPGen #93 を維持
 const sa93 = sa(93);
