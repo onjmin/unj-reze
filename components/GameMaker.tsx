@@ -706,17 +706,32 @@ const SpriteThumbnail = ({
       sx = csx;
       sy = csy;
     } else {
-      const std = walk?.stdId === 'auto'
-        ? detectStandard(imgW, imgH)
-        : standardById(walk?.stdId ?? 'auto');
-      const cols = std.frames;
-      const rows = std.ways.length;
-      sw = imgW / cols;
-      sh = imgH / rows;
-      // VX/MV standard first frame might be down-facing, column 1
-      const idleCol = std.frames === 3 ? 1 : 0;
-      sx = idleCol * sw;
-      sy = 0;
+      const hashIdx = resolvedUrl.indexOf('#');
+      if (hashIdx !== -1) {
+        const frag = resolvedUrl.slice(hashIdx + 1);
+        const parts = frag.split(',').map(n => parseInt(n, 10));
+        if (parts.length >= 4 && parts.every(n => !isNaN(n))) {
+          sx = parts[0];
+          sy = parts[1];
+          sw = parts[2];
+          sh = parts[3];
+          if (parts.length >= 5 && parts[4] > 1) {
+            sw = sw / parts[4];
+          }
+        }
+      } else {
+        const std = walk?.stdId === 'auto'
+          ? detectStandard(imgW, imgH)
+          : standardById(walk?.stdId ?? 'auto');
+        const cols = std.frames;
+        const rows = std.ways.length;
+        sw = imgW / cols;
+        sh = imgH / rows;
+        // VX/MV standard first frame might be down-facing, column 1
+        const idleCol = std.frames === 3 ? 1 : 0;
+        sx = idleCol * sw;
+        sy = 0;
+      }
     }
 
     ctx.clearRect(0, 0, size, size);
@@ -2345,7 +2360,8 @@ const lose = (msg: string) => {
             // ── 横スク（マリオ/ロックマン）：重力・地面/壁判定つき敵AI ──
             // 地面に接していなければ自由落下。walker は崖の手前で反転（赤ノコノコ型）、
             // patrolH/緑ノコノコ型は崖からそのまま落ちる。
-            const ES = TILE_SIZE; // 敵の当たり判定サイズ
+            const ew = d.w ?? TILE_SIZE; // 敵の当たり判定幅
+            const eh = d.h ?? TILE_SIZE; // 敵の当たり判定高さ
             if (d.behavior === 'still') {
               // 静止：配置位置に固定（壁付き砲台など）。移動・重力なし。
               e.vx = 0; e.vy = 0;
@@ -2364,15 +2380,15 @@ const lose = (msg: string) => {
               // 水平移動（壁・画面端で反転。walker は接地中、進行方向の足元が無ければ反転）
               if (e.vx !== 0) {
                 const nx = e.x + e.vx;
-                const leadX = e.vx > 0 ? nx + ES - 1 : nx;
-                const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + ES - 2);
+                const leadX = e.vx > 0 ? nx + ew - 1 : nx;
+                const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + eh - 2);
                 const wall = (wt && !wt.info.passable) || (wb && !wb.info.passable);
                 let edge = false;
                 if (d.behavior === 'walker' && e.isGrounded) {
-                  const f = getTile(leadX, e.y + ES + 2);
+                  const f = getTile(leadX, e.y + eh + 2);
                   edge = !f || f.info.passable;
                 }
-                if (wall || edge || nx < 0 || nx > worldW - ES) e.vx = -e.vx;
+                if (wall || edge || nx < 0 || nx > worldW - ew) e.vx = -e.vx;
                 else e.x = nx;
               }
               // 重力 → 垂直移動 → 地面/天井判定（接地していなければ自由落下）
@@ -2380,15 +2396,15 @@ const lose = (msg: string) => {
               e.y += e.vy;
               e.isGrounded = false;
               if (e.vy > 0) {
-                const fl = getTile(e.x + 2, e.y + ES), fr = getTile(e.x + ES - 2, e.y + ES);
+                const fl = getTile(e.x + 2, e.y + eh), fr = getTile(e.x + ew - 2, e.y + eh);
                 const g = (fl && !fl.info.passable) ? fl : (fr && !fr.info.passable) ? fr : null;
-                if (g) { e.y = g.rect.y - ES; e.vy = 0; e.isGrounded = true; }
+                if (g) { e.y = g.rect.y - eh; e.vy = 0; e.isGrounded = true; }
               } else if (e.vy < 0) {
-                const hl = getTile(e.x + 2, e.y), hr = getTile(e.x + ES - 2, e.y);
+                const hl = getTile(e.x + 2, e.y), hr = getTile(e.x + ew - 2, e.y);
                 const c = (hl && !hl.info.passable) ? hl : (hr && !hr.info.passable) ? hr : null;
                 if (c) { e.y = c.rect.y + TILE_SIZE; e.vy = 0; }
               }
-              e.x = Math.max(0, Math.min(worldW - ES, e.x));
+              e.x = Math.max(0, Math.min(worldW - ew, e.x));
               // 穴に落ちたら除去
               if (e.y > worldH + TILE_SIZE) { eng.entities.splice(ei, 1); continue; }
             }
@@ -4620,7 +4636,7 @@ const lose = (msg: string) => {
                           <div key={id} className={`rounded-lg border ${selectedTileId === id ? 'border-blue-500 bg-gray-800' : 'border-gray-700 bg-gray-900'}`}>
                             <div className="flex items-center gap-2 p-2">
                               <button onClick={() => setSelectedTileId(id)} className="w-6 h-6 shrink-0 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: tile.color }}>
-                                {tile.imageUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={tile.imageUrl} alt="" className="w-full h-full object-cover" />}
+                                {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
                               </button>
                               <input value={tile.name} onChange={e => updateTile(id, { name: e.target.value })}
                                 className="flex-1 min-w-0 bg-transparent text-[11px] text-gray-200 outline-none border-b border-transparent focus:border-gray-600" />
@@ -5822,7 +5838,7 @@ const lose = (msg: string) => {
                         {Object.entries(gameData.tiles).filter(([id]) => Number(id) !== 0).map(([id, tile]) => (
                           <div key={id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5 border border-gray-800">
                             <div className="w-6 h-6 shrink-0 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: tile.color }}>
-                              {tile.imageUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={tile.imageUrl} alt="" className="w-full h-full object-cover" />}
+                              {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
                             </div>
                             <span className="text-[10px] text-gray-400 flex-1 truncate">{tile.name}</span>
                             {tile.imageRef && <button onClick={() => setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { ...p.tiles[Number(id)], imageRef: undefined, imageUrl: undefined } } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
