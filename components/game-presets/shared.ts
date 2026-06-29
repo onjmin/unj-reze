@@ -58,7 +58,13 @@ export interface EventPage {
   commands: EventCommand[];
 }
 
-export interface TileDef { name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string; }
+export interface TileDef {
+  name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string;
+  /** true: 長方形素材を正方形に潰さず、セル幅基準でアスペクト比を保ち下端固定で上方向へはみ出して描く
+   *  （1マスに置く単独の縦長素材＝ゴール旗など）。既定は cell-fill（マスいっぱい）で、土管トップ＋ボディのように
+   *  欠片を縦に積んでも継ぎ目が出ない。 */
+  imageOverflowTop?: boolean;
+}
 export interface PlayerDef {
   emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number;
   start: { x: number; y: number }; spriteRef?: string; spriteUrl?: string;

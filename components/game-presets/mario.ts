@@ -18,17 +18,24 @@ const smcWalk = (path: string, sx: number, sy: number, sw: number, sh: number) =
   `walk:smc:u:${smc(path)}#${sx},${sy},${sw},${sh}`;
 
 // ── タイル用 SMC URL ──────────────────────────────────────────────────────
-//  Retro_SMB1_Blocks (384×144, 16px/cell): ? ブロック (0,0)
-//  Bricks            (448×208, 16px/cell): 茶レンガブロック (0,0)
-//  Castle            (384×352, 16px/cell): 石床 (0,0)
-//  Large_Pipes       (448×192, スプライトシート): 土管
-//  Flag_Pole         (448×112, スプライトシート): ゴール旗
+//  すべてスプライトシート。#sx,sy,sw,sh で実スプライトを切り出す（クロップ無し＝シート丸ごと1枚絵、
+//  かつ各シートの (0,0) はマット背景の空白なので必ず実セルを指す）。SMCの不透明マット背景は
+//  GameMaker 側がロード時に自動透明化（クロマキー）する。16pxグリッド整列セルは col*16,row*16 で取れる。
+//  Retro_SMB1_Blocks (384×144): ?ブロック=(144,0) / 茶レンガ=(144,16)
+//  Castle            (384×352): 城の石床（斑点）=(48,64)
+//  Large_Pipes       (448×192): 単一の土管イラストで16pxグリッドに非整列。傘=pipeCap・胴=pipeBody の
+//                    2欠片に切り出し、マップにマス単位で積んで任意高の土管を作る（cell-fill描画。
+//                    胴は縦縞のみなので積んでも継ぎ目が出ない）。
+//  Flag_Pole         (448×112): 旗竿（緑球+ポール+土台）(240,2,16,42)。imageOverflowTop で上へ伸ばす
+//                    （ペナント旗は左側にあり除外）。
+const RETRO = 'SMW/Objects/Retro%20Skins/Retro_SMB1_Blocks.png';
 const T = {
-  brick:    smcTile('SMW/General%20tiles/Bricks.png',                        0, 0, 16, 16),
-  qBlock:   smcTile('SMW/Objects/Retro%20Skins/Retro_SMB1_Blocks.png',      0, 0, 16, 16),
-  stone:    smcTile('SMW/Tilesets/Castle.png',                               0, 0, 16, 16),
-  pipe:     smc('SMW/General%20tiles/Large_Pipes.png'),
-  goalFlag: smc('SMW/Objects/Goals%20%26%20Checkpoints/Flag_Pole.png'),
+  brick:    smcTile(RETRO,                                                  144, 16, 16, 16),
+  qBlock:   smcTile(RETRO,                                                  144, 0, 16, 16),
+  stone:    smcTile('SMW/Tilesets/Castle.png',                              48, 64, 16, 16),
+  pipeCap:  smcTile('SMW/General%20tiles/Large_Pipes.png',                  213, 0, 50, 24),
+  pipeBody: smcTile('SMW/General%20tiles/Large_Pipes.png',                  216, 30, 46, 18),
+  goalFlag: smcTile('SMW/Objects/Goals%20%26%20Checkpoints/Flag_Pole.png',  240, 2, 16, 42),
 };
 
 // ── 敵/NPC 用 SMC walk/static URL ────────────────────────────────────────
@@ -66,16 +73,17 @@ const tiles: PresetData['tiles'] = {
   0:  { name: '空',              color: '#5c94fc', passable: true  },
   1:  { name: 'ブロック',         color: '#8B4513', passable: false, imageRef: smcRef(T.brick),    imageUrl: T.brick    },
   2:  { name: 'ハテナ',           color: '#FFD700', passable: false, special: 'item',        imageRef: smcRef(T.qBlock),   imageUrl: T.qBlock   },
-  3:  { name: 'ゴール旗',         color: '#32CD32', passable: true,  special: 'goal',        imageRef: `url:${T.goalFlag}`, imageUrl: T.goalFlag },
-  4:  { name: '土管',             color: '#2aa02a', passable: false, imageRef: `url:${T.pipe}`,    imageUrl: T.pipe     },
+  3:  { name: 'ゴール旗',         color: '#32CD32', passable: true,  special: 'goal',        imageRef: smcRef(T.goalFlag), imageUrl: T.goalFlag, imageOverflowTop: true },
+  4:  { name: '土管',             color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeBody),  imageUrl: T.pipeBody },
   5:  { name: '岩床',             color: '#555566', passable: false, imageRef: smcRef(T.stone),    imageUrl: T.stone    },
   6:  { name: '音符ブロック',     color: '#e8b000', passable: false, special: 'bounce'       },
   7:  { name: 'チェックポイント', color: '#ff8800', passable: true,  special: 'checkpoint'   },
-  8:  { name: 'ツタ',             color: '#22aa22', passable: true,  special: 'vine',        imageRef: `url:${T.pipe}`, imageUrl: T.pipe     },
+  8:  { name: 'ツタ',             color: '#22aa22', passable: true,  special: 'vine',        imageRef: smcRef(T.pipeBody), imageUrl: T.pipeBody },
   9:  { name: '水',               color: '#3a78f0', passable: true,  special: 'water'        },
   10: { name: '溶岩',             color: '#ff4400', passable: true,  special: 'lava'         },
   11: { name: '壊せるブロック',   color: '#c08840', passable: false, special: 'destructible', imageRef: smcRef(T.brick), imageUrl: T.brick },
   12: { name: 'P スイッチ',       color: '#4444ff', passable: false, special: 'pswitch'      },
+  13: { name: '土管トップ',       color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeCap),  imageUrl: T.pipeCap   },
 };
 
 // ── シーン1：地上ステージ ────────────────────────────────────────────────────
@@ -87,7 +95,9 @@ const scene1Map = Array.from({ length: ROWS }, (_, y) =>
       const h = x - (WCOLS - 5);
       if (y <= ROWS - 3 && y >= ROWS - 2 - h) return 1;
     }
-    if ((x === 9 && y >= ROWS - 4) || (x === 20 && y >= ROWS - 5)) return 4;
+    // 土管：最上段が傘(13)、その下は胴(4)を積む
+    if (x === 9  && y >= ROWS - 4) return y === ROWS - 4 ? 13 : 4;
+    if (x === 20 && y >= ROWS - 5) return y === ROWS - 5 ? 13 : 4;
     if ((y === ROWS - 6 && (x === 5 || x === 6)) || (y === ROWS - 7 && x === 15)) return 2;
     if (y === ROWS - 8 && x === 10) return 6;               // 音符ブロック
     if (y === ROWS - 9 && (x >= 5 && x <= 7 || x >= 15 && x <= 17)) return 1;
@@ -154,7 +164,7 @@ const scene2Map = Array.from({ length: ROWS }, (_, y) =>
   Array.from({ length: COLS }, (_, x) => {
     if (y <= 1) return 5;
     if (y >= ROWS - 2) return 5;
-    if (x >= COLS - 3 && x <= COLS - 2 && y >= ROWS - 4) return 4;
+    if (x === COLS - 3 && y >= ROWS - 4) return y === ROWS - 4 ? 13 : 4;  // 土管（傘+胴）
     if (y === ROWS - 5 && x >= 3 && x <= 7) return 5;
     if (y === ROWS - 7 && x >= 10 && x <= 14) return 5;
     if (y === ROWS - 9 && x >= 7 && x <= 11) return 1;
@@ -191,7 +201,7 @@ const scene3Map = Array.from({ length: ROWS }, (_, y) =>
   Array.from({ length: COLS }, (_, x) => {
     if (y <= 1) return 5;
     if (y >= ROWS - 2) return 5;
-    if (x >= COLS - 3 && x <= COLS - 2 && y >= ROWS - 4) return 4;
+    if (x === COLS - 3 && y >= ROWS - 4) return y === ROWS - 4 ? 13 : 4;  // 土管（傘+胴）
     if (y === ROWS - 5 && x % 3 === 0 && x > 1 && x < COLS - 4) return 2;
     if (y === ROWS - 8 && x % 4 === 1 && x > 1 && x < COLS - 4) return 6;  // 音符ブロック
     if (y === ROWS - 6 && x >= 4 && x <= 8) return 5;

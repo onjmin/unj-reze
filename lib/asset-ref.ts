@@ -120,6 +120,11 @@ export interface WalkRef {
    * SMC 形式アトラスで特定キャラのフレームを切り出す際に使用。
    */
   crop?: [number, number, number, number];
+  /**
+   * SMC ストリップのコマ数（省略時は lib/smc-sprite.ts が正方形コマとして幅/高さで自動算出）。
+   * 非正方形コマ（縦長の敵など）のとき #sx,sy,sw,sh,frames の5番目で明示する。
+   */
+  frames?: number;
 }
 
 const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc']);
@@ -151,14 +156,16 @@ export function parseWalkRef(raw: string): WalkRef | null {
         const hashIdx = rawUrl.indexOf('#');
         let url = rawUrl;
         let crop: [number, number, number, number] | undefined;
+        let frames: number | undefined;
         if (hashIdx !== -1) {
           url = rawUrl.slice(0, hashIdx);
           const parts = rawUrl.slice(hashIdx + 1).split(',').map(Number);
-          if (parts.length === 4 && parts.every(n => !isNaN(n))) {
-            crop = parts as [number, number, number, number];
+          if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
+            crop = parts.slice(0, 4) as [number, number, number, number];
+            if (parts.length >= 5 && !isNaN(parts[4]) && parts[4] > 0) frames = parts[4];
           }
         }
-        return { stdId: maybeStd, source: { kind: 'url', url }, crop };
+        return { stdId: maybeStd, source: { kind: 'url', url }, crop, frames };
       }
       if (srcStr.startsWith('p:')) {
         const id = parseInt(srcStr.slice(2), 10);
