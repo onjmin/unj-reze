@@ -1,4 +1,5 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS } from './shared';
+import { resolveSMCUrl } from '../../lib/smc-helper';
 import { sAnimUrl as sa } from '@/lib/rpgen-assets';
 
 // SMC-released-sprites (Level-Share-Square/SMC-released-sprites) via jsDelivr CDN
@@ -49,20 +50,20 @@ const T = {
 //   Dry_Bones   448× 96  →  2フレーム (176,0,48,32,2)
 //   Blazin_Boos 448×272  →  4フレーム (184,0,80,16,4)
 const E = {
-  goombaRef:   smcWalk('SMW/Enemies/Common%20Enemies/Goombas.png',          160, 0, 96, 16, 3),
-  goombaUrl:   smc('SMW/Enemies/Common%20Enemies/Goombas.png'),
-  koopaRef:    smcWalk('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png',      200, 0, 32, 32, 2),
-  koopaUrl:    smc('SMAS/Enemies/Shell%20Enemies/Beach_Koopa.png'),
-  bobOmbRef:   smcWalk('SMW/Enemies/Artillery/Bob-omb.png',                  184, 0, 32, 16, 2),
-  bobOmbUrl:   smc('SMW/Enemies/Artillery/Bob-omb.png'),
-  dryBonesRef: smcWalk('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png',       176, 0, 48, 32, 2),
-  dryBonesUrl: smc('SMAS/Enemies/Castle%20Enemies/Dry_Bones.png'),
-  booRef:      smcWalk('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png',       184, 0, 80, 16, 4),
-  booUrl:      smc('SMW/Enemies/Ghost%20Enemies/Blazin_Boos.png'),
-  toadRef:     `walk:smc:u:${smc('SMW/Objects/NPCs/Toad_NPCs.png')}#0,0,32,64,1`,
-  toadUrl:     smc('SMW/Objects/NPCs/Toad_NPCs.png'),
-  princessRef: `walk:smc:u:${smc('SMW/Objects/NPCs/Princesses.png')}#64,0,64,96,1`,
-  princessUrl: smc('SMW/Objects/NPCs/Princesses.png'),
+  goombaRef:   'walk:smc_json:Goomba',
+  goombaUrl:   resolveSMCUrl('images/goomba-sheet0.png'),
+  koopaRef:    'walk:smc_json:KoopaTroopa',
+  koopaUrl:    resolveSMCUrl('images/koopatroopa-sheet0.png'),
+  bobOmbRef:   'walk:smc_json:Bobomb',
+  bobOmbUrl:   resolveSMCUrl('images/bobomb-sheet0.png'),
+  dryBonesRef: 'walk:smc_json:DryBones',
+  dryBonesUrl: resolveSMCUrl('images/drybones-sheet0.png'),
+  booRef:      'walk:smc_json:Boo',
+  booUrl:      resolveSMCUrl('images/bootrail-sheet1.png'),
+  toadRef:     'walk:smc_json:NPC:1NPC0',
+  toadUrl:     resolveSMCUrl('images/npc-sheet0.png'),
+  princessRef: 'walk:smc_json:NPC:1NPC1',
+  princessUrl: resolveSMCUrl('images/npc-sheet0.png'),
 };
 
 // プレイヤー (マリオ): SMC に基本歩行スプライトなし → RPGen #90 を維持
@@ -77,7 +78,7 @@ const tiles: PresetData['tiles'] = {
   1:  { name: 'ブロック',         color: '#8B4513', passable: false, imageRef: smcRef(T.brick),    imageUrl: T.brick    },
   2:  { name: 'ハテナ',           color: '#FFD700', passable: false, special: 'item',        imageRef: smcRef(T.qBlock),   imageUrl: T.qBlock   },
   3:  { name: 'ゴール旗',         color: '#32CD32', passable: true,  special: 'goal',        imageRef: smcRef(T.goalFlag), imageUrl: T.goalFlag, imageOverflowTop: true },
-  4:  { name: '土管',             color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeBody),  imageUrl: T.pipeBody },
+  4:  { name: '土管',             color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeBody),  imageUrl: T.pipeBody, imageScale2x: true },
   5:  { name: '岩床',             color: '#555566', passable: false, imageRef: smcRef(T.stone),    imageUrl: T.stone    },
   6:  { name: '音符ブロック',     color: '#e8b000', passable: false, special: 'bounce'       },
   7:  { name: 'チェックポイント', color: '#ff8800', passable: true,  special: 'checkpoint'   },
@@ -86,7 +87,7 @@ const tiles: PresetData['tiles'] = {
   10: { name: '溶岩',             color: '#ff4400', passable: true,  special: 'lava'         },
   11: { name: '壊せるブロック',   color: '#c08840', passable: false, special: 'destructible', imageRef: smcRef(T.brick), imageUrl: T.brick },
   12: { name: 'P スイッチ',       color: '#4444ff', passable: false, special: 'pswitch'      },
-  13: { name: '土管トップ',       color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeCap),  imageUrl: T.pipeCap   },
+  13: { name: '土管トップ',       color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeCap),  imageUrl: T.pipeCap,   imageScale2x: true, imageOverflowTop: true },
 };
 
 // ── シーン1：地上ステージ ────────────────────────────────────────────────────
@@ -136,11 +137,11 @@ const scene1: SceneDef = {
     newObject({ emoji: '🐟', col: 12, row: ROWS - 4, behavior: 'patrolV', speed: 1.5, hazard: true,  hp: 1, bullet: 'none',
       name: 'プクプク' }),
     // キノピオ NPC (SMC: Toad_NPCs.png 静止表示)
-    newObject({ emoji: '🍄', col: 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
+    newObject({ emoji: '🍄', col: 3, row: ROWS - 4, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'キノピオだよ！音符ブロックを下から叩くと高くジャンプできるよ！チェックポイントを踏むと途中から再開できるよ！',
       w: 32, h: 64, spriteRef: E.toadRef, spriteUrl: E.toadUrl }),
     // ピーチ姫（ゴール付近 NPC, SMC: Princesses.png 静止表示）
-    newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
+    newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 4, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！クッパをやっつけて！',
       w: 32, h: 64, spriteRef: E.princessRef, spriteUrl: E.princessUrl }),
     // 土管ワープ→地下
@@ -233,8 +234,8 @@ export const mario: PresetData = {
     emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -18, w: 24, h: 64,
     start: { x: 50, y: 50 },
     hearts: 8,
-    spriteRef: `walk:smc:u:${smc('SMW/Player%20%26%20Powerups/Tanooki_Suit.png')}#0,33,99,33,3`,
-    spriteUrl: smc('SMW/Player%20%26%20Powerups/Tanooki_Suit.png'),
+    spriteRef: 'walk:smc_json:PlayerSprite:2Idle0_3',
+    spriteUrl: resolveSMCUrl('images/playersprite-sheet0.png'),
   },
   tiles,
   map: JSON.parse(JSON.stringify(scene1Map)),

@@ -8,6 +8,7 @@ import { extractMmlFromContent, mmlToNotes, playMml } from '@/lib/mml';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
+import SMCAssetPanel from './SMCAssetPanel';
 
 export interface PickResult {
   ref: string;
@@ -23,7 +24,7 @@ interface ContentPickerProps {
   onClose: () => void;
 }
 
-type ImageTab = 'posts' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk';
+type ImageTab = 'posts' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc';
 type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe';
 
 export default function ContentPicker({ mode, userId, onPick, onClose }: ContentPickerProps) {
@@ -134,6 +135,7 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
               <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => setImageTab('rpgenSprite')}>🧩 素材</button>
               <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => setImageTab('rpgenWalk')}>🚶 歩行グラ</button>
               <button className={tabBtn(imageTab === 'walk')} onClick={() => setImageTab('walk')}>📥 投稿グラ</button>
+              <button className={tabBtn(imageTab === 'smc')} onClick={() => setImageTab('smc')}>🎮 SMC素材</button>
               <button className={tabBtn(imageTab === 'url')} onClick={() => setImageTab('url')}><Link2 size={12} />URL</button>
             </>
           ) : (
@@ -209,6 +211,9 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
           )}
           {mode === 'image' && imageTab === 'rpgenWalk' && (
             <RpgenAssetPanel kind="walk" onPick={onPick} />
+          )}
+          {mode === 'image' && imageTab === 'smc' && (
+            <SMCAssetPanel onPick={onPick} />
           )}
 
           {/* BGM: youtube */}

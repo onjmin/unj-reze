@@ -64,6 +64,9 @@ export interface TileDef {
    *  （1マスに置く単独の縦長素材＝ゴール旗など）。既定は cell-fill（マスいっぱい）で、土管トップ＋ボディのように
    *  欠片を縦に積んでも継ぎ目が出ない。 */
   imageOverflowTop?: boolean;
+  /** true: SMC素材の本来のサイズ（2倍比率）を崩さずに描画する。
+   *  土管の頭（Cap）や胴（Body）のように横幅が32pxを超える場合に、アスペクト比を保ったまま横にはみ出して描画する。 */
+  imageScale2x?: boolean;
 }
 export interface PlayerDef {
   emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number;

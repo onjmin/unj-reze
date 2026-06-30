@@ -12,6 +12,7 @@ import {
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
 import { mmlToNotes, playMml } from '@/lib/mml';
 import ContentPicker, { type PickResult } from './ContentPicker';
+import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
@@ -682,23 +683,59 @@ const SpriteThumbnail = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const walk = spriteRef ? parseWalkRef(spriteRef) : null;
-  const resolvedUrl = spriteUrl ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
-  const img = resolvedUrl ? imgCache.current.get(resolvedUrl) : undefined;
+  let resolvedUrl = spriteUrl ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+  let resolvedSMC = resolvedUrl;
+  let sxOffset = 0, syOffset = 0, swOffset = 0, shOffset = 0;
+  let hasSMCFrame = false;
+
+  if (walk?.stdId === 'smc_json' && resolvedUrl && walk.source.kind === 'url') {
+    const parts = walk.source.url.split(':');
+    const spriteKey = parts[1];
+    let animName = parts[2];
+    const spriteData = globalSmcMetadata?.[spriteKey];
+    if (spriteData) {
+      if (!animName) {
+        if (spriteKey === 'Goomba') animName = '2Walk0_0';
+        else if (spriteKey === 'KoopaTroopa') animName = '1Walk0';
+        else if (spriteKey === 'DryBones') animName = '1Walk0';
+        else if (spriteKey === 'Bobomb') animName = '1Walk0';
+        else if (spriteKey === 'Boo') animName = '1Idle0';
+        else animName = Object.keys(spriteData.animations)[0];
+      }
+      let anim = spriteData.animations[animName];
+      if (!anim) anim = Object.values(spriteData.animations)[0];
+      if (anim) {
+        resolvedSMC = resolveSMCUrl(anim.frames[0].image);
+        sxOffset = anim.frames[0].x;
+        syOffset = anim.frames[0].y;
+        swOffset = anim.frames[0].w;
+        shOffset = anim.frames[0].h;
+        hasSMCFrame = true;
+      }
+    }
+  }
+
+  const img = resolvedSMC ? imgCache.current.get(resolvedSMC) : undefined;
   const loaded = !!img && img.complete && img.naturalWidth > 0;
 
   useEffect(() => {
-    if (!loaded || !resolvedUrl || !img || !canvasRef.current) return;
+    if (!loaded || !resolvedSMC || !img || !canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const imgW = img.naturalWidth;
     const imgH = img.naturalHeight;
-    const srcImg = keyedCache.current.get(resolvedUrl) ?? img;
+    const srcImg = keyedCache.current.get(resolvedSMC) ?? img;
 
     let sx = 0, sy = 0, sw = imgW, sh = imgH;
 
-    if (walk?.crop) {
+    if (hasSMCFrame) {
+      sx = sxOffset;
+      sy = syOffset;
+      sw = swOffset;
+      sh = shOffset;
+    } else if (walk?.crop) {
       const [csx, csy, csw, csh] = walk.crop;
       const frames = smcFrameCount(walk.crop, walk.frames);
       sw = csw / frames;
@@ -706,9 +743,9 @@ const SpriteThumbnail = ({
       sx = csx;
       sy = csy;
     } else {
-      const hashIdx = resolvedUrl.indexOf('#');
+      const hashIdx = resolvedUrl!.indexOf('#');
       if (hashIdx !== -1) {
-        const frag = resolvedUrl.slice(hashIdx + 1);
+        const frag = resolvedUrl!.slice(hashIdx + 1);
         const parts = frag.split(',').map(n => parseInt(n, 10));
         if (parts.length >= 4 && parts.every(n => !isNaN(n))) {
           sx = parts[0];
@@ -745,7 +782,7 @@ const SpriteThumbnail = ({
 
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(srcImg, sx, sy, sw, sh, destX, destY, destW, destH);
-  }, [loaded, resolvedUrl, img, walk?.crop, walk?.stdId, walk?.frames, size]);
+  }, [loaded, resolvedSMC, img, walk?.crop, walk?.stdId, walk?.frames, size, hasSMCFrame, sxOffset, syOffset, swOffset, shOffset]);
 
   if (loaded && resolvedUrl) {
     return (
@@ -772,12 +809,32 @@ const SpriteThumbnail = ({
   );
 };
 
+let globalSmcMetadata: any = null;
+
+// SMC のスプライトは敵キャラの多くが「左向き」で描かれている（プレイヤー Mario / Toad は右向き）。
+// drawSprite は既定で「右向き素材・左移動時に水平反転」を前提とするため、左向き素材を
+// そのまま流すと進行方向と逆を向く＝ムーンウォークになる。これらは反転条件を逆にする。
+const SMC_LEFT_FACING = new Set(['Goomba', 'Bobomb', 'BobOmb', 'KoopaTroopa', 'DryBones', 'Boo']);
+
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [presetId, setPresetId] = useState<PresetId>('onjReze');
   const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.onjReze));
   const [title, setTitle] = useState(PRESETS.onjReze.name);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [smcMetadata, setSmcMetadata] = useState<any>(null);
+  useEffect(() => {
+    if (globalSmcMetadata) {
+      setSmcMetadata(globalSmcMetadata);
+      return;
+    }
+    getSmcMetadata()
+      .then(data => {
+        globalSmcMetadata = data;
+        setSmcMetadata(data);
+      })
+      .catch(e => console.error("Failed to load SMC metadata:", e));
+  }, []);
   /** 新規作成時の入口ヒーロー（デモ再生＋あそぶ/改造の選択）。playOnly/編集再開/埋め込み時は出さない。 */
   const [introOpen, setIntroOpen] = useState(!playOnly && !initialManifest && !embedded);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
@@ -786,6 +843,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
   const isDraggingStartRef = useRef(false);
+  const justStartedRef = useRef(false);
   // ── タイトル／エンディング画面ランタイム ──
   const [showTitle, setShowTitle] = useState(false);
   const [showEnding, setShowEnding] = useState(false);
@@ -933,6 +991,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const onjThrowCoolRef = useRef(0);  // 🎯投げ／💀首爆弾のクールダウン
 
   const bossDefeatedRef = useRef(false);
+  /** NPCに接触中のセリフ表示（フキダシではなく頭上に1文字ずつ表示） */
+  const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number } | null>(null);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
@@ -1509,10 +1569,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // spriteRef から URL を抽出して ensureImage する（Entity.def は spriteUrl を除外するため）
   const ensureImageFromRef = useCallback((spriteRef?: string, spriteUrl?: string) => {
-    ensureImage(spriteUrl);
+    const walk = spriteRef ? parseWalkRef(spriteRef) : null;
+    if (walk?.stdId !== 'smc_json') {
+      ensureImage(spriteUrl);
+    }
     if (!spriteRef) return;
-    const walk = parseWalkRef(spriteRef);
-    if (walk?.source.kind === 'url') ensureImage(walk.source.url);
+    if (walk?.source.kind === 'url') {
+      if (walk.stdId === 'smc_json') {
+        const parts = walk.source.url.split(':');
+        const spriteKey = parts[1];
+        let animName = parts[2];
+        const spriteData = globalSmcMetadata?.[spriteKey];
+        if (spriteData) {
+          if (!animName) {
+            if (spriteKey === 'Goomba') animName = '2Walk';
+            else if (spriteKey === 'KoopaTroopa') animName = '2Walk';
+            else if (spriteKey === 'DryBones') animName = '1Walk';
+            else if (spriteKey === 'Bobomb') animName = 'Walk';
+            else if (spriteKey === 'Boo') animName = '1Idle';
+            else animName = Object.keys(spriteData.animations)[0];
+          }
+          let anim = spriteData.animations[animName];
+          if (!anim) anim = Object.values(spriteData.animations)[0];
+          if (anim) {
+            ensureImage(resolveSMCUrl(anim.frames[0].image));
+          }
+        }
+      } else {
+        ensureImage(walk.source.url);
+      }
+    }
   }, [ensureImage]);
 
   useEffect(() => {
@@ -1523,7 +1609,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     ensureImage(gameData.mapBgUrl);
     ensureImage(gameData.titleScreen?.bgUrl);
     ensureImage(gameData.ending?.bgUrl);
-  }, [gameData, objTemplate, ensureImage]);
+  }, [gameData, objTemplate, ensureImage, smcMetadata]);
 
   const resetGame = useCallback((id: PresetId) => {
     const data = clone(PRESETS[id]);
@@ -1553,6 +1639,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const restart = useCallback(() => {
     const eng = engineRef.current;
     eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
+    justStartedRef.current = true;
     eng.keys.clear();
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
     actionDirRef.current = 1; actionShootCoolRef.current = 0;
@@ -1791,7 +1878,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       actionWeaponEnergyRef.current = {};
       actionWeaponsRef.current.forEach(w => { actionWeaponEnergyRef.current[w] = MAX_WEAPON_ENERGY; });
 
-      bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false;
+      bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false; npcTalkRef.current = null;
       bombCountRef.current = gameData.player.bombCount ?? 3;
       bombInvulnRef.current = 0; bombCooldownRef.current = 0;
       bombPickupsRef.current = []; spellCardTriggeredRef.current = new Set();
@@ -1862,10 +1949,109 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       overrideDir?: WayKey,
     ) => {
       const walk = def.spriteRef ? parseWalkRef(def.spriteRef) : null;
-      // spriteUrl が undefined の場合（Entity.def は spriteUrl を除外する型）、
-      // spriteRef の source URL を fallback として使う
       const resolvedUrl = def.spriteUrl
         ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+
+      // 向き・移動を画面上の移動量から導出（エンジン非依存）
+      const key = animKey ?? resolvedUrl ?? 'unknown';
+      const prev = walkInst.get(key);
+      let dx = 0, dy = 0;
+      if (prev) { dx = x - prev.px; dy = y - prev.py; }
+      let dir: WayKey = overrideDir ?? prev?.dir ?? 's';
+      const moving = Math.hypot(dx, dy) > 0.15;
+      if (!overrideDir && moving) {
+        if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
+        else dir = dirFromDelta(dx, dy) ?? dir;
+      }
+      walkInst.set(key, { px: x, py: y, dir: overrideDir ?? dir });
+
+      // SMC Metadata-driven rendering (smc_json)
+      if (walk?.stdId === 'smc_json' && walk.source.kind === 'url') {
+        const parts = walk.source.url.split(':');
+        const spriteKey = parts[1];
+        let animName = parts[2];
+        const spriteData = globalSmcMetadata?.[spriteKey];
+        if (spriteData) {
+          if (spriteKey === 'PlayerSprite' && animKey === 'player') {
+            const pObj = engineRef.current.player;
+            const action = !pObj.isGrounded ? 'Jump' : (Math.abs(pObj.vx) > 0.15 ? 'Walk' : 'Idle');
+            animName = (animName || '2Idle0_3').replace(/(Idle|Walk|Jump)/g, action);
+          } else if (spriteKey === 'NPC') {
+            const base = animName || '1NPC0';
+            const isMoving = Math.hypot(dx, dy) > 0.15;
+            if (isMoving && spriteData.animations[`${base}_Walk`]) {
+              animName = `${base}_Walk`;
+            } else {
+              animName = base;
+            }
+          }
+
+          if (!animName) {
+            if (spriteKey === 'Goomba') animName = '2Walk';
+            else if (spriteKey === 'KoopaTroopa') animName = '2Walk';
+            else if (spriteKey === 'DryBones') animName = '1Walk';
+            else if (spriteKey === 'Bobomb') animName = 'Walk';
+            else if (spriteKey === 'Boo') animName = '1Idle';
+            else animName = Object.keys(spriteData.animations)[0];
+          }
+
+          let anim = spriteData.animations[animName];
+          if (!anim) anim = Object.values(spriteData.animations)[0];
+          if (anim) {
+            // SMC のアニメは各コマが別シートにまたがることがある
+            // （例: Goomba 2Walk は f0=tiles-sheet5, f1=goomba-sheet0）。
+            // frames[0] のシート固定で各コマの矩形を切ると別フレームに化けるので、
+            // 全コマの画像をプリロードし、描画は選択コマ自身の画像から行う。
+            anim.frames.forEach((f: any) => {
+              const u = resolveSMCUrl(f.image);
+              if (!imgCache.current.get(u)) ensureImage(u);
+            });
+            const framesCount = anim.frames.length;
+            let frameIndex = 0;
+            if (framesCount > 1) {
+              const fps = anim.speed || 7;
+              frameIndex = Math.floor((performance.now() / 1000) * fps) % framesCount;
+            }
+            let frame = anim.frames[frameIndex];
+            let smcUrl = resolveSMCUrl(frame.image);
+            let targetImg = imgCache.current.get(smcUrl);
+            // 選択コマの画像が未ロードなら先頭コマにフォールバック（チラつき防止）。
+            if (!(targetImg && targetImg.complete && targetImg.naturalWidth > 0)) {
+              frame = anim.frames[0];
+              smcUrl = resolveSMCUrl(frame.image);
+              targetImg = imgCache.current.get(smcUrl);
+            }
+            if (targetImg && targetImg.complete && targetImg.naturalWidth > 0) {
+              const srcImg = keyedCache.current.get(smcUrl) ?? targetImg;
+              const sx = frame.x;
+              const sy = frame.y;
+              const sw = frame.w;
+              const sh = frame.h;
+
+              // 左向き素材は反転条件を逆転させ、常に進行方向を向かせる。
+              const flip = SMC_LEFT_FACING.has(spriteKey) ? dir === 'd' : dir === 'a';
+
+              const zoom = 1.0;
+              const destW = sw * zoom;
+              const destH = sh * zoom;
+              const destX = x + (w - destW) / 2;
+              const destY = y + (h - destH);
+
+              if (flip) {
+                ctx.save();
+                ctx.translate(destX + destW, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(srcImg, sx, sy, sw, sh, 0, destY, destW, destH);
+                ctx.restore();
+              } else {
+                ctx.drawImage(srcImg, sx, sy, sw, sh, destX, destY, destW, destH);
+              }
+              return;
+            }
+          }
+        }
+      }
+
       const img = resolvedUrl ? imgCache.current.get(resolvedUrl) : undefined;
       const loaded = !!img && img.complete && img.naturalWidth > 0;
 
@@ -1878,18 +2064,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             : standardById(walk.stdId);
           walkStdCache.set(resolvedUrl, std);
         }
-        // 向き・移動を画面上の移動量から導出（エンジン非依存）
-        const key = animKey ?? resolvedUrl;
-        const prev = walkInst.get(key);
-        let dx = 0, dy = 0;
-        if (prev) { dx = x - prev.px; dy = y - prev.py; }
-        let dir: WayKey = overrideDir ?? prev?.dir ?? 's';
-        const moving = Math.hypot(dx, dy) > 0.15;
-        if (!overrideDir && moving) {
-          if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
-          else dir = dirFromDelta(dx, dy) ?? dir;
-        }
-        walkInst.set(key, { px: x, py: y, dir: overrideDir ?? dir });
 
         // 描画ソース: マット透明化済み canvas があればそれを使う（寸法は元画像から取る）。
         const srcImg: CanvasImageSource = keyedCache.current.get(resolvedUrl) ?? img!;
@@ -2007,6 +2181,7 @@ const lose = (msg: string) => {
           const p2 = engineRef.current.player;
           p2.x = gameData.player.start.x; p2.y = gameData.player.start.y;
           p2.vx = 0; p2.vy = 0;
+          justStartedRef.current = true;
           engineRef.current.bullets = [];
           invulnRef.current = 180; // 3 秒間点滅無敵
           isPlayerDeadRef.current = false;
@@ -2037,6 +2212,36 @@ const lose = (msg: string) => {
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
       const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current);
+      
+      // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
+      if (justStartedRef.current && isPlaying && !frozen) {
+        justStartedRef.current = false;
+        let safety = 0;
+        while (safety < 128) {
+          let overlapping = false;
+          for (let dy = 2; dy <= pData.h; dy += 8) {
+            const yOffset = Math.min(dy, pData.h - 2);
+            const t1 = getTile(p.x + 2, p.y + yOffset);
+            const t2 = getTile(p.x + pData.w - 2, p.y + yOffset);
+            if ((t1 && !t1.info.passable) || (t2 && !t2.info.passable)) {
+              overlapping = true;
+              break;
+            }
+          }
+          if (!overlapping) {
+            // 接地判定ライン（最下部）の重なりもチェック
+            const t3 = getTile(p.x + 2, p.y + pData.h);
+            const t4 = getTile(p.x + pData.w - 2, p.y + pData.h);
+            if ((t3 && !t3.info.passable) || (t4 && !t4.info.passable)) {
+              overlapping = true;
+            }
+          }
+          if (!overlapping) break;
+          p.y -= 1;
+          safety++;
+        }
+      }
+
       if (!battleRef.current.active) {
         if (!isPlaying) {
           p.vx = 0; p.vy = 0; p.isGrounded = false;
@@ -2606,8 +2811,35 @@ const lose = (msg: string) => {
               }
               break;
             }
-            else if (d.message && !e.talked) { e.talked = true; showGameMsg(d.message, 'instant', () => {}); }
-          } else if (!d.hazard && !d.pages) { e.talked = false; }
+            else if (d.message && !e.talked) { e.talked = true; npcTalkRef.current = { entity: e, text: d.message, startTime: performance.now() }; }
+          } else if (!d.hazard && !d.pages) { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
+        }
+
+        // ── 敵同士の衝突反射（横歩き系のみ。テレサ＝chase 等はすり抜ける）──
+        if (gameData.engine === 'action') {
+          const ents = eng.entities;
+          const reflects = (b: NpcBehavior) => b === 'patrolH' || b === 'walker';
+          for (let a = 0; a < ents.length; a++) {
+            const ea = ents[a];
+            if (!reflects(ea.def.behavior)) continue;
+            const aw = ea.def.w ?? TILE_SIZE, ah = ea.def.h ?? TILE_SIZE;
+            for (let b = a + 1; b < ents.length; b++) {
+              const eb = ents[b];
+              if (!reflects(eb.def.behavior)) continue;
+              const bw = eb.def.w ?? TILE_SIZE, bh = eb.def.h ?? TILE_SIZE;
+              // AABB が重なったら、互いに逆方向へ歩き出す（反射）
+              if (ea.x < eb.x + bw && ea.x + aw > eb.x && ea.y < eb.y + bh && ea.y + ah > eb.y) {
+                const ov = Math.min(ea.x + aw, eb.x + bw) - Math.max(ea.x, eb.x);
+                const left = ea.x <= eb.x ? ea : eb;
+                const right = left === ea ? eb : ea;
+                // 重なりを解消してから反転（左の敵は左へ、右の敵は右へ）
+                left.x = Math.max(0, left.x - ov / 2);
+                right.x = Math.min(worldW - (right.def.w ?? TILE_SIZE), right.x + ov / 2);
+                left.vx = -Math.abs(left.vx || left.def.speed);
+                right.vx = Math.abs(right.vx || right.def.speed);
+              }
+            }
+          }
         }
 
         if (!dead) {
@@ -2903,7 +3135,18 @@ const lose = (msg: string) => {
               const sh = imgCrop ? imgCrop[3] : img.naturalHeight;
               // マット透明化済み canvas があればそれを描画ソースに（寸法は元画像と同じ）。
               const drawSrc = keyedCache.current.get(rawImgUrl) ?? keyedCache.current.get(baseImgUrl) ?? img;
-              if (info.imageOverflowTop) {
+              if (info.imageScale2x) {
+                const zoom = 2.0;
+                const destW = sw * zoom;
+                const destH = sh * zoom;
+                const destX = x * TILE_SIZE + (TILE_SIZE - destW) / 2;
+                if (info.imageOverflowTop) {
+                  const destY = y * TILE_SIZE + TILE_SIZE - destH;
+                  ctx.drawImage(drawSrc, sx, sy, sw, sh, destX, destY, destW, destH);
+                } else {
+                  ctx.drawImage(drawSrc, sx, sy, sw, sh, destX, y * TILE_SIZE, destW, TILE_SIZE);
+                }
+              } else if (info.imageOverflowTop) {
                 // セル幅に合わせ高さをアスペクト比から算出。下端固定で縦長は上へはみ出す。
                 const dH = sw > 0 ? Math.round(sh * (TILE_SIZE / sw)) : TILE_SIZE;
                 ctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE, y * TILE_SIZE + TILE_SIZE - dH, TILE_SIZE, dH);
@@ -2925,6 +3168,24 @@ const lose = (msg: string) => {
           const e = eng.entities[ei];
           drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
           if (e.def.hp > 1) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
+          // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）
+          if (npcTalkRef.current && npcTalkRef.current.entity === e) {
+            const { text, startTime } = npcTalkRef.current;
+            const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
+            const display = text.slice(0, shown);
+            if (display) {
+              ctx.font = 'bold 11px monospace';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              const tw = ctx.measureText(display).width;
+              const px = e.x + (e.def.w ?? TILE_SIZE) / 2;
+              const py = e.y - 8;
+              ctx.fillStyle = 'rgba(0,0,0,0.6)';
+              ctx.fillRect(px - tw / 2 - 4, py - 13, tw + 8, 16);
+              ctx.fillStyle = '#fff';
+              ctx.fillText(display, px, py);
+            }
+          }
         }
         ctx.fillStyle = 'yellow';
         for (const b of eng.bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -3430,13 +3691,13 @@ const lose = (msg: string) => {
     if (editorTab === 'map') {
       // 🏁マーカー付近クリック → 初期位置ドラッグ開始
       const startCol = Math.floor(gameData.player.start.x / TILE_SIZE);
-      const startRow = Math.floor(gameData.player.start.y / TILE_SIZE);
+      const startRow = Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE);
       const isPointerDown = ('buttons' in e ? (e as React.MouseEvent).buttons === 1 : true);
       if (isPointerDown && !isDraggingStartRef.current && Math.abs(col - startCol) <= 1 && Math.abs(row - startRow) <= 1) {
         isDraggingStartRef.current = true;
       }
       if (isDraggingStartRef.current) {
-        const sx = col * TILE_SIZE, sy = row * TILE_SIZE;
+        const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameData.player.h;
         setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
         engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
         setEditScroll(Math.max(0, Math.min(worldCols * TILE_SIZE - VIEW_W, sx + gameData.player.w / 2 - VIEW_W / 2)));
@@ -3790,6 +4051,7 @@ const lose = (msg: string) => {
             setActivePreviewKey(null);
             if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
             setIsPlaying(true);
+            justStartedRef.current = true;
           }}
             className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
             {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
@@ -3830,6 +4092,21 @@ const lose = (msg: string) => {
               >
                 🎨 SMC sprites
               </a>
+            )}
+
+            {/* ゲーム編集時は画面右下に主人公の現在座標を表示(x,y) */}
+            {!isPlaying && !introOpen && !showTitle && !showEnding && (
+              <div className="absolute bottom-2 right-2 z-30 bg-black/75 backdrop-blur-sm text-[11px] font-mono text-gray-200 px-2.5 py-1.5 rounded border border-white/10 select-none shadow-lg flex flex-col gap-0.5 pointer-events-none align-right text-right">
+                <div className="flex items-center justify-end gap-1">
+                  <span className="text-emerald-400 font-bold">🏁</span>
+                  <span className="font-semibold text-white">
+                    ({Math.floor(gameData.player.start.x / TILE_SIZE)}, {Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE)})
+                  </span>
+                </div>
+                <div className="text-[9px] text-gray-500">
+                  px: ({gameData.player.start.x}, {gameData.player.start.y})
+                </div>
+              </div>
             )}
             {/* ── タイトル画面オーバーレイ ── */}
             {showTitle && gameData.titleScreen && (

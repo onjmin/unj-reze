@@ -127,7 +127,7 @@ export interface WalkRef {
   frames?: number;
 }
 
-const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc']);
+const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc', 'smc_json']);
 
 export function buildWalkRef(stdId: string, source: WalkRef['source']): string {
   const src = source.kind === 'url' ? `u:${source.url}` : `p:${source.postId}`;
@@ -150,6 +150,15 @@ export function parseWalkRef(raw: string): WalkRef | null {
     const maybeStd = rest.slice(0, colon);
     if (WALK_STD_IDS.has(maybeStd)) {
       const srcStr = rest.slice(colon + 1);
+      if (maybeStd === 'smc_json') {
+        const parts = srcStr.split(':');
+        const spriteKey = parts[0];
+        const animName = parts[1] || '';
+        return {
+          stdId: 'smc_json',
+          source: { kind: 'url', url: `smc_json:${spriteKey}:${animName}` }
+        };
+      }
       if (srcStr.startsWith('u:')) {
         const rawUrl = srcStr.slice(2);
         // クロップ指定 (#sx,sy,sw,sh) をURLフラグメントとして解析
