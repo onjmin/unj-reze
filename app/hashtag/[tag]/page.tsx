@@ -1,7 +1,10 @@
 import { db as mockDb } from '@/lib/mock-db';
 import HashtagView from '@/components/HashtagView';
 
+export const dynamic = 'force-dynamic';
+
 export function generateStaticParams() {
+  if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
   const tags = new Set<string>();
   for (const p of mockDb.getPosts()) {
     const matches = p.content.match(/#[^\s#]+/g);
