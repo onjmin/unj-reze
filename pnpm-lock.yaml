@@ -35,6 +35,9 @@ importers:
       sql.js:
         specifier: 1.14.1
         version: 1.14.1
+      tiny-segmenter:
+        specifier: 0.2.0
+        version: 0.2.0
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -2117,6 +2120,9 @@ packages:
   tapable@2.3.3:
     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
     engines: {node: '>=6'}
+
+  tiny-segmenter@0.2.0:
+    resolution: {integrity: sha512-m+aTJQ/CUBKurLaJRpLmJiwcL+Gpkzft5ZYnRU9AkuO45Y/k/2iJmuLEbN1XLrq6N3kDVyIUCCeqRzQx0feBag==}
 
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
@@ -4616,6 +4622,8 @@ snapshots:
   tailwindcss@4.3.0: {}
 
   tapable@2.3.3: {}
+
+  tiny-segmenter@0.2.0: {}
 
   tinyglobby@0.2.17:
     dependencies:

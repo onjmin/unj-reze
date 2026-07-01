@@ -204,6 +204,12 @@ export interface ObjectDef {
   miniScript?: string;
   /** 所属フェーズ番号（touhou エンジン、phases 使用時）。未指定=0。 */
   phase?: number;
+  /** action（マリオ系）: 上から踏むと倒せる敵（クリボー型）。SMC core 準拠。
+   *  未指定/false の敵は上に乗ってもダメージを受ける（テレサ・プクプク等）。 */
+  stompable?: boolean;
+  /** action（マリオ系）: 踏むと甲羅化する敵（ノコノコ型）。shell=true は stompable を含意。
+   *  甲羅は静止→蹴ると滑走して他の敵を巻き込み、横から触れるとプレイヤーがダメージを受ける。 */
+  shell?: boolean;
 }
 
 /** スペルカード定義（touhou ボス用）。HP が triggerHp 以下になったとき発動する。 */

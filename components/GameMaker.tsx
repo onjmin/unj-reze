@@ -13,6 +13,7 @@ import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
 import { mmlToNotes, playMml } from '@/lib/mml';
 import ContentPicker, { type PickResult } from './ContentPicker';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
+import { segment } from '@/lib/tiny-segmenter';
 
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
@@ -43,6 +44,55 @@ function colorFromId(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return `hsl(${h % 360}, 70%, 55%)`;
+}
+
+/** 行頭に来てはいけない文字（禁則：句読点・閉じ括弧・促音/拗音など） */
+const KINSOKU_LINE_HEAD_FORBIDDEN = new Set(
+  '、。，．・：；？！ーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ）］｝」』】〉》ヽヾゝゞ々）〕,.!?)]}'.split(''),
+);
+
+/** 文節（単語）単位で詰め、語の途中で改行しないよう wrapSegments で改行する */
+function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    // 形態素的な単語境界でトークン化し、句読点等は直前の語にくっつける
+    const rawTokens = segment(paragraph);
+    const tokens: string[] = [];
+    for (const t of rawTokens) {
+      if (tokens.length > 0 && KINSOKU_LINE_HEAD_FORBIDDEN.has(t[0])) {
+        tokens[tokens.length - 1] += t;
+      } else {
+        tokens.push(t);
+      }
+    }
+
+    let line = '';
+    for (const token of tokens) {
+      const candidate = line + token;
+      if (line && ctx.measureText(candidate).width > maxWidth) {
+        lines.push(line);
+        line = '';
+      }
+      // 1トークン自体が最大幅を超える場合は文字単位でも改行する
+      if (ctx.measureText(line + token).width > maxWidth && !line) {
+        let chunk = '';
+        for (const ch of token) {
+          const next = chunk + ch;
+          if (chunk && ctx.measureText(next).width > maxWidth) {
+            lines.push(chunk);
+            chunk = ch;
+          } else {
+            chunk = next;
+          }
+        }
+        line = chunk;
+      } else {
+        line += token;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
 }
 
 type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound' | 'screen';
@@ -171,8 +221,22 @@ interface Entity {
   spellState?: SpellExecState;
   moveTarget?: MoveTarget;
   scriptCtx?: { cancelled: boolean };
+  /** マリオ系・ノコノコの甲羅状態。undefined=通常, 'idle'=静止甲羅, 'slide'=滑走甲羅。SMC core 準拠。 */
+  shellState?: 'idle' | 'slide';
+  /** 甲羅を蹴った直後、プレイヤーへ即ダメージを与えないための猶予フレーム。 */
+  shellGrace?: number;
 }
-interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; }
+// ── マリオ系アクションの落下・踏みつけ定数（SMC core 準拠）─────────────────
+/** 終端速度 px/frame。32px タイルのすり抜け（トンネリング）を防ぎ、SMC 風の落下感を出す。 */
+const ACTION_MAX_FALL = 20;
+/** ジャンプ力に対する踏みつけ跳ね返り比（敵を踏んだ瞬間の上昇速度）。 */
+const STOMP_BOUNCE_RATIO = 0.7;
+/** 蹴られた甲羅の滑走速度 px/frame。プレイヤー速度より速く設定。 */
+const SHELL_SPEED = 7;
+/** 甲羅を蹴った直後、プレイヤーへダメージを与えない猶予フレーム数。 */
+const SHELL_KICK_GRACE = 12;
+
+interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; color?: string; bounce?: boolean; }
 interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean; accel?: number; maxSpeed?: number; vanishIn?: number; }
 
 // ── 空間グリッド（弾幕当たり判定高速化）────────────────────────────────────
@@ -977,6 +1041,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const actionWeaponEnergyRef = useRef<Record<string, number>>({});
   const MAX_WEAPON_ENERGY = 28;
   const prevNextWeaponRef = useRef(false);
+  // ── マリオ系パワーアップ（ハイブリッド：ハートHP と スーパー/ファイア状態を併用）──
+  const marioPowerRef = useRef<'super' | 'fire'>('super');  // 既定スーパー、ファイアフラワーでファイア
+  const coinsRef = useRef(0);                                 // コイン枚数（ハテナ・回収）
+  const starTimerRef = useRef(0);                             // スター無敵の残フレーム
+  const STAR_DURATION = 600;                                  // スター無敵時間（約10秒 @60fps）
+  const usedBlocksRef = useRef<Set<string>>(new Set());       // 叩き済みハテナ "col,row"
   // ── onjReze エンジン（トップビュー・アクションRPG）──
   const onjRezeDirRef = useRef<{ x: number; y: number }>({ x: 0, y: 1 });  // プレイヤーの向き（4方向）
   const swordRef = useRef<{ active: number; cool: number; dir: { x: number; y: number }; hit: Set<string> }>(
@@ -1821,8 +1891,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const isTouhouWave = (o: ObjectDef) => gameData.engine === 'touhou' && !o.isBoss;
       const makeEntity = (o: ObjectDef): Entity => ({
         def: o, x: o.col * TILE_SIZE,
-        y: isTouhouWave(o) ? -TILE_SIZE * 2 : o.row * TILE_SIZE,
-        homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
+        y: isTouhouWave(o) ? -TILE_SIZE * 2 : (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
+        homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
         hp: o.hp, timer: 0, vx: 0, vy: 0, talked: false,
         spellState: o.spellScript?.length
           ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number }, ], frame: 0, waitLeft: 0 }
@@ -1867,6 +1937,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // onjReze：ハート・向き・剣の初期化
       const zMax = Math.max(1, gameData.player.hearts ?? 3) * 2;
       onjRezeHpRef.current = { hp: zMax, max: zMax };
+      // マリオ系パワーアップの初期化
+      marioPowerRef.current = 'super'; coinsRef.current = 0; starTimerRef.current = 0;
+      usedBlocksRef.current = new Set();
       checkpointRef.current = null;
       onjRezeDirRef.current = { x: 0, y: 1 };
       swordRef.current = { active: 0, cool: 0, dir: { x: 0, y: 1 }, hit: new Set() };
@@ -2127,6 +2200,7 @@ const lose = (msg: string) => {
         p2.y = checkpointRef.current.y;
         p2.vx = 0; p2.vy = 0; p2.isGrounded = false;
         onjRezeHpRef.current.hp = Math.ceil(onjRezeHpRef.current.max / 2);
+        marioPowerRef.current = 'super'; starTimerRef.current = 0;  // 復帰時はスーパーに戻す
         invulnRef.current = 120;
         shakeRef.current = 8;
         forceHud(n => n + 1);
@@ -2205,6 +2279,7 @@ const lose = (msg: string) => {
 
       let dead = false;
       if (invulnRef.current > 0) invulnRef.current--;
+      if (starTimerRef.current > 0) starTimerRef.current--;
       if (bombInvulnRef.current > 0) bombInvulnRef.current--;
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
 
@@ -2266,7 +2341,7 @@ const lose = (msg: string) => {
             if (isUp) p.y -= pData.speed;
             if (isDown) p.y += pData.speed;
           }
-          if (!onLadder) p.vy += gameData.gravity;
+          if (!onLadder) { p.vy += gameData.gravity; if (p.vy > ACTION_MAX_FALL) p.vy = ACTION_MAX_FALL; }
           if (isAction && !prevActionRef.current && p.isGrounded) { p.vy = gameData.player.jumpPower; p.isGrounded = false; playSfx(sfxRef.current.jump); }
           // 武器切り替え
           const isNextWeapon = keys.has('e') || keys.has('E');
@@ -2290,7 +2365,27 @@ const lose = (msg: string) => {
           getTile(p.x + 2, p.y + pData.h), getTile(p.x + pData.w - 2, p.y + pData.h)]
             .filter(t2 => t2 && !t2.info.passable);
           const tile2 = hits[0];
-          if (tile2) { if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; } else if (p.vy < 0) p.y = tile2.rect.y + TILE_SIZE; p.vy = 0; }
+          if (tile2) {
+            if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; }
+            else if (p.vy < 0) {
+              p.y = tile2.rect.y + TILE_SIZE;
+              // 下から叩く：ハテナ→コイン排出（使用済みに変化）、壊せるブロック→破壊
+              const bcol = Math.round(tile2.rect.x / TILE_SIZE), brow = Math.round(tile2.rect.y / TILE_SIZE);
+              const bsp = tile2.info?.special, bkey = `${bcol},${brow}`;
+              if (bsp === 'item' && !usedBlocksRef.current.has(bkey)) {
+                usedBlocksRef.current.add(bkey);
+                coinsRef.current += 1; scoreRef.current += 100; forceHud(n => n + 1);
+                const usedId = Number(Object.keys(gameData.tiles).find(k => gameData.tiles[Number(k)]?.special === 'used'));
+                if (usedId && engineRef.current.map[brow]) engineRef.current.map[brow][bcol] = usedId;
+                playSfx(sfxRef.current.jump);
+              } else if (bsp === 'destructible') {
+                if (engineRef.current.map[brow]) engineRef.current.map[brow][bcol] = 0;
+                scoreRef.current += 50; forceHud(n => n + 1);
+                playSfx(sfxRef.current.damage);
+              }
+            }
+            p.vy = 0;
+          }
           if (p.y > worldH && isPlaying && !debugInvincibleRef.current) { lose('ミス！'); dead = true; }
           // プレイヤー向き更新
           if (isLeft) actionDirRef.current = -1;
@@ -2298,8 +2393,16 @@ const lose = (msg: string) => {
           // 射撃（X キーまたはタッチ SHOT ボタン）
           if (actionShootCoolRef.current > 0) actionShootCoolRef.current--;
           const isShoot = keys.has('x') || keys.has('X') || touchRef.current.shoot;
-          if (isPlaying && !dead && isShoot && actionShootCoolRef.current <= 0) {
+          // マリオはファイア状態のときだけショット可（他プリセットは常時可）
+          const canShoot = gameData.id !== 'mario' || marioPowerRef.current === 'fire';
+          if (isPlaying && !dead && isShoot && canShoot && actionShootCoolRef.current <= 0) {
             const dir = actionDirRef.current;
+            if (gameData.id === 'mario') {
+              // ファイアマリオ：地面で跳ねるファイアボール
+              eng.bullets.push({ x: dir > 0 ? p.x + pData.w : p.x - 10, y: p.y + pData.h / 2, w: 10, h: 10, vx: dir * 8, vy: 2, color: '#ff6a00', bounce: true });
+              actionShootCoolRef.current = 16;
+              playSfx(sfxRef.current.shot);
+            } else {
             const currentWeapon = actionWeaponsRef.current[actionWeaponIdxRef.current];
             const energy = actionWeaponEnergyRef.current;
             if (currentWeapon && (energy[currentWeapon] ?? 0) > 0) {
@@ -2323,11 +2426,21 @@ const lose = (msg: string) => {
             }
             actionShootCoolRef.current = 12;
             playSfx(sfxRef.current.shot);
+            }
           }
-          // プレイヤー弾移動・範囲外削除
+          // プレイヤー弾移動・範囲外削除（bounce=ファイアボールは重力＋地面反射）
           for (let i = eng.bullets.length - 1; i >= 0; i--) {
             const b = eng.bullets[i];
-            b.x += b.vx ?? 0; b.y += b.vy ?? 0;
+            if (b.bounce) {
+              b.vy = (b.vy ?? 0) + 0.8; if (b.vy > 10) b.vy = 10;
+              b.x += b.vx ?? 0; b.y += b.vy;
+              const fl = getTile(b.x + b.w / 2, b.y + b.h);
+              if (fl && !fl.info.passable && b.vy > 0) { b.y = fl.rect.y - b.h; b.vy = -6; }  // 地面で跳ねる
+              const wl = getTile((b.vx ?? 0) > 0 ? b.x + b.w : b.x, b.y + b.h / 2);
+              if (wl && !wl.info.passable) { eng.bullets.splice(i, 1); continue; }             // 壁で消滅
+            } else {
+              b.x += b.vx ?? 0; b.y += b.vy ?? 0;
+            }
             if (b.x < -16 || b.x > worldW + 16 || b.y < -16 || b.y > worldH + 16) eng.bullets.splice(i, 1);
           }
         } else if (gameData.engine === 'onjReze') {
@@ -2516,6 +2629,7 @@ const lose = (msg: string) => {
       // ラウンド終了演出中（roundOver）は敵・弾・当たり判定も止める（残機の死亡中は継続）
       if (isPlaying && !roundOverRef.current && !battleRef.current.active) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
+        const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
           const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
@@ -2567,7 +2681,30 @@ const lose = (msg: string) => {
             // patrolH/緑ノコノコ型は崖からそのまま落ちる。
             const ew = d.w ?? TILE_SIZE; // 敵の当たり判定幅
             const eh = d.h ?? TILE_SIZE; // 敵の当たり判定高さ
-            if (d.behavior === 'still') {
+            if (e.shellGrace && e.shellGrace > 0) e.shellGrace--;
+            if (e.shellState) {
+              // ── 甲羅（ノコノコ）：静止 or 滑走。SMC physics_process_shell 準拠 ──
+              // 滑走中は壁で反射し、崖はそのまま落下。静止中は重力のみ受けて止まる。
+              if (e.shellState === 'slide' && e.vx !== 0) {
+                const nx = e.x + e.vx;
+                const leadX = e.vx > 0 ? nx + ew - 1 : nx;
+                const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + eh - 2);
+                const wall = (wt && !wt.info.passable) || (wb && !wb.info.passable);
+                if (wall || nx < 0 || nx > worldW - ew) e.vx = -e.vx; // 壁・画面端で跳ね返る
+                else e.x = nx;
+              } else {
+                e.vx = 0; // 静止甲羅
+              }
+              e.vy += gameData.gravity; if (e.vy > ACTION_MAX_FALL) e.vy = ACTION_MAX_FALL;
+              e.y += e.vy; e.isGrounded = false;
+              if (e.vy > 0) {
+                const fl = getTile(e.x + 2, e.y + eh), fr = getTile(e.x + ew - 2, e.y + eh);
+                const g = (fl && !fl.info.passable) ? fl : (fr && !fr.info.passable) ? fr : null;
+                if (g) { e.y = g.rect.y - eh; e.vy = 0; e.isGrounded = true; }
+              }
+              e.x = Math.max(0, Math.min(worldW - ew, e.x));
+              if (e.y > worldH + TILE_SIZE) { eng.entities.splice(ei, 1); continue; }
+            } else if (d.behavior === 'still') {
               // 静止：配置位置に固定（壁付き砲台など）。移動・重力なし。
               e.vx = 0; e.vy = 0;
             } else {
@@ -2597,7 +2734,7 @@ const lose = (msg: string) => {
                 else e.x = nx;
               }
               // 重力 → 垂直移動 → 地面/天井判定（接地していなければ自由落下）
-              e.vy += gameData.gravity;
+              e.vy += gameData.gravity; if (e.vy > ACTION_MAX_FALL) e.vy = ACTION_MAX_FALL;
               e.y += e.vy;
               e.isGrounded = false;
               if (e.vy > 0) {
@@ -2738,6 +2875,61 @@ const lose = (msg: string) => {
             }
           }
 
+          // ── マリオ系：踏みつけ／甲羅アクション（SMC core 準拠）──────────────
+          // stompable/shell な敵（および甲羅化済み）のみ専用処理。AABB で接触判定し、
+          // 上から落下中なら踏みつけ、横からなら甲羅蹴り or ダメージ。
+          // テレサ・プクプク等の踏めない敵は従来の overlap 判定（下）でダメージを受ける。
+          if (gameData.engine === 'action' && (d.objType ?? 'enemy') === 'enemy'
+              && (d.stompable || d.shell || e.shellState || marioInvincible) && !(d.pages && d.pages.length > 0)) {
+            const mew = d.w ?? TILE_SIZE, meh = d.h ?? TILE_SIZE;
+            const aabb = p.x < e.x + mew && p.x + pData.w > e.x && p.y < e.y + meh && p.y + pData.h > e.y;
+            if (!aabb) continue; // 接触なし → この敵はここで処理終了（legacy 判定へは進めない）
+            // スター無敵：触れるだけで撃破
+            if (marioInvincible) {
+              scoreRef.current += 20; forceHud(n => n + 1); playSfx(sfxRef.current.damage);
+              eng.entities.splice(ei, 1); break;
+            }
+            const prevFeet = (p.y + pData.h) - p.vy;            // 直前フレームの足元
+            const isStomp = p.vy > 0 && prevFeet <= e.y + meh * 0.5; // 落下中かつ敵の上半分から
+            const stompBounce = Math.min(-8, gameData.player.jumpPower * STOMP_BOUNCE_RATIO);
+            if (isStomp) {
+              p.y = e.y - pData.h; p.vy = stompBounce; p.isGrounded = false; // 敵の上にスナップして跳ねる
+              playSfx(sfxRef.current.jump);
+              if (d.shell) {
+                if (!e.shellState) {
+                  e.shellState = 'idle'; e.vx = 0; e.shellGrace = SHELL_KICK_GRACE; // ノコノコ→甲羅化
+                  scoreRef.current += 10; forceHud(n => n + 1);
+                } else if (e.shellState === 'slide') {
+                  e.shellState = 'idle'; e.vx = 0; e.shellGrace = SHELL_KICK_GRACE; // 滑走甲羅を踏んで停止
+                } else {
+                  const kdir = Math.sign((e.x + mew / 2) - pcx) || 1; // 静止甲羅を踏んで蹴り出す
+                  e.shellState = 'slide'; e.vx = kdir * SHELL_SPEED; e.shellGrace = SHELL_KICK_GRACE;
+                }
+              } else {
+                scoreRef.current += 10; forceHud(n => n + 1); eng.entities.splice(ei, 1); // クリボー型は一撃
+              }
+              break;
+            }
+            // 横からの接触
+            if (e.shellState === 'idle') {
+              const kdir = Math.sign((e.x + mew / 2) - pcx) || 1; // 静止甲羅を横から蹴る（ダメージなし）
+              e.shellState = 'slide'; e.vx = kdir * SHELL_SPEED; e.shellGrace = SHELL_KICK_GRACE;
+              p.x = kdir > 0 ? e.x - pData.w : e.x + mew;          // 甲羅の外へ押し出す
+              p.x = Math.max(0, Math.min(worldW - pData.w, p.x));
+              playSfx(sfxRef.current.jump);
+              break;
+            }
+            // 滑走甲羅 or 通常の敵に横から触れた → ダメージ（蹴り出し直後の猶予中はスキップ）
+            if (d.hazard && (e.shellGrace ?? 0) <= 0 && !debugInvincibleRef.current && invulnRef.current <= 0) {
+              const dmg = Math.max(1, d.atk ?? 2);
+              onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
+              if (marioPowerRef.current === 'fire') marioPowerRef.current = 'super'; // ファイア→スーパーに降格
+              hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+              if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+            }
+            break;
+          }
+
           const overlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
           if (overlap) {
             const ot = d.objType ?? 'enemy';
@@ -2761,6 +2953,13 @@ const lose = (msg: string) => {
             if (ot === 'item') {
               if (!eventRunningRef.current) {
                 const iid = d.itemId || d.name || d.id;
+                // マリオ系パワーアップの即時効果
+                if (gameData.id === 'mario') {
+                  if (iid === 'fireFlower') marioPowerRef.current = 'fire';
+                  else if (iid === 'superMushroom') { const z = onjRezeHpRef.current; z.hp = Math.min(z.max, z.hp + 2); }
+                  else if (iid === 'oneUp') livesRef.current += 1;
+                  else if (iid === 'star') starTimerRef.current = STAR_DURATION;
+                }
                 setInventory(p => { const n = { ...p }; n[iid] = (n[iid] ?? 0) + 1; return n; });
                 eng.entities.splice(ei, 1);
                 const itemDef = (gameData.items ?? []).find(it => it.id === iid);
@@ -2802,6 +3001,7 @@ const lose = (msg: string) => {
                   if (invulnRef.current <= 0) {
                     const dmg = Math.max(1, d.atk ?? 2);
                     onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
+                    if (marioPowerRef.current === 'fire') marioPowerRef.current = 'super'; // ファイア→スーパーに降格
                     hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
                     if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
                   }
@@ -2821,11 +3021,11 @@ const lose = (msg: string) => {
           const reflects = (b: NpcBehavior) => b === 'patrolH' || b === 'walker';
           for (let a = 0; a < ents.length; a++) {
             const ea = ents[a];
-            if (!reflects(ea.def.behavior)) continue;
+            if (!reflects(ea.def.behavior) || ea.shellState) continue; // 甲羅は反射せず巻き込む
             const aw = ea.def.w ?? TILE_SIZE, ah = ea.def.h ?? TILE_SIZE;
             for (let b = a + 1; b < ents.length; b++) {
               const eb = ents[b];
-              if (!reflects(eb.def.behavior)) continue;
+              if (!reflects(eb.def.behavior) || eb.shellState) continue;
               const bw = eb.def.w ?? TILE_SIZE, bh = eb.def.h ?? TILE_SIZE;
               // AABB が重なったら、互いに逆方向へ歩き出す（反射）
               if (ea.x < eb.x + bw && ea.x + aw > eb.x && ea.y < eb.y + bh && ea.y + ah > eb.y) {
@@ -2837,6 +3037,25 @@ const lose = (msg: string) => {
                 right.x = Math.min(worldW - (right.def.w ?? TILE_SIZE), right.x + ov / 2);
                 left.vx = -Math.abs(left.vx || left.def.speed);
                 right.vx = Math.abs(right.vx || right.def.speed);
+              }
+            }
+          }
+        }
+
+        // ── 滑走甲羅が他の敵を巻き込んで撃破（SMC shell_destroy_area 準拠）──
+        if (gameData.engine === 'action') {
+          const shells = eng.entities.filter(en => en.shellState === 'slide' && en.vx !== 0);
+          for (const sh of shells) {
+            const shw = sh.def.w ?? TILE_SIZE, shh = sh.def.h ?? TILE_SIZE;
+            for (let t = eng.entities.length - 1; t >= 0; t--) {
+              const tg = eng.entities[t];
+              if (tg === sh || tg.shellState) continue;                       // 甲羅同士は対象外
+              if ((tg.def.objType ?? 'enemy') !== 'enemy' || !tg.def.hazard) continue;
+              const tw = tg.def.w ?? TILE_SIZE, th = tg.def.h ?? TILE_SIZE;
+              if (sh.x < tg.x + tw && sh.x + shw > tg.x && sh.y < tg.y + th && sh.y + shh > tg.y) {
+                eng.entities.splice(t, 1);
+                scoreRef.current += 10; forceHud(n => n + 1);
+                playSfx(sfxRef.current.damage);
               }
             }
           }
@@ -3177,18 +3396,36 @@ const lose = (msg: string) => {
               ctx.font = 'bold 11px monospace';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'bottom';
-              const tw = ctx.measureText(display).width;
-              const px = e.x + (e.def.w ?? TILE_SIZE) / 2;
-              const py = e.y - 8;
+              // 画面外にはみ出さないよう、最大幅で改行してから複数行描画する（禁則処理つき）
+              const maxWidth = Math.min(PLAY_W - 16, 220);
+              const wrapped = wrapWithKinsoku(ctx, display, maxWidth);
+
+              const lineHeight = 14;
+              const tw = Math.max(...wrapped.map(l => ctx.measureText(l).width));
+              let px = e.x + (e.def.w ?? TILE_SIZE) / 2;
+              px = Math.max(tw / 2 + 4, Math.min(PLAY_W - tw / 2 - 4, px));
+              const boxBottom = e.y - 8;
+              const boxHeight = wrapped.length * lineHeight + 6;
+              const boxTop = boxBottom - boxHeight;
               ctx.fillStyle = 'rgba(0,0,0,0.6)';
-              ctx.fillRect(px - tw / 2 - 4, py - 13, tw + 8, 16);
+              ctx.fillRect(px - tw / 2 - 4, boxTop, tw + 8, boxHeight);
               ctx.fillStyle = '#fff';
-              ctx.fillText(display, px, py);
+              wrapped.forEach((l, i) => {
+                ctx.fillText(l, px, boxBottom - (wrapped.length - 1 - i) * lineHeight);
+              });
             }
           }
         }
-        ctx.fillStyle = 'yellow';
-        for (const b of eng.bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
+        for (const b of eng.bullets) {
+          if (b.bounce) {
+            // ファイアボール：オレンジの円
+            ctx.fillStyle = b.color ?? '#ff6a00';
+            ctx.beginPath(); ctx.arc(b.x + b.w / 2, b.y + b.h / 2, b.w / 2, 0, Math.PI * 2); ctx.fill();
+          } else {
+            ctx.fillStyle = b.color ?? 'yellow';
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+          }
+        }
         // ボムアイテム描画
         if (gameData.engine === 'touhou' && bombPickupsRef.current.length > 0) {
           ctx.font = '14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3273,7 +3510,7 @@ const lose = (msg: string) => {
         }
       } else {
         for (const o of gameData.objects) {
-          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, o.row * TILE_SIZE, o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `obj${o.id}`);
+          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE), o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `obj${o.id}`);
           const isSel = o.id === selectedObjIdRef.current;
           ctx.strokeStyle = o.hazard ? 'rgba(255,80,80,0.6)' : 'rgba(80,200,255,0.6)';
           ctx.lineWidth = isSel ? 3 : 1.5;
@@ -3451,14 +3688,15 @@ const lose = (msg: string) => {
             activeSceneIdxRef.current = nextIdx;
             eng.map = JSON.parse(JSON.stringify(next.map));
             eng.entities = next.objects.map(o => ({
-              x: o.col * TILE_SIZE, y: o.row * TILE_SIZE,
-              homeX: o.col * TILE_SIZE, homeY: o.row * TILE_SIZE,
+              x: o.col * TILE_SIZE, y: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
+              homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
               vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
               def: o,
             })) as unknown as Entity[];
             eng.bullets = []; eng.enemyBullets = [];
             eng.player.x = fade.entryX; eng.player.y = fade.entryY;
             eng.player.vx = 0; eng.player.vy = 0;
+            justStartedRef.current = true; // 2マスキャラ等のワープ先埋まり防止イジェクトを再実行
             setEditSceneIdx(nextIdx);
             // シーン別BGM切り替え
             if (next.bgm) switchBgm(next.bgm);
@@ -3626,6 +3864,21 @@ const lose = (msg: string) => {
           const sy = gy + (segs - 1 - i) * (segH + segGap);
           ctx.fillStyle = i < filled ? '#28c8ff' : '#1a3a4a';
           ctx.fillRect(gx, sy, segW, segH);
+        }
+        // マリオ：コイン枚数＋パワー状態＋スター残り
+        if (gameData.id === 'mario') {
+          ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.font = 'bold 14px Arial';
+          ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(6, 6, 150, 24);
+          ctx.fillStyle = '#ffd700';
+          ctx.fillText(`🪙×${coinsRef.current}`, 12, 10);
+          const powerLabel = marioPowerRef.current === 'fire' ? '🔥ファイア' : '⭐スーパー';
+          ctx.fillStyle = marioPowerRef.current === 'fire' ? '#ff8a3c' : '#7fd4ff';
+          ctx.fillText(powerLabel, 74, 10);
+          if (starTimerRef.current > 0 && Math.floor(starTimerRef.current / 6) % 2 === 0) {
+            ctx.fillStyle = '#fff59d';
+            ctx.fillRect(6, 32, Math.max(0, (starTimerRef.current / STAR_DURATION) * 150), 4); // 無敵ゲージ
+          }
         }
       }
 

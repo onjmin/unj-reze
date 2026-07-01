@@ -88,6 +88,8 @@ const tiles: PresetData['tiles'] = {
   11: { name: '壊せるブロック',   color: '#c08840', passable: false, special: 'destructible', imageRef: smcRef(T.brick), imageUrl: T.brick },
   12: { name: 'P スイッチ',       color: '#4444ff', passable: false, special: 'pswitch'      },
   13: { name: '土管トップ',       color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeCap),  imageUrl: T.pipeCap,   imageScale2x: true, imageOverflowTop: true },
+  14: { name: '使用済みブロック', color: '#6b4a24', passable: false, special: 'used',
+        imageRef: smcRef(T.stone), imageUrl: T.stone },  // ハテナを下から叩いた後の空ブロック
 };
 
 // ── シーン1：地上ステージ ────────────────────────────────────────────────────
@@ -116,20 +118,20 @@ const scene1: SceneDef = {
   id: 'overworld', name: '地上ステージ',
   map: scene1Map,
   objects: [
-    // クリボー (SMC: Goombas.png walk:smc 2フレーム)
+    // クリボー (SMC: Goombas.png walk:smc 2フレーム)。踏むと一撃で倒せる。
     newObject({ emoji: '🐛', col: 5,  row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
+      stompable: true, spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
     newObject({ emoji: '🐛', col: 18, row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
-    // ノコノコ (SMC: Beach_Koopa.png walk:smc 2フレーム)
+      stompable: true, spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
+    // ノコノコ (SMC: Beach_Koopa.png walk:smc 2フレーム)。踏むと甲羅化→蹴って攻撃できる。
     newObject({ emoji: '🐢', col: 24, row: ROWS - 3, behavior: 'walker',  speed: 1.2, hazard: true,  hp: 2, bullet: 'none',
-      spriteRef: E.koopaRef, spriteUrl: E.koopaUrl }),
-    // キラー（SMC: Bob-omb.png 流用・直進）
+      stompable: true, shell: true, spriteRef: E.koopaRef, spriteUrl: E.koopaUrl }),
+    // キラー（SMC: Bob-omb.png 流用・直進）。弾扱いなので踏めない。
     newObject({ emoji: '💣', col: 2,  row: ROWS - 4, behavior: 'walker',  speed: 2.5, hazard: true,  hp: 1, bullet: 'none',
       name: 'キラー', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
-    // ボム兵（爆発あり, SMC: Bob-omb.png walk:smc 2フレーム）
+    // ボム兵（爆発あり, SMC: Bob-omb.png walk:smc 2フレーム）。踏むと倒せる。
     newObject({ emoji: '💥', col: 28, row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      name: 'ボム兵', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
+      stompable: true, name: 'ボム兵', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
     // テレサ（近づくと動く, SMC: Blazin_Boos.png walk:smc 2フレーム）
     newObject({ emoji: '👻', col: 8,  row: ROWS - 8, behavior: 'chase',   speed: 0.8, hazard: true,  hp: 1, bullet: 'none',
       name: 'テレサ', spriteRef: E.booRef, spriteUrl: E.booUrl }),
@@ -160,6 +162,12 @@ const scene1: SceneDef = {
     // 1UP キノコ
     newObject({ emoji: '💚', col: 15, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'oneUp', message: '' }),
+    // スーパーキノコ（ハート回復）
+    newObject({ emoji: '🍄', col: 11, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+      itemId: 'superMushroom', message: '' }),
+    // ファイアフラワー（ファイアマリオ化）
+    newObject({ emoji: '🌸', col: 25, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+      itemId: 'fireFlower', message: '' }),
   ],
 };
 
@@ -189,9 +197,9 @@ const scene2: SceneDef = {
       spriteRef: wr93, spriteUrl: sa93 }),
     newObject({ emoji: '🐀', col: 13, row: ROWS - 3, behavior: 'patrolH', speed: 1.4, hazard: true, hp: 1, bullet: 'none',
       spriteRef: wr93, spriteUrl: sa93 }),
-    // ホネクッパ（SMC: Dry_Bones.png walk:smc 2フレーム 16px）
+    // ホネクッパ（SMC: Dry_Bones.png walk:smc 2フレーム 16px）。踏むと崩れる。
     newObject({ emoji: '💀', col: 10, row: ROWS - 6, behavior: 'patrolH', speed: 1, hazard: true, hp: 3, bullet: 'none',
-      name: 'ホネクッパ', spriteRef: E.dryBonesRef, spriteUrl: E.dryBonesUrl }),
+      stompable: true, name: 'ホネクッパ', spriteRef: E.dryBonesRef, spriteUrl: E.dryBonesUrl }),
     // シャインかけら
     newObject({ emoji: '✨', col: 9,  row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'shineShard', message: '' }),
@@ -246,7 +254,9 @@ export const mario: PresetData = {
     { id: 'redCoin',    name: 'レッドコイン',    emoji: '🔴', description: '8枚集めるとご褒美アイテムが出現する特別なコイン' },
     { id: 'shineShard', name: 'シャインかけら',  emoji: '✨', description: '5枚集めるとシャインスプライトが完成する' },
     { id: 'oneUp',      name: '1UPキノコ',       emoji: '💚', description: '残機が1増える緑色のキノコ' },
-    { id: 'star',       name: 'スーパースター',  emoji: '⭐', description: '一定時間無敵になり敵を踏んで倒せる' },
+    { id: 'superMushroom', name: 'スーパーキノコ', emoji: '🍄', description: 'ハートを1つ回復するキノコ' },
+    { id: 'fireFlower', name: 'ファイアフラワー', emoji: '🌸', description: 'ファイアマリオになりファイアボールを撃てる' },
+    { id: 'star',       name: 'スーパースター',  emoji: '⭐', description: '一定時間無敵になり敵に触れるだけで倒せる' },
     { id: 'metalCap',   name: 'メタルキャップ',  emoji: '⚙️',  description: '一定時間金属マリオに変身。水中でも沈んで歩ける' },
     { id: 'wingCap',    name: 'ウィングキャップ', emoji: '🪽', description: '一定時間飛行できる赤い帽子' },
     { id: 'vanishCap',  name: 'バニッシュキャップ', emoji: '🌫️', description: '一定時間透明になり特定の壁をすり抜けられる' },
