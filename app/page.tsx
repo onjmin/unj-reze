@@ -324,8 +324,6 @@ export default function App() {
         onClose={() => setDrawerOpen(false)}
         userId={userId}
         setUserId={setUserId}
-        server={server}
-        setServer={setServer}
         bbsMode={bbsMode}
         setBbsMode={setBbsMode}
         currentUser={currentUser}

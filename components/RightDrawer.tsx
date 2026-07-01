@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, X, Check, Home, ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy } from 'lucide-react';
-import Link from 'next/link';
+import { Settings, X, ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy } from 'lucide-react';
 import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 
@@ -17,14 +16,12 @@ interface RightDrawerProps {
   onClose: () => void;
   userId: string;
   setUserId: (id: string) => void;
-  server: string;
-  setServer: (s: string) => void;
   bbsMode: string;
   setBbsMode: (m: string) => void;
   currentUser?: AnonymousUser | null;
 }
 
-export default function RightDrawer({ isOpen, onClose, userId, setUserId, server, setServer, bbsMode, setBbsMode, currentUser }: RightDrawerProps) {
+export default function RightDrawer({ isOpen, onClose, userId, setUserId, bbsMode, setBbsMode, currentUser }: RightDrawerProps) {
   const [editingId, setEditingId] = useState(userId);
   const [privacy, setPrivacy] = useState({ isPrivate: false, hideFromSearch: false, hideReactions: false });
   const [migrationToken, setMigrationToken] = useState('');
@@ -167,25 +164,6 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">接続サーバー</label>
-            <div className="space-y-1.5">
-              {['/main', '/sandbox', '/rpg_creators', '/gacha'].map((srv) => (
-                <button
-                  key={srv}
-                  onClick={() => setServer(srv)}
-                  className={`w-full text-left px-3 py-2 text-xs rounded-lg flex items-center justify-between border transition-all ${server === srv
-                    ? 'bg-gray-100/10 text-[#a3e635] border-gray-700 font-bold'
-                    : 'bg-transparent text-gray-400 border-transparent hover:bg-gray-100/5'
-                    }`}
-                >
-                  <span>{srv}</span>
-                  {server === srv && <Check size={14} className="text-[#a3e635]" />}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="h-px bg-gray-800" />
 
           <div className="space-y-2">
@@ -224,8 +202,9 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
             <p className="text-[9px] text-gray-500">セッションが変わっても過去のアカウントを復元できます。</p>
             <button
               onClick={handleIssueToken}
-              className="w-full bg-gray-100/5 hover:bg-gray-100/10 border border-gray-800 rounded-lg py-1.5 text-xs text-gray-200 transition-colors"
+              className="w-full flex items-center justify-center gap-1.5 bg-[#a3e635]/15 hover:bg-[#a3e635]/25 border border-[#a3e635]/55 rounded-lg py-2 text-xs font-bold text-[#a3e635] transition-colors"
             >
+              <KeyRound size={13} />
               移行トークンを発行
             </button>
             {migrationToken && (
@@ -254,51 +233,19 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
             {redeemMsg && <p className="text-[9px] text-gray-400">{redeemMsg}</p>}
           </div>
 
-          <div className="h-px bg-gray-800" />
-
-          <div className="space-y-1">
-            <Link
-              href="/"
-              onClick={onClose}
-              className="flex items-center gap-3 w-full px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-100/8 rounded-lg transition-colors"
-            >
-              <Home size={16} className="text-gray-500 shrink-0" />
-              <span>ホームに戻る</span>
-            </Link>
-            <a
-              href="https://unj.netlify.app/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 w-full px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-100/8 rounded-lg transition-colors"
-            >
-              <ExternalLink size={16} className="text-gray-500 shrink-0" />
-              <span>うんjに戻る</span>
-            </a>
-          </div>
-
-          <div className="h-px bg-gray-800" />
-
-          <div className="space-y-2 text-xs text-gray-400">
-            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">うんｊレゼのステータス</label>
-            <div className="bg-gray-100/5 rounded-xl p-3 border border-gray-800 space-y-2">
-              <div className="flex justify-between">
-                <span>ユーザーレベル</span>
-                <span className="text-[#a3e635] font-bold">Lv.42</span>
-              </div>
-              <div className="flex justify-between">
-                <span>総投稿数</span>
-                <span>124 スレッド</span>
-              </div>
-              <div className="flex justify-between">
-                <span>総いいね獲得数</span>
-                <span>4.8k Likes</span>
-              </div>
-            </div>
-          </div>
         </div>
 
-        <div className="p-4 border-t border-gray-800 bg-[#0b0e14] text-center text-[10px] text-gray-600">
-          <span>うんｊレゼ v0.1.0</span>
+        <div className="p-4 border-t border-gray-800 bg-[#0b0e14] space-y-3">
+          <a
+            href="https://unj.netlify.app/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-2 text-xs text-gray-400 hover:text-gray-200 hover:bg-gray-100/5 rounded-lg transition-colors"
+          >
+            <ExternalLink size={14} className="text-gray-500 shrink-0" />
+            <span>うんjに戻る</span>
+          </a>
+          <div className="text-center text-[10px] text-gray-600">うんｊレゼ v0.1.0</div>
         </div>
       </div>
     </>
