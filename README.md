@@ -64,7 +64,8 @@ Netlify ダッシュボード → **Site configuration → Environment variables
 
 **KV（Cloudflare KV）**
 
-Cloudflare ダッシュボード → **Workers & Pages → KV** で Namespace を作成後：
+まず Cloudflare ダッシュボード → **Workers & Pages → KV** で Namespace を作成する。  
+その後、以下を **Netlify の環境変数**として登録：
 
 | 変数名 | 値 |
 |---|---|
@@ -78,7 +79,8 @@ API Token の作成：Cloudflare ダッシュボード → **My Profile → API 
 
 **ストレージ（Cloudflare R2）**
 
-Cloudflare ダッシュボード → **R2 → Create bucket** でバケットを作成後：
+まず Cloudflare ダッシュボード → **R2 → Create bucket** でバケットを作成する。  
+その後、以下を **Netlify の環境変数**として登録：
 
 | 変数名 | 値 |
 |---|---|
