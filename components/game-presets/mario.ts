@@ -237,9 +237,9 @@ const scene3: SceneDef = {
 };
 
 export const mario: PresetData = {
-  id: 'mario', name: 'マリオ', engine: 'action', gravity: 2.5, friction: 0.85,
+  id: 'mario', name: 'マリオ', engine: 'action', gravity: 0.5, friction: 0.85,
   player: {
-    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -18, w: 24, h: 64,
+    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -12, w: 24, h: 64,
     start: { x: 50, y: 50 },
     hearts: 8,
     spriteRef: 'walk:smc_json:PlayerSprite:2Idle0_3',
