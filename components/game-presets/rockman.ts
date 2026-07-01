@@ -128,6 +128,7 @@ const scene3: SceneDef = {
 
 export const rockman: PresetData = {
   id: 'rockman', name: 'ロックマン', engine: 'action', gravity: 0.55, friction: 0.78,
+  scroll: { worldCols: 40 },
   player: {
     emoji: '🤖', color: '#1e90ff', speed: 3.5, jumpPower: -11, w: 22, h: 24,
     start: { x: TILE_SIZE * 1, y: TILE_SIZE * (ROWS - 4) },

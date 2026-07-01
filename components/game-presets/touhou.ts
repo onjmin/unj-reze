@@ -175,17 +175,18 @@ end while
     // ── フェーズ 2：道中後半 ──────────────────────────────────────────────
     // 通常 aimed 弾
     newObject({ emoji: '🧚', col: 3,  row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
-      miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
+      miniScript: waveMiniScript(4, 55, 2.8, 5, 8), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
     newObject({ emoji: '🧚', col: 11, row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
-      miniScript: waveMiniScript(4, 55, 2.8, 5, 8) }),
+      miniScript: waveMiniScript(4, 55, 2.8, 5, 8), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
     // spread 弾
     newObject({ emoji: '🧚', col: 7,  row: 1, phase: 2, speed: 1.0, hp: 3, bullet: 'none',
-      miniScript: waveSpreadScript(4, 65, 5, 40, 2.2, 8) }),
+      miniScript: waveSpreadScript(4, 65, 5, 40, 2.2, 8), spriteRef: walkRef('CwkSjr'), spriteUrl: sa('CwkSjr') }),
     // 加速弾（初速遅め→急加速、120フレームで消滅）
     newObject({ emoji: '🧝', col: 4,  row: 2, phase: 2, speed: 0.9, hp: 4, bullet: 'none',
-      miniScript: waveAccelScript(5, 60, 0.8, 0.06, 3.5, 120, 2, 12) }),
+      miniScript: waveAccelScript(5, 60, 0.8, 0.06, 3.5, 120, 2, 12), spriteRef: walkRef('sJb8cg'), spriteUrl: sa('sJb8cg') }),
     // リング弾（角度ずらし）
     newObject({ emoji: '🧝', col: 10, row: 2, speed: 0.9, hp: 4, bullet: 'none', phase: 2,
+      spriteRef: walkRef('sJb8cg'), spriteUrl: sa('sJb8cg'),
       miniScript: `
 wait(row * 25)
 moveTo(startX, 110, 45)
@@ -202,6 +203,7 @@ exit()
 `.trim() }),
     // リング＋スタック複合（道中後半ザコ上位）
     newObject({ emoji: '🧙', col: 7, row: 0, phase: 2, speed: 0.6, hp: 6, bullet: 'none',
+      spriteRef: walkRef('jXcwd1'), spriteUrl: sa('jXcwd1'),
       miniScript: `
 wait(row * 25)
 moveTo(startX, 130, 55)

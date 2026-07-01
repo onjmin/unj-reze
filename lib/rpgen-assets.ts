@@ -84,6 +84,32 @@ export interface SpriteSheetItem {
   sprite_ids: SpriteSheetMember[];
 }
 
+/** スプライトアニメシートのメンバー（id が実体ファイル名）。 */
+export interface SAnimSheetMember { id: string; }
+
+/** 人間がまとめた歩行グラコレクション。anim_ids がメンバー。 */
+export interface SAnimSheetItem {
+  no: number;
+  id: string;
+  name: string;
+  comment: string;
+  author_site?: string;
+  anim_ids: SAnimSheetMember[];
+}
+
+/** 効果音シートのメンバー（id が実体ファイル名）。 */
+export interface SoundSheetMember { id: string; }
+
+/** 人間がまとめた効果音コレクション。sound_ids がメンバー。 */
+export interface SoundSheetItem {
+  no: number;
+  id: string;
+  name: string;
+  comment: string;
+  author_site?: string;
+  sound_ids: SoundSheetMember[];
+}
+
 export interface SearchParams {
   q?: string;
   page?: number;
@@ -112,3 +138,7 @@ export const searchSpriteAnims = (p?: SearchParams) => get<SpriteAnimItem>('spri
 export const searchSounds = (p?: SearchParams) => get<SoundItem>('sounds', p);
 /** 人間がまとめたスプライトシート（カテゴリ）一覧。`/api/sheets/sprite` */
 export const searchSpriteSheets = (p?: SearchParams) => get<SpriteSheetItem>('sheets/sprite', p);
+/** 人間がまとめた歩行グラセット一覧。`/api/sheets/sanim` */
+export const searchSAnimSheets = (p?: SearchParams) => get<SAnimSheetItem>('sheets/sanim', p);
+/** 人間がまとめた効果音セット一覧。`/api/sheets/sound` */
+export const searchSoundSheets = (p?: SearchParams) => get<SoundSheetItem>('sheets/sound', p);

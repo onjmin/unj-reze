@@ -164,15 +164,11 @@ async function main() {
   // SMB 1-2: 地下ステージ (最初の 60 列)
   const smbUnderground = convertSmb(smb12, 0, 60);
 
-  // MM 1-1: CutMan ステージ前半 (最初の 40 列)
-  const mm1Scene1 = convertMm(mm1, -1, 40, 0);
-  // MM 1-1: 中盤 (40〜80 列)
-  let mm1StartCol = -1;
-  const mm1Lines = mm1.split('\n').filter(l => l.length > 0);
-  for (let x = 0; x < (mm1Lines[0]?.length ?? 0); x++) {
-    if (mm1Lines.some(l => l[x] && l[x] !== '@')) { mm1StartCol = x; break; }
-  }
-  const mm1Scene2 = convertMm(mm1, mm1StartCol + 40, 40, 0);
+  // MM 1-1: VGLCフォーマットは75行構成 — 行0-59が@パディング、行60-74が実データ
+  // CutMan ステージ前半 (列0〜39)
+  const mm1Scene1 = convertMm(mm1, 0, 40, 60);
+  // MM 1-1: 中盤 (列40〜79)
+  const mm1Scene2 = convertMm(mm1, 40, 40, 60);
 
   // DQ フィールド
   const dqField = makeDqField();

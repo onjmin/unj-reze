@@ -3629,8 +3629,27 @@ const lose = (msg: string) => {
                   invulnRef.current = 120;
                   hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
                 } else {
-                  // 小状態でのダメージ → lose() がHP管理・復帰・ゲームオーバーを全て担う
-                  lose('ミス！'); dead = true;
+                  // 小状態でのダメージ
+                  onjRezeHpRef.current.hp -= 1;
+                  forceHud(n => n + 1);
+                  if (onjRezeHpRef.current.hp <= 0) {
+                    lose('ミス！'); dead = true;
+                  } else {
+                    const droppedCoins = Math.min(10, coinsRef.current);
+                    if (droppedCoins > 0) {
+                      coinsRef.current -= droppedCoins;
+                      const coinsToSpawn = Math.min(6, droppedCoins);
+                      for (let i = 0; i < coinsToSpawn; i++) {
+                        const angle = (Math.PI / 4) + (Math.random() * Math.PI / 2);
+                        const speed = 2.0 + Math.random() * 4.0;
+                        particlesRef.current.push({ x: p.x + pData.w / 2, y: p.y + pData.h / 2,
+                          vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? 1 : -1), vy: -Math.sin(angle) * speed - 1.0,
+                          life: 300, maxLife: 300, size: 6, color: '#ffd700', type: 'coin', bounceCount: 0 });
+                      }
+                    }
+                    invulnRef.current = 120;
+                    hitShake(); playSfx(sfxRef.current.damage);
+                  }
                 }
               } else {
                 onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
@@ -3760,7 +3779,10 @@ const lose = (msg: string) => {
                         marioPowerRef.current = 'small';
                         p.y += 32; // 接地を維持
                       } else {
-                        lose('ミス！'); dead = true;
+                        onjRezeHpRef.current.hp -= 1;
+                        if (onjRezeHpRef.current.hp <= 0) {
+                          lose('ミス！'); dead = true;
+                        }
                       }
                       const droppedCoins = Math.min(10, coinsRef.current);
                       if (droppedCoins > 0) {
@@ -3920,7 +3942,10 @@ const lose = (msg: string) => {
                     marioPowerRef.current = 'small';
                     p.y += 32; // 接地を維持
                   } else {
-                    lose('ミス！'); dead = true; break;
+                    onjRezeHpRef.current.hp -= 1;
+                    if (onjRezeHpRef.current.hp <= 0) {
+                      lose('ミス！'); dead = true; break;
+                    }
                   }
                   const droppedCoins = Math.min(10, coinsRef.current);
                   if (droppedCoins > 0) {
