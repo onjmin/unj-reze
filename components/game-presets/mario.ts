@@ -1,6 +1,7 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS } from './shared';
 import { resolveSMCUrl } from '../../lib/smc-helper';
 import { sAnimUrl as sa } from '@/lib/rpgen-assets';
+import { smbOverworld, smbUnderground } from './vglc-stages';
 
 // SMC-released-sprites (Level-Share-Square/SMC-released-sprites) via jsDelivr CDN
 // ライセンス: 非商用無料、作者クレジット必須
@@ -93,28 +94,10 @@ const tiles: PresetData['tiles'] = {
   15: { name: 'すり抜け床',       color: '#ffb366', passable: true,  special: 'oneway' },
 };
 
-// ── シーン1：地上ステージ ────────────────────────────────────────────────────
-const WCOLS = 36;
-const scene1Map = Array.from({ length: ROWS }, (_, y) =>
-  Array.from({ length: WCOLS }, (_, x) => {
-    if (x === WCOLS - 1 && y === ROWS - 3) return 3;
-    if (x >= WCOLS - 4 && x <= WCOLS - 2) {
-      const h = x - (WCOLS - 5);
-      if (y <= ROWS - 3 && y >= ROWS - 2 - h) return 1;
-    }
-    // 土管：最上段が傘(13)、その下は胴(4)を積む
-    if (x === 9  && y >= ROWS - 4) return y === ROWS - 4 ? 13 : 4;
-    if (x === 20 && y >= ROWS - 5) return y === ROWS - 5 ? 13 : 4;
-    if ((y === ROWS - 6 && (x === 5 || x === 6)) || (y === ROWS - 7 && x === 15)) return 2;
-    if (y === ROWS - 8 && x === 10) return 6;               // 音符ブロック
-    if (y === ROWS - 9 && (x >= 5 && x <= 7 || x >= 15 && x <= 17)) return 1;
-    if (x === 22 && y === ROWS - 3) return 7;               // チェックポイントフラグ
-    if (y === ROWS - 5 && (x === 26 || x === 27)) return 15; // すり抜け床
-    const gap = (x === 13 || x === 14) || (x === 26 || x === 27) || x === 32;
-    if (y >= ROWS - 2) return gap ? 0 : 1;
-    return 0;
-  })
-);
+// ── シーン1：地上ステージ (VGLC SMB 1-1 より) ──────────────────────────────
+// Source: TheVGLC/TheVGLC Super Mario Bros/Processed/mario-1-1.txt (CC BY-NC-SA 4.0)
+const WCOLS = 60;
+const scene1Map = smbOverworld.map(row => [...row]);
 
 const scene1: SceneDef = {
   id: 'overworld', name: '地上ステージ',
@@ -175,22 +158,9 @@ const scene1: SceneDef = {
   ],
 };
 
-// ── シーン2：地下ステージ1 ────────────────────────────────────────────────────
-const scene2Map = Array.from({ length: ROWS }, (_, y) =>
-  Array.from({ length: COLS }, (_, x) => {
-    if (y <= 1) return 5;
-    if (y >= ROWS - 2) return 5;
-    if (x === COLS - 3 && y >= ROWS - 4) return y === ROWS - 4 ? 13 : 4;  // 土管（傘+胴）
-    if (y === ROWS - 5 && x >= 3 && x <= 7) return 5;
-    if (y === ROWS - 7 && x >= 10 && x <= 14) return 5;
-    if (y === ROWS - 9 && x >= 7 && x <= 11) return 1;
-    if (y === ROWS - 6 && (x === 5 || x === 12)) return 2;
-    if (y === ROWS - 8 && x === 9) return 12;               // P スイッチ
-    // 水溜まり
-    if (y >= ROWS - 4 && y <= ROWS - 3 && x >= 14 && x <= 16) return 9;
-    return 0;
-  })
-);
+// ── シーン2：地下ステージ1 (VGLC SMB 1-2 より) ─────────────────────────────
+// Source: TheVGLC/TheVGLC Super Mario Bros/Processed/mario-1-2.txt (CC BY-NC-SA 4.0)
+const scene2Map = smbUnderground.map(row => [...row]);
 
 const scene2: SceneDef = {
   id: 'underground', name: '地下ステージ1',

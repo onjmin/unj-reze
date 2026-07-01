@@ -1,5 +1,6 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
+import { mmScene1, mmScene2 } from './vglc-stages';
 const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
 const ir  = (no: number) => `url:${sp(no)}`;
 
@@ -15,21 +16,9 @@ const tiles: PresetData['tiles'] = {
   8: { name: '壊せる壁',       color: '#a06040', passable: false, special: 'destructible'  },   // ショットで破壊可能
 };
 
-// ── シーン1：横スクロール道中 ─────────────────────────────────────────────────
-const scene1Map = Array.from({ length: ROWS }, (_, y) =>
-  Array.from({ length: COLS }, (_, x) => {
-    if (y >= ROWS - 2) return (x === 6 || x === 7 || x === 14 || x === 15) ? 2 : 1;
-    if (y === ROWS - 5 && (x >= 3 && x <= 5 || x >= 10 && x <= 13)) return 1;
-    if (y === ROWS - 8 && (x >= 7 && x <= 9 || x >= 15 && x <= 17)) return 1;
-    // はしご
-    if (x === 2 && y >= ROWS - 7 && y <= ROWS - 3) return 5;
-    // チェックポイント
-    if (x === 11 && y === ROWS - 3) return 6;
-    // 消えるブロック（橋）
-    if (y === ROWS - 6 && x >= 17 && x <= 19) return 7;
-    return 0;
-  })
-);
+// ── シーン1：道中 1 (VGLC Mega Man 1-1 前半より) ─────────────────────────────
+// Source: TheVGLC/TheVGLC MegaMan/megaman_1_1.txt (CC BY-NC-SA 4.0)
+const scene1Map = mmScene1.map(row => [...row]);
 
 const scene1: SceneDef = {
   id: 'stage1', name: '道中 1',
@@ -58,22 +47,9 @@ const scene1: SceneDef = {
   ],
 };
 
-// ── シーン2：縦シャフト ─────────────────────────────────────────────────────
-const scene2Map = Array.from({ length: ROWS }, (_, y) =>
-  Array.from({ length: COLS }, (_, x) => {
-    const inShaft = x >= 7 && x <= 10;
-    const inCorridor = x >= 1 && x <= 6;
-    if (y === 0) return 4;
-    if (x === 0) return 4;
-    if (x >= 11) return 4;
-    if ((inCorridor) && y >= ROWS - 2) return 1;
-    if (inCorridor && y === 8) return 1;
-    if (inShaft && y === 6) return 1;
-    // 壊せる壁
-    if (x === 5 && y >= 3 && y <= 5) return 8;
-    return 0;
-  })
-);
+// ── シーン2：道中 2 (VGLC Mega Man 1-1 中盤より) ─────────────────────────────
+// Source: TheVGLC/TheVGLC MegaMan/megaman_1_1.txt (CC BY-NC-SA 4.0)
+const scene2Map = mmScene2.map(row => [...row]);
 
 const scene2: SceneDef = {
   id: 'shaft', name: '縦シャフト',

@@ -8,10 +8,11 @@ interface HeaderProps {
   server: string;
   bbsMode: string;
   onOpenDrawer: () => void;
+  onToggleBbsMode: () => void;
 }
 
 export default function Header({
-  userId, server, bbsMode, onOpenDrawer,
+  userId, server, bbsMode, onOpenDrawer, onToggleBbsMode,
 }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState('02:03:04');
 
@@ -30,7 +31,17 @@ export default function Header({
         <div className="flex items-center space-x-2">
           <span className="text-[#a3e635] font-bold text-xl tracking-tight">うんｊレゼ</span>
         </div>
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={onToggleBbsMode}
+            className={`px-3 py-0.5 rounded-full text-[11px] font-bold border transition-colors ${
+              bbsMode === '掲示板モード'
+                ? 'bg-[#a3e635]/15 text-[#a3e635] border-[#a3e635]/55 hover:bg-[#a3e635]/25'
+                : 'bg-blue-500/10 text-blue-400 border-blue-500/35 hover:bg-blue-500/20'
+            }`}
+          >
+            {bbsMode}
+          </button>
           <button
             onClick={onOpenDrawer}
             className="p-1.5 hover:bg-gray-100/10 rounded-full transition-colors text-gray-500 hover:text-gray-300"

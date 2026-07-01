@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { s3Storage } from '@/lib/storage/s3';
+import { uploadImage } from '@/lib/storage';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'invalid image format' }, { status: 400 });
     }
 
-    const url = await s3Storage.uploadImage(image, filename);
+    const url = await uploadImage(image, filename);
     return NextResponse.json({ url }, { status: 201 });
   } catch (e) {
     console.error('Upload error:', e);

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Settings, X, Check } from 'lucide-react';
+import { Settings, X, Check, Home, ExternalLink } from 'lucide-react';
+import Link from 'next/link';
 import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 
@@ -111,6 +112,28 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="h-px bg-gray-800" />
+
+          <div className="space-y-1">
+            <Link
+              href="/"
+              onClick={onClose}
+              className="flex items-center gap-3 w-full px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-100/8 rounded-lg transition-colors"
+            >
+              <Home size={16} className="text-gray-500 shrink-0" />
+              <span>ホームに戻る</span>
+            </Link>
+            <a
+              href="https://unj.netlify.app/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 w-full px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-100/8 rounded-lg transition-colors"
+            >
+              <ExternalLink size={16} className="text-gray-500 shrink-0" />
+              <span>うんjに戻る</span>
+            </a>
           </div>
 
           <div className="h-px bg-gray-800" />

@@ -38,7 +38,17 @@ export default function App() {
   const [userId, setUserId] = useState('');
   const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [server, setServer] = useState('/main');
-  const [bbsMode, setBbsMode] = useState('掲示板モード');
+  const [bbsMode, setBbsModeRaw] = useState('SNSモード');
+
+  const setBbsMode = (m: string) => {
+    setBbsModeRaw(m);
+    if (typeof localStorage !== 'undefined') localStorage.setItem('unj_bbs_mode', m);
+  };
+
+  useEffect(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
+    if (saved) setBbsModeRaw(saved);
+  }, []);
   const [notifCount, setNotifCount] = useState(0);
   const [messageCount, setMessageCount] = useState(0);
   const [inputText, setInputText] = useState('');
@@ -377,6 +387,7 @@ export default function App() {
               server={server}
               bbsMode={bbsMode}
               onOpenDrawer={() => setDrawerOpen(true)}
+              onToggleBbsMode={() => setBbsMode(bbsMode === '掲示板モード' ? 'SNSモード' : '掲示板モード')}
             />
 
             {currentNav === 'home' && (
@@ -495,6 +506,7 @@ export default function App() {
                     posts={posts}
                     activeTab={topTab}
                     rankCategory={rankCategory}
+                    bbsMode={bbsMode}
                     onLike={handleLike}
                     onDislike={handleDislike}
                     onRepost={handleRepost}

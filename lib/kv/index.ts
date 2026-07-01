@@ -1,78 +1,29 @@
-const store = new Map<string, string>();
+// KV_PROVIDER=mock (default) | cloudflare
 
-export async function kvGet(key: string): Promise<string | null> {
-  return store.get(key) ?? null;
-}
+type KVModule = typeof import('./mock');
 
-export async function kvSet(key: string, value: string): Promise<void> {
-  store.set(key, value);
-}
+let impl: KVModule | null = null;
 
-export async function kvIncr(key: string): Promise<number> {
-  const val = parseInt(store.get(key) || '0', 10) + 1;
-  store.set(key, String(val));
-  return val;
-}
-
-export async function kvDecr(key: string): Promise<number> {
-  const val = Math.max(0, parseInt(store.get(key) || '0', 10) - 1);
-  store.set(key, String(val));
-  return val;
-}
-
-export async function kvDel(key: string): Promise<void> {
-  store.delete(key);
-}
-
-export async function kvExists(key: string): Promise<boolean> {
-  return store.has(key);
-}
-
-export async function kvHGet(key: string, field: string): Promise<string | null> {
-  try {
-    const obj = JSON.parse(store.get(key) || '{}');
-    return obj[field] ?? null;
-  } catch {
-    return null;
+async function getImpl(): Promise<KVModule> {
+  if (impl) return impl;
+  if (process.env.KV_PROVIDER === 'cloudflare') {
+    impl = await import('./cloudflare') as KVModule;
+  } else {
+    impl = await import('./mock');
   }
+  return impl;
 }
 
-export async function kvHSet(key: string, field: string, value: string): Promise<void> {
-  const obj = JSON.parse(store.get(key) || '{}');
-  obj[field] = value;
-  store.set(key, JSON.stringify(obj));
-}
-
-export async function kvHDel(key: string, field: string): Promise<void> {
-  try {
-    const obj = JSON.parse(store.get(key) || '{}');
-    delete obj[field];
-    store.set(key, JSON.stringify(obj));
-  } catch {}
-}
-
-export async function kvHIncr(key: string, field: string): Promise<number> {
-  const obj = JSON.parse(store.get(key) || '{}');
-  obj[field] = (parseInt(obj[field] || '0', 10) + 1).toString();
-  store.set(key, JSON.stringify(obj));
-  return parseInt(obj[field], 10);
-}
-
-export async function kvHDecr(key: string, field: string): Promise<number> {
-  const obj = JSON.parse(store.get(key) || '{}');
-  obj[field] = Math.max(0, parseInt(obj[field] || '0', 10) - 1).toString();
-  store.set(key, JSON.stringify(obj));
-  return parseInt(obj[field], 10);
-}
-
-export async function kvHGetAll(key: string): Promise<Record<string, string>> {
-  try {
-    return JSON.parse(store.get(key) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-export async function kvDisconnect(): Promise<void> {
-  store.clear();
-}
+export async function kvGet(key: string) { return (await getImpl()).kvGet(key); }
+export async function kvSet(key: string, value: string) { return (await getImpl()).kvSet(key, value); }
+export async function kvIncr(key: string) { return (await getImpl()).kvIncr(key); }
+export async function kvDecr(key: string) { return (await getImpl()).kvDecr(key); }
+export async function kvDel(key: string) { return (await getImpl()).kvDel(key); }
+export async function kvExists(key: string) { return (await getImpl()).kvExists(key); }
+export async function kvHGet(key: string, field: string) { return (await getImpl()).kvHGet(key, field); }
+export async function kvHSet(key: string, field: string, value: string) { return (await getImpl()).kvHSet(key, field, value); }
+export async function kvHDel(key: string, field: string) { return (await getImpl()).kvHDel(key, field); }
+export async function kvHIncr(key: string, field: string) { return (await getImpl()).kvHIncr(key, field); }
+export async function kvHDecr(key: string, field: string) { return (await getImpl()).kvHDecr(key, field); }
+export async function kvHGetAll(key: string) { return (await getImpl()).kvHGetAll(key); }
+export async function kvDisconnect() { return (await getImpl()).kvDisconnect(); }

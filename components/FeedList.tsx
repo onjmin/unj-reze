@@ -2,11 +2,13 @@
 
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
+import BbsBoardView from './BbsBoardView';
 
 interface FeedListProps {
   posts: Post[];
   activeTab: string;
   rankCategory: string;
+  bbsMode: string;
   onLike: (id: number) => void;
   onDislike: (id: number) => void;
   onRepost: (id: number) => void;
@@ -18,7 +20,7 @@ interface FeedListProps {
   openMml: () => void;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -33,6 +35,17 @@ export default function FeedList({ posts, activeTab, rankCategory, onLike, onDis
     }
   } else if (activeTab === 'following') {
     displayPosts = displayPosts.filter(p => p.id === 3 || p.id === 6);
+  }
+
+  if (bbsMode === '掲示板モード') {
+    return (
+      <BbsBoardView
+        posts={displayPosts}
+        activeTab={activeTab}
+        rankCategory={rankCategory}
+        onQuickPost={onQuickPost}
+      />
+    );
   }
 
   return (

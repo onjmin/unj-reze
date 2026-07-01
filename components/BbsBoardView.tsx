@@ -1,0 +1,144 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Search, Plus } from 'lucide-react';
+import { Post } from '@/lib/types';
+
+interface BbsBoardViewProps {
+  posts: Post[];
+  activeTab: string;
+  rankCategory: string;
+  onQuickPost: () => void;
+}
+
+const PAGE_SIZE = 15;
+
+export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPost }: BbsBoardViewProps) {
+  const router = useRouter();
+  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [page, setPage] = useState(1);
+
+  let displayPosts = [...posts];
+  if (activeTab === 'ranking') {
+    if (rankCategory === 'イイ') displayPosts.sort((a, b) => b.likes - a.likes);
+    else if (rankCategory === 'コメ') displayPosts.sort((a, b) => b.repliesCount - a.repliesCount);
+    else if (rankCategory === 'ダメ') displayPosts.sort((a, b) => b.dislikes - a.dislikes);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(displayPosts.length / PAGE_SIZE));
+  const pagePosts = displayPosts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const badgeClass = (count: number) => {
+    if (count >= 100) return 'bg-red-600 text-white';
+    if (count >= 20) return 'bg-orange-600 text-white';
+    if (count >= 7) return 'bg-green-500 text-white';
+    if (count >= 3) return 'bg-green-900 text-green-300';
+    return 'bg-gray-800 text-gray-400';
+  };
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${m}/${day} ${h}:${min}`;
+  };
+
+  return (
+    <div className="flex flex-col min-h-0">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 flex-wrap shrink-0">
+        <span className="text-gray-500 text-[10px]">並び:</span>
+        <span className="bg-gray-800 text-gray-200 px-2 py-0.5 rounded text-[10px]">
+          更新順 <span className="text-gray-500">▼</span>
+        </span>
+        <button
+          onClick={() => setAutoUpdate(v => !v)}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
+            autoUpdate ? 'border-green-600/60 text-green-400' : 'border-gray-700 text-gray-500'
+          }`}
+        >
+          <span className={`inline-flex items-center justify-center w-3 h-3 rounded-sm border text-[7px] font-bold transition-colors ${
+            autoUpdate ? 'bg-green-500 border-green-500 text-white' : 'border-gray-600 text-transparent'
+          }`}>✓</span>
+          自動更新
+          {autoUpdate && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
+        </button>
+        <button
+          onClick={onQuickPost}
+          className="ml-auto flex items-center gap-1 bg-gray-700 hover:bg-gray-600 text-gray-100 px-2.5 py-1 rounded text-[11px] font-bold transition-colors"
+        >
+          <Plus size={11} /> スレ作成
+        </button>
+        <button className="p-1 hover:bg-gray-800 rounded text-gray-500 transition-colors">
+          <Search size={14} />
+        </button>
+      </div>
+
+      {/* Count + pagination */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800/50 shrink-0">
+        <span className="text-[10px] text-gray-500">全 {displayPosts.length} スレッド</span>
+        <div className="flex items-center gap-1 text-[10px]">
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-gray-400 disabled:opacity-30 hover:bg-gray-700 transition-colors"
+          >{'<'}</button>
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-gray-400 disabled:opacity-30 hover:bg-gray-700 transition-colors"
+          >{'>'}</button>
+          <span className="text-gray-500 ml-0.5">{page} / {totalPages}</span>
+        </div>
+      </div>
+
+      {/* Thread list */}
+      <div className="divide-y divide-gray-800/50">
+        {pagePosts.map(post => (
+          <div
+            key={post.id}
+            onClick={() => router.push(`/post/${post.id}`)}
+            className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
+          >
+            {/* Reply count badge */}
+            <div className={`shrink-0 min-w-[28px] h-6 rounded px-1.5 flex items-center justify-center text-[11px] font-bold tabular-nums ${badgeClass(post.repliesCount)}`}>
+              {post.repliesCount}
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] text-gray-100 leading-snug line-clamp-2 break-words">
+                {post.content.split('\n')[0]}
+              </p>
+              <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
+                <span>ID:{post.displayName.slice(-3)}</span>
+                <span>{formatDate(post.createdAt)}</span>
+                <span className="text-gray-600">({post.time})</span>
+                {post.likes > 0 && (
+                  <span className="flex items-center gap-0.5">
+                    <span className="text-gray-600">👍</span>
+                    <span>{post.likes}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Thumbnail */}
+            {post.hasImage && post.imageSrc && (
+              <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
+                <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="py-8 text-center text-[10px] text-gray-700">
+        すべて表示されました
+      </div>
+    </div>
+  );
+}

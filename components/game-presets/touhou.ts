@@ -241,10 +241,7 @@ end while
         {
           name: '氷符「パーフェクトフリーズ」',
           triggerHp: 130,
-          dialogue: [
-            { speaker: 'チルノ', emoji: '🌸', text: 'ふふん、スペルカードを使ってあげるわ！',
-              imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-          ],
+
           // 12方向リング + aimed 加速弾の複合
           miniScript: `
 moveTo(rand(80, ${VIEW_W - 80}), 80, 40)
@@ -260,10 +257,7 @@ end while
         {
           name: '氷符「ブルーフロストオーロラ」',
           triggerHp: 60,
-          dialogue: [
-            { speaker: 'チルノ', emoji: '🌸', text: '⑨の力、全部使ってやる！',
-              imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-          ],
+
           // 回転リング（frame で角度をずらし続けることで螺旋に見える）＋速度差リングスタック
           miniScript: `
 moveTo(${VIEW_W / 2}, 70, 30)
@@ -283,10 +277,7 @@ end while
         {
           name: '凍符「ダイヤモンドブリザード」',
           triggerHp: 20,
-          dialogue: [
-            { speaker: 'チルノ', emoji: '🌸', text: 'これが⑨の本気よ！最強の弾幕を見せてあげる！',
-              imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-          ],
+
           // 加速弾 + spread 複合、180フレームで弾消滅
           miniScript: `
 moveTo(${VIEW_W / 2}, 65, 25)

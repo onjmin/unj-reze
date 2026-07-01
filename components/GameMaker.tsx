@@ -2283,7 +2283,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       overrideDir?: WayKey,
     ) => {
       const isPlayer = animKey === 'player';
-      if (isPlayer) {
+      // touhouエンジンではジャンプ演出のsquash/stretchは不要なので適用しない
+      const useScale = isPlayer && gameData.engine !== 'touhou';
+      if (useScale) {
         ctx.save();
         const centerX = x + w / 2;
         const bottomY = y + h;
@@ -2292,7 +2294,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.translate(-centerX, -bottomY);
       }
       drawSpriteInner(def, x, y, w, h, animKey, overrideDir);
-      if (isPlayer) {
+      if (useScale) {
         ctx.restore();
       }
     };

@@ -1,5 +1,6 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
+import { dqField as vglcDqField } from './vglc-stages';
 const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
 const ir  = (no: number) => `url:${sp(no)}`;
 
@@ -15,27 +16,9 @@ const tiles: PresetData['tiles'] = {
   7: { name: '扉',       color: '#c0802a', passable: true,  imageRef: ir(151), imageUrl: sp(151) },
 };
 
-// ── シーン1：フィールド ──────────────────────────────────────────────────────
+// ── シーン1：フィールド (scripts/import-vglc.mjs 生成 DQ風マップ 30×24) ─────
 const W = 30, H = 24;
-const fieldMap = Array.from({ length: H }, (_, y) =>
-  Array.from({ length: W }, (_, x) => {
-    if (x === 0 || x === W - 1 || y === 0 || y === H - 1) return 1;
-    if (y <= 1 && x >= 14 && x <= 16) return (y === 1 && x === 15) ? 3 : 1;
-    if (x >= 4 && x <= 8 && y >= 6 && y <= 9) return 2;
-    if (x >= 19 && x <= 24 && y >= 12 && y <= 15) return 2;
-    if (x >= 10 && x <= 12 && y >= 4 && y <= 5) return 4;
-    if (x >= 22 && x <= 25 && y >= 4 && y <= 6) return 4;
-    if (x >= 6 && x <= 8 && y >= 16 && y <= 18) return 4;
-    if (x >= 13 && x <= 15 && y >= 10 && y <= 12) return 1;
-    if (x >= 2 && x <= 3 && y >= 12 && y <= 14) return 1;
-    // 村（南端）
-    if (x >= 5 && x <= 6 && y === 22) return 7;
-    if (x >= 3 && x <= 8 && y >= 19 && y <= 22 && !(x >= 4 && x <= 7 && y >= 20 && y <= 21)) return 6;
-    // 洞窟入口
-    if (x === 9 && (y === 13 || y === 14)) return 7;
-    return 0;
-  })
-);
+const fieldMap = vglcDqField.map(row => [...row]);
 
 const scene1: SceneDef = {
   id: 'field', name: 'フィールド',

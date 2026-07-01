@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import BbsThreadView from './BbsThreadView';
 import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag } from 'lucide-react';
 import Link from 'next/link';
 import { Post } from '@/lib/types';
@@ -19,7 +20,17 @@ interface PostDetailProps {
 }
 
 export default function PostDetail({ post: initial }: PostDetailProps) {
+  const [bbsMode, setBbsMode] = useState('');
+  useEffect(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
+    setBbsMode(saved ?? 'SNSモード');
+  }, []);
+
   const [post, setPost] = useState<Post>(initial);
+
+  if (bbsMode === '掲示板モード') {
+    return <BbsThreadView post={initial} />;
+  }
   const [replyText, setReplyText] = useState('');
   const [replyTo, setReplyTo] = useState<Post | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
