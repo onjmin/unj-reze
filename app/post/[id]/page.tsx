@@ -3,8 +3,6 @@ import { db as mockDb } from '@/lib/mock-db';
 import PostDetail from '@/components/PostDetail';
 import Link from 'next/link';
 
-export const dynamic = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' ? 'auto' : 'force-dynamic';
-
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
   return mockDb.getPosts().map(post => ({ id: post.id.toString() }));

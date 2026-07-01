@@ -1,8 +1,6 @@
 import { db as mockDb } from '@/lib/mock-db';
 import HashtagView from '@/components/HashtagView';
 
-export const dynamic = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' ? 'auto' : 'force-dynamic';
-
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
   const tags = new Set<string>();
