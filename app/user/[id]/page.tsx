@@ -4,7 +4,7 @@ import ProfileView from '@/components/ProfileView';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
-export const dynamic = 'force-dynamic';
+export const dynamic = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' ? 'auto' : 'force-dynamic';
 
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
