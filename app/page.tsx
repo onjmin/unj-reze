@@ -28,6 +28,8 @@ const MmlEditor = dynamic(() => import('@/components/MmlEditor'), { ssr: false }
 
 export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
+  const [newPosts, setNewPosts] = useState<Post[]>([]);
+  const postsRef = useRef<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentNav, setCurrentNav] = useState('home');
   const [topTab, setTopTab] = useState('everyone');
@@ -132,8 +134,42 @@ export default function App() {
   }, [userId]);
 
   useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
+
+  useEffect(() => {
     fetchPosts();
   }, [fetchPosts]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const intervalId = setInterval(async () => {
+      try {
+        const data = await api.posts.list(userId);
+        const existingIds = new Set(postsRef.current.map(p => p.id));
+        
+        setNewPosts(currentNewPosts => {
+          const newIds = new Set(currentNewPosts.map(p => p.id));
+          const incomingNewPosts = data.filter(p => !existingIds.has(p.id) && !newIds.has(p.id));
+          
+          if (incomingNewPosts.length > 0) {
+            return [...incomingNewPosts, ...currentNewPosts];
+          }
+          return currentNewPosts;
+        });
+      } catch (err) {
+        // ignore errors
+      }
+    }, 15000);
+    
+    return () => clearInterval(intervalId);
+  }, [userId]);
+
+  const handleShowNewPosts = () => {
+    setPosts(prev => [...newPosts, ...prev]);
+    setNewPosts([]);
+    document.getElementById('scrollable-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const handleQuickPost = () => {
     setComposerOpen(true);
@@ -323,7 +359,6 @@ export default function App() {
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         userId={userId}
-        setUserId={setUserId}
         bbsMode={bbsMode}
         setBbsMode={setBbsMode}
         currentUser={currentUser}
@@ -401,7 +436,7 @@ export default function App() {
               />
             )}
 
-            <div className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-20'}`}>
+            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-20'}`}>
               {currentNav === 'home' && topTab === 'game' && (
                 <LiveGameView
                   userId={userId}
@@ -498,6 +533,18 @@ export default function App() {
                       activeCategory={rankCategory}
                       setActiveCategory={setRankCategory}
                     />
+                  )}
+
+                  {newPosts.length > 0 && (
+                    <div className="sticky top-4 z-10 flex justify-center w-full pointer-events-none my-2">
+                      <button
+                        onClick={handleShowNewPosts}
+                        className="pointer-events-auto bg-blue-500/90 hover:bg-blue-400 backdrop-blur-md text-white px-5 py-2 rounded-full shadow-lg shadow-blue-500/20 text-sm font-bold flex items-center space-x-2 transition-all transform hover:scale-105 animate-in slide-in-from-top-4 fade-in duration-300"
+                      >
+                        <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                        <span>{newPosts.length}件の新しい投稿を表示</span>
+                      </button>
+                    </div>
                   )}
 
                   <FeedList

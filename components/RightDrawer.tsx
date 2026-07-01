@@ -15,34 +15,24 @@ interface RightDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   userId: string;
-  setUserId: (id: string) => void;
   bbsMode: string;
   setBbsMode: (m: string) => void;
   currentUser?: AnonymousUser | null;
 }
 
-export default function RightDrawer({ isOpen, onClose, userId, setUserId, bbsMode, setBbsMode, currentUser }: RightDrawerProps) {
-  const [editingId, setEditingId] = useState(userId);
+export default function RightDrawer({ isOpen, onClose, userId, bbsMode, setBbsMode, currentUser }: RightDrawerProps) {
   const [privacy, setPrivacy] = useState({ isPrivate: false, hideFromSearch: false, hideReactions: false });
   const [migrationToken, setMigrationToken] = useState('');
   const [redeemInput, setRedeemInput] = useState('');
   const [redeemMsg, setRedeemMsg] = useState('');
+
+  const displayName = currentUser?.displayName || userId;
 
   useEffect(() => {
     if (isOpen && currentUser?.slug) {
       api.auth.getSettings(currentUser.slug).then(setPrivacy).catch(() => {});
     }
   }, [isOpen, currentUser?.slug]);
-
-  const handleIdChangeSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingId.trim()) {
-      setUserId(editingId.trim());
-      if (currentUser?.id) {
-        api.auth.updateDisplayName(currentUser.id, editingId.trim());
-      }
-    }
-  };
 
   const togglePrivacy = async (key: 'isPrivate' | 'hideFromSearch' | 'hideReactions') => {
     if (!currentUser?.slug) return;
@@ -122,22 +112,15 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, bbsMod
 
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           <div className="space-y-2">
-            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">IDカスタマイズ</label>
-            <form onSubmit={handleIdChangeSubmit} className="flex space-x-1.5">
-              <input
-                type="text"
-                value={editingId}
-                onChange={(e) => setEditingId(e.target.value)}
-                className="flex-1 bg-gray-100/5 hover:bg-gray-100/10 focus:bg-gray-100/10 rounded-lg px-2.5 py-1.5 text-xs outline-none text-white border border-gray-800 focus:border-blue-500/55 transition-colors"
-              />
-              <button
-                type="submit"
-                className="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors flex items-center justify-center shrink-0"
-              >
-                更新
-              </button>
-            </form>
-            <p className="text-[9px] text-gray-500">※変更するとタイムライン等に新規投稿する際のIDが変わります</p>
+            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">あなたのID</label>
+            <div className="flex items-center gap-2 bg-gray-100/5 border border-gray-800 rounded-lg px-3 py-2">
+              {currentUser?.avatarColor && (
+                <span className={`w-6 h-6 rounded-full bg-gradient-to-br ${currentUser.avatarColor} shrink-0 border border-gray-700/50`} />
+              )}
+              <span className="flex-1 text-xs font-bold text-gray-200 truncate">{displayName || '名無し'}</span>
+              <Lock size={12} className="text-gray-500 shrink-0" />
+            </div>
+            <p className="text-[9px] text-gray-500">※IDは固定です（変更不可）。別の端末やセッションへは下部の移行トークンで引き継げます。</p>
           </div>
 
           <div className="space-y-2">
