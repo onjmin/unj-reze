@@ -11,6 +11,63 @@ let initialized = false;
 async function ensureTables(client: any) {
   if (initialized) return;
 
+  // Core tables: 新規DBでも必ず存在するように作成
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS trends (
+      id SERIAL PRIMARY KEY,
+      keyword TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT 'like',
+      post_id INTEGER,
+      target_user TEXT,
+      read BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id SERIAL PRIMARY KEY,
+      sender TEXT NOT NULL,
+      text TEXT NOT NULL,
+      recipient TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id SERIAL PRIMARY KEY,
+      thread_id INTEGER NOT NULL,
+      parent_post_id INTEGER,
+      display_name TEXT NOT NULL,
+      slug TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      content TEXT NOT NULL,
+      likes INTEGER NOT NULL DEFAULT 0,
+      dislikes INTEGER NOT NULL DEFAULT 0,
+      liked BOOLEAN NOT NULL DEFAULT FALSE,
+      disliked BOOLEAN NOT NULL DEFAULT FALSE,
+      replies_count INTEGER NOT NULL DEFAULT 0,
+      reposts INTEGER NOT NULL DEFAULT 0,
+      reposted BOOLEAN NOT NULL DEFAULT FALSE,
+      has_image BOOLEAN NOT NULL DEFAULT FALSE,
+      image_src TEXT,
+      image_alt TEXT,
+      avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+      has_collab_button BOOLEAN NOT NULL DEFAULT FALSE,
+      hearts_total INTEGER NOT NULL DEFAULT 0,
+      has_game BOOLEAN NOT NULL DEFAULT FALSE,
+      game_id BIGINT
+    )
+  `);
+
   // Migration: add sequences for tables created with INTEGER PRIMARY KEY (not SERIAL)
   const tables = ['notifications', 'messages', 'trends', 'posts', 'post_votes', 'post_hearts'];
   for (const table of tables) {
@@ -34,30 +91,31 @@ async function ensureTables(client: any) {
   }
 
   // Migration: add columns to notifications table for navigation links
+  // Guard: テーブルが存在しない新規DBではスキップ（CREATE TABLE後に自動的に正しいカラムで作られる）
   for (const col of ['type', 'post_id', 'target_user']) {
     await client.query(`
       DO $$ BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_name = 'notifications' AND column_name = '${col}'
-        ) THEN
-          ALTER TABLE notifications ADD COLUMN ${col} ${col === 'type' ? 'TEXT NOT NULL DEFAULT \'like\'' : col === 'post_id' ? 'INTEGER' : 'TEXT'};
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'notifications') THEN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'notifications' AND column_name = '${col}'
+          ) THEN
+            ALTER TABLE notifications ADD COLUMN ${col} ${col === 'type' ? 'TEXT NOT NULL DEFAULT \'like\'' : col === 'post_id' ? 'INTEGER' : 'TEXT'};
+          END IF;
         END IF;
       END $$;
     `);
   }
   // Migration: set type/post_id/target_user for existing seed rows
   await client.query(`
-    UPDATE notifications SET type = 'like', post_id = 7 WHERE id = 1 AND type = 'like' AND post_id IS NULL
-  `);
-  await client.query(`
-    UPDATE notifications SET type = 'repost', post_id = 6 WHERE id = 2 AND type = 'like' AND post_id IS NULL
-  `);
-  await client.query(`
-    UPDATE notifications SET type = 'reply', post_id = 5 WHERE id = 3 AND type = 'like' AND post_id IS NULL
-  `);
-  await client.query(`
-    UPDATE notifications SET type = 'follow', target_user = '名無しvFZ' WHERE id = 4 AND type = 'like' AND target_user IS NULL
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'notifications') THEN
+        UPDATE notifications SET type = 'like', post_id = 7 WHERE id = 1 AND type = 'like' AND post_id IS NULL;
+        UPDATE notifications SET type = 'repost', post_id = 6 WHERE id = 2 AND type = 'like' AND post_id IS NULL;
+        UPDATE notifications SET type = 'reply', post_id = 5 WHERE id = 3 AND type = 'like' AND post_id IS NULL;
+        UPDATE notifications SET type = 'follow', target_user = '名無しvFZ' WHERE id = 4 AND type = 'like' AND target_user IS NULL;
+      END IF;
+    END $$;
   `);
 
   await client.query(`
