@@ -22,3 +22,13 @@ export async function POST(request: NextRequest) {
   const message = await db.addMessage({ sender, text, recipient });
   return NextResponse.json(message, { status: 201 });
 }
+
+export async function DELETE(request: NextRequest) {
+  const { id, userId } = await request.json();
+  if (id == null || !userId) {
+    return NextResponse.json({ error: 'id and userId are required' }, { status: 400 });
+  }
+  const ok = await db.deleteMessage(Number(id), userId);
+  if (!ok) return NextResponse.json({ error: 'Message not found or not owned' }, { status: 404 });
+  return NextResponse.json({ success: true });
+}

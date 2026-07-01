@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   if (!q || !q.trim()) {
     return NextResponse.json({ error: 'query parameter q is required' }, { status: 400 });
   }
-  const posts = await db.searchPosts(q);
+  const userId = url.searchParams.get('userId') || undefined;
+  const posts = await db.searchPosts(q, userId);
   return NextResponse.json(posts);
 }

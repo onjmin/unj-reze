@@ -27,6 +27,17 @@ export async function kvSet(key: string, value: string): Promise<void> {
   if (!res.ok) throw new Error(`KV SET failed: ${res.status}`);
 }
 
+export async function kvSetEx(key: string, value: string, ttlSeconds: number): Promise<void> {
+  // Cloudflare KV は expiration_ttl の最小値が 60 秒
+  const ttl = Math.max(60, Math.floor(ttlSeconds));
+  const res = await fetch(`${base()}/values/${encodeURIComponent(key)}?expiration_ttl=${ttl}`, {
+    method: 'PUT',
+    headers: { ...headers(), 'Content-Type': 'text/plain' },
+    body: value,
+  });
+  if (!res.ok) throw new Error(`KV SETEX failed: ${res.status}`);
+}
+
 export async function kvIncr(key: string): Promise<number> {
   const current = parseInt((await kvGet(key)) || '0', 10);
   const next = current + 1;

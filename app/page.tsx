@@ -91,8 +91,8 @@ export default function App() {
     api.auth.anonymous(sessionId).then(user => {
       setUserId(user.displayName);
       setCurrentUser(user);
-      api.notifications.list(user.displayName).then(notifs => {
-        setNotifCount(notifs.length);
+      api.notifications.unreadCount(user.displayName).then(({ count }) => {
+        setNotifCount(count);
       }).catch(() => {});
       api.messages.list(user.displayName).then(msgs => {
         setMessageCount(msgs.length);
@@ -518,6 +518,8 @@ export default function App() {
                     }}
                     openCollab={handleOpenCollab}
                     openMml={() => setActiveScreen('mml')}
+                    currentUserSlug={currentUser?.slug}
+                    onModerationChange={fetchPosts}
                   />
                 </>
               )}

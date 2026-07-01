@@ -2,6 +2,7 @@
 
 import { Search, Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
@@ -19,6 +20,7 @@ interface SearchViewProps {
 }
 
 export default function SearchView(props: SearchViewProps) {
+  const router = useRouter();
   const [trends, setTrends] = useState<{ keyword: string; count: number }[]>([]);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Post[]>([]);
@@ -52,6 +54,10 @@ export default function SearchView(props: SearchViewProps) {
   };
 
   const handleTrendClick = (keyword: string) => {
+    if (keyword.startsWith('#')) {
+      router.push(`/hashtag/${encodeURIComponent(keyword.slice(1))}`);
+      return;
+    }
     setQuery(keyword);
     handleSearch(keyword);
   };

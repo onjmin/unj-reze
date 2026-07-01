@@ -25,6 +25,17 @@ const staticApi = {
     updateDisplayName: async (userId: string, displayName: string) => {
       mockDbInstance.updateUserDisplayName(userId, displayName);
     },
+    getSettings: async (slug: string) => mockDbInstance.getUserSettings(slug),
+    updateSettings: async (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) => {
+      mockDbInstance.updateUserSettings(slug, settings);
+      return mockDbInstance.getUserSettings(slug);
+    },
+    issueMigrationToken: async (userId: string) => ({ token: mockDbInstance.issueMigrationToken(userId) }),
+    redeemMigrationToken: async (token: string, sessionId: string) => {
+      const user = mockDbInstance.redeemMigrationToken(token, sessionId);
+      if (!user) throw new Error('invalid or expired token');
+      return user;
+    },
   },
   upload: {
     image: async (data: { image: string; filename?: string }) => ({ url: data.image }),
@@ -58,8 +69,18 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return post;
     },
+    edit: async (id: number, userId: string, content: string) => {
+      const post = mockDbInstance.editPost(id, userId, content);
+      if (!post) throw new Error('Post not found or not owned');
+      return post;
+    },
+    remove: async (id: number, userId: string) => {
+      const ok = mockDbInstance.deletePost(id, userId);
+      if (!ok) throw new Error('Post not found or not owned');
+      return { success: true };
+    },
     replies: {
-      list: async (postId: number) => mockDbInstance.getReplies(postId),
+      list: async (postId: number, userId?: string) => mockDbInstance.getReplies(postId, userId),
       create: async (postId: number, data: { displayName: string; content: string; parentPostId?: number }) => {
         const reply = mockDbInstance.addReply(postId, data);
         if (!reply) throw new Error('Post not found');
@@ -69,17 +90,29 @@ const staticApi = {
   },
   notifications: {
     list: async (userId?: string) => mockDbInstance.getNotifications(userId),
+    unreadCount: async (userId: string) => ({ count: mockDbInstance.getUnreadCount(userId) }),
+    markRead: async (id: number, userId: string) => { mockDbInstance.markNotificationRead(id, userId); return { success: true }; },
+    markAllRead: async (userId: string) => { mockDbInstance.markAllNotificationsRead(userId); return { success: true }; },
+    remove: async (id: number, userId: string) => { mockDbInstance.deleteNotification(id, userId); return { success: true }; },
   },
   messages: {
     list: async (userId?: string) => mockDbInstance.getMessages(userId),
     send: async (data: { sender: string; text: string; recipient?: string }) => mockDbInstance.addMessage(data),
+    remove: async (id: number, userId: string) => {
+      const ok = mockDbInstance.deleteMessage(id, userId);
+      if (!ok) throw new Error('Message not found or not owned');
+      return { success: true };
+    },
   },
   search: {
     trends: async () => mockDbInstance.getTrends(),
-    posts: async (query: string) => {
+    posts: async (query: string, userId?: string) => {
       if (!query.trim()) return [];
-      return mockDbInstance.searchPosts(query);
+      return mockDbInstance.searchPosts(query, userId);
     },
+  },
+  hashtag: {
+    posts: async (tag: string, userId?: string) => mockDbInstance.getPostsByHashtag(tag, userId),
   },
   users: {
     profile: async (id: string, userId?: string, tab?: string) => {
@@ -103,6 +136,19 @@ const staticApi = {
     follow: async (followerId: string, followedId: string) => { mockDbInstance.followUser(followerId, followedId); return { success: true }; },
     unfollow: async (followerId: string, followedId: string) => { mockDbInstance.unfollowUser(followerId, followedId); return { success: true }; },
   },
+  block: {
+    list: async (blockerSlug: string) => ({ blocked: mockDbInstance.getBlockedSlugs(blockerSlug) }),
+    block: async (blockerSlug: string, blockedSlug: string) => { mockDbInstance.blockUser(blockerSlug, blockedSlug); return { success: true }; },
+    unblock: async (blockerSlug: string, blockedSlug: string) => { mockDbInstance.unblockUser(blockerSlug, blockedSlug); return { success: true }; },
+  },
+  mute: {
+    list: async (muterSlug: string) => ({ muted: mockDbInstance.getMutedSlugs(muterSlug) }),
+    mute: async (muterSlug: string, mutedSlug: string) => { mockDbInstance.muteUser(muterSlug, mutedSlug); return { success: true }; },
+    unmute: async (muterSlug: string, mutedSlug: string) => { mockDbInstance.unmuteUser(muterSlug, mutedSlug); return { success: true }; },
+  },
+  report: {
+    create: async (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) => { mockDbInstance.reportContent({ ...data, reason: data.reason || '' }); return { success: true }; },
+  },
 };
 
 const liveApi = {
@@ -113,6 +159,11 @@ const liveApi = {
     },
     updateDisplayName: (userId: string, displayName: string) =>
       fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName }) }),
+    getSettings: (slug: string) => fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>(`/auth/settings?slug=${encodeURIComponent(slug)}`),
+    updateSettings: (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) =>
+      fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>('/auth/settings', { method: 'PUT', body: JSON.stringify({ slug, settings }) }),
+    issueMigrationToken: (userId: string) => fetcher<{ token: string }>('/auth/migrate', { method: 'POST', body: JSON.stringify({ userId }) }),
+    redeemMigrationToken: (token: string, sessionId: string) => fetcher<AnonymousUser>('/auth/migrate', { method: 'PUT', body: JSON.stringify({ token, sessionId }) }),
   },
   upload: {
     image: (data: { image: string; filename?: string }) =>
@@ -133,8 +184,13 @@ const liveApi = {
     dislike: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
     heart: (id: number, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
     repost: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
+    edit: (id: number, userId: string, content: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content }) }),
+    remove: (id: number, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
     replies: {
-      list: (postId: number) => fetcher<Post[]>(`/posts/${postId}/replies`),
+      list: (postId: number, userId?: string) => {
+        const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+        return fetcher<Post[]>(`/posts/${postId}/replies${qs}`);
+      },
       create: (postId: number, data: { displayName: string; content: string; parentPostId?: number }) =>
         fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
     },
@@ -144,6 +200,10 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Notification[]>(`/notifications${qs}`);
     },
+    unreadCount: (userId: string) => fetcher<{ count: number }>(`/notifications?unread=1&userId=${encodeURIComponent(userId)}`),
+    markRead: (id: number, userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'PATCH', body: JSON.stringify({ id, userId }) }),
+    markAllRead: (userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'PATCH', body: JSON.stringify({ all: true, userId }) }),
+    remove: (id: number, userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'DELETE', body: JSON.stringify({ id, userId }) }),
   },
   messages: {
     list: (userId?: string) => {
@@ -152,10 +212,22 @@ const liveApi = {
     },
     send: (data: { sender: string; text: string; recipient?: string }) =>
       fetcher<Message>('/messages', { method: 'POST', body: JSON.stringify(data) }),
+    remove: (id: number, userId: string) =>
+      fetcher<{ success: boolean }>('/messages', { method: 'DELETE', body: JSON.stringify({ id, userId }) }),
   },
   search: {
     trends: () => fetcher<Trend[]>('/search/trends'),
-    posts: (query: string) => fetcher<Post[]>(`/search?q=${encodeURIComponent(query)}`),
+    posts: (query: string, userId?: string) => {
+      const params = new URLSearchParams({ q: query });
+      if (userId) params.set('userId', userId);
+      return fetcher<Post[]>(`/search?${params.toString()}`);
+    },
+  },
+  hashtag: {
+    posts: (tag: string, userId?: string) => {
+      const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+      return fetcher<Post[]>(`/hashtag/${encodeURIComponent(tag)}${qs}`);
+    },
   },
   users: {
     profile: (id: string, userId?: string, tab?: string) => {
@@ -171,6 +243,20 @@ const liveApi = {
     isFollowing: (followerId: string, followedId: string) => fetcher<{ isFollowing: boolean }>(`/follow?followerId=${encodeURIComponent(followerId)}&followedId=${encodeURIComponent(followedId)}`),
     follow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'POST', body: JSON.stringify({ followerId, followedId }) }),
     unfollow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'DELETE', body: JSON.stringify({ followerId, followedId }) }),
+  },
+  block: {
+    list: (blockerSlug: string) => fetcher<{ blocked: string[] }>(`/block?blockerSlug=${encodeURIComponent(blockerSlug)}`),
+    block: (blockerSlug: string, blockedSlug: string) => fetcher<{ success: boolean }>('/block', { method: 'POST', body: JSON.stringify({ blockerSlug, blockedSlug }) }),
+    unblock: (blockerSlug: string, blockedSlug: string) => fetcher<{ success: boolean }>('/block', { method: 'DELETE', body: JSON.stringify({ blockerSlug, blockedSlug }) }),
+  },
+  mute: {
+    list: (muterSlug: string) => fetcher<{ muted: string[] }>(`/mute?muterSlug=${encodeURIComponent(muterSlug)}`),
+    mute: (muterSlug: string, mutedSlug: string) => fetcher<{ success: boolean }>('/mute', { method: 'POST', body: JSON.stringify({ muterSlug, mutedSlug }) }),
+    unmute: (muterSlug: string, mutedSlug: string) => fetcher<{ success: boolean }>('/mute', { method: 'DELETE', body: JSON.stringify({ muterSlug, mutedSlug }) }),
+  },
+  report: {
+    create: (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) =>
+      fetcher<{ success: boolean }>('/report', { method: 'POST', body: JSON.stringify(data) }),
   },
 };
 

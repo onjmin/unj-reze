@@ -1,10 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Settings, X, Check, Home, ExternalLink } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Settings, X, Check, Home, ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
+
+function getCookieValue(name: string): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
 
 interface RightDrawerProps {
   isOpen: boolean;
@@ -20,6 +26,16 @@ interface RightDrawerProps {
 
 export default function RightDrawer({ isOpen, onClose, userId, setUserId, server, setServer, bbsMode, setBbsMode, currentUser }: RightDrawerProps) {
   const [editingId, setEditingId] = useState(userId);
+  const [privacy, setPrivacy] = useState({ isPrivate: false, hideFromSearch: false, hideReactions: false });
+  const [migrationToken, setMigrationToken] = useState('');
+  const [redeemInput, setRedeemInput] = useState('');
+  const [redeemMsg, setRedeemMsg] = useState('');
+
+  useEffect(() => {
+    if (isOpen && currentUser?.slug) {
+      api.auth.getSettings(currentUser.slug).then(setPrivacy).catch(() => {});
+    }
+  }, [isOpen, currentUser?.slug]);
 
   const handleIdChangeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +46,62 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
       }
     }
   };
+
+  const togglePrivacy = async (key: 'isPrivate' | 'hideFromSearch' | 'hideReactions') => {
+    if (!currentUser?.slug) return;
+    const next = { ...privacy, [key]: !privacy[key] };
+    setPrivacy(next);
+    try {
+      await api.auth.updateSettings(currentUser.slug, { [key]: next[key] });
+    } catch {
+      setPrivacy(privacy); // 失敗時ロールバック
+    }
+  };
+
+  const handleIssueToken = async () => {
+    if (!currentUser?.id) return;
+    try {
+      const { token } = await api.auth.issueMigrationToken(currentUser.id);
+      setMigrationToken(token);
+    } catch { /* noop */ }
+  };
+
+  const handleCopyToken = () => {
+    if (migrationToken) navigator.clipboard.writeText(migrationToken);
+  };
+
+  const handleRedeem = async () => {
+    const token = redeemInput.trim();
+    if (!token) return;
+    let sessionId = getCookieValue('unj_reze_session');
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      document.cookie = `unj_reze_session=${sessionId};path=/;max-age=${60 * 60 * 24 * 365};SameSite=Lax`;
+    }
+    try {
+      const user = await api.auth.redeemMigrationToken(token, sessionId);
+      setRedeemMsg(`「${user.displayName}」として復元しました。再読み込みします…`);
+      setTimeout(() => { if (typeof window !== 'undefined') window.location.reload(); }, 800);
+    } catch {
+      setRedeemMsg('トークンが無効か期限切れです。');
+    }
+  };
+
+  const PrivacyToggle = ({ label, desc, icon: Icon, active, onClick }: { label: string; desc: string; icon: React.ElementType; active: boolean; onClick: () => void }) => (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-left"
+    >
+      <Icon size={14} className={active ? 'text-[#a3e635] shrink-0' : 'text-gray-500 shrink-0'} />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs text-gray-200">{label}</div>
+        <div className="text-[9px] text-gray-500">{desc}</div>
+      </div>
+      <span className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${active ? 'bg-[#a3e635]' : 'bg-gray-700'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${active ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+    </button>
+  );
 
   return (
     <>
@@ -112,6 +184,74 @@ export default function RightDrawer({ isOpen, onClose, userId, setUserId, server
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="h-px bg-gray-800" />
+
+          <div className="space-y-2">
+            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">プライバシー</label>
+            <div className="space-y-1.5">
+              <PrivacyToggle
+                label="鍵アカウント"
+                desc="フォロワーのみに投稿を公開"
+                icon={Lock}
+                active={privacy.isPrivate}
+                onClick={() => togglePrivacy('isPrivate')}
+              />
+              <PrivacyToggle
+                label="検索から除外"
+                desc="検索・トレンドに自分の投稿を出さない"
+                icon={EyeOff}
+                active={privacy.hideFromSearch}
+                onClick={() => togglePrivacy('hideFromSearch')}
+              />
+              <PrivacyToggle
+                label="リアクション履歴を非公開"
+                desc="いいね／ハート等の履歴を隠す"
+                icon={Heart}
+                active={privacy.hideReactions}
+                onClick={() => togglePrivacy('hideReactions')}
+              />
+            </div>
+          </div>
+
+          <div className="h-px bg-gray-800" />
+
+          <div className="space-y-2">
+            <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1.5">
+              <KeyRound size={12} /> アカウント移行トークン
+            </label>
+            <p className="text-[9px] text-gray-500">セッションが変わっても過去のアカウントを復元できます。</p>
+            <button
+              onClick={handleIssueToken}
+              className="w-full bg-gray-100/5 hover:bg-gray-100/10 border border-gray-800 rounded-lg py-1.5 text-xs text-gray-200 transition-colors"
+            >
+              移行トークンを発行
+            </button>
+            {migrationToken && (
+              <div className="flex items-center gap-1.5 bg-gray-100/5 border border-gray-800 rounded-lg px-2 py-1.5">
+                <code className="flex-1 text-[10px] text-[#a3e635] truncate">{migrationToken}</code>
+                <button onClick={handleCopyToken} className="text-gray-400 hover:text-white p-1 shrink-0" title="コピー">
+                  <Copy size={12} />
+                </button>
+              </div>
+            )}
+            <div className="flex space-x-1.5">
+              <input
+                type="text"
+                value={redeemInput}
+                onChange={(e) => setRedeemInput(e.target.value)}
+                placeholder="トークンを入力して復元"
+                className="flex-1 bg-gray-100/5 hover:bg-gray-100/10 focus:bg-gray-100/10 rounded-lg px-2.5 py-1.5 text-xs outline-none text-white border border-gray-800 focus:border-blue-500/55 transition-colors"
+              />
+              <button
+                onClick={handleRedeem}
+                className="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors shrink-0"
+              >
+                復元
+              </button>
+            </div>
+            {redeemMsg && <p className="text-[9px] text-gray-400">{redeemMsg}</p>}
           </div>
 
           <div className="h-px bg-gray-800" />

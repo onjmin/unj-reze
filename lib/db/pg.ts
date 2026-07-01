@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { Post, AnonymousUser } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
 import { kvIncr, kvDecr, kvGet } from '../kv';
 
@@ -160,6 +160,59 @@ async function ensureTables(client: any) {
       PRIMARY KEY (session_id, game_id)
     )
   `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS user_blocks (
+      blocker_slug TEXT NOT NULL,
+      blocked_slug TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (blocker_slug, blocked_slug)
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS user_mutes (
+      muter_slug TEXT NOT NULL,
+      muted_slug TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (muter_slug, muted_slug)
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS reports (
+      id SERIAL PRIMARY KEY,
+      reporter_slug TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS migration_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anonymous_users' AND column_name = 'is_private') THEN
+        ALTER TABLE anonymous_users ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT false;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anonymous_users' AND column_name = 'hide_from_search') THEN
+        ALTER TABLE anonymous_users ADD COLUMN hide_from_search BOOLEAN NOT NULL DEFAULT false;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anonymous_users' AND column_name = 'hide_reactions') THEN
+        ALTER TABLE anonymous_users ADD COLUMN hide_reactions BOOLEAN NOT NULL DEFAULT false;
+      END IF;
+    END $$;
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'notifications' AND column_name = 'read') THEN
+        ALTER TABLE notifications ADD COLUMN read BOOLEAN NOT NULL DEFAULT false;
+      END IF;
+    END $$;
+  `);
   initialized = true;
 }
 
@@ -306,11 +359,60 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
   return post;
 }
 
+function snippetPg(text: string): string {
+  return text.length > 20 ? text.slice(0, 20) + '…' : text;
+}
+
+/** 通知を挿入。自己宛は生成しない。 */
+async function insertNotificationPg(client: any, d: { recipientId: string; actor: string; type: string; action: string; target?: string; postId?: number }): Promise<void> {
+  if (!d.recipientId || d.recipientId === d.actor) return;
+  try {
+    await client.query(
+      `INSERT INTO notifications (user_name, action, target, type, post_id, target_user, read, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, false, NOW())`,
+      [d.actor, d.action, d.target ?? '', d.type, d.postId ?? null, d.recipientId]
+    );
+  } catch { /* notifications テーブル未整備時は無視 */ }
+}
+
+/** userId(匿名ID/displayName/slug) から slug を解決。 */
+async function resolveViewerSlug(client: any, userId: string): Promise<string> {
+  const u = await client.query(
+    'SELECT slug FROM anonymous_users WHERE id = $1 OR display_name = $1 OR slug = $1 LIMIT 1',
+    [userId]
+  );
+  return u.rows[0]?.slug ?? deriveSlugPg(userId);
+}
+
+/** 閲覧者に対して非表示にすべき slug 集合(自分がブロック/ミュート ＋ 自分をブロックした相手)。 */
+async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>> {
+  const hidden = new Set<string>();
+  if (!userId) return hidden;
+  const viewerSlug = await resolveViewerSlug(client, userId);
+  if (!viewerSlug) return hidden;
+  const blocks = await client.query(
+    'SELECT blocker_slug, blocked_slug FROM user_blocks WHERE blocker_slug = $1 OR blocked_slug = $1',
+    [viewerSlug]
+  );
+  for (const r of blocks.rows) {
+    if (r.blocker_slug === viewerSlug) hidden.add(r.blocked_slug);
+    if (r.blocked_slug === viewerSlug) hidden.add(r.blocker_slug);
+  }
+  const mutes = await client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [viewerSlug]);
+  for (const r of mutes.rows) hidden.add(r.muted_slug);
+  return hidden;
+}
+
 export const pgStore: DataStore = {
   async getPosts(userId?: string) {
     const client = await getPool().connect();
     try {
-      return await getPostsWithVotes(client, userId);
+      const posts = await getPostsWithVotes(client, userId);
+      const hidden = await getHiddenSlugs(client, userId);
+      if (hidden.size === 0) return posts;
+      return posts
+        .filter(p => !hidden.has(p.slug ?? ''))
+        .map(p => ({ ...p, replies: p.replies.filter(r => !hidden.has(r.slug ?? '')) }));
     } finally {
       client.release();
     }
@@ -381,6 +483,8 @@ export const pgStore: DataStore = {
         );
         await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
         try { await kvIncr(`post:${id}:likes`); } catch {}
+        const author = postResult.rows[0];
+        await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', action: 'がいいねしました', target: snippetPg(author.content ?? ''), postId: id });
       }
 
       await client.query('COMMIT');
@@ -444,7 +548,7 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       await ensureTables(client);
-      const postResult = await client.query('SELECT id FROM posts WHERE id = $1', [id]);
+      const postResult = await client.query('SELECT id, display_name, content FROM posts WHERE id = $1', [id]);
       if (postResult.rows.length === 0) return null;
 
       for (let i = 0; i < count; i++) {
@@ -453,6 +557,8 @@ export const pgStore: DataStore = {
           [id, userId]
         );
       }
+      const author = postResult.rows[0];
+      await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: snippetPg(author.content ?? ''), postId: id });
       return await getPostWithVotes(client, id);
     } finally {
       client.release();
@@ -474,14 +580,16 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getReplies(postId: number) {
+  async getReplies(postId: number, userId?: string) {
     const client = await getPool().connect();
     try {
       const result = await client.query(
         'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
         [postId]
       );
-      return Promise.all(result.rows.map(rowToPost));
+      const replies = await Promise.all(result.rows.map(rowToPost));
+      const hidden = await getHiddenSlugs(client, userId);
+      return hidden.size === 0 ? replies : replies.filter(r => !hidden.has(r.slug ?? ''));
     } finally {
       client.release();
     }
@@ -503,7 +611,89 @@ export const pgStore: DataStore = {
         'UPDATE posts SET replies_count = replies_count + 1 WHERE id = $1',
         [postId]
       );
+      const parentRes = await client.query('SELECT display_name FROM posts WHERE id = $1', [parentPostId]);
+      const parentAuthor = parentRes.rows[0]?.display_name;
+      if (parentAuthor) {
+        await insertNotificationPg(client, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', action: 'が返信しました', target: snippetPg(data.content), postId: result.rows[0].id });
+      }
+      const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
+      if (mentions) {
+        const seen = new Set<string>();
+        for (const m of mentions) {
+          const slug = m.slice(1);
+          if (seen.has(slug)) continue;
+          seen.add(slug);
+          const mres = await client.query('SELECT display_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
+          const mname = mres.rows[0]?.display_name;
+          if (mname && mname !== parentAuthor) {
+            await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: snippetPg(data.content), postId: result.rows[0].id });
+          }
+        }
+      }
       return await rowToPost(result.rows[0]);
+    } finally {
+      client.release();
+    }
+  },
+
+  async editPost(id: number, userId: string, content: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const postResult = await client.query('SELECT slug, display_name FROM posts WHERE id = $1', [id]);
+      if (postResult.rows.length === 0) return null;
+      const viewerSlug = await resolveViewerSlug(client, userId);
+      const row = postResult.rows[0];
+      if (row.display_name !== userId && row.slug !== viewerSlug) return null;
+      await client.query('UPDATE posts SET content = $1 WHERE id = $2', [content, id]);
+      return await getPostWithVotes(client, id, userId);
+    } finally {
+      client.release();
+    }
+  },
+
+  async deletePost(id: number, userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const postResult = await client.query('SELECT * FROM posts WHERE id = $1', [id]);
+      if (postResult.rows.length === 0) return false;
+      const post = postResult.rows[0];
+      const viewerSlug = await resolveViewerSlug(client, userId);
+      if (post.display_name !== userId && post.slug !== viewerSlug) return false;
+
+      const isReply = post.parent_post_id != null && post.thread_id !== post.id;
+      const childCount = await client.query('SELECT COUNT(*) AS cnt FROM posts WHERE thread_id = $1 AND id != thread_id', [id]);
+      const hasChildren = parseInt(childCount.rows[0].cnt, 10) > 0;
+
+      if (!isReply && hasChildren) {
+        await client.query(
+          `UPDATE posts SET content = '(削除されました)', has_image = false, image_src = NULL, has_game = false, game_id = NULL WHERE id = $1`,
+          [id]
+        );
+      } else {
+        await client.query('DELETE FROM posts WHERE id = $1', [id]);
+        if (isReply) {
+          await client.query('UPDATE posts SET replies_count = GREATEST(replies_count - 1, 0) WHERE id = $1', [post.thread_id]);
+        }
+      }
+      return true;
+    } finally {
+      client.release();
+    }
+  },
+
+  async deleteMessage(id: number, userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const msgResult = await client.query('SELECT sender FROM messages WHERE id = $1', [id]);
+      if (msgResult.rows.length === 0) return false;
+      const sender = msgResult.rows[0].sender;
+      const viewerSlug = await resolveViewerSlug(client, userId);
+      if (sender !== userId && deriveSlugPg(sender) !== viewerSlug) return false;
+      await client.query('DELETE FROM messages WHERE id = $1', [id]);
+      return true;
     } finally {
       client.release();
     }
@@ -633,6 +823,8 @@ export const pgStore: DataStore = {
           type: r.type || 'like',
           postId: r.post_id ?? undefined,
           targetUser: r.target_user ?? undefined,
+          recipientId: r.target_user ?? undefined,
+          read: !!r.read,
           createdAt,
           time: formatRelativeTime(createdAt),
         } as Notification;
@@ -640,6 +832,39 @@ export const pgStore: DataStore = {
     } finally {
       client.release();
     }
+  },
+
+  async markNotificationRead(id: number, userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query('UPDATE notifications SET read = true WHERE id = $1 AND target_user = $2', [id, userId]);
+    } finally { client.release(); }
+  },
+
+  async markAllNotificationsRead(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query('UPDATE notifications SET read = true WHERE target_user = $1', [userId]);
+    } finally { client.release(); }
+  },
+
+  async deleteNotification(id: number, userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query('DELETE FROM notifications WHERE id = $1 AND target_user = $2', [id, userId]);
+    } finally { client.release(); }
+  },
+
+  async getUnreadCount(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query('SELECT COUNT(*) AS cnt FROM notifications WHERE target_user = $1 AND read = false', [userId]);
+      return parseInt(result.rows[0].cnt, 10);
+    } finally { client.release(); }
   },
 
   async getMessages(userId?: string) {
@@ -714,7 +939,7 @@ export const pgStore: DataStore = {
     }
   },
 
-  async searchPosts(query: string) {
+  async searchPosts(query: string, userId?: string) {
     if (!query.trim()) return [];
     const client = await getPool().connect();
     try {
@@ -727,9 +952,36 @@ export const pgStore: DataStore = {
         FROM posts p
         WHERE p.thread_id = p.id
           AND (p.content ILIKE $1 OR p.display_name ILIKE $1)
+          AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
       `, [`%${query}%`]);
-      return Promise.all(result.rows.map(rowToPost));
+      const posts = await Promise.all(result.rows.map(rowToPost));
+      const hidden = await getHiddenSlugs(client, userId);
+      return hidden.size === 0 ? posts : posts.filter(p => !hidden.has(p.slug ?? ''));
+    } finally {
+      client.release();
+    }
+  },
+
+  async getPostsByHashtag(tag: string, userId?: string) {
+    const normalized = tag.startsWith('#') ? tag : `#${tag}`;
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query(`
+        SELECT p.*,
+          false as liked,
+          false as disliked,
+          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        FROM posts p
+        WHERE p.thread_id = p.id
+          AND p.content ~ ('(^|[[:space:]])' || $1 || '([[:space:]]|$)')
+          AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), false) = false
+        ORDER BY p.id DESC
+      `, [normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')]);
+      const posts = await Promise.all(result.rows.map(rowToPost));
+      const hidden = await getHiddenSlugs(client, userId);
+      return hidden.size === 0 ? posts : posts.filter(p => !hidden.has(p.slug ?? ''));
     } finally {
       client.release();
     }
@@ -817,14 +1069,87 @@ export const pgStore: DataStore = {
     }
   },
 
+  async getUserSettings(slug: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const r = await client.query('SELECT is_private, hide_from_search, hide_reactions FROM anonymous_users WHERE slug = $1 LIMIT 1', [slug]);
+      const row = r.rows[0];
+      return {
+        isPrivate: !!row?.is_private,
+        hideFromSearch: !!row?.hide_from_search,
+        hideReactions: !!row?.hide_reactions,
+      };
+    } finally {
+      client.release();
+    }
+  },
+
+  async updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const sets: string[] = [];
+      const vals: any[] = [];
+      let i = 1;
+      if (settings.isPrivate !== undefined) { sets.push(`is_private = $${i++}`); vals.push(settings.isPrivate); }
+      if (settings.hideFromSearch !== undefined) { sets.push(`hide_from_search = $${i++}`); vals.push(settings.hideFromSearch); }
+      if (settings.hideReactions !== undefined) { sets.push(`hide_reactions = $${i++}`); vals.push(settings.hideReactions); }
+      if (sets.length === 0) return;
+      vals.push(slug);
+      await client.query(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE slug = $${i}`, vals);
+    } finally {
+      client.release();
+    }
+  },
+
+  async issueMigrationToken(userId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+      await client.query('INSERT INTO migration_tokens (token, user_id) VALUES ($1, $2)', [token, userId]);
+      return token;
+    } finally {
+      client.release();
+    }
+  },
+
+  async redeemMigrationToken(token: string, newSessionId: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const r = await client.query('SELECT user_id FROM migration_tokens WHERE token = $1', [token]);
+      if (r.rows.length === 0) return null;
+      const userId = r.rows[0].user_id;
+      const ur = await client.query('SELECT * FROM anonymous_users WHERE id = $1', [userId]);
+      if (ur.rows.length === 0) return null;
+      await client.query('UPDATE anonymous_users SET session_id = $1, last_seen_at = NOW() WHERE id = $2', [newSessionId, userId]);
+      await client.query('DELETE FROM migration_tokens WHERE token = $1', [token]);
+      const row = ur.rows[0];
+      return {
+        id: row.id,
+        displayName: row.display_name,
+        slug: row.slug,
+        avatarColor: row.avatar_color,
+        createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString ? row.created_at.toISOString() : String(row.created_at),
+      } as AnonymousUser;
+    } finally {
+      client.release();
+    }
+  },
+
   async followUser(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
       await ensureTables(client);
-      await client.query(
+      const ins = await client.query(
         'INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [followerId, followedId]
       );
+      if (ins.rowCount && ins.rowCount > 0) {
+        await insertNotificationPg(client, { recipientId: followedId, actor: followerId, type: 'follow', action: 'がフォローしました', target: '' });
+      }
     } finally {
       client.release();
     }
@@ -873,6 +1198,75 @@ export const pgStore: DataStore = {
     } finally {
       client.release();
     }
+  },
+
+  async blockUser(blockerSlug: string, blockedSlug: string) {
+    if (blockerSlug === blockedSlug) return;
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query(
+        'INSERT INTO user_blocks (blocker_slug, blocked_slug) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [blockerSlug, blockedSlug]
+      );
+    } finally { client.release(); }
+  },
+
+  async unblockUser(blockerSlug: string, blockedSlug: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query('DELETE FROM user_blocks WHERE blocker_slug = $1 AND blocked_slug = $2', [blockerSlug, blockedSlug]);
+    } finally { client.release(); }
+  },
+
+  async getBlockedSlugs(blockerSlug: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query('SELECT blocked_slug FROM user_blocks WHERE blocker_slug = $1', [blockerSlug]);
+      return result.rows.map((r: any) => r.blocked_slug);
+    } finally { client.release(); }
+  },
+
+  async muteUser(muterSlug: string, mutedSlug: string) {
+    if (muterSlug === mutedSlug) return;
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query(
+        'INSERT INTO user_mutes (muter_slug, muted_slug) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [muterSlug, mutedSlug]
+      );
+    } finally { client.release(); }
+  },
+
+  async unmuteUser(muterSlug: string, mutedSlug: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query('DELETE FROM user_mutes WHERE muter_slug = $1 AND muted_slug = $2', [muterSlug, mutedSlug]);
+    } finally { client.release(); }
+  },
+
+  async getMutedSlugs(muterSlug: string) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      const result = await client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [muterSlug]);
+      return result.rows.map((r: any) => r.muted_slug);
+    } finally { client.release(); }
+  },
+
+  async reportContent(data: ReportParams) {
+    const client = await getPool().connect();
+    try {
+      await ensureTables(client);
+      await client.query(
+        'INSERT INTO reports (reporter_slug, target_type, target_id, reason) VALUES ($1, $2, $3, $4)',
+        [data.reporterSlug, data.targetType, data.targetId, data.reason]
+      );
+    } finally { client.release(); }
   },
 
   async createGame(data) {

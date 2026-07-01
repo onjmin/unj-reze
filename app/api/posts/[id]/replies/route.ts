@@ -6,7 +6,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const replies = await db.getReplies(parseInt(id));
+  const userId = new URL(_request.url).searchParams.get('userId') || undefined;
+  const replies = await db.getReplies(parseInt(id), userId);
   return NextResponse.json(replies);
 }
 

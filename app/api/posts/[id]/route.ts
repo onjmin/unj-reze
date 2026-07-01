@@ -65,3 +65,37 @@ export async function POST(
   }
   return NextResponse.json(result);
 }
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const { userId, content } = await request.json();
+  if (!userId || typeof content !== 'string') {
+    return NextResponse.json({ error: 'userId and content are required' }, { status: 400 });
+  }
+  const result = await db.editPost(parseInt(id), userId, content);
+  if (!result) {
+    return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
+  }
+  return NextResponse.json(result);
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const { userId } = await request.json().catch(() => ({}));
+  const url = new URL(request.url);
+  const uid = userId || url.searchParams.get('userId');
+  if (!uid) {
+    return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+  }
+  const ok = await db.deletePost(parseInt(id), uid);
+  if (!ok) {
+    return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
+  }
+  return NextResponse.json({ success: true });
+}

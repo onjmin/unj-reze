@@ -1,5 +1,5 @@
 export interface EmbeddedMedia {
-  type: 'image' | 'video' | 'audio' | 'game' | 'video_file';
+  type: 'image' | 'video' | 'audio' | 'game' | 'video_file' | 'sns';
   embedUrl: string;
   siteId: number;
   siteName: string;
@@ -138,10 +138,17 @@ const parseVideoFileEmbed = (url: URL): string | undefined => {
   return url.href;
 };
 
+// X(Twitter): 公式のツイート埋め込み iframe を利用。
+export const parseSnsEmbedX = (url: URL): string | undefined => {
+  const id = url.pathname.match(/\/status(?:es)?\/(\d+)/)?.[1];
+  if (!id) return;
+  return `https://platform.twitter.com/embed/Tweet.html?id=${id}&theme=dark`;
+};
+
 interface SiteInfo {
   id: number;
   name: string;
-  type: 'image' | 'video' | 'audio' | 'game' | 'video_file';
+  type: 'image' | 'video' | 'audio' | 'game' | 'video_file' | 'sns';
   parser: (url: URL) => string | undefined;
 }
 
@@ -169,6 +176,7 @@ const sites: SiteInfo[] = [
   { id: 3203, name: 'Suno', type: 'audio', parser: parseAudioEmbedSuno },
   { id: 6401, name: 'RPGEN', type: 'game', parser: parseGameEmbedRPGEN },
   { id: 2001, name: 'Karotter', type: 'video_file', parser: parseVideoFileEmbed },
+  { id: 12801, name: 'X', type: 'sns', parser: parseSnsEmbedX },
 ];
 
 function matchSite(url: URL): SiteInfo | undefined {
@@ -202,6 +210,9 @@ function matchSite(url: URL): SiteInfo | undefined {
     'suno.com': [3203],
     'rpgen.org': [6401],
     'api.karotter.com': [2001],
+    'twitter.com': [12801],
+    'x.com': [12801],
+    'mobile.twitter.com': [12801],
   };
   const ids = hostMap[host];
   if (!ids) return;
@@ -219,16 +230,22 @@ export function parseMediaUrl(rawUrl: string): EmbeddedMedia | null {
     return null;
   }
   const site = matchSite(url);
-  if (!site) return null;
-  const embedUrl = site.parser(url);
-  if (!embedUrl) return null;
-  return {
-    type: site.type,
-    embedUrl,
-    siteId: site.id,
-    siteName: site.name,
-    rawUrl,
-  };
+  if (site) {
+    const embedUrl = site.parser(url);
+    if (embedUrl) {
+      return { type: site.type, embedUrl, siteId: site.id, siteName: site.name, rawUrl };
+    }
+  }
+
+  // ホスト未登録でも直リンクの動画/画像は展開する
+  if (/\.(mp4|webm|ogg)$/i.test(url.pathname)) {
+    return { type: 'video_file', embedUrl: url.href, siteId: 2099, siteName: '動画', rawUrl };
+  }
+  if (/\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(url.pathname)) {
+    return { type: 'image', embedUrl: url.href, siteId: 4099, siteName: '画像', rawUrl };
+  }
+
+  return null;
 }
 
 export function extractFirstEmbed(content: string): EmbeddedMedia | null {

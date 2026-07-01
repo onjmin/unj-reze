@@ -3,10 +3,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Plus, MoreHorizontal, ThumbsUp, ThumbsDown,
-  MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare, Copy, UserPlus, Ban, Flag
+  MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare, Copy, UserPlus, Ban, Flag, VolumeX, Pencil, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
+import { api } from '@/lib/api';
 import { extractMmlFromContent, EMBED_TEXT_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -30,16 +31,22 @@ interface PostContainerProps {
   openGame: (gameId?: number, postId?: number) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
+  currentUserSlug?: string;
+  onModerationChange?: () => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, onModerationChange }: PostContainerProps) {
   const router = useRouter();
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [following, setFollowing] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [muted, setMuted] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const targetSlug = post.slug || post.displayName;
+  const isSelf = !!currentUserSlug && currentUserSlug === targetSlug;
 
   const toggleMenu = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -59,16 +66,75 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     setMenuOpen(false);
   }, []);
 
-  const handleMenuBlock = useCallback((e: React.MouseEvent) => {
+  const handleMenuBlock = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setBlocked(v => !v);
     setMenuOpen(false);
-  }, []);
+    if (!currentUserSlug) return;
+    try {
+      if (blocked) {
+        await api.block.unblock(currentUserSlug, targetSlug);
+        setBlocked(false);
+      } else {
+        await api.block.block(currentUserSlug, targetSlug);
+        setBlocked(true);
+      }
+      onModerationChange?.();
+    } catch { /* レートリミット等は無視 */ }
+  }, [currentUserSlug, targetSlug, blocked, onModerationChange]);
 
-  const handleMenuReport = useCallback((e: React.MouseEvent) => {
+  const handleMenuMute = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     setMenuOpen(false);
-  }, []);
+    if (!currentUserSlug) return;
+    try {
+      if (muted) {
+        await api.mute.unmute(currentUserSlug, targetSlug);
+        setMuted(false);
+      } else {
+        await api.mute.mute(currentUserSlug, targetSlug);
+        setMuted(true);
+      }
+      onModerationChange?.();
+    } catch { /* noop */ }
+  }, [currentUserSlug, targetSlug, muted, onModerationChange]);
+
+  const handleMenuReport = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    const reason = typeof window !== 'undefined' ? (window.prompt('通報理由を入力してください（任意）') ?? '') : '';
+    try {
+      await api.report.create({
+        reporterSlug: currentUserSlug || '名無し',
+        targetType: 'post',
+        targetId: String(post.id),
+        reason,
+      });
+      if (typeof window !== 'undefined') window.alert('通報を受け付けました。');
+    } catch { /* noop */ }
+  }, [currentUserSlug, post.id]);
+
+  const handleMenuEdit = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    const next = typeof window !== 'undefined' ? window.prompt('ポストを編集', post.content) : null;
+    if (next == null || next === post.content) return;
+    try {
+      await api.posts.edit(post.id, currentUserSlug, next);
+      onModerationChange?.();
+    } catch { /* noop */ }
+  }, [currentUserSlug, post.id, post.content, onModerationChange]);
+
+  const handleMenuDelete = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    if (typeof window !== 'undefined' && !window.confirm('このポストを削除しますか？')) return;
+    try {
+      await api.posts.remove(post.id, currentUserSlug);
+      onModerationChange?.();
+    } catch { /* noop */ }
+  }, [currentUserSlug, post.id, onModerationChange]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -149,19 +215,43 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                     <Copy size={12} className="shrink-0" />
                     <span>テキストをコピー</span>
                   </button>
-                  <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
-                    <UserPlus size={12} className="shrink-0" />
-                    <span>{following ? 'フォロー中' : `${post.displayName}さんをフォロー`}</span>
-                  </button>
-                  <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
-                    <Ban size={12} className="shrink-0" />
-                    <span>{blocked ? 'ブロック中' : `${post.displayName}さんをブロック`}</span>
-                  </button>
-                  <div className="border-t border-gray-800 my-1" />
-                  <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
-                    <Flag size={12} className="shrink-0" />
-                    <span>ポストを通報</span>
-                  </button>
+                  {isSelf && (
+                    <button role="menuitem" onClick={handleMenuEdit} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Pencil size={12} className="shrink-0" />
+                      <span>ポストを編集</span>
+                    </button>
+                  )}
+                  {isSelf && (
+                    <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                      <Trash2 size={12} className="shrink-0" />
+                      <span>ポストを削除</span>
+                    </button>
+                  )}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <UserPlus size={12} className="shrink-0" />
+                      <span>{following ? 'フォロー中' : `${post.displayName}さんをフォロー`}</span>
+                    </button>
+                  )}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={handleMenuMute} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <VolumeX size={12} className="shrink-0" />
+                      <span>{muted ? 'ミュート中' : `${post.displayName}さんをミュート`}</span>
+                    </button>
+                  )}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Ban size={12} className="shrink-0" />
+                      <span>{blocked ? 'ブロック中' : `${post.displayName}さんをブロック`}</span>
+                    </button>
+                  )}
+                  {!isSelf && <div className="border-t border-gray-800 my-1" />}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                      <Flag size={12} className="shrink-0" />
+                      <span>ポストを通報</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -179,8 +269,16 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               return lines.map((line, lIdx) => (
                 <span key={lIdx} className="block">
                   {line.split(' ').map((word, wIdx) => {
-                    if (word.startsWith('#')) {
-                      return <span key={wIdx} className="text-blue-400 mr-1 cursor-pointer hover:underline">{word}</span>;
+                    if (word.startsWith('#') && word.length > 1) {
+                      return (
+                        <span
+                          key={wIdx}
+                          className="text-blue-400 mr-1 cursor-pointer hover:underline"
+                          onClick={(e) => { e.stopPropagation(); router.push(`/hashtag/${encodeURIComponent(word.slice(1))}`); }}
+                        >
+                          {word}
+                        </span>
+                      );
                     }
                     if (/^https?:\/\//.test(word)) {
                       return <a key={wIdx} href={word} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mr-1">{word}</a>;

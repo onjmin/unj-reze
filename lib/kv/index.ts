@@ -16,6 +16,7 @@ async function getImpl(): Promise<KVModule> {
 
 export async function kvGet(key: string) { return (await getImpl()).kvGet(key); }
 export async function kvSet(key: string, value: string) { return (await getImpl()).kvSet(key, value); }
+export async function kvSetEx(key: string, value: string, ttlSeconds: number) { return (await getImpl()).kvSetEx(key, value, ttlSeconds); }
 export async function kvIncr(key: string) { return (await getImpl()).kvIncr(key); }
 export async function kvDecr(key: string) { return (await getImpl()).kvDecr(key); }
 export async function kvDel(key: string) { return (await getImpl()).kvDel(key); }

@@ -10,6 +10,8 @@ export interface Notification {
   type: string;
   postId?: number;
   targetUser?: string;
+  recipientId?: string;
+  read?: boolean;
   createdAt: string;
   time: string;
 }
@@ -100,6 +102,14 @@ class MockDB {
   private ipToUser: Map<string, string> = new Map();
   private sessionToUser: Map<string, string> = new Map();
   private follows: { followerId: string; followedId: string }[] = [];
+  private blocks: { blockerSlug: string; blockedSlug: string }[] = [];
+  private mutes: { muterSlug: string; mutedSlug: string }[] = [];
+  private reports: { id: number; reporterSlug: string; targetType: string; targetId: string; reason: string; createdAt: string }[] = [];
+  // Phase 7: ユーザー設定(slug単位)。isPrivate / hideFromSearch / hideReactions。
+  private userSettings: Map<string, { isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }> = new Map();
+  private hiddenFromSearchSlugs: Set<string> = new Set();
+  // Phase 2: 移行トークン(token -> userId)。
+  private migrationTokens: Map<string, string> = new Map();
 
   constructor() {
     this.posts = JSON.parse(JSON.stringify(INITIAL_POSTS));
@@ -120,6 +130,8 @@ class MockDB {
       type: n.type,
       postId: n.postId,
       targetUser: n.targetUser,
+      recipientId: n.targetUser,
+      read: false,
       time: n.time,
       createdAt: parseRelativeTime(n.time),
     }));
@@ -193,11 +205,21 @@ class MockDB {
   }
 
   getPosts(userId?: string): Post[] {
-    return this.posts.filter(p => p.id === p.threadId).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    const hidden = this.getHiddenSlugs(userId);
+    return this.posts
+      .filter(p => p.id === p.threadId)
+      .filter(p => !hidden.has(p.slug ?? ''))
+      .filter(p => this.canViewAuthor(p.slug ?? '', p.displayName, userId))
+      .map(p => this.applyUserState({ ...p, replies: [...p.replies].filter(r => !hidden.has(r.slug ?? '')) }, userId));
   }
 
   getUserPostsBySlug(slug: string, userId?: string): Post[] {
-    return this.posts.filter(p => p.slug === slug).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    const hidden = this.getHiddenSlugs(userId);
+    if (hidden.has(slug)) return [];
+    const posts = this.posts.filter(p => p.slug === slug);
+    const author = posts[0];
+    if (author && !this.canViewAuthor(slug, author.displayName, userId)) return [];
+    return posts.map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
   }
 
   getLikedPosts(userId: string): Post[] {
@@ -236,6 +258,7 @@ class MockDB {
   getPost(id: number, userId?: string): Post | undefined {
     const post = this.posts.find(p => p.id === id);
     if (!post) return undefined;
+    if (!this.canViewAuthor(post.slug ?? '', post.displayName, userId)) return undefined;
     return this.applyUserState({ ...post, replies: [...post.replies] }, userId);
   }
 
@@ -297,6 +320,7 @@ class MockDB {
       }
       this.votes.set(likeKey, 'like');
       post.likes += 1;
+      this.createNotification({ recipientId: post.displayName, actor: userId, type: 'like', action: 'がいいねしました', target: this.snippet(post.content), postId: id });
     }
     return this.getPost(id, userId) ?? null;
   }
@@ -329,6 +353,7 @@ class MockDB {
     }
     const current = this.heartCounts.get(id) ?? 0;
     this.heartCounts.set(id, current + count);
+    this.createNotification({ recipientId: post.displayName, actor: userId, type: 'heart', action: 'がハートを送りました', target: this.snippet(post.content), postId: id });
     return this.getPost(id) ?? null;
   }
 
@@ -355,24 +380,90 @@ class MockDB {
     this.posts.push(reply);
     post.repliesCount += 1;
     if (post.replies) post.replies.push(reply);
+
+    // 返信先の投稿主へ通知(自己宛は除外)
+    const parentId = data.parentPostId ?? post.id;
+    const parent = this.posts.find(p => p.id === parentId) ?? post;
+    this.createNotification({ recipientId: parent.displayName, actor: data.displayName, type: 'reply', action: 'が返信しました', target: this.snippet(data.content), postId: post.id });
+
+    // 本文中の @slug メンション宛に通知
+    const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
+    if (mentions) {
+      const seen = new Set<string>();
+      for (const m of mentions) {
+        const slug = m.slice(1);
+        if (seen.has(slug)) continue;
+        seen.add(slug);
+        const target = this.posts.find(p => p.slug === slug);
+        if (target && target.displayName !== parent.displayName) {
+          this.createNotification({ recipientId: target.displayName, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: this.snippet(data.content), postId: post.id });
+        }
+      }
+    }
     return reply;
   }
 
-  getReplies(postId: number): Post[] {
+  getReplies(postId: number, userId?: string): Post[] {
     const post = this.posts.find(p => p.id === postId);
-    return post?.replies ?? [];
+    if (!post) return [];
+    const hidden = this.getHiddenSlugs(userId);
+    return (post.replies ?? []).filter(r => !hidden.has(r.slug ?? ''));
   }
 
   getNotifications(userId?: string): Notification[] {
     if (!userId) return this.notifications;
-    return this.notifications.filter(n => n.targetUser === userId);
+    return this.notifications
+      .filter(n => n.recipientId === userId || n.targetUser === userId)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  }
+
+  /** 通知を生成する。自己宛(actor===recipient)は生成しない。 */
+  createNotification(data: { recipientId: string; actor: string; type: string; action: string; target?: string; postId?: number }): void {
+    if (!data.recipientId || data.recipientId === data.actor) return;
+    this.notifications.push({
+      id: this.genId(),
+      user: data.actor,
+      action: data.action,
+      target: data.target ?? '',
+      type: data.type,
+      postId: data.postId,
+      recipientId: data.recipientId,
+      targetUser: data.recipientId,
+      read: false,
+      createdAt: this.now(),
+      time: 'たった今',
+    });
+  }
+
+  markNotificationRead(id: number, userId: string): void {
+    const n = this.notifications.find(n => n.id === id && (n.recipientId === userId || n.targetUser === userId));
+    if (n) n.read = true;
+  }
+
+  markAllNotificationsRead(userId: string): void {
+    for (const n of this.notifications) {
+      if (n.recipientId === userId || n.targetUser === userId) n.read = true;
+    }
+  }
+
+  deleteNotification(id: number, userId: string): void {
+    this.notifications = this.notifications.filter(n => !(n.id === id && (n.recipientId === userId || n.targetUser === userId)));
+  }
+
+  getUnreadCount(userId: string): number {
+    return this.notifications.filter(n => (n.recipientId === userId || n.targetUser === userId) && !n.read).length;
+  }
+
+  private snippet(text: string): string {
+    return text.length > 20 ? text.slice(0, 20) + '…' : text;
   }
 
   getMessages(userId?: string): Message[] {
     if (!userId) return this.messages;
-    return this.messages.filter(m =>
-      !m.recipient || m.sender === userId || m.recipient === userId
-    );
+    const hidden = this.getHiddenSlugs(userId);
+    return this.messages
+      .filter(m => !m.recipient || m.sender === userId || m.recipient === userId)
+      .filter(m => !hidden.has(this.slugForUser(m.sender)));
   }
 
   addMessage(data: { sender: string; text: string; recipient?: string }): Message {
@@ -389,13 +480,30 @@ class MockDB {
     return msg;
   }
 
-  searchPosts(query: string): Post[] {
+  searchPosts(query: string, userId?: string): Post[] {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
+    const hidden = this.getHiddenSlugs(userId);
     return this.posts
       .filter(p => p.id === p.threadId)
+      .filter(p => !hidden.has(p.slug ?? ''))
+      .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
       .filter(p => p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))
-      .map(p => this.applyUserState({ ...p, replies: [...p.replies] }));
+      .map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+  }
+
+  getPostsByHashtag(tag: string, userId?: string): Post[] {
+    const normalized = tag.startsWith('#') ? tag : `#${tag}`;
+    const hidden = this.getHiddenSlugs(userId);
+    return this.posts
+      .filter(p => p.id === p.threadId)
+      .filter(p => !hidden.has(p.slug ?? ''))
+      .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
+      .filter(p => {
+        const tags = p.content.match(/#[^\s#]+/g);
+        return tags?.some(t => t === normalized) ?? false;
+      })
+      .map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
   }
 
   getTrends(): Trend[] {
@@ -420,7 +528,10 @@ class MockDB {
   followUser(followerId: string, followedId: string): void {
     if (followerId === followedId) return;
     const exists = this.follows.some(f => f.followerId === followerId && f.followedId === followedId);
-    if (!exists) this.follows.push({ followerId, followedId });
+    if (!exists) {
+      this.follows.push({ followerId, followedId });
+      this.createNotification({ recipientId: followedId, actor: followerId, type: 'follow', action: 'がフォローしました', target: '', postId: undefined });
+    }
   }
 
   unfollowUser(followerId: string, followedId: string): void {
@@ -436,6 +547,177 @@ class MockDB {
       followers: this.follows.filter(f => f.followedId === userId).length,
       following: this.follows.filter(f => f.followerId === userId).length,
     };
+  }
+
+  // ── ブロック / ミュート / 通報 ──
+
+  /**
+   * userId(匿名ID) / displayName / slug のいずれからでも slug を解決する。
+   * クライアントは userId として displayName を渡すため deriveSlug でフォールバックする。
+   */
+  private slugForUser(userOrSlug: string): string {
+    const stored = this.anonUserData.get(userOrSlug);
+    if (stored) return stored.slug;
+    return deriveSlug(userOrSlug);
+  }
+
+  /** 閲覧者(viewer)に対して非表示にすべき slug 集合: 自分がブロック/ミュート ＋ 自分をブロックした相手。 */
+  private getHiddenSlugs(viewerUserOrSlug?: string): Set<string> {
+    const hidden = new Set<string>();
+    if (!viewerUserOrSlug) return hidden;
+    const viewerSlug = this.slugForUser(viewerUserOrSlug);
+    for (const b of this.blocks) {
+      if (b.blockerSlug === viewerSlug) hidden.add(b.blockedSlug);
+      if (b.blockedSlug === viewerSlug) hidden.add(b.blockerSlug); // ブロックは相互不可視
+    }
+    for (const m of this.mutes) {
+      if (m.muterSlug === viewerSlug) hidden.add(m.mutedSlug);
+    }
+    return hidden;
+  }
+
+  blockUser(blockerSlug: string, blockedSlug: string): void {
+    if (blockerSlug === blockedSlug) return;
+    if (!this.blocks.some(b => b.blockerSlug === blockerSlug && b.blockedSlug === blockedSlug)) {
+      this.blocks.push({ blockerSlug, blockedSlug });
+    }
+  }
+
+  unblockUser(blockerSlug: string, blockedSlug: string): void {
+    this.blocks = this.blocks.filter(b => !(b.blockerSlug === blockerSlug && b.blockedSlug === blockedSlug));
+  }
+
+  getBlockedSlugs(blockerSlug: string): string[] {
+    return this.blocks.filter(b => b.blockerSlug === blockerSlug).map(b => b.blockedSlug);
+  }
+
+  muteUser(muterSlug: string, mutedSlug: string): void {
+    if (muterSlug === mutedSlug) return;
+    if (!this.mutes.some(m => m.muterSlug === muterSlug && m.mutedSlug === mutedSlug)) {
+      this.mutes.push({ muterSlug, mutedSlug });
+    }
+  }
+
+  unmuteUser(muterSlug: string, mutedSlug: string): void {
+    this.mutes = this.mutes.filter(m => !(m.muterSlug === muterSlug && m.mutedSlug === mutedSlug));
+  }
+
+  getMutedSlugs(muterSlug: string): string[] {
+    return this.mutes.filter(m => m.muterSlug === muterSlug).map(m => m.mutedSlug);
+  }
+
+  reportContent(data: { reporterSlug: string; targetType: string; targetId: string; reason: string }): void {
+    this.reports.push({
+      id: this.genId(),
+      reporterSlug: data.reporterSlug,
+      targetType: data.targetType,
+      targetId: data.targetId,
+      reason: data.reason,
+      createdAt: this.now(),
+    });
+  }
+
+  // ── 投稿 / リプライ / メッセージの編集・削除 ──
+
+  /** userId(displayName) が対象投稿の所有者か。 */
+  private ownsPost(post: Post, userId: string): boolean {
+    return post.displayName === userId || post.slug === this.slugForUser(userId);
+  }
+
+  editPost(id: number, userId: string, content: string): Post | null {
+    const post = this.posts.find(p => p.id === id);
+    if (!post || !this.ownsPost(post, userId)) return null;
+    post.content = content;
+    // 親スレッドの replies 配列内の同一投稿も更新
+    for (const thread of this.posts) {
+      const child = thread.replies?.find(r => r.id === id);
+      if (child) child.content = content;
+    }
+    return this.getPost(id, userId) ?? null;
+  }
+
+  deletePost(id: number, userId: string): boolean {
+    const post = this.posts.find(p => p.id === id);
+    if (!post || !this.ownsPost(post, userId)) return false;
+
+    const isReply = post.parentPostId != null && post.threadId !== post.id;
+    const hasChildren = this.posts.some(p => p.parentPostId === id && p.id !== id)
+      || (post.replies?.length ?? 0) > 0;
+
+    if (!isReply && hasChildren) {
+      // 子を持つスレッド親は論理削除(プレースホルダ表示)
+      post.content = '(削除されました)';
+      post.hasImage = false;
+      post.imageSrc = undefined;
+      post.hasGame = false;
+      post.gameId = undefined;
+      return true;
+    }
+
+    // それ以外はハード削除
+    this.posts = this.posts.filter(p => p.id !== id);
+    // 親スレッドの replies 配列とカウントを更新
+    for (const thread of this.posts) {
+      if (thread.replies?.some(r => r.id === id)) {
+        thread.replies = thread.replies.filter(r => r.id !== id);
+        thread.repliesCount = Math.max(0, thread.repliesCount - 1);
+      }
+    }
+    return true;
+  }
+
+  deleteMessage(id: number, userId: string): boolean {
+    const msg = this.messages.find(m => m.id === id);
+    if (!msg) return false;
+    if (msg.sender !== userId && this.slugForUser(msg.sender) !== this.slugForUser(userId)) return false;
+    this.messages = this.messages.filter(m => m.id !== id);
+    return true;
+  }
+
+  // ── プライバシー設定 ──
+
+  getUserSettings(slug: string): { isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean } {
+    const key = this.slugForUser(slug);
+    return this.userSettings.get(key) ?? { isPrivate: false, hideFromSearch: false, hideReactions: false };
+  }
+
+  updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>): void {
+    const key = this.slugForUser(slug);
+    const current = this.getUserSettings(key);
+    const next = { ...current, ...settings };
+    this.userSettings.set(key, next);
+    if (next.hideFromSearch) this.hiddenFromSearchSlugs.add(key);
+    else this.hiddenFromSearchSlugs.delete(key);
+  }
+
+  /** 鍵アカウント考慮: 閲覧者が投稿主を閲覧できるか。 */
+  private canViewAuthor(authorSlug: string, authorDisplayName: string, viewerId?: string): boolean {
+    const settings = this.userSettings.get(authorSlug);
+    if (!settings?.isPrivate) return true;
+    if (!viewerId) return false;
+    if (this.slugForUser(viewerId) === authorSlug) return true; // 本人
+    return this.isFollowing(viewerId, authorDisplayName);
+  }
+
+  // ── 移行トークン(匿名アカウントの引き継ぎ) ──
+
+  issueMigrationToken(userId: string): string {
+    const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    this.migrationTokens.set(token, userId);
+    return token;
+  }
+
+  redeemMigrationToken(token: string, newSessionId: string): AnonymousUser | null {
+    const userId = this.migrationTokens.get(token);
+    if (!userId) return null;
+    const stored = this.anonUserData.get(userId);
+    if (!stored) return null;
+    // 新セッションを既存ユーザーに再バインド
+    this.sessionToUser.set(newSessionId, userId);
+    stored.sessionId = newSessionId;
+    stored.lastSeenAt = this.now();
+    this.migrationTokens.delete(token); // ワンタイム
+    return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, createdAt: stored.createdAt };
   }
 }
 

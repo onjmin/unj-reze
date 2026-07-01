@@ -143,6 +143,18 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
         <img src={embed.embedUrl} alt="embed" className="w-full h-auto object-contain max-h-[400px]" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
       )}
 
+      {embed.type === 'sns' && (
+        <iframe
+          title="post"
+          src={embed.embedUrl}
+          className="w-full rounded-b-xl"
+          style={{ height: 420, border: 'none' }}
+          scrolling="no"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      )}
+
       {(embed.type === 'video' || embed.type === 'audio' || embed.type === 'video_file' || embed.type === 'game') && (
         <div
           ref={containerRef}

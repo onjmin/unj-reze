@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 
 interface MessageViewProps {
@@ -25,14 +25,33 @@ export default function MessageView({ userId }: MessageViewProps) {
 
   const currentSender = userId || '名無し';
 
+  const handleDelete = async (id: number) => {
+    if (typeof window !== 'undefined' && !window.confirm('このメッセージを削除しますか？')) return;
+    try {
+      await api.messages.remove(id, currentSender);
+      setMessages(prev => prev.filter(m => m.id !== id));
+    } catch { /* noop */ }
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-12rem)]">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map(m => (
-          <div key={m.id} className={`flex flex-col ${m.sender === currentSender ? 'items-end' : 'items-start'}`}>
+          <div key={m.id} className={`flex flex-col group ${m.sender === currentSender ? 'items-end' : 'items-start'}`}>
             <span className="text-[10px] text-gray-500 mb-0.5">{m.sender} ・ {m.time}</span>
-            <div className={`p-2.5 rounded-2xl max-w-[80%] text-xs ${m.sender === currentSender ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-100/10 text-gray-200 rounded-tl-none'}`}>
-              {m.text}
+            <div className="flex items-center gap-1.5">
+              {m.sender === currentSender && (
+                <button
+                  onClick={() => handleDelete(m.id)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-1"
+                  title="削除"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+              <div className={`p-2.5 rounded-2xl max-w-[80%] text-xs ${m.sender === currentSender ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-100/10 text-gray-200 rounded-tl-none'}`}>
+                {m.text}
+              </div>
             </div>
           </div>
         ))}

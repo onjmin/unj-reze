@@ -18,9 +18,11 @@ interface FeedListProps {
   openGame: (gameId?: number, postId?: number) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
+  currentUserSlug?: string;
+  onModerationChange?: () => void;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, onModerationChange }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -66,6 +68,8 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
           openGame={openGame}
           openCollab={openCollab}
           openMml={openMml}
+          currentUserSlug={currentUserSlug}
+          onModerationChange={onModerationChange}
         />
       ))}
       <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">

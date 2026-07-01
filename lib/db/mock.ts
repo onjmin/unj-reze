@@ -1,5 +1,5 @@
 import { db as mockDb } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, GameRecord, CreateGameParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, GameRecord, CreateGameParams, ReportParams } from './interface';
 
 const gameStore = new Map<number, GameRecord>();
 
@@ -32,12 +32,24 @@ export const mockStore: DataStore = {
     return mockDb.repostPost(id);
   },
 
-  async getReplies(postId: number) {
-    return mockDb.getReplies(postId);
+  async getReplies(postId: number, userId?: string) {
+    return mockDb.getReplies(postId, userId);
   },
 
   async addReply(postId: number, data: ReplyParams) {
     return mockDb.addReply(postId, data);
+  },
+
+  async editPost(id: number, userId: string, content: string) {
+    return mockDb.editPost(id, userId, content);
+  },
+
+  async deletePost(id: number, userId: string) {
+    return mockDb.deletePost(id, userId);
+  },
+
+  async deleteMessage(id: number, userId: string) {
+    return mockDb.deleteMessage(id, userId);
   },
 
   async getUserPostsBySlug(slug: string, userId?: string) {
@@ -64,6 +76,22 @@ export const mockStore: DataStore = {
     return mockDb.getNotifications(userId);
   },
 
+  async markNotificationRead(id: number, userId: string) {
+    return mockDb.markNotificationRead(id, userId);
+  },
+
+  async markAllNotificationsRead(userId: string) {
+    return mockDb.markAllNotificationsRead(userId);
+  },
+
+  async deleteNotification(id: number, userId: string) {
+    return mockDb.deleteNotification(id, userId);
+  },
+
+  async getUnreadCount(userId: string) {
+    return mockDb.getUnreadCount(userId);
+  },
+
   async getMessages(userId?: string) {
     return mockDb.getMessages(userId);
   },
@@ -76,8 +104,12 @@ export const mockStore: DataStore = {
     return mockDb.getTrends();
   },
 
-  async searchPosts(query: string) {
-    return mockDb.searchPosts(query);
+  async searchPosts(query: string, userId?: string) {
+    return mockDb.searchPosts(query, userId);
+  },
+
+  async getPostsByHashtag(tag: string, userId?: string) {
+    return mockDb.getPostsByHashtag(tag, userId);
   },
 
   async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
@@ -86,6 +118,22 @@ export const mockStore: DataStore = {
 
   async updateUserDisplayName(userId: string, displayName: string) {
     return mockDb.updateUserDisplayName(userId, displayName);
+  },
+
+  async getUserSettings(slug: string) {
+    return mockDb.getUserSettings(slug);
+  },
+
+  async updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) {
+    return mockDb.updateUserSettings(slug, settings);
+  },
+
+  async issueMigrationToken(userId: string) {
+    return mockDb.issueMigrationToken(userId);
+  },
+
+  async redeemMigrationToken(token: string, newSessionId: string) {
+    return mockDb.redeemMigrationToken(token, newSessionId);
   },
 
   async followUser(followerId: string, followedId: string) {
@@ -102,6 +150,34 @@ export const mockStore: DataStore = {
 
   async getFollowCounts(userId: string) {
     return mockDb.getFollowCounts(userId);
+  },
+
+  async blockUser(blockerSlug: string, blockedSlug: string) {
+    return mockDb.blockUser(blockerSlug, blockedSlug);
+  },
+
+  async unblockUser(blockerSlug: string, blockedSlug: string) {
+    return mockDb.unblockUser(blockerSlug, blockedSlug);
+  },
+
+  async getBlockedSlugs(blockerSlug: string) {
+    return mockDb.getBlockedSlugs(blockerSlug);
+  },
+
+  async muteUser(muterSlug: string, mutedSlug: string) {
+    return mockDb.muteUser(muterSlug, mutedSlug);
+  },
+
+  async unmuteUser(muterSlug: string, mutedSlug: string) {
+    return mockDb.unmuteUser(muterSlug, mutedSlug);
+  },
+
+  async getMutedSlugs(muterSlug: string) {
+    return mockDb.getMutedSlugs(muterSlug);
+  },
+
+  async reportContent(data: ReportParams) {
+    return mockDb.reportContent(data);
   },
 
   async createGame(data: CreateGameParams): Promise<GameRecord> {

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { Post, AnonymousUser } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
 
 let db: SqlJsDatabase | null = null;
@@ -114,6 +114,76 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!postColNames.includes('game_id')) {
     d.run("ALTER TABLE posts ADD COLUMN game_id INTEGER");
   }
+  d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
+    blocker_slug TEXT NOT NULL,
+    blocked_slug TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (blocker_slug, blocked_slug)
+  )`);
+  d.run(`CREATE TABLE IF NOT EXISTS user_mutes (
+    muter_slug TEXT NOT NULL,
+    muted_slug TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (muter_slug, muted_slug)
+  )`);
+  d.run(`CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_slug TEXT NOT NULL,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  d.run(`CREATE TABLE IF NOT EXISTS migration_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  const auCols = d.exec("PRAGMA table_info(anonymous_users)");
+  const auColNames = auCols.length > 0 ? auCols[0].values.map((v: any) => v[1]) : [];
+  if (!auColNames.includes('is_private')) d.run("ALTER TABLE anonymous_users ADD COLUMN is_private INTEGER NOT NULL DEFAULT 0");
+  if (!auColNames.includes('hide_from_search')) d.run("ALTER TABLE anonymous_users ADD COLUMN hide_from_search INTEGER NOT NULL DEFAULT 0");
+  if (!auColNames.includes('hide_reactions')) d.run("ALTER TABLE anonymous_users ADD COLUMN hide_reactions INTEGER NOT NULL DEFAULT 0");
+  if (!colNames.includes('read')) d.run("ALTER TABLE notifications ADD COLUMN read INTEGER NOT NULL DEFAULT 0");
+}
+
+function snippetSqlite(text: string): string {
+  return text.length > 20 ? text.slice(0, 20) + '…' : text;
+}
+
+/** 通知を挿入。自己宛は生成しない。 */
+function insertNotificationSqlite(d: SqlJsDatabase, data: { recipientId: string; actor: string; type: string; action: string; target?: string; postId?: number }): void {
+  if (!data.recipientId || data.recipientId === data.actor) return;
+  try {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    d.run(
+      `INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, read, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [id, data.actor, data.action, data.target ?? '', data.type, data.postId ?? null, data.recipientId, new Date().toISOString()]
+    );
+  } catch { /* notifications 未整備時は無視 */ }
+}
+
+/** userId(匿名ID/displayName/slug) から slug を解決。 */
+function resolveViewerSlugSqlite(d: SqlJsDatabase, userId: string): string {
+  const u = rowsToObjects(d, 'SELECT slug FROM anonymous_users WHERE id = ? OR display_name = ? OR slug = ? LIMIT 1', [userId, userId, userId]);
+  return u.length > 0 ? u[0].slug : deriveSlugSqlite(userId);
+}
+
+/** 閲覧者に対して非表示にすべき slug 集合(ブロック双方向 + 自分のミュート)。 */
+function getHiddenSlugsSqlite(d: SqlJsDatabase, userId?: string): Set<string> {
+  const hidden = new Set<string>();
+  if (!userId) return hidden;
+  const viewerSlug = resolveViewerSlugSqlite(d, userId);
+  if (!viewerSlug) return hidden;
+  const blocks = rowsToObjects(d, 'SELECT blocker_slug, blocked_slug FROM user_blocks WHERE blocker_slug = ? OR blocked_slug = ?', [viewerSlug, viewerSlug]);
+  for (const r of blocks) {
+    if (r.blocker_slug === viewerSlug) hidden.add(r.blocked_slug);
+    if (r.blocked_slug === viewerSlug) hidden.add(r.blocker_slug);
+  }
+  const mutes = rowsToObjects(d, 'SELECT muted_slug FROM user_mutes WHERE muter_slug = ?', [viewerSlug]);
+  for (const r of mutes) hidden.add(r.muted_slug);
+  return hidden;
 }
 
 function saveDb() {
@@ -255,10 +325,11 @@ export const sqliteStore: DataStore = {
     const threadIds = rows.map(r => r.id);
     const repliesMap = await getThreadRepliesSqlite(d, threadIds);
 
+    const hidden = getHiddenSlugsSqlite(d, userId);
     return rows.map(r => ({
       ...rowToPost(r),
-      replies: repliesMap.get(r.id) || [],
-    }));
+      replies: (repliesMap.get(r.id) || []).filter(rep => !hidden.has(rep.slug ?? '')),
+    })).filter(p => !hidden.has(p.slug ?? ''));
   },
 
   async getPost(id: number, userId?: string) {
@@ -332,6 +403,10 @@ export const sqliteStore: DataStore = {
     } else {
       d.run('INSERT INTO post_votes (post_id, user_id, vote_type) VALUES (?, ?, ?)', [id, userId, 'like']);
       d.run('UPDATE posts SET likes = likes + 1 WHERE id = ?', [id]);
+      const authorRows = rowsToObjects(d, 'SELECT display_name, content FROM posts WHERE id = ?', [id]);
+      if (authorRows.length > 0) {
+        insertNotificationSqlite(d, { recipientId: authorRows[0].display_name, actor: userId, type: 'like', action: 'がいいねしました', target: snippetSqlite(authorRows[0].content ?? ''), postId: id });
+      }
     }
     saveDb();
 
@@ -372,6 +447,10 @@ export const sqliteStore: DataStore = {
     for (let i = 0; i < count; i++) {
       d.run('INSERT INTO post_hearts (post_id, user_id) VALUES (?, ?)', [id, userId]);
     }
+    const heartAuthor = rowsToObjects(d, 'SELECT display_name, content FROM posts WHERE id = ?', [id]);
+    if (heartAuthor.length > 0) {
+      insertNotificationSqlite(d, { recipientId: heartAuthor[0].display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: snippetSqlite(heartAuthor[0].content ?? ''), postId: id });
+    }
     saveDb();
 
     const rows = rowsToObjects(
@@ -398,14 +477,15 @@ export const sqliteStore: DataStore = {
     return rowToPost(obj);
   },
 
-  async getReplies(postId: number) {
+  async getReplies(postId: number, userId?: string) {
     const d = await getDb();
     const rows = rowsToObjects(
       d,
       'SELECT * FROM posts WHERE thread_id = ? AND id != thread_id ORDER BY id',
       [postId]
     );
-    return rows.map(rowToPost);
+    const hidden = getHiddenSlugsSqlite(d, userId);
+    return rows.map(rowToPost).filter(r => !hidden.has(r.slug ?? ''));
   },
 
   async addReply(postId: number, data: ReplyParams) {
@@ -420,6 +500,25 @@ export const sqliteStore: DataStore = {
       [id, postId, parentPostId, data.displayName, slug, data.content, now]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
+    const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
+    const parentAuthor = parentRows[0]?.display_name;
+    if (parentAuthor) {
+      insertNotificationSqlite(d, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', action: 'が返信しました', target: snippetSqlite(data.content), postId: id });
+    }
+    const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
+    if (mentions) {
+      const seen = new Set<string>();
+      for (const m of mentions) {
+        const mslug = m.slice(1);
+        if (seen.has(mslug)) continue;
+        seen.add(mslug);
+        const mrows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE slug = ? LIMIT 1', [mslug]);
+        const mname = mrows[0]?.display_name;
+        if (mname && mname !== parentAuthor) {
+          insertNotificationSqlite(d, { recipientId: mname, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: snippetSqlite(data.content), postId: id });
+        }
+      }
+    }
     saveDb();
     return {
       ...rowToPost({
@@ -433,6 +532,54 @@ export const sqliteStore: DataStore = {
       }),
       replies: [],
     };
+  },
+
+  async editPost(id: number, userId: string, content: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT slug, display_name FROM posts WHERE id = ?', [id]);
+    if (rows.length === 0) return null;
+    const viewerSlug = resolveViewerSlugSqlite(d, userId);
+    if (rows[0].display_name !== userId && rows[0].slug !== viewerSlug) return null;
+    d.run('UPDATE posts SET content = ? WHERE id = ?', [content, id]);
+    saveDb();
+    const updated = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);
+    if (updated.length === 0) return null;
+    applyVoteRow(updated[0], userId);
+    return rowToPost(updated[0]);
+  },
+
+  async deletePost(id: number, userId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM posts WHERE id = ?', [id]);
+    if (rows.length === 0) return false;
+    const post = rows[0];
+    const viewerSlug = resolveViewerSlugSqlite(d, userId);
+    if (post.display_name !== userId && post.slug !== viewerSlug) return false;
+
+    const isReply = post.parent_post_id != null && post.thread_id !== post.id;
+    const childRows = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM posts WHERE thread_id = ? AND id != thread_id', [id]);
+    const hasChildren = (childRows[0]?.cnt ?? 0) > 0;
+
+    if (!isReply && hasChildren) {
+      d.run(`UPDATE posts SET content = '(削除されました)', has_image = 0, image_src = NULL, has_game = 0, game_id = NULL WHERE id = ?`, [id]);
+    } else {
+      d.run('DELETE FROM posts WHERE id = ?', [id]);
+      if (isReply) d.run('UPDATE posts SET replies_count = MAX(replies_count - 1, 0) WHERE id = ?', [post.thread_id]);
+    }
+    saveDb();
+    return true;
+  },
+
+  async deleteMessage(id: number, userId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT sender FROM messages WHERE id = ?', [id]);
+    if (rows.length === 0) return false;
+    const sender = rows[0].sender;
+    const viewerSlug = resolveViewerSlugSqlite(d, userId);
+    if (sender !== userId && deriveSlugSqlite(sender) !== viewerSlug) return false;
+    d.run('DELETE FROM messages WHERE id = ?', [id]);
+    saveDb();
+    return true;
   },
 
   async getLikedPosts(userId: string) {
@@ -504,8 +651,33 @@ export const sqliteStore: DataStore = {
     return rows.map(r => ({
       id: r.id, user: r.user_name, action: r.action, target: r.target,
       type: r.type || 'like', postId: r.post_id ?? undefined, targetUser: r.target_user ?? undefined,
+      recipientId: r.target_user ?? undefined, read: !!r.read,
       createdAt: r.created_at, time: formatRelativeTime(r.created_at),
     } as Notification));
+  },
+
+  async markNotificationRead(id: number, userId: string) {
+    const d = await getDb();
+    d.run('UPDATE notifications SET read = 1 WHERE id = ? AND target_user = ?', [id, userId]);
+    saveDb();
+  },
+
+  async markAllNotificationsRead(userId: string) {
+    const d = await getDb();
+    d.run('UPDATE notifications SET read = 1 WHERE target_user = ?', [userId]);
+    saveDb();
+  },
+
+  async deleteNotification(id: number, userId: string) {
+    const d = await getDb();
+    d.run('DELETE FROM notifications WHERE id = ? AND target_user = ?', [id, userId]);
+    saveDb();
+  },
+
+  async getUnreadCount(userId: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM notifications WHERE target_user = ? AND read = 0', [userId]);
+    return rows[0]?.cnt ?? 0;
   },
 
   async getMessages(userId?: string) {
@@ -549,7 +721,7 @@ export const sqliteStore: DataStore = {
       .slice(0, 10);
   },
 
-  async searchPosts(query: string) {
+  async searchPosts(query: string, userId?: string) {
     if (!query.trim()) return [];
     const d = await getDb();
     const rows = rowsToObjects(
@@ -561,10 +733,36 @@ export const sqliteStore: DataStore = {
       FROM posts p
       WHERE p.thread_id = p.id
         AND (p.content LIKE ? OR p.display_name LIKE ?)
+        AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), 0) = 0
       ORDER BY p.id DESC`,
       [`%${query}%`, `%${query}%`]
     );
-    return rows.map(rowToPost);
+    const hidden = getHiddenSlugsSqlite(d, userId);
+    return rows.map(rowToPost).filter(p => !hidden.has(p.slug ?? ''));
+  },
+
+  async getPostsByHashtag(tag: string, userId?: string) {
+    const normalized = tag.startsWith('#') ? tag : `#${tag}`;
+    const d = await getDb();
+    const rows = rowsToObjects(
+      d,
+      `SELECT p.*, 0 as liked, 0 as disliked,
+        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+      FROM posts p
+      WHERE p.thread_id = p.id
+        AND p.content LIKE ?
+        AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), 0) = 0
+      ORDER BY p.id DESC`,
+      [`%${normalized}%`]
+    );
+    const hidden = getHiddenSlugsSqlite(d, userId);
+    return rows
+      .map(rowToPost)
+      .filter(p => {
+        const tags: string[] = p.content.match(/#[^\s#]+/g) ?? [];
+        return tags.includes(normalized);
+      })
+      .filter(p => !hidden.has(p.slug ?? ''));
   },
 
   async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
@@ -635,12 +833,62 @@ export const sqliteStore: DataStore = {
     saveDb();
   },
 
+  async getUserSettings(slug: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT is_private, hide_from_search, hide_reactions FROM anonymous_users WHERE slug = ? LIMIT 1', [slug]);
+    const row = rows[0];
+    return {
+      isPrivate: !!row?.is_private,
+      hideFromSearch: !!row?.hide_from_search,
+      hideReactions: !!row?.hide_reactions,
+    };
+  },
+
+  async updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) {
+    const d = await getDb();
+    const sets: string[] = [];
+    const vals: any[] = [];
+    if (settings.isPrivate !== undefined) { sets.push('is_private = ?'); vals.push(settings.isPrivate ? 1 : 0); }
+    if (settings.hideFromSearch !== undefined) { sets.push('hide_from_search = ?'); vals.push(settings.hideFromSearch ? 1 : 0); }
+    if (settings.hideReactions !== undefined) { sets.push('hide_reactions = ?'); vals.push(settings.hideReactions ? 1 : 0); }
+    if (sets.length === 0) return;
+    vals.push(slug);
+    d.run(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE slug = ?`, vals);
+    saveDb();
+  },
+
+  async issueMigrationToken(userId: string) {
+    const d = await getDb();
+    const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+    d.run('INSERT INTO migration_tokens (token, user_id) VALUES (?, ?)', [token, userId]);
+    saveDb();
+    return token;
+  },
+
+  async redeemMigrationToken(token: string, newSessionId: string) {
+    const d = await getDb();
+    const tr = rowsToObjects(d, 'SELECT user_id FROM migration_tokens WHERE token = ?', [token]);
+    if (tr.length === 0) return null;
+    const userId = tr[0].user_id;
+    const ur = rowsToObjects(d, 'SELECT * FROM anonymous_users WHERE id = ?', [userId]);
+    if (ur.length === 0) return null;
+    d.run('UPDATE anonymous_users SET session_id = ?, last_seen_at = ? WHERE id = ?', [newSessionId, new Date().toISOString(), userId]);
+    d.run('DELETE FROM migration_tokens WHERE token = ?', [token]);
+    saveDb();
+    const row = ur[0];
+    return { id: row.id, displayName: row.display_name, slug: row.slug, avatarColor: row.avatar_color, createdAt: row.created_at } as AnonymousUser;
+  },
+
   async followUser(followerId: string, followedId: string) {
     const d = await getDb();
+    const before = rowsToObjects(d, 'SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ? LIMIT 1', [followerId, followedId]);
     d.run(
       'INSERT OR IGNORE INTO user_follows (follower_id, followed_id) VALUES (?, ?)',
       [followerId, followedId]
     );
+    if (before.length === 0) {
+      insertNotificationSqlite(d, { recipientId: followedId, actor: followerId, type: 'follow', action: 'がフォローしました', target: '' });
+    }
     saveDb();
   },
 
@@ -671,6 +919,48 @@ export const sqliteStore: DataStore = {
       followers: followers[0]?.cnt ?? 0,
       following: following[0]?.cnt ?? 0,
     };
+  },
+
+  async blockUser(blockerSlug: string, blockedSlug: string) {
+    if (blockerSlug === blockedSlug) return;
+    const d = await getDb();
+    d.run('INSERT OR IGNORE INTO user_blocks (blocker_slug, blocked_slug) VALUES (?, ?)', [blockerSlug, blockedSlug]);
+    saveDb();
+  },
+
+  async unblockUser(blockerSlug: string, blockedSlug: string) {
+    const d = await getDb();
+    d.run('DELETE FROM user_blocks WHERE blocker_slug = ? AND blocked_slug = ?', [blockerSlug, blockedSlug]);
+    saveDb();
+  },
+
+  async getBlockedSlugs(blockerSlug: string) {
+    const d = await getDb();
+    return rowsToObjects(d, 'SELECT blocked_slug FROM user_blocks WHERE blocker_slug = ?', [blockerSlug]).map((r: any) => r.blocked_slug);
+  },
+
+  async muteUser(muterSlug: string, mutedSlug: string) {
+    if (muterSlug === mutedSlug) return;
+    const d = await getDb();
+    d.run('INSERT OR IGNORE INTO user_mutes (muter_slug, muted_slug) VALUES (?, ?)', [muterSlug, mutedSlug]);
+    saveDb();
+  },
+
+  async unmuteUser(muterSlug: string, mutedSlug: string) {
+    const d = await getDb();
+    d.run('DELETE FROM user_mutes WHERE muter_slug = ? AND muted_slug = ?', [muterSlug, mutedSlug]);
+    saveDb();
+  },
+
+  async getMutedSlugs(muterSlug: string) {
+    const d = await getDb();
+    return rowsToObjects(d, 'SELECT muted_slug FROM user_mutes WHERE muter_slug = ?', [muterSlug]).map((r: any) => r.muted_slug);
+  },
+
+  async reportContent(data: ReportParams) {
+    const d = await getDb();
+    d.run('INSERT INTO reports (reporter_slug, target_type, target_id, reason) VALUES (?, ?, ?, ?)', [data.reporterSlug, data.targetType, data.targetId, data.reason]);
+    saveDb();
   },
 
   async createGame(data) {

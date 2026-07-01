@@ -8,6 +8,17 @@ export async function kvSet(key: string, value: string): Promise<void> {
   store.set(key, value);
 }
 
+const expiries = new Map<string, ReturnType<typeof setTimeout>>();
+
+export async function kvSetEx(key: string, value: string, ttlSeconds: number): Promise<void> {
+  store.set(key, value);
+  const existing = expiries.get(key);
+  if (existing) clearTimeout(existing);
+  const t = setTimeout(() => { store.delete(key); expiries.delete(key); }, ttlSeconds * 1000);
+  (t as unknown as { unref?: () => void }).unref?.();
+  expiries.set(key, t);
+}
+
 export async function kvIncr(key: string): Promise<number> {
   const val = parseInt(store.get(key) || '0', 10) + 1;
   store.set(key, String(val));

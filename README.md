@@ -110,17 +110,22 @@ npx netlify deploy --prod
 
 ```sh
 cp .env.example .env
-# DATABASE_PROVIDER=mock のままでも動作確認可能
-
 pnpm install
 pnpm dev
 ```
 
-Docker を使って Neon 互換の PostgreSQL を起動する場合：
+`.env` の `DATABASE_PROVIDER` で接続先を切り替えられます：
+
+| 値 | 説明 | 追加設定 |
+|---|---|---|
+| `mock`（デフォルト） | インメモリのモックデータ。外部サービス不要 | なし |
+| `neon` | Docker で立ち上げた PostgreSQL または Neon 本番 | `DATABASE_URL=postgresql://neon:neon@localhost:5432/unj_reze` |
+| `d1` | SQLite ファイル（Cloudflare D1 互換） | `D1_DATABASE_PATH=./data/d1.sqlite` |
+
+**neon モードで Docker を使う場合：**
 
 ```sh
 docker compose up -d db-neon
-# .env: DATABASE_PROVIDER=neon, DATABASE_URL=postgresql://neon:neon@localhost:5432/unj_reze
 ```
 
 ---
