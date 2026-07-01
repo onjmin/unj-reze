@@ -174,7 +174,7 @@ function buildWorldLayout(scenes: SceneDef[]): {
 const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
-const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント' };
+const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
 const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊' };
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
@@ -225,6 +225,8 @@ interface Entity {
   shellState?: 'idle' | 'slide';
   /** 甲羅を蹴った直後、プレイヤーへ即ダメージを与えないための猶予フレーム。 */
   shellGrace?: number;
+  /** ブロックから出現するアイテムのせり上がり残フレーム数。 */
+  spawnGrace?: number;
 }
 // ── マリオ系アクションの落下・踏みつけ定数（SMC core 準拠）─────────────────
 /** 終端速度 px/frame。32px タイルのすり抜け（トンネリング）を防ぎ、SMC 風の落下感を出す。 */
@@ -940,7 +942,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
   const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
-  const [gameOverResult, setGameOverResult] = useState<{ score: number } | null>(null);
+  const [gameOverResult, setGameOverResult] = useState<{ score: number; marioDeathAnim?: boolean } | null>(null);
   const gameMsgReadyRef = useRef(false);
   const gameMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewStopRef = useRef<(() => void) | null>(null);
@@ -1042,7 +1044,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const MAX_WEAPON_ENERGY = 28;
   const prevNextWeaponRef = useRef(false);
   // ── マリオ系パワーアップ（ハイブリッド：ハートHP と スーパー/ファイア状態を併用）──
-  const marioPowerRef = useRef<'super' | 'fire'>('super');  // 既定スーパー、ファイアフラワーでファイア
+  const marioPowerRef = useRef<'small' | 'super' | 'fire'>('small');  // 既定チビ(small)、キノコでスーパー、フラワーでファイア
+  const marioTransformingRef = useRef(0);                             // 巨大化変身用残フレーム
+  const marioPipeRef = useRef<{
+    phase: 'entering' | 'exiting';
+    x: number;
+    startY: number;
+    targetY: number;
+    progress: number;
+    maxProgress: number;
+    warpSceneId?: string;
+    entryX?: number;
+    entryY?: number;
+  } | null>(null);
+  const marioGoalRef = useRef<{
+    phase: 'slide' | 'walk' | 'done';
+    x: number;
+    targetY: number;
+    progress: number;
+  } | null>(null);
+  const blockAnimsRef = useRef<{
+    col: number;
+    row: number;
+    type: 'bump' | 'break';
+    timer: number;
+    maxTimer: number;
+    originalTile: number;
+    info: any;
+    oy: number;
+    targetTileId?: number;
+    spawnCoin?: boolean;
+    particles?: { x: number; y: number; vx: number; vy: number }[];
+  }[]>([]);
+
+  // ── 新規追加のプラットフォーム物理・エフェクト用 Ref ──
+  const coyoteFramesRef = useRef(0);
+  const isJumpingRef = useRef(false);
+  const runDurationRef = useRef(0);
+  const scaleXRef = useRef(1.0);
+  const scaleYRef = useRef(1.0);
+  const isWallSlidingRef = useRef(false);
+  const wallSlideDirRef = useRef(0); // -1: 左壁, 1: 右壁, 0: なし
+  const prevGroundedRef = useRef(false);
+  const particlesRef = useRef<{
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    life: number;
+    maxLife: number;
+    size: number;
+    color: string;
+    type?: 'smoke' | 'coin';
+    bounceCount?: number;
+  }[]>([]);
+
   const coinsRef = useRef(0);                                 // コイン枚数（ハテナ・回収）
   const starTimerRef = useRef(0);                             // スター無敵の残フレーム
   const STAR_DURATION = 600;                                  // スター無敵時間（約10秒 @60fps）
@@ -1938,7 +1994,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const zMax = Math.max(1, gameData.player.hearts ?? 3) * 2;
       onjRezeHpRef.current = { hp: zMax, max: zMax };
       // マリオ系パワーアップの初期化
-      marioPowerRef.current = 'super'; coinsRef.current = 0; starTimerRef.current = 0;
+      marioPowerRef.current = 'small'; coinsRef.current = 0; starTimerRef.current = 0;
+      marioTransformingRef.current = 0;
+      marioPipeRef.current = null;
+      marioGoalRef.current = null;
+      blockAnimsRef.current = [];
       usedBlocksRef.current = new Set();
       checkpointRef.current = null;
       onjRezeDirRef.current = { x: 0, y: 1 };
@@ -2015,7 +2075,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const walkInst = new Map<string, { px: number; py: number; dir: WayKey }>();
     const horizontalEngine = gameData.engine === 'action'; // 横スク（マリオ系）は左右のみ
 
-    const drawSprite = (
+    const drawSpriteInner = (
       def: { emoji: string; spriteUrl?: string; spriteRef?: string },
       x: number, y: number, w: number, h: number,
       animKey?: string,
@@ -2047,8 +2107,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (spriteData) {
           if (spriteKey === 'PlayerSprite' && animKey === 'player') {
             const pObj = engineRef.current.player;
-            const action = !pObj.isGrounded ? 'Jump' : (Math.abs(pObj.vx) > 0.15 ? 'Walk' : 'Idle');
-            animName = (animName || '2Idle0_3').replace(/(Idle|Walk|Jump)/g, action);
+            let action = !pObj.isGrounded ? 'Jump' : (Math.abs(pObj.vx) > 0.15 ? 'Walk' : 'Idle');
+            let prefix = marioPowerRef.current === 'small' ? '1' : '2';
+            if (marioTransformingRef.current > 0) {
+              const showSmall = Math.floor(marioTransformingRef.current / 4) % 2 === 0;
+              prefix = showSmall ? '1' : '2';
+            }
+            let nameOverride = '';
+            if (marioGoalRef.current) {
+              const goal = marioGoalRef.current;
+              if (goal.phase === 'slide') {
+                nameOverride = `${prefix}PoleClimb0_3`;
+              } else if (goal.phase === 'walk') {
+                action = 'Walk';
+              }
+            }
+            animName = nameOverride || (animName || '2Idle0_3').replace(/(Idle|Walk|Jump)/g, action);
+            if (!nameOverride) {
+              animName = prefix + animName.slice(1);
+            }
           } else if (spriteKey === 'NPC') {
             const base = animName || '1NPC0';
             const isMoving = Math.hypot(dx, dy) > 0.15;
@@ -2082,7 +2159,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const framesCount = anim.frames.length;
             let frameIndex = 0;
             if (framesCount > 1) {
-              const fps = anim.speed || 7;
+              let fps = anim.speed || 7;
+              if (spriteKey === 'PlayerSprite' && animKey === 'player') {
+                const pObj = engineRef.current.player;
+                const isDash = engineRef.current.keys.has('Shift') || engineRef.current.keys.has('c') || engineRef.current.keys.has('C');
+                if (isDash && Math.abs(pObj.vx) > 1.0) {
+                  fps *= 1.6;
+                }
+              }
               frameIndex = Math.floor((performance.now() / 1000) * fps) % framesCount;
             }
             let frame = anim.frames[frameIndex];
@@ -2192,15 +2276,70 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
     };
 
+    const drawSprite = (
+      def: { emoji: string; spriteUrl?: string; spriteRef?: string },
+      x: number, y: number, w: number, h: number,
+      animKey?: string,
+      overrideDir?: WayKey,
+    ) => {
+      const isPlayer = animKey === 'player';
+      if (isPlayer) {
+        ctx.save();
+        const centerX = x + w / 2;
+        const bottomY = y + h;
+        ctx.translate(centerX, bottomY);
+        ctx.scale(scaleXRef.current, scaleYRef.current);
+        ctx.translate(-centerX, -bottomY);
+      }
+      drawSpriteInner(def, x, y, w, h, animKey, overrideDir);
+      if (isPlayer) {
+        ctx.restore();
+      }
+    };
+
     const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); }); };
 const lose = (msg: string) => {
+      // ── マリオ体力制ゲームオーバー ──────────────────────────────────
+      // 小状態でのミスはHPを-1し、0になったらフキダシなしで直接ゲームオーバー演出へ。
+      if (gameData.id === 'mario' && !debugInvincibleRef.current) {
+        if (roundOverRef.current) return;
+        roundOverRef.current = true;
+        onjRezeHpRef.current.hp -= 1;
+        forceHud(n => n + 1);
+        hitShake();
+        playSfx(sfxRef.current.damage);
+        if (onjRezeHpRef.current.hp <= 0) {
+          // 体力0 → 専用ゲームオーバー演出
+          setTimeout(() => { setGameOverResult({ score: scoreRef.current, marioDeathAnim: true }); }, 1200);
+        } else {
+          // 体力残あり → チェックポイントまたはスタート地点に戻す
+          const p2 = engineRef.current.player;
+          const cp = checkpointRef.current;
+          p2.x = cp ? cp.x : gameData.player.start.x;
+          p2.y = cp ? cp.y : gameData.player.start.y;
+          p2.vx = 0; p2.vy = 0; p2.isGrounded = false;
+          marioPowerRef.current = 'small'; starTimerRef.current = 0;
+          marioTransformingRef.current = 0;
+          marioPipeRef.current = null;
+          marioGoalRef.current = null;
+          invulnRef.current = 120;
+          shakeRef.current = 8;
+          forceHud(n => n + 1);
+          roundOverRef.current = false;
+        }
+        return;
+      }
+      // ── 他ゲーム：チェックポイント復帰 ──────────────────────────────
       if (gameData.engine === 'action' && checkpointRef.current && !debugInvincibleRef.current) {
         const p2 = engineRef.current.player;
         p2.x = checkpointRef.current.x;
         p2.y = checkpointRef.current.y;
         p2.vx = 0; p2.vy = 0; p2.isGrounded = false;
         onjRezeHpRef.current.hp = Math.ceil(onjRezeHpRef.current.max / 2);
-        marioPowerRef.current = 'super'; starTimerRef.current = 0;  // 復帰時はスーパーに戻す
+        marioPowerRef.current = 'small'; starTimerRef.current = 0;  // 復帰時はチビに戻す
+        marioTransformingRef.current = 0;
+        marioPipeRef.current = null;
+        marioGoalRef.current = null;
         invulnRef.current = 120;
         shakeRef.current = 8;
         forceHud(n => n + 1);
@@ -2259,8 +2398,156 @@ const lose = (msg: string) => {
           engineRef.current.bullets = [];
           invulnRef.current = 180; // 3 秒間点滅無敵
           isPlayerDeadRef.current = false;
+          marioPowerRef.current = 'small';
+          marioTransformingRef.current = 0;
+          marioPipeRef.current = null;
           forceHud(n => n + 1);
         }, 1500);
+      }
+    };
+
+    const getPlayerHeight = () => {
+      if (gameDataRef.current.id === 'mario') {
+        return marioPowerRef.current === 'small' ? 32 : 64;
+      }
+      return gameDataRef.current.player.h;
+    };
+
+    const getPlayerWidth = () => {
+      return gameDataRef.current.player.w;
+    };
+
+    const triggerBlockBump = (col: number, row: number, type: 'item' | 'destructible' | 'bounce', info: any) => {
+      const bkey = `${col},${row}`;
+      const originalTile = engineRef.current.map[row]?.[col] ?? 0;
+      if (type === 'item') {
+        usedBlocksRef.current.add(bkey);
+        engineRef.current.map[row][col] = 0; // 一時的に空気化
+        
+        const usedId = Number(Object.keys(gameDataRef.current.tiles).find(k => gameDataRef.current.tiles[Number(k)]?.special === 'used')) || 14;
+        const isPowerupBlock = (col % 4 === 0) && gameData.id === 'mario';
+
+        if (isPowerupBlock) {
+          const isSmall = marioPowerRef.current === 'small';
+          const itemId = isSmall ? 'superMushroom' : 'fireFlower';
+          const emoji = isSmall ? '🍄' : '🌸';
+          
+          const itemDef: ObjectDef = {
+            id: Math.random().toString(),
+            kind: 'npc',
+            emoji,
+            col,
+            row: row - 1,
+            w: TILE_SIZE,
+            h: TILE_SIZE,
+            objType: 'item',
+            itemId,
+            behavior: 'still',
+            speed: 0,
+            hazard: false,
+            hp: 1,
+            bullet: 'none',
+            bulletSpeed: 0,
+            bulletColor: '#fff',
+            fireRate: 0,
+            message: ''
+          };
+          
+          const newEnt: Entity = {
+            def: itemDef,
+            x: col * TILE_SIZE,
+            y: row * TILE_SIZE, // 最初はブロックの中に隠れている状態
+            homeX: col * TILE_SIZE,
+            homeY: (row - 1) * TILE_SIZE,
+            hp: 1,
+            timer: 0,
+            vx: 0,
+            vy: 0,
+            talked: false,
+            spawnGrace: 32
+          };
+          
+          engineRef.current.entities.push(newEnt);
+          
+          blockAnimsRef.current.push({
+            col, row,
+            type: 'bump',
+            timer: 0,
+            maxTimer: 10,
+            originalTile,
+            info,
+            oy: 0,
+            targetTileId: usedId,
+            spawnCoin: false
+          });
+          playSfx(sfxRef.current.shot); // アイテム出現効果音
+        } else {
+          coinsRef.current += 1; scoreRef.current += 100; forceHud(n => n + 1);
+          blockAnimsRef.current.push({
+            col, row,
+            type: 'bump',
+            timer: 0,
+            maxTimer: 10,
+            originalTile,
+            info,
+            oy: 0,
+            targetTileId: usedId,
+            spawnCoin: true
+          });
+          playSfx(sfxRef.current.jump);
+        }
+      }
+      else if (type === 'destructible') {
+        engineRef.current.map[row][col] = 0; // マップから消去
+        if (marioPowerRef.current === 'small') {
+          // チビマリオは壊せず、跳ねるだけ
+          blockAnimsRef.current.push({
+            col, row,
+            type: 'bump',
+            timer: 0,
+            maxTimer: 10,
+            originalTile,
+            info,
+            oy: 0,
+            targetTileId: originalTile
+          });
+          playSfx(sfxRef.current.jump);
+        } else {
+          // デカマリオは破壊
+          const px = col * TILE_SIZE + 8;
+          const py = row * TILE_SIZE + 8;
+          const particles = [
+            { x: px - 4, y: py - 4, vx: -2, vy: -5 },
+            { x: px + 4, y: py - 4, vx: 2, vy: -5 },
+            { x: px - 4, y: py + 4, vx: -1.5, vy: -3 },
+            { x: px + 4, y: py + 4, vx: 1.5, vy: -3 }
+          ];
+          blockAnimsRef.current.push({
+            col, row,
+            type: 'break',
+            timer: 0,
+            maxTimer: 30,
+            originalTile,
+            info,
+            oy: 0,
+            particles
+          });
+          scoreRef.current += 50; forceHud(n => n + 1);
+          playSfx(sfxRef.current.damage);
+        }
+      }
+      else if (type === 'bounce') {
+        engineRef.current.map[row][col] = 0;
+        blockAnimsRef.current.push({
+          col, row,
+          type: 'bump',
+          timer: 0,
+          maxTimer: 10,
+          originalTile,
+          info,
+          oy: 0,
+          targetTileId: originalTile
+        });
       }
     };
 
@@ -2283,21 +2570,155 @@ const lose = (msg: string) => {
       if (bombInvulnRef.current > 0) bombInvulnRef.current--;
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
 
+      // マリオ巨大化変身タイマー
+      if (marioTransformingRef.current > 0) {
+        marioTransformingRef.current--;
+        p.vx = 0; p.vy = 0;
+      }
+
+      // マリオ土管アニメーション更新
+      if (isPlaying && marioPipeRef.current) {
+        const pipe = marioPipeRef.current;
+        pipe.progress++;
+        const t = pipe.progress / pipe.maxProgress;
+        p.x = pipe.x;
+        p.y = pipe.startY + (pipe.targetY - pipe.startY) * t;
+        p.vx = 0; p.vy = 0;
+
+        if (pipe.progress >= pipe.maxProgress) {
+          if (pipe.phase === 'entering') {
+            sceneFadeRef.current = {
+              phase: 'out',
+              frame: 0,
+              totalFrames: 16,
+              nextSceneId: pipe.warpSceneId!,
+              entryX: pipe.entryX!,
+              entryY: pipe.entryY!
+            };
+          }
+          marioPipeRef.current = null;
+        }
+      }
+
+      // マリオゴールポール滑り降りアニメーション更新
+      if (isPlaying && marioGoalRef.current) {
+        const goal = marioGoalRef.current;
+        p.vx = 0; p.vy = 0;
+        
+        if (goal.phase === 'slide') {
+          p.x = goal.x;
+          p.y += 2.0; // スライド降下
+          
+          // ポールの下端（通常は地面の数マス上、Y衝突チェックで足元が接地したら歩行開始にする）
+          const ph = getPlayerHeight();
+          const pw = getPlayerWidth();
+          let hitGround = false;
+          for (let dx = 2; dx <= pw - 2; dx += 8) {
+            const tBottom = getTile(p.x + dx, p.y + ph + 2); // 2px 下をチェック
+            if (tBottom && !tBottom.info.passable) hitGround = true;
+          }
+          if (hitGround || p.y >= worldH - ph - TILE_SIZE) {
+            goal.phase = 'walk';
+            goal.progress = 0;
+          }
+        } else if (goal.phase === 'walk') {
+          // 右側（お城の方向）へ自動歩行
+          p.vx = 2.0;
+          p.x += p.vx;
+          goal.progress++;
+          if (goal.progress >= 90) {
+            goal.phase = 'done';
+            marioGoalRef.current = null;
+            win();
+          }
+        }
+      }
+
+      // ── ブロックアニメーションの更新 ──
+      blockAnimsRef.current = blockAnimsRef.current.filter(anim => {
+        anim.timer++;
+        if (anim.type === 'bump') {
+          const t = anim.timer / anim.maxTimer;
+          anim.oy = -Math.sin(t * Math.PI) * 8;
+          if (anim.timer >= anim.maxTimer) {
+            if (engineRef.current.map[anim.row] && anim.targetTileId !== undefined) {
+              engineRef.current.map[anim.row][anim.col] = anim.targetTileId;
+            }
+            return false;
+          }
+        } else if (anim.type === 'break') {
+          if (anim.particles) {
+            anim.particles.forEach(pt => {
+              pt.x += pt.vx;
+              pt.y += pt.vy;
+              pt.vy += 0.3;
+            });
+          }
+          if (anim.timer >= anim.maxTimer) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      // ── 新規粒子の物理更新 ──
+      particlesRef.current = particlesRef.current.filter(pt => {
+        pt.x += pt.vx;
+        pt.y += pt.vy;
+        pt.life--;
+
+        if (pt.type === 'coin') {
+          pt.vy += 0.4; // Gravity
+          const col = Math.floor(pt.x / TILE_SIZE);
+          const row = Math.floor(pt.y / TILE_SIZE);
+          if (col >= 0 && col < worldCols && row >= 0 && row < worldRows) {
+            const tileId = engineRef.current.map[row]?.[col] ?? 0;
+            const tileInfo = gameData.tiles[tileId];
+            if (tileInfo && !tileInfo.passable && tileInfo.special !== 'oneway') {
+              pt.y = row * TILE_SIZE - pt.size;
+              pt.vy = -Math.abs(pt.vy) * 0.6;
+              pt.vx *= 0.8;
+              pt.bounceCount = (pt.bounceCount ?? 0) + 1;
+            }
+          }
+          const ph = getPlayerHeight();
+          const pw = getPlayerWidth();
+          if (isPlaying && !roundOverRef.current && !isPlayerDeadRef.current) {
+            const dx = pt.x - (p.x + pw / 2);
+            const dy = pt.y - (p.y + ph / 2);
+            const dist = Math.hypot(dx, dy);
+            if (dist < 20) {
+              coinsRef.current++;
+              forceHud(n => n + 1);
+              playSfx(sfxRef.current.jump);
+              return false;
+            }
+          }
+        } else {
+          pt.vx *= 0.95;
+          pt.vy *= 0.95;
+        }
+        return pt.life > 0;
+      });
+
       // ── player movement (both modes, paused during battle) ──
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current);
+      // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current);
       
       // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
       if (justStartedRef.current && isPlaying && !frozen) {
         justStartedRef.current = false;
         let safety = 0;
+        const ph = getPlayerHeight();
+        const pw = getPlayerWidth();
         while (safety < 128) {
           let overlapping = false;
-          for (let dy = 2; dy <= pData.h; dy += 8) {
-            const yOffset = Math.min(dy, pData.h - 2);
+          for (let dy = 2; dy <= ph; dy += 8) {
+            const yOffset = Math.min(dy, ph - 2);
             const t1 = getTile(p.x + 2, p.y + yOffset);
-            const t2 = getTile(p.x + pData.w - 2, p.y + yOffset);
+            const t2 = getTile(p.x + pw - 2, p.y + yOffset);
             if ((t1 && !t1.info.passable) || (t2 && !t2.info.passable)) {
               overlapping = true;
               break;
@@ -2305,8 +2726,8 @@ const lose = (msg: string) => {
           }
           if (!overlapping) {
             // 接地判定ライン（最下部）の重なりもチェック
-            const t3 = getTile(p.x + 2, p.y + pData.h);
-            const t4 = getTile(p.x + pData.w - 2, p.y + pData.h);
+            const t3 = getTile(p.x + 2, p.y + ph);
+            const t4 = getTile(p.x + pw - 2, p.y + ph);
             if ((t3 && !t3.info.passable) || (t4 && !t4.info.passable)) {
               overlapping = true;
             }
@@ -2328,9 +2749,25 @@ const lose = (msg: string) => {
         } else if (frozen) {
           p.vx = 0; p.vy = 0; p.isGrounded = false;
         } else if (gameData.engine === 'action') {
-          if (isLeft) p.vx -= 1;
-          if (isRight) p.vx += 1;
+          // ── Auto-Sprint & Dash Speed ──
+          const isDash = keys.has('Shift') || keys.has('c') || keys.has('C');
+          let sprintActive = false;
+          if (isDash && (isLeft || isRight)) {
+            runDurationRef.current++;
+            if (runDurationRef.current > 60) {
+              sprintActive = true;
+            }
+          } else {
+            runDurationRef.current = 0;
+          }
+
+          const accel = sprintActive ? 2.2 : (isDash ? 1.6 : 1.0);
+          const maxSpeed = sprintActive ? 11.0 : (isDash ? 9.0 : 5.5);
+
+          if (isLeft) p.vx = Math.max(-maxSpeed, p.vx - accel);
+          if (isRight) p.vx = Math.min(maxSpeed, p.vx + accel);
           p.vx *= gameData.friction;
+
           // はしご：プレイヤー中心がはしごタイルにいるとき重力キャンセル＆上下移動
           const onLadder = isAction && (() => {
             const pcxL = p.x + pData.w / 2, pcyL = p.y + pData.h / 2;
@@ -2341,9 +2778,66 @@ const lose = (msg: string) => {
             if (isUp) p.y -= pData.speed;
             if (isDown) p.y += pData.speed;
           }
-          if (!onLadder) { p.vy += gameData.gravity; if (p.vy > ACTION_MAX_FALL) p.vy = ACTION_MAX_FALL; }
-          if (isAction && !prevActionRef.current && p.isGrounded) { p.vy = gameData.player.jumpPower; p.isGrounded = false; playSfx(sfxRef.current.jump); }
-          // 武器切り替え
+
+          // ── Coyote Time ──
+          if (p.isGrounded) {
+            coyoteFramesRef.current = 6; // ~100ms grace
+            isJumpingRef.current = false;
+            isWallSlidingRef.current = false;
+            wallSlideDirRef.current = 0;
+          } else {
+            coyoteFramesRef.current = Math.max(0, coyoteFramesRef.current - 1);
+          }
+
+          // ── Variable Jump Gravity ──
+          if (!onLadder) {
+            let gravityMult = 1.0;
+            if (isJumpingRef.current && p.vy < 0) {
+              if (isAction) {
+                gravityMult = 0.5; // JUMP_GRAVITY
+              }
+              if (Math.abs(p.vy) < 2.0) {
+                gravityMult = 0.3; // APEX_GRAVITY
+              }
+            }
+            p.vy += gameData.gravity * gravityMult;
+            if (p.vy > ACTION_MAX_FALL) p.vy = ACTION_MAX_FALL;
+          }
+
+          // ── Jump Action & Coyote Jump ──
+          const canCoyoteJump = coyoteFramesRef.current > 0 && !isJumpingRef.current;
+          if (isAction && !prevActionRef.current && (p.isGrounded || canCoyoteJump)) {
+            const jumpPowerBoost = sprintActive ? 1.2 : (isDash ? 1.1 : 1.0);
+            p.vy = gameData.player.jumpPower * jumpPowerBoost;
+            p.isGrounded = false;
+            isJumpingRef.current = true;
+            coyoteFramesRef.current = 0;
+
+            // Visual stretch
+            scaleXRef.current = 0.8;
+            scaleYRef.current = 1.2;
+
+            playSfx(sfxRef.current.jump);
+          }
+
+          // ── Wall Jump ──
+          if (isAction && !prevActionRef.current && (isWallSlidingRef.current || wallSlideDirRef.current !== 0)) {
+            const wd = wallSlideDirRef.current;
+            p.vx = -wd * 6.5;
+            p.vy = gameData.player.jumpPower * 0.9;
+            isJumpingRef.current = true;
+            isWallSlidingRef.current = false;
+            wallSlideDirRef.current = 0;
+            coyoteFramesRef.current = 0;
+
+            // Visual stretch
+            scaleXRef.current = 0.8;
+            scaleYRef.current = 1.2;
+
+            playSfx(sfxRef.current.jump);
+          }
+
+          // ── 武器切り替え ──
           const isNextWeapon = keys.has('e') || keys.has('E');
           const isPrevWeapon = keys.has('q') || keys.has('Q');
           if (isNextWeapon && !prevNextWeaponRef.current) {
@@ -2353,39 +2847,189 @@ const lose = (msg: string) => {
           void isPrevWeapon;
           prevNextWeaponRef.current = isNextWeapon;
 
+          // ── Horizontal movement and Wall Slide detection ──
           p.x += p.vx;
-          let hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
-          getTile(p.x + 2, p.y + pData.h - 2), getTile(p.x + pData.w - 2, p.y + pData.h - 2)]
-            .filter(t2 => t2 && !t2.info.passable);
-          const tile = hits[0];
-          if (tile) { if (p.vx > 0) p.x = tile.rect.x - pData.w; else if (p.vx < 0) p.x = tile.rect.x + TILE_SIZE; p.vx = 0; }
+          const ph = getPlayerHeight();
+          const pw = getPlayerWidth();
+          const xHits: any[] = [];
+          for (let dy = 2; dy <= ph - 2; dy += 8) {
+            const yOffset = Math.min(dy, ph - 2);
+            const tLeft = getTile(p.x + 2, p.y + yOffset);
+            const tRight = getTile(p.x + pw - 2, p.y + yOffset);
+            // Ignore one-way platforms during horizontal checks
+            if (tLeft && !tLeft.info.passable && tLeft.info.special !== 'oneway') xHits.push(tLeft);
+            if (tRight && !tRight.info.passable && tRight.info.special !== 'oneway') xHits.push(tRight);
+          }
+          const tLeftBottom = getTile(p.x + 2, p.y + ph - 2);
+          const tRightBottom = getTile(p.x + pw - 2, p.y + ph - 2);
+          if (tLeftBottom && !tLeftBottom.info.passable && tLeftBottom.info.special !== 'oneway') xHits.push(tLeftBottom);
+          if (tRightBottom && !tRightBottom.info.passable && tRightBottom.info.special !== 'oneway') xHits.push(tRightBottom);
 
+          let wallDir = 0;
+          const tile = xHits[0];
+          if (tile) { 
+            if (p.x + pw / 2 < tile.rect.x + TILE_SIZE / 2) {
+              wallDir = 1; // Wall is to the right
+              if (p.vx > 0) p.x = tile.rect.x - pw; 
+            } else {
+              wallDir = -1; // Wall is to the left
+              if (p.vx < 0) p.x = tile.rect.x + TILE_SIZE; 
+            }
+            p.vx = 0; 
+          }
+
+          // Wall Slide trigger
+          if (wallDir !== 0 && !p.isGrounded && p.vy > 0) {
+            if ((wallDir === 1 && isRight) || (wallDir === -1 && isLeft)) {
+              isWallSlidingRef.current = true;
+              wallSlideDirRef.current = wallDir;
+              p.vy = Math.min(p.vy, 2.5); // Wall slide speed limit
+            }
+          } else {
+            isWallSlidingRef.current = false;
+            wallSlideDirRef.current = 0;
+          }
+
+          // ── Vertical Movement & Collisions ──
           p.y += p.vy; p.isGrounded = false;
-          hits = [getTile(p.x + 2, p.y + 2), getTile(p.x + pData.w - 2, p.y + 2),
-          getTile(p.x + 2, p.y + pData.h), getTile(p.x + pData.w - 2, p.y + pData.h)]
-            .filter(t2 => t2 && !t2.info.passable);
-          const tile2 = hits[0];
-          if (tile2) {
-            if (p.vy > 0) { p.y = tile2.rect.y - pData.h; p.isGrounded = true; }
-            else if (p.vy < 0) {
+          const yHits: { tile: any; dir: 'up' | 'down' }[] = [];
+          for (let dx = 2; dx <= pw - 2; dx += 8) {
+            const tBottom = getTile(p.x + dx, p.y + ph);
+            if (tBottom) {
+              if (tBottom.info.special === 'oneway') {
+                if (p.vy >= 0 && (p.y + ph - p.vy <= tBottom.rect.y + 4)) {
+                  yHits.push({ tile: tBottom, dir: 'down' });
+                }
+              } else if (!tBottom.info.passable) {
+                yHits.push({ tile: tBottom, dir: 'down' });
+              }
+            }
+            const tTop = getTile(p.x + dx, p.y + 2);
+            if (tTop && !tTop.info.passable && tTop.info.special !== 'oneway') yHits.push({ tile: tTop, dir: 'up' });
+          }
+          const tBottomRight = getTile(p.x + pw - 2, p.y + ph);
+          if (tBottomRight) {
+            if (tBottomRight.info.special === 'oneway') {
+              if (p.vy >= 0 && (p.y + ph - p.vy <= tBottomRight.rect.y + 4)) {
+                yHits.push({ tile: tBottomRight, dir: 'down' });
+              }
+            } else if (!tBottomRight.info.passable) {
+              yHits.push({ tile: tBottomRight, dir: 'down' });
+            }
+          }
+          const tTopRight = getTile(p.x + pw - 2, p.y + 2);
+          if (tTopRight && !tTopRight.info.passable && tTopRight.info.special !== 'oneway') yHits.push({ tile: tTopRight, dir: 'up' });
+
+          const yHit = yHits[0];
+          if (yHit) {
+            const tile2 = yHit.tile;
+            if (yHit.dir === 'down' || p.vy > 0) { 
+              p.y = tile2.rect.y - ph; 
+              p.isGrounded = true; 
+            }
+            else if (yHit.dir === 'up' || p.vy < 0) {
               p.y = tile2.rect.y + TILE_SIZE;
               // 下から叩く：ハテナ→コイン排出（使用済みに変化）、壊せるブロック→破壊
               const bcol = Math.round(tile2.rect.x / TILE_SIZE), brow = Math.round(tile2.rect.y / TILE_SIZE);
               const bsp = tile2.info?.special, bkey = `${bcol},${brow}`;
               if (bsp === 'item' && !usedBlocksRef.current.has(bkey)) {
-                usedBlocksRef.current.add(bkey);
-                coinsRef.current += 1; scoreRef.current += 100; forceHud(n => n + 1);
-                const usedId = Number(Object.keys(gameData.tiles).find(k => gameData.tiles[Number(k)]?.special === 'used'));
-                if (usedId && engineRef.current.map[brow]) engineRef.current.map[brow][bcol] = usedId;
-                playSfx(sfxRef.current.jump);
+                triggerBlockBump(bcol, brow, 'item', tile2.info);
               } else if (bsp === 'destructible') {
-                if (engineRef.current.map[brow]) engineRef.current.map[brow][bcol] = 0;
-                scoreRef.current += 50; forceHud(n => n + 1);
-                playSfx(sfxRef.current.damage);
+                triggerBlockBump(bcol, brow, 'destructible', tile2.info);
+              } else if (bsp === 'bounce') {
+                triggerBlockBump(bcol, brow, 'bounce', tile2.info);
+                p.vy = gameData.player.jumpPower * 1.5; // Springboard bounce!
+                p.isGrounded = false;
+
+                // Visual stretch on bounce
+                scaleXRef.current = 0.8;
+                scaleYRef.current = 1.3;
+
+                playSfx(sfxRef.current.jump);
               }
             }
             p.vy = 0;
           }
+
+          // ── Moving Platforms carriage ──
+          let stoodOnPlatform: Entity | null = null;
+          for (const ent of eng.entities) {
+            const ed = ent.def;
+            if (ed.objType === 'platform' || ed.name?.toLowerCase().includes('platform')) {
+              const ew = ed.w ?? TILE_SIZE;
+              const playerBottom = p.y + ph;
+              const platformTop = ent.y;
+              const isAbove = playerBottom >= platformTop - 5 && playerBottom <= platformTop + 5;
+              const overlapX = p.x + pw - 2 > ent.x && p.x + 2 < ent.x + ew;
+              if (isAbove && overlapX && p.vy >= 0) {
+                stoodOnPlatform = ent;
+                break;
+              }
+            }
+          }
+          if (stoodOnPlatform) {
+            p.y = stoodOnPlatform.y - ph;
+            p.vy = 0;
+            p.isGrounded = true;
+            p.x += stoodOnPlatform.vx || 0;
+            p.y += stoodOnPlatform.vy || 0;
+          }
+
+          // ── Smoke Particles Spawn & Scale Interpolation ──
+          scaleXRef.current += (1.0 - scaleXRef.current) * 0.15;
+          scaleYRef.current += (1.0 - scaleYRef.current) * 0.15;
+
+          const frameCount = Math.floor(performance.now() / 16.67);
+          if (p.isGrounded && !prevGroundedRef.current) {
+            const landingSmokeCount = 6;
+            for (let i = 0; i < landingSmokeCount; i++) {
+              const angle = (i / (landingSmokeCount - 1)) * Math.PI;
+              const speed = 1.0 + Math.random() * 1.5;
+              particlesRef.current.push({
+                x: p.x + pw / 2,
+                y: p.y + ph - 2,
+                vx: Math.cos(angle) * speed,
+                vy: -Math.sin(angle) * speed * 0.4,
+                life: 15,
+                maxLife: 15,
+                size: 3 + Math.random() * 3,
+                color: '#eee',
+                type: 'smoke'
+              });
+            }
+            scaleXRef.current = 1.3;
+            scaleYRef.current = 0.7;
+          }
+          prevGroundedRef.current = p.isGrounded;
+
+          if (p.isGrounded && Math.abs(p.vx) > 2.0) {
+            if (sprintActive && frameCount % 6 === 0) {
+              particlesRef.current.push({
+                x: p.x + pw / 2 - Math.sign(p.vx) * (pw / 2),
+                y: p.y + ph - 2,
+                vx: -Math.sign(p.vx) * (0.5 + Math.random() * 1.0),
+                vy: -(0.2 + Math.random() * 0.5),
+                life: 18,
+                maxLife: 18,
+                size: 4 + Math.random() * 4,
+                color: '#eee',
+                type: 'smoke'
+              });
+            } else if (isDash && frameCount % 12 === 0) {
+              particlesRef.current.push({
+                x: p.x + pw / 2 - Math.sign(p.vx) * (pw / 2),
+                y: p.y + ph - 2,
+                vx: -Math.sign(p.vx) * (0.3 + Math.random() * 0.7),
+                vy: -(0.1 + Math.random() * 0.4),
+                life: 12,
+                maxLife: 12,
+                size: 3 + Math.random() * 3,
+                color: '#eee',
+                type: 'smoke'
+              });
+            }
+          }
+
           if (p.y > worldH && isPlaying && !debugInvincibleRef.current) { lose('ミス！'); dead = true; }
           // プレイヤー向き更新
           if (isLeft) actionDirRef.current = -1;
@@ -2632,6 +3276,9 @@ const lose = (msg: string) => {
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
+          if (e.spawnGrace && e.spawnGrace > 0) {
+            continue;
+          }
           const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
 
           const sp = d.speed;
@@ -2676,6 +3323,21 @@ const lose = (msg: string) => {
               e.y = Math.max(TILE_SIZE, Math.min(VIEW_H * 0.4, e.y));
             }
           } else if (gameData.engine === 'action') {
+            // ── パワーアップ出現アニメーション中 (spawnGrace) ──
+            if (e.spawnGrace && e.spawnGrace > 0) {
+              e.spawnGrace--;
+              e.y -= 0.5; // 32フレームで 16px 上に這い出る
+              if (e.spawnGrace === 0) {
+                if (e.def.itemId === 'superMushroom') {
+                  e.def.behavior = 'walker';
+                  e.vx = 1.0;
+                } else if (e.def.itemId === 'fireFlower') {
+                  e.def.behavior = 'still';
+                  e.vx = 0; e.vy = 0;
+                }
+              }
+              continue;
+            }
             // ── 横スク（マリオ/ロックマン）：重力・地面/壁判定つき敵AI ──
             // 地面に接していなければ自由落下。walker は崖の手前で反転（赤ノコノコ型）、
             // patrolH/緑ノコノコ型は崖からそのまま落ちる。
@@ -2919,13 +3581,60 @@ const lose = (msg: string) => {
               playSfx(sfxRef.current.jump);
               break;
             }
+            // スター無敵による即死処理
+            if (starTimerRef.current > 0 && d.hazard && (e.shellGrace ?? 0) <= 0) {
+              eng.entities.splice(ei, 1);
+              scoreRef.current += 100;
+              playSfx(sfxRef.current.damage);
+              forceHud(n => n + 1);
+              break;
+            }
             // 滑走甲羅 or 通常の敵に横から触れた → ダメージ（蹴り出し直後の猶予中はスキップ）
             if (d.hazard && (e.shellGrace ?? 0) <= 0 && !debugInvincibleRef.current && invulnRef.current <= 0) {
               const dmg = Math.max(1, d.atk ?? 2);
-              onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
-              if (marioPowerRef.current === 'fire') marioPowerRef.current = 'super'; // ファイア→スーパーに降格
-              hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
-              if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+              if (gameData.id === 'mario') {
+                if (marioPowerRef.current === 'fire') {
+                  marioPowerRef.current = 'super';
+                  const droppedCoins = Math.min(10, coinsRef.current);
+                  if (droppedCoins > 0) {
+                    coinsRef.current -= droppedCoins;
+                    const coinsToSpawn = Math.min(6, droppedCoins);
+                    for (let i = 0; i < coinsToSpawn; i++) {
+                      const angle = (Math.PI / 4) + (Math.random() * Math.PI / 2);
+                      const speed = 2.0 + Math.random() * 4.0;
+                      particlesRef.current.push({ x: p.x + pData.w / 2, y: p.y + pData.h / 2,
+                        vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? 1 : -1), vy: -Math.sin(angle) * speed - 1.0,
+                        life: 300, maxLife: 300, size: 6, color: '#ffd700', type: 'coin', bounceCount: 0 });
+                    }
+                  }
+                  invulnRef.current = 120;
+                  hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                } else if (marioPowerRef.current === 'super') {
+                  marioPowerRef.current = 'small';
+                  p.y += 32; // 接地を維持
+                  const droppedCoins = Math.min(10, coinsRef.current);
+                  if (droppedCoins > 0) {
+                    coinsRef.current -= droppedCoins;
+                    const coinsToSpawn = Math.min(6, droppedCoins);
+                    for (let i = 0; i < coinsToSpawn; i++) {
+                      const angle = (Math.PI / 4) + (Math.random() * Math.PI / 2);
+                      const speed = 2.0 + Math.random() * 4.0;
+                      particlesRef.current.push({ x: p.x + pData.w / 2, y: p.y + pData.h / 2,
+                        vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? 1 : -1), vy: -Math.sin(angle) * speed - 1.0,
+                        life: 300, maxLife: 300, size: 6, color: '#ffd700', type: 'coin', bounceCount: 0 });
+                    }
+                  }
+                  invulnRef.current = 120;
+                  hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                } else {
+                  // 小状態でのダメージ → lose() がHP管理・復帰・ゲームオーバーを全て担う
+                  lose('ミス！'); dead = true;
+                }
+              } else {
+                onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
+                hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+              }
             }
             break;
           }
@@ -2946,7 +3655,25 @@ const lose = (msg: string) => {
               if (tgtScene) {
                 const ex = (d.warpEntryCol ?? 1) * TILE_SIZE;
                 const ey = (d.warpEntryRow ?? 1) * TILE_SIZE;
-                sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: d.warpSceneId, entryX: ex, entryY: ey };
+                if (gameData.id === 'mario') {
+                  const onTop = Math.abs(p.x - d.col * TILE_SIZE) < 12 && p.isGrounded;
+                  if (onTop && isDown && !marioPipeRef.current) {
+                    marioPipeRef.current = {
+                      phase: 'entering',
+                      x: d.col * TILE_SIZE,
+                      startY: p.y,
+                      targetY: p.y + getPlayerHeight(),
+                      progress: 0,
+                      maxProgress: 40,
+                      warpSceneId: d.warpSceneId,
+                      entryX: ex,
+                      entryY: ey
+                    };
+                    playSfx(sfxRef.current.damage); // 土管に入る効果音
+                  }
+                } else {
+                  sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: d.warpSceneId, entryX: ex, entryY: ey };
+                }
               }
               break;
             }
@@ -2955,10 +3682,27 @@ const lose = (msg: string) => {
                 const iid = d.itemId || d.name || d.id;
                 // マリオ系パワーアップの即時効果
                 if (gameData.id === 'mario') {
-                  if (iid === 'fireFlower') marioPowerRef.current = 'fire';
-                  else if (iid === 'superMushroom') { const z = onjRezeHpRef.current; z.hp = Math.min(z.max, z.hp + 2); }
-                  else if (iid === 'oneUp') livesRef.current += 1;
-                  else if (iid === 'star') starTimerRef.current = STAR_DURATION;
+                  if (iid === 'fireFlower') {
+                    marioPowerRef.current = 'fire';
+                    playSfx(sfxRef.current.jump);
+                  }
+                  else if (iid === 'superMushroom') {
+                    if (marioPowerRef.current === 'small') {
+                      marioPowerRef.current = 'super';
+                      p.y -= 32;
+                      marioTransformingRef.current = 40;
+                    }
+                    const z = onjRezeHpRef.current;
+                    z.hp = Math.min(z.max, z.hp + 2);
+                    playSfx(sfxRef.current.jump);
+                  }
+                  else if (iid === 'oneUp') {
+                    livesRef.current += 1;
+                    playSfx(sfxRef.current.jump);
+                  }
+                  else if (iid === 'star') {
+                    starTimerRef.current = STAR_DURATION;
+                  }
                 }
                 setInventory(p => { const n = { ...p }; n[iid] = (n[iid] ?? 0) + 1; return n; });
                 eng.entities.splice(ei, 1);
@@ -2981,6 +3725,13 @@ const lose = (msg: string) => {
               break;
             }
             if (d.hazard) {
+              if (starTimerRef.current > 0) {
+                eng.entities.splice(ei, 1);
+                scoreRef.current += 100;
+                playSfx(sfxRef.current.damage);
+                forceHud(n => n + 1);
+                break;
+              }
               if (!debugInvincibleRef.current) {
                 if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { startBattle(e); dead = true; } break; }
                 if (gameData.engine === 'touhou') { if (!isPlayerDeadRef.current && invulnRef.current <= 0) { handlePlayerDeath(); dead = true; } break; }
@@ -3000,10 +3751,43 @@ const lose = (msg: string) => {
                 if (gameData.engine === 'action') {
                   if (invulnRef.current <= 0) {
                     const dmg = Math.max(1, d.atk ?? 2);
-                    onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
-                    if (marioPowerRef.current === 'fire') marioPowerRef.current = 'super'; // ファイア→スーパーに降格
-                    hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
-                    if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+                    if (gameData.id === 'mario') {
+                      if (marioPowerRef.current === 'fire') {
+                        marioPowerRef.current = 'super';
+                      } else if (marioPowerRef.current === 'super') {
+                        marioPowerRef.current = 'small';
+                        p.y += 32; // 接地を維持
+                      } else {
+                        lose('ミス！'); dead = true;
+                      }
+                      const droppedCoins = Math.min(10, coinsRef.current);
+                      if (droppedCoins > 0) {
+                        coinsRef.current -= droppedCoins;
+                        const coinsToSpawn = Math.min(6, droppedCoins);
+                        for (let i = 0; i < coinsToSpawn; i++) {
+                          const angle = (Math.PI / 4) + (Math.random() * Math.PI / 2);
+                          const speed = 2.0 + Math.random() * 4.0;
+                          particlesRef.current.push({
+                            x: p.x + pData.w / 2,
+                            y: p.y + pData.h / 2,
+                            vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? 1 : -1),
+                            vy: -Math.sin(angle) * speed - 1.0,
+                            life: 300,
+                            maxLife: 300,
+                            size: 6,
+                            color: '#ffd700',
+                            type: 'coin',
+                            bounceCount: 0
+                          });
+                        }
+                      }
+                      invulnRef.current = 120;
+                      hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                    } else {
+                      onjRezeHpRef.current.hp -= dmg; invulnRef.current = 120;
+                      hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                      if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+                    }
                   }
                   break;
                 }
@@ -3127,6 +3911,40 @@ const lose = (msg: string) => {
               if (gameData.engine === 'action') {
                 const idx = eng.enemyBullets.indexOf(eb);
                 if (idx >= 0) eng.enemyBullets.splice(idx, 1);
+                if (gameData.id === 'mario') {
+                  if (marioPowerRef.current === 'fire') {
+                    marioPowerRef.current = 'super';
+                  } else if (marioPowerRef.current === 'super') {
+                    marioPowerRef.current = 'small';
+                    p.y += 32; // 接地を維持
+                  } else {
+                    lose('ミス！'); dead = true; break;
+                  }
+                  const droppedCoins = Math.min(10, coinsRef.current);
+                  if (droppedCoins > 0) {
+                    coinsRef.current -= droppedCoins;
+                    const coinsToSpawn = Math.min(6, droppedCoins);
+                    for (let i = 0; i < coinsToSpawn; i++) {
+                      const angle = (Math.PI / 4) + (Math.random() * Math.PI / 2);
+                      const speed = 2.0 + Math.random() * 4.0;
+                      particlesRef.current.push({
+                        x: p.x + pData.w / 2,
+                        y: p.y + pData.h / 2,
+                        vx: Math.cos(angle) * speed * (Math.random() < 0.5 ? 1 : -1),
+                        vy: -Math.sin(angle) * speed - 1.0,
+                        life: 300,
+                        maxLife: 300,
+                        size: 6,
+                        color: '#ffd700',
+                        type: 'coin',
+                        bounceCount: 0
+                      });
+                    }
+                  }
+                  invulnRef.current = 120;
+                  hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+                  continue;
+                }
                 onjRezeHpRef.current.hp -= 1; invulnRef.current = 120;
                 hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
                 if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; break; }
@@ -3162,7 +3980,19 @@ const lose = (msg: string) => {
                 if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
-              } else win();
+              } else {
+                if (gameData.id === 'mario' && !marioGoalRef.current) {
+                  marioGoalRef.current = {
+                    phase: 'slide',
+                    x: center.rect.x,
+                    targetY: center.rect.y + TILE_SIZE * 3.5,
+                    progress: 0
+                  };
+                  playSfx(sfxRef.current.clear);
+                } else if (gameData.id !== 'mario') {
+                  win();
+                }
+              }
             }
             else if (center?.info?.special === 'trap') { if (!debugInvincibleRef.current) { lose('ミス！'); dead = true; } }
             else if (center?.info?.special === 'lava') {
@@ -3380,6 +4210,48 @@ const lose = (msg: string) => {
         }
       }
 
+      // ── アニメーション中ブロックの描画 ──
+      if (isPlaying) {
+        blockAnimsRef.current.forEach(anim => {
+          const info = anim.info;
+          if (!info) return;
+          const tx = anim.col * TILE_SIZE;
+          const ty = anim.row * TILE_SIZE + anim.oy;
+          
+          if (anim.type === 'bump') {
+            const rawImgUrl = info.imageUrl ?? '';
+            const hashIdx = rawImgUrl.indexOf('#');
+            const baseImgUrl = hashIdx !== -1 ? rawImgUrl.slice(0, hashIdx) : rawImgUrl;
+            const img = baseImgUrl ? (imgCache.current.get(rawImgUrl) ?? imgCache.current.get(baseImgUrl)) : undefined;
+            if (img && img.complete && img.naturalWidth > 0) {
+              const hash = hashIdx !== -1 ? rawImgUrl.slice(hashIdx + 1).split(',').map(Number) : null;
+              const sx = hash ? hash[0] : 0;
+              const sy = hash ? hash[1] : 0;
+              const sw = hash ? hash[2] : img.naturalWidth;
+              const sh = hash ? hash[3] : img.naturalHeight;
+              const drawSrc = keyedCache.current.get(rawImgUrl) ?? keyedCache.current.get(baseImgUrl) ?? img;
+              
+              if (info.imageScale2x) {
+                const zoom = 2.0;
+                const destW = sw * zoom;
+                const destH = sh * zoom;
+                const destX = tx + (TILE_SIZE - destW) / 2;
+                ctx.drawImage(drawSrc, sx, sy, sw, sh, destX, ty, destW, TILE_SIZE);
+              } else {
+                ctx.drawImage(drawSrc, sx, sy, sw, sh, tx, ty, TILE_SIZE, TILE_SIZE);
+              }
+            } else {
+              ctx.fillStyle = info.color;
+              ctx.fillRect(tx, ty, TILE_SIZE, TILE_SIZE);
+            }
+          } else if (anim.type === 'break' && anim.particles) {
+            anim.particles.forEach(pt => {
+              ctx.fillStyle = info.color ?? '#c08840';
+              ctx.fillRect(pt.x - 2, pt.y - 2, 4, 4);
+            });
+          }
+        });
+      }
 
       // objects (play: from entities, edit: from data)
       if (isPlaying) {
@@ -3426,6 +4298,33 @@ const lose = (msg: string) => {
             ctx.fillRect(b.x, b.y, b.w, b.h);
           }
         }
+        // ── 新規粒子の描画 ──
+        particlesRef.current.forEach(pt => {
+          if (pt.type === 'coin') {
+            ctx.save();
+            ctx.fillStyle = '#ffd700';
+            ctx.strokeStyle = '#d4af37';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.strokeStyle = '#f5c542';
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, pt.size * 0.6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          } else {
+            ctx.save();
+            const alpha = Math.max(0, pt.life / pt.maxLife);
+            ctx.fillStyle = `rgba(220, 220, 220, ${alpha * 0.65})`;
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, pt.size * (0.4 + 0.6 * alpha), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+        });
         // ボムアイテム描画
         if (gameData.engine === 'touhou' && bombPickupsRef.current.length > 0) {
           ctx.font = '14px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3581,14 +4480,31 @@ const lose = (msg: string) => {
       // player
       if (gameData.engine !== 'touhou') {
         ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + pData.h, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
+        const ph = getPlayerHeight();
+        ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + ph, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
       ctx.fillStyle = gameData.player.color;
       // 死亡中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）
       const blinkPeriod = gameData.engine === 'action' ? 2 : 4;
       if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
-        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, p.x, p.y, pData.w, pData.h, 'player',
+        let drawH = pData.h;
+        if (gameData.id === 'mario') {
+          if (marioTransformingRef.current > 0) {
+            drawH = Math.floor(marioTransformingRef.current / 4) % 2 === 0 ? 32 : 64;
+          } else {
+            drawH = marioPowerRef.current === 'small' ? 32 : 64;
+          }
+        }
+        const isStar = starTimerRef.current > 0;
+        if (isStar) {
+          ctx.save();
+          ctx.filter = `hue-rotate(${(performance.now() / 2.0) % 360}deg) brightness(1.25)`;
+        }
+        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
           gameData.engine === 'touhou' ? 'w' : undefined);
+        if (isStar) {
+          ctx.restore();
+        }
       }
       // onjReze：近接攻撃の描画（振っている間だけ向きに合わせて表示）
       if (gameData.engine === 'onjReze' && isPlaying && swordRef.current.active > 0) {
@@ -3696,6 +4612,17 @@ const lose = (msg: string) => {
             eng.bullets = []; eng.enemyBullets = [];
             eng.player.x = fade.entryX; eng.player.y = fade.entryY;
             eng.player.vx = 0; eng.player.vy = 0;
+            if (gameData.id === 'mario') {
+              marioPipeRef.current = {
+                phase: 'exiting',
+                x: fade.entryX,
+                startY: fade.entryY + 32,
+                targetY: fade.entryY,
+                progress: 0,
+                maxProgress: 30
+              };
+              eng.player.y = fade.entryY + 32;
+            }
             justStartedRef.current = true; // 2マスキャラ等のワープ先埋まり防止イジェクトを再実行
             setEditSceneIdx(nextIdx);
             // シーン別BGM切り替え
@@ -4517,32 +5444,73 @@ const lose = (msg: string) => {
 
             {/* ── ゲームオーバー リザルト画面 ── */}
             {gameOverResult && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-50">
-                <div className="bg-gray-950 border-2 border-red-600 rounded-2xl px-8 py-7 text-center shadow-2xl min-w-[200px] space-y-4"
-                  style={{ fontFamily: 'monospace' }}>
-                  <p className="text-red-400 text-2xl font-bold tracking-widest">GAME OVER</p>
+              gameOverResult.marioDeathAnim
+              ? (
+                /* ── マリオ専用ゲームオーバー演出 ── */
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-50"
+                  style={{ background: 'rgba(0,0,0,0.88)', fontFamily: '"Press Start 2P", monospace, sans-serif' }}>
+                  {/* GAME OVER タイトル */}
+                  <div style={{ animation: 'marioGoFadeIn 0.6s ease-out forwards', opacity: 0 }}>
+                    <p style={{
+                      color: '#ff3030', fontSize: 22, fontWeight: 900, letterSpacing: 6,
+                      textShadow: '2px 2px 0 #800000, 4px 4px 0 #400000',
+                      fontFamily: 'monospace', lineHeight: 1
+                    }}>GAME OVER</p>
+                  </div>
+                  {/* コイン残数 */}
+                  <div style={{ marginTop: 24, color: '#ffd700', fontSize: 13, letterSpacing: 2, fontFamily: 'monospace' }}>
+                    🪙 × {coinsRef.current}
+                  </div>
+                  {/* スコア */}
                   {gameOverResult.score > 0 && (
-                    <div className="border border-gray-700 rounded-lg px-4 py-2">
-                      <p className="text-gray-400 text-[11px] tracking-widest">SCORE</p>
-                      <p className="text-yellow-300 text-xl font-bold">{gameOverResult.score.toLocaleString()}</p>
+                    <div style={{ marginTop: 8, color: '#aaa', fontSize: 11, letterSpacing: 2, fontFamily: 'monospace' }}>
+                      SCORE {gameOverResult.score.toLocaleString()}
                     </div>
                   )}
-                  <div className="flex flex-col gap-2 pt-1">
+                  {/* ボタン */}
+                  <div style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 10, width: 180 }}>
                     <button
                       onClick={handleGameOverRetry}
-                      className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold tracking-wide transition-colors"
-                    >
-                      ▶ リトライ
-                    </button>
+                      style={{ padding: '9px 0', background: '#1060d0', color: '#fff', border: '2px solid #4090ff',
+                        fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold', letterSpacing: 2, cursor: 'pointer' }}
+                    >▶ RETRY</button>
                     <button
                       onClick={handleGameOverExit}
-                      className="w-full py-2 rounded-lg bg-gray-700 hover:bg-gray-600 active:bg-gray-800 text-gray-200 text-sm font-bold tracking-wide transition-colors"
-                    >
-                      ✕ 終了
-                    </button>
+                      style={{ padding: '9px 0', background: '#333', color: '#aaa', border: '2px solid #555',
+                        fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold', letterSpacing: 2, cursor: 'pointer' }}
+                    >✕ QUIT</button>
                   </div>
                 </div>
-              </div>
+              )
+              : (
+                /* ── 汎用ゲームオーバー画面 ── */
+                <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-50">
+                  <div className="bg-gray-950 border-2 border-red-600 rounded-2xl px-8 py-7 text-center shadow-2xl min-w-[200px] space-y-4"
+                    style={{ fontFamily: 'monospace' }}>
+                    <p className="text-red-400 text-2xl font-bold tracking-widest">GAME OVER</p>
+                    {gameOverResult.score > 0 && (
+                      <div className="border border-gray-700 rounded-lg px-4 py-2">
+                        <p className="text-gray-400 text-[11px] tracking-widest">SCORE</p>
+                        <p className="text-yellow-300 text-xl font-bold">{gameOverResult.score.toLocaleString()}</p>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button
+                        onClick={handleGameOverRetry}
+                        className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold tracking-wide transition-colors"
+                      >
+                        ▶ リトライ
+                      </button>
+                      <button
+                        onClick={handleGameOverExit}
+                        className="w-full py-2 rounded-lg bg-gray-700 hover:bg-gray-600 active:bg-gray-800 text-gray-200 text-sm font-bold tracking-wide transition-colors"
+                      >
+                        ✕ 終了
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
             )}
 
             {/* ── セリフカットシーン（ゲーム中） ── */}

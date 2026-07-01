@@ -17,7 +17,7 @@ export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'p
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
 export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn';
 export type ObjectKind = 'npc' | 'tile' | 'bullet';
-export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event';
+export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event' | 'platform';
 
 /** グローバルスイッチ定義。id は連番。 */
 export interface SwitchDef { id: number; name: string; }

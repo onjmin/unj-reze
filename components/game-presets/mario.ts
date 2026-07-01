@@ -90,6 +90,7 @@ const tiles: PresetData['tiles'] = {
   13: { name: '土管トップ',       color: '#2aa02a', passable: false, imageRef: smcRef(T.pipeCap),  imageUrl: T.pipeCap,   imageScale2x: true, imageOverflowTop: true },
   14: { name: '使用済みブロック', color: '#6b4a24', passable: false, special: 'used',
         imageRef: smcRef(T.stone), imageUrl: T.stone },  // ハテナを下から叩いた後の空ブロック
+  15: { name: 'すり抜け床',       color: '#ffb366', passable: true,  special: 'oneway' },
 };
 
 // ── シーン1：地上ステージ ────────────────────────────────────────────────────
@@ -108,6 +109,7 @@ const scene1Map = Array.from({ length: ROWS }, (_, y) =>
     if (y === ROWS - 8 && x === 10) return 6;               // 音符ブロック
     if (y === ROWS - 9 && (x >= 5 && x <= 7 || x >= 15 && x <= 17)) return 1;
     if (x === 22 && y === ROWS - 3) return 7;               // チェックポイントフラグ
+    if (y === ROWS - 5 && (x === 26 || x === 27)) return 15; // すり抜け床
     const gap = (x === 13 || x === 14) || (x === 26 || x === 27) || x === 32;
     if (y >= ROWS - 2) return gap ? 0 : 1;
     return 0;
@@ -139,11 +141,11 @@ const scene1: SceneDef = {
     newObject({ emoji: '🐟', col: 12, row: ROWS - 4, behavior: 'patrolV', speed: 1.5, hazard: true,  hp: 1, bullet: 'none',
       name: 'プクプク' }),
     // キノピオ NPC (SMC: Toad_NPCs.png 静止表示)
-    newObject({ emoji: '🍄', col: 3, row: ROWS - 4, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
+    newObject({ emoji: '🍄', col: 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'キノピオだよ！音符ブロックを下から叩くと高くジャンプできるよ！チェックポイントを踏むと途中から再開できるよ！',
       w: 32, h: 64, spriteRef: E.toadRef, spriteUrl: E.toadUrl }),
     // ピーチ姫（ゴール付近 NPC, SMC: Princesses.png 静止表示）
-    newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 4, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
+    newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
       objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！クッパをやっつけて！',
       w: 32, h: 64, spriteRef: E.princessRef, spriteUrl: E.princessUrl }),
     // 土管ワープ→地下
@@ -168,6 +170,8 @@ const scene1: SceneDef = {
     // ファイアフラワー（ファイアマリオ化）
     newObject({ emoji: '🌸', col: 25, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'fireFlower', message: '' }),
+    // 動くリフト (Moving Platform)
+    newObject({ emoji: '🛹', col: 13, row: ROWS - 4, objType: 'platform', name: 'movingPlatform', hazard: false, hp: 1, speed: 1.0, behavior: 'patrolH', bullet: 'none' }),
   ],
 };
 
@@ -239,10 +243,10 @@ const scene3: SceneDef = {
 export const mario: PresetData = {
   id: 'mario', name: 'マリオ', engine: 'action', gravity: 0.5, friction: 0.85,
   player: {
-    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -12, w: 24, h: 64,
+    emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -8.0, w: 24, h: 64,
     start: { x: 50, y: 50 },
-    hearts: 8,
-    spriteRef: 'walk:smc_json:PlayerSprite:2Idle0_3',
+    hearts: 3,
+    spriteRef: 'walk:smc_json:PlayerSprite:1Idle0_3',
     spriteUrl: resolveSMCUrl('images/playersprite-sheet0.png'),
   },
   tiles,
