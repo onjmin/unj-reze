@@ -61,24 +61,24 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
 
   const runSearch = () => { setPage(1); setSubmitted(query.trim()); };
 
-  const toggleSoundPreview = (no: number) => {
+  const toggleSoundPreview = (it: SoundItem) => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    if (previewNo === no) { setPreviewNo(null); return; }
-    const a = new Audio(soundUrl(no));
+    if (previewNo === it.no) { setPreviewNo(null); return; }
+    const a = new Audio(soundUrl(it.id));
     a.volume = 0.7;
-    a.onended = () => setPreviewNo((cur) => (cur === no ? null : cur));
+    a.onended = () => setPreviewNo((cur) => (cur === it.no ? null : cur));
     a.play().catch(() => {});
     audioRef.current = a;
-    setPreviewNo(no);
+    setPreviewNo(it.no);
   };
 
   const pickWalk = (it: SpriteAnimItem) => {
-    const url = sAnimUrl(it.no);
+    const url = sAnimUrl(it.id);
     onPick({ ref: buildWalkRef('auto', { kind: 'url', url }), url, label: `歩行グラ #${it.no}` });
   };
 
   const pickSound = (it: SoundItem) =>
-    onPick({ ref: `direct:${soundUrl(it.no)}`, url: soundUrl(it.no), label: it.title || `SE #${it.no}` });
+    onPick({ ref: `direct:${soundUrl(it.id)}`, url: soundUrl(it.id), label: it.title || `SE #${it.no}` });
 
   const placeholder = kind === 'sound' ? '効果音を検索（例: 攻撃, ジャンプ）' : '歩行グラを検索（例: 主人公, 敵）';
 
@@ -112,7 +112,7 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
               {(items as SoundItem[]).map((it) => (
                 <div key={it.no} className="flex items-center gap-2 p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900">
                   <button
-                    onClick={() => toggleSoundPreview(it.no)}
+                    onClick={() => toggleSoundPreview(it)}
                     className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${previewNo === it.no ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
                     title={previewNo === it.no ? '停止' : '試聴'}
                   >
@@ -137,7 +137,7 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
                   className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
                   title={`#${it.no} ${it.comment || ''}`}
                 >
-                  <WalkSpritePreview url={sAnimUrl(it.no)} size={64} />
+                  <WalkSpritePreview url={sAnimUrl(it.id)} size={64} />
                   <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-1 truncate">
                     {it.comment && it.comment !== 'なし' ? it.comment : `#${it.no}`}
                   </span>

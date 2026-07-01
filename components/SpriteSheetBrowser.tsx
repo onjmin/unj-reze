@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Search, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { searchSpriteSheets, spriteUrl, type SpriteSheetItem } from '@/lib/rpgen-assets';
+import { searchSpriteSheets, spriteUrl, type SpriteSheetItem, type SpriteSheetMember } from '@/lib/rpgen-assets';
 import type { PickResult } from './ContentPicker';
 
 interface SpriteSheetBrowserProps {
@@ -48,8 +48,8 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
 
   const openSheet = (s: SpriteSheetItem) => { setOpen(s); setShown(SPRITES_PER_CHUNK); scrollRef.current?.scrollTo(0, 0); };
 
-  const pick = (no: number, sheetName: string) =>
-    onPick({ ref: `url:${spriteUrl(no)}`, url: spriteUrl(no), label: sheetName ? `${sheetName} #${no}` : `素材 #${no}` });
+  const pick = (m: SpriteSheetMember, sheetName: string) =>
+    onPick({ ref: `url:${spriteUrl(m.id)}`, url: spriteUrl(m.id), label: sheetName ? `${sheetName} #${m.no}` : `素材 #${m.no}` });
 
   // ── 詳細（シート内の素材グリッド） ──
   if (open) {
@@ -67,15 +67,15 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
           </div>
         </div>
         <div className="grid grid-cols-6 gap-1">
-          {visible.map((no, i) => (
+          {visible.map((m, i) => (
             <button
-              key={`${no}-${i}`}
-              onClick={() => pick(no, open.name)}
+              key={`${m.id}-${i}`}
+              onClick={() => pick(m, open.name)}
               className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background relative group"
-              title={`#${no}`}
+              title={`#${m.no}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={spriteUrl(no)} alt="" className="w-full h-full object-contain p-px" style={{ imageRendering: 'pixelated' }} loading="lazy" />
+              <img src={spriteUrl(m.id)} alt="" className="w-full h-full object-contain p-px" style={{ imageRendering: 'pixelated' }} loading="lazy" />
             </button>
           ))}
         </div>
@@ -120,10 +120,10 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
                 className="w-full flex items-center gap-2 p-1.5 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900 text-left"
               >
                 <div className="flex gap-0.5 shrink-0">
-                  {s.sprite_ids.slice(0, 5).map((no, i) => (
-                    <span key={`${no}-${i}`} className="w-7 h-7 rounded-sm bg-[#11131a] gimp-checkered-background overflow-hidden shrink-0">
+                  {s.sprite_ids.slice(0, 5).map((m, i) => (
+                    <span key={`${m.id}-${i}`} className="w-7 h-7 rounded-sm bg-[#11131a] gimp-checkered-background overflow-hidden shrink-0">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spriteUrl(no)} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} loading="lazy" />
+                      <img src={spriteUrl(m.id)} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} loading="lazy" />
                     </span>
                   ))}
                 </div>

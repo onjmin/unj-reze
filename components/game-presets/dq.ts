@@ -1,19 +1,20 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
-import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
+import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-assets';
 import { dqField as vglcDqField } from './vglc-stages';
-const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
-const ir  = (no: number) => `url:${sp(no)}`;
+// id は rpgen-search API の id フィールド（ハッシュ文字列）
+const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
+const ir  = (id: string) => `url:${sp(id)}`;
 
 // ── タイル定義 ─────────────────────────────────────────────────────────────
 const tiles: PresetData['tiles'] = {
-  0: { name: '平地',     color: '#3a9a4a', passable: true,  imageRef: ir(95),  imageUrl: sp(95)  },
-  1: { name: '山/岩',   color: '#6b5a3a', passable: false, imageRef: ir(102), imageUrl: sp(102) },
-  2: { name: '水',       color: '#2a5acb', passable: false, imageRef: ir(14),  imageUrl: sp(14)  },
-  3: { name: '竜王の城', color: '#b0b0c0', passable: true,  special: 'goal',   imageRef: ir(358), imageUrl: sp(358) },
-  4: { name: '森',       color: '#1f5a2a', passable: false, imageRef: ir(377), imageUrl: sp(377) },
-  5: { name: '石床',     color: '#5a5a6a', passable: true,  imageRef: ir(121), imageUrl: sp(121) },
-  6: { name: '壁',       color: '#3a3a4a', passable: false, imageRef: ir(371), imageUrl: sp(371) },
-  7: { name: '扉',       color: '#c0802a', passable: true,  imageRef: ir(151), imageUrl: sp(151) },
+  0: { name: '平地',     color: '#3a9a4a', passable: true,  imageRef: ir('seHP8GT'), imageUrl: sp('seHP8GT') },
+  1: { name: '山/岩',   color: '#6b5a3a', passable: false, imageRef: ir('7COldwt'), imageUrl: sp('7COldwt') },
+  2: { name: '水',       color: '#2a5acb', passable: false, imageRef: ir('4vGDOZE'), imageUrl: sp('4vGDOZE') },
+  3: { name: '竜王の城', color: '#b0b0c0', passable: true,  special: 'goal',         imageRef: ir('h9WtBWs'), imageUrl: sp('h9WtBWs') },
+  4: { name: '森',       color: '#1f5a2a', passable: false, imageRef: ir('IoHgv20'), imageUrl: sp('IoHgv20') },
+  5: { name: '石床',     color: '#5a5a6a', passable: true,  imageRef: ir('sTJ89N'),  imageUrl: sp('sTJ89N')  },
+  6: { name: '壁',       color: '#3a3a4a', passable: false, imageRef: ir('vcyXmCw'), imageUrl: sp('vcyXmCw') },
+  7: { name: '扉',       color: '#c0802a', passable: true,  imageRef: ir('p6oDkn7'), imageUrl: sp('p6oDkn7') },
 };
 
 // ── シーン1：フィールド (scripts/import-vglc.mjs 生成 DQ風マップ 30×24) ─────
@@ -37,30 +38,30 @@ const scene1: SceneDef = {
   objects: [
     // NPC
     newObject({ emoji: '👴', col: 6, row: 21, behavior: 'still', hazard: false, message: 'よくきたな勇者よ！竜王の城は北にある。魔物に気をつけて進むのだ！',
-      spriteRef: wr(30), spriteUrl: sa(30) }),
+      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh') }),
     newObject({ emoji: '👩', col: 5, row: 20, behavior: 'still', hazard: false, message: 'フィールドを歩くと魔物がおそってくるわ。やくそうを買って備えておくのよ！',
-      spriteRef: wr(25), spriteUrl: sa(25) }),
+      spriteRef: wr('okIlh5'), spriteUrl: sa('okIlh5') }),
     // シンボルエンカウント敵（フィールドに出現）
     newObject({ emoji: '🟦', name: 'スライム', col: 5, row: 16, hp: 8, atk: 7, def: 3, exp: 4,
-      spriteRef: wr(556), spriteUrl: sa(556) }),
+      spriteRef: wr('k3vKh6'), spriteUrl: sa('k3vKh6') }),
     newObject({ emoji: '🟦', name: 'スライム', col: 11, row: 17, hp: 8, atk: 7, def: 3, exp: 4,
-      spriteRef: wr(556), spriteUrl: sa(556) }),
+      spriteRef: wr('k3vKh6'), spriteUrl: sa('k3vKh6') }),
     newObject({ emoji: '🟥', name: 'スライムベス', col: 10, row: 14, hp: 11, atk: 9, def: 4, exp: 6,
-      spriteRef: wr(662), spriteUrl: sa(662) }),
+      spriteRef: wr('hswBaA'), spriteUrl: sa('hswBaA') }),
     newObject({ emoji: '🦇', name: 'ドラキー', col: 11, row: 6, hp: 14, atk: 11, def: 6, exp: 9,
-      spriteRef: wr(233), spriteUrl: sa(233) }),
+      spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
     newObject({ emoji: '🦇', name: 'ドラキー', col: 21, row: 7, hp: 14, atk: 11, def: 6, exp: 9,
-      spriteRef: wr(233), spriteUrl: sa(233) }),
+      spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
     newObject({ emoji: '👁️', name: 'メーダ', col: 13, row: 11, hp: 24, atk: 18, def: 10, exp: 18, moves: [{ name: 'メラ', power: 14 }],
-      spriteRef: wr(50), spriteUrl: sa(50) }),
+      spriteRef: wr('oE4l1x'), spriteUrl: sa('oE4l1x') }),
     newObject({ emoji: '💀', name: 'がいこつ', col: 4, row: 13, hp: 30, atk: 22, def: 14, exp: 26,
-      spriteRef: wr(234), spriteUrl: sa(234) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     newObject({ emoji: '🧙', name: 'まどうし', col: 9, row: 8, hp: 28, atk: 18, def: 12, exp: 30, moves: [{ name: 'ギラ', power: 16 }, { name: 'ホイミ', power: 20, heal: true }],
-      spriteRef: wr(102), spriteUrl: sa(102) }),
+      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
     // りゅうおう（ゴールボスは battle.boss で定義のため、ここは飾り）
     newObject({ emoji: '🐉', name: 'りゅうおう', col: 15, row: 3, behavior: 'still', hazard: true, isBoss: true,
       hp: 90, atk: 40, def: 24, exp: 200, moves: [{ name: 'はげしいほのお', power: 30 }, { name: 'ベホイミ', power: 28, heal: true }],
-      spriteRef: wr(309), spriteUrl: sa(309) }),
+      spriteRef: wr('Ilpvcu'), spriteUrl: sa('Ilpvcu') }),
     // 扉ワープ
     newObject({ emoji: '🚪', col: 5, row: 22, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'village', warpEntryCol: 5, warpEntryRow: ROWS - 3 }),
@@ -69,7 +70,7 @@ const scene1: SceneDef = {
     // アイテムドロップ（フィールド上宝箱）
     newObject({ emoji: '👑', col: 18, row: 10, behavior: 'still', hazard: false,
       objType: 'item', itemId: 'wingBoots', message: '宝箱を開けた！「キメラのつばさ」を手に入れた！',
-      spriteRef: wr(208), spriteUrl: sa(208) }),
+      spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL') }),
   ],
 };
 
@@ -90,7 +91,7 @@ const scene2: SceneDef = {
     // 宿屋（HP/MP全回復）
     newObject({
       emoji: '🏥', col: 3, row: 3, behavior: 'still', hazard: false,
-      spriteRef: wr(193), spriteUrl: sa(193),
+      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh'),
       pages: [{
         conditions: {},
         commands: [
@@ -117,7 +118,7 @@ const scene2: SceneDef = {
     // 道具屋（やくそう・どくけしそう・たいまつ販売）
     newObject({
       emoji: '⚔️', col: 14, row: 5, behavior: 'still', hazard: false,
-      spriteRef: wr(207), spriteUrl: sa(207),
+      spriteRef: wr('P2dNvQ'), spriteUrl: sa('P2dNvQ'),
       shopItems: [
         { itemId: 'herb',      price: 8  },
         { itemId: 'antidote',  price: 10 },
@@ -135,7 +136,7 @@ const scene2: SceneDef = {
     // 武器防具屋
     newObject({
       emoji: '🗡️', col: 8, row: 3, behavior: 'still', hazard: false,
-      spriteRef: wr(64), spriteUrl: sa(64),
+      spriteRef: wr('YjGEny'), spriteUrl: sa('YjGEny'),
       shopItems: [
         { itemId: 'copperSword',  price: 180 },
         { itemId: 'ironSword',    price: 500 },
@@ -154,10 +155,10 @@ const scene2: SceneDef = {
     // 一般 NPC
     newObject({ emoji: '🧙‍♂️', col: 8, row: 5, behavior: 'still', hazard: false,
       message: '竜王は強い！まずレベルを上げろ！やくそうをたくさん持って行くのじゃ。',
-      spriteRef: wr(64), spriteUrl: sa(64) }),
+      spriteRef: wr('xP8oPz'), spriteUrl: sa('xP8oPz') }),
     newObject({ emoji: '👧', col: 6, row: 8, behavior: 'still', hazard: false,
       message: '洞窟の中には強い魔物がいるよ。でもすごいお宝もあるって！たいまつを持って行ってね。',
-      spriteRef: wr(130), spriteUrl: sa(130) }),
+      spriteRef: wr('mLHxrK'), spriteUrl: sa('mLHxrK') }),
     // 村出口
     newObject({ emoji: '🚪', col: COLS / 2, row: ROWS - 2, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'field', warpEntryCol: 6, warpEntryRow: 22 }),
@@ -190,21 +191,21 @@ const scene3: SceneDef = {
   bgm: { ref: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', src: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', type: 'youtube' },
   objects: [
     newObject({ emoji: '💀', name: 'がいこつ', col: 5, row: 4, behavior: 'patrolH', hp: 30, atk: 22, def: 14, exp: 26, hazard: true,
-      spriteRef: wr(234), spriteUrl: sa(234) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     newObject({ emoji: '🧙', name: 'まどうし', col: 15, row: 4, behavior: 'chase', hp: 28, atk: 18, def: 12, exp: 30, hazard: true,
       moves: [{ name: 'ギラ', power: 16 }, { name: 'ホイミ', power: 20, heal: true }],
-      spriteRef: wr(102), spriteUrl: sa(102) }),
+      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
     newObject({ emoji: '👁️', name: 'メーダ', col: 9, row: 8, behavior: 'patrolV', hp: 24, atk: 18, def: 10, exp: 18, hazard: true,
       moves: [{ name: 'メラ', power: 14 }],
-      spriteRef: wr(50), spriteUrl: sa(50) }),
+      spriteRef: wr('oE4l1x'), spriteUrl: sa('oE4l1x') }),
     // 宝箱（条件なし）
     newObject({ emoji: '👑', col: COLS - 3, row: ROWS - 4, behavior: 'still', hazard: false,
       objType: 'item', itemId: 'ironSword', message: '宝箱を開けた！「てつのつるぎ」を手に入れた！',
-      spriteRef: wr(208), spriteUrl: sa(208) }),
+      spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL') }),
     // スイッチで開く扉の奥の宝箱（イベントページ利用）
     newObject({
       emoji: '🔒', col: COLS - 5, row: ROWS - 4, behavior: 'still', hazard: false,
-      spriteRef: wr(208), spriteUrl: sa(208),
+      spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL'),
       pages: [
         {
           conditions: { switchId: 1, switchValue: true },
@@ -245,7 +246,7 @@ export const dq: PresetData = {
   player: {
     emoji: '🧝', color: '#4444ff', speed: 3, jumpPower: 0, w: 24, h: 24,
     start: { x: TILE_SIZE * 6, y: TILE_SIZE * 21 },
-    spriteRef: wr(2), spriteUrl: sa(2),
+    spriteRef: wr('0yyTSP'), spriteUrl: sa('0yyTSP'),
   },
   tiles,
   map: JSON.parse(JSON.stringify(fieldMap)),
@@ -330,10 +331,10 @@ export const dq: PresetData = {
   battleBgm: { ref: 'https://www.youtube.com/watch?v=Str7rMSDhcI', src: 'https://www.youtube.com/watch?v=Str7rMSDhcI', type: 'youtube' },
   bossBgm:   { ref: 'https://www.youtube.com/watch?v=9QzO_4pMZPY', src: 'https://www.youtube.com/watch?v=9QzO_4pMZPY', type: 'youtube' },
   sfx: {
-    levelup:  { ref: 'direct:https://rpgen.org/dq/sound/res/222.mp3', src: 'https://rpgen.org/dq/sound/res/222.mp3', type: 'direct' as const },
-    purchase: { ref: 'direct:https://rpgen.org/dq/sound/res/1848.mp3', src: 'https://rpgen.org/dq/sound/res/1848.mp3', type: 'direct' as const },
-    inn:      { ref: 'direct:https://rpgen.org/dq/sound/res/3.mp3', src: 'https://rpgen.org/dq/sound/res/3.mp3', type: 'direct' as const },
-    damage:   { ref: 'direct:https://rpgen.org/dq/sound/res/1845.mp3', src: 'https://rpgen.org/dq/sound/res/1845.mp3', type: 'direct' as const },
+    levelup:  { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
+    purchase: { ref: `direct:${su('PEeN5M')}`, src: su('PEeN5M'), type: 'direct' as const },
+    inn:      { ref: `direct:${su('L5Npni')}`, src: su('L5Npni'), type: 'direct' as const },
+    damage:   { ref: `direct:${su('HlYVmj')}`, src: su('HlYVmj'), type: 'direct' as const },
     clear:    { ref: 'clear' },
   },
 };

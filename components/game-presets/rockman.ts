@@ -1,15 +1,16 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
 import { mmScene1, mmScene2 } from './vglc-stages';
-const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
-const ir  = (no: number) => `url:${sp(no)}`;
+// id は rpgen-search API の id フィールド（ハッシュ文字列）
+const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
+const ir  = (id: string) => `url:${sp(id)}`;
 
 const tiles: PresetData['tiles'] = {
-  0: { name: '空',             color: '#0d1826', passable: true,  imageRef: ir(626), imageUrl: sp(626) },
-  1: { name: '鉄床',           color: '#3a4a5c', passable: false, imageRef: ir(831), imageUrl: sp(831) },
-  2: { name: 'トゲ',           color: '#c03030', passable: true,  special: 'trap',         imageRef: ir(349), imageUrl: sp(349) },
-  3: { name: 'ゴール扉',       color: '#28c090', passable: true,  special: 'goal',         imageRef: ir(17),  imageUrl: sp(17)  },
-  4: { name: '壁',             color: '#202a38', passable: false, imageRef: ir(628), imageUrl: sp(628) },
+  0: { name: '空',             color: '#0d1826', passable: true,  imageRef: ir('X1lgbYC'), imageUrl: sp('X1lgbYC') },
+  1: { name: '鉄床',           color: '#3a4a5c', passable: false, imageRef: ir('hpicBeb'), imageUrl: sp('hpicBeb') },
+  2: { name: 'トゲ',           color: '#c03030', passable: true,  special: 'trap',         imageRef: ir('wGAsfp2'), imageUrl: sp('wGAsfp2') },
+  3: { name: 'ゴール扉',       color: '#28c090', passable: true,  special: 'goal',         imageRef: ir('7S58d26'), imageUrl: sp('7S58d26') },
+  4: { name: '壁',             color: '#202a38', passable: false, imageRef: ir('vcyXmCw'), imageUrl: sp('vcyXmCw') },
   5: { name: 'はしご',         color: '#c08030', passable: true,  special: 'ladder'        },   // 上下移動可能
   6: { name: 'チェックポイント', color: '#ff8800', passable: true, special: 'checkpoint'   },   // 死亡後の復帰地点
   7: { name: '消えるブロック', color: '#8080ff', passable: false, special: 'disappearing'  },   // 踏むと数秒後に消える
@@ -26,19 +27,19 @@ const scene1: SceneDef = {
   exits: { right: 'shaft' },
   objects: [
     newObject({ emoji: '🪖', col: 4,  row: ROWS - 3, behavior: 'walker', speed: 1.5, hazard: true, hp: 1, bullet: 'none', atk: 2,
-      spriteRef: wr(987), spriteUrl: sa(987) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     newObject({ emoji: '🪖', col: 12, row: ROWS - 3, behavior: 'walker', speed: 1.6, hazard: true, hp: 1, bullet: 'none', atk: 2,
-      spriteRef: wr(987), spriteUrl: sa(987) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     // スナイパージョー（シールド持ち。射撃中のみ被弾）
     newObject({ emoji: '🛡️', col: 16, row: ROWS - 3, behavior: 'still', speed: 0, hazard: true, hp: 3, atk: 4,
       bullet: 'aimed', fireRate: 90, bulletSpeed: 3, bulletColor: '#ffaa00',
       name: 'スナイパージョー' }),
     newObject({ emoji: '🔫', col: 8,  row: ROWS - 9, behavior: 'still', hazard: true, hp: 2, atk: 4,
       bullet: 'aimed', fireRate: 80, bulletSpeed: 3.5, bulletColor: '#ff6644',
-      spriteRef: wr(995), spriteUrl: sa(995) }),
+      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
     newObject({ emoji: '👾', col: 16, row: ROWS - 6, behavior: 'walker', speed: 1.8, hazard: true, hp: 2, atk: 2,
       bullet: 'spread', fireRate: 110, bulletColor: '#ff9900', bulletSpeed: 3,
-      spriteRef: wr(992), spriteUrl: sa(992) }),
+      spriteRef: wr('oE4l1x'), spriteUrl: sa('oE4l1x') }),
     // エネルギーカプセル（アイテム）
     newObject({ emoji: '💊', col: 3, row: ROWS - 6, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'energyCapsule', message: '' }),
@@ -58,17 +59,17 @@ const scene2: SceneDef = {
   objects: [
     newObject({ emoji: '🔫', col: 3, row: 7, behavior: 'still', hazard: true, hp: 2, atk: 3,
       bullet: 'aimed', fireRate: 95, bulletSpeed: 2.5, bulletColor: '#ff6644',
-      spriteRef: wr(995), spriteUrl: sa(995) }),
+      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
     // スナイパーアーマー（装甲型スナイパージョー）
     newObject({ emoji: '🤖', col: 4, row: ROWS - 3, behavior: 'walker', speed: 0.8, hazard: true, hp: 6, atk: 5,
       bullet: 'aimed', fireRate: 70, bulletSpeed: 3, bulletColor: '#ffcc00',
       name: 'スナイパーアーマー' }),
     newObject({ emoji: '🕷️', col: 8, row: 9, behavior: 'still', hazard: true, hp: 1, atk: 3,
       bullet: 'aimed', fireRate: 100, bulletSpeed: 2.5, bulletColor: '#ff9900',
-      spriteRef: wr(1020), spriteUrl: sa(1020) }),
+      spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
     newObject({ emoji: '🕷️', col: 9, row: 12, behavior: 'still', hazard: true, hp: 1, atk: 3,
       bullet: 'aimed', fireRate: 90, bulletSpeed: 2.5, bulletColor: '#ff9900',
-      spriteRef: wr(1020), spriteUrl: sa(1020) }),
+      spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
     // 武器タンク
     newObject({ emoji: '🔵', col: 2, row: 4, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'weaponTank', message: '' }),
@@ -96,13 +97,13 @@ const scene3: SceneDef = {
   map: scene3Map,
   objects: [
     newObject({ emoji: '🪖', col: 4,  row: ROWS - 3, behavior: 'walker', speed: 1.7, hazard: true, hp: 1, bullet: 'none', atk: 2,
-      spriteRef: wr(987), spriteUrl: sa(987) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     newObject({ emoji: '👾', col: 11, row: ROWS - 3, behavior: 'walker', speed: 1.9, hazard: true, hp: 2, atk: 2,
       bullet: 'spread', fireRate: 100, bulletColor: '#ff9900', bulletSpeed: 3,
-      spriteRef: wr(992), spriteUrl: sa(992) }),
+      spriteRef: wr('oE4l1x'), spriteUrl: sa('oE4l1x') }),
     newObject({ emoji: '🔫', col: 16, row: ROWS - 9, behavior: 'still', hazard: true, hp: 2, atk: 4,
       bullet: 'aimed', fireRate: 75, bulletSpeed: 3.2, bulletColor: '#ff6644',
-      spriteRef: wr(995), spriteUrl: sa(995) }),
+      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
     // 残機UP（ボス部屋前）
     newObject({ emoji: '💙', col: 1, row: ROWS - 3, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'extraLife', message: '' }),
@@ -112,7 +113,7 @@ const scene3: SceneDef = {
       behavior: 'walker', speed: 1.5, hazard: true,
       hp: 28, atk: 8, bullet: 'spread', fireRate: 55, bulletSpeed: 3.5, bulletColor: '#ff2222',
       isBoss: true, name: 'カットマン',
-      spriteRef: wr(2114), spriteUrl: sa(2114),
+      spriteRef: wr('zA2cuG'), spriteUrl: sa('zA2cuG'),
       outroDialogue: [
         { speaker: 'カットマン', emoji: '✂️', text: 'ぐおっ……やられた……！' },
         { speaker: 'ロック',     emoji: '🤖', text: 'ワイリー博士のもとへはいかせない！' },
@@ -131,7 +132,7 @@ export const rockman: PresetData = {
     emoji: '🤖', color: '#1e90ff', speed: 3.5, jumpPower: -11, w: 22, h: 24,
     start: { x: TILE_SIZE * 1, y: TILE_SIZE * (ROWS - 4) },
     hearts: 28,
-    spriteRef: wr(997), spriteUrl: sa(997),
+    spriteRef: wr('PFBNfk'), spriteUrl: sa('PFBNfk'),
   },
   tiles,
   map: JSON.parse(JSON.stringify(scene1Map)),

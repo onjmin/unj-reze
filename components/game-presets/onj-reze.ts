@@ -1,20 +1,21 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
-const wr  = (no: number) => `walk:auto:u:${sa(no)}`;
-const ir  = (no: number) => `url:${sp(no)}`;
+// id は rpgen-search API の id フィールド（ハッシュ文字列）
+const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
+const ir  = (id: string) => `url:${sp(id)}`;
 
 // ── タイル定義 ─────────────────────────────────────────────────────────────
 const GRASS = 0, WALL = 1, WATER = 2, FLOOR = 3, BWALL = 4, DOOR = 5, FOREST = 6, PATH = 7;
 
 const tiles: PresetData['tiles'] = {
-  [GRASS]:  { name: '草地',   color: '#3a9a4a', passable: true,  imageRef: ir(95),  imageUrl: sp(95)  },
-  [WALL]:   { name: '岩山',   color: '#6b5a3a', passable: false, imageRef: ir(102), imageUrl: sp(102) },
-  [WATER]:  { name: '川',     color: '#2a5acb', passable: false, imageRef: ir(14),  imageUrl: sp(14)  },
-  [FLOOR]:  { name: '石床',   color: '#5a5a6a', passable: true,  imageRef: ir(121), imageUrl: sp(121) },
-  [BWALL]:  { name: '建物壁', color: '#3a3a4a', passable: false, imageRef: ir(371), imageUrl: sp(371) },
-  [DOOR]:   { name: '扉',     color: '#c0802a', passable: true,  imageRef: ir(151), imageUrl: sp(151) },
-  [FOREST]: { name: '森',     color: '#1f5a2a', passable: false, imageRef: ir(377), imageUrl: sp(377) },
-  [PATH]:   { name: '道',     color: '#9a8a6a', passable: true,  imageRef: ir(126), imageUrl: sp(126) },
+  [GRASS]:  { name: '草地',   color: '#3a9a4a', passable: true,  imageRef: ir('seHP8GT'), imageUrl: sp('seHP8GT') },
+  [WALL]:   { name: '岩山',   color: '#6b5a3a', passable: false, imageRef: ir('7COldwt'), imageUrl: sp('7COldwt') },
+  [WATER]:  { name: '川',     color: '#2a5acb', passable: false, imageRef: ir('4vGDOZE'), imageUrl: sp('4vGDOZE') },
+  [FLOOR]:  { name: '石床',   color: '#5a5a6a', passable: true,  imageRef: ir('sTJ89N'),  imageUrl: sp('sTJ89N')  },
+  [BWALL]:  { name: '建物壁', color: '#3a3a4a', passable: false, imageRef: ir('vcyXmCw'), imageUrl: sp('vcyXmCw') },
+  [DOOR]:   { name: '扉',     color: '#c0802a', passable: true,  imageRef: ir('p6oDkn7'), imageUrl: sp('p6oDkn7') },
+  [FOREST]: { name: '森',     color: '#1f5a2a', passable: false, imageRef: ir('IoHgv20'), imageUrl: sp('IoHgv20') },
+  [PATH]:   { name: '道',     color: '#9a8a6a', passable: true,  imageRef: ir('lP5YiFj'), imageUrl: sp('lP5YiFj') },
 };
 
 // ── シーン1：レゼの街 ──────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ const scene1: SceneDef = {
     // ── 宿屋 ──
     newObject({
       emoji: '🏥', col: 2, row: 3, behavior: 'still', hazard: false,
-      spriteRef: wr(193), spriteUrl: sa(193),
+      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh'),
       pages: [{
         conditions: {},
         commands: [
@@ -72,7 +73,7 @@ const scene1: SceneDef = {
     // ── 道具屋 ──
     newObject({
       emoji: '🛒', col: 16, row: 3, behavior: 'still', hazard: false,
-      spriteRef: wr(64), spriteUrl: sa(64),
+      spriteRef: wr('P2dNvQ'), spriteUrl: sa('P2dNvQ'),
       shopItems: [
         { itemId: 'herb',      price: 8  },
         { itemId: 'antidote',  price: 10 },
@@ -89,19 +90,19 @@ const scene1: SceneDef = {
     // ── NPC ──
     newObject({ emoji: '👨', col: 8, row: 6, behavior: 'still', hazard: false,
       message: 'ここはレゼが守る街や。南の門の外はフィールドで、デビルの手下がうろついとるで。気をつけてな。',
-      spriteRef: wr(30), spriteUrl: sa(30) }),
+      spriteRef: wr('xP8oPz'), spriteUrl: sa('xP8oPz') }),
     newObject({ emoji: '👩', col: 13, row: 8, behavior: 'still', hazard: false,
       message: 'レゼちゃんって爆弾少女やんな……ボムのチカラで魔物を倒してくるんや！\nやくそうは多めに持って行きや！',
-      spriteRef: wr(25), spriteUrl: sa(25) }),
+      spriteRef: wr('okIlh5'), spriteUrl: sa('okIlh5') }),
     newObject({ emoji: '🧑', col: 5, row: 11, behavior: 'still', hazard: false,
       message: 'ワイはおんJのスレ民や。このスレの住民みんなでデビルと戦っとるで！\nまずは草原のザコから慣れてみ。北の森には強い魔物おるで。',
-      spriteRef: wr(2), spriteUrl: sa(2) }),
+      spriteRef: wr('mLHxrK'), spriteUrl: sa('mLHxrK') }),
     newObject({ emoji: '👴', col: 16, row: 11, behavior: 'still', hazard: false,
       message: 'フィールドの奥には強いデビルがおるぞ。レベルを上げてから挑むんじゃ。\nボムのわざを覚えたら一気に楽になる。',
-      spriteRef: wr(30), spriteUrl: sa(30) }),
+      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh') }),
     newObject({ emoji: '👧', col: 10, row: 12, behavior: 'still', hazard: false,
       message: 'フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\nせいすいを持ってくと魔物を一時的に遠ざけられるで！',
-      spriteRef: wr(130), spriteUrl: sa(130) }),
+      spriteRef: wr('TO81en'), spriteUrl: sa('TO81en') }),
     // ── 街の出口ワープ ──
     newObject({ emoji: '🚪', col: 9,  row: ROWS - 2, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'field', warpEntryCol: 14, warpEntryRow: 3 }),
@@ -158,31 +159,31 @@ const scene2: SceneDef = {
       warpSceneId: 'town', warpEntryCol: 10, warpEntryRow: ROWS - 3 }),
     // ── シンボルエンカウント敵 ──
     newObject({ emoji: '🧟', name: 'ゾンビ',     col: 8,  row: 7,  behavior: 'patrolH', speed: 0.8, hp: 10, atk: 8,  def: 3,  exp: 5,  hazard: true,
-      spriteRef: wr(234), spriteUrl: sa(234) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     newObject({ emoji: '🧎', name: 'カルト信者', col: 16, row: 6,  behavior: 'random',  speed: 1.0, hp: 14, atk: 11, def: 4,  exp: 8,  hazard: true,
-      spriteRef: wr(102), spriteUrl: sa(102) }),
+      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
     newObject({ emoji: '😈', name: 'デビル兵',   col: 20, row: 10, behavior: 'chase',   speed: 1.2, hp: 20, atk: 14, def: 7,  exp: 14, hazard: true,
       moves: [{ name: 'つかみかかる', power: 12 }],
-      spriteRef: wr(478), spriteUrl: sa(478) }),
+      spriteRef: wr('zA2cuG'), spriteUrl: sa('zA2cuG') }),
     newObject({ emoji: '🦇', name: 'コウモリデビル', col: 24, row: 9,  behavior: 'random',  speed: 1.3, hp: 18, atk: 13, def: 6,  exp: 18, hazard: true,
       moves: [{ name: '毒爪', power: 10 }],
-      spriteRef: wr(233), spriteUrl: sa(233) }),
+      spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
     newObject({ emoji: '💀', name: '魔人の手下', col: 11, row: 16, behavior: 'patrolV', speed: 1.1, hp: 30, atk: 20, def: 12, exp: 25, hazard: true,
-      spriteRef: wr(234), spriteUrl: sa(234) }),
+      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
     newObject({ emoji: '👿', name: '上位デビル',  col: 22, row: 13, behavior: 'chase',   speed: 1.4, hp: 40, atk: 26, def: 16, exp: 40, hazard: true,
       moves: [{ name: '魔力砲', power: 20 }, { name: '自己修復', power: 16, heal: true }],
-      spriteRef: wr(812), spriteUrl: sa(812) }),
+      spriteRef: wr('Ilpvcu'), spriteUrl: sa('Ilpvcu') }),
     // ── フィールド NPC ──
     newObject({ emoji: '🧑', col: 17, row: 5, behavior: 'still', hazard: false,
       message: '道の先に強い魔人がいるって噂や。Lv5 以上になってから挑んだ方がええで。',
-      spriteRef: wr(2), spriteUrl: sa(2) }),
+      spriteRef: wr('mLHxrK'), spriteUrl: sa('mLHxrK') }),
     // ── 宝箱 ──
     newObject({ emoji: '👑', col: 26, row: 11, behavior: 'still', hazard: false,
       objType: 'item', itemId: 'herb', message: '宝箱を開けた！「やくそう」を手に入れた！',
-      spriteRef: wr(208), spriteUrl: sa(208) }),
+      spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL') }),
     newObject({ emoji: '🎁', col: 7, row: 19, behavior: 'still', hazard: false,
       objType: 'item', itemId: 'holyWater', message: '草むらの中に「せいすい」が落ちていた！',
-      spriteRef: wr(208), spriteUrl: sa(208) }),
+      spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL') }),
   ],
 };
 
@@ -192,7 +193,7 @@ export const onjReze: PresetData = {
   player: {
     emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: 24, h: 24,
     start: { x: TILE_SIZE * 10, y: TILE_SIZE * 10 },
-    spriteRef: wr(130), spriteUrl: sa(130),
+    spriteRef: wr('TO81en'), spriteUrl: sa('TO81en'),
   },
   tiles,
   map: townMap,

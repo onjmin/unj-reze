@@ -67,11 +67,9 @@ const E = {
   princessUrl: resolveSMCUrl('images/npc-sheet0.png'),
 };
 
-// プレイヤー (マリオ): SMC に基本歩行スプライトなし → RPGen #90 を維持
-const wr = (no: number) => `walk:auto:u:${sa(no)}`;
-// 地下ネズミ: SMC に対応スプライトなし → RPGen #93 を維持
-const sa93 = sa(93);
-const wr93 = wr(93);
+// 地下ネズミ: SMC に対応スプライトなし → RPGen を使用（id は rpgen-search API の id）
+const sa93 = sa('UWDL7g');
+const wr93 = `walk:auto:u:${sa('UWDL7g')}`;
 
 // ── タイル定義 ─────────────────────────────────────────────────────────────
 const tiles: PresetData['tiles'] = {

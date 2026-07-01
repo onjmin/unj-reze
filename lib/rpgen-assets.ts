@@ -10,15 +10,19 @@ const CDN = 'https://rpgen-search.pages.dev';
 
 // ───────────────── アセット実体URL ─────────────────
 // rpgen-search.pages.dev はCORSヘッダーを返すため直リンクで安全に扱える。
+//
+// 重要: 実体ファイル名は API の `id`（image_path のハッシュ、例 'YUmdEb'）で決まる。
+// 旧来の `${no}.png` 方式は廃止され、no とファイル名は完全に分離した
+// （`/sprites/999.png` は無関係な古い画像を返す）。必ず検索結果の `id` を渡すこと。
 
-/** 単体スプライト（16x16 ドット絵）。`no` は /api/sprites の no。 */
-export const spriteUrl = (no: number) => `${CDN}/data/images/sprites/${no}.png`;
+/** 単体スプライト（16x16 ドット絵）。`id` は /api/sprites の id。 */
+export const spriteUrl = (id: string) => `${CDN}/data/images/sprites/${id}.png`;
 
-/** スプライトアニメ/歩行シート（例 32x64 = 2フレーム×4方向）。`no` は /api/sprite-anims の no。 */
-export const sAnimUrl = (no: number) => `${CDN}/data/images/sAnims/${no}.png`;
+/** スプライトアニメ/歩行シート（例 32x64 = 2フレーム×4方向）。`id` は /api/sprite-anims の id。 */
+export const sAnimUrl = (id: string) => `${CDN}/data/images/sAnims/${id}.png`;
 
-/** 効果音/BGM（mp3）。`no` は /api/sounds の no。 */
-export const soundUrl = (no: number) => `${CDN}/data/audio/sound/${no}.mp3`;
+/** 効果音/BGM（mp3）。`id` は /api/sounds の id。 */
+export const soundUrl = (id: string) => `${CDN}/data/audio/sound/${id}.mp3`;
 
 // ───────────────── 型 ─────────────────
 
@@ -35,9 +39,10 @@ export interface RpgenList<T> {
 
 export interface SpriteItem {
   no: number;
+  id: string;
   name: string;
   comment: string;
-  image_path: string;
+  image_path?: string;
   author_site?: string;
   rgb_r_median?: number;
   rgb_g_median?: number;
@@ -46,9 +51,10 @@ export interface SpriteItem {
 
 export interface SpriteAnimItem {
   no: number;
+  id: string;
   name: string;
   comment: string;
-  image_path: string;
+  image_path?: string;
   author_site?: string;
   rgb_r_median?: number;
   rgb_g_median?: number;
@@ -57,6 +63,7 @@ export interface SpriteAnimItem {
 
 export interface SoundItem {
   no: number;
+  id: string;
   title: string;
   comment: string;
   category1: number;
@@ -64,13 +71,17 @@ export interface SoundItem {
   file_size: number;
 }
 
-// 人間がまとめたスプライトのコレクション（カテゴリ）。sprite_ids がメンバーのスプライト番号。
+/** スプライトシートのメンバー（no は表示用の通番、id が実体ファイル名）。 */
+export interface SpriteSheetMember { no: number; id: string; }
+
+// 人間がまとめたスプライトのコレクション（カテゴリ）。sprite_ids がメンバー。
 export interface SpriteSheetItem {
   no: number;
+  id: string;
   name: string;
   comment: string;
   author_site?: string;
-  sprite_ids: number[];
+  sprite_ids: SpriteSheetMember[];
 }
 
 export interface SearchParams {
