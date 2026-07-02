@@ -1,9 +1,9 @@
 1:"$Sreact.fragment"
 2:I[32850,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js"],"ClientPageRoot"]
-3:I[31713,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js","/unj-reze/_next/static/chunks/0r3_gh1vmh7_a.js","/unj-reze/_next/static/chunks/3qtmg4tj_-6ig.js","/unj-reze/_next/static/chunks/02cabbo5dbpsp.js"],"default"]
+3:I[31713,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js","/unj-reze/_next/static/chunks/0r3_gh1vmh7_a.js","/unj-reze/_next/static/chunks/0i8inoyklpihr.js","/unj-reze/_next/static/chunks/02cabbo5dbpsp.js"],"default"]
 6:I[62991,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js"],"OutletBoundary"]
 7:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],[["$","script","script-0",{"src":"/unj-reze/_next/static/chunks/0r3_gh1vmh7_a.js","async":true}],["$","script","script-1",{"src":"/unj-reze/_next/static/chunks/3qtmg4tj_-6ig.js","async":true}],["$","script","script-2",{"src":"/unj-reze/_next/static/chunks/02cabbo5dbpsp.js","async":true}]],["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"uo1B6c6ZITC8vUoRJmA-p"}
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@4","$@5"]}}],[["$","script","script-0",{"src":"/unj-reze/_next/static/chunks/0r3_gh1vmh7_a.js","async":true}],["$","script","script-1",{"src":"/unj-reze/_next/static/chunks/0i8inoyklpihr.js","async":true}],["$","script","script-2",{"src":"/unj-reze/_next/static/chunks/02cabbo5dbpsp.js","async":true}]],["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"3jag79iuvgfJdfh5oPTwR"}
 4:{}
 5:"$0:rsc:props:children:0:props:serverProvidedParams:params"
 8:null
