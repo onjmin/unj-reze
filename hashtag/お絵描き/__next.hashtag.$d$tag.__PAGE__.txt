@@ -1,6 +1,6 @@
 1:"$Sreact.fragment"
-2:I[54903,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js","/unj-reze/_next/static/chunks/3qnir5dgqiclv.js","/unj-reze/_next/static/chunks/3kp00dxbhmlym.js"],"default"]
+2:I[54903,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js","/unj-reze/_next/static/chunks/0o9h2qy-w0li_.js","/unj-reze/_next/static/chunks/3kp00dxbhmlym.js"],"default"]
 3:I[62991,["/unj-reze/_next/static/chunks/10-rib3n8czvm.js","/unj-reze/_next/static/chunks/1124ddmj5g_p8.js"],"OutletBoundary"]
 4:"$Sreact.suspense"
-0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"tag":"お絵描き"}],[["$","script","script-0",{"src":"/unj-reze/_next/static/chunks/3qnir5dgqiclv.js","async":true}],["$","script","script-1",{"src":"/unj-reze/_next/static/chunks/3kp00dxbhmlym.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"3jag79iuvgfJdfh5oPTwR"}
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"tag":"お絵描き"}],[["$","script","script-0",{"src":"/unj-reze/_next/static/chunks/0o9h2qy-w0li_.js","async":true}],["$","script","script-1",{"src":"/unj-reze/_next/static/chunks/3kp00dxbhmlym.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"_uSHvf8kK6EXzW80bbOuS"}
 5:null
