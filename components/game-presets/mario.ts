@@ -1,7 +1,7 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS } from './shared';
 import { resolveSMCUrl } from '../../lib/smc-helper';
 import { sAnimUrl as sa } from '@/lib/rpgen-assets';
-import { smbOverworld, smbUnderground } from './vglc-stages';
+import { smbOverworld, smbUnderground, smbOverworldEnemies, smbUndergroundEnemies } from './vglc-stages';
 
 // SMC-released-sprites (Level-Share-Square/SMC-released-sprites) via jsDelivr CDN
 // ライセンス: 非商用無料、作者クレジット必須
@@ -90,93 +90,104 @@ const tiles: PresetData['tiles'] = {
   14: { name: '使用済みブロック', color: '#6b4a24', passable: false, special: 'used',
         imageRef: smcRef(T.stone), imageUrl: T.stone },  // ハテナを下から叩いた後の空ブロック
   15: { name: 'すり抜け床',       color: '#ffb366', passable: true,  special: 'oneway' },
+  16: { name: 'コイン',           color: '#ffd700', passable: true,  special: 'coin' },  // エンジンが回転コインを描画
+  17: { name: 'ハテナ(アイテム)', color: '#ffa500', passable: false, special: 'itemPowerup',
+        imageRef: smcRef(T.qBlock), imageUrl: T.qBlock },  // 叩くとキノコ/フラワーが出る（見た目はコインのハテナと同じ）
 };
 
-// ── シーン1：地上ステージ (VGLC SMB 1-1 より) ──────────────────────────────
+// ── シーン1：地上ステージ (VGLC SMB 1-1 全長 202 列) ────────────────────────
 // Source: TheVGLC/TheVGLC Super Mario Bros/Processed/mario-1-1.txt (CC BY-NC-SA 4.0)
-const WCOLS = 60;
+// 穴・階段・ゴール旗(タイル3, col 198)込みの原作再現。敵は VGLC の 'E' 座標から生成。
 const scene1Map = smbOverworld.map(row => [...row]);
+const WCOLS = scene1Map[0].length;
+scene1Map[13][100] = 7;  // 中間チェックポイント（地上ルート中間地点）
+
+// VGLC 'E' 出現位置から敵を生成。原作 1-1 は col 106 だけノコノコ、他は全てクリボー。
+const owEnemies = smbOverworldEnemies.map(({ col, row }) =>
+  col === 106
+    ? newObject({ emoji: '🐢', col, row, behavior: 'walker', speed: 1.2, hazard: true, hp: 2, bullet: 'none',
+        stompable: true, shell: true, spriteRef: E.koopaRef, spriteUrl: E.koopaUrl })
+    : newObject({ emoji: '🐛', col, row, behavior: 'patrolH', speed: 1, hazard: true, hp: 1, bullet: 'none',
+        stompable: true, spriteRef: E.goombaRef, spriteUrl: E.goombaUrl })
+);
 
 const scene1: SceneDef = {
   id: 'overworld', name: '地上ステージ',
   map: scene1Map,
   objects: [
-    // クリボー (SMC: Goombas.png walk:smc 2フレーム)。踏むと一撃で倒せる。
-    newObject({ emoji: '🐛', col: 5,  row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      stompable: true, spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
-    newObject({ emoji: '🐛', col: 18, row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
-      stompable: true, spriteRef: E.goombaRef, spriteUrl: E.goombaUrl }),
-    // ノコノコ (SMC: Beach_Koopa.png walk:smc 2フレーム)。踏むと甲羅化→蹴って攻撃できる。
-    newObject({ emoji: '🐢', col: 24, row: ROWS - 3, behavior: 'walker',  speed: 1.2, hazard: true,  hp: 2, bullet: 'none',
-      stompable: true, shell: true, spriteRef: E.koopaRef, spriteUrl: E.koopaUrl }),
-    // キラー（SMC: Bob-omb.png 流用・直進）。弾扱いなので踏めない。
-    newObject({ emoji: '💣', col: 2,  row: ROWS - 4, behavior: 'walker',  speed: 2.5, hazard: true,  hp: 1, bullet: 'none',
-      name: 'キラー', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
-    // ボム兵（爆発あり, SMC: Bob-omb.png walk:smc 2フレーム）。踏むと倒せる。
-    newObject({ emoji: '💥', col: 28, row: ROWS - 3, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
+    ...owEnemies,
+    // ボム兵（オリジナル要素, SMC: Bob-omb.png walk:smc 2フレーム）。踏むと倒せる。
+    newObject({ emoji: '💥', col: 33, row: 13, behavior: 'patrolH', speed: 1,   hazard: true,  hp: 1, bullet: 'none',
       stompable: true, name: 'ボム兵', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
-    // テレサ（近づくと動く, SMC: Blazin_Boos.png walk:smc 2フレーム）
-    newObject({ emoji: '👻', col: 8,  row: ROWS - 8, behavior: 'chase',   speed: 0.8, hazard: true,  hp: 1, bullet: 'none',
+    // キラー（終盤の平地に直進で飛来）。弾扱いなので踏めない。
+    newObject({ emoji: '💣', col: 145, row: 12, behavior: 'walker',  speed: 2.5, hazard: true,  hp: 1, bullet: 'none',
+      name: 'キラー', spriteRef: E.bobOmbRef, spriteUrl: E.bobOmbUrl }),
+    // テレサ（ブロック密集地帯で追尾, SMC: Blazin_Boos.png walk:smc 2フレーム）
+    newObject({ emoji: '👻', col: 132, row: 8, behavior: 'chase',   speed: 0.8, hazard: true,  hp: 1, bullet: 'none',
       name: 'テレサ', spriteRef: E.booRef, spriteUrl: E.booUrl }),
-    // プクプク（水中）
-    newObject({ emoji: '🐟', col: 12, row: ROWS - 4, behavior: 'patrolV', speed: 1.5, hazard: true,  hp: 1, bullet: 'none',
-      name: 'プクプク' }),
     // キノピオ NPC (SMC: Toad_NPCs.png 静止表示)
-    newObject({ emoji: '🍄', col: 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
-      objType: 'npc', message: 'キノピオだよ！音符ブロックを下から叩くと高くジャンプできるよ！チェックポイントを踏むと途中から再開できるよ！',
+    newObject({ emoji: '🍄', col: 3, row: 13, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
+      objType: 'npc', message: 'キノピオだよ！この先には穴があるから気をつけて！オレンジのチェックポイントを踏むと、やられてもそこから再開できるよ！',
       w: 32, h: 64, spriteRef: E.toadRef, spriteUrl: E.toadUrl }),
-    // ピーチ姫（ゴール付近 NPC, SMC: Princesses.png 静止表示）
-    newObject({ emoji: '👸', col: WCOLS - 3, row: ROWS - 3, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
-      objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！クッパをやっつけて！',
+    // ピーチ姫（ゴール旗の先, SMC: Princesses.png 静止表示）
+    newObject({ emoji: '👸', col: 200, row: 13, behavior: 'still', hazard: false, hp: 1, bullet: 'none',
+      objType: 'npc', message: 'マリオ！助けに来てくれてありがとう！',
       w: 32, h: 64, spriteRef: E.princessRef, spriteUrl: E.princessUrl }),
-    // 土管ワープ→地下
-    newObject({ emoji: '🪣', col: 9,  row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
-      warpSceneId: 'underground', warpEntryCol: 2, warpEntryRow: ROWS - 4 }),
-    newObject({ emoji: '🪣', col: 20, row: ROWS - 6, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
+    // 土管ワープ→地下（4本目の土管の上に乗ると入れる）
+    newObject({ emoji: '⬇️', col: 57, row: 9, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
+      warpSceneId: 'underground', warpEntryCol: 2, warpEntryRow: 11 }),
+    // 土管ワープ→秘密の地下（2本目の土管）
+    newObject({ emoji: '⬇️', col: 38, row: 10, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'underground2', warpEntryCol: 2, warpEntryRow: ROWS - 4 }),
-    // レッドコイン（アイテム）
-    newObject({ emoji: '🔴', col: 7,  row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+    // レッドコイン（土管の上と高層ブロックの上）
+    newObject({ emoji: '🔴', col: 46,  row: 9, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'redCoin', message: '' }),
-    newObject({ emoji: '🔴', col: 16, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+    newObject({ emoji: '🔴', col: 122, row: 5, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'redCoin', message: '' }),
-    // スター（パワーアップ）
-    newObject({ emoji: '⭐', col: 6,  row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+    // スター（原作でスターが入っているレンガの位置）
+    newObject({ emoji: '⭐', col: 101, row: 9, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'star', message: '' }),
-    // 1UP キノコ
-    newObject({ emoji: '💚', col: 15, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+    // 1UP キノコ（原作の隠しブロック付近）
+    newObject({ emoji: '💚', col: 64, row: 9, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'oneUp', message: '' }),
-    // スーパーキノコ（ハート回復）
-    newObject({ emoji: '🍄', col: 11, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
-      itemId: 'superMushroom', message: '' }),
-    // ファイアフラワー（ファイアマリオ化）
-    newObject({ emoji: '🌸', col: 25, row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
-      itemId: 'fireFlower', message: '' }),
-    // 動くリフト (Moving Platform)
-    newObject({ emoji: '🛹', col: 13, row: ROWS - 4, objType: 'platform', name: 'movingPlatform', hazard: false, hp: 1, speed: 1.0, behavior: 'patrolH', bullet: 'none' }),
+    // 動くリフト（3マス幅の穴の上）
+    newObject({ emoji: '🛹', col: 87, row: 10, objType: 'platform', name: 'movingPlatform', hazard: false, hp: 1, speed: 1.0, behavior: 'patrolH', bullet: 'none' }),
   ],
 };
 
-// ── シーン2：地下ステージ1 (VGLC SMB 1-2 より) ─────────────────────────────
+// ── シーン2：地下ステージ1 (VGLC SMB 1-2 全長 158 列) ───────────────────────
 // Source: TheVGLC/TheVGLC Super Mario Bros/Processed/mario-1-2.txt (CC BY-NC-SA 4.0)
+// コイン列・天井裏の抜け道・終盤の大穴（リフトで渡る）込みの原作再現。
 const scene2Map = smbUnderground.map(row => [...row]);
+
+// VGLC 'E' 出現位置からクリボーを生成
+const ugEnemies = smbUndergroundEnemies.map(({ col, row }) =>
+  newObject({ emoji: '🐛', col, row, behavior: 'patrolH', speed: 1, hazard: true, hp: 1, bullet: 'none',
+    stompable: true, spriteRef: E.goombaRef, spriteUrl: E.goombaUrl })
+);
 
 const scene2: SceneDef = {
   id: 'underground', name: '地下ステージ1',
   map: scene2Map,
   objects: [
-    // 地下ネズミ（SMCに対応スプライトなし → RPGen維持）
-    newObject({ emoji: '🐀', col: 5,  row: ROWS - 3, behavior: 'patrolH', speed: 1.2, hazard: true, hp: 1, bullet: 'none',
-      spriteRef: wr93, spriteUrl: sa93 }),
-    newObject({ emoji: '🐀', col: 13, row: ROWS - 3, behavior: 'patrolH', speed: 1.4, hazard: true, hp: 1, bullet: 'none',
+    ...ugEnemies,
+    // 地下ネズミ（オリジナル要素。SMCに対応スプライトなし → RPGen維持）
+    newObject({ emoji: '🐀', col: 5,  row: ROWS - 2, behavior: 'patrolH', speed: 1.2, hazard: true, hp: 1, bullet: 'none',
       spriteRef: wr93, spriteUrl: sa93 }),
     // ホネクッパ（SMC: Dry_Bones.png walk:smc 2フレーム 16px）。踏むと崩れる。
-    newObject({ emoji: '💀', col: 10, row: ROWS - 6, behavior: 'patrolH', speed: 1, hazard: true, hp: 3, bullet: 'none',
+    newObject({ emoji: '💀', col: 8, row: ROWS - 2, behavior: 'patrolH', speed: 1, hazard: true, hp: 3, bullet: 'none',
       stompable: true, name: 'ホネクッパ', spriteRef: E.dryBonesRef, spriteUrl: E.dryBonesUrl }),
-    // シャインかけら
-    newObject({ emoji: '✨', col: 9,  row: ROWS - 10, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+    // 終盤の大穴（cols 138-144）を渡る上下リフト
+    newObject({ emoji: '🛹', col: 139, row: 11, objType: 'platform', name: 'movingPlatform', hazard: false, hp: 1, speed: 1.2, behavior: 'patrolV', bullet: 'none' }),
+    newObject({ emoji: '🛹', col: 142, row: 7,  objType: 'platform', name: 'movingPlatform', hazard: false, hp: 1, speed: 1.2, behavior: 'patrolV', bullet: 'none' }),
+    // シャインかけら（コイン列の上と、天井裏の抜け道）
+    newObject({ emoji: '✨', col: 44,  row: 5, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'shineShard', message: '' }),
-    newObject({ emoji: '🪣', col: COLS - 3, row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
-      warpSceneId: 'overworld', warpEntryCol: 10, warpEntryRow: ROWS - 3 }),
+    newObject({ emoji: '✨', col: 120, row: 2, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
+      itemId: 'shineShard', message: '' }),
+    // 出口（終端の床）→ 地上の5本目の土管の上へ
+    newObject({ emoji: '⬆️', col: 156, row: 13, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
+      warpSceneId: 'overworld', warpEntryCol: 163, warpEntryRow: 10 }),
   ],
 };
 
@@ -200,8 +211,8 @@ const scene3: SceneDef = {
   id: 'underground2', name: '秘密の地下ステージ',
   map: scene3Map,
   objects: [
-    newObject({ emoji: '🪣', col: COLS - 3, row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
-      warpSceneId: 'overworld', warpEntryCol: 21, warpEntryRow: ROWS - 3 }),
+    newObject({ emoji: '⬆️', col: COLS - 3, row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
+      warpSceneId: 'overworld', warpEntryCol: 40, warpEntryRow: 13 }),
     // 壊せるブロックの先にシャインかけら
     newObject({ emoji: '✨', col: COLS - 5, row: ROWS - 6, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
       itemId: 'shineShard', message: '' }),
@@ -212,7 +223,7 @@ export const mario: PresetData = {
   id: 'mario', name: 'マリオ', engine: 'action', gravity: 0.5, friction: 0.85,
   player: {
     emoji: '🦝', color: '#ff4444', speed: 5, jumpPower: -8.0, w: 24, h: 64,
-    start: { x: 50, y: 50 },
+    start: { x: 64, y: 352 },
     hearts: 3,
     spriteRef: 'walk:smc_json:PlayerSprite:1Idle0_3',
     spriteUrl: resolveSMCUrl('images/playersprite-sheet0.png'),
@@ -255,5 +266,6 @@ export const mario: PresetData = {
     jump:   { ref: 'jump' },
     clear:  { ref: 'clear' },
     damage: { ref: 'damage' },
+    coin:   { ref: 'mml:t180o6l16b>e8', src: 't180o6l16b>e8', type: 'mml' },  // 定番のコイン音 (B→E)
   },
 };

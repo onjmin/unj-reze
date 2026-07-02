@@ -175,7 +175,7 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊', coin: 'コイン' };
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
@@ -2427,7 +2427,11 @@ const lose = (msg: string) => {
         engineRef.current.map[row][col] = 0; // 一時的に空気化
         
         const usedId = Number(Object.keys(gameDataRef.current.tiles).find(k => gameDataRef.current.tiles[Number(k)]?.special === 'used')) || 14;
-        const isPowerupBlock = (col % 4 === 0) && gameData.id === 'mario';
+        // アイテム入りハテナ: special='itemPowerup' のタイルなら常にパワーアップ。
+        // タイルセットに itemPowerup が無い旧データは従来の col%4 ヒューリスティックを維持。
+        const hasPowerupTile = Object.values(gameDataRef.current.tiles).some(t => t?.special === 'itemPowerup');
+        const isPowerupBlock = info?.special === 'itemPowerup' ||
+          (!hasPowerupTile && (col % 4 === 0) && gameData.id === 'mario');
 
         if (isPowerupBlock) {
           const isSmall = marioPowerRef.current === 'small';
@@ -2934,7 +2938,7 @@ const lose = (msg: string) => {
               // 下から叩く：ハテナ→コイン排出（使用済みに変化）、壊せるブロック→破壊
               const bcol = Math.round(tile2.rect.x / TILE_SIZE), brow = Math.round(tile2.rect.y / TILE_SIZE);
               const bsp = tile2.info?.special, bkey = `${bcol},${brow}`;
-              if (bsp === 'item' && !usedBlocksRef.current.has(bkey)) {
+              if ((bsp === 'item' || bsp === 'itemPowerup') && !usedBlocksRef.current.has(bkey)) {
                 triggerBlockBump(bcol, brow, 'item', tile2.info);
               } else if (bsp === 'destructible') {
                 triggerBlockBump(bcol, brow, 'destructible', tile2.info);
@@ -4032,6 +4036,24 @@ const lose = (msg: string) => {
               }
             }
             else bossWarnRef.current = false;
+            // コインタイル：プレイヤーが重なったら回収（actionエンジン）
+            if (isAction) {
+              const phC = getPlayerHeight();
+              const coinPts: [number, number][] = [
+                [p.x + pData.w / 2, p.y + 6],
+                [p.x + pData.w / 2, p.y + phC / 2],
+                [p.x + pData.w / 2, p.y + phC - 6],
+              ];
+              for (const [cxq, cyq] of coinPts) {
+                const ct = getTile(cxq, cyq);
+                if (ct?.info?.special === 'coin') {
+                  const ccol = Math.round(ct.rect.x / TILE_SIZE), crow = Math.round(ct.rect.y / TILE_SIZE);
+                  if (eng.map[crow]?.[ccol] !== undefined) eng.map[crow][ccol] = 0;
+                  coinsRef.current += 1; scoreRef.current += 200; forceHud(n => n + 1);
+                  playSfx(sfxRef.current.coin);
+                }
+              }
+            }
             // 音符ブロック：着地時に強制スーパージャンプ
             if (isAction) {
               const below = getTile(p.x + pData.w / 2, p.y + pData.h + 2);
@@ -4190,6 +4212,17 @@ const lose = (msg: string) => {
           const tileId = map[y]?.[x] ?? 0;
           const info = gameData.tiles[tileId];
           if (tileId !== 0 && info) {
+            // コインタイル：回転コイン（横幅が正弦波で伸縮）を描く。画像不要。
+            if (info.special === 'coin') {
+              const ccx = x * TILE_SIZE + TILE_SIZE / 2, ccy = y * TILE_SIZE + TILE_SIZE / 2;
+              const spinW = Math.max(2, Math.abs(Math.sin(Date.now() / 180 + x * 0.9)) * 9);
+              ctx.fillStyle = '#ffd700';
+              ctx.beginPath(); ctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); ctx.fill();
+              ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2;
+              ctx.beginPath(); ctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); ctx.stroke();
+              if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+              continue;
+            }
             // imageUrl に #sx,sy,sw,sh が付いていればアトラスから単一スプライトを切り出す。
             // 既定は cell-fill（マスいっぱいに描画）＝欠片を縦に積んでも継ぎ目が出ない（土管トップ＋ボディ等）。
             // imageOverflowTop=true のタイルのみ、アスペクト比を保ち「セル幅基準・下端固定」で上方向へはみ出す
@@ -4929,6 +4962,53 @@ const lose = (msg: string) => {
     onPointerLeave: (e: React.PointerEvent) => { e.preventDefault(); setTouch(key, false); },
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
   });
+
+  // ── 8方向バーチャルパッド（プレイ用） ──────────────────────────────────
+  // 1枚のパッドでポインタ位置から方向を量子化する。斜め入力（東方の斜め避け・
+  // アクションの走りながら方向転換）と、指を離さずスライドでの方向転換に対応。
+  const dpadRef = useRef<HTMLDivElement | null>(null);
+  const dpadPointerRef = useRef<number | null>(null);
+  const clearDpad = () => {
+    const t = touchRef.current;
+    if (t.up || t.down || t.left || t.right) { t.up = t.down = t.left = t.right = false; force(n => n + 1); }
+  };
+  const applyDpad = (clientX: number, clientY: number) => {
+    const el = dpadRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dx = clientX - (r.left + r.width / 2);
+    const dy = clientY - (r.top + r.height / 2);
+    const t = touchRef.current;
+    const prev = `${t.up}${t.down}${t.left}${t.right}`;
+    t.up = t.down = t.left = t.right = false;
+    if (Math.hypot(dx, dy) >= r.width * 0.12) {  // 中央12%はデッドゾーン
+      // 8方向量子化（45°の扇形。0=右, 時計回り）
+      const oct = Math.round(Math.atan2(dy, dx) / (Math.PI / 4));
+      if (oct === -1 || oct === 0 || oct === 1) t.right = true;
+      if (oct === 1 || oct === 2 || oct === 3) t.down = true;
+      if (oct === 3 || oct === 4 || oct === -4 || oct === -3) t.left = true;
+      if (oct === -3 || oct === -2 || oct === -1) t.up = true;
+    }
+    if (prev !== `${t.up}${t.down}${t.left}${t.right}`) force(n => n + 1);
+  };
+  const dpadProps = {
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault();
+      dpadPointerRef.current = e.pointerId;
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      applyDpad(e.clientX, e.clientY);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (dpadPointerRef.current === e.pointerId) applyDpad(e.clientX, e.clientY);
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      e.preventDefault();
+      if (dpadPointerRef.current === e.pointerId) { dpadPointerRef.current = null; clearDpad(); }
+    },
+    onPointerCancel: (e: React.PointerEvent) => {
+      if (dpadPointerRef.current === e.pointerId) { dpadPointerRef.current = null; clearDpad(); }
+    },
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+  };
 
   const applyPick = (res: PickResult) => {
     const target = picker?.target;
@@ -5730,12 +5810,18 @@ const lose = (msg: string) => {
             <div className="flex-1 flex flex-col p-4 select-none">
               <div className="flex-1 flex items-center justify-center">
               <div className="flex justify-between items-center max-w-xs w-full gap-8">
-                <div className="relative w-28 h-28">
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-10 h-12 bg-gray-600 rounded-t-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('up')}></div>
-                  <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-12 bg-gray-600 rounded-b-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('down')}></div>
-                  <div className="absolute left-0 top-1/2 -translate-y-1/2 w-12 h-10 bg-gray-600 rounded-l-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('left')}></div>
-                  <div className="absolute right-0 top-1/2 -translate-y-1/2 w-12 h-10 bg-gray-600 rounded-r-lg active:bg-gray-400 touch-none cursor-pointer" {...padProps('right')}></div>
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-gray-700 pointer-events-none rounded"></div>
+                <div ref={dpadRef} {...dpadProps} className="relative w-32 h-32 touch-none cursor-pointer select-none">
+                  {/* 8方向パッド：本体1枚でポインタ追跡。子要素は表示のみ */}
+                  <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] rounded-t-lg pointer-events-none transition-colors ${touchRef.current.up ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] rounded-b-lg pointer-events-none transition-colors ${touchRef.current.down ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 rounded-l-lg pointer-events-none transition-colors ${touchRef.current.left ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 rounded-r-lg pointer-events-none transition-colors ${touchRef.current.right ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 bg-gray-700 pointer-events-none rounded"></div>
+                  {/* 斜め入力ガイド（対応する2方向が同時点灯） */}
+                  <div className={`absolute top-1.5 right-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute top-1.5 left-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute bottom-1.5 right-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute bottom-1.5 left-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
                 </div>
                 {introOpen ? (
                   <div className="flex flex-col gap-2.5 items-center">

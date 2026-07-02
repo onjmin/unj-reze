@@ -15,7 +15,7 @@ export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
-export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn';
+export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn' | 'coin';
 export type ObjectKind = 'npc' | 'tile' | 'bullet';
 export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event' | 'platform';
 
