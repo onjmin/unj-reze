@@ -996,10 +996,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // ── ターン制戦闘 ──
   interface BattleView { enemyName: string; enemyEmoji: string; enemyHp: number; enemyMaxHp: number; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
-  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean }[]; exp: number; isBoss: boolean }>(
-    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false });
-  const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
+  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean }[]; exp: number; gold: number; isBoss: boolean }>(
+    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false });
+  // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
+  const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
+  /** 戦闘コマンド「どうぐ」のサブメニュー開閉。 */
+  const [battleItemsOpen, setBattleItemsOpen] = useState(false);
+  /** フィールドの 🎒 どうぐ袋モーダル開閉（rpg エンジン）。開いている間は移動を凍結。 */
+  const [bagOpen, setBagOpen] = useState(false);
+  const bagOpenRef = useRef(false);
+  bagOpenRef.current = bagOpen;
+  /** ランダムエンカウント：歩行距離ゲージ（px）と次の発生しきい値（px）。 */
+  const encounterGaugeRef = useRef(0);
+  const encounterNextRef = useRef(0);
   /** 画面シェイク残フレーム数（0=なし）。ヒット・爆発・ゲームオーバー時にセット。 */
   const shakeRef = useRef(0);
   // ── シーン切り替え ────────────────────────────────────────────────────────
@@ -1241,11 +1251,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; moves?: { name: string; power: number; heal?: boolean }[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean }[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
-      enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp, isBoss: !!opts.isBoss,
+      enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
+      gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss,
     };
+    setBattleItemsOpen(false); setBagOpen(false);
     bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
     setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemyHp: opts.hp, enemyMaxHp: opts.hp, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
     // バトルBGM切り替え
@@ -1260,7 +1272,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), moves: d.moves, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
   };
 
   const nudgePlayer = () => {
@@ -1296,19 +1308,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (nextEntry) {
             if (nextEntry.maxHp != null) pr.maxHp = nextEntry.maxHp;
             if (nextEntry.maxMp != null) pr.maxMp = nextEntry.maxMp;
-            if (nextEntry.atk != null) pr.atk = nextEntry.atk;
-            if (nextEntry.def != null) pr.def = nextEntry.def;
+            if (nextEntry.atk != null) pr.baseAtk = nextEntry.atk;
+            if (nextEntry.def != null) pr.baseDef = nextEntry.def;
             pr.hp = pr.maxHp; pr.mp = pr.maxMp;
           } else {
-            pr.maxHp += 6; pr.maxMp += 3; pr.atk += 2; pr.def += 1; pr.hp = pr.maxHp; pr.mp = pr.maxMp;
+            pr.maxHp += 6; pr.maxMp += 3; pr.baseAtk += 2; pr.baseDef += 1; pr.hp = pr.maxHp; pr.mp = pr.maxMp;
           }
           const nextNext = levelTable.find(e => e.level === pr.level + 1);
           pr.expNext = nextNext?.exp ?? pr.level * 10;
           lvUp = `レベルが ${pr.level} に あがった！`;
           playSfx(sfxRef.current.levelup);
         }
+        if (lvUp) applyEquipment(equipmentRef.current); // 基礎値の上に装備ボーナスを再計算
       }
-      setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を たおした！${b.exp > 0 ? ` EXP+${b.exp}` : ''}`, ...(lvUp ? [lvUp] : [])].slice(-6) } : v));
+      pr.gold = (pr.gold ?? 0) + b.gold;
+      setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を たおした！${b.exp > 0 ? ` EXP+${b.exp}` : ''}${b.gold > 0 ? ` ${b.gold}G` : ''}`, ...(lvUp ? [lvUp] : [])].slice(-6) } : v));
       if (wasBoss) bossDefeatedRef.current = true;
     }
     nudgePlayer();
@@ -1385,6 +1399,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (Math.random() < 0.6) { appendLog('うまく にげきれた！', { canAct: false, over: true }); setTimeout(() => endBattle('flee'), 700); }
     else { appendLog('しかし まわりこまれてしまった！', { canAct: false }); setTimeout(enemyTurn, 750); }
   };
+
+  /** healHp/healMp を持つアイテムを使う。inBattle=true ならターン消費して敵の反撃を受ける。 */
+  const useHealItem = (it: ItemDef, inBattle: boolean) => {
+    const pr = progressRef.current;
+    if ((inventoryRef.current[it.id] ?? 0) <= 0) return;
+    const parts: string[] = [];
+    if (it.healHp) { const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + it.healHp); parts.push(`HPが ${pr.hp - before} かいふく`); }
+    if (it.healMp) { const before = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + it.healMp); parts.push(`MPが ${pr.mp - before} かいふく`); }
+    setInventory(p => { const n = { ...p }; n[it.id] = (n[it.id] ?? 0) - 1; if (n[it.id] <= 0) delete n[it.id]; return n; });
+    playSfx(sfxRef.current.inn);
+    forceHud(n => n + 1);
+    if (inBattle) {
+      setBattleItemsOpen(false);
+      appendLog(`${it.name}を つかった！ ${parts.join('、')}`, { canAct: false });
+      setTimeout(enemyTurn, 750);
+    } else {
+      setBagOpen(false);
+      showGameMsg(`${it.emoji} ${it.name}を つかった！\n${parts.join('、')}した`, 'instant', () => {});
+    }
+  };
+
+  /** 「どうぐ」で使えるアイテム（healHp/healMp 持ちで所持数 1 以上）。 */
+  const usableItems = () =>
+    (gameDataRef.current.items ?? []).filter(it => (it.healHp || it.healMp) && (inventoryRef.current[it.id] ?? 0) > 0);
 
   const showGameMsg = useCallback((text: string, mode: 'instant' | 'timed', onDismiss: () => void) => {
     // timed メッセージ（ミス/ゲームオーバー/クリア）は必ずラウンド終了 → 即座に操作・進行を凍結。
@@ -1495,8 +1533,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     let atkBonus = 0, defBonus = 0;
     if (eq.weapon) { const it = items.find(i => i.id === eq.weapon); atkBonus += it?.atkBonus ?? 0; }
     if (eq.armor) { const it = items.find(i => i.id === eq.armor); defBonus += it?.defBonus ?? 0; }
-    pr.atk = b.atk + atkBonus;
-    pr.def = b.def + defBonus;
+    // レベル基礎値（baseAtk/baseDef）に装備ボーナスを重ねる。旧データ互換で未設定なら初期値を使う。
+    pr.atk = (pr.baseAtk || b.atk) + atkBonus;
+    pr.def = (pr.baseDef || b.def) + defBonus;
     forceHud(n => n + 1);
   }, []);
 
@@ -1987,8 +2026,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
-      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, level: 1, exp: 0, expNext: b.levelTable?.[0]?.exp ?? 10, gold: b.gold ?? 0 };
-      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false };
+      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.[0]?.exp ?? 10, gold: b.gold ?? 0 };
+      setEquipment({}); equipmentRef.current = {};
+      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false };
+      encounterGaugeRef.current = 0; encounterNextRef.current = 0;
       invulnRef.current = 0; isPlayerDeadRef.current = false; roundOverRef.current = false; livesRef.current = 3; scoreRef.current = 0;
       // onjReze：ハート・向き・剣の初期化
       const zMax = Math.max(1, gameData.player.hearts ?? 3) * 2;
@@ -2020,6 +2061,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       bossBgmActiveRef.current = false;
       setActiveDialogue(null);
       setBattle(null);
+      setBattleItemsOpen(false); setBagOpen(false);
       setSwitchVals({}); switchValsRef.current = {};
       setInventory({}); inventoryRef.current = {};
       selfSwitchesRef.current = {};
@@ -2355,7 +2397,12 @@ const lose = (msg: string) => {
     // ── シーン境界検出：ワールドマップ上でプレイヤーが別シーン領域に入ったら即切り替え ──
     const trySceneTrans = () => {
       if (!worldLayoutRef.current || !scenesRef.current.length || roundOverRef.current) return;
+      if (sceneFadeRef.current) return; // フェード遷移中は領域判定しない
       const layout = worldLayoutRef.current;
+      // ワープ（warpSceneId）で合成ワールドに含まれないシーンへ入っている間は、
+      // eng.map がシーン単体マップに置き換わり座標がシーンローカルになるため、領域判定は無効。
+      // （判定を続けるとシーン0の領域と誤判定してエンティティが差し替わる）
+      if (!layout.layouts.some(l => l.sceneIdx === activeSceneIdxRef.current)) return;
       const ep = engineRef.current.player;
       const px = ep.x / TILE_SIZE, py = ep.y / TILE_SIZE;
       for (const lay of layout.layouts) {
@@ -2374,6 +2421,7 @@ const lose = (msg: string) => {
             def: o,
           })) as unknown as Entity[];
           engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
+          encounterGaugeRef.current = 0; encounterNextRef.current = 0;
           setEditSceneIdx(lay.sceneIdx);
           break;
         }
@@ -2711,7 +2759,7 @@ const lose = (msg: string) => {
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
       // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current);
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current);
       
       // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
       if (justStartedRef.current && isPlaying && !frozen) {
@@ -3185,6 +3233,7 @@ const lose = (msg: string) => {
           p.vx = 0; p.vy = 0;
           const isSlow = gameData.engine === 'touhou' && (keys.has('Shift') || touchRef.current.slow);
           const moveSpd = isSlow ? pData.speed * 0.45 : pData.speed;
+          const prevPx = p.x, prevPy = p.y;
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
@@ -3192,6 +3241,29 @@ const lose = (msg: string) => {
           if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h) p.y = ny;
+          // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
+          // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
+          if (isPlaying && gameData.engine === 'rpg' && gameData.battle && !dead &&
+              !eventRunningRef.current && !sceneFadeRef.current && invulnRef.current <= 0) {
+            const scene = scenesRef.current[activeSceneIdxRef.current];
+            const table = scene?.randomEncounters;
+            if (table?.length) {
+              const moved = Math.abs(p.x - prevPx) + Math.abs(p.y - prevPy);
+              if (moved > 0) {
+                if (encounterNextRef.current <= 0) {
+                  const rate = scene.encounterRate ?? 16;
+                  encounterNextRef.current = rate * TILE_SIZE * (0.6 + Math.random() * 0.8);
+                }
+                encounterGaugeRef.current += moved;
+                if (encounterGaugeRef.current >= encounterNextRef.current) {
+                  encounterGaugeRef.current = 0; encounterNextRef.current = 0;
+                  const enemy = table[Math.floor(Math.random() * table.length)];
+                  beginBattle({ ...enemy, entity: null });
+                  dead = true;
+                }
+              }
+            }
+          }
           // touhou: 画面外に出ないようクランプ（タイルチェックを抜けた場合の保険）
           if (gameData.engine === 'touhou') {
             p.x = Math.max(0, Math.min(VIEW_W - pData.w, p.x));
@@ -4008,7 +4080,7 @@ const lose = (msg: string) => {
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else {
@@ -4670,6 +4742,7 @@ const lose = (msg: string) => {
               def: o,
             })) as unknown as Entity[];
             eng.bullets = []; eng.enemyBullets = [];
+            encounterGaugeRef.current = 0; encounterNextRef.current = 0;
             eng.player.x = fade.entryX; eng.player.y = fade.entryY;
             eng.player.vx = 0; eng.player.vy = 0;
             if (gameData.id === 'mario') {
@@ -5333,7 +5406,7 @@ const lose = (msg: string) => {
           </div>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
-            if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2))); }
+            if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2))); }
             if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
             setActivePreviewKey(null);
             if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
@@ -5717,7 +5790,19 @@ const lose = (msg: string) => {
                   <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] mb-2">
                     {battle.log.slice(-3).map((l, i) => <p key={i}>{l}</p>)}
                   </div>
-                  {battle.canAct && !battle.over && (
+                  {battle.canAct && !battle.over && (battleItemsOpen ? (
+                    <div className="space-y-1.5">
+                      {usableItems().map(it => (
+                        <button key={it.id} onClick={() => useHealItem(it, true)}
+                          className="w-full flex justify-between items-center px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-[11px] font-bold">
+                          <span>{it.emoji} {it.name}</span>
+                          <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                        </button>
+                      ))}
+                      <button onClick={() => setBattleItemsOpen(false)}
+                        className="w-full py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-bold">もどる</button>
+                    </div>
+                  ) : (
                     <div className="grid grid-cols-2 gap-1.5">
                       <button onClick={doAttack} className="py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.attack}</button>
                       <button onClick={doFlee} className="py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.flee}</button>
@@ -5727,8 +5812,14 @@ const lose = (msg: string) => {
                           {m.name}<span className="text-indigo-300 ml-1">{m.cost}</span>
                         </button>
                       ))}
+                      {usableItems().length > 0 && (
+                        <button onClick={() => setBattleItemsOpen(true)}
+                          className="py-1.5 rounded bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold">
+                          {gameData.battle?.labels.item ?? 'どうぐ'}
+                        </button>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
             )}
@@ -5750,8 +5841,17 @@ const lose = (msg: string) => {
                           onClick={() => {
                             progressRef.current.gold = (progressRef.current.gold ?? 0) - si.price;
                             setInventory(p => { const n = { ...p }; n[si.itemId] = (n[si.itemId] ?? 0) + 1; return n; });
+                            // 武器・防具は購入と同時に装備（giveItem コマンドと同じ挙動）
+                            if (itemDef?.category === 'weapon' || itemDef?.category === 'armor') {
+                              const eq = { ...equipmentRef.current };
+                              if (itemDef.category === 'weapon') eq.weapon = itemDef.id;
+                              if (itemDef.category === 'armor') eq.armor = itemDef.id;
+                              setEquipment(eq);
+                              applyEquipment(eq);
+                            }
                             playSfx(sfxRef.current.purchase);
-                            showGameMsg(`${itemDef?.emoji ?? '?'} ${itemDef?.name ?? si.itemId} を買った！`, 'timed', () => {});
+                            // 'timed' はラウンド終了演出用（roundOver が立ち操作が戻らない）ため 'instant' で表示する
+                            showGameMsg(`${itemDef?.emoji ?? '?'} ${itemDef?.name ?? si.itemId} を買った！`, 'instant', () => {});
                             setShopModal(null);
                             forceHud(n => n + 1);
                           }}
@@ -5764,6 +5864,44 @@ const lose = (msg: string) => {
                     })}
                   </div>
                   <button onClick={() => setShopModal(null)} className="mt-3 w-full py-2 rounded-lg bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── フィールドどうぐ袋（rpg エンジン）── */}
+            {isPlaying && gameData.engine === 'rpg' && gameData.battle && !battle && !shopModal && !gameMsg && !activeDialogue && !eventChoice && !bagOpen && (
+              <button onClick={() => setBagOpen(true)}
+                className="absolute top-2 right-2 z-20 w-9 h-9 grid place-items-center rounded-full bg-black/55 border border-amber-500/60 text-base active:bg-black/80"
+                title="どうぐ">🎒</button>
+            )}
+            {bagOpen && !battle && (
+              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => setBagOpen(false)}>
+                <div className="bg-gray-900 border border-amber-600 rounded-xl p-4 w-full max-w-xs mx-3" onClick={e => e.stopPropagation()}>
+                  <div className="text-amber-400 font-bold text-sm mb-2">🎒 どうぐ</div>
+                  <div className="text-yellow-300 text-xs mb-3">所持金: {progressRef.current.gold ?? 0} G</div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {(gameData.items ?? []).filter(it => (inventory[it.id] ?? 0) > 0).length === 0 && (
+                      <p className="text-[11px] text-gray-500">なにも もっていない。</p>
+                    )}
+                    {(gameData.items ?? []).filter(it => (inventory[it.id] ?? 0) > 0).map(it => {
+                      const equipped = equipment.weapon === it.id || equipment.armor === it.id;
+                      const usable = !!(it.healHp || it.healMp);
+                      return (
+                        <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-800 text-xs text-white">
+                          <span className="min-w-0 truncate">
+                            {it.emoji} {it.name}
+                            {equipped && <span className="text-green-400 ml-1 font-bold">E</span>}
+                            <span className="text-gray-500 ml-1">×{inventory[it.id] ?? 0}</span>
+                          </span>
+                          {usable && (
+                            <button onClick={() => useHealItem(it, false)}
+                              className="shrink-0 px-2.5 py-1 rounded bg-amber-700 active:bg-amber-600 text-white font-bold">つかう</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button onClick={() => setBagOpen(false)} className="mt-3 w-full py-2 rounded-lg bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
                 </div>
               </div>
             )}
@@ -6458,6 +6596,10 @@ const lose = (msg: string) => {
                                 </label>
                                 <label className="text-[10px] text-gray-400">経験値
                                   <input type="text" inputMode="numeric" defaultValue={selObj.exp ?? Math.round(selObj.hp * 1.5)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ exp: v }); }}
+                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                </label>
+                                <label className="text-[10px] text-gray-400">ゴールド
+                                  <input type="text" inputMode="numeric" defaultValue={selObj.gold ?? Math.round((selObj.exp ?? Math.round(selObj.hp * 1.5)) * 0.6)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ gold: v }); }}
                                     className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                                 </label>
                               </div>

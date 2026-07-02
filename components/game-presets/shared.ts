@@ -22,8 +22,9 @@ export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event' | 'platform';
 /** グローバルスイッチ定義。id は連番。 */
 export interface SwitchDef { id: number; name: string; }
 
-/** アイテム定義。id は一意キー（英字推奨）。 */
-export interface ItemDef { id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; }
+/** アイテム定義。id は一意キー（英字推奨）。
+ *  healHp/healMp があると rpg エンジンで「どうぐ」として使用可能（戦闘中・フィールド両方）。 */
+export interface ItemDef { id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; healHp?: number; healMp?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; }
 
 /** イベントページの発生条件。すべて AND。 */
 export interface EventCondition {
@@ -173,6 +174,8 @@ export interface ObjectDef {
   objType?: ObjType;
   /** ターン制戦闘用ステータス（rpg + battle のとき使用。未指定なら hp から自動算出）。 */
   name?: string; atk?: number; def?: number; exp?: number;
+  /** 撃破時に得るゴールド（rpg）。未指定なら exp から自動算出。 */
+  gold?: number;
   /** 敵の攻撃パターン（呪文/特技）。 */
   moves?: EnemyMove[];
   /** シンボルエンカウントのボス。倒すまでゴールでクリアにならない。 */
@@ -280,8 +283,8 @@ export interface BattleMove { name: string; cost: number; power: number; heal?: 
 /** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。 */
 export interface EnemyMove { name: string; power: number; heal?: boolean; }
 
-/** ランダムエンカウント／ボスで出現する敵。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; moves?: EnemyMove[]; }
+/** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。 */
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; }
 
 /** ターン制戦闘設定（rpg エンジン：ドラクエ/ポケモン）。
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */
@@ -289,8 +292,8 @@ export interface BattleConfig {
   playerName: string;
   maxHp: number; maxMp: number; atk: number; def: number;
   moves: BattleMove[];
-  /** コマンドの表示名（テーマ差し替え）。 */
-  labels: { attack: string; move: string; flee: string };
+  /** コマンドの表示名（テーマ差し替え）。item 省略時は「どうぐ」。 */
+  labels: { attack: string; move: string; flee: string; item?: string };
   /** 初期所持金。 */
   gold?: number;
   /** レベルアップテーブル。exp 到達時に対応ステータスへ上書き。 */
