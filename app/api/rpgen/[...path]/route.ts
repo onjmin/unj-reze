@@ -38,9 +38,16 @@ export async function GET(
     ? `${ORIGIN}/${joined}${search}`
     : `${ORIGIN}/api/${joined}${search}`;
 
+  const clientReferer = request.headers.get('referer') ?? request.headers.get('origin') ?? '';
+
   try {
     const res = await fetch(upstreamUrl, {
-      headers: isData ? {} : { Authorization: `Bearer ${AUTH_TOKEN}` },
+      headers: isData ? {} : {
+        Authorization: `Bearer ${AUTH_TOKEN}`,
+        Origin: request.headers.get('origin') ?? '',
+        Referer: clientReferer,
+        'User-Agent': request.headers.get('user-agent') ?? 'Mozilla/5.0',
+      },
       next: { revalidate: isData ? 86400 : 300 },
     });
 

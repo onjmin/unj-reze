@@ -7,10 +7,10 @@ const ir  = (id: string) => `url:${sp(id)}`;
 
 const tiles: PresetData['tiles'] = {
   0: { name: '空',             color: '#0d1826', passable: true,  imageRef: ir('X1lgbYC'), imageUrl: sp('X1lgbYC') },
-  1: { name: '鉄床',           color: '#3a4a5c', passable: false, imageRef: ir('hpicBeb'), imageUrl: sp('hpicBeb') },
+  1: { name: '鉄床',           color: '#b4b6b4', passable: false, imageRef: ir('wF7vf3V'), imageUrl: sp('wF7vf3V') },
   2: { name: 'トゲ',           color: '#c03030', passable: true,  special: 'trap',         imageRef: ir('wGAsfp2'), imageUrl: sp('wGAsfp2') },
   3: { name: 'ゴール扉',       color: '#28c090', passable: true,  special: 'goal',         imageRef: ir('7S58d26'), imageUrl: sp('7S58d26') },
-  4: { name: '壁',             color: '#202a38', passable: false, imageRef: ir('vcyXmCw'), imageUrl: sp('vcyXmCw') },
+  4: { name: '壁',             color: '#e1e1e1', passable: false, imageRef: ir('eqty6yo'), imageUrl: sp('eqty6yo') },
   5: { name: 'はしご',         color: '#c08030', passable: true,  special: 'ladder'        },   // 上下移動可能
   6: { name: 'チェックポイント', color: '#ff8800', passable: true, special: 'checkpoint'   },   // 死亡後の復帰地点
   7: { name: '消えるブロック', color: '#8080ff', passable: false, special: 'disappearing'  },   // 踏むと数秒後に消える
