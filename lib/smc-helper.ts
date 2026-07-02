@@ -94,18 +94,19 @@ export function extractSmcMetadata(dataJson: any): any {
   }
 
   // 2. Alias Toad to NPC
+  // Toad の実データは <番号>Idle (0〜11) で、番号はキノコの色違い（10 はキノピコ）。
+  // ピーチ姫・ロゼッタは存在しない。全バリエーションを 1NPC<番号>(_Walk) として公開する
+  // （1NPC0/1NPC1 を参照する既存プリセットとランタイムの `${base}_Walk` 規約を維持）。
   if (results['Toad']) {
     results['NPC'] = {
       name: 'NPC',
       animations: {}
     };
     for (const [animName, anim] of Object.entries(results['Toad'].animations)) {
-      if (animName === '0Idle') {
-        results['NPC'].animations['1NPC0'] = anim;
-        results['NPC'].animations['1NPC0_Walk'] = anim;
-      } else if (animName === '1Idle') {
-        results['NPC'].animations['1NPC1'] = anim;
-        results['NPC'].animations['1NPC1_Walk'] = anim;
+      const m = animName.match(/^(\d+)Idle$/);
+      if (m) {
+        results['NPC'].animations[`1NPC${m[1]}`] = anim;
+        results['NPC'].animations[`1NPC${m[1]}_Walk`] = anim;
       }
     }
   }

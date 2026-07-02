@@ -24,7 +24,7 @@ const RECOMMENDED_SPRITES = [
   { key: 'DryBones', name: 'カロン (Dry Bones)' },
   { key: 'Bobomb', name: 'ボム兵 (Bob-omb)' },
   { key: 'Boo', name: 'テレサ (Boo)' },
-  { key: 'NPC', name: 'キノピオ/ピーチ姫 (NPC)' }
+  { key: 'NPC', name: 'キノピオ/キノピコ (NPC)' }
 ];
 
 export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
@@ -34,16 +34,13 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
   const [selectedSprite, setSelectedSprite] = useState<string | null>(null);
 
   // Filters for PlayerSprite
-  const [playerStyle, setPlayerStyle] = useState<'all' | 'smb3' | 'smw'>('smw');
+  // 実データの命名は <姿番号><アクション><0|1>（例: 1Walk0 = スーパーマリオ歩き・マリオ）。
+  // 姿番号 = パワーアップ(0〜12)、末尾 0=マリオ / 1=ルイージ。SMB3/SMWのスタイル区別は存在しない。
   const [playerChar, setPlayerChar] = useState<'all' | 'mario' | 'luigi'>('mario');
-  const [playerPowerup, setPlayerPowerup] = useState<'all' | 'small' | 'super' | 'fire' | 'tanooki' | 'cape' | 'frog'>('all');
+  const [playerPowerup, setPlayerPowerup] = useState<string>('all');
 
-  // Filters for NPC
-  const [npcStyle, setNpcStyle] = useState<'all' | 'smb3' | 'smw'>('all');
-  const [npcChar, setNpcChar] = useState<'all' | 'toad' | 'peach' | 'rosalina'>('all');
-
-  // General Style filter (for Goomba, Koopa, etc.)
-  const [generalStyle, setGeneralStyle] = useState<'all' | 'smb3' | 'smw'>('all');
+  // NPC・敵の接頭辞は色/種類のバリエーション番号で、SMB3/SMWのスタイル区別は実データに存在しない。
+  // 件数も少ないためフィルタは設けず全件表示する。
 
   useEffect(() => {
     getMetadata()
@@ -96,48 +93,24 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
 
     // Apply filters
     const filteredAnims = allAnims.filter(animName => {
-      // 1. PlayerSprite Filters
+      // 1. PlayerSprite Filters（命名: <姿番号><アクション><0|1>）
       if (selectedSprite === 'PlayerSprite') {
-        const styleChar = animName[0];
-        if (playerStyle === 'smb3' && styleChar !== '1') return false;
-        if (playerStyle === 'smw' && styleChar !== '2') return false;
+        // 互換シム由来のエイリアス（2Idle0_3 等、'_'入り）は実体の重複なので出さない
+        if (animName.includes('_')) return false;
 
-        const isLuigi = animName.endsWith('_1') || animName.includes('_1_') || animName.endsWith('_1_1');
-        if (playerChar === 'mario' && isLuigi) return false;
-        if (playerChar === 'luigi' && !isLuigi) return false;
+        const m = animName.match(/^(\d+)([A-Za-z]+?)(\d?)$/);
+        if (!m) return true; // 想定外の名前はフィルタせず表示
+        const [, powerNum, , charDigit] = m;
 
-        const parts = animName.split('_');
-        const powerupPart = parts[1]; // e.g. "3" or "12"
-        if (playerPowerup !== 'all') {
-          const targetMap: Record<string, string> = {
-            small: '0',
-            super: '1',
-            fire: '2',
-            tanooki: '3',
-            cape: '4',
-            frog: '12'
-          };
-          if (powerupPart !== targetMap[playerPowerup]) return false;
-        }
+        // 末尾 0=マリオ / 1=ルイージ / なし(RunJump等)=共通
+        if (playerChar === 'mario' && charDigit === '1') return false;
+        if (playerChar === 'luigi' && charDigit === '0') return false;
+
+        if (playerPowerup !== 'all' && powerNum !== playerPowerup) return false;
       }
 
-      // 2. NPC Filters
-      if (selectedSprite === 'NPC') {
-        const styleChar = animName[0];
-        if (npcStyle === 'smb3' && styleChar !== '1') return false;
-        if (npcStyle === 'smw' && styleChar !== '2') return false;
-
-        if (npcChar === 'toad' && !animName.includes('NPC0')) return false;
-        if (npcChar === 'peach' && !animName.includes('NPC1')) return false;
-        if (npcChar === 'rosalina' && !animName.includes('NPC2')) return false;
-      }
-
-      // 3. General Style Filters (starts with 1 or 2)
-      if (selectedSprite !== 'PlayerSprite' && selectedSprite !== 'NPC') {
-        const styleChar = animName[0];
-        if (generalStyle === 'smb3' && styleChar !== '1') return false;
-        if (generalStyle === 'smw' && styleChar !== '2') return false;
-      }
+      // 2. NPC: _Walk エイリアスは Idle と同一実体なので出さない
+      if (selectedSprite === 'NPC' && animName.endsWith('_Walk')) return false;
 
       return true;
     });
@@ -162,14 +135,6 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
         {selectedSprite === 'PlayerSprite' && (
           <div className="flex flex-col gap-2 p-2 bg-gray-950 border border-gray-800 rounded-lg">
             <div className="flex items-center justify-between text-[10px] text-gray-500">
-              <span>スタイル:</span>
-              <div className="flex gap-1">
-                <button className={activeFilterBtn(playerStyle === 'all')} onClick={() => setPlayerStyle('all')}>すべて</button>
-                <button className={activeFilterBtn(playerStyle === 'smb3')} onClick={() => setPlayerStyle('smb3')}>SMB3</button>
-                <button className={activeFilterBtn(playerStyle === 'smw')} onClick={() => setPlayerStyle('smw')}>SMW</button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-gray-500">
               <span>キャラクター:</span>
               <div className="flex gap-1">
                 <button className={activeFilterBtn(playerChar === 'all')} onClick={() => setPlayerChar('all')}>すべて</button>
@@ -181,50 +146,24 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
               <span>パワーアップ:</span>
               <select
                 value={playerPowerup}
-                onChange={(e) => setPlayerPowerup(e.target.value as any)}
+                onChange={(e) => setPlayerPowerup(e.target.value)}
                 className="bg-gray-900 text-gray-300 text-[10px] font-bold border border-gray-800 rounded px-1.5 py-0.5 outline-none focus:border-blue-500"
               >
                 <option value="all">すべて</option>
-                <option value="small">ちびマリオ</option>
-                <option value="super">スーパーマリオ</option>
-                <option value="fire">ファイア</option>
-                <option value="tanooki">タヌキ</option>
-                <option value="cape">マント</option>
-                <option value="frog">カエル</option>
+                <option value="0">ちびマリオ</option>
+                <option value="1">スーパーマリオ</option>
+                <option value="2">ファイア</option>
+                <option value="3">しっぽ</option>
+                <option value="4">ハンマー</option>
+                <option value="5">アイス</option>
+                <option value="6">バリエーション6</option>
+                <option value="7">ペンギン</option>
+                <option value="8">バリエーション8</option>
+                <option value="9">バニー</option>
+                <option value="10">タヌキスーツ</option>
+                <option value="11">バリエーション11</option>
+                <option value="12">カエル</option>
               </select>
-            </div>
-          </div>
-        )}
-
-        {selectedSprite === 'NPC' && (
-          <div className="flex flex-col gap-2 p-2 bg-gray-950 border border-gray-800 rounded-lg">
-            <div className="flex items-center justify-between text-[10px] text-gray-500">
-              <span>スタイル:</span>
-              <div className="flex gap-1">
-                <button className={activeFilterBtn(npcStyle === 'all')} onClick={() => setNpcStyle('all')}>すべて</button>
-                <button className={activeFilterBtn(npcStyle === 'smb3')} onClick={() => setNpcStyle('smb3')}>SMB3</button>
-                <button className={activeFilterBtn(npcStyle === 'smw')} onClick={() => setNpcStyle('smw')}>SMW</button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between text-[10px] text-gray-500">
-              <span>キャラクター:</span>
-              <div className="flex gap-1">
-                <button className={activeFilterBtn(npcChar === 'all')} onClick={() => setNpcChar('all')}>すべて</button>
-                <button className={activeFilterBtn(npcChar === 'toad')} onClick={() => setNpcChar('toad')}>キノピオ</button>
-                <button className={activeFilterBtn(npcChar === 'peach')} onClick={() => setNpcChar('peach')}>ピーチ姫</button>
-                <button className={activeFilterBtn(npcChar === 'rosalina')} onClick={() => setNpcChar('rosalina')}>ロゼッタ</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {selectedSprite !== 'PlayerSprite' && selectedSprite !== 'NPC' && (
-          <div className="flex items-center justify-between text-[10px] text-gray-500 p-2 bg-gray-950 border border-gray-800 rounded-lg">
-            <span>スタイル:</span>
-            <div className="flex gap-1">
-              <button className={activeFilterBtn(generalStyle === 'all')} onClick={() => setGeneralStyle('all')}>すべて</button>
-              <button className={activeFilterBtn(generalStyle === 'smb3')} onClick={() => setGeneralStyle('smb3')}>SMB3 (栗/亀..)</button>
-              <button className={generalStyle === 'smw' ? activeFilterBtn(true) : activeFilterBtn(false)} onClick={() => setGeneralStyle('smw')}>SMW (丸栗..)</button>
             </div>
           </div>
         )}
@@ -337,7 +276,6 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
 
   useEffect(() => {
     let raf = 0;
-    let img: HTMLImageElement | null = null;
     let cancelled = false;
     setError(false);
 
@@ -345,19 +283,24 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
     const anim = sprite?.animations?.[animName];
     if (!anim || !anim.frames.length) return;
 
-    const imageUrl = resolveSMCUrl(anim.frames[0].image);
-
-    loadImage(imageUrl).then((loaded) => {
-      if (cancelled) return;
-      img = loaded;
-      raf = requestAnimationFrame(render);
-    }).catch(() => { if (!cancelled) setError(true); });
+    // SMC のアニメはコマごとに別シートにまたがることがある
+    // （例: Goomba 2Walk は f0=tiles-sheet5, f1=goomba-sheet0）。
+    // frames[0] のシート固定で切り抜くと別コマが化けるので、シートごとにロードして
+    // 各コマは自分のシートから描く。
+    const imgByUrl = new Map<string, HTMLImageElement>();
+    const urls = Array.from(new Set<string>(anim.frames.map((f: any) => resolveSMCUrl(f.image))));
+    Promise.all(urls.map(u => loadImage(u).then(img => imgByUrl.set(u, img))))
+      .then(() => {
+        if (cancelled) return;
+        raf = requestAnimationFrame(render);
+      })
+      .catch(() => { if (!cancelled) setError(true); });
 
     const render = () => {
       if (cancelled) return;
       raf = requestAnimationFrame(render);
       const canvas = canvasRef.current;
-      if (!canvas || !img) return;
+      if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
@@ -368,6 +311,8 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
         frameIndex = Math.floor((performance.now() / 1000) * fps) % framesCount;
       }
       const frame = anim.frames[frameIndex];
+      const img = imgByUrl.get(resolveSMCUrl(frame.image));
+      if (!img) return;
       const sx = frame.x;
       const sy = frame.y;
       const sw = frame.w;
