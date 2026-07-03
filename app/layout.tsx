@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, DotGothic16, Press_Start_2P } from "next/font/google";
 import "./globals.css";
 import { AudioFocusProvider } from '@/lib/audio-focus-context';
 import DemoNoticeModal from '@/components/DemoNoticeModal';
@@ -12,6 +12,20 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+});
+
+const dotGothic16 = DotGothic16({
+  variable: "--font-pixel",
+  weight: "400",
+  subsets: ["latin"],
+  preload: false,
+});
+
+const pressStart2P = Press_Start_2P({
+  variable: "--font-pixel-en",
+  weight: "400",
+  subsets: ["latin"],
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -42,7 +56,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${dotGothic16.variable} ${pressStart2P.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col"><AudioFocusProvider>{children}</AudioFocusProvider>{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
     </html>

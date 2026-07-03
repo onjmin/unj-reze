@@ -36,7 +36,7 @@ export async function GET(
   const joined = path.map(encodeURIComponent).join('/');
   const upstreamUrl = isData
     ? `${ORIGIN}/${joined}${search}`
-    : `${ORIGIN}/api/${joined}${search}`;
+    : `${ORIGIN}/api/rpgen/${joined}${search}`;
 
   const clientReferer = request.headers.get('referer') ?? request.headers.get('origin') ?? '';
 

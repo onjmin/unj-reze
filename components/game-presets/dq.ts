@@ -628,8 +628,8 @@ export const dq: PresetData = {
     textColor: '#ffee88',
   },
   bgm: { ref: 'https://www.youtube.com/watch?v=HYjTiY6RITE', src: 'https://www.youtube.com/watch?v=HYjTiY6RITE', type: 'youtube' },
-  battleBgm: { ref: 'https://www.youtube.com/watch?v=Str7rMSDhcI', src: 'https://www.youtube.com/watch?v=Str7rMSDhcI', type: 'youtube' },
-  bossBgm:   { ref: 'https://www.youtube.com/watch?v=9QzO_4pMZPY', src: 'https://www.youtube.com/watch?v=9QzO_4pMZPY', type: 'youtube' },
+  battleBgm: { ref: 'https://www.youtube.com/watch?v=CjgbtaH99do', src: 'https://www.youtube.com/watch?v=CjgbtaH99do', type: 'youtube' },
+  bossBgm:   { ref: 'https://www.youtube.com/watch?v=2JslD8UrL9E', src: 'https://www.youtube.com/watch?v=2JslD8UrL9E', type: 'youtube' },
   sfx: {
     levelup:  { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
     purchase: { ref: `direct:${su('PEeN5M')}`, src: su('PEeN5M'), type: 'direct' as const },

@@ -40,6 +40,16 @@ import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 
 export type { PresetId };
 
+let cachedPixelFontFamily: string | null = null;
+/** HUD/ダイアログのcanvas描画に使うピクセルアートフォント名を取得（next/fontのCSS変数から解決） */
+function getPixelFontFamily(): string {
+  if (cachedPixelFontFamily) return cachedPixelFontFamily;
+  if (typeof document === 'undefined') return 'monospace';
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--font-pixel').trim();
+  cachedPixelFontFamily = raw || 'monospace';
+  return cachedPixelFontFamily;
+}
+
 function colorFromId(id: string): string {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
@@ -4397,7 +4407,7 @@ const lose = (msg: string) => {
             const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
             const display = text.slice(0, shown);
             if (display) {
-              ctx.font = 'bold 11px monospace';
+              ctx.font = `bold 11px ${getPixelFontFamily()}`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'bottom';
               // 画面外にはみ出さないよう、最大幅で改行してから複数行描画する（禁則処理つき）
@@ -4583,7 +4593,7 @@ const lose = (msg: string) => {
           drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, fp.x, fp.y, pData.w, pData.h, `fake_${fp.sessionId}`);
           // 頭上ネームプレート（色帯＋ID文字）
           const label = fp.sessionId;
-          ctx.font = 'bold 9px monospace';
+          ctx.font = `bold 9px ${getPixelFontFamily()}`;
           const tw = ctx.measureText(label).width;
           const bw = tw + 6, bh = 13;
           const bx = cx - bw / 2, by = fp.y - bh - 6;
@@ -4782,7 +4792,7 @@ const lose = (msg: string) => {
         ctx.fillStyle = 'rgba(0,0,0,0.45)';
         ctx.fillRect(PLAY_W - 110, 8, 102, 18);
         ctx.fillStyle = curPhase?.kind === 'boss' ? '#ff9940' : '#ffd84d';
-        ctx.font = 'bold 11px monospace';
+        ctx.font = `bold 11px ${getPixelFontFamily()}`;
         ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
         ctx.fillText(text, PLAY_W - 8, 22);
         void remaining;
@@ -4793,7 +4803,7 @@ const lose = (msg: string) => {
         const sc = scoreRef.current;
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(PLAY_W - 130, PLAY_H - 26, 122, 20);
-        ctx.font = 'bold 12px monospace';
+        ctx.font = `bold 12px ${getPixelFontFamily()}`;
         ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = '#ffd84d';
         ctx.fillText(`SCORE  ${sc.toLocaleString()}`, PLAY_W - 8, PLAY_H - 10);
@@ -4803,7 +4813,7 @@ const lose = (msg: string) => {
         const gz = grazeRef.current;
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(PLAY_W - 130, PLAY_H - 50, 122, 20);
-        ctx.font = 'bold 11px monospace';
+        ctx.font = `bold 11px ${getPixelFontFamily()}`;
         ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = gz > 0 ? '#fde68a' : '#666';
         ctx.fillText(`GRAZE  ${gz}`, PLAY_W - 8, PLAY_H - 34);
@@ -4813,7 +4823,7 @@ const lose = (msg: string) => {
       if (isPlaying && gameData.engine === 'touhou') {
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(8, PLAY_H - 26, 90, 20);
-        ctx.font = 'bold 13px monospace';
+        ctx.font = `bold 13px ${getPixelFontFamily()}`;
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         const lives = livesRef.current;
         const hearts = '❤'.repeat(Math.max(0, lives));
@@ -4825,7 +4835,7 @@ const lose = (msg: string) => {
         const bc = bombCountRef.current;
         ctx.fillStyle = 'rgba(0,0,0,0.5)';
         ctx.fillRect(8, PLAY_H - 50, 100, 20);
-        ctx.font = 'bold 12px monospace';
+        ctx.font = `bold 12px ${getPixelFontFamily()}`;
         ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = bc > 0 ? '#c4b5fd' : '#555';
         ctx.fillText('💣 ×' + bc, 12, PLAY_H - 34);
@@ -4850,7 +4860,7 @@ const lose = (msg: string) => {
           ctx.fillStyle = 'rgba(0,0,0,0.45)';
           ctx.fillRect(barX, barY + barH + 2, 200, 14);
           ctx.fillStyle = activeSpellCardNameRef.current ? '#ffaa44' : '#5bd1ff';
-          ctx.font = 'bold 10px monospace';
+          ctx.font = `bold 10px ${getPixelFontFamily()}`;
           ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
           ctx.fillText(activeSpellCardNameRef.current ?? boss.def.name ?? boss.def.emoji, barX + 4, barY + barH + 12);
         }
@@ -4870,7 +4880,7 @@ const lose = (msg: string) => {
           ctx.fillRect(barX, barY, barW * pct, barH);
           ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1;
           ctx.strokeRect(barX, barY, barW, barH);
-          ctx.fillStyle = '#ff8888'; ctx.font = 'bold 10px monospace';
+          ctx.fillStyle = '#ff8888'; ctx.font = `bold 10px ${getPixelFontFamily()}`;
           ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
           ctx.fillText(`BOSS: ${boss.def.name ?? boss.def.emoji}`, barX + 4, barY + barH + 12);
         }
@@ -4881,7 +4891,7 @@ const lose = (msg: string) => {
         const pr = progressRef.current;
         ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(6, 6, 150, 68);
         ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(6, 6, 150, 68);
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = '#fff'; ctx.font = `bold 12px ${getPixelFontFamily()}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
         ctx.fillText(`Lv ${pr.level}  ${playerNameRef.current || gameData.battle.playerName}`, 12, 22);
         ctx.fillText(`HP ${Math.max(0, pr.hp)}/${pr.maxHp}`, 12, 38);
         ctx.fillStyle = '#7fd0ff'; ctx.fillText(`MP ${pr.mp}/${pr.maxMp}`, 12, 52);
@@ -4906,7 +4916,7 @@ const lose = (msg: string) => {
           ctx.fillRect(gx2, sy, segW, segH);
         }
         const wItem = (gameDataRef.current.items ?? []).find(it => it.id === wId);
-        ctx.fillStyle = '#ffaa44'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffaa44'; ctx.font = `bold 8px ${getPixelFontFamily()}`; ctx.textAlign = 'left';
         ctx.fillText(wItem?.emoji ?? wId.slice(0, 3), gx2, gy2 - 6);
       }
 
@@ -5324,11 +5334,11 @@ const lose = (msg: string) => {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 rounded-full shrink-0"><X size={16} /></button>}
+          {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 shrink-0"><X size={16} /></button>}
           <span className="text-xs font-bold text-white shrink-0">{embedded ? '▶ プレイ中' : 'ゲーム作成'}</span>
           {!isPlaying && !playOnly && (
             <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
+              className="bg-gray-800 border border-gray-700 px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
               {PRESET_ORDER.map(id => (
                 <option key={id} value={id}>{PRESETS[id].name}</option>
               ))}
@@ -5340,24 +5350,24 @@ const lose = (msg: string) => {
           <div className="relative" ref={settingsRef}>
             <button
               onClick={() => setSettingsOpen(v => !v)}
-              className={`p-2 rounded-full ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-700/50 text-gray-400 hover:text-white'} ${debugInvincible ? 'ring-1 ring-yellow-400' : ''}`}
+              className={`p-2 ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-700/50 text-gray-400 hover:text-white'} ${debugInvincible ? 'ring-1 ring-yellow-400' : ''}`}
               title="設定"
             >
               <Settings size={14} />
             </button>
             {settingsOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[#1a1a2e] border border-gray-700 rounded-xl shadow-2xl p-2 space-y-1">
+              <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
                 {/* 無敵モード */}
                 <button
                   onClick={() => setDebugInvincible(v => !v)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition ${debugInvincible ? 'bg-yellow-500/20 text-yellow-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${debugInvincible ? 'bg-yellow-500/20 text-yellow-300' : 'text-gray-400 hover:bg-gray-700'}`}
                 >
                   {debugInvincible ? <Shield size={13} /> : <ShieldOff size={13} />}
                   無敵モード {debugInvincible ? 'ON' : 'OFF'}
                 </button>
                 <button
                   onClick={() => { setOnlineTestMode(v => !v); setSettingsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
                 >
                   🌐 オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
                 </button>
@@ -5366,14 +5376,14 @@ const lose = (msg: string) => {
                 {/* エクスポート */}
                 <button
                   onClick={() => { handleExport(); setSettingsOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
                 >
                   <Download size={13} />データをエクスポート (.json)
                 </button>
                 {/* インポート */}
                 <button
                   onClick={() => { importFileRef.current?.click(); setSettingsOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
                 >
                   <Upload size={13} />データをインポート (.json)
                 </button>
@@ -5404,7 +5414,7 @@ const lose = (msg: string) => {
               </div>
             )}
           </div>
-          <button onClick={restart} className="p-2 text-gray-400 hover:text-white rounded-full bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
+          <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
             if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2))); }
             if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
@@ -5413,11 +5423,11 @@ const lose = (msg: string) => {
             setIsPlaying(true);
             justStartedRef.current = true;
           }}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
             {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
           </button>
           {onSave && (
-            <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
+            <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
               <Save size={14} /><span className="hidden sm:inline">投稿に添付</span>
             </button>
           )}
@@ -5428,7 +5438,7 @@ const lose = (msg: string) => {
       <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
         {/* Canvas */}
         <div className={`flex flex-col items-center justify-center bg-black overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1 portrait:flex-none'}`}>
-          <div className="relative w-full mx-auto rounded-lg overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
+          <div className="relative w-full mx-auto overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
             style={{ aspectRatio: `${PLAY_W}/${PLAY_H}`, maxWidth: PLAY_W + 'px' }}>
             <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
               className={`block w-full h-full ${!isPlaying ? 'cursor-crosshair' : ''}`}
@@ -5446,7 +5456,7 @@ const lose = (msg: string) => {
                 href="https://github.com/Level-Share-Square/SMC-released-sprites"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="absolute bottom-1 right-1 z-30 bg-black/60 text-[8px] text-gray-400 hover:text-white px-1.5 py-0.5 rounded select-none leading-none"
+                className="absolute bottom-1 right-1 z-30 bg-black text-[8px] text-gray-400 hover:text-white px-1.5 py-0.5 select-none leading-none font-pixel"
                 title="Sprites: SMC-released-sprites © Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph (non-commercial)"
                 onClick={e => e.stopPropagation()}
               >
@@ -5456,7 +5466,7 @@ const lose = (msg: string) => {
 
             {/* ゲーム編集時は画面右下に主人公の現在座標を表示(x,y) */}
             {!isPlaying && !introOpen && !showTitle && !showEnding && (
-              <div className="absolute bottom-2 right-2 z-30 bg-black/75 backdrop-blur-sm text-[11px] font-mono text-gray-200 px-2.5 py-1.5 rounded border border-white/10 select-none shadow-lg flex flex-col gap-0.5 pointer-events-none align-right text-right">
+              <div className="absolute bottom-2 right-2 z-30 bg-black text-[11px] font-pixel text-gray-200 px-2.5 py-1.5 border-2 border-white/40 select-none flex flex-col gap-0.5 pointer-events-none align-right text-right">
                 <div className="flex items-center justify-end gap-1">
                   <span className="text-emerald-400 font-bold">🏁</span>
                   <span className="font-semibold text-white">
@@ -5475,20 +5485,20 @@ const lose = (msg: string) => {
                   <img src={gameData.titleScreen.bgUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
                 )}
                 {!embedded && (
-                  <button onClick={() => setShowTitle(false)} className="absolute top-2 right-2 z-20 p-1.5 rounded-full bg-black/50 text-white/80 hover:text-white"><X size={16} /></button>
+                  <button onClick={() => setShowTitle(false)} className="absolute top-2 right-2 z-20 p-1.5 bg-black/50 text-white/80 hover:text-white"><X size={16} /></button>
                 )}
                 <div className="relative z-10 w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center select-none"
                   style={{ color: gameData.titleScreen.textColor ?? '#ffffff' }}>
-                  <h1 className="text-2xl sm:text-4xl font-black" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.heading}</h1>
-                  {gameData.titleScreen.subtitle && <p className="text-sm opacity-90" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.subtitle}</p>}
-                  {playerName && <p className="text-xs opacity-80" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>ようこそ {playerName} さん</p>}
+                  <h1 className="text-2xl sm:text-4xl font-pixel" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.heading}</h1>
+                  {gameData.titleScreen.subtitle && <p className="text-sm font-pixel opacity-90" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.subtitle}</p>}
+                  {playerName && <p className="text-xs font-pixel opacity-80" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>ようこそ {playerName} さん</p>}
                   <div className="flex flex-col gap-2 mt-2 w-52 max-w-full">
                     {gameData.titleScreen.menu.map((mi, i) => mi.kind === 'nameInput' ? (
                       <input key={i} value={playerName} onChange={e => setPlayerName(e.target.value.slice(0, 16))} placeholder={mi.label}
-                        className="px-3 py-2 rounded-lg bg-black/45 border border-white/30 text-white text-sm text-center outline-none placeholder-white/50" />
+                        className="px-3 py-2 bg-black border-2 border-white/60 text-white text-sm text-center outline-none placeholder-white/50 font-pixel" />
                     ) : (
                       <button key={i} onClick={startFromTitle}
-                        className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">{mi.label}</button>
+                        className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">{mi.label}</button>
                     ))}
                   </div>
                 </div>
@@ -5503,15 +5513,15 @@ const lose = (msg: string) => {
                 )}
                 <div className="relative z-10 w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center select-none"
                   style={{ color: gameData.ending.textColor ?? '#ffffff' }}>
-                  <h1 className="text-2xl sm:text-4xl font-black" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.ending.heading}</h1>
-                  {gameData.ending.message && <p className="text-sm opacity-90 whitespace-pre-wrap" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.ending.message}</p>}
+                  <h1 className="text-2xl sm:text-4xl font-pixel" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.ending.heading}</h1>
+                  {gameData.ending.message && <p className="text-sm font-pixel opacity-90 whitespace-pre-wrap" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.ending.message}</p>}
                   <div className="flex gap-2 mt-3">
                     {gameData.titleScreen && (
                       <button onClick={() => { setShowEnding(false); setShowTitle(true); }}
-                        className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">タイトルへ</button>
+                        className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">タイトルへ</button>
                     )}
                     <button onClick={() => setShowEnding(false)}
-                      className="px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 border border-white/30 font-bold text-sm backdrop-blur-sm">とじる</button>
+                      className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">とじる</button>
                   </div>
                 </div>
               </div>
@@ -5556,7 +5566,7 @@ const lose = (msg: string) => {
                       style={{ animation: `${introAnim === 'right' ? 'introCardInRight' : 'introCardInLeft'} 0.22s ease both` }}
                       className="flex flex-col items-center gap-3 px-12">
                       {/* パッケージ風カード */}
-                      <div className={`w-28 h-36 rounded-2xl bg-gradient-to-b ${PRESET_BOX_GRADIENT[presetId]} ring-2 ${PRESET_RING[presetId]} shadow-2xl flex flex-col items-center justify-center gap-2 relative overflow-hidden`}>
+                      <div className={`w-28 h-36 bg-gradient-to-b ${PRESET_BOX_GRADIENT[presetId]} ring-2 ${PRESET_RING[presetId]} shadow-2xl flex flex-col items-center justify-center gap-2 relative overflow-hidden`}>
                         <div className="absolute inset-0 opacity-10"
                           style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fff 0, #fff 1px, transparent 0, transparent 50%)', backgroundSize: '6px 6px' }} />
                         <span className="text-5xl leading-none relative z-10">{PRESET_EMOJI[presetId]}</span>
@@ -5580,7 +5590,7 @@ const lose = (msg: string) => {
                   <div className="shrink-0 flex justify-center gap-2 pb-3">
                     {PRESET_ORDER.map(id => (
                       <button key={id} onClick={() => { setIntroAnim('right'); previewPresetInIntro(id); }}
-                        className={`rounded-full transition-all duration-200 ${id === presetId ? 'w-5 h-2 bg-white' : 'w-2 h-2 bg-white/25 hover:bg-white/50'}`} />
+                        className={` transition-all duration-200 ${id === presetId ? 'w-5 h-2 bg-white' : 'w-2 h-2 bg-white/25 hover:bg-white/50'}`} />
                     ))}
                   </div>
                 </div>
@@ -5609,8 +5619,8 @@ const lose = (msg: string) => {
                 onClick={dismissGameMsg}
                 onTouchEnd={e => { e.preventDefault(); dismissGameMsg(); }}
               >
-                <div className="bg-[#1a1a2e] border-2 border-gray-400 rounded-lg px-4 py-3 shadow-2xl"
-                  style={{ fontFamily: 'monospace', imageRendering: 'pixelated' }}>
+                <div className="bg-[#1a1a2e] border-2 border-gray-400 px-4 py-3 font-pixel"
+                  style={{ imageRendering: 'pixelated' }}>
                   <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{gameMsg.text}</p>
                   <div className="flex justify-end mt-1.5 h-4">
                     {gameMsgReadyRef.current
@@ -5627,23 +5637,23 @@ const lose = (msg: string) => {
               gameOverResult.marioDeathAnim
               ? (
                 /* ── マリオ専用ゲームオーバー演出 ── */
-                <div className="absolute inset-0 flex flex-col items-center justify-center z-50"
-                  style={{ background: 'rgba(0,0,0,0.88)', fontFamily: '"Press Start 2P", monospace, sans-serif' }}>
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-50 font-pixel-en"
+                  style={{ background: 'rgba(0,0,0,0.88)' }}>
                   {/* GAME OVER タイトル */}
                   <div style={{ animation: 'marioGoFadeIn 0.6s ease-out forwards', opacity: 0 }}>
                     <p style={{
                       color: '#ff3030', fontSize: 22, fontWeight: 900, letterSpacing: 6,
                       textShadow: '2px 2px 0 #800000, 4px 4px 0 #400000',
-                      fontFamily: 'monospace', lineHeight: 1
+                      lineHeight: 1
                     }}>GAME OVER</p>
                   </div>
                   {/* コイン残数 */}
-                  <div style={{ marginTop: 24, color: '#ffd700', fontSize: 13, letterSpacing: 2, fontFamily: 'monospace' }}>
+                  <div style={{ marginTop: 24, color: '#ffd700', fontSize: 13, letterSpacing: 2 }}>
                     🪙 × {coinsRef.current}
                   </div>
                   {/* スコア */}
                   {gameOverResult.score > 0 && (
-                    <div style={{ marginTop: 8, color: '#aaa', fontSize: 11, letterSpacing: 2, fontFamily: 'monospace' }}>
+                    <div style={{ marginTop: 8, color: '#aaa', fontSize: 11, letterSpacing: 2 }}>
                       SCORE {gameOverResult.score.toLocaleString()}
                     </div>
                   )}
@@ -5652,12 +5662,12 @@ const lose = (msg: string) => {
                     <button
                       onClick={handleGameOverRetry}
                       style={{ padding: '9px 0', background: '#1060d0', color: '#fff', border: '2px solid #4090ff',
-                        fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold', letterSpacing: 2, cursor: 'pointer' }}
+                        fontSize: 12, fontWeight: 'bold', letterSpacing: 2, cursor: 'pointer' }}
                     >▶ RETRY</button>
                     <button
                       onClick={handleGameOverExit}
                       style={{ padding: '9px 0', background: '#333', color: '#aaa', border: '2px solid #555',
-                        fontFamily: 'monospace', fontSize: 12, fontWeight: 'bold', letterSpacing: 2, cursor: 'pointer' }}
+                        fontSize: 12, fontWeight: 'bold', letterSpacing: 2, cursor: 'pointer' }}
                     >✕ QUIT</button>
                   </div>
                 </div>
@@ -5665,11 +5675,10 @@ const lose = (msg: string) => {
               : (
                 /* ── 汎用ゲームオーバー画面 ── */
                 <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-50">
-                  <div className="bg-gray-950 border-2 border-red-600 rounded-2xl px-8 py-7 text-center shadow-2xl min-w-[200px] space-y-4"
-                    style={{ fontFamily: 'monospace' }}>
+                  <div className="bg-gray-950 border-2 border-red-600 px-8 py-7 text-center min-w-[200px] space-y-4 font-pixel">
                     <p className="text-red-400 text-2xl font-bold tracking-widest">GAME OVER</p>
                     {gameOverResult.score > 0 && (
-                      <div className="border border-gray-700 rounded-lg px-4 py-2">
+                      <div className="border border-gray-700 px-4 py-2">
                         <p className="text-gray-400 text-[11px] tracking-widest">SCORE</p>
                         <p className="text-yellow-300 text-xl font-bold">{gameOverResult.score.toLocaleString()}</p>
                       </div>
@@ -5677,13 +5686,13 @@ const lose = (msg: string) => {
                     <div className="flex flex-col gap-2 pt-1">
                       <button
                         onClick={handleGameOverRetry}
-                        className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold tracking-wide transition-colors"
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold tracking-wide transition-colors"
                       >
                         ▶ リトライ
                       </button>
                       <button
                         onClick={handleGameOverExit}
-                        className="w-full py-2 rounded-lg bg-gray-700 hover:bg-gray-600 active:bg-gray-800 text-gray-200 text-sm font-bold tracking-wide transition-colors"
+                        className="w-full py-2 bg-gray-700 hover:bg-gray-600 active:bg-gray-800 text-gray-200 text-sm font-bold tracking-wide transition-colors"
                       >
                         ✕ 終了
                       </button>
@@ -5758,14 +5767,13 @@ const lose = (msg: string) => {
 
             {/* ── イベント選択肢 ── */}
             {eventChoice && !battle && (
-              <div className="absolute inset-0 flex items-end justify-center pb-16 px-4"
-                style={{ fontFamily: 'monospace' }}>
-                <div className="bg-[#1a1a2e] border-2 border-gray-400 rounded-lg p-3 shadow-2xl w-full max-w-xs">
+              <div className="absolute inset-0 flex items-end justify-center pb-16 px-4 font-pixel">
+                <div className="bg-[#1a1a2e] border-2 border-gray-400 p-3 shadow-2xl w-full max-w-xs">
                   <p className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap">{eventChoice.text}</p>
                   <div className="space-y-1.5">
                     {eventChoice.choices.map((ch, i) => (
                       <button key={i} onClick={() => eventChoice.onPick(i)}
-                        className="w-full py-1.5 rounded bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white text-xs font-bold text-left px-3">
+                        className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white text-xs font-bold text-left px-3">
                         {ch.label}
                       </button>
                     ))}
@@ -5776,17 +5784,17 @@ const lose = (msg: string) => {
 
             {/* ── ターン制戦闘オーバーレイ ── */}
             {battle && (
-              <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40" style={{ fontFamily: 'monospace' }}>
+              <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40 font-pixel">
                 {/* 敵 */}
                 <div className="flex flex-col items-center mt-2">
                   <div className="text-5xl sm:text-6xl leading-none drop-shadow">{battle.enemyEmoji}</div>
                   <div className="mt-1 text-white text-xs sm:text-sm">{battle.enemyName}</div>
-                  <div className="w-40 h-2 bg-gray-700 rounded mt-1 overflow-hidden">
+                  <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
                     <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
                   </div>
                 </div>
                 {/* ログ + コマンド */}
-                <div className="bg-[#1a1a2e] border-2 border-gray-400 rounded-lg p-2 sm:p-3 shadow-2xl">
+                <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
                   <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] mb-2">
                     {battle.log.slice(-3).map((l, i) => <p key={i}>{l}</p>)}
                   </div>
@@ -5794,27 +5802,27 @@ const lose = (msg: string) => {
                     <div className="space-y-1.5">
                       {usableItems().map(it => (
                         <button key={it.id} onClick={() => useHealItem(it, true)}
-                          className="w-full flex justify-between items-center px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-[11px] font-bold">
+                          className="w-full flex justify-between items-center px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-[11px] font-bold">
                           <span>{it.emoji} {it.name}</span>
                           <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
                         </button>
                       ))}
                       <button onClick={() => setBattleItemsOpen(false)}
-                        className="w-full py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-bold">もどる</button>
+                        className="w-full py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-bold">もどる</button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-1.5">
-                      <button onClick={doAttack} className="py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.attack}</button>
-                      <button onClick={doFlee} className="py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.flee}</button>
+                      <button onClick={doAttack} className="py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.attack}</button>
+                      <button onClick={doFlee} className="py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.flee}</button>
                       {(gameData.battle?.moves ?? []).map((m, i) => (
                         <button key={i} onClick={() => doMove(m)} disabled={progressRef.current.mp < m.cost}
-                          className="py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-bold">
+                          className="py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-bold">
                           {m.name}<span className="text-indigo-300 ml-1">{m.cost}</span>
                         </button>
                       ))}
                       {usableItems().length > 0 && (
                         <button onClick={() => setBattleItemsOpen(true)}
-                          className="py-1.5 rounded bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold">
+                          className="py-1.5 bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold">
                           {gameData.battle?.labels.item ?? 'どうぐ'}
                         </button>
                       )}
@@ -5827,7 +5835,7 @@ const lose = (msg: string) => {
             {/* ── ショップモーダル ── */}
             {shopModal && (
               <div className="absolute inset-0 flex items-end justify-center pb-4 z-30">
-                <div className="bg-gray-900 border border-yellow-600 rounded-xl p-4 w-full max-w-xs mx-3">
+                <div className="bg-gray-900 border border-yellow-600 p-4 w-full max-w-xs mx-3 font-pixel">
                   <div className="text-yellow-400 font-bold text-sm mb-2">🏪 お店</div>
                   <div className="text-yellow-300 text-xs mb-3">所持金: {progressRef.current.gold ?? 0} G</div>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -5855,7 +5863,7 @@ const lose = (msg: string) => {
                             setShopModal(null);
                             forceHud(n => n + 1);
                           }}
-                          className={`w-full flex justify-between items-center px-3 py-2 rounded-lg text-xs ${canAfford ? 'bg-gray-700 text-white active:bg-yellow-600/30' : 'bg-gray-800 text-gray-500'}`}
+                          className={`w-full flex justify-between items-center px-3 py-2 text-xs ${canAfford ? 'bg-gray-700 text-white active:bg-yellow-600/30' : 'bg-gray-800 text-gray-500'}`}
                         >
                           <span>{itemDef?.emoji ?? '?'} {itemDef?.name ?? si.itemId}</span>
                           <span className={canAfford ? 'text-yellow-400' : 'text-gray-600'}>{si.price} G</span>
@@ -5863,7 +5871,7 @@ const lose = (msg: string) => {
                       );
                     })}
                   </div>
-                  <button onClick={() => setShopModal(null)} className="mt-3 w-full py-2 rounded-lg bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                  <button onClick={() => setShopModal(null)} className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
                 </div>
               </div>
             )}
@@ -5871,12 +5879,12 @@ const lose = (msg: string) => {
             {/* ── フィールドどうぐ袋（rpg エンジン）── */}
             {isPlaying && gameData.engine === 'rpg' && gameData.battle && !battle && !shopModal && !gameMsg && !activeDialogue && !eventChoice && !bagOpen && (
               <button onClick={() => setBagOpen(true)}
-                className="absolute top-2 right-2 z-20 w-9 h-9 grid place-items-center rounded-full bg-black/55 border border-amber-500/60 text-base active:bg-black/80"
+                className="absolute top-2 right-2 z-20 w-9 h-9 grid place-items-center bg-black/55 border border-amber-500/60 text-base active:bg-black/80"
                 title="どうぐ">🎒</button>
             )}
             {bagOpen && !battle && (
               <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => setBagOpen(false)}>
-                <div className="bg-gray-900 border border-amber-600 rounded-xl p-4 w-full max-w-xs mx-3" onClick={e => e.stopPropagation()}>
+                <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
                   <div className="text-amber-400 font-bold text-sm mb-2">🎒 どうぐ</div>
                   <div className="text-yellow-300 text-xs mb-3">所持金: {progressRef.current.gold ?? 0} G</div>
                   <div className="space-y-1.5 max-h-48 overflow-y-auto">
@@ -5887,7 +5895,7 @@ const lose = (msg: string) => {
                       const equipped = equipment.weapon === it.id || equipment.armor === it.id;
                       const usable = !!(it.healHp || it.healMp);
                       return (
-                        <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-800 text-xs text-white">
+                        <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 text-xs text-white">
                           <span className="min-w-0 truncate">
                             {it.emoji} {it.name}
                             {equipped && <span className="text-green-400 ml-1 font-bold">E</span>}
@@ -5895,13 +5903,13 @@ const lose = (msg: string) => {
                           </span>
                           {usable && (
                             <button onClick={() => useHealItem(it, false)}
-                              className="shrink-0 px-2.5 py-1 rounded bg-amber-700 active:bg-amber-600 text-white font-bold">つかう</button>
+                              className="shrink-0 px-2.5 py-1 bg-amber-700 active:bg-amber-600 text-white font-bold">つかう</button>
                           )}
                         </div>
                       );
                     })}
                   </div>
-                  <button onClick={() => setBagOpen(false)} className="mt-3 w-full py-2 rounded-lg bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                  <button onClick={() => setBagOpen(false)} className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
                 </div>
               </div>
             )}
@@ -5910,28 +5918,28 @@ const lose = (msg: string) => {
               <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute bottom-2 left-1 pointer-events-auto touch-none select-none opacity-90">
                   <div className="relative w-16 h-16">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 rounded-t active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('up')}>▲</div>
-                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 rounded-b active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('down')}>▼</div>
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 rounded-l active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('left')}>◀</div>
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 rounded-r active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('right')}>▶</div>
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('up')}>▲</div>
+                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('down')}>▼</div>
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('left')}>◀</div>
+                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('right')}>▶</div>
                   </div>
                 </div>
                 <div className="absolute bottom-2 right-1 pointer-events-auto touch-none select-none opacity-90">
                   <div className="relative w-14 h-16">
                     <button onClick={placeObj}
-                      className="absolute right-0 bottom-0 w-10 h-10 rounded-full bg-green-600 active:bg-green-500 shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
+                      className="absolute right-0 bottom-0 w-10 h-10 bg-green-600 active:bg-green-500 shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
                       title="Zキー">PUT</button>
                     <button onClick={() => { if (selectedObjIdRef.current) { setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) })); setSelectedObjId(null); }}}
-                      className="absolute left-0 top-1 w-9 h-9 rounded-full bg-red-700 active:bg-red-600 shadow-lg border-b-4 border-red-900 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
+                      className="absolute left-0 top-1 w-9 h-9 bg-red-700 active:bg-red-600 shadow-lg border-b-4 border-red-900 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
                       title="Xキー">DEL</button>
                   </div>
                 </div>
                 <div className="absolute top-1 left-1/2 -translate-x-1/2 pointer-events-auto touch-none select-none opacity-90">
-                  <div className="flex items-center gap-1 px-2 py-1 rounded bg-black/50 text-[10px]">
+                  <div className="flex items-center gap-1 px-2 py-1 bg-black/50 text-[10px]">
                     <span className="text-gray-300">速度:</span>
                     {[1, 2, 4].map(m => (
                       <button key={m} onClick={() => setEditSpeedMult(m)}
-                        className={`px-2 py-0.5 rounded font-bold transition ${editSpeedMult === m ? 'bg-blue-600 text-white' : 'bg-gray-700/70 text-gray-400 hover:bg-gray-600'}`}>
+                        className={`px-2 py-0.5 font-bold transition ${editSpeedMult === m ? 'bg-blue-600 text-white' : 'bg-gray-700/70 text-gray-400 hover:bg-gray-600'}`}>
                         {m}x
                       </button>
                     ))}
@@ -5950,35 +5958,35 @@ const lose = (msg: string) => {
               <div className="flex justify-between items-center max-w-xs w-full gap-8">
                 <div ref={dpadRef} {...dpadProps} className="relative w-32 h-32 touch-none cursor-pointer select-none">
                   {/* 8方向パッド：本体1枚でポインタ追跡。子要素は表示のみ */}
-                  <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] rounded-t-lg pointer-events-none transition-colors ${touchRef.current.up ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] rounded-b-lg pointer-events-none transition-colors ${touchRef.current.down ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 rounded-l-lg pointer-events-none transition-colors ${touchRef.current.left ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 rounded-r-lg pointer-events-none transition-colors ${touchRef.current.right ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 bg-gray-700 pointer-events-none rounded"></div>
+                  <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] pointer-events-none transition-colors ${touchRef.current.up ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] pointer-events-none transition-colors ${touchRef.current.down ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 pointer-events-none transition-colors ${touchRef.current.left ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 pointer-events-none transition-colors ${touchRef.current.right ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 bg-gray-700 pointer-events-none"></div>
                   {/* 斜め入力ガイド（対応する2方向が同時点灯） */}
-                  <div className={`absolute top-1.5 right-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
-                  <div className={`absolute top-1.5 left-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
-                  <div className={`absolute bottom-1.5 right-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
-                  <div className={`absolute bottom-1.5 left-1.5 w-3 h-3 rounded-full pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute top-1.5 right-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute top-1.5 left-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute bottom-1.5 right-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                  <div className={`absolute bottom-1.5 left-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
                 </div>
                 {introOpen ? (
                   <div className="flex flex-col gap-2.5 items-center">
                     <button onClick={enterPlayFromIntro}
-                      className="w-28 h-14 rounded-full border-b-4 border-green-900 active:border-b-0 active:translate-y-1 bg-green-500 active:bg-green-400 text-green-950 font-black text-sm shadow-lg shadow-green-500/30 flex items-center justify-center gap-1.5 transition touch-none select-none">
+                      className="w-28 h-14 border-b-4 border-green-900 active:border-b-0 active:translate-y-1 bg-green-500 active:bg-green-400 text-green-950 font-black text-sm shadow-lg shadow-green-500/30 flex items-center justify-center gap-1.5 transition touch-none select-none">
                       <Play size={14} /> あそぶ
                     </button>
                     <button onClick={enterEditFromIntro}
-                      className="w-28 h-10 rounded-full border border-white/25 bg-white/10 active:bg-white/20 text-white font-bold text-sm flex items-center justify-center gap-1.5 transition touch-none select-none">
+                      className="w-28 h-10 border border-white/25 bg-white/10 active:bg-white/20 text-white font-bold text-sm flex items-center justify-center gap-1.5 transition touch-none select-none">
                       ✏ 改造する
                     </button>
                   </div>
                 ) : gameData.engine === 'action' ? (
                   <div className="flex gap-3">
-                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-cyan-600 active:bg-cyan-500 touch-none cursor-pointer select-none"
+                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-cyan-600 active:bg-cyan-500 touch-none cursor-pointer select-none"
                       {...padProps('shoot')}>
                       SHOT
                     </button>
-                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
+                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
                       {...padProps('action')}>
                       JUMP
                     </button>
@@ -5986,19 +5994,19 @@ const lose = (msg: string) => {
                 ) : null}
                 {!introOpen && gameData.engine === 'onjReze' && (
                   <div className="grid grid-cols-2 gap-2">
-                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-red-600 active:bg-red-500 touch-none cursor-pointer select-none"
+                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-red-600 active:bg-red-500 touch-none cursor-pointer select-none"
                       {...padProps('action')}>
                       ⚔️
                     </button>
-                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-orange-600 active:bg-orange-500 touch-none cursor-pointer select-none"
+                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-orange-600 active:bg-orange-500 touch-none cursor-pointer select-none"
                       {...padProps('shoot')}>
                       🎯
                     </button>
-                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-amber-600 active:bg-amber-500 touch-none cursor-pointer select-none"
+                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-amber-600 active:bg-amber-500 touch-none cursor-pointer select-none"
                       {...padProps('bomb')}>
                       💣
                     </button>
-                    <button className="w-14 h-14 rounded-full border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-purple-700 active:bg-purple-600 touch-none cursor-pointer select-none"
+                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-purple-700 active:bg-purple-600 touch-none cursor-pointer select-none"
                       {...padProps('slow')}>
                       💀
                     </button>
@@ -6006,11 +6014,11 @@ const lose = (msg: string) => {
                 )}
                 {!introOpen && gameData.engine === 'touhou' && (
                   <div className="flex flex-col items-center gap-2">
-                    <button className="w-14 h-10 rounded-full border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
+                    <button className="w-14 h-10 border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
                       {...padProps('slow')}>
                       低速
                     </button>
-                    <button className="w-14 h-10 rounded-lg border-2 border-violet-500 bg-violet-900/40 text-violet-200 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-violet-700/60"
+                    <button className="w-14 h-10 border-2 border-violet-500 bg-violet-900/40 text-violet-200 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-violet-700/60"
                       {...padProps('bomb')}>
                       💣 BOMB
                     </button>
@@ -6021,7 +6029,7 @@ const lose = (msg: string) => {
               {/* セリフ送りボタン（ダイアログ表示中のみ） */}
               {activeDialogue && (
                 <button
-                  className="w-full py-3 mt-2 rounded-xl bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-bold text-sm active:bg-yellow-600 touch-none select-none"
+                  className="w-full py-3 mt-2 bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-bold text-sm active:bg-yellow-600 touch-none select-none"
                   onPointerDown={e => { e.preventDefault(); dialogueCutsceneRef.current?.advance(); }}
                 >
                   次へ ▼
@@ -6044,12 +6052,12 @@ const lose = (msg: string) => {
                     onChange={e => setCommentText(e.target.value)}
                     placeholder="コメントを送る…"
                     maxLength={50}
-                    className="flex-1 bg-gray-700/80 border border-gray-600 rounded-full px-3 py-1.5 text-xs text-white outline-none placeholder:text-gray-500"
+                    className="flex-1 bg-gray-700/80 border border-gray-600 px-3 py-1.5 text-xs text-white outline-none placeholder:text-gray-500"
                   />
                   <button
                     type="submit"
                     disabled={!commentText.trim()}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded-full text-xs text-white font-bold shrink-0"
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-xs text-white font-bold shrink-0"
                   >
                     送信
                   </button>

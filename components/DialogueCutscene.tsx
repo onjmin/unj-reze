@@ -168,8 +168,8 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
 
       <div className="absolute bottom-0 left-0 right-0 mx-2 mb-2">
         <div
-          className="rounded-lg px-4 py-3 shadow-2xl"
-          style={{ background: '#1a1a2e', border: '2px solid #555', fontFamily: 'monospace' }}
+          className="px-4 py-3 font-pixel"
+          style={{ background: '#1a1a2e', border: '2px solid #555' }}
         >
           <p className="text-yellow-300 text-xs font-bold mb-1 leading-none">{current.speaker}</p>
           <p
