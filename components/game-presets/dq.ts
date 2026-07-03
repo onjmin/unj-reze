@@ -555,7 +555,7 @@ const sceneDragonCastle: SceneDef = {
 export const dq: PresetData = {
   id: 'dq', name: 'ドラクエ', engine: 'rpg', gravity: 0, friction: 0,
   player: {
-    emoji: '🧝', color: '#4444ff', speed: 3, jumpPower: 0, w: 24, h: 24,
+    emoji: '🧝', color: '#4444ff', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 15, y: TILE_SIZE * 18 },  // ラダトーム城 玉座の間の前
     spriteRef: wr('0yyTSP'), spriteUrl: sa('0yyTSP'),
   },

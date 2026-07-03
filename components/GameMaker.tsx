@@ -2092,6 +2092,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
 
     // ワールド寸法（touhou は画面固定のため常に 1 画面。他はワールドレイアウト優先）
     const worldCols = gameData.engine === 'touhou' ? COLS : (worldLayoutRef.current?.worldCols ?? gameData.scroll?.worldCols ?? COLS);
