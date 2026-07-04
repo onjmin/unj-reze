@@ -3241,6 +3241,13 @@ const lose = (msg: string) => {
                 }
               }
             }
+            // 自爆風判定：プレイヤー自身も爆風範囲に入っていればダメージを受ける
+            if (!debugInvincibleRef.current && !dead && invulnRef.current <= 0 &&
+                Math.hypot(pcx0 - bm.x, pcy0 - bm.y) <= bm.r) {
+              onjRezeHpRef.current.hp -= bm.dmg; invulnRef.current = 60;
+              hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+              if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+            }
           }
           // 爆発エフェクトの寿命
           for (let i = onjBlastsRef.current.length - 1; i >= 0; i--) {

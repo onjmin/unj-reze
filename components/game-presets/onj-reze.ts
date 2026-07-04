@@ -141,15 +141,6 @@ const fieldMap = Array.from({ length: FH }, (_, y) =>
 const scene2: SceneDef = {
   id: 'field', name: 'フィールド',
   map: fieldMap,
-  randomEncounters: [
-    { name: 'ゾンビ',       emoji: '🧟', hp: 10, atk: 8,  def: 3,  exp: 5  },
-    { name: 'カルト信者',   emoji: '🧎', hp: 14, atk: 11, def: 4,  exp: 8  },
-    { name: 'デビル兵',     emoji: '😈', hp: 20, atk: 14, def: 7,  exp: 14, moves: [{ name: 'つかみかかる', power: 12 }] },
-    { name: '魔人の手下',   emoji: '💀', hp: 30, atk: 20, def: 12, exp: 25 },
-    { name: 'コウモリデビル', emoji: '🦇', hp: 18, atk: 13, def: 6, exp: 18, moves: [{ name: '毒爪', power: 10 }] },
-    { name: '組織の刺客',   emoji: '👿', hp: 40, atk: 26, def: 16, exp: 40, moves: [{ name: '魔力砲', power: 20 }, { name: '自己修復', power: 16, heal: true }] },
-  ],
-  encounterRate: 14,
   bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
   objects: [
     // ── 街帰還ワープ（北端の道） ──
@@ -189,7 +180,7 @@ const scene2: SceneDef = {
 
 // ── プリセット本体 ─────────────────────────────────────────────────────────
 export const onjReze: PresetData = {
-  id: 'onjReze', name: 'おんｊレゼ', engine: 'rpg', gravity: 0, friction: 0,
+  id: 'onjReze', name: 'おんｊレゼ', engine: 'onjReze', gravity: 0, friction: 0,
   player: {
     emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 10, y: TILE_SIZE * 10 },
@@ -200,28 +191,6 @@ export const onjReze: PresetData = {
   objects: [...scene1.objects],
   scenes: [scene1, scene2],
   scroll: { worldCols: FW, worldRows: FH },
-  battle: {
-    playerName: 'レゼ',
-    maxHp: 35, maxMp: 14, atk: 12, def: 6,
-    gold: 50,
-    moves: [
-      { name: 'ボム',     cost: 3, power: 16 },
-      { name: 'ホイミ',   cost: 4, power: 22, heal: true },
-      { name: 'バクハツ', cost: 7, power: 28 },
-    ],
-    labels: { attack: 'たたかう', move: 'わざ', flee: 'にげる' },
-    levelTable: [
-      { level: 2,  exp:   10, maxHp: 42,  maxMp: 18, atk: 14, def: 8  },
-      { level: 3,  exp:   28, maxHp: 50,  maxMp: 22, atk: 16, def: 10 },
-      { level: 4,  exp:   58, maxHp: 58,  maxMp: 26, atk: 18, def: 12 },
-      { level: 5,  exp:  108, maxHp: 66,  maxMp: 30, atk: 21, def: 14 },
-      { level: 6,  exp:  188, maxHp: 74,  maxMp: 34, atk: 24, def: 16 },
-      { level: 7,  exp:  308, maxHp: 82,  maxMp: 38, atk: 27, def: 19 },
-      { level: 8,  exp:  488, maxHp: 90,  maxMp: 42, atk: 30, def: 22 },
-      { level: 9,  exp:  748, maxHp: 98,  maxMp: 46, atk: 33, def: 25 },
-      { level: 10, exp: 1108, maxHp: 106, maxMp: 50, atk: 37, def: 28 },
-    ],
-  },
   items: [
     { id: 'herb',      name: 'やくそう',       emoji: '🌿', description: 'HPを約30回復する薬草',            category: 'consumable' },
     { id: 'antidote',  name: 'どくけしそう',   emoji: '🍃', description: '毒を回復する草',                  category: 'consumable' },
