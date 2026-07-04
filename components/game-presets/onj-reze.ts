@@ -41,14 +41,14 @@ const townMap = Array.from({ length: ROWS }, (_, y) =>
 );
 
 const scene1: SceneDef = {
-  id: 'town', name: 'レゼの街',
+  id: 'town', name: 'ロゼの街',
   map: townMap,
   bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },
   objects: [
     // ── 宿屋 ──
     newObject({
       emoji: '🏥', col: 2, row: 3, behavior: 'still', hazard: false,
-      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh'),
+      spriteRef: wr('oLrlUq'), spriteUrl: sa('oLrlUq'),
       pages: [{
         conditions: {},
         commands: [
@@ -73,7 +73,7 @@ const scene1: SceneDef = {
     // ── 道具屋 ──
     newObject({
       emoji: '🛒', col: 16, row: 3, behavior: 'still', hazard: false,
-      spriteRef: wr('P2dNvQ'), spriteUrl: sa('P2dNvQ'),
+      spriteRef: wr('4KtOzD'), spriteUrl: sa('4KtOzD'),
       shopItems: [
         { itemId: 'herb',      price: 8  },
         { itemId: 'antidote',  price: 10 },
@@ -89,20 +89,20 @@ const scene1: SceneDef = {
     }),
     // ── NPC ──
     newObject({ emoji: '👨', col: 8, row: 6, behavior: 'still', hazard: false,
-      message: 'ここはレゼが守る街や。南の門の外はフィールドで、デビルの手下がうろついとるで。気をつけてな。',
-      spriteRef: wr('xP8oPz'), spriteUrl: sa('xP8oPz') }),
+      message: 'ここは束音ロゼが守る街や。南の門の外はフィールドで、デビルの手下がうろついとるで。気をつけてな。',
+      spriteRef: wr('qhy37c'), spriteUrl: sa('qhy37c') }),
     newObject({ emoji: '👩', col: 13, row: 8, behavior: 'still', hazard: false,
-      message: 'レゼちゃんって爆弾少女やんな……ボムのチカラで魔物を倒してくるんや！\nやくそうは多めに持って行きや！',
-      spriteRef: wr('okIlh5'), spriteUrl: sa('okIlh5') }),
+      message: '束音ロゼって爆弾少女やんな……ボムのチカラで魔物を倒してくるんや！\nやくそうは多めに持って行きや！',
+      spriteRef: wr('nabqyI'), spriteUrl: sa('nabqyI') }),
     newObject({ emoji: '🧑', col: 5, row: 11, behavior: 'still', hazard: false,
-      message: 'ワイはおんJのスレ民や。このスレの住民みんなでデビルと戦っとるで！\nまずは草原のザコから慣れてみ。北の森には強い魔物おるで。',
-      spriteRef: wr('mLHxrK'), spriteUrl: sa('mLHxrK') }),
+      message: 'ワイはなんJ民や。このスレの住民みんなでデビルと戦っとるで！\nまずは草原のザコから慣れてみ。北の森には強い魔物おるで。',
+      spriteRef: ir('lIjiPk'), spriteUrl: sp('lIjiPk') }),
     newObject({ emoji: '👴', col: 16, row: 11, behavior: 'still', hazard: false,
       message: 'フィールドの奥には強いデビルがおるぞ。レベルを上げてから挑むんじゃ。\nボムのわざを覚えたら一気に楽になる。',
-      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh') }),
+      spriteRef: wr('oLrlUq'), spriteUrl: sa('oLrlUq') }),
     newObject({ emoji: '👧', col: 10, row: 12, behavior: 'still', hazard: false,
       message: 'フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\nせいすいを持ってくと魔物を一時的に遠ざけられるで！',
-      spriteRef: wr('TO81en'), spriteUrl: sa('TO81en') }),
+      spriteRef: wr('4KtOzD'), spriteUrl: sa('4KtOzD') }),
     // ── 街の出口ワープ ──
     newObject({ emoji: '🚪', col: 9,  row: ROWS - 2, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'field', warpEntryCol: 14, warpEntryRow: 3 }),
@@ -176,7 +176,7 @@ const scene2: SceneDef = {
     // ── フィールド NPC ──
     newObject({ emoji: '🧑', col: 17, row: 5, behavior: 'still', hazard: false,
       message: '道の先に強い魔人がいるって噂や。Lv5 以上になってから挑んだ方がええで。',
-      spriteRef: wr('mLHxrK'), spriteUrl: sa('mLHxrK') }),
+      spriteRef: wr('qhy37c'), spriteUrl: sa('qhy37c') }),
     // ── 宝箱 ──
     newObject({ emoji: '👑', col: 26, row: 11, behavior: 'still', hazard: false,
       objType: 'item', itemId: 'herb', message: '宝箱を開けた！「やくそう」を手に入れた！',
@@ -193,7 +193,7 @@ export const onjReze: PresetData = {
   player: {
     emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 10, y: TILE_SIZE * 10 },
-    spriteRef: wr('TO81en'), spriteUrl: sa('TO81en'),
+    spriteRef: wr('mHhx69'), spriteUrl: sa('mHhx69'),
   },
   tiles,
   map: townMap,
@@ -201,7 +201,7 @@ export const onjReze: PresetData = {
   scenes: [scene1, scene2],
   scroll: { worldCols: FW, worldRows: FH },
   battle: {
-    playerName: 'レゼ',
+    playerName: '束音ロゼ',
     maxHp: 35, maxMp: 14, atk: 12, def: 6,
     gold: 50,
     moves: [
@@ -231,7 +231,7 @@ export const onjReze: PresetData = {
   titleScreen: {
     enabled: true,
     heading: 'おんｊレゼ',
-    subtitle: 'レゼの街を拠点に、フィールドを探検しよう！',
+    subtitle: 'ロゼの街を拠点に、フィールドを探検しよう！',
     textColor: '#ffaacc',
     menu: [
       { kind: 'newGame',   label: 'ぼうけんをはじめる' },
