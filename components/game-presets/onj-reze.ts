@@ -41,7 +41,7 @@ const townMap = Array.from({ length: ROWS }, (_, y) =>
 );
 
 const scene1: SceneDef = {
-  id: 'town', name: 'ロゼの街',
+  id: 'town', name: 'レゼの街',
   map: townMap,
   bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },
   objects: [
@@ -89,16 +89,16 @@ const scene1: SceneDef = {
     }),
     // ── NPC ──
     newObject({ emoji: '👨', col: 8, row: 6, behavior: 'still', hazard: false,
-      message: 'ここは束音ロゼが守る街や。南の門の外はフィールドで、デビルの手下がうろついとるで。気をつけてな。',
+      message: 'この街の喫茶店、レゼが看板娘やっとったんやけど、正体は爆弾の混血や言うて組織に狙われてもうてな。\n今はワイらなんJ民総出で街を守っとるんやで。気をつけてな。',
       spriteRef: wr('qhy37c'), spriteUrl: sa('qhy37c') }),
     newObject({ emoji: '👩', col: 13, row: 8, behavior: 'still', hazard: false,
-      message: '束音ロゼって爆弾少女やんな……ボムのチカラで魔物を倒してくるんや！\nやくそうは多めに持って行きや！',
+      message: '組織の連中、レゼの中にある『鍵』とやらを狙っとるらしいで……ワイら住民には詳しいことはわからんけど。\nやくそうは多めに持って行きや！',
       spriteRef: wr('nabqyI'), spriteUrl: sa('nabqyI') }),
     newObject({ emoji: '🧑', col: 5, row: 11, behavior: 'still', hazard: false,
-      message: 'ワイはなんJ民や。このスレの住民みんなでデビルと戦っとるで！\nまずは草原のザコから慣れてみ。北の森には強い魔物おるで。',
+      message: 'ワイはなんJ民や。昔レゼが淹れてくれたコーヒー、めちゃ美味かったんやで……もう店は畳んでもうたけどな。\nまずは草原のザコから慣れてみ。北の森には強い魔物おるで。',
       spriteRef: ir('lIjiPk'), spriteUrl: sp('lIjiPk') }),
     newObject({ emoji: '👴', col: 16, row: 11, behavior: 'still', hazard: false,
-      message: 'フィールドの奥には強いデビルがおるぞ。レベルを上げてから挑むんじゃ。\nボムのわざを覚えたら一気に楽になる。',
+      message: 'フィールドの奥にゃ組織の残党が送り込んだデビルがおるぞ。レベルを上げてから挑むんじゃ。\nボムのわざを覚えたら一気に楽になる。',
       spriteRef: wr('oLrlUq'), spriteUrl: sa('oLrlUq') }),
     newObject({ emoji: '👧', col: 10, row: 12, behavior: 'still', hazard: false,
       message: 'フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\nせいすいを持ってくと魔物を一時的に遠ざけられるで！',
@@ -147,7 +147,7 @@ const scene2: SceneDef = {
     { name: 'デビル兵',     emoji: '😈', hp: 20, atk: 14, def: 7,  exp: 14, moves: [{ name: 'つかみかかる', power: 12 }] },
     { name: '魔人の手下',   emoji: '💀', hp: 30, atk: 20, def: 12, exp: 25 },
     { name: 'コウモリデビル', emoji: '🦇', hp: 18, atk: 13, def: 6, exp: 18, moves: [{ name: '毒爪', power: 10 }] },
-    { name: '上位デビル',   emoji: '👿', hp: 40, atk: 26, def: 16, exp: 40, moves: [{ name: '魔力砲', power: 20 }, { name: '自己修復', power: 16, heal: true }] },
+    { name: '組織の刺客',   emoji: '👿', hp: 40, atk: 26, def: 16, exp: 40, moves: [{ name: '魔力砲', power: 20 }, { name: '自己修復', power: 16, heal: true }] },
   ],
   encounterRate: 14,
   bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
@@ -170,12 +170,12 @@ const scene2: SceneDef = {
       spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
     newObject({ emoji: '💀', name: '魔人の手下', col: 11, row: 16, behavior: 'patrolV', speed: 1.1, hp: 30, atk: 20, def: 12, exp: 25, hazard: true,
       spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
-    newObject({ emoji: '👿', name: '上位デビル',  col: 22, row: 13, behavior: 'chase',   speed: 1.4, hp: 40, atk: 26, def: 16, exp: 40, hazard: true,
+    newObject({ emoji: '👿', name: '組織の刺客',  col: 22, row: 13, behavior: 'chase',   speed: 1.4, hp: 40, atk: 26, def: 16, exp: 40, hazard: true,
       moves: [{ name: '魔力砲', power: 20 }, { name: '自己修復', power: 16, heal: true }],
       spriteRef: wr('Ilpvcu'), spriteUrl: sa('Ilpvcu') }),
     // ── フィールド NPC ──
     newObject({ emoji: '🧑', col: 17, row: 5, behavior: 'still', hazard: false,
-      message: '道の先に強い魔人がいるって噂や。Lv5 以上になってから挑んだ方がええで。',
+      message: '道の先に組織の生き残りがおるって噂や。Lv5 以上になってから挑んだ方がええで。',
       spriteRef: wr('qhy37c'), spriteUrl: sa('qhy37c') }),
     // ── 宝箱 ──
     newObject({ emoji: '👑', col: 26, row: 11, behavior: 'still', hazard: false,
@@ -193,7 +193,7 @@ export const onjReze: PresetData = {
   player: {
     emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 10, y: TILE_SIZE * 10 },
-    spriteRef: wr('mHhx69'), spriteUrl: sa('mHhx69'),
+    spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA'),
   },
   tiles,
   map: townMap,
@@ -201,7 +201,7 @@ export const onjReze: PresetData = {
   scenes: [scene1, scene2],
   scroll: { worldCols: FW, worldRows: FH },
   battle: {
-    playerName: '束音ロゼ',
+    playerName: 'レゼ',
     maxHp: 35, maxMp: 14, atk: 12, def: 6,
     gold: 50,
     moves: [
@@ -231,7 +231,7 @@ export const onjReze: PresetData = {
   titleScreen: {
     enabled: true,
     heading: 'おんｊレゼ',
-    subtitle: 'ロゼの街を拠点に、フィールドを探検しよう！',
+    subtitle: '喫茶店の看板娘レゼと、なんJ民たちの街を拠点に、フィールドを探検しよう！',
     textColor: '#ffaacc',
     menu: [
       { kind: 'newGame',   label: 'ぼうけんをはじめる' },

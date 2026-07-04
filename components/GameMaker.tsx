@@ -1143,6 +1143,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const bossDefeatedRef = useRef(false);
   /** NPCに接触中のセリフ表示（フキダシではなく頭上に1文字ずつ表示） */
   const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number } | null>(null);
+  /** アイテム取得演出（メッセージウィンドウではなく頭上に一定時間表示） */
+  const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
@@ -2066,7 +2068,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       actionWeaponEnergyRef.current = {};
       actionWeaponsRef.current.forEach(w => { actionWeaponEnergyRef.current[w] = MAX_WEAPON_ENERGY; });
 
-      bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false; npcTalkRef.current = null;
+      bossDefeatedRef.current = false; bossWarnRef.current = false; outroModeRef.current = false; npcTalkRef.current = null; itemGetRef.current = null;
       bombCountRef.current = gameData.player.bombCount ?? 3;
       bombInvulnRef.current = 0; bombCooldownRef.current = 0;
       bombPickupsRef.current = []; spellCardTriggeredRef.current = new Set();
@@ -3821,7 +3823,7 @@ const lose = (msg: string) => {
                 setInventory(p => { const n = { ...p }; n[iid] = (n[iid] ?? 0) + 1; return n; });
                 eng.entities.splice(ei, 1);
                 const itemDef = (gameData.items ?? []).find(it => it.id === iid);
-                showGameMsg(`${itemDef?.emoji ?? d.emoji} ×1 を てにいれた！`, 'instant', () => {});
+                itemGetRef.current = { text: `${itemDef?.emoji ?? d.emoji} ×1 を てにいれた！`, startTime: performance.now() };
               }
               break;
             }
@@ -4654,6 +4656,31 @@ const lose = (msg: string) => {
           gameData.engine === 'touhou' ? 'w' : undefined);
         if (isStar) {
           ctx.restore();
+        }
+        // アイテム取得演出（頭上に一定時間表示、フェードアウト）
+        if (itemGetRef.current) {
+          const ITEM_GET_DURATION = 1200;
+          const elapsed = performance.now() - itemGetRef.current.startTime;
+          if (elapsed > ITEM_GET_DURATION) {
+            itemGetRef.current = null;
+          } else {
+            const text = itemGetRef.current.text;
+            const alpha = elapsed > ITEM_GET_DURATION - 300 ? Math.max(0, (ITEM_GET_DURATION - elapsed) / 300) : 1;
+            const riseY = Math.min(elapsed / 40, 12);
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.font = `bold 11px ${getPixelFontFamily()}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            const px = p.x + pData.w / 2;
+            const py = p.y - riseY - 4;
+            const tw = ctx.measureText(text).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(px - tw / 2 - 4, py - 14, tw + 8, 18);
+            ctx.fillStyle = '#fff';
+            ctx.fillText(text, px, py);
+            ctx.restore();
+          }
         }
       }
       // onjReze：近接攻撃の描画（振っている間だけ向きに合わせて表示）
