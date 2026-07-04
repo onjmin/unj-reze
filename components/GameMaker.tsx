@@ -237,7 +237,13 @@ interface Entity {
   shellGrace?: number;
   /** ブロックから出現するアイテムのせり上がり残フレーム数。 */
   spawnGrace?: number;
+  /** レゼ専用：上半身を投げてから爆発するまで true（再投擲不可・自身は下半分のみ表示）。 */
+  bombThrown?: boolean;
+  /** 味方モブが攻撃されて怯え、プレイヤーから逃げるようになった状態。 */
+  fleeing?: boolean;
 }
+// onjReze: 近接攻撃の剣スプライト（素材は右向きが基準）
+const SWORD_SPRITE_URL = 'https://rpgen-search.pages.dev/data/images/sprites/BkIGjOn.png';
 // ── マリオ系アクションの落下・踏みつけ定数（SMC core 準拠）─────────────────
 /** 終端速度 px/frame。32px タイルのすり抜け（トンネリング）を防ぎ、SMC 風の落下感を出す。 */
 const ACTION_MAX_FALL = 20;
@@ -1134,8 +1140,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const onjRezeHpRef = useRef<{ hp: number; max: number }>({ hp: 6, max: 6 }); // ハート（1ハート=2HP）
   const checkpointRef = useRef<{ x: number; y: number } | null>(null);
   // onjReze: 原作のボム挙動の再現（💣設置・🎯投げ・💀首爆弾・爆発）。すべてフレーム単位（60fps想定）。
-  const onjBombsRef = useRef<{ x: number; y: number; fuse: number; maxFuse: number; r: number; dmg: number; head: boolean }[]>([]);   // 着地済み・導火線カウント中のボム（中心座標）
-  const onjFliesRef = useRef<{ fx: number; fy: number; tx: number; ty: number; t: number; dur: number; fuse: number; r: number; dmg: number; head: boolean }[]>([]); // 放物線で飛行中のボム/首
+  const onjBombsRef = useRef<{ x: number; y: number; fuse: number; maxFuse: number; r: number; dmg: number; head: boolean; srcUrl?: string; owner?: Entity }[]>([]);   // 着地済み・導火線カウント中のボム（中心座標）
+  const onjFliesRef = useRef<{ fx: number; fy: number; tx: number; ty: number; t: number; dur: number; fuse: number; r: number; dmg: number; head: boolean; srcUrl?: string; owner?: Entity }[]>([]); // 放物線で飛行中のボム/首
   const onjBlastsRef = useRef<{ x: number; y: number; life: number; maxLife: number; r: number }[]>([]);  // 爆発エフェクト
   const onjBombCoolRef = useRef(0);   // 💣設置のクールダウン（長押し連打）
   const onjThrowCoolRef = useRef(0);  // 🎯投げ／💀首爆弾のクールダウン
@@ -2060,6 +2066,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       checkpointRef.current = null;
       onjRezeDirRef.current = { x: 0, y: 1 };
       swordRef.current = { active: 0, cool: 0, dir: { x: 0, y: 1 }, hit: new Set() };
+      ensureImage(SWORD_SPRITE_URL); // 剣の初回スイングで絵文字が一瞬映るのを防ぐため先読みしておく
       onjBombsRef.current = []; onjFliesRef.current = []; onjBlastsRef.current = [];
       onjBombCoolRef.current = 0; onjThrowCoolRef.current = 0;
       // action エンジン：武器スロット初期化
@@ -2128,6 +2135,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const id = engineRef.current.map[row]?.[col] ?? 0;
       return { id, rect: { x: col * TILE_SIZE, y: row * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE }, info: gameData.tiles[id] };
     };
+    // モブ（非hazardのNPC）との衝突判定（円形）。敵(hazard)はすり抜け・接触ダメージ等の既存挙動を維持するため対象外。
+    const isBlockedByMob = (x: number, y: number, w: number, h: number) => {
+      const cx = x + w / 2, cy = y + h / 2;
+      const playerR = Math.min(w, h) / 2 * 0.7;
+      return engineRef.current.entities.some(e => {
+        // 敵、ワープ、アイテムは「モブ」ではないため衝突対象から除外（踏んで発動する挙動を維持）
+        if (e.def.hazard || e.def.objType === 'warp' || e.def.objType === 'item') return false;
+        const ew = e.def.w ?? TILE_SIZE, eh = e.def.h ?? TILE_SIZE;
+        const ecx = e.x + ew / 2, ecy = e.y + eh / 2;
+        const mobR = Math.min(ew, eh) / 2 * 0.7;
+        return Math.hypot(cx - ecx, cy - ecy) < playerR + mobR;
+      });
+    };
 
     // 歩行グラ用の状態: 規格の自動判定キャッシュ と 各インスタンスの向き/移動追跡。
     const walkStdCache = new Map<string, WalkStandard>();
@@ -2152,7 +2172,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       let dir: WayKey = overrideDir ?? prev?.dir ?? 's';
       const moving = Math.hypot(dx, dy) > 0.15;
       // dq/onjReze/touhou は静止中も足踏みアニメを続ける（向き判定には影響させない）
-      const animMoving = moving || gameData.engine === 'rpg' || gameData.engine === 'touhou';
+      const animMoving = moving || gameData.engine === 'rpg' || gameData.engine === 'touhou' || gameData.engine === 'onjReze';
       if (!overrideDir && moving) {
         if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
         else dir = dirFromDelta(dx, dy) ?? dir;
@@ -3168,9 +3188,9 @@ const lose = (msg: string) => {
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
           let zt1 = getTile(nx, p.y), zt2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-          if (zt1?.info.passable && zt2?.info.passable && nx >= 0 && nx <= worldW - pData.w) p.x = nx;
+          if (zt1?.info.passable && zt2?.info.passable && nx >= 0 && nx <= worldW - pData.w && !isBlockedByMob(nx, p.y, pData.w, pData.h)) p.x = nx;
           zt1 = getTile(p.x, ny); zt2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-          if (zt1?.info.passable && zt2?.info.passable && ny >= 0 && ny <= worldH - pData.h) p.y = ny;
+          if (zt1?.info.passable && zt2?.info.passable && ny >= 0 && ny <= worldH - pData.h && !isBlockedByMob(p.x, ny, pData.w, pData.h)) p.y = ny;
           // 向き更新（最後に押した方向。左右優先、無ければ上下）
           if (isLeft) onjRezeDirRef.current = { x: -1, y: 0 };
           else if (isRight) onjRezeDirRef.current = { x: 1, y: 0 };
@@ -3218,7 +3238,7 @@ const lose = (msg: string) => {
           for (let i = onjFliesRef.current.length - 1; i >= 0; i--) {
             const fb = onjFliesRef.current[i]; fb.t++;
             if (fb.t >= fb.dur) {
-              onjBombsRef.current.push({ x: fb.tx, y: fb.ty, fuse: fb.fuse, maxFuse: fb.fuse, r: fb.r, dmg: fb.dmg, head: fb.head });
+              onjBombsRef.current.push({ x: fb.tx, y: fb.ty, fuse: fb.fuse, maxFuse: fb.fuse, r: fb.r, dmg: fb.dmg, head: fb.head, srcUrl: fb.srcUrl, owner: fb.owner });
               onjFliesRef.current.splice(i, 1);
             }
           }
@@ -3227,6 +3247,7 @@ const lose = (msg: string) => {
             const bm = onjBombsRef.current[i]; bm.fuse--;
             if (bm.fuse > 0) continue;
             onjBombsRef.current.splice(i, 1);
+            if (bm.owner) bm.owner.bombThrown = false; // 爆発 → 投げた本人が復活（次を投げられる）
             onjBlastsRef.current.push({ x: bm.x, y: bm.y, life: B_BLAST, maxLife: B_BLAST, r: bm.r });
             hitShake(); playSfx(sfxRef.current.damage);
             for (let k = eng.entities.length - 1; k >= 0; k--) {
@@ -3263,10 +3284,11 @@ const lose = (msg: string) => {
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
+          const mobBlockActive = gameData.engine === 'rpg';
           let t1 = getTile(nx, p.y), t2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-          if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w) p.x = nx;
+          if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-          if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h) p.y = ny;
+          if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
           if (isPlaying && gameData.engine === 'rpg' && gameData.battle && !dead &&
@@ -3516,6 +3538,18 @@ const lose = (msg: string) => {
               // 穴に落ちたら除去
               if (e.y > worldH + TILE_SIZE) { eng.entities.splice(ei, 1); continue; }
             }
+          } else if (e.bombThrown) {
+            // レゼ：上半身を投げてから爆発するまでは立ち止まる
+            e.vx = 0; e.vy = 0;
+          } else if (e.fleeing) {
+            // 怯えた味方モブ：本来の behavior を無視してプレイヤーから逃げる（壁はすり抜けない）
+            const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
+            const fleeSp = sp > 0 ? sp : 1.5;
+            const nex = e.x - (dx / dist) * fleeSp, ney = e.y - (dy / dist) * fleeSp;
+            const et1 = getTile(nex, e.y), et2 = getTile(nex + TILE_SIZE - 1, e.y + TILE_SIZE - 1);
+            if (et1?.info.passable && et2?.info.passable && nex >= 0 && nex <= worldW - TILE_SIZE) e.x = nex;
+            const et3 = getTile(e.x, ney), et4 = getTile(e.x + TILE_SIZE - 1, ney + TILE_SIZE - 1);
+            if (et3?.info.passable && et4?.info.passable && ney >= 0 && ney <= worldH - TILE_SIZE) e.y = ney;
           } else {
             if (d.behavior === 'random') {
               if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
@@ -3535,6 +3569,21 @@ const lose = (msg: string) => {
             }
             e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
             e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
+          }
+
+          // ── レゼ（敵）: 一定間隔でプレイヤーめがけて爆弾を投げる ──
+          if (gameData.engine === 'onjReze' && d.name === 'レゼ' && isPlaying && !dead) {
+            const RB_FUSE = 96, RB_FLY = 24, RB_R = TILE_SIZE * 1.6, RB_DMG = 2;
+            const distToPlayer = Math.hypot(pcx - ecx, pcy - ecy);
+            if (!e.bombThrown && distToPlayer < TILE_SIZE * 8 && e.timer % 120 === 0) {
+              e.bombThrown = true; // 爆発するまで次を投げない
+              onjFliesRef.current.push({
+                fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: RB_FLY,
+                fuse: RB_FUSE, r: RB_R, dmg: RB_DMG, head: false,
+                srcUrl: d.spriteUrl, owner: e,
+              });
+              playSfx(sfxRef.current.shot);
+            }
           }
 
           // hp が 0 以下なら即除去（exit() による非同期死亡に対応）
@@ -3583,22 +3632,49 @@ const lose = (msg: string) => {
           if (e.hp <= 0) continue;
 
           // ── 剣（近接）の当たり判定（onjReze） ──
+          // 直線状の矩形判定だと、追尾してくる敵が斜め位置にいるだけで当たらず「ダメージを与えられない」原因になるため、
+          // プレイヤーの向いている方向に少しずらした円形の判定に変更（斜め位置の敵にも当たるように緩和）。
           if (gameData.engine === 'onjReze' && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
             const sw = swordRef.current; const reach = 26;
-            let hx: number, hy: number, hw: number, hh: number;
-            if (sw.dir.x !== 0) { hw = reach; hh = pData.h; hy = p.y; hx = sw.dir.x > 0 ? p.x + pData.w : p.x - reach; }
-            else { hw = pData.w; hh = reach; hx = p.x; hy = sw.dir.y > 0 ? p.y + pData.h : p.y - reach; }
-            if (hx < e.x + TILE_SIZE && hx + hw > e.x && hy < e.y + TILE_SIZE && hy + hh > e.y) {
+            const swingCx = p.x + pData.w / 2 + sw.dir.x * (pData.w / 2 + reach / 2);
+            const swingCy = p.y + pData.h / 2 + sw.dir.y * (pData.h / 2 + reach / 2);
+            const ew0 = e.def.w ?? TILE_SIZE, eh0 = e.def.h ?? TILE_SIZE;
+            const hitR = reach + Math.max(pData.w, pData.h, ew0, eh0) / 2 * 0.6;
+            if (Math.hypot(ecx - swingCx, ecy - swingCy) < hitR) {
               sw.hit.add(d.id);
+              if (!d.hazard) {
+                // 味方モブ：怯えて逃げるAIに切り替えつつ、ダメージも与える
+                e.fleeing = true;
+                e.talked = false;
+                if (npcTalkRef.current?.entity === e) npcTalkRef.current = null;
+              }
               e.hp--;
               e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x + sw.dir.x * 12));
               e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y + sw.dir.y * 12));
               if (e.hp <= 0) {
                 if (e.scriptCtx) e.scriptCtx.cancelled = true;
                 scoreRef.current += d.isBoss ? 100 : 10;
+                if (npcTalkRef.current?.entity === e) npcTalkRef.current = null;
                 eng.entities.splice(ei, 1);
                 continue;
               }
+            }
+          }
+
+          // ── onjReze: hazard 敵に触れたら確実にダメージを受ける（仕様変更） ──
+          if (gameData.engine === 'onjReze' && d.hazard && isPlaying && !dead
+              && !debugInvincibleRef.current && invulnRef.current <= 0) {
+            const ew1 = e.def.w ?? TILE_SIZE, eh1 = e.def.h ?? TILE_SIZE;
+            const touchR = (Math.max(pData.w, pData.h) + Math.max(ew1, eh1)) / 2 * 0.85;
+            if (Math.hypot(pcx - ecx, pcy - ecy) < touchR) {
+              const dmg = Math.max(1, Math.round((d.atk ?? 8) / 8));
+              onjRezeHpRef.current.hp -= dmg; invulnRef.current = 60;
+              // ノックバック（敵と反対方向へ）
+              const kdx = pcx - ecx, kdy = pcy - ecy; const kd = Math.hypot(kdx, kdy) || 1;
+              p.x = Math.max(0, Math.min(worldW - pData.w, p.x + (kdx / kd) * 18));
+              p.y = Math.max(0, Math.min(worldH - pData.h, p.y + (kdy / kd) * 18));
+              hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
+              if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
             }
           }
 
@@ -3762,18 +3838,22 @@ const lose = (msg: string) => {
             break;
           }
 
-          const overlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
+          // モブ衝突が円形になり隣接タイルへ入れなくなったため、NPCとの接触扱いの判定は円形かつ広めに取る。
+          // ただしワープ/アイテムはモブ衝突の対象外（isBlockedByMob参照）で従来通りタイルに乗れるため、
+          // 判定を広げると隣接するワープ同士が入った瞬間に誤発動するので、こちらは元の狭い矩形判定を使う。
+          const overlap = Math.hypot(pcx - (e.x + TILE_SIZE / 2), pcy - (e.y + TILE_SIZE / 2)) < TILE_SIZE * 1.1;
+          const exactOverlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
           if (overlap) {
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
-              if (!eventRunningRef.current) {
+              if (exactOverlap && !eventRunningRef.current) {
                 engineRef.current.player.x = d.warpTarget.col * TILE_SIZE;
                 engineRef.current.player.y = d.warpTarget.row * TILE_SIZE;
               }
               break;
             }
             // シーン間ワープ（土管・扉など）：フェード遷移を開始
-            if (d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current) {
+            if (exactOverlap && d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current) {
               const tgtScene = scenesRef.current.find(s => s.id === d.warpSceneId);
               if (tgtScene) {
                 const ex = (d.warpEntryCol ?? 1) * TILE_SIZE;
@@ -3801,7 +3881,7 @@ const lose = (msg: string) => {
               break;
             }
             if (ot === 'item') {
-              if (!eventRunningRef.current) {
+              if (exactOverlap && !eventRunningRef.current) {
                 const iid = d.itemId || d.name || d.id;
                 // マリオ系パワーアップの即時効果
                 if (gameData.id === 'mario') {
@@ -3859,19 +3939,8 @@ const lose = (msg: string) => {
               if (!debugInvincibleRef.current) {
                 if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { startBattle(e); dead = true; } break; }
                 if (gameData.engine === 'touhou') { if (!isPlayerDeadRef.current && invulnRef.current <= 0) { handlePlayerDeath(); dead = true; } break; }
-                if (gameData.engine === 'onjReze') {
-                  if (invulnRef.current <= 0) {
-                    const dmg = Math.max(1, Math.round((d.atk ?? 8) / 8));
-                    onjRezeHpRef.current.hp -= dmg; invulnRef.current = 60;
-                    // ノックバック（敵と反対方向へ）
-                    const kdx = pcx - ecx, kdy = pcy - ecy; const kd = Math.hypot(kdx, kdy) || 1;
-                    p.x = Math.max(0, Math.min(worldW - pData.w, p.x + (kdx / kd) * 18));
-                    p.y = Math.max(0, Math.min(worldH - pData.h, p.y + (kdy / kd) * 18));
-                    hitShake(); playSfx(sfxRef.current.damage); forceHud(n => n + 1);
-                    if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
-                  }
-                  break;
-                }
+                // onjReze の hazard 接触ダメージは、円形のモブ判定に一本化するため下の専用ブロックで処理する（ここでは何もしない）
+                if (gameData.engine === 'onjReze') break;
                 if (gameData.engine === 'action') {
                   if (invulnRef.current <= 0) {
                     const dmg = Math.max(1, d.atk ?? 2);
@@ -3922,6 +3991,7 @@ const lose = (msg: string) => {
               }
               break;
             }
+            else if (e.fleeing && !e.talked) { e.talked = true; npcTalkRef.current = { entity: e, text: 'ひぃっ！？も、もう堪忍してぇや…！', startTime: performance.now() }; }
             else if (d.message && !e.talked) { e.talked = true; npcTalkRef.current = { entity: e, text: d.message, startTime: performance.now() }; }
           } else { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
         }
@@ -4228,15 +4298,20 @@ const lose = (msg: string) => {
         const target = (isPlaying ? eng.entities : gameData.objects).find(o => {
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
           const oy = isPlaying ? (o as Entity).y : (o as ObjectDef).row * TILE_SIZE;
-          return pcx > ox && pcx < ox + TILE_SIZE && pcy > oy && pcy < oy + TILE_SIZE;
+          // モブ衝突が円形になり隣接タイルへ入れなくなったため、話しかけ判定も円形かつ広めに取る
+          return Math.hypot(pcx - (ox + TILE_SIZE / 2), pcy - (oy + TILE_SIZE / 2)) < TILE_SIZE * 1.1;
         });
         if (target) {
           const def = isPlaying ? (target as Entity).def : target as ObjectDef;
-          const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
-          if (page && page.commands.length > 0) {
-            runEventCommands(def.id, page.commands);
-          } else if (def.message) {
-            showGameMsg(def.message, 'instant', () => {});
+          if (isPlaying && (target as Entity).fleeing) {
+            // 怯えているモブはメッセージウィンドウを出さない（頭上のセリフのみ）
+          } else {
+            const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
+            if (page && page.commands.length > 0) {
+              runEventCommands(def.id, page.commands);
+            } else if (def.message) {
+              showGameMsg(def.message, 'instant', () => {});
+            }
           }
         }
       }
@@ -4416,8 +4491,22 @@ const lose = (msg: string) => {
       if (isPlaying) {
         for (let ei = 0; ei < eng.entities.length; ei++) {
           const e = eng.entities[ei];
-          drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
-          if (e.def.hp > 1) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
+          if (gameData.engine === 'onjReze' && e.def.name === 'レゼ' && e.bombThrown && e.def.spriteUrl) {
+            // 上半身を投げて爆発を待っている間は、下半身だけを表示する
+            ensureImage(e.def.spriteUrl);
+            const img = imgCache.current.get(e.def.spriteUrl);
+            if (img && img.complete && img.naturalWidth > 0) {
+              let std = walkStdCache.get(e.def.spriteUrl);
+              if (!std) { std = detectStandard(img.naturalWidth, img.naturalHeight); walkStdCache.set(e.def.spriteUrl, std); }
+              const cell = animatedCell(std, img.naturalWidth, img.naturalHeight, { dir: 's', moving: false, timeSec: 0, fps: 7 });
+              const srcImg = keyedCache.current.get(e.def.spriteUrl) ?? img;
+              const ew = e.def.w ?? TILE_SIZE, eh = e.def.h ?? TILE_SIZE;
+              ctx.drawImage(srcImg, cell.sx, cell.sy + cell.sh / 2, cell.sw, cell.sh / 2, e.x, e.y + eh / 2, ew, eh / 2);
+            }
+          } else {
+            drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
+          }
+          if (e.def.hp > 1 && e.hp < e.def.hp) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
           // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）
           if (npcTalkRef.current && npcTalkRef.current.entity === e) {
             const { text, startTime } = npcTalkRef.current;
@@ -4696,14 +4785,45 @@ const lose = (msg: string) => {
         let hx: number, hy: number, hw: number, hh: number;
         if (sw.dir.x !== 0) { hw = reach; hh = pData.h; hy = p.y; hx = sw.dir.x > 0 ? p.x + pData.w : p.x - reach; }
         else { hw = pData.w; hh = reach; hx = p.x; hy = sw.dir.y > 0 ? p.y + pData.h : p.y - reach; }
-        ctx.fillStyle = 'rgba(220,235,255,0.85)';
-        ctx.fillRect(hx, hy, hw, hh);
-        ctx.font = '18px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('⚔️', hx + hw / 2, hy + hh / 2);
+        ensureImage(SWORD_SPRITE_URL);
+        const swordImg = imgCache.current.get(SWORD_SPRITE_URL);
+        const cx = hx + hw / 2, cy = hy + hh / 2;
+        if (swordImg && swordImg.complete && swordImg.naturalWidth > 0) {
+          const srcImg = keyedCache.current.get(SWORD_SPRITE_URL) ?? swordImg;
+          // 素材は右向きが基準。sw.dir に合わせて回転させる（右向き基準なので補正不要）。
+          const angle = Math.atan2(sw.dir.y, sw.dir.x);
+          const size = Math.max(hw, hh, TILE_SIZE);
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(angle);
+          ctx.drawImage(srcImg, -size / 2, -size / 2, size, size);
+          ctx.restore();
+        } else {
+          ctx.font = '18px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('⚔️', cx, cy);
+        }
       }
       // onjReze：ボム・飛行ボム・爆発の描画（原作 onj-reze.html の見た目を移植）
       if (gameData.engine === 'onjReze') {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        // レゼが投げる爆弾は自身のスプライト上半分を切り離したものとして描く（それ以外は従来の絵文字）
+        const drawBombVisual = (url: string | undefined, cx: number, cy: number, fallback: string) => {
+          if (url) {
+            ensureImage(url);
+            const img = imgCache.current.get(url);
+            if (img && img.complete && img.naturalWidth > 0) {
+              let std = walkStdCache.get(url);
+              if (!std) { std = detectStandard(img.naturalWidth, img.naturalHeight); walkStdCache.set(url, std); }
+              const cell = animatedCell(std, img.naturalWidth, img.naturalHeight, { dir: 's', moving: false, timeSec: 0, fps: 7 });
+              const srcImg = keyedCache.current.get(url) ?? img;
+              const destW = TILE_SIZE, destH = TILE_SIZE / 2;
+              ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh / 2, cx - destW / 2, cy - destH / 2, destW, destH);
+              return;
+            }
+          }
+          ctx.font = '18px Arial';
+          ctx.fillText(fallback, cx, cy);
+        };
         // 飛行中（放物線アーク + 影）
         for (const fb of onjFliesRef.current) {
           const pr = fb.t / fb.dur;
@@ -4711,8 +4831,8 @@ const lose = (msg: string) => {
           const arc = -Math.sin(pr * Math.PI) * 26;
           ctx.globalAlpha = 0.3; ctx.fillStyle = '#000';
           ctx.beginPath(); ctx.ellipse(cx, cy, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
-          ctx.globalAlpha = 1; ctx.font = '18px Arial';
-          ctx.fillText(fb.head ? '💀' : '💣', cx, cy + arc);
+          ctx.globalAlpha = 1;
+          drawBombVisual(fb.srcUrl, cx, cy + arc, fb.head ? '💀' : '💣');
         }
         // 着地済みボム（揺れ + 火花 + 残り1秒で赤光）
         for (const bm of onjBombsRef.current) {
@@ -4723,8 +4843,8 @@ const lose = (msg: string) => {
             ctx.globalAlpha = 0.3 * (1 - bm.fuse / 60) * ((Math.sin(bm.fuse * 1.2) + 1) / 2);
             ctx.fillStyle = '#f00'; ctx.beginPath(); ctx.arc(bm.x, bm.y, 18, 0, Math.PI * 2); ctx.fill();
           }
-          ctx.globalAlpha = 1; ctx.font = '20px Arial';
-          ctx.fillText(bm.head ? '💀' : '💣', bm.x + ox, bm.y + oy);
+          ctx.globalAlpha = 1;
+          drawBombVisual(bm.srcUrl, bm.x + ox, bm.y + oy, bm.head ? '💀' : '💣');
           if (pr > 0.2) {
             const sparks = Math.floor(pr * 8);
             for (let s = 0; s < sparks; s++) {

@@ -89,19 +89,19 @@ const scene1: SceneDef = {
     }),
     // ── NPC ──
     newObject({ emoji: '👨', col: 8, row: 6, behavior: 'still', hazard: false,
-      message: 'この街の喫茶店、レゼが看板娘やっとったんやけど、正体は爆弾の混血や言うて組織に狙われてもうてな。\n今はワイらなんJ民総出で街を守っとるんやで。気をつけてな。',
+      message: 'この街の喫茶店で働いとったレゼ、実は爆弾の混血で、組織の鍵を持って街を出てもうてな。\n今はフィールドで暴れとるらしいで。気をつけてな。',
       spriteRef: wr('qhy37c'), spriteUrl: sa('qhy37c') }),
     newObject({ emoji: '👩', col: 13, row: 8, behavior: 'still', hazard: false,
-      message: '組織の連中、レゼの中にある『鍵』とやらを狙っとるらしいで……ワイら住民には詳しいことはわからんけど。\nやくそうは多めに持って行きや！',
+      message: 'レゼ、爆弾を投げてくるから離れて戦うんやで……直撃はもちろん、爆風の範囲も危ないから距離感ミスったらあかんで！\nやくそうは多めに持って行きや！',
       spriteRef: wr('nabqyI'), spriteUrl: sa('nabqyI') }),
     newObject({ emoji: '🧑', col: 5, row: 11, behavior: 'still', hazard: false,
-      message: 'ワイはなんJ民や。昔レゼが淹れてくれたコーヒー、めちゃ美味かったんやで……もう店は畳んでもうたけどな。\nまずは草原のザコから慣れてみ。北の森には強い魔物おるで。',
+      message: 'ワイはなんJ民や。昔レゼが淹れてくれたコーヒー、めちゃ美味かったんやで……今はもう戦うしかないんが悲しいわ。\nフィールドに出たらレゼがおるはずや。',
       spriteRef: ir('lIjiPk'), spriteUrl: sp('lIjiPk') }),
     newObject({ emoji: '👴', col: 16, row: 11, behavior: 'still', hazard: false,
-      message: 'フィールドの奥にゃ組織の残党が送り込んだデビルがおるぞ。レベルを上げてから挑むんじゃ。\nボムのわざを覚えたら一気に楽になる。',
+      message: 'フィールドの奥でレゼが彷徨っとるぞ。レベルを上げてから挑むんじゃ。\n剣を振り回すコツを掴んだら一気に楽になる。',
       spriteRef: wr('oLrlUq'), spriteUrl: sa('oLrlUq') }),
     newObject({ emoji: '👧', col: 10, row: 12, behavior: 'still', hazard: false,
-      message: 'フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\nせいすいを持ってくと魔物を一時的に遠ざけられるで！',
+      message: 'フィールドを北に向かうと草原が広がっとるよ。川を渡れへんさかい、道沿いに進むんや。\nやくそうは多めに持って行きや！',
       spriteRef: wr('4KtOzD'), spriteUrl: sa('4KtOzD') }),
     // ── 街の出口ワープ ──
     newObject({ emoji: '🚪', col: 9,  row: ROWS - 2, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
@@ -141,32 +141,19 @@ const fieldMap = Array.from({ length: FH }, (_, y) =>
 const scene2: SceneDef = {
   id: 'field', name: 'フィールド',
   map: fieldMap,
-  bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
+  bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },
   objects: [
     // ── 街帰還ワープ（北端の道） ──
     newObject({ emoji: '🏠', col: 14, row: 1, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'town', warpEntryCol: 9, warpEntryRow: ROWS - 3 }),
     newObject({ emoji: '🏠', col: 15, row: 1, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'town', warpEntryCol: 10, warpEntryRow: ROWS - 3 }),
-    // ── シンボルエンカウント敵 ──
-    newObject({ emoji: '🧟', name: 'ゾンビ',     col: 8,  row: 7,  behavior: 'patrolH', speed: 0.8, hp: 10, atk: 8,  def: 3,  exp: 5,  hazard: true,
-      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
-    newObject({ emoji: '🧎', name: 'カルト信者', col: 16, row: 6,  behavior: 'random',  speed: 1.0, hp: 14, atk: 11, def: 4,  exp: 8,  hazard: true,
-      spriteRef: wr('tSHy6V'), spriteUrl: sa('tSHy6V') }),
-    newObject({ emoji: '😈', name: 'デビル兵',   col: 20, row: 10, behavior: 'chase',   speed: 1.2, hp: 20, atk: 14, def: 7,  exp: 14, hazard: true,
-      moves: [{ name: 'つかみかかる', power: 12 }],
-      spriteRef: wr('zA2cuG'), spriteUrl: sa('zA2cuG') }),
-    newObject({ emoji: '🦇', name: 'コウモリデビル', col: 24, row: 9,  behavior: 'random',  speed: 1.3, hp: 18, atk: 13, def: 6,  exp: 18, hazard: true,
-      moves: [{ name: '毒爪', power: 10 }],
-      spriteRef: wr('R42ett'), spriteUrl: sa('R42ett') }),
-    newObject({ emoji: '💀', name: '魔人の手下', col: 11, row: 16, behavior: 'patrolV', speed: 1.1, hp: 30, atk: 20, def: 12, exp: 25, hazard: true,
-      spriteRef: wr('pyPkIs'), spriteUrl: sa('pyPkIs') }),
-    newObject({ emoji: '👿', name: '組織の刺客',  col: 22, row: 13, behavior: 'chase',   speed: 1.4, hp: 40, atk: 26, def: 16, exp: 40, hazard: true,
-      moves: [{ name: '魔力砲', power: 20 }, { name: '自己修復', power: 16, heal: true }],
-      spriteRef: wr('Ilpvcu'), spriteUrl: sa('Ilpvcu') }),
+    // ── レゼ（爆弾を投げてくる敵）──
+    newObject({ emoji: '🧨', name: 'レゼ', col: 20, row: 18, behavior: 'chase', speed: 0.9, hp: 50, atk: 30, def: 18, exp: 60, hazard: true,
+      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
     // ── フィールド NPC ──
     newObject({ emoji: '🧑', col: 17, row: 5, behavior: 'still', hazard: false,
-      message: '道の先に組織の生き残りがおるって噂や。Lv5 以上になってから挑んだ方がええで。',
+      message: '道の先にレゼがおるって噂や。爆弾を投げてくるから気をつけてな。',
       spriteRef: wr('qhy37c'), spriteUrl: sa('qhy37c') }),
     // ── 宝箱 ──
     newObject({ emoji: '👑', col: 26, row: 11, behavior: 'still', hazard: false,
@@ -182,9 +169,9 @@ const scene2: SceneDef = {
 export const onjReze: PresetData = {
   id: 'onjReze', name: 'おんｊレゼ', engine: 'onjReze', gravity: 0, friction: 0,
   player: {
-    emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
+    emoji: '🧑', color: '#66aaff', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 10, y: TILE_SIZE * 10 },
-    spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA'),
+    spriteRef: wr('4rSOzo'), spriteUrl: sa('4rSOzo'),
   },
   tiles,
   map: townMap,
@@ -200,7 +187,7 @@ export const onjReze: PresetData = {
   titleScreen: {
     enabled: true,
     heading: 'おんｊレゼ',
-    subtitle: '喫茶店の看板娘レゼと、なんJ民たちの街を拠点に、フィールドを探検しよう！',
+    subtitle: 'なんJ民として、爆弾を投げてくるレゼたちに立ち向かおう！',
     textColor: '#ffaacc',
     menu: [
       { kind: 'newGame',   label: 'ぼうけんをはじめる' },
