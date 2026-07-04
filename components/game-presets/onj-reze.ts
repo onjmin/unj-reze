@@ -191,7 +191,7 @@ const scene2: SceneDef = {
 export const onjReze: PresetData = {
   id: 'onjReze', name: 'おんｊレゼ', engine: 'rpg', gravity: 0, friction: 0,
   player: {
-    emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: 24, h: 24,
+    emoji: '🧨', color: '#ff5c7a', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 10, y: TILE_SIZE * 10 },
     spriteRef: wr('TO81en'), spriteUrl: sa('TO81en'),
   },

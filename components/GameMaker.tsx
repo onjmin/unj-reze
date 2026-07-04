@@ -941,6 +941,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   switchValsRef.current = switchVals;
   const [inventory, setInventory] = useState<Record<string, number>>({});
   const [shopModal, setShopModal] = useState<{ npcId: string; items: import('./game-presets/shared').ShopItem[] } | null>(null);
+  const shopModalRef = useRef<typeof shopModal>(null);
+  shopModalRef.current = shopModal;
   const [equipment, setEquipment] = useState<{ weapon?: string; armor?: string }>({});
   const equipmentRef = useRef<{ weapon?: string; armor?: string }>({});
   const inventoryRef = useRef<Record<string, number>>({});
@@ -952,6 +954,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
   const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
+  const gameMsgRef = useRef<typeof gameMsg>(null);
+  gameMsgRef.current = gameMsg;
   const [gameOverResult, setGameOverResult] = useState<{ score: number; marioDeathAnim?: boolean } | null>(null);
   const gameMsgReadyRef = useRef(false);
   const gameMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2145,6 +2149,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (prev) { dx = x - prev.px; dy = y - prev.py; }
       let dir: WayKey = overrideDir ?? prev?.dir ?? 's';
       const moving = Math.hypot(dx, dy) > 0.15;
+      // dq/onjReze/touhou は静止中も足踏みアニメを続ける（向き判定には影響させない）
+      const animMoving = moving || gameData.engine === 'rpg' || gameData.engine === 'touhou';
       if (!overrideDir && moving) {
         if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
         else dir = dirFromDelta(dx, dy) ?? dir;
@@ -2282,7 +2288,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (walk.crop) {
           // SMC専用ロジック（lib/smc-sprite.ts）: ストリップを分割。
           // 右向き素材なので、左移動時は水平反転して描く。
-          const rect = smcFrameRect(walk.crop, { moving, timeSec: performance.now() / 1000, fps: 7, frames: walk.frames });
+          const rect = smcFrameRect(walk.crop, { moving: animMoving, timeSec: performance.now() / 1000, fps: 7, frames: walk.frames });
           
           // アスペクト比を保ち、縦幅を h に合わせ、横幅をスケーリングして中央揃えにする。
           const baseH = rect.sh;
@@ -2306,7 +2312,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
         const cell = animatedCell(std, imgW, imgH, {
           dir: std.flipH ? 'd' : dir,
-          moving, timeSec: performance.now() / 1000, fps: 7,
+          moving: animMoving, timeSec: performance.now() / 1000, fps: 7,
         });
         const flipLeft = std.flipH && dir === 'a';
         if (flipLeft) {
@@ -2770,7 +2776,7 @@ const lose = (msg: string) => {
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
       // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current);
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current);
       
       // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
       if (justStartedRef.current && isPlaying && !frozen) {
@@ -3820,13 +3826,14 @@ const lose = (msg: string) => {
               break;
             }
             if (d.shopItems?.length && !eventRunningRef.current) {
-              setShopModal({ npcId: d.id, items: d.shopItems });
+              if (!e.talked) { e.talked = true; setShopModal({ npcId: d.id, items: d.shopItems }); }
               break;
             }
             if (d.pages && d.pages.length > 0) {
-              if (!eventRunningRef.current) {
+              if (!eventRunningRef.current && !e.talked) {
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
+                  e.talked = true;
                   runEventCommands(d.id, page.commands);
                 }
               }
@@ -3907,7 +3914,7 @@ const lose = (msg: string) => {
               break;
             }
             else if (d.message && !e.talked) { e.talked = true; npcTalkRef.current = { entity: e, text: d.message, startTime: performance.now() }; }
-          } else if (!d.hazard && !d.pages) { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
+          } else { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
         }
 
         // ── 敵同士の衝突反射（横歩き系のみ。テレサ＝chase 等はすり抜ける）──
