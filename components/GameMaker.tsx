@@ -3192,10 +3192,12 @@ const lose = (msg: string) => {
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
+          // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
+          const alreadyOverlapping = isBlockedByMob(p.x, p.y, pData.w, pData.h);
           let zt1 = getTile(nx, p.y), zt2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-          if (zt1?.info.passable && zt2?.info.passable && nx >= 0 && nx <= worldW - pData.w && !isBlockedByMob(nx, p.y, pData.w, pData.h)) p.x = nx;
+          if (zt1?.info.passable && zt2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           zt1 = getTile(p.x, ny); zt2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-          if (zt1?.info.passable && zt2?.info.passable && ny >= 0 && ny <= worldH - pData.h && !isBlockedByMob(p.x, ny, pData.w, pData.h)) p.y = ny;
+          if (zt1?.info.passable && zt2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           // 向き更新（最後に押した方向。左右優先、無ければ上下）
           if (isLeft) onjRezeDirRef.current = { x: -1, y: 0 };
           else if (isRight) onjRezeDirRef.current = { x: 1, y: 0 };
@@ -3291,10 +3293,12 @@ const lose = (msg: string) => {
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
           const mobBlockActive = gameData.engine === 'rpg';
+          // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
+          const alreadyOverlapping = mobBlockActive && isBlockedByMob(p.x, p.y, pData.w, pData.h);
           let t1 = getTile(nx, p.y), t2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-          if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
+          if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-          if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+          if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
           if (isPlaying && gameData.engine === 'rpg' && gameData.battle && !dead &&
@@ -3640,7 +3644,7 @@ const lose = (msg: string) => {
           // ── 剣（近接）の当たり判定（onjReze） ──
           // 直線状の矩形判定だと、追尾してくる敵が斜め位置にいるだけで当たらず「ダメージを与えられない」原因になるため、
           // プレイヤーの向いている方向に少しずらした円形の判定に変更（斜め位置の敵にも当たるように緩和）。
-          if (gameData.engine === 'onjReze' && d.objType !== 'warp' && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
+          if (gameData.engine === 'onjReze' && (d.hazard || d.objType === 'npc') && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
             const sw = swordRef.current; const reach = 26;
             const swingCx = p.x + pData.w / 2 + sw.dir.x * (pData.w / 2 + reach / 2);
             const swingCy = p.y + pData.h / 2 + sw.dir.y * (pData.h / 2 + reach / 2);
@@ -4315,7 +4319,9 @@ const lose = (msg: string) => {
             const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
             if (page && page.commands.length > 0) {
               runEventCommands(def.id, page.commands);
-            } else if (def.message) {
+            } else if (def.message && !(isPlaying && !def.hazard)) {
+              // 頭上に1文字ずつセリフが出るキャラ（非hazardの接触モブ）は、そちらで既に表示されるため
+              // 話しかけ時の個別フキダシは重複させない
               showGameMsg(def.message, 'instant', () => {});
             }
           }
