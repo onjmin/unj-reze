@@ -11,14 +11,16 @@ class BgmManager {
     this.stop();
     if (!manifest.bgm || !manifest.bgm.src) return;
 
+    const volume = (manifest.bgm as any).volume !== undefined ? (manifest.bgm as any).volume : 50;
+
     if (manifest.bgm.type === 'midi') {
-      await this.playMidi(manifest.bgm.src);
+      await this.playMidi(manifest.bgm.src, volume);
     } else if (manifest.bgm.type === 'youtube') {
-      this.playYoutube(manifest.bgm.src);
+      this.playYoutube(manifest.bgm.src, volume);
     } else if (manifest.bgm.type === 'mml') {
-      this.playMml(manifest.bgm.src);
+      this.playMml(manifest.bgm.src, manifest.bgm.loop, volume);
     } else if (manifest.bgm.type === 'direct') {
-      this.playDirect(manifest.bgm.src);
+      this.playDirect(manifest.bgm.src, volume);
     }
   }
 
@@ -29,10 +31,10 @@ class BgmManager {
 
   // ── 直リンク音声（MP3/WAV）をループ再生 ──
 
-  private playDirect(url: string) {
+  private playDirect(url: string, volume: number = 50) {
     const audio = new Audio(url);
     audio.loop = true;
-    audio.volume = 0.6;
+    audio.volume = (volume / 100) * 0.6;
     audio.play().catch(() => {});
     this.current = {
       stop: () => { try { audio.pause(); audio.src = ''; } catch (e) { } },
@@ -45,7 +47,7 @@ class BgmManager {
 
   // ── MIDI ──
 
-  private async playMidi(url: string) {
+  private async playMidi(url: string, volume: number = 50) {
     const loadScript = (src: string) =>
       new Promise<void>((resolve, reject) => {
         const s = document.createElement('script');
@@ -72,7 +74,7 @@ class BgmManager {
 
     const player = new MP.Player((evt: any) => {
       if (evt.name === 'Note on' && evt.velocity > 0) {
-        inst.play(evt.noteName, ctx.currentTime, { gain: evt.velocity / 127 * 1.0, duration: 0.25 });
+        inst.play(evt.noteName, ctx.currentTime, { gain: (evt.velocity / 127) * (volume / 50), duration: 0.25 });
       }
     });
     player.on('endOfFile', () => { try { player.stop(); player.play(); } catch (e) { } });
@@ -86,49 +88,34 @@ class BgmManager {
 
   // ── MML ──
 
-  private mmlTimer: ReturnType<typeof setTimeout> | null = null;
   private mmlCtx: AudioContext | null = null;
 
-  private playMml(mml: string) {
+  private async playMml(mml: string, loop?: any, volume: number = 50) {
+    const { playMML } = await import('@onjmin/dtm');
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    if (ctx.state === 'suspended') ctx.resume();
+    if (ctx.state === 'suspended') await ctx.resume();
     this.mmlCtx = ctx;
 
-    const notes = mml.toUpperCase().match(/[A-G][#B]?[0-9]?/g) || [];
-    const noteLen = 0.25;
-    const getFreq = (n: string): number => {
-      const base: Record<string, number> = { 'C': 261.63, 'C#': 277.18, 'D': 293.66, 'D#': 311.13, 'E': 329.63, 'F': 349.23, 'F#': 369.99, 'G': 392.00, 'G#': 415.30, 'A': 440.00, 'A#': 466.16, 'B': 493.88 };
-      const key = n.length > 1 && (n[1] === '#' || n[1] === 'B') ? n.slice(0, 2) : n[0];
-      return base[key] || 0;
-    };
+    const loopOption = loop !== undefined ? loop : true;
 
-    let time = ctx.currentTime;
-    for (const note of notes) {
-      if (note.includes('R')) continue;
-      const freq = getFreq(note);
-      if (!freq) continue;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = freq;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      gain.gain.setValueAtTime(0.1, time);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + noteLen - 0.05);
-      osc.start(time);
-      osc.stop(time + noteLen);
-      time += noteLen;
+    try {
+      const bgm = playMML(mml, {
+        audioContext: ctx,
+        volume: volume,
+        loop: loopOption,
+      });
+
+      this.current = {
+        stop: () => {
+          try { bgm.stop(); } catch (e) {}
+          try { bgm.destroy(); } catch (e) {}
+          ctx.close();
+        },
+      };
+    } catch (err) {
+      console.error('Error playing MML BGM:', err);
+      ctx.close();
     }
-
-    const totalDuration = (time - ctx.currentTime) * 1000;
-    this.mmlTimer = setTimeout(() => { this.playMml(mml); }, totalDuration);
-
-    this.current = {
-      stop: () => {
-        if (this.mmlTimer) clearTimeout(this.mmlTimer);
-        ctx.close();
-      },
-    };
   }
 
   // ── YouTube ──
@@ -138,7 +125,7 @@ class BgmManager {
     return m ? m[1] : null;
   }
 
-  private playYoutube(url: string) {
+  private playYoutube(url: string, volume: number = 50) {
     const videoId = this.extractVideoId(url);
     if (!videoId) return;
 
@@ -148,17 +135,69 @@ class BgmManager {
     const container = document.createElement('div');
     container.className = 'bgm-youtube-container';
     container.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
-
-    const iframe = document.createElement('iframe');
-    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&loop=1&playlist=${videoId}`;
-    iframe.width = '1';
-    iframe.height = '1';
-    iframe.allow = 'autoplay';
-    container.appendChild(iframe);
     document.body.appendChild(container);
 
+    const playerDiv = document.createElement('div');
+    playerDiv.id = 'bgm-youtube-player';
+    container.appendChild(playerDiv);
+
+    const loadYtApi = () => {
+      if ((window as any).YT && (window as any).YT.Player) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        if (!document.getElementById('youtube-iframe-api-script')) {
+          const tag = document.createElement('script');
+          tag.id = 'youtube-iframe-api-script';
+          tag.src = 'https://www.youtube.com/iframe_api';
+          const firstScriptTag = document.getElementsByTagName('script')[0];
+          firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+        }
+        const prevCallback = (window as any).onYouTubeIframeAPIReady;
+        (window as any).onYouTubeIframeAPIReady = () => {
+          if (prevCallback) prevCallback();
+          resolve();
+        };
+        const check = setInterval(() => {
+          if ((window as any).YT && (window as any).YT.Player) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+      });
+    };
+
+    let player: any = null;
+    loadYtApi().then(() => {
+      player = new (window as any).YT.Player('bgm-youtube-player', {
+        height: '1',
+        width: '1',
+        videoId: videoId,
+        playerVars: {
+          autoplay: 1,
+          loop: 1,
+          playlist: videoId,
+          controls: 0,
+        },
+        events: {
+          onReady: (event: any) => {
+            event.target.setVolume(volume);
+            event.target.playVideo();
+          },
+          onStateChange: (event: any) => {
+            if (event.data === (window as any).YT.PlayerState.ENDED) {
+              event.target.playVideo();
+            }
+          }
+        }
+      });
+    });
+
     this.current = {
-      stop: () => { container.remove(); },
+      stop: () => {
+        try { if (player && player.destroy) player.destroy(); } catch (e) {}
+        container.remove();
+      },
     };
   }
 }

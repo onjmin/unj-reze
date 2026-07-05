@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
-import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl } from '@/lib/asset-ref';
+import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
@@ -217,14 +217,17 @@ const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData =
 
 async function playSfx(s?: SfxRef) {
   if (!s || !s.src) return;
+  const volume = s.ref ? getBgmVolume(s.ref) : 50;
   if (s.type === 'direct') {
-    const a = new Audio(s.src); a.volume = 0.7; a.play().catch(() => {});
+    const a = new Audio(s.src);
+    a.volume = (volume / 100) * 0.7;
+    a.play().catch(() => {});
     return;
   }
   if (s.type !== 'mml') return; // youtube は即時再生に不向きなので無視
   try {
     const { playMML } = await import('@onjmin/dtm');
-    playMML(s.src, { loop: false });
+    playMML(s.src, { loop: false, volume: volume });
   } catch (e) {
     console.error(e);
   }
@@ -755,7 +758,8 @@ interface GameMakerProps {
 type PickTarget =
   | { t: 'player' } | { t: 'bgm' } | { t: 'battleBgm' } | { t: 'bossBgm' } | { t: 'tile'; id: number }
   | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' } | { t: 'selObjSprite' } | { t: 'mapBg' }
-  | { t: 'titleBg' } | { t: 'endingBg' } | { t: 'titleBgm' } | { t: 'endingBgm' };
+  | { t: 'titleBg' } | { t: 'endingBg' } | { t: 'titleBgm' } | { t: 'endingBgm' }
+  | { t: 'sceneBgm'; idx: number };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -1272,10 +1276,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const appendLog = (line: string, patch: Partial<BattleView> = {}) =>
     setBattle(v => (v ? { ...v, enemyHp: battleRef.current.enemyHp, log: [...v.log, line].slice(-6), ...patch } : v));
 
+  const getCurrentFieldBgm = useCallback(() => {
+    if (isPlaying && gameData.scenes && gameData.scenes.length > 0) {
+      const curSceneIdx = activeSceneIdxRef.current;
+      const curScene = gameData.scenes[curSceneIdx];
+      if (curScene?.bgm?.ref) {
+        return curScene.bgm;
+      }
+    }
+    return gameData.bgm;
+  }, [isPlaying, gameData.bgm, gameData.scenes]);
+
   /** BGM を即時切り替えるヘルパー。src がなければ停止。 */
-  const switchBgm = (bgm?: { src?: string; type?: 'youtube' | 'mml' | 'direct' }) => {
+  const switchBgm = (bgm?: { src?: string; type?: 'youtube' | 'mml' | 'direct'; ref?: string }) => {
     if (bgm?.src && bgm.type !== 'direct') {
-      bgmManager.play({ bgm: { type: bgm.type ?? 'youtube', src: bgm.src }, tileset: {} } as never);
+      const loopOption = getLoopOption(bgm.ref);
+      const volume = getBgmVolume(bgm.ref);
+      bgmManager.play({ bgm: { type: bgm.type ?? 'youtube', src: bgm.src, loop: loopOption, volume } as any, tileset: {} });
     } else {
       bgmManager.stop();
     }
@@ -1362,7 +1379,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // バトルBGM終了 → フィールドBGMに戻す
       if (battleBgmActiveRef.current !== 'none') {
         battleBgmActiveRef.current = 'none';
-        switchBgm(gameDataRef.current.bgm);
+        switchBgm(getCurrentFieldBgm());
       }
       if (result === 'win' && wasBoss) {
         const outro = bossOutroRef.current;
@@ -1526,11 +1543,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const bossBgm = gameData.bossBgm;
     if (isBossPhase && bossBgm?.src && !bossBgmActiveRef.current) {
       bossBgmActiveRef.current = true;
-      bgmManager.play({ bgm: { type: bossBgm.type ?? 'youtube', src: bossBgm.src }, tileset: {} } as never);
+      const loopOption = getLoopOption(bossBgm.ref);
+      const volume = getBgmVolume(bossBgm.ref);
+      bgmManager.play({ bgm: { type: bossBgm.type ?? 'youtube', src: bossBgm.src, loop: loopOption, volume } as any, tileset: {} });
     } else if (!isBossPhase && bossBgmActiveRef.current) {
       bossBgmActiveRef.current = false;
-      const normal = gameData.bgm;
-      if (normal?.src) bgmManager.play({ bgm: { type: normal.type ?? 'youtube', src: normal.src }, tileset: {} } as never);
+      const normal = getCurrentFieldBgm();
+      if (normal?.src) {
+        const loopOption = getLoopOption(normal.ref);
+        const volume = getBgmVolume(normal.ref);
+        bgmManager.play({ bgm: { type: normal.type ?? 'youtube', src: normal.src, loop: loopOption, volume } as any, tileset: {} });
+      }
       else bgmManager.stop();
     }
 
@@ -1943,19 +1966,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // BGM
   useEffect(() => {
-    if (isPlaying && gameData.bgm?.src) {
-      const type = gameData.bgm.type;
-      const src = gameData.bgm.src;
-      if (type && src) bgmManager.play({ bgm: { type, src }, tileset: {} } as never);
-      else {
-        const asset = bgmRefToAsset(gameData.bgm.ref);
-        if (asset) bgmManager.play({ bgm: asset, tileset: {} } as never); else bgmManager.stop();
+    if (isPlaying) {
+      if (battleBgmActiveRef.current !== 'none') return;
+      const currentBgm = getCurrentFieldBgm();
+      if (currentBgm?.src) {
+        const type = currentBgm.type;
+        const src = currentBgm.src;
+        const loopOption = getLoopOption(currentBgm.ref);
+        const volume = getBgmVolume(currentBgm.ref);
+        if (type && src) bgmManager.play({ bgm: { type, src, loop: loopOption, volume } as any, tileset: {} });
+        else {
+          const asset = bgmRefToAsset(currentBgm.ref);
+          if (asset) bgmManager.play({ bgm: asset, tileset: {} } as never); else bgmManager.stop();
+        }
+      } else {
+        bgmManager.stop();
       }
     } else {
       bgmManager.stop();
     }
     return () => bgmManager.stop();
-  }, [isPlaying, gameData.bgm]);
+  }, [isPlaying, gameData.bgm, editSceneIdx, getCurrentFieldBgm]);
 
   // ── シーン切り替えモード：全シーンをワールドマップに合成して初期化 ──
   useEffect(() => {
@@ -4951,8 +4982,7 @@ const lose = (msg: string) => {
             justStartedRef.current = true; // 2マスキャラ等のワープ先埋まり防止イジェクトを再実行
             setEditSceneIdx(nextIdx);
             // シーン別BGM切り替え
-            if (next.bgm) switchBgm(next.bgm);
-            else if (battleBgmActiveRef.current === 'none') switchBgm(gameDataRef.current.bgm);
+            switchBgm(getCurrentFieldBgm());
           }
           sceneFadeRef.current = { ...fade, phase: 'in', frame: 0 };
         }
@@ -5297,6 +5327,7 @@ const lose = (msg: string) => {
     else if (target.t === 'endingBg') { ensureImage(res.url); setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, bgRef: res.ref, bgUrl: res.url } }) : p); }
     else if (target.t === 'titleBgm') setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, bgmRef: bgmLike().ref } }) : p);
     else if (target.t === 'endingBgm') setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, bgmRef: bgmLike().ref } }) : p);
+    else if (target.t === 'sceneBgm') setGameData(p => ({ ...p, scenes: p.scenes?.map((s, i) => i === target.idx ? { ...s, bgm: bgmLike() } : s) }));
   };
 
   const addTile = () => {
@@ -6647,10 +6678,20 @@ const lose = (msg: string) => {
                           {/* BGM */}
                           <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'titleBgm' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><Music size={12} />BGMを参照</button>
                           {gameData.titleScreen.bgmRef && (
-                            <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
-                              <span className="truncate flex-1">{refLabel(gameData.titleScreen.bgmRef)}</span>
-                              <button onClick={() => updTitle({ bgmRef: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
-                            </div>
+                            <>
+                              <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
+                                <span className="truncate flex-1">{refLabel(gameData.titleScreen.bgmRef)}</span>
+                                <button onClick={() => updTitle({ bgmRef: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                              </div>
+                              <BgmVolumeSettings
+                                bgm={{ ref: gameData.titleScreen.bgmRef }}
+                                onChange={(newRef) => updTitle({ bgmRef: newRef })}
+                              />
+                              <MmlLoopSettings
+                                bgm={{ ref: gameData.titleScreen.bgmRef }}
+                                onChange={(newRef) => updTitle({ bgmRef: newRef })}
+                              />
+                            </>
                           )}
                           {/* 開始ボタン */}
                           <p className="text-[10px] text-gray-400 font-bold mt-1">開始ボタンの表示名</p>
@@ -6691,10 +6732,20 @@ const lose = (msg: string) => {
                           )}
                           <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'endingBgm' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><Music size={12} />BGMを参照</button>
                           {gameData.ending.bgmRef && (
-                            <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
-                              <span className="truncate flex-1">{refLabel(gameData.ending.bgmRef)}</span>
-                              <button onClick={() => updEnding({ bgmRef: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
-                            </div>
+                            <>
+                              <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
+                                <span className="truncate flex-1">{refLabel(gameData.ending.bgmRef)}</span>
+                                <button onClick={() => updEnding({ bgmRef: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                              </div>
+                              <BgmVolumeSettings
+                                bgm={{ ref: gameData.ending.bgmRef }}
+                                onChange={(newRef) => updEnding({ bgmRef: newRef })}
+                              />
+                              <MmlLoopSettings
+                                bgm={{ ref: gameData.ending.bgmRef }}
+                                onChange={(newRef) => updEnding({ bgmRef: newRef })}
+                              />
+                            </>
                           )}
                         </div>
                       )}
@@ -7563,10 +7614,20 @@ const lose = (msg: string) => {
                         <Music size={13} className="shrink-0 ml-1" />
                       </button>
                       {gameData.bgm && (
-                        <div className="mt-1 flex items-center gap-2">
-                          <button onClick={() => previewMmlAsset('bgm', gameData.bgm)} className="px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>
-                          <button onClick={() => setGameData(p => ({ ...p, bgm: undefined }))} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-gray-400 hover:text-red-400 active:bg-red-500/15"><Trash2 size={13} />外す</button>
-                        </div>
+                        <>
+                          <div className="mt-1 flex items-center gap-2">
+                            <button onClick={() => previewMmlAsset('bgm', gameData.bgm)} className="px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>
+                            <button onClick={() => setGameData(p => ({ ...p, bgm: undefined }))} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-gray-400 hover:text-red-400 active:bg-red-500/15"><Trash2 size={13} />外す</button>
+                          </div>
+                          <BgmVolumeSettings
+                            bgm={gameData.bgm}
+                            onChange={(newRef) => setGameData(p => ({ ...p, bgm: p.bgm ? { ...p.bgm, ref: newRef } : undefined }))}
+                          />
+                          <MmlLoopSettings
+                            bgm={gameData.bgm}
+                            onChange={(newRef) => setGameData(p => ({ ...p, bgm: p.bgm ? { ...p.bgm, ref: newRef } : undefined }))}
+                          />
+                        </>
                       )}
                     </div>
 
@@ -7582,10 +7643,20 @@ const lose = (msg: string) => {
                           <Music size={13} className="shrink-0 ml-1" />
                         </button>
                         {gameData.battleBgm && (
-                          <div className="mt-1 flex items-center gap-2">
-                            <button onClick={() => previewMmlAsset('battleBgm', gameData.battleBgm)} className="px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>
-                            <button onClick={() => setGameData(p => ({ ...p, battleBgm: undefined }))} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-gray-400 hover:text-red-400 active:bg-red-500/15"><Trash2 size={13} />外す</button>
-                          </div>
+                          <>
+                            <div className="mt-1 flex items-center gap-2">
+                              <button onClick={() => previewMmlAsset('battleBgm', gameData.battleBgm)} className="px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>
+                              <button onClick={() => setGameData(p => ({ ...p, battleBgm: undefined }))} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-gray-400 hover:text-red-400 active:bg-red-500/15"><Trash2 size={13} />外す</button>
+                            </div>
+                            <BgmVolumeSettings
+                              bgm={gameData.battleBgm}
+                              onChange={(newRef) => setGameData(p => ({ ...p, battleBgm: p.battleBgm ? { ...p.battleBgm, ref: newRef } : undefined }))}
+                            />
+                            <MmlLoopSettings
+                              bgm={gameData.battleBgm}
+                              onChange={(newRef) => setGameData(p => ({ ...p, battleBgm: p.battleBgm ? { ...p.battleBgm, ref: newRef } : undefined }))}
+                            />
+                          </>
                         )}
                         <p className="text-[10px] text-gray-600 mt-1">通常エンカウント開始時に切り替え。空欄ならマップBGMのまま。</p>
                       </div>
@@ -7603,10 +7674,20 @@ const lose = (msg: string) => {
                           <Music size={13} className="shrink-0 ml-1" />
                         </button>
                         {gameData.bossBgm && (
-                          <div className="mt-1 flex items-center gap-2">
-                            <button onClick={() => previewMmlAsset('bossBgm', gameData.bossBgm)} className="px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>
-                            <button onClick={() => setGameData(p => ({ ...p, bossBgm: undefined }))} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-gray-400 hover:text-red-400 active:bg-red-500/15"><Trash2 size={13} />外す</button>
-                          </div>
+                          <>
+                            <div className="mt-1 flex items-center gap-2">
+                              <button onClick={() => previewMmlAsset('bossBgm', gameData.bossBgm)} className="px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>
+                              <button onClick={() => setGameData(p => ({ ...p, bossBgm: undefined }))} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-gray-400 hover:text-red-400 active:bg-red-500/15"><Trash2 size={13} />外す</button>
+                            </div>
+                            <BgmVolumeSettings
+                              bgm={gameData.bossBgm}
+                              onChange={(newRef) => setGameData(p => ({ ...p, bossBgm: p.bossBgm ? { ...p.bossBgm, ref: newRef } : undefined }))}
+                            />
+                            <MmlLoopSettings
+                              bgm={gameData.bossBgm}
+                              onChange={(newRef) => setGameData(p => ({ ...p, bossBgm: p.bossBgm ? { ...p.bossBgm, ref: newRef } : undefined }))}
+                            />
+                          </>
                         )}
                         <p className="text-[10px] text-gray-600 mt-1">{gameData.engine === 'touhou' ? 'ボスフェーズ（kind: boss）開始時に自動切り替え。空欄なら道中BGMのまま。' : 'ボス戦開始時に切り替え。空欄なら通常戦闘BGMのまま。'}</p>
                       </div>
@@ -7621,11 +7702,19 @@ const lose = (msg: string) => {
                           if (trig === 'graze' || trig === 'spellcard') return gameData.engine === 'touhou';
                           return true;
                         }).map(trig => (
-                          <div key={trig} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5 border border-gray-800">
-                            <span className="text-[10px] text-gray-400 w-20 shrink-0">{SFX_LABELS[trig]}</span>
-                            <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'sfx', trigger: trig } })} className="flex-1 min-w-0 text-left text-[10px] text-gray-300 truncate">{gameData.sfx[trig] ? refLabel(gameData.sfx[trig]!.ref) : '未設定'}</button>
-                            {gameData.sfx[trig] && <button onClick={() => previewMmlAsset(`sfx-${trig}`, gameData.sfx[trig])} className="shrink-0 px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>}
-                            {gameData.sfx[trig] && <button onClick={() => setGameData(p => { const s = { ...p.sfx }; delete s[trig]; return { ...p, sfx: s }; })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
+                          <div key={trig} className="bg-gray-900 rounded-lg p-2 border border-gray-800 space-y-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-gray-400 w-20 shrink-0">{SFX_LABELS[trig]}</span>
+                              <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'sfx', trigger: trig } })} className="flex-1 min-w-0 text-left text-[10px] text-gray-300 truncate">{gameData.sfx[trig] ? refLabel(gameData.sfx[trig]!.ref) : '未設定'}</button>
+                              {gameData.sfx[trig] && <button onClick={() => previewMmlAsset(`sfx-${trig}`, gameData.sfx[trig])} className="shrink-0 px-2.5 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>}
+                              {gameData.sfx[trig] && <button onClick={() => setGameData(p => { const s = { ...p.sfx }; delete s[trig]; return { ...p, sfx: s }; })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
+                            </div>
+                            {gameData.sfx[trig] && (
+                              <BgmVolumeSettings
+                                bgm={gameData.sfx[trig]}
+                                onChange={(newRef) => setGameData(p => ({ ...p, sfx: { ...p.sfx, [trig]: { ...p.sfx[trig]!, ref: newRef } } }))}
+                              />
+                            )}
                           </div>
                         ))}
                       </div>
@@ -7688,6 +7777,40 @@ const lose = (msg: string) => {
                                 </label>
                               );
                             })}
+                          </div>
+
+                          {/* シーンBGM設定 */}
+                          <div className="space-y-1.5 pt-1.5 border-t border-gray-850">
+                            <div className="flex items-center justify-between text-[9px] text-gray-400">
+                              <span>シーン固有BGM (空欄=全体のBGM)</span>
+                              {sc.bgm && (
+                                <button onClick={() => setGameData(p => ({ ...p, scenes: p.scenes!.map((s, i) => i === idx ? { ...s, bgm: undefined } : s) }))}
+                                  className="text-gray-500 hover:text-red-400">外す</button>
+                              )}
+                            </div>
+                            <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'sceneBgm', idx } })}
+                              className="w-full flex items-center justify-between py-1 px-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300">
+                              <span className="truncate">{sc.bgm ? refLabel(sc.bgm.ref) : '未設定（全体のBGMを使用）'}</span>
+                              <Music size={11} className="shrink-0 ml-1" />
+                            </button>
+                            {sc.bgm && (
+                              <>
+                                <BgmVolumeSettings
+                                  bgm={sc.bgm}
+                                  onChange={(newRef) => setGameData(p => ({
+                                    ...p,
+                                    scenes: p.scenes!.map((s, i) => i === idx ? { ...s, bgm: { ...s.bgm!, ref: newRef } } : s)
+                                  }))}
+                                />
+                                <MmlLoopSettings
+                                  bgm={sc.bgm}
+                                  onChange={(newRef) => setGameData(p => ({
+                                    ...p,
+                                    scenes: p.scenes!.map((s, i) => i === idx ? { ...s, bgm: { ...s.bgm!, ref: newRef } } : s)
+                                  }))}
+                                />
+                              </>
+                            )}
                           </div>
                         </div>
                       );
@@ -8058,3 +8181,127 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
     </div>
   );
 }
+
+interface MmlLoopSettingsProps {
+  bgm?: { ref: string };
+  onChange: (newRef: string) => void;
+}
+
+const MmlLoopSettings: React.FC<MmlLoopSettingsProps> = ({ bgm, onChange }) => {
+  if (!bgm || !bgm.ref.startsWith('mml:')) return null;
+
+  const hasLoop = bgm.ref.includes('#loop=');
+  const loop = parseLoopFromRef(bgm.ref) || { type: 'bar', val: 2, endType: 'none', endVal: 4 };
+
+  const endType = loop.endType || 'none';
+  const endVal = loop.endVal !== undefined ? loop.endVal : 4;
+
+  return (
+    <div className="mt-2 p-2 rounded bg-gray-900 border border-gray-800 space-y-2">
+      <label className="flex items-center gap-1.5 text-[10px] text-gray-300 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={hasLoop}
+          onChange={(e) => {
+            const enabled = e.target.checked;
+            const newRef = updateRefLoop(bgm.ref, enabled, loop);
+            onChange(newRef);
+          }}
+          className="accent-emerald-500"
+        />
+        <span>ループ設定を有効にする</span>
+      </label>
+      {hasLoop && (
+        <div className="space-y-2 pl-4 text-[10px] text-gray-400">
+          <div className="flex items-center gap-2">
+            <span className="w-10">開始:</span>
+            <select
+              value={loop.type}
+              onChange={(e) => {
+                const nextType = e.target.value as 'bar' | 'step' | 'seconds';
+                const newRef = updateRefLoop(bgm.ref, true, { ...loop, type: nextType });
+                onChange(newRef);
+              }}
+              className="bg-gray-950 border border-gray-800 text-gray-300 text-[10px] rounded px-1 py-0.5"
+            >
+              <option value="bar">小節 (BAR)</option>
+              <option value="step">ステップ (STEP)</option>
+              <option value="seconds">秒 (SECONDS)</option>
+            </select>
+            <input
+              type="number"
+              value={loop.val}
+              onChange={(e) => {
+                const nextVal = parseFloat(e.target.value) || 0;
+                const newRef = updateRefLoop(bgm.ref, true, { ...loop, val: nextVal });
+                onChange(newRef);
+              }}
+              className="w-14 bg-gray-950 border border-gray-800 text-center text-[10px] text-gray-300 rounded py-0.5"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-10">終了:</span>
+            <select
+              value={endType}
+              onChange={(e) => {
+                const nextEndType = e.target.value as 'none' | 'bar' | 'step' | 'seconds';
+                const newRef = updateRefLoop(bgm.ref, true, { ...loop, endType: nextEndType, endVal });
+                onChange(newRef);
+              }}
+              className="bg-gray-950 border border-gray-800 text-gray-300 text-[10px] rounded px-1 py-0.5"
+            >
+              <option value="none">曲の終端 (NONE)</option>
+              <option value="bar">小節 (BAR)</option>
+              <option value="step">ステップ (STEP)</option>
+              <option value="seconds">秒 (SECONDS)</option>
+            </select>
+            {endType !== 'none' && (
+              <input
+                type="number"
+                value={endVal}
+                onChange={(e) => {
+                  const nextEndVal = parseFloat(e.target.value) || 0;
+                  const newRef = updateRefLoop(bgm.ref, true, { ...loop, endVal: nextEndVal });
+                  onChange(newRef);
+                }}
+                className="w-14 bg-gray-950 border border-gray-800 text-center text-[10px] text-gray-300 rounded py-0.5"
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface BgmVolumeSettingsProps {
+  bgm?: { ref: string };
+  onChange: (newRef: string) => void;
+}
+
+const BgmVolumeSettings: React.FC<BgmVolumeSettingsProps> = ({ bgm, onChange }) => {
+  if (!bgm) return null;
+  const volume = getBgmVolume(bgm.ref);
+
+  return (
+    <div className="mt-2 p-2 rounded bg-gray-900 border border-gray-800 flex items-center gap-2">
+      <span className="text-[10px] text-gray-400 shrink-0 w-8">音量:</span>
+      <input
+        type="range"
+        min="0"
+        max="100"
+        value={volume}
+        onChange={(e) => {
+          const nextVol = parseInt(e.target.value, 10);
+          const params = parseBgmParams(bgm.ref);
+          params.volume = nextVol;
+          const newRef = updateRefBgmParams(bgm.ref, params);
+          onChange(newRef);
+        }}
+        className="grow accent-emerald-500 h-1 cursor-pointer"
+      />
+      <span className="text-[9px] text-gray-400 w-8 text-right font-mono">{volume}%</span>
+    </div>
+  );
+};
+

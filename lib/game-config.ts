@@ -44,6 +44,18 @@ export interface WinCondition {
 export interface BgmAsset {
   type: 'midi' | 'mml' | 'youtube' | 'direct';
   src: string;
+  loop?: boolean | {
+    start?: {
+      bar?: number;
+      step?: number;
+      seconds?: number;
+    };
+    end?: {
+      bar?: number;
+      step?: number;
+      seconds?: number;
+    };
+  };
 }
 
 export interface SpriteMap {

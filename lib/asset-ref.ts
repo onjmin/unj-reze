@@ -55,21 +55,129 @@ export function isImageRef(raw: string): boolean {
   return !!ref && ['post', 'walk', 'url'].includes(ref.scheme);
 }
 
-/** BGM参照を BgmManager が解釈できる {type, src} へ。
+export interface LoopConfig {
+  type: 'bar' | 'step' | 'seconds';
+  val: number;
+  endType?: 'none' | 'bar' | 'step' | 'seconds';
+  endVal?: number;
+}
+
+export interface BgmParams {
+  loop?: LoopConfig;
+  volume?: number;
+}
+
+export function parseBgmParams(ref?: string): BgmParams {
+  const result: BgmParams = {};
+  if (!ref) return result;
+  const hashIdx = ref.indexOf('#');
+  if (hashIdx === -1) return result;
+  const hash = ref.slice(hashIdx + 1);
+
+  const parts = hash.split('&');
+  for (const part of parts) {
+    const [key, val] = part.split('=');
+    if (key === 'loop' && val) {
+      const [startPart, endPart] = val.split(',');
+      const [startType, startValStr] = startPart.split(':');
+      const startVal = parseFloat(startValStr);
+      if (startType && !isNaN(startVal)) {
+        const loopConfig: LoopConfig = {
+          type: startType as 'bar' | 'step' | 'seconds',
+          val: startVal,
+        };
+        if (endPart) {
+          const [endType, endValStr] = endPart.split(':');
+          const endVal = parseFloat(endValStr);
+          if (endType && !isNaN(endVal)) {
+            loopConfig.endType = endType as 'none' | 'bar' | 'step' | 'seconds';
+            loopConfig.endVal = endVal;
+          }
+        }
+        result.loop = loopConfig;
+      }
+    } else if (key === 'vol' && val) {
+      const vol = parseInt(val, 10);
+      if (!isNaN(vol)) {
+        result.volume = Math.max(0, Math.min(100, vol));
+      }
+    }
+  }
+  return result;
+}
+
+export function updateRefBgmParams(ref: string, params: BgmParams): string {
+  const base = ref.split('#')[0];
+  const hashParts: string[] = [];
+
+  if (params.loop) {
+    let loopStr = `${params.loop.type}:${params.loop.val}`;
+    if (params.loop.endType && params.loop.endType !== 'none' && params.loop.endVal !== undefined) {
+      loopStr += `,${params.loop.endType}:${params.loop.endVal}`;
+    }
+    hashParts.push(`loop=${loopStr}`);
+  }
+  if (params.volume !== undefined) {
+    hashParts.push(`vol=${params.volume}`);
+  }
+
+  if (hashParts.length === 0) return base;
+  return `${base}#${hashParts.join('&')}`;
+}
+
+export function parseLoopFromRef(ref?: string): LoopConfig | null {
+  return parseBgmParams(ref).loop || null;
+}
+
+export function updateRefLoop(ref: string, enabled: boolean, config?: LoopConfig): string {
+  const params = parseBgmParams(ref);
+  params.loop = enabled && config ? config : undefined;
+  return updateRefBgmParams(ref, params);
+}
+
+export function getLoopOption(ref?: string): any {
+  const params = parseBgmParams(ref);
+  const loop = params.loop;
+  if (!loop) return undefined;
+  const opt: any = {
+    start: { [loop.type]: loop.val }
+  };
+  if (loop.endType && loop.endType !== 'none' && loop.endVal !== undefined) {
+    opt.end = { [loop.endType]: loop.endVal };
+  }
+  return opt;
+}
+
+export function getBgmVolume(ref?: string): number {
+  const params = parseBgmParams(ref);
+  return params.volume !== undefined ? params.volume : 50;
+}
+
+/** BGM参照を BgmManager が解釈できる {type, src, loop, volume} へ。
  *  mml:post:N はその投稿のMML本文(rawMml)が要るため省略可。 */
 export function bgmRefToAsset(
   raw: string,
   rawMml?: string,
-): { type: 'youtube' | 'mml'; src: string } | null {
+): { type: 'youtube' | 'mml'; src: string; loop?: any; volume?: number } | null {
   const ref = parseRef(raw);
   if (!ref || ref.scheme === 'none' || !ref.value) return null;
-  if (ref.scheme === 'youtube') return { type: 'youtube', src: ref.value };
-  if (ref.scheme === 'url') return { type: 'youtube', src: ref.value };
+
+  const loopOption = getLoopOption(raw);
+  const volume = getBgmVolume(raw);
+
+  let valStr = ref.value;
+  const hashIdx = valStr.indexOf('#');
+  if (hashIdx !== -1) {
+    valStr = valStr.slice(0, hashIdx);
+  }
+
+  if (ref.scheme === 'youtube') return { type: 'youtube', src: valStr, volume };
+  if (ref.scheme === 'url') return { type: 'youtube', src: valStr, volume };
   if (ref.scheme === 'mml') {
-    if (ref.value.startsWith('post:')) {
-      return rawMml ? { type: 'mml', src: rawMml } : null;
+    if (valStr.startsWith('post:')) {
+      return rawMml ? { type: 'mml', src: rawMml, loop: loopOption, volume } : null;
     }
-    return { type: 'mml', src: ref.value };
+    return { type: 'mml', src: valStr, loop: loopOption, volume };
   }
   return null;
 }
