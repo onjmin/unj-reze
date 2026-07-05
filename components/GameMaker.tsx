@@ -967,6 +967,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   inventoryRef.current = inventory;
   const selfSwitchesRef = useRef<Record<string, Record<string, boolean>>>({});
   const eventRunningRef = useRef(false);
+  const eventIdRef = useRef(0);
   const eventChoiceRef = useRef<{ text: string; choices: { label: string; commands: EventCommand[] }[]; onPick: (idx: number) => void } | null>(null);
   const [eventChoice, setEventChoice] = useState<{ text: string; choices: { label: string; commands: EventCommand[] }[]; onPick: (idx: number) => void } | null>(null);
 
@@ -1594,11 +1595,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const runEventCommands = useCallback((objId: string, commands: EventCommand[], onDone?: () => void) => {
     if (eventRunningRef.current && !onDone) return;
+    eventIdRef.current++;
+    const currentEventId = eventIdRef.current;
     let index = 0;
     let cmds = commands;
     const ss = selfSwitchesRef.current;
-    const advance = () => { index++; runNext(); };
+    const advance = () => {
+      if (currentEventId !== eventIdRef.current) return;
+      index++;
+      runNext();
+    };
     const runNext = () => {
+      if (currentEventId !== eventIdRef.current) return;
       if (index >= cmds.length) {
         eventRunningRef.current = false;
         forceHud(n => n + 1);
@@ -1726,6 +1734,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     eventRunningRef.current = true;
     runNext();
   }, [showGameMsg]);
+
+  const resetSceneState = useCallback(() => {
+    eventIdRef.current++;
+    eventRunningRef.current = false;
+    setActiveDialogue(null);
+    activeDialogueRef.current = null;
+    afterDialogueRef.current = null;
+    if (gameMsgTimerRef.current) {
+      clearTimeout(gameMsgTimerRef.current);
+      gameMsgTimerRef.current = null;
+    }
+    setGameMsg(null);
+    gameMsgReadyRef.current = false;
+    setEventChoice(null);
+    eventChoiceRef.current = null;
+    setShopModal(null);
+  }, []);
 
   const runObjectEvent = useCallback((obj: ObjectDef) => {
     if (eventRunningRef.current) return;
@@ -1866,6 +1891,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     eng.keys.clear();
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
     actionDirRef.current = 1; actionShootCoolRef.current = 0;
+    invulnRef.current = 0;
+    bombInvulnRef.current = 0;
+    isPlayerDeadRef.current = false;
+    roundOverRef.current = false;
     setIsPlaying(false); setSelectedObjId(null);
     setShowEnding(false); setGameOverResult(null);
   }, [gameData]);
@@ -2505,6 +2534,7 @@ const lose = (msg: string) => {
           })) as unknown as Entity[];
           engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
           encounterGaugeRef.current = 0; encounterNextRef.current = 0;
+          resetSceneState();
           setEditSceneIdx(lay.sceneIdx);
           break;
         }
@@ -2695,10 +2725,10 @@ const lose = (msg: string) => {
       const keys = eng.keys;
       const t = touchRef.current;
 
-      const isLeft = keys.has('ArrowLeft') || keys.has('a') || t.left;
-      const isRight = keys.has('ArrowRight') || keys.has('d') || t.right;
-      const isUp = keys.has('ArrowUp') || keys.has('w') || t.up;
-      const isDown = keys.has('ArrowDown') || keys.has('s') || t.down;
+      const isLeft = keys.has('ArrowLeft') || keys.has('a') || keys.has('A') || t.left;
+      const isRight = keys.has('ArrowRight') || keys.has('d') || keys.has('D') || t.right;
+      const isUp = keys.has('ArrowUp') || keys.has('w') || keys.has('W') || t.up;
+      const isDown = keys.has('ArrowDown') || keys.has('s') || keys.has('S') || t.down;
       const isAction = keys.has('z') || keys.has('Z') || keys.has('Enter') || keys.has(' ') || t.action || (gameData.engine === 'action' && isUp);
 
       let dead = false;
@@ -3456,7 +3486,7 @@ const lose = (msg: string) => {
           }
           const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
 
-          const sp = d.speed;
+          const sp = (gameData.engine === 'onjReze' && d.name === 'レゼ' && Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) ? 2.2 : d.speed;
           if (gameData.engine === 'touhou') {
             if (d.miniScript) {
               // MiniScript 制御：moveTarget (lerp) または vx/vy で移動
@@ -3622,16 +3652,42 @@ const lose = (msg: string) => {
 
           // ── レゼ（敵）: 一定間隔でプレイヤーめがけて爆弾を投げる ──
           if (gameData.engine === 'onjReze' && d.name === 'レゼ' && isPlaying && !dead) {
-            const RB_FUSE = 96, RB_FLY = 24, RB_R = TILE_SIZE * 1.6, RB_DMG = 2;
             const distToPlayer = Math.hypot(pcx - ecx, pcy - ecy);
-            if (!e.bombThrown && distToPlayer < TILE_SIZE * 8 && e.timer % 120 === 0) {
-              e.bombThrown = true; // 爆発するまで次を投げない
-              onjFliesRef.current.push({
-                fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: RB_FLY,
-                fuse: RB_FUSE, r: RB_R, dmg: RB_DMG, head: false,
-                srcUrl: d.spriteUrl, owner: e,
-              });
-              playSfx(sfxRef.current.shot);
+            const isClose = distToPlayer < TILE_SIZE * 4;
+            if (isClose) {
+              // 近接戦闘AI: 45フレームに1回、非常に導火線が短いボムを使用
+              if (!e.bombThrown && e.timer % 45 === 0) {
+                e.bombThrown = true;
+                const isVeryClose = distToPlayer < TILE_SIZE * 1.5;
+                if (isVeryClose) {
+                  // 超至近距離なら直接プレイヤーの足元に設置（fuse: 12）
+                  onjBombsRef.current.push({
+                    x: pcx, y: pcy, fuse: 12, maxFuse: 12,
+                    r: TILE_SIZE * 1.5, dmg: 2, head: false,
+                    srcUrl: d.spriteUrl, owner: e,
+                  });
+                } else {
+                  // 近距離なら超高速ボムスロー（飛翔時間 10, 着地後 5フレームで爆発）
+                  onjFliesRef.current.push({
+                    fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: 10,
+                    fuse: 15, r: TILE_SIZE * 1.5, dmg: 2, head: false,
+                    srcUrl: d.spriteUrl, owner: e,
+                  });
+                }
+                playSfx(sfxRef.current.shot);
+              }
+            } else {
+              // 通常モード: 遠距離から120フレームに1回ボムスロー
+              const RB_FUSE = 96, RB_FLY = 24, RB_R = TILE_SIZE * 1.6, RB_DMG = 2;
+              if (!e.bombThrown && distToPlayer < TILE_SIZE * 8 && e.timer % 120 === 0) {
+                e.bombThrown = true; // 爆発するまで次を投げない
+                onjFliesRef.current.push({
+                  fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: RB_FLY,
+                  fuse: RB_FUSE, r: RB_R, dmg: RB_DMG, head: false,
+                  srcUrl: d.spriteUrl, owner: e,
+                });
+                playSfx(sfxRef.current.shot);
+              }
             }
           }
 
@@ -4557,6 +4613,20 @@ const lose = (msg: string) => {
           } else {
             drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
           }
+          // レゼが近接戦闘AIに移行している時（プレイヤーが近くにいる時）は赤いオーラを描画
+          if (gameData.engine === 'onjReze' && e.def.name === 'レゼ' && !dead) {
+            const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
+            const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
+            if (Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) {
+              ctx.save();
+              ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+              ctx.lineWidth = 2;
+              ctx.shadowColor = 'rgba(255, 0, 0, 0.8)';
+              ctx.shadowBlur = 8;
+              ctx.strokeRect(e.x - 2, e.y - 2, (e.def.w ?? TILE_SIZE) + 4, (e.def.h ?? TILE_SIZE) + 4);
+              ctx.restore();
+            }
+          }
           if (e.def.hp > 1 && e.hp < e.def.hp) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
         }
         for (const b of eng.bullets) {
@@ -4980,6 +5050,7 @@ const lose = (msg: string) => {
               eng.player.y = fade.entryY + 32;
             }
             justStartedRef.current = true; // 2マスキャラ等のワープ先埋まり防止イジェクトを再実行
+            resetSceneState();
             setEditSceneIdx(nextIdx);
             // シーン別BGM切り替え
             switchBgm(getCurrentFieldBgm());
@@ -5627,7 +5698,23 @@ const lose = (msg: string) => {
           </div>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           <button onClick={() => {
-            if (isPlaying) { setGameMsg(null); setBattle(null); setEventChoice(null); setPicker(null); battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false }; eventRunningRef.current = false; invulnRef.current = 0; const pp = engineRef.current.player; const pw = gameData.player.w, ph = gameData.player.h; setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2))); setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2))); }
+            if (introOpen) {
+              enterEditFromIntro();
+              return;
+            }
+            if (isPlaying) {
+              resetSceneState();
+              invulnRef.current = 0;
+              bombInvulnRef.current = 0;
+              isPlayerDeadRef.current = false;
+              roundOverRef.current = false;
+              setBattle(null);
+              battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false };
+              const pp = engineRef.current.player;
+              const pw = gameData.player.w, ph = gameData.player.h;
+              setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
+              setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+            }
             if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
             setActivePreviewKey(null);
             if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }

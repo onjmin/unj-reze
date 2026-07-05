@@ -3,19 +3,15 @@
 import { useEffect, useState } from 'react';
 
 const PROD_URL = 'https://unj-reze.netlify.app/';
-const STORAGE_KEY = 'demo_notice_dismissed';
 
 export default function DemoNoticeModal() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (!localStorage.getItem(STORAGE_KEY)) {
-      setVisible(true);
-    }
+    setVisible(true);
   }, []);
 
   const dismiss = () => {
-    localStorage.setItem(STORAGE_KEY, '1');
     setVisible(false);
   };
 

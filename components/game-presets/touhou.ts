@@ -297,7 +297,7 @@ end while
   ],
   sfx: {
     graze:     { ref: `direct:${su('8x4RbZ')}`, src: su('8x4RbZ'), type: 'direct' as const },
-    damage:    { ref: `direct:${su('HlYVmj')}`, src: su('HlYVmj'), type: 'direct' as const },
+    damage:    { ref: `direct:${su('EWsh6F')}#vol=25`, src: su('EWsh6F'), type: 'direct' as const },
     spellcard: { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
   },
 };
