@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
-import { extractMmlFromContent, mmlToNotes, playMml } from '@/lib/mml';
+import { extractMmlFromContent } from '@/lib/mml';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
@@ -73,15 +73,28 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
     scrollPositions.set(`${mode}:${currentTab}`, el.scrollTop);
   };
 
-  const previewMml = (key: string, mml: string) => {
+  const previewMml = async (key: string, mml: string) => {
     stopRef.current?.();
     stopRef.current = null;
     if (previewKey === key) { setPreviewKey(null); return; }
-    const { tracks, tempo } = mmlToNotes(mml);
-    if (!tracks.some(t => t.notes.length > 0)) return;
-    const stop = playMml(tracks, tempo, undefined, () => { setPreviewKey(null); stopRef.current = null; });
-    stopRef.current = stop;
-    setPreviewKey(key);
+    if (!mml.trim()) return;
+    try {
+      const { playMML } = await import('@onjmin/dtm');
+      const bgm = playMML(mml, {
+        loop: false,
+        onStop: () => {
+          setPreviewKey(null);
+          stopRef.current = null;
+        }
+      });
+      stopRef.current = () => {
+        bgm.stop();
+        bgm.destroy();
+      };
+      setPreviewKey(key);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   useEffect(() => () => { stopRef.current?.(); }, []);

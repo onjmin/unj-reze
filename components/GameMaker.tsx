@@ -10,7 +10,6 @@ import {
   type WayKey, type WalkStandard,
 } from '@/lib/walk-sprite';
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
-import { mmlToNotes, playMml } from '@/lib/mml';
 import ContentPicker, { type PickResult } from './ContentPicker';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
@@ -216,15 +215,19 @@ const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData =
   return { ...d, map, scroll: (w > COLS || h > ROWS) ? { worldCols: w, worldRows: h } : undefined };
 };
 
-function playSfx(s?: SfxRef) {
+async function playSfx(s?: SfxRef) {
   if (!s || !s.src) return;
   if (s.type === 'direct') {
     const a = new Audio(s.src); a.volume = 0.7; a.play().catch(() => {});
     return;
   }
   if (s.type !== 'mml') return; // youtube は即時再生に不向きなので無視
-  const { tracks, tempo } = mmlToNotes(s.src);
-  if (tracks.some(t => t.notes.length > 0)) playMml(tracks, tempo);
+  try {
+    const { playMML } = await import('@onjmin/dtm');
+    playMML(s.src, { loop: false });
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 // ── 弾幕スクリプト実行状態 ──────────────────────────────────────────
@@ -1711,7 +1714,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return false;
   }, [findActivePage, runEventCommands]);
 
-  const previewMmlAsset = useCallback((_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' }) => {
+  const previewMmlAsset = useCallback(async (_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' }) => {
     previewStopRef.current?.();
     previewStopRef.current = null;
     if (!asset?.src) return;
@@ -1721,11 +1724,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     if (asset.type !== 'mml') return;
-    const { tracks, tempo } = mmlToNotes(asset.src);
-    if (!tracks.some(t => t.notes.length > 0)) return;
-    previewStopRef.current = playMml(tracks, tempo, undefined, () => {
-      previewStopRef.current = null;
-    });
+    try {
+      const { playMML } = await import('@onjmin/dtm');
+      const bgm = playMML(asset.src, {
+        loop: false,
+        onStop: () => { previewStopRef.current = null; }
+      });
+      previewStopRef.current = () => { bgm.stop(); bgm.destroy(); };
+    } catch (e) {
+      console.error(e);
+    }
   }, []);
 
   useEffect(() => () => { previewStopRef.current?.(); previewStopRef.current = null; }, []);

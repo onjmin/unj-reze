@@ -272,7 +272,10 @@ export function mmlToNotes(mml: string): ParsedMml {
       if (!idMatch) return;
       const id = parseInt(idMatch[1]);
       const tempoMatch = section.match(/t(\d+)/);
-      if (tempoMatch) globalTempo = parseInt(tempoMatch[1]);
+      if (tempoMatch) {
+        const parsedTempo = parseInt(tempoMatch[1], 10);
+        if (parsedTempo > 0) globalTempo = parsedTempo;
+      }
       const volMatch = section.match(/v(\d+)/);
       const vol = volMatch ? parseInt(volMatch[1]) : 100;
 
@@ -296,7 +299,8 @@ export function mmlToNotes(mml: string): ParsedMml {
   }
 
   const tempM = mml.match(/t(\d+)/);
-  const tempoVal = tempM ? parseInt(tempM[1]) : 135;
+  let tempoVal = tempM ? parseInt(tempM[1], 10) : 135;
+  if (isNaN(tempoVal) || tempoVal <= 0) tempoVal = 135;
   const cleanMml = mml.replace(/t\d+\s*/, '').trim();
   const notes = parseSingleTrack(cleanMml);
   return { tracks: [{ id: 0, notes, volume: 100 }], tempo: tempoVal };
@@ -310,16 +314,18 @@ export function playMml(
   totalCols?: number
 ): () => void {
   const ctx = new AudioContext();
-  const beatSec = 60 / tempo;
+  const safeTempo = (typeof tempo === 'number' && isFinite(tempo) && tempo > 0) ? tempo : 135;
+  const beatSec = 60 / safeTempo;
   const tickSec = beatSec / 4;
 
   let allNotes: { col: number; dur: number; freq: number; vol: number }[] = [];
   let maxTicks = 0;
 
   tracks.forEach(t => {
+    const trackVol = (typeof t.volume === 'number' && isFinite(t.volume)) ? t.volume : 100;
     t.notes.forEach(n => {
       const freq = freqFromSemitone(PIANO_START + n.row);
-      const vol = t.volume / 100;
+      const vol = trackVol / 100;
       allNotes.push({ col: n.col, dur: n.dur, freq, vol });
       const end = n.col + n.dur;
       if (end > maxTicks) maxTicks = end;
@@ -336,13 +342,19 @@ export function playMml(
   allNotes.forEach(n => {
     const t = n.col * tickSec;
     const dur = n.dur * tickSec;
+    if (!isFinite(t) || !isFinite(dur) || isNaN(t) || isNaN(dur)) {
+      return;
+    }
+    const safeFreq = (typeof n.freq === 'number' && isFinite(n.freq)) ? n.freq : 440;
+    const safeVol = (typeof n.vol === 'number' && isFinite(n.vol)) ? n.vol : 1;
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.type = 'square';
-    osc.frequency.value = n.freq;
-    gain.gain.setValueAtTime(0.06 * n.vol * 1.5, ctx.currentTime + t);
+    osc.frequency.value = safeFreq;
+    gain.gain.setValueAtTime(0.06 * safeVol * 1.5, ctx.currentTime + t);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + dur);
     osc.start(ctx.currentTime + t);
     osc.stop(ctx.currentTime + t + dur + 0.02);
