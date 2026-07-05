@@ -3257,6 +3257,7 @@ const lose = (msg: string) => {
             hitShake(); playSfx(sfxRef.current.damage);
             for (let k = eng.entities.length - 1; k >= 0; k--) {
               const ent = eng.entities[k];
+              if (ent.def.objType === 'warp') continue; // 扉などのワープオブジェクトは攻撃で破壊されない
               const ex = ent.x + TILE_SIZE / 2, ey = ent.y + TILE_SIZE / 2;
               if (Math.hypot(ex - bm.x, ey - bm.y) <= bm.r) {
                 ent.hp -= bm.dmg;
@@ -3639,7 +3640,7 @@ const lose = (msg: string) => {
           // ── 剣（近接）の当たり判定（onjReze） ──
           // 直線状の矩形判定だと、追尾してくる敵が斜め位置にいるだけで当たらず「ダメージを与えられない」原因になるため、
           // プレイヤーの向いている方向に少しずらした円形の判定に変更（斜め位置の敵にも当たるように緩和）。
-          if (gameData.engine === 'onjReze' && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
+          if (gameData.engine === 'onjReze' && d.objType !== 'warp' && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
             const sw = swordRef.current; const reach = 26;
             const swingCx = p.x + pData.w / 2 + sw.dir.x * (pData.w / 2 + reach / 2);
             const swingCy = p.y + pData.h / 2 + sw.dir.y * (pData.h / 2 + reach / 2);
