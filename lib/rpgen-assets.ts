@@ -71,8 +71,8 @@ export interface SoundItem {
   file_size: number;
 }
 
-/** スプライトシートのメンバー（no は表示用の通番、id が実体ファイル名）。 */
-export interface SpriteSheetMember { no: number; id: string; }
+/** スプライトシートのメンバー（id が実体ファイル名=key。no/name は含まれない）。 */
+export interface SpriteSheetMember { id: string; }
 
 // 人間がまとめたスプライトのコレクション（カテゴリ）。sprite_ids がメンバー。
 export interface SpriteSheetItem {
@@ -142,3 +142,21 @@ export const searchSpriteSheets = (p?: SearchParams) => get<SpriteSheetItem>('sh
 export const searchSAnimSheets = (p?: SearchParams) => get<SAnimSheetItem>('sheets/sanim', p);
 /** 人間がまとめた効果音セット一覧。`/api/sheets/sound` */
 export const searchSoundSheets = (p?: SearchParams) => get<SoundSheetItem>('sheets/sound', p);
+
+// ───────────────── 単体詳細（プロキシ経由） ─────────────────
+// `sheets/*` のメンバー配列は `{id}` のみ（name等は含まれない）。名前を出すには
+// メンバーの id ごとに単体詳細（GET /sprites/:id 等）を引く必要がある。
+
+async function getById<T>(endpoint: string, id: string, signal?: AbortSignal): Promise<T | null> {
+  try {
+    const res = await fetch(`${PROXY}/${endpoint}/${encodeURIComponent(id)}`, { signal });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export const getSpriteById = (id: string, signal?: AbortSignal) => getById<SpriteItem>('sprites', id, signal);
+export const getSpriteAnimById = (id: string, signal?: AbortSignal) => getById<SpriteAnimItem>('sprite-anims', id, signal);
+export const getSoundById = (id: string, signal?: AbortSignal) => getById<SoundItem>('sounds', id, signal);

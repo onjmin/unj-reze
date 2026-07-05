@@ -617,8 +617,6 @@ export const dq: PresetData = {
     textColor: '#ffee88',
     menu: [
       { kind: 'newGame',   label: 'ぼうけんをはじめる' },
-      { kind: 'continue',  label: 'ぼうけんのしょを読む' },
-      { kind: 'nameInput', label: 'なまえをいれる' },
     ],
   },
   ending: {

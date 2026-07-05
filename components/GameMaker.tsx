@@ -28,8 +28,8 @@ import {
   type ObjType, type WarpTarget,
   type BattleMove, type SwitchDef, type ItemDef,
   type EventCommand, type EventPage, type EventCondition,
-  type TitleScreenConfig, type EndingScreenConfig, type ScreenMenuKind,
-  defaultTitleScreen, defaultEndingScreen, SCREEN_MENU_LABELS,
+  type TitleScreenConfig, type EndingScreenConfig,
+  defaultTitleScreen, defaultEndingScreen,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -937,9 +937,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // ── タイトル／エンディング画面ランタイム ──
   const [showTitle, setShowTitle] = useState(false);
   const [showEnding, setShowEnding] = useState(false);
-  const [playerName, setPlayerName] = useState('');
-  const playerNameRef = useRef('');
-  playerNameRef.current = playerName;
   const endingRef = useRef<EndingScreenConfig | undefined>(undefined);
   endingRef.current = gameData.ending;
   const [selectedTileId, setSelectedTileId] = useState(1);
@@ -1402,7 +1399,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const b = battleRef.current; const pr = progressRef.current;
     const dmg = calcDmg(pr.atk, b.enemyDef);
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
-    appendLog(`${playerNameRef.current || gameData.battle?.playerName || '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
+    appendLog(`${gameData.battle?.playerName || '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     setTimeout(enemyTurn, 750);
   };
@@ -5062,7 +5059,7 @@ const lose = (msg: string) => {
         ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(6, 6, 150, 68);
         ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1; ctx.strokeRect(6, 6, 150, 68);
         ctx.fillStyle = '#fff'; ctx.font = `bold 12px ${getPixelFontFamily()}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-        ctx.fillText(`Lv ${pr.level}  ${playerNameRef.current || gameData.battle.playerName}`, 12, 22);
+        ctx.fillText(`Lv ${pr.level}  ${gameData.battle.playerName}`, 12, 22);
         ctx.fillText(`HP ${Math.max(0, pr.hp)}/${pr.maxHp}`, 12, 38);
         ctx.fillStyle = '#7fd0ff'; ctx.fillText(`MP ${pr.mp}/${pr.maxMp}`, 12, 52);
         ctx.fillStyle = '#fde68a'; ctx.fillText(`G: ${pr.gold ?? 0}`, 12, 66);
@@ -5495,8 +5492,6 @@ const lose = (msg: string) => {
   // ── タイトル／エンディング画面の更新ヘルパ ──
   const updTitle = (patch: Partial<TitleScreenConfig>) => setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, ...patch } }) : p);
   const updEnding = (patch: Partial<EndingScreenConfig>) => setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, ...patch } }) : p);
-  const addMenuItem = (kind: ScreenMenuKind) => setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, menu: [...p.titleScreen.menu, { kind, label: SCREEN_MENU_LABELS[kind] }] } }) : p);
-  /** タイトルメニュー項目を選んだときの挙動。newGame/continue=プレイ開始（continue は現状スタブ）。 */
   const startFromTitle = () => { setShowTitle(false); setIsPlaying(true); };
 
   return (
@@ -5661,12 +5656,8 @@ const lose = (msg: string) => {
                   style={{ color: gameData.titleScreen.textColor ?? '#ffffff' }}>
                   <h1 className="text-2xl sm:text-4xl font-pixel" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.heading}</h1>
                   {gameData.titleScreen.subtitle && <p className="text-sm font-pixel opacity-90" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.subtitle}</p>}
-                  {playerName && <p className="text-xs font-pixel opacity-80" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>ようこそ {playerName} さん</p>}
                   <div className="flex flex-col gap-2 mt-2 w-52 max-w-full">
-                    {gameData.titleScreen.menu.map((mi, i) => mi.kind === 'nameInput' ? (
-                      <input key={i} value={playerName} onChange={e => setPlayerName(e.target.value.slice(0, 16))} placeholder={mi.label}
-                        className="px-3 py-2 bg-black border-2 border-white/60 text-white text-sm text-center outline-none placeholder-white/50 font-pixel" />
-                    ) : (
+                    {gameData.titleScreen.menu.map((mi, i) => (
                       <button key={i} onClick={startFromTitle}
                         className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">{mi.label}</button>
                     ))}
@@ -6237,7 +6228,7 @@ const lose = (msg: string) => {
           ) : (
             <>
               {/* ── タブバー：基本3つ＋詳細▼ で圧迫感を抑える ── */}
-              <div className="flex border-b border-gray-800 shrink-0 overflow-x-auto">
+              <div className="flex flex-wrap border-b border-gray-800 shrink-0">
                 {/* 基本タブ（常時表示） */}
                 {([
                   ['map', 'マップ'],
@@ -6646,22 +6637,12 @@ const lose = (msg: string) => {
                               <button onClick={() => updTitle({ bgmRef: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                             </div>
                           )}
-                          {/* メニュー項目 */}
-                          <p className="text-[10px] text-gray-400 font-bold mt-1">メニュー項目</p>
+                          {/* 開始ボタン */}
+                          <p className="text-[10px] text-gray-400 font-bold mt-1">開始ボタンの表示名</p>
                           {gameData.titleScreen.menu.map((mi, i) => (
-                            <div key={i} className="flex items-center gap-1">
-                              <span className="text-[9px] text-gray-500 w-14 shrink-0">{SCREEN_MENU_LABELS[mi.kind]}</span>
-                              <input value={mi.label} onChange={e => updTitle({ menu: gameData.titleScreen!.menu.map((m, j) => j === i ? { ...m, label: e.target.value } : m) })}
-                                className="flex-1 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none" />
-                              <button onClick={() => updTitle({ menu: gameData.titleScreen!.menu.filter((_, j) => j !== i) })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-red-400 hover:text-red-300 active:bg-red-500/20 text-sm">✕</button>
-                            </div>
+                            <input key={i} value={mi.label} onChange={e => updTitle({ menu: gameData.titleScreen!.menu.map((m, j) => j === i ? { ...m, label: e.target.value } : m) })}
+                              className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none" />
                           ))}
-                          <div className="flex gap-1 flex-wrap">
-                            {(['newGame', 'continue', 'nameInput'] as ScreenMenuKind[]).map(k => (
-                              <button key={k} onClick={() => addMenuItem(k)} className="inline-flex items-center text-[11px] text-blue-400 border border-blue-500/40 rounded-md px-3 py-1.5 hover:bg-blue-500/10 active:bg-blue-500/20">+ {SCREEN_MENU_LABELS[k]}</button>
-                            ))}
-                          </div>
-                          <p className="text-[9px] text-gray-500">※「つづきから」は現状スタブ（はじめからと同じ挙動）です。</p>
                         </div>
                       )}
                     </div>
@@ -7208,7 +7189,7 @@ const lose = (msg: string) => {
                   return (
                     <div className="space-y-3">
                       {/* サブタブナビ */}
-                      <div className="flex border-b border-gray-700 -mx-3 overflow-x-auto">
+                      <div className="flex flex-wrap border-b border-gray-700 -mx-3">
                         {(Object.keys(SUB_LABELS) as Array<keyof typeof SUB_LABELS>).map(id => (
                           <button key={id} onClick={() => { setCharSubTab(id); if (id !== charSubTab) setSelectedObjId(null); }}
                             className={`flex-none py-2.5 px-3 text-[11px] font-bold transition ${charSubTab === id ? 'text-blue-400 border-b-2 border-blue-500' : 'text-gray-500 hover:text-gray-400'}`}>
@@ -7789,7 +7770,13 @@ const lose = (msg: string) => {
       </div>
 
       {picker && (
-        <ContentPicker mode={picker.mode} userId={userId} onPick={applyPick} onClose={() => setPicker(null)} />
+        <ContentPicker
+          mode={picker.mode}
+          bgmKind={picker.target.t === 'sfx' ? 'sfx' : 'bgm'}
+          userId={userId}
+          onPick={applyPick}
+          onClose={() => setPicker(null)}
+        />
       )}
     </div>
   );

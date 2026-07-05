@@ -20,6 +20,8 @@ export interface PickResult {
 
 interface ContentPickerProps {
   mode: 'image' | 'bgm';
+  /** mode==='bgm' のときのみ有効。'bgm'=BGM欄（YouTube/MML/URL）、'sfx'=効果音欄（rpgen効果音/URL）でタブを出し分ける。 */
+  bgmKind?: 'bgm' | 'sfx';
   userId: string;
   onPick: (result: PickResult) => void;
   onClose: () => void;
@@ -28,16 +30,48 @@ interface ContentPickerProps {
 type ImageTab = 'posts' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local';
 type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe';
 
-export default function ContentPicker({ mode, userId, onPick, onClose }: ContentPickerProps) {
+// BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/URL、効果音はrpgen効果音/URLのみ。
+const BGM_TABS: BgmTab[] = ['youtube', 'mmlPost', 'mmlRaw', 'direct'];
+const SFX_TABS: BgmTab[] = ['rpgenSe', 'direct'];
+
+// モーダルは閉じるたびにアンマウントされるため、タブ選択とスクロール位置をモジュール変数で覚えておき、
+// 再度開いたときに前回見ていた場所へ復元する。BGM欄/効果音欄は選べるタブが違うので別々に覚える。
+let lastImageTab: ImageTab = 'posts';
+const lastBgmTabByKind: Record<'bgm' | 'sfx', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe' };
+const scrollPositions = new Map<string, number>();
+
+export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
-  const [imageTab, setImageTab] = useState<ImageTab>('posts');
-  const [bgmTab, setBgmTab] = useState<BgmTab>('youtube');
+  const [imageTab, setImageTab] = useState<ImageTab>(lastImageTab);
+  const allowedBgmTabs = bgmKind === 'sfx' ? SFX_TABS : BGM_TABS;
+  const [bgmTab, setBgmTab] = useState<BgmTab>(() => {
+    const last = lastBgmTabByKind[bgmKind];
+    return allowedBgmTabs.includes(last) ? last : allowedBgmTabs[0];
+  });
   const [urlInput, setUrlInput] = useState('');
   const [mmlInput, setMmlInput] = useState('T120 o4 c d e f g a b');
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const currentTab = mode === 'image' ? imageTab : bgmTab;
+
+  const changeImageTab = (tab: ImageTab) => { lastImageTab = tab; setImageTab(tab); };
+  const changeBgmTab = (tab: BgmTab) => { lastBgmTabByKind[bgmKind] = tab; setBgmTab(tab); };
+
+  // タブ切り替え時: 直前のタブのスクロール位置を保存し、切り替え先タブの位置を復元する
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = scrollPositions.get(`${mode}:${currentTab}`) ?? 0;
+  }, [mode, currentTab]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    scrollPositions.set(`${mode}:${currentTab}`, el.scrollTop);
+  };
 
   const previewMml = (key: string, mml: string) => {
     stopRef.current?.();
@@ -121,7 +155,7 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
           <span className="text-xs font-bold text-gray-200">
-            {mode === 'image' ? '画像を参照' : 'BGM / 音を参照'}
+            {mode === 'image' ? '画像を参照' : bgmKind === 'sfx' ? '効果音を参照' : 'BGMを参照'}
           </span>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-200 p-1 rounded-full hover:bg-gray-100/10">
             <X size={16} />
@@ -129,29 +163,39 @@ export default function ContentPicker({ mode, userId, onPick, onClose }: Content
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0 overflow-x-auto scrollbar-none">
+        <div className="flex flex-wrap gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
           {mode === 'image' ? (
             <>
-              <button className={tabBtn(imageTab === 'posts')} onClick={() => setImageTab('posts')}><ImageIcon size={12} />画像投稿</button>
-              <button className={tabBtn(imageTab === 'local')} onClick={() => setImageTab('local')}>🏰 内蔵素材</button>
-              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => setImageTab('rpgenSprite')}>🧩 素材</button>
-              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => setImageTab('rpgenWalk')}>🚶 歩行グラ</button>
-              <button className={tabBtn(imageTab === 'walk')} onClick={() => setImageTab('walk')}>📥 投稿グラ</button>
-              <button className={tabBtn(imageTab === 'smc')} onClick={() => setImageTab('smc')}>🎮 SMC素材</button>
-              <button className={tabBtn(imageTab === 'url')} onClick={() => setImageTab('url')}><Link2 size={12} />URL</button>
+              <button className={tabBtn(imageTab === 'posts')} onClick={() => changeImageTab('posts')}><ImageIcon size={12} />画像投稿</button>
+              <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
+              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 素材</button>
+              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 歩行グラ</button>
+              <button className={tabBtn(imageTab === 'walk')} onClick={() => changeImageTab('walk')}>📥 投稿グラ</button>
+              <button className={tabBtn(imageTab === 'smc')} onClick={() => changeImageTab('smc')}>🎮 SMC素材</button>
+              <button className={tabBtn(imageTab === 'url')} onClick={() => changeImageTab('url')}><Link2 size={12} />URL</button>
             </>
           ) : (
             <>
-              <button className={tabBtn(bgmTab === 'youtube')} onClick={() => setBgmTab('youtube')}><Video size={12} />YouTube</button>
-              <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => setBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
-              <button className={tabBtn(bgmTab === 'rpgenSe')} onClick={() => setBgmTab('rpgenSe')}>🔊 効果音</button>
-              <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => setBgmTab('mmlRaw')}>♪ 直接</button>
-              <button className={tabBtn(bgmTab === 'direct')} onClick={() => setBgmTab('direct')}>🔗 URL</button>
+              {allowedBgmTabs.includes('youtube') && (
+                <button className={tabBtn(bgmTab === 'youtube')} onClick={() => changeBgmTab('youtube')}><Video size={12} />YouTube</button>
+              )}
+              {allowedBgmTabs.includes('mmlPost') && (
+                <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => changeBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
+              )}
+              {allowedBgmTabs.includes('rpgenSe') && (
+                <button className={tabBtn(bgmTab === 'rpgenSe')} onClick={() => changeBgmTab('rpgenSe')}>🔊 効果音</button>
+              )}
+              {allowedBgmTabs.includes('mmlRaw') && (
+                <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => changeBgmTab('mmlRaw')}>♪ 直接</button>
+              )}
+              {allowedBgmTabs.includes('direct') && (
+                <button className={tabBtn(bgmTab === 'direct')} onClick={() => changeBgmTab('direct')}>🔗 URL</button>
+              )}
             </>
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 scrollbar-none">
+        <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 scrollbar-none">
           {/* Image: posts / walk */}
           {mode === 'image' && (imageTab === 'posts' || imageTab === 'walk') && (
             <>

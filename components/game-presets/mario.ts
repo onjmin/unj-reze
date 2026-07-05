@@ -251,8 +251,6 @@ export const mario: PresetData = {
     textColor: '#ffe000',
     menu: [
       { kind: 'newGame',   label: 'はじめから' },
-      { kind: 'continue',  label: 'つづきから' },
-      { kind: 'nameInput', label: 'なまえをいれる' },
     ],
   },
   ending: {

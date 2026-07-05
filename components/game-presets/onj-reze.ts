@@ -291,8 +291,6 @@ export const onjReze: PresetData = {
     textColor: '#ffaacc',
     menu: [
       { kind: 'newGame',   label: 'ぼうけんをはじめる' },
-      { kind: 'continue',  label: 'ぼうけんのしょを読む' },
-      { kind: 'nameInput', label: 'なまえをいれる' },
     ],
   },
   bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },

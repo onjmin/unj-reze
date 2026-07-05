@@ -244,10 +244,8 @@ export interface SpellCardDef {
 export interface ScrollConfig { worldCols: number; worldRows?: number; }
 
 // ── タイトル画面／エンディング画面 ──────────────────────────────────────
-/** タイトル画面のメニュー項目。
- *  newGame=はじめから、continue=つづきから（現状はスタブ＝はじめからと同じ挙動）、
- *  nameInput=名前入力欄（入力した名前をゲーム内で使用）。 */
-export type ScreenMenuKind = 'newGame' | 'continue' | 'nameInput';
+/** タイトル画面のメニュー項目。newGame=はじめる（唯一の開始操作）。 */
+export type ScreenMenuKind = 'newGame';
 export interface ScreenMenuItem { kind: ScreenMenuKind; label: string; }
 
 /** タイトル画面設定（東方以外のエンジンで使用）。enabled=true でプレイ開始前に表示。 */
@@ -357,7 +355,7 @@ export const defaultTitleScreen = (name: string): TitleScreenConfig => ({
   heading: name,
   subtitle: '',
   textColor: '#ffffff',
-  menu: [{ kind: 'newGame', label: 'はじめから' }],
+  menu: [{ kind: 'newGame', label: 'はじめる' }],
 });
 
 /** エンディング画面のデフォルト設定。 */
@@ -370,7 +368,7 @@ export const defaultEndingScreen = (): EndingScreenConfig => ({
 
 /** メニュー項目の種別ラベル。 */
 export const SCREEN_MENU_LABELS: Record<ScreenMenuKind, string> = {
-  newGame: 'はじめから', continue: 'つづきから', nameInput: '名前入力欄',
+  newGame: 'はじめる',
 };
 
 export const uid = () => `o${Math.random().toString(36).slice(2, 9)}`;

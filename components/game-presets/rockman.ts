@@ -161,7 +161,6 @@ export const rockman: PresetData = {
     textColor: '#4488ff',
     menu: [
       { kind: 'newGame',  label: 'はじめから' },
-      { kind: 'continue', label: 'つづきから' },
     ],
   },
   ending: {
