@@ -121,6 +121,7 @@ export interface GameManifestDraft {
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number; };
   tiles: Record<number, { name: string; color: string; passable: boolean; special?: string; imageRef?: string }>;
   map: number[][];
+  overlayMap?: number[][];
   objects: Array<Omit<ObjectDef, 'spriteUrl'>>;
   bgm: string;
   battleBgm?: string;
@@ -151,11 +152,16 @@ const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
  *  各シーンの実寸（map の行数・列数）を使うので DQ フィールドなどの非標準サイズも正しく扱う。 */
 function buildWorldLayout(scenes: SceneDef[]): {
   map: number[][];
+  overlayMap: number[][];
   layouts: Array<{ sceneIdx: number; originX: number; originY: number; sceneW: number; sceneH: number }>;
   worldCols: number;
   worldRows: number;
 } {
-  if (!scenes.length) return { map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)), layouts: [], worldCols: COLS, worldRows: ROWS };
+  if (!scenes.length) return {
+    map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
+    overlayMap: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
+    layouts: [], worldCols: COLS, worldRows: ROWS,
+  };
   const layouts: Array<{ sceneIdx: number; originX: number; originY: number; sceneW: number; sceneH: number }> = [];
   const placed = new Set<number>();
   const q: Array<{ idx: number; ox: number; oy: number }> = [{ idx: 0, ox: 0, oy: 0 }];
@@ -180,13 +186,21 @@ function buildWorldLayout(scenes: SceneDef[]): {
     add(exits.down, 0, sceneH); add(exits.up, 0, -sceneH);
   }
   const map: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
+  const overlayMap: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
   for (const { sceneIdx, originX, originY, sceneW, sceneH } of layouts) {
     const sm = scenes[sceneIdx].map;
-    for (let r = 0; r < sceneH; r++) for (let c = 0; c < sceneW; c++)
+    const som = scenes[sceneIdx].overlayMap;
+    for (let r = 0; r < sceneH; r++) for (let c = 0; c < sceneW; c++) {
       map[originY + r][originX + c] = sm[r]?.[c] ?? 0;
+      overlayMap[originY + r][originX + c] = som?.[r]?.[c] ?? 0;
+    }
   }
-  return { map, layouts, worldCols: maxC, worldRows: maxR };
+  return { map, overlayMap, layouts, worldCols: maxC, worldRows: maxR };
 }
+
+/** map と同サイズの空グリッド（overlayMap の既定値）を作る。 */
+const emptyGridLike = (map: number[][]): number[][] =>
+  map.map(row => new Array(row.length).fill(0));
 
 const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
@@ -202,17 +216,23 @@ const curWorldRows = (d: PresetData): number => d.scroll?.worldRows ?? d.map.len
 
 /** ワールドサイズ（幅・高さ＝タイル数）を変更する。マップを拡縮し、scroll を更新。
  *  画面サイズ（COLS×ROWS）と同じなら scroll を外して 1 画面固定に戻す。 */
-const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData => {
-  const w = Math.max(COLS, Math.round(cols));
-  const h = Math.max(ROWS, Math.round(rows));
-  let map = d.map.map(row => {
+const resizeGrid = (grid: number[][], w: number, h: number): number[][] => {
+  let g = grid.map(row => {
     const next = row.slice(0, w);
     while (next.length < w) next.push(0);
     return next;
   });
-  map = map.slice(0, h);
-  while (map.length < h) map.push(new Array(w).fill(0));
-  return { ...d, map, scroll: (w > COLS || h > ROWS) ? { worldCols: w, worldRows: h } : undefined };
+  g = g.slice(0, h);
+  while (g.length < h) g.push(new Array(w).fill(0));
+  return g;
+};
+
+const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData => {
+  const w = Math.max(COLS, Math.round(cols));
+  const h = Math.max(ROWS, Math.round(rows));
+  const map = resizeGrid(d.map, w, h);
+  const overlayMap = resizeGrid(d.overlayMap ?? emptyGridLike(d.map), w, h);
+  return { ...d, map, overlayMap, scroll: (w > COLS || h > ROWS) ? { worldCols: w, worldRows: h } : undefined };
 };
 
 async function playSfx(s?: SfxRef) {
@@ -915,6 +935,28 @@ let globalSmcMetadata: any = null;
 // そのまま流すと進行方向と逆を向く＝ムーンウォークになる。これらは反転条件を逆にする。
 const SMC_LEFT_FACING = new Set(['Goomba', 'Bobomb', 'BobOmb', 'KoopaTroopa', 'DryBones', 'Boo']);
 
+let cachedBlastCanvas: HTMLCanvasElement | null = null;
+function getBlastCanvas(): HTMLCanvasElement {
+  if (cachedBlastCanvas) return cachedBlastCanvas;
+  if (typeof document === 'undefined') {
+    return {} as HTMLCanvasElement;
+  }
+  const cnv = document.createElement('canvas');
+  cnv.width = 256;
+  cnv.height = 256;
+  const ctx = cnv.getContext('2d')!;
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, '#fff6c0');
+  g.addColorStop(0.4, '#ff9d2a');
+  g.addColorStop(1, 'rgba(229,62,62,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(128, 128, 128, 0, Math.PI * 2);
+  ctx.fill();
+  cachedBlastCanvas = cnv;
+  return cnv;
+}
+
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [presetId, setPresetId] = useState<PresetId>('onjReze');
@@ -950,6 +992,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const endingRef = useRef<EndingScreenConfig | undefined>(undefined);
   endingRef.current = gameData.ending;
   const [selectedTileId, setSelectedTileId] = useState(1);
+  /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=上層(プレイヤーより手前・半透明化)。 */
+  const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay'>('base');
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
   const [charSubTab, setCharSubTab] = useState<'jiki' | 'boss' | 'midboss' | 'zenhan' | 'kohan'>('jiki');
@@ -1037,6 +1081,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
+  /** 上層タイル(overlay)の描画アルファ。プレイヤーが真下にいる間だけ滑らかに半透明化する。 */
+  const overlayAlphaRef = useRef(1);
   /** 戦闘コマンド「どうぐ」のサブメニュー開閉。 */
   const [battleItemsOpen, setBattleItemsOpen] = useState(false);
   /** フィールドの 🎒 どうぐ袋モーダル開閉（rpg エンジン）。開いている間は移動を凍結。 */
@@ -1078,6 +1124,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     entryX: number;
     entryY: number;
   } | null>(null);
+  /** シーン間ワープ直後の再発動抑制。ワープ先の入場座標を保持し、そこから一定距離離れるまで
+   *  ワープ（warpSceneId / warpTarget）の発動を無効化する（入場地点付近に別のワープがある場合の
+   *  即座の巻き戻り・往復ループを防ぐ）。 */
+  const warpCooldownRef = useRef<{ x: number; y: number } | null>(null);
   const roundOverRef = useRef(false);    // ミス/ゲームオーバー/クリア演出中（操作・進行を凍結）
   const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
   const livesRef = useRef(3);            // 残機数
@@ -1164,7 +1214,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const bossDefeatedRef = useRef(false);
   /** NPCに接触中のセリフ表示（フキダシではなく頭上に1文字ずつ表示） */
-  const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number } | null>(null);
+  const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number; wrapped?: string[] } | null>(null);
   /** アイテム取得演出（メッセージウィンドウではなく頭上に一定時間表示） */
   const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
@@ -1898,6 +1948,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     bombInvulnRef.current = 0;
     isPlayerDeadRef.current = false;
     roundOverRef.current = false;
+    warpCooldownRef.current = null;
     setIsPlaying(false); setSelectedObjId(null);
     setShowEnding(false); setGameOverResult(null);
   }, [gameData]);
@@ -1918,6 +1969,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
         ),
         map: initialManifest.map,
+        overlayMap: initialManifest.overlayMap ?? emptyGridLike(initialManifest.map),
         objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
         scroll: initialManifest.scroll ?? base.scroll,
         phases: initialManifest.phases ?? base.phases,
@@ -2183,13 +2235,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
 
-    // ワールド寸法（touhou は画面固定のため常に 1 画面。他はワールドレイアウト優先）
-    const worldCols = gameData.engine === 'touhou' ? COLS : (worldLayoutRef.current?.worldCols ?? gameData.scroll?.worldCols ?? COLS);
-    const worldRows = gameData.engine === 'touhou' ? ROWS : (worldLayoutRef.current?.worldRows ?? gameData.scroll?.worldRows ?? ROWS);
-    const worldW = worldCols * TILE_SIZE;
-    const worldH = worldRows * TILE_SIZE;
-    const camMax = Math.max(0, worldW - VIEW_W);
-    const camMaxY = Math.max(0, worldH - VIEW_H);
+    // ワールド寸法（touhou は画面固定のため常に 1 画面。それ以外は毎フレーム updateWorldBounds() で
+    // engineRef.current.map（ワープ／シーン切替のたびに実際に差し替わる生きたマップ）実寸から再計算する。
+    // gameData.map/scroll はシーン切替時に更新されないため、effect 起動時の値のまま固定してしまうと
+    // ワープ先シーンのサイズに関わらず旧シーンの境界で移動がクランプされるバグになる。
+    let worldCols = gameData.engine === 'touhou' ? COLS
+      : (gameData.map[0]?.length ?? gameData.scroll?.worldCols ?? COLS);
+    let worldRows = gameData.engine === 'touhou' ? ROWS
+      : (gameData.map.length ?? gameData.scroll?.worldRows ?? ROWS);
+    let worldW = worldCols * TILE_SIZE;
+    let worldH = worldRows * TILE_SIZE;
+    let camMax = Math.max(0, worldW - VIEW_W);
+    let camMaxY = Math.max(0, worldH - VIEW_H);
+    const updateWorldBounds = () => {
+      if (gameData.engine === 'touhou') return;
+      // engineRef.current.map は「合成ワールド(exits)」でも「シーン単体ワープ」でも、実際に描画・
+      // 当たり判定に使われているマップへ常に差し替わるため、これを唯一の正とする
+      // （worldLayoutRef はシーンに exits が無い場合 scenesRef.current[0] のみを含んだまま固定される
+      //   ことがあり、ワープ後の実サイズと食い違うので基準にしない）。
+      const liveMap = engineRef.current.map;
+      worldCols = liveMap[0]?.length ?? gameData.scroll?.worldCols ?? COLS;
+      worldRows = liveMap.length ?? gameData.scroll?.worldRows ?? ROWS;
+      worldW = worldCols * TILE_SIZE;
+      worldH = worldRows * TILE_SIZE;
+      camMax = Math.max(0, worldW - VIEW_W);
+      camMaxY = Math.max(0, worldH - VIEW_H);
+    };
 
     const isInputTarget = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -2722,6 +2793,7 @@ const lose = (msg: string) => {
     };
 
     const loop = () => {
+      updateWorldBounds();
       const eng = engineRef.current;
       const p = eng.player;
       const pData = gameData.player;
@@ -3487,6 +3559,11 @@ const lose = (msg: string) => {
       // ラウンド終了演出中（roundOver）は敵・弾・当たり判定も止める（残機の死亡中は継続）
       if (isPlaying && !roundOverRef.current && !battleRef.current.active) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
+        // ワープ直後の再発動抑制：入場座標から十分離れたら解除（overlap判定の半径 TILE_SIZE*1.1 より広めに取る）
+        if (warpCooldownRef.current) {
+          const wc = warpCooldownRef.current;
+          if (Math.hypot(pcx - wc.x, pcy - wc.y) > TILE_SIZE * 1.5) warpCooldownRef.current = null;
+        }
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
@@ -3990,14 +4067,14 @@ const lose = (msg: string) => {
           if (overlap) {
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
-              if (exactOverlap && !eventRunningRef.current) {
+              if (exactOverlap && !eventRunningRef.current && !warpCooldownRef.current) {
                 engineRef.current.player.x = d.warpTarget.col * TILE_SIZE;
                 engineRef.current.player.y = d.warpTarget.row * TILE_SIZE;
               }
               break;
             }
             // シーン間ワープ（土管・扉など）：フェード遷移を開始
-            if (exactOverlap && d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current) {
+            if (exactOverlap && d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current && !warpCooldownRef.current) {
               const tgtScene = scenesRef.current.find(s => s.id === d.warpSceneId);
               if (tgtScene) {
                 const ex = (d.warpEntryCol ?? 1) * TILE_SIZE;
@@ -4137,8 +4214,20 @@ const lose = (msg: string) => {
               }
               break;
             }
-            else if (e.fleeing && !e.talked) { e.talked = true; npcTalkRef.current = { entity: e, text: 'ひぃっ！？も、もう堪忍してぇや…！', startTime: performance.now() }; }
-            else if (d.message && !e.talked) { e.talked = true; npcTalkRef.current = { entity: e, text: d.message, startTime: performance.now() }; }
+            else if (e.fleeing && !e.talked) {
+              e.talked = true;
+              const text = 'ひぃっ！？も、もう堪忍してぇや…！';
+              ctx.font = `bold 11px ${getPixelFontFamily()}`;
+              const wrapped = wrapWithKinsoku(ctx, text, Math.min(PLAY_W - 16, 220));
+              npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped };
+            }
+            else if (d.message && !e.talked) {
+              e.talked = true;
+              const text = d.message;
+              ctx.font = `bold 11px ${getPixelFontFamily()}`;
+              const wrapped = wrapWithKinsoku(ctx, text, Math.min(PLAY_W - 16, 220));
+              npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped };
+            }
           } else { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
         }
 
@@ -4529,11 +4618,7 @@ const lose = (msg: string) => {
       const endCol = Math.min(worldCols, startCol + VIEW_COLS + 2);
       const startRow = Math.max(0, Math.floor(finalCamY / TILE_SIZE));
       const endRow = Math.min(worldRows, startRow + VIEW_ROWS + 2);
-      for (let y = startRow; y < endRow; y++) {
-        for (let x = startCol; x < endCol; x++) {
-          const tileId = map[y]?.[x] ?? 0;
-          const info = gameData.tiles[tileId];
-          if (tileId !== 0 && info) {
+      const drawTileCell = (x: number, y: number, tileId: number, info: TileDef) => {
             // コインタイル：回転コイン（横幅が正弦波で伸縮）を描く。画像不要。
             if (info.special === 'coin') {
               const ccx = x * TILE_SIZE + TILE_SIZE / 2, ccy = y * TILE_SIZE + TILE_SIZE / 2;
@@ -4543,7 +4628,7 @@ const lose = (msg: string) => {
               ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2;
               ctx.beginPath(); ctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); ctx.stroke();
               if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
-              continue;
+              return;
             }
             // imageUrl に #sx,sy,sw,sh が付いていればアトラスから単一スプライトを切り出す。
             // 既定は cell-fill（マスいっぱいに描画）＝欠片を縦に積んでも継ぎ目が出ない（土管トップ＋ボディ等）。
@@ -4588,9 +4673,17 @@ const lose = (msg: string) => {
             }
             else { ctx.fillStyle = info.color; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
             if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
-          }
+      };
+      // 地面レイヤー：プレイヤーより先に描画
+      for (let y = startRow; y < endRow; y++) {
+        for (let x = startCol; x < endCol; x++) {
+          const tileId = map[y]?.[x] ?? 0;
+          const info = gameData.tiles[tileId];
+          if (tileId !== 0 && info) drawTileCell(x, y, tileId, info);
         }
       }
+      // 上層レイヤー（木の上部・屋根など）：地面と同じ座標範囲・タイル定義を使う別グリッド
+      const overlayMap = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
 
       // ── アニメーション中ブロックの描画 ──
       if (isPlaying) {
@@ -4913,31 +5006,67 @@ const lose = (msg: string) => {
           }
         }
       }
+      // 上層レイヤー：木の上部や屋根などプレイヤーより手前に重ねて描画。
+      // プレイヤーがその真下付近にいる間は半透明化し、奥のプレイヤーが見えるようにする（gomi.html の drawMapUpper 相当）。
+      if (overlayMap) {
+        const ptx = Math.floor((p.x + pData.w / 2) / TILE_SIZE);
+        const pty = Math.floor((p.y + pData.h) / TILE_SIZE);
+        let underOverlay = false;
+        for (let dy = -1; dy <= 0 && !underOverlay; dy++) {
+          if ((overlayMap[pty + dy]?.[ptx] ?? 0) !== 0) underOverlay = true;
+        }
+        const targetAlpha = underOverlay ? 0.5 : 1.0;
+        overlayAlphaRef.current += (targetAlpha - overlayAlphaRef.current) * 0.15;
+        if (Math.abs(overlayAlphaRef.current - targetAlpha) < 0.01) overlayAlphaRef.current = targetAlpha;
+        ctx.globalAlpha = overlayAlphaRef.current;
+        for (let y = startRow; y < endRow; y++) {
+          for (let x = startCol; x < endCol; x++) {
+            const tileId = overlayMap[y]?.[x] ?? 0;
+            const info = gameData.tiles[tileId];
+            if (tileId !== 0 && info) drawTileCell(x, y, tileId, info);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
       // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）。全スプライトより前面に出すため描画の最後で行う
       if (isPlaying && npcTalkRef.current) {
-        const { entity: e, text, startTime } = npcTalkRef.current;
+        const { entity: e, text, startTime, wrapped } = npcTalkRef.current;
         const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
-        const display = text.slice(0, shown);
-        if (display) {
+        if (shown > 0) {
           ctx.font = `bold 11px ${getPixelFontFamily()}`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
-          // 画面外にはみ出さないよう、最大幅で改行してから複数行描画する（禁則処理つき）
-          const maxWidth = Math.min(PLAY_W - 16, 220);
-          const wrapped = wrapWithKinsoku(ctx, display, maxWidth);
+          
+          const wrappedDisplay: string[] = [];
+          if (wrapped) {
+            let charsLeft = shown;
+            for (const line of wrapped) {
+              if (charsLeft <= 0) break;
+              if (charsLeft >= line.length) {
+                wrappedDisplay.push(line);
+                charsLeft -= line.length;
+              } else {
+                wrappedDisplay.push(line.slice(0, charsLeft));
+                charsLeft = 0;
+              }
+            }
+          } else {
+            const display = text.slice(0, shown);
+            wrappedDisplay.push(...wrapWithKinsoku(ctx, display, Math.min(PLAY_W - 16, 220)));
+          }
 
           const lineHeight = 14;
-          const tw = Math.max(...wrapped.map(l => ctx.measureText(l).width));
+          const tw = Math.max(...wrappedDisplay.map(l => ctx.measureText(l).width));
           let px = e.x + (e.def.w ?? TILE_SIZE) / 2;
           px = Math.max(tw / 2 + 4, Math.min(PLAY_W - tw / 2 - 4, px));
           const boxBottom = e.y - 8;
-          const boxHeight = wrapped.length * lineHeight + 6;
+          const boxHeight = wrappedDisplay.length * lineHeight + 6;
           const boxTop = boxBottom - boxHeight;
           ctx.fillStyle = 'rgba(0,0,0,0.6)';
           ctx.fillRect(px - tw / 2 - 4, boxTop, tw + 8, boxHeight);
           ctx.fillStyle = '#fff';
-          wrapped.forEach((l, i) => {
-            ctx.fillText(l, px, boxBottom - (wrapped.length - 1 - i) * lineHeight);
+          wrappedDisplay.forEach((l, i) => {
+            ctx.fillText(l, px, boxBottom - (wrappedDisplay.length - 1 - i) * lineHeight);
           });
         }
       }
@@ -5079,6 +5208,8 @@ const lose = (msg: string) => {
             encounterGaugeRef.current = 0; encounterNextRef.current = 0;
             eng.player.x = fade.entryX; eng.player.y = fade.entryY;
             eng.player.vx = 0; eng.player.vy = 0;
+            // 入場地点付近に別のワープがあっても即座に巻き戻らないよう、離れるまで発動を抑制する
+            warpCooldownRef.current = { x: fade.entryX + pData.w / 2, y: fade.entryY + pData.h / 2 };
             if (gameData.id === 'mario') {
               marioPipeRef.current = {
                 phase: 'exiting',
@@ -5349,14 +5480,16 @@ const lose = (msg: string) => {
     // canvas px → world px（SCALE_X/SCALE_Y でズームしているため逆変換）
     const x = (clientX - rect.left) * (canvas.width / rect.width) / SCALE_X;
     const y = (clientY - rect.top) * (canvas.height / rect.height) / SCALE_Y;
-    const worldCols = gameData.scroll?.worldCols ?? COLS;
-    const worldRows = gameData.scroll?.worldRows ?? ROWS;
+    // gameData.scroll はプリセット全体の既定値でシーンごとに更新されないため、当たり判定の境界は
+    // 現在編集中の実際の map(=switchEditScene で書き戻される gameData.map) の実寸を優先する。
+    const worldCols = gameData.map[0]?.length ?? gameData.scroll?.worldCols ?? COLS;
+    const worldRows = gameData.map.length ?? gameData.scroll?.worldRows ?? ROWS;
     // camera follows player in edit mode now
-    const camX = Math.max(0, Math.min((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W,
+    const camX = Math.max(0, Math.min(worldCols * TILE_SIZE - VIEW_W,
       engineRef.current.player.x !== gameData.player.start.x
         ? engineRef.current.player.x + gameData.player.w / 2 - VIEW_W / 2
         : editScrollRef.current));
-    const camY = Math.max(0, Math.min((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H,
+    const camY = Math.max(0, Math.min(worldRows * TILE_SIZE - VIEW_H,
       engineRef.current.player.y !== gameData.player.start.y
         ? engineRef.current.player.y + gameData.player.h / 2 - VIEW_H / 2
         : editScrollYRef.current));
@@ -5379,12 +5512,20 @@ const lose = (msg: string) => {
         setEditScrollY(Math.max(0, Math.min(worldRows * TILE_SIZE - VIEW_H, sy + gameData.player.h / 2 - VIEW_H / 2)));
         return;
       }
-      setGameData(prev => {
-        const newMap = prev.map.map(r => [...r]);
-        newMap[row][col] = selectedTileId;
-        engineRef.current.map = newMap;
-        return { ...prev, map: newMap };
-      });
+      if (editMapLayer === 'overlay') {
+        setGameData(prev => {
+          const newOverlay = (prev.overlayMap ?? emptyGridLike(prev.map)).map(r => [...r]);
+          newOverlay[row][col] = selectedTileId;
+          return { ...prev, overlayMap: newOverlay };
+        });
+      } else {
+        setGameData(prev => {
+          const newMap = prev.map.map(r => [...r]);
+          newMap[row][col] = selectedTileId;
+          engineRef.current.map = newMap;
+          return { ...prev, map: newMap };
+        });
+      }
     } else if (editorTab === 'object') {
       const found = gameData.objects.find(o => o.col === col && o.row === row);
       setSelectedObjId(found?.id ?? null);
@@ -5508,6 +5649,7 @@ const lose = (msg: string) => {
       name: t.name, color: t.color, passable: t.passable, special: t.special, imageRef: t.imageRef,
     }])),
     map: gameData.map,
+    overlayMap: gameData.overlayMap,
     objects: gameData.objects.map(({ spriteUrl, ...o }) => o),
     mapBgRef: gameData.mapBgRef,
     scroll: gameData.scroll,
@@ -5523,6 +5665,7 @@ const lose = (msg: string) => {
     scenes: gameData.scenes?.map(s => ({
       id: s.id, name: s.name, exits: s.exits,
       map: s.map,
+      overlayMap: s.overlayMap,
       objects: s.objects.map(({ spriteUrl, ...o }) => o),
       bgm: s.bgm?.ref,
     })),
@@ -5559,6 +5702,7 @@ const lose = (msg: string) => {
             Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
           ),
           map: manifest.map,
+          overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
           objects: manifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
           mapBgRef: manifest.mapBgRef,
           mapBgUrl: undefined,
@@ -5599,10 +5743,10 @@ const lose = (msg: string) => {
     setGameData(prev => {
       if (!prev.scenes) return prev;
       const scenes = prev.scenes.map((s, i) =>
-        i === editSceneIdx ? { ...s, map: prev.map, objects: prev.objects } : s
+        i === editSceneIdx ? { ...s, map: prev.map, overlayMap: prev.overlayMap, objects: prev.objects } : s
       );
       const next = scenes[newIdx];
-      return { ...prev, scenes, map: next.map, objects: next.objects };
+      return { ...prev, scenes, map: next.map, overlayMap: next.overlayMap, objects: next.objects };
     });
     setEditSceneIdx(newIdx);
     setSelectedObjId(null);
@@ -5620,7 +5764,7 @@ const lose = (msg: string) => {
     setGameData(prev => {
       if (!prev.scenes) return prev;
       const scenes = prev.scenes.map((s, i) =>
-        i === editSceneIdx ? { ...s, map: prev.map, objects: prev.objects } : s
+        i === editSceneIdx ? { ...s, map: prev.map, overlayMap: prev.overlayMap, objects: prev.objects } : s
       );
       return { ...prev, scenes };
     });
@@ -5632,11 +5776,12 @@ const lose = (msg: string) => {
     const emptyMap = Array.from({ length: ROWS }, (_, y) =>
       Array.from({ length: COLS }, (_, x) => (y >= ROWS - 2 ? 1 : 0))
     );
-    const newScene: SceneDef = { id: newId, name: `シーン${(gameData.scenes?.length ?? 0) + 1}`, map: emptyMap, objects: [] };
+    const emptyOverlay = emptyGridLike(emptyMap);
+    const newScene: SceneDef = { id: newId, name: `シーン${(gameData.scenes?.length ?? 0) + 1}`, map: emptyMap, overlayMap: emptyOverlay, objects: [] };
     flushSceneEdits();
     setGameData(prev => {
       const scenes = [...(prev.scenes ?? []), newScene];
-      return { ...prev, scenes, map: newScene.map, objects: newScene.objects };
+      return { ...prev, scenes, map: newScene.map, overlayMap: newScene.overlayMap, objects: newScene.objects };
     });
     setEditSceneIdx((gameData.scenes?.length ?? 0));
     setSelectedObjId(null);
@@ -5649,7 +5794,7 @@ const lose = (msg: string) => {
       if (!prev.scenes) return prev;
       const scenes = prev.scenes.filter((_, i) => i !== idx);
       const nextIdx = Math.min(editSceneIdx, scenes.length - 1);
-      return { ...prev, scenes, map: scenes[nextIdx].map, objects: scenes[nextIdx].objects };
+      return { ...prev, scenes, map: scenes[nextIdx].map, overlayMap: scenes[nextIdx].overlayMap, objects: scenes[nextIdx].objects };
     });
     setEditSceneIdx(prev => Math.max(0, prev - (idx <= editSceneIdx ? 1 : 0)));
     setSelectedObjId(null);
@@ -6739,6 +6884,16 @@ const lose = (msg: string) => {
                       </div>
                     )}
 
+                    {/* ── 描画レイヤー切り替え ── */}
+                    <div className="flex rounded-lg border border-gray-700 overflow-hidden text-[11px]">
+                      <button onClick={() => setEditMapLayer('base')}
+                        className={`flex-1 py-1.5 ${editMapLayer === 'base' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>地面（当たり判定）</button>
+                      <button onClick={() => setEditMapLayer('overlay')}
+                        className={`flex-1 py-1.5 ${editMapLayer === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>上層（木の上部等・手前）</button>
+                    </div>
+                    {editMapLayer === 'overlay' && (
+                      <p className="text-[10px] text-gray-500">上層はプレイヤーより手前に描画され、当たり判定を持ちません。プレイヤーが真下付近にいる間は半透明化します。</p>
+                    )}
                     {/* ── タイル塗りヒント ── */}
                     <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> タイルを選択して画面をタップ／ドラッグ</p>
                     <p className="text-[10px] text-green-400 flex items-center gap-1">🏁 マーカーをドラッグしてプレイヤーの初期位置を変更</p>

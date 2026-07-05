@@ -317,6 +317,9 @@ export interface SceneDef {
   id: string;
   name?: string;
   map: number[][];
+  /** 上層レイヤー（木の上部・屋根など）。プレイヤーより手前に描画され、真下付近にいる間は半透明化する。
+   *  同じ tiles 定義・チップ切り出し(imageUrl の #sx,sy,sw,sh)を再利用する、地面レイヤーとは別の同サイズグリッド。 */
+  overlayMap?: number[][];
   objects: ObjectDef[];
   exits?: SceneExit;
   /** このシーン専用 BGM。省略時はゲーム共通 BGM を継続。 */
@@ -330,6 +333,9 @@ export interface SceneDef {
 export interface PresetData {
   id: PresetId; name: string; engine: EngineKind; gravity: number; friction: number;
   player: PlayerDef; tiles: Record<number, TileDef>; map: number[][];
+  /** 上層レイヤー（木の上部・屋根など）。map と同サイズのグリッド。プレイヤーより手前に描画され、
+   *  真下付近にいる間は半透明化する（gomi.html の drawMapLower/drawMapUpper 相当）。 */
+  overlayMap?: number[][];
   objects: ObjectDef[]; bgm?: BgmState; battleBgm?: BgmState; bossBgm?: BgmState; sfx: Partial<Record<SfxTrigger, SfxRef>>;
   /** シーン切り替えモード。定義されていればマップ/オブジェクトは scenes[0] を初期シーンとして使う。 */
   scenes?: SceneDef[];
