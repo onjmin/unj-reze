@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
-import { bgmRefToAsset, refLabel, parseWalkRef } from '@/lib/asset-ref';
+import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl } from '@/lib/asset-ref';
 import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
@@ -106,6 +106,14 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
 }
 
 type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound' | 'screen';
+
+/** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
+ *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
+const hydrateUrlFromRef = (ref?: string): string | undefined => {
+  if (!ref) return undefined;
+  const url = imageRefToUrl(ref);
+  return url && (url.startsWith('http') || url.startsWith('/') || url.startsWith('data:')) ? url : undefined;
+};
 
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
@@ -1845,12 +1853,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         name: initialManifest.name,
         gravity: initialManifest.gravity,
         friction: initialManifest.friction,
-        player: { ...base.player, ...initialManifest.player, spriteUrl: undefined },
+        player: { ...base.player, ...initialManifest.player, spriteUrl: hydrateUrlFromRef(initialManifest.player.spriteRef) },
         tiles: Object.fromEntries(
-          Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: undefined }])
+          Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
         ),
         map: initialManifest.map,
-        objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: undefined })),
+        objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
         scroll: initialManifest.scroll ?? base.scroll,
         phases: initialManifest.phases ?? base.phases,
         titleScreen: initialManifest.titleScreen ?? base.titleScreen,
@@ -5363,12 +5371,12 @@ const lose = (msg: string) => {
           name: manifest.name,
           gravity: manifest.gravity,
           friction: manifest.friction,
-          player: { ...base.player, ...manifest.player, spriteUrl: undefined },
+          player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
           tiles: Object.fromEntries(
-            Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: undefined }])
+            Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
           ),
           map: manifest.map,
-          objects: manifest.objects.map(o => ({ ...o, spriteUrl: undefined })),
+          objects: manifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
           mapBgRef: manifest.mapBgRef,
           mapBgUrl: undefined,
           scroll: manifest.scroll ?? base.scroll,
@@ -5378,7 +5386,7 @@ const lose = (msg: string) => {
           battle: base.battle,
           scenes: manifest.scenes?.map(s => ({
             ...s,
-            objects: s.objects.map(o => ({ ...o, spriteUrl: undefined })),
+            objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
             bgm: s.bgm ? { ref: s.bgm } : undefined,
           })),
           bgm: manifest.bgm && manifest.bgm !== 'none' ? { ref: manifest.bgm } : undefined,

@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "vglc": "node scripts/import-vglc.mjs"
+    "vglc": "node scripts/import-vglc.mjs",
+    "slice-assets": "node scripts/slice-rpg-assets.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1067.0",
