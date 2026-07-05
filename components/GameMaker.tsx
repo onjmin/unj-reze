@@ -4512,34 +4512,6 @@ const lose = (msg: string) => {
             drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
           }
           if (e.def.hp > 1 && e.hp < e.def.hp) { ctx.fillStyle = 'red'; ctx.fillRect(e.x, e.y - 5, TILE_SIZE * (e.hp / e.def.hp), 3); }
-          // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）
-          if (npcTalkRef.current && npcTalkRef.current.entity === e) {
-            const { text, startTime } = npcTalkRef.current;
-            const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
-            const display = text.slice(0, shown);
-            if (display) {
-              ctx.font = `bold 11px ${getPixelFontFamily()}`;
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'bottom';
-              // 画面外にはみ出さないよう、最大幅で改行してから複数行描画する（禁則処理つき）
-              const maxWidth = Math.min(PLAY_W - 16, 220);
-              const wrapped = wrapWithKinsoku(ctx, display, maxWidth);
-
-              const lineHeight = 14;
-              const tw = Math.max(...wrapped.map(l => ctx.measureText(l).width));
-              let px = e.x + (e.def.w ?? TILE_SIZE) / 2;
-              px = Math.max(tw / 2 + 4, Math.min(PLAY_W - tw / 2 - 4, px));
-              const boxBottom = e.y - 8;
-              const boxHeight = wrapped.length * lineHeight + 6;
-              const boxTop = boxBottom - boxHeight;
-              ctx.fillStyle = 'rgba(0,0,0,0.6)';
-              ctx.fillRect(px - tw / 2 - 4, boxTop, tw + 8, boxHeight);
-              ctx.fillStyle = '#fff';
-              wrapped.forEach((l, i) => {
-                ctx.fillText(l, px, boxBottom - (wrapped.length - 1 - i) * lineHeight);
-              });
-            }
-          }
         }
         for (const b of eng.bullets) {
           if (b.bounce) {
@@ -4782,6 +4754,34 @@ const lose = (msg: string) => {
             ctx.fillText(text, px, py);
             ctx.restore();
           }
+        }
+      }
+      // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）。全スプライトより前面に出すため描画の最後で行う
+      if (isPlaying && npcTalkRef.current) {
+        const { entity: e, text, startTime } = npcTalkRef.current;
+        const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
+        const display = text.slice(0, shown);
+        if (display) {
+          ctx.font = `bold 11px ${getPixelFontFamily()}`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          // 画面外にはみ出さないよう、最大幅で改行してから複数行描画する（禁則処理つき）
+          const maxWidth = Math.min(PLAY_W - 16, 220);
+          const wrapped = wrapWithKinsoku(ctx, display, maxWidth);
+
+          const lineHeight = 14;
+          const tw = Math.max(...wrapped.map(l => ctx.measureText(l).width));
+          let px = e.x + (e.def.w ?? TILE_SIZE) / 2;
+          px = Math.max(tw / 2 + 4, Math.min(PLAY_W - tw / 2 - 4, px));
+          const boxBottom = e.y - 8;
+          const boxHeight = wrapped.length * lineHeight + 6;
+          const boxTop = boxBottom - boxHeight;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(px - tw / 2 - 4, boxTop, tw + 8, boxHeight);
+          ctx.fillStyle = '#fff';
+          wrapped.forEach((l, i) => {
+            ctx.fillText(l, px, boxBottom - (wrapped.length - 1 - i) * lineHeight);
+          });
         }
       }
       // onjReze：近接攻撃の描画（振っている間だけ向きに合わせて表示）
