@@ -253,6 +253,8 @@ interface Entity {
   spawnGrace?: number;
   /** レゼ専用：上半身を投げてから爆発するまで true（再投擲不可・自身は下半分のみ表示）。 */
   bombThrown?: boolean;
+  rezeState?: 'charge' | 'flank' | 'normal';
+  rezeStateTimer?: number;
   /** 味方モブが攻撃されて怯え、プレイヤーから逃げるようになった状態。 */
   fleeing?: boolean;
 }
@@ -941,6 +943,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [mapTool] = useState<'tile'>('tile');
   const isDraggingStartRef = useRef(false);
   const justStartedRef = useRef(false);
+  const editorCoordRef = useRef<HTMLDivElement>(null);
   // ── タイトル／エンディング画面ランタイム ──
   const [showTitle, setShowTitle] = useState(false);
   const [showEnding, setShowEnding] = useState(false);
@@ -3323,7 +3326,12 @@ const lose = (msg: string) => {
             const bm = onjBombsRef.current[i]; bm.fuse--;
             if (bm.fuse > 0) continue;
             onjBombsRef.current.splice(i, 1);
-            if (bm.owner) bm.owner.bombThrown = false; // 爆発 → 投げた本人が復活（次を投げられる）
+            if (bm.owner) {
+              bm.owner.bombThrown = false;
+              // 爆発後、次の行動パターン（'charge': ダッシュ接近, 'flank': 回避ステップ, 'normal': 通常追尾）を決定する
+              bm.owner.rezeState = Math.random() < 0.4 ? 'charge' : (Math.random() < 0.8 ? 'flank' : 'normal');
+              bm.owner.rezeStateTimer = 90; // 90フレーム（1.5秒）の間、この行動を取る
+            }
             onjBlastsRef.current.push({ x: bm.x, y: bm.y, life: B_BLAST, maxLife: B_BLAST, r: bm.r });
             hitShake(); playSfx(sfxRef.current.damage);
             for (let k = eng.entities.length - 1; k >= 0; k--) {
@@ -3331,6 +3339,7 @@ const lose = (msg: string) => {
               if (ent.def.objType === 'warp') continue; // 扉などのワープオブジェクトは攻撃で破壊されない
               const ex = ent.x + TILE_SIZE / 2, ey = ent.y + TILE_SIZE / 2;
               if (Math.hypot(ex - bm.x, ey - bm.y) <= bm.r) {
+                if (bm.owner && bm.owner === ent) continue; // 自分が投げた爆弾の爆風ダメージは無効
                 ent.hp -= bm.dmg;
                 if (ent.hp <= 0) {
                   if (ent.scriptCtx) ent.scriptCtx.cancelled = true;
@@ -3618,7 +3627,7 @@ const lose = (msg: string) => {
               if (e.y > worldH + TILE_SIZE) { eng.entities.splice(ei, 1); continue; }
             }
           } else if (e.bombThrown) {
-            // レゼ：上半身を投げてから爆発するまでは立ち止まる
+            // レゼ：上半身を投げてから爆発するまでは立ち止まる（原作再現のため棒立ち）
             e.vx = 0; e.vy = 0;
           } else if (e.fleeing) {
             // 怯えた味方モブ：本来の behavior を無視してプレイヤーから逃げる（壁はすり抜けない）
@@ -3635,15 +3644,41 @@ const lose = (msg: string) => {
               e.x += e.vx; e.y += e.vy;
             } else if (d.behavior === 'chase' || d.behavior === 'flee') {
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
-              const s = (d.behavior === 'chase' ? 1 : -1) * sp;
-              e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+              let s = (d.behavior === 'chase' ? 1 : -1) * sp;
+
+              // レゼ専用：爆弾爆発後の次の行動パターンに応じた移動
+              if (gameData.engine === 'onjReze' && d.name === 'レゼ' && e.rezeState) {
+                if (e.rezeStateTimer && e.rezeStateTimer > 0) {
+                  e.rezeStateTimer--;
+                  if (e.rezeState === 'charge') {
+                    // 突撃：猛ダッシュでプレイヤーに接近
+                    s = 2.2;
+                    e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+                  } else if (e.rezeState === 'flank') {
+                    // 回り込み：プレイヤーの側面に回り込むように移動
+                    const flankSp = 1.6;
+                    const signDir = ((e.homeX + e.homeY) % 2 === 0) ? 1 : -1;
+                    e.x += (dy / dist) * flankSp * signDir;
+                    e.y += (-dx / dist) * flankSp * signDir;
+                  } else {
+                    // normal：通常追尾
+                    e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+                  }
+                } else {
+                  e.rezeState = undefined;
+                  e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+                }
+              } else {
+                // 通常の追尾処理
+                e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+              }
             } else if (d.behavior === 'patrolH') {
               if (e.vx === 0) e.vx = sp; e.x += e.vx;
               if (e.x < e.homeX - TILE_SIZE * 3 || e.x > e.homeX + TILE_SIZE * 3) e.vx *= -1;
               if (e.x < TILE_SIZE || e.x > worldW - TILE_SIZE * 2) e.vx *= -1;
             } else if (d.behavior === 'patrolV') {
               if (e.vy === 0) e.vy = sp; e.y += e.vy;
-              if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
+              if (e.x < e.homeY - TILE_SIZE * 3 || e.x > e.homeY + TILE_SIZE * 3) e.vy *= -1;
               if (e.y < TILE_SIZE || e.y > worldH - TILE_SIZE * 2) e.vy *= -1;
             }
             e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
@@ -3654,39 +3689,43 @@ const lose = (msg: string) => {
           if (gameData.engine === 'onjReze' && d.name === 'レゼ' && isPlaying && !dead) {
             const distToPlayer = Math.hypot(pcx - ecx, pcy - ecy);
             const isClose = distToPlayer < TILE_SIZE * 4;
-            if (isClose) {
-              // 近接戦闘AI: 45フレームに1回、非常に導火線が短いボムを使用
-              if (!e.bombThrown && e.timer % 45 === 0) {
-                e.bombThrown = true;
-                const isVeryClose = distToPlayer < TILE_SIZE * 1.5;
-                if (isVeryClose) {
-                  // 超至近距離なら直接プレイヤーの足元に設置（fuse: 12）
-                  onjBombsRef.current.push({
-                    x: pcx, y: pcy, fuse: 12, maxFuse: 12,
-                    r: TILE_SIZE * 1.5, dmg: 2, head: false,
-                    srcUrl: d.spriteUrl, owner: e,
-                  });
-                } else {
-                  // 近距離なら超高速ボムスロー（飛翔時間 10, 着地後 5フレームで爆発）
-                  onjFliesRef.current.push({
-                    fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: 10,
-                    fuse: 15, r: TILE_SIZE * 1.5, dmg: 2, head: false,
-                    srcUrl: d.spriteUrl, owner: e,
-                  });
+
+            // 爆発後の行動パターン持続中（e.rezeState が設定されている）は新しいボムを投げない
+            if (!e.rezeState) {
+              if (isClose) {
+                // 近接戦闘AI: 45フレームに1回、非常に導火線が短いボムを使用
+                if (!e.bombThrown && e.timer % 45 === 0) {
+                  e.bombThrown = true;
+                  const isVeryClose = distToPlayer < TILE_SIZE * 1.5;
+                  if (isVeryClose) {
+                    // 超至近距離なら直接プレイヤーの足元に設置（fuse: 12）
+                    onjBombsRef.current.push({
+                      x: pcx, y: pcy, fuse: 12, maxFuse: 12,
+                      r: TILE_SIZE * 1.5, dmg: 2, head: false,
+                      srcUrl: d.spriteUrl, owner: e,
+                    });
+                  } else {
+                    // 近距離なら超高速ボムスロー（飛翔時間 10, 着地後 5フレームで爆発）
+                    onjFliesRef.current.push({
+                      fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: 10,
+                      fuse: 15, r: TILE_SIZE * 1.5, dmg: 2, head: false,
+                      srcUrl: d.spriteUrl, owner: e,
+                    });
+                  }
+                  playSfx(sfxRef.current.shot);
                 }
-                playSfx(sfxRef.current.shot);
-              }
-            } else {
-              // 通常モード: 遠距離から120フレームに1回ボムスロー
-              const RB_FUSE = 96, RB_FLY = 24, RB_R = TILE_SIZE * 1.6, RB_DMG = 2;
-              if (!e.bombThrown && distToPlayer < TILE_SIZE * 8 && e.timer % 120 === 0) {
-                e.bombThrown = true; // 爆発するまで次を投げない
-                onjFliesRef.current.push({
-                  fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: RB_FLY,
-                  fuse: RB_FUSE, r: RB_R, dmg: RB_DMG, head: false,
-                  srcUrl: d.spriteUrl, owner: e,
-                });
-                playSfx(sfxRef.current.shot);
+              } else {
+                // 通常モード: 遠距離から120フレームに1回ボムスロー
+                const RB_FUSE = 96, RB_FLY = 24, RB_R = TILE_SIZE * 1.6, RB_DMG = 2;
+                if (!e.bombThrown && distToPlayer < TILE_SIZE * 8 && e.timer % 120 === 0) {
+                  e.bombThrown = true; // 爆発するまで次を投げない
+                  onjFliesRef.current.push({
+                    fx: ecx, fy: ecy, tx: pcx, ty: pcy, t: 0, dur: RB_FLY,
+                    fuse: RB_FUSE, r: RB_R, dmg: RB_DMG, head: false,
+                    srcUrl: d.spriteUrl, owner: e,
+                  });
+                  playSfx(sfxRef.current.shot);
+                }
               }
             }
           }
@@ -3978,9 +4017,11 @@ const lose = (msg: string) => {
                       entryY: ey
                     };
                     playSfx(sfxRef.current.damage); // 土管に入る効果音
+                    resetSceneState(); // 遷移開始時にセリフ・イベントを即座に消去
                   }
                 } else {
                   sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: d.warpSceneId, entryX: ex, entryY: ey };
+                  resetSceneState(); // 遷移開始時にセリフ・イベントを即座に消去
                 }
               }
               break;
@@ -4019,12 +4060,12 @@ const lose = (msg: string) => {
               }
               break;
             }
-            if (d.shopItems?.length && !eventRunningRef.current) {
+            if (d.shopItems?.length && !eventRunningRef.current && !frozen) {
               if (!e.talked) { e.talked = true; setShopModal({ npcId: d.id, items: d.shopItems }); }
               break;
             }
             if (d.pages && d.pages.length > 0) {
-              if (!eventRunningRef.current && !e.talked) {
+              if (!eventRunningRef.current && !e.talked && !frozen) {
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
                   e.talked = true;
@@ -4398,7 +4439,7 @@ const lose = (msg: string) => {
       }
 
       // ── action key: trigger event/message on overlapping object ──
-      if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current) {
+      if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current && !frozen) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
         const target = (isPlaying ? eng.entities : gameData.objects).find(o => {
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
@@ -5250,6 +5291,34 @@ const lose = (msg: string) => {
 
       }
 
+      // 編集モードでのリアルタイム座標表示更新（右上のDOMを直接書き換え）
+      if (!isPlaying && editorCoordRef.current) {
+        const curX = p.x;
+        const curY = p.y;
+        const curW = pData.w;
+        const curH = pData.h;
+        const startX = gameData.player.start.x;
+        const startY = gameData.player.start.y;
+
+        const curGridX = Math.floor(curX / TILE_SIZE);
+        const curGridY = Math.floor((curY + curH - TILE_SIZE) / TILE_SIZE);
+        const startGridX = Math.floor(startX / TILE_SIZE);
+        const startGridY = Math.floor((startY + curH - TILE_SIZE) / TILE_SIZE);
+
+        editorCoordRef.current.innerHTML = `
+          <div class="flex items-center justify-end gap-1.5">
+            <span class="text-blue-400 font-bold">👤</span>
+            <span class="font-semibold text-white">(${curGridX}, ${curGridY})</span>
+            <span class="text-[9px] text-gray-400">px: (${Math.round(curX)}, ${Math.round(curY)})</span>
+          </div>
+          <div class="flex items-center justify-end gap-1.5 opacity-80">
+            <span class="text-emerald-400 font-bold">🏁</span>
+            <span class="font-semibold text-white">(${startGridX}, ${startGridY})</span>
+            <span class="text-[9px] text-gray-400">px: (${Math.round(startX)}, ${Math.round(startY)})</span>
+          </div>
+        `;
+      }
+
       eng.animId = requestAnimationFrame(loop);
     };
 
@@ -5762,19 +5831,12 @@ const lose = (msg: string) => {
               </a>
             )}
 
-            {/* ゲーム編集時は画面右下に主人公の現在座標を表示(x,y) */}
+            {/* ゲーム編集時は主人公の現在座標および初期位置を表示(x,y) */}
             {!isPlaying && !introOpen && !showTitle && !showEnding && (
-              <div className="absolute bottom-2 right-2 z-30 bg-black text-[11px] font-pixel text-gray-200 px-2.5 py-1.5 border-2 border-white/40 select-none flex flex-col gap-0.5 pointer-events-none align-right text-right">
-                <div className="flex items-center justify-end gap-1">
-                  <span className="text-emerald-400 font-bold">🏁</span>
-                  <span className="font-semibold text-white">
-                    ({Math.floor(gameData.player.start.x / TILE_SIZE)}, {Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE)})
-                  </span>
-                </div>
-                <div className="text-[9px] text-gray-500">
-                  px: ({gameData.player.start.x}, {gameData.player.start.y})
-                </div>
-              </div>
+              <div
+                ref={editorCoordRef}
+                className="absolute top-2 right-2 z-30 bg-black/85 text-[11px] font-pixel text-gray-200 px-2.5 py-2 border border-white/20 rounded shadow-lg select-none flex flex-col gap-1 pointer-events-none text-right min-w-[140px]"
+              />
             )}
             {/* ── タイトル画面オーバーレイ ── */}
             {showTitle && gameData.titleScreen && (
