@@ -20,6 +20,8 @@ export interface Post {
   heartsTotal: number;
   hasGame?: boolean;
   gameId?: number;
+  /** true=自作 false=他作 undefined=未設定 */
+  isOriginal?: boolean;
   threadId: number;
   parentPostId?: number;
   replies: Post[];

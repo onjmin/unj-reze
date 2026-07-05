@@ -25,6 +25,8 @@ export interface CreatePostParams {
   avatarColor?: string;
   slug?: string;
   gameId?: number;
+  /** true=自作 false=他作 undefined=未設定 */
+  isOriginal?: boolean;
 }
 
 export interface ReplyParams {
@@ -56,7 +58,7 @@ export interface DataStore {
   repostPost(id: number): Promise<Post | null>;
   getReplies(postId: number, userId?: string): Promise<Post[]>;
   addReply(postId: number, data: ReplyParams): Promise<Post | null>;
-  editPost(id: number, userId: string, content: string): Promise<Post | null>;
+  editPost(id: number, userId: string, content: string, isOriginal?: boolean | null): Promise<Post | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
   getUserPostsBySlug(slug: string, userId?: string): Promise<Post[]>;

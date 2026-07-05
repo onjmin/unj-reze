@@ -64,7 +64,8 @@ async function ensureTables(client: any) {
       has_collab_button BOOLEAN NOT NULL DEFAULT FALSE,
       hearts_total INTEGER NOT NULL DEFAULT 0,
       has_game BOOLEAN NOT NULL DEFAULT FALSE,
-      game_id BIGINT
+      game_id BIGINT,
+      is_original BOOLEAN
     )
   `);
 
@@ -189,6 +190,16 @@ async function ensureTables(client: any) {
         WHERE table_name = 'posts' AND column_name = 'game_id'
       ) THEN
         ALTER TABLE posts ADD COLUMN game_id BIGINT;
+      END IF;
+    END $$;
+  `);
+  await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'posts' AND column_name = 'is_original'
+      ) THEN
+        ALTER TABLE posts ADD COLUMN is_original BOOLEAN;
       END IF;
     END $$;
   `);
@@ -319,6 +330,7 @@ async function rowToPost(row: any): Promise<Post> {
     heartsTotal: row.hearts_total ?? 0,
     hasGame: row.has_game,
     gameId: row.game_id ?? undefined,
+    isOriginal: row.is_original ?? undefined,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -491,12 +503,12 @@ export const pgStore: DataStore = {
       await ensureTables(client);
       const slug = data.slug || deriveSlugPg(data.displayName);
       const insertResult = await client.query(
-        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, is_original)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10)
          RETURNING id`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-         !!data.gameId, data.gameId || null]
+         !!data.gameId, data.gameId || null, data.isOriginal ?? null]
       );
       const newId = insertResult.rows[0].id;
       const result = await client.query('SELECT * FROM posts WHERE id = $1', [newId]);
@@ -694,7 +706,7 @@ export const pgStore: DataStore = {
     }
   },
 
-  async editPost(id: number, userId: string, content: string) {
+  async editPost(id: number, userId: string, content: string, isOriginal?: boolean | null) {
     const client = await getPool().connect();
     try {
       await ensureTables(client);
@@ -703,7 +715,11 @@ export const pgStore: DataStore = {
       const viewerSlug = await resolveViewerSlug(client, userId);
       const row = postResult.rows[0];
       if (row.display_name !== userId && row.slug !== viewerSlug) return null;
-      await client.query('UPDATE posts SET content = $1 WHERE id = $2', [content, id]);
+      if (isOriginal === undefined) {
+        await client.query('UPDATE posts SET content = $1 WHERE id = $2', [content, id]);
+      } else {
+        await client.query('UPDATE posts SET content = $1, is_original = $2 WHERE id = $3', [content, isOriginal, id]);
+      }
       return await getPostWithVotes(client, id, userId);
     } finally {
       client.release();

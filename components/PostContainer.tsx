@@ -125,6 +125,16 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     } catch { /* noop */ }
   }, [currentUserSlug, post.id, post.content, onModerationChange]);
 
+  const handleMenuSetOriginal = useCallback(async (e: React.MouseEvent, value: boolean | null) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    try {
+      await api.posts.edit(post.id, currentUserSlug, post.content, value);
+      onModerationChange?.();
+    } catch { /* noop */ }
+  }, [currentUserSlug, post.id, post.content, onModerationChange]);
+
   const handleMenuDelete = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     setMenuOpen(false);
@@ -199,6 +209,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
               <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
+              {post.isOriginal === true && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">自作</span>
+              )}
+              {post.isOriginal === false && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40">他作</span>
+              )}
               <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
             </div>
             <div ref={menuRef} className="relative">
@@ -219,6 +235,18 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                     <button role="menuitem" onClick={handleMenuEdit} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                       <Pencil size={12} className="shrink-0" />
                       <span>ポストを編集</span>
+                    </button>
+                  )}
+                  {isSelf && (
+                    <button role="menuitem" onClick={(e) => handleMenuSetOriginal(e, post.isOriginal === true ? null : true)} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Pencil size={12} className="shrink-0" />
+                      <span>{post.isOriginal === true ? '「自作」を解除' : '「自作」に設定'}</span>
+                    </button>
+                  )}
+                  {isSelf && (
+                    <button role="menuitem" onClick={(e) => handleMenuSetOriginal(e, post.isOriginal === false ? null : false)} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Pencil size={12} className="shrink-0" />
+                      <span>{post.isOriginal === false ? '「他作」を解除' : '「他作」に設定'}</span>
                     </button>
                   )}
                   {isSelf && (

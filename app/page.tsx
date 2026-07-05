@@ -55,6 +55,7 @@ export default function App() {
   const [messageCount, setMessageCount] = useState(0);
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [isOriginal, setIsOriginal] = useState<boolean | undefined>(undefined);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
@@ -289,11 +290,13 @@ export default function App() {
       imageSrc,
       avatarColor: "from-blue-500 to-indigo-600",
       gameId,
+      isOriginal,
     });
     setPosts([post, ...posts]);
     setInputText('');
     setAttachedImage(null);
     setGameDraft(null);
+    setIsOriginal(undefined);
   };
 
   const handleOpenCollab = useCallback((post: Post) => {
@@ -613,6 +616,8 @@ export default function App() {
             setText={setInputText}
             image={attachedImage}
             setImage={setAttachedImage}
+            isOriginal={isOriginal}
+            setIsOriginal={setIsOriginal}
             onClose={() => setComposerOpen(false)}
             onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
             onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}

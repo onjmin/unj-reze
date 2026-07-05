@@ -9,6 +9,8 @@ interface PostComposerProps {
   setText: (v: string) => void;
   image: string | null;
   setImage: (v: string | null) => void;
+  isOriginal?: boolean;
+  setIsOriginal: (v: boolean | undefined) => void;
   onClose: () => void;
   onSubmit: () => void;
   onOpenDrawing: () => void;
@@ -17,7 +19,7 @@ interface PostComposerProps {
   onOpenGameMaker: () => void;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, isOriginal, setIsOriginal, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -58,6 +60,29 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
               </div>
             )}
           </div>
+        </div>
+        <div className="flex items-center gap-1.5 pl-12">
+          <span className="text-[10px] text-gray-500">権利表記</span>
+          <button
+            type="button"
+            onClick={() => setIsOriginal(isOriginal === true ? undefined : true)}
+            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-colors ${isOriginal === true
+              ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+              : 'border-gray-700 text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            自作
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsOriginal(isOriginal === false ? undefined : false)}
+            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-colors ${isOriginal === false
+              ? 'bg-amber-500/20 border-amber-500 text-amber-400'
+              : 'border-gray-700 text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            他作
+          </button>
         </div>
         <div className="flex justify-between items-center pl-12">
           <div className="flex space-x-2 text-gray-500">

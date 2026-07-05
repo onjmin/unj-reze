@@ -71,11 +71,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const { userId, content } = await request.json();
+  const { userId, content, isOriginal } = await request.json();
   if (!userId || typeof content !== 'string') {
     return NextResponse.json({ error: 'userId and content are required' }, { status: 400 });
   }
-  const result = await db.editPost(parseInt(id), userId, content);
+  const result = await db.editPost(parseInt(id), userId, content, isOriginal);
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }

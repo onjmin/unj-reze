@@ -47,7 +47,7 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return post;
     },
-    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number }) =>
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number; isOriginal?: boolean }) =>
       mockDbInstance.createPost(data),
     like: async (id: number, userId?: string) => {
       const post = mockDbInstance.likePost(id, userId || '');
@@ -69,8 +69,8 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return post;
     },
-    edit: async (id: number, userId: string, content: string) => {
-      const post = mockDbInstance.editPost(id, userId, content);
+    edit: async (id: number, userId: string, content: string, isOriginal?: boolean | null) => {
+      const post = mockDbInstance.editPost(id, userId, content, isOriginal);
       if (!post) throw new Error('Post not found or not owned');
       return post;
     },
@@ -178,13 +178,13 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
-    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number }) =>
+    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number; isOriginal?: boolean }) =>
       fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
     like: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
     dislike: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
     heart: (id: number, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
     repost: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
-    edit: (id: number, userId: string, content: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content }) }),
+    edit: (id: number, userId: string, content: string, isOriginal?: boolean | null) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, isOriginal }) }),
     remove: (id: number, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
     replies: {
       list: (postId: number, userId?: string) => {

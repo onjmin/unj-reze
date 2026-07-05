@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId } = body;
+    const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, isOriginal } = body;
 
     if (!displayName || !content) {
       return NextResponse.json(
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId });
+    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, isOriginal });
     return NextResponse.json(post, { status: 201 });
   } catch (e) {
     console.error('[POST /api/posts]', e);
