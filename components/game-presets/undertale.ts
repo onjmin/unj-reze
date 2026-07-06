@@ -39,14 +39,16 @@ const M = (rows: string[]): number[][] => rows.map(r => [...r].map(ch => LEGEND[
 const foe = (o: {
   name: string; emoji: string; col: number; row: number;
   hp: number; atk: number; def: number; exp: number; gold: number;
-  moves?: { name: string; power: number; heal?: boolean }[];
+  moves?: { name: string; power: number; heal?: boolean; miniScript?: string }[];
   behavior?: 'still' | 'random' | 'patrolH' | 'patrolV' | 'chase'; speed?: number; spriteId?: string;
   isBoss?: boolean; outroDialogue?: PresetData['objects'][number]['outroDialogue'];
+  /** soul 戦闘の通常攻撃弾幕（MiniScript）。技側の miniScript が優先。 */
+  miniScript?: string;
 }) => newObject({
   emoji: o.emoji, name: o.name, col: o.col, row: o.row,
   hp: o.hp, atk: o.atk, def: o.def, exp: o.exp, gold: o.gold, moves: o.moves,
   behavior: o.behavior ?? 'still', speed: o.speed ?? 1.2, hazard: true,
-  isBoss: o.isBoss, outroDialogue: o.outroDialogue,
+  isBoss: o.isBoss, outroDialogue: o.outroDialogue, miniScript: o.miniScript,
   ...(o.spriteId ? { spriteRef: wr(o.spriteId), spriteUrl: sa(o.spriteId) } : {}),
 });
 
@@ -108,7 +110,12 @@ const sceneRuins: SceneDef = {
   randomEncounters: [
     { name: 'カエルさん',     emoji: '🐸', hp: 10, atk: 8, def: 2, exp: 3, gold: 5 },
     { name: 'ひらひらむし',   emoji: '🦋', hp: 8,  atk: 7, def: 1, exp: 2, gold: 4 },
-    { name: 'ないてるおばけ', emoji: '👻', hp: 14, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7 }] },
+    { name: 'ないてるおばけ', emoji: '👻', hp: 14, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+while true
+  shotRain(randF(1.2, 2.0), 3, 4)
+  wait(9)
+end while
+`.trim() }] },
   ],
   encounterRate: 16,
   bgm: { ref: 'https://www.youtube.com/watch?v=oHZDWwW6iXs', src: 'https://www.youtube.com/watch?v=oHZDWwW6iXs', type: 'youtube' },
@@ -172,7 +179,12 @@ const sceneRuins: SceneDef = {
     // 遺跡のモンスター
     foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 10, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
     foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 10, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
-    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 14, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7 }], behavior: 'random' }),
+    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 14, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+while true
+  shotRain(randF(1.2, 2.0), 3, 4)
+  wait(9)
+end while
+`.trim() }], behavior: 'random' }),
     // 出口前のママ（たおしても みのがしても 先へ進める）
     newObject({
       emoji: '🚪', col: 15, row: 21, behavior: 'still', hazard: false, hp: 1, speed: 0, bullet: 'none',
@@ -186,7 +198,25 @@ const sceneRuins: SceneDef = {
       ],
     }),
     foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 90, atk: 14, def: 12, exp: 45, gold: 40,
-      moves: [{ name: 'ふんわりファイア', power: 10 }] }),
+      // 通常攻撃：ゆっくり降るオレンジの火の粉（やさしい）
+      miniScript: `
+while true
+  shotRain(1.4, 5, 7)
+  wait(16)
+end while
+`.trim(),
+      moves: [{
+        name: 'ふんわりファイア', power: 10,
+        // 技専用：赤とオレンジ2色の火がやや密に降る
+        miniScript: `
+setDuration(300)
+while true
+  shotRain(randF(1.0, 1.6), 5, 7)
+  shotRain(randF(1.0, 1.6), 4, 1)
+  wait(14)
+end while
+`.trim(),
+      }] }),
     // 出口 → ゆきのまち
     warp('🚪', 14, 22, 'snowdin', 2, 11),
   ],
@@ -236,7 +266,42 @@ const sceneSnowdin: SceneDef = {
     // ホネの兄弟
     npc('💀', 5, 13, 'よう にんげん。ほねのある やつは きらいじゃないぜ。……おっと、おれの ことか。', 'BKRjJx'),
     foe({ name: 'ハデなガイコツ', emoji: '💀', col: 21, row: 11, hp: 110, atk: 16, def: 14, exp: 55, gold: 60,
-      moves: [{ name: 'ホネのやり', power: 12 }, { name: 'あおいホネこうげき', power: 8 }], spriteId: 'YFwEEx' }),
+      // 通常攻撃：左右から交互に飛んでくるホネ
+      miniScript: `
+while true
+  shotSide(true, randF(20, 156), 2.0, 4, 0)
+  wait(12)
+  shotSide(false, randF(20, 156), 2.0, 4, 0)
+  wait(12)
+end while
+`.trim(),
+      moves: [
+        {
+          name: 'ホネのやり', power: 12,
+          // 3本1組のホネ柱が左から連続で来る
+          miniScript: `
+setDuration(280)
+while true
+  y = randF(15, 145)
+  for i in range(0, 2, 1)
+    shotSide(true, y + i * 14, 2.6, 4, 0)
+  end for
+  wait(26)
+end while
+`.trim(),
+        },
+        {
+          name: 'あおいホネこうげき', power: 8,
+          // 青いホネが上からハートを狙って落ちる
+          miniScript: `
+while true
+  shotPlayer(getPlayerX(), -6, 1.6, 5, 3)
+  shotPlayer(88, -6, 1.8, 5, 3)
+  wait(20)
+end while
+`.trim(),
+        },
+      ], spriteId: 'YFwEEx' }),
     // 橋の前の看板がわりのイベント
     newObject({
       emoji: '🪧', col: 17, row: 11, behavior: 'still', hazard: false,
@@ -372,7 +437,39 @@ const sceneWaterfall: SceneDef = {
     // 出口の通路をまもる さかなのヒーロー
     npc('🪧', 6, 16, '看板「この先 せまい通路。\n【えいゆう】が にんげんを まちかまえている とのこと」'),
     foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 150, atk: 20, def: 16, exp: 80, gold: 80,
-      moves: [{ name: 'やりのあめ', power: 14 }, { name: 'みどりのやり', power: 11 }], behavior: 'patrolH', speed: 1.2 }),
+      // 通常攻撃：画面端からハートを狙う水色のやり
+      miniScript: `
+while true
+  shotAimed(2.2, 5, 4)
+  wait(18)
+end while
+`.trim(),
+      moves: [
+        {
+          name: 'やりのあめ', power: 14,
+          // 上から降りそそぐ高速のやり
+          miniScript: `
+setDuration(280)
+while true
+  shotRain(2.4, 4, 4)
+  shotRain(2.0, 4, 4)
+  wait(8)
+end while
+`.trim(),
+        },
+        {
+          name: 'みどりのやり', power: 11,
+          // 全方向から3本同時に狙ってくる
+          miniScript: `
+while true
+  for i in range(0, 2, 1)
+    shotAimed(2.0, 5, 5)
+  end for
+  wait(30)
+end while
+`.trim(),
+        },
+      ], behavior: 'patrolH', speed: 1.2 }),
     // 出口 → おうのしろ
     warp('🕳️', 27, 18, 'newhome', 14, 2),
   ],
@@ -437,7 +534,42 @@ const sceneNewHome: SceneDef = {
     // 最後のボス。たおしても みのがしても クリア（spare でも bossDefeated になる）
     foe({
       name: 'やさしいおうさま', emoji: '🐐', col: 14, row: 19, hp: 260, atk: 20, def: 18, exp: 300, gold: 0,
-      moves: [{ name: 'ほのおのあめ', power: 14 }, { name: 'みつまたのやり', power: 18 }],
+      // 通常攻撃：上からランダムな向きの炎の扇
+      miniScript: `
+while true
+  a = rand(45, 135)
+  for i in range(-2, 2, 1)
+    shotAngle(88, -4, a + i * 12, 2.0, 4, 7)
+  end for
+  wait(22)
+end while
+`.trim(),
+      moves: [
+        {
+          name: 'ほのおのあめ', power: 14,
+          // 赤とオレンジの炎が長時間 密に降りそそぐ
+          miniScript: `
+setDuration(320)
+while true
+  shotRain(randF(1.6, 2.4), 4, 7)
+  shotRain(randF(1.6, 2.4), 4, 1)
+  wait(7)
+end while
+`.trim(),
+        },
+        {
+          name: 'みつまたのやり', power: 18,
+          // 上と左右の3方向から黄色のやりが同時にハートを狙う
+          miniScript: `
+while true
+  shotPlayer(getPlayerX(), -6, 2.6, 5, 6)
+  shotPlayer(-6, getPlayerY(), 2.6, 5, 6)
+  shotPlayer(182, getPlayerY(), 2.6, 5, 6)
+  wait(34)
+end while
+`.trim(),
+        },
+      ],
       behavior: 'still', speed: 0, isBoss: true,
       outroDialogue: [
         { speaker: 'おうさま', emoji: '🐐', text: '……つよいのだね。 いや……\nやさしいのか。' },

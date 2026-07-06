@@ -1091,7 +1091,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // menu: コマンド選択 / attack: タイミングバー / dodge: バトルボックス内で弾幕よけ
   const [soulPhase, setSoulPhase] = useState<'menu' | 'attack' | 'dodge'>('menu');
   const [soulMenu, setSoulMenu] = useState<'root' | 'act' | 'item' | 'mercy'>('root');
-  const soulDodgeRef = useRef<{ frames: number; duration: number; pattern: number; dmg: number; bullets: { x: number; y: number; vx: number; vy: number; r: number }[]; hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean } } | null>(null);
+  const soulDodgeRef = useRef<{ frames: number; duration: number; pattern: number; dmg: number; bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string }[]; hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean } } | null>(null);
   const soulBarRef = useRef({ pos: 0 });
   const soulBarElRef = useRef<HTMLDivElement | null>(null);
   const soulCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1651,44 +1651,70 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             requestAnimationFrame(check);
           });
 
-        const pushBullet = (x: number, y: number, vx: number, vy: number, r = 4) => {
+        // color は SPELL_PALETTE のインデックス 0-8（省略時は白）
+        const toColor = (c?: unknown) => c != null ? SPELL_PALETTE[((+(c as number) | 0) + 9) % 9] : undefined;
+        const pushBullet = (x: number, y: number, vx: number, vy: number, r = 4, color?: string) => {
           if (scriptCtx.cancelled) return;
-          st.bullets.push({ x, y, vx, vy, r });
+          st.bullets.push({ x, y, vx, vy, r, color });
         };
 
         const env: MiniEnv = {
           wait,
-          shot: (x: unknown, y: unknown, vx: unknown, vy: unknown, r?: unknown) => {
-            pushBullet(+(x as number), +(y as number), +(vx as number), +(vy as number), r != null ? +(r as number) : 4);
+          /** 任意位置から速度指定で発射 */
+          shot: (x: unknown, y: unknown, vx: unknown, vy: unknown, r?: unknown, color?: unknown) => {
+            pushBullet(+(x as number), +(y as number), +(vx as number), +(vy as number), r != null ? +(r as number) : 4, toColor(color));
           },
-          shotPlayer: (x: unknown, y: unknown, speed: unknown, r?: unknown) => {
+          /** 任意位置から角度（度: 0=右, 90=下）で発射。リング/扇は for + shotAngle で組む */
+          shotAngle: (x: unknown, y: unknown, angle: unknown, speed: unknown, r?: unknown, color?: unknown) => {
+            const a = +(angle as number) * DEG_TO_RAD, sp = +(speed as number);
+            pushBullet(+(x as number), +(y as number), Math.cos(a) * sp, Math.sin(a) * sp, r != null ? +(r as number) : 4, toColor(color));
+          },
+          /** 任意位置からハートを狙って発射 */
+          shotPlayer: (x: unknown, y: unknown, speed: unknown, r?: unknown, color?: unknown) => {
             const sx = +(x as number), sy = +(y as number), sp = +(speed as number);
             const d = Math.hypot(st.hx - sx, st.hy - sy) || 1;
-            pushBullet(sx, sy, (st.hx - sx) / d * sp, (st.hy - sy) / d * sp, r != null ? +(r as number) : 4.5);
+            pushBullet(sx, sy, (st.hx - sx) / d * sp, (st.hy - sy) / d * sp, r != null ? +(r as number) : 4.5, toColor(color));
           },
-          shotAimed: (speed: unknown, r?: unknown) => {
+          /** ランダムな画面端からハートを狙って発射 */
+          shotAimed: (speed: unknown, r?: unknown, color?: unknown) => {
             const edge = Math.floor(Math.random() * 4);
             const sx = edge === 0 ? -6 : edge === 1 ? W + 6 : Math.random() * W;
             const sy = edge === 2 ? -6 : edge === 3 ? H + 6 : Math.random() * H;
             const sp = +(speed as number);
             const d = Math.hypot(st.hx - sx, st.hy - sy) || 1;
-            pushBullet(sx, sy, (st.hx - sx) / d * sp, (st.hy - sy) / d * sp, r != null ? +(r as number) : 4.5);
+            pushBullet(sx, sy, (st.hx - sx) / d * sp, (st.hy - sy) / d * sp, r != null ? +(r as number) : 4.5, toColor(color));
           },
-          shotRain: (speed: unknown, r?: unknown) => {
+          /** 上からランダム位置に降らせる */
+          shotRain: (speed: unknown, r?: unknown, color?: unknown) => {
             const sx = 8 + Math.random() * (W - 16);
-            pushBullet(sx, -6, 0, +(speed as number), r != null ? +(r as number) : 4);
+            pushBullet(sx, -6, 0, +(speed as number), r != null ? +(r as number) : 4, toColor(color));
           },
-          shotSide: (fromLeft: unknown, y: unknown, speed: unknown, r?: unknown) => {
+          /** 左右の端から水平に発射 */
+          shotSide: (fromLeft: unknown, y: unknown, speed: unknown, r?: unknown, color?: unknown) => {
             const fl = !!fromLeft;
             const sx = fl ? -6 : W + 6;
-            const sy = +(y as number);
-            const sp = +(speed as number);
-            pushBullet(sx, sy, fl ? sp : -sp, 0, r != null ? +(r as number) : 4);
+            pushBullet(sx, +(y as number), fl ? +(speed as number) : -+(speed as number), 0, r != null ? +(r as number) : 4, toColor(color));
           },
+          /** 回避フェーズの長さを変更（60〜900フレーム） */
+          setDuration: (frames: unknown) => { st.duration = Math.max(60, Math.min(900, (frames as number) | 0)); },
           getPlayerX: () => st.hx,
           getPlayerY: () => st.hy,
+          getFrame: () => st.frames,
+          // 数学・ループ補助（touhou の MiniScript と同じ語彙）
+          abs: Math.abs, floor: Math.floor, ceil: Math.ceil, sqrt: Math.sqrt, min: Math.min, max: Math.max,
+          round: (x: unknown, d: unknown = 0) => Number(Math.round(+(x as number) * 10 ** +(d as number)) / 10 ** +(d as number)),
+          sin: (d: unknown) => Math.sin(+(d as number) * DEG_TO_RAD),
+          cos: (d: unknown) => Math.cos(+(d as number) * DEG_TO_RAD),
+          pi: Math.PI,
           rand: (mn: unknown, mx: unknown) => Math.floor(Math.random() * (+(mx as number) - +(mn as number) + 1)) + +(mn as number),
           randF: (mn: unknown, mx: unknown) => Math.random() * (+(mx as number) - +(mn as number)) + +(mn as number),
+          range: (from: unknown, to: unknown, step: unknown = 1) => {
+            const out: number[] = [];
+            const s = +(step as number) || 1;
+            for (let i = +(from as number); s > 0 ? i <= +(to as number) : i >= +(to as number); i += s) out.push(i);
+            return out;
+          },
+          W, H,
         };
 
         try {
@@ -1759,8 +1785,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 描画
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = '#fff';
-      for (const bl of st.bullets) { ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.fill(); }
+      for (const bl of st.bullets) { ctx.fillStyle = bl.color ?? '#fff'; ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.fill(); }
       if (st.invuln % 8 < 4) drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c');
       if (st.frames >= st.duration) {
         alive = false;
@@ -3574,7 +3599,8 @@ const lose = (msg: string) => {
             } else {
             const currentWeapon = actionWeaponsRef.current[actionWeaponIdxRef.current];
             const energy = actionWeaponEnergyRef.current;
-            if (currentWeapon && (energy[currentWeapon] ?? 0) > 0) {
+            // 'buster' はエネルギー無限の初期武器（ゲージを消費せず常に通常弾）
+            if (currentWeapon && currentWeapon !== 'buster' && (energy[currentWeapon] ?? 0) > 0) {
               energy[currentWeapon] = Math.max(0, (energy[currentWeapon] ?? 0) - 1);
               if (currentWeapon === 'airShooter') {
                 [-15, 0, 15].forEach(offset => {
@@ -4120,6 +4146,8 @@ const lose = (msg: string) => {
 
           for (let j = eng.bullets.length - 1; j >= 0; j--) {
             const b = eng.bullets[j];
+            // アイテム・NPC・ワープ・イベント等は自弾で破壊されない（敵のみ被弾）
+            if ((d.objType ?? 'enemy') !== 'enemy') break;
             if (b.x < e.x + TILE_SIZE && b.x + b.w > e.x && b.y < e.y + TILE_SIZE && b.y + b.h > e.y) {
               e.hp--; eng.bullets.splice(j, 1);
               if (e.hp <= 0) {
@@ -4129,7 +4157,12 @@ const lose = (msg: string) => {
                   bombPickupsRef.current.push({ x: ecx, y: ecy, life: 300 });
                 }
                 if (d.isBoss) activeSpellCardNameRef.current = null;
-                eng.entities.splice(ei, 1); break;
+                eng.entities.splice(ei, 1);
+                // action ボス撃破：outroDialogue を流す（ゴール解放は goal タイル側の isBoss 残存チェック）
+                if (gameData.engine === 'action' && d.isBoss && d.outroDialogue?.length && !activeDialogueRef.current) {
+                  setActiveDialogue(d.outroDialogue);
+                }
+                break;
               }
             }
           }
@@ -4413,6 +4446,26 @@ const lose = (msg: string) => {
                     starTimerRef.current = STAR_DURATION;
                   }
                 }
+                // ロックマン系アイテムの即時効果（action エンジン汎用、itemId の規約で判定）
+                else if (gameData.engine === 'action') {
+                  const z = onjRezeHpRef.current;
+                  const wEn = actionWeaponEnergyRef.current;
+                  if (iid === 'energyCapsule') z.hp = Math.min(z.max, z.hp + 8);
+                  else if (iid === 'smallEnergyTank') z.hp = Math.min(z.max, z.hp + Math.ceil(z.max / 2));
+                  else if (iid === 'energyTank') z.hp = z.max;
+                  else if (iid === 'weaponTank') actionWeaponsRef.current.forEach(w => { if (w !== 'buster') wEn[w] = MAX_WEAPON_ENERGY; });
+                  else if (iid === 'smallWeaponTank') {
+                    const cw = actionWeaponsRef.current[actionWeaponIdxRef.current];
+                    if (cw && cw !== 'buster') wEn[cw] = Math.min(MAX_WEAPON_ENERGY, (wEn[cw] ?? 0) + Math.ceil(MAX_WEAPON_ENERGY / 2));
+                  }
+                  // ボス武器の入手：武器スロットに追加してフルチャージ（E キーで切り替え）
+                  else if (['airShooter', 'metalBlade', 'crashBomb'].includes(iid)) {
+                    if (!actionWeaponsRef.current.includes(iid)) actionWeaponsRef.current.push(iid);
+                    wEn[iid] = MAX_WEAPON_ENERGY;
+                  }
+                  playSfx(sfxRef.current.jump);
+                  forceHud(n => n + 1);
+                }
                 setInventory(p => { const n = { ...p }; n[iid] = (n[iid] ?? 0) + 1; return n; });
                 eng.entities.splice(ei, 1);
                 const itemDef = (gameData.items ?? []).find(it => it.id === iid);
@@ -4695,7 +4748,7 @@ const lose = (msg: string) => {
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else {
@@ -7552,21 +7605,22 @@ const lose = (msg: string) => {
                                       <textarea value={selObj.miniScript ?? ''} onChange={e => {
                                         const v = e.target.value;
                                         updObj(v ? { miniScript: v, bullet: 'none' } : { miniScript: undefined });
-                                      }} placeholder="// 弾幕パターンをMiniScriptで記述 (例: wait 40\nshotRain(1.5))"
-                                        rows={2} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                      }} placeholder={'// 例:\nwhile true\n  shotRain(1.8, 4, 1)\n  wait(10)\nend while'}
+                                        rows={4} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-green-300 font-mono outline-none resize-y" />
+                                      <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">shot(x,y,vx,vy,r,色) / shotAngle(x,y,角度,速,r,色) / shotPlayer(x,y,速) / shotAimed(速) / shotRain(速) / shotSide(左?,y,速) / wait n / setDuration(f) / getPlayerX() / rand / range / sin / cos ・ 色=0〜8 ・ 画面=W×H(176px)</p>
                                     </label>
                                   )}
 
                                   {/* 2. 特技/呪文の追加/編集 */}
                                   <div className="space-y-1.5">
                                     <div className="flex justify-between items-center">
-                                      <span className="text-[9px] text-gray-400 font-bold">特技 / 呪文</span>
+                                      <span className="text-[10px] text-gray-400 font-bold">特技 / 呪文</span>
                                       <button onClick={() => updObj({
                                         moves: [...(selObj.moves ?? []), { name: '新しいわざ', power: 10 }]
-                                      })} className="text-[9px] text-emerald-400 hover:text-emerald-300 font-bold">+ 追加</button>
+                                      })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
                                     </div>
                                     <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                      {(selObj.moves ?? []).length === 0 && <p className="text-[9px] text-gray-500">（通常攻撃のみ）</p>}
+                                      {(selObj.moves ?? []).length === 0 && <p className="text-[10px] text-gray-500">（通常攻撃のみ）</p>}
                                       {(selObj.moves ?? []).map((m, i) => (
                                         <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
                                           <div className="flex gap-1.5 items-center">
@@ -7574,41 +7628,41 @@ const lose = (msg: string) => {
                                               const copy = [...(selObj.moves ?? [])];
                                               copy[i] = { ...copy[i], name: e.target.value };
                                               updObj({ moves: copy });
-                                            }} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" placeholder="わざ名" />
+                                            }} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" placeholder="わざ名" />
                                             <button onClick={() => {
                                               const copy = [...(selObj.moves ?? [])]; copy.splice(i, 1);
                                               updObj({ moves: copy.length > 0 ? copy : undefined });
-                                            }} className="text-[10px] text-red-400 px-1 hover:text-red-300">✕</button>
+                                            }} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
                                           </div>
                                           <div className="grid grid-cols-2 gap-1.5">
-                                            <label className="text-[9px] text-gray-400">威力/回復量
+                                            <label className="text-[10px] text-gray-400">威力/回復量
                                               <input type="text" inputMode="numeric" value={m.power} onChange={e => {
                                                 const copy = [...(selObj.moves ?? [])];
                                                 const v = parseInt(e.target.value);
                                                 copy[i] = { ...copy[i], power: !isNaN(v) ? v : 0 };
                                                 updObj({ moves: copy });
-                                              }} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                              }} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                             </label>
-                                            <label className="text-[9px] text-gray-400 block">回復フラグ
+                                            <label className="text-[10px] text-gray-400 block">回復フラグ
                                               <select value={m.heal ? 'true' : 'false'} onChange={e => {
                                                 const copy = [...(selObj.moves ?? [])];
                                                 copy[i] = { ...copy[i], heal: e.target.value === 'true' };
                                                 updObj({ moves: copy });
-                                              }} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-0.5 text-[9px] text-white outline-none">
+                                              }} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1.5 text-[11px] text-white outline-none">
                                                 <option value="false">攻撃</option>
                                                 <option value="true">回復</option>
                                               </select>
                                             </label>
                                           </div>
                                           {gameData.battle?.style === 'soul' && !m.heal && (
-                                            <label className="block text-[9px] text-gray-400">弾幕スクリプト (MiniScript)
+                                            <label className="block text-[10px] text-gray-400">弾幕スクリプト (MiniScript)
                                               <textarea value={m.miniScript ?? ''} onChange={e => {
                                                 const copy = [...(selObj.moves ?? [])];
                                                 const val = e.target.value;
                                                 copy[i] = { ...copy[i], miniScript: val || undefined };
                                                 updObj({ moves: copy });
-                                              }} placeholder="// MiniScript 記述欄 (省略時は通常攻撃と同じ)"
-                                                rows={2} className="w-full mt-0.5 bg-gray-700 border border-gray-600 rounded px-1 py-0.5 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                              }} placeholder="// この技専用の弾幕（省略時は通常攻撃の弾幕）"
+                                                rows={3} className="w-full mt-0.5 bg-gray-700 border border-gray-600 rounded px-1.5 py-1.5 text-[11px] text-green-300 font-mono outline-none resize-y" />
                                             </label>
                                           )}
                                         </div>
@@ -8042,6 +8096,44 @@ const lose = (msg: string) => {
                                 const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, def: v } }));
                               }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
                             </label>
+                            <label className="text-[10px] text-gray-400">初期ゴールド
+                              <input type="text" inputMode="numeric" value={gameData.battle.gold ?? 0} onChange={e => {
+                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, gold: v } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                            </label>
+                          </div>
+                          <label className="block text-[10px] text-gray-400">戦闘スタイル
+                            <select value={gameData.battle.style ?? 'classic'} onChange={e => {
+                              const style = e.target.value as 'classic' | 'soul';
+                              setGameData(p => ({ ...p, battle: { ...p.battle!, style } }));
+                            }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
+                              <option value="classic">コマンド戦闘（ドラクエ風）</option>
+                              <option value="soul">ハート弾幕よけ（アンダーテール風）</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        {/* 1.5 コマンド表示名 */}
+                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                          <p className="text-[10px] text-gray-300 font-bold">コマンド表示名</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {([
+                              ['attack', 'こうげき', false], ['move', 'とくぎ/こうどう', false],
+                              ['flee', 'にげる', false], ['item', 'どうぐ', false],
+                            ] as [('attack' | 'move' | 'flee' | 'item'), string, boolean][]).map(([key, ph]) => (
+                              <label key={key} className="text-[10px] text-gray-400">{ph}
+                                <input type="text" value={gameData.battle!.labels[key] ?? ''} placeholder={ph} onChange={e => {
+                                  const v = e.target.value;
+                                  setGameData(p => ({ ...p, battle: { ...p.battle!, labels: { ...p.battle!.labels, [key]: key === 'item' ? (v || undefined) : v } } }));
+                                }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none" />
+                              </label>
+                            ))}
+                            <label className="text-[10px] text-gray-400 col-span-2">みのがす（空欄にすると「みのがす」コマンド自体が無効）
+                              <input type="text" value={gameData.battle.labels.mercy ?? ''} placeholder="例: みのがす（空欄=無効）" onChange={e => {
+                                const v = e.target.value;
+                                setGameData(p => ({ ...p, battle: { ...p.battle!, labels: { ...p.battle!.labels, mercy: v || undefined } } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none" />
+                            </label>
                           </div>
                         </div>
 
@@ -8073,7 +8165,7 @@ const lose = (msg: string) => {
                             <button onClick={() => setGameData(p => {
                               const b = p.battle!;
                               return { ...p, battle: { ...b, moves: [...b.moves, { name: '新しい技', cost: 0, power: 10 }] } };
-                            })} className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold">+ 追加</button>
+                            })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
                           </div>
                           <div className="space-y-2 max-h-60 overflow-y-auto">
                             {gameData.battle.moves.map((m, i) => (
@@ -8083,22 +8175,22 @@ const lose = (msg: string) => {
                                     const b = p.battle!; const next = [...b.moves];
                                     next[i] = { ...next[i], name: e.target.value };
                                     return { ...p, battle: { ...b, moves: next } };
-                                  })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" placeholder="技名" />
+                                  })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" placeholder="技名" />
                                   <button onClick={() => setGameData(p => {
                                     const b = p.battle!; const next = [...b.moves]; next.splice(i, 1);
                                     return { ...p, battle: { ...b, moves: next } };
-                                  })} className="text-[10px] text-red-400 px-1 hover:text-red-300">✕</button>
+                                  })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
                                 </div>
                                 <div className="grid grid-cols-3 gap-1.5">
-                                  <label className="text-[9px] text-gray-400">消費MP
+                                  <label className="text-[10px] text-gray-400">消費MP
                                     <input type="text" inputMode="numeric" value={m.cost} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...b.moves];
                                       const v = parseInt(e.target.value);
                                       next[i] = { ...next[i], cost: !isNaN(v) ? v : 0 };
                                       return { ...p, battle: { ...b, moves: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
-                                  <label className="text-[9px] text-gray-400">{m.mercy != null ? 'ゲージ上昇' : '威力/回復量'}
+                                  <label className="text-[10px] text-gray-400">{m.mercy != null ? 'ゲージ上昇' : '威力/回復量'}
                                     <input type="text" inputMode="numeric" value={m.mercy != null ? m.mercy : m.power} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...b.moves];
                                       const v = parseInt(e.target.value);
@@ -8108,9 +8200,9 @@ const lose = (msg: string) => {
                                         next[i] = { ...next[i], power: !isNaN(v) ? v : 0 };
                                       }
                                       return { ...p, battle: { ...b, moves: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
-                                  <label className="text-[9px] text-gray-400 block">種別
+                                  <label className="text-[10px] text-gray-400 block">種別
                                     <select value={m.mercy != null ? 'mercy' : m.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...b.moves];
                                       const type = e.target.value;
@@ -8122,7 +8214,7 @@ const lose = (msg: string) => {
                                         next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10 };
                                       }
                                       return { ...p, battle: { ...b, moves: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-0.5 text-[9px] text-white outline-none">
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1.5 text-[11px] text-white outline-none">
                                       <option value="attack">ダメージ</option>
                                       <option value="heal">HP回復</option>
                                       {gameData.battle?.labels.mercy && <option value="mercy">こうどう(敵意)</option>}
@@ -8144,10 +8236,10 @@ const lose = (msg: string) => {
                               const nextLv = table.length > 0 ? Math.max(...table.map(e => e.level)) + 1 : 2;
                               const prevExp = table.length > 0 ? table[table.length - 1].exp : 0;
                               return { ...p, battle: { ...b, levelTable: [...table, { level: nextLv, exp: prevExp + 10, maxHp: b.maxHp + 8, maxMp: b.maxMp + 2, atk: b.atk + 3, def: b.def + 2 }] } };
-                            })} className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold">+ 追加</button>
+                            })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
                           </div>
                           <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {(gameData.battle.levelTable ?? []).length === 0 && <p className="text-[9px] text-gray-500 px-1">（なし - レベル固定）</p>}
+                            {(gameData.battle.levelTable ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - レベル固定）</p>}
                             {(gameData.battle.levelTable ?? []).map((le, i) => (
                               <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1">
                                 <div className="flex justify-between items-center">
@@ -8155,48 +8247,48 @@ const lose = (msg: string) => {
                                   <button onClick={() => setGameData(p => {
                                     const b = p.battle!; const next = [...(b.levelTable ?? [])]; next.splice(i, 1);
                                     return { ...p, battle: { ...b, levelTable: next } };
-                                  })} className="text-[10px] text-red-400 px-1 hover:text-red-300">✕</button>
+                                  })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
                                 </div>
                                 <div className="grid grid-cols-3 gap-1.5">
-                                  <label className="text-[9px] text-gray-400">必要累計EXP
+                                  <label className="text-[10px] text-gray-400">必要累計EXP
                                     <input type="text" inputMode="numeric" value={le.exp} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...(b.levelTable ?? [])];
                                       const v = parseInt(e.target.value);
                                       next[i] = { ...next[i], exp: !isNaN(v) ? v : 0 };
                                       return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
-                                  <label className="text-[9px] text-gray-400">最大HP
+                                  <label className="text-[10px] text-gray-400">最大HP
                                     <input type="text" inputMode="numeric" value={le.maxHp ?? ''} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...(b.levelTable ?? [])];
                                       const v = parseInt(e.target.value);
                                       next[i] = { ...next[i], maxHp: !isNaN(v) ? v : undefined };
                                       return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
-                                  <label className="text-[9px] text-gray-400">最大MP
+                                  <label className="text-[10px] text-gray-400">最大MP
                                     <input type="text" inputMode="numeric" value={le.maxMp ?? ''} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...(b.levelTable ?? [])];
                                       const v = parseInt(e.target.value);
                                       next[i] = { ...next[i], maxMp: !isNaN(v) ? v : undefined };
                                       return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
-                                  <label className="text-[9px] text-gray-400">攻撃力
+                                  <label className="text-[10px] text-gray-400">攻撃力
                                     <input type="text" inputMode="numeric" value={le.atk ?? ''} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...(b.levelTable ?? [])];
                                       const v = parseInt(e.target.value);
                                       next[i] = { ...next[i], atk: !isNaN(v) ? v : undefined };
                                       return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
-                                  <label className="text-[9px] text-gray-400">防御力
+                                  <label className="text-[10px] text-gray-400">防御力
                                     <input type="text" inputMode="numeric" value={le.def ?? ''} onChange={e => setGameData(p => {
                                       const b = p.battle!; const next = [...(b.levelTable ?? [])];
                                       const v = parseInt(e.target.value);
                                       next[i] = { ...next[i], def: !isNaN(v) ? v : undefined };
                                       return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                                   </label>
                                 </div>
                               </div>
