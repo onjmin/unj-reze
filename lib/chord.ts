@@ -168,8 +168,11 @@ export function eventsToMml(events: ChordEvent[], bpm: number): string {
   const finalMml = trackMmls
     .map(mml => `t${bpm} v60 ` + mml.trim())
     .join('; ');
-    
-  return finalMml;
+
+  // 各トラックの音色をピアノに固定する(プリセット既定を当てにせず明示指定)。
+  const instMeta = Array.from({ length: maxTracks }, (_, t) => `#t${t}inst=Acoustic Grand Piano`).join('\n');
+
+  return `${instMeta}\n${finalMml}`;
 }
 
 export async function playChordProgression(
@@ -184,22 +187,28 @@ export async function playChordProgression(
   }
 
   const mml = eventsToMml(events, bpm);
-  
+
   if (typeof window === 'undefined') {
     onDone?.();
     return () => {};
   }
 
-  const { playMML } = await import('@onjmin/dtm');
+  // playMML() は onPlayNote 未指定だと内蔵の square synth で鳴るためピアノ音にならない。
+  // getStudio() が保持する SoundFont 音源経由の mountPlayer(非表示DOM)を使い、
+  // 他画面のMML再生(MmlPlayer)と同じ実際の楽器音(既定Acoustic Grand Piano)で鳴らす。
+  const { getStudio } = await import('@/lib/dtm');
+  const studio = await getStudio();
+  const hiddenHost = document.createElement('div');
+  hiddenHost.style.display = 'none';
+  document.body.appendChild(hiddenHost);
 
-  const playback = playMML(mml, {
-    loop: false,
-    defaultBpm: bpm,
+  const playback = studio.mountPlayer(hiddenHost, mml, {
     volume: 50,
     onStop: () => {
       onDone?.();
-    }
+    },
   });
+  playback.play();
 
   let stopped = false;
   let rafId: number | null = null;
@@ -228,6 +237,7 @@ export async function playChordProgression(
     stopped = true;
     if (rafId) cancelAnimationFrame(rafId);
     playback.destroy();
+    hiddenHost.remove();
   };
 }
 
