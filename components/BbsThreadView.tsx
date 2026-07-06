@@ -10,7 +10,7 @@ interface BbsThreadViewProps {
   post: Post;
 }
 
-function parseContent(text: string, replyMap: Map<number, number>) {
+function parseContent(text: string, replyMap: Map<string, number>) {
   const lines = text.split('\n');
   return lines.map((line, li) => {
     const parts = line.split(/(>>[\d]+)/g);
@@ -53,14 +53,14 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
 
   // Build ordered list: OP as #1, then replies in order
   const allPosts: Post[] = [post, ...post.replies];
-  const indexMap = new Map<number, number>(allPosts.map((p, i) => [p.id, i + 1]));
+  const indexMap = new Map<string, number>(allPosts.map((p, i) => [p.id, i + 1]));
 
   const handleAddReply = () => {
     if (!replyText.trim()) return;
     const replyNum = replyTo !== null ? `>>${replyTo}\n` : '';
     const now = Date.now();
     const newReply: Post = {
-      id: now,
+      id: now.toString(),
       displayName: userId,
       createdAt: new Date(now).toISOString(),
       time: 'たった今',

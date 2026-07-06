@@ -1,6 +1,7 @@
 import { Pool } from '@neondatabase/serverless';
-import { Post, AnonymousUser, OriginType } from '../types';
-import type { Notification, Message, Trend } from '../mock-db';
+import { AnonymousUser, OriginType } from '../types';
+import { DbPost as Post, DbGameRecord as GameRecord, DbNotification as Notification } from '../types-db';
+import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
 import { kvIncr, kvDecr, kvGet } from '../kv';

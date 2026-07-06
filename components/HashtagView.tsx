@@ -48,22 +48,22 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 
-  const handleLike = async (id: number) => {
+  const handleLike = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, liked: !p.liked, likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1) }));
     try { const u = await api.posts.like(id, userId); setPosts(prev => prev.map(p => p.id === id ? u : p)); } catch {}
   };
-  const handleDislike = async (id: number) => {
+  const handleDislike = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, disliked: !p.disliked, dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1) }));
     try { const u = await api.posts.dislike(id, userId); setPosts(prev => prev.map(p => p.id === id ? u : p)); } catch {}
   };
-  const handleRepost = async (id: number) => {
+  const handleRepost = async (id: string) => {
     try { const u = await api.posts.repost(id); setPosts(prev => prev.map(p => p.id === id ? u : p)); } catch {}
   };
-  const handleHeart = async (id: number) => {
+  const handleHeart = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
     try { await api.posts.heart(id, userId, 1); } catch {}
   };
-  const handleAddReply = async (id: number, text: string) => {
+  const handleAddReply = async (id: string, text: string) => {
     if (!text.trim()) return;
     try {
       const reply = await api.posts.replies.create(id, { displayName: userId, content: text, parentPostId: id });

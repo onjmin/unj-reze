@@ -21,6 +21,7 @@
     "next": "16.2.7",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "sqids": "0.3.0",
     "sql.js": "1.14.1",
     "tiny-segmenter": "0.2.0"
   },

@@ -770,7 +770,7 @@ interface GameMakerProps {
   ghostPlayers?: { sessionId: string; x: number; y: number; emoji: string; color?: string }[];
   onPositionChange?: (x: number, y: number, emoji: string) => void;
   /** ゲームポストのID（コメント返信先） */
-  postId?: number;
+  postId?: string;
   /** ニコニコ風弾幕コメント（新しい文字列が追加されるたびに流れる） */
   danmakuComments?: string[];
   /** コメント送信コールバック */

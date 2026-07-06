@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { decodeId, encodePost } from '@/lib/sqids';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const decodedId = decodeId(id);
+  if (decodedId === null) {
+    return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  }
   const url = new URL(_request.url);
   const userId = url.searchParams.get('userId') || undefined;
-  const post = await db.getPost(parseInt(id), userId);
+  const post = await db.getPost(decodedId, userId);
   if (!post) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
-  return NextResponse.json(post);
+  return NextResponse.json(encodePost(post));
 }
 
 export async function PUT(
@@ -20,21 +25,24 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const decodedId = decodeId(id);
+  if (decodedId === null) {
+    return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  }
   const body = await request.json();
   const { action, userId } = body;
-  const postId = parseInt(id);
 
   let result;
 
   switch (action) {
     case 'like':
-      result = await db.likePost(postId, userId || '');
+      result = await db.likePost(decodedId, userId || '');
       break;
     case 'dislike':
-      result = await db.dislikePost(postId, userId || '');
+      result = await db.dislikePost(decodedId, userId || '');
       break;
     case 'repost':
-      result = await db.repostPost(postId);
+      result = await db.repostPost(decodedId);
       break;
     default:
       return NextResponse.json(
@@ -47,7 +55,7 @@ export async function PUT(
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
 
-  return NextResponse.json(result);
+  return NextResponse.json(encodePost(result));
 }
 
 export async function POST(
@@ -55,15 +63,18 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const decodedId = decodeId(id);
+  if (decodedId === null) {
+    return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  }
   const body = await request.json();
   const { userId, count = 1 } = body;
-  const postId = parseInt(id);
 
-  const result = await db.heartPost(postId, userId || '', count);
+  const result = await db.heartPost(decodedId, userId || '', count);
   if (!result) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
-  return NextResponse.json(result);
+  return NextResponse.json(encodePost(result));
 }
 
 export async function PATCH(
@@ -71,15 +82,19 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const decodedId = decodeId(id);
+  if (decodedId === null) {
+    return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  }
   const { userId, content, originType } = await request.json();
   if (!userId || typeof content !== 'string') {
     return NextResponse.json({ error: 'userId and content are required' }, { status: 400 });
   }
-  const result = await db.editPost(parseInt(id), userId, content, originType);
+  const result = await db.editPost(decodedId, userId, content, originType);
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }
-  return NextResponse.json(result);
+  return NextResponse.json(encodePost(result));
 }
 
 export async function DELETE(
@@ -87,13 +102,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const decodedId = decodeId(id);
+  if (decodedId === null) {
+    return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  }
   const { userId } = await request.json().catch(() => ({}));
   const url = new URL(request.url);
   const uid = userId || url.searchParams.get('userId');
   if (!uid) {
     return NextResponse.json({ error: 'userId is required' }, { status: 400 });
   }
-  const ok = await db.deletePost(parseInt(id), uid);
+  const ok = await db.deletePost(decodedId, uid);
   if (!ok) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }

@@ -18,11 +18,11 @@ interface ProfileViewProps {
   userId: string;
   displayName?: string;
   currentUserId?: string;
-  onLike?: (id: number) => void;
-  onDislike?: (id: number) => void;
-  onHeart?: (id: number) => void;
-  onAddReply?: (id: number, text: string) => void;
-  onRepost?: (id: number) => void;
+  onLike?: (id: string) => void;
+  onDislike?: (id: string) => void;
+  onHeart?: (id: string) => void;
+  onAddReply?: (id: string, text: string) => void;
+  onRepost?: (id: string) => void;
   openCollab?: (post: Post) => void;
 }
 
@@ -134,7 +134,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
 
   const resolvedName = displayName || myPosts[0]?.displayName || userId;
 
-  const handlePostClick = (postId: number) => {
+  const handlePostClick = (postId: string) => {
     router.push(`/post/${postId}`);
   };
 

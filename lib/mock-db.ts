@@ -1,20 +1,7 @@
-import { Post, AnonymousUser, OriginType } from './types';
+import { AnonymousUser, OriginType } from './types';
+import { DbPost as Post, DbNotification as Notification } from './types-db';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
-
-export interface Notification {
-  id: number;
-  user: string;
-  action: string;
-  target: string;
-  type: string;
-  postId?: number;
-  targetUser?: string;
-  recipientId?: string;
-  read?: boolean;
-  createdAt: string;
-  time: string;
-}
 
 export interface Trend {
   keyword: string;

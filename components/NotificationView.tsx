@@ -29,7 +29,7 @@ interface NotificationViewProps {
   userId?: string;
 }
 
-type Notif = { id: number; user: string; action: string; target: string; time: string; type?: string; postId?: number; targetUser?: string; read?: boolean };
+type Notif = { id: string; user: string; action: string; target: string; time: string; type?: string; postId?: string; targetUser?: string; read?: boolean };
 
 export default function NotificationView({ userId }: NotificationViewProps) {
   const router = useRouter();
@@ -52,7 +52,7 @@ export default function NotificationView({ userId }: NotificationViewProps) {
     }
   };
 
-  const handleDelete = (e: React.MouseEvent, id: number) => {
+  const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (userId) api.notifications.remove(id, userId).catch(() => {});
     setNotifs(prev => prev.filter(n => n.id !== id));

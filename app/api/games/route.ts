@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { encodeGame } from '@/lib/sqids';
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -10,5 +11,5 @@ export async function POST(request: NextRequest) {
   }
 
   const game = await db.createGame({ preset, title, manifest });
-  return NextResponse.json(game, { status: 201 });
+  return NextResponse.json(encodeGame(game), { status: 201 });
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import { encodeId } from '@/lib/sqids';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
 import BbsBoardView from './BbsBoardView';
@@ -9,13 +10,13 @@ interface FeedListProps {
   activeTab: string;
   rankCategory: string;
   bbsMode: string;
-  onLike: (id: number) => void;
-  onDislike: (id: number) => void;
-  onRepost: (id: number) => void;
-  onHeart: (id: number) => void;
-  onAddReply: (id: number, text: string) => void;
+  onLike: (id: string) => void;
+  onDislike: (id: string) => void;
+  onRepost: (id: string) => void;
+  onHeart: (id: string) => void;
+  onAddReply: (id: string, text: string, replyToNum?: number) => void;
   onQuickPost: () => void;
-  openGame: (gameId?: number, postId?: number) => void;
+  openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
   currentUserSlug?: string;
@@ -37,7 +38,7 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
       displayPosts.sort((a, b) => b.heartsTotal - a.heartsTotal);
     }
   } else if (activeTab === 'following') {
-    displayPosts = displayPosts.filter(p => p.id === 3 || p.id === 6);
+    displayPosts = displayPosts.filter(p => p.id === encodeId(3) || p.id === encodeId(6));
   }
 
   if (bbsMode === '掲示板モード') {

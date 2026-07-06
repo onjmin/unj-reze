@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { decodeId } from '@/lib/sqids';
 
 function getIp(request: NextRequest): string {
   return (
@@ -10,8 +11,12 @@ function getIp(request: NextRequest): string {
 }
 
 export async function POST(request: NextRequest) {
-  const { gameId } = await request.json();
+  const { gameId: gameIdRaw } = await request.json();
+  const gameId = decodeId(gameIdRaw);
+  if (gameId === null) {
+    return NextResponse.json({ error: 'Invalid gameId' }, { status: 400 });
+  }
   const ip = getIp(request);
-  await db.voteGame(Number(gameId), ip);
+  await db.voteGame(gameId, ip);
   return NextResponse.json({ ok: true });
 }

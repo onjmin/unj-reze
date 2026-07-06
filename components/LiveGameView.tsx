@@ -4,13 +4,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Clock, Trophy, Users } from 'lucide-react';
 import GameMaker, { type GameManifestDraft } from './GameMaker';
 import type { GhostPlayer, GameVoteCandidate } from '@/lib/types';
+import { decodeId } from '@/lib/sqids';
 
 interface LiveInfo {
-  gameId: number | null;
+  gameId: string | null;
   gameTitle: string;
   gamePreset: string;
   hourSlot: string;
-  postId: number | null;
+  postId: string | null;
   manifest: GameManifestDraft | null;
   nextCandidates: GameVoteCandidate[];
   myVote: number | null;
@@ -89,10 +90,10 @@ export default function LiveGameView({ userId, sessionId }: Props) {
         try {
           const res = await fetch(`/api/posts/${postId}/replies`);
           if (res.ok) {
-            const replies: { id: number; displayName: string; content: string }[] = await res.json();
-            const newOnes = replies.filter(r => r.id > commentLastIdRef.current);
+            const replies: { id: string; displayName: string; content: string }[] = await res.json();
+            const newOnes = replies.filter(r => (decodeId(r.id) || 0) > commentLastIdRef.current);
             if (newOnes.length > 0) {
-              commentLastIdRef.current = Math.max(...newOnes.map(r => r.id));
+              commentLastIdRef.current = Math.max(...newOnes.map(r => decodeId(r.id) || 0));
               setDanmakuComments(prev => [...prev, ...newOnes.map(r => `${r.displayName}: ${r.content}`)]);
             }
           }

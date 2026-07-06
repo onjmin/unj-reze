@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Post } from '@/lib/types';
 import { db } from '@/lib/db';
+import { DbPost } from '@/lib/types-db';
+import { encodePost } from '@/lib/sqids';
 
 export const runtime = 'edge';
 
@@ -13,7 +14,7 @@ export async function GET(
   const userId = url.searchParams.get('userId') || undefined;
   const tab = url.searchParams.get('tab');
 
-  let posts: Post[];
+  let posts: DbPost[];
   if (tab === 'likes' && userId) {
     posts = await db.getLikedPosts(userId);
   } else if (tab === 'dislikes' && userId) {
@@ -29,7 +30,7 @@ export async function GET(
   return NextResponse.json({
     id,
     displayName,
-    posts,
+    posts: posts.map(encodePost),
     postCount: posts.length,
   });
 }

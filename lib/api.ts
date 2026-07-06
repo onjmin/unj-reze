@@ -1,6 +1,7 @@
-import { Post, AnonymousUser, OriginType } from './types';
+import { Post, AnonymousUser, OriginType, Notification } from './types';
 import { db as mockDbInstance } from './mock-db';
-import type { Notification, Message, Trend } from './mock-db';
+import type { Message, Trend } from './mock-db';
+import { decodeIdOrThrow, encodePost, encodeNotification, encodeId } from './sqids';
 
 const BASE = '/api';
 const useStaticMockData = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' || process.env.GITHUB_ACTIONS === 'true';
@@ -41,59 +42,78 @@ const staticApi = {
     image: async (data: { image: string; filename?: string }) => ({ url: data.image }),
   },
   posts: {
-    list: async (userId?: string) => mockDbInstance.getPosts(userId),
-    get: async (id: number, userId?: string) => {
-      const post = mockDbInstance.getPost(id, userId);
-      if (!post) throw new Error('Post not found');
-      return post;
+    list: async (userId?: string) => {
+      const posts = await mockDbInstance.getPosts(userId);
+      return posts.map(encodePost);
     },
-    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number; originType?: OriginType }) =>
-      mockDbInstance.createPost(data),
-    like: async (id: number, userId?: string) => {
-      const post = mockDbInstance.likePost(id, userId || '');
+    get: async (id: string, userId?: string) => {
+      const post = mockDbInstance.getPost(decodeIdOrThrow(id), userId);
       if (!post) throw new Error('Post not found');
-      return post;
+      return encodePost(post);
     },
-    dislike: async (id: number, userId?: string) => {
-      const post = mockDbInstance.dislikePost(id, userId || '');
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType }) => {
+      const decodedGameId = data.gameId ? decodeIdOrThrow(data.gameId) : undefined;
+      const post = await mockDbInstance.createPost({ ...data, gameId: decodedGameId });
+      return encodePost(post);
+    },
+    like: async (id: string, userId?: string) => {
+      const post = mockDbInstance.likePost(decodeIdOrThrow(id), userId || '');
       if (!post) throw new Error('Post not found');
-      return post;
+      return encodePost(post);
     },
-    heart: async (id: number, userId?: string, count?: number) => {
-      const post = mockDbInstance.heartPost(id, userId || '', count);
+    dislike: async (id: string, userId?: string) => {
+      const post = mockDbInstance.dislikePost(decodeIdOrThrow(id), userId || '');
       if (!post) throw new Error('Post not found');
-      return post;
+      return encodePost(post);
     },
-    repost: async (id: number) => {
-      const post = mockDbInstance.repostPost(id);
+    heart: async (id: string, userId?: string, count?: number) => {
+      const post = mockDbInstance.heartPost(decodeIdOrThrow(id), userId || '', count);
       if (!post) throw new Error('Post not found');
-      return post;
+      return encodePost(post);
     },
-    edit: async (id: number, userId: string, content: string, originType?: OriginType | null) => {
-      const post = mockDbInstance.editPost(id, userId, content, originType);
+    repost: async (id: string) => {
+      const post = mockDbInstance.repostPost(decodeIdOrThrow(id));
+      if (!post) throw new Error('Post not found');
+      return encodePost(post);
+    },
+    edit: async (id: string, userId: string, content: string, originType?: OriginType | null) => {
+      const post = mockDbInstance.editPost(decodeIdOrThrow(id), userId, content, originType);
       if (!post) throw new Error('Post not found or not owned');
-      return post;
+      return encodePost(post);
     },
-    remove: async (id: number, userId: string) => {
-      const ok = mockDbInstance.deletePost(id, userId);
+    remove: async (id: string, userId: string) => {
+      const ok = mockDbInstance.deletePost(decodeIdOrThrow(id), userId);
       if (!ok) throw new Error('Post not found or not owned');
       return { success: true };
     },
     replies: {
-      list: async (postId: number, userId?: string) => mockDbInstance.getReplies(postId, userId),
-      create: async (postId: number, data: { displayName: string; content: string; parentPostId?: number }) => {
-        const reply = mockDbInstance.addReply(postId, data);
+      list: async (postId: string, userId?: string) => {
+        const replies = await mockDbInstance.getReplies(decodeIdOrThrow(postId), userId);
+        return replies.map(encodePost);
+      },
+      create: async (postId: string, data: { displayName: string; content: string; parentPostId?: string }) => {
+        const decodedParentPostId = data.parentPostId ? decodeIdOrThrow(data.parentPostId) : undefined;
+        const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), { ...data, parentPostId: decodedParentPostId });
         if (!reply) throw new Error('Post not found');
-        return reply;
+        return encodePost(reply);
       },
     },
   },
   notifications: {
-    list: async (userId?: string) => mockDbInstance.getNotifications(userId),
+    list: async (userId?: string) => {
+      const notifications = await mockDbInstance.getNotifications(userId);
+      return notifications.map(encodeNotification);
+    },
     unreadCount: async (userId: string) => ({ count: mockDbInstance.getUnreadCount(userId) }),
-    markRead: async (id: number, userId: string) => { mockDbInstance.markNotificationRead(id, userId); return { success: true }; },
+    markRead: async (id: string, userId: string) => {
+      mockDbInstance.markNotificationRead(decodeIdOrThrow(id), userId);
+      return { success: true };
+    },
     markAllRead: async (userId: string) => { mockDbInstance.markAllNotificationsRead(userId); return { success: true }; },
-    remove: async (id: number, userId: string) => { mockDbInstance.deleteNotification(id, userId); return { success: true }; },
+    remove: async (id: string, userId: string) => {
+      mockDbInstance.deleteNotification(decodeIdOrThrow(id), userId);
+      return { success: true };
+    },
   },
   messages: {
     list: async (userId?: string) => mockDbInstance.getMessages(userId),
@@ -108,23 +128,27 @@ const staticApi = {
     trends: async () => mockDbInstance.getTrends(),
     posts: async (query: string, userId?: string) => {
       if (!query.trim()) return [];
-      return mockDbInstance.searchPosts(query, userId);
+      const posts = await mockDbInstance.searchPosts(query, userId);
+      return posts.map(encodePost);
     },
   },
   hashtag: {
-    posts: async (tag: string, userId?: string) => mockDbInstance.getPostsByHashtag(tag, userId),
+    posts: async (tag: string, userId?: string) => {
+      const posts = await mockDbInstance.getPostsByHashtag(tag, userId);
+      return posts.map(encodePost);
+    },
   },
   users: {
     profile: async (id: string, userId?: string, tab?: string) => {
       let posts: Post[];
       if (tab === 'likes' && userId) {
-        posts = mockDbInstance.getLikedPosts(userId);
+        posts = (await mockDbInstance.getLikedPosts(userId)).map(encodePost);
       } else if (tab === 'dislikes' && userId) {
-        posts = mockDbInstance.getDislikedPosts(userId);
+        posts = (await mockDbInstance.getDislikedPosts(userId)).map(encodePost);
       } else if (tab === 'hearts' && userId) {
-        posts = mockDbInstance.getHeartedPosts(userId);
+        posts = (await mockDbInstance.getHeartedPosts(userId)).map(encodePost);
       } else {
-        posts = mockDbInstance.getUserPostsBySlug(id, userId);
+        posts = (await mockDbInstance.getUserPostsBySlug(id, userId)).map(encodePost);
       }
       const displayName = mockDbInstance.getUserDisplayName(id) || id;
       return { id, displayName, posts, postCount: posts.length };
@@ -174,24 +198,24 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post[]>(`/posts${qs}`);
     },
-    get: (id: number, userId?: string) => {
+    get: (id: string, userId?: string) => {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
-    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: number; originType?: OriginType }) =>
+    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType }) =>
       fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
-    like: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
-    dislike: (id: number, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
-    heart: (id: number, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
-    repost: (id: number) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
-    edit: (id: number, userId: string, content: string, originType?: OriginType | null) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType }) }),
-    remove: (id: number, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
+    like: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
+    dislike: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
+    heart: (id: string, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
+    repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
+    edit: (id: string, userId: string, content: string, originType?: OriginType | null) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType }) }),
+    remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
     replies: {
-      list: (postId: number, userId?: string) => {
+      list: (postId: string, userId?: string) => {
         const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
         return fetcher<Post[]>(`/posts/${postId}/replies${qs}`);
       },
-      create: (postId: number, data: { displayName: string; content: string; parentPostId?: number }) =>
+      create: (postId: string, data: { displayName: string; content: string; parentPostId?: string }) =>
         fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
     },
   },
@@ -201,9 +225,9 @@ const liveApi = {
       return fetcher<Notification[]>(`/notifications${qs}`);
     },
     unreadCount: (userId: string) => fetcher<{ count: number }>(`/notifications?unread=1&userId=${encodeURIComponent(userId)}`),
-    markRead: (id: number, userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'PATCH', body: JSON.stringify({ id, userId }) }),
+    markRead: (id: string, userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'PATCH', body: JSON.stringify({ id, userId }) }),
     markAllRead: (userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'PATCH', body: JSON.stringify({ all: true, userId }) }),
-    remove: (id: number, userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'DELETE', body: JSON.stringify({ id, userId }) }),
+    remove: (id: string, userId: string) => fetcher<{ success: boolean }>('/notifications', { method: 'DELETE', body: JSON.stringify({ id, userId }) }),
   },
   messages: {
     list: (userId?: string) => {

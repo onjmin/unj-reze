@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { encodePost } from '@/lib/sqids';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -9,5 +10,5 @@ export async function GET(request: NextRequest) {
   }
   const userId = url.searchParams.get('userId') || undefined;
   const posts = await db.searchPosts(q, userId);
-  return NextResponse.json(posts);
+  return NextResponse.json(posts.map(encodePost));
 }

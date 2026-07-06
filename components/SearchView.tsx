@@ -8,13 +8,13 @@ import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
 
 interface SearchViewProps {
-  onLike: (id: number) => void;
-  onDislike: (id: number) => void;
-  onRepost: (id: number) => void;
-  onHeart: (id: number) => void;
-  onAddReply: (id: number, text: string) => void;
+  onLike: (id: string) => void;
+  onDislike: (id: string) => void;
+  onRepost: (id: string) => void;
+  onHeart: (id: string) => void;
+  onAddReply: (id: string, text: string) => void;
   onQuickPost: () => void;
-  openGame: (gameId?: number, postId?: number) => void;
+  openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
 }

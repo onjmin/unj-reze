@@ -5,6 +5,7 @@ import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
 import { Post, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import { api } from '@/lib/api';
+import { decodeId } from '@/lib/sqids';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
@@ -63,16 +64,16 @@ export default function App() {
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
-  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: number } | null>(null);
+  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string } | null>(null);
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
 
-  const heartQueue = useRef<Map<number, number>>(new Map());
-  const heartTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
-  const likeParity = useRef<Map<number, number>>(new Map());
-  const likeTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
-  const dislikeParity = useRef<Map<number, number>>(new Map());
-  const dislikeTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const heartQueue = useRef<Map<string, number>>(new Map());
+  const heartTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const likeParity = useRef<Map<string, number>>(new Map());
+  const likeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const dislikeParity = useRef<Map<string, number>>(new Map());
+  const dislikeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const sessionInitialized = useRef(false);
 
   function getCookie(name: string): string | undefined {
@@ -117,9 +118,9 @@ export default function App() {
         const res = await fetch(`/api/posts/${pid}/replies`);
         if (!res.ok) return;
         const replies: Post[] = await res.json();
-        const newOnes = replies.filter(r => r.id > postGameLastIdRef.current);
+        const newOnes = replies.filter(r => (decodeId(r.id) || 0) > postGameLastIdRef.current);
         if (newOnes.length > 0) {
-          postGameLastIdRef.current = Math.max(...newOnes.map(r => r.id));
+          postGameLastIdRef.current = Math.max(...newOnes.map(r => decodeId(r.id) || 0));
           setPostGameDanmaku(prev => [...prev, ...newOnes.map(r => `${r.displayName}: ${r.content}`)]);
         }
       } catch {}
@@ -183,7 +184,7 @@ export default function App() {
     setComposerOpen(true);
   };
 
-  const handleLike = (postId: number) => {
+  const handleLike = (postId: string) => {
     setPosts(prev => prev.map(p => p.id !== postId ? p : {
       ...p, liked: !p.liked,
       likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
@@ -203,7 +204,7 @@ export default function App() {
     }, 2000));
   };
 
-  const handleDislike = (postId: number) => {
+  const handleDislike = (postId: string) => {
     setPosts(prev => prev.map(p => p.id !== postId ? p : {
       ...p, disliked: !p.disliked,
       dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
@@ -223,7 +224,7 @@ export default function App() {
     }, 2000));
   };
 
-  const handleRepost = async (postId: number) => {
+  const handleRepost = async (postId: string) => {
     setPosts(prev => prev.map(p => p.id !== postId ? p : {
       ...p, reposted: !p.reposted,
       reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
@@ -232,7 +233,7 @@ export default function App() {
     setPosts(prev => prev.map(p => p.id === postId ? updated : p));
   };
 
-  const handleHeart = (postId: number) => {
+  const handleHeart = (postId: string) => {
     setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
     const current = heartQueue.current.get(postId) || 0;
     heartQueue.current.set(postId, current + 1);
@@ -246,7 +247,7 @@ export default function App() {
     }, 2000));
   };
 
-  const handleAddReply = async (postId: number, replyText: string) => {
+  const handleAddReply = async (postId: string, replyText: string) => {
     if (!replyText.trim()) return;
     const reply = await api.posts.replies.create(postId, {
       displayName: userId,
@@ -278,7 +279,7 @@ export default function App() {
       const result = await api.upload.image({ image: attachedImage });
       imageSrc = result.url;
     }
-    let gameId: number | undefined;
+    let gameId: string | undefined;
     if (gameDraft) {
       const res = await fetch('/api/games', {
         method: 'POST',
@@ -353,7 +354,7 @@ export default function App() {
     setAttachedMml(mml);
   };
 
-  const handleOpenPostGame = async (gameId: number, postId?: number) => {
+  const handleOpenPostGame = async (gameId: string, postId?: string) => {
     try {
       const res = await fetch(`/api/games/${gameId}`);
       if (!res.ok) return;
@@ -606,7 +607,7 @@ export default function App() {
                     onHeart={handleHeart}
                     onAddReply={handleAddReply}
                     onQuickPost={handleQuickPost}
-                    openGame={(gameId?: number, postId?: number) => {
+                    openGame={(gameId?: string, postId?: string) => {
                       if (gameId) handleOpenPostGame(gameId, postId);
                     }}
                     openCollab={handleOpenCollab}
@@ -626,7 +627,7 @@ export default function App() {
                   onHeart={handleHeart}
                   onAddReply={handleAddReply}
                   onQuickPost={handleQuickPost}
-                  openGame={(gameId?: number, postId?: number) => {
+                  openGame={(gameId?: string, postId?: string) => {
                     if (gameId) handleOpenPostGame(gameId, postId);
                   }}
                   openCollab={handleOpenCollab}

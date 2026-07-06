@@ -143,7 +143,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     const now = Date.now();
     const targetParent = replyTo ?? post;
     const newReply: Post = {
-      id: now, displayName: userId, createdAt: new Date(now).toISOString(), time: "たった今", content: replyText,
+      id: now.toString(), displayName: userId, createdAt: new Date(now).toISOString(), time: "たった今", content: replyText,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: "from-blue-500 to-indigo-600",

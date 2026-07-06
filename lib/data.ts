@@ -1,6 +1,6 @@
-import { Post } from "./types";
+import { DbPost } from "./types-db";
 
-export const INITIAL_POSTS: Post[] = [
+export const INITIAL_POSTS: DbPost[] = [
   {
     id: 12,
     displayName: "名無しvFZ",

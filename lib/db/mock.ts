@@ -1,8 +1,9 @@
 import { db as mockDb } from '../mock-db';
 import { OriginType } from '../types';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, GameRecord, CreateGameParams, ReportParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, ReportParams } from './interface';
+import type { DbGameRecord } from '../types-db';
 
-const gameStore = new Map<number, GameRecord>();
+const gameStore = new Map<number, DbGameRecord>();
 
 export const mockStore: DataStore = {
   async getPosts(userId?: string) {
@@ -181,14 +182,14 @@ export const mockStore: DataStore = {
     return mockDb.reportContent(data);
   },
 
-  async createGame(data: CreateGameParams): Promise<GameRecord> {
+  async createGame(data: CreateGameParams): Promise<DbGameRecord> {
     const id = Date.now() + Math.floor(Math.random() * 1000);
-    const record: GameRecord = { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: new Date().toISOString() };
+    const record: DbGameRecord = { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: new Date().toISOString() };
     gameStore.set(id, record);
     return record;
   },
 
-  async getGame(id: number): Promise<GameRecord | null> {
+  async getGame(id: number): Promise<DbGameRecord | null> {
     return gameStore.get(id) ?? null;
   },
 

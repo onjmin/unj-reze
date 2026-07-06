@@ -25,13 +25,13 @@ interface PostContainerProps {
   isRankingMode: boolean;
   rankIndex: number;
   rankCategory: string;
-  onLike: (id: number) => void;
-  onDislike: (id: number) => void;
-  onRepost: (id: number) => void;
-  onHeart: (id: number) => void;
-  onAddReply: (id: number, text: string) => void;
+  onLike: (id: string) => void;
+  onDislike: (id: string) => void;
+  onRepost: (id: string) => void;
+  onHeart: (id: string) => void;
+  onAddReply: (id: string, text: string) => void;
   onQuickPost: () => void;
-  openGame: (gameId?: number, postId?: number) => void;
+  openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
   currentUserSlug?: string;
@@ -533,7 +533,7 @@ function nameToInitials(name: string | null | undefined): string {
   return name.substring(3, 5) || '名無';
 }
 
-function ReplyPreview({ replies, postId }: { replies: Post[]; postId: number }) {
+function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
   const [pop, setPop] = useState(false);

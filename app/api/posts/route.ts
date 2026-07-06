@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { decodeId, encodePost } from '@/lib/sqids';
 
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
     const userId = url.searchParams.get('userId') || undefined;
     const posts = await db.getPosts(userId);
-    return NextResponse.json(posts);
+    return NextResponse.json(posts.map(encodePost));
   } catch (e) {
     console.error('[GET /api/posts]', e);
     const message = e instanceof Error ? e.message : String(e);
@@ -26,8 +27,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType });
-    return NextResponse.json(post, { status: 201 });
+    const decodedGameId = gameId ? decodeId(gameId) : undefined;
+    if (gameId && decodedGameId === null) {
+      return NextResponse.json({ error: 'Invalid gameId' }, { status: 400 });
+    }
+
+    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId: decodedGameId === null ? undefined : decodedGameId, originType });
+    return NextResponse.json(encodePost(post), { status: 201 });
   } catch (e) {
     console.error('[POST /api/posts]', e);
     const message = e instanceof Error ? e.message : String(e);

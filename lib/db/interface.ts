@@ -1,14 +1,7 @@
 import { Post, AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType } from '../types';
-import type { Notification, Message, Trend } from '../mock-db';
+import { DbPost, DbGameRecord, DbNotification } from '../types-db';
+import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
-
-export interface GameRecord {
-  id: number;
-  preset: string;
-  title: string;
-  manifest: GameManifestDraft;
-  createdAt: string;
-}
 
 export interface CreateGameParams {
   preset: string;
@@ -49,24 +42,24 @@ export interface ReportParams {
 }
 
 export interface DataStore {
-  getPosts(userId?: string): Promise<Post[]>;
-  getPost(id: number, userId?: string): Promise<Post | null>;
-  createPost(data: CreatePostParams): Promise<Post>;
-  likePost(id: number, userId: string): Promise<Post | null>;
-  dislikePost(id: number, userId: string): Promise<Post | null>;
-  heartPost(id: number, userId: string, count?: number): Promise<Post | null>;
-  repostPost(id: number): Promise<Post | null>;
-  getReplies(postId: number, userId?: string): Promise<Post[]>;
-  addReply(postId: number, data: ReplyParams): Promise<Post | null>;
-  editPost(id: number, userId: string, content: string, originType?: OriginType | null): Promise<Post | null>;
+  getPosts(userId?: string): Promise<DbPost[]>;
+  getPost(id: number, userId?: string): Promise<DbPost | null>;
+  createPost(data: CreatePostParams): Promise<DbPost>;
+  likePost(id: number, userId: string): Promise<DbPost | null>;
+  dislikePost(id: number, userId: string): Promise<DbPost | null>;
+  heartPost(id: number, userId: string, count?: number): Promise<DbPost | null>;
+  repostPost(id: number): Promise<DbPost | null>;
+  getReplies(postId: number, userId?: string): Promise<DbPost[]>;
+  addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null): Promise<DbPost | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
-  getUserPostsBySlug(slug: string, userId?: string): Promise<Post[]>;
+  getUserPostsBySlug(slug: string, userId?: string): Promise<DbPost[]>;
   getUserDisplayName(slug: string): Promise<string | undefined>;
-  getLikedPosts(userId: string): Promise<Post[]>;
-  getDislikedPosts(userId: string): Promise<Post[]>;
-  getHeartedPosts(userId: string): Promise<Post[]>;
-  getNotifications(userId?: string): Promise<Notification[]>;
+  getLikedPosts(userId: string): Promise<DbPost[]>;
+  getDislikedPosts(userId: string): Promise<DbPost[]>;
+  getHeartedPosts(userId: string): Promise<DbPost[]>;
+  getNotifications(userId?: string): Promise<DbNotification[]>;
   markNotificationRead(id: number, userId: string): Promise<void>;
   markAllNotificationsRead(userId: string): Promise<void>;
   deleteNotification(id: number, userId: string): Promise<void>;
@@ -74,8 +67,8 @@ export interface DataStore {
   getMessages(userId?: string): Promise<Message[]>;
   addMessage(data: MessageParams): Promise<Message>;
   getTrends(): Promise<Trend[]>;
-  searchPosts(query: string, userId?: string): Promise<Post[]>;
-  getPostsByHashtag(tag: string, userId?: string): Promise<Post[]>;
+  searchPosts(query: string, userId?: string): Promise<DbPost[]>;
+  getPostsByHashtag(tag: string, userId?: string): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
   updateUserDisplayName(userId: string, displayName: string): Promise<void>;
   getUserSettings(slug: string): Promise<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>;
@@ -94,9 +87,9 @@ export interface DataStore {
   unmuteUser(muterSlug: string, mutedSlug: string): Promise<void>;
   getMutedSlugs(muterSlug: string): Promise<string[]>;
   reportContent(data: ReportParams): Promise<void>;
-  createGame(data: CreateGameParams): Promise<GameRecord>;
-  getGame(id: number): Promise<GameRecord | null>;
-  listAllGames(): Promise<GameRecord[]>;
+  createGame(data: CreateGameParams): Promise<DbGameRecord>;
+  getGame(id: number): Promise<DbGameRecord | null>;
+  listAllGames(): Promise<DbGameRecord[]>;
   getLiveGameInfo(ipAddress: string): Promise<{ gameId: number | null; gameTitle: string; gamePreset: string; hourSlot: string; postId: number | null; nextCandidates: GameVoteCandidate[]; myVote: number | null }>;
   voteGame(gameId: number, ipAddress: string): Promise<void>;
   updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string): Promise<void>;

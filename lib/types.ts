@@ -1,3 +1,5 @@
+import type { GameManifestDraft } from '@/components/GameMaker';
+
 /** 自己申告の権利表記。未設定(undefined)は「申告なし」 */
 export type OriginType =
   | 'full_original'
@@ -21,7 +23,7 @@ export const ORIGIN_TYPE_OPTIONS: { value: OriginType; label: string; badgeClass
 ];
 
 export interface Post {
-  id: number;
+  id: string;
   displayName: string;
   slug?: string;
   createdAt: string;
@@ -41,18 +43,26 @@ export interface Post {
   hasCollabButton?: boolean;
   heartsTotal: number;
   hasGame?: boolean;
-  gameId?: number;
+  gameId?: string;
   /** 自己申告の権利表記。未設定(申告なし)なら undefined */
   originType?: OriginType;
   /** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
   isFalseDeclaration?: boolean;
   isEdited?: boolean;
-  threadId: number;
-  parentPostId?: number;
+  threadId: string;
+  parentPostId?: string;
   replies: Post[];
 }
 
 export type Reply = Post;
+
+export interface GameRecord {
+  id: string;
+  preset: string;
+  title: string;
+  manifest: GameManifestDraft;
+  createdAt: string;
+}
 
 export interface AnonymousUser {
   id: string;
@@ -97,4 +107,18 @@ export interface Obstacle {
   y: number;
   size: number;
   passed?: boolean;
+}
+
+export interface Notification {
+  id: string;
+  user: string;
+  action: string;
+  target: string;
+  type: string;
+  postId?: string;
+  targetUser?: string;
+  recipientId?: string;
+  read?: boolean;
+  createdAt: string;
+  time: string;
 }

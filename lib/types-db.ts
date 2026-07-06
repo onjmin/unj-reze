@@ -1,0 +1,54 @@
+import type { GameManifestDraft } from '@/components/GameMaker';
+import type { OriginType } from './types';
+
+export interface DbPost {
+  id: number;
+  displayName: string;
+  slug?: string;
+  createdAt: string;
+  time: string;
+  content: string;
+  likes: number;
+  dislikes: number;
+  liked: boolean;
+  disliked: boolean;
+  repliesCount: number;
+  reposts: number;
+  reposted: boolean;
+  hasImage?: boolean;
+  imageSrc?: string;
+  imageAlt?: string;
+  avatarColor: string;
+  hasCollabButton?: boolean;
+  heartsTotal: number;
+  hasGame?: boolean;
+  gameId?: number;
+  originType?: OriginType;
+  isFalseDeclaration?: boolean;
+  isEdited?: boolean;
+  threadId: number;
+  parentPostId?: number;
+  replies: DbPost[];
+}
+
+export interface DbGameRecord {
+  id: number;
+  preset: string;
+  title: string;
+  manifest: GameManifestDraft;
+  createdAt: string;
+}
+
+export interface DbNotification {
+  id: number;
+  user: string;
+  action: string;
+  target: string;
+  type: string;
+  postId?: number;
+  targetUser?: string;
+  recipientId?: string;
+  read?: boolean;
+  createdAt: string;
+  time: string;
+}
