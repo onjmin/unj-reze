@@ -615,6 +615,7 @@ export default function App() {
                     currentUserSlug={currentUser?.slug}
                     currentUserDisplayName={currentUser?.displayName}
                     onModerationChange={fetchPosts}
+                    loading={loading}
                   />
                 </>
               )}

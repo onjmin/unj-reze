@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, Loader2 } from 'lucide-react';
 import { Post } from '@/lib/types';
 
 interface BbsBoardViewProps {
@@ -10,11 +10,12 @@ interface BbsBoardViewProps {
   activeTab: string;
   rankCategory: string;
   onQuickPost: () => void;
+  loading?: boolean;
 }
 
 const PAGE_SIZE = 15;
 
-export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPost }: BbsBoardViewProps) {
+export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPost, loading }: BbsBoardViewProps) {
   const router = useRouter();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [page, setPage] = useState(1);
@@ -97,48 +98,64 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
 
       {/* Thread list */}
       <div className="divide-y divide-gray-800/50">
-        {pagePosts.map(post => (
-          <div
-            key={post.id}
-            onClick={() => router.push(`/post/${post.id}`)}
-            className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
-          >
-            {/* Reply count badge */}
-            <div className={`shrink-0 min-w-[28px] h-6 rounded px-1.5 flex items-center justify-center text-[11px] font-bold tabular-nums ${badgeClass(post.repliesCount)}`}>
-              {post.repliesCount}
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <p className="text-[13px] text-gray-100 leading-snug line-clamp-2 break-words">
-                {post.content.split('\n')[0]}
-              </p>
-              <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
-                <span>ID:{post.displayName.slice(-3)}</span>
-                <span>{formatDate(post.createdAt)}</span>
-                <span className="text-gray-600">({post.time}){post.isEdited && ' (編集済み)'}</span>
-                {post.likes > 0 && (
-                  <span className="flex items-center gap-0.5">
-                    <span className="text-gray-600">👍</span>
-                    <span>{post.likes}</span>
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Thumbnail */}
-            {post.hasImage && post.imageSrc && (
-              <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
-                <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
-              </div>
-            )}
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 size={20} className="text-gray-500 animate-spin" />
           </div>
-        ))}
+        ) : displayPosts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center p-12 text-center py-20 bg-gray-900/5">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 flex items-center justify-center mb-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
+              <span className="text-2xl animate-pulse">🌱</span>
+            </div>
+            <p className="text-sm font-bold text-gray-200">まだ投稿がありません。</p>
+            <p className="text-xs text-gray-400 mt-1 font-medium">最初の投稿をしてみましょう！</p>
+          </div>
+        ) : (
+          pagePosts.map(post => (
+            <div
+              key={post.id}
+              onClick={() => router.push(`/post/${post.id}`)}
+              className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
+            >
+              {/* Reply count badge */}
+              <div className={`shrink-0 min-w-[28px] h-6 rounded px-1.5 flex items-center justify-center text-[11px] font-bold tabular-nums ${badgeClass(post.repliesCount)}`}>
+                {post.repliesCount}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] text-gray-100 leading-snug line-clamp-2 break-words">
+                  {post.content.split('\n')[0]}
+                </p>
+                <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
+                  <span>ID:{post.displayName.slice(-3)}</span>
+                  <span>{formatDate(post.createdAt)}</span>
+                  <span className="text-gray-600">({post.time}){post.isEdited && ' (編集済み)'}</span>
+                  {post.likes > 0 && (
+                    <span className="flex items-center gap-0.5">
+                      <span className="text-gray-600">👍</span>
+                      <span>{post.likes}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Thumbnail */}
+              {post.hasImage && post.imageSrc && (
+                <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
+                  <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </div>
 
-      <div className="py-8 text-center text-[10px] text-gray-700">
-        すべて表示されました
-      </div>
+      {displayPosts.length > 0 && (
+        <div className="py-8 text-center text-[10px] text-gray-700">
+          すべて表示されました
+        </div>
+      )}
     </div>
   );
 }

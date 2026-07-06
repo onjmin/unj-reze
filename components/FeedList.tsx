@@ -4,6 +4,7 @@ import { encodeId } from '@/lib/sqids';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
 import BbsBoardView from './BbsBoardView';
+import { Loader2 } from 'lucide-react';
 
 interface FeedListProps {
   posts: Post[];
@@ -22,9 +23,10 @@ interface FeedListProps {
   currentUserSlug?: string;
   currentUserDisplayName?: string;
   onModerationChange?: () => void;
+  loading?: boolean;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -48,7 +50,28 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
         activeTab={activeTab}
         rankCategory={rankCategory}
         onQuickPost={onQuickPost}
+        loading={loading}
       />
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <Loader2 className="text-gray-500 animate-spin" size={20} />
+      </div>
+    );
+  }
+
+  if (displayPosts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 text-center py-20 bg-gray-900/5">
+        <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 flex items-center justify-center mb-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
+          <span className="text-2xl animate-pulse">🌱</span>
+        </div>
+        <p className="text-sm font-bold text-gray-200">まだ投稿がありません。</p>
+        <p className="text-xs text-gray-400 mt-1 font-medium">最初の投稿をしてみましょう！</p>
+      </div>
     );
   }
 
