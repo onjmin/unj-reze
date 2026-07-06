@@ -288,7 +288,7 @@ export default function App() {
     // #MML作曲行は1行目、自由コメントはその下の行として保存する
     // （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
     const parts: string[] = [];
-    if (attachedMml) parts.push(`#MML作曲 ${attachedMml}`);
+    if (attachedMml) parts.push(`#mml ${attachedMml}`);
     if (inputText.trim()) parts.push(inputText.trim());
     const content = parts.join('\n');
     const post = await api.posts.create({

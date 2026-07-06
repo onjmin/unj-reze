@@ -245,8 +245,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
             </div>
             <div ref={menuRef} className="relative">
-              <button onClick={toggleMenu} className="p-0.5 -mr-0.5 rounded hover:bg-gray-100/10 transition-colors">
-                <MoreHorizontal size={14} className="text-gray-500 hover:text-gray-300" />
+              <button onClick={toggleMenu} className="p-2 -mr-2 -mt-1 rounded hover:bg-gray-100/10 transition-colors">
+                <MoreHorizontal size={16} className="text-gray-500 hover:text-gray-300" />
               </button>
               {menuOpen && (
                 <div

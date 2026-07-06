@@ -128,7 +128,7 @@ function countToMmlDiv(count: number): string {
   return best.div;
 }
 
-// MML本文の開始マーカー。投稿コンポーザは `#MML作曲 <mml>`、旧seedは `#mml <mml>` を使う。
+// MML本文の開始マーカー。投稿コンポーザは `#mml <mml>`、過去の投稿は `#MML作曲 <mml>` などのマーカーを使う。
 // 抽出・本文表示の双方でこの定義を共有し、マーカー不一致による埋め込み未認識を防ぐ。
 export const MML_MARKERS = ['#mml', '#MML作曲'];
 // 投稿本文から「埋め込みに置き換える」ために隠すマーカー（MML + コード）。
@@ -137,8 +137,8 @@ export const EMBED_TEXT_MARKERS = [...MML_MARKERS, '#chord'];
 /** contentの中から「行頭がMMLマーカーの行」を探し、その行番号を返す(なければ-1)。 */
 function findMmlLineIndex(lines: string[]): number {
   return lines.findIndex(line => {
-    const trimmed = line.trim();
-    return MML_MARKERS.some(m => trimmed.startsWith(m));
+    const trimmed = line.trim().toLowerCase();
+    return MML_MARKERS.some(m => trimmed.startsWith(m.toLowerCase()));
   });
 }
 
@@ -149,7 +149,7 @@ export function extractMmlFromContent(content: string): string | null {
   const idx = findMmlLineIndex(lines);
   if (idx === -1) return null;
   const line = lines[idx].trim();
-  const marker = MML_MARKERS.find(m => line.startsWith(m))!;
+  const marker = MML_MARKERS.find(m => line.toLowerCase().startsWith(m.toLowerCase()))!;
   return line.slice(marker.length).trim();
 }
 

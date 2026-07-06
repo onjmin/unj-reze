@@ -168,8 +168,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           </Link>
           <span className="ml-3 font-bold text-sm text-gray-200">投稿</span>
           <div ref={menuRef} className="relative ml-auto">
-            <button onClick={toggleMenu} className="p-1.5 rounded hover:bg-gray-100/10 transition-colors">
-              <MoreHorizontal size={16} className="text-gray-400" />
+            <button onClick={toggleMenu} className="p-2.5 -mr-1 rounded hover:bg-gray-100/10 transition-colors">
+              <MoreHorizontal size={18} className="text-gray-400" />
             </button>
             {menuOpen && (
               <div
