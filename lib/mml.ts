@@ -132,7 +132,7 @@ function countToMmlDiv(count: number): string {
 // 抽出・本文表示の双方でこの定義を共有し、マーカー不一致による埋め込み未認識を防ぐ。
 export const MML_MARKERS = ['#mml', '#MML作曲'];
 // 投稿本文から「埋め込みに置き換える」ために隠すマーカー（MML + コード）。
-export const EMBED_TEXT_MARKERS = [...MML_MARKERS, '#chord'];
+export const EMBED_TEXT_MARKERS = [...MML_MARKERS, '#コード進行'];
 
 /** contentの中から「行頭がMMLマーカーの行」を探し、その行番号を返す(なければ-1)。 */
 function findMmlLineIndex(lines: string[]): number {
@@ -169,7 +169,7 @@ export function stripMmlLine(content: string): string {
  */
 export function getDisplayContent(content: string): string {
   const withoutMml = stripMmlLine(content);
-  const chordIdx = withoutMml.indexOf('#chord');
+  const chordIdx = withoutMml.indexOf('#コード進行');
   const sliced = chordIdx >= 0 ? withoutMml.slice(0, chordIdx) : withoutMml;
   return sliced.trimEnd();
 }
@@ -343,7 +343,7 @@ export function playMml(
   const beatSec = 60 / safeTempo;
   const tickSec = beatSec / 4;
 
-  let allNotes: { col: number; dur: number; freq: number; vol: number }[] = [];
+  const allNotes: { col: number; dur: number; freq: number; vol: number }[] = [];
   let maxTicks = 0;
 
   tracks.forEach(t => {

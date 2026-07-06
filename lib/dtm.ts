@@ -1,4 +1,3 @@
-import { createDtmStudio, type DtmStudio } from '@onjmin/dtm';
 
 const SOUNDFONT_CDN = {
   soundFont: 'https://rpgen3.github.io/soundfont/mjs/surikov/SoundFont.mjs',
@@ -16,9 +15,9 @@ async function loadEngine(url: string, name: string): Promise<unknown> {
   return mod[name] ?? mod.default;
 }
 
-let studioPromise: Promise<DtmStudio> | null = null;
+let studioPromise: Promise<any> | null = null;
 
-export const getStudio = (): Promise<DtmStudio> => {
+export const getStudio = (): Promise<any> => {
   if (!studioPromise) {
     studioPromise = (async () => {
       const [SoundFont, SoundFont_drum, SoundFont_list] = await Promise.all([
@@ -26,6 +25,7 @@ export const getStudio = (): Promise<DtmStudio> => {
         loadEngine(SOUNDFONT_CDN.soundFontDrum, 'SoundFont_drum'),
         loadEngine(SOUNDFONT_CDN.soundFontList, 'SoundFont_list'),
       ]);
+      const { createDtmStudio } = await import('@onjmin/dtm');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return createDtmStudio({ engines: { SoundFont, SoundFont_drum, SoundFont_list } as any });
     })();

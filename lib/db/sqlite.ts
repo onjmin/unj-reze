@@ -1,8 +1,7 @@
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
-import fs from 'fs';
-import path from 'path';
+import type { Database as SqlJsDatabase } from 'sql.js';
+import { INIT_SQL } from './init-sql';
 import { AnonymousUser, OriginType } from '../types';
-import { DbPost as Post, DbGameRecord as GameRecord, DbNotification as Notification } from '../types-db';
+import { DbPost as Post, DbNotification as Notification } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -14,19 +13,12 @@ let db: SqlJsDatabase | null = null;
 async function getDb(): Promise<SqlJsDatabase> {
   if (db) return db;
 
+  const initSqlJs = (await import('sql.js')).default;
   const SQL = await initSqlJs();
-  const dbPath = process.env.D1_DATABASE_PATH || './data/d1.sqlite';
 
   try {
-    if (fs.existsSync(dbPath)) {
-      const buffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(buffer);
-    } else {
-      db = new SQL.Database();
-      const dir = path.dirname(dbPath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      await runInitSql(db);
-    }
+    db = new SQL.Database();
+    await runInitSql(db);
   } catch {
     db = new SQL.Database();
     await runInitSql(db);
@@ -38,12 +30,8 @@ async function getDb(): Promise<SqlJsDatabase> {
 }
 
 async function runInitSql(database: SqlJsDatabase) {
-  const initPath = './docker/init.sqlite.sql';
-  if (fs.existsSync(initPath)) {
-    const sql = fs.readFileSync(initPath, 'utf-8');
-    database.run(sql);
-    saveDb();
-  }
+  database.run(INIT_SQL);
+  saveDb();
 }
 
 function ensureAnonymousUsersTable(d: SqlJsDatabase) {
@@ -205,14 +193,7 @@ function getHiddenSlugsSqlite(d: SqlJsDatabase, userId?: string): Set<string> {
 }
 
 function saveDb() {
-  const dbPath = process.env.D1_DATABASE_PATH || './data/d1.sqlite';
-  if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    const dir = path.dirname(dbPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(dbPath, buffer);
-  }
+  // インメモリSQLモックのため、物理ファイルへの保存は行いません。
 }
 
 function rowToPost(row: any): Post {
@@ -1035,7 +1016,7 @@ export const sqliteStore: DataStore = {
   async getLiveGameInfo(ipAddress: string) {
     const d = await getDb();
     const slot = new Date().toISOString().slice(0, 13);
-    let schedRows = rowsToObjects(d, 'SELECT game_id FROM game_schedule WHERE hour_slot = ?', [slot]);
+    const schedRows = rowsToObjects(d, 'SELECT game_id FROM game_schedule WHERE hour_slot = ?', [slot]);
     let gameId: number | null = null;
     if (schedRows.length > 0) {
       gameId = schedRows[0].game_id;

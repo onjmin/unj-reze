@@ -18,6 +18,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # Neon用 WebSocket プロキシ
+  web-proxy:
+    image: neondatabase/wsproxyd:latest
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://neon:neon@db-neon:5432/unj_reze
+    depends_on:
+      db-neon:
+        condition: service_healthy
+
   # MinIO (Cloudflare R2代替) - 本番構成用
   # 開発時は public/uploads/ にファイル保存するため不要
   # 有効化するには .env に S3_* の設定も必要

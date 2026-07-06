@@ -14,6 +14,9 @@ importers:
       '@neondatabase/serverless':
         specifier: 1.1.0
         version: 1.1.0
+      '@onjmin/chord-parser':
+        specifier: 1.0.3
+        version: 1.0.3
       '@onjmin/dtm':
         specifier: 0.1.55
         version: 0.1.55
@@ -561,6 +564,9 @@ packages:
 
   '@onjmin/chord-parser@1.0.2':
     resolution: {integrity: sha512-dkx7CY0sSwCZH7QlVpBVCKCGZI7lJZUjriUrIIT4rcbyPJhPnkinCXkNHohZ5oKMFgE8J5ziB+WFSr4D5y/86g==}
+
+  '@onjmin/chord-parser@1.0.3':
+    resolution: {integrity: sha512-HGJt7Xe1qfYST8FHb/gDMh4EmpHSFeVg35NLrqAb3hU0mcz9EI8wBZHhi2l2TlM3qdb5ETYKrB2loE5ih57tPQ==}
 
   '@onjmin/dtm@0.1.14':
     resolution: {integrity: sha512-4sgVlv2X0uc4kd0qT+CxdZnRkV/RrK8nIqg6yvD/qYobKPj2I1OvGbzlG+73Nheiw64VSekP3MCKptvMq7+VZg==}
@@ -2853,6 +2859,8 @@ snapshots:
   '@nolyfill/is-core-module@1.0.39': {}
 
   '@onjmin/chord-parser@1.0.2': {}
+
+  '@onjmin/chord-parser@1.0.3': {}
 
   '@onjmin/dtm@0.1.14':
     dependencies:

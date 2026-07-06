@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useId } from 'react';
-import { type MmlPlayerInstance } from '@onjmin/dtm';
 import { useAudioFocus } from '@/lib/audio-focus-context';
 import { getStudio } from '@/lib/dtm';
 
@@ -18,13 +17,14 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const claimedRef = useRef(false);
   const focusRef = useRef({ requestFocus, releaseFocus });
-  focusRef.current = { requestFocus, releaseFocus };
+  const focusRef_current = { requestFocus, releaseFocus };
+  focusRef.current = focusRef_current;
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    let inst: MmlPlayerInstance | null = null;
+    let inst: any | null = null;
     let disposed = false;
 
     let cleanup: (() => void) | null = null;

@@ -100,21 +100,27 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
     setActiveIndex(-1);
   }, []);
 
-  const handlePlay = () => {
+  const handlePlay = async () => {
     if (events.length === 0) return;
     requestFocus(id, handleExternalStop);
     setIsPlaying(true);
     setActiveIndex(0);
 
-    const stop = playChordProgression(events, bpm,
-      (idx) => setActiveIndex(idx),
-      () => {
-        setIsPlaying(false);
-        setActiveIndex(-1);
-        releaseFocus(id);
-      },
-    );
-    stopRef.current = stop;
+    try {
+      const stop = await playChordProgression(events, bpm,
+        (idx) => setActiveIndex(idx),
+        () => {
+          setIsPlaying(false);
+          setActiveIndex(-1);
+          releaseFocus(id);
+        },
+      );
+      stopRef.current = stop;
+    } catch (e) {
+      console.error(e);
+      setIsPlaying(false);
+      releaseFocus(id);
+    }
   };
 
   const handleStop = () => {

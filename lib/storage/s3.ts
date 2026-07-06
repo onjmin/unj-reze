@@ -1,5 +1,13 @@
-import fs from 'fs';
-import path from 'path';
+const getRequire = () => {
+  try {
+    return new Function('name', 'return require(name)');
+  } catch {
+    return null;
+  }
+};
+const req = typeof window === 'undefined' ? getRequire() : null;
+const fs = req ? req('fs') : null;
+const path = req ? req('path') : null;
 
 const UPLOADS_DIR = './public/uploads';
 

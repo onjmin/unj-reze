@@ -31,8 +31,11 @@ export const db = new Proxy<DataStore>({} as DataStore, {
   get(_target, prop: keyof DataStore) {
     return async (...args: unknown[]) => {
       const s = await getStore();
-      const method = (s as any)[prop] as Function;
-      return method.apply(s, args);
+      const method = s[prop];
+      if (typeof method === 'function') {
+        return (method as (...args: unknown[]) => unknown).apply(s, args);
+      }
+      throw new Error(`Method ${String(prop)} is not a function`);
     };
   },
 });

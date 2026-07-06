@@ -1,11 +1,27 @@
-import { Pool as NeonPool } from '@neondatabase/serverless';
-import pg from 'pg';
+import { Pool as NeonPool, neonConfig } from '@neondatabase/serverless';
 import { AnonymousUser, OriginType } from '../types';
-import { DbPost as Post, DbGameRecord as GameRecord, DbNotification as Notification } from '../types-db';
+import { DbPost as Post, DbNotification as Notification } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
 import { kvIncr, kvDecr, kvGet } from '../kv';
+
+// Node.js環境（マイグレーション実行時など）での WebSocket ポリフィル
+if (typeof window === 'undefined' && !process.env.NEXT_RUNTIME) {
+  const getRequire = () => {
+    try {
+      return new Function('name', 'return require(name)');
+    } catch {
+      return null;
+    }
+  };
+  const req = getRequire();
+  if (req) {
+    try {
+      neonConfig.webSocketConstructor = req('ws');
+    } catch {}
+  }
+}
 
 let pool: any = null;
 
@@ -15,10 +31,11 @@ function getPool(): any {
     const connectionString = process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze';
     const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
     if (isLocal) {
-      pool = new pg.Pool({ connectionString });
-    } else {
-      pool = new NeonPool({ connectionString });
+      // ローカルの wsproxyd (8080ポート) への WebSocket トンネリング接続を有効化
+      neonConfig.wsConnectionUri = 'ws://localhost:8080/v1';
+      neonConfig.useSecureWebSocket = false;
     }
+    pool = new NeonPool({ connectionString });
   }
   return pool;
 }

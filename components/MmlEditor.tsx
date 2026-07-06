@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Music, Loader2 } from 'lucide-react';
-import { type ModeSwitchInstance } from '@onjmin/dtm';
 import { getStudio } from '@/lib/dtm';
 
 interface MmlEditorProps {
@@ -16,7 +15,7 @@ interface MmlEditorProps {
 // MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
 export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const modeSwitchRef = useRef<ModeSwitchInstance | null>(null);
+  const modeSwitchRef = useRef<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
