@@ -2,7 +2,7 @@
 // three.js で低解像度レンダリングする。レイアウトは Layout25D（プレーンJSON）が唯一の真実で、
 // setLayout() でいつでも丸ごと再構築できる。使い終わったら必ず dispose() を呼ぶこと。
 import * as THREE from 'three';
-import type { Layout25D, Tex25D, Dir4 } from '@/components/game-presets/shared';
+import type { Layout25D, Tex25D, Dir4, Billboard25D } from '@/components/game-presets/shared';
 
 /** 内部レンダリング解像度。CSS 側で pixelated 拡大してドット感を出す。 */
 export const RENDER_W = 320;
@@ -22,6 +22,8 @@ const GRAVITY = 16;
 const POV_MIN_DIST = 0.4;
 const POV_MAX_DIST = 3.5;
 const POV_HEIGHT_ABOVE_EYE = 0.22;  // 三人称視点：目線より上から見下ろす高さ
+const PITCH_LIMIT = (55 * Math.PI) / 180;  // 見上げ/見下ろしの可動域
+const INTERACT_RANGE = 1.4;                // 「はなす」が届く距離（マス単位）
 
 /** 方角 → ヨー角。カメラ前方は (-sin yaw, -cos yaw)。 */
 const YAW_FOR_DIR: Record<Dir4, number> = { 0: 0, 1: -Math.PI / 2, 2: Math.PI, 3: Math.PI / 2 };
@@ -100,7 +102,7 @@ export class Yume25DEngine {
   private buildGen = 0;
 
   // ワールド状態
-  private x = 0; private z = 0; private yaw = 0;
+  private x = 0; private z = 0; private yaw = 0; private pitch = 0;
   private vy = 0; private hop = 0; private grounded = true;
   private jumpQueued = false;
   private pov: PovMode = 'first';
@@ -158,6 +160,7 @@ export class Yume25DEngine {
     const s = this.layout.start;
     this.x = s.col + 0.5; this.z = s.row + 0.5;
     this.yaw = YAW_FOR_DIR[s.dir];
+    this.pitch = 0;
     this.vy = 0; this.hop = 0; this.grounded = true;
     this.clampToBounds();
   }
@@ -190,9 +193,23 @@ export class Yume25DEngine {
     if (this.grounded) this.jumpQueued = true;
   }
 
-  /** ドラッグ操作によるカメラ回転（ラジアン加算）。turnL/turnR とは独立に毎フレーム呼べる。 */
-  turnBy(deltaYaw: number) {
+  /** ドラッグ操作によるカメラ回転（ラジアン加算）。turnL/turnR とは独立に毎フレーム呼べる。
+   *  deltaPitch は上下見回し（見上げ/見下ろし）。可動域を超えないようクランプする。 */
+  turnBy(deltaYaw: number, deltaPitch = 0) {
     this.yaw += deltaYaw;
+    if (deltaPitch !== 0) this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch + deltaPitch));
+  }
+
+  /** 近くの「はなせる」ビルボードを1つ返す（範囲内で最も近いもの。無ければ null）。 */
+  getInteractable(): Billboard25D | null {
+    let best: Billboard25D | null = null;
+    let bestDist = INTERACT_RANGE;
+    for (const b of this.layout.billboards) {
+      if (!b.interactive) continue;
+      const dist = Math.hypot(b.col + 0.5 - this.x, b.row + 0.5 - this.z);
+      if (dist < bestDist) { best = b; bestDist = dist; }
+    }
+    return best;
   }
 
   start() {
@@ -496,11 +513,12 @@ export class Yume25DEngine {
       const dist = this.raycastClamp(backX, backZ, this.povDistance);
       this.camera.position.set(this.x + backX * dist, eyeY + POV_HEIGHT_ABOVE_EYE, this.z + backZ * dist);
       this.camera.rotation.y = this.yaw;
-      this.camera.rotation.x = -Math.atan2(POV_HEIGHT_ABOVE_EYE + 0.1, Math.max(0.35, dist));
+      // 肩越しの俯瞰チルト＋ユーザーの上下見回し操作分を加算
+      this.camera.rotation.x = -Math.atan2(POV_HEIGHT_ABOVE_EYE + 0.1, Math.max(0.35, dist)) + this.pitch;
     } else {
       this.camera.position.set(this.x, eyeY, this.z);
       this.camera.rotation.y = this.yaw;
-      this.camera.rotation.x = 0;
+      this.camera.rotation.x = this.pitch;
     }
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;

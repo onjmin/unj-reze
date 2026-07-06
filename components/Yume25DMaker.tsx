@@ -12,10 +12,21 @@ import {
 } from './game-presets/shared';
 
 const CELL = 28;              // 2Dエディタの1マスpx
-type Tool = 'floor' | 'wall' | 'sprite' | 'start' | 'erase';
-const TOOL_LABELS: Record<Tool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', erase: '消す' };
+type Tool = 'floor' | 'wall' | 'sprite' | 'start' | 'talk' | 'erase';
+const TOOL_LABELS: Record<Tool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', talk: '会話設定', erase: '消す' };
 /** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */
 const DRAG_TURN_SENSITIVITY = 0.006;
+/** D-pad/LOOKパッドの不感帯（px）。中心付近の誤入力を防ぐ。 */
+const PAD_DEADZONE = 10;
+
+interface DialogueState { message: string; choices?: string[]; }
+
+/** setPointerCapture は一部環境で「アクティブなポインタが見つからない」例外を投げることがある
+ *  （マルチタッチの取りこぼしなど）。取れなくてもドラッグ自体は ref 側の手動追跡で継続できるので、
+ *  ここで握りつぶして呼び出し元の状態更新を止めないようにする。 */
+const tryCapturePointer = (el: Element, pointerId: number) => {
+  try { el.setPointerCapture(pointerId); } catch { /* noop */ }
+};
 
 interface Yume25DMakerProps {
   layout: Layout25D;
@@ -47,6 +58,11 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
   const [selWall, setSelWall] = useState(() => texList(layout, 'wall')[0]?.id ?? 0);
   const [selSprite, setSelSprite] = useState(() => texList(layout, 'sprite')[0]?.id ?? 0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [talkTargetId, setTalkTargetId] = useState<string | null>(null);
+  /** 「はなす」で開く会話ウィンドウ。開いている間は仮想ボタン一式を非表示にする。 */
+  const [dialogue, setDialogue] = useState<DialogueState | null>(null);
+  const dialogueRef = useRef<DialogueState | null>(null);
+  dialogueRef.current = dialogue;
 
   const playing = isPlaying || !!demo;
   const is3d = playing || view === '3d';
@@ -81,9 +97,11 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     eng.demo = !!demo;
     if (playing) eng.resetToStart();
     eng.input.forward = eng.input.back = eng.input.turnL = eng.input.turnR = eng.input.strafeL = eng.input.strafeR = eng.input.dash = false;
+    setDialogue(null);
   }, [playing, demo]);
 
   // ── 3D操作：キーボード（矢印＝前後＋旋回、WASD＝前後＋左右ストレイフ、Space＝ジャンプ、Shift＝ダッシュ） ──
+  // 会話ウィンドウが開いている間は移動キーを無視し、Enter/Spaceで閉じる。
   useEffect(() => {
     if (!is3d || demo) return;
     const setKey = (key: string, on: boolean): boolean => {
@@ -103,7 +121,16 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     const down = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (dialogueRef.current) {
+        if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setDialogue(null); }
+        return;
+      }
       if (e.key === ' ') { e.preventDefault(); engineRef.current?.jump(); return; }
+      if (e.key === 'e' || e.key === 'E' || e.key === 'f' || e.key === 'F') {
+        const b = engineRef.current?.getInteractable();
+        if (b) setDialogue({ message: b.message || '……', choices: b.choices });
+        return;
+      }
       if (setKey(e.key, true) && (e.key.startsWith('Arrow') || 'wasdWASD'.includes(e.key))) e.preventDefault();
     };
     const up = (e: KeyboardEvent) => { setKey(e.key, false); };
@@ -115,30 +142,81 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
   const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash') => ({
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      tryCapturePointer(e.currentTarget as HTMLElement, e.pointerId);
       const inp = engineRef.current?.input; if (inp) inp[prop] = true;
     },
     onPointerUp: () => { const inp = engineRef.current?.input; if (inp) inp[prop] = false; },
     onPointerCancel: () => { const inp = engineRef.current?.input; if (inp) inp[prop] = false; },
   });
 
-  // ── 3D操作：ドラッグでカメラ回転（マウス・タッチ共通。Pointer Events を使うので追加実装不要） ──
-  const dragRef = useRef<{ id: number; lastX: number } | null>(null);
+  // ── 3D操作：ドラッグでカメラ回転（マウス・タッチ共通。Pointer Events を使うので追加実装不要）。
+  //    横方向＝旋回(yaw)、縦方向＝見上げ/見下ろし(pitch)。 ──
+  const dragRef = useRef<{ id: number; lastX: number; lastY: number } | null>(null);
   const glPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!is3d || demo) return;
     e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { id: e.pointerId, lastX: e.clientX };
+    tryCapturePointer(e.currentTarget, e.pointerId);
+    dragRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY };
   };
   const glPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const d = dragRef.current;
     if (!d || d.id !== e.pointerId) return;
-    const dx = e.clientX - d.lastX;
-    d.lastX = e.clientX;
-    if (dx !== 0) engineRef.current?.turnBy(-dx * DRAG_TURN_SENSITIVITY);
+    const dx = e.clientX - d.lastX, dy = e.clientY - d.lastY;
+    d.lastX = e.clientX; d.lastY = e.clientY;
+    if (dx !== 0 || dy !== 0) engineRef.current?.turnBy(-dx * DRAG_TURN_SENSITIVITY, -dy * DRAG_TURN_SENSITIVITY);
   };
   const glPointerEnd = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (dragRef.current?.id === e.pointerId) dragRef.current = null;
+  };
+
+  // ── 仮想 D-pad：1つの領域内でのポインタ位置から forward/back/strafeL/strafeR を合成する ──
+  const dpadPointerRef = useRef<number | null>(null);
+  const applyDpad = (e: React.PointerEvent<HTMLDivElement>) => {
+    const inp = engineRef.current?.input; if (!inp) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const dx = e.clientX - (rect.left + rect.width / 2), dy = e.clientY - (rect.top + rect.height / 2);
+    const dist = Math.hypot(dx, dy);
+    if (dist < PAD_DEADZONE) { inp.forward = inp.back = inp.strafeL = inp.strafeR = false; return; }
+    const nx = dx / dist, ny = dy / dist;
+    const AXIS = 0.35;
+    inp.strafeR = nx > AXIS; inp.strafeL = nx < -AXIS;
+    inp.back = ny > AXIS; inp.forward = ny < -AXIS;
+  };
+  const dpadDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    tryCapturePointer(e.currentTarget, e.pointerId);
+    dpadPointerRef.current = e.pointerId;
+    applyDpad(e);
+  };
+  const dpadMove = (e: React.PointerEvent<HTMLDivElement>) => { if (dpadPointerRef.current === e.pointerId) applyDpad(e); };
+  const dpadEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dpadPointerRef.current !== e.pointerId) return;
+    dpadPointerRef.current = null;
+    const inp = engineRef.current?.input; if (inp) inp.forward = inp.back = inp.strafeL = inp.strafeR = false;
+  };
+
+  // ── 仮想 LOOK ボタン：ドラッグでカメラ回転（ドラッグ量は前回位置との差分） ──
+  const lookPointerRef = useRef<{ id: number; lastX: number; lastY: number } | null>(null);
+  const lookDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    tryCapturePointer(e.currentTarget, e.pointerId);
+    lookPointerRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY };
+  };
+  const lookMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = lookPointerRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.lastX, dy = e.clientY - d.lastY;
+    d.lastX = e.clientX; d.lastY = e.clientY;
+    if (dx !== 0 || dy !== 0) engineRef.current?.turnBy(-dx * DRAG_TURN_SENSITIVITY, -dy * DRAG_TURN_SENSITIVITY);
+  };
+  const lookEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (lookPointerRef.current?.id === e.pointerId) lookPointerRef.current = null;
+  };
+
+  // ── 「はなす」：近くの interactive なビルボードがあれば会話ウィンドウを開く ──
+  const handleTalk = () => {
+    const b = engineRef.current?.getInteractable();
+    if (b) setDialogue({ message: b.message || '……', choices: b.choices });
   };
 
   // ── 2Dエディタ描画 ───────────────────────────────────────────────────────
@@ -242,6 +320,11 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       });
       return;
     }
+    if (tool === 'talk') {
+      const hit = layoutRef.current.billboards.find(b => b.col === c && b.row === r);
+      setTalkTargetId(hit ? hit.id : null);
+      return;
+    }
     // erase: ビルボード → 壁（辺の近く） → 床 の順に消す
     onLayoutChange(l => {
       const bb = l.billboards.find(b => b.col === c && b.row === r);
@@ -332,7 +415,7 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
                 ))}
               </>
             ) : (
-              <span className="text-[10px] text-gray-400 px-1">WASDで移動/ストレイフ・ドラッグで視点回転・Shiftでダッシュ・Spaceでジャンプ</span>
+              <span className="text-[10px] text-gray-400 px-1">WASDで移動/ストレイフ・ドラッグで視点回転(上下も可)・Shiftでダッシュ・Spaceでジャンプ・E/Fではなす</span>
             )}
             <button onClick={() => setSettingsOpen(v => !v)}
               className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
@@ -357,6 +440,33 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
               ))}
             </div>
           )}
+
+          {/* 会話設定：スプライトをタップして選択し、メッセージ/選択肢/はなせるかどうかを編集する */}
+          {view === '2d' && tool === 'talk' && (() => {
+            const target = layout.billboards.find(b => b.id === talkTargetId);
+            if (!target) return (
+              <p className="text-[10px] text-gray-500 px-1">スプライトをタップして選択してください</p>
+            );
+            return (
+              <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+                <label className="flex items-center gap-1.5">
+                  <input type="checkbox" checked={!!target.interactive}
+                    onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, interactive: e.target.checked } : b) }))} />
+                  はなせる（「はなす」ボタンの対象にする）
+                </label>
+                <label className="flex items-center gap-1.5">メッセージ
+                  <input type="text" value={target.message ?? ''} placeholder="……"
+                    onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, message: e.target.value } : b) }))}
+                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
+                </label>
+                <label className="flex items-center gap-1.5">選択肢（,区切り）
+                  <input type="text" value={(target.choices ?? []).join(',')}
+                    onChange={e => { const v = e.target.value; const choices = v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, choices } : b) })); }}
+                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
+                </label>
+              </div>
+            );
+          })()}
 
           {/* 設定パネル */}
           {settingsOpen && (
@@ -412,18 +522,30 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
         </div>
       )}
 
-      {/* 3D操作ボタン（タッチ用。視点回転は画面ドラッグに任せ、ここは移動系のみ。デモ中は非表示） */}
-      {is3d && !demo && (
+      {/* 3D操作パネル（タッチ用）。会話ウィンドウを表示中は選択の邪魔にならないよう丸ごと隠す。デモ中も非表示。 */}
+      {is3d && !demo && !dialogue && (
         <>
-          <div className="absolute bottom-2 left-2 z-20 flex gap-1.5 opacity-90 touch-none">
-            <button {...holdProps('strafeL')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">◀</button>
-            <button {...holdProps('strafeR')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">▶</button>
+          {/* 仮想 D-pad：左手で移動（前後＋左右ストレイフ、斜め可）。 */}
+          <div
+            onPointerDown={dpadDown} onPointerMove={dpadMove} onPointerUp={dpadEnd} onPointerCancel={dpadEnd}
+            className="absolute bottom-2 left-2 z-20 w-24 h-24 rounded-full bg-gray-700/60 border border-gray-500/60 opacity-90 touch-none select-none flex items-center justify-center"
+          >
+            <span className="absolute top-1.5 text-white/70 text-xs">▲</span>
+            <span className="absolute bottom-1.5 text-white/70 text-xs">▼</span>
+            <span className="absolute left-1.5 text-white/70 text-xs">◀</span>
+            <span className="absolute right-1.5 text-white/70 text-xs">▶</span>
+            <span className="w-3 h-3 rounded-full bg-white/30" />
           </div>
-          <div className="absolute bottom-2 right-2 z-20 flex flex-col gap-1.5 opacity-90 touch-none">
-            <button {...holdProps('forward')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">▲</button>
-            <button {...holdProps('back')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">▼</button>
+
+          {/* 仮想 LOOK ボタン：右手でドラッグしてカメラ回転（上下も可）。 */}
+          <div
+            onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookEnd} onPointerCancel={lookEnd}
+            className="absolute bottom-2 right-2 z-20 w-24 h-24 rounded-full bg-gray-700/60 border border-gray-500/60 opacity-90 touch-none select-none flex items-center justify-center text-white/70 text-[11px] font-bold"
+          >
+            LOOK
           </div>
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 opacity-90 touch-none">
+
+          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 opacity-90 touch-none">
             <button {...holdProps('dash')}
               className="w-12 h-10 bg-amber-700/85 active:bg-amber-500 rounded-lg text-white text-[10px] font-bold flex items-center justify-center">
               DASH
@@ -433,8 +555,37 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
               className="w-12 h-12 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
               JUMP
             </button>
+            <button
+              onPointerDown={e => { e.preventDefault(); handleTalk(); }}
+              className="w-12 h-10 bg-sky-700/85 active:bg-sky-500 rounded-lg text-white text-[10px] font-bold flex items-center justify-center">
+              TALK
+            </button>
           </div>
         </>
+      )}
+
+      {/* 会話ウィンドウ（選択肢がある場合は「選ぶ」までここに留まり、仮想ボタンは上で隠されている）。 */}
+      {is3d && dialogue && (
+        <div className="absolute inset-x-0 bottom-0 z-30 p-3">
+          <div className="mx-auto max-w-md bg-black/90 border border-white/25 rounded-lg p-3 text-white text-[12px] leading-relaxed">
+            <p className="whitespace-pre-wrap mb-2">{dialogue.message}</p>
+            {dialogue.choices?.length ? (
+              <div className="flex flex-col gap-1.5">
+                {dialogue.choices.map((c, i) => (
+                  <button key={i} onClick={() => setDialogue(null)}
+                    className="text-left px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded text-[11px]">
+                    ▸ {c}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <button onClick={() => setDialogue(null)}
+                className="w-full text-center px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded text-[11px]">
+                とじる
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

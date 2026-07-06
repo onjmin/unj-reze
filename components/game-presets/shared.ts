@@ -335,8 +335,15 @@ export interface Tex25D {
  *  （南辺＝1つ下のセルの北辺、東辺＝1つ右のセルの西辺）。 */
 export interface Wall25D { col: number; row: number; dir: Dir4; tex: number; }
 
-/** ビルボードスプライト（常にカメラへ正対する薄板）。セル中央に立つ。 */
-export interface Billboard25D { id: string; col: number; row: number; tex: number; scale?: number; }
+/** ビルボードスプライト（常にカメラへ正対する薄板）。セル中央に立つ。
+ *  interactive=true のとき「話す」ボタンの対象になる（message／choices を表示）。 */
+export interface Billboard25D {
+  id: string; col: number; row: number; tex: number; scale?: number;
+  interactive?: boolean;
+  message?: string;
+  /** 選択肢（あれば「はなす」でメッセージの下に並ぶ。実行結果は無く、選ぶと会話が閉じるだけ）。 */
+  choices?: string[];
+}
 
 /** 2.5Dエンジンのレイアウト全体。プレーンJSONとしてそのまま保存できる。 */
 export interface Layout25D {
