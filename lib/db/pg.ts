@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool } from '@neondatabase/serverless';
 import { Post, AnonymousUser, OriginType } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
@@ -6,322 +6,7 @@ import { formatRelativeTime } from '../time';
 import { kvIncr, kvDecr, kvGet } from '../kv';
 
 let pool: Pool | null = null;
-let initialized = false;
 
-async function ensureTables(client: any) {
-  if (initialized) return;
-
-  // Core tables: 新規DBでも必ず存在するように作成
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS trends (
-      id SERIAL PRIMARY KEY,
-      keyword TEXT NOT NULL,
-      count INTEGER NOT NULL DEFAULT 0
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS notifications (
-      id SERIAL PRIMARY KEY,
-      user_name TEXT NOT NULL,
-      action TEXT NOT NULL,
-      target TEXT NOT NULL DEFAULT '',
-      type TEXT NOT NULL DEFAULT 'like',
-      post_id INTEGER,
-      target_user TEXT,
-      read BOOLEAN NOT NULL DEFAULT false,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS messages (
-      id SERIAL PRIMARY KEY,
-      sender TEXT NOT NULL,
-      text TEXT NOT NULL,
-      recipient TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS posts (
-      id SERIAL PRIMARY KEY,
-      thread_id INTEGER NOT NULL,
-      parent_post_id INTEGER,
-      display_name TEXT NOT NULL,
-      slug TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      content TEXT NOT NULL,
-      likes INTEGER NOT NULL DEFAULT 0,
-      dislikes INTEGER NOT NULL DEFAULT 0,
-      liked BOOLEAN NOT NULL DEFAULT FALSE,
-      disliked BOOLEAN NOT NULL DEFAULT FALSE,
-      replies_count INTEGER NOT NULL DEFAULT 0,
-      reposts INTEGER NOT NULL DEFAULT 0,
-      reposted BOOLEAN NOT NULL DEFAULT FALSE,
-      has_image BOOLEAN NOT NULL DEFAULT FALSE,
-      image_src TEXT,
-      image_alt TEXT,
-      avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
-      has_collab_button BOOLEAN NOT NULL DEFAULT FALSE,
-      hearts_total INTEGER NOT NULL DEFAULT 0,
-      has_game BOOLEAN NOT NULL DEFAULT FALSE,
-      game_id BIGINT,
-      is_original BOOLEAN,
-      origin_type TEXT,
-      is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE,
-      is_edited BOOLEAN NOT NULL DEFAULT FALSE
-    )
-  `);
-
-  // Migration: add sequences for tables created with INTEGER PRIMARY KEY (not SERIAL)
-  const tables = ['notifications', 'messages', 'trends', 'posts', 'post_votes', 'post_hearts'];
-  for (const table of tables) {
-    await client.query(`
-      DO $$ BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '${table}') THEN
-          IF NOT EXISTS (
-            SELECT 1 FROM pg_attrdef
-            JOIN pg_class ON pg_attrdef.adrelid = pg_class.oid
-            JOIN pg_attribute ON pg_attrdef.adrelid = pg_attribute.attrelid AND pg_attrdef.adnum = pg_attribute.attnum
-            WHERE pg_class.relname = '${table}' AND pg_attribute.attname = 'id'
-          ) THEN
-            CREATE SEQUENCE IF NOT EXISTS ${table}_id_seq;
-            ALTER TABLE ${table} ALTER COLUMN id SET DEFAULT nextval('${table}_id_seq');
-            ALTER SEQUENCE ${table}_id_seq OWNED BY ${table}.id;
-            PERFORM setval('${table}_id_seq', COALESCE((SELECT MAX(id) FROM ${table}), 0));
-          END IF;
-        END IF;
-      END $$;
-    `);
-  }
-
-  // Migration: add columns to notifications table for navigation links
-  // Guard: テーブルが存在しない新規DBではスキップ（CREATE TABLE後に自動的に正しいカラムで作られる）
-  for (const col of ['type', 'post_id', 'target_user']) {
-    await client.query(`
-      DO $$ BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'notifications') THEN
-          IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'notifications' AND column_name = '${col}'
-          ) THEN
-            ALTER TABLE notifications ADD COLUMN ${col} ${col === 'type' ? 'TEXT NOT NULL DEFAULT \'like\'' : col === 'post_id' ? 'INTEGER' : 'TEXT'};
-          END IF;
-        END IF;
-      END $$;
-    `);
-  }
-  // Migration: set type/post_id/target_user for existing seed rows
-  await client.query(`
-    DO $$ BEGIN
-      IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'notifications') THEN
-        UPDATE notifications SET type = 'like', post_id = 7 WHERE id = 1 AND type = 'like' AND post_id IS NULL;
-        UPDATE notifications SET type = 'repost', post_id = 6 WHERE id = 2 AND type = 'like' AND post_id IS NULL;
-        UPDATE notifications SET type = 'reply', post_id = 5 WHERE id = 3 AND type = 'like' AND post_id IS NULL;
-        UPDATE notifications SET type = 'follow', target_user = '名無しvFZ' WHERE id = 4 AND type = 'like' AND target_user IS NULL;
-      END IF;
-    END $$;
-  `);
-
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS post_votes (
-      id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-      user_id TEXT NOT NULL,
-      vote_type TEXT NOT NULL CHECK (vote_type IN ('like', 'dislike')),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (post_id, user_id)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS post_hearts (
-      id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-      user_id TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'messages' AND column_name = 'recipient'
-      ) THEN
-        ALTER TABLE messages ADD COLUMN recipient TEXT;
-      END IF;
-    END $$;
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS anonymous_users (
-      id TEXT PRIMARY KEY,
-      ip_address TEXT NOT NULL,
-      session_id TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      slug TEXT,
-      avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_anonymous_users_ip ON anonymous_users(ip_address)
-  `);
-  await client.query(`
-    CREATE INDEX IF NOT EXISTS idx_anonymous_users_session ON anonymous_users(session_id)
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS user_follows (
-      id SERIAL PRIMARY KEY,
-      follower_id TEXT NOT NULL,
-      followed_id TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (follower_id, followed_id)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS games (
-      id BIGINT PRIMARY KEY,
-      preset TEXT NOT NULL,
-      title TEXT NOT NULL,
-      manifest TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'posts' AND column_name = 'game_id'
-      ) THEN
-        ALTER TABLE posts ADD COLUMN game_id BIGINT;
-      END IF;
-    END $$;
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'posts' AND column_name = 'is_original'
-      ) THEN
-        ALTER TABLE posts ADD COLUMN is_original BOOLEAN;
-      END IF;
-    END $$;
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'posts' AND column_name = 'origin_type'
-      ) THEN
-        ALTER TABLE posts ADD COLUMN origin_type TEXT;
-      END IF;
-    END $$;
-  `);
-  // Migration: 旧 is_original(boolean) の値を origin_type(自作/他作/AI作品) に引き継ぐ
-  await client.query(`
-    UPDATE posts SET origin_type = CASE WHEN is_original THEN 'original' ELSE 'derivative' END
-    WHERE origin_type IS NULL AND is_original IS NOT NULL
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'posts' AND column_name = 'is_false_declaration'
-      ) THEN
-        ALTER TABLE posts ADD COLUMN is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE;
-      END IF;
-    END $$;
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'posts' AND column_name = 'is_edited'
-      ) THEN
-        ALTER TABLE posts ADD COLUMN is_edited BOOLEAN NOT NULL DEFAULT FALSE;
-      END IF;
-    END $$;
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS game_schedule (
-      hour_slot TEXT PRIMARY KEY,
-      game_id BIGINT NOT NULL
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS game_votes (
-      id SERIAL PRIMARY KEY,
-      game_id BIGINT NOT NULL,
-      ip_address TEXT NOT NULL,
-      hour_slot TEXT NOT NULL,
-      UNIQUE(ip_address, hour_slot)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS game_players (
-      session_id TEXT NOT NULL,
-      game_id BIGINT NOT NULL,
-      x REAL NOT NULL DEFAULT 0,
-      y REAL NOT NULL DEFAULT 0,
-      emoji TEXT NOT NULL DEFAULT '🎮',
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (session_id, game_id)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS user_blocks (
-      blocker_slug TEXT NOT NULL,
-      blocked_slug TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (blocker_slug, blocked_slug)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS user_mutes (
-      muter_slug TEXT NOT NULL,
-      muted_slug TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (muter_slug, muted_slug)
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS reports (
-      id SERIAL PRIMARY KEY,
-      reporter_slug TEXT NOT NULL,
-      target_type TEXT NOT NULL,
-      target_id TEXT NOT NULL,
-      reason TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS migration_tokens (
-      token TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anonymous_users' AND column_name = 'is_private') THEN
-        ALTER TABLE anonymous_users ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT false;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anonymous_users' AND column_name = 'hide_from_search') THEN
-        ALTER TABLE anonymous_users ADD COLUMN hide_from_search BOOLEAN NOT NULL DEFAULT false;
-      END IF;
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'anonymous_users' AND column_name = 'hide_reactions') THEN
-        ALTER TABLE anonymous_users ADD COLUMN hide_reactions BOOLEAN NOT NULL DEFAULT false;
-      END IF;
-    END $$;
-  `);
-  await client.query(`
-    DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'notifications' AND column_name = 'read') THEN
-        ALTER TABLE notifications ADD COLUMN read BOOLEAN NOT NULL DEFAULT false;
-      END IF;
-    END $$;
-  `);
-  initialized = true;
-}
 
 function getPool(): Pool {
   if (!pool) {
@@ -393,7 +78,6 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
 }
 
 async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> {
-  await ensureTables(client);
   let result;
   if (userId) {
     result = await client.query(`
@@ -431,7 +115,6 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
 }
 
 async function getPostWithVotes(client: any, id: number, userId?: string): Promise<Post | null> {
-  await ensureTables(client);
   let result;
   if (userId) {
     result = await client.query(`
@@ -540,7 +223,6 @@ export const pgStore: DataStore = {
   async createPost(data: CreatePostParams) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const slug = data.slug || deriveSlugPg(data.displayName);
       const insertResult = await client.query(
         `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
@@ -561,7 +243,6 @@ export const pgStore: DataStore = {
   async likePost(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('BEGIN');
       const postResult = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
       if (postResult.rows.length === 0) {
@@ -610,7 +291,6 @@ export const pgStore: DataStore = {
   async dislikePost(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('BEGIN');
       const postResult = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
       if (postResult.rows.length === 0) {
@@ -657,7 +337,6 @@ export const pgStore: DataStore = {
   async heartPost(id: number, userId: string, count: number = 1) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const postResult = await client.query('SELECT id, display_name, content FROM posts WHERE id = $1', [id]);
       if (postResult.rows.length === 0) return null;
 
@@ -708,7 +387,6 @@ export const pgStore: DataStore = {
   async addReply(postId: number, data: ReplyParams) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
@@ -749,7 +427,6 @@ export const pgStore: DataStore = {
   async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const postResult = await client.query('SELECT slug, display_name, content, origin_type FROM posts WHERE id = $1', [id]);
       if (postResult.rows.length === 0) return null;
       const viewerSlug = await resolveViewerSlug(client, userId);
@@ -782,7 +459,6 @@ export const pgStore: DataStore = {
   async deletePost(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const postResult = await client.query('SELECT * FROM posts WHERE id = $1', [id]);
       if (postResult.rows.length === 0) return false;
       const post = postResult.rows[0];
@@ -813,7 +489,6 @@ export const pgStore: DataStore = {
   async deleteMessage(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const msgResult = await client.query('SELECT sender FROM messages WHERE id = $1', [id]);
       if (msgResult.rows.length === 0) return false;
       const sender = msgResult.rows[0].sender;
@@ -829,7 +504,6 @@ export const pgStore: DataStore = {
   async getLikedPosts(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(`
         SELECT p.*,
           COALESCE(pv.vote_type = 'like', false) as liked,
@@ -848,7 +522,6 @@ export const pgStore: DataStore = {
   async getDislikedPosts(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(`
         SELECT p.*,
           COALESCE(pv.vote_type = 'like', false) as liked,
@@ -867,7 +540,6 @@ export const pgStore: DataStore = {
   async getHeartedPosts(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(`
         SELECT p.*,
           false as liked,
@@ -886,7 +558,6 @@ export const pgStore: DataStore = {
   async getUserPostsBySlug(slug: string, userId?: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       let result;
       if (userId) {
         result = await client.query(`
@@ -964,7 +635,6 @@ export const pgStore: DataStore = {
   async markNotificationRead(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('UPDATE notifications SET read = true WHERE id = $1 AND target_user = $2', [id, userId]);
     } finally { client.release(); }
   },
@@ -972,7 +642,6 @@ export const pgStore: DataStore = {
   async markAllNotificationsRead(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('UPDATE notifications SET read = true WHERE target_user = $1', [userId]);
     } finally { client.release(); }
   },
@@ -980,7 +649,6 @@ export const pgStore: DataStore = {
   async deleteNotification(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('DELETE FROM notifications WHERE id = $1 AND target_user = $2', [id, userId]);
     } finally { client.release(); }
   },
@@ -988,7 +656,6 @@ export const pgStore: DataStore = {
   async getUnreadCount(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query('SELECT COUNT(*) AS cnt FROM notifications WHERE target_user = $1 AND read = false', [userId]);
       return parseInt(result.rows[0].cnt, 10);
     } finally { client.release(); }
@@ -1070,7 +737,6 @@ export const pgStore: DataStore = {
     if (!query.trim()) return [];
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(`
         SELECT p.*,
           false as liked,
@@ -1094,7 +760,6 @@ export const pgStore: DataStore = {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(`
         SELECT p.*,
           false as liked,
@@ -1117,7 +782,6 @@ export const pgStore: DataStore = {
   async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
 
       const sessionResult = await client.query(
         'SELECT * FROM anonymous_users WHERE session_id = $1',
@@ -1185,7 +849,6 @@ export const pgStore: DataStore = {
   async updateUserDisplayName(userId: string, displayName: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const slug = deriveSlugPg(displayName);
       await client.query(
         'UPDATE anonymous_users SET display_name = $1, slug = $2 WHERE id = $3',
@@ -1199,7 +862,6 @@ export const pgStore: DataStore = {
   async getUserSettings(slug: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const r = await client.query('SELECT is_private, hide_from_search, hide_reactions FROM anonymous_users WHERE slug = $1 LIMIT 1', [slug]);
       const row = r.rows[0];
       return {
@@ -1215,7 +877,6 @@ export const pgStore: DataStore = {
   async updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const sets: string[] = [];
       const vals: any[] = [];
       let i = 1;
@@ -1233,7 +894,6 @@ export const pgStore: DataStore = {
   async issueMigrationToken(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
       await client.query('INSERT INTO migration_tokens (token, user_id) VALUES ($1, $2)', [token, userId]);
       return token;
@@ -1245,7 +905,6 @@ export const pgStore: DataStore = {
   async redeemMigrationToken(token: string, newSessionId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const r = await client.query('SELECT user_id FROM migration_tokens WHERE token = $1', [token]);
       if (r.rows.length === 0) return null;
       const userId = r.rows[0].user_id;
@@ -1269,7 +928,6 @@ export const pgStore: DataStore = {
   async followUser(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const ins = await client.query(
         'INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [followerId, followedId]
@@ -1285,7 +943,6 @@ export const pgStore: DataStore = {
   async unfollowUser(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query(
         'DELETE FROM user_follows WHERE follower_id = $1 AND followed_id = $2',
         [followerId, followedId]
@@ -1298,7 +955,6 @@ export const pgStore: DataStore = {
   async isFollowing(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(
         'SELECT 1 FROM user_follows WHERE follower_id = $1 AND followed_id = $2 LIMIT 1',
         [followerId, followedId]
@@ -1312,7 +968,6 @@ export const pgStore: DataStore = {
   async getFollowCounts(userId: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query(`
         SELECT
           (SELECT COUNT(*) FROM user_follows WHERE followed_id = $1) AS followers,
@@ -1331,7 +986,6 @@ export const pgStore: DataStore = {
     if (blockerSlug === blockedSlug) return;
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query(
         'INSERT INTO user_blocks (blocker_slug, blocked_slug) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [blockerSlug, blockedSlug]
@@ -1342,7 +996,6 @@ export const pgStore: DataStore = {
   async unblockUser(blockerSlug: string, blockedSlug: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('DELETE FROM user_blocks WHERE blocker_slug = $1 AND blocked_slug = $2', [blockerSlug, blockedSlug]);
     } finally { client.release(); }
   },
@@ -1350,7 +1003,6 @@ export const pgStore: DataStore = {
   async getBlockedSlugs(blockerSlug: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query('SELECT blocked_slug FROM user_blocks WHERE blocker_slug = $1', [blockerSlug]);
       return result.rows.map((r: any) => r.blocked_slug);
     } finally { client.release(); }
@@ -1360,7 +1012,6 @@ export const pgStore: DataStore = {
     if (muterSlug === mutedSlug) return;
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query(
         'INSERT INTO user_mutes (muter_slug, muted_slug) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [muterSlug, mutedSlug]
@@ -1371,7 +1022,6 @@ export const pgStore: DataStore = {
   async unmuteUser(muterSlug: string, mutedSlug: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('DELETE FROM user_mutes WHERE muter_slug = $1 AND muted_slug = $2', [muterSlug, mutedSlug]);
     } finally { client.release(); }
   },
@@ -1379,7 +1029,6 @@ export const pgStore: DataStore = {
   async getMutedSlugs(muterSlug: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [muterSlug]);
       return result.rows.map((r: any) => r.muted_slug);
     } finally { client.release(); }
@@ -1388,7 +1037,6 @@ export const pgStore: DataStore = {
   async reportContent(data: ReportParams) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query(
         'INSERT INTO reports (reporter_slug, target_type, target_id, reason) VALUES ($1, $2, $3, $4)',
         [data.reporterSlug, data.targetType, data.targetId, data.reason]
@@ -1399,7 +1047,6 @@ export const pgStore: DataStore = {
   async createGame(data) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const id = Date.now() + Math.floor(Math.random() * 1000);
       const now = new Date().toISOString();
       await client.query(
@@ -1415,7 +1062,6 @@ export const pgStore: DataStore = {
   async getGame(id) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query('SELECT * FROM games WHERE id = $1', [id]);
       if (result.rows.length === 0) return null;
       const r = result.rows[0];
@@ -1429,7 +1075,6 @@ export const pgStore: DataStore = {
   async listAllGames() {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query('SELECT * FROM games ORDER BY id DESC');
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
@@ -1443,7 +1088,6 @@ export const pgStore: DataStore = {
   async getLiveGameInfo(ipAddress: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const slot = new Date().toISOString().slice(0, 13);
       const schedResult = await client.query('SELECT game_id FROM game_schedule WHERE hour_slot = $1', [slot]);
       let gameId: number | null = null;
@@ -1490,7 +1134,6 @@ export const pgStore: DataStore = {
   async voteGame(gameId: number, ipAddress: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const slot = new Date().toISOString().slice(0, 13);
       await client.query('INSERT INTO game_votes (game_id, ip_address, hour_slot) VALUES ($1, $2, $3) ON CONFLICT (ip_address, hour_slot) DO UPDATE SET game_id = $1', [gameId, ipAddress, slot]);
     } finally {
@@ -1501,7 +1144,6 @@ export const pgStore: DataStore = {
   async updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       await client.query('INSERT INTO game_players (session_id, game_id, x, y, emoji, updated_at) VALUES ($1, $2, $3, $4, $5, NOW()) ON CONFLICT (session_id, game_id) DO UPDATE SET x=$3, y=$4, emoji=$5, updated_at=NOW()', [sessionId, gameId, x, y, emoji]);
       await client.query("DELETE FROM game_players WHERE updated_at < NOW() - INTERVAL '15 seconds'");
     } finally {
@@ -1512,7 +1154,6 @@ export const pgStore: DataStore = {
   async getGamePlayers(gameId: number, excludeSession: string) {
     const client = await getPool().connect();
     try {
-      await ensureTables(client);
       const result = await client.query("SELECT * FROM game_players WHERE game_id = $1 AND session_id != $2 AND updated_at > NOW() - INTERVAL '10 seconds'", [gameId, excludeSession]);
       return result.rows.map((r: any) => ({ sessionId: r.session_id, x: r.x, y: r.y, emoji: r.emoji, updatedAt: r.updated_at?.toISOString?.() }));
     } finally {
