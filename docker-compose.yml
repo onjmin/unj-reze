@@ -18,13 +18,15 @@ services:
       timeout: 5s
       retries: 5
 
-  # Neon用 WebSocket プロキシ
+  # Neon用 WebSocket プロキシ (公式 wsproxy: https://github.com/neondatabase/wsproxy)
   web-proxy:
-    image: neondatabase/wsproxyd:latest
+    image: ghcr.io/neondatabase/wsproxy:latest
     ports:
-      - "8080:8080"
+      - "8080:80"
     environment:
-      DATABASE_URL: postgresql://neon:neon@db-neon:5432/unj_reze
+      LISTEN_PORT: ":80"
+      # db-neon はこのコンテナのネットワークからのみ名前解決できるためこれを許可
+      ALLOW_ADDR_REGEX: "^db-neon:5432$"
     depends_on:
       db-neon:
         condition: service_healthy

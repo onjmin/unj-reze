@@ -31,9 +31,15 @@ function getPool(): any {
     const connectionString = process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze';
     const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
     if (isLocal) {
-      // ローカルの wsproxyd (8080ポート) への WebSocket トンネリング接続を有効化
-      neonConfig.wsConnectionUri = 'ws://localhost:8080/v1';
+      // ローカルの wsproxy (8080ポート) への WebSocket トンネリング接続を有効化。
+      // wsproxy は Docker ネットワーク内で動くため、接続先アドレスは
+      // ホスト側の DATABASE_URL の host(localhost)ではなく、
+      // wsproxy から解決できる db-neon:5432 を明示的に指定する。
+      neonConfig.wsProxy = () => 'localhost:8080/v1?address=db-neon:5432';
       neonConfig.useSecureWebSocket = false;
+      // postgres:16-alpine はデフォルトで scram-sha-256(SASL)認証のため、
+      // クリアテキストパスワード専用の pipelineConnect は使えない。
+      neonConfig.pipelineConnect = false;
     }
     pool = new NeonPool({ connectionString });
   }
