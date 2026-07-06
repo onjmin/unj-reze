@@ -5,12 +5,13 @@ import { rockman } from './rockman';
 import { touhou } from './touhou';
 import { onjReze } from './onj-reze';
 import { undertale } from './undertale';
+import { yume } from './yume';
 
 export * from './shared';
 
-export const PRESETS: Record<PresetId, PresetData> = { dq, mario, rockman, touhou, onjReze, undertale };
-export const PRESET_ORDER: PresetId[] = ['onjReze', 'dq', 'mario', 'touhou', 'rockman', 'undertale'];
-export const PRESET_EMOJI: Record<PresetId, string> = { dq: '🐉', mario: '🍄', touhou: '🎀', rockman: '🤖', onjReze: '💣', undertale: '❤️' };
+export const PRESETS: Record<PresetId, PresetData> = { dq, mario, rockman, touhou, onjReze, undertale, yume };
+export const PRESET_ORDER: PresetId[] = ['onjReze', 'dq', 'mario', 'touhou', 'rockman', 'undertale', 'yume'];
+export const PRESET_EMOJI: Record<PresetId, string> = { dq: '🐉', mario: '🍄', touhou: '🎀', rockman: '🤖', onjReze: '💣', undertale: '❤️', yume: '🌙' };
 
 /** ギャラリーで各プリセットの中身を一言で伝えるキャッチコピー。 */
 export const PRESET_TAGLINE: Record<PresetId, string> = {
@@ -20,4 +21,5 @@ export const PRESET_TAGLINE: Record<PresetId, string> = {
   touhou: '弾幕をよけるシューティング',
   rockman: '撃って進むアクション',
   undertale: 'ころさなくてもいいRPG',
+  yume: 'さまよう2.5Dの夢の世界',
 };

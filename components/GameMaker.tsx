@@ -29,6 +29,7 @@ import {
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig,
   defaultTitleScreen, defaultEndingScreen,
+  type Layout25D,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -36,6 +37,7 @@ import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
+import Yume25DMaker from './Yume25DMaker';
 
 export type { PresetId };
 
@@ -134,6 +136,8 @@ export interface GameManifestDraft {
   phases?: StagePhase[];
   titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
   ending?: Omit<EndingScreenConfig, 'bgUrl'>;
+  /** 2.5Dエンジン（yume25d）のレイアウト。 */
+  layout25d?: Layout25D;
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
   scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
   battle?: BattleConfig;
@@ -2292,6 +2296,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         titleScreen: initialManifest.titleScreen ?? base.titleScreen,
         ending: initialManifest.ending ?? base.ending,
         battle: initialManifest.battle ?? base.battle,
+        layout25d: initialManifest.layout25d ?? base.layout25d,
         bgm: initialManifest.bgm && initialManifest.bgm !== 'none' ? { ref: initialManifest.bgm } : undefined,
         battleBgm: initialManifest.battleBgm ? { ref: initialManifest.battleBgm } : undefined,
         bossBgm: initialManifest.bossBgm ? { ref: initialManifest.bossBgm } : undefined,
@@ -6198,6 +6203,7 @@ const lose = (msg: string) => {
     titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
     ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
     battle: gameData.battle,
+    layout25d: gameData.layout25d,
     scenes: gameData.scenes?.map(s => ({
       id: s.id, name: s.name, exits: s.exits,
       map: s.map,
@@ -6249,6 +6255,7 @@ const lose = (msg: string) => {
           titleScreen: manifest.titleScreen ?? base.titleScreen,
           ending: manifest.ending ?? base.ending,
           battle: manifest.battle ?? base.battle,
+          layout25d: manifest.layout25d ?? base.layout25d,
           scenes: manifest.scenes?.map(s => ({
             ...s,
             objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
@@ -6491,15 +6498,24 @@ const lose = (msg: string) => {
         <div className={`flex flex-col items-center justify-center bg-black overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1 portrait:flex-none'}`}>
           <div className="relative w-full mx-auto overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
             style={{ aspectRatio: `${PLAY_W}/${PLAY_H}`, maxWidth: PLAY_W + 'px' }}>
-            <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
-              className={`block w-full h-full ${!isPlaying ? 'cursor-crosshair' : ''}`}
-              style={{ imageRendering: 'pixelated' }}
-              onMouseDown={handleCanvasAction}
-              onMouseMove={e => editorTab !== 'object' && (e.buttons & 1) === 1 && handleCanvasAction(e)}
-              onMouseUp={() => { isDraggingStartRef.current = false; }}
-              onTouchStart={handleCanvasAction}
-              onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
-              onTouchEnd={() => { isDraggingStartRef.current = false; }} />
+            {gameData.engine === 'yume25d' ? (
+              <Yume25DMaker
+                layout={gameData.layout25d!}
+                onLayoutChange={updater => setGameData(prev => prev.layout25d ? { ...prev, layout25d: updater(prev.layout25d) } : prev)}
+                isPlaying={isPlaying}
+                demo={introOpen}
+              />
+            ) : (
+              <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
+                className={`block w-full h-full ${!isPlaying ? 'cursor-crosshair' : ''}`}
+                style={{ imageRendering: 'pixelated' }}
+                onMouseDown={handleCanvasAction}
+                onMouseMove={e => editorTab !== 'object' && (e.buttons & 1) === 1 && handleCanvasAction(e)}
+                onMouseUp={() => { isDraggingStartRef.current = false; }}
+                onTouchStart={handleCanvasAction}
+                onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
+                onTouchEnd={() => { isDraggingStartRef.current = false; }} />
+            )}
 
             {/* SMC素材クレジットバッジ（マリオプリセット プレイ中） */}
             {isPlaying && gameData.id === 'mario' && (
@@ -6516,7 +6532,7 @@ const lose = (msg: string) => {
             )}
 
             {/* ゲーム編集時は主人公の現在座標および初期位置を表示(x,y) */}
-            {!isPlaying && !introOpen && !showTitle && !showEnding && (
+            {gameData.engine !== 'yume25d' && !isPlaying && !introOpen && !showTitle && !showEnding && (
               <div
                 ref={editorCoordRef}
                 className="absolute top-2 right-2 z-30 bg-black/85 text-[11px] font-pixel text-gray-200 px-2.5 py-2 border border-white/20 rounded shadow-lg select-none flex flex-col gap-1 pointer-events-none text-right min-w-[140px]"
@@ -6576,6 +6592,7 @@ const lose = (msg: string) => {
                 touhou:  'from-purple-950 via-gray-900 to-gray-950',
                 rockman: 'from-cyan-950  via-gray-900 to-gray-950',
                 undertale: 'from-rose-950 via-gray-950 to-black',
+                yume: 'from-violet-950 via-gray-950 to-black',
               };
               const PRESET_RING: Record<PresetId, string> = {
                 onjReze: 'ring-orange-500/50',
@@ -6584,6 +6601,7 @@ const lose = (msg: string) => {
                 touhou:  'ring-purple-500/50',
                 rockman: 'ring-cyan-500/50',
                 undertale: 'ring-rose-500/50',
+                yume: 'ring-violet-500/50',
               };
               return (
                 <div className="absolute inset-0 z-[45] flex flex-col select-none"
@@ -7077,7 +7095,7 @@ const lose = (msg: string) => {
               </div>
             )}
 
-            {!isPlaying && (
+            {!isPlaying && gameData.engine !== 'yume25d' && (
               <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute bottom-2 left-1 pointer-events-auto touch-none select-none opacity-90">
                   <div className="relative w-16 h-16">
