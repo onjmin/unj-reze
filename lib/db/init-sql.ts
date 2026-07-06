@@ -1,3 +1,5 @@
+// Auto-generated from docker/init.sqlite.sql. Do not edit directly.
+export const INIT_SQL = `
 -- SQLite用初期化スクリプト（Cloudflare D1互換）
 -- BOOLEANの代わりにINTEGER(0/1)を使用
 
@@ -170,3 +172,5 @@ INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, likes
   (401, 1, 1, '名無しRf6', 'Rf6', datetime('now', '-2 hours'), '外スケッチいいな！私も今度やってみよう', 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 'from-blue-400 to-indigo-500', 0, 0, 0),
   (501, 5, 5, '名無しHn3', 'Hn3', datetime('now', '-15 minutes'), 'lofiは作業効率上がるよね、自分も愛用してる', 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 'from-blue-400 to-indigo-500', 0, 0, 0),
   (601, 3, 3, '名無しPz5', 'Pz5', datetime('now', '-5 hours'), 'こちらはもう桜が咲き始めましたよ〜春ですね', 0, 0, 0, 0, 0, 0, 0, 0, NULL, NULL, 'from-blue-400 to-indigo-500', 0, 0, 0);
+
+`;

@@ -1,4 +1,4 @@
-import { Post, AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType } from '../types';
+import { AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType } from '../types';
 import { DbPost, DbGameRecord, DbNotification } from '../types-db';
 import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';

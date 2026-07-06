@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint app components lib --cache",
     "typecheck": "tsc --noEmit",
     "vglc": "node scripts/import-vglc.mjs",
     "slice-assets": "node scripts/slice-rpg-assets.mjs",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1067.0",
     "@neondatabase/serverless": "1.1.0",
+    "@onjmin/chord-parser": "1.0.3",
     "@onjmin/dtm": "0.1.55",
     "@onjmin/oekaki": "1.0.59",
     "lucide-react": "1.17.0",
