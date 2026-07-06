@@ -11,8 +11,8 @@ export const VIEW_ROWS = 11;
 export const VIEW_W = VIEW_COLS * TILE_SIZE;  // 480 px
 export const VIEW_H = VIEW_ROWS * TILE_SIZE;  // 352 px
 
-export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'undertale';
-export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';
+export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'undertale' | 'yume';
+export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze' | 'yume25d';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
 export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn' | 'coin';
@@ -314,6 +314,55 @@ export interface BattleConfig {
 }
 
 
+// ── 2.5Dエンジン（yume25d）レイアウト ────────────────────────────────────
+/** 方角。0=北(-row) 1=東(+col) 2=南(+row) 3=西(-col)。 */
+export type Dir4 = 0 | 1 | 2 | 3;
+
+/** 2.5D用テクスチャ定義。imageUrl が無ければ color（＋emoji）から生成する。 */
+export interface Tex25D {
+  id: number;
+  name: string;
+  kind: 'floor' | 'wall' | 'sprite';
+  /** フォールバック色（チェッカー模様の下地に使う） */
+  color: string;
+  /** sprite用：絵文字をそのままテクスチャ化する */
+  emoji?: string;
+  imageRef?: string;
+  imageUrl?: string;
+}
+
+/** 薄板1枚の壁。セルの北辺(dir=0)または西辺(dir=3)に正規化して保存する
+ *  （南辺＝1つ下のセルの北辺、東辺＝1つ右のセルの西辺）。 */
+export interface Wall25D { col: number; row: number; dir: Dir4; tex: number; }
+
+/** ビルボードスプライト（常にカメラへ正対する薄板）。セル中央に立つ。 */
+export interface Billboard25D { id: string; col: number; row: number; tex: number; scale?: number; }
+
+/** 2.5Dエンジンのレイアウト全体。プレーンJSONとしてそのまま保存できる。 */
+export interface Layout25D {
+  cols: number; rows: number;
+  /** 床テクスチャID。0=床なし（奈落＝描画しない） */
+  floor: number[][];
+  /** 天井を張るか（屋内風）。false なら空が見える */
+  ceiling: boolean;
+  ceilingTex: number;
+  walls: Wall25D[];
+  billboards: Billboard25D[];
+  textures: Record<number, Tex25D>;
+  /** 壁の高さ（1.0＝1マス幅と同じ） */
+  wallHeight: number;
+  skyColor: string;
+  fogColor: string; fogNear: number; fogFar: number;
+  start: { col: number; row: number; dir: Dir4 };
+}
+
+/** 壁の置き場所を北辺/西辺に正規化する。 */
+export const normalizeWall25D = (col: number, row: number, dir: Dir4, tex: number): Wall25D => {
+  if (dir === 2) return { col, row: row + 1, dir: 0, tex };  // 南辺 → 下セルの北辺
+  if (dir === 1) return { col: col + 1, row, dir: 3, tex };  // 東辺 → 右セルの西辺
+  return { col, row, dir, tex };
+};
+
 // ── シーン切り替え（ロックマン型・部屋遷移） ────────────────────────────────
 /** 各辺の出口先シーン ID。省略した辺はマップ端で止まる。 */
 export interface SceneExit {
@@ -360,6 +409,8 @@ export interface PresetData {
   items?: ItemDef[];
   /** フェーズ定義（touhou エンジン）。定義するとフェーズ順に進行する。 */
   phases?: StagePhase[];
+  /** 2.5Dエンジン（yume25d）のレイアウト。engine==='yume25d' のとき必須。 */
+  layout25d?: Layout25D;
 /** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
   titleScreen?: TitleScreenConfig;
   /** エンディング画面（東方以外）。enabled=true でクリア時に表示。 */
