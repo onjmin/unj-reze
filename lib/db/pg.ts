@@ -1,4 +1,5 @@
-import { Pool } from '@neondatabase/serverless';
+import { Pool as NeonPool } from '@neondatabase/serverless';
+import pg from 'pg';
 import { AnonymousUser, OriginType } from '../types';
 import { DbPost as Post, DbGameRecord as GameRecord, DbNotification as Notification } from '../types-db';
 import type { Message, Trend } from '../mock-db';
@@ -6,14 +7,18 @@ import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportPar
 import { formatRelativeTime } from '../time';
 import { kvIncr, kvDecr, kvGet } from '../kv';
 
-let pool: Pool | null = null;
+let pool: any = null;
 
 
-function getPool(): Pool {
+function getPool(): any {
   if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze',
-    });
+    const connectionString = process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze';
+    const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+    if (isLocal) {
+      pool = new pg.Pool({ connectionString });
+    } else {
+      pool = new NeonPool({ connectionString });
+    }
   }
   return pool;
 }
@@ -610,7 +615,7 @@ export const pgStore: DataStore = {
       } else {
         result = await client.query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20');
       }
-      return result.rows.map(r => {
+      return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
           ? r.created_at.toISOString()
           : String(r.created_at);
@@ -674,7 +679,7 @@ export const pgStore: DataStore = {
       } else {
         result = await client.query('SELECT * FROM messages ORDER BY created_at DESC LIMIT 20');
       }
-      return result.rows.map(r => {
+      return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
           ? r.created_at.toISOString()
           : String(r.created_at);
@@ -725,7 +730,7 @@ export const pgStore: DataStore = {
       } catch {
         result = { rows: [] };
       }
-      return result.rows.map(r => ({
+      return result.rows.map((r: any) => ({
         keyword: r.keyword,
         count: parseInt(r.count, 10),
       } as Trend));

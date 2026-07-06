@@ -240,7 +240,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           </button>
         </div>
 
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={handlePostClick}>
+        <div className="flex-1 min-w-0">
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
               <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
@@ -323,7 +323,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             </div>
           </div>
 
-          <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
+          <p
+            onClick={handlePostClick}
+            className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
+          >
             {(() => {
               const displayText = getDisplayContent(post.content);
               const lines = displayText ? displayText.split('\n') : [];
@@ -352,7 +355,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           </p>
 
           {post.hasImage && (
-            <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+            <div
+              onClick={handlePostClick}
+              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer"
+            >
               <img
                 src={post.imageSrc}
                 alt={post.imageAlt || "ユーザーアート"}

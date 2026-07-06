@@ -220,7 +220,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                 >
                   {nameToInitials(p.displayName)}
                 </div>
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handlePostClick(p.id)}>
+                <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline mb-0.5">
                     <div className="flex items-baseline space-x-1.5">
                       <span className="font-bold text-xs text-gray-200">{p.displayName}</span>
@@ -228,7 +228,10 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                     </div>
                   </div>
 
-                  <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
+                  <p
+                    className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
+                    onClick={() => handlePostClick(p.id)}
+                  >
                     {(() => {
                       const displayText = getDisplayContent(p.content);
                       const lines = displayText ? displayText.split('\n') : [];
@@ -249,7 +252,10 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                   </p>
 
                   {p.hasImage && (
-                    <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+                    <div
+                      onClick={() => handlePostClick(p.id)}
+                      className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer"
+                    >
                       <img
                         src={p.imageSrc}
                         alt={p.imageAlt || "ユーザーアート"}
@@ -272,7 +278,10 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                   )}
 
                   {p.hasGame && (
-                    <div className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner">
+                    <div
+                      onClick={() => handlePostClick(p.id)}
+                      className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
+                    >
                       <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
                       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
                       <div className="z-10 flex flex-col items-center space-y-1">
