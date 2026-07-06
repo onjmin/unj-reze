@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
-import { Post, AnonymousUser, OriginType } from '@/lib/types';
+import { Post, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import { api } from '@/lib/api';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
@@ -17,6 +17,7 @@ import CollabSelector from '@/components/CollabSelector';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
 import LiveGameView from '@/components/LiveGameView';
 import PostComposer from '@/components/PostComposer';
+import OriginTypeModal from '@/components/OriginTypeModal';
 import SearchView from '@/components/SearchView';
 import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
@@ -58,6 +59,7 @@ export default function App() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [attachedMml, setAttachedMml] = useState<string | null>(null);
   const [originType, setOriginType] = useState<OriginType | undefined>(undefined);
+  const [showOriginModal, setShowOriginModal] = useState(false);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
@@ -136,6 +138,8 @@ export default function App() {
       setLoading(false);
     }
   }, [userId]);
+
+  const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
 
   useEffect(() => {
     postsRef.current = posts;
@@ -517,6 +521,19 @@ export default function App() {
                           )}
                         </div>
                       </div>
+                      <div className="flex items-center gap-1.5 pl-12 mb-1.5">
+                        <span className="text-[10px] text-gray-500 font-medium">権利表記</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowOriginModal(true)}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${originOption
+                            ? originOption.badgeClass
+                            : 'border-gray-700 text-gray-500 hover:text-gray-300'
+                            }`}
+                        >
+                          {originOption ? originOption.label : '申告なし'}
+                        </button>
+                      </div>
                       <div className="flex justify-between items-center pl-12">
                         <div className="flex space-x-2 text-gray-500">
                           <button
@@ -655,6 +672,14 @@ export default function App() {
             onOpenDotDrawing={() => { setComposerOpen(false); setActiveScreen('dotdrawing'); }}
             onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
             onOpenGameMaker={() => { setComposerOpen(false); setActiveScreen('gamemaker'); }}
+          />
+        )}
+
+        {showOriginModal && (
+          <OriginTypeModal
+            value={originType}
+            onClose={() => setShowOriginModal(false)}
+            onSelect={(v) => { setOriginType(v); setShowOriginModal(false); }}
           />
         )}
       </div>

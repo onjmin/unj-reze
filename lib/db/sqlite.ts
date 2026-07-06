@@ -126,6 +126,9 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!postColNames.includes('is_false_declaration')) {
     d.run("ALTER TABLE posts ADD COLUMN is_false_declaration INTEGER NOT NULL DEFAULT 0");
   }
+  if (!postColNames.includes('is_edited')) {
+    d.run("ALTER TABLE posts ADD COLUMN is_edited INTEGER NOT NULL DEFAULT 0");
+  }
   d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_slug TEXT NOT NULL,
     blocked_slug TEXT NOT NULL,
@@ -235,6 +238,7 @@ function rowToPost(row: any): Post {
     gameId: row.game_id ?? undefined,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: !!row.is_false_declaration,
+    isEdited: !!row.is_edited,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -551,14 +555,27 @@ export const sqliteStore: DataStore = {
 
   async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT slug, display_name FROM posts WHERE id = ?', [id]);
+    const rows = rowsToObjects(d, 'SELECT slug, display_name, content, origin_type FROM posts WHERE id = ?', [id]);
     if (rows.length === 0) return null;
     const viewerSlug = resolveViewerSlugSqlite(d, userId);
     if (rows[0].display_name !== userId && rows[0].slug !== viewerSlug) return null;
-    if (originType === undefined) {
-      d.run('UPDATE posts SET content = ? WHERE id = ?', [content, id]);
+
+    const hasContentChanged = rows[0].content !== content;
+    const hasOriginTypeChanged = originType !== undefined && (rows[0].origin_type !== (originType ?? null));
+    const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged;
+
+    if (shouldMarkEdited) {
+      if (originType === undefined) {
+        d.run('UPDATE posts SET content = ?, is_edited = 1 WHERE id = ?', [content, id]);
+      } else {
+        d.run('UPDATE posts SET content = ?, origin_type = ?, is_edited = 1 WHERE id = ?', [content, originType, id]);
+      }
     } else {
-      d.run('UPDATE posts SET content = ?, origin_type = ? WHERE id = ?', [content, originType, id]);
+      if (originType === undefined) {
+        d.run('UPDATE posts SET content = ? WHERE id = ?', [content, id]);
+      } else {
+        d.run('UPDATE posts SET content = ?, origin_type = ? WHERE id = ?', [content, originType, id]);
+      }
     }
     saveDb();
     const updated = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);

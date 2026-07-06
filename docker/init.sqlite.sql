@@ -47,7 +47,12 @@ CREATE TABLE IF NOT EXISTS posts (
   avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
   has_collab_button INTEGER NOT NULL DEFAULT 0,
   hearts_total INTEGER NOT NULL DEFAULT 0,
-  has_game INTEGER NOT NULL DEFAULT 0
+  has_game INTEGER NOT NULL DEFAULT 0,
+  game_id INTEGER,
+  is_original INTEGER,
+  origin_type TEXT,
+  is_false_declaration INTEGER NOT NULL DEFAULT 0,
+  is_edited INTEGER NOT NULL DEFAULT 0
 );
 
 -- ゲームテーブル

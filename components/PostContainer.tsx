@@ -8,7 +8,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { Post, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import { api } from '@/lib/api';
-import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
+import { extractMmlFromContent, getDisplayContent, stripMmlLine, MML_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -131,10 +131,23 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     setShowEditModal(false);
     if (!currentUserDisplayName) return;
     try {
-      await api.posts.edit(post.id, currentUserDisplayName, next);
+      let finalContent = next;
+      const lines = post.content.split('\n');
+      const idx = lines.findIndex(line => {
+        const trimmed = line.trim().toLowerCase();
+        return MML_MARKERS.some(m => trimmed.startsWith(m.toLowerCase()));
+      });
+      if (idx !== -1) {
+        const mmlLine = lines[idx];
+        const editedLines = next.split('\n');
+        const targetIdx = Math.min(idx, editedLines.length);
+        editedLines.splice(targetIdx, 0, mmlLine);
+        finalContent = editedLines.join('\n');
+      }
+      await api.posts.edit(post.id, currentUserDisplayName, finalContent);
       onModerationChange?.();
     } catch { /* noop */ }
-  }, [currentUserDisplayName, post.id, onModerationChange]);
+  }, [currentUserDisplayName, post.id, post.content, onModerationChange]);
 
   const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -243,7 +256,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               {post.isFalseDeclaration && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
               )}
-              <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
+              <span className="text-gray-500 text-[10px] font-medium">
+                {post.time}
+                {post.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
+              </span>
             </div>
             <div ref={menuRef} className="relative">
               <button onClick={toggleMenu} className="p-2 -mr-2 -mt-1 rounded hover:bg-gray-100/10 transition-colors">
@@ -470,7 +486,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
       {showEditModal && (
         <EditPostModal
-          initialContent={post.content}
+          initialContent={stripMmlLine(post.content)}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
         />

@@ -123,7 +123,7 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-800/60 text-[10px] text-gray-500 shrink-0">
         <span>全 <span className="text-gray-300 font-bold">{allPosts.length}</span> レス</span>
         <span>👁 {viewCount}</span>
-        <span>⏱ {post.time}</span>
+        <span>⏱ {post.time}{post.isEdited && ' (編集済み)'}</span>
         <span>💬 {post.repliesCount}件</span>
       </div>
 
@@ -138,7 +138,7 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
                 <span className="text-gray-500 font-bold tabular-nums w-5 text-right shrink-0">{num}</span>
                 <span className="text-gray-200 font-bold">名無し</span>
                 <span className="text-gray-600">：{formatDateTime(p.createdAt)}</span>
-                <span className="text-gray-600">({p.time})</span>
+                <span className="text-gray-600">({p.time}){p.isEdited && ' (編集済み)'}</span>
                 <span className="text-gray-500">
                   ID: <span className="text-green-400 font-bold">{p.displayName.slice(-3)}</span>
                 </span>

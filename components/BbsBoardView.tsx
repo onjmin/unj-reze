@@ -116,7 +116,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
               <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
                 <span>ID:{post.displayName.slice(-3)}</span>
                 <span>{formatDate(post.createdAt)}</span>
-                <span className="text-gray-600">({post.time})</span>
+                <span className="text-gray-600">({post.time}){post.isEdited && ' (編集済み)'}</span>
                 {post.likes > 0 && (
                   <span className="flex items-center gap-0.5">
                     <span className="text-gray-600">👍</span>

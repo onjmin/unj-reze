@@ -67,7 +67,8 @@ async function ensureTables(client: any) {
       game_id BIGINT,
       is_original BOOLEAN,
       origin_type TEXT,
-      is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE
+      is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE,
+      is_edited BOOLEAN NOT NULL DEFAULT FALSE
     )
   `);
 
@@ -231,6 +232,16 @@ async function ensureTables(client: any) {
     END $$;
   `);
   await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'posts' AND column_name = 'is_edited'
+      ) THEN
+        ALTER TABLE posts ADD COLUMN is_edited BOOLEAN NOT NULL DEFAULT FALSE;
+      END IF;
+    END $$;
+  `);
+  await client.query(`
     CREATE TABLE IF NOT EXISTS game_schedule (
       hour_slot TEXT PRIMARY KEY,
       game_id BIGINT NOT NULL
@@ -359,6 +370,7 @@ async function rowToPost(row: any): Promise<Post> {
     gameId: row.game_id ?? undefined,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: row.is_false_declaration ?? false,
+    isEdited: row.is_edited ?? false,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -738,15 +750,28 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       await ensureTables(client);
-      const postResult = await client.query('SELECT slug, display_name FROM posts WHERE id = $1', [id]);
+      const postResult = await client.query('SELECT slug, display_name, content, origin_type FROM posts WHERE id = $1', [id]);
       if (postResult.rows.length === 0) return null;
       const viewerSlug = await resolveViewerSlug(client, userId);
       const row = postResult.rows[0];
       if (row.display_name !== userId && row.slug !== viewerSlug) return null;
-      if (originType === undefined) {
-        await client.query('UPDATE posts SET content = $1 WHERE id = $2', [content, id]);
+
+      const hasContentChanged = row.content !== content;
+      const hasOriginTypeChanged = originType !== undefined && (row.origin_type !== (originType ?? null));
+      const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged;
+
+      if (shouldMarkEdited) {
+        if (originType === undefined) {
+          await client.query('UPDATE posts SET content = $1, is_edited = TRUE WHERE id = $2', [content, id]);
+        } else {
+          await client.query('UPDATE posts SET content = $1, origin_type = $2, is_edited = TRUE WHERE id = $3', [content, originType, id]);
+        }
       } else {
-        await client.query('UPDATE posts SET content = $1, origin_type = $2 WHERE id = $3', [content, originType, id]);
+        if (originType === undefined) {
+          await client.query('UPDATE posts SET content = $1 WHERE id = $2', [content, id]);
+        } else {
+          await client.query('UPDATE posts SET content = $1, origin_type = $2 WHERE id = $3', [content, originType, id]);
+        }
       }
       return await getPostWithVotes(client, id, userId);
     } finally {

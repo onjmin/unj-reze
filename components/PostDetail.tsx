@@ -222,7 +222,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             {post.isFalseDeclaration && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
             )}
-            <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
+            <span className="text-gray-500 text-[10px] font-medium">
+              {post.time}
+              {post.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
+            </span>
           </div>
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
@@ -383,7 +386,10 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
             {localPost.isFalseDeclaration && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
             )}
-            <span className="text-gray-500 text-[10px] font-medium">{localPost.time}</span>
+            <span className="text-gray-500 text-[10px] font-medium">
+              {localPost.time}
+              {localPost.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
+            </span>
           </div>
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">

@@ -630,6 +630,11 @@ class MockDB {
   editPost(id: number, userId: string, content: string, originType?: OriginType | null): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post || !this.ownsPost(post, userId)) return null;
+    const hasContentChanged = post.content !== content;
+    const hasOriginTypeChanged = originType !== undefined && (post.originType !== (originType == null ? undefined : originType));
+    if (hasContentChanged || hasOriginTypeChanged) {
+      post.isEdited = true;
+    }
     post.content = content;
     if (originType !== undefined) post.originType = originType == null ? undefined : originType;
     // 親スレッドの replies 配列内の同一投稿も更新
@@ -638,6 +643,9 @@ class MockDB {
       if (child) {
         child.content = content;
         if (originType !== undefined) child.originType = originType == null ? undefined : originType;
+        if (hasContentChanged || hasOriginTypeChanged) {
+          child.isEdited = true;
+        }
       }
     }
     return this.getPost(id, userId) ?? null;
