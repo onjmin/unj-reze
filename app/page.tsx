@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
-import { Post, AnonymousUser } from '@/lib/types';
+import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
@@ -55,7 +55,7 @@ export default function App() {
   const [messageCount, setMessageCount] = useState(0);
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
-  const [isOriginal, setIsOriginal] = useState<boolean | undefined>(undefined);
+  const [originType, setOriginType] = useState<OriginType | undefined>(undefined);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
@@ -290,13 +290,13 @@ export default function App() {
       imageSrc,
       avatarColor: "from-blue-500 to-indigo-600",
       gameId,
-      isOriginal,
+      originType,
     });
     setPosts([post, ...posts]);
     setInputText('');
     setAttachedImage(null);
     setGameDraft(null);
-    setIsOriginal(undefined);
+    setOriginType(undefined);
   };
 
   const handleOpenCollab = useCallback((post: Post) => {
@@ -616,8 +616,8 @@ export default function App() {
             setText={setInputText}
             image={attachedImage}
             setImage={setAttachedImage}
-            isOriginal={isOriginal}
-            setIsOriginal={setIsOriginal}
+            originType={originType}
+            setOriginType={setOriginType}
             onClose={() => setComposerOpen(false)}
             onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
             onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}

@@ -1,4 +1,4 @@
-import { Post, AnonymousUser } from './types';
+import { Post, AnonymousUser, OriginType } from './types';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
 
@@ -271,7 +271,7 @@ class MockDB {
     avatarColor?: string;
     slug?: string;
     gameId?: number;
-    isOriginal?: boolean;
+    originType?: OriginType;
   }): Post {
     const createdAt = this.now();
     const post: Post = {
@@ -296,7 +296,7 @@ class MockDB {
       heartsTotal: 0,
       hasGame: !!data.gameId,
       gameId: data.gameId,
-      isOriginal: data.isOriginal,
+      originType: data.originType,
       threadId: this.genId(),
       replies: [],
     };
@@ -626,17 +626,17 @@ class MockDB {
     return post.displayName === userId || post.slug === this.slugForUser(userId);
   }
 
-  editPost(id: number, userId: string, content: string, isOriginal?: boolean | null): Post | null {
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post || !this.ownsPost(post, userId)) return null;
     post.content = content;
-    if (isOriginal !== undefined) post.isOriginal = isOriginal == null ? undefined : isOriginal;
+    if (originType !== undefined) post.originType = originType == null ? undefined : originType;
     // 親スレッドの replies 配列内の同一投稿も更新
     for (const thread of this.posts) {
       const child = thread.replies?.find(r => r.id === id);
       if (child) {
         child.content = content;
-        if (isOriginal !== undefined) child.isOriginal = isOriginal == null ? undefined : isOriginal;
+        if (originType !== undefined) child.originType = originType == null ? undefined : originType;
       }
     }
     return this.getPost(id, userId) ?? null;

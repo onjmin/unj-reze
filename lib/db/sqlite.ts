@@ -1,7 +1,7 @@
 import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
-import { Post, AnonymousUser } from '../types';
+import { Post, AnonymousUser, OriginType } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -117,6 +117,12 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!postColNames.includes('is_original')) {
     d.run("ALTER TABLE posts ADD COLUMN is_original INTEGER");
   }
+  if (!postColNames.includes('origin_type')) {
+    d.run("ALTER TABLE posts ADD COLUMN origin_type TEXT");
+  }
+  // Migration: 旧 is_original(boolean) の値を origin_type(自作/他作/AI作品) に引き継ぐ
+  d.run(`UPDATE posts SET origin_type = CASE WHEN is_original THEN 'original' ELSE 'derivative' END
+         WHERE origin_type IS NULL AND is_original IS NOT NULL`);
   d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_slug TEXT NOT NULL,
     blocked_slug TEXT NOT NULL,
@@ -224,7 +230,7 @@ function rowToPost(row: any): Post {
     heartsTotal: row.hearts_total ?? 0,
     hasGame: !!row.has_game,
     gameId: row.game_id ?? undefined,
-    isOriginal: row.is_original == null ? undefined : !!row.is_original,
+    originType: row.origin_type ?? undefined,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -369,13 +375,13 @@ export const sqliteStore: DataStore = {
     const slug = data.slug || deriveSlugSqlite(data.displayName);
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
-    const isOriginalVal = data.isOriginal === undefined ? null : (data.isOriginal ? 1 : 0);
+    const originTypeVal = data.originType ?? null;
     d.run(
-      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, is_original)
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null,
-       data.gameId ? 1 : 0, data.gameId || null, isOriginalVal]
+       data.gameId ? 1 : 0, data.gameId || null, originTypeVal]
     );
     saveDb();
     return {
@@ -388,7 +394,7 @@ export const sqliteStore: DataStore = {
         image_src: data.imageSrc || null, image_alt: data.imageAlt || null,
         avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
         has_collab_button: 1, hearts_total: 0, has_game: data.gameId ? 1 : 0,
-        game_id: data.gameId || null, is_original: isOriginalVal,
+        game_id: data.gameId || null, origin_type: originTypeVal,
       }),
       replies: []
     };
@@ -539,16 +545,16 @@ export const sqliteStore: DataStore = {
     };
   },
 
-  async editPost(id: number, userId: string, content: string, isOriginal?: boolean | null) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
     const d = await getDb();
     const rows = rowsToObjects(d, 'SELECT slug, display_name FROM posts WHERE id = ?', [id]);
     if (rows.length === 0) return null;
     const viewerSlug = resolveViewerSlugSqlite(d, userId);
     if (rows[0].display_name !== userId && rows[0].slug !== viewerSlug) return null;
-    if (isOriginal === undefined) {
+    if (originType === undefined) {
       d.run('UPDATE posts SET content = ? WHERE id = ?', [content, id]);
     } else {
-      d.run('UPDATE posts SET content = ?, is_original = ? WHERE id = ?', [content, isOriginal == null ? null : (isOriginal ? 1 : 0), id]);
+      d.run('UPDATE posts SET content = ?, origin_type = ? WHERE id = ?', [content, originType, id]);
     }
     saveDb();
     const updated = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);

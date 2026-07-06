@@ -1,7 +1,9 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { X, Pen, Grid3x3, Music, Gamepad2 } from 'lucide-react';
+import { OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
+import OriginTypeModal from './OriginTypeModal';
 
 interface PostComposerProps {
   userId: string;
@@ -9,8 +11,8 @@ interface PostComposerProps {
   setText: (v: string) => void;
   image: string | null;
   setImage: (v: string | null) => void;
-  isOriginal?: boolean;
-  setIsOriginal: (v: boolean | undefined) => void;
+  originType?: OriginType;
+  setOriginType: (v: OriginType | undefined) => void;
   onClose: () => void;
   onSubmit: () => void;
   onOpenDrawing: () => void;
@@ -19,8 +21,10 @@ interface PostComposerProps {
   onOpenGameMaker: () => void;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, isOriginal, setIsOriginal, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showOriginModal, setShowOriginModal] = useState(false);
+  const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -65,23 +69,13 @@ export default function PostComposer({ userId, text, setText, image, setImage, i
           <span className="text-[10px] text-gray-500">権利表記</span>
           <button
             type="button"
-            onClick={() => setIsOriginal(isOriginal === true ? undefined : true)}
-            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-colors ${isOriginal === true
-              ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+            onClick={() => setShowOriginModal(true)}
+            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-colors ${originOption
+              ? originOption.badgeClass
               : 'border-gray-700 text-gray-500 hover:text-gray-300'
               }`}
           >
-            自作
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsOriginal(isOriginal === false ? undefined : false)}
-            className={`text-[10px] font-bold px-2 py-1 rounded-full border transition-colors ${isOriginal === false
-              ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-              : 'border-gray-700 text-gray-500 hover:text-gray-300'
-              }`}
-          >
-            他作
+            {originOption ? originOption.label : '申告なし'}
           </button>
         </div>
         <div className="flex justify-between items-center pl-12">
@@ -124,6 +118,13 @@ export default function PostComposer({ userId, text, setText, image, setImage, i
           </button>
         </div>
       </div>
+      {showOriginModal && (
+        <OriginTypeModal
+          value={originType}
+          onClose={() => setShowOriginModal(false)}
+          onSelect={(v) => { setOriginType(v); setShowOriginModal(false); }}
+        />
+      )}
     </div>
   );
 }

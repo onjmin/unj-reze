@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import BbsThreadView from './BbsThreadView';
 import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag } from 'lucide-react';
 import Link from 'next/link';
-import { Post } from '@/lib/types';
+import { Post, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import { api } from '@/lib/api';
 import { extractMmlFromContent, EMBED_TEXT_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -210,12 +210,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
             <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
-            {post.isOriginal === true && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">自作</span>
-            )}
-            {post.isOriginal === false && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40">他作</span>
-            )}
+            {(() => {
+              const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === post.originType);
+              return opt ? (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
+              ) : null;
+            })()}
             <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
           </div>
 
@@ -370,12 +370,12 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
             <span className="font-bold text-xs text-gray-200">{localPost.displayName}</span>
-            {localPost.isOriginal === true && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">自作</span>
-            )}
-            {localPost.isOriginal === false && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40">他作</span>
-            )}
+            {(() => {
+              const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === localPost.originType);
+              return opt ? (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
+              ) : null;
+            })()}
             <span className="text-gray-500 text-[10px] font-medium">{localPost.time}</span>
           </div>
 

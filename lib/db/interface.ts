@@ -1,4 +1,4 @@
-import { Post, AnonymousUser, GhostPlayer, GameVoteCandidate } from '../types';
+import { Post, AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType } from '../types';
 import type { Notification, Message, Trend } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
 
@@ -25,8 +25,8 @@ export interface CreatePostParams {
   avatarColor?: string;
   slug?: string;
   gameId?: number;
-  /** true=自作 false=他作 undefined=未設定 */
-  isOriginal?: boolean;
+  /** 自己申告の権利表記。未設定なら undefined */
+  originType?: OriginType;
 }
 
 export interface ReplyParams {
@@ -58,7 +58,7 @@ export interface DataStore {
   repostPost(id: number): Promise<Post | null>;
   getReplies(postId: number, userId?: string): Promise<Post[]>;
   addReply(postId: number, data: ReplyParams): Promise<Post | null>;
-  editPost(id: number, userId: string, content: string, isOriginal?: boolean | null): Promise<Post | null>;
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null): Promise<Post | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
   getUserPostsBySlug(slug: string, userId?: string): Promise<Post[]>;
