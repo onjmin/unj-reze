@@ -123,6 +123,9 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   // Migration: 旧 is_original(boolean) の値を origin_type(自作/他作/AI作品) に引き継ぐ
   d.run(`UPDATE posts SET origin_type = CASE WHEN is_original THEN 'original' ELSE 'derivative' END
          WHERE origin_type IS NULL AND is_original IS NOT NULL`);
+  if (!postColNames.includes('is_false_declaration')) {
+    d.run("ALTER TABLE posts ADD COLUMN is_false_declaration INTEGER NOT NULL DEFAULT 0");
+  }
   d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_slug TEXT NOT NULL,
     blocked_slug TEXT NOT NULL,
@@ -231,6 +234,7 @@ function rowToPost(row: any): Post {
     hasGame: !!row.has_game,
     gameId: row.game_id ?? undefined,
     originType: row.origin_type ?? undefined,
+    isFalseDeclaration: !!row.is_false_declaration,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],

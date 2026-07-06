@@ -66,7 +66,8 @@ async function ensureTables(client: any) {
       has_game BOOLEAN NOT NULL DEFAULT FALSE,
       game_id BIGINT,
       is_original BOOLEAN,
-      origin_type TEXT
+      origin_type TEXT,
+      is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE
     )
   `);
 
@@ -220,6 +221,16 @@ async function ensureTables(client: any) {
     WHERE origin_type IS NULL AND is_original IS NOT NULL
   `);
   await client.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'posts' AND column_name = 'is_false_declaration'
+      ) THEN
+        ALTER TABLE posts ADD COLUMN is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE;
+      END IF;
+    END $$;
+  `);
+  await client.query(`
     CREATE TABLE IF NOT EXISTS game_schedule (
       hour_slot TEXT PRIMARY KEY,
       game_id BIGINT NOT NULL
@@ -347,6 +358,7 @@ async function rowToPost(row: any): Promise<Post> {
     hasGame: row.has_game,
     gameId: row.game_id ?? undefined,
     originType: row.origin_type ?? undefined,
+    isFalseDeclaration: row.is_false_declaration ?? false,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],

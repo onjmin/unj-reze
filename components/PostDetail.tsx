@@ -210,12 +210,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
             <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
+            {(post.slug || post.displayName) === userId && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
+            )}
             {(() => {
               const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === post.originType);
               return opt ? (
                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
               ) : null;
             })()}
+            {post.isFalseDeclaration && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
+            )}
             <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
           </div>
 
@@ -370,12 +376,18 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
             <span className="font-bold text-xs text-gray-200">{localPost.displayName}</span>
+            {(localPost.slug || localPost.displayName) === userId && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
+            )}
             {(() => {
               const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === localPost.originType);
               return opt ? (
                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
               ) : null;
             })()}
+            {localPost.isFalseDeclaration && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
+            )}
             <span className="text-gray-500 text-[10px] font-medium">{localPost.time}</span>
           </div>
 

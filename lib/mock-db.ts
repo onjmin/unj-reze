@@ -297,6 +297,7 @@ class MockDB {
       hasGame: !!data.gameId,
       gameId: data.gameId,
       originType: data.originType,
+      isFalseDeclaration: false,
       threadId: this.genId(),
       replies: [],
     };

@@ -230,12 +230,18 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
               <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
+              {isSelf && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
+              )}
               {(() => {
                 const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === post.originType);
                 return opt ? (
                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
                 ) : null;
               })()}
+              {post.isFalseDeclaration && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
+              )}
               <span className="text-gray-500 text-[10px] font-medium">{post.time}</span>
             </div>
             <div ref={menuRef} className="relative">

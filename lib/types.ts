@@ -42,6 +42,8 @@ export interface Post {
   gameId?: number;
   /** 自己申告の権利表記。未設定(申告なし)なら undefined */
   originType?: OriginType;
+  /** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
+  isFalseDeclaration?: boolean;
   threadId: number;
   parentPostId?: number;
   replies: Post[];
