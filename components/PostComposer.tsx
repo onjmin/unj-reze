@@ -16,6 +16,8 @@ interface PostComposerProps {
   setImage: (v: string | null) => void;
   mml: string | null;
   setMml: (v: string | null) => void;
+  gameDraft: { title: string } | null;
+  setGameDraft: (v: any) => void;
   originType?: OriginType;
   setOriginType: (v: OriginType | undefined) => void;
   onClose: () => void;
@@ -26,7 +28,7 @@ interface PostComposerProps {
   onOpenGameMaker: () => void;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, mml, setMml, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showOriginModal, setShowOriginModal] = useState(false);
   const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
@@ -86,6 +88,21 @@ export default function PostComposer({ userId, text, setText, image, setImage, m
                 <MmlPlayer mml={mml} />
               </div>
             )}
+            {gameDraft && (
+              <div className="relative mt-2 flex items-center gap-2 rounded-lg border border-yellow-700/50 bg-yellow-500/10 px-3 py-2 md:px-4 md:py-3 max-w-[280px] md:max-w-[420px]">
+                <Gamepad2 size={16} className="text-yellow-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-yellow-200 truncate">{gameDraft.title}</p>
+                  <p className="text-[10px] text-yellow-400/70">ゲームを添付中</p>
+                </div>
+                <button
+                  onClick={() => setGameDraft(null)}
+                  className="ml-auto text-yellow-300/70 hover:text-red-400 shrink-0"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 pl-12 md:pl-16">
@@ -138,7 +155,7 @@ export default function PostComposer({ userId, text, setText, image, setImage, m
           </div>
           <button
             onClick={onSubmit}
-            disabled={!text.trim() && !image && !mml}
+            disabled={!text.trim() && !image && !mml && !gameDraft}
             className="bg-blue-600 text-white font-bold px-4 py-1.5 md:px-6 md:py-2.5 rounded-full text-xs md:text-sm hover:bg-blue-500 disabled:opacity-50 transition-colors"
           >
             投稿

@@ -23,6 +23,7 @@ import SearchView from '@/components/SearchView';
 import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
 import ProfileView from '@/components/ProfileView';
+import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
 
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
@@ -67,6 +68,10 @@ export default function App() {
   const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string } | null>(null);
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
+  const [discardModalConfig, setDiscardModalConfig] = useState<{
+    discardType: 'image' | 'mml' | 'game';
+    targetScreen: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker';
+  } | null>(null);
 
   const heartQueue = useRef<Map<string, number>>(new Map());
   const heartTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -372,6 +377,57 @@ export default function App() {
     setInputText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
   };
 
+  const handleOpenEditor = (screenType: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker') => {
+    const hasImage = !!attachedImage;
+    const hasMml = !!attachedMml;
+    const hasGame = !!gameDraft;
+
+    if (screenType === 'drawing' || screenType === 'dotdrawing') {
+      if (hasMml) {
+        setDiscardModalConfig({ discardType: 'mml', targetScreen: screenType });
+        return;
+      }
+      if (hasGame) {
+        setDiscardModalConfig({ discardType: 'game', targetScreen: screenType });
+        return;
+      }
+    } else if (screenType === 'mml') {
+      if (hasImage) {
+        setDiscardModalConfig({ discardType: 'image', targetScreen: screenType });
+        return;
+      }
+      if (hasGame) {
+        setDiscardModalConfig({ discardType: 'game', targetScreen: screenType });
+        return;
+      }
+    } else if (screenType === 'gamemaker') {
+      if (hasImage) {
+        setDiscardModalConfig({ discardType: 'image', targetScreen: screenType });
+        return;
+      }
+      if (hasMml) {
+        setDiscardModalConfig({ discardType: 'mml', targetScreen: screenType });
+        return;
+      }
+    }
+
+    setComposerOpen(false);
+    setActiveScreen(screenType);
+  };
+
+  const handleConfirmDiscard = () => {
+    if (!discardModalConfig) return;
+    const { discardType, targetScreen } = discardModalConfig;
+
+    if (discardType === 'image') setAttachedImage(null);
+    if (discardType === 'mml') setAttachedMml(null);
+    if (discardType === 'game') setGameDraft(null);
+
+    setComposerOpen(false);
+    setActiveScreen(targetScreen);
+    setDiscardModalConfig(null);
+  };
+
   return (
     <div className="bg-[#0b0e14] text-gray-100 h-screen w-full flex flex-col overflow-hidden select-none font-sans relative">
       <RightDrawer
@@ -538,28 +594,28 @@ export default function App() {
                       <div className="flex justify-between items-center pl-12">
                         <div className="flex space-x-2 text-gray-500">
                           <button
-                            onClick={() => { setCollabImageUrl(undefined); setActiveScreen('drawing'); }}
+                            onClick={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
                             className="p-2 hover:bg-gray-100/10 rounded-full hover:text-[#a3e635] transition-colors"
                             title="お絵描き"
                           >
                             <Pen size={18} />
                           </button>
                           <button
-                            onClick={() => setActiveScreen('dotdrawing')}
+                            onClick={() => handleOpenEditor('dotdrawing')}
                             className="p-2 hover:bg-gray-100/10 rounded-full hover:text-orange-400 transition-colors"
                             title="ドット絵専用お絵描き"
                           >
                             <Grid3x3 size={18} />
                           </button>
                           <button
-                            onClick={() => setActiveScreen('mml')}
+                            onClick={() => handleOpenEditor('mml')}
                             className="p-2 hover:bg-gray-100/10 rounded-full hover:text-pink-400 transition-colors"
                             title="MML作曲"
                           >
                             <Music size={18} />
                           </button>
                           <button
-                            onClick={() => setActiveScreen('gamemaker')}
+                            onClick={() => handleOpenEditor('gamemaker')}
                             className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
                             title="ゲーム作成"
                           >
@@ -568,7 +624,7 @@ export default function App() {
                         </div>
                         <button
                           onClick={handleCreatePost}
-                          disabled={!inputText.trim() && !attachedImage && !attachedMml}
+                          disabled={!inputText.trim() && !attachedImage && !attachedMml && !gameDraft}
                           className="bg-blue-600 text-white font-bold px-4 py-1.5 rounded-full text-xs hover:bg-blue-500 disabled:opacity-50 transition-colors"
                         >
                           投稿
@@ -666,14 +722,16 @@ export default function App() {
             setImage={setAttachedImage}
             mml={attachedMml}
             setMml={setAttachedMml}
+            gameDraft={gameDraft}
+            setGameDraft={setGameDraft}
             originType={originType}
             setOriginType={setOriginType}
             onClose={() => setComposerOpen(false)}
             onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
-            onOpenDrawing={() => { setComposerOpen(false); setActiveScreen('drawing'); }}
-            onOpenDotDrawing={() => { setComposerOpen(false); setActiveScreen('dotdrawing'); }}
-            onOpenMml={() => { setComposerOpen(false); setActiveScreen('mml'); }}
-            onOpenGameMaker={() => { setComposerOpen(false); setActiveScreen('gamemaker'); }}
+            onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
+            onOpenDotDrawing={() => handleOpenEditor('dotdrawing')}
+            onOpenMml={() => handleOpenEditor('mml')}
+            onOpenGameMaker={() => handleOpenEditor('gamemaker')}
           />
         )}
 
@@ -682,6 +740,14 @@ export default function App() {
             value={originType}
             onClose={() => setShowOriginModal(false)}
             onSelect={(v) => { setOriginType(v); setShowOriginModal(false); }}
+          />
+        )}
+
+        {discardModalConfig && (
+          <AttachmentDiscardModal
+            onClose={() => setDiscardModalConfig(null)}
+            onConfirm={handleConfirmDiscard}
+            discardType={discardModalConfig.discardType}
           />
         )}
       </div>

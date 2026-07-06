@@ -255,7 +255,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           {(() => {
             if (mmlCode) return <MmlPlayer mml={mmlCode} />;
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
-            if (post.hasImage) return null;
+            if (post.hasImage || post.hasGame) return null;
             const embed = extractFirstEmbed(post.content);
             return embed ? <EmbedPart embed={embed} /> : null;
           })()}
@@ -419,7 +419,7 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
           {(() => {
             if (mmlCode) return <MmlPlayer mml={mmlCode} />;
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
-            if (localPost.hasImage) return null;
+            if (localPost.hasImage || localPost.hasGame) return null;
             const embed = extractFirstEmbed(localPost.content);
             return embed ? <EmbedPart embed={embed} /> : null;
           })()}
