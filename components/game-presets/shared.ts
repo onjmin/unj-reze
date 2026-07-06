@@ -354,6 +354,10 @@ export interface Layout25D {
   skyColor: string;
   fogColor: string; fogNear: number; fogFar: number;
   start: { col: number; row: number; dir: Dir4 };
+  /** 視点モード。first=一人称、third=三人称（プレイヤー自身のスプライトが見える）。未指定は first。 */
+  pov?: 'first' | 'third';
+  /** 三人称視点でのカメラ距離（マス単位）。未指定は 1.6。 */
+  povDistance?: number;
 }
 
 /** 壁の置き場所を北辺/西辺に正規化する。 */

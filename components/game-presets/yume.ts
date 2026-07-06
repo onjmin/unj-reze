@@ -77,6 +77,8 @@ const layout25d: Layout25D = {
   fogNear: 2,
   fogFar: 12,
   start: { col: 8, row: 13, dir: 0 },
+  pov: 'third',
+  povDistance: 1.6,
 };
 
 export const yume: PresetData = {

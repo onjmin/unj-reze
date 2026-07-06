@@ -6,7 +6,7 @@
 // プレイ/デモ：常に 3D。エンジン実体（WebGL）はマウント中1つを使い回し、アンマウントで dispose。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Yume25DEngine, RENDER_W, RENDER_H } from '@/lib/yume25d';
+import { Yume25DEngine, RENDER_W, RENDER_H, type PlayerAppearance } from '@/lib/yume25d';
 import {
   type Layout25D, type Tex25D, type Dir4, uid, normalizeWall25D,
 } from './game-presets/shared';
@@ -14,6 +14,8 @@ import {
 const CELL = 28;              // 2Dエディタの1マスpx
 type Tool = 'floor' | 'wall' | 'sprite' | 'start' | 'erase';
 const TOOL_LABELS: Record<Tool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', erase: '消す' };
+/** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */
+const DRAG_TURN_SENSITIVITY = 0.006;
 
 interface Yume25DMakerProps {
   layout: Layout25D;
@@ -21,6 +23,8 @@ interface Yume25DMakerProps {
   isPlaying: boolean;
   /** イントロカルーセルのデモ再生（自動走行） */
   demo?: boolean;
+  /** 三人称視点で表示するプレイヤー自身の見た目。 */
+  playerAppearance: PlayerAppearance;
 }
 
 const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
@@ -30,7 +34,7 @@ const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
 const resizeFloor = (floor: number[][], cols: number, rows: number): number[][] =>
   Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => floor[r]?.[c] ?? 0));
 
-export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }: Yume25DMakerProps) {
+export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, playerAppearance }: Yume25DMakerProps) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Yume25DEngine | null>(null);
@@ -51,13 +55,17 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
   useEffect(() => {
     const cv = glCanvasRef.current;
     if (!cv) return;
-    const eng = new Yume25DEngine(cv, layoutRef.current);
+    const eng = new Yume25DEngine(cv, layoutRef.current, playerAppearance);
     engineRef.current = eng;
     return () => { eng.dispose(); engineRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // レイアウト編集 → シーン再構築
   useEffect(() => { engineRef.current?.setLayout(layout); }, [layout]);
+
+  // プレイヤー自身の見た目（絵文字/色）が変わったらビルボードだけ描き直す
+  useEffect(() => { engineRef.current?.setPlayerAppearance(playerAppearance); }, [playerAppearance]);
 
   // 表示中だけレンダリングループを回す
   useEffect(() => {
@@ -72,10 +80,10 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
     if (!eng) return;
     eng.demo = !!demo;
     if (playing) eng.resetToStart();
-    eng.input.forward = eng.input.back = eng.input.turnL = eng.input.turnR = false;
+    eng.input.forward = eng.input.back = eng.input.turnL = eng.input.turnR = eng.input.strafeL = eng.input.strafeR = eng.input.dash = false;
   }, [playing, demo]);
 
-  // ── 3D操作：キーボード（矢印/WASD。←→は旋回） ──────────────────────────
+  // ── 3D操作：キーボード（矢印＝前後＋旋回、WASD＝前後＋左右ストレイフ、Space＝ジャンプ、Shift＝ダッシュ） ──
   useEffect(() => {
     if (!is3d || demo) return;
     const setKey = (key: string, on: boolean): boolean => {
@@ -84,15 +92,19 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
       switch (key) {
         case 'ArrowUp': case 'w': case 'W': inp.forward = on; return true;
         case 'ArrowDown': case 's': case 'S': inp.back = on; return true;
-        case 'ArrowLeft': case 'a': case 'A': inp.turnL = on; return true;
-        case 'ArrowRight': case 'd': case 'D': inp.turnR = on; return true;
+        case 'ArrowLeft': inp.turnL = on; return true;
+        case 'ArrowRight': inp.turnR = on; return true;
+        case 'a': case 'A': inp.strafeL = on; return true;
+        case 'd': case 'D': inp.strafeR = on; return true;
+        case 'Shift': inp.dash = on; return true;
       }
       return false;
     };
     const down = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (setKey(e.key, true) && e.key.startsWith('Arrow')) e.preventDefault();
+      if (e.key === ' ') { e.preventDefault(); engineRef.current?.jump(); return; }
+      if (setKey(e.key, true) && (e.key.startsWith('Arrow') || 'wasdWASD'.includes(e.key))) e.preventDefault();
     };
     const up = (e: KeyboardEvent) => { setKey(e.key, false); };
     window.addEventListener('keydown', down);
@@ -100,7 +112,7 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
   }, [is3d, demo]);
 
-  const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR') => ({
+  const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash') => ({
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -109,6 +121,25 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
     onPointerUp: () => { const inp = engineRef.current?.input; if (inp) inp[prop] = false; },
     onPointerCancel: () => { const inp = engineRef.current?.input; if (inp) inp[prop] = false; },
   });
+
+  // ── 3D操作：ドラッグでカメラ回転（マウス・タッチ共通。Pointer Events を使うので追加実装不要） ──
+  const dragRef = useRef<{ id: number; lastX: number } | null>(null);
+  const glPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!is3d || demo) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { id: e.pointerId, lastX: e.clientX };
+  };
+  const glPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.lastX;
+    d.lastX = e.clientX;
+    if (dx !== 0) engineRef.current?.turnBy(-dx * DRAG_TURN_SENSITIVITY);
+  };
+  const glPointerEnd = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (dragRef.current?.id === e.pointerId) dragRef.current = null;
+  };
 
   // ── 2Dエディタ描画 ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -253,11 +284,15 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
 
   return (
     <div className="absolute inset-0 flex flex-col bg-black select-none">
-      {/* 3Dビュー（常時マウント：WebGLコンテキストを使い回す） */}
+      {/* 3Dビュー（常時マウント：WebGLコンテキストを使い回す）。ドラッグでカメラ回転（PC/モバイル共通）。 */}
       <canvas
         ref={glCanvasRef} width={RENDER_W} height={RENDER_H}
-        className="w-full h-full"
+        className={`w-full h-full touch-none ${is3d && !demo ? 'cursor-grab active:cursor-grabbing' : ''}`}
         style={{ imageRendering: 'pixelated', display: is3d ? 'block' : 'none' }}
+        onPointerDown={glPointerDown}
+        onPointerMove={glPointerMove}
+        onPointerUp={glPointerEnd}
+        onPointerCancel={glPointerEnd}
       />
 
       {/* 2D見下ろしエディタ */}
@@ -297,7 +332,7 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
                 ))}
               </>
             ) : (
-              <span className="text-[10px] text-gray-400 px-1">矢印/WASDで歩く（←→で旋回）</span>
+              <span className="text-[10px] text-gray-400 px-1">WASDで移動/ストレイフ・ドラッグで視点回転・Shiftでダッシュ・Spaceでジャンプ</span>
             )}
             <button onClick={() => setSettingsOpen(v => !v)}
               className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
@@ -356,21 +391,48 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo }
                 <input type="color" value={layout.skyColor}
                   onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
               </label>
+              <label className="flex items-center justify-between gap-1 col-span-2">視点
+                <span className="flex overflow-hidden rounded border border-gray-600">
+                  {(['first', 'third'] as const).map(m => (
+                    <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
+                      className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                      {m === 'first' ? '一人称' : '三人称'}
+                    </button>
+                  ))}
+                </span>
+              </label>
+              {(layout.pov ?? 'first') === 'third' && (
+                <label className="flex items-center justify-between gap-1 col-span-2">カメラ距離
+                  <input type="range" min={0.4} max={3.5} step={0.1} value={layout.povDistance ?? 1.6}
+                    onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
+                </label>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* 3D操作ボタン（タッチ用。デモ中は非表示） */}
+      {/* 3D操作ボタン（タッチ用。視点回転は画面ドラッグに任せ、ここは移動系のみ。デモ中は非表示） */}
       {is3d && !demo && (
         <>
           <div className="absolute bottom-2 left-2 z-20 flex gap-1.5 opacity-90 touch-none">
-            <button {...holdProps('turnL')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">⟲</button>
-            <button {...holdProps('turnR')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">⟳</button>
+            <button {...holdProps('strafeL')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">◀</button>
+            <button {...holdProps('strafeR')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">▶</button>
           </div>
           <div className="absolute bottom-2 right-2 z-20 flex flex-col gap-1.5 opacity-90 touch-none">
             <button {...holdProps('forward')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">▲</button>
             <button {...holdProps('back')} className="w-11 h-11 bg-gray-700/80 active:bg-gray-500 rounded-lg text-white text-base flex items-center justify-center">▼</button>
+          </div>
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 opacity-90 touch-none">
+            <button {...holdProps('dash')}
+              className="w-12 h-10 bg-amber-700/85 active:bg-amber-500 rounded-lg text-white text-[10px] font-bold flex items-center justify-center">
+              DASH
+            </button>
+            <button
+              onPointerDown={e => { e.preventDefault(); engineRef.current?.jump(); }}
+              className="w-12 h-12 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
+              JUMP
+            </button>
           </div>
         </>
       )}

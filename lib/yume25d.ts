@@ -10,13 +10,32 @@ export const RENDER_H = 240;
 
 const PLAYER_RADIUS = 0.22;
 const MOVE_SPEED = 2.4;    // マス/秒
+const STRAFE_SPEED = 2.0;  // マス/秒
 const TURN_SPEED = 2.4;    // ラジアン/秒
+const DASH_MULT = 1.8;     // Shift（ダッシュ）中の速度倍率
 const EPS = 1e-3;
+
+// 短くポンと跳ねる程度のジャンプ（頭上の低い夢空間を想定）。
+const JUMP_VELOCITY = 3.2;
+const GRAVITY = 16;
+
+const POV_MIN_DIST = 0.4;
+const POV_MAX_DIST = 3.5;
+const POV_HEIGHT_ABOVE_EYE = 0.22;  // 三人称視点：目線より上から見下ろす高さ
 
 /** 方角 → ヨー角。カメラ前方は (-sin yaw, -cos yaw)。 */
 const YAW_FOR_DIR: Record<Dir4, number> = { 0: 0, 1: -Math.PI / 2, 2: Math.PI, 3: Math.PI / 2 };
 
-export interface Input25D { forward: boolean; back: boolean; turnL: boolean; turnR: boolean; }
+export interface Input25D {
+  forward: boolean; back: boolean;
+  turnL: boolean; turnR: boolean;
+  strafeL: boolean; strafeR: boolean;
+  /** Shift（ダッシュ）。押している間だけ移動速度が上がる。 */
+  dash: boolean;
+}
+
+export interface PlayerAppearance { emoji?: string; color: string; }
+export type PovMode = 'first' | 'third';
 
 /** テクスチャ実体。fallback キャンバスに画像を後から重ね描きする（Texture の差し替え不要）。 */
 interface TexEntry { texture: THREE.CanvasTexture; canvas: HTMLCanvasElement; }
@@ -49,8 +68,24 @@ const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
   ctx.strokeRect(0.5, 0.5, 63, 63);
 };
 
+/** プレイヤー自身のビルボード用テクスチャ（三人称視点でのみ表示）。 */
+const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance) => {
+  const ctx = cv.getContext('2d')!;
+  ctx.clearRect(0, 0, 64, 64);
+  if (a.emoji) {
+    ctx.font = '52px serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(a.emoji, 32, 36);
+  } else {
+    ctx.fillStyle = a.color;
+    ctx.beginPath();
+    ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();  // 頭
+    ctx.fillRect(20, 34, 24, 24);                      // 胴
+  }
+};
+
 export class Yume25DEngine {
-  readonly input: Input25D = { forward: false, back: false, turnL: false, turnR: false };
+  readonly input: Input25D = { forward: false, back: false, turnL: false, turnR: false, strafeL: false, strafeR: false, dash: false };
   /** デモ再生（イントロ用）：自動で前進し、壁に当たったら向きを変える。 */
   demo = false;
 
@@ -66,6 +101,10 @@ export class Yume25DEngine {
 
   // ワールド状態
   private x = 0; private z = 0; private yaw = 0;
+  private vy = 0; private hop = 0; private grounded = true;
+  private jumpQueued = false;
+  private pov: PovMode = 'first';
+  private povDistance = 1.6;
   private hEdges = new Set<string>();  // セル(c,r)の北辺（z=r, x∈[c,c+1]）
   private vEdges = new Set<string>();  // セル(c,r)の西辺（x=c, z∈[r,r+1]）
   private billboardMeshes: THREE.Mesh[] = [];
@@ -75,7 +114,14 @@ export class Yume25DEngine {
   private texEntries = new Map<number, TexEntry>();
   private demoTurnFrames = 0;
 
-  constructor(canvas: HTMLCanvasElement, layout: Layout25D) {
+  private playerAppearance: PlayerAppearance = { color: '#ffffff' };
+  private playerCanvas: HTMLCanvasElement;
+  private playerTexture: THREE.CanvasTexture;
+  private playerMesh: THREE.Mesh;
+  private playerGeo: THREE.PlaneGeometry;
+  private playerMat: THREE.MeshBasicMaterial;
+
+  constructor(canvas: HTMLCanvasElement, layout: Layout25D, playerAppearance?: PlayerAppearance) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(RENDER_W, RENDER_H, false);
@@ -83,6 +129,25 @@ export class Yume25DEngine {
     this.camera = new THREE.PerspectiveCamera(72, RENDER_W / RENDER_H, 0.05, 100);
     this.camera.rotation.order = 'YXZ';
     this.layout = layout;
+    this.pov = layout.pov ?? 'first';
+    this.povDistance = layout.povDistance ?? 1.6;
+    if (playerAppearance) this.playerAppearance = playerAppearance;
+
+    // プレイヤー自身のビルボード（三人称視点のときだけ表示）。
+    this.playerCanvas = document.createElement('canvas');
+    this.playerCanvas.width = 64; this.playerCanvas.height = 64;
+    drawPlayerCanvas(this.playerCanvas, this.playerAppearance);
+    this.playerTexture = new THREE.CanvasTexture(this.playerCanvas);
+    this.playerTexture.magFilter = THREE.NearestFilter;
+    this.playerTexture.minFilter = THREE.NearestFilter;
+    this.playerTexture.generateMipmaps = false;
+    this.playerTexture.colorSpace = THREE.SRGBColorSpace;
+    this.playerGeo = new THREE.PlaneGeometry(0.8, 0.8);
+    this.playerMat = new THREE.MeshBasicMaterial({ map: this.playerTexture, alphaTest: 0.5, side: THREE.DoubleSide });
+    this.playerMesh = new THREE.Mesh(this.playerGeo, this.playerMat);
+    this.playerMesh.visible = this.pov === 'third';
+    this.scene.add(this.playerMesh);
+
     this.buildScene();
     this.resetToStart();
   }
@@ -93,14 +158,41 @@ export class Yume25DEngine {
     const s = this.layout.start;
     this.x = s.col + 0.5; this.z = s.row + 0.5;
     this.yaw = YAW_FOR_DIR[s.dir];
+    this.vy = 0; this.hop = 0; this.grounded = true;
     this.clampToBounds();
   }
 
   /** レイアウト差し替え。シーンを丸ごと作り直す（カメラ位置は維持）。 */
   setLayout(layout: Layout25D) {
     this.layout = layout;
+    this.pov = layout.pov ?? this.pov;
+    this.povDistance = layout.povDistance ?? this.povDistance;
+    this.playerMesh.visible = this.pov === 'third';
     this.buildScene();
     this.clampToBounds();
+  }
+
+  /** プレイヤー自身の見た目（絵文字/色）を更新。ジオメトリは使い回し、キャンバスだけ再描画する。 */
+  setPlayerAppearance(appearance: PlayerAppearance) {
+    this.playerAppearance = appearance;
+    drawPlayerCanvas(this.playerCanvas, appearance);
+    this.playerTexture.needsUpdate = true;
+  }
+
+  setPov(mode: PovMode, distance?: number) {
+    this.pov = mode;
+    if (distance !== undefined) this.povDistance = Math.max(POV_MIN_DIST, Math.min(POV_MAX_DIST, distance));
+    this.playerMesh.visible = this.pov === 'third';
+  }
+
+  /** その場でポンと短く跳ねる。地面にいるときのみ発動（多重ジャンプ防止）。 */
+  jump() {
+    if (this.grounded) this.jumpQueued = true;
+  }
+
+  /** ドラッグ操作によるカメラ回転（ラジアン加算）。turnL/turnR とは独立に毎フレーム呼べる。 */
+  turnBy(deltaYaw: number) {
+    this.yaw += deltaYaw;
   }
 
   start() {
@@ -128,10 +220,17 @@ export class Yume25DEngine {
     this.disposed = true;
     this.stop();
     this.clearWorld();
+    this.playerGeo.dispose();
+    this.playerMat.dispose();
+    this.playerTexture.dispose();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
+    // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
+    // マウント→アンマウント→再マウント（開発時の二重実行）で作り直されると、
+    // 一度失った WebGL コンテキストを再取得することになり、
+    // WebGLRenderer の初期化が「Cannot read properties of null (reading 'precision')」で落ちる。
+    // dispose() だけで GPU リソース（テクスチャ・プログラム等）は十分に解放される。
     this.renderer.dispose();
-    this.renderer.forceContextLoss();
   }
 
   // ── シーン構築 ──────────────────────────────────────────────────────────
@@ -328,22 +427,44 @@ export class Yume25DEngine {
     this.z = nz;
   }
 
+  /** 三人称カメラが壁にめり込まないよう、プレイヤーから backX/backZ 方向へ壁に当たるまでの距離を測る
+   *  （粗いレイマーチ。壁の薄板1枚ぶんの精度があれば十分なので細かい解析式は使わない）。 */
+  private raycastClamp(backX: number, backZ: number, maxDist: number): number {
+    const STEPS = 24;
+    let px = this.x, pz = this.z;
+    for (let i = 1; i <= STEPS; i++) {
+      const t = (maxDist * i) / STEPS;
+      const nx = this.x + backX * t, nz = this.z + backZ * t;
+      const bx0 = Math.floor(px), bx1 = Math.floor(nx);
+      if (bx1 !== bx0 && this.vEdges.has(`${Math.max(bx0, bx1)},${Math.floor(nz)}`)) return Math.max(POV_MIN_DIST, (maxDist * (i - 1)) / STEPS);
+      const bz0 = Math.floor(pz), bz1 = Math.floor(nz);
+      if (bz1 !== bz0 && this.hEdges.has(`${Math.floor(nx)},${Math.max(bz0, bz1)}`)) return Math.max(POV_MIN_DIST, (maxDist * (i - 1)) / STEPS);
+      px = nx; pz = nz;
+    }
+    return maxDist;
+  }
+
   private step(dt: number) {
     const inp = this.input;
     let turn = (inp.turnL ? 1 : 0) - (inp.turnR ? 1 : 0);
     let move = (inp.forward ? 1 : 0) - (inp.back ? 1 : 0);
+    let strafe = (inp.strafeR ? 1 : 0) - (inp.strafeL ? 1 : 0);
 
     if (this.demo) {
-      move = 1;
+      move = 1; strafe = 0;
       if (this.demoTurnFrames > 0) { this.demoTurnFrames--; turn = -1; }
     }
 
     this.yaw += turn * TURN_SPEED * dt;
     const px = this.x, pz = this.z;
-    if (move !== 0) {
-      const s = move * MOVE_SPEED * dt;
-      this.moveX(-Math.sin(this.yaw) * s);
-      this.moveZ(-Math.cos(this.yaw) * s);
+    // 前方 = (-sin yaw, -cos yaw)、右方 = (cos yaw, -sin yaw)
+    const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+    const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    if (move !== 0 || strafe !== 0) {
+      const dashMult = (inp.dash && !this.demo) ? DASH_MULT : 1;
+      const ms = move * MOVE_SPEED * dashMult * dt, ss = strafe * STRAFE_SPEED * dashMult * dt;
+      this.moveX(fx * ms + rx * ss);
+      this.moveZ(fz * ms + rz * ss);
       this.clampToBounds();
     }
     if (this.demo && move !== 0 && this.demoTurnFrames <= 0) {
@@ -353,9 +474,34 @@ export class Yume25DEngine {
       if (moved < expected * 0.35) this.demoTurnFrames = 25 + Math.floor(Math.random() * 50);
     }
 
-    const eyeY = this.layout.wallHeight * 0.52;
-    this.camera.position.set(this.x, eyeY, this.z);
-    this.camera.rotation.y = this.yaw;
+    // ── ジャンプ（短い一段ジャンプ。地面着地でリセット） ──
+    if (this.jumpQueued && this.grounded) {
+      this.vy = JUMP_VELOCITY;
+      this.grounded = false;
+      this.jumpQueued = false;
+    }
+    if (!this.grounded || this.hop > 0) {
+      this.vy -= GRAVITY * dt;
+      this.hop += this.vy * dt;
+      if (this.hop <= 0) { this.hop = 0; this.vy = 0; this.grounded = true; }
+    }
+
+    const eyeY = this.layout.wallHeight * 0.52 + this.hop;
+    // プレイヤー本体（三人称のときだけ見える）は常に最新の位置・向き・高さへ追従
+    this.playerMesh.position.set(this.x, this.hop + 0.42, this.z);
+    this.playerMesh.rotation.y = this.yaw;
+
+    if (this.pov === 'third') {
+      const backX = Math.sin(this.yaw), backZ = Math.cos(this.yaw);
+      const dist = this.raycastClamp(backX, backZ, this.povDistance);
+      this.camera.position.set(this.x + backX * dist, eyeY + POV_HEIGHT_ABOVE_EYE, this.z + backZ * dist);
+      this.camera.rotation.y = this.yaw;
+      this.camera.rotation.x = -Math.atan2(POV_HEIGHT_ABOVE_EYE + 0.1, Math.max(0.35, dist));
+    } else {
+      this.camera.position.set(this.x, eyeY, this.z);
+      this.camera.rotation.y = this.yaw;
+      this.camera.rotation.x = 0;
+    }
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;
   }
