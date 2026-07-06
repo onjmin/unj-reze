@@ -9,9 +9,9 @@ interface DeletePostModalProps {
 
 export default function DeletePostModal({ onClose, onConfirm }: DeletePostModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative mt-24 mx-3 md:mx-auto md:max-w-sm bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-4 flex flex-col space-y-3 animate-fade-in-up">
+    <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto px-3 pt-24" onClick={(e) => e.stopPropagation()}>
+      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full md:max-w-sm bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-4 flex flex-col space-y-3 animate-fade-in-up">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
             <Trash2 size={14} className="text-red-400" />

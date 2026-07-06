@@ -11,9 +11,9 @@ interface OriginTypeModalProps {
 
 export default function OriginTypeModal({ value, onClose, onSelect }: OriginTypeModalProps) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative mt-16 mx-3 md:mx-auto md:max-w-sm bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-3 flex flex-col space-y-2 animate-fade-in-up">
+    <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto px-3 pt-16" onClick={(e) => e.stopPropagation()}>
+      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full md:max-w-sm bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-3 flex flex-col space-y-2 animate-fade-in-up">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs font-bold text-gray-400">権利表記を設定</span>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/10 transition-colors">
