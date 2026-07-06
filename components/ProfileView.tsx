@@ -5,7 +5,7 @@ import { Post } from '@/lib/types';
 import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { extractMmlFromContent, EMBED_TEXT_MARKERS } from '@/lib/mml';
+import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -230,12 +230,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
 
                   <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
                     {(() => {
-                      const markers = EMBED_TEXT_MARKERS;
-                      const markerPos = markers.reduce((best, kw) => {
-                        const pos = p.content.indexOf(kw);
-                        return pos >= 0 ? Math.min(best, pos) : best;
-                      }, Infinity);
-                      const displayText = markerPos < Infinity ? p.content.slice(0, markerPos).trimEnd() : p.content;
+                      const displayText = getDisplayContent(p.content);
                       const lines = displayText ? displayText.split('\n') : [];
                       return lines.map((line, lIdx) => (
                         <span key={lIdx} className="block">

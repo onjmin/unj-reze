@@ -1,9 +1,12 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { X, Pen, Grid3x3, Music, Gamepad2 } from 'lucide-react';
 import { OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import OriginTypeModal from './OriginTypeModal';
+
+const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
 interface PostComposerProps {
   userId: string;
@@ -11,6 +14,8 @@ interface PostComposerProps {
   setText: (v: string) => void;
   image: string | null;
   setImage: (v: string | null) => void;
+  mml: string | null;
+  setMml: (v: string | null) => void;
   originType?: OriginType;
   setOriginType: (v: OriginType | undefined) => void;
   onClose: () => void;
@@ -21,7 +26,7 @@ interface PostComposerProps {
   onOpenGameMaker: () => void;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, mml, setMml, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showOriginModal, setShowOriginModal] = useState(false);
   const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
@@ -62,6 +67,23 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
                 >
                   <X size={14} />
                 </button>
+              </div>
+            )}
+            {mml && (
+              <div className="relative mt-2 rounded-lg border border-pink-700/50 bg-pink-500/10 px-3 py-2 md:px-4 md:py-3 max-w-[280px] md:max-w-[420px]">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] md:text-xs font-bold text-pink-300 flex items-center gap-1">
+                    <Music size={12} />
+                    MMLを添付中（試聴できます）
+                  </span>
+                  <button
+                    onClick={() => setMml(null)}
+                    className="text-pink-300/70 hover:text-red-400 shrink-0"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <MmlPlayer mml={mml} />
               </div>
             )}
           </div>
@@ -116,7 +138,7 @@ export default function PostComposer({ userId, text, setText, image, setImage, o
           </div>
           <button
             onClick={onSubmit}
-            disabled={!text.trim() && !image}
+            disabled={!text.trim() && !image && !mml}
             className="bg-blue-600 text-white font-bold px-4 py-1.5 md:px-6 md:py-2.5 rounded-full text-xs md:text-sm hover:bg-blue-500 disabled:opacity-50 transition-colors"
           >
             投稿

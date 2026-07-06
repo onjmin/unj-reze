@@ -134,19 +134,44 @@ export const MML_MARKERS = ['#mml', '#MML作曲'];
 // 投稿本文から「埋め込みに置き換える」ために隠すマーカー（MML + コード）。
 export const EMBED_TEXT_MARKERS = [...MML_MARKERS, '#chord'];
 
+/** contentの中から「行頭がMMLマーカーの行」を探し、その行番号を返す(なければ-1)。 */
+function findMmlLineIndex(lines: string[]): number {
+  return lines.findIndex(line => {
+    const trimmed = line.trim();
+    return MML_MARKERS.some(m => trimmed.startsWith(m));
+  });
+}
+
+// MML行は他の行と混在しうる（1行下に自由コメントが入る等）ため、
+// マーカーが現れた行だけを対象に抽出・除去する。マーカー以降を全部飲み込まない。
 export function extractMmlFromContent(content: string): string | null {
-  const markers = MML_MARKERS;
-  let idx = -1;
-  let markerLen = 0;
-  for (const m of markers) {
-    const p = content.indexOf(m);
-    if (p !== -1 && (idx === -1 || p < idx)) {
-      idx = p;
-      markerLen = m.length;
-    }
-  }
+  const lines = content.split('\n');
+  const idx = findMmlLineIndex(lines);
   if (idx === -1) return null;
-  return content.slice(idx + markerLen).trim();
+  const line = lines[idx].trim();
+  const marker = MML_MARKERS.find(m => line.startsWith(m))!;
+  return line.slice(marker.length).trim();
+}
+
+/** MMLマーカー行だけを取り除いたcontentを返す。前後の自由コメント行は維持する。 */
+export function stripMmlLine(content: string): string {
+  const lines = content.split('\n');
+  const idx = findMmlLineIndex(lines);
+  if (idx === -1) return content;
+  lines.splice(idx, 1);
+  return lines.join('\n');
+}
+
+/**
+ * 投稿本文の表示用テキストを生成する。
+ * MML行は(前後の自由コメントを残したまま)行単位で除去し、
+ * #chordは従来通りマーカー以降を丸ごと埋め込みに譲る。
+ */
+export function getDisplayContent(content: string): string {
+  const withoutMml = stripMmlLine(content);
+  const chordIdx = withoutMml.indexOf('#chord');
+  const sliced = chordIdx >= 0 ? withoutMml.slice(0, chordIdx) : withoutMml;
+  return sliced.trimEnd();
 }
 
 function parseSingleTrack(body: string): GridNote[] {

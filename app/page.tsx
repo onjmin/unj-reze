@@ -25,6 +25,7 @@ import ProfileView from '@/components/ProfileView';
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
 const MmlEditor = dynamic(() => import('@/components/MmlEditor'), { ssr: false });
+const MmlPlayer = dynamic(() => import('@/components/MmlPlayer'), { ssr: false });
 
 export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -55,6 +56,7 @@ export default function App() {
   const [messageCount, setMessageCount] = useState(0);
   const [inputText, setInputText] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [attachedMml, setAttachedMml] = useState<string | null>(null);
   const [originType, setOriginType] = useState<OriginType | undefined>(undefined);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
@@ -265,7 +267,7 @@ export default function App() {
   };
 
   const handleCreatePost = async () => {
-    if (!inputText.trim() && !attachedImage) return;
+    if (!inputText.trim() && !attachedImage && !attachedMml) return;
     let imageSrc: string | undefined;
     if (attachedImage) {
       const result = await api.upload.image({ image: attachedImage });
@@ -283,9 +285,15 @@ export default function App() {
         gameId = savedGame.id;
       }
     }
+    // #MML作曲行は1行目、自由コメントはその下の行として保存する
+    // （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
+    const parts: string[] = [];
+    if (attachedMml) parts.push(`#MML作曲 ${attachedMml}`);
+    if (inputText.trim()) parts.push(inputText.trim());
+    const content = parts.join('\n');
     const post = await api.posts.create({
       displayName: userId,
-      content: inputText,
+      content,
       hasImage: !!attachedImage,
       imageSrc,
       avatarColor: "from-blue-500 to-indigo-600",
@@ -295,6 +303,7 @@ export default function App() {
     setPosts([post, ...posts]);
     setInputText('');
     setAttachedImage(null);
+    setAttachedMml(null);
     setGameDraft(null);
     setOriginType(undefined);
   };
@@ -335,7 +344,7 @@ export default function App() {
 
   const handleSaveMml = (mml: string) => {
     setActiveScreen(null);
-    setInputText(`#MML作曲 ${mml}`);
+    setAttachedMml(mml);
   };
 
   const handleOpenPostGame = async (gameId: number, postId?: number) => {
@@ -487,6 +496,23 @@ export default function App() {
                               </button>
                             </div>
                           )}
+                          {attachedMml && (
+                            <div className="relative mt-2 rounded-lg border border-pink-700/50 bg-pink-500/10 px-3 py-2 max-w-[280px]">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-bold text-pink-300 flex items-center gap-1">
+                                  <Music size={12} />
+                                  MMLを添付中（試聴できます）
+                                </span>
+                                <button
+                                  onClick={() => setAttachedMml(null)}
+                                  className="text-pink-300/70 hover:text-red-400 shrink-0"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                              <MmlPlayer mml={attachedMml} />
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex justify-between items-center pl-12">
@@ -522,7 +548,7 @@ export default function App() {
                         </div>
                         <button
                           onClick={handleCreatePost}
-                          disabled={!inputText.trim() && !attachedImage}
+                          disabled={!inputText.trim() && !attachedImage && !attachedMml}
                           className="bg-blue-600 text-white font-bold px-4 py-1.5 rounded-full text-xs hover:bg-blue-500 disabled:opacity-50 transition-colors"
                         >
                           投稿
@@ -616,6 +642,8 @@ export default function App() {
             setText={setInputText}
             image={attachedImage}
             setImage={setAttachedImage}
+            mml={attachedMml}
+            setMml={setAttachedMml}
             originType={originType}
             setOriginType={setOriginType}
             onClose={() => setComposerOpen(false)}

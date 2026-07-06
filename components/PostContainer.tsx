@@ -8,7 +8,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { Post, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import { api } from '@/lib/api';
-import { extractMmlFromContent, EMBED_TEXT_MARKERS } from '@/lib/mml';
+import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -308,12 +308,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
             {(() => {
-              const markers = EMBED_TEXT_MARKERS;
-              const markerPos = markers.reduce((best, kw) => {
-                const p = post.content.indexOf(kw);
-                return p >= 0 ? Math.min(best, p) : best;
-              }, Infinity);
-              const displayText = markerPos < Infinity ? post.content.slice(0, markerPos).trimEnd() : post.content;
+              const displayText = getDisplayContent(post.content);
               const lines = displayText ? displayText.split('\n') : [];
               return lines.map((line, lIdx) => (
                 <span key={lIdx} className="block">
