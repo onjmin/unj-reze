@@ -25,7 +25,7 @@ import {
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
-  type BattleMove, type SwitchDef, type ItemDef,
+  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig,
   defaultTitleScreen, defaultEndingScreen,
@@ -132,10 +132,11 @@ export interface GameManifestDraft {
   switches?: SwitchDef[];
   items?: ItemDef[];
   phases?: StagePhase[];
-titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
+  titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
   ending?: Omit<EndingScreenConfig, 'bgUrl'>;
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
   scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
+  battle?: BattleConfig;
 }
 
 /** ズームビューポート：画面に表示するタイル数。canvas は PLAY_W×PLAY_H px 固定のまま ctx.scale で拡大。 */
@@ -1074,10 +1075,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   editScrollYRef.current = editScrollY;
 
   // ── ターン制戦闘 ──
-  interface BattleView { enemyName: string; enemyEmoji: string; enemyHp: number; enemyMaxHp: number; log: string[]; canAct: boolean; over: boolean; }
+  // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
+  interface BattleView { enemyName: string; enemyEmoji: string; enemyHp: number; enemyMaxHp: number; mercy: number; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
-  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean }[]; exp: number; gold: number; isBoss: boolean }>(
-    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false });
+  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string }[]; exp: number; gold: number; isBoss: boolean; mercy: number; miniScript?: string }>(
+    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, miniScript: undefined });
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
@@ -1085,6 +1087,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const overlayAlphaRef = useRef(1);
   /** 戦闘コマンド「どうぐ」のサブメニュー開閉。 */
   const [battleItemsOpen, setBattleItemsOpen] = useState(false);
+  // ── アンダーテール風戦闘（battle.style === 'soul'）──
+  // menu: コマンド選択 / attack: タイミングバー / dodge: バトルボックス内で弾幕よけ
+  const [soulPhase, setSoulPhase] = useState<'menu' | 'attack' | 'dodge'>('menu');
+  const [soulMenu, setSoulMenu] = useState<'root' | 'act' | 'item' | 'mercy'>('root');
+  const soulDodgeRef = useRef<{ frames: number; duration: number; pattern: number; dmg: number; bullets: { x: number; y: number; vx: number; vy: number; r: number }[]; hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean } } | null>(null);
+  const soulBarRef = useRef({ pos: 0 });
+  const soulBarElRef = useRef<HTMLDivElement | null>(null);
+  const soulCanvasRef = useRef<HTMLCanvasElement | null>(null);
   /** フィールドの 🎒 どうぐ袋モーダル開閉（rpg エンジン）。開いている間は移動を凍結。 */
   const [bagOpen, setBagOpen] = useState(false);
   const bagOpenRef = useRef(false);
@@ -1328,7 +1338,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const calcDmg = (atk: number, def: number) => Math.max(1, Math.round((atk - def / 2) * (0.85 + Math.random() * 0.3)));
   const appendLog = (line: string, patch: Partial<BattleView> = {}) =>
-    setBattle(v => (v ? { ...v, enemyHp: battleRef.current.enemyHp, log: [...v.log, line].slice(-6), ...patch } : v));
+    setBattle(v => (v ? { ...v, enemyHp: battleRef.current.enemyHp, mercy: battleRef.current.mercy, log: [...v.log, line].slice(-6), ...patch } : v));
 
   const getCurrentFieldBgm = useCallback(() => {
     if (isPlaying && gameData.scenes && gameData.scenes.length > 0) {
@@ -1352,15 +1362,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean }[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string }[]; miniScript?: string; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
       enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
-      gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss,
+      gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss, mercy: 0,
+      miniScript: opts.miniScript,
     };
     setBattleItemsOpen(false); setBagOpen(false);
+    setSoulPhase('menu'); setSoulMenu('root'); soulDodgeRef.current = null;
     bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
-    setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemyHp: opts.hp, enemyMaxHp: opts.hp, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
+    setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemyHp: opts.hp, enemyMaxHp: opts.hp, mercy: 0, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
     // バトルBGM切り替え
     if (opts.isBoss && gameDataRef.current.bossBgm?.src) {
       battleBgmActiveRef.current = 'boss';
@@ -1373,7 +1385,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
   };
 
   const nudgePlayer = () => {
@@ -1385,7 +1397,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     p.y = Math.max(0, Math.min(VIEW_H - pData.h, p.y + (dy / dist) * TILE_SIZE * 1.3));
   };
 
-  const endBattle = (result: 'win' | 'lose' | 'flee') => {
+  // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
+  // ボスをみのがした場合も撃破と同様にクリア扱い（不殺ルート）。
+  const endBattle = (result: 'win' | 'lose' | 'flee' | 'spare') => {
     const b = battleRef.current; const pr = progressRef.current; const eng = engineRef.current;
     if (result === 'lose') {
       battleRef.current.active = false; setBattle(null);
@@ -1394,6 +1408,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     const wasBoss = b.isBoss;
+    if (result === 'spare') {
+      if (b.entity) { const idx = eng.entities.indexOf(b.entity); if (idx >= 0) eng.entities.splice(idx, 1); }
+      pr.gold = (pr.gold ?? 0) + b.gold;
+      setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を みのがした！${b.gold > 0 ? ` ${b.gold}G` : ''}`].slice(-6) } : v));
+      if (wasBoss) bossDefeatedRef.current = true;
+    }
     if (result === 'win') {
       if (b.entity) { const idx = eng.entities.indexOf(b.entity); if (idx >= 0) eng.entities.splice(idx, 1); }
       pr.exp += b.exp;
@@ -1435,7 +1455,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         battleBgmActiveRef.current = 'none';
         switchBgm(getCurrentFieldBgm());
       }
-      if (result === 'win' && wasBoss) {
+      if ((result === 'win' || result === 'spare') && wasBoss) {
         const outro = bossOutroRef.current;
         if (outro?.length) {
           outroModeRef.current = true;
@@ -1445,7 +1465,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); });
         }
       }
-    }, result === 'win' ? 1100 : 500);
+    }, result === 'win' || result === 'spare' ? 1100 : 500);
+  };
+
+  /** みのがし成立条件：こうどうでゲージ満タン（閾値 %）、または敵HPが所定の割合以下。 */
+  const spareReady = (b: { mercy: number; enemyHp: number; enemyMaxHp: number }) => {
+    const battleCfg = gameDataRef.current.battle;
+    const mercyTh = battleCfg?.mercyThreshold ?? 100;
+    const hpThPct = battleCfg?.hpSpareThreshold ?? 20;
+    const hpLimit = Math.ceil(b.enemyMaxHp * (hpThPct / 100));
+    return b.mercy >= mercyTh || (b.enemyHp > 0 && b.enemyHp <= hpLimit);
   };
 
   const enemyTurn = () => {
@@ -1468,6 +1497,48 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (pr.hp <= 0) setTimeout(() => endBattle('lose'), 600);
   };
 
+  /** プレイヤーの行動後に敵ターンへ。soul スタイルなら弾幕よけ、classic なら従来の即時ダメージ。 */
+  const queueEnemyTurn = (delay = 750) => setTimeout(() => {
+    if ((gameDataRef.current.battle?.style ?? 'classic') === 'soul') soulEnemyTurn(); else enemyTurn();
+  }, delay);
+
+  /** soul: 敵ターン開始。回復技なら回復のみ、攻撃ならバトルボックスを変形させて弾幕よけへ。 */
+  const soulEnemyTurn = () => {
+    const b = battleRef.current; const pr = progressRef.current;
+    if (!b.active) return;
+    const move = b.enemyMoves.length && Math.random() < 0.4 ? b.enemyMoves[Math.floor(Math.random() * b.enemyMoves.length)] : null;
+    if (move?.heal) {
+      const before = b.enemyHp; b.enemyHp = Math.min(b.enemyMaxHp, b.enemyHp + move.power);
+      appendLog(`${b.enemyName}は ${move.name}を つかった！ HPが ${b.enemyHp - before} かいふく`, { canAct: pr.hp > 0 });
+      return;
+    }
+    // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
+    const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
+    appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`);
+    const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
+    soulDodgeRef.current = { frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [], hx: 88, hy: 118, invuln: 30, miniScript: script };
+    setSoulPhase('dodge');
+  };
+
+  /** soul: タイミングバーの結果からダメージを与える。中央に近いほど高倍率。 */
+  const resolveSoulAttack = (pos: number) => {
+    const b = battleRef.current; const pr = progressRef.current;
+    const dist = Math.abs(pos - 0.5);
+    const mult = dist < 0.06 ? 1.6 : dist < 0.18 ? 1.2 : dist < 0.32 ? 0.9 : 0.6;
+    const dmg = Math.max(1, Math.round(calcDmg(pr.atk, b.enemyDef) * mult));
+    b.enemyHp = Math.max(0, b.enemyHp - dmg);
+    setSoulPhase('menu');
+    appendLog(`${mult >= 1.6 ? '会心の いちげき！ ' : ''}${dmg}のダメージ！`, { canAct: false });
+    if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+    queueEnemyTurn();
+  };
+
+  const missSoulAttack = () => {
+    setSoulPhase('menu');
+    appendLog('こうげきは ハズれた！', { canAct: false });
+    queueEnemyTurn();
+  };
+
   const doAttack = () => {
     if (!battle?.canAct || battle.over) return;
     const b = battleRef.current; const pr = progressRef.current;
@@ -1475,7 +1546,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
     appendLog(`${gameData.battle?.playerName || '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
-    setTimeout(enemyTurn, 750);
+    queueEnemyTurn();
   };
 
   const doMove = (m: BattleMove) => {
@@ -1483,6 +1554,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const b = battleRef.current; const pr = progressRef.current;
     if (pr.mp < m.cost) { appendLog('MPが たりない！'); return; }
     pr.mp -= m.cost; forceHud(n => n + 1);
+    if (m.mercy != null) {
+      // こうどう技：ダメージを与えず敵意ゲージを溜める
+      const before = b.mercy;
+      b.mercy = Math.min(100, b.mercy + m.mercy);
+      const line = b.mercy >= 100
+        ? `「${m.name}」！ ${b.enemyName}は たたかう気を なくしたようだ…`
+        : b.mercy > before
+          ? `「${m.name}」！ ${b.enemyName}の 敵意が やわらいだ`
+          : `「${m.name}」！ しかし ${b.enemyName}には とどかなかった`;
+      appendLog(line, { canAct: false });
+      queueEnemyTurn();
+      return;
+    }
     if (m.heal) {
       const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + m.power);
       appendLog(`${m.name}！ HPが ${pr.hp - before} かいふくした`, { canAct: false });
@@ -1492,13 +1576,212 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       appendLog(`${m.name}！ ${dmg}のダメージ`, { canAct: false });
       if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     }
-    setTimeout(enemyTurn, 750);
+    queueEnemyTurn();
   };
 
   const doFlee = () => {
     if (!battle?.canAct || battle.over) return;
     if (Math.random() < 0.6) { appendLog('うまく にげきれた！', { canAct: false, over: true }); setTimeout(() => endBattle('flee'), 700); }
-    else { appendLog('しかし まわりこまれてしまった！', { canAct: false }); setTimeout(enemyTurn, 750); }
+    else { appendLog('しかし まわりこまれてしまった！', { canAct: false }); queueEnemyTurn(); }
+  };
+
+  /** みのがす（labels.mercy 設定時のみUIに出る）。条件を満たしていなければターンを消費して失敗。 */
+  const doSpare = () => {
+    if (!battle?.canAct || battle.over) return;
+    const b = battleRef.current;
+    if (spareReady(b)) {
+      appendLog(`${b.enemyName}は しずかに たちさった…`, { canAct: false, over: true });
+      setTimeout(() => endBattle('spare'), 700);
+    } else {
+      appendLog(`${b.enemyName}は まだ たたかう気だ！`, { canAct: false });
+      queueEnemyTurn();
+    }
+  };
+
+  const battleStyle = gameData.battle?.style ?? 'classic';
+  const inBattle = !!battle;
+
+  // soul: たたかう＝タイミングバー。バーが右端まで行くとミス。クリック/Z/Enter/Spaceで停止。
+  useEffect(() => {
+    if (!inBattle || battleStyle !== 'soul' || soulPhase !== 'attack') return;
+    soulBarRef.current = { pos: 0 };
+    let raf = 0; let alive = true;
+    const step = () => {
+      if (!alive) return;
+      soulBarRef.current.pos += 0.013;
+      if (soulBarElRef.current) soulBarElRef.current.style.left = `${Math.min(100, soulBarRef.current.pos * 100)}%`;
+      if (soulBarRef.current.pos >= 1) { alive = false; missSoulAttack(); return; }
+      raf = requestAnimationFrame(step);
+    };
+    const stop = () => { if (!alive) return; alive = false; cancelAnimationFrame(raf); resolveSoulAttack(soulBarRef.current.pos); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'z' || e.key === 'Z' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stop(); } };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointerdown', stop);
+    raf = requestAnimationFrame(step);
+    return () => { alive = false; cancelAnimationFrame(raf); window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', stop); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inBattle, battleStyle, soulPhase]);
+
+  // soul: 敵ターン＝バトルボックス内の弾幕よけミニゲーム（176×176 の小キャンバス）。
+  useEffect(() => {
+    if (!inBattle || battleStyle !== 'soul' || soulPhase !== 'dodge') return;
+    const cv = soulCanvasRef.current; const st = soulDodgeRef.current;
+    if (!cv || !st) return;
+    const ctx = cv.getContext('2d'); if (!ctx) return;
+    const W = 176, H = 176, HR = 6;
+    let raf = 0; let alive = true;
+
+    const scriptSrc = st.miniScript;
+    let scriptCtx = { cancelled: false };
+    st.scriptCtx = scriptCtx;
+
+    if (scriptSrc) {
+      const runDodgeScript = async () => {
+        const lines = parseMiniScript(scriptSrc);
+        const CANCEL = Symbol('cancel');
+        const wait = (frames: number): Promise<void> =>
+          new Promise((res, rej) => {
+            if (scriptCtx.cancelled) { rej(CANCEL); return; }
+            const target = st.frames + Math.max(0, frames | 0);
+            const check = () => {
+              if (scriptCtx.cancelled) { rej(CANCEL); return; }
+              if (st.frames >= target) { res(); return; }
+              requestAnimationFrame(check);
+            };
+            requestAnimationFrame(check);
+          });
+
+        const pushBullet = (x: number, y: number, vx: number, vy: number, r = 4) => {
+          if (scriptCtx.cancelled) return;
+          st.bullets.push({ x, y, vx, vy, r });
+        };
+
+        const env: MiniEnv = {
+          wait,
+          shot: (x: unknown, y: unknown, vx: unknown, vy: unknown, r?: unknown) => {
+            pushBullet(+(x as number), +(y as number), +(vx as number), +(vy as number), r != null ? +(r as number) : 4);
+          },
+          shotPlayer: (x: unknown, y: unknown, speed: unknown, r?: unknown) => {
+            const sx = +(x as number), sy = +(y as number), sp = +(speed as number);
+            const d = Math.hypot(st.hx - sx, st.hy - sy) || 1;
+            pushBullet(sx, sy, (st.hx - sx) / d * sp, (st.hy - sy) / d * sp, r != null ? +(r as number) : 4.5);
+          },
+          shotAimed: (speed: unknown, r?: unknown) => {
+            const edge = Math.floor(Math.random() * 4);
+            const sx = edge === 0 ? -6 : edge === 1 ? W + 6 : Math.random() * W;
+            const sy = edge === 2 ? -6 : edge === 3 ? H + 6 : Math.random() * H;
+            const sp = +(speed as number);
+            const d = Math.hypot(st.hx - sx, st.hy - sy) || 1;
+            pushBullet(sx, sy, (st.hx - sx) / d * sp, (st.hy - sy) / d * sp, r != null ? +(r as number) : 4.5);
+          },
+          shotRain: (speed: unknown, r?: unknown) => {
+            const sx = 8 + Math.random() * (W - 16);
+            pushBullet(sx, -6, 0, +(speed as number), r != null ? +(r as number) : 4);
+          },
+          shotSide: (fromLeft: unknown, y: unknown, speed: unknown, r?: unknown) => {
+            const fl = !!fromLeft;
+            const sx = fl ? -6 : W + 6;
+            const sy = +(y as number);
+            const sp = +(speed as number);
+            pushBullet(sx, sy, fl ? sp : -sp, 0, r != null ? +(r as number) : 4);
+          },
+          getPlayerX: () => st.hx,
+          getPlayerY: () => st.hy,
+          rand: (mn: unknown, mx: unknown) => Math.floor(Math.random() * (+(mx as number) - +(mn as number) + 1)) + +(mn as number),
+          randF: (mn: unknown, mx: unknown) => Math.random() * (+(mx as number) - +(mn as number)) + +(mn as number),
+        };
+
+        try {
+          await runMiniScript(lines, env, {});
+        } catch (e) {
+          if (e !== CANCEL) console.warn('[MiniScript Dodge]', e);
+        }
+      };
+      runDodgeScript();
+    }
+
+    const drawHeart = (x: number, y: number, s: number, color: string) => {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x, y + s * 0.9);
+      ctx.bezierCurveTo(x + s, y + s * 0.2, x + s * 0.8, y - s * 0.8, x, y - s * 0.2);
+      ctx.bezierCurveTo(x - s * 0.8, y - s * 0.8, x - s, y + s * 0.2, x, y + s * 0.9);
+      ctx.fill();
+    };
+    const loop = () => {
+      if (!alive) return;
+      const pr = progressRef.current;
+      st.frames++;
+      // 入力（メインエンジンと同じキーセットを読む）＋タッチはポインタで直接動かす
+      const keys = engineRef.current.keys;
+      const sp = 2.4;
+      if (keys.has('ArrowLeft') || keys.has('a') || keys.has('A')) st.hx -= sp;
+      if (keys.has('ArrowRight') || keys.has('d') || keys.has('D')) st.hx += sp;
+      if (keys.has('ArrowUp') || keys.has('w') || keys.has('W')) st.hy -= sp;
+      if (keys.has('ArrowDown') || keys.has('s') || keys.has('S')) st.hy += sp;
+      st.hx = Math.max(9, Math.min(W - 9, st.hx));
+      st.hy = Math.max(9, Math.min(H - 9, st.hy));
+      // 弾の生成（3パターン：あめ／ねらいうち／よこなぐり）
+      if (!scriptSrc) {
+        if (st.pattern === 0) {
+          if (st.frames % 11 === 0) st.bullets.push({ x: 8 + Math.random() * (W - 16), y: -6, vx: 0, vy: 1.3 + Math.random() * 1.2, r: 4 });
+        } else if (st.pattern === 1) {
+          if (st.frames % 24 === 0) {
+            const edge = Math.floor(Math.random() * 4);
+            const x = edge === 0 ? -6 : edge === 1 ? W + 6 : Math.random() * W;
+            const y = edge === 2 ? -6 : edge === 3 ? H + 6 : Math.random() * H;
+            const d = Math.hypot(st.hx - x, st.hy - y) || 1;
+            st.bullets.push({ x, y, vx: (st.hx - x) / d * 1.6, vy: (st.hy - y) / d * 1.6, r: 4.5 });
+          }
+        } else {
+          if (st.frames % 16 === 0) {
+            const fromLeft = Math.floor(st.frames / 16) % 2 === 0;
+            st.bullets.push({ x: fromLeft ? -6 : W + 6, y: 10 + Math.random() * (H - 20), vx: fromLeft ? 1.9 : -1.9, vy: 0, r: 4 });
+          }
+        }
+      }
+      for (const bl of st.bullets) { bl.x += bl.vx; bl.y += bl.vy; }
+      st.bullets = st.bullets.filter(bl => bl.x > -20 && bl.x < W + 20 && bl.y > -20 && bl.y < H + 20);
+      // 被弾判定（被弾後は無敵時間つき）
+      if (st.invuln > 0) st.invuln--;
+      else {
+        for (const bl of st.bullets) {
+          if (Math.hypot(bl.x - st.hx, bl.y - st.hy) < bl.r + HR - 1) {
+            pr.hp = Math.max(0, pr.hp - st.dmg);
+            st.invuln = 45;
+            playSfx(sfxRef.current.damage);
+            forceHud(n => n + 1);
+            if (pr.hp <= 0) { alive = false; endBattle('lose'); return; }
+            break;
+          }
+        }
+      }
+      // 描画
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      for (const bl of st.bullets) { ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.fill(); }
+      if (st.invuln % 8 < 4) drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c');
+      if (st.frames >= st.duration) {
+        alive = false;
+        setSoulPhase('menu'); setSoulMenu('root');
+        appendLog('…こうげきを しのいだ！', { canAct: progressRef.current.hp > 0 });
+        return;
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => { alive = false; scriptCtx.cancelled = true; cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inBattle, battleStyle, soulPhase]);
+
+  /** soul: タッチ/マウスでハートを直接動かす。 */
+  const soulPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const st = soulDodgeRef.current; const cv = soulCanvasRef.current;
+    if (!st || !cv) return;
+    const rect = cv.getBoundingClientRect();
+    st.hx = Math.max(9, Math.min(167, (e.clientX - rect.left) / rect.width * 176));
+    st.hy = Math.max(9, Math.min(167, (e.clientY - rect.top) / rect.height * 176));
   };
 
   /** healHp/healMp を持つアイテムを使う。inBattle=true ならターン消費して敵の反撃を受ける。 */
@@ -1514,7 +1797,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (inBattle) {
       setBattleItemsOpen(false);
       appendLog(`${it.name}を つかった！ ${parts.join('、')}`, { canAct: false });
-      setTimeout(enemyTurn, 750);
+      queueEnemyTurn();
     } else {
       setBagOpen(false);
       showGameMsg(`${it.emoji} ${it.name}を つかった！\n${parts.join('、')}した`, 'instant', () => {});
@@ -1975,7 +2258,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         phases: initialManifest.phases ?? base.phases,
         titleScreen: initialManifest.titleScreen ?? base.titleScreen,
         ending: initialManifest.ending ?? base.ending,
-        battle: base.battle,
+        battle: initialManifest.battle ?? base.battle,
         bgm: initialManifest.bgm && initialManifest.bgm !== 'none' ? { ref: initialManifest.bgm } : undefined,
         battleBgm: initialManifest.battleBgm ? { ref: initialManifest.battleBgm } : undefined,
         bossBgm: initialManifest.bossBgm ? { ref: initialManifest.bossBgm } : undefined,
@@ -2178,7 +2461,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const b = gameData.battle;
       if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.[0]?.exp ?? 10, gold: b.gold ?? 0 };
       setEquipment({}); equipmentRef.current = {};
-      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false };
+      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0 };
       encounterGaugeRef.current = 0; encounterNextRef.current = 0;
       invulnRef.current = 0; isPlayerDeadRef.current = false; roundOverRef.current = false; livesRef.current = 3; scoreRef.current = 0;
       // onjReze：ハート・向き・剣の初期化
@@ -5662,12 +5945,15 @@ const lose = (msg: string) => {
     phases: gameData.phases,
     titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
     ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
+    battle: gameData.battle,
     scenes: gameData.scenes?.map(s => ({
       id: s.id, name: s.name, exits: s.exits,
       map: s.map,
       overlayMap: s.overlayMap,
       objects: s.objects.map(({ spriteUrl, ...o }) => o),
       bgm: s.bgm?.ref,
+      randomEncounters: s.randomEncounters,
+      encounterRate: s.encounterRate,
     })),
   });
 
@@ -5710,7 +5996,7 @@ const lose = (msg: string) => {
           phases: manifest.phases ?? base.phases,
           titleScreen: manifest.titleScreen ?? base.titleScreen,
           ending: manifest.ending ?? base.ending,
-          battle: base.battle,
+          battle: manifest.battle ?? base.battle,
           scenes: manifest.scenes?.map(s => ({
             ...s,
             objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
@@ -5923,7 +6209,7 @@ const lose = (msg: string) => {
               isPlayerDeadRef.current = false;
               roundOverRef.current = false;
               setBattle(null);
-              battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false };
+              battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0 };
               const pp = engineRef.current.player;
               const pw = gameData.player.w, ph = gameData.player.h;
               setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
@@ -6036,6 +6322,7 @@ const lose = (msg: string) => {
                 mario:   'from-red-950   via-gray-900 to-gray-950',
                 touhou:  'from-purple-950 via-gray-900 to-gray-950',
                 rockman: 'from-cyan-950  via-gray-900 to-gray-950',
+                undertale: 'from-rose-950 via-gray-950 to-black',
               };
               const PRESET_RING: Record<PresetId, string> = {
                 onjReze: 'ring-orange-500/50',
@@ -6043,6 +6330,7 @@ const lose = (msg: string) => {
                 mario:   'ring-red-500/50',
                 touhou:  'ring-purple-500/50',
                 rockman: 'ring-cyan-500/50',
+                undertale: 'ring-rose-500/50',
               };
               return (
                 <div className="absolute inset-0 z-[45] flex flex-col select-none"
@@ -6284,15 +6572,130 @@ const lose = (msg: string) => {
             )}
 
             {/* ── ターン制戦闘オーバーレイ ── */}
-            {battle && (
+            {/* ── アンダーテール風戦闘（soul）── */}
+            {battle && battleStyle === 'soul' && (() => {
+              const pr = progressRef.current;
+              const bd = gameData.battle!;
+              const canMenu = battle.canAct && !battle.over && soulPhase === 'menu';
+              const ready = spareReady(battle);
+              return (
+                <div className="absolute inset-0 flex flex-col p-2 sm:p-3 bg-black/70 font-pixel select-none">
+                  {/* 敵 */}
+                  <div className="flex flex-col items-center mt-1 shrink-0">
+                    <div className={`text-5xl sm:text-6xl leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>{battle.enemyEmoji}</div>
+                    <div className={`mt-1 text-xs sm:text-sm ${ready ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}{ready ? ' ✦' : ''}</div>
+                    <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
+                      <div className="h-full bg-green-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
+                    </div>
+                    <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
+                      <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                    </div>
+                  </div>
+                  {/* バトルボックス（白枠がシームレスに変形する） */}
+                  <div className="flex-1 flex items-center justify-center min-h-0">
+                    <div className="bg-black border-4 border-white relative overflow-hidden"
+                      style={{
+                        width: soulPhase === 'dodge' ? 184 : 'min(100%, 440px)',
+                        height: soulPhase === 'dodge' ? 184 : 128,
+                        transition: 'width 0.35s ease-in-out, height 0.35s ease-in-out',
+                      }}>
+                      {soulPhase === 'dodge' ? (
+                        <canvas ref={soulCanvasRef} width={176} height={176}
+                          className="w-full h-full touch-none cursor-crosshair" style={{ imageRendering: 'pixelated' }}
+                          onPointerMove={soulPointerMove} onPointerDown={soulPointerMove} />
+                      ) : soulPhase === 'attack' ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center px-3 gap-1.5">
+                          <div className="text-white/70 text-[10px]">タイミングよく タップ / Zキー！</div>
+                          <div className="relative w-full h-10 border-2 border-white/80 bg-[#0c0c14] overflow-hidden">
+                            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[14%] bg-emerald-500/25" />
+                            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[4%] bg-emerald-400/70" />
+                            <div ref={soulBarElRef} className="absolute inset-y-0 w-1 bg-white" style={{ left: '0%' }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="absolute inset-0 p-2.5 text-white text-[11px] sm:text-sm leading-relaxed overflow-hidden">
+                          {soulMenu === 'root' && battle.log.slice(-3).map((l, i) => <p key={i}>＊ {l}</p>)}
+                          {soulMenu === 'act' && (
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                              {bd.moves.map((m, i) => (
+                                <button key={i} disabled={!canMenu || pr.mp < m.cost}
+                                  onClick={() => { setSoulMenu('root'); doMove(m); }}
+                                  className="text-left text-white hover:text-yellow-300 disabled:opacity-40 text-[11px] sm:text-xs py-0.5">
+                                  ❤ {m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
+                                </button>
+                              ))}
+                              <button onClick={() => setSoulMenu('root')} className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">❤ もどる</button>
+                            </div>
+                          )}
+                          {soulMenu === 'item' && (
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                              {usableItems().map(it => (
+                                <button key={it.id} disabled={!canMenu}
+                                  onClick={() => { setSoulMenu('root'); useHealItem(it, true); }}
+                                  className="text-left text-white hover:text-yellow-300 disabled:opacity-40 text-[11px] sm:text-xs py-0.5">
+                                  ❤ {it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                                </button>
+                              ))}
+                              {usableItems().length === 0 && <p className="text-gray-500">もちものが ない…</p>}
+                              <button onClick={() => setSoulMenu('root')} className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">❤ もどる</button>
+                            </div>
+                          )}
+                          {soulMenu === 'mercy' && (
+                            <div className="flex flex-col gap-1">
+                              <button disabled={!canMenu} onClick={() => { setSoulMenu('root'); doSpare(); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : 'text-white hover:text-yellow-300'}`}>
+                                ❤ {bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
+                              </button>
+                              <button disabled={!canMenu} onClick={() => { setSoulMenu('root'); doFlee(); }}
+                                className="text-left text-white hover:text-yellow-300 disabled:opacity-40 text-[11px] sm:text-xs py-0.5">
+                                ❤ {bd.labels.flee}
+                              </button>
+                              <button onClick={() => setSoulMenu('root')} className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">❤ もどる</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* プレイヤーステータス */}
+                  <div className="text-center text-[10px] sm:text-xs text-white mb-1.5 shrink-0">
+                    {bd.playerName}　LV {pr.level}　<span className="text-red-400">HP</span> {pr.hp}/{pr.maxHp}　<span className="text-cyan-300">MP</span> {pr.mp}/{pr.maxMp}
+                  </div>
+                  {/* FIGHT / ACT / ITEM / MERCY */}
+                  <div className="flex justify-center gap-1.5 sm:gap-2 shrink-0">
+                    {([
+                      { label: bd.labels.attack, sel: false, onClick: () => canMenu && setSoulPhase('attack') },
+                      { label: bd.labels.move, sel: soulMenu === 'act', onClick: () => canMenu && setSoulMenu(m => m === 'act' ? 'root' : 'act') },
+                      { label: bd.labels.item ?? 'アイテム', sel: soulMenu === 'item', onClick: () => canMenu && setSoulMenu(m => m === 'item' ? 'root' : 'item') },
+                      { label: bd.labels.mercy ?? 'みのがす', sel: soulMenu === 'mercy', mercy: true, onClick: () => canMenu && setSoulMenu(m => m === 'mercy' ? 'root' : 'mercy') },
+                    ] as { label: string; sel: boolean; mercy?: boolean; onClick: () => void }[]).map((c, i) => (
+                      <button key={i} onClick={c.onClick} disabled={!canMenu}
+                        className={`flex-1 max-w-[104px] py-2 border-2 bg-black text-[10px] sm:text-xs font-bold tracking-wider transition
+                          ${c.sel ? 'border-yellow-300 text-yellow-300' : c.mercy && ready ? 'border-yellow-400 text-yellow-300 animate-pulse' : 'border-orange-400 text-orange-300 hover:border-yellow-300 hover:text-yellow-300'}
+                          disabled:opacity-40`}>
+                        {c.sel ? '❤ ' : ''}{c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {battle && battleStyle !== 'soul' && (
               <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40 font-pixel">
                 {/* 敵 */}
                 <div className="flex flex-col items-center mt-2">
                   <div className="text-5xl sm:text-6xl leading-none drop-shadow">{battle.enemyEmoji}</div>
-                  <div className="mt-1 text-white text-xs sm:text-sm">{battle.enemyName}</div>
+                  {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風） */}
+                  <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
                   <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
                     <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
                   </div>
+                  {gameData.battle?.labels.mercy && (
+                    <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
+                      <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                    </div>
+                  )}
                 </div>
                 {/* ログ + コマンド */}
                 <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
@@ -6317,10 +6720,16 @@ const lose = (msg: string) => {
                       <button onClick={doFlee} className="py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.flee}</button>
                       {(gameData.battle?.moves ?? []).map((m, i) => (
                         <button key={i} onClick={() => doMove(m)} disabled={progressRef.current.mp < m.cost}
-                          className="py-1.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-bold">
-                          {m.name}<span className="text-indigo-300 ml-1">{m.cost}</span>
+                          className={`py-1.5 disabled:opacity-40 text-white text-[11px] font-bold ${m.mercy != null ? 'bg-teal-700 hover:bg-teal-600' : 'bg-indigo-700 hover:bg-indigo-600'}`}>
+                          {m.name}{m.cost > 0 && <span className={`ml-1 ${m.mercy != null ? 'text-teal-300' : 'text-indigo-300'}`}>{m.cost}</span>}
                         </button>
                       ))}
+                      {gameData.battle?.labels.mercy && (
+                        <button onClick={doSpare}
+                          className={`py-1.5 text-[11px] font-bold ${spareReady(battle) ? 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse' : 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200/70'}`}>
+                          {gameData.battle.labels.mercy}
+                        </button>
+                      )}
                       {usableItems().length > 0 && (
                         <button onClick={() => setBattleItemsOpen(true)}
                           className="py-1.5 bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold">
@@ -7114,24 +7523,100 @@ const lose = (msg: string) => {
                               </label>
                             </div>
                             {gameData.battle && (
-                              <div className="grid grid-cols-3 gap-2">
-                                <label className="text-[10px] text-gray-400">攻撃
-                                  <input type="text" inputMode="numeric" defaultValue={selObj.atk ?? Math.round(selObj.hp)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ atk: v }); }}
-                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                </label>
-                                <label className="text-[10px] text-gray-400">防御
-                                  <input type="text" inputMode="numeric" defaultValue={selObj.def ?? Math.round(selObj.hp * 0.4)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ def: v }); }}
-                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                </label>
-                                <label className="text-[10px] text-gray-400">経験値
-                                  <input type="text" inputMode="numeric" defaultValue={selObj.exp ?? Math.round(selObj.hp * 1.5)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ exp: v }); }}
-                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                </label>
-                                <label className="text-[10px] text-gray-400">ゴールド
-                                  <input type="text" inputMode="numeric" defaultValue={selObj.gold ?? Math.round((selObj.exp ?? Math.round(selObj.hp * 1.5)) * 0.6)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ gold: v }); }}
-                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                </label>
-                              </div>
+                              <>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <label className="text-[10px] text-gray-400">攻撃
+                                    <input type="text" inputMode="numeric" defaultValue={selObj.atk ?? Math.round(selObj.hp)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ atk: v }); }}
+                                      className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-gray-400">防御
+                                    <input type="text" inputMode="numeric" defaultValue={selObj.def ?? Math.round(selObj.hp * 0.4)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ def: v }); }}
+                                      className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-gray-400">経験値
+                                    <input type="text" inputMode="numeric" defaultValue={selObj.exp ?? Math.round(selObj.hp * 1.5)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ exp: v }); }}
+                                      className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                  </label>
+                                  <label className="text-[10px] text-gray-400">ゴールド
+                                    <input type="text" inputMode="numeric" defaultValue={selObj.gold ?? Math.round((selObj.exp ?? Math.round(selObj.hp * 1.5)) * 0.6)} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ gold: v }); }}
+                                      className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+                                  </label>
+                                </div>
+
+                                <div className="mt-2.5 space-y-2.5 border-t border-gray-800 pt-2.5">
+                                  <p className="text-[10px] text-gray-300 font-bold">敵の行動パターン設定</p>
+                                  
+                                  {/* 1. 通常攻撃の弾幕 (soul style only) */}
+                                  {gameData.battle.style === 'soul' && (
+                                    <label className="block text-[10px] text-gray-400">通常攻撃の弾幕 (MiniScript)
+                                      <textarea value={selObj.miniScript ?? ''} onChange={e => {
+                                        const v = e.target.value;
+                                        updObj(v ? { miniScript: v, bullet: 'none' } : { miniScript: undefined });
+                                      }} placeholder="// 弾幕パターンをMiniScriptで記述 (例: wait 40\nshotRain(1.5))"
+                                        rows={2} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                    </label>
+                                  )}
+
+                                  {/* 2. 特技/呪文の追加/編集 */}
+                                  <div className="space-y-1.5">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-[9px] text-gray-400 font-bold">特技 / 呪文</span>
+                                      <button onClick={() => updObj({
+                                        moves: [...(selObj.moves ?? []), { name: '新しいわざ', power: 10 }]
+                                      })} className="text-[9px] text-emerald-400 hover:text-emerald-300 font-bold">+ 追加</button>
+                                    </div>
+                                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                      {(selObj.moves ?? []).length === 0 && <p className="text-[9px] text-gray-500">（通常攻撃のみ）</p>}
+                                      {(selObj.moves ?? []).map((m, i) => (
+                                        <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
+                                          <div className="flex gap-1.5 items-center">
+                                            <input value={m.name} onChange={e => {
+                                              const copy = [...(selObj.moves ?? [])];
+                                              copy[i] = { ...copy[i], name: e.target.value };
+                                              updObj({ moves: copy });
+                                            }} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" placeholder="わざ名" />
+                                            <button onClick={() => {
+                                              const copy = [...(selObj.moves ?? [])]; copy.splice(i, 1);
+                                              updObj({ moves: copy.length > 0 ? copy : undefined });
+                                            }} className="text-[10px] text-red-400 px-1 hover:text-red-300">✕</button>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-1.5">
+                                            <label className="text-[9px] text-gray-400">威力/回復量
+                                              <input type="text" inputMode="numeric" value={m.power} onChange={e => {
+                                                const copy = [...(selObj.moves ?? [])];
+                                                const v = parseInt(e.target.value);
+                                                copy[i] = { ...copy[i], power: !isNaN(v) ? v : 0 };
+                                                updObj({ moves: copy });
+                                              }} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                            </label>
+                                            <label className="text-[9px] text-gray-400 block">回復フラグ
+                                              <select value={m.heal ? 'true' : 'false'} onChange={e => {
+                                                const copy = [...(selObj.moves ?? [])];
+                                                copy[i] = { ...copy[i], heal: e.target.value === 'true' };
+                                                updObj({ moves: copy });
+                                              }} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-0.5 text-[9px] text-white outline-none">
+                                                <option value="false">攻撃</option>
+                                                <option value="true">回復</option>
+                                              </select>
+                                            </label>
+                                          </div>
+                                          {gameData.battle?.style === 'soul' && !m.heal && (
+                                            <label className="block text-[9px] text-gray-400">弾幕スクリプト (MiniScript)
+                                              <textarea value={m.miniScript ?? ''} onChange={e => {
+                                                const copy = [...(selObj.moves ?? [])];
+                                                const val = e.target.value;
+                                                copy[i] = { ...copy[i], miniScript: val || undefined };
+                                                updObj({ moves: copy });
+                                              }} placeholder="// MiniScript 記述欄 (省略時は通常攻撃と同じ)"
+                                                rows={2} className="w-full mt-0.5 bg-gray-700 border border-gray-600 rounded px-1 py-0.5 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                            </label>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </>
                             )}
                             {selObj.bullet !== 'none' && (
                               <div className="grid grid-cols-3 gap-2 items-end">
@@ -7522,6 +8007,203 @@ const lose = (msg: string) => {
                           onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, player: { ...p.player, jumpPower: v } })); }}
                           className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
                       </label>
+                    )}
+                    {gameData.battle && (
+                      <div className="border-t border-gray-700 pt-3 space-y-4">
+                        <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
+                        
+                        {/* 1. 基本ステータス */}
+                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                          <p className="text-[10px] text-gray-300 font-bold">基本ステータス</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="text-[10px] text-gray-400">プレイヤー名
+                              <input type="text" value={gameData.battle.playerName} onChange={e => {
+                                const playerName = e.target.value;
+                                setGameData(p => ({ ...p, battle: { ...p.battle!, playerName } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                            </label>
+                            <label className="text-[10px] text-gray-400">初期最大HP
+                              <input type="text" inputMode="numeric" value={gameData.battle.maxHp} onChange={e => {
+                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, maxHp: v } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                            </label>
+                            <label className="text-[10px] text-gray-400">初期最大MP
+                              <input type="text" inputMode="numeric" value={gameData.battle.maxMp} onChange={e => {
+                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, maxMp: v } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                            </label>
+                            <label className="text-[10px] text-gray-400">初期攻撃力
+                              <input type="text" inputMode="numeric" value={gameData.battle.atk} onChange={e => {
+                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, atk: v } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                            </label>
+                            <label className="text-[10px] text-gray-400">初期防御力
+                              <input type="text" inputMode="numeric" value={gameData.battle.def} onChange={e => {
+                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, def: v } }));
+                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* 2. みのがし条件 */}
+                        {gameData.battle.labels.mercy && (
+                          <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                            <p className="text-[10px] text-gray-300 font-bold">みのがし条件</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="text-[10px] text-gray-400">ゲージ満タンの閾値 (%)
+                                <input type="text" inputMode="numeric" placeholder="100" defaultValue={gameData.battle.mercyThreshold ?? 100} onBlur={e => {
+                                  const v = parseInt(e.target.value);
+                                  setGameData(p => ({ ...p, battle: { ...p.battle!, mercyThreshold: !isNaN(v) ? v : undefined } }));
+                                }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                              </label>
+                              <label className="text-[10px] text-gray-400">HP割合の閾値 (%)
+                                <input type="text" inputMode="numeric" placeholder="20" defaultValue={gameData.battle.hpSpareThreshold ?? 20} onBlur={e => {
+                                  const v = parseInt(e.target.value);
+                                  setGameData(p => ({ ...p, battle: { ...p.battle!, hpSpareThreshold: !isNaN(v) ? v : undefined } }));
+                                }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                              </label>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 3. 技 / 呪文 (Moves) */}
+                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                          <div className="flex justify-between items-center">
+                            <p className="text-[10px] text-gray-300 font-bold">戦闘コマンド・こうどう・魔法</p>
+                            <button onClick={() => setGameData(p => {
+                              const b = p.battle!;
+                              return { ...p, battle: { ...b, moves: [...b.moves, { name: '新しい技', cost: 0, power: 10 }] } };
+                            })} className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold">+ 追加</button>
+                          </div>
+                          <div className="space-y-2 max-h-60 overflow-y-auto">
+                            {gameData.battle.moves.map((m, i) => (
+                              <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
+                                <div className="flex gap-1.5 items-center">
+                                  <input value={m.name} onChange={e => setGameData(p => {
+                                    const b = p.battle!; const next = [...b.moves];
+                                    next[i] = { ...next[i], name: e.target.value };
+                                    return { ...p, battle: { ...b, moves: next } };
+                                  })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" placeholder="技名" />
+                                  <button onClick={() => setGameData(p => {
+                                    const b = p.battle!; const next = [...b.moves]; next.splice(i, 1);
+                                    return { ...p, battle: { ...b, moves: next } };
+                                  })} className="text-[10px] text-red-400 px-1 hover:text-red-300">✕</button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  <label className="text-[9px] text-gray-400">消費MP
+                                    <input type="text" inputMode="numeric" value={m.cost} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...b.moves];
+                                      const v = parseInt(e.target.value);
+                                      next[i] = { ...next[i], cost: !isNaN(v) ? v : 0 };
+                                      return { ...p, battle: { ...b, moves: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                  <label className="text-[9px] text-gray-400">{m.mercy != null ? 'ゲージ上昇' : '威力/回復量'}
+                                    <input type="text" inputMode="numeric" value={m.mercy != null ? m.mercy : m.power} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...b.moves];
+                                      const v = parseInt(e.target.value);
+                                      if (m.mercy != null) {
+                                        next[i] = { ...next[i], mercy: !isNaN(v) ? v : 0 };
+                                      } else {
+                                        next[i] = { ...next[i], power: !isNaN(v) ? v : 0 };
+                                      }
+                                      return { ...p, battle: { ...b, moves: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                  <label className="text-[9px] text-gray-400 block">種別
+                                    <select value={m.mercy != null ? 'mercy' : m.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...b.moves];
+                                      const type = e.target.value;
+                                      if (type === 'mercy') {
+                                        next[i] = { name: next[i].name, cost: next[i].cost, power: 0, mercy: 40 };
+                                      } else if (type === 'heal') {
+                                        next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10, heal: true };
+                                      } else {
+                                        next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10 };
+                                      }
+                                      return { ...p, battle: { ...b, moves: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-0.5 text-[9px] text-white outline-none">
+                                      <option value="attack">ダメージ</option>
+                                      <option value="heal">HP回復</option>
+                                      {gameData.battle?.labels.mercy && <option value="mercy">こうどう(敵意)</option>}
+                                    </select>
+                                  </label>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 4. レベルアップ成長テーブル */}
+                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                          <div className="flex justify-between items-center">
+                            <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長表</p>
+                            <button onClick={() => setGameData(p => {
+                              const b = p.battle!;
+                              const table = b.levelTable ?? [];
+                              const nextLv = table.length > 0 ? Math.max(...table.map(e => e.level)) + 1 : 2;
+                              const prevExp = table.length > 0 ? table[table.length - 1].exp : 0;
+                              return { ...p, battle: { ...b, levelTable: [...table, { level: nextLv, exp: prevExp + 10, maxHp: b.maxHp + 8, maxMp: b.maxMp + 2, atk: b.atk + 3, def: b.def + 2 }] } };
+                            })} className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold">+ 追加</button>
+                          </div>
+                          <div className="space-y-2 max-h-60 overflow-y-auto">
+                            {(gameData.battle.levelTable ?? []).length === 0 && <p className="text-[9px] text-gray-500 px-1">（なし - レベル固定）</p>}
+                            {(gameData.battle.levelTable ?? []).map((le, i) => (
+                              <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[10px] text-yellow-400 font-bold">Lv {le.level}</span>
+                                  <button onClick={() => setGameData(p => {
+                                    const b = p.battle!; const next = [...(b.levelTable ?? [])]; next.splice(i, 1);
+                                    return { ...p, battle: { ...b, levelTable: next } };
+                                  })} className="text-[10px] text-red-400 px-1 hover:text-red-300">✕</button>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  <label className="text-[9px] text-gray-400">必要累計EXP
+                                    <input type="text" inputMode="numeric" value={le.exp} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                      const v = parseInt(e.target.value);
+                                      next[i] = { ...next[i], exp: !isNaN(v) ? v : 0 };
+                                      return { ...p, battle: { ...b, levelTable: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                  <label className="text-[9px] text-gray-400">最大HP
+                                    <input type="text" inputMode="numeric" value={le.maxHp ?? ''} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                      const v = parseInt(e.target.value);
+                                      next[i] = { ...next[i], maxHp: !isNaN(v) ? v : undefined };
+                                      return { ...p, battle: { ...b, levelTable: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                  <label className="text-[9px] text-gray-400">最大MP
+                                    <input type="text" inputMode="numeric" value={le.maxMp ?? ''} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                      const v = parseInt(e.target.value);
+                                      next[i] = { ...next[i], maxMp: !isNaN(v) ? v : undefined };
+                                      return { ...p, battle: { ...b, levelTable: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                  <label className="text-[9px] text-gray-400">攻撃力
+                                    <input type="text" inputMode="numeric" value={le.atk ?? ''} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                      const v = parseInt(e.target.value);
+                                      next[i] = { ...next[i], atk: !isNaN(v) ? v : undefined };
+                                      return { ...p, battle: { ...b, levelTable: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                  <label className="text-[9px] text-gray-400">防御力
+                                    <input type="text" inputMode="numeric" value={le.def ?? ''} onChange={e => setGameData(p => {
+                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                      const v = parseInt(e.target.value);
+                                      next[i] = { ...next[i], def: !isNaN(v) ? v : undefined };
+                                      return { ...p, battle: { ...b, levelTable: next } };
+                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-0.5 text-[9px] text-white text-right outline-none" />
+                                  </label>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     )}
                     <p className="text-[10px] text-gray-500">マップの広さやプレイヤー初期位置は「マップ」タブで設定できます。</p>
                   </div>

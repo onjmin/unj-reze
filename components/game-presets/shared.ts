@@ -11,7 +11,7 @@ export const VIEW_ROWS = 11;
 export const VIEW_W = VIEW_COLS * TILE_SIZE;  // 480 px
 export const VIEW_H = VIEW_ROWS * TILE_SIZE;  // 352 px
 
-export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze';
+export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'undertale';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
@@ -275,23 +275,30 @@ export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?
 /** ショップ販売アイテム定義。 */
 export interface ShopItem { itemId: string; price: number; }
 
-/** ターン制戦闘の技/呪文。heal=true のとき power 分だけ自分のHPを回復。 */
-export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; }
+/** ターン制戦闘の技/呪文。heal=true のとき power 分だけ自分のHPを回復。
+ *  mercy を指定すると「こうどう」技になる：ダメージを与えず敵の敵意ゲージ（0〜100）を mercy 分下げる。
+ *  ゲージが満タン（または敵HPが2割以下）になると「みのがす」で戦闘を終了できる（labels.mercy 参照）。 */
+export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; }
 
 /** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。 */
-export interface EnemyMove { name: string; power: number; heal?: boolean; }
+export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; }
 
 /** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; }
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; }
 
 /** ターン制戦闘設定（rpg エンジン：ドラクエ/ポケモン）。
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */
 export interface BattleConfig {
   playerName: string;
   maxHp: number; maxMp: number; atk: number; def: number;
+  /** 戦闘スタイル。'soul'＝アンダーテール風：FIGHT/ACT/ITEM/MERCY の4コマンド、
+   *  たたかう＝タイミングバー、敵ターン＝バトルボックスが変形してハート弾幕よけ。
+   *  省略時 'classic'＝従来のコマンド戦闘。 */
+  style?: 'classic' | 'soul';
   moves: BattleMove[];
-  /** コマンドの表示名（テーマ差し替え）。item 省略時は「どうぐ」。 */
-  labels: { attack: string; move: string; flee: string; item?: string };
+  /** コマンドの表示名（テーマ差し替え）。item 省略時は「どうぐ」。
+   *  mercy を指定すると「みのがす」コマンドが出現する（アンダーテール系）。 */
+  labels: { attack: string; move: string; flee: string; item?: string; mercy?: string };
   /** 初期所持金。 */
   gold?: number;
   /** レベルアップテーブル。exp 到達時に対応ステータスへ上書き。 */
@@ -300,6 +307,10 @@ export interface BattleConfig {
   boss?: EncounterEnemy;
   /** ゴールボス撃破後に流すセリフ。 */
   outroDialogue?: DialogueLine[];
+  /** みのがしに必要な敵意ゲージ %（デフォルト100）。 */
+  mercyThreshold?: number;
+  /** みのがし可能になる敵HP割合 %（デフォルト20）。 */
+  hpSpareThreshold?: number;
 }
 
 
