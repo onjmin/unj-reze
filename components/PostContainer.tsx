@@ -35,10 +35,11 @@ interface PostContainerProps {
   openCollab: (post: Post) => void;
   openMml: () => void;
   currentUserSlug?: string;
+  currentUserDisplayName?: string;
   onModerationChange?: () => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, onModerationChange }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange }: PostContainerProps) {
   const router = useRouter();
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText] = useState('');
@@ -128,12 +129,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
   const handleSaveEdit = useCallback(async (next: string) => {
     setShowEditModal(false);
-    if (!currentUserSlug) return;
+    if (!currentUserDisplayName) return;
     try {
-      await api.posts.edit(post.id, currentUserSlug, next);
+      await api.posts.edit(post.id, currentUserDisplayName, next);
       onModerationChange?.();
     } catch { /* noop */ }
-  }, [currentUserSlug, post.id, onModerationChange]);
+  }, [currentUserDisplayName, post.id, onModerationChange]);
 
   const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -144,12 +145,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
   const handleSelectOriginType = useCallback(async (value: OriginType | undefined) => {
     setShowOriginModal(false);
-    if (!currentUserSlug) return;
+    if (!currentUserDisplayName) return;
     try {
-      await api.posts.edit(post.id, currentUserSlug, post.content, value ?? null);
+      await api.posts.edit(post.id, currentUserDisplayName, post.content, value ?? null);
       onModerationChange?.();
     } catch { /* noop */ }
-  }, [currentUserSlug, post.id, post.content, onModerationChange]);
+  }, [currentUserDisplayName, post.id, post.content, onModerationChange]);
 
   const handleMenuDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();

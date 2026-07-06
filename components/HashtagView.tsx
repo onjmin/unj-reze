@@ -107,6 +107,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
                 openCollab={() => {}}
                 openMml={() => {}}
                 currentUserSlug={currentUser?.slug}
+                currentUserDisplayName={currentUser?.displayName}
                 onModerationChange={fetchPosts}
               />
             ))

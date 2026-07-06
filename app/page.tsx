@@ -131,6 +131,7 @@ export default function App() {
     try {
       const data = await api.posts.list(userId);
       setPosts(data);
+      postsRef.current = data;
     } finally {
       setLoading(false);
     }
@@ -149,11 +150,11 @@ export default function App() {
     const intervalId = setInterval(async () => {
       try {
         const data = await api.posts.list(userId);
-        const existingIds = new Set(postsRef.current.map(p => p.id));
+        const existingIds = new Set(postsRef.current.map(p => String(p.id)));
         
         setNewPosts(currentNewPosts => {
-          const newIds = new Set(currentNewPosts.map(p => p.id));
-          const incomingNewPosts = data.filter(p => !existingIds.has(p.id) && !newIds.has(p.id));
+          const newIds = new Set(currentNewPosts.map(p => String(p.id)));
+          const incomingNewPosts = data.filter(p => !existingIds.has(String(p.id)) && !newIds.has(String(p.id)));
           
           if (incomingNewPosts.length > 0) {
             return [...incomingNewPosts, ...currentNewPosts];
@@ -301,6 +302,7 @@ export default function App() {
       originType,
     });
     setPosts([post, ...posts]);
+    postsRef.current = [post, ...posts];
     setInputText('');
     setAttachedImage(null);
     setAttachedMml(null);
@@ -593,6 +595,7 @@ export default function App() {
                     openCollab={handleOpenCollab}
                     openMml={() => setActiveScreen('mml')}
                     currentUserSlug={currentUser?.slug}
+                    currentUserDisplayName={currentUser?.displayName}
                     onModerationChange={fetchPosts}
                   />
                 </>

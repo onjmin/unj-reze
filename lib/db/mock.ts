@@ -1,4 +1,5 @@
 import { db as mockDb } from '../mock-db';
+import { OriginType } from '../types';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, GameRecord, CreateGameParams, ReportParams } from './interface';
 
 const gameStore = new Map<number, GameRecord>();
@@ -40,8 +41,8 @@ export const mockStore: DataStore = {
     return mockDb.addReply(postId, data);
   },
 
-  async editPost(id: number, userId: string, content: string) {
-    return mockDb.editPost(id, userId, content);
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
+    return mockDb.editPost(id, userId, content, originType);
   },
 
   async deletePost(id: number, userId: string) {

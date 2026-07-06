@@ -19,10 +19,11 @@ interface FeedListProps {
   openCollab: (post: Post) => void;
   openMml: () => void;
   currentUserSlug?: string;
+  currentUserDisplayName?: string;
   onModerationChange?: () => void;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, onModerationChange }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -69,6 +70,7 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
           openCollab={openCollab}
           openMml={openMml}
           currentUserSlug={currentUserSlug}
+          currentUserDisplayName={currentUserDisplayName}
           onModerationChange={onModerationChange}
         />
       ))}
