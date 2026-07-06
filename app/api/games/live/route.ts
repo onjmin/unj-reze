@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { encodeId } from '@/lib/sqids';
 
+export const runtime = 'edge';
+
 function getIp(request: NextRequest): string {
   return (
     request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||

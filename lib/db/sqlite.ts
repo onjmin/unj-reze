@@ -6,6 +6,8 @@ import { DbPost as Post, DbGameRecord as GameRecord, DbNotification as Notificat
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
+import { cleanContentForTrends, isValidTrendKeyword } from '../mml';
+
 
 let db: SqlJsDatabase | null = null;
 
@@ -745,10 +747,14 @@ export const sqliteStore: DataStore = {
     const rows = rowsToObjects(d, 'SELECT content FROM posts');
     const freq = new Map<string, number>();
     for (const row of rows) {
-      const tags = row.content?.match(/#[^\s#]+/g);
+      if (!row.content) continue;
+      const cleaned = cleanContentForTrends(row.content);
+      const tags = cleaned.match(/#[^\s#]+/g);
       if (tags) {
         for (const tag of tags) {
-          freq.set(tag, (freq.get(tag) || 0) + 1);
+          if (isValidTrendKeyword(tag)) {
+            freq.set(tag, (freq.get(tag) || 0) + 1);
+          }
         }
       }
     }

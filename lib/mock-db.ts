@@ -2,6 +2,8 @@ import { AnonymousUser, OriginType } from './types';
 import { DbPost as Post, DbNotification as Notification } from './types-db';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
+import { cleanContentForTrends, isValidTrendKeyword } from './mml';
+
 
 export interface Trend {
   keyword: string;
@@ -502,10 +504,13 @@ class MockDB {
       this.posts.flatMap(p => p.replies.map(r => r.content))
     );
     for (const content of allContent) {
-      const hashtags = content.match(/#[^\s#]+/g);
+      const cleaned = cleanContentForTrends(content);
+      const hashtags = cleaned.match(/#[^\s#]+/g);
       if (hashtags) {
         for (const tag of hashtags) {
-          freq.set(tag, (freq.get(tag) || 0) + 1);
+          if (isValidTrendKeyword(tag)) {
+            freq.set(tag, (freq.get(tag) || 0) + 1);
+          }
         }
       }
     }

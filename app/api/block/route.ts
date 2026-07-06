@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const blockerSlug = new URL(request.url).searchParams.get('blockerSlug');
   if (!blockerSlug) return NextResponse.json({ error: 'blockerSlug is required' }, { status: 400 });

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const slug = new URL(request.url).searchParams.get('slug');
   if (!slug) return NextResponse.json({ error: 'slug is required' }, { status: 400 });

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+
 // RPGen Search（https://rpgen-search.pages.dev）への薄いサーバープロキシ。
 //
 // 2系統を扱う:

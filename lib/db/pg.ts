@@ -722,7 +722,17 @@ export const pgStore: DataStore = {
       try {
         result = await client.query(`
           SELECT m[1] AS keyword, COUNT(*) AS count
-          FROM posts p, LATERAL regexp_matches(p.content, '#[^\\s#]+', 'g') AS m
+          FROM (
+            SELECT regexp_replace(
+              regexp_replace(content, '^#(mml|MML作曲)[^\\n]*(\\n|$)', '', 'gni'),
+              'https?://[^\\s]+|www\\.[^\\s]+', '', 'gi'
+            ) AS cleaned_content
+            FROM posts
+          ) p, LATERAL regexp_matches(p.cleaned_content, '#[^\\s#]+', 'g') AS m
+          WHERE m[1] != '#'
+            AND m[1] !~ '^#\\d+$'
+            AND m[1] !~ '^#[\\x21-\\x2f\\x3a-\\x40\\x5b-\\x60\\x7b-\\x7e]+$'
+            AND m[1] !~ '^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$'
           GROUP BY m[1]
           ORDER BY count DESC
           LIMIT 10

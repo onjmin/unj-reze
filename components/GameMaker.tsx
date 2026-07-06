@@ -1121,6 +1121,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     /** 遷移完了後のプレイヤー位置。 */
     entryX: number;
     entryY: number;
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    startCamX: number;
+    startCamY: number;
+    endCamX: number;
+    endCamY: number;
   } | null>(null);
   const TRANS_FRAMES = 24;
   /** 全シーン合成ワールドレイアウト（シーンモード時のみ）。 */
@@ -2891,19 +2899,140 @@ const lose = (msg: string) => {
     // ── シーン境界検出：ワールドマップ上でプレイヤーが別シーン領域に入ったら即切り替え ──
     const trySceneTrans = () => {
       if (!worldLayoutRef.current || !scenesRef.current.length || roundOverRef.current) return;
-      if (sceneFadeRef.current) return; // フェード遷移中は領域判定しない
+      if (sceneFadeRef.current || sceneTransRef.current) return;
       const layout = worldLayoutRef.current;
-      // ワープ（warpSceneId）で合成ワールドに含まれないシーンへ入っている間は、
-      // eng.map がシーン単体マップに置き換わり座標がシーンローカルになるため、領域判定は無効。
-      // （判定を続けるとシーン0の領域と誤判定してエンティティが差し替わる）
-      if (!layout.layouts.some(l => l.sceneIdx === activeSceneIdxRef.current)) return;
+      const curScene = scenesRef.current[activeSceneIdxRef.current];
+      const activeLayout = layout.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
+      if (!activeLayout || !curScene) return;
+
       const ep = engineRef.current.player;
+      const pw = getPlayerWidth();
+      const ph = getPlayerHeight();
+
+      // ロックマン風アクションエンジンのスライド遷移判定
+      if (gameData.engine === 'action') {
+        const exits = curScene.exits;
+
+        // ── プレイヤーが現在のシーンの境界から「完全に外れている」場合は即時ワープ ──
+        // (チェックポイント復帰やワープゲートによる座標ジャンプを検知するため)
+        const curLeft = activeLayout.originX * TILE_SIZE;
+        const curRight = (activeLayout.originX + activeLayout.sceneW) * TILE_SIZE;
+        const curTop = activeLayout.originY * TILE_SIZE;
+        const curBottom = (activeLayout.originY + activeLayout.sceneH) * TILE_SIZE;
+
+        const isInside = ep.x + pw > curLeft && ep.x < curRight &&
+                        ep.y + ph > curTop && ep.y < curBottom;
+
+        if (!isInside) {
+          // どのシーンに属しているか検索
+          const px = ep.x / TILE_SIZE, py = ep.y / TILE_SIZE;
+          const tgtLay = layout.layouts.find(lay => 
+            px >= lay.originX && px < lay.originX + lay.sceneW &&
+            py >= lay.originY && py < lay.originY + lay.sceneH
+          );
+          if (tgtLay && tgtLay.sceneIdx !== activeSceneIdxRef.current) {
+            activeSceneIdxRef.current = tgtLay.sceneIdx;
+            const newScene = scenesRef.current[tgtLay.sceneIdx];
+            engineRef.current.entities = newScene.objects.map(o => ({
+              x: (tgtLay.originX + o.col) * TILE_SIZE,
+              y: (tgtLay.originY + o.row) * TILE_SIZE,
+              homeX: (tgtLay.originX + o.col) * TILE_SIZE,
+              homeY: (tgtLay.originY + o.row) * TILE_SIZE,
+              vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
+              def: o,
+            })) as unknown as Entity[];
+            engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
+            resetSceneState();
+            setEditSceneIdx(tgtLay.sceneIdx);
+            switchBgm(getCurrentFieldBgm());
+            return;
+          }
+        }
+
+        if (!exits) return;
+
+        let dir: 'right' | 'left' | 'up' | 'down' | null = null;
+        let targetSceneId: string | undefined;
+
+        if (exits.right && ep.x + pw >= curRight) {
+          dir = 'right'; targetSceneId = exits.right;
+        } else if (exits.left && ep.x <= curLeft) {
+          dir = 'left'; targetSceneId = exits.left;
+        } else if (exits.up && ep.y <= curTop) {
+          dir = 'up'; targetSceneId = exits.up;
+        } else if (exits.down && ep.y + ph >= curBottom) {
+          dir = 'down'; targetSceneId = exits.down;
+        }
+
+        if (dir && targetSceneId) {
+          const nextIdx = scenesRef.current.findIndex(s => s.id === targetSceneId);
+          const nextLayout = layout.layouts.find(l => l.sceneIdx === nextIdx);
+          if (nextIdx >= 0 && nextLayout) {
+            // 現在のカメラ位置を計算
+            const camMinX = activeLayout.originX * TILE_SIZE;
+            const camMaxX = Math.max(camMinX, (activeLayout.originX + activeLayout.sceneW) * TILE_SIZE - VIEW_W);
+            const camMinY = activeLayout.originY * TILE_SIZE;
+            const camMaxY = Math.max(camMinY, (activeLayout.originY + activeLayout.sceneH) * TILE_SIZE - VIEW_H);
+            const startCamX = Math.max(camMinX, Math.min(camMaxX, ep.x + pw / 2 - VIEW_W / 2));
+            const startCamY = Math.max(camMinY, Math.min(camMaxY, ep.y + ph / 2 - VIEW_H / 2));
+
+            // 遷移完了後のカメラ位置を計算
+            const nextCamMinX = nextLayout.originX * TILE_SIZE;
+            const nextCamMaxX = Math.max(nextCamMinX, (nextLayout.originX + nextLayout.sceneW) * TILE_SIZE - VIEW_W);
+            const nextCamMinY = nextLayout.originY * TILE_SIZE;
+            const nextCamMaxY = Math.max(nextCamMinY, (nextLayout.originY + nextLayout.sceneH) * TILE_SIZE - VIEW_H);
+            
+            let endCamX = startCamX;
+            let endCamY = startCamY;
+            if (dir === 'right') endCamX = nextLayout.originX * TILE_SIZE;
+            else if (dir === 'left') endCamX = (nextLayout.originX + nextLayout.sceneW) * TILE_SIZE - VIEW_W;
+            else if (dir === 'down') endCamY = nextLayout.originY * TILE_SIZE;
+            else if (dir === 'up') endCamY = (nextLayout.originY + nextLayout.sceneH) * TILE_SIZE - VIEW_H;
+
+            endCamX = Math.max(nextCamMinX, Math.min(nextCamMaxX, endCamX));
+            endCamY = Math.max(nextCamMinY, Math.min(nextCamMaxY, endCamY));
+
+            // プレイヤーの遷移後の位置（入場座標）
+            let endX = ep.x;
+            let endY = ep.y;
+            if (dir === 'right') {
+              endX = nextLayout.originX * TILE_SIZE + 8;
+            } else if (dir === 'left') {
+              endX = (nextLayout.originX + nextLayout.sceneW) * TILE_SIZE - pw - 8;
+            } else if (dir === 'down') {
+              endY = nextLayout.originY * TILE_SIZE + 8;
+            } else if (dir === 'up') {
+              endY = (nextLayout.originY + nextLayout.sceneH) * TILE_SIZE - ph - 8;
+            }
+
+            sceneTransRef.current = {
+              dir,
+              frame: 0,
+              nextIdx,
+              wideMap: [],
+              entryX: endX,
+              entryY: endY,
+              startX: ep.x,
+              startY: ep.y,
+              endX,
+              endY,
+              startCamX,
+              startCamY,
+              endCamX,
+              endCamY
+            };
+          }
+        }
+        return;
+      }
+
+      // 他のエンジン（rpg, touhou 等）は従来の即時切り替えを維持
+      if (!layout.layouts.some(l => l.sceneIdx === activeSceneIdxRef.current)) return;
       const px = ep.x / TILE_SIZE, py = ep.y / TILE_SIZE;
       for (const lay of layout.layouts) {
         if (lay.sceneIdx === activeSceneIdxRef.current) continue;
         if (px >= lay.originX && px < lay.originX + lay.sceneW &&
             py >= lay.originY && py < lay.originY + lay.sceneH) {
-          // 新シーン領域に入った → エンティティを即座に入れ替え（カメラは動かない）
           activeSceneIdxRef.current = lay.sceneIdx;
           const newScene = scenesRef.current[lay.sceneIdx];
           engineRef.current.entities = newScene.objects.map(o => ({
@@ -3255,7 +3384,7 @@ const lose = (msg: string) => {
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
       // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current);
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || !!sceneTransRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current);
       
       // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
       if (justStartedRef.current && isPlaying && !frozen) {
@@ -4928,15 +5057,36 @@ const lose = (msg: string) => {
       }
 
       // カメラ：touhou は画面固定（常に原点）、他はプレイヤー中心追従
-      const camX = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMax,
+      let camX = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMax,
         isPlaying || p.x !== gameData.player.start.x
           ? p.x + pData.w / 2 - VIEW_W / 2
           : editScrollRef.current));
-      const camY = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMaxY,
+      let camY = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMaxY,
         isPlaying || p.y !== gameData.player.start.y
           ? p.y + pData.h / 2 - VIEW_H / 2
           : editScrollYRef.current));
-      // シーン遷移はワールドマップ方式（アニメーション不要）
+
+      // ── シーン切り替えモードでのカメラ境界クランプ ──
+      if (isPlaying && gameData.engine === 'action' && scenesRef.current.length > 0 && worldLayoutRef.current) {
+        const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
+        if (lay && !sceneTransRef.current) {
+          const minX = lay.originX * TILE_SIZE;
+          const maxX = Math.max(minX, (lay.originX + lay.sceneW) * TILE_SIZE - VIEW_W);
+          const minY = lay.originY * TILE_SIZE;
+          const maxY = Math.max(minY, (lay.originY + lay.sceneH) * TILE_SIZE - VIEW_H);
+          camX = Math.max(minX, Math.min(maxX, camX));
+          camY = Math.max(minY, Math.min(maxY, camY));
+        }
+      }
+
+      // ── スライド遷移中のカメラ位置線形補間 ──
+      if (isPlaying && gameData.engine === 'action' && sceneTransRef.current) {
+        const trans = sceneTransRef.current;
+        const ratio = trans.frame / TRANS_FRAMES;
+        camX = trans.startCamX + (trans.endCamX - trans.startCamX) * ratio;
+        camY = trans.startCamY + (trans.endCamY - trans.startCamY) * ratio;
+      }
+
       const finalCamX = camX, finalCamY = camY;
 
       // 画面シェイク（ヒット・爆発・ゲームオーバー）
@@ -5568,6 +5718,55 @@ const lose = (msg: string) => {
         // フェードイン完了 → 解除
         if (fade.phase === 'in' && fade.frame >= fade.totalFrames) {
           sceneFadeRef.current = null;
+        }
+      }
+
+      // ── ロックマン風スライド遷移（部屋遷移）の更新 ──
+      const trans = sceneTransRef.current;
+      if (trans) {
+        trans.frame++;
+        const ratio = trans.frame / TRANS_FRAMES;
+        // プレイヤー位置を線形補間
+        p.x = trans.startX + (trans.endX - trans.startX) * ratio;
+        p.y = trans.startY + (trans.endY - trans.startY) * ratio;
+
+        // 遷移完了処理
+        if (trans.frame >= TRANS_FRAMES) {
+          const nextIdx = trans.nextIdx;
+          const nextScene = scenesRef.current[nextIdx];
+          const layout = worldLayoutRef.current;
+          const nextLayout = layout?.layouts.find(l => l.sceneIdx === nextIdx);
+
+          if (nextScene && nextLayout) {
+            activeSceneIdxRef.current = nextIdx;
+
+            // エンティティを次のシーンのものに置き換え
+            engineRef.current.entities = nextScene.objects.map(o => ({
+              x: (nextLayout.originX + o.col) * TILE_SIZE,
+              y: (nextLayout.originY + o.row) * TILE_SIZE,
+              homeX: (nextLayout.originX + o.col) * TILE_SIZE,
+              homeY: (nextLayout.originY + o.row) * TILE_SIZE,
+              vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
+              def: o,
+            })) as unknown as Entity[];
+
+            engineRef.current.bullets = [];
+            engineRef.current.enemyBullets = [];
+            encounterGaugeRef.current = 0;
+            encounterNextRef.current = 0;
+
+            // プレイヤー位置確定
+            p.x = trans.entryX;
+            p.y = trans.entryY;
+            p.vx = 0;
+            p.vy = 0;
+
+            resetSceneState();
+            setEditSceneIdx(nextIdx);
+            // シーン別BGM切り替え
+            switchBgm(getCurrentFieldBgm());
+          }
+          sceneTransRef.current = null;
         }
       }
 
@@ -6270,6 +6469,7 @@ const lose = (msg: string) => {
             }
             if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
             setActivePreviewKey(null);
+            flushSceneEdits();
             if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
             setIsPlaying(true);
             justStartedRef.current = true;

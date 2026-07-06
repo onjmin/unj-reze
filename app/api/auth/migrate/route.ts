@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+export const runtime = 'edge';
+
 // 移行トークンの発行(過去の匿名アカウントを新セッションへ引き継ぐため)
 export async function POST(request: NextRequest) {
   const { userId } = await request.json();

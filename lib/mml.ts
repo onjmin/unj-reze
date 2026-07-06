@@ -415,3 +415,40 @@ export function playMml(
     ctx.close();
   };
 }
+
+/**
+ * トレンド分析用に投稿内容をクリーンアップする。
+ * MML行やURLなどを除去する。
+ */
+export function cleanContentForTrends(content: string | null | undefined): string {
+  if (!content) return '';
+  // 1. MML行（#mml または #MML作曲 で始まる行）をすべて除去
+  let cleaned = content.replace(/^#(mml|MML作曲)[^\n]*(\n|$)/gim, '');
+  
+  // 2. URL（http://, https://, www.）を除去
+  cleaned = cleaned.replace(/(https?:\/\/[^\s]+|www\.[^\s]+)/gi, '');
+  
+  return cleaned;
+}
+
+/**
+ * トレンドキーワードとして有効かどうかを判定する。
+ * 数値のみ、記号のみ、カラーコードなどは除外する。
+ */
+export function isValidTrendKeyword(tag: string): boolean {
+  if (!tag || !tag.startsWith('#')) return false;
+  const word = tag.slice(1);
+  if (!word) return false;
+  
+  // 数字のみは除外 (例: #123)
+  if (/^\d+$/.test(word)) return false;
+  
+  // 半角記号のみは除外 (例: #!!!, #+++)
+  if (/^[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+$/.test(word)) return false;
+  
+  // カラーコードっぽいもの (3桁または6桁の16進数) は除外
+  if (/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(word)) return false;
+
+  return true;
+}
+

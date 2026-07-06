@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId } from '@/lib/sqids';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const gameIdRaw = request.nextUrl.searchParams.get('gameId');
   const gameId = gameIdRaw ? decodeId(gameIdRaw) : null;

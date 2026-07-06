@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { encodePost } from '@/lib/sqids';
 
+export const runtime = 'edge';
+
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const q = url.searchParams.get('q');
