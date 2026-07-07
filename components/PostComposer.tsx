@@ -57,10 +57,13 @@ export default function PostComposer({ userId, text, setText, image, setImage, m
         </div>
         <div className="flex items-start space-x-3 md:space-x-4">
           <div
-            className="w-9 h-9 md:w-12 md:h-12 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs md:text-sm text-white"
+            className="w-9 h-9 md:w-12 md:h-12 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs md:text-sm text-white relative overflow-hidden"
             style={avatarInfo.style}
           >
-            {avatarInfo.emoji}
+            {(() => {
+              const AvatarIcon = avatarInfo.Icon;
+              return <AvatarIcon className="w-5 h-5 md:w-7 md:h-7 text-white/40 leading-none" />;
+            })()}
           </div>
           <div className="flex-1">
             <textarea

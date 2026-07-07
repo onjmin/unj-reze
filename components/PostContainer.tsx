@@ -239,7 +239,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity"
           style={avatarInfo.style}
         >
-          {avatarInfo.emoji}
+          {(() => {
+            const AvatarIcon = avatarInfo.Icon;
+            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+          })()}
           <button
             onClick={(e) => { e.stopPropagation(); onQuickPost(); }}
             className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full p-0.5 border border-gray-800 hover:bg-blue-600 transition-colors cursor-pointer"
@@ -582,13 +585,16 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
             return (
               <div
                 key={r.id}
-                className={`w-5 h-5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${isActive
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 relative overflow-hidden ${isActive
                   ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
                   : 'border border-gray-900'
                   }`}
                 style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i, ...rAvatarInfo.style }}
               >
-                {rAvatarInfo.emoji}
+                {(() => {
+                  const RAvatarIcon = rAvatarInfo.Icon;
+                  return <RAvatarIcon className="w-3 h-3 text-white/40 leading-none" />;
+                })()}
               </div>
             );
           })}

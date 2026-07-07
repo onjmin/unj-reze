@@ -150,10 +150,13 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
       <div className="p-4 border-b border-gray-800 bg-gradient-to-b from-gray-100/[0.03] to-transparent">
         <div className="flex items-start space-x-3.5 mb-3">
           <div
-            className="w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 shrink-0"
+            className="w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 shrink-0 relative overflow-hidden"
             style={avatarInfo.style}
           >
-            {avatarInfo.emoji}
+            {(() => {
+              const AvatarIcon = avatarInfo.Icon;
+              return <AvatarIcon className="w-8 h-8 text-white/40 leading-none" />;
+            })()}
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="font-bold text-base text-white truncate">{avatarInfo.username}</h2>
@@ -221,10 +224,13 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                 <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
                   <div
                     onClick={(e) => { e.stopPropagation(); router.push(`/user/${p.slug || p.displayName}`); }}
-                    className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity"
+                    className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity overflow-hidden"
                     style={pAvatarInfo.style}
                   >
-                    {pAvatarInfo.emoji}
+                    {(() => {
+                      const AvatarIcon = pAvatarInfo.Icon;
+                      return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+                    })()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline mb-0.5">

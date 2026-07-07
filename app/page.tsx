@@ -636,10 +636,13 @@ export default function App() {
                     <div className="p-3 border-b border-gray-800/80 flex flex-col space-y-2">
                       <div className="flex items-start space-x-3">
                         <div
-                          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white"
+                          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white relative overflow-hidden"
                           style={getAvatarInfo(userId).style}
                         >
-                          {getAvatarInfo(userId).emoji}
+                          {(() => {
+                            const AvatarIcon = getAvatarInfo(userId).Icon;
+                            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+                          })()}
                         </div>
                         <div className="flex-1">
                           <textarea

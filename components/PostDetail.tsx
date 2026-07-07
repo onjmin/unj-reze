@@ -419,10 +419,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       <div className="flex p-3 space-x-2.5">
         <Link
           href={`/user/${post.slug || post.displayName}`}
-          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity"
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden"
           style={getAvatarInfo(post.displayName).style}
         >
-          {getAvatarInfo(post.displayName).emoji}
+          {(() => {
+            const AvatarIcon = getAvatarInfo(post.displayName).Icon;
+            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+          })()}
         </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
@@ -731,10 +734,13 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, onEdit, onDelete
       <div className="flex p-3 space-x-2.5">
         <Link
           href={`/user/${localPost.slug || localPost.displayName}`}
-          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity"
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden"
           style={avatarInfo.style}
         >
-          {avatarInfo.emoji}
+          {(() => {
+            const AvatarIcon = avatarInfo.Icon;
+            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+          })()}
         </Link>
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-baseline mb-0.5">
