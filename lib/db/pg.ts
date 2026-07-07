@@ -419,10 +419,15 @@ export const pgStore: DataStore = {
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
-        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), 'from-blue-500 to-indigo-600')
+        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12)
          RETURNING *`,
-        [postId, parentPostId, data.displayName, slug, data.content]
+        [
+          postId, parentPostId, data.displayName, slug, data.content,
+          data.avatarColor || 'from-blue-500 to-indigo-600',
+          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
+          !!data.gameId, data.gameId || null, data.originType ?? null
+        ]
       );
       await client.query(
         'UPDATE posts SET replies_count = replies_count + 1 WHERE id = $1',
@@ -1221,9 +1226,9 @@ const AVATAR_GRADIENTS_PG = [
 
 function generateDisplayNamePg(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let suffix = '';
-  for (let i = 0; i < 3; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-  return `名無し${suffix}`;
+  let result = '';
+  for (let i = 0; i < 10; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+  return result;
 }
 
 function randomGradientPg(): string {

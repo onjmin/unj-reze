@@ -66,9 +66,9 @@ const AVATAR_GRADIENTS = [
 
 function generateDisplayName(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let suffix = '';
-  for (let i = 0; i < 3; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-  return `名無し${suffix}`;
+  let result = '';
+  for (let i = 0; i < 10; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+  return result;
 }
 
 function generateSlug(fullName: string): string {
@@ -357,7 +357,17 @@ class MockDB {
     return post;
   }
 
-  addReply(postId: number, data: { displayName: string; content: string; parentPostId?: number }): Post | null {
+  addReply(postId: number, data: {
+    displayName: string;
+    content: string;
+    parentPostId?: number;
+    hasImage?: boolean;
+    imageSrc?: string;
+    imageAlt?: string;
+    avatarColor?: string;
+    gameId?: number;
+    originType?: OriginType;
+  }): Post | null {
     const post = this.posts.find(p => p.id === postId);
     if (!post) return null;
     const id = Math.max(0, ...this.posts.map(p => p.id)) + 1;
@@ -365,9 +375,15 @@ class MockDB {
       id, displayName: data.displayName, slug: data.displayName, createdAt: new Date().toISOString(), time: "たった今",
       content: data.content, likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
-      avatarColor: 'from-blue-400 to-indigo-500', heartsTotal: 0, replies: [],
+      avatarColor: data.avatarColor || 'from-blue-400 to-indigo-500', heartsTotal: 0, replies: [],
       threadId: post.threadId === post.id ? post.id : post.threadId,
       parentPostId: data.parentPostId ?? post.id,
+      hasImage: data.hasImage,
+      imageSrc: data.imageSrc,
+      imageAlt: data.imageAlt,
+      gameId: data.gameId,
+      hasGame: !!data.gameId,
+      originType: data.originType,
     };
     this.posts.push(reply);
     post.repliesCount += 1;

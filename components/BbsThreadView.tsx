@@ -43,26 +43,41 @@ function parseContent(text: string, replyMap: Map<string, number>) {
   });
 }
 
+function getCookie(name: string): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const [post, setPost] = useState<Post>(initial);
   const [replyText, setReplyText] = useState('');
   const [replyTo, setReplyTo] = useState<number | null>(null);
-  const userId = '名無しvFZ';
+  const [userId, setUserId] = useState('名無しvFZ');
   const heartQueue = useRef(0);
   const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const sessionId = getCookie('unj_reze_session');
+    if (sessionId) {
+      api.auth.anonymous(sessionId).then(user => {
+        setUserId(user.displayName);
+      }).catch(() => {});
+    }
+  }, []);
 
   // Build ordered list: OP as #1, then replies in order
   const allPosts: Post[] = [post, ...post.replies];
   const indexMap = new Map<string, number>(allPosts.map((p, i) => [p.id, i + 1]));
 
-  const handleAddReply = () => {
+  const handleAddReply = async () => {
     if (!replyText.trim()) return;
     const replyNum = replyTo !== null ? `>>${replyTo}\n` : '';
-    const now = Date.now();
-    const newReply: Post = {
-      id: now.toString(),
+    const tempId = `temp-${Date.now()}`;
+    const optimisticReply: Post = {
+      id: tempId,
       displayName: userId,
-      createdAt: new Date(now).toISOString(),
+      createdAt: new Date().toISOString(),
       time: 'たった今',
       content: replyNum + replyText,
       likes: 0, dislikes: 0, liked: false, disliked: false,
@@ -72,9 +87,20 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
       threadId: post.id,
       parentPostId: post.id,
     };
-    setPost(p => ({ ...p, replies: [...p.replies, newReply], repliesCount: p.repliesCount + 1 }));
+    setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
     setReplyText('');
     setReplyTo(null);
+
+    const reply = await api.posts.replies.create(post.id, {
+      displayName: userId,
+      content: replyNum + replyText,
+      parentPostId: post.id,
+    });
+
+    setPost(p => ({
+      ...p,
+      replies: p.replies.map(r => r.id === tempId ? reply : r)
+    }));
   };
 
   const handleHeart = useCallback((targetPost: Post) => {

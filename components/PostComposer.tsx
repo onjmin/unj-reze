@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { X, Pen, Grid3x3, Music, Gamepad2 } from 'lucide-react';
 import { OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import OriginTypeModal from './OriginTypeModal';
+import { getAvatarInfo } from '@/lib/avatar';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
@@ -26,12 +27,16 @@ interface PostComposerProps {
   onOpenDotDrawing: () => void;
   onOpenMml: () => void;
   onOpenGameMaker: () => void;
+  replyToDisplayName?: string;
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker }: PostComposerProps) {
+export default function PostComposer({ userId, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, replyToDisplayName }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showOriginModal, setShowOriginModal] = useState(false);
   const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
+
+  const avatarInfo = getAvatarInfo(userId);
+  const replyAvatarInfo = replyToDisplayName ? getAvatarInfo(replyToDisplayName) : null;
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -42,15 +47,20 @@ export default function PostComposer({ userId, text, setText, image, setImage, m
       <div className="fixed inset-0 bg-black/60" onClick={onClose} />
       <div className="relative w-full md:max-w-2xl lg:max-w-3xl bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-3 md:p-6 flex flex-col space-y-2 md:space-y-4 animate-fade-in-up">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-xs md:text-base font-bold text-gray-400">新規ポスト</span>
+          <span className="text-xs md:text-base font-bold text-gray-400">
+            {replyAvatarInfo ? `@${replyAvatarInfo.username} への返信` : '新規ポスト'}
+          </span>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/10 transition-colors">
             <X size={16} className="md:hidden" />
             <X size={22} className="hidden md:block" />
           </button>
         </div>
         <div className="flex items-start space-x-3 md:space-x-4">
-          <div className="w-9 h-9 md:w-12 md:h-12 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs md:text-sm text-white">
-            {userId.substring(3, 5) || "vF"}
+          <div
+            className="w-9 h-9 md:w-12 md:h-12 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs md:text-sm text-white"
+            style={avatarInfo.style}
+          >
+            {avatarInfo.emoji}
           </div>
           <div className="flex-1">
             <textarea
@@ -58,7 +68,7 @@ export default function PostComposer({ userId, text, setText, image, setImage, m
               value={text}
               onChange={(e) => setText(e.target.value)}
               className="w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 md:px-5 md:py-4 focus:outline-none transition-all placeholder:text-gray-500 text-sm md:text-lg resize-none h-24 md:h-48 text-gray-100"
-              placeholder="いまどうしてる？ #お絵描き #ゲーム"
+              placeholder={replyAvatarInfo ? '返信を書き込む...' : 'いまどうしてる？ #お絵描き #ゲーム'}
             />
             {image && (
               <div className="relative mt-2 rounded-lg overflow-hidden border border-gray-800 max-w-[180px] md:max-w-[260px]">

@@ -5,6 +5,7 @@ import { Post } from '@/lib/types';
 import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { getAvatarInfo } from '@/lib/avatar';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -24,10 +25,6 @@ interface ProfileViewProps {
   onAddReply?: (id: string, text: string) => void;
   onRepost?: (id: string) => void;
   openCollab?: (post: Post) => void;
-}
-
-function nameToInitials(name: string): string {
-  return name.substring(3, 5) || name.substring(0, 2) || "--";
 }
 
 const tabs = [
@@ -146,15 +143,21 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     );
   }
 
+  const avatarInfo = getAvatarInfo(resolvedName);
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-gray-800 bg-gradient-to-b from-gray-100/[0.03] to-transparent">
         <div className="flex items-start space-x-3.5 mb-3">
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-bold text-lg text-white border border-gray-700 shrink-0">
-            {nameToInitials(resolvedName)}
+          <div
+            className="w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 shrink-0"
+            style={avatarInfo.style}
+          >
+            {avatarInfo.emoji}
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="font-bold text-base text-white truncate">{resolvedName}</h2>
+            <h2 className="font-bold text-base text-white truncate">{avatarInfo.username}</h2>
+            <span className="text-[10px] text-gray-500 block truncate">@{resolvedName}</span>
             <span className="text-[11px] text-gray-500 block mt-0.5">登録: 2026-06-13</span>
             <p className="text-xs text-gray-400 leading-relaxed mt-2">
               {resolvedName === '名無しvFZ' ? 'お絵描きとゲーム制作が趣味です。たまに作曲も。' : '自己紹介を追加してみましょう'}
@@ -211,22 +214,25 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
         {loading ? (
           <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
         ) : filteredPosts.length > 0 ? (
-          filteredPosts.map(p => (
-            <div key={p.id} className="flex relative transition-all hover:bg-gray-100/5">
-              <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
-                <div
-                  onClick={(e) => { e.stopPropagation(); router.push(`/user/${p.slug || p.displayName}`); }}
-                  className={`w-9 h-9 rounded-full bg-gradient-to-br ${p.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity`}
-                >
-                  {nameToInitials(p.displayName)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline mb-0.5">
-                    <div className="flex items-baseline space-x-1.5">
-                      <span className="font-bold text-xs text-gray-200">{p.displayName}</span>
-                      <span className="text-gray-500 text-[10px] font-medium">{p.time}</span>
-                    </div>
+          filteredPosts.map(p => {
+            const pAvatarInfo = getAvatarInfo(p.displayName);
+            return (
+              <div key={p.id} className="flex relative transition-all hover:bg-gray-100/5">
+                <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
+                  <div
+                    onClick={(e) => { e.stopPropagation(); router.push(`/user/${p.slug || p.displayName}`); }}
+                    className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity"
+                    style={pAvatarInfo.style}
+                  >
+                    {pAvatarInfo.emoji}
                   </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline mb-0.5">
+                      <div className="flex items-baseline space-x-1.5">
+                        <span className="font-bold text-xs text-gray-200">{pAvatarInfo.username}</span>
+                        <span className="text-gray-500 text-[10px] font-medium">{p.time}</span>
+                      </div>
+                    </div>
 
                   <p
                     className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
@@ -349,7 +355,8 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                 </div>
               </div>
             </div>
-          ))
+          );
+        })
         ) : (
           <div className="p-12 text-center text-xs text-gray-600 flex flex-col items-center gap-2">
             {activeTab === 'threads' && <><FileText size={24} className="text-gray-700" /><span>作成したスレッドはまだありません</span></>}

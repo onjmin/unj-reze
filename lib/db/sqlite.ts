@@ -249,9 +249,9 @@ const AVATAR_GRADIENTS_SQLITE = [
 
 function generateDisplayNameSqlite(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let suffix = '';
-  for (let i = 0; i < 3; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
-  return `名無し${suffix}`;
+  let result = '';
+  for (let i = 0; i < 10; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
+  return result;
 }
 
 function randomGradientSqlite(): string {
@@ -498,9 +498,10 @@ export const sqliteStore: DataStore = {
     const now = new Date().toISOString();
     const parentPostId = data.parentPostId ?? postId;
     d.run(
-      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'from-blue-500 to-indigo-600')`,
-      [id, postId, parentPostId, data.displayName, slug, data.content, now]
+      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, postId, parentPostId, data.displayName, slug, data.content, now, data.avatarColor || 'from-blue-500 to-indigo-600',
+       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null, data.originType || null]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
     const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
@@ -525,13 +526,14 @@ export const sqliteStore: DataStore = {
     saveDb();
     return {
       ...rowToPost({
-        id, thread_id: postId, display_name: data.displayName, slug,
+        id, thread_id: postId, parent_post_id: parentPostId, display_name: data.displayName, slug,
         created_at: now, content: data.content,
         likes: 0, dislikes: 0, liked: 0, disliked: 0,
         replies_count: 0, reposts: 0, reposted: 0,
-        has_image: 0, image_src: null, image_alt: null,
-        avatar_color: 'from-blue-500 to-indigo-600',
-        has_collab_button: 0, hearts_total: 0, has_game: 0,
+        has_image: data.hasImage ? 1 : 0, image_src: data.imageSrc || null, image_alt: data.imageAlt || null,
+        avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
+        has_collab_button: 0, hearts_total: 0, has_game: data.gameId ? 1 : 0,
+        game_id: data.gameId || null, origin_type: data.originType || null,
       }),
       replies: [],
     };

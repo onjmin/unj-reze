@@ -24,9 +24,10 @@ interface FeedListProps {
   currentUserDisplayName?: string;
   onModerationChange?: () => void;
   loading?: boolean;
+  onReplyClick?: (post: Post) => void;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -96,6 +97,7 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
           currentUserSlug={currentUserSlug}
           currentUserDisplayName={currentUserDisplayName}
           onModerationChange={onModerationChange}
+          onReplyClick={onReplyClick}
         />
       ))}
       <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">

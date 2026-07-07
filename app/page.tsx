@@ -6,6 +6,7 @@ import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 import { Post, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import { api } from '@/lib/api';
 import { decodeId } from '@/lib/sqids';
+import { getAvatarInfo } from '@/lib/avatar';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
@@ -40,6 +41,7 @@ export default function App() {
   const [rankCategory, setRankCategory] = useState('イイ');
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
+  const [replyTargetPost, setReplyTargetPost] = useState<Post | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [userId, setUserId] = useState('');
   const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
@@ -275,6 +277,75 @@ export default function App() {
       content: replyText,
       parentPostId: postId,
     });
+    setPosts(prev => {
+      const next = prev.map(p => p.id === postId
+        ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
+        : p);
+      postsRef.current = next;
+      return next;
+    });
+  };
+
+  const handleCreateReplyFromComposer = async (postId: string) => {
+    const parts: string[] = [];
+    if (attachedMml) parts.push(`#mml ${attachedMml}`);
+    if (inputText.trim()) parts.push(inputText.trim());
+    const content = parts.join('\n');
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticReply: Post = {
+      id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content,
+      likes: 0, dislikes: 0, liked: false, disliked: false,
+      repliesCount: 0, reposts: 0, reposted: false,
+      avatarColor: "from-blue-500 to-indigo-600",
+      heartsTotal: 0, replies: [],
+      threadId: postId, parentPostId: postId,
+      hasImage: !!attachedImage,
+      imageSrc: attachedImage ?? undefined,
+      originType,
+    };
+    setPosts(prev => {
+      const next = prev.map(p => p.id === postId
+        ? { ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, optimisticReply] }
+        : p);
+      postsRef.current = next;
+      return next;
+    });
+
+    setInputText('');
+    setAttachedImage(null);
+    setAttachedMml(null);
+    setGameDraft(null);
+    setOriginType(undefined);
+
+    let imageSrc: string | undefined;
+    if (attachedImage) {
+      const result = await api.upload.image({ image: attachedImage });
+      imageSrc = result.url;
+    }
+    let gameId: number | undefined;
+    if (gameDraft) {
+      const res = await fetch('/api/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest }),
+      });
+      if (res.ok) {
+        const savedGame = await res.json();
+        gameId = savedGame.id;
+      }
+    }
+
+    const reply = await api.posts.replies.create(postId, {
+      displayName: userId,
+      content,
+      parentPostId: postId,
+      hasImage: !!attachedImage,
+      imageSrc,
+      gameId,
+      originType,
+    });
+
     setPosts(prev => {
       const next = prev.map(p => p.id === postId
         ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
@@ -564,8 +635,11 @@ export default function App() {
                   {topTab !== 'ranking' && topTab !== 'game' && (
                     <div className="p-3 border-b border-gray-800/80 flex flex-col space-y-2">
                       <div className="flex items-start space-x-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white">
-                          {userId.substring(3, 5) || "vF"}
+                        <div
+                          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white"
+                          style={getAvatarInfo(userId).style}
+                        >
+                          {getAvatarInfo(userId).emoji}
                         </div>
                         <div className="flex-1">
                           <textarea
@@ -713,6 +787,10 @@ export default function App() {
                     currentUserDisplayName={currentUser?.displayName}
                     onModerationChange={fetchPosts}
                     loading={loading}
+                    onReplyClick={(post) => {
+                      setReplyTargetPost(post);
+                      setComposerOpen(true);
+                    }}
                   />
                 </>
               )}
@@ -767,12 +845,21 @@ export default function App() {
             setGameDraft={setGameDraft}
             originType={originType}
             setOriginType={setOriginType}
-            onClose={() => setComposerOpen(false)}
-            onSubmit={() => { handleCreatePost(); setComposerOpen(false); }}
+            onClose={() => { setComposerOpen(false); setReplyTargetPost(null); }}
+            onSubmit={() => {
+              if (replyTargetPost) {
+                handleCreateReplyFromComposer(replyTargetPost.id);
+              } else {
+                handleCreatePost();
+              }
+              setComposerOpen(false);
+              setReplyTargetPost(null);
+            }}
             onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
             onOpenDotDrawing={() => handleOpenEditor('dotdrawing')}
             onOpenMml={() => handleOpenEditor('mml')}
             onOpenGameMaker={() => handleOpenEditor('gamemaker')}
+            replyToDisplayName={replyTargetPost ? replyTargetPost.displayName : undefined}
           />
         )}
 

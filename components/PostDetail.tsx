@@ -2,10 +2,12 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import BbsThreadView from './BbsThreadView';
-import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
+import { getAvatarInfo } from '@/lib/avatar';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -14,12 +16,28 @@ import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
+const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
+const DotDrawingEditor = dynamic(() => import('./DotDrawingEditor'), { ssr: false });
+const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
+const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
+const PostComposer = dynamic(() => import('./PostComposer'), { ssr: false });
+const EditPostModal = dynamic(() => import('./EditPostModal'), { ssr: false });
+const DeletePostModal = dynamic(() => import('./DeletePostModal'), { ssr: false });
+const OriginTypeModal = dynamic(() => import('./OriginTypeModal'), { ssr: false });
+const CollabSelector = dynamic(() => import('./CollabSelector'), { ssr: false });
 
 interface PostDetailProps {
   post: Post;
 }
 
+function getCookie(name: string): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
 export default function PostDetail({ post: initial }: PostDetailProps) {
+  const router = useRouter();
   const [bbsMode, setBbsMode] = useState('');
   useEffect(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
@@ -33,7 +51,40 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [following, setFollowing] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const userId = '名無しvFZ';
+  const [userId, setUserId] = useState('名無しvFZ');
+
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [replyImage, setReplyImage] = useState<string | null>(null);
+  const [replyMml, setReplyMml] = useState<string | null>(null);
+  const [replyGameDraft, setReplyGameDraft] = useState<any>(null);
+  const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
+  const [activeScreen, setActiveScreen] = useState<string | null>(null);
+  const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
+  const [showCollabSelector, setShowCollabSelector] = useState(false);
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showOriginModal, setShowOriginModal] = useState(false);
+
+  useEffect(() => {
+    const sessionId = getCookie('unj_reze_session');
+    if (sessionId) {
+      api.auth.anonymous(sessionId).then(user => {
+        setUserId(user.displayName);
+      }).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (replyTo) {
+      setComposerOpen(true);
+    }
+  }, [replyTo]);
+
+  const handleComposerClose = () => {
+    setComposerOpen(false);
+    setReplyTo(null);
+  };
   const heartQueue = useRef(0);
   const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const likeParity = useRef(0);
@@ -135,23 +186,165 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }, 2000);
   }, [post.id, userId]);
 
-  const handleAddReply = () => {
-    if (!replyText.trim()) return;
-    const now = Date.now();
+  const handleCreateReplyFromComposer = async () => {
     const targetParent = replyTo ?? post;
-    const newReply: Post = {
-      id: now.toString(), displayName: userId, createdAt: new Date(now).toISOString(), time: "たった今", content: replyText,
+    const parts: string[] = [];
+    if (replyMml) parts.push(`#mml ${replyMml}`);
+    if (replyText.trim()) parts.push(replyText.trim());
+    const content = parts.join('\n');
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticReply: Post = {
+      id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: "from-blue-500 to-indigo-600",
       heartsTotal: 0, replies: [],
-      threadId: post.threadId === post.id ? post.id : post.threadId,
-      parentPostId: targetParent.id,
+      threadId: post.id, parentPostId: targetParent.id,
+      hasImage: !!replyImage,
+      imageSrc: replyImage ?? undefined,
+      originType: replyOriginType,
     };
-    setPost(p => ({ ...p, replies: [...p.replies, newReply], repliesCount: p.repliesCount + 1 }));
+    setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
+
     setReplyText('');
+    setReplyImage(null);
+    setReplyMml(null);
+    setReplyGameDraft(null);
+    setReplyOriginType(undefined);
+    setComposerOpen(false);
+
+    let imageSrc: string | undefined;
+    if (replyImage) {
+      const result = await api.upload.image({ image: replyImage });
+      imageSrc = result.url;
+    }
+    let gameId: number | undefined;
+    if (replyGameDraft) {
+      const res = await fetch('/api/games', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset: replyGameDraft.preset, title: replyGameDraft.title, manifest: replyGameDraft.manifest }),
+      });
+      if (res.ok) {
+        const savedGame = await res.json();
+        gameId = savedGame.id;
+      }
+    }
+
+    const reply = await api.posts.replies.create(post.id, {
+      displayName: userId,
+      content,
+      parentPostId: targetParent.id,
+      hasImage: !!replyImage,
+      imageSrc,
+      gameId,
+      originType: replyOriginType,
+    });
+
+    setPost(p => ({
+      ...p,
+      replies: p.replies.map(r => r.id === tempId ? reply : r)
+    }));
     setReplyTo(null);
   };
+
+  const handleEditReply = async (replyId: string, content: string, originType?: OriginType) => {
+    const updated = await api.posts.edit(replyId, userId, content, originType);
+    setPost(p => ({
+      ...p,
+      replies: p.replies.map(r => r.id === replyId ? { ...r, content: updated.content, originType: updated.originType, isEdited: true } : r)
+    }));
+  };
+
+  const handleDeleteReply = async (replyId: string) => {
+    await api.posts.remove(replyId, userId);
+    setPost(p => ({
+      ...p,
+      replies: p.replies.filter(r => r.id !== replyId),
+      repliesCount: Math.max(0, p.repliesCount - 1)
+    }));
+  };
+
+  const handleOpenCollab = useCallback((p: Post) => {
+    setCollabImageUrl(p.imageSrc);
+    setShowCollabSelector(true);
+  }, []);
+
+  const handleCollabSelectDrawing = useCallback(() => {
+    setShowCollabSelector(false);
+    setActiveScreen('drawing');
+  }, []);
+
+  const handleCollabSelectDotDrawing = useCallback(() => {
+    setShowCollabSelector(false);
+    setActiveScreen('dotdrawing');
+  }, []);
+
+  const handleCloseCollabSelector = useCallback(() => {
+    setShowCollabSelector(false);
+    setCollabImageUrl(undefined);
+  }, []);
+
+  const handleSaveDrawing = (canvasData: string) => {
+    setReplyImage(canvasData);
+    setActiveScreen(null);
+    setCollabImageUrl(undefined);
+    setReplyText("#お絵描き 自作イラスト完成！");
+  };
+
+  const handleSaveDotDrawing = (canvasData: string) => {
+    setReplyImage(canvasData);
+    setActiveScreen(null);
+    setCollabImageUrl(undefined);
+    setReplyText("#ドット絵 自作ドット絵完成！");
+  };
+
+  const handleSaveMml = (mml: string) => {
+    setActiveScreen(null);
+    setReplyMml(mml);
+  };
+
+  const handleSaveGame = (manifest: any, meta: { title: string; preset: string }) => {
+    setReplyGameDraft({ manifest, title: meta.title, preset: meta.preset });
+    setActiveScreen(null);
+    setReplyText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
+  };
+
+  const handleSaveEdit = async (newContent: string) => {
+    const updated = await api.posts.edit(post.id, userId, newContent, post.originType);
+    setPost(updated);
+    setShowEditModal(false);
+  };
+
+  const handleSelectOriginType = async (ot: OriginType | undefined) => {
+    const updated = await api.posts.edit(post.id, userId, post.content, ot);
+    setPost(updated);
+    setShowOriginModal(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    await api.posts.remove(post.id, userId);
+    setShowDeleteModal(false);
+    router.push('/');
+  };
+
+  const handleMenuEdit = () => {
+    setShowEditModal(true);
+    setMenuOpen(false);
+  };
+
+  const handleMenuOriginType = () => {
+    setShowOriginModal(true);
+    setMenuOpen(false);
+  };
+
+  const handleMenuDelete = () => {
+    setShowDeleteModal(true);
+    setMenuOpen(false);
+  };
+
+  const isSelf = (post.slug || post.displayName) === userId;
 
   const mmlCode = extractMmlFromContent(post.content);
   const chordRes = extractChordsFromContent(post.content);
@@ -182,14 +375,36 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   <Copy size={12} className="shrink-0" />
                   <span>テキストをコピー</span>
                 </button>
-                <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
-                  <UserPlus size={12} className="shrink-0" />
-                  <span>{following ? 'フォロー中' : `${post.displayName}さんをフォロー`}</span>
-                </button>
-                <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
-                  <Ban size={12} className="shrink-0" />
-                  <span>{blocked ? 'ブロック中' : `${post.displayName}さんをブロック`}</span>
-                </button>
+                {isSelf && (
+                  <button role="menuitem" onClick={handleMenuEdit} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>ポストを編集</span>
+                  </button>
+                )}
+                {isSelf && (
+                  <button role="menuitem" onClick={handleMenuOriginType} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>権利表記を設定</span>
+                  </button>
+                )}
+                {isSelf && (
+                  <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                    <Trash2 size={12} className="shrink-0" />
+                    <span>ポストを削除</span>
+                  </button>
+                )}
+                {!isSelf && (
+                  <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <UserPlus size={12} className="shrink-0" />
+                    <span>{following ? 'フォロー中' : `${getAvatarInfo(post.displayName).username}さんをフォロー`}</span>
+                  </button>
+                )}
+                {!isSelf && (
+                  <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Ban size={12} className="shrink-0" />
+                    <span>{blocked ? 'ブロック中' : `${getAvatarInfo(post.displayName).username}さんをブロック`}</span>
+                  </button>
+                )}
                 <div className="border-t border-gray-800 my-1" />
                 <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
                   <Flag size={12} className="shrink-0" />
@@ -204,14 +419,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       <div className="flex p-3 space-x-2.5">
         <Link
           href={`/user/${post.slug || post.displayName}`}
-          className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity`}
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity"
+          style={getAvatarInfo(post.displayName).style}
         >
-          {post.displayName.substring(3, 5) || "名無"}
+          {getAvatarInfo(post.displayName).emoji}
         </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
-            <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
-            {(post.slug || post.displayName) === userId && (
+            <span className="font-bold text-xs text-gray-200">{getAvatarInfo(post.displayName).username}</span>
+            {isSelf && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
             )}
             {(() => {
@@ -284,7 +500,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             <button onClick={handleDislike} className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${post.disliked ? 'text-red-500 font-bold' : ''}`}>
               <ThumbsDown size={14} /><span className="text-[11px]">{post.dislikes || ''}</span>
             </button>
-            <button className="flex items-center space-x-1 hover:text-green-400 transition-colors">
+            <button onClick={() => { setReplyTo(null); setComposerOpen(true); }} className="flex items-center space-x-1 hover:text-green-400 transition-colors">
               <MessageCircle size={14} /><span className="text-[11px]">{post.repliesCount || ''}</span>
             </button>
             <button onClick={handleRepost} className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? 'text-purple-400' : ''}`}>
@@ -305,39 +521,168 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div className="border-t border-gray-800 px-3 py-3 space-y-2">
           <span className="text-[11px] text-gray-500 font-bold">返信</span>
           {post.replies.filter(r => r.parentPostId === post.id).map(reply => (
-            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} />
+            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} onEdit={handleEditReply} onDelete={handleDeleteReply} />
           ))}
         </div>
       )}
 
       <div className="border-t border-gray-800 px-3 pt-1 pb-3 space-y-1 mx-3 mb-4 mt-2">
-        {replyTo && (
-          <div className="flex items-center justify-between text-[10px] text-gray-500 px-1">
-            <span><span className="text-blue-400">@{replyTo.displayName}</span> に返信</span>
-            <button onClick={() => setReplyTo(null)} className="text-gray-600 hover:text-gray-400">取消</button>
-          </div>
-        )}
-        <div className="flex items-center space-x-2 bg-gray-100/5 rounded-lg px-3 py-2">
-          <input
-            type="text"
-            placeholder={replyTo ? `@${replyTo.displayName} に返信...` : "返信を書き込む..."}
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            className="bg-transparent flex-1 text-xs outline-none text-gray-100 placeholder:text-gray-600"
-            onKeyDown={(e) => { if (e.key === 'Enter') handleAddReply(); }}
-          />
-          <button onClick={handleAddReply} className="text-blue-500 hover:text-blue-400 text-xs font-bold px-1">送信</button>
+        <div
+          onClick={() => { setReplyTo(null); setComposerOpen(true); }}
+          className="flex items-center space-x-2 bg-gray-100/5 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-100/10 transition-colors"
+        >
+          <span className="text-xs text-gray-500 flex-1">返信を書き込む...</span>
+          <button className="text-blue-500 text-xs font-bold px-1">送信</button>
         </div>
       </div>
+
+      {composerOpen && (
+        <PostComposer
+          userId={userId}
+          text={replyText}
+          setText={setReplyText}
+          image={replyImage}
+          setImage={setReplyImage}
+          mml={replyMml}
+          setMml={setReplyMml}
+          gameDraft={replyGameDraft}
+          setGameDraft={setReplyGameDraft}
+          originType={replyOriginType}
+          setOriginType={setReplyOriginType}
+          onClose={handleComposerClose}
+          onSubmit={handleCreateReplyFromComposer}
+          onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenCollab(post); }}
+          onOpenDotDrawing={() => { setCollabImageUrl(undefined); handleCollabSelectDotDrawing(); }}
+          onOpenMml={() => setActiveScreen('mml')}
+          onOpenGameMaker={() => setActiveScreen('gamemaker')}
+          replyToDisplayName={replyTo ? replyTo.displayName : post.displayName}
+        />
+      )}
+
+      {activeScreen === 'drawing' && (
+        <DrawingEditor
+          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
+          onSave={handleSaveDrawing}
+          collabImageUrl={collabImageUrl}
+        />
+      )}
+      {activeScreen === 'dotdrawing' && (
+        <DotDrawingEditor
+          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
+          onSave={handleSaveDotDrawing}
+          collabImageUrl={collabImageUrl}
+        />
+      )}
+      {activeScreen === 'gamemaker' && (
+        <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} />
+      )}
+      {activeScreen === 'mml' && (
+        <MmlEditor
+          onClose={() => setActiveScreen(null)}
+          onSave={handleSaveMml}
+        />
+      )}
+
+      {showCollabSelector && collabImageUrl && (
+        <CollabSelector
+          imageUrl={collabImageUrl}
+          onSelectDrawing={handleCollabSelectDrawing}
+          onSelectDotDrawing={handleCollabSelectDotDrawing}
+          onClose={handleCloseCollabSelector}
+        />
+      )}
+
+      {showEditModal && (
+        <EditPostModal
+          initialContent={post.content}
+          onClose={() => setShowEditModal(false)}
+          onSave={handleSaveEdit}
+        />
+      )}
+      {showDeleteModal && (
+        <DeletePostModal
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
+      {showOriginModal && (
+        <OriginTypeModal
+          value={post.originType}
+          onClose={() => setShowOriginModal(false)}
+          onSelect={handleSelectOriginType}
+        />
+      )}
     </>
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, onEdit, onDelete }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void> }) {
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [localPost, setLocalPost] = useState<Post>(post);
-  const userId = '名無しvFZ';
+
+  useEffect(() => {
+    setLocalPost(post);
+  }, [post]);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showOriginModal, setShowOriginModal] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const toggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(v => !v);
+  };
+
+  const handleMenuCopy = () => {
+    navigator.clipboard.writeText(localPost.content);
+    setMenuOpen(false);
+  };
+
+  const handleMenuEdit = () => {
+    setShowEditModal(true);
+    setMenuOpen(false);
+  };
+
+  const handleMenuOriginType = () => {
+    setShowOriginModal(true);
+    setMenuOpen(false);
+  };
+
+  const handleMenuDelete = () => {
+    setShowDeleteModal(true);
+    setMenuOpen(false);
+  };
+
+  const handleSaveEdit = async (newContent: string) => {
+    await onEdit(localPost.id, newContent, localPost.originType);
+    setLocalPost(p => ({ ...p, content: newContent, isEdited: true }));
+    setShowEditModal(false);
+  };
+
+  const handleSelectOriginType = async (ot: OriginType | undefined) => {
+    await onEdit(localPost.id, localPost.content, ot);
+    setLocalPost(p => ({ ...p, originType: ot }));
+    setShowOriginModal(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    await onDelete(localPost.id);
+    setShowDeleteModal(false);
+  };
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   const handleLike = useCallback(() => {
     const id = localPost.id;
@@ -378,35 +723,75 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
 
   const mmlCode = extractMmlFromContent(localPost.content);
   const chordRes = extractChordsFromContent(localPost.content);
+  const avatarInfo = getAvatarInfo(localPost.displayName);
+  const isSelf = (localPost.slug || localPost.displayName) === userId;
 
   return (
     <div style={{ marginLeft: depth * 12 }} className={depth > 0 ? 'pl-3 border-l-2 border-gray-800/40' : ''}>
       <div className="flex p-3 space-x-2.5">
         <Link
           href={`/user/${localPost.slug || localPost.displayName}`}
-          className={`w-9 h-9 rounded-full bg-gradient-to-br ${localPost.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity`}
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity"
+          style={avatarInfo.style}
         >
-          {localPost.displayName.substring(3, 5) || "名無"}
+          {avatarInfo.emoji}
         </Link>
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline space-x-1.5 mb-0.5">
-            <span className="font-bold text-xs text-gray-200">{localPost.displayName}</span>
-            {(localPost.slug || localPost.displayName) === userId && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
-            )}
-            {(() => {
-              const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === localPost.originType);
-              return opt ? (
-                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
-              ) : null;
-            })()}
-            {localPost.isFalseDeclaration && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
-            )}
-            <span className="text-gray-500 text-[10px] font-medium">
-              {localPost.time}
-              {localPost.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
-            </span>
+          <div className="flex justify-between items-baseline mb-0.5">
+            <div className="flex items-baseline space-x-1.5">
+              <span className="font-bold text-xs text-gray-200">{avatarInfo.username}</span>
+              {isSelf && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
+              )}
+              {(() => {
+                const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === localPost.originType);
+                return opt ? (
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
+                ) : null;
+              })()}
+              {localPost.isFalseDeclaration && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
+              )}
+              <span className="text-gray-500 text-[10px] font-medium">
+                {localPost.time}
+                {localPost.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
+              </span>
+            </div>
+            <div ref={menuRef} className="relative">
+              <button onClick={toggleMenu} className="p-2 -mr-2 -mt-1 rounded hover:bg-gray-100/10 transition-colors">
+                <MoreHorizontal size={14} className="text-gray-500 hover:text-gray-300" />
+              </button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-5 z-50 w-40 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1 text-[10px]"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button role="menuitem" onClick={handleMenuCopy} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Copy size={11} className="shrink-0" />
+                    <span>コピー</span>
+                  </button>
+                  {isSelf && (
+                    <button role="menuitem" onClick={handleMenuEdit} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Pencil size={11} className="shrink-0" />
+                      <span>編集</span>
+                    </button>
+                  )}
+                  {isSelf && (
+                    <button role="menuitem" onClick={handleMenuOriginType} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Pencil size={11} className="shrink-0" />
+                      <span>権利表記</span>
+                    </button>
+                  )}
+                  {isSelf && (
+                    <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                      <Trash2 size={11} className="shrink-0" />
+                      <span>削除</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
@@ -448,7 +833,7 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
             <button onClick={handleDislike} className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${localPost.disliked ? 'text-red-500 font-bold' : ''}`}>
               <ThumbsDown size={14} /><span className="text-[11px]">{localPost.dislikes || ''}</span>
             </button>
-            <button className="flex items-center space-x-1 hover:text-green-400 transition-colors">
+            <button onClick={() => onReply(localPost)} className="flex items-center space-x-1 hover:text-green-400 transition-colors">
               <MessageCircle size={14} /><span className="text-[11px]">{localPost.repliesCount || ''}</span>
             </button>
             <button onClick={handleRepost} className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? 'text-purple-400' : ''}`}>
@@ -476,9 +861,30 @@ function ReplyTreeItem({ post, replies, depth, onReply }: { post: Post; replies:
       {!collapsed && children.length > 0 && (
         <div>
           {children.map(child => (
-            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} />
+            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </div>
+      )}
+
+      {showEditModal && (
+        <EditPostModal
+          initialContent={localPost.content}
+          onClose={() => setShowEditModal(false)}
+          onSave={handleSaveEdit}
+        />
+      )}
+      {showDeleteModal && (
+        <DeletePostModal
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
+      {showOriginModal && (
+        <OriginTypeModal
+          value={localPost.originType}
+          onClose={() => setShowOriginModal(false)}
+          onSelect={handleSelectOriginType}
+        />
       )}
     </div>
   );

@@ -26,6 +26,12 @@ export interface ReplyParams {
   displayName: string;
   content: string;
   parentPostId?: number;
+  hasImage?: boolean;
+  imageSrc?: string;
+  imageAlt?: string;
+  avatarColor?: string;
+  gameId?: number;
+  originType?: OriginType;
 }
 
 export interface MessageParams {

@@ -91,9 +91,24 @@ const staticApi = {
         const replies = await mockDbInstance.getReplies(decodeIdOrThrow(postId), userId);
         return replies.map(encodePost);
       },
-      create: async (postId: string, data: { displayName: string; content: string; parentPostId?: string }) => {
+      create: async (postId: string, data: {
+        displayName: string;
+        content: string;
+        parentPostId?: string;
+        hasImage?: boolean;
+        imageSrc?: string;
+        imageAlt?: string;
+        avatarColor?: string;
+        gameId?: string | number;
+        originType?: OriginType;
+      }) => {
         const decodedParentPostId = data.parentPostId ? decodeIdOrThrow(data.parentPostId) : undefined;
-        const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), { ...data, parentPostId: decodedParentPostId });
+        const gameIdNum = data.gameId ? Number(data.gameId) : undefined;
+        const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), {
+          ...data,
+          parentPostId: decodedParentPostId,
+          gameId: gameIdNum
+        });
         if (!reply) throw new Error('Post not found');
         return encodePost(reply);
       },
@@ -215,7 +230,17 @@ const liveApi = {
         const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
         return fetcher<Post[]>(`/posts/${postId}/replies${qs}`);
       },
-      create: (postId: string, data: { displayName: string; content: string; parentPostId?: string }) =>
+      create: (postId: string, data: {
+        displayName: string;
+        content: string;
+        parentPostId?: string;
+        hasImage?: boolean;
+        imageSrc?: string;
+        imageAlt?: string;
+        avatarColor?: string;
+        gameId?: string | number;
+        originType?: OriginType;
+      }) =>
         fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
     },
   },

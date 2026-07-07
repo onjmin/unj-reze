@@ -37,6 +37,17 @@ interface Yume25DMakerProps {
   /** 三人称視点で表示するプレイヤー自身の見た目。 */
   playerAppearance: PlayerAppearance;
   onPickImage?: (target: { t: 'yumeTex'; id: number }) => void;
+  virtualKeys?: {
+    up: boolean;
+    down: boolean;
+    left: boolean;
+    right: boolean;
+    action: boolean;
+    shoot: boolean;
+    slow: boolean;
+    bomb: boolean;
+    select: boolean;
+  };
 }
 
 const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
@@ -46,7 +57,7 @@ const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
 const resizeFloor = (floor: number[][], cols: number, rows: number): number[][] =>
   Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => floor[r]?.[c] ?? 0));
 
-export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage }: Yume25DMakerProps) {
+export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage, virtualKeys }: Yume25DMakerProps) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Yume25DEngine | null>(null);
@@ -180,6 +191,46 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
   }, [is3d, demo]);
+
+  // ── 共通コントローラーからの入力を 2.5D エンジンへ転送 ──
+  useEffect(() => {
+    const inp = engineRef.current?.input;
+    if (!inp || !virtualKeys) return;
+    inp.forward = virtualKeys.up;
+    inp.back = virtualKeys.down;
+    inp.strafeL = virtualKeys.left;
+    inp.strafeR = virtualKeys.right;
+    inp.dash = virtualKeys.slow;
+  }, [virtualKeys?.up, virtualKeys?.down, virtualKeys?.left, virtualKeys?.right, virtualKeys?.slow]);
+
+  // Aボタン(Z): ジャンプ / ダイアログ進行
+  useEffect(() => {
+    if (virtualKeys?.action) {
+      if (dialogueRef.current) {
+        setDialogue(null);
+      } else {
+        engineRef.current?.jump();
+      }
+    }
+  }, [virtualKeys?.action]);
+
+  // Bボタン(X): 話す
+  useEffect(() => {
+    if (virtualKeys?.shoot) {
+      handleTalk();
+    }
+  }, [virtualKeys?.shoot]);
+
+  // SELECTボタン: カメラPOV切り替え (first <=> third)
+  useEffect(() => {
+    if (virtualKeys?.select) {
+      onLayoutChange(l => {
+        const nextPov = l.pov === 'third' ? 'first' : 'third';
+        engineRef.current?.setPov(nextPov);
+        return { ...l, pov: nextPov };
+      });
+    }
+  }, [virtualKeys?.select]);
 
   const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash') => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -594,7 +645,7 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       {/* 3D操作パネル（タッチ用）。視点回転は画面ドラッグに任せるので LOOK パッドは置かず、
           D-pad（移動）と最小限のアクションボタンだけに絞って画面占有を抑える。
           会話ウィンドウを表示中は選択の邪魔にならないよう丸ごと隠す。デモ中も非表示。 */}
-      {is3d && !demo && !dialogue && (
+      {is3d && !demo && !dialogue && !virtualKeys && (
         <>
           {/* 仮想 D-pad：移動（前後＋左右ストレイフ、斜め可）。視点回転は画面を直接ドラッグ。 */}
           <div

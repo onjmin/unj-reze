@@ -1002,6 +1002,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay'>('base');
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
+  const [editModeType, setEditModeType] = useState<'move_place' | 'panel_input'>('panel_input');
   const [charSubTab, setCharSubTab] = useState<'jiki' | 'boss' | 'midboss' | 'zenhan' | 'kohan'>('jiki');
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
@@ -5070,8 +5071,8 @@ const lose = (msg: string) => {
       prevActionRef.current = isAction;
 
       // ── Z / X keys: place / delete object ──
-      const isZ = keys.has('z') || keys.has('Z');
-      const isX = keys.has('x') || keys.has('X');
+      const isZ = keys.has('z') || keys.has('Z') || touchRef.current.action;
+      const isX = keys.has('x') || keys.has('X') || touchRef.current.shoot;
       if (!isPlaying && !battleRef.current.active && !eventRunningRef.current) {
         if (isZ && !prevZRef.current) placeObj();
         if (isX && !prevXRef.current && selectedObjIdRef.current) {
@@ -6044,7 +6045,7 @@ const lose = (msg: string) => {
   }, [gameData, isPlaying, restart, editorTab, editSpeedMult]);
 
   // touch state via ref to avoid re-running the loop effect
-  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false, shoot: false });
+  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false, shoot: false, select: false });
   const prevActionRef = useRef(false);
   const prevZRef = useRef(false);
   const prevXRef = useRef(false);
@@ -6425,6 +6426,70 @@ const lose = (msg: string) => {
   const updEnding = (patch: Partial<EndingScreenConfig>) => setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, ...patch } }) : p);
   const startFromTitle = () => { setShowTitle(false); setIsPlaying(true); };
 
+  // SELECT ボタンが押されたとき
+  const handleSelectPress = () => {
+    if (introOpen) return;
+    if (!isPlaying) {
+      // 編集モード：速度切り替え (1x => 2x => 4x)
+      setEditSpeedMult(prev => {
+        const speeds = [1, 2, 4];
+        return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
+      });
+    } else {
+      // プレイ中
+      if (gameData.engine === 'rpg') {
+        // どうぐ袋をトグル
+        const hasOverlay = !!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult;
+        if (gameData.battle && !battle && !hasOverlay) {
+          setBagOpen(prev => !prev);
+        }
+      } else if (gameData.engine === 'yume25d') {
+        setTouch('select', true);
+        setTimeout(() => setTouch('select', false), 80);
+      } else {
+        // その他：速度切り替え (Fキー相当) もできるようにしておくと便利
+        setEditSpeedMult(prev => {
+          const speeds = [1, 2, 4];
+          return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
+        });
+      }
+    }
+  };
+
+  // START ボタンが押されたとき
+  const handleStartPress = () => {
+    if (introOpen) {
+      enterPlayFromIntro();
+      return;
+    }
+    if (isPlaying) {
+      // 編集に戻る
+      resetSceneState();
+      invulnRef.current = 0;
+      bombInvulnRef.current = 0;
+      isPlayerDeadRef.current = false;
+      roundOverRef.current = false;
+      setBattle(null);
+      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0 };
+      const pp = engineRef.current.player;
+      const pw = gameData.player.w, ph = gameData.player.h;
+      setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
+      setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+      setShowEnding(false);
+      setIsPlaying(false);
+    } else {
+      // テストプレイ開始
+      setActivePreviewKey(null);
+      flushSceneEdits();
+      if (gameData.titleScreen?.enabled) {
+        setShowTitle(true);
+      } else {
+        setIsPlaying(true);
+        justStartedRef.current = true;
+      }
+    }
+  };
+
   return (
     <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}>
       {/* Header */}
@@ -6561,6 +6626,7 @@ const lose = (msg: string) => {
                 demo={introOpen}
                 playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color }}
                 onPickImage={(target) => setPicker({ mode: 'image', target })}
+                virtualKeys={touchRef.current}
               />
             ) : (
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
@@ -7113,12 +7179,6 @@ const lose = (msg: string) => {
               </div>
             )}
 
-            {/* ── フィールドどうぐ袋（rpg エンジン）── */}
-            {isPlaying && gameData.engine === 'rpg' && gameData.battle && !battle && !shopModal && !gameMsg && !activeDialogue && !eventChoice && !bagOpen && (
-              <button onClick={() => setBagOpen(true)}
-                className="absolute top-2 right-2 z-20 w-9 h-9 grid place-items-center bg-black/55 border border-amber-500/60 text-base active:bg-black/80"
-                title="どうぐ">🎒</button>
-            )}
             {bagOpen && !battle && (
               <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => setBagOpen(false)}>
                 <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
@@ -7147,40 +7207,6 @@ const lose = (msg: string) => {
                     })}
                   </div>
                   <button onClick={() => setBagOpen(false)} className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
-                </div>
-              </div>
-            )}
-
-            {!isPlaying && gameData.engine !== 'yume25d' && (
-              <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute bottom-2 left-1 pointer-events-auto touch-none select-none opacity-90">
-                  <div className="relative w-16 h-16">
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('up')}>▲</div>
-                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-6 h-7 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('down')}>▼</div>
-                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('left')}>◀</div>
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-7 h-6 bg-gray-700 active:bg-gray-600 flex items-center justify-center text-white text-[9px] leading-none" {...padProps('right')}>▶</div>
-                  </div>
-                </div>
-                <div className="absolute bottom-2 right-1 pointer-events-auto touch-none select-none opacity-90">
-                  <div className="relative w-14 h-16">
-                    <button onClick={placeObj}
-                      className="absolute right-0 bottom-0 w-10 h-10 bg-green-600 active:bg-green-500 shadow-lg border-b-4 border-green-800 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
-                      title="Zキー">PUT</button>
-                    <button onClick={() => { if (selectedObjIdRef.current) { setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) })); setSelectedObjId(null); }}}
-                      className="absolute left-0 top-1 w-9 h-9 bg-red-700 active:bg-red-600 shadow-lg border-b-4 border-red-900 active:border-b-0 active:translate-y-1 text-white font-bold text-[8px] flex items-center justify-center"
-                      title="Xキー">DEL</button>
-                  </div>
-                </div>
-                <div className="absolute top-1 left-1/2 -translate-x-1/2 pointer-events-auto touch-none select-none opacity-90">
-                  <div className="flex items-center gap-1 px-2 py-1 bg-black/50 text-[10px]">
-                    <span className="text-gray-300">速度:</span>
-                    {[1, 2, 4].map(m => (
-                      <button key={m} onClick={() => setEditSpeedMult(m)}
-                        className={`px-2 py-0.5 font-bold transition ${editSpeedMult === m ? 'bg-blue-600 text-white' : 'bg-gray-700/70 text-gray-400 hover:bg-gray-600'}`}>
-                        {m}x
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </div>
             )}
@@ -7279,92 +7305,164 @@ const lose = (msg: string) => {
         </div>
 
         {/* Sidebar */}
-        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly) ? 'w-full md:w-auto' : 'portrait:flex-1 flex-none max-h-[40vh] md:max-h-none overflow-y-auto md:w-80 md:flex-none'}`}>
-          {(isPlaying || playOnly) ? (
-            <div className="flex-1 flex flex-col p-4 select-none">
+        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly || editModeType === 'move_place') ? 'w-full md:w-auto' : 'portrait:flex-1 flex-none max-h-[40vh] md:max-h-none overflow-y-auto md:w-80 md:flex-none'}`}>
+          {!isPlaying && !playOnly && (
+            <div className="flex p-2 bg-gray-900 border-b border-gray-800 gap-2 shrink-0">
+              <button
+                onClick={() => setEditModeType('move_place')}
+                className={`flex-1 py-1.5 rounded text-xs font-bold font-pixel flex items-center justify-center gap-1.5 transition ${editModeType === 'move_place' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-gray-800 text-gray-400 hover:text-gray-300'}`}
+              >
+                🕹️ 移動・設置モード
+              </button>
+              <button
+                onClick={() => setEditModeType('panel_input')}
+                className={`flex-1 py-1.5 rounded text-xs font-bold font-pixel flex items-center justify-center gap-1.5 transition ${editModeType === 'panel_input' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-gray-800 text-gray-400 hover:text-gray-300'}`}
+              >
+                📝 パネル編集モード
+              </button>
+            </div>
+          )}
+
+          {(isPlaying || playOnly || editModeType === 'move_place') ? (
+            <div className="flex-1 flex flex-col p-4 select-none bg-[#0e0f14] min-h-[220px]">
+              {/* コントローラーのヘッダー情報 */}
+              <div className="flex justify-between items-center px-1 mb-2 text-[9px] text-gray-500 font-pixel font-bold leading-none">
+                <span>SYSTEM: {gameData.engine.toUpperCase()} ENGINE</span>
+                <span>{isPlaying ? "MODE: PLAY" : `MODE: EDIT (${editSpeedMult}x)`}</span>
+              </div>
+
               <div className="flex-1 flex items-center justify-center">
-              <div className="flex justify-between items-center max-w-xs w-full gap-8">
-                <div ref={dpadRef} {...dpadProps} className="relative w-32 h-32 touch-none cursor-pointer select-none">
-                  {/* 8方向パッド：本体1枚でポインタ追跡。子要素は表示のみ */}
-                  <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] pointer-events-none transition-colors ${touchRef.current.up ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-11 h-[3.25rem] pointer-events-none transition-colors ${touchRef.current.down ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 pointer-events-none transition-colors ${touchRef.current.left ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-[3.25rem] h-11 pointer-events-none transition-colors ${touchRef.current.right ? 'bg-gray-400' : 'bg-gray-600'}`}></div>
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 bg-gray-700 pointer-events-none"></div>
-                  {/* 斜め入力ガイド（対応する2方向が同時点灯） */}
-                  <div className={`absolute top-1.5 right-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
-                  <div className={`absolute top-1.5 left-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.up && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
-                  <div className={`absolute bottom-1.5 right-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.right ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
-                  <div className={`absolute bottom-1.5 left-1.5 w-3 h-3 pointer-events-none transition-colors ${touchRef.current.down && touchRef.current.left ? 'bg-gray-300' : 'bg-gray-700/70'}`}></div>
+                <div className="flex justify-between items-center max-w-sm w-full gap-6">
+                  {/* 左側：十字キー */}
+                  <div ref={dpadRef} {...dpadProps} className="relative w-32 h-32 touch-none cursor-pointer select-none bg-[#1d1f27] rounded-full shadow-2xl border-4 border-gray-900 flex items-center justify-center">
+                    <div className="absolute w-24 h-8 bg-gray-800 rounded shadow pointer-events-none"></div>
+                    <div className="absolute w-8 h-24 bg-gray-800 rounded shadow pointer-events-none"></div>
+                    <div className="absolute w-8 h-8 bg-gray-900 rounded-full z-10 pointer-events-none border border-gray-800/80"></div>
+                    <div className={`absolute top-0.5 left-1/2 -translate-x-1/2 w-8 h-8 pointer-events-none transition-colors rounded-t ${touchRef.current.up ? 'bg-indigo-500/30' : ''} flex items-start justify-center pt-1`}>
+                      <span className={`text-[8px] leading-none ${touchRef.current.up ? 'text-indigo-400' : 'text-gray-600'}`}>▲</span>
+                    </div>
+                    <div className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-8 h-8 pointer-events-none transition-colors rounded-b ${touchRef.current.down ? 'bg-indigo-500/30' : ''} flex items-end justify-center pb-1`}>
+                      <span className={`text-[8px] leading-none ${touchRef.current.down ? 'text-indigo-400' : 'text-gray-600'}`}>▼</span>
+                    </div>
+                    <div className={`absolute left-0.5 top-1/2 -translate-y-1/2 w-8 h-8 pointer-events-none transition-colors rounded-l ${touchRef.current.left ? 'bg-indigo-500/30' : ''} flex items-center justify-start pl-1`}>
+                      <span className={`text-[8px] leading-none ${touchRef.current.left ? 'text-indigo-400' : 'text-gray-600'}`}>◀</span>
+                    </div>
+                    <div className={`absolute right-0.5 top-1/2 -translate-y-1/2 w-8 h-8 pointer-events-none transition-colors rounded-r ${touchRef.current.right ? 'bg-indigo-500/30' : ''} flex items-center justify-end pr-1`}>
+                      <span className={`text-[8px] leading-none ${touchRef.current.right ? 'text-indigo-400' : 'text-gray-600'}`}>▶</span>
+                    </div>
+                  </div>
+
+                  {/* 右側：ボタン群 */}
+                  {introOpen ? (
+                    <div className="flex flex-col gap-2 items-center">
+                      <button onClick={enterPlayFromIntro}
+                        className="w-28 h-12 border-b-4 border-green-900 active:border-b-0 active:translate-y-1 bg-green-500 active:bg-green-400 text-green-950 font-black text-xs shadow-lg shadow-green-500/30 flex items-center justify-center gap-1.5 transition touch-none select-none">
+                        <Play size={12} /> あそぶ
+                      </button>
+                      <button onClick={enterEditFromIntro}
+                        className="w-28 h-9 border border-white/25 bg-white/10 active:bg-white/20 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition touch-none select-none">
+                        ✏ 改造する
+                      </button>
+                    </div>
+                  ) : (() => {
+                    let btnAActive = false; let btnALabel = "";
+                    let btnBActive = false; let btnBLabel = "";
+                    let btnXActive = false; let btnXLabel = "";
+                    let btnYActive = false; let btnYLabel = "";
+
+                    if (!isPlaying) {
+                      btnAActive = true; btnALabel = "PUT";
+                      btnBActive = selectedObjId !== null || selectedObjIdRef.current !== null; btnBLabel = "DEL";
+                    } else if (gameData.engine === 'action') {
+                      btnAActive = true; btnALabel = "JUMP";
+                      btnBActive = true; btnBLabel = "SHOT";
+                      btnYActive = true; btnYLabel = "RUN";
+                    } else if (gameData.engine === 'touhou') {
+                      btnAActive = true; btnALabel = "SHOT";
+                      btnBActive = true; btnBLabel = "BOMB";
+                      btnYActive = true; btnYLabel = "低速";
+                    } else if (gameData.engine === 'onjReze') {
+                      btnAActive = true; btnALabel = "⚔️ 攻撃";
+                      btnBActive = true; btnBLabel = "🎯 投擲";
+                      btnYActive = true; btnYLabel = "💣 ボム";
+                      btnXActive = true; btnXLabel = "💀 首爆";
+                    } else if (gameData.engine === 'rpg') {
+                      btnAActive = true; btnALabel = "決定";
+                      btnBActive = true; btnBLabel = "取消";
+                    } else if (gameData.engine === 'yume25d') {
+                      btnAActive = true; btnALabel = "JUMP";
+                      btnBActive = true; btnBLabel = "話す";
+                      btnYActive = true; btnYLabel = "DASH";
+                    }
+
+                    return (
+                      <div className="relative w-32 h-32 flex items-center justify-center select-none shrink-0">
+                        {/* Yボタン (左) */}
+                        <button disabled={!btnYActive} {...padProps('slow')}
+                          className={`absolute left-0 w-11 h-11 rounded-full border-b-4 shadow-lg flex flex-col items-center justify-center transition touch-none select-none
+                            ${btnYActive ? 'bg-amber-600 border-amber-800 active:border-b-0 active:translate-y-0.5 active:bg-amber-500 text-white' : 'bg-gray-800/20 border-gray-900/20 text-gray-700 opacity-20 pointer-events-none'}`}>
+                          <span className="text-[9px] font-bold leading-none">Y</span>
+                          {btnYLabel && <span className="text-[6px] font-pixel scale-90 mt-0.5 leading-none">{btnYLabel}</span>}
+                        </button>
+                        {/* Xボタン (上) */}
+                        <button disabled={!btnXActive} {...padProps('slow')}
+                          className={`absolute top-0 w-11 h-11 rounded-full border-b-4 shadow-lg flex flex-col items-center justify-center transition touch-none select-none
+                            ${btnXActive ? 'bg-purple-600 border-purple-800 active:border-b-0 active:translate-y-0.5 active:bg-purple-500 text-white' : 'bg-gray-800/20 border-gray-900/20 text-gray-700 opacity-20 pointer-events-none'}`}>
+                          <span className="text-[9px] font-bold leading-none">X</span>
+                          {btnXLabel && <span className="text-[6px] font-pixel scale-90 mt-0.5 leading-none">{btnXLabel}</span>}
+                        </button>
+                        {/* Bボタン (下) */}
+                        <button disabled={!btnBActive} {...padProps('shoot')}
+                          className={`absolute bottom-0 w-11 h-11 rounded-full border-b-4 shadow-lg flex flex-col items-center justify-center transition touch-none select-none
+                            ${btnBActive ? 'bg-blue-600 border-blue-800 active:border-b-0 active:translate-y-0.5 active:bg-blue-500 text-white' : 'bg-gray-800/20 border-gray-900/20 text-gray-700 opacity-20 pointer-events-none'}`}>
+                          <span className="text-[9px] font-bold leading-none">B</span>
+                          {btnBLabel && <span className="text-[6px] font-pixel scale-90 mt-0.5 leading-none">{btnBLabel}</span>}
+                        </button>
+                        {/* Aボタン (右) */}
+                        <button disabled={!btnAActive} {...padProps('action')}
+                          className={`absolute right-0 w-11 h-11 rounded-full border-b-4 shadow-lg flex flex-col items-center justify-center transition touch-none select-none
+                            ${btnAActive ? 'bg-red-600 border-red-800 active:border-b-0 active:translate-y-0.5 active:bg-red-500 text-white font-bold' : 'bg-gray-800/20 border-gray-900/20 text-gray-700 opacity-20 pointer-events-none'}`}>
+                          <span className="text-[9px] font-bold leading-none">A</span>
+                          {btnALabel && <span className="text-[6px] font-pixel scale-90 mt-0.5 leading-none">{btnALabel}</span>}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
-                {introOpen ? (
-                  <div className="flex flex-col gap-2.5 items-center">
-                    <button onClick={enterPlayFromIntro}
-                      className="w-28 h-14 border-b-4 border-green-900 active:border-b-0 active:translate-y-1 bg-green-500 active:bg-green-400 text-green-950 font-black text-sm shadow-lg shadow-green-500/30 flex items-center justify-center gap-1.5 transition touch-none select-none">
-                      <Play size={14} /> あそぶ
-                    </button>
-                    <button onClick={enterEditFromIntro}
-                      className="w-28 h-10 border border-white/25 bg-white/10 active:bg-white/20 text-white font-bold text-sm flex items-center justify-center gap-1.5 transition touch-none select-none">
-                      ✏ 改造する
-                    </button>
-                  </div>
-                ) : gameData.engine === 'action' ? (
-                  <div className="flex gap-3">
-                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-cyan-600 active:bg-cyan-500 touch-none cursor-pointer select-none"
-                      {...padProps('shoot')}>
-                      SHOT
-                    </button>
-                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-xs bg-blue-600 active:bg-blue-500 touch-none cursor-pointer select-none"
-                      {...padProps('action')}>
-                      JUMP
-                    </button>
-                  </div>
-                ) : null}
-                {!introOpen && gameData.engine === 'onjReze' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-red-600 active:bg-red-500 touch-none cursor-pointer select-none"
-                      {...padProps('action')}>
-                      ⚔️
-                    </button>
-                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-orange-600 active:bg-orange-500 touch-none cursor-pointer select-none"
-                      {...padProps('shoot')}>
-                      🎯
-                    </button>
-                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-amber-600 active:bg-amber-500 touch-none cursor-pointer select-none"
-                      {...padProps('bomb')}>
-                      💣
-                    </button>
-                    <button className="w-14 h-14 border-b-4 border-gray-800 active:border-b-0 active:translate-y-1 shadow-lg text-white font-bold text-lg bg-purple-700 active:bg-purple-600 touch-none cursor-pointer select-none"
-                      {...padProps('slow')}>
-                      💀
-                    </button>
-                  </div>
-                )}
-                {!introOpen && gameData.engine === 'touhou' && (
-                  <div className="flex flex-col items-center gap-2">
-                    <button className="w-14 h-10 border border-purple-600 text-purple-300 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-purple-900/50"
-                      {...padProps('slow')}>
-                      低速
-                    </button>
-                    <button className="w-14 h-10 border-2 border-violet-500 bg-violet-900/40 text-violet-200 font-bold text-[11px] touch-none cursor-pointer select-none active:bg-violet-700/60"
-                      {...padProps('bomb')}>
-                      💣 BOMB
-                    </button>
-                  </div>
-                )}
               </div>
-              </div>
-              {/* セリフ送りボタン（ダイアログ表示中のみ） */}
-              {activeDialogue && (
+
+              {/* 中央下部：SELECT / START ボタン */}
+              {!introOpen && (
+                <div className="flex gap-8 justify-center items-center mt-3 pt-1 border-t border-gray-800/40 w-full shrink-0 select-none">
+                  {/* SELECT */}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <button onClick={handleSelectPress}
+                      className="w-11 h-3.5 bg-gray-700 active:bg-gray-600 rounded-full border border-gray-900 shadow-md transform rotate-12 active:translate-y-0.5 transition touch-none cursor-pointer"
+                      title="SELECT" />
+                    <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">SELECT</span>
+                  </div>
+                  {/* START */}
+                  <div className="flex flex-col items-center gap-0.5">
+                    <button onClick={handleStartPress}
+                      className="w-11 h-3.5 bg-gray-700 active:bg-gray-600 rounded-full border border-gray-900 shadow-md transform rotate-12 active:translate-y-0.5 transition touch-none cursor-pointer"
+                      title="START" />
+                    <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">START</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ダイアログ送りボタン等 */}
+              {isPlaying && activeDialogue && (
                 <button
-                  className="w-full py-3 mt-2 bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-bold text-sm active:bg-yellow-600 touch-none select-none"
+                  className="w-full py-2.5 mt-2 bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-bold text-xs active:bg-yellow-600 touch-none select-none rounded"
                   onPointerDown={e => { e.preventDefault(); dialogueCutsceneRef.current?.advance(); }}
                 >
                   次へ ▼
                 </button>
               )}
+
               {/* コメント欄 */}
-              {postId && onComment && (
+              {isPlaying && postId && onComment && (
                 <form
                   onSubmit={e => {
                     e.preventDefault();

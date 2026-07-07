@@ -8,6 +8,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
 import { api } from '@/lib/api';
+import { getAvatarInfo } from '@/lib/avatar';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine, MML_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -37,10 +38,12 @@ interface PostContainerProps {
   currentUserSlug?: string;
   currentUserDisplayName?: string;
   onModerationChange?: () => void;
+  onReplyClick?: (post: Post) => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick }: PostContainerProps) {
   const router = useRouter();
+  const avatarInfo = getAvatarInfo(post.displayName);
   const [showReplyInput, setShowReplyInput] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
@@ -233,9 +236,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
       <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
         <div
           onClick={(e) => { e.stopPropagation(); router.push(`/user/${post.slug || post.displayName}`); }}
-          className={`w-9 h-9 rounded-full bg-gradient-to-br ${post.avatarColor} shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity`}
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity"
+          style={avatarInfo.style}
         >
-          {post.displayName.substring(3, 5) || "名無"}
+          {avatarInfo.emoji}
           <button
             onClick={(e) => { e.stopPropagation(); onQuickPost(); }}
             className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full p-0.5 border border-gray-800 hover:bg-blue-600 transition-colors cursor-pointer"
@@ -247,7 +251,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
-              <span className="font-bold text-xs text-gray-200">{post.displayName}</span>
+              <span className="font-bold text-xs text-gray-200">{avatarInfo.username}</span>
               {isSelf && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">自分</span>
               )}
@@ -447,7 +451,13 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             </button>
 
             <button
-              onClick={() => setShowReplyInput(!showReplyInput)}
+              onClick={() => {
+                if (onReplyClick) {
+                  onReplyClick(post);
+                } else {
+                  setShowReplyInput(!showReplyInput);
+                }
+              }}
               className={`flex items-center space-x-1 hover:text-green-400 transition-colors ${showReplyInput ? 'text-green-400' : ''}`}
             >
               <MessageCircle size={14} />
@@ -534,31 +544,6 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   );
 }
 
-const AVATAR_COLORS = [
-  'from-blue-400 to-indigo-500',
-  'from-pink-400 to-rose-500',
-  'from-green-400 to-teal-500',
-  'from-orange-400 to-red-500',
-  'from-purple-400 to-violet-500',
-  'from-cyan-400 to-blue-500',
-  'from-amber-400 to-yellow-500',
-  'from-lime-400 to-green-500',
-  'from-emerald-400 to-teal-500',
-  'from-sky-400 to-indigo-500',
-];
-
-function nameToColor(name: string | null | undefined): string {
-  if (!name) return 'from-gray-400 to-gray-500';
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
-function nameToInitials(name: string | null | undefined): string {
-  if (!name) return '名無';
-  return name.substring(3, 5) || '名無';
-}
-
 function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) {
   const router = useRouter();
   const [index, setIndex] = useState(0);
@@ -582,6 +567,8 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
   const maxAvatars = Math.min(replies.length, 5);
   const extraCount = replies.length - maxAvatars;
 
+  const activeAvatarInfo = getAvatarInfo(reply?.displayName);
+
   return (
     <div
       onClick={() => router.push(`/post/${postId}`)}
@@ -590,17 +577,18 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
       <div className="flex items-center gap-1.5 py-1">
         <div className="flex items-center shrink-0 -space-x-1.5">
           {replies.slice(0, maxAvatars).map((r, i) => {
-            const isActive = r.id === reply.id;
+            const isActive = r.id === reply?.id;
+            const rAvatarInfo = getAvatarInfo(r.displayName);
             return (
               <div
                 key={r.id}
-                className={`w-5 h-5 rounded-full bg-gradient-to-br ${nameToColor(r.displayName)} flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${isActive
+                className={`w-5 h-5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0 transition-colors duration-300 ${isActive
                   ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
                   : 'border border-gray-900'
                   }`}
-                style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i }}
+                style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i, ...rAvatarInfo.style }}
               >
-                {nameToInitials(r.displayName)}
+                {rAvatarInfo.emoji}
               </div>
             );
           })}
@@ -612,10 +600,10 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
         </div>
         <span key={index} className="flex items-center min-w-0 animate-fade-in-up">
           <span className="truncate text-[11px] text-gray-400">
-            <span className="text-gray-300 font-bold">{reply.displayName}</span>
-            <span className="text-gray-500 ml-1">{reply.content}</span>
+            <span className="text-gray-300 font-bold">{activeAvatarInfo.username}</span>
+            <span className="text-gray-500 ml-1">{reply?.content}</span>
           </span>
-          <span className="text-[11px] text-gray-600 shrink-0 ml-1.5">{reply.time}</span>
+          <span className="text-[11px] text-gray-600 shrink-0 ml-1.5">{reply?.time}</span>
         </span>
       </div>
     </div>

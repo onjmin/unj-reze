@@ -132,7 +132,7 @@ INSERT INTO trends (id, keyword, count) VALUES
   (8, 'lofi beats', 25);
 
 -- 投稿データ（スレッド＋返信一括）
-INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
+INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, created_at, content, likes, dislikes, liked, disliked, replies_count, reposts, reposted, has_image, image_src, image_alt, avatar_color, has_collab_button, hearts_total, has_game) VALUES
   (1, 1, NULL, '名無しaB3', 'aB3', datetime('now', '-3 hours'), '#お絵描き' || char(10) || '今日の落書き 天気いいから外でスケッチした', 42, 0, 0, 0, 12, 5, 0, 1, 'sketch_01.png', '公園のベンチで描いたスケッチ', 'from-sky-400 to-blue-500', 1, 320, 0),
   (2, 2, NULL, '名無しR9k', 'R9k', datetime('now', '-5 hours'), '今週の #ゲーム 進捗' || char(10) || 'ステージ3のボス戦やっと実装できた' || char(10) || 'あとは調整だけどバグが取れない…', 18, 3, 0, 0, 7, 1, 0, 0, NULL, NULL, 'from-red-500 to-rose-600', 1, 95, 1),
   (3, 3, NULL, '名無しLm8', 'Lm8', datetime('now', '-8 hours'), '朝起きたら雪積もっててびっくりした' || char(10) || 'もう春だと思ってたのに', 56, 2, 0, 0, 19, 8, 0, 1, 'snow_morning.jpg', '朝の雪景色', 'from-gray-300 to-slate-400', 0, 612, 0),
