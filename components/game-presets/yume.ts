@@ -104,7 +104,7 @@ const layout25d: Layout25D = {
 
 export const yume: PresetData = {
   id: 'yume',
-  name: 'ゆめのせかい',
+  name: 'ゆめにっき3D',
   engine: 'yume25d',
   gravity: 0,
   friction: 0,
