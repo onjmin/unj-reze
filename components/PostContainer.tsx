@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
-import { extractMmlFromContent, getDisplayContent, stripMmlLine, MML_MARKERS } from '@/lib/mml';
+import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -135,26 +135,13 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     setShowEditModal(false);
     if (!currentUserDisplayName) return;
     try {
-      let finalContent = next;
-      const lines = post.content.split('\n');
-      const idx = lines.findIndex(line => {
-        const trimmed = line.trim().toLowerCase();
-        return MML_MARKERS.some(m => trimmed.startsWith(m.toLowerCase()));
-      });
-      if (idx !== -1) {
-        const mmlLine = lines[idx];
-        const editedLines = next.split('\n');
-        const targetIdx = Math.min(idx, editedLines.length);
-        editedLines.splice(targetIdx, 0, mmlLine);
-        finalContent = editedLines.join('\n');
-      }
-      await api.posts.edit(post.id, currentUserDisplayName, finalContent);
+      await api.posts.edit(post.id, currentUserDisplayName, next);
       onModerationChange?.();
       // /post/[id] はサーバーコンポーネントでDBから直接取得するため、
       // 編集直後に開いても本文が古いまま残らないようRouterキャッシュを破棄する
       router.refresh();
     } catch { /* noop */ }
-  }, [currentUserDisplayName, post.id, post.content, onModerationChange, router]);
+  }, [currentUserDisplayName, post.id, onModerationChange, router]);
 
   const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -525,7 +512,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
       {showEditModal && (
         <EditPostModal
-          initialContent={stripMmlLine(post.content)}
+          initialContent={post.content}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
         />
