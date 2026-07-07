@@ -19,6 +19,8 @@ for (let r = 2; r <= 5; r++) { walls.push(W(2, r, 3, 11), W(5, r, 1, 11)); }
 // ちのかべの回廊（右下）
 for (let r = 8; r <= 12; r++) { walls.push(W(11, r, 3, 12), W(13, r, 1, 12)); }
 walls.push(W(11, 8, 0, 12), W(12, 8, 0, 12), W(13, 8, 0, 12));
+// 縦積み（level）のショーケース：くろいしの部屋の入口上にアーチ壁（下はくぐれる）
+walls.push(normalizeWall25D(3, 6, 0, 11, 1));
 
 // 床：むらさき一面 ＋ 参道（あかい小道）＋ 部屋・回廊はくらい床
 const floor: number[][] = Array.from({ length: YROWS }, (_, r) =>
@@ -58,6 +60,9 @@ const billboards: Billboard25D[] = [
   { id: 'bb-tree4', col: 14, row: 14, tex: 23, scale: 1.3 },
   { id: 'bb-tree5', col: 3, row: 11, tex: 23, scale: 1.3 },
   { id: 'bb-tree6', col: 12, row: 4, tex: 23, scale: 1.3 },
+  // 上空に浮かぶ め（level=1,2 の縦積みショーケース）
+  { id: 'bb-eyefloat1', col: 8, row: 11, tex: 22, scale: 0.9, level: 1 },
+  { id: 'bb-eyefloat2', col: 7, row: 4, tex: 22, scale: 0.9, level: 2 },
   // 住人（歩行グラNPC。ビルボードなので常にこちらを向き、その場で足踏みする）
   { id: 'bb-shiroiko', col: 4, row: 4, tex: 26, scale: 0.9, interactive: true, message: 'ゆめのなかで あったこと、\nおきたら わすれてしまうのかな。', choices: ['わすれないよ', '……'] },
   { id: 'bb-onryo', col: 12, row: 12, tex: 27, scale: 0.95, interactive: true, message: 'カエレ……　カエレ……\nココハ　オマエノ　バショデハナイ……' },

@@ -463,9 +463,10 @@ export class Yume25DEngine {
     this.scene.background = new THREE.Color(L.skyColor);
     this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor), L.fogNear, L.fogFar);
 
-    // 当たり判定用のエッジ集合
+    // 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
     this.hEdges.clear(); this.vEdges.clear();
     for (const w of L.walls) {
+      if ((w.level ?? 0) !== 0) continue;
       if (w.dir === 0) this.hEdges.add(`${w.col},${w.row}`);
       else if (w.dir === 3) this.vEdges.add(`${w.col},${w.row}`);
     }
@@ -503,6 +504,10 @@ export class Yume25DEngine {
       this.worldObjects.push(mesh);
     };
 
+    // 天井は最上段の壁の上面に張る（多段構造でも壁を貫かない）
+    const topLevel = L.walls.reduce((m, w) => Math.max(m, w.level ?? 0), 0);
+    const ceilY = H * (topLevel + 1);
+
     for (const [texId, cells] of floorQuads) {
       const quads: { v: number[][] }[] = [];
       const ceil: { v: number[][] }[] = [];
@@ -511,23 +516,25 @@ export class Yume25DEngine {
         // 上向きの床（反時計回り = +Y 法線）
         quads.push({ v: [[c, 0, r + 1], [c + 1, 0, r + 1], [c + 1, 0, r], [c, 0, r]] });
         if (L.ceiling) {
-          ceil.push({ v: [[c, H, r], [c + 1, H, r], [c + 1, H, r + 1], [c, H, r + 1]] });
+          ceil.push({ v: [[c, ceilY, r], [c + 1, ceilY, r], [c + 1, ceilY, r + 1], [c, ceilY, r + 1]] });
         }
       }
       makeMergedMesh(texId, quads, false);
       if (L.ceiling && ceil.length) makeMergedMesh(L.ceilingTex, ceil, false);
     }
 
-    // ── 壁：薄板1枚。両面描画して裏からも見えるようにする ──
+    // ── 壁：薄板1枚。両面描画して裏からも見えるようにする。
+    //    level の段だけ上（y = level*H 〜 (level+1)*H）に積み上げる ──
     const wallQuads = new Map<number, { v: number[][] }[]>();
     for (const w of L.walls) {
       const arr = wallQuads.get(w.tex) ?? [];
+      const y0 = (w.level ?? 0) * H, y1 = y0 + H;
       if (w.dir === 0) {
         // 北辺：z=row、x∈[col, col+1]
-        arr.push({ v: [[w.col, 0, w.row], [w.col + 1, 0, w.row], [w.col + 1, H, w.row], [w.col, H, w.row]] });
+        arr.push({ v: [[w.col, y0, w.row], [w.col + 1, y0, w.row], [w.col + 1, y1, w.row], [w.col, y1, w.row]] });
       } else {
         // 西辺：x=col、z∈[row, row+1]
-        arr.push({ v: [[w.col, 0, w.row + 1], [w.col, 0, w.row], [w.col, H, w.row], [w.col, H, w.row + 1]] });
+        arr.push({ v: [[w.col, y0, w.row + 1], [w.col, y0, w.row], [w.col, y1, w.row], [w.col, y1, w.row + 1]] });
       }
       wallQuads.set(w.tex, arr);
     }
@@ -545,7 +552,8 @@ export class Yume25DEngine {
       this.ownedGeometries.push(geo);
       this.ownedMaterials.push(mat);
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(b.col + 0.5, (s * 0.9) / 2, b.row + 0.5);
+      // level 段ぶん浮かせる（足元が y = level*H に揃う）
+      mesh.position.set(b.col + 0.5, (b.level ?? 0) * H + (s * 0.9) / 2, b.row + 0.5);
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);

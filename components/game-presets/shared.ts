@@ -332,13 +332,17 @@ export interface Tex25D {
 }
 
 /** 薄板1枚の壁。セルの北辺(dir=0)または西辺(dir=3)に正規化して保存する
- *  （南辺＝1つ下のセルの北辺、東辺＝1つ右のセルの西辺）。 */
-export interface Wall25D { col: number; row: number; dir: Dir4; tex: number; }
+ *  （南辺＝1つ下のセルの北辺、東辺＝1つ右のセルの西辺）。
+ *  level は縦積みの段（0=地上。1以上は上空: y ∈ [level*wallHeight, (level+1)*wallHeight]）。
+ *  当たり判定があるのは level 0 のみで、上段の壁の下はくぐれる（アーチ・浮遊構造物用）。 */
+export interface Wall25D { col: number; row: number; dir: Dir4; tex: number; level?: number; }
 
 /** ビルボードスプライト（常にカメラへ正対する薄板）。セル中央に立つ。
- *  interactive=true のとき「話す」ボタンの対象になる（message／choices を表示）。 */
+ *  interactive=true のとき「話す」ボタンの対象になる（message／choices を表示）。
+ *  level は縦積みの段（0=地面に立つ。1以上は y=level*wallHeight を足元に浮かぶ）。 */
 export interface Billboard25D {
   id: string; col: number; row: number; tex: number; scale?: number;
+  level?: number;
   interactive?: boolean;
   message?: string;
   /** 選択肢（あれば「はなす」でメッセージの下に並ぶ。実行結果は無く、選ぶと会話が閉じるだけ）。 */
@@ -368,10 +372,13 @@ export interface Layout25D {
 }
 
 /** 壁の置き場所を北辺/西辺に正規化する。 */
-export const normalizeWall25D = (col: number, row: number, dir: Dir4, tex: number): Wall25D => {
-  if (dir === 2) return { col, row: row + 1, dir: 0, tex };  // 南辺 → 下セルの北辺
-  if (dir === 1) return { col: col + 1, row, dir: 3, tex };  // 東辺 → 右セルの西辺
-  return { col, row, dir, tex };
+export const normalizeWall25D = (col: number, row: number, dir: Dir4, tex: number, level = 0): Wall25D => {
+  const w: Wall25D =
+    dir === 2 ? { col, row: row + 1, dir: 0, tex }    // 南辺 → 下セルの北辺
+    : dir === 1 ? { col: col + 1, row, dir: 3, tex }  // 東辺 → 右セルの西辺
+    : { col, row, dir, tex };
+  if (level > 0) w.level = level;  // 0 は省略（保存JSONを小さく保つ・後方互換）
+  return w;
 };
 
 // ── シーン切り替え（ロックマン型・部屋遷移） ────────────────────────────────

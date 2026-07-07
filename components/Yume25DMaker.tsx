@@ -12,6 +12,8 @@ import {
 } from './game-presets/shared';
 
 const CELL = 28;              // 2Dエディタの1マスpx
+/** 縦積みの最大段数（level 0〜MAX_LEVEL）。マイクラ風に壁/スプライトを上へ積める。 */
+const MAX_LEVEL = 3;
 type Tool = 'floor' | 'wall' | 'sprite' | 'start' | 'talk' | 'erase';
 const TOOL_LABELS: Record<Tool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', talk: '会話設定', erase: '消す' };
 /** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */
@@ -66,6 +68,8 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
 
   const [view, setView] = useState<'2d' | '3d'>('2d');
   const [tool, setTool] = useState<Tool>('wall');
+  /** 編集対象の段（高さ）。壁/スプライトの配置・消去はこの段に対して行う。 */
+  const [level, setLevel] = useState(0);
   const [selFloor, setSelFloor] = useState(() => texList(layout, 'floor')[0]?.id ?? 0);
   const [selWall, setSelWall] = useState(() => texList(layout, 'wall')[0]?.id ?? 0);
   const [selSprite, setSelSprite] = useState(() => texList(layout, 'sprite')[0]?.id ?? 0);
@@ -312,20 +316,26 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     ctx.lineWidth = 1;
     for (let c = 0; c <= L.cols; c++) { ctx.beginPath(); ctx.moveTo(c * CELL + 0.5, 0); ctx.lineTo(c * CELL + 0.5, L.rows * CELL); ctx.stroke(); }
     for (let r = 0; r <= L.rows; r++) { ctx.beginPath(); ctx.moveTo(0, r * CELL + 0.5); ctx.lineTo(L.cols * CELL, r * CELL + 0.5); ctx.stroke(); }
-    // 壁（薄板＝辺の上の太線）
-    for (const w of L.walls) {
+    // 壁（薄板＝辺の上の太線）。編集中の段以外はゴースト表示（他の段の配置を透かして見せる）。
+    const sorted = [...L.walls].sort((a, b) => (Math.abs((a.level ?? 0) - level)) - (Math.abs((b.level ?? 0) - level))).reverse();
+    for (const w of sorted) {
+      const lv = w.level ?? 0;
+      ctx.globalAlpha = lv === level ? 1 : 0.25;
       ctx.strokeStyle = L.textures[w.tex]?.color ?? '#f0f';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = lv === level ? 4 : 3;
       ctx.beginPath();
       if (w.dir === 0) { ctx.moveTo(w.col * CELL, w.row * CELL); ctx.lineTo((w.col + 1) * CELL, w.row * CELL); }
       else { ctx.moveTo(w.col * CELL, w.row * CELL); ctx.lineTo(w.col * CELL, (w.row + 1) * CELL); }
       ctx.stroke();
     }
-    // ビルボード
+    ctx.globalAlpha = 1;
+    // ビルボード。上空（level>0）のものには右上に段数バッジを添える。
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const b of L.billboards) {
       const t = L.textures[b.tex];
+      const lv = b.level ?? 0;
       const cx = (b.col + 0.5) * CELL, cy = (b.row + 0.5) * CELL;
+      ctx.globalAlpha = lv === level ? 1 : 0.3;
       if (t?.emoji) { ctx.font = '18px serif'; ctx.fillText(t.emoji, cx, cy + 1); }
       else {
         ctx.fillStyle = t?.color ?? '#f0f';
@@ -333,7 +343,13 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
         ctx.moveTo(cx, cy - 9); ctx.lineTo(cx + 9, cy); ctx.lineTo(cx, cy + 9); ctx.lineTo(cx - 9, cy);
         ctx.closePath(); ctx.fill();
       }
+      if (lv > 0) {
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillStyle = '#ffd75e';
+        ctx.fillText(String(lv + 1), cx + 10, cy - 9);
+      }
     }
+    ctx.globalAlpha = 1;
     // スタート地点（向き付き三角）
     {
       const { col, row, dir } = L.start;
@@ -347,7 +363,7 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       ctx.closePath(); ctx.fill();
       ctx.restore();
     }
-  }, [layout, is3d]);
+  }, [layout, is3d, level]);
 
   // ── 2Dエディタ操作 ───────────────────────────────────────────────────────
   const applyEdit = useCallback((sx: number, sy: number, isDrag: boolean) => {
@@ -369,9 +385,9 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       const fx = sx / CELL - c, fy = sy / CELL - r;
       const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
       dists.sort((a, b) => a[0] - b[0]);
-      const w = normalizeWall25D(c, r, dists[0][1], selWall);
+      const w = normalizeWall25D(c, r, dists[0][1], selWall, level);
       onLayoutChange(l => {
-        const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir);
+        const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir && (v.level ?? 0) === level);
         if (hit && hit.tex === w.tex) return { ...l, walls: l.walls.filter(v => v !== hit) };  // 同じ壁 → 取り除く
         if (hit) return { ...l, walls: l.walls.map(v => v === hit ? w : v) };                   // 別テクスチャ → 貼り替え
         return { ...l, walls: [...l.walls, w] };
@@ -380,10 +396,10 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     }
     if (tool === 'sprite') {
       onLayoutChange(l => {
-        const hit = l.billboards.find(b => b.col === c && b.row === r);
+        const hit = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === level);
         if (hit && hit.tex === selSprite) return { ...l, billboards: l.billboards.filter(b => b !== hit) };
         if (hit) return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, tex: selSprite } : b) };
-        return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1 }] };
+        return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1, ...(level > 0 ? { level } : {}) }] };
       });
       return;
     }
@@ -396,13 +412,16 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       return;
     }
     if (tool === 'talk') {
-      const hit = layoutRef.current.billboards.find(b => b.col === c && b.row === r);
+      // いま編集中の段を優先し、無ければ同セルの他の段から拾う
+      const bs = layoutRef.current.billboards;
+      const hit = bs.find(b => b.col === c && b.row === r && (b.level ?? 0) === level)
+        ?? bs.find(b => b.col === c && b.row === r);
       setTalkTargetId(hit ? hit.id : null);
       return;
     }
-    // erase: ビルボード → 壁（辺の近く） → 床 の順に消す
+    // erase: 編集中の段の ビルボード → 壁（辺の近く） の順に消す。床は地上段(0)のみ。
     onLayoutChange(l => {
-      const bb = l.billboards.find(b => b.col === c && b.row === r);
+      const bb = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === level);
       if (bb) return { ...l, billboards: l.billboards.filter(b => b !== bb) };
       if (!isDrag) {
         const fx = sx / CELL - c, fy = sy / CELL - r;
@@ -410,17 +429,17 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
         dists.sort((a, b) => a[0] - b[0]);
         if (dists[0][0] < 0.3) {
           const w = normalizeWall25D(c, r, dists[0][1], 0);
-          const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir);
+          const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir && (v.level ?? 0) === level);
           if (hit) return { ...l, walls: l.walls.filter(v => v !== hit) };
         }
       }
-      if ((l.floor[r]?.[c] ?? 0) !== 0) {
+      if (level === 0 && (l.floor[r]?.[c] ?? 0) !== 0) {
         const floor = l.floor.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? 0 : v) : row);
         return { ...l, floor };
       }
       return l;
     });
-  }, [tool, selFloor, selWall, selSprite, onLayoutChange]);
+  }, [tool, selFloor, selWall, selSprite, level, onLayoutChange]);
 
   const pointerToCanvas = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const cv = e.currentTarget;
@@ -497,6 +516,21 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
               設定
             </button>
           </div>
+
+          {/* 段（高さ）セレクタ：壁/スプライトはこの段に配置される。マイクラ風の縦積み。 */}
+          {view === '2d' && (tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-gray-400 px-0.5">高さ</span>
+              {Array.from({ length: MAX_LEVEL + 1 }, (_, lv) => (
+                <button key={lv} onClick={() => setLevel(lv)}
+                  title={lv === 0 ? '地上（当たり判定あり）' : `${lv + 1}段目（上空・下をくぐれる）`}
+                  className={`w-7 h-7 rounded border-2 text-[11px] font-bold ${level === lv ? 'border-yellow-400 bg-violet-700 text-white' : 'border-gray-700 bg-gray-800 text-gray-400'}`}>
+                  {lv + 1}
+                </button>
+              ))}
+              <span className="text-[9px] text-gray-500">段目に{tool === 'erase' ? 'あるものを消す' : '積む'}{level > 0 ? '（上空・すり抜け）' : ''}</span>
+            </div>
+          )}
 
           {/* パレット */}
           {view === '2d' && paletteKind && (
