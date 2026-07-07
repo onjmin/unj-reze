@@ -30,23 +30,37 @@ const floor: number[][] = Array.from({ length: YROWS }, (_, r) =>
   })
 );
 
+// RPGen の歩行グラ素材（walk: 参照でシート分割され、足踏みアニメする）。
+const SANIM = 'https://rpgen-search.pages.dev/data/images/sAnims';
+const SHIROIKO_URL = `${SANIM}/jkAwdz.png`;   // 白い少女
+const ONRYO_URL = `${SANIM}/qoc3wW.png`;      // 怨霊
+const AKAIKO_URL = `${SANIM}/jkswZA.png`;     // 赤い少女（プレイヤー）
+
 const billboards: Billboard25D[] = [
+  // あかい小道の参道：とりいのトンネル
   { id: 'bb-torii1', col: 7, row: 3, tex: 20, scale: 1.4 },
   { id: 'bb-torii2', col: 8, row: 3, tex: 20, scale: 1.4 },
-  { id: 'bb-moai', col: 7, row: 7, tex: 24, scale: 1.2 },
-  { id: 'bb-door', col: 8, row: 1, tex: 25, scale: 1 },
+  { id: 'bb-torii3', col: 7, row: 6, tex: 20, scale: 1.4 },
+  { id: 'bb-torii4', col: 8, row: 6, tex: 20, scale: 1.4 },
+  { id: 'bb-torii5', col: 7, row: 9, tex: 20, scale: 1.4 },
+  { id: 'bb-torii6', col: 8, row: 9, tex: 20, scale: 1.4 },
+  { id: 'bb-moai', col: 7, row: 7, tex: 24, scale: 1.2, interactive: true, message: 'せきぞうは だまって こちらをみている。' },
+  { id: 'bb-door', col: 8, row: 1, tex: 25, scale: 1, interactive: true, message: 'どこかへつづく ドア。\nあけてみる？', choices: ['あける', 'やめておく'] },
   { id: 'bb-lan1', col: 6, row: 5, tex: 21, scale: 0.8 },
   { id: 'bb-lan2', col: 9, row: 5, tex: 21, scale: 0.8 },
   { id: 'bb-lan3', col: 6, row: 10, tex: 21, scale: 0.8 },
   { id: 'bb-lan4', col: 9, row: 10, tex: 21, scale: 0.8 },
-  { id: 'bb-eye1', col: 3, row: 3, tex: 22, scale: 0.9 },
-  { id: 'bb-eye2', col: 12, row: 10, tex: 22, scale: 0.9 },
+  { id: 'bb-eye1', col: 3, row: 3, tex: 22, scale: 0.9, interactive: true, message: 'めが あなたを みつめている。\nまばたきを しない。' },
+  { id: 'bb-eye2', col: 12, row: 10, tex: 22, scale: 0.9, interactive: true, message: 'めが あなたを みつめている。\nまばたきを しない。' },
   { id: 'bb-tree1', col: 1, row: 1, tex: 23, scale: 1.3 },
   { id: 'bb-tree2', col: 14, row: 1, tex: 23, scale: 1.3 },
   { id: 'bb-tree3', col: 1, row: 14, tex: 23, scale: 1.3 },
   { id: 'bb-tree4', col: 14, row: 14, tex: 23, scale: 1.3 },
   { id: 'bb-tree5', col: 3, row: 11, tex: 23, scale: 1.3 },
   { id: 'bb-tree6', col: 12, row: 4, tex: 23, scale: 1.3 },
+  // 住人（歩行グラNPC。ビルボードなので常にこちらを向き、その場で足踏みする）
+  { id: 'bb-shiroiko', col: 4, row: 4, tex: 26, scale: 0.9, interactive: true, message: 'ゆめのなかで あったこと、\nおきたら わすれてしまうのかな。', choices: ['わすれないよ', '……'] },
+  { id: 'bb-onryo', col: 12, row: 12, tex: 27, scale: 0.95, interactive: true, message: 'カエレ……　カエレ……\nココハ　オマエノ　バショデハナイ……' },
 ];
 
 const layout25d: Layout25D = {
@@ -70,6 +84,8 @@ const layout25d: Layout25D = {
     23: { id: 23, name: 'き', kind: 'sprite', color: '#2c6b3f', emoji: '🌲' },
     24: { id: 24, name: 'せきぞう', kind: 'sprite', color: '#8a8a99', emoji: '🗿' },
     25: { id: 25, name: 'ドア', kind: 'sprite', color: '#7a5230', emoji: '🚪' },
+    26: { id: 26, name: 'しろいこ', kind: 'sprite', color: '#e8e8f4', emoji: '👧', imageRef: `walk:auto:u:${SHIROIKO_URL}`, imageUrl: SHIROIKO_URL },
+    27: { id: 27, name: 'おんりょう', kind: 'sprite', color: '#4f6fd8', emoji: '👻', imageRef: `walk:auto:u:${ONRYO_URL}`, imageUrl: ONRYO_URL },
   },
   wallHeight: 1,
   skyColor: '#0b0714',
@@ -90,6 +106,8 @@ export const yume: PresetData = {
   player: {
     emoji: '🌙', color: '#b9a6e8', speed: 2, jumpPower: 0, w: 24, h: 24,
     start: { x: TILE_SIZE * 8, y: TILE_SIZE * 13 },
+    // RPGen「赤い少女」歩行グラ。三人称視点で向き・足踏みがアニメする（絵文字はロード失敗時の予備）。
+    spriteRef: `walk:auto:u:${AKAIKO_URL}`, spriteUrl: AKAIKO_URL,
   },
   tiles: { 0: { name: 'なし', color: '#000000', passable: true } },
   map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),

@@ -3,6 +3,8 @@
 // setLayout() でいつでも丸ごと再構築できる。使い終わったら必ず dispose() を呼ぶこと。
 import * as THREE from 'three';
 import type { Layout25D, Tex25D, Dir4, Billboard25D } from '@/components/game-presets/shared';
+import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
+import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
 
 /** 内部レンダリング解像度。CSS 側で pixelated 拡大してドット感を出す。 */
 export const RENDER_W = 320;
@@ -18,6 +20,10 @@ const EPS = 1e-3;
 // 短くポンと跳ねる程度のジャンプ（頭上の低い夢空間を想定）。
 const JUMP_VELOCITY = 3.2;
 const GRAVITY = 16;
+
+/** 歩行グラ（walk: 参照）の足踏み速度。NPCビルボードは常時ゆっくりマーチ、プレイヤーは歩行時のみ。 */
+const BILLBOARD_ANIM_FPS = 4;
+const PLAYER_ANIM_FPS = 7;
 
 const POV_MIN_DIST = 0.4;
 const POV_MAX_DIST = 3.5;
@@ -36,11 +42,38 @@ export interface Input25D {
   dash: boolean;
 }
 
-export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; }
+export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; spriteRef?: string; }
 export type PovMode = 'first' | 'third';
 
-/** テクスチャ実体。fallback キャンバスに画像を後から重ね描きする（Texture の差し替え不要）。 */
-interface TexEntry { texture: THREE.CanvasTexture; canvas: HTMLCanvasElement; }
+/** 歩行グラシートの足踏みアニメ状態。lastFrame/lastKey が変わったコマだけ再描画する。 */
+interface WalkAnimState { img: HTMLImageElement; std: WalkStandard; lastFrame: number; }
+
+/** テクスチャ実体。fallback キャンバスに画像を後から重ね描きする（Texture の差し替え不要）。
+ *  url は「いま canvas に反映している imageUrl」。差し替え検知に使う。 */
+interface TexEntry {
+  texture: THREE.CanvasTexture;
+  canvas: HTMLCanvasElement;
+  url?: string;
+  anim?: WalkAnimState;
+}
+
+/** walk: 参照のうち、この2.5Dエンジンでシート分割アニメできる形式か
+ *  （SMCアトラス系のクロップ/JSON形式は対象外＝静止画として扱う）。 */
+const isAnimatableWalk = (walk: WalkRef | null): walk is WalkRef =>
+  !!walk && walk.stdId !== 'smc_json' && !walk.crop;
+
+/** シートの1セルを canvas へ contain・下端合わせで描く（キャラの足元が揃う）。 */
+const drawCellContain = (
+  cv: HTMLCanvasElement, img: HTMLImageElement,
+  sx: number, sy: number, sw: number, sh: number,
+) => {
+  const ctx = cv.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const sc = Math.min(cv.width / sw, cv.height / sh);
+  const w = sw * sc, h = sh * sc;
+  ctx.drawImage(img, sx, sy, sw, sh, (cv.width - w) / 2, cv.height - h, w, h);
+};
 
 const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
   const ctx = cv.getContext('2d')!;
@@ -141,7 +174,6 @@ export class Yume25DEngine {
   private running = false;
   private lastT = 0;
   private disposed = false;
-  private buildGen = 0;
 
   // ワールド状態
   private x = 0; private z = 0; private yaw = 0; private pitch = 0;
@@ -164,6 +196,10 @@ export class Yume25DEngine {
   private playerMesh: THREE.Mesh;
   private playerGeo: THREE.PlaneGeometry;
   private playerMat: THREE.MeshBasicMaterial;
+  // 歩行グラプレイヤーのアニメ状態。lastKey は「向き:フレーム」で再描画の要否を判定する。
+  private playerAnim: { img: HTMLImageElement; std: WalkStandard; lastKey: string } | null = null;
+  private playerDir: WayKey = 'w';
+  private playerMoving = false;
 
   constructor(canvas: HTMLCanvasElement, layout: Layout25D, playerAppearance?: PlayerAppearance) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
@@ -180,12 +216,12 @@ export class Yume25DEngine {
     // プレイヤー自身のビルボード（三人称視点のときだけ表示）。
     this.playerCanvas = document.createElement('canvas');
     this.playerCanvas.width = 64; this.playerCanvas.height = 64;
-    drawPlayerCanvas(this.playerCanvas, this.playerAppearance, () => { this.playerTexture.needsUpdate = true; });
     this.playerTexture = new THREE.CanvasTexture(this.playerCanvas);
     this.playerTexture.magFilter = THREE.NearestFilter;
     this.playerTexture.minFilter = THREE.NearestFilter;
     this.playerTexture.generateMipmaps = false;
     this.playerTexture.colorSpace = THREE.SRGBColorSpace;
+    this.applyPlayerAppearance();
     this.playerGeo = new THREE.PlaneGeometry(0.8, 0.8);
     this.playerMat = new THREE.MeshBasicMaterial({ map: this.playerTexture, alphaTest: 0.5, side: THREE.DoubleSide });
     this.playerMesh = new THREE.Mesh(this.playerGeo, this.playerMat);
@@ -217,10 +253,41 @@ export class Yume25DEngine {
     this.clampToBounds();
   }
 
-  /** プレイヤー自身の見た目（絵文字/色/spriteUrl）を更新。ジオメトリは使い回し、キャンバスだけ再描画する。 */
+  /** プレイヤー自身の見た目（絵文字/色/spriteUrl/spriteRef）を更新。ジオメトリは使い回し、キャンバスだけ再描画する。
+   *  呼び出し側は毎レンダーで新しいオブジェクトを渡してくるため、内容が同じなら何もしない
+   *  （歩行グラの再ロード＆アニメ状態リセットを防ぐ）。 */
   setPlayerAppearance(appearance: PlayerAppearance) {
+    const p = this.playerAppearance;
+    if (p.emoji === appearance.emoji && p.color === appearance.color
+      && p.spriteUrl === appearance.spriteUrl && p.spriteRef === appearance.spriteRef) return;
     this.playerAppearance = appearance;
-    drawPlayerCanvas(this.playerCanvas, appearance, () => { this.playerTexture.needsUpdate = true; });
+    this.applyPlayerAppearance();
+  }
+
+  /** 見た目をキャンバスへ反映。spriteRef が歩行グラ（walk:）ならシートをロードして
+   *  歩行アニメ対象にし、以後の描画はレンダリングループの updatePlayerAnim() が行う。 */
+  private applyPlayerAppearance() {
+    const a = this.playerAppearance;
+    this.playerAnim = null;
+    const walk = a.spriteRef ? parseWalkRef(a.spriteRef) : null;
+    const sheetUrl = isAnimatableWalk(walk)
+      ? (a.spriteUrl ?? (walk.source.kind === 'url' ? walk.source.url : undefined))
+      : undefined;
+    if (walk && sheetUrl) {
+      // ロード完了までは絵文字/色で暫定表示
+      drawPlayerCanvas(this.playerCanvas, { emoji: a.emoji, color: a.color }, () => { this.playerTexture.needsUpdate = true; });
+      this.playerTexture.needsUpdate = true;
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (this.disposed || this.playerAppearance !== a) return;
+        const std = walk.stdId === 'auto' ? detectStandard(img.naturalWidth, img.naturalHeight) : standardById(walk.stdId);
+        this.playerAnim = { img, std, lastKey: '' };  // 次フレームの updatePlayerAnim() が描画する
+      };
+      img.src = sheetUrl;
+      return;
+    }
+    drawPlayerCanvas(this.playerCanvas, a, () => { this.playerTexture.needsUpdate = true; });
     this.playerTexture.needsUpdate = true;
   }
 
@@ -263,6 +330,8 @@ export class Yume25DEngine {
       const dt = Math.min(0.05, (t - this.lastT) / 1000);
       this.lastT = t;
       this.step(dt);
+      this.updateTexAnimations(t / 1000);
+      this.updatePlayerAnim(t / 1000);
       this.renderer.render(this.scene, this.camera);
       this.raf = requestAnimationFrame(loop);
     };
@@ -305,47 +374,94 @@ export class Yume25DEngine {
   }
 
   private getTex(id: number): THREE.CanvasTexture {
-    const cached = this.texEntries.get(id);
     const def = this.layout.textures[id];
-    if (cached) {
-      // 定義が変わっている可能性があるので描き直すだけ（Texture は同一実体を維持）
-      if (def && !def.imageUrl) { texCanvasDraw(cached.canvas, def); cached.texture.needsUpdate = true; }
-      return cached.texture;
-    }
-    const cv = document.createElement('canvas');
-    cv.width = 64; cv.height = 64;
     const fallback: Tex25D = def ?? { id, name: '?', kind: 'wall', color: '#ff00ff' };
-    texCanvasDraw(cv, fallback);
-    const texture = new THREE.CanvasTexture(cv);
-    // ドット絵前提：常に最近傍補間・ミップマップなし
-    texture.magFilter = THREE.NearestFilter;
-    texture.minFilter = THREE.NearestFilter;
-    texture.generateMipmaps = false;
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const entry: TexEntry = { texture, canvas: cv };
-    this.texEntries.set(id, entry);
-    if (def?.imageUrl) {
-      const gen = this.buildGen;
+    let entry = this.texEntries.get(id);
+    if (!entry) {
+      const cv = document.createElement('canvas');
+      cv.width = 64; cv.height = 64;
+      texCanvasDraw(cv, fallback);
+      const texture = new THREE.CanvasTexture(cv);
+      // ドット絵前提：常に最近傍補間・ミップマップなし
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      entry = { texture, canvas: cv };
+      this.texEntries.set(id, entry);
+    }
+    if (!def?.imageUrl) {
+      // 画像なし（または消去された）→ 色/絵文字を描き直す（Texture は同一実体を維持）
+      entry.url = undefined;
+      entry.anim = undefined;
+      texCanvasDraw(entry.canvas, fallback);
+      entry.texture.needsUpdate = true;
+      return entry.texture;
+    }
+    if (entry.url !== def.imageUrl) {
+      // 画像が新規指定/差し替えされた → ロードして描く。歩行グラ（walk:）ならアニメ登録。
+      const url = def.imageUrl;
+      entry.url = url;
+      entry.anim = undefined;
+      const walk = def.imageRef ? parseWalkRef(def.imageRef) : null;
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        if (this.disposed || gen !== this.buildGen) return;
-        const ctx = cv.getContext('2d')!;
-        ctx.imageSmoothingEnabled = false;
-        ctx.clearRect(0, 0, 64, 64);
-        // アスペクト比を保って contain 描画（下端合わせ：立て看板やキャラの足元が揃う）
-        const sc = Math.min(64 / img.width, 64 / img.height);
-        const w = img.width * sc, h = img.height * sc;
-        ctx.drawImage(img, (64 - w) / 2, 64 - h, w, h);
-        texture.needsUpdate = true;
+        const e = this.texEntries.get(id);
+        if (this.disposed || !e || e.url !== url) return;  // ロード中に差し替え/消去された
+        if (isAnimatableWalk(walk)) {
+          const std = walk.stdId === 'auto' ? detectStandard(img.naturalWidth, img.naturalHeight) : standardById(walk.stdId);
+          e.anim = { img, std, lastFrame: -1 };
+          // 停止中（2D編集ビュー）でも見えるよう正面1コマ目を即描画。以後はループが足踏みさせる。
+          const rect = cellRect(std, img.naturalWidth, img.naturalHeight, 's', 0);
+          drawCellContain(e.canvas, img, rect.sx, rect.sy, rect.sw, rect.sh);
+        } else {
+          // アスペクト比を保って contain 描画（下端合わせ：立て看板やキャラの足元が揃う）
+          drawCellContain(e.canvas, img, 0, 0, img.naturalWidth, img.naturalHeight);
+        }
+        e.texture.needsUpdate = true;
       };
-      img.src = def.imageUrl;
+      img.onerror = () => {
+        const e = this.texEntries.get(id);
+        if (this.disposed || !e || e.url !== url) return;
+        texCanvasDraw(e.canvas, fallback);
+        e.texture.needsUpdate = true;
+      };
+      img.src = url;
     }
-    return texture;
+    return entry.texture;
+  }
+
+  /** walk: 参照のテクスチャ（NPCビルボード等）を常時ゆっくり足踏みさせる。
+   *  ビルボードはカメラへ正対するので正面（s）の行を使う。変化したコマだけ再描画。 */
+  private updateTexAnimations(timeSec: number) {
+    for (const entry of this.texEntries.values()) {
+      const a = entry.anim;
+      if (!a) continue;
+      const frame = walkFrameIndex(a.std, Math.floor(timeSec * BILLBOARD_ANIM_FPS));
+      if (frame === a.lastFrame) continue;
+      a.lastFrame = frame;
+      const rect = cellRect(a.std, a.img.naturalWidth, a.img.naturalHeight, 's', frame);
+      drawCellContain(entry.canvas, a.img, rect.sx, rect.sy, rect.sw, rect.sh);
+      entry.texture.needsUpdate = true;
+    }
+  }
+
+  /** 歩行グラプレイヤーを向き・足踏みに応じて描き替える。停止中は待機ポーズ。 */
+  private updatePlayerAnim(timeSec: number) {
+    const a = this.playerAnim;
+    if (!a) return;
+    const idleFrame = a.std.frames === 3 ? 1 : 0;  // 3フレーム規格は中央が待機
+    const frame = this.playerMoving ? walkFrameIndex(a.std, Math.floor(timeSec * PLAYER_ANIM_FPS)) : idleFrame;
+    const key = `${this.playerDir}:${frame}`;
+    if (key === a.lastKey) return;
+    a.lastKey = key;
+    const rect = cellRect(a.std, a.img.naturalWidth, a.img.naturalHeight, this.playerDir, frame);
+    drawCellContain(this.playerCanvas, a.img, rect.sx, rect.sy, rect.sw, rect.sh);
+    this.playerTexture.needsUpdate = true;
   }
 
   private buildScene() {
-    this.buildGen++;
     this.clearWorld();
     const L = this.layout;
     const H = L.wallHeight;
@@ -526,6 +642,14 @@ export class Yume25DEngine {
       this.moveZ(fz * ms + rz * ss);
       this.clampToBounds();
     }
+    // 歩行アニメ用：移動状態と「カメラから見た向き」を更新。カメラはプレイヤーの後方に
+    // 追従するので、前進中は背中(w)・後退は正面(s)・ストレイフは横向きが見える。
+    this.playerMoving = move !== 0 || strafe !== 0;
+    if (move > 0) this.playerDir = 'w';
+    else if (move < 0) this.playerDir = 's';
+    else if (strafe > 0) this.playerDir = 'd';
+    else if (strafe < 0) this.playerDir = 'a';
+
     if (this.demo && move !== 0 && this.demoTurnFrames <= 0) {
       const moved = Math.hypot(this.x - px, this.z - pz);
       const expected = MOVE_SPEED * dt;

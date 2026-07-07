@@ -6624,7 +6624,7 @@ const lose = (msg: string) => {
                 onLayoutChange={updater => setGameData(prev => prev.layout25d ? { ...prev, layout25d: updater(prev.layout25d) } : prev)}
                 isPlaying={isPlaying}
                 demo={introOpen}
-                playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color, spriteUrl: gameData.player.spriteUrl }}
+                playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color, spriteUrl: gameData.player.spriteUrl, spriteRef: gameData.player.spriteRef }}
                 onPickImage={(target) => setPicker({ mode: 'image', target })}
                 virtualKeys={touchRef.current}
               />
