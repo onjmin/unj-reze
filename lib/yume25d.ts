@@ -36,7 +36,7 @@ export interface Input25D {
   dash: boolean;
 }
 
-export interface PlayerAppearance { emoji?: string; color: string; }
+export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; }
 export type PovMode = 'first' | 'third';
 
 /** テクスチャ実体。fallback キャンバスに画像を後から重ね描きする（Texture の差し替え不要）。 */
@@ -70,10 +70,52 @@ const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
   ctx.strokeRect(0.5, 0.5, 63, 63);
 };
 
-/** プレイヤー自身のビルボード用テクスチャ（三人称視点でのみ表示）。 */
-const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance) => {
+/** プレイヤー自身のビルボード用テクスチャ（三人称視点でのみ表示）。
+ *  spriteUrl がある場合は歩行グラ画像の1フレーム目を描画する（非同期）。
+ *  ロード完了後に onUpdate() を呼び出してテクスチャを更新すること。 */
+const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?: () => void): void => {
   const ctx = cv.getContext('2d')!;
   ctx.clearRect(0, 0, 64, 64);
+  if (a.spriteUrl) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      ctx.clearRect(0, 0, 64, 64);
+      // 歩行グラのフレーム1枚目（左上）を64x64に収めて描画
+      const frameW = img.naturalWidth >= img.naturalHeight * 2 ? Math.floor(img.naturalWidth / 3) : img.naturalWidth;
+      const frameH = img.naturalHeight >= img.naturalWidth ? Math.floor(img.naturalHeight / 4) : img.naturalHeight;
+      ctx.drawImage(img, 0, 0, frameW, frameH, 0, 0, 64, 64);
+      onUpdate?.();
+    };
+    img.onerror = () => {
+      // フォールバック: 絵文字か図形
+      ctx.clearRect(0, 0, 64, 64);
+      if (a.emoji) {
+        ctx.font = '52px serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(a.emoji, 32, 36);
+      } else {
+        ctx.fillStyle = a.color;
+        ctx.beginPath();
+        ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();
+        ctx.fillRect(20, 34, 24, 24);
+      }
+      onUpdate?.();
+    };
+    img.src = a.spriteUrl;
+    // ロード待ちの間は絵文字/色で暫定表示
+    if (a.emoji) {
+      ctx.font = '52px serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(a.emoji, 32, 36);
+    } else {
+      ctx.fillStyle = a.color;
+      ctx.beginPath();
+      ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(20, 34, 24, 24);
+    }
+    return;
+  }
   if (a.emoji) {
     ctx.font = '52px serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -138,7 +180,7 @@ export class Yume25DEngine {
     // プレイヤー自身のビルボード（三人称視点のときだけ表示）。
     this.playerCanvas = document.createElement('canvas');
     this.playerCanvas.width = 64; this.playerCanvas.height = 64;
-    drawPlayerCanvas(this.playerCanvas, this.playerAppearance);
+    drawPlayerCanvas(this.playerCanvas, this.playerAppearance, () => { this.playerTexture.needsUpdate = true; });
     this.playerTexture = new THREE.CanvasTexture(this.playerCanvas);
     this.playerTexture.magFilter = THREE.NearestFilter;
     this.playerTexture.minFilter = THREE.NearestFilter;
@@ -175,10 +217,10 @@ export class Yume25DEngine {
     this.clampToBounds();
   }
 
-  /** プレイヤー自身の見た目（絵文字/色）を更新。ジオメトリは使い回し、キャンバスだけ再描画する。 */
+  /** プレイヤー自身の見た目（絵文字/色/spriteUrl）を更新。ジオメトリは使い回し、キャンバスだけ再描画する。 */
   setPlayerAppearance(appearance: PlayerAppearance) {
     this.playerAppearance = appearance;
-    drawPlayerCanvas(this.playerCanvas, appearance);
+    drawPlayerCanvas(this.playerCanvas, appearance, () => { this.playerTexture.needsUpdate = true; });
     this.playerTexture.needsUpdate = true;
   }
 

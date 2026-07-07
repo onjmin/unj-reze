@@ -189,8 +189,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const handleCreateReplyFromComposer = async () => {
     const targetParent = replyTo ?? post;
     const parts: string[] = [];
-    if (replyMml) parts.push(`#mml ${replyMml}`);
     if (replyText.trim()) parts.push(replyText.trim());
+    if (replyMml) parts.push(`#mml ${replyMml}`);
     const content = parts.join('\n');
 
     const tempId = `temp-${Date.now()}`;

@@ -5,13 +5,20 @@ import { ArrowLeft, Share2, Image, Pen, Mic, MoreHorizontal, ThumbsUp } from 'lu
 import Link from 'next/link';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
+import EmbedPart from './EmbedPart';
+import MmlPlayer from './MmlPlayer';
+import ChordPlayer from './ChordPlayer';
+import { extractFirstEmbed } from '@/lib/embed';
+import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
+import { extractChordsFromContent } from '@/lib/chord';
 
 interface BbsThreadViewProps {
   post: Post;
 }
 
 function parseContent(text: string, replyMap: Map<string, number>) {
-  const lines = text.split('\n');
+  const displayText = getDisplayContent(text);
+  const lines = displayText.split('\n');
   return lines.map((line, li) => {
     const parts = line.split(/(>>[\d]+)/g);
     return (
@@ -184,6 +191,16 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
               <div className="pl-6 text-[13px] text-gray-200 leading-relaxed whitespace-pre-wrap break-words">
                 {parseContent(p.content, indexMap)}
               </div>
+
+              {/* Embeds (MML / Chord / URL埋め込み) */}
+              {(() => {
+                const mmlCode = extractMmlFromContent(p.content);
+                if (mmlCode) return <div className="pl-6 mt-2" onClick={e => e.stopPropagation()}><MmlPlayer mml={mmlCode} /></div>;
+                const chordRes = extractChordsFromContent(p.content);
+                if (chordRes) return <div className="pl-6 mt-2" onClick={e => e.stopPropagation()}><ChordPlayer chords={chordRes.chords} /></div>;
+                const embed = extractFirstEmbed(p.content);
+                return embed ? <div className="pl-6 mt-2" onClick={e => e.stopPropagation()}><EmbedPart embed={embed} /></div> : null;
+              })()}
 
               {/* Image */}
               {p.hasImage && p.imageSrc && (
