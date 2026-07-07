@@ -254,21 +254,34 @@ export default function App() {
 
   const handleAddReply = async (postId: string, replyText: string) => {
     if (!replyText.trim()) return;
+    const tempId = `temp-${Date.now()}`;
+    const optimisticReply: Post = {
+      id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content: replyText,
+      likes: 0, dislikes: 0, liked: false, disliked: false,
+      repliesCount: 0, reposts: 0, reposted: false,
+      avatarColor: "from-blue-500 to-indigo-600",
+      heartsTotal: 0, replies: [],
+      threadId: postId, parentPostId: postId,
+    };
+    setPosts(prev => {
+      const next = prev.map(p => p.id === postId
+        ? { ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, optimisticReply] }
+        : p);
+      postsRef.current = next;
+      return next;
+    });
     const reply = await api.posts.replies.create(postId, {
       displayName: userId,
       content: replyText,
       parentPostId: postId,
     });
-    setPosts(posts.map(p => {
-      if (p.id === postId) {
-        return {
-          ...p,
-          repliesCount: p.repliesCount + 1,
-          replies: [...p.replies, reply],
-        };
-      }
-      return p;
-    }));
+    setPosts(prev => {
+      const next = prev.map(p => p.id === postId
+        ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
+        : p);
+      postsRef.current = next;
+      return next;
+    });
   };
 
   const handleNavigate = (id: string) => {
@@ -279,6 +292,32 @@ export default function App() {
 
   const handleCreatePost = async () => {
     if (!inputText.trim() && !attachedImage && !attachedMml) return;
+    // #MML作曲行は1行目、自由コメントはその下の行として保存する
+    // （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
+    const parts: string[] = [];
+    if (attachedMml) parts.push(`#mml ${attachedMml}`);
+    if (inputText.trim()) parts.push(inputText.trim());
+    const content = parts.join('\n');
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticPost: Post = {
+      id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content,
+      likes: 0, dislikes: 0, liked: false, disliked: false,
+      repliesCount: 0, reposts: 0, reposted: false,
+      avatarColor: "from-blue-500 to-indigo-600",
+      heartsTotal: 0, replies: [],
+      threadId: tempId, parentPostId: undefined,
+      hasImage: !!attachedImage,
+      imageSrc: attachedImage ?? undefined,
+      originType,
+    };
+    setPosts(prev => { const next = [optimisticPost, ...prev]; postsRef.current = next; return next; });
+    setInputText('');
+    setAttachedImage(null);
+    setAttachedMml(null);
+    setGameDraft(null);
+    setOriginType(undefined);
+
     let imageSrc: string | undefined;
     if (attachedImage) {
       const result = await api.upload.image({ image: attachedImage });
@@ -296,12 +335,6 @@ export default function App() {
         gameId = savedGame.id;
       }
     }
-    // #MML作曲行は1行目、自由コメントはその下の行として保存する
-    // （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
-    const parts: string[] = [];
-    if (attachedMml) parts.push(`#mml ${attachedMml}`);
-    if (inputText.trim()) parts.push(inputText.trim());
-    const content = parts.join('\n');
     const post = await api.posts.create({
       displayName: userId,
       content,
@@ -311,13 +344,11 @@ export default function App() {
       gameId,
       originType,
     });
-    setPosts([post, ...posts]);
-    postsRef.current = [post, ...posts];
-    setInputText('');
-    setAttachedImage(null);
-    setAttachedMml(null);
-    setGameDraft(null);
-    setOriginType(undefined);
+    setPosts(prev => {
+      const next = prev.map(p => p.id === tempId ? post : p);
+      postsRef.current = next;
+      return next;
+    });
   };
 
   const handleOpenCollab = useCallback((post: Post) => {
@@ -498,18 +529,28 @@ export default function App() {
               onToggleBbsMode={() => setBbsMode(bbsMode === '掲示板モード' ? 'SNSモード' : '掲示板モード')}
             />
 
-            {currentNav === 'home' && (
-              <TopTabs
-                activeTab={topTab}
-                setActiveTab={(tab) => {
-                  setTopTab(tab);
-                  if (tab !== 'game') setActiveScreen(null);
-                  if (tab === 'ranking') {
-                    setRankCategory('イイ');
-                  }
-                }}
-              />
-            )}
+            {currentNav === 'home' && (() => {
+              const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+              const recentPosts = posts.filter(p => new Date(p.createdAt).getTime() >= dayAgo);
+              const latestThreadCount = recentPosts.length;
+              const latestReplyCount = recentPosts.reduce((sum, p) => sum + p.repliesCount, 0);
+              const mediaCount = posts.filter(p => p.hasImage).length;
+              return (
+                <TopTabs
+                  activeTab={topTab}
+                  setActiveTab={(tab) => {
+                    setTopTab(tab);
+                    if (tab !== 'game') setActiveScreen(null);
+                    if (tab === 'ranking') {
+                      setRankCategory('イイ');
+                    }
+                  }}
+                  latestThreadCount={latestThreadCount}
+                  latestReplyCount={latestReplyCount}
+                  mediaCount={mediaCount}
+                />
+              );
+            })()}
 
             <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-20'}`}>
               {currentNav === 'home' && topTab === 'game' && (

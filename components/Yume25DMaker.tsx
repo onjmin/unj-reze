@@ -36,6 +36,7 @@ interface Yume25DMakerProps {
   demo?: boolean;
   /** 三人称視点で表示するプレイヤー自身の見た目。 */
   playerAppearance: PlayerAppearance;
+  onPickImage?: (target: { t: 'yumeTex'; id: number }) => void;
 }
 
 const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
@@ -45,7 +46,7 @@ const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
 const resizeFloor = (floor: number[][], cols: number, rows: number): number[][] =>
   Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => floor[r]?.[c] ?? 0));
 
-export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, playerAppearance }: Yume25DMakerProps) {
+export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage }: Yume25DMakerProps) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Yume25DEngine | null>(null);
@@ -61,6 +62,8 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
   const [talkTargetId, setTalkTargetId] = useState<string | null>(null);
   /** 「はなす」で開く会話ウィンドウ。開いている間は仮想ボタン一式を非表示にする。 */
   const [dialogue, setDialogue] = useState<DialogueState | null>(null);
+  const [showControlGuide, setShowControlGuide] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogueRef = useRef<DialogueState | null>(null);
   dialogueRef.current = dialogue;
 
@@ -99,6 +102,45 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     eng.input.forward = eng.input.back = eng.input.turnL = eng.input.turnR = eng.input.strafeL = eng.input.strafeR = eng.input.dash = false;
     setDialogue(null);
   }, [playing, demo]);
+
+  const resetIdleTimer = useCallback(() => {
+    setShowControlGuide(false);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (playing && !dialogue && !demo) {
+      idleTimerRef.current = setTimeout(() => {
+        setShowControlGuide(true);
+      }, 3500);
+    }
+  }, [playing, dialogue, demo]);
+
+  useEffect(() => {
+    if (!playing || dialogue || demo) {
+      setShowControlGuide(false);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      return;
+    }
+
+    const handleActivity = () => {
+      resetIdleTimer();
+    };
+
+    window.addEventListener('keydown', handleActivity, { passive: true });
+    window.addEventListener('mousedown', handleActivity, { passive: true });
+    window.addEventListener('pointerdown', handleActivity, { passive: true });
+    window.addEventListener('pointermove', handleActivity, { passive: true });
+    window.addEventListener('touchstart', handleActivity, { passive: true });
+
+    resetIdleTimer();
+
+    return () => {
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('mousedown', handleActivity);
+      window.removeEventListener('pointerdown', handleActivity);
+      window.removeEventListener('pointermove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [playing, dialogue, demo, resetIdleTimer]);
 
   // ── 3D操作：キーボード（矢印＝前後＋旋回、WASD＝前後＋左右ストレイフ、Space＝ジャンプ、Shift＝ダッシュ） ──
   // 会話ウィンドウが開いている間は移動キーを無視し、Enter/Spaceで閉じる。
@@ -416,8 +458,8 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
               {texList(layout, paletteKind).map(t => (
                 <button key={t.id} onClick={() => setPaletteSel(t.id)} title={t.name}
                   className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm ${paletteSel === t.id ? 'border-yellow-400' : 'border-gray-700'}`}
-                  style={{ background: t.emoji ? '#1c1826' : t.color }}>
-                  {t.emoji ?? ''}
+                  style={{ background: t.imageUrl ? `url(${t.imageUrl}) center/contain no-repeat #1c1826` : t.emoji ? '#1c1826' : t.color }}>
+                  {!t.imageUrl && (t.emoji ?? '')}
                 </button>
               ))}
             </div>
@@ -446,6 +488,51 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
                     onChange={e => { const v = e.target.value; const choices = v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, choices } : b) })); }}
                     className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
                 </label>
+              </div>
+            );
+          })()}
+
+          {/* テクスチャ個別設定 */}
+          {view === '2d' && paletteSel !== 0 && (() => {
+            const t = layout.textures[paletteSel];
+            if (!t) return null;
+            return (
+              <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-violet-400">🎨 {t.name} の設定</span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className="flex items-center gap-1">名前:
+                    <input type="text" value={t.name}
+                      onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], name: e.target.value } } }))}
+                      className="w-24 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
+                  </label>
+                  {t.kind === 'sprite' && (
+                    <label className="flex items-center gap-1">絵文字:
+                      <input type="text" value={t.emoji ?? ''} maxLength={2}
+                        onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], emoji: e.target.value || undefined } } }))}
+                        className="w-10 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white text-center" />
+                    </label>
+                  )}
+                  <label className="flex items-center gap-1">色:
+                    <input type="color" value={t.color}
+                      onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], color: e.target.value } } }))}
+                      className="w-6 h-4 bg-transparent cursor-pointer" />
+                  </label>
+                  
+                  <div className="flex items-center gap-1 ml-auto">
+                    {t.imageUrl && (
+                      <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], imageRef: undefined, imageUrl: undefined } } }))}
+                        className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                        画像消去
+                      </button>
+                    )}
+                    <button onClick={() => onPickImage?.({ t: 'yumeTex', id: t.id })}
+                      className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
+                      画像参照...
+                    </button>
+                  </div>
+                </div>
               </div>
             );
           })()}
@@ -561,6 +648,43 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
                 とじる
               </button>
             )}
+          </div>
+        </div>
+      )}
+      {/* 3D操作方法ナビ */}
+      {is3d && showControlGuide && !dialogue && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-20 pointer-events-none transition-opacity duration-300">
+          <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 p-4 rounded-xl max-w-xs text-white text-center shadow-2xl pointer-events-auto">
+            <h4 className="text-violet-400 font-bold text-xs mb-2.5">🎮 操作方法</h4>
+            <div className="space-y-2 text-[10px] text-gray-300 text-left">
+              <div className="flex items-center justify-between gap-4">
+                <span>移動/ストレイフ</span>
+                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[W][A][S][D]</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>左右に旋回</span>
+                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[◀][▶]</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>視点回転</span>
+                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[ドラッグ]</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>ジャンプ</span>
+                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Space]</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>ダッシュ</span>
+                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Shift]</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span>話しかける</span>
+                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[E] / [F]</span>
+              </div>
+            </div>
+            <div className="mt-3 text-[9px] text-gray-400 border-t border-gray-800 pt-2">
+              操作を行うとガイドは非表示になります
+            </div>
           </div>
         </div>
       )}

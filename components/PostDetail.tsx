@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import BbsThreadView from './BbsThreadView';
 import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag } from 'lucide-react';
 import Link from 'next/link';
-import { Post, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
+import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
 import { api } from '@/lib/api';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -27,10 +27,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   }, []);
 
   const [post, setPost] = useState<Post>(initial);
-
-  if (bbsMode === '掲示板モード') {
-    return <BbsThreadView post={initial} />;
-  }
   const [replyText, setReplyText] = useState('');
   const [replyTo, setReplyTo] = useState<Post | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -44,6 +40,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const likeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dislikeParity = useRef(0);
   const dislikeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [bodyExpanded, setBodyExpanded] = useState(false);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -159,6 +156,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const mmlCode = extractMmlFromContent(post.content);
   const chordRes = extractChordsFromContent(post.content);
 
+  if (bbsMode === '掲示板モード') {
+    return <BbsThreadView post={initial} />;
+  }
+
   return (
     <>
       <div className="sticky top-0 z-10 bg-[#0b0e14]/95 backdrop-blur border-b border-gray-800">
@@ -231,7 +232,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
             {(() => {
               const displayText = getDisplayContent(post.content);
-              const lines = displayText ? displayText.split('\n') : [];
+              const allLines = displayText ? displayText.split('\n') : [];
+              const isOverflowing = allLines.length > POST_BODY_COLLAPSE_LINES;
+              const lines = isOverflowing && !bodyExpanded ? allLines.slice(0, POST_BODY_COLLAPSE_LINES) : allLines;
               return lines.map((line, lIdx) => (
                 <span key={lIdx} className="block">
                   {line.split(' ').map((word, wIdx) => (
@@ -245,6 +248,20 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               ));
             })()}
           </p>
+
+          {(() => {
+            const displayText = getDisplayContent(post.content);
+            const allLines = displayText ? displayText.split('\n') : [];
+            if (allLines.length <= POST_BODY_COLLAPSE_LINES) return null;
+            return (
+              <button
+                onClick={() => setBodyExpanded(v => !v)}
+                className="text-[11px] text-blue-400 hover:underline mb-2.5 -mt-1.5 block"
+              >
+                {bodyExpanded ? '折りたたむ' : '続きを読む'}
+              </button>
+            );
+          })()}
 
           {post.hasImage && (
             <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">

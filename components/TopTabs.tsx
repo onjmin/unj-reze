@@ -3,9 +3,16 @@
 interface TopTabsProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  latestThreadCount?: number;
+  latestReplyCount?: number;
+  mediaCount?: number;
 }
 
-export default function TopTabs({ activeTab, setActiveTab }: TopTabsProps) {
+function formatCount(n: number) {
+  return n > 99 ? '99+' : String(n);
+}
+
+export default function TopTabs({ activeTab, setActiveTab, latestThreadCount = 0, latestReplyCount = 0, mediaCount = 0 }: TopTabsProps) {
   return (
     <div className="flex flex-col border-b border-gray-800 shrink-0 bg-[#0b0e14] z-10">
       <div className="flex justify-between px-6 py-2.5 font-bold text-sm text-gray-500">
@@ -36,12 +43,14 @@ export default function TopTabs({ activeTab, setActiveTab }: TopTabsProps) {
       </div>
       <div className="flex space-x-4 px-4 py-1.5 text-xs bg-gray-100/5 text-gray-400 border-t border-gray-800/40">
         <span className="font-bold flex items-center">
-          最新スレ <span className="bg-blue-600 text-white text-[9px] rounded-full px-1 ml-1 font-bold">2</span>
+          最新スレ <span className="bg-blue-600 text-white text-[9px] rounded-full px-1 ml-1 font-bold">{formatCount(latestThreadCount)}</span>
         </span>
         <span className="flex items-center">
-          最新レス <span className="bg-blue-600/50 text-white text-[9px] rounded-full px-1.5 ml-1 font-bold">99+</span>
+          最新レス <span className="bg-blue-600/50 text-white text-[9px] rounded-full px-1.5 ml-1 font-bold">{formatCount(latestReplyCount)}</span>
         </span>
-        <span>メディア</span>
+        <span className="flex items-center">
+          メディア <span className="bg-blue-600/50 text-white text-[9px] rounded-full px-1.5 ml-1 font-bold">{formatCount(mediaCount)}</span>
+        </span>
       </div>
     </div>
   );

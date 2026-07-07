@@ -6,7 +6,7 @@ import {
   MessageCircle, Repeat, Mail, Heart, Edit3, PlaySquare, Copy, UserPlus, Ban, Flag, VolumeX, Pencil, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Post, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
+import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
 import { api } from '@/lib/api';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine, MML_MARKERS } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -50,6 +50,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showOriginModal, setShowOriginModal] = useState(false);
+  const [bodyExpanded, setBodyExpanded] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const targetSlug = post.slug || post.displayName;
@@ -146,8 +147,11 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
       }
       await api.posts.edit(post.id, currentUserDisplayName, finalContent);
       onModerationChange?.();
+      // /post/[id] はサーバーコンポーネントでDBから直接取得するため、
+      // 編集直後に開いても本文が古いまま残らないようRouterキャッシュを破棄する
+      router.refresh();
     } catch { /* noop */ }
-  }, [currentUserDisplayName, post.id, post.content, onModerationChange]);
+  }, [currentUserDisplayName, post.id, post.content, onModerationChange, router]);
 
   const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -329,7 +333,9 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           >
             {(() => {
               const displayText = getDisplayContent(post.content);
-              const lines = displayText ? displayText.split('\n') : [];
+              const allLines = displayText ? displayText.split('\n') : [];
+              const isOverflowing = allLines.length > POST_BODY_COLLAPSE_LINES;
+              const lines = isOverflowing && !bodyExpanded ? allLines.slice(0, POST_BODY_COLLAPSE_LINES) : allLines;
               return lines.map((line, lIdx) => (
                 <span key={lIdx} className="block">
                   {line.split(' ').map((word, wIdx) => {
@@ -353,6 +359,20 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               ));
             })()}
           </p>
+
+          {(() => {
+            const displayText = getDisplayContent(post.content);
+            const allLines = displayText ? displayText.split('\n') : [];
+            if (allLines.length <= POST_BODY_COLLAPSE_LINES) return null;
+            return (
+              <button
+                onClick={(e) => { e.stopPropagation(); setBodyExpanded(v => !v); }}
+                className="text-[11px] text-blue-400 hover:underline mb-2.5 -mt-1.5 block"
+              >
+                {bodyExpanded ? '折りたたむ' : '続きを読む'}
+              </button>
+            );
+          })()}
 
           {post.hasImage && (
             <div

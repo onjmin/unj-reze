@@ -786,7 +786,8 @@ type PickTarget =
   | { t: 'player' } | { t: 'bgm' } | { t: 'battleBgm' } | { t: 'bossBgm' } | { t: 'tile'; id: number }
   | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' } | { t: 'selObjSprite' } | { t: 'mapBg' }
   | { t: 'titleBg' } | { t: 'endingBg' } | { t: 'titleBgm' } | { t: 'endingBgm' }
-  | { t: 'sceneBgm'; idx: number };
+  | { t: 'sceneBgm'; idx: number }
+  | { t: 'yumeTex'; id: number };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -1024,6 +1025,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [eventChoice, setEventChoice] = useState<{ text: string; choices: { label: string; commands: EventCommand[] }[]; onPick: (idx: number) => void } | null>(null);
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
+  const [showControlGuide, setShowControlGuide] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
   const gameMsgRef = useRef<typeof gameMsg>(null);
   gameMsgRef.current = gameMsg;
@@ -2041,6 +2044,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               setEquipment(eq);
               applyEquipment(eq);
             }
+            itemGetRef.current = { text: `${newItem?.emoji ?? '🎒'} ${newItem?.name ?? cmd.itemId} ×${cmd.count} を てにいれた！`, startTime: performance.now() };
           }
           setTimeout(advance, 30);
           break;
@@ -2548,6 +2552,47 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setBattle(null);
     }
   }, [isPlaying, gameData]);
+
+  const resetIdleTimer = useCallback(() => {
+    setShowControlGuide(false);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    const hasOverlay = !!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult;
+    if (isPlaying && !hasOverlay && gameData.engine !== 'yume25d') {
+      idleTimerRef.current = setTimeout(() => {
+        setShowControlGuide(true);
+      }, 3500);
+    }
+  }, [isPlaying, activeDialogue, gameMsg, shopModal, eventChoice, gameOverResult, gameData.engine]);
+
+  useEffect(() => {
+    const hasOverlay = !!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult;
+    if (!isPlaying || hasOverlay || gameData.engine === 'yume25d') {
+      setShowControlGuide(false);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      return;
+    }
+
+    const handleActivity = () => {
+      resetIdleTimer();
+    };
+
+    window.addEventListener('keydown', handleActivity, { passive: true });
+    window.addEventListener('mousedown', handleActivity, { passive: true });
+    window.addEventListener('pointerdown', handleActivity, { passive: true });
+    window.addEventListener('pointermove', handleActivity, { passive: true });
+    window.addEventListener('touchstart', handleActivity, { passive: true });
+
+    resetIdleTimer();
+
+    return () => {
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('mousedown', handleActivity);
+      window.removeEventListener('pointerdown', handleActivity);
+      window.removeEventListener('pointermove', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [isPlaying, activeDialogue, gameMsg, shopModal, eventChoice, gameOverResult, gameData.engine, resetIdleTimer]);
 
   // Game loop
   useEffect(() => {
@@ -6149,6 +6194,16 @@ const lose = (msg: string) => {
     else if (target.t === 'titleBgm') setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, bgmRef: bgmLike().ref } }) : p);
     else if (target.t === 'endingBgm') setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, bgmRef: bgmLike().ref } }) : p);
     else if (target.t === 'sceneBgm') setGameData(p => ({ ...p, scenes: p.scenes?.map((s, i) => i === target.idx ? { ...s, bgm: bgmLike() } : s) }));
+    else if (target.t === 'yumeTex') {
+      setGameData(p => {
+        if (!p.layout25d) return p;
+        const textures = { ...p.layout25d.textures };
+        if (textures[target.id]) {
+          textures[target.id] = { ...textures[target.id], imageRef: res.ref, imageUrl: res.url };
+        }
+        return { ...p, layout25d: { ...p.layout25d, textures } };
+      });
+    }
   };
 
   const addTile = () => {
@@ -6505,6 +6560,7 @@ const lose = (msg: string) => {
                 isPlaying={isPlaying}
                 demo={introOpen}
                 playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color }}
+                onPickImage={(target) => setPicker({ mode: 'image', target })}
               />
             ) : (
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
@@ -7040,8 +7096,7 @@ const lose = (msg: string) => {
                               applyEquipment(eq);
                             }
                             playSfx(sfxRef.current.purchase);
-                            // 'timed' はラウンド終了演出用（roundOver が立ち操作が戻らない）ため 'instant' で表示する
-                            showGameMsg(`${itemDef?.emoji ?? '?'} ${itemDef?.name ?? si.itemId} を買った！`, 'instant', () => {});
+                            itemGetRef.current = { text: `${itemDef?.emoji ?? '?'} ${itemDef?.name ?? si.itemId} を買った！`, startTime: performance.now() };
                             setShopModal(null);
                             forceHud(n => n + 1);
                           }}
@@ -7125,6 +7180,97 @@ const lose = (msg: string) => {
                         {m}x
                       </button>
                     ))}
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* 操作方法のナビ */}
+            {showControlGuide && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-50 pointer-events-none transition-opacity duration-300">
+                <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 p-4 rounded-xl max-w-xs text-white text-center shadow-2xl pointer-events-auto">
+                  <h4 className="text-violet-400 font-bold text-xs mb-2.5">🎮 操作方法</h4>
+                  <div className="space-y-2 text-[10px] text-gray-300 text-left">
+                    <div className="flex items-center justify-between gap-4">
+                      <span>移動</span>
+                      <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[矢印キー] / [WASD]</span>
+                    </div>
+
+                    {gameData.engine === 'action' && (
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ジャンプ</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Space] / [Z]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ショット / 攻撃</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ダッシュ</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Shift] / [C]</span>
+                        </div>
+                        {gameData.id === 'rockman' && (
+                          <div className="flex items-center justify-between gap-4">
+                            <span>武器切替</span>
+                            <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Q] / [E]</span>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {gameData.engine === 'rpg' && (
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>決定 / 調べる / 話す</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Z] / [Enter]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>キャンセル</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
+                        </div>
+                      </>
+                    )}
+
+                    {gameData.engine === 'touhou' && (
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ショット</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Z]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ボム</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>低速移動</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Shift]</span>
+                        </div>
+                      </>
+                    )}
+
+                    {gameData.engine === 'onjReze' && (
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>剣攻撃</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Z]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ボム設置</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[C]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>ボム投擲</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span>首爆弾投擲</span>
+                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[V]</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="mt-3 text-[9px] text-gray-400 border-t border-gray-800 pt-2">
+                    操作を行うとガイドは非表示になります
                   </div>
                 </div>
               </div>

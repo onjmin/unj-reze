@@ -1,5 +1,8 @@
 import type { GameManifestDraft } from '@/components/GameMaker';
 
+/** 投稿本文をこの行数を超えたら折りたたむ（タイムライン・投稿個別ページ共通） */
+export const POST_BODY_COLLAPSE_LINES = 8;
+
 /** 自己申告の権利表記。未設定(undefined)は「申告なし」 */
 export type OriginType =
   | 'full_original'
