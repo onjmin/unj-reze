@@ -16,7 +16,7 @@ type Tool = 'floor' | 'wall' | 'sprite' | 'start' | 'talk' | 'erase';
 const TOOL_LABELS: Record<Tool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', talk: '会話設定', erase: '消す' };
 /** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */
 const DRAG_TURN_SENSITIVITY = 0.006;
-/** D-pad/LOOKパッドの不感帯（px）。中心付近の誤入力を防ぐ。 */
+/** D-padの不感帯（px）。中心付近の誤入力を防ぐ。 */
 const PAD_DEADZONE = 10;
 
 interface DialogueState { message: string; choices?: string[]; }
@@ -193,24 +193,6 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     if (dpadPointerRef.current !== e.pointerId) return;
     dpadPointerRef.current = null;
     const inp = engineRef.current?.input; if (inp) inp.forward = inp.back = inp.strafeL = inp.strafeR = false;
-  };
-
-  // ── 仮想 LOOK ボタン：ドラッグでカメラ回転（ドラッグ量は前回位置との差分） ──
-  const lookPointerRef = useRef<{ id: number; lastX: number; lastY: number } | null>(null);
-  const lookDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    tryCapturePointer(e.currentTarget, e.pointerId);
-    lookPointerRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY };
-  };
-  const lookMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const d = lookPointerRef.current;
-    if (!d || d.id !== e.pointerId) return;
-    const dx = e.clientX - d.lastX, dy = e.clientY - d.lastY;
-    d.lastX = e.clientX; d.lastY = e.clientY;
-    if (dx !== 0 || dy !== 0) engineRef.current?.turnBy(-dx * DRAG_TURN_SENSITIVITY, -dy * DRAG_TURN_SENSITIVITY);
-  };
-  const lookEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (lookPointerRef.current?.id === e.pointerId) lookPointerRef.current = null;
   };
 
   // ── 「はなす」：近くの interactive なビルボードがあれば会話ウィンドウを開く ──
@@ -522,42 +504,37 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
         </div>
       )}
 
-      {/* 3D操作パネル（タッチ用）。会話ウィンドウを表示中は選択の邪魔にならないよう丸ごと隠す。デモ中も非表示。 */}
+      {/* 3D操作パネル（タッチ用）。視点回転は画面ドラッグに任せるので LOOK パッドは置かず、
+          D-pad（移動）と最小限のアクションボタンだけに絞って画面占有を抑える。
+          会話ウィンドウを表示中は選択の邪魔にならないよう丸ごと隠す。デモ中も非表示。 */}
       {is3d && !demo && !dialogue && (
         <>
-          {/* 仮想 D-pad：左手で移動（前後＋左右ストレイフ、斜め可）。 */}
+          {/* 仮想 D-pad：移動（前後＋左右ストレイフ、斜め可）。視点回転は画面を直接ドラッグ。 */}
           <div
             onPointerDown={dpadDown} onPointerMove={dpadMove} onPointerUp={dpadEnd} onPointerCancel={dpadEnd}
-            className="absolute bottom-2 left-2 z-20 w-24 h-24 rounded-full bg-gray-700/60 border border-gray-500/60 opacity-90 touch-none select-none flex items-center justify-center"
+            className="absolute bottom-2 left-2 z-20 w-20 h-20 rounded-full bg-gray-700/60 border border-gray-500/60 opacity-90 touch-none select-none flex items-center justify-center"
           >
-            <span className="absolute top-1.5 text-white/70 text-xs">▲</span>
-            <span className="absolute bottom-1.5 text-white/70 text-xs">▼</span>
-            <span className="absolute left-1.5 text-white/70 text-xs">◀</span>
-            <span className="absolute right-1.5 text-white/70 text-xs">▶</span>
-            <span className="w-3 h-3 rounded-full bg-white/30" />
+            <span className="absolute top-1 text-white/70 text-xs">▲</span>
+            <span className="absolute bottom-1 text-white/70 text-xs">▼</span>
+            <span className="absolute left-1 text-white/70 text-xs">◀</span>
+            <span className="absolute right-1 text-white/70 text-xs">▶</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-white/30" />
           </div>
 
-          {/* 仮想 LOOK ボタン：右手でドラッグしてカメラ回転（上下も可）。 */}
-          <div
-            onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookEnd} onPointerCancel={lookEnd}
-            className="absolute bottom-2 right-2 z-20 w-24 h-24 rounded-full bg-gray-700/60 border border-gray-500/60 opacity-90 touch-none select-none flex items-center justify-center text-white/70 text-[11px] font-bold"
-          >
-            LOOK
-          </div>
-
-          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 opacity-90 touch-none">
+          {/* アクションボタン：右下にまとめて画面占有を最小化。 */}
+          <div className="absolute bottom-2 right-2 z-20 flex items-center gap-1.5 opacity-90 touch-none">
             <button {...holdProps('dash')}
-              className="w-12 h-10 bg-amber-700/85 active:bg-amber-500 rounded-lg text-white text-[10px] font-bold flex items-center justify-center">
+              className="w-9 h-9 bg-amber-700/85 active:bg-amber-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center">
               DASH
             </button>
             <button
               onPointerDown={e => { e.preventDefault(); engineRef.current?.jump(); }}
-              className="w-12 h-12 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
+              className="w-9 h-9 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center">
               JUMP
             </button>
             <button
               onPointerDown={e => { e.preventDefault(); handleTalk(); }}
-              className="w-12 h-10 bg-sky-700/85 active:bg-sky-500 rounded-lg text-white text-[10px] font-bold flex items-center justify-center">
+              className="w-9 h-9 bg-sky-700/85 active:bg-sky-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center">
               TALK
             </button>
           </div>
