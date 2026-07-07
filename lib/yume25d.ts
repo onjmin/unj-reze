@@ -62,6 +62,15 @@ interface TexEntry {
 const isAnimatableWalk = (walk: WalkRef | null): walk is WalkRef =>
   !!walk && walk.stdId !== 'smc_json' && !walk.crop;
 
+/** url 末尾の #sx,sy,sw,sh クロップ指定を分離する（内蔵シートから切り出す単体スプライト用）。 */
+const splitCropUrl = (raw: string): { url: string; crop: [number, number, number, number] | null } => {
+  const hashIdx = raw.indexOf('#');
+  if (hashIdx === -1) return { url: raw, crop: null };
+  const parts = raw.slice(hashIdx + 1).split(',').map(Number);
+  const ok = parts.length >= 4 && parts.slice(0, 4).every(n => !Number.isNaN(n));
+  return { url: raw.slice(0, hashIdx), crop: ok ? [parts[0], parts[1], parts[2], parts[3]] : null };
+};
+
 /** シートの1セルを canvas へ contain・下端合わせで描く（キャラの足元が揃う）。 */
 const drawCellContain = (
   cv: HTMLCanvasElement, img: HTMLImageElement,
@@ -104,39 +113,13 @@ const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
 };
 
 /** プレイヤー自身のビルボード用テクスチャ（三人称視点でのみ表示）。
- *  spriteUrl がある場合は歩行グラ画像の1フレーム目を描画する（非同期）。
+ *  spriteUrl がある場合は単体スプライト画像として丸ごと描く（#sx,sy,sw,sh クロップ対応・非同期）。
+ *  歩行グラ（walk: 参照）はここを通らず、エンジンの updatePlayerAnim() がシート分割アニメを描く。
  *  ロード完了後に onUpdate() を呼び出してテクスチャを更新すること。 */
 const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?: () => void): void => {
   const ctx = cv.getContext('2d')!;
-  ctx.clearRect(0, 0, 64, 64);
-  if (a.spriteUrl) {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      ctx.clearRect(0, 0, 64, 64);
-      // 歩行グラのフレーム1枚目（左上）を64x64に収めて描画
-      const frameW = img.naturalWidth >= img.naturalHeight * 2 ? Math.floor(img.naturalWidth / 3) : img.naturalWidth;
-      const frameH = img.naturalHeight >= img.naturalWidth ? Math.floor(img.naturalHeight / 4) : img.naturalHeight;
-      ctx.drawImage(img, 0, 0, frameW, frameH, 0, 0, 64, 64);
-      onUpdate?.();
-    };
-    img.onerror = () => {
-      // フォールバック: 絵文字か図形
-      ctx.clearRect(0, 0, 64, 64);
-      if (a.emoji) {
-        ctx.font = '52px serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(a.emoji, 32, 36);
-      } else {
-        ctx.fillStyle = a.color;
-        ctx.beginPath();
-        ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();
-        ctx.fillRect(20, 34, 24, 24);
-      }
-      onUpdate?.();
-    };
-    img.src = a.spriteUrl;
-    // ロード待ちの間は絵文字/色で暫定表示
+  const drawFallback = () => {
+    ctx.clearRect(0, 0, 64, 64);
     if (a.emoji) {
       ctx.font = '52px serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -144,21 +127,25 @@ const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?:
     } else {
       ctx.fillStyle = a.color;
       ctx.beginPath();
-      ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();
-      ctx.fillRect(20, 34, 24, 24);
+      ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();  // 頭
+      ctx.fillRect(20, 34, 24, 24);                      // 胴
     }
+  };
+  if (a.spriteUrl) {
+    const { url, crop } = splitCropUrl(a.spriteUrl);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (crop) drawCellContain(cv, img, crop[0], crop[1], crop[2], crop[3]);
+      else drawCellContain(cv, img, 0, 0, img.naturalWidth, img.naturalHeight);
+      onUpdate?.();
+    };
+    img.onerror = () => { drawFallback(); onUpdate?.(); };
+    img.src = url;
+    drawFallback();  // ロード待ちの間は絵文字/色で暫定表示
     return;
   }
-  if (a.emoji) {
-    ctx.font = '52px serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(a.emoji, 32, 36);
-  } else {
-    ctx.fillStyle = a.color;
-    ctx.beginPath();
-    ctx.arc(32, 24, 14, 0, Math.PI * 2); ctx.fill();  // 頭
-    ctx.fillRect(20, 34, 24, 24);                      // 胴
-  }
+  drawFallback();
 };
 
 export class Yume25DEngine {
@@ -241,6 +228,7 @@ export class Yume25DEngine {
     this.pitch = 0;
     this.vy = 0; this.hop = 0; this.grounded = true;
     this.clampToBounds();
+    this.resolveWalls();
   }
 
   /** レイアウト差し替え。シーンを丸ごと作り直す（カメラ位置は維持）。 */
@@ -251,6 +239,7 @@ export class Yume25DEngine {
     this.playerMesh.visible = this.pov === 'third';
     this.buildScene();
     this.clampToBounds();
+    this.resolveWalls();  // 編集で足元に壁が置かれた場合のめり込みを解消
   }
 
   /** プレイヤー自身の見た目（絵文字/色/spriteUrl/spriteRef）を更新。ジオメトリは使い回し、キャンバスだけ再描画する。
@@ -404,6 +393,8 @@ export class Yume25DEngine {
       entry.url = url;
       entry.anim = undefined;
       const walk = def.imageRef ? parseWalkRef(def.imageRef) : null;
+      // 単体スプライトの内蔵シート切り出し（url:...#sx,sy,sw,sh）に対応
+      const { url: loadUrl, crop } = splitCropUrl(url);
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
@@ -415,6 +406,8 @@ export class Yume25DEngine {
           // 停止中（2D編集ビュー）でも見えるよう正面1コマ目を即描画。以後はループが足踏みさせる。
           const rect = cellRect(std, img.naturalWidth, img.naturalHeight, 's', 0);
           drawCellContain(e.canvas, img, rect.sx, rect.sy, rect.sw, rect.sh);
+        } else if (crop) {
+          drawCellContain(e.canvas, img, crop[0], crop[1], crop[2], crop[3]);
         } else {
           // アスペクト比を保って contain 描画（下端合わせ：立て看板やキャラの足元が揃う）
           drawCellContain(e.canvas, img, 0, 0, img.naturalWidth, img.naturalHeight);
@@ -427,7 +420,7 @@ export class Yume25DEngine {
         texCanvasDraw(e.canvas, fallback);
         e.texture.needsUpdate = true;
       };
-      img.src = url;
+      img.src = loadUrl;
     }
     return entry.texture;
   }
@@ -447,12 +440,13 @@ export class Yume25DEngine {
     }
   }
 
-  /** 歩行グラプレイヤーを向き・足踏みに応じて描き替える。停止中は待機ポーズ。 */
+  /** 歩行グラプレイヤーを向き・足踏みに応じて描き替える。
+   *  静止中もその場で足踏みを続ける（NPCと同じゆっくりテンポ。移動中は速める）。 */
   private updatePlayerAnim(timeSec: number) {
     const a = this.playerAnim;
     if (!a) return;
-    const idleFrame = a.std.frames === 3 ? 1 : 0;  // 3フレーム規格は中央が待機
-    const frame = this.playerMoving ? walkFrameIndex(a.std, Math.floor(timeSec * PLAYER_ANIM_FPS)) : idleFrame;
+    const fps = this.playerMoving ? PLAYER_ANIM_FPS : BILLBOARD_ANIM_FPS;
+    const frame = walkFrameIndex(a.std, Math.floor(timeSec * fps));
     const key = `${this.playerDir}:${frame}`;
     if (key === a.lastKey) return;
     a.lastKey = key;
@@ -577,6 +571,31 @@ export class Yume25DEngine {
     return false;
   }
 
+  /** プレイヤー円と壁面の重なりを、中心のある側へ押し出して解消する。
+   *  moveX/moveZ は「前縁が境界をまたいだ瞬間」しか見ないため、通路や壁の端で壁面を
+   *  またいだ状態のまま横滑りすると壁の内側へ入れてしまう（垂直に突っ込むと抜ける報告の正体）。
+   *  毎フレーム最後に重なり自体を解消することで、進入経路によらずすり抜けを防ぐ。
+   *  押し出しで別の壁と重なることがあるので2回まで反復する。 */
+  private resolveWalls() {
+    const r = PLAYER_RADIUS;
+    for (let pass = 0; pass < 2; pass++) {
+      let moved = false;
+      const c0 = Math.ceil(this.x - r), c1 = Math.floor(this.x + r);
+      for (let c = c0; c <= c1; c++) {
+        if (!this.blockedV(c, this.z)) continue;
+        this.x = this.x < c ? c - r - EPS : c + r + EPS;
+        moved = true;
+      }
+      const r0 = Math.ceil(this.z - r), r1 = Math.floor(this.z + r);
+      for (let rr = r0; rr <= r1; rr++) {
+        if (!this.blockedH(rr, this.x)) continue;
+        this.z = this.z < rr ? rr - r - EPS : rr + r + EPS;
+        moved = true;
+      }
+      if (!moved) break;
+    }
+  }
+
   private moveX(dx: number) {
     if (dx === 0) return;
     let nx = this.x + dx;
@@ -641,6 +660,7 @@ export class Yume25DEngine {
       this.moveX(fx * ms + rx * ss);
       this.moveZ(fz * ms + rz * ss);
       this.clampToBounds();
+      this.resolveWalls();
     }
     // 歩行アニメ用：移動状態と「カメラから見た向き」を更新。カメラはプレイヤーの後方に
     // 追従するので、前進中は背中(w)・後退は正面(s)・ストレイフは横向きが見える。
