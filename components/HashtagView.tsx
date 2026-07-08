@@ -6,6 +6,7 @@ import { ArrowLeft, Hash } from 'lucide-react';
 import { Post, AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import PostContainer from './PostContainer';
+import VirtualizedItem from './VirtualizedItem';
 
 function getCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
@@ -91,25 +92,26 @@ export default function HashtagView({ tag }: HashtagViewProps) {
             <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
           ) : posts.length > 0 ? (
             posts.map((post, index) => (
-              <PostContainer
-                key={post.id}
-                post={post}
-                isRankingMode={false}
-                rankIndex={index + 1}
-                rankCategory=""
-                onLike={handleLike}
-                onDislike={handleDislike}
-                onRepost={handleRepost}
-                onHeart={handleHeart}
-                onAddReply={handleAddReply}
-                onQuickPost={() => {}}
-                openGame={() => {}}
-                openCollab={() => {}}
-                openMml={() => {}}
-                currentUserSlug={currentUser?.slug}
-                currentUserDisplayName={currentUser?.displayName}
-                onModerationChange={fetchPosts}
-              />
+              <VirtualizedItem key={post.id} initialVisible={index < 8}>
+                <PostContainer
+                  post={post}
+                  isRankingMode={false}
+                  rankIndex={index + 1}
+                  rankCategory=""
+                  onLike={handleLike}
+                  onDislike={handleDislike}
+                  onRepost={handleRepost}
+                  onHeart={handleHeart}
+                  onAddReply={handleAddReply}
+                  onQuickPost={() => {}}
+                  openGame={() => {}}
+                  openCollab={() => {}}
+                  openMml={() => {}}
+                  currentUserSlug={currentUser?.slug}
+                  currentUserDisplayName={currentUser?.displayName}
+                  onModerationChange={fetchPosts}
+                />
+              </VirtualizedItem>
             ))
           ) : (
             <div className="p-12 text-center text-xs text-gray-600 flex flex-col items-center gap-2">

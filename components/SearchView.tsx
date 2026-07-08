@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
+import VirtualizedItem from './VirtualizedItem';
 
 interface SearchViewProps {
   onLike: (id: string) => void;
@@ -91,23 +92,24 @@ export default function SearchView(props: SearchViewProps) {
 
       {!loading && searched && results.length > 0 && (
         <div className="divide-y divide-gray-800/80">
-          {results.map((post) => (
-            <PostContainer
-              key={post.id}
-              post={post}
-              isRankingMode={false}
-              rankIndex={0}
-              rankCategory=""
-              onLike={props.onLike}
-              onDislike={props.onDislike}
-              onRepost={props.onRepost}
-              onHeart={props.onHeart}
-              onAddReply={props.onAddReply}
-              onQuickPost={props.onQuickPost}
-              openGame={props.openGame}
-              openCollab={props.openCollab}
-              openMml={props.openMml}
-            />
+          {results.map((post, index) => (
+            <VirtualizedItem key={post.id} initialVisible={index < 8}>
+              <PostContainer
+                post={post}
+                isRankingMode={false}
+                rankIndex={0}
+                rankCategory=""
+                onLike={props.onLike}
+                onDislike={props.onDislike}
+                onRepost={props.onRepost}
+                onHeart={props.onHeart}
+                onAddReply={props.onAddReply}
+                onQuickPost={props.onQuickPost}
+                openGame={props.openGame}
+                openCollab={props.openCollab}
+                openMml={props.openMml}
+              />
+            </VirtualizedItem>
           ))}
           <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
             すべて表示されました 🌱

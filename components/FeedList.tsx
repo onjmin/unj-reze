@@ -4,6 +4,7 @@ import { encodeId } from '@/lib/sqids';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
 import BbsBoardView from './BbsBoardView';
+import VirtualizedItem from './VirtualizedItem';
 import { Loader2 } from 'lucide-react';
 
 interface FeedListProps {
@@ -79,26 +80,27 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
   return (
     <div className="divide-y divide-gray-800/80">
       {displayPosts.map((post, index) => (
-        <PostContainer
-          key={post.id}
-          post={post}
-          isRankingMode={activeTab === 'ranking'}
-          rankIndex={index + 1}
-          rankCategory={rankCategory}
-          onLike={onLike}
-          onDislike={onDislike}
-          onRepost={onRepost}
-          onHeart={onHeart}
-          onAddReply={onAddReply}
-          onQuickPost={onQuickPost}
-          openGame={openGame}
-          openCollab={openCollab}
-          openMml={openMml}
-          currentUserSlug={currentUserSlug}
-          currentUserDisplayName={currentUserDisplayName}
-          onModerationChange={onModerationChange}
-          onReplyClick={onReplyClick}
-        />
+        <VirtualizedItem key={post.id} initialVisible={index < 8}>
+          <PostContainer
+            post={post}
+            isRankingMode={activeTab === 'ranking'}
+            rankIndex={index + 1}
+            rankCategory={rankCategory}
+            onLike={onLike}
+            onDislike={onDislike}
+            onRepost={onRepost}
+            onHeart={onHeart}
+            onAddReply={onAddReply}
+            onQuickPost={onQuickPost}
+            openGame={openGame}
+            openCollab={openCollab}
+            openMml={openMml}
+            currentUserSlug={currentUserSlug}
+            currentUserDisplayName={currentUserDisplayName}
+            onModerationChange={onModerationChange}
+            onReplyClick={onReplyClick}
+          />
+        </VirtualizedItem>
       ))}
       <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
         すべて表示されました 🌱
