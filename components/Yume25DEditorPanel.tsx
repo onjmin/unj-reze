@@ -3,8 +3,22 @@
 // yume25d（ゆめにっき3D）の編集パネル。かつては Yume25DMaker 内でキャンバスに重ねる
 // absolute オーバーレイだったが、GameMaker のサイドバーへ吸収し縦積みのリストとして表示する。
 
+import { useEffect, useRef } from 'react';
 import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
 import { type Layout25D, type Tex25D } from './game-presets/shared';
+import { drawPlayerIconCanvas } from '@/lib/yume25d';
+
+/** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
+function SpriteThumb({ t }: { t: Tex25D }) {
+  const cvRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = cvRef.current;
+    if (!cv) return;
+    cv.width = 64; cv.height = 64;
+    drawPlayerIconCanvas(cv, { emoji: t.emoji, color: t.color, spriteUrl: t.imageUrl, spriteRef: t.imageRef }, () => {});
+  }, [t.imageUrl, t.imageRef, t.emoji, t.color]);
+  return <canvas ref={cvRef} className="w-full h-full" style={{ imageRendering: 'pixelated' }} />;
+}
 
 interface Yume25DEditorPanelProps {
   layout: Layout25D;
@@ -98,9 +112,13 @@ export default function Yume25DEditorPanel({
           )}
           {yume25dTexList(layout, paletteKind).map(t => (
             <button key={t.id} onClick={() => setPaletteSel(t.id)} title={t.name}
-              className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm ${paletteSel === t.id ? 'border-yellow-400' : 'border-gray-700'}`}
-              style={{ background: t.imageUrl ? `url(${t.imageUrl}) center/contain no-repeat #1c1826` : t.emoji ? '#1c1826' : t.color }}>
-              {!t.imageUrl && (t.emoji ?? '')}
+              className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm overflow-hidden ${paletteSel === t.id ? 'border-yellow-400' : 'border-gray-700'}`}
+              style={{ background: t.imageUrl ? undefined : t.emoji ? '#1c1826' : t.color }}>
+              {paletteKind === 'sprite' && t.imageUrl ? (
+                <SpriteThumb t={t} />
+              ) : t.imageUrl ? (
+                <div className="w-full h-full" style={{ background: `url(${t.imageUrl}) center/contain no-repeat #1c1826` }} />
+              ) : (t.emoji ?? '')}
             </button>
           ))}
         </div>

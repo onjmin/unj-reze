@@ -6661,7 +6661,8 @@ const lose = (msg: string) => {
                 onMouseUp={() => { isDraggingStartRef.current = false; }}
                 onTouchStart={handleCanvasAction}
                 onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
-                onTouchEnd={() => { isDraggingStartRef.current = false; }} />
+                onTouchEnd={() => { isDraggingStartRef.current = false; }}
+                onContextMenu={e => e.preventDefault()} />
             )}
 
             {/* SMC素材クレジットバッジ（マリオプリセット プレイ中） */}
@@ -7020,7 +7021,8 @@ const lose = (msg: string) => {
                       {soulPhase === 'dodge' ? (
                         <canvas ref={soulCanvasRef} width={176} height={176}
                           className="w-full h-full touch-none cursor-crosshair" style={{ imageRendering: 'pixelated' }}
-                          onPointerMove={soulPointerMove} onPointerDown={soulPointerMove} />
+                          onPointerMove={soulPointerMove} onPointerDown={soulPointerMove}
+                          onContextMenu={e => e.preventDefault()} />
                       ) : soulPhase === 'attack' ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center px-3 gap-1.5">
                           <div className="text-white/70 text-[10px]">タイミングよく タップ / Zキー！</div>

@@ -883,6 +883,7 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
         onPointerUp={glPointerUp}
         onPointerCancel={glPointerCancel}
         onPointerLeave={glPointerLeave}
+        onContextMenu={e => e.preventDefault()}
       />
 
       {/* 2D見下ろしエディタ：他プリセットと同じ箱サイズに収まる固定窓（VIEW_COLS×VIEW_ROWS）。 */}
@@ -895,6 +896,7 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
             style={{ imageRendering: 'pixelated' }}
             onPointerDown={e => { e.preventDefault(); const { sx, sy } = pointerToCanvas(e); applyEdit(sx, sy, false); }}
             onPointerMove={e => { if ((e.buttons & 1) === 1) { const { sx, sy } = pointerToCanvas(e); applyEdit(sx, sy, true); } }}
+            onContextMenu={e => e.preventDefault()}
           />
         </div>
       )}
@@ -964,35 +966,35 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
       {/* 3D操作方法ナビ */}
       {is3d && showControlGuide && !dialogue && (
         <div className="absolute inset-0 flex items-start justify-start p-3 z-20 pointer-events-none transition-opacity duration-300">
-          <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 p-4 rounded-xl max-w-xs text-white text-center shadow-2xl pointer-events-auto">
-            <h4 className="text-violet-400 font-bold text-xs mb-2.5">🎮 操作方法</h4>
+          <div className="bg-black/95 border-2 border-white/40 p-4 max-w-xs text-white text-center shadow-2xl pointer-events-auto font-pixel">
+            <h4 className="text-violet-400 font-bold text-[11px] mb-2.5 tracking-widest">操作方法</h4>
             <div className="space-y-2 text-[10px] text-gray-300 text-left">
               <div className="flex items-center justify-between gap-4">
                 <span>移動/ストレイフ</span>
-                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[W][A][S][D]</span>
+                <span className="bg-gray-800 border border-gray-600 px-1 py-0.5 text-white">[W][A][S][D]</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span>左右に旋回</span>
-                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[◀][▶]</span>
+                <span className="bg-gray-800 border border-gray-600 px-1 py-0.5 text-white">[◀][▶]</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span>視点回転</span>
-                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[ドラッグ]</span>
+                <span className="bg-gray-800 border border-gray-600 px-1 py-0.5 text-white">[ドラッグ]</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span>ジャンプ</span>
-                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Space]</span>
+                <span className="bg-gray-800 border border-gray-600 px-1 py-0.5 text-white">[Space]</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span>ダッシュ</span>
-                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Shift]</span>
+                <span className="bg-gray-800 border border-gray-600 px-1 py-0.5 text-white">[Shift]</span>
               </div>
               <div className="flex items-center justify-between gap-4">
                 <span>話しかける</span>
-                <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[E] / [F]</span>
+                <span className="bg-gray-800 border border-gray-600 px-1 py-0.5 text-white">[E] / [F]</span>
               </div>
             </div>
-            <div className="mt-3 text-[9px] text-gray-400 border-t border-gray-800 pt-2">
+            <div className="mt-3 text-[9px] text-gray-400 border-t-2 border-gray-700 pt-2">
               操作を行うとガイドは非表示になります
             </div>
           </div>
