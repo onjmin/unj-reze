@@ -7230,7 +7230,7 @@ const lose = (msg: string) => {
             )}
             {/* 操作方法のナビ */}
             {showControlGuide && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-50 pointer-events-none transition-opacity duration-300">
+              <div className="absolute inset-0 flex items-start justify-start p-3 z-50 pointer-events-none transition-opacity duration-300">
                 <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 p-4 rounded-xl max-w-xs text-white text-center shadow-2xl pointer-events-auto">
                   <h4 className="text-violet-400 font-bold text-xs mb-2.5">🎮 操作方法</h4>
                   <div className="space-y-2 text-[10px] text-gray-300 text-left">
