@@ -6,7 +6,7 @@
 // プレイ/デモ：常に 3D。エンジン実体（WebGL）はマウント中1つを使い回し、アンマウントで dispose。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Yume25DEngine, RENDER_W, RENDER_H, type PlayerAppearance } from '@/lib/yume25d';
+import { Yume25DEngine, RENDER_W, RENDER_H, drawPlayerIconCanvas, type PlayerAppearance } from '@/lib/yume25d';
 import {
   type Layout25D, type Tex25D, type Dir4, uid, normalizeWall25D,
 } from './game-presets/shared';
@@ -119,6 +119,17 @@ export default function Yume25DMaker({
       row: Math.max(0, Math.min(layout.rows - 1, cur.row)),
     }));
   }, [layout.cols, layout.rows]);
+
+  // ── カーソルに表示するプレイヤーの見た目（絵文字/色/spriteUrl）。3D確認と同じ描画ロジックを使い回す。 ──
+  const playerIconCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [playerIconVersion, setPlayerIconVersion] = useState(0);
+  useEffect(() => {
+    if (!playerIconCanvasRef.current) playerIconCanvasRef.current = document.createElement('canvas');
+    playerIconCanvasRef.current.width = 64;
+    playerIconCanvasRef.current.height = 64;
+    drawPlayerIconCanvas(playerIconCanvasRef.current, playerAppearance, () => setPlayerIconVersion(v => v + 1));
+    setPlayerIconVersion(v => v + 1);
+  }, [playerAppearance.emoji, playerAppearance.color, playerAppearance.spriteUrl, playerAppearance.spriteRef]);
 
   // ── 3Dエンジン：マウント中は1実体を使い回し、破棄時に必ず dispose ──────────
   useEffect(() => {
@@ -404,14 +415,20 @@ export default function Yume25DMaker({
       ctx.closePath(); ctx.fill();
       ctx.restore();
     }
-    // 十字キー操作カーソル（配置先セルの目印）
-    if (!playing) {
+    // 十字キー操作カーソル：他プリセットの編集画面同様、プレイヤー自身の見た目（絵文字/色/スプライト）で表示する。
+    if (!playing && playerIconCanvasRef.current) {
+      const cx = cursor.col * CELL + CELL / 2, cy = cursor.row * CELL + CELL / 2;
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.6)';
+      ctx.shadowBlur = 3;
+      ctx.drawImage(playerIconCanvasRef.current, cx - CELL / 2, cy - CELL / 2, CELL, CELL);
+      ctx.restore();
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(cursor.col * CELL + 1, cursor.row * CELL + 1, CELL - 2, CELL - 2);
     }
     ctx.restore();
-  }, [layout, is3d, level, scroll, cursor, playing]);
+  }, [layout, is3d, level, scroll, cursor, playing, playerIconVersion]);
 
   // ── 2Dエディタ操作 ───────────────────────────────────────────────────────
   // c, r はワールド座標のマス目。fx, fy はマス内の相対位置（0〜1、壁の辺選択に使用）。

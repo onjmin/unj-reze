@@ -116,7 +116,7 @@ const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
  *  spriteUrl がある場合は単体スプライト画像として丸ごと描く（#sx,sy,sw,sh クロップ対応・非同期）。
  *  歩行グラ（walk: 参照）はここを通らず、エンジンの updatePlayerAnim() がシート分割アニメを描く。
  *  ロード完了後に onUpdate() を呼び出してテクスチャを更新すること。 */
-const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?: () => void): void => {
+export const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?: () => void): void => {
   const ctx = cv.getContext('2d')!;
   const drawFallback = () => {
     ctx.clearRect(0, 0, 64, 64);
@@ -146,6 +146,27 @@ const drawPlayerCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?:
     return;
   }
   drawFallback();
+};
+
+/** 2D見下ろしエディタのカーソル等、静止状態でプレイヤーの見た目を表示する用途向け。
+ *  歩行グラ（walk: 参照）なら正面（下向き）1コマ目を切り出して描く。それ以外は drawPlayerCanvas と同じ。 */
+export const drawPlayerIconCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance, onUpdate?: () => void): void => {
+  const walk = a.spriteRef ? parseWalkRef(a.spriteRef) : null;
+  const sheetUrl = isAnimatableWalk(walk) ? (a.spriteUrl ?? (walk.source.kind === 'url' ? walk.source.url : undefined)) : undefined;
+  if (walk && sheetUrl) {
+    drawPlayerCanvas(cv, { emoji: a.emoji, color: a.color }, onUpdate);  // ロード完了までは絵文字/色で暫定表示
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const std = walk.stdId === 'auto' ? detectStandard(img.naturalWidth, img.naturalHeight) : standardById(walk.stdId);
+      const rect = cellRect(std, img.naturalWidth, img.naturalHeight, 's', 0);
+      drawCellContain(cv, img, rect.sx, rect.sy, rect.sw, rect.sh);
+      onUpdate?.();
+    };
+    img.src = sheetUrl;
+    return;
+  }
+  drawPlayerCanvas(cv, a, onUpdate);
 };
 
 export class Yume25DEngine {
