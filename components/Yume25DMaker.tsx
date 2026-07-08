@@ -7,6 +7,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Yume25DEngine, RENDER_W, RENDER_H, drawPlayerIconCanvas, type PlayerAppearance } from '@/lib/yume25d';
+import { detectStandard, standardById, cellRect, walkFrameIndex, type WayKey } from '@/lib/walk-sprite';
+import { parseWalkRef } from '@/lib/asset-ref';
 import {
   type Layout25D, type Tex25D, type Dir4, uid, normalizeWall25D,
 } from './game-presets/shared';
@@ -119,6 +121,41 @@ export default function Yume25DMaker({
       row: Math.max(0, Math.min(layout.rows - 1, cur.row)),
     }));
   }, [layout.cols, layout.rows]);
+
+  // 2Dエディタ用カーソルの向き・アニメーション状態
+  const [cursorDir, setCursorDir] = useState<WayKey>('s');
+  const [cursorMoving, setCursorMoving] = useState(false);
+  const [cursorStep, setCursorStep] = useState(0);
+  const cursorDirRef = useRef<WayKey>('s');
+  const cursorMovingRef = useRef(false);
+
+  // 歩行グラシートのロード＆キャッシュ
+  const playerImageRef = useRef<HTMLImageElement | null>(null);
+  const [playerImageLoaded, setPlayerImageLoaded] = useState(false);
+  useEffect(() => {
+    const walk = playerAppearance.spriteRef ? parseWalkRef(playerAppearance.spriteRef) : null;
+    const isAnimatableWalk = walk && walk.stdId !== 'smc_json' && !walk.crop;
+    const sheetUrl = isAnimatableWalk
+      ? (playerAppearance.spriteUrl ?? (walk.source.kind === 'url' ? walk.source.url : undefined))
+      : undefined;
+
+    if (sheetUrl) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        playerImageRef.current = img;
+        setPlayerImageLoaded(true);
+      };
+      img.onerror = () => {
+        playerImageRef.current = null;
+        setPlayerImageLoaded(false);
+      };
+      img.src = sheetUrl;
+    } else {
+      playerImageRef.current = null;
+      setPlayerImageLoaded(false);
+    }
+  }, [playerAppearance.spriteUrl, playerAppearance.spriteRef]);
 
   // ── カーソルに表示するプレイヤーの見た目（絵文字/色/spriteUrl）。3D確認と同じ描画ロジックを使い回す。 ──
   const playerIconCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -416,19 +453,51 @@ export default function Yume25DMaker({
       ctx.restore();
     }
     // 十字キー操作カーソル：他プリセットの編集画面同様、プレイヤー自身の見た目（絵文字/色/スプライト）で表示する。
-    if (!playing && playerIconCanvasRef.current) {
+    if (!playing) {
       const cx = cursor.col * CELL + CELL / 2, cy = cursor.row * CELL + CELL / 2;
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 3;
-      ctx.drawImage(playerIconCanvasRef.current, cx - CELL / 2, cy - CELL / 2, CELL, CELL);
-      ctx.restore();
+      const img = playerImageRef.current;
+      const walk = playerAppearance.spriteRef ? parseWalkRef(playerAppearance.spriteRef) : null;
+      const isWalk = walk && walk.stdId !== 'smc_json' && !walk.crop;
+
+      if (isWalk && img && img.complete && img.naturalWidth > 0) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 3;
+        const std = walk.stdId === 'auto' ? detectStandard(img.naturalWidth, img.naturalHeight) : standardById(walk.stdId);
+        const idleFrame = std.frames === 3 ? 1 : 0;
+        const frame = cursorMoving ? walkFrameIndex(std, cursorStep) : idleFrame;
+        const rect = cellRect(std, img.naturalWidth, img.naturalHeight, cursorDir, frame);
+        const sc = Math.min(CELL / rect.sw, CELL / rect.sh);
+        const w = rect.sw * sc, h = rect.sh * sc;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, cx - w / 2, cy - h / 2, w, h);
+        ctx.restore();
+      } else {
+        if (playerAppearance.emoji) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.6)';
+          ctx.shadowBlur = 3;
+          ctx.font = '18px serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(playerAppearance.emoji, cx, cy + 1);
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.6)';
+          ctx.shadowBlur = 3;
+          ctx.fillStyle = playerAppearance.color;
+          ctx.beginPath();
+          ctx.arc(cx, cy - 4, 5, 0, Math.PI * 2); ctx.fill(); // 頭
+          ctx.fillRect(cx - 5, cy - 1, 10, 8);               // 胴
+          ctx.restore();
+        }
+      }
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1.5;
       ctx.strokeRect(cursor.col * CELL + 1, cursor.row * CELL + 1, CELL - 2, CELL - 2);
     }
     ctx.restore();
-  }, [layout, is3d, level, scroll, cursor, playing, playerIconVersion]);
+  }, [layout, is3d, level, scroll, cursor, playing, playerIconVersion, cursorDir, cursorMoving, cursorStep, playerImageLoaded]);
 
   // ── 2Dエディタ操作 ───────────────────────────────────────────────────────
   // c, r はワールド座標のマス目。fx, fy はマス内の相対位置（0〜1、壁の辺選択に使用）。
@@ -521,24 +590,84 @@ export default function Yume25DMaker({
     };
   };
 
-  // ── カーソル操作（十字キーでカーソルを移動し、A ボタンで現在のツールを配置）────
+  // キーボードでの2Dエディタ移動キー押下状態を保持するSet
+  const pressedKeysRef = useRef<Set<string>>(new Set());
+
+  // 物理キーボードのリスナー
+  useEffect(() => {
+    if (is3d) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      const keyLower = e.key.toLowerCase();
+      if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(keyLower)) {
+        e.preventDefault();
+        pressedKeysRef.current.add(keyLower);
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        const cur = cursorRef.current;
+        applyEditAt(cur.col, cur.row, false, 0, 0);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      pressedKeysRef.current.delete(e.key.toLowerCase());
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      pressedKeysRef.current.clear();
+    };
+  }, [is3d, applyEditAt]);
+
+  // ── カーソル操作（十字キー・キーボードでカーソルを移動し、A ボタン/Space キーで現在のツールを配置）────
   //    プレイ中の3D操作とは独立に、2D編集画面のみで有効。カメラ窓はカーソルに追従する。
   useEffect(() => {
-    if (is3d || !virtualKeys) return;
+    if (is3d) return;
     const STEP_MS = 160;
     const timer = setInterval(() => {
       const L = layoutRef.current;
       const k = virtualKeys;
-      const dc = (k.right ? 1 : 0) - (k.left ? 1 : 0);
-      const dr = (k.down ? 1 : 0) - (k.up ? 1 : 0);
+      const pk = pressedKeysRef.current;
+
+      const left = !!((k?.left) || pk.has('arrowleft') || pk.has('a'));
+      const right = !!((k?.right) || pk.has('arrowright') || pk.has('d'));
+      const up = !!((k?.up) || pk.has('arrowup') || pk.has('w'));
+      const down = !!((k?.down) || pk.has('arrowdown') || pk.has('s'));
+      const moving = left || right || up || down;
+
+      if (moving !== cursorMovingRef.current) {
+        cursorMovingRef.current = moving;
+        setCursorMoving(moving);
+      }
+
+      if (moving) {
+        let newDir = cursorDirRef.current;
+        if (left) newDir = 'a';
+        else if (right) newDir = 'd';
+        else if (up) newDir = 'w';
+        else if (down) newDir = 's';
+        if (newDir !== cursorDirRef.current) {
+          cursorDirRef.current = newDir;
+          setCursorDir(newDir);
+        }
+      }
+
+      const dc = (right ? 1 : 0) - (left ? 1 : 0);
+      const dr = (down ? 1 : 0) - (up ? 1 : 0);
       if (dc === 0 && dr === 0) return;
+
       const cur = cursorRef.current;
       const next = {
         col: Math.max(0, Math.min(L.cols - 1, cur.col + dc)),
         row: Math.max(0, Math.min(L.rows - 1, cur.row + dr)),
       };
       if (next.col === cur.col && next.row === cur.row) return;
+
       setCursor(next);
+      setCursorStep(s => s + 1);
       setScroll(centerScroll(next.col, next.row, L.cols, L.rows));
     }, STEP_MS);
     return () => clearInterval(timer);
