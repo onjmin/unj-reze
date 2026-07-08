@@ -3619,6 +3619,13 @@ const lose = (msg: string) => {
           void isPrevWeapon;
           prevNextWeaponRef.current = isNextWeapon;
 
+          // ── つるつる床（システムタイル）：スライド中は入力を無視し、目標Xへ強制移動する（左右のみ対応） ──
+          if (iceSlideRef.current) {
+            const slide = iceSlideRef.current;
+            const dxa = slide.targetX - p.x;
+            p.vx = Math.sign(dxa) * Math.min(Math.abs(dxa), 4);
+          }
+
           // ── Horizontal movement and Wall Slide detection ──
           p.x += p.vx;
           const ph = getPlayerHeight();
@@ -3864,6 +3871,29 @@ const lose = (msg: string) => {
           // onjReze: トップビュー 4/8方向移動 ＋ 剣（近接）＋ 剣ビーム（HP満タン時）
           p.vx = 0; p.vy = 0;
           const moveSpd = pData.speed;
+          const zAlreadyOverlapping0 = isBlockedByMob(p.x, p.y, pData.w, pData.h);
+          const zCanStandAt = (x: number, y: number) => {
+            const ta = getTile(x, y), tb = getTile(x + pData.w - 1, y + pData.h - 1);
+            return !!ta?.info.passable && !!tb?.info.passable && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
+              (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
+          };
+          // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
+          if (iceSlideRef.current) {
+            const slide = iceSlideRef.current;
+            const dxz = slide.targetX - p.x, dyz = slide.targetY - p.y;
+            const distz = Math.hypot(dxz, dyz);
+            if (distz <= moveSpd || distz === 0) { p.x = slide.targetX; p.y = slide.targetY; }
+            else { p.x += (dxz / distz) * moveSpd; p.y += (dyz / distz) * moveSpd; }
+            if (p.x === slide.targetX && p.y === slide.targetY) {
+              iceSlideRef.current = null;
+              const landed = getTile(p.x, p.y);
+              const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
+              if (nextDir) {
+                const tx = p.x + nextDir[0] * TILE_SIZE, ty = p.y + nextDir[1] * TILE_SIZE;
+                if (zCanStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+              }
+            }
+          } else {
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
@@ -3873,6 +3903,7 @@ const lose = (msg: string) => {
           if (zt1?.info.passable && zt2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           zt1 = getTile(p.x, ny); zt2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (zt1?.info.passable && zt2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+          }
           // 向き更新（最後に押した方向。左右優先、無ければ上下）
           if (isLeft) onjRezeDirRef.current = { x: -1, y: 0 };
           else if (isRight) onjRezeDirRef.current = { x: 1, y: 0 };
@@ -5020,8 +5051,22 @@ const lose = (msg: string) => {
                 showGameMsg('チェックポイント！', 'timed', () => {});
               }
             }
+            // ── システムタイル：つるつる床（action系の到達判定・連結。rpg/onjRezeは移動処理側で自己完結） ──
+            else if (gameData.engine === 'action' && iceSlideRef.current && Math.abs(p.x - iceSlideRef.current.targetX) < 1) {
+              p.x = iceSlideRef.current.targetX; p.vx = 0;
+              iceSlideRef.current = null;
+              const landedSpecial = getTile(p.x, p.y)?.info?.special;
+              if (landedSpecial === 'ice-left' || landedSpecial === 'ice-right') {
+                const [ndx] = ICE_DIRS[landedSpecial];
+                const ntx = p.x + ndx * TILE_SIZE;
+                const nta = getTile(ntx, p.y), ntb = getTile(ntx + pData.w - 1, p.y + pData.h - 1);
+                if (nta?.info.passable && ntb?.info.passable && ntx >= 0 && ntx <= worldW - pData.w) {
+                  iceSlideRef.current = { targetX: ntx, targetY: p.y };
+                }
+              }
+            }
             // ── システムタイル：シーン切替床 ──
-            else if (gameData.engine === 'rpg' && center?.info?.special === 'warp' && center.info.warpSceneId) {
+            else if (center?.info?.special === 'warp' && center.info.warpSceneId) {
               if (scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current && !warpCooldownRef.current) {
                 const tgtScene = scenesRef.current.find(s => s.id === center!.info!.warpSceneId);
                 if (tgtScene) {
@@ -5034,7 +5079,7 @@ const lose = (msg: string) => {
               }
             }
             // ── システムタイル：どく沼/ダメージ床 ──
-            else if (gameData.engine === 'rpg' && center?.info?.special === 'damage') {
+            else if (center?.info?.special === 'damage') {
               if (!debugInvincibleRef.current && invulnRef.current <= 0) {
                 playSfx({ ref: `direct:${SYS_TILE_DAMAGE_SFX}`, src: SYS_TILE_DAMAGE_SFX, type: 'direct' });
                 invulnRef.current = 45;
@@ -5050,16 +5095,22 @@ const lose = (msg: string) => {
               }
             }
             // ── システムタイル：つるつる床（スライド開始） ──
-            else if (gameData.engine === 'rpg' && center?.info?.special && ICE_DIRS[center.info.special] && !iceSlideRef.current) {
+            // action（マリオ系）は重力に沿った物理移動のため、左右方向のみ強制スライドに対応する（上下は無効）。
+            // rpg/onjReze は元々グリッド上の自由8方向移動なので4方向すべてに対応する。
+            else if (center?.info?.special && ICE_DIRS[center.info.special] &&
+              (gameData.engine === 'rpg' || gameData.engine === 'onjReze' ||
+                (gameData.engine === 'action' && center.info.special !== 'ice-up' && center.info.special !== 'ice-down')) &&
+              !iceSlideRef.current) {
               const tileKey = `${center.rect.x},${center.rect.y}`;
               if (lastIceTileRef.current !== tileKey) {
                 lastIceTileRef.current = tileKey;
-                p.x = center.rect.x; p.y = center.rect.y;
                 const [dx, dy] = ICE_DIRS[center.info.special];
                 const tx = center.rect.x + dx * TILE_SIZE, ty = center.rect.y + dy * TILE_SIZE;
                 const ta = getTile(tx, ty), tb = getTile(tx + pData.w - 1, ty + pData.h - 1);
                 if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - pData.w && ty >= 0 && ty <= worldH - pData.h) {
-                  iceSlideRef.current = { targetX: tx, targetY: ty };
+                  if (gameData.engine === 'rpg' || gameData.engine === 'onjReze') { p.x = center.rect.x; p.y = center.rect.y; }
+                  else { p.x = center.rect.x; }
+                  iceSlideRef.current = { targetX: tx, targetY: (gameData.engine === 'rpg' || gameData.engine === 'onjReze') ? ty : p.y };
                 }
               }
             }
@@ -8104,16 +8155,18 @@ const lose = (msg: string) => {
                     <button onClick={addTile} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />タイルを追加</button>
 
                     {/* ── システムオブジェクト（宝箱・ワープ床・どく沼/ダメージ床・つるつる床）── */}
-                    {gameData.engine === 'rpg' && (
+                    {(gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
                       <div className="rounded-lg border border-purple-700/50 bg-purple-950/20 p-2.5 space-y-2">
                         <p className="text-[11px] font-bold text-purple-300">システムオブジェクト</p>
-                        <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきで追加されます（宝箱はプレイヤー位置に配置、床タイルはタイル一覧に追加されるのでマップに塗ってください）。</p>
+                        <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきで追加されます（宝箱はプレイヤー位置に配置、床タイルはタイル一覧に追加されるのでマップに塗ってください）。
+                          {gameData.engine === 'action' && '重力で移動するこのエンジンでは、つるつる床は左右方向のみ効果があります。'}
+                        </p>
                         <button onClick={addChestObject}
                           className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[11px] text-purple-200 hover:bg-purple-900/70">
                           <Plus size={12} />宝箱を追加
                         </button>
                         <div className="grid grid-cols-2 gap-1.5">
-                          {SYSTEM_TILE_TEMPLATES.map(tpl => (
+                          {SYSTEM_TILE_TEMPLATES.filter(tpl => gameData.engine !== 'action' || (tpl.special !== 'ice-up' && tpl.special !== 'ice-down')).map(tpl => (
                             <button key={tpl.key} onClick={() => addSystemTile(tpl)}
                               className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
                               <Plus size={11} />{tpl.label}
