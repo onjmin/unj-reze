@@ -6,7 +6,7 @@
 // プレイ/デモ：常に 3D。エンジン実体（WebGL）はマウント中1つを使い回し、アンマウントで dispose。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Yume25DEngine, RENDER_W, RENDER_H, drawPlayerIconCanvas, type PlayerAppearance } from '@/lib/yume25d';
+import { Yume25DEngine, RENDER_W, RENDER_H, drawPlayerIconCanvas, type PlayerAppearance, type GhostSpec } from '@/lib/yume25d';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef } from '@/lib/asset-ref';
 import {
@@ -25,6 +25,8 @@ export const YUME25D_TOOL_LABELS: Record<Yume25DTool, string> = { floor: '床', 
 const DRAG_TURN_SENSITIVITY = 0.006;
 /** D-padの不感帯（px）。中心付近の誤入力を防ぐ。 */
 const PAD_DEADZONE = 10;
+/** 3Dビューのタップ判定：累計移動量がこのpx以下で離したら「配置」、超えたら「視点回転ドラッグ」。 */
+const TAP_MAX_MOVE = 8;
 
 interface DialogueState { message: string; choices?: string[]; }
 
@@ -334,24 +336,108 @@ export default function Yume25DMaker({
     onPointerCancel: () => { const inp = engineRef.current?.input; if (inp) inp[prop] = false; },
   });
 
+  // ── 3D配置プレビュー（ゴースト）：カーソル位置から applyEditAt と同じ適用先を割り出し、
+  //    半透明のゴーストで「タップしたらここに置かれる」を示す。 ──
+  const lastHoverRef = useRef<{ x: number; y: number } | null>(null);
+  const computeGhost = useCallback((clientX: number, clientY: number): GhostSpec | null => {
+    const eng = engineRef.current, cv = glCanvasRef.current;
+    if (!eng || !cv) return null;
+    const rect = cv.getBoundingClientRect();
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -(((clientY - rect.top) / rect.height) * 2 - 1);
+    const L = layoutRef.current;
+    const planeY = (tool === 'wall' || tool === 'sprite' || tool === 'erase') ? level * L.wallHeight : 0;
+    const hit = eng.pickGround(ndcX, ndcY, planeY);
+    if (!hit) return null;
+    const c = Math.floor(hit.x), r = Math.floor(hit.z);
+    if (c < 0 || r < 0 || c >= L.cols || r >= L.rows) return null;
+    const fx = hit.x - c, fy = hit.z - r;
+    if (tool === 'floor') {
+      // 床なし（奈落）選択中はテクスチャが無いので暗色ハイライトで示す
+      return selFloor > 0 ? { kind: 'floor', col: c, row: r, tex: selFloor } : { kind: 'cell', col: c, row: r, level: 0, color: '#0d0a14' };
+    }
+    if (tool === 'wall') {
+      const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
+      dists.sort((a, b) => a[0] - b[0]);
+      const w = normalizeWall25D(c, r, dists[0][1], selWall, level);
+      return { kind: 'wall', col: w.col, row: w.row, dir: w.dir, level, tex: selWall };
+    }
+    if (tool === 'sprite') return { kind: 'sprite', col: c, row: r, level, tex: selSprite };
+    if (tool === 'start') return { kind: 'cell', col: c, row: r, level: 0, color: '#7fffd4' };
+    if (tool === 'talk') return { kind: 'cell', col: c, row: r, level, color: '#38bdf8' };
+    return { kind: 'cell', col: c, row: r, level, color: '#ef4444' };  // erase
+  }, [tool, level, selFloor, selWall, selSprite]);
+
+  const updateGhost = (clientX: number, clientY: number) => {
+    lastHoverRef.current = { x: clientX, y: clientY };
+    engineRef.current?.setGhost(computeGhost(clientX, clientY));
+  };
+
+  // ツール/段/パレット切替やビュー・プレイ状態の変化時に、その場でゴーストを描き直す/消す。
+  useEffect(() => {
+    if (!is3d || playing || demo) { engineRef.current?.setGhost(null); return; }
+    const p = lastHoverRef.current;
+    if (p) engineRef.current?.setGhost(computeGhost(p.x, p.y));
+  }, [is3d, playing, demo, computeGhost]);
+
   // ── 3D操作：ドラッグでカメラ回転（マウス・タッチ共通。Pointer Events を使うので追加実装不要）。
-  //    横方向＝旋回(yaw)、縦方向＝見上げ/見下ろし(pitch)。 ──
-  const dragRef = useRef<{ id: number; lastX: number; lastY: number } | null>(null);
+  //    横方向＝旋回(yaw)、縦方向＝見上げ/見下ろし(pitch)。
+  //    編集中（3D確認ビュー）は、ほぼ動かさず離した「タップ」を配置操作として扱う。 ──
+  const dragRef = useRef<{ id: number; lastX: number; lastY: number; moved: number } | null>(null);
   const glPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!is3d || demo) return;
     e.preventDefault();
     tryCapturePointer(e.currentTarget, e.pointerId);
-    dragRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY };
+    dragRef.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, moved: 0 };
+    // タッチにはホバーが無いので、指を置いた時点でゴーストを出して「離すとここ」を見せる。
+    if (!playing) updateGhost(e.clientX, e.clientY);
   };
   const glPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const d = dragRef.current;
-    if (!d || d.id !== e.pointerId) return;
+    if (!d || d.id !== e.pointerId) {
+      // 非ドラッグ（マウスホバー）：カーソル位置の配置プレビューを追従させる。
+      if (is3d && !playing && !demo) updateGhost(e.clientX, e.clientY);
+      return;
+    }
     const dx = e.clientX - d.lastX, dy = e.clientY - d.lastY;
     d.lastX = e.clientX; d.lastY = e.clientY;
+    d.moved += Math.abs(dx) + Math.abs(dy);
     if (dx !== 0 || dy !== 0) engineRef.current?.turnBy(-dx * DRAG_TURN_SENSITIVITY, -dy * DRAG_TURN_SENSITIVITY);
+    // タップ閾値を超えたら視点回転ドラッグなのでゴーストを消す。閾値内なら追従させる。
+    if (!playing) {
+      if (d.moved > TAP_MAX_MOVE) engineRef.current?.setGhost(null);
+      else updateGhost(e.clientX, e.clientY);
+    }
   };
-  const glPointerEnd = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const glPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = dragRef.current;
+    if (d?.id !== e.pointerId) return;
+    dragRef.current = null;
+    if (playing) return;
+    // タップ判定：指ブレ程度しか動いていなければ、視線の先のマスへ現在のツールを適用する。
+    if (d.moved <= TAP_MAX_MOVE) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
+      const L = layoutRef.current;
+      // 壁/スプライト/消去は編集中の段の高さの水平面でピッキング（上段の配置・消去も直感通りになる）。
+      const planeY = (tool === 'wall' || tool === 'sprite' || tool === 'erase') ? level * L.wallHeight : 0;
+      const hit = engineRef.current?.pickGround(ndcX, ndcY, planeY);
+      if (hit) {
+        const c = Math.floor(hit.x), r = Math.floor(hit.z);
+        applyEditAt(c, r, false, hit.x - c, hit.z - r);
+      }
+    }
+    // 視点回転の終了後や配置直後も、カーソル位置のプレビューを復帰させる。
+    updateGhost(e.clientX, e.clientY);
+  };
+  const glPointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (dragRef.current?.id === e.pointerId) dragRef.current = null;
+    engineRef.current?.setGhost(null);
+  };
+  const glPointerLeave = () => {
+    lastHoverRef.current = null;
+    engineRef.current?.setGhost(null);
   };
 
   // ── 仮想 D-pad：1つの領域内でのポインタ位置から forward/back/strafeL/strafeR を合成する ──
@@ -711,8 +797,9 @@ export default function Yume25DMaker({
         style={{ imageRendering: 'pixelated', display: is3d ? 'block' : 'none' }}
         onPointerDown={glPointerDown}
         onPointerMove={glPointerMove}
-        onPointerUp={glPointerEnd}
-        onPointerCancel={glPointerEnd}
+        onPointerUp={glPointerUp}
+        onPointerCancel={glPointerCancel}
+        onPointerLeave={glPointerLeave}
       />
 
       {/* 2D見下ろしエディタ：他プリセットと同じ箱サイズに収まる固定窓（VIEW_COLS×VIEW_ROWS）。 */}

@@ -59,21 +59,21 @@ export default function Yume25DEditorPanel({
         </button>
       </div>
 
-      {view === '2d' ? (
-        <div className="flex items-center gap-1 flex-wrap">
-          {(Object.keys(YUME25D_TOOL_LABELS) as Yume25DTool[]).map(t => (
-            <button key={t} onClick={() => onToolChange(t)}
-              className={`px-2 py-1 text-[11px] font-bold rounded ${tool === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-              {YUME25D_TOOL_LABELS[t]}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <span className="text-[10px] text-gray-400 px-1">WASDで移動/ストレイフ・ドラッグで視点回転(上下も可)・Shiftでダッシュ・Spaceでジャンプ・E/Fではなす</span>
+      {/* ツール：2D/3D どちらのビューでも使える（3Dはタップした視線の先のマスへ配置）。 */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {(Object.keys(YUME25D_TOOL_LABELS) as Yume25DTool[]).map(t => (
+          <button key={t} onClick={() => onToolChange(t)}
+            className={`px-2 py-1 text-[11px] font-bold rounded ${tool === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+            {YUME25D_TOOL_LABELS[t]}
+          </button>
+        ))}
+      </div>
+      {view === '3d' && (
+        <span className="text-[10px] text-gray-400 px-1">タップ/クリックで配置・WASDで移動/ストレイフ・ドラッグで視点回転(上下も可)・Shiftでダッシュ・Spaceでジャンプ・E/Fではなす</span>
       )}
 
       {/* 段（高さ）セレクタ：壁/スプライトはこの段に配置される。マイクラ風の縦積み。 */}
-      {view === '2d' && (tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
+      {(tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
         <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[10px] text-gray-400 px-0.5">高さ</span>
           {Array.from({ length: MAX_LEVEL + 1 }, (_, lv) => (
@@ -88,7 +88,7 @@ export default function Yume25DEditorPanel({
       )}
 
       {/* パレット */}
-      {view === '2d' && paletteKind && (
+      {paletteKind && (
         <div className="flex items-center gap-1 flex-wrap">
           {paletteKind === 'floor' && (
             <button onClick={() => setPaletteSel(0)}
@@ -106,7 +106,7 @@ export default function Yume25DEditorPanel({
       )}
 
       {/* 会話設定：スプライトをタップして選択し、メッセージ/選択肢/はなせるかどうかを編集する */}
-      {view === '2d' && tool === 'talk' && (() => {
+      {tool === 'talk' && (() => {
         const target = layout.billboards.find(b => b.id === talkTargetId);
         if (!target) return (
           <p className="text-[10px] text-gray-500 px-1">スプライトをタップして選択してください</p>
@@ -133,7 +133,7 @@ export default function Yume25DEditorPanel({
       })()}
 
       {/* テクスチャ個別設定 */}
-      {view === '2d' && paletteSel !== 0 && (() => {
+      {paletteSel !== 0 && (() => {
         const t = layout.textures[paletteSel];
         if (!t) return null;
         return (

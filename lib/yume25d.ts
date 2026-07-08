@@ -45,6 +45,16 @@ export interface Input25D {
 export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; spriteRef?: string; }
 export type PovMode = 'first' | 'third';
 
+/** 3Dビュー編集時の配置プレビュー（ゴースト）。カーソル位置のツール適用先を半透明で示す。
+ *  wall の col/row/dir は normalizeWall25D 済み（dir=0:北辺 / 3:西辺）を渡すこと。 */
+export type GhostSpec =
+  | { kind: 'floor'; col: number; row: number; tex: number }
+  | { kind: 'wall'; col: number; row: number; dir: Dir4; level: number; tex: number }
+  | { kind: 'sprite'; col: number; row: number; level: number; tex: number }
+  | { kind: 'cell'; col: number; row: number; level: number; color: string };
+
+const GHOST_OPACITY = 0.45;
+
 /** 歩行グラシートの足踏みアニメ状態。lastFrame/lastKey が変わったコマだけ再描画する。 */
 interface WalkAnimState { img: HTMLImageElement; std: WalkStandard; lastFrame: number; }
 
@@ -198,6 +208,13 @@ export class Yume25DEngine {
   private texEntries = new Map<number, TexEntry>();
   private demoTurnFrames = 0;
 
+  // 配置プレビュー（ゴースト）。1メッシュを使い回し、ツール対象に応じてジオメトリ/姿勢を差し替える。
+  private ghostMesh: THREE.Mesh;
+  private ghostMat: THREE.MeshBasicMaterial;
+  private ghostPlaneGeo: THREE.PlaneGeometry;  // 1×1 共用（床・壁・セルハイライト）
+  private ghostBillGeo: THREE.PlaneGeometry;   // スプライト用（ビルボードと同寸）
+  private ghostKind: GhostSpec['kind'] | null = null;
+
   private playerAppearance: PlayerAppearance = { color: '#ffffff' };
   private playerCanvas: HTMLCanvasElement;
   private playerTexture: THREE.CanvasTexture;
@@ -235,6 +252,14 @@ export class Yume25DEngine {
     this.playerMesh = new THREE.Mesh(this.playerGeo, this.playerMat);
     this.playerMesh.visible = this.pov === 'third';
     this.scene.add(this.playerMesh);
+
+    // 配置プレビュー（ゴースト）：worldObjects に入れず、buildScene のシーン再構築後も生き残らせる。
+    this.ghostPlaneGeo = new THREE.PlaneGeometry(1, 1);
+    this.ghostBillGeo = new THREE.PlaneGeometry(0.9, 0.9);
+    this.ghostMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: GHOST_OPACITY, depthWrite: false, side: THREE.DoubleSide });
+    this.ghostMesh = new THREE.Mesh(this.ghostPlaneGeo, this.ghostMat);
+    this.ghostMesh.visible = false;
+    this.scene.add(this.ghostMesh);
 
     this.buildScene();
     this.resetToStart();
@@ -319,6 +344,62 @@ export class Yume25DEngine {
     if (deltaPitch !== 0) this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch + deltaPitch));
   }
 
+  /** 編集用ピッキング：画面NDC座標から高さ y=planeY の水平面へレイを飛ばし、交点をワールド座標で返す。
+   *  水平線より上を向いていて交点が無い、または霧の彼方（fogFar超・見えない場所）なら null。 */
+  pickGround(ndcX: number, ndcY: number, planeY = 0): { x: number; z: number } | null {
+    this.camera.updateMatrixWorld();
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
+    const pt = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(plane, pt)) return null;
+    if (pt.distanceTo(this.camera.position) > this.layout.fogFar) return null;
+    return { x: pt.x, z: pt.z };
+  }
+
+  /** 配置プレビュー：ツールが適用される場所へ半透明ゴーストを表示する（null で非表示）。 */
+  setGhost(spec: GhostSpec | null) {
+    const m = this.ghostMesh, mat = this.ghostMat;
+    if (!spec) {
+      m.visible = false;
+      this.ghostKind = null;
+      return;
+    }
+    const H = this.layout.wallHeight;
+    this.ghostKind = spec.kind;
+    const hadMap = mat.map !== null;
+    m.rotation.set(0, 0, 0);
+    m.scale.set(1, 1, 1);
+    if (spec.kind === 'cell') {
+      // 開始/会話設定/消去など「マスを指す」だけのツールは色付きハイライト
+      m.geometry = this.ghostPlaneGeo;
+      mat.map = null;
+      mat.color.set(spec.color);
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(spec.col + 0.5, spec.level * H + 0.02, spec.row + 0.5);
+    } else {
+      mat.map = this.getTex(spec.tex);
+      mat.color.set('#ffffff');
+      if (spec.kind === 'floor') {
+        m.geometry = this.ghostPlaneGeo;
+        m.rotation.x = -Math.PI / 2;
+        m.position.set(spec.col + 0.5, 0.02, spec.row + 0.5);
+      } else if (spec.kind === 'wall') {
+        m.geometry = this.ghostPlaneGeo;
+        m.scale.y = H;
+        const y = spec.level * H + H / 2;
+        if (spec.dir === 0) m.position.set(spec.col + 0.5, y, spec.row);            // 北辺
+        else { m.rotation.y = Math.PI / 2; m.position.set(spec.col, y, spec.row + 0.5); }  // 西辺
+      } else {
+        m.geometry = this.ghostBillGeo;
+        m.rotation.y = this.yaw;  // 以後は step() がビルボード同様カメラへ正対させる
+        m.position.set(spec.col + 0.5, spec.level * H + 0.45, spec.row + 0.5);
+      }
+    }
+    if (hadMap !== (mat.map !== null)) mat.needsUpdate = true;  // map の有無切替はシェーダ再コンパイルが要る
+    m.visible = true;
+  }
+
   /** 近くの「はなせる」ビルボードを1つ返す（範囲内で最も近いもの。無ければ null）。 */
   getInteractable(): Billboard25D | null {
     let best: Billboard25D | null = null;
@@ -361,6 +442,9 @@ export class Yume25DEngine {
     this.playerGeo.dispose();
     this.playerMat.dispose();
     this.playerTexture.dispose();
+    this.ghostPlaneGeo.dispose();
+    this.ghostBillGeo.dispose();
+    this.ghostMat.dispose();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -737,5 +821,6 @@ export class Yume25DEngine {
     }
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;
+    if (this.ghostKind === 'sprite') this.ghostMesh.rotation.y = this.yaw;
   }
 }
