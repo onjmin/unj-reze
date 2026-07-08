@@ -72,7 +72,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
   };
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col">
+    <div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
       <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
         <div className="sticky top-0 z-10 bg-[#0b0e14]/95 backdrop-blur border-b border-gray-800">
           <div className="flex items-center px-3 h-11">

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { encodePost } from '@/lib/sqids';
+import { attachGameInfo } from '@/lib/game-embed';
 
 export const runtime = 'edge';
 
@@ -12,5 +13,6 @@ export async function GET(
   const userId = new URL(request.url).searchParams.get('userId') || undefined;
   const decoded = decodeURIComponent(tag);
   const posts = await db.getPostsByHashtag(decoded, userId);
+  await attachGameInfo(posts);
   return NextResponse.json(posts.map(encodePost));
 }

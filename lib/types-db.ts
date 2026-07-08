@@ -23,6 +23,8 @@ export interface DbPost {
   heartsTotal: number;
   hasGame?: boolean;
   gameId?: number;
+  gameTitle?: string;
+  gameThumbnail?: string;
   originType?: OriginType;
   isFalseDeclaration?: boolean;
   isEdited?: boolean;

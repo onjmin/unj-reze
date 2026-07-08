@@ -171,11 +171,18 @@ export default function LiveGameView({ userId, sessionId }: Props) {
             onComment={async (text, displayName) => {
               if (!info.postId) return;
               setDanmakuComments(prev => [...prev, `${displayName}: ${text}`]);
-              await fetch(`/api/posts/${info.postId}/replies`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ displayName, content: text, parentPostId: info.postId }),
-              }).catch(() => {});
+              try {
+                const res = await fetch(`/api/posts/${info.postId}/replies`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ displayName, content: text, parentPostId: info.postId }),
+                });
+                if (res.ok) {
+                  const reply: { id: string } = await res.json();
+                  const replyId = decodeId(reply.id) || 0;
+                  commentLastIdRef.current = Math.max(commentLastIdRef.current, replyId);
+                }
+              } catch {}
             }}
           />
         ) : info && !info.manifest ? (

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { DbPost } from '@/lib/types-db';
 import { encodePost } from '@/lib/sqids';
+import { attachGameInfo } from '@/lib/game-embed';
 
 export const runtime = 'edge';
 
@@ -26,6 +27,7 @@ export async function GET(
   }
 
   const displayName = (await db.getUserDisplayName(id)) || id;
+  await attachGameInfo(posts);
 
   return NextResponse.json({
     id,

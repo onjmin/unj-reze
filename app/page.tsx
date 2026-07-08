@@ -531,7 +531,7 @@ export default function App() {
   };
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 h-screen w-full flex flex-col overflow-hidden select-none font-sans relative">
+    <div className="bg-[#0b0e14] text-gray-100 h-dvh w-full flex flex-col overflow-hidden select-none font-sans relative">
       <RightDrawer
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -589,7 +589,7 @@ export default function App() {
         />
       )}
 
-      <div className="relative w-full max-w-2xl mx-auto border-x border-gray-800 h-screen flex flex-col shrink-0">
+      <div className="relative w-full max-w-2xl mx-auto border-x border-gray-800 h-dvh flex flex-col shrink-0">
         {!activeScreen && (
           <>
             <Header
@@ -623,7 +623,7 @@ export default function App() {
               );
             })()}
 
-            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto pb-20'}`}>
+            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col pb-14' : 'overflow-y-auto pb-20'}`}>
               {currentNav === 'home' && topTab === 'game' && (
                 <LiveGameView
                   userId={userId}

@@ -17,7 +17,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
 
   if (userPosts.length === 0) {
     return (
-      <div className="bg-[#0b0e14] text-gray-100 min-h-screen flex flex-col items-center justify-center space-y-3">
+      <div className="bg-[#0b0e14] text-gray-100 min-h-dvh flex flex-col items-center justify-center space-y-3">
         <p className="text-gray-500 text-sm">ユーザーが見つかりません</p>
         <Link href="/" className="text-blue-400 text-xs hover:underline">戻る</Link>
       </div>
@@ -25,7 +25,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
   }
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col">
+    <div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
       <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
         <div className="sticky top-0 z-10 bg-[#0b0e14]/95 backdrop-blur border-b border-gray-800">
           <div className="flex items-center px-3 h-11">

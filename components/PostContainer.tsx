@@ -399,7 +399,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               onClick={() => openGame(post.gameId, post.id)}
               className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
             >
-              <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
+              {post.gameThumbnail && (
+                <div
+                  className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"
+                  style={{ backgroundImage: `url('${post.gameThumbnail}')` }}
+                ></div>
+              )}
               <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
               <div className="z-10 flex flex-col items-center space-y-1">
                 <div className="bg-red-600 p-3 rounded-full shadow-[0_0_15px_rgba(220,38,38,0.5)] group-hover:scale-110 transition-transform">
@@ -408,7 +413,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                 <span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">TAP TO PLAY GAME</span>
               </div>
               <div className="absolute bottom-2 left-2.5 z-10 flex items-center space-x-1.5">
-                <span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">escape_the_mushroom</span>
+                <span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">{post.gameTitle || 'ゲーム'}</span>
               </div>
             </div>
           )}

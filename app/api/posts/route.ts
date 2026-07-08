@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
+import { attachGameInfo } from '@/lib/game-embed';
 
 export const runtime = 'edge';
 
@@ -9,6 +10,7 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     const userId = url.searchParams.get('userId') || undefined;
     const posts = await db.getPosts(userId);
+    await attachGameInfo(posts);
     return NextResponse.json(posts.map(encodePost));
   } catch (e) {
     console.error('[GET /api/posts]', e);
@@ -35,6 +37,7 @@ export async function POST(request: NextRequest) {
     }
 
     const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId: decodedGameId === null ? undefined : decodedGameId, originType });
+    await attachGameInfo(post);
     return NextResponse.json(encodePost(post), { status: 201 });
   } catch (e) {
     console.error('[POST /api/posts]', e);

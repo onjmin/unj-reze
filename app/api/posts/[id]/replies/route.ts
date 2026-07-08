@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
+import { attachGameInfo } from '@/lib/game-embed';
 
 export const runtime = 'edge';
 
@@ -15,6 +16,7 @@ export async function GET(
   }
   const userId = new URL(_request.url).searchParams.get('userId') || undefined;
   const replies = await db.getReplies(decodedId, userId);
+  await attachGameInfo(replies);
   return NextResponse.json(replies.map(encodePost));
 }
 
@@ -47,5 +49,6 @@ export async function POST(
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
 
+  await attachGameInfo(reply);
   return NextResponse.json(encodePost(reply), { status: 201 });
 }

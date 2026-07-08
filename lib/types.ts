@@ -47,6 +47,8 @@ export interface Post {
   heartsTotal: number;
   hasGame?: boolean;
   gameId?: string;
+  gameTitle?: string;
+  gameThumbnail?: string;
   /** 自己申告の権利表記。未設定(申告なし)なら undefined */
   originType?: OriginType;
   /** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
