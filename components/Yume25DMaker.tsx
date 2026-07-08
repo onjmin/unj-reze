@@ -103,29 +103,34 @@ export default function Yume25DMaker({
   });
   const centerScroll = (col: number, row: number, cols: number, rows: number) =>
     clampScroll(col - Math.floor(VIEW_COLS / 2), row - Math.floor(VIEW_ROWS / 2), cols, rows);
-  const [scroll, setScroll] = useState(() => centerScroll(layout.start.col, layout.start.row, layout.cols, layout.rows));
-  const scrollRef = useRef(scroll);
-  scrollRef.current = scroll;
-  // マップサイズ変更（設定パネル）で現在のスクロール位置が範囲外になったら補正する。
-  useEffect(() => {
-    setScroll(s => clampScroll(s.col, s.row, layout.cols, layout.rows));
-  }, [layout.cols, layout.rows]);
 
-  // ── 十字キー操作カーソル：2D編集画面でプレイヤーの代わりに動かす配置先セル。カメラ窓はこれに追従する。 ──
-  const [cursor, setCursor] = useState(() => ({ col: layout.start.col, row: layout.start.row }));
-  const cursorRef = useRef(cursor);
-  cursorRef.current = cursor;
+  // スムーズな float 座標を useRef で直接保持する（毎フレーム再レンダリングするのを防ぐため）
+  const cursorRef = useRef({ col: layout.start.col, row: layout.start.row });
+  const scrollRef = useRef({ col: 0, row: 0 });
+
+  // 初期値セット
+  const isInitializedRef = useRef(false);
+  if (!isInitializedRef.current) {
+    scrollRef.current = centerScroll(layout.start.col, layout.start.row, layout.cols, layout.rows);
+    isInitializedRef.current = true;
+  }
+
+  // スタート地点が変更されたら位置を同期する
   useEffect(() => {
-    setCursor(cur => ({
-      col: Math.max(0, Math.min(layout.cols - 1, cur.col)),
-      row: Math.max(0, Math.min(layout.rows - 1, cur.row)),
-    }));
+    cursorRef.current = { col: layout.start.col, row: layout.start.row };
+    scrollRef.current = centerScroll(layout.start.col, layout.start.row, layout.cols, layout.rows);
+  }, [layout.start.col, layout.start.row]);
+
+  // マップサイズ変更（設定パネル）で現在の位置が範囲外になったら補正する。
+  useEffect(() => {
+    cursorRef.current = {
+      col: Math.max(0, Math.min(layout.cols - 1, cursorRef.current.col)),
+      row: Math.max(0, Math.min(layout.rows - 1, cursorRef.current.row)),
+    };
+    scrollRef.current = clampScroll(scrollRef.current.col, scrollRef.current.row, layout.cols, layout.rows);
   }, [layout.cols, layout.rows]);
 
   // 2Dエディタ用カーソルの向き・アニメーション状態
-  const [cursorDir, setCursorDir] = useState<WayKey>('s');
-  const [cursorMoving, setCursorMoving] = useState(false);
-  const [cursorStep, setCursorStep] = useState(0);
   const cursorDirRef = useRef<WayKey>('s');
   const cursorMovingRef = useRef(false);
 
@@ -382,12 +387,14 @@ export default function Yume25DMaker({
   };
 
   // ── 2Dエディタ描画：VIEW_COLS×VIEW_ROWS マス分の窓だけを scroll 位置基準で描画する ──────
-  useEffect(() => {
+  const draw2DCanvas = useCallback(() => {
     if (is3d) return;
     const cv = edCanvasRef.current; if (!cv) return;
     const ctx = cv.getContext('2d')!;
-    const L = layout;
-    const offX = scroll.col * CELL, offY = scroll.row * CELL;
+    const L = layoutRef.current;
+    const scr = scrollRef.current;
+    const cur = cursorRef.current;
+    const offX = scr.col * CELL, offY = scr.row * CELL;
     ctx.clearRect(0, 0, cv.width, cv.height);
     ctx.save();
     ctx.beginPath();
@@ -454,7 +461,7 @@ export default function Yume25DMaker({
     }
     // 十字キー操作カーソル：他プリセットの編集画面同様、プレイヤー自身の見た目（絵文字/色/スプライト）で表示する。
     if (!playing) {
-      const cx = cursor.col * CELL + CELL / 2, cy = cursor.row * CELL + CELL / 2;
+      const cx = cur.col * CELL + CELL / 2, cy = cur.row * CELL + CELL / 2;
       const img = playerImageRef.current;
       const walk = playerAppearance.spriteRef ? parseWalkRef(playerAppearance.spriteRef) : null;
       const isWalk = walk && walk.stdId !== 'smc_json' && !walk.crop;
@@ -465,8 +472,10 @@ export default function Yume25DMaker({
         ctx.shadowBlur = 3;
         const std = walk.stdId === 'auto' ? detectStandard(img.naturalWidth, img.naturalHeight) : standardById(walk.stdId);
         const idleFrame = std.frames === 3 ? 1 : 0;
-        const frame = cursorMoving ? walkFrameIndex(std, cursorStep) : idleFrame;
-        const rect = cellRect(std, img.naturalWidth, img.naturalHeight, cursorDir, frame);
+        const timeSec = performance.now() / 1000;
+        const fps = cursorMovingRef.current ? 8 : 4;
+        const frame = walkFrameIndex(std, Math.floor(timeSec * fps)); // Always animate walk graphic!
+        const rect = cellRect(std, img.naturalWidth, img.naturalHeight, cursorDirRef.current, frame);
         const sc = Math.min(CELL / rect.sw, CELL / rect.sh);
         const w = rect.sw * sc, h = rect.sh * sc;
         ctx.imageSmoothingEnabled = false;
@@ -494,10 +503,15 @@ export default function Yume25DMaker({
       }
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(cursor.col * CELL + 1, cursor.row * CELL + 1, CELL - 2, CELL - 2);
+      ctx.strokeRect(Math.floor(cur.col) * CELL + 1, Math.floor(cur.row) * CELL + 1, CELL - 2, CELL - 2);
     }
     ctx.restore();
-  }, [layout, is3d, level, scroll, cursor, playing, playerIconVersion, cursorDir, cursorMoving, cursorStep, playerImageLoaded]);
+  }, [level, playing, playerAppearance, is3d]);
+
+  // マウント中または依存関係が変更されたら初回だけ描画する
+  useEffect(() => {
+    draw2DCanvas();
+  }, [draw2DCanvas]);
 
   // ── 2Dエディタ操作 ───────────────────────────────────────────────────────
   // c, r はワールド座標のマス目。fx, fy はマス内の相対位置（0〜1、壁の辺選択に使用）。
@@ -543,7 +557,7 @@ export default function Yume25DMaker({
         return { ...l, start: { ...l.start, col: c, row: r } };
       });
       // 他プリセット同様、開始地点を動かしたらそこを中心にカメラ窓を再スクロールする。
-      setScroll(centerScroll(c, r, L.cols, L.rows));
+      scrollRef.current = centerScroll(c, r, L.cols, L.rows);
       return;
     }
     if (tool === 'talk') {
@@ -607,7 +621,7 @@ export default function Yume25DMaker({
       } else if (e.key === ' ') {
         e.preventDefault();
         const cur = cursorRef.current;
-        applyEditAt(cur.col, cur.row, false, 0, 0);
+        applyEditAt(Math.floor(cur.col), Math.floor(cur.row), false, 0, 0);
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -622,15 +636,19 @@ export default function Yume25DMaker({
     };
   }, [is3d, applyEditAt]);
 
-  // ── カーソル操作（十字キー・キーボードでカーソルを移動し、A ボタン/Space キーで現在のツールを配置）────
-  //    プレイ中の3D操作とは独立に、2D編集画面のみで有効。カメラ窓はカーソルに追従する。
+  // ── カーソル操作（十字キー・キーボードでスムーズに移動）＆2Dキャンバス高頻度描画ループ ────
   useEffect(() => {
     if (is3d) return;
-    const STEP_MS = 160;
-    const timer = setInterval(() => {
+    let rafId = 0;
+    let lastTime = performance.now();
+
+    const loop = () => {
       const L = layoutRef.current;
       const k = virtualKeys;
       const pk = pressedKeysRef.current;
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - lastTime) / 1000);
+      lastTime = now;
 
       const left = !!((k?.left) || pk.has('arrowleft') || pk.has('a'));
       const right = !!((k?.right) || pk.has('arrowright') || pk.has('d'));
@@ -638,10 +656,7 @@ export default function Yume25DMaker({
       const down = !!((k?.down) || pk.has('arrowdown') || pk.has('s'));
       const moving = left || right || up || down;
 
-      if (moving !== cursorMovingRef.current) {
-        cursorMovingRef.current = moving;
-        setCursorMoving(moving);
-      }
+      cursorMovingRef.current = moving;
 
       if (moving) {
         let newDir = cursorDirRef.current;
@@ -649,30 +664,34 @@ export default function Yume25DMaker({
         else if (right) newDir = 'd';
         else if (up) newDir = 'w';
         else if (down) newDir = 's';
-        if (newDir !== cursorDirRef.current) {
-          cursorDirRef.current = newDir;
-          setCursorDir(newDir);
+        cursorDirRef.current = newDir;
+
+        const speed = 4.8; // Smooth movement speed: cells per second
+        let dx = (right ? 1 : 0) - (left ? 1 : 0);
+        let dy = (down ? 1 : 0) - (up ? 1 : 0);
+        if (dx !== 0 && dy !== 0) {
+          const len = Math.hypot(dx, dy);
+          dx /= len;
+          dy /= len;
         }
+
+        const cur = cursorRef.current;
+        const nextCol = Math.max(0, Math.min(L.cols - 1, cur.col + dx * speed * dt));
+        const nextRow = Math.max(0, Math.min(L.rows - 1, cur.row + dy * speed * dt));
+        cursorRef.current = { col: nextCol, row: nextRow };
+        scrollRef.current = centerScroll(nextCol, nextRow, L.cols, L.rows);
       }
 
-      const dc = (right ? 1 : 0) - (left ? 1 : 0);
-      const dr = (down ? 1 : 0) - (up ? 1 : 0);
-      if (dc === 0 && dr === 0) return;
+      draw2DCanvas();
 
-      const cur = cursorRef.current;
-      const next = {
-        col: Math.max(0, Math.min(L.cols - 1, cur.col + dc)),
-        row: Math.max(0, Math.min(L.rows - 1, cur.row + dr)),
-      };
-      if (next.col === cur.col && next.row === cur.row) return;
+      rafId = requestAnimationFrame(loop);
+    };
 
-      setCursor(next);
-      setCursorStep(s => s + 1);
-      setScroll(centerScroll(next.col, next.row, L.cols, L.rows));
-    }, STEP_MS);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [is3d, virtualKeys]);
+    rafId = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [is3d, virtualKeys, draw2DCanvas]);
 
   // A ボタン（配置/消す）：立ち上がりエッジでのみ発火し、カーソル位置へ現在のツールを適用する。
   const prevActionRef = useRef(false);
@@ -681,7 +700,7 @@ export default function Yume25DMaker({
     const pressed = !!virtualKeys.action;
     if (pressed && !prevActionRef.current) {
       const cur = cursorRef.current;
-      applyEditAt(cur.col, cur.row, false, 0, 0);
+      applyEditAt(Math.floor(cur.col), Math.floor(cur.row), false, 0, 0);
     }
     prevActionRef.current = pressed;
   }, [is3d, virtualKeys, virtualKeys?.action, applyEditAt]);
