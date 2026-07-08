@@ -37,7 +37,8 @@ import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
-import Yume25DMaker from './Yume25DMaker';
+import Yume25DMaker, { type Yume25DTool, yume25dTexList } from './Yume25DMaker';
+import Yume25DEditorPanel from './Yume25DEditorPanel';
 
 export type { PresetId };
 
@@ -1003,6 +1004,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
   const [editModeType, setEditModeType] = useState<'move_place' | 'panel_input'>('panel_input');
+  // ── yume25d（ゆめにっき3D）編集パネルの状態。パネルをキャンバス外（サイドバー）に配置するため GameMaker 側で保持する。 ──
+  const [yume25dView, setYume25dView] = useState<'2d' | '3d'>('2d');
+  const [yume25dTool, setYume25dTool] = useState<Yume25DTool>('wall');
+  const [yume25dLevel, setYume25dLevel] = useState(0);
+  const [yume25dSelFloor, setYume25dSelFloor] = useState(() => yume25dTexList(gameData.layout25d, 'floor')[0]?.id ?? 0);
+  const [yume25dSelWall, setYume25dSelWall] = useState(() => yume25dTexList(gameData.layout25d, 'wall')[0]?.id ?? 0);
+  const [yume25dSelSprite, setYume25dSelSprite] = useState(() => yume25dTexList(gameData.layout25d, 'sprite')[0]?.id ?? 0);
+  const [yume25dSettingsOpen, setYume25dSettingsOpen] = useState(false);
+  const [yume25dTalkTargetId, setYume25dTalkTargetId] = useState<string | null>(null);
   const [charSubTab, setCharSubTab] = useState<'jiki' | 'boss' | 'midboss' | 'zenhan' | 'kohan'>('jiki');
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
@@ -6627,6 +6637,14 @@ const lose = (msg: string) => {
                 playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color, spriteUrl: gameData.player.spriteUrl, spriteRef: gameData.player.spriteRef }}
                 onPickImage={(target) => setPicker({ mode: 'image', target })}
                 virtualKeys={touchRef.current}
+                view={yume25dView}
+                tool={yume25dTool}
+                level={yume25dLevel}
+                selFloor={yume25dSelFloor}
+                selWall={yume25dSelWall}
+                selSprite={yume25dSelSprite}
+                talkTargetId={yume25dTalkTargetId}
+                onTalkTargetChange={setYume25dTalkTargetId}
               />
             ) : (
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
@@ -7370,7 +7388,10 @@ const lose = (msg: string) => {
                     let btnXActive = false; let btnXLabel = "";
                     let btnYActive = false; let btnYLabel = "";
 
-                    if (!isPlaying) {
+                    if (!isPlaying && gameData.engine === 'yume25d') {
+                      // ゆめにっき3D：十字キーでカーソルを動かし、Aボタンで現在のツール（床/壁/スプライト/開始等）を配置する。
+                      btnAActive = true; btnALabel = yume25dTool === 'erase' ? '消す' : '配置';
+                    } else if (!isPlaying) {
                       btnAActive = true; btnALabel = "PUT";
                       btnBActive = selectedObjId !== null || selectedObjIdRef.current !== null; btnBLabel = "DEL";
                     } else if (gameData.engine === 'action') {
@@ -7786,8 +7807,30 @@ const lose = (msg: string) => {
                     )}
                   </div>
                 )}
-                {/* ── MAP ── */}
-                {editorTab === 'map' && (
+                {/* ── MAP（yume25d は 2D 見下ろし編集/3D 確認パネルをここに吸収） ── */}
+                {editorTab === 'map' && gameData.engine === 'yume25d' && (
+                  <Yume25DEditorPanel
+                    layout={gameData.layout25d!}
+                    onLayoutChange={updater => setGameData(prev => prev.layout25d ? { ...prev, layout25d: updater(prev.layout25d) } : prev)}
+                    onPickImage={(target) => setPicker({ mode: 'image', target })}
+                    view={yume25dView}
+                    onViewChange={setYume25dView}
+                    tool={yume25dTool}
+                    onToolChange={setYume25dTool}
+                    level={yume25dLevel}
+                    onLevelChange={setYume25dLevel}
+                    selFloor={yume25dSelFloor}
+                    onSelFloorChange={setYume25dSelFloor}
+                    selWall={yume25dSelWall}
+                    onSelWallChange={setYume25dSelWall}
+                    selSprite={yume25dSelSprite}
+                    onSelSpriteChange={setYume25dSelSprite}
+                    settingsOpen={yume25dSettingsOpen}
+                    onSettingsOpenChange={setYume25dSettingsOpen}
+                    talkTargetId={yume25dTalkTargetId}
+                  />
+                )}
+                {editorTab === 'map' && gameData.engine !== 'yume25d' && (
                   <div className="space-y-3">
                     {/* ── マップサイズ（自由拡張・東方以外）── */}
                     {gameData.engine !== 'touhou' && (

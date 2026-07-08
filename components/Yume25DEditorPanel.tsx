@@ -1,0 +1,233 @@
+'use client';
+
+// yume25d（ゆめにっき3D）の編集パネル。かつては Yume25DMaker 内でキャンバスに重ねる
+// absolute オーバーレイだったが、GameMaker のサイドバーへ吸収し縦積みのリストとして表示する。
+
+import { type Yume25DTool, YUME25D_TOOL_LABELS, MAX_LEVEL, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
+import { type Layout25D, type Tex25D } from './game-presets/shared';
+
+interface Yume25DEditorPanelProps {
+  layout: Layout25D;
+  onLayoutChange: (updater: (l: Layout25D) => Layout25D) => void;
+  onPickImage?: (target: { t: 'yumeTex'; id: number }) => void;
+  view: '2d' | '3d';
+  onViewChange: (v: '2d' | '3d') => void;
+  tool: Yume25DTool;
+  onToolChange: (t: Yume25DTool) => void;
+  level: number;
+  onLevelChange: (lv: number) => void;
+  selFloor: number;
+  onSelFloorChange: (id: number) => void;
+  selWall: number;
+  onSelWallChange: (id: number) => void;
+  selSprite: number;
+  onSelSpriteChange: (id: number) => void;
+  settingsOpen: boolean;
+  onSettingsOpenChange: (v: boolean) => void;
+  talkTargetId: string | null;
+}
+
+export default function Yume25DEditorPanel({
+  layout, onLayoutChange, onPickImage,
+  view, onViewChange, tool, onToolChange, level, onLevelChange,
+  selFloor, onSelFloorChange, selWall, onSelWallChange, selSprite, onSelSpriteChange,
+  settingsOpen, onSettingsOpenChange, talkTargetId,
+}: Yume25DEditorPanelProps) {
+  const paletteKind: Tex25D['kind'] | null = tool === 'floor' ? 'floor' : tool === 'wall' ? 'wall' : tool === 'sprite' ? 'sprite' : null;
+  const paletteSel = tool === 'floor' ? selFloor : tool === 'wall' ? selWall : selSprite;
+  const setPaletteSel = (id: number) => {
+    if (tool === 'floor') onSelFloorChange(id);
+    else if (tool === 'wall') onSelWallChange(id);
+    else onSelSpriteChange(id);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5 p-2">
+      <div className="flex items-center gap-1 flex-wrap">
+        {/* 2D/3D トグル */}
+        <div className="flex overflow-hidden rounded border border-gray-600">
+          {(['2d', '3d'] as const).map(v => (
+            <button key={v} onClick={() => onViewChange(v)}
+              className={`px-2.5 py-1 text-[11px] font-bold ${view === v ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+              {v === '2d' ? '2D 編集' : '3D 確認'}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => onSettingsOpenChange(!settingsOpen)}
+          className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+          設定
+        </button>
+      </div>
+
+      {view === '2d' ? (
+        <div className="flex items-center gap-1 flex-wrap">
+          {(Object.keys(YUME25D_TOOL_LABELS) as Yume25DTool[]).map(t => (
+            <button key={t} onClick={() => onToolChange(t)}
+              className={`px-2 py-1 text-[11px] font-bold rounded ${tool === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+              {YUME25D_TOOL_LABELS[t]}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <span className="text-[10px] text-gray-400 px-1">WASDで移動/ストレイフ・ドラッグで視点回転(上下も可)・Shiftでダッシュ・Spaceでジャンプ・E/Fではなす</span>
+      )}
+
+      {/* 段（高さ）セレクタ：壁/スプライトはこの段に配置される。マイクラ風の縦積み。 */}
+      {view === '2d' && (tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[10px] text-gray-400 px-0.5">高さ</span>
+          {Array.from({ length: MAX_LEVEL + 1 }, (_, lv) => (
+            <button key={lv} onClick={() => onLevelChange(lv)}
+              title={lv === 0 ? '地上（当たり判定あり）' : `${lv + 1}段目（上空・下をくぐれる）`}
+              className={`w-7 h-7 rounded border-2 text-[11px] font-bold ${level === lv ? 'border-yellow-400 bg-violet-700 text-white' : 'border-gray-700 bg-gray-800 text-gray-400'}`}>
+              {lv + 1}
+            </button>
+          ))}
+          <span className="text-[9px] text-gray-500">段目に{tool === 'erase' ? 'あるものを消す' : '積む'}{level > 0 ? '（上空・すり抜け）' : ''}</span>
+        </div>
+      )}
+
+      {/* パレット */}
+      {view === '2d' && paletteKind && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {paletteKind === 'floor' && (
+            <button onClick={() => setPaletteSel(0)}
+              className={`w-7 h-7 rounded text-[9px] text-gray-300 bg-[#0d0a14] border-2 ${paletteSel === 0 ? 'border-yellow-400' : 'border-gray-700'}`}
+              title="床なし（奈落）">×</button>
+          )}
+          {yume25dTexList(layout, paletteKind).map(t => (
+            <button key={t.id} onClick={() => setPaletteSel(t.id)} title={t.name}
+              className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm ${paletteSel === t.id ? 'border-yellow-400' : 'border-gray-700'}`}
+              style={{ background: t.imageUrl ? `url(${t.imageUrl}) center/contain no-repeat #1c1826` : t.emoji ? '#1c1826' : t.color }}>
+              {!t.imageUrl && (t.emoji ?? '')}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 会話設定：スプライトをタップして選択し、メッセージ/選択肢/はなせるかどうかを編集する */}
+      {view === '2d' && tool === 'talk' && (() => {
+        const target = layout.billboards.find(b => b.id === talkTargetId);
+        if (!target) return (
+          <p className="text-[10px] text-gray-500 px-1">スプライトをタップして選択してください</p>
+        );
+        return (
+          <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={!!target.interactive}
+                onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, interactive: e.target.checked } : b) }))} />
+              はなせる（「はなす」ボタンの対象にする）
+            </label>
+            <label className="flex items-center gap-1.5">メッセージ
+              <input type="text" value={target.message ?? ''} placeholder="……"
+                onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, message: e.target.value } : b) }))}
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
+            </label>
+            <label className="flex items-center gap-1.5">選択肢（,区切り）
+              <input type="text" value={(target.choices ?? []).join(',')}
+                onChange={e => { const v = e.target.value; const choices = v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, choices } : b) })); }}
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
+            </label>
+          </div>
+        );
+      })()}
+
+      {/* テクスチャ個別設定 */}
+      {view === '2d' && paletteSel !== 0 && (() => {
+        const t = layout.textures[paletteSel];
+        if (!t) return null;
+        return (
+          <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-violet-400">🎨 {t.name} の設定</span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="flex items-center gap-1">名前:
+                <input type="text" value={t.name}
+                  onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], name: e.target.value } } }))}
+                  className="w-24 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
+              </label>
+              {t.kind === 'sprite' && (
+                <label className="flex items-center gap-1">絵文字:
+                  <input type="text" value={t.emoji ?? ''} maxLength={2}
+                    onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], emoji: e.target.value || undefined } } }))}
+                    className="w-10 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white text-center" />
+                </label>
+              )}
+              <label className="flex items-center gap-1">色:
+                <input type="color" value={t.color}
+                  onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], color: e.target.value } } }))}
+                  className="w-6 h-4 bg-transparent cursor-pointer" />
+              </label>
+
+              <div className="flex items-center gap-1 ml-auto">
+                {t.imageUrl && (
+                  <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], imageRef: undefined, imageUrl: undefined } } }))}
+                    className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                    画像消去
+                  </button>
+                )}
+                <button onClick={() => onPickImage?.({ t: 'yumeTex', id: t.id })}
+                  className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
+                  画像参照...
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 設定パネル */}
+      {settingsOpen && (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+          <label className="flex items-center justify-between gap-1">広さ(列)
+            <input type="number" min={4} max={48} value={layout.cols}
+              onChange={e => { const cols = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, cols, floor: yume25dResizeFloor(l.floor, cols, l.rows), walls: l.walls.filter(w => w.col <= cols - (w.dir === 3 ? 0 : 1) && w.col >= 0), billboards: l.billboards.filter(b => b.col < cols), start: { ...l.start, col: Math.min(l.start.col, cols - 1) } })); }}
+              className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+          </label>
+          <label className="flex items-center justify-between gap-1">広さ(行)
+            <input type="number" min={4} max={48} value={layout.rows}
+              onChange={e => { const rows = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, rows, floor: yume25dResizeFloor(l.floor, l.cols, rows), walls: l.walls.filter(w => w.row <= rows - (w.dir === 0 ? 0 : 1) && w.row >= 0), billboards: l.billboards.filter(b => b.row < rows), start: { ...l.start, row: Math.min(l.start.row, rows - 1) } })); }}
+              className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+          </label>
+          <label className="flex items-center justify-between gap-1">壁の高さ
+            <input type="range" min={0.5} max={2} step={0.1} value={layout.wallHeight}
+              onChange={e => onLayoutChange(l => ({ ...l, wallHeight: Number(e.target.value) }))} className="w-20" />
+          </label>
+          <label className="flex items-center justify-between gap-1">天井
+            <input type="checkbox" checked={layout.ceiling}
+              onChange={e => onLayoutChange(l => ({ ...l, ceiling: e.target.checked }))} />
+          </label>
+          <label className="flex items-center justify-between gap-1">霧の距離
+            <input type="range" min={3} max={30} step={1} value={layout.fogFar}
+              onChange={e => onLayoutChange(l => ({ ...l, fogFar: Number(e.target.value), fogNear: Math.min(l.fogNear, Number(e.target.value) - 1) }))} className="w-20" />
+          </label>
+          <label className="flex items-center justify-between gap-1">霧の色
+            <input type="color" value={layout.fogColor}
+              onChange={e => onLayoutChange(l => ({ ...l, fogColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+          </label>
+          <label className="flex items-center justify-between gap-1">空の色
+            <input type="color" value={layout.skyColor}
+              onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+          </label>
+          <label className="flex items-center justify-between gap-1 col-span-2">視点
+            <span className="flex overflow-hidden rounded border border-gray-600">
+              {(['first', 'third'] as const).map(m => (
+                <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
+                  className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                  {m === 'first' ? '一人称' : '三人称'}
+                </button>
+              ))}
+            </span>
+          </label>
+          {(layout.pov ?? 'first') === 'third' && (
+            <label className="flex items-center justify-between gap-1 col-span-2">カメラ距離
+              <input type="range" min={0.4} max={3.5} step={0.1} value={layout.povDistance ?? 1.6}
+                onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
+            </label>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

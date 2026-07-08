@@ -11,11 +11,14 @@ import {
   type Layout25D, type Tex25D, type Dir4, uid, normalizeWall25D,
 } from './game-presets/shared';
 
-const CELL = 28;              // 2Dエディタの1マスpx
+export const CELL = 28;              // 2Dエディタの1マスpx
+/** 他プリセットの編集キャンバス（15×11マス分の窓をプレイヤー開始地点基準でスクロール）に合わせた可視窓サイズ。 */
+const VIEW_COLS = 15;
+const VIEW_ROWS = 11;
 /** 縦積みの最大段数（level 0〜MAX_LEVEL）。マイクラ風に壁/スプライトを上へ積める。 */
-const MAX_LEVEL = 3;
-type Tool = 'floor' | 'wall' | 'sprite' | 'start' | 'talk' | 'erase';
-const TOOL_LABELS: Record<Tool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', talk: '会話設定', erase: '消す' };
+export const MAX_LEVEL = 3;
+export type Yume25DTool = 'floor' | 'wall' | 'sprite' | 'start' | 'talk' | 'erase';
+export const YUME25D_TOOL_LABELS: Record<Yume25DTool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', talk: '会話設定', erase: '消す' };
 /** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */
 const DRAG_TURN_SENSITIVITY = 0.006;
 /** D-padの不感帯（px）。中心付近の誤入力を防ぐ。 */
@@ -50,31 +53,36 @@ interface Yume25DMakerProps {
     bomb: boolean;
     select: boolean;
   };
+  /** 2D編集/3D確認の表示・編集ツール類はキャンバス上に重ねず、呼び出し側（サイドパネル）が持つ制御状態。 */
+  view: '2d' | '3d';
+  tool: Yume25DTool;
+  /** 編集対象の段（高さ）。壁/スプライトの配置・消去はこの段に対して行う。 */
+  level: number;
+  selFloor: number;
+  selWall: number;
+  selSprite: number;
+  talkTargetId: string | null;
+  onTalkTargetChange: (id: string | null) => void;
 }
 
-const texList = (l: Layout25D, kind: Tex25D['kind']): Tex25D[] =>
-  Object.values(l.textures).filter(t => t.kind === kind).sort((a, b) => a.id - b.id);
+export const yume25dTexList = (l: Layout25D | undefined, kind: Tex25D['kind']): Tex25D[] =>
+  l ? Object.values(l.textures).filter(t => t.kind === kind).sort((a, b) => a.id - b.id) : [];
 
 /** グリッドを新サイズへ切り詰め/拡張（拡張部は 0 埋め）。 */
-const resizeFloor = (floor: number[][], cols: number, rows: number): number[][] =>
+export const yume25dResizeFloor = (floor: number[][], cols: number, rows: number): number[][] =>
   Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => floor[r]?.[c] ?? 0));
 
-export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage, virtualKeys }: Yume25DMakerProps) {
+export default function Yume25DMaker({
+  layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage, virtualKeys,
+  view, tool, level, selFloor, selWall, selSprite, talkTargetId, onTalkTargetChange,
+}: Yume25DMakerProps) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Yume25DEngine | null>(null);
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
 
-  const [view, setView] = useState<'2d' | '3d'>('2d');
-  const [tool, setTool] = useState<Tool>('wall');
-  /** 編集対象の段（高さ）。壁/スプライトの配置・消去はこの段に対して行う。 */
-  const [level, setLevel] = useState(0);
-  const [selFloor, setSelFloor] = useState(() => texList(layout, 'floor')[0]?.id ?? 0);
-  const [selWall, setSelWall] = useState(() => texList(layout, 'wall')[0]?.id ?? 0);
-  const [selSprite, setSelSprite] = useState(() => texList(layout, 'sprite')[0]?.id ?? 0);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [talkTargetId, setTalkTargetId] = useState<string | null>(null);
+  const setTalkTargetId = onTalkTargetChange;
   /** 「はなす」で開く会話ウィンドウ。開いている間は仮想ボタン一式を非表示にする。 */
   const [dialogue, setDialogue] = useState<DialogueState | null>(null);
   const [showControlGuide, setShowControlGuide] = useState(false);
@@ -84,6 +92,33 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
 
   const playing = isPlaying || !!demo;
   const is3d = playing || view === '3d';
+
+  // ── 2Dエディタのカメラ窓：他プリセット同様に VIEW_COLS×VIEW_ROWS マス分だけを表示し、
+  //    プレイヤー開始地点（🏁）を基準にスクロールする（ブラウザのネイティブスクロールは使わない）。 ──
+  const clampScroll = (col: number, row: number, cols: number, rows: number) => ({
+    col: Math.max(0, Math.min(cols - VIEW_COLS, col)),
+    row: Math.max(0, Math.min(rows - VIEW_ROWS, row)),
+  });
+  const centerScroll = (col: number, row: number, cols: number, rows: number) =>
+    clampScroll(col - Math.floor(VIEW_COLS / 2), row - Math.floor(VIEW_ROWS / 2), cols, rows);
+  const [scroll, setScroll] = useState(() => centerScroll(layout.start.col, layout.start.row, layout.cols, layout.rows));
+  const scrollRef = useRef(scroll);
+  scrollRef.current = scroll;
+  // マップサイズ変更（設定パネル）で現在のスクロール位置が範囲外になったら補正する。
+  useEffect(() => {
+    setScroll(s => clampScroll(s.col, s.row, layout.cols, layout.rows));
+  }, [layout.cols, layout.rows]);
+
+  // ── 十字キー操作カーソル：2D編集画面でプレイヤーの代わりに動かす配置先セル。カメラ窓はこれに追従する。 ──
+  const [cursor, setCursor] = useState(() => ({ col: layout.start.col, row: layout.start.row }));
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
+  useEffect(() => {
+    setCursor(cur => ({
+      col: Math.max(0, Math.min(layout.cols - 1, cur.col)),
+      row: Math.max(0, Math.min(layout.rows - 1, cur.row)),
+    }));
+  }, [layout.cols, layout.rows]);
 
   // ── 3Dエンジン：マウント中は1実体を使い回し、破棄時に必ず dispose ──────────
   useEffect(() => {
@@ -298,13 +333,19 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     if (b) setDialogue({ message: b.message || '……', choices: b.choices });
   };
 
-  // ── 2Dエディタ描画 ───────────────────────────────────────────────────────
+  // ── 2Dエディタ描画：VIEW_COLS×VIEW_ROWS マス分の窓だけを scroll 位置基準で描画する ──────
   useEffect(() => {
     if (is3d) return;
     const cv = edCanvasRef.current; if (!cv) return;
     const ctx = cv.getContext('2d')!;
     const L = layout;
+    const offX = scroll.col * CELL, offY = scroll.row * CELL;
     ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, cv.width, cv.height);
+    ctx.clip();
+    ctx.translate(-offX, -offY);
     // 床
     for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
       const t = L.floor[r]?.[c] ?? 0;
@@ -363,12 +404,19 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       ctx.closePath(); ctx.fill();
       ctx.restore();
     }
-  }, [layout, is3d, level]);
+    // 十字キー操作カーソル（配置先セルの目印）
+    if (!playing) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cursor.col * CELL + 1, cursor.row * CELL + 1, CELL - 2, CELL - 2);
+    }
+    ctx.restore();
+  }, [layout, is3d, level, scroll, cursor, playing]);
 
   // ── 2Dエディタ操作 ───────────────────────────────────────────────────────
-  const applyEdit = useCallback((sx: number, sy: number, isDrag: boolean) => {
+  // c, r はワールド座標のマス目。fx, fy はマス内の相対位置（0〜1、壁の辺選択に使用）。
+  const applyEditAt = useCallback((c: number, r: number, isDrag: boolean, fx: number, fy: number) => {
     const L = layoutRef.current;
-    const c = Math.floor(sx / CELL), r = Math.floor(sy / CELL);
     if (c < 0 || r < 0 || c >= L.cols || r >= L.rows) return;
 
     if (tool === 'floor') {
@@ -382,7 +430,6 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     if (isDrag && tool !== 'erase') return;  // 床以外はクリック単位（誤爆防止）
 
     if (tool === 'wall') {
-      const fx = sx / CELL - c, fy = sy / CELL - r;
       const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
       dists.sort((a, b) => a[0] - b[0]);
       const w = normalizeWall25D(c, r, dists[0][1], selWall, level);
@@ -409,6 +456,8 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
           return { ...l, start: { ...l.start, dir: ((l.start.dir + 1) % 4) as Dir4 } };  // 同マス再クリックで向き回転
         return { ...l, start: { ...l.start, col: c, row: r } };
       });
+      // 他プリセット同様、開始地点を動かしたらそこを中心にカメラ窓を再スクロールする。
+      setScroll(centerScroll(c, r, L.cols, L.rows));
       return;
     }
     if (tool === 'talk') {
@@ -424,7 +473,6 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
       const bb = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === level);
       if (bb) return { ...l, billboards: l.billboards.filter(b => b !== bb) };
       if (!isDrag) {
-        const fx = sx / CELL - c, fy = sy / CELL - r;
         const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
         dists.sort((a, b) => a[0] - b[0]);
         if (dists[0][0] < 0.3) {
@@ -441,6 +489,12 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     });
   }, [tool, selFloor, selWall, selSprite, level, onLayoutChange]);
 
+  const applyEdit = useCallback((sxWin: number, syWin: number, isDrag: boolean) => {
+    const sx = sxWin + scrollRef.current.col * CELL, sy = syWin + scrollRef.current.row * CELL;
+    const c = Math.floor(sx / CELL), r = Math.floor(sy / CELL);
+    applyEditAt(c, r, isDrag, sx / CELL - c, sy / CELL - r);
+  }, [applyEditAt]);
+
   const pointerToCanvas = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const cv = e.currentTarget;
     const rect = cv.getBoundingClientRect();
@@ -450,14 +504,41 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
     };
   };
 
-  // ── パレット ─────────────────────────────────────────────────────────────
-  const paletteKind: Tex25D['kind'] | null = tool === 'floor' ? 'floor' : tool === 'wall' ? 'wall' : tool === 'sprite' ? 'sprite' : null;
-  const paletteSel = tool === 'floor' ? selFloor : tool === 'wall' ? selWall : selSprite;
-  const setPaletteSel = (id: number) => {
-    if (tool === 'floor') setSelFloor(id);
-    else if (tool === 'wall') setSelWall(id);
-    else setSelSprite(id);
-  };
+  // ── カーソル操作（十字キーでカーソルを移動し、A ボタンで現在のツールを配置）────
+  //    プレイ中の3D操作とは独立に、2D編集画面のみで有効。カメラ窓はカーソルに追従する。
+  useEffect(() => {
+    if (is3d || !virtualKeys) return;
+    const STEP_MS = 160;
+    const timer = setInterval(() => {
+      const L = layoutRef.current;
+      const k = virtualKeys;
+      const dc = (k.right ? 1 : 0) - (k.left ? 1 : 0);
+      const dr = (k.down ? 1 : 0) - (k.up ? 1 : 0);
+      if (dc === 0 && dr === 0) return;
+      const cur = cursorRef.current;
+      const next = {
+        col: Math.max(0, Math.min(L.cols - 1, cur.col + dc)),
+        row: Math.max(0, Math.min(L.rows - 1, cur.row + dr)),
+      };
+      if (next.col === cur.col && next.row === cur.row) return;
+      setCursor(next);
+      setScroll(centerScroll(next.col, next.row, L.cols, L.rows));
+    }, STEP_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [is3d, virtualKeys]);
+
+  // A ボタン（配置/消す）：立ち上がりエッジでのみ発火し、カーソル位置へ現在のツールを適用する。
+  const prevActionRef = useRef(false);
+  useEffect(() => {
+    if (is3d || !virtualKeys) return;
+    const pressed = !!virtualKeys.action;
+    if (pressed && !prevActionRef.current) {
+      const cur = cursorRef.current;
+      applyEditAt(cur.col, cur.row, false, 0, 0);
+    }
+    prevActionRef.current = pressed;
+  }, [is3d, virtualKeys, virtualKeys?.action, applyEditAt]);
 
   return (
     <div className="absolute inset-0 flex flex-col bg-black select-none">
@@ -472,207 +553,17 @@ export default function Yume25DMaker({ layout, onLayoutChange, isPlaying, demo, 
         onPointerCancel={glPointerEnd}
       />
 
-      {/* 2D見下ろしエディタ */}
+      {/* 2D見下ろしエディタ：他プリセットと同じ箱サイズに収まる固定窓（VIEW_COLS×VIEW_ROWS）。 */}
       {!is3d && (
-        <div className="flex-1 overflow-auto flex items-center justify-center p-2 pt-16">
+        <div className="flex-1 w-full p-2">
           <canvas
             ref={edCanvasRef}
-            width={layout.cols * CELL} height={layout.rows * CELL}
-            className="cursor-crosshair touch-none max-w-none"
+            width={VIEW_COLS * CELL} height={VIEW_ROWS * CELL}
+            className="cursor-crosshair touch-none w-full h-full"
             style={{ imageRendering: 'pixelated' }}
             onPointerDown={e => { e.preventDefault(); const { sx, sy } = pointerToCanvas(e); applyEdit(sx, sy, false); }}
             onPointerMove={e => { if ((e.buttons & 1) === 1) { const { sx, sy } = pointerToCanvas(e); applyEdit(sx, sy, true); } }}
           />
-        </div>
-      )}
-
-      {/* 編集ツールバー（プレイ/デモ中は非表示） */}
-      {!playing && (
-        <div className="absolute top-0 left-0 right-0 z-20 flex flex-col gap-1 p-1.5 bg-black/70 backdrop-blur-sm">
-          <div className="flex items-center gap-1 flex-wrap">
-            {/* 2D/3D トグル */}
-            <div className="flex overflow-hidden rounded border border-gray-600">
-              {(['2d', '3d'] as const).map(v => (
-                <button key={v} onClick={() => setView(v)}
-                  className={`px-2.5 py-1 text-[11px] font-bold ${view === v ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-                  {v === '2d' ? '2D 編集' : '3D 確認'}
-                </button>
-              ))}
-            </div>
-            {view === '2d' ? (
-              <>
-                {(Object.keys(TOOL_LABELS) as Tool[]).map(t => (
-                  <button key={t} onClick={() => setTool(t)}
-                    className={`px-2 py-1 text-[11px] font-bold rounded ${tool === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-                    {TOOL_LABELS[t]}
-                  </button>
-                ))}
-              </>
-            ) : (
-              <span className="text-[10px] text-gray-400 px-1">WASDで移動/ストレイフ・ドラッグで視点回転(上下も可)・Shiftでダッシュ・Spaceでジャンプ・E/Fではなす</span>
-            )}
-            <button onClick={() => setSettingsOpen(v => !v)}
-              className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-              設定
-            </button>
-          </div>
-
-          {/* 段（高さ）セレクタ：壁/スプライトはこの段に配置される。マイクラ風の縦積み。 */}
-          {view === '2d' && (tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-gray-400 px-0.5">高さ</span>
-              {Array.from({ length: MAX_LEVEL + 1 }, (_, lv) => (
-                <button key={lv} onClick={() => setLevel(lv)}
-                  title={lv === 0 ? '地上（当たり判定あり）' : `${lv + 1}段目（上空・下をくぐれる）`}
-                  className={`w-7 h-7 rounded border-2 text-[11px] font-bold ${level === lv ? 'border-yellow-400 bg-violet-700 text-white' : 'border-gray-700 bg-gray-800 text-gray-400'}`}>
-                  {lv + 1}
-                </button>
-              ))}
-              <span className="text-[9px] text-gray-500">段目に{tool === 'erase' ? 'あるものを消す' : '積む'}{level > 0 ? '（上空・すり抜け）' : ''}</span>
-            </div>
-          )}
-
-          {/* パレット */}
-          {view === '2d' && paletteKind && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {paletteKind === 'floor' && (
-                <button onClick={() => setPaletteSel(0)}
-                  className={`w-7 h-7 rounded text-[9px] text-gray-300 bg-[#0d0a14] border-2 ${paletteSel === 0 ? 'border-yellow-400' : 'border-gray-700'}`}
-                  title="床なし（奈落）">×</button>
-              )}
-              {texList(layout, paletteKind).map(t => (
-                <button key={t.id} onClick={() => setPaletteSel(t.id)} title={t.name}
-                  className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm ${paletteSel === t.id ? 'border-yellow-400' : 'border-gray-700'}`}
-                  style={{ background: t.imageUrl ? `url(${t.imageUrl}) center/contain no-repeat #1c1826` : t.emoji ? '#1c1826' : t.color }}>
-                  {!t.imageUrl && (t.emoji ?? '')}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* 会話設定：スプライトをタップして選択し、メッセージ/選択肢/はなせるかどうかを編集する */}
-          {view === '2d' && tool === 'talk' && (() => {
-            const target = layout.billboards.find(b => b.id === talkTargetId);
-            if (!target) return (
-              <p className="text-[10px] text-gray-500 px-1">スプライトをタップして選択してください</p>
-            );
-            return (
-              <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
-                <label className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={!!target.interactive}
-                    onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, interactive: e.target.checked } : b) }))} />
-                  はなせる（「はなす」ボタンの対象にする）
-                </label>
-                <label className="flex items-center gap-1.5">メッセージ
-                  <input type="text" value={target.message ?? ''} placeholder="……"
-                    onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, message: e.target.value } : b) }))}
-                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
-                </label>
-                <label className="flex items-center gap-1.5">選択肢（,区切り）
-                  <input type="text" value={(target.choices ?? []).join(',')}
-                    onChange={e => { const v = e.target.value; const choices = v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, choices } : b) })); }}
-                    className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
-                </label>
-              </div>
-            );
-          })()}
-
-          {/* テクスチャ個別設定 */}
-          {view === '2d' && paletteSel !== 0 && (() => {
-            const t = layout.textures[paletteSel];
-            if (!t) return null;
-            return (
-              <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-violet-400">🎨 {t.name} の設定</span>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <label className="flex items-center gap-1">名前:
-                    <input type="text" value={t.name}
-                      onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], name: e.target.value } } }))}
-                      className="w-24 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
-                  </label>
-                  {t.kind === 'sprite' && (
-                    <label className="flex items-center gap-1">絵文字:
-                      <input type="text" value={t.emoji ?? ''} maxLength={2}
-                        onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], emoji: e.target.value || undefined } } }))}
-                        className="w-10 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white text-center" />
-                    </label>
-                  )}
-                  <label className="flex items-center gap-1">色:
-                    <input type="color" value={t.color}
-                      onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], color: e.target.value } } }))}
-                      className="w-6 h-4 bg-transparent cursor-pointer" />
-                  </label>
-                  
-                  <div className="flex items-center gap-1 ml-auto">
-                    {t.imageUrl && (
-                      <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], imageRef: undefined, imageUrl: undefined } } }))}
-                        className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
-                        画像消去
-                      </button>
-                    )}
-                    <button onClick={() => onPickImage?.({ t: 'yumeTex', id: t.id })}
-                      className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
-                      画像参照...
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 設定パネル */}
-          {settingsOpen && (
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
-              <label className="flex items-center justify-between gap-1">広さ(列)
-                <input type="number" min={4} max={48} value={layout.cols}
-                  onChange={e => { const cols = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, cols, floor: resizeFloor(l.floor, cols, l.rows), walls: l.walls.filter(w => w.col <= cols - (w.dir === 3 ? 0 : 1) && w.col >= 0), billboards: l.billboards.filter(b => b.col < cols), start: { ...l.start, col: Math.min(l.start.col, cols - 1) } })); }}
-                  className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
-              </label>
-              <label className="flex items-center justify-between gap-1">広さ(行)
-                <input type="number" min={4} max={48} value={layout.rows}
-                  onChange={e => { const rows = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, rows, floor: resizeFloor(l.floor, l.cols, rows), walls: l.walls.filter(w => w.row <= rows - (w.dir === 0 ? 0 : 1) && w.row >= 0), billboards: l.billboards.filter(b => b.row < rows), start: { ...l.start, row: Math.min(l.start.row, rows - 1) } })); }}
-                  className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
-              </label>
-              <label className="flex items-center justify-between gap-1">壁の高さ
-                <input type="range" min={0.5} max={2} step={0.1} value={layout.wallHeight}
-                  onChange={e => onLayoutChange(l => ({ ...l, wallHeight: Number(e.target.value) }))} className="w-20" />
-              </label>
-              <label className="flex items-center justify-between gap-1">天井
-                <input type="checkbox" checked={layout.ceiling}
-                  onChange={e => onLayoutChange(l => ({ ...l, ceiling: e.target.checked }))} />
-              </label>
-              <label className="flex items-center justify-between gap-1">霧の距離
-                <input type="range" min={3} max={30} step={1} value={layout.fogFar}
-                  onChange={e => onLayoutChange(l => ({ ...l, fogFar: Number(e.target.value), fogNear: Math.min(l.fogNear, Number(e.target.value) - 1) }))} className="w-20" />
-              </label>
-              <label className="flex items-center justify-between gap-1">霧の色
-                <input type="color" value={layout.fogColor}
-                  onChange={e => onLayoutChange(l => ({ ...l, fogColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-              </label>
-              <label className="flex items-center justify-between gap-1">空の色
-                <input type="color" value={layout.skyColor}
-                  onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-              </label>
-              <label className="flex items-center justify-between gap-1 col-span-2">視点
-                <span className="flex overflow-hidden rounded border border-gray-600">
-                  {(['first', 'third'] as const).map(m => (
-                    <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
-                      className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-                      {m === 'first' ? '一人称' : '三人称'}
-                    </button>
-                  ))}
-                </span>
-              </label>
-              {(layout.pov ?? 'first') === 'third' && (
-                <label className="flex items-center justify-between gap-1 col-span-2">カメラ距離
-                  <input type="range" min={0.4} max={3.5} step={0.1} value={layout.povDistance ?? 1.6}
-                    onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
-                </label>
-              )}
-            </div>
-          )}
         </div>
       )}
 
