@@ -2088,6 +2088,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'changeGold':
           progressRef.current.gold = (progressRef.current.gold ?? 0) + cmd.amount;
+          if (cmd.amount > 0) {
+            itemGetRef.current = { text: `🪙 ${cmd.amount}ゴールド を てにいれた！`, startTime: performance.now() };
+          } else if (cmd.amount < 0) {
+            itemGetRef.current = { text: `🪙 ${Math.abs(cmd.amount)}ゴールド を うしなった`, startTime: performance.now() };
+          }
           forceHud(n => n + 1);
           setTimeout(advance, 30);
           break;

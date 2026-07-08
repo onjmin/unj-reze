@@ -29,6 +29,66 @@ const FLY_MAX_ALT = 48;
 const BILLBOARD_ANIM_FPS = 4;
 const PLAYER_ANIM_FPS = 7;
 
+// ── NPC頭上セリフ（プレイ中、interactive+message のビルボードへ近づくと1文字ずつ表示）──
+const SPEECH_RANGE = 0.8;        // セリフが見え始める距離（マス）。INTERACT_RANGE より広く、近づく途中から読める
+const SPEECH_CHAR_MS = 50;       // 1文字あたりの表示間隔。2Dエンジンの頭上セリフと同じテンポ
+const SPEECH_FONT_PX = 16;
+const SPEECH_LINE_H = 22;
+const SPEECH_MAX_W = 240;        // 折り返し幅（canvas px）
+const SPEECH_PAD = 8;
+const SPEECH_PX_PER_UNIT = 130;  // canvas px → ワールド単位の縮尺
+const SPEECH_MARGIN_Y = 0.12;    // ビルボード上端からの隙間（ワールド単位）
+
+/** 行頭に来てはいけない文字（禁則）。頭上セリフの折り返し用の簡易版。 */
+const SPEECH_KINSOKU = new Set(
+  '、。，．・：；？！ー…ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ）」』】〉》,.!?)]'.split(''),
+);
+
+let speechFontFamily: string | null = null;
+/** HUD等と同じピクセルフォント（next/font の CSS 変数）をセリフ描画にも使う。 */
+const speechFont = (): string => {
+  if (speechFontFamily === null) {
+    const raw = typeof document !== 'undefined'
+      ? getComputedStyle(document.documentElement).getPropertyValue('--font-pixel').trim()
+      : '';
+    speechFontFamily = raw || 'monospace';
+  }
+  return `bold ${SPEECH_FONT_PX}px ${speechFontFamily}`;
+};
+
+/** \n を段落区切りとして、測定幅ベース＋簡易禁則で折り返す。 */
+const wrapSpeech = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] => {
+  const lines: string[] = [];
+  for (const para of text.split('\n')) {
+    let line = '';
+    for (const ch of para) {
+      const cand = line + ch;
+      // 禁則文字は行頭へ送らず、多少はみ出しても現在行に残す
+      if (line && ctx.measureText(cand).width > maxWidth && !SPEECH_KINSOKU.has(ch)) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = cand;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
+};
+
+/** 頭上セリフ1件分の表示状態。ビルボードidごとに生成し、離れたら破棄する。 */
+interface SpeechEntry {
+  lines: string[];
+  totalChars: number;
+  start: number;   // 表示開始時刻（ms）
+  shown: number;   // 直近に描画した文字数（-1=未描画）
+  canvas: HTMLCanvasElement;
+  texture: THREE.CanvasTexture;
+  mat: THREE.MeshBasicMaterial;
+  geo: THREE.PlaneGeometry;
+  mesh: THREE.Mesh;
+}
+
 const POV_MIN_DIST = 0.4;
 const POV_MAX_DIST = 3.5;
 const POV_HEIGHT_ABOVE_EYE = 0.22;  // 三人称視点：目線より上から見下ろす高さ
@@ -220,6 +280,8 @@ export class Yume25DEngine {
   private ownedMaterials: THREE.Material[] = [];
   private texEntries = new Map<number, TexEntry>();
   private demoTurnFrames = 0;
+  // NPC頭上セリフ（ビルボードid → 表示状態）。接近で生成・離脱/再構築で破棄。
+  private speeches = new Map<string, SpeechEntry>();
 
   // 配置プレビュー（ゴースト）。1メッシュを使い回し、ツール対象に応じてジオメトリ/姿勢を差し替える。
   private ghostMesh: THREE.Mesh;
@@ -448,6 +510,113 @@ export class Yume25DEngine {
     return best;
   }
 
+  // ── NPC頭上セリフ ────────────────────────────────────────────────────────
+  /** 毎フレーム：セリフ持ちビルボードとの距離を見て、接近中は1文字ずつ表示・離脱で破棄する。
+   *  板はビルボード同様Y軸回転のみでカメラへ正対し、depthTest なしで壁越しでも読める。 */
+  private updateSpeeches(nowMs: number) {
+    if (this.editMode) {
+      if (this.speeches.size) this.clearSpeeches();
+      return;
+    }
+    const active = new Set<string>();
+    for (const b of this.layout.billboards) {
+      if (!b.interactive || !b.message) continue;
+      const dist = Math.hypot(b.col + 0.5 - this.x, b.row + 0.5 - this.z);
+      if (dist > SPEECH_RANGE) continue;
+      active.add(b.id);
+      let e = this.speeches.get(b.id);
+      if (!e) {
+        e = this.createSpeech(b, nowMs);
+        this.speeches.set(b.id, e);
+      }
+      const shown = Math.min(e.totalChars, Math.floor((nowMs - e.start) / SPEECH_CHAR_MS));
+      if (shown !== e.shown) {
+        e.shown = shown;
+        this.drawSpeech(e);
+      }
+      e.mesh.rotation.y = this.yaw;
+    }
+    for (const [id, e] of this.speeches) {
+      if (!active.has(id)) {
+        this.removeSpeech(e);
+        this.speeches.delete(id);
+      }
+    }
+  }
+
+  private createSpeech(b: Billboard25D, nowMs: number): SpeechEntry {
+    const canvas = document.createElement('canvas');
+    let ctx = canvas.getContext('2d')!;
+    ctx.font = speechFont();
+    const lines = wrapSpeech(ctx, b.message ?? '', SPEECH_MAX_W);
+    const textW = Math.max(1, ...lines.map(l => ctx.measureText(l).width));
+    canvas.width = Math.ceil(textW) + SPEECH_PAD * 2;
+    canvas.height = lines.length * SPEECH_LINE_H + SPEECH_PAD;
+    ctx = canvas.getContext('2d')!;  // サイズ変更で描画状態が消えるため取り直す
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = THREE.NearestFilter;
+    texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,   // 鳥居や壁が手前にあっても読めるよう常に最前面へ
+      depthWrite: false,
+      fog: false,         // 霧で薄れると読めないので除外
+      side: THREE.DoubleSide,
+    });
+    const geo = new THREE.PlaneGeometry(canvas.width / SPEECH_PX_PER_UNIT, canvas.height / SPEECH_PX_PER_UNIT);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 999;
+    const s = b.scale ?? 1;
+    const topY = (b.level ?? 0) * this.layout.wallHeight + s * 0.9;  // ビルボード上端
+    mesh.position.set(b.col + 0.5, topY + SPEECH_MARGIN_Y + (canvas.height / SPEECH_PX_PER_UNIT) / 2, b.row + 0.5);
+    mesh.rotation.y = this.yaw;
+    this.scene.add(mesh);
+    const totalChars = lines.reduce((n, l) => n + l.length, 0);
+    return { lines, totalChars, start: nowMs, shown: -1, canvas, texture, mat, geo, mesh };
+  }
+
+  /** 表示済み文字数（e.shown）までを canvas へ描き直す。上から順に行が増える。 */
+  private drawSpeech(e: SpeechEntry) {
+    const ctx = e.canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, e.canvas.width, e.canvas.height);
+    if (e.shown > 0) {
+      let left = e.shown;
+      const disp: string[] = [];
+      for (const l of e.lines) {
+        if (left <= 0) break;
+        disp.push(left >= l.length ? l : l.slice(0, left));
+        left -= l.length;
+      }
+      ctx.font = speechFont();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const tw = Math.max(1, ...disp.map(l => ctx.measureText(l).width));
+      const cx = e.canvas.width / 2;
+      // 2Dエンジンの頭上セリフと同じ半透明の下地（フキダシは使わない）
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(cx - tw / 2 - 4, 0, tw + 8, disp.length * SPEECH_LINE_H + 6);
+      ctx.fillStyle = '#fff';
+      disp.forEach((l, i) => ctx.fillText(l, cx, 3 + i * SPEECH_LINE_H + (SPEECH_LINE_H - SPEECH_FONT_PX) / 2));
+    }
+    e.texture.needsUpdate = true;
+  }
+
+  private removeSpeech(e: SpeechEntry) {
+    this.scene.remove(e.mesh);
+    e.geo.dispose();
+    e.mat.dispose();
+    e.texture.dispose();
+  }
+
+  private clearSpeeches() {
+    for (const e of this.speeches.values()) this.removeSpeech(e);
+    this.speeches.clear();
+  }
+
   start() {
     if (this.running || this.disposed) return;
     this.running = true;
@@ -458,6 +627,7 @@ export class Yume25DEngine {
       this.lastT = t;
       this.step(dt);
       if (this.editMode) this.onEditFrame?.();  // 移動・浮遊でカメラが動いてもプレビューを追従させる
+      this.updateSpeeches(t);
       this.updateTexAnimations(t / 1000);
       this.updatePlayerAnim(t / 1000);
       this.renderer.render(this.scene, this.camera);
@@ -494,6 +664,7 @@ export class Yume25DEngine {
 
   // ── シーン構築 ──────────────────────────────────────────────────────────
   private clearWorld() {
+    this.clearSpeeches();  // レイアウト差し替えでビルボードが変わる/破棄時のリソース解放
     for (const o of this.worldObjects) this.scene.remove(o);
     this.worldObjects = [];
     this.billboardMeshes = [];
