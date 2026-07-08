@@ -49,7 +49,7 @@ export default function Yume25DEditorPanel({
           {(['2d', '3d'] as const).map(v => (
             <button key={v} onClick={() => onViewChange(v)}
               className={`px-2.5 py-1 text-[11px] font-bold ${view === v ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-              {v === '2d' ? '2D 編集' : '3D 確認'}
+              {v === '2d' ? '2D 表示' : '3D 表示'}
             </button>
           ))}
         </div>

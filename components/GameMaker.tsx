@@ -37,7 +37,7 @@ import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
-import Yume25DMaker, { type Yume25DTool, yume25dTexList } from './Yume25DMaker';
+import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList } from './Yume25DMaker';
 import Yume25DEditorPanel from './Yume25DEditorPanel';
 
 export type { PresetId };
@@ -1005,7 +1005,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [editSpeedMult, setEditSpeedMult] = useState(1);
   const [editModeType, setEditModeType] = useState<'move_place' | 'panel_input'>('panel_input');
   // ── yume25d（ゆめにっき3D）編集パネルの状態。パネルをキャンバス外（サイドバー）に配置するため GameMaker 側で保持する。 ──
-  const [yume25dView, setYume25dView] = useState<'2d' | '3d'>('2d');
+  const [yume25dView, setYume25dView] = useState<'2d' | '3d'>('3d');
   const [yume25dTool, setYume25dTool] = useState<Yume25DTool>('wall');
   const [yume25dLevel, setYume25dLevel] = useState(0);
   const [yume25dSelFloor, setYume25dSelFloor] = useState(() => yume25dTexList(gameData.layout25d, 'floor')[0]?.id ?? 0);
@@ -1013,6 +1013,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [yume25dSelSprite, setYume25dSelSprite] = useState(() => yume25dTexList(gameData.layout25d, 'sprite')[0]?.id ?? 0);
   const [yume25dSettingsOpen, setYume25dSettingsOpen] = useState(false);
   const [yume25dTalkTargetId, setYume25dTalkTargetId] = useState<string | null>(null);
+  /** 浮遊（ホバー）モード：ボタンは移動・設置モードパネル側に置くが、上昇/下降の実処理は engineRef を持つ Yume25DMaker に委譲する。 */
+  const [yume25dHoverMode, setYume25dHoverMode] = useState(false);
+  const yume25dMakerRef = useRef<Yume25DMakerHandle>(null);
   const [charSubTab, setCharSubTab] = useState<'jiki' | 'boss' | 'midboss' | 'zenhan' | 'kohan'>('jiki');
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
@@ -6630,6 +6633,7 @@ const lose = (msg: string) => {
             style={{ aspectRatio: `${PLAY_W}/${PLAY_H}`, maxWidth: PLAY_W + 'px' }}>
             {gameData.engine === 'yume25d' ? (
               <Yume25DMaker
+                ref={yume25dMakerRef}
                 layout={gameData.layout25d!}
                 onLayoutChange={updater => setGameData(prev => prev.layout25d ? { ...prev, layout25d: updater(prev.layout25d) } : prev)}
                 isPlaying={isPlaying}
@@ -6645,6 +6649,8 @@ const lose = (msg: string) => {
                 selSprite={yume25dSelSprite}
                 talkTargetId={yume25dTalkTargetId}
                 onTalkTargetChange={setYume25dTalkTargetId}
+                hoverMode={yume25dHoverMode}
+                onHoverModeChange={setYume25dHoverMode}
               />
             ) : (
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
@@ -7469,6 +7475,35 @@ const lose = (msg: string) => {
                       title="START" />
                     <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">START</span>
                   </div>
+                </div>
+              )}
+
+              {/* 浮遊（ホバー）操作：ゆめにっき3D編集中・3Dビュー表示時のみ。Minecraft創造飛行風。 */}
+              {!isPlaying && gameData.engine === 'yume25d' && yume25dView === '3d' && (
+                <div className="flex items-center justify-center gap-1.5 mt-3 pt-2 border-t border-gray-800/40 w-full shrink-0 select-none touch-none">
+                  {yume25dHoverMode && (
+                    <>
+                      <button
+                        onPointerDown={e => { e.preventDefault(); yume25dMakerRef.current?.setFlyUp(true); }}
+                        onPointerUp={() => yume25dMakerRef.current?.setFlyUp(false)}
+                        onPointerCancel={() => yume25dMakerRef.current?.setFlyUp(false)}
+                        className="w-11 h-11 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
+                        ▲上昇
+                      </button>
+                      <button
+                        onPointerDown={e => { e.preventDefault(); yume25dMakerRef.current?.setFlyDown(true); }}
+                        onPointerUp={() => yume25dMakerRef.current?.setFlyDown(false)}
+                        onPointerCancel={() => yume25dMakerRef.current?.setFlyDown(false)}
+                        className="w-11 h-11 bg-sky-700/85 active:bg-sky-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
+                        ▼下降
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onPointerDown={e => { e.preventDefault(); setYume25dHoverMode(h => !h); }}
+                    className={`h-11 px-3 rounded-full text-[10px] font-bold flex items-center justify-center border ${yume25dHoverMode ? 'bg-violet-600 border-violet-300 text-white' : 'bg-gray-800/85 border-gray-500 text-gray-200'}`}>
+                    {yume25dHoverMode ? '浮遊中' : '浮遊'}
+                  </button>
                 </div>
               )}
 

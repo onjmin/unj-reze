@@ -5,7 +5,7 @@
 // 編集モード：2D 見下ろしグリッド（配置） ⇄ 3D プレビュー（歩行）をトグルで切替。
 // プレイ/デモ：常に 3D。エンジン実体（WebGL）はマウント中1つを使い回し、アンマウントで dispose。
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Yume25DEngine, RENDER_W, RENDER_H, drawPlayerIconCanvas, type PlayerAppearance, type GhostSpec } from '@/lib/yume25d';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef } from '@/lib/asset-ref';
@@ -67,6 +67,15 @@ interface Yume25DMakerProps {
   selSprite: number;
   talkTargetId: string | null;
   onTalkTargetChange: (id: string | null) => void;
+  /** 浮遊（ホバー）モードのON/OFF。ボタンはキャンバス上ではなく呼び出し側（移動・設置モードパネル）に配置するため、
+   *  状態も呼び出し側で保持する。上昇/下降のホールド操作は engineRef を持つこちら側で imperative handle として公開する。 */
+  hoverMode: boolean;
+  onHoverModeChange: (v: boolean) => void;
+}
+
+export interface Yume25DMakerHandle {
+  setFlyUp: (active: boolean) => void;
+  setFlyDown: (active: boolean) => void;
 }
 
 export const yume25dTexList = (l: Layout25D | undefined, kind: Tex25D['kind']): Tex25D[] =>
@@ -76,10 +85,11 @@ export const yume25dTexList = (l: Layout25D | undefined, kind: Tex25D['kind']): 
 export const yume25dResizeFloor = (floor: number[][], cols: number, rows: number): number[][] =>
   Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => floor[r]?.[c] ?? 0));
 
-export default function Yume25DMaker({
+const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function Yume25DMaker({
   layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage, virtualKeys,
   view, tool, level, selFloor, selWall, selSprite, talkTargetId, onTalkTargetChange,
-}: Yume25DMakerProps) {
+  hoverMode, onHoverModeChange,
+}, ref) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Yume25DEngine | null>(null);
@@ -98,8 +108,8 @@ export default function Yume25DMaker({
   const is3d = playing || view === '3d';
 
   // ── 浮遊（ホバー）モード：Minecraft創造飛行風。編集中の3Dビューで Space 2回押し／浮遊ボタンでトグル。
-  //    ONの間は Space/上昇ボタン=上昇・Shift/下降ボタン=下降。OFFは通常の落下モード（重力・ジャンプ）。 ──
-  const [hoverMode, setHoverMode] = useState(false);
+  //    ONの間は Space/上昇ボタン=上昇・Shift/下降ボタン=下降。OFFは通常の落下モード（重力・ジャンプ）。
+  //    state は呼び出し側（移動・設置モードパネル）が持つので、ここでは hoverMode / onHoverModeChange プロップを使う。 ──
   const lastSpaceDownRef = useRef(0);
 
   // ── 2Dエディタのカメラ窓：他プリセット同様に VIEW_COLS×VIEW_ROWS マス分だけを表示し、
@@ -295,7 +305,7 @@ export default function Yume25DMaker({
             lastSpaceDownRef.current = 0;
             const inp = engineRef.current?.input;
             if (inp) { inp.flyUp = false; inp.flyDown = false; }
-            setHoverMode(h => !h);
+            onHoverModeChange(!hoverMode);
             return;
           }
           lastSpaceDownRef.current = now;
@@ -361,6 +371,11 @@ export default function Yume25DMaker({
       });
     }
   }, [virtualKeys?.select]);
+
+  useImperativeHandle(ref, () => ({
+    setFlyUp: (active: boolean) => { const inp = engineRef.current?.input; if (inp) inp.flyUp = active; },
+    setFlyDown: (active: boolean) => { const inp = engineRef.current?.input; if (inp) inp.flyDown = active; },
+  }), []);
 
   const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash' | 'flyUp' | 'flyDown') => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -432,7 +447,7 @@ export default function Yume25DMaker({
 
   // プレイ開始やビュー切替で編集から離れたら浮遊モードを解除する。
   useEffect(() => {
-    if (!is3d || playing || demo) setHoverMode(false);
+    if ((!is3d || playing || demo) && hoverMode) onHoverModeChange(false);
   }, [is3d, playing, demo]);
 
   // 浮遊・移動でカメラが動くとカーソルの指す先も変わるので、編集中は毎フレームゴーストを追従させる。
@@ -921,30 +936,7 @@ export default function Yume25DMaker({
         </>
       )}
 
-      {/* 浮遊（ホバー）操作：Minecraft創造飛行風のオンスクリーンボタン（モバイル向け・編集中のみ）。
-          「浮遊」トグルは Space 2回押しと同じ。ONの間だけ上昇/下降のホールドボタンを出す。
-          共通コントローラー使用時（virtualKeys あり）でも表示し、タッチだけで飛べるようにする。 */}
-      {is3d && !playing && !demo && (
-        <div className="absolute right-2 bottom-14 z-20 flex flex-col items-end gap-1.5 opacity-90 touch-none select-none">
-          {hoverMode && (
-            <>
-              <button {...holdProps('flyUp')}
-                className="w-10 h-10 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
-                ▲上昇
-              </button>
-              <button {...holdProps('flyDown')}
-                className="w-10 h-10 bg-sky-700/85 active:bg-sky-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
-                ▼下降
-              </button>
-            </>
-          )}
-          <button
-            onPointerDown={e => { e.preventDefault(); setHoverMode(h => !h); }}
-            className={`h-10 px-3 rounded-full text-[10px] font-bold flex items-center justify-center border ${hoverMode ? 'bg-violet-600 border-violet-300 text-white' : 'bg-gray-800/85 border-gray-500 text-gray-200'}`}>
-            {hoverMode ? '浮遊中' : '浮遊'}
-          </button>
-        </div>
-      )}
+      {/* 浮遊（ホバー）操作は移動・設置モードパネル（GameMaker.tsx サイドバー）側に配置。 */}
 
       {/* 会話ウィンドウ（選択肢がある場合は「選ぶ」までここに留まり、仮想ボタンは上で隠されている）。 */}
       {is3d && dialogue && (
@@ -1008,4 +1000,6 @@ export default function Yume25DMaker({
       )}
     </div>
   );
-}
+});
+
+export default Yume25DMaker;
