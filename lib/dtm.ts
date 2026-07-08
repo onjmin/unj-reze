@@ -27,7 +27,10 @@ export const getStudio = (): Promise<any> => {
       ]);
       const { createDtmStudio } = await import('@onjmin/dtm');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return createDtmStudio({ engines: { SoundFont, SoundFont_drum, SoundFont_list } as any });
+      return createDtmStudio({
+        engines: { SoundFont, SoundFont_drum, SoundFont_list } as any,
+        midiSearch: { apiKey: process.env.RPGEN_SEARCH_TOKEN },
+      });
     })();
   }
   return studioPromise;
