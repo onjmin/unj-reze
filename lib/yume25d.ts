@@ -21,6 +21,10 @@ const EPS = 1e-3;
 const JUMP_VELOCITY = 3.2;
 const GRAVITY = 16;
 
+// 編集モードの空中浮遊：上昇/下降速度（マス/秒）と高度上限（マス）。
+const FLY_SPEED = 2.6;
+const FLY_MAX_ALT = 48;
+
 /** 歩行グラ（walk: 参照）の足踏み速度。NPCビルボードは常時ゆっくりマーチ、プレイヤーは歩行時のみ。 */
 const BILLBOARD_ANIM_FPS = 4;
 const PLAYER_ANIM_FPS = 7;
@@ -40,6 +44,8 @@ export interface Input25D {
   strafeL: boolean; strafeR: boolean;
   /** Shift（ダッシュ）。押している間だけ移動速度が上がる。 */
   dash: boolean;
+  /** 浮遊（ホバー）モード中の昇降。押している間だけ上昇/下降する（Minecraft創造飛行風）。 */
+  flyUp: boolean; flyDown: boolean;
 }
 
 export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; spriteRef?: string; }
@@ -180,9 +186,16 @@ export const drawPlayerIconCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance,
 };
 
 export class Yume25DEngine {
-  readonly input: Input25D = { forward: false, back: false, turnL: false, turnR: false, strafeL: false, strafeR: false, dash: false };
+  readonly input: Input25D = { forward: false, back: false, turnL: false, turnR: false, strafeL: false, strafeR: false, dash: false, flyUp: false, flyDown: false };
   /** デモ再生（イントロ用）：自動で前進し、壁に当たったら向きを変える。 */
   demo = false;
+  /** 編集モード（3D確認ビュー）。ピッキングの空中面フォールバックと onEditFrame が有効になる。 */
+  editMode = false;
+  /** 浮遊（ホバー）モード。editMode 中のみ有効。Minecraft創造飛行風に重力を切り、flyUp/flyDown で昇降する。
+   *  false に戻すと通常の落下モード（重力あり・ジャンプ可）。 */
+  hover = false;
+  /** editMode 中に毎フレーム呼ばれるフック。呼び出し側が配置プレビューをカメラ移動へ追従させるのに使う。 */
+  onEditFrame: (() => void) | null = null;
 
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -344,17 +357,40 @@ export class Yume25DEngine {
     if (deltaPitch !== 0) this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch + deltaPitch));
   }
 
-  /** 編集用ピッキング：画面NDC座標から高さ y=planeY の水平面へレイを飛ばし、交点をワールド座標で返す。
-   *  水平線より上を向いていて交点が無い、または霧の彼方（fogFar超・見えない場所）なら null。 */
-  pickGround(ndcX: number, ndcY: number, planeY = 0): { x: number; z: number } | null {
+  /** 編集用ピッキング：画面NDC座標からレイを飛ばし、配置対象のワールド座標と段（高さ）を返す。
+   *  1) 床・壁・ビルボードなど実ジオメトリとの最近交点を最優先し、当たった高さから段を割り出す
+   *     （壁の上の方を指せば上の段、NPCを指せばそのNPCの段）。
+   *  2) 何もない空中を指しているときは、プレイヤーの浮遊高度の段の水平面で拾う
+   *     （飛べば飛ぶほど高い段へ置ける）。
+   *  preferGeometry=true（消す/会話/開始/床など既存物を対象にするツール）は、浮遊面より遠くても
+   *  実ジオメトリの交点を優先する（上空から見下ろしても指した物そのものに当たる）。
+   *  どちらも霧の彼方（fogFar超・見えない場所）は対象外。該当なしは null。 */
+  pickTarget(ndcX: number, ndcY: number, preferGeometry = false): { x: number; z: number; level: number } | null {
     this.camera.updateMatrixWorld();
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -planeY);
+    raycaster.far = this.layout.fogFar;
+    const H = this.layout.wallHeight;
+
+    // 実ジオメトリ（床・壁・ビルボード）との最近交点
+    const hit = raycaster.intersectObjects(this.worldObjects, false)[0];
+
+    // 空中フォールバック：浮遊高度に最も近い段の水平面
+    const flightLevel = Math.max(0, Math.round(this.hop / H));
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(flightLevel * H));
     const pt = new THREE.Vector3();
-    if (!raycaster.ray.intersectPlane(plane, pt)) return null;
-    if (pt.distanceTo(this.camera.position) > this.layout.fogFar) return null;
-    return { x: pt.x, z: pt.z };
+    const planeHit = raycaster.ray.intersectPlane(plane, pt);
+    const planeDist = planeHit ? pt.distanceTo(raycaster.ray.origin) : Infinity;
+
+    if (hit && (preferGeometry || hit.distance <= planeDist)) {
+      // 面上ぴったりだとセルが裏側に落ちるので、視点側へ僅かに戻した点でセルを判定する
+      const p = hit.point.clone().addScaledVector(raycaster.ray.direction, -1e-3);
+      const bbLevel = hit.object.userData.bbLevel as number | undefined;
+      const level = bbLevel ?? Math.max(0, Math.floor(p.y / H));
+      return { x: p.x, z: p.z, level };
+    }
+    if (planeHit && planeDist <= this.layout.fogFar) return { x: pt.x, z: pt.z, level: flightLevel };
+    return null;
   }
 
   /** 配置プレビュー：ツールが適用される場所へ半透明ゴーストを表示する（null で非表示）。 */
@@ -421,6 +457,7 @@ export class Yume25DEngine {
       const dt = Math.min(0.05, (t - this.lastT) / 1000);
       this.lastT = t;
       this.step(dt);
+      if (this.editMode) this.onEditFrame?.();  // 移動・浮遊でカメラが動いてもプレビューを追従させる
       this.updateTexAnimations(t / 1000);
       this.updatePlayerAnim(t / 1000);
       this.renderer.render(this.scene, this.camera);
@@ -659,6 +696,8 @@ export class Yume25DEngine {
       const mesh = new THREE.Mesh(geo, mat);
       // level 段ぶん浮かせる（足元が y = level*H に揃う）
       mesh.position.set(b.col + 0.5, (b.level ?? 0) * H + (s * 0.9) / 2, b.row + 0.5);
+      // 編集ピッキング用：交点の y からではなくビルボード自身の段を採用する（壁の高さと縮尺が違うため）
+      mesh.userData.bbLevel = b.level ?? 0;
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);
@@ -767,13 +806,22 @@ export class Yume25DEngine {
     // 前方 = (-sin yaw, -cos yaw)、右方 = (cos yaw, -sin yaw)
     const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+    const H = this.layout.wallHeight;
+    const hovering = this.editMode && this.hover;
     if (move !== 0 || strafe !== 0) {
       const dashMult = (inp.dash && !this.demo) ? DASH_MULT : 1;
       const ms = move * MOVE_SPEED * dashMult * dt, ss = strafe * STRAFE_SPEED * dashMult * dt;
-      this.moveX(fx * ms + rx * ss);
-      this.moveZ(fz * ms + rz * ss);
-      this.clampToBounds();
-      this.resolveWalls();
+      if (hovering && this.hop >= H) {
+        // 壁の上端より高く浮遊している間は遮る物がない（当たり判定を持つのは地上段の壁のみ）
+        this.x += fx * ms + rx * ss;
+        this.z += fz * ms + rz * ss;
+        this.clampToBounds();
+      } else {
+        this.moveX(fx * ms + rx * ss);
+        this.moveZ(fz * ms + rz * ss);
+        this.clampToBounds();
+        this.resolveWalls();
+      }
     }
     // 歩行アニメ用：移動状態と「カメラから見た向き」を更新。カメラはプレイヤーの後方に
     // 追従するので、前進中は背中(w)・後退は正面(s)・ストレイフは横向きが見える。
@@ -790,16 +838,29 @@ export class Yume25DEngine {
       if (moved < expected * 0.35) this.demoTurnFrames = 25 + Math.floor(Math.random() * 50);
     }
 
-    // ── ジャンプ（短い一段ジャンプ。地面着地でリセット） ──
-    if (this.jumpQueued && this.grounded) {
-      this.vy = JUMP_VELOCITY;
-      this.grounded = false;
+    // ── 高さ方向：浮遊（ホバー）中は押している間だけ上昇/下降・重力なし。
+    //    それ以外（プレイ中・編集の通常モード・浮遊解除直後）は重力とジャンプが働く ──
+    if (hovering) {
+      const fly = (inp.flyUp ? 1 : 0) - (inp.flyDown ? 1 : 0);
+      if (fly !== 0) {
+        this.hop = Math.max(0, Math.min(FLY_MAX_ALT, this.hop + fly * FLY_SPEED * dt));
+        if (this.hop < H) this.resolveWalls();  // 壁の高さより下へ降りたら壁の中に居座らないよう押し出す
+      }
+      this.vy = 0;
+      this.grounded = this.hop <= 0;
       this.jumpQueued = false;
-    }
-    if (!this.grounded || this.hop > 0) {
-      this.vy -= GRAVITY * dt;
-      this.hop += this.vy * dt;
-      if (this.hop <= 0) { this.hop = 0; this.vy = 0; this.grounded = true; }
+    } else {
+      // ジャンプ（短い一段ジャンプ。地面着地でリセット）
+      if (this.jumpQueued && this.grounded) {
+        this.vy = JUMP_VELOCITY;
+        this.grounded = false;
+        this.jumpQueued = false;
+      }
+      if (!this.grounded || this.hop > 0) {
+        this.vy -= GRAVITY * dt;
+        this.hop += this.vy * dt;
+        if (this.hop <= 0) { this.hop = 0; this.vy = 0; this.grounded = true; }
+      }
     }
 
     const eyeY = this.layout.wallHeight * 0.52 + this.hop;

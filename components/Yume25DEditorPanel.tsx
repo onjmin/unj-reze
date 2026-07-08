@@ -3,7 +3,7 @@
 // yume25d（ゆめにっき3D）の編集パネル。かつては Yume25DMaker 内でキャンバスに重ねる
 // absolute オーバーレイだったが、GameMaker のサイドバーへ吸収し縦積みのリストとして表示する。
 
-import { type Yume25DTool, YUME25D_TOOL_LABELS, MAX_LEVEL, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
+import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
 import { type Layout25D, type Tex25D } from './game-presets/shared';
 
 interface Yume25DEditorPanelProps {
@@ -69,21 +69,22 @@ export default function Yume25DEditorPanel({
         ))}
       </div>
       {view === '3d' && (
-        <span className="text-[10px] text-gray-400 px-1">タップ/クリックで配置・WASDで移動/ストレイフ・ドラッグで視点回転(上下も可)・Shiftでダッシュ・Spaceでジャンプ・E/Fではなす</span>
+        <span className="text-[10px] text-gray-400 px-1">タップ/クリックで配置（高さは指した先に自動追従）・WASDで移動・Space2回押しで浮遊ON/OFF（浮遊中：Spaceで上昇/Shiftで下降）・通常時：Spaceでジャンプ/Shiftでダッシュ・ドラッグで視点回転(上下も可)</span>
       )}
 
-      {/* 段（高さ）セレクタ：壁/スプライトはこの段に配置される。マイクラ風の縦積み。 */}
-      {(tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
+      {/* 段（高さ）セレクタ：壁/スプライトはこの段に配置される。マイクラ風の縦積みで上限なし。
+          3Dビューではカーソルの指した先（壁の上・NPC・浮遊高度）から自動で決まるため表示しない。 */}
+      {view === '2d' && (tool === 'wall' || tool === 'sprite' || tool === 'erase') && (
         <div className="flex items-center gap-1 flex-wrap">
           <span className="text-[10px] text-gray-400 px-0.5">高さ</span>
-          {Array.from({ length: MAX_LEVEL + 1 }, (_, lv) => (
-            <button key={lv} onClick={() => onLevelChange(lv)}
-              title={lv === 0 ? '地上（当たり判定あり）' : `${lv + 1}段目（上空・下をくぐれる）`}
-              className={`w-7 h-7 rounded border-2 text-[11px] font-bold ${level === lv ? 'border-yellow-400 bg-violet-700 text-white' : 'border-gray-700 bg-gray-800 text-gray-400'}`}>
-              {lv + 1}
-            </button>
-          ))}
-          <span className="text-[9px] text-gray-500">段目に{tool === 'erase' ? 'あるものを消す' : '積む'}{level > 0 ? '（上空・すり抜け）' : ''}</span>
+          <button onClick={() => onLevelChange(Math.max(0, level - 1))} disabled={level === 0}
+            className="w-7 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-300 text-[13px] font-bold disabled:opacity-40">−</button>
+          <span className="h-7 min-w-14 px-1.5 rounded border-2 border-yellow-400 bg-violet-700 text-white text-[11px] font-bold flex items-center justify-center">
+            {level + 1}段目
+          </span>
+          <button onClick={() => onLevelChange(level + 1)}
+            className="w-7 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-300 text-[13px] font-bold">＋</button>
+          <span className="text-[9px] text-gray-500">に{tool === 'erase' ? 'あるものを消す' : '積む'}{level > 0 ? '（上空・すり抜け）' : '（地上・当たり判定あり）'}</span>
         </div>
       )}
 

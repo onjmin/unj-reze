@@ -143,10 +143,26 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
     const activeEl = scrollRef.current.querySelector(`[data-eidx="${activeIndex}"]`) as HTMLElement | null;
     const lane = scrollRef.current;
     if (activeEl && lane) {
-      const elCenter = activeEl.offsetLeft + activeEl.offsetWidth / 2;
-      const containerCenter = lane.clientWidth / 2;
-      const maxScroll = lane.scrollWidth - lane.clientWidth;
-      lane.scrollLeft = Math.max(0, Math.min(elCenter - containerCenter, Math.max(0, maxScroll)));
+      const elTop = activeEl.offsetTop;
+      const elHeight = activeEl.offsetHeight;
+      const elBottom = elTop + elHeight;
+
+      const viewTop = lane.scrollTop;
+      const viewBottom = viewTop + lane.clientHeight;
+
+      const MARGIN = 12;
+
+      if (elTop < viewTop + MARGIN) {
+        lane.scrollTo({
+          top: Math.max(0, elTop - MARGIN),
+          behavior: 'smooth'
+        });
+      } else if (elBottom > viewBottom - MARGIN) {
+        lane.scrollTo({
+          top: elBottom - lane.clientHeight + MARGIN,
+          behavior: 'smooth'
+        });
+      }
     }
   }, [activeIndex, isPlaying]);
 
@@ -174,7 +190,7 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
         </span>
       </div>
 
-      <div ref={scrollRef} className="px-2.5 pb-2.5 overflow-x-auto scrollbar-none relative">
+      <div ref={scrollRef} className="px-2.5 pb-2.5 max-h-40 overflow-y-auto scrollbar-none relative">
         {displayLines.map((dl, li) => {
           const color = SECTION_COLORS[dl.colorIdx % SECTION_COLORS.length];
           if (dl.type === 'section') {

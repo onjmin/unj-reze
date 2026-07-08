@@ -17,8 +17,6 @@ export const CELL = 28;              // 2Dエディタの1マスpx
 /** 他プリセットの編集キャンバス（15×11マス分の窓をプレイヤー開始地点基準でスクロール）に合わせた可視窓サイズ。 */
 const VIEW_COLS = 15;
 const VIEW_ROWS = 11;
-/** 縦積みの最大段数（level 0〜MAX_LEVEL）。マイクラ風に壁/スプライトを上へ積める。 */
-export const MAX_LEVEL = 3;
 export type Yume25DTool = 'floor' | 'wall' | 'sprite' | 'start' | 'talk' | 'erase';
 export const YUME25D_TOOL_LABELS: Record<Yume25DTool, string> = { floor: '床', wall: '壁', sprite: 'スプライト', start: '開始', talk: '会話設定', erase: '消す' };
 /** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */
@@ -27,6 +25,8 @@ const DRAG_TURN_SENSITIVITY = 0.006;
 const PAD_DEADZONE = 10;
 /** 3Dビューのタップ判定：累計移動量がこのpx以下で離したら「配置」、超えたら「視点回転ドラッグ」。 */
 const TAP_MAX_MOVE = 8;
+/** Minecraft風の浮遊トグル：Space 2回押しがこのms以内なら浮遊モードをON/OFFする。 */
+const SPACE_DOUBLE_TAP_MS = 300;
 
 interface DialogueState { message: string; choices?: string[]; }
 
@@ -96,6 +96,11 @@ export default function Yume25DMaker({
 
   const playing = isPlaying || !!demo;
   const is3d = playing || view === '3d';
+
+  // ── 浮遊（ホバー）モード：Minecraft創造飛行風。編集中の3Dビューで Space 2回押し／浮遊ボタンでトグル。
+  //    ONの間は Space/上昇ボタン=上昇・Shift/下降ボタン=下降。OFFは通常の落下モード（重力・ジャンプ）。 ──
+  const [hoverMode, setHoverMode] = useState(false);
+  const lastSpaceDownRef = useRef(0);
 
   // ── 2Dエディタのカメラ窓：他プリセット同様に VIEW_COLS×VIEW_ROWS マス分だけを表示し、
   //    プレイヤー開始地点（🏁）を基準にスクロールする（ブラウザのネイティブスクロールは使わない）。 ──
@@ -204,7 +209,7 @@ export default function Yume25DMaker({
     if (!eng) return;
     eng.demo = !!demo;
     if (playing) eng.resetToStart();
-    eng.input.forward = eng.input.back = eng.input.turnL = eng.input.turnR = eng.input.strafeL = eng.input.strafeR = eng.input.dash = false;
+    eng.input.forward = eng.input.back = eng.input.turnL = eng.input.turnR = eng.input.strafeL = eng.input.strafeR = eng.input.dash = eng.input.flyUp = eng.input.flyDown = false;
     setDialogue(null);
   }, [playing, demo]);
 
@@ -247,10 +252,13 @@ export default function Yume25DMaker({
     };
   }, [playing, dialogue, demo, resetIdleTimer]);
 
-  // ── 3D操作：キーボード（矢印＝前後＋旋回、WASD＝前後＋左右ストレイフ、Space＝ジャンプ、Shift＝ダッシュ） ──
+  // ── 3D操作：キーボード（矢印＝前後＋旋回、WASD＝前後＋左右ストレイフ）。Minecraft創造モード風：
+  //    Space＝ジャンプ（浮遊中は上昇）、編集中に Space 2回押しで浮遊モードON/OFF、
+  //    Shift＝ダッシュ（浮遊中は下降）。 ──
   // 会話ウィンドウが開いている間は移動キーを無視し、Enter/Spaceで閉じる。
   useEffect(() => {
     if (!is3d || demo) return;
+    const editHover = !playing && hoverMode;
     const setKey = (key: string, on: boolean): boolean => {
       const inp = engineRef.current?.input;
       if (!inp) return false;
@@ -261,7 +269,12 @@ export default function Yume25DMaker({
         case 'ArrowRight': inp.turnR = on; return true;
         case 'a': case 'A': inp.strafeL = on; return true;
         case 'd': case 'D': inp.strafeR = on; return true;
-        case 'Shift': inp.dash = on; return true;
+        case 'Shift':
+          // Minecraft風：浮遊中は下降、それ以外はダッシュ。離したらどちらも解除（押下中のモード切替対策）。
+          if (on) { if (editHover) inp.flyDown = true; else inp.dash = true; }
+          else { inp.dash = false; inp.flyDown = false; }
+          return true;
+        case ' ': if (!on) inp.flyUp = false; return true;  // 押下側は down ハンドラが処理する
       }
       return false;
     };
@@ -272,7 +285,25 @@ export default function Yume25DMaker({
         if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setDialogue(null); }
         return;
       }
-      if (e.key === ' ') { e.preventDefault(); engineRef.current?.jump(); return; }
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (playing) { engineRef.current?.jump(); return; }
+        if (!e.repeat) {
+          const now = performance.now();
+          if (now - lastSpaceDownRef.current < SPACE_DOUBLE_TAP_MS) {
+            // Space 2回押し：浮遊モードをトグル（ONで滞空開始、OFFで落下開始）
+            lastSpaceDownRef.current = 0;
+            const inp = engineRef.current?.input;
+            if (inp) { inp.flyUp = false; inp.flyDown = false; }
+            setHoverMode(h => !h);
+            return;
+          }
+          lastSpaceDownRef.current = now;
+        }
+        if (editHover) { const inp = engineRef.current?.input; if (inp) inp.flyUp = true; }
+        else engineRef.current?.jump();
+        return;
+      }
       if (e.key === 'e' || e.key === 'E' || e.key === 'f' || e.key === 'F') {
         const b = engineRef.current?.getInteractable();
         if (b) setDialogue({ message: b.message || '……', choices: b.choices });
@@ -284,9 +315,10 @@ export default function Yume25DMaker({
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, [is3d, demo]);
+  }, [is3d, demo, playing, hoverMode]);
 
   // ── 共通コントローラーからの入力を 2.5D エンジンへ転送 ──
+  // 浮遊（ホバー）モード中は A/B ボタンを上昇/下降の押しっぱなし入力として扱う。
   useEffect(() => {
     const inp = engineRef.current?.input;
     if (!inp || !virtualKeys) return;
@@ -295,22 +327,26 @@ export default function Yume25DMaker({
     inp.strafeL = virtualKeys.left;
     inp.strafeR = virtualKeys.right;
     inp.dash = virtualKeys.slow;
-  }, [virtualKeys?.up, virtualKeys?.down, virtualKeys?.left, virtualKeys?.right, virtualKeys?.slow]);
+    const fly = is3d && !playing && !demo && hoverMode;
+    inp.flyUp = fly && virtualKeys.action;
+    inp.flyDown = fly && virtualKeys.shoot;
+  }, [virtualKeys?.up, virtualKeys?.down, virtualKeys?.left, virtualKeys?.right, virtualKeys?.slow,
+      virtualKeys?.action, virtualKeys?.shoot, is3d, playing, demo, hoverMode]);
 
-  // Aボタン(Z): ジャンプ / ダイアログ進行
+  // Aボタン(Z): ジャンプ / ダイアログ進行（浮遊モード中は上の転送処理が「上昇」として扱う）
   useEffect(() => {
     if (virtualKeys?.action) {
       if (dialogueRef.current) {
         setDialogue(null);
-      } else {
+      } else if (!engineRef.current?.hover) {
         engineRef.current?.jump();
       }
     }
   }, [virtualKeys?.action]);
 
-  // Bボタン(X): 話す
+  // Bボタン(X): 話す（浮遊モード中は「下降」に割り当てるため無効）
   useEffect(() => {
-    if (virtualKeys?.shoot) {
+    if (virtualKeys?.shoot && !engineRef.current?.hover) {
       handleTalk();
     }
   }, [virtualKeys?.shoot]);
@@ -326,7 +362,7 @@ export default function Yume25DMaker({
     }
   }, [virtualKeys?.select]);
 
-  const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash') => ({
+  const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash' | 'flyUp' | 'flyDown') => ({
     onPointerDown: (e: React.PointerEvent) => {
       e.preventDefault();
       tryCapturePointer(e.currentTarget as HTMLElement, e.pointerId);
@@ -337,8 +373,11 @@ export default function Yume25DMaker({
   });
 
   // ── 3D配置プレビュー（ゴースト）：カーソル位置から applyEditAt と同じ適用先を割り出し、
-  //    半透明のゴーストで「タップしたらここに置かれる」を示す。 ──
+  //    半透明のゴーストで「タップしたらここに置かれる」を示す。
+  //    高さ（段）は pickTarget が指した先（壁の上の方・NPC・浮遊高度の空中面）から自動で決まる。 ──
   const lastHoverRef = useRef<{ x: number; y: number } | null>(null);
+  /** 既存物を対象にするツールは、浮遊面より遠くても実ジオメトリの交点を優先する。 */
+  const prefersGeometry = (t: Yume25DTool) => t === 'floor' || t === 'start' || t === 'talk' || t === 'erase';
   const computeGhost = useCallback((clientX: number, clientY: number): GhostSpec | null => {
     const eng = engineRef.current, cv = glCanvasRef.current;
     if (!eng || !cv) return null;
@@ -346,12 +385,12 @@ export default function Yume25DMaker({
     const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
     const ndcY = -(((clientY - rect.top) / rect.height) * 2 - 1);
     const L = layoutRef.current;
-    const planeY = (tool === 'wall' || tool === 'sprite' || tool === 'erase') ? level * L.wallHeight : 0;
-    const hit = eng.pickGround(ndcX, ndcY, planeY);
-    if (!hit) return null;
-    const c = Math.floor(hit.x), r = Math.floor(hit.z);
+    const res = eng.pickTarget(ndcX, ndcY, prefersGeometry(tool));
+    if (!res) return null;
+    const c = Math.floor(res.x), r = Math.floor(res.z);
     if (c < 0 || r < 0 || c >= L.cols || r >= L.rows) return null;
-    const fx = hit.x - c, fy = hit.z - r;
+    const fx = res.x - c, fy = res.z - r;
+    const lv = res.level;
     if (tool === 'floor') {
       // 床なし（奈落）選択中はテクスチャが無いので暗色ハイライトで示す
       return selFloor > 0 ? { kind: 'floor', col: c, row: r, tex: selFloor } : { kind: 'cell', col: c, row: r, level: 0, color: '#0d0a14' };
@@ -359,14 +398,14 @@ export default function Yume25DMaker({
     if (tool === 'wall') {
       const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
       dists.sort((a, b) => a[0] - b[0]);
-      const w = normalizeWall25D(c, r, dists[0][1], selWall, level);
-      return { kind: 'wall', col: w.col, row: w.row, dir: w.dir, level, tex: selWall };
+      const w = normalizeWall25D(c, r, dists[0][1], selWall, lv);
+      return { kind: 'wall', col: w.col, row: w.row, dir: w.dir, level: lv, tex: selWall };
     }
-    if (tool === 'sprite') return { kind: 'sprite', col: c, row: r, level, tex: selSprite };
+    if (tool === 'sprite') return { kind: 'sprite', col: c, row: r, level: lv, tex: selSprite };
     if (tool === 'start') return { kind: 'cell', col: c, row: r, level: 0, color: '#7fffd4' };
-    if (tool === 'talk') return { kind: 'cell', col: c, row: r, level, color: '#38bdf8' };
-    return { kind: 'cell', col: c, row: r, level, color: '#ef4444' };  // erase
-  }, [tool, level, selFloor, selWall, selSprite]);
+    if (tool === 'talk') return { kind: 'cell', col: c, row: r, level: lv, color: '#38bdf8' };
+    return { kind: 'cell', col: c, row: r, level: lv, color: '#ef4444' };  // erase
+  }, [tool, selFloor, selWall, selSprite]);
 
   const updateGhost = (clientX: number, clientY: number) => {
     lastHoverRef.current = { x: clientX, y: clientY };
@@ -379,6 +418,35 @@ export default function Yume25DMaker({
     const p = lastHoverRef.current;
     if (p) engineRef.current?.setGhost(computeGhost(p.x, p.y));
   }, [is3d, playing, demo, computeGhost]);
+
+  // 編集中の3Dビューは編集モード（空中面ピッキング・毎フレームのゴースト追従）。
+  // 浮遊（ホバー）は hoverMode のトグルに従う。OFFなら通常の落下モードで歩き回れる。
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    const edit = is3d && !playing && !demo;
+    eng.editMode = edit;
+    eng.hover = edit && hoverMode;
+    if (!eng.hover) { eng.input.flyUp = false; eng.input.flyDown = false; }
+  }, [is3d, playing, demo, hoverMode]);
+
+  // プレイ開始やビュー切替で編集から離れたら浮遊モードを解除する。
+  useEffect(() => {
+    if (!is3d || playing || demo) setHoverMode(false);
+  }, [is3d, playing, demo]);
+
+  // 浮遊・移動でカメラが動くとカーソルの指す先も変わるので、編集中は毎フレームゴーストを追従させる。
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    eng.onEditFrame = () => {
+      const d = dragRef.current;
+      if (d && d.moved > TAP_MAX_MOVE) return;  // 視点回転ドラッグ中は消したままにする
+      const p = lastHoverRef.current;
+      if (p) eng.setGhost(computeGhost(p.x, p.y));
+    };
+    return () => { eng.onEditFrame = null; };
+  }, [computeGhost]);
 
   // ── 3D操作：ドラッグでカメラ回転（マウス・タッチ共通。Pointer Events を使うので追加実装不要）。
   //    横方向＝旋回(yaw)、縦方向＝見上げ/見下ろし(pitch)。
@@ -419,13 +487,11 @@ export default function Yume25DMaker({
       const rect = e.currentTarget.getBoundingClientRect();
       const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const ndcY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-      const L = layoutRef.current;
-      // 壁/スプライト/消去は編集中の段の高さの水平面でピッキング（上段の配置・消去も直感通りになる）。
-      const planeY = (tool === 'wall' || tool === 'sprite' || tool === 'erase') ? level * L.wallHeight : 0;
-      const hit = engineRef.current?.pickGround(ndcX, ndcY, planeY);
-      if (hit) {
-        const c = Math.floor(hit.x), r = Math.floor(hit.z);
-        applyEditAt(c, r, false, hit.x - c, hit.z - r);
+      // 高さ（段）はゴーストと同じくピッキング結果から自動で決まる。
+      const res = engineRef.current?.pickTarget(ndcX, ndcY, prefersGeometry(tool));
+      if (res) {
+        const c = Math.floor(res.x), r = Math.floor(res.z);
+        applyEditAt(c, r, false, res.x - c, res.z - r, res.level);
       }
     }
     // 視点回転の終了後や配置直後も、カーソル位置のプレビューを復帰させる。
@@ -598,9 +664,11 @@ export default function Yume25DMaker({
 
   // ── 2Dエディタ操作 ───────────────────────────────────────────────────────
   // c, r はワールド座標のマス目。fx, fy はマス内の相対位置（0〜1、壁の辺選択に使用）。
-  const applyEditAt = useCallback((c: number, r: number, isDrag: boolean, fx: number, fy: number) => {
+  // lvOverride: 3Dビューのピッキングが割り出した段。2D編集はパネルで選んだ段（level prop）を使う。
+  const applyEditAt = useCallback((c: number, r: number, isDrag: boolean, fx: number, fy: number, lvOverride?: number) => {
     const L = layoutRef.current;
     if (c < 0 || r < 0 || c >= L.cols || r >= L.rows) return;
+    const lv = lvOverride ?? level;
 
     if (tool === 'floor') {
       onLayoutChange(l => {
@@ -615,9 +683,9 @@ export default function Yume25DMaker({
     if (tool === 'wall') {
       const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
       dists.sort((a, b) => a[0] - b[0]);
-      const w = normalizeWall25D(c, r, dists[0][1], selWall, level);
+      const w = normalizeWall25D(c, r, dists[0][1], selWall, lv);
       onLayoutChange(l => {
-        const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir && (v.level ?? 0) === level);
+        const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir && (v.level ?? 0) === lv);
         if (hit && hit.tex === w.tex) return { ...l, walls: l.walls.filter(v => v !== hit) };  // 同じ壁 → 取り除く
         if (hit) return { ...l, walls: l.walls.map(v => v === hit ? w : v) };                   // 別テクスチャ → 貼り替え
         return { ...l, walls: [...l.walls, w] };
@@ -626,10 +694,10 @@ export default function Yume25DMaker({
     }
     if (tool === 'sprite') {
       onLayoutChange(l => {
-        const hit = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === level);
+        const hit = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === lv);
         if (hit && hit.tex === selSprite) return { ...l, billboards: l.billboards.filter(b => b !== hit) };
         if (hit) return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, tex: selSprite } : b) };
-        return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1, ...(level > 0 ? { level } : {}) }] };
+        return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1, ...(lv > 0 ? { level: lv } : {}) }] };
       });
       return;
     }
@@ -646,25 +714,25 @@ export default function Yume25DMaker({
     if (tool === 'talk') {
       // いま編集中の段を優先し、無ければ同セルの他の段から拾う
       const bs = layoutRef.current.billboards;
-      const hit = bs.find(b => b.col === c && b.row === r && (b.level ?? 0) === level)
+      const hit = bs.find(b => b.col === c && b.row === r && (b.level ?? 0) === lv)
         ?? bs.find(b => b.col === c && b.row === r);
       setTalkTargetId(hit ? hit.id : null);
       return;
     }
     // erase: 編集中の段の ビルボード → 壁（辺の近く） の順に消す。床は地上段(0)のみ。
     onLayoutChange(l => {
-      const bb = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === level);
+      const bb = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === lv);
       if (bb) return { ...l, billboards: l.billboards.filter(b => b !== bb) };
       if (!isDrag) {
         const dists: [number, Dir4][] = [[fy, 0], [1 - fx, 1], [1 - fy, 2], [fx, 3]];
         dists.sort((a, b) => a[0] - b[0]);
         if (dists[0][0] < 0.3) {
           const w = normalizeWall25D(c, r, dists[0][1], 0);
-          const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir && (v.level ?? 0) === level);
+          const hit = l.walls.find(v => v.col === w.col && v.row === w.row && v.dir === w.dir && (v.level ?? 0) === lv);
           if (hit) return { ...l, walls: l.walls.filter(v => v !== hit) };
         }
       }
-      if (level === 0 && (l.floor[r]?.[c] ?? 0) !== 0) {
+      if (lv === 0 && (l.floor[r]?.[c] ?? 0) !== 0) {
         const floor = l.floor.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? 0 : v) : row);
         return { ...l, floor };
       }
@@ -833,7 +901,7 @@ export default function Yume25DMaker({
             <span className="w-2.5 h-2.5 rounded-full bg-white/30" />
           </div>
 
-          {/* アクションボタン：右下にまとめて画面占有を最小化。 */}
+          {/* アクションボタン：右下にまとめて画面占有を最小化。浮遊の昇降は専用クラスタ（下記）が担う。 */}
           <div className="absolute bottom-2 right-2 z-20 flex items-center gap-1.5 opacity-90 touch-none">
             <button {...holdProps('dash')}
               className="w-9 h-9 bg-amber-700/85 active:bg-amber-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center">
@@ -851,6 +919,31 @@ export default function Yume25DMaker({
             </button>
           </div>
         </>
+      )}
+
+      {/* 浮遊（ホバー）操作：Minecraft創造飛行風のオンスクリーンボタン（モバイル向け・編集中のみ）。
+          「浮遊」トグルは Space 2回押しと同じ。ONの間だけ上昇/下降のホールドボタンを出す。
+          共通コントローラー使用時（virtualKeys あり）でも表示し、タッチだけで飛べるようにする。 */}
+      {is3d && !playing && !demo && (
+        <div className="absolute right-2 bottom-14 z-20 flex flex-col items-end gap-1.5 opacity-90 touch-none select-none">
+          {hoverMode && (
+            <>
+              <button {...holdProps('flyUp')}
+                className="w-10 h-10 bg-emerald-700/85 active:bg-emerald-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
+                ▲上昇
+              </button>
+              <button {...holdProps('flyDown')}
+                className="w-10 h-10 bg-sky-700/85 active:bg-sky-500 rounded-full text-white text-[10px] font-bold flex items-center justify-center">
+                ▼下降
+              </button>
+            </>
+          )}
+          <button
+            onPointerDown={e => { e.preventDefault(); setHoverMode(h => !h); }}
+            className={`h-10 px-3 rounded-full text-[10px] font-bold flex items-center justify-center border ${hoverMode ? 'bg-violet-600 border-violet-300 text-white' : 'bg-gray-800/85 border-gray-500 text-gray-200'}`}>
+            {hoverMode ? '浮遊中' : '浮遊'}
+          </button>
+        </div>
       )}
 
       {/* 会話ウィンドウ（選択肢がある場合は「選ぶ」までここに留まり、仮想ボタンは上で隠されている）。 */}
