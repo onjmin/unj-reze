@@ -501,9 +501,6 @@ export default function Yume25DMaker({
           ctx.restore();
         }
       }
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(Math.floor(cur.col) * CELL + 1, Math.floor(cur.row) * CELL + 1, CELL - 2, CELL - 2);
     }
     ctx.restore();
   }, [level, playing, playerAppearance, is3d]);
