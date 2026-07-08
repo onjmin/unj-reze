@@ -1,4 +1,4 @@
-import { type PresetData, type SceneDef, type EventCommand, newObject, TILE_SIZE } from './shared';
+import { type PresetData, type SceneDef, type EventCommand, newObject, chest, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-assets';
 // id は rpgen-search API の id フィールド（ハッシュ文字列）
 const wr = (id: string) => `walk:auto:u:${sa(id)}`;
@@ -56,16 +56,6 @@ const foe = (o: {
 const npc = (emoji: string, col: number, row: number, message: string, spriteId?: string) => newObject({
   emoji, col, row, behavior: 'still', hazard: false, message,
   ...(spriteId ? { spriteRef: wr(spriteId), spriteUrl: sa(spriteId) } : {}),
-});
-
-/** 一度だけ開けられる宝箱（セルフスイッチ A）。 */
-const chest = (col: number, row: number, openCmds: EventCommand[]) => newObject({
-  emoji: '👑', col, row, behavior: 'still', hazard: false,
-  spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL'),
-  pages: [
-    { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [{ type: 'message', text: 'からっぽだ。' }] },
-    { conditions: {}, commands: [...openCmds, { type: 'setSelfSwitch', id: 'A', value: true }] },
-  ],
 });
 
 /** シーン間ワープ（扉・穴）。 */
@@ -169,11 +159,9 @@ end while
     }),
     // 宝物庫（右の部屋）
     chest(25, 14, [
-      { type: 'message', text: '宝箱をあけた！ 🍬モンスターキャンディ×2 を手に入れた！' },
       { type: 'giveItem', itemId: 'monsterCandy', count: 2 },
     ]),
     chest(26, 16, [
-      { type: 'message', text: '宝箱をあけた！ 30ゴールドを手に入れた！' },
       { type: 'changeGold', amount: 30 },
     ]),
     // 遺跡のモンスター
@@ -425,11 +413,9 @@ const sceneWaterfall: SceneDef = {
     }),
     // 宝箱
     chest(26, 3, [
-      { type: 'message', text: '宝箱をあけた！ 🍳こげたフライパン を手に入れた！\n（なぜか つよい。こうげき力が大きく上がった）' },
       { type: 'giveItem', itemId: 'burntPan', count: 1 },
     ]),
     chest(2, 14, [
-      { type: 'message', text: '宝箱をあけた！ 🩰ふるびたチュチュ を手に入れた！\n（みのまもりが 上がった）' },
       { type: 'giveItem', itemId: 'tutu', count: 1 },
     ]),
     // どうくつのモンスター

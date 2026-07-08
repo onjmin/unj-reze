@@ -30,6 +30,7 @@ import {
   type TitleScreenConfig, type EndingScreenConfig,
   defaultTitleScreen, defaultEndingScreen,
   type Layout25D,
+  chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -122,7 +123,8 @@ export interface GameManifestDraft {
   preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
   player: { emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string;
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number; };
-  tiles: Record<number, { name: string; color: string; passable: boolean; special?: string; imageRef?: string }>;
+  tiles: Record<number, { name: string; color: string; passable: boolean; special?: string; imageRef?: string;
+    warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number; damageAmount?: number }>;
   map: number[][];
   overlayMap?: number[][];
   objects: Array<Omit<ObjectDef, 'spriteUrl'>>;
@@ -213,6 +215,15 @@ const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙�
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
 const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊', coin: 'コイン' };
+
+// ── システムタイル（宝箱以外）: ワープ床・どく沼/ダメージ床・つるつる床 ──────────
+// special の値ごとに固定の効果音・挙動を持つ。画像は /assets/rpgen/map.png の16pxグリッドから
+// 切り出す（`localTileUrl` と同じ #sx,sy,16,16 記法）。
+const SYS_TILE_WARP_SFX = 'https://rpgen-search.pages.dev/data/audio/sound/vfCmoe.mp3';
+const SYS_TILE_DAMAGE_SFX = 'https://rpgen-search.pages.dev/audio/sound/4z7O4A.mp3';
+const ICE_DIRS: Record<string, [number, number]> = {
+  'ice-up': [0, -1], 'ice-right': [1, 0], 'ice-down': [0, 1], 'ice-left': [-1, 0],
+};
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
@@ -1167,6 +1178,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  ワープ（warpSceneId / warpTarget）の発動を無効化する（入場地点付近に別のワープがある場合の
    *  即座の巻き戻り・往復ループを防ぐ）。 */
   const warpCooldownRef = useRef<{ x: number; y: number } | null>(null);
+  /** つるつる床（システムタイル）：強制スライド中の目標座標。null なら通常操作。 */
+  const iceSlideRef = useRef<{ targetX: number; targetY: number } | null>(null);
+  /** つるつる床の多重発動防止：直近に発動開始したタイル座標キー。 */
+  const lastIceTileRef = useRef<string | null>(null);
+  /** システムタイル（どく沼/ダメージ床/ワープ床）：無敵時間中の多重発動防止に invulnRef を流用。 */
   const roundOverRef = useRef(false);    // ミス/ゲームオーバー/クリア演出中（操作・進行を凍結）
   const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
   const livesRef = useRef(3);            // 残機数
@@ -2007,6 +2023,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       switch (cmd.type) {
         case 'message':
           showGameMsg(cmd.text, 'instant', advance);
+          break;
+        case 'overheadMessage':
+          itemGetRef.current = { text: cmd.text, startTime: performance.now() };
+          setTimeout(advance, 30);
+          break;
+        case 'playSound':
+          playSfx({ ref: `direct:${cmd.src}`, src: cmd.src, type: 'direct' });
+          setTimeout(advance, 0);
           break;
         case 'choice':
           eventChoiceRef.current = {
@@ -3946,16 +3970,39 @@ const lose = (msg: string) => {
           const isSlow = gameData.engine === 'touhou' && (keys.has('Shift') || touchRef.current.slow);
           const moveSpd = isSlow ? pData.speed * 0.45 : pData.speed;
           const prevPx = p.x, prevPy = p.y;
+          const mobBlockActive = gameData.engine === 'rpg';
+          const canStandAt = (x: number, y: number) => {
+            const ta = getTile(x, y), tb = getTile(x + pData.w - 1, y + pData.h - 1);
+            return !!ta?.info.passable && !!tb?.info.passable && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
+              (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
+          };
+          // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
+          if (gameData.engine === 'rpg' && iceSlideRef.current) {
+            const slide = iceSlideRef.current;
+            const dx = slide.targetX - p.x, dy = slide.targetY - p.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist <= moveSpd || dist === 0) { p.x = slide.targetX; p.y = slide.targetY; }
+            else { p.x += (dx / dist) * moveSpd; p.y += (dy / dist) * moveSpd; }
+            if (p.x === slide.targetX && p.y === slide.targetY) {
+              iceSlideRef.current = null;
+              const landed = getTile(p.x, p.y);
+              const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
+              if (nextDir) {
+                const tx = p.x + nextDir[0] * TILE_SIZE, ty = p.y + nextDir[1] * TILE_SIZE;
+                if (canStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+              }
+            }
+          } else {
           let nx = p.x, ny = p.y;
           if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
-          const mobBlockActive = gameData.engine === 'rpg';
           // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
           const alreadyOverlapping = mobBlockActive && isBlockedByMob(p.x, p.y, pData.w, pData.h);
           let t1 = getTile(nx, p.y), t2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
           if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+          }
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
           if (isPlaying && gameData.engine === 'rpg' && gameData.battle && !dead &&
@@ -4973,7 +5020,53 @@ const lose = (msg: string) => {
                 showGameMsg('チェックポイント！', 'timed', () => {});
               }
             }
-            else bossWarnRef.current = false;
+            // ── システムタイル：シーン切替床 ──
+            else if (gameData.engine === 'rpg' && center?.info?.special === 'warp' && center.info.warpSceneId) {
+              if (scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current && !warpCooldownRef.current) {
+                const tgtScene = scenesRef.current.find(s => s.id === center!.info!.warpSceneId);
+                if (tgtScene) {
+                  playSfx({ ref: `direct:${SYS_TILE_WARP_SFX}`, src: SYS_TILE_WARP_SFX, type: 'direct' });
+                  const ex = (center.info.warpEntryCol ?? 1) * TILE_SIZE;
+                  const ey = (center.info.warpEntryRow ?? 1) * TILE_SIZE;
+                  sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: center.info.warpSceneId, entryX: ex, entryY: ey };
+                  resetSceneState();
+                }
+              }
+            }
+            // ── システムタイル：どく沼/ダメージ床 ──
+            else if (gameData.engine === 'rpg' && center?.info?.special === 'damage') {
+              if (!debugInvincibleRef.current && invulnRef.current <= 0) {
+                playSfx({ ref: `direct:${SYS_TILE_DAMAGE_SFX}`, src: SYS_TILE_DAMAGE_SFX, type: 'direct' });
+                invulnRef.current = 45;
+                const dmg = center.info.damageAmount ?? 3;
+                hitShake();
+                if (gameData.battle) {
+                  progressRef.current.hp -= dmg; forceHud(n => n + 1);
+                  if (progressRef.current.hp <= 0) { lose('どくにたおれた…'); dead = true; }
+                } else {
+                  onjRezeHpRef.current.hp -= dmg; forceHud(n => n + 1);
+                  if (onjRezeHpRef.current.hp <= 0) { lose('やられた…'); dead = true; }
+                }
+              }
+            }
+            // ── システムタイル：つるつる床（スライド開始） ──
+            else if (gameData.engine === 'rpg' && center?.info?.special && ICE_DIRS[center.info.special] && !iceSlideRef.current) {
+              const tileKey = `${center.rect.x},${center.rect.y}`;
+              if (lastIceTileRef.current !== tileKey) {
+                lastIceTileRef.current = tileKey;
+                p.x = center.rect.x; p.y = center.rect.y;
+                const [dx, dy] = ICE_DIRS[center.info.special];
+                const tx = center.rect.x + dx * TILE_SIZE, ty = center.rect.y + dy * TILE_SIZE;
+                const ta = getTile(tx, ty), tb = getTile(tx + pData.w - 1, ty + pData.h - 1);
+                if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - pData.w && ty >= 0 && ty <= worldH - pData.h) {
+                  iceSlideRef.current = { targetX: tx, targetY: ty };
+                }
+              }
+            }
+            else {
+              bossWarnRef.current = false;
+              if (!(center?.info?.special && ICE_DIRS[center.info.special])) lastIceTileRef.current = null;
+            }
             // コインタイル：プレイヤーが重なったら回収（actionエンジン）
             if (isAction) {
               const phC = getPlayerHeight();
@@ -5300,7 +5393,12 @@ const lose = (msg: string) => {
               ctx.drawImage(srcImg, cell.sx, cell.sy + cell.sh / 2, cell.sw, cell.sh / 2, e.x, e.y + eh / 2, ew, eh / 2);
             }
           } else {
-            drawSprite({ emoji: e.def.emoji, spriteUrl: e.def.spriteUrl, spriteRef: e.def.spriteRef }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
+            const eOpened = e.def.altSpriteRef && (selfSwitchesRef.current[e.def.id]?.['A'] ?? false);
+            drawSprite({
+              emoji: e.def.emoji,
+              spriteUrl: eOpened ? e.def.altSpriteUrl : e.def.spriteUrl,
+              spriteRef: eOpened ? e.def.altSpriteRef : e.def.spriteRef,
+            }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
           }
           // レゼが近接戦闘AIに移行している時（プレイヤーが近くにいる時）は赤いオーラを描画
           if (gameData.engine === 'onjReze' && e.def.name === 'レゼ' && !dead) {
@@ -6234,6 +6332,33 @@ const lose = (msg: string) => {
   };
   const updateTile = (id: number, patch: Partial<TileDef>) =>
     setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { ...p.tiles[id], ...patch } } }));
+  /** システムタイル（ワープ床/どく沼・ダメージ床/つるつる床）をテンプレートから新規タイルとして追加する。 */
+  const addSystemTile = (tpl: SystemTileTemplate) => {
+    setGameData(p => {
+      const ids = Object.keys(p.tiles).map(Number);
+      const id = Math.max(...ids) + 1;
+      return {
+        ...p,
+        tiles: {
+          ...p.tiles,
+          [id]: {
+            name: tpl.label, color: '#888888', passable: tpl.passable,
+            special: tpl.special, imageRef: tpl.imageRef, imageUrl: tpl.imageUrl,
+          },
+        },
+      };
+    });
+    setEditorTab('map');
+  };
+  /** 宝箱（システムオブジェクト）をプレイヤーの現在位置に配置する。 */
+  const addChestObject = () => {
+    const p = engineRef.current.player;
+    const col = Math.floor((p.x + 12) / TILE_SIZE), row = Math.floor((p.y + 12) / TILE_SIZE);
+    const obj = chest(col, row, []);
+    setGameData(prev => ({ ...prev, objects: [...prev.objects, obj] }));
+    setEditorTab('object');
+    setSelectedObjId(obj.id);
+  };
   const deleteTile = (id: number) => {
     if (id === 0) return;
     setGameData(p => {
@@ -6261,6 +6386,7 @@ const lose = (msg: string) => {
     },
     tiles: Object.fromEntries(Object.entries(gameData.tiles).map(([k, t]) => [k, {
       name: t.name, color: t.color, passable: t.passable, special: t.special, imageRef: t.imageRef,
+      warpSceneId: t.warpSceneId, warpEntryCol: t.warpEntryCol, warpEntryRow: t.warpEntryRow, damageAmount: t.damageAmount,
     }])),
     map: gameData.map,
     overlayMap: gameData.overlayMap,
@@ -7923,15 +8049,52 @@ const lose = (msg: string) => {
                               {id !== 0 && <button onClick={() => deleteTile(id)} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
                             </div>
                             {selectedTileId === id && (
-                              <div className="flex items-center gap-3 px-2 pb-2 text-[10px] text-gray-400">
-                                <label className="flex items-center gap-1"><input type="checkbox" checked={tile.passable} onChange={e => updateTile(id, { passable: e.target.checked })} className="accent-blue-500" />通行可</label>
-                                <select value={tile.special || ''} onChange={e => updateTile(id, { special: e.target.value || undefined })} className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
-                                  <option value="">特殊なし</option>
-                                  <option value="goal">ゴール</option>
-                                  <option value="trap">トラップ</option>
-                                  <option value="item">アイテム</option>
-                                  <option value="grass">草むら</option>
-                                </select>
+                              <div className="px-2 pb-2 space-y-1.5">
+                                <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                                  <label className="flex items-center gap-1"><input type="checkbox" checked={tile.passable} onChange={e => updateTile(id, { passable: e.target.checked })} className="accent-blue-500" />通行可</label>
+                                  <select value={tile.special || ''} onChange={e => updateTile(id, { special: e.target.value || undefined })} className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
+                                    <option value="">特殊なし</option>
+                                    <option value="goal">ゴール</option>
+                                    <option value="trap">トラップ</option>
+                                    <option value="item">アイテム</option>
+                                    <option value="grass">草むら</option>
+                                    <option value="warp">システム: シーン切替床</option>
+                                    <option value="damage">システム: どく沼/ダメージ床</option>
+                                    <option value="ice-up">システム: つるつる床（↑）</option>
+                                    <option value="ice-right">システム: つるつる床（→）</option>
+                                    <option value="ice-down">システム: つるつる床（↓）</option>
+                                    <option value="ice-left">システム: つるつる床（←）</option>
+                                  </select>
+                                </div>
+                                {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] text-gray-400 flex items-center gap-1">🚪 遷移先シーン
+                                      <select value={tile.warpSceneId ?? ''} onChange={e => updateTile(id, { warpSceneId: e.target.value || undefined })}
+                                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none">
+                                        <option value="">（未設定）</option>
+                                        {(gameData.scenes ?? []).map(s => <option key={s.id} value={s.id}>{s.name ?? s.id}</option>)}
+                                      </select>
+                                    </label>
+                                    {tile.warpSceneId && (
+                                      <div className="grid grid-cols-2 gap-1.5">
+                                        <label className="text-[10px] text-gray-400">入場X(列)
+                                          <input type="number" value={tile.warpEntryCol ?? 1} onChange={e => updateTile(id, { warpEntryCol: Number(e.target.value) })}
+                                            className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                        </label>
+                                        <label className="text-[10px] text-gray-400">入場Y(行)
+                                          <input type="number" value={tile.warpEntryRow ?? 1} onChange={e => updateTile(id, { warpEntryRow: Number(e.target.value) })}
+                                            className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                        </label>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {tile.special === 'damage' && (
+                                  <label className="text-[10px] text-gray-400 flex items-center gap-1">被ダメージ量
+                                    <input type="number" value={tile.damageAmount ?? 3} onChange={e => updateTile(id, { damageAmount: Number(e.target.value) })}
+                                      className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                  </label>
+                                )}
                               </div>
                             )}
                           </div>
@@ -7939,6 +8102,26 @@ const lose = (msg: string) => {
                       })}
                     </div>
                     <button onClick={addTile} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />タイルを追加</button>
+
+                    {/* ── システムオブジェクト（宝箱・ワープ床・どく沼/ダメージ床・つるつる床）── */}
+                    {gameData.engine === 'rpg' && (
+                      <div className="rounded-lg border border-purple-700/50 bg-purple-950/20 p-2.5 space-y-2">
+                        <p className="text-[11px] font-bold text-purple-300">システムオブジェクト</p>
+                        <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきで追加されます（宝箱はプレイヤー位置に配置、床タイルはタイル一覧に追加されるのでマップに塗ってください）。</p>
+                        <button onClick={addChestObject}
+                          className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[11px] text-purple-200 hover:bg-purple-900/70">
+                          <Plus size={12} />宝箱を追加
+                        </button>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {SYSTEM_TILE_TEMPLATES.map(tpl => (
+                            <button key={tpl.key} onClick={() => addSystemTile(tpl)}
+                              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
+                              <Plus size={11} />{tpl.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* ── マップ背景画像 ── */}
                     <div>
@@ -9554,6 +9737,7 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   giveItem: 'アイテム入手', removeItem: 'アイテム削除', changeGold: 'ゴールド増減',
   restoreHp: 'HP回復', restoreMp: 'MP回復',
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
+  overheadMessage: '頭上メッセージ', playSound: '効果音再生',
 };
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
@@ -9687,6 +9871,8 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         case 'changeGold': return { type: 'changeGold', amount: 0 };
         case 'restoreHp': return { type: 'restoreHp' };
         case 'restoreMp': return { type: 'restoreMp' };
+        case 'overheadMessage': return { type: 'overheadMessage', text: '' };
+        case 'playSound': return { type: 'playSound', src: '' };
       }
     })();
     onChange(base);
@@ -9802,6 +9988,14 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
           <input value={(cmd as any).text ?? (cmd as any).name ?? ''}
             onChange={e => onChange(type === 'comment' ? { text: e.target.value } : { name: e.target.value, ...(type === 'jump' ? { label: e.target.value } : {}) })}
             className={inputCls} placeholder={type === 'comment' ? 'コメント' : type === 'label' ? 'ラベル名' : 'ジャンプ先ラベル'} />
+        )}
+        {type === 'overheadMessage' && (
+          <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+            rows={2} className={inputCls} placeholder="頭上メッセージ" />
+        )}
+        {type === 'playSound' && (
+          <input value={(cmd as any).src ?? ''} onChange={e => onChange({ src: e.target.value })}
+            className={inputCls} placeholder="効果音URL（mp3）" />
         )}
       </div>
     </div>

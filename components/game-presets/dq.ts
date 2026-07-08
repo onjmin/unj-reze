@@ -1,4 +1,4 @@
-import { type PresetData, type SceneDef, type EventCommand, newObject, TILE_SIZE } from './shared';
+import { type PresetData, type SceneDef, type EventCommand, newObject, chest, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-assets';
 // id は rpgen-search API の id フィールド（ハッシュ文字列）
 const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
@@ -48,16 +48,6 @@ const foe = (o: {
 const npc = (emoji: string, col: number, row: number, message: string, spriteId?: string) => newObject({
   emoji, col, row, behavior: 'still', hazard: false, message,
   ...(spriteId ? { spriteRef: wr(spriteId), spriteUrl: sa(spriteId) } : {}),
-});
-
-/** 一度だけ開けられる宝箱（セルフスイッチ A）。 */
-const chest = (col: number, row: number, openCmds: EventCommand[]) => newObject({
-  emoji: '👑', col, row, behavior: 'still', hazard: false,
-  spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL'),
-  pages: [
-    { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [{ type: 'message', text: 'からっぽだ。' }] },
-    { conditions: {}, commands: [...openCmds, { type: 'setSelfSwitch', id: 'A', value: true }] },
-  ],
 });
 
 /** シーン間ワープ（扉・穴）。 */
@@ -150,11 +140,9 @@ const sceneCastle: SceneDef = {
     npc('👴', 4, 11, '戦いのコツを教えよう。MPを使う呪文は強力だが、まずは【たたかう】で様子を見ることじゃ。にげるが勝ちのときもある。', 'M05nRh'),
     // 宝物庫
     chest(25, 10, [
-      { type: 'message', text: '宝箱をあけた！ 40ゴールドを手に入れた！' },
       { type: 'changeGold', amount: 40 },
     ]),
     chest(26, 12, [
-      { type: 'message', text: '宝箱をあけた！ 🌿やくそう×2 を手に入れた！' },
       { type: 'giveItem', itemId: 'herb', count: 2 },
     ]),
     // 城の出口 → フィールド
@@ -223,7 +211,6 @@ const sceneField: SceneDef = {
     npc('👴', 10, 19, '西の城がラダトーム城、東の町がリムルダールじゃ。北西の山には洞窟の入り口があるらしい。', 'M05nRh'),
     // ── 宝箱（北東の隠しポケット）──
     chest(28, 2, [
-      { type: 'message', text: '宝箱をあけた！ 64ゴールドを手に入れた！' },
       { type: 'changeGold', amount: 64 },
     ]),
     // ── ワープ ──
@@ -380,7 +367,6 @@ const sceneCave: SceneDef = {
     npc('👴', 3, 19, 'この洞窟のおくには ドラゴンが住みついておる。ローラ姫とまほうのカギは その先じゃ……むりはするなよ。', 'M05nRh'),
     // ── 西の部屋（石板と金貨）──
     chest(7, 9, [
-      { type: 'message', text: '宝箱をあけた！ 120ゴールドを手に入れた！' },
       { type: 'changeGold', amount: 120 },
     ]),
     foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 32, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
@@ -416,7 +402,6 @@ const sceneCave: SceneDef = {
     foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 90, atk: 44, def: 24, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 26 }], behavior: 'patrolV', speed: 1.4 }),
     // まほうのカギの宝箱
     chest(26, 15, [
-      { type: 'message', text: '宝箱をあけた！ 🗝️まほうのカギ を手に入れた！\nこれで竜王の城の扉が開けられる！' },
       { type: 'giveItem', itemId: 'magicKey', count: 1 },
     ]),
     // ローラ姫
@@ -503,13 +488,11 @@ const sceneDragonCastle: SceneDef = {
     // 西翼：ロトのつるぎ（ストーンマンが守る）
     foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 95, atk: 50, def: 30, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8 }),
     chest(3, 9, [
-      { type: 'message', text: '宝箱をあけた！ 🔱ロトのつるぎ を手に入れた！\n（でんせつの剣。こうげき力が大きく上がった）' },
       { type: 'giveItem', itemId: 'lotoSword', count: 1 },
     ]),
     // 東翼：軍資金
     foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 70, atk: 48, def: 26, exp: 95, gold: 110, behavior: 'patrolH' }),
     chest(26, 10, [
-      { type: 'message', text: '宝箱をあけた！ 300ゴールドを手に入れた！' },
       { type: 'changeGold', amount: 300 },
     ]),
     // 玉座の間の前：竜王の問いかけ

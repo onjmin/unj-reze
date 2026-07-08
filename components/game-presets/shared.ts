@@ -51,7 +51,11 @@ export type EventCommand =
   | { type: 'wait'; frames: number }
   | { type: 'comment'; text: string }
   | { type: 'label'; name: string }
-  | { type: 'jump'; label: string };
+  | { type: 'jump'; label: string }
+  /** プレイヤー頭上に一時的なメッセージを表示する（メッセージウィンドウは開かない）。 */
+  | { type: 'overheadMessage'; text: string }
+  /** 効果音を1回再生する（直リンクmp3のURL）。 */
+  | { type: 'playSound'; src: string };
 
 export interface EventPage {
   name?: string;
@@ -61,6 +65,10 @@ export interface EventPage {
 
 export interface TileDef {
   name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string;
+  /** special='warp'（シーン切替床）のワープ先。シーン間ワープ床のみ使用。 */
+  warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number;
+  /** special='damage'（どく沼/ダメージ床）の被ダメージ量。未指定時は3。 */
+  damageAmount?: number;
   /** true: 長方形素材を正方形に潰さず、セル幅基準でアスペクト比を保ち下端固定で上方向へはみ出して描く
    *  （1マスに置く単独の縦長素材＝ゴール旗など）。既定は cell-fill（マスいっぱい）で、土管トップ＋ボディのように
    *  欠片を縦に積んでも継ぎ目が出ない。 */
@@ -166,6 +174,8 @@ export const mkSpell = (kind: SpellBlockKind, over: Partial<SpellBlock> = {}): S
 export interface ObjectDef {
   id: string; kind: ObjectKind;
   emoji: string; spriteRef?: string; spriteUrl?: string;
+  /** セルフスイッチ A が true のとき spriteRef/spriteUrl の代わりに使う見た目（宝箱の開扉後など）。 */
+  altSpriteRef?: string; altSpriteUrl?: string;
   col: number; row: number; hp: number; speed: number;
   behavior: NpcBehavior; bullet: BulletType; bulletSpeed: number; bulletColor: string; fireRate: number;
   hazard: boolean; message: string;
@@ -463,4 +473,52 @@ export const newObject = (over: Partial<ObjectDef> = {}): ObjectDef => ({
   id: uid(), kind: 'npc', emoji: '👾', col: 5, row: 5, hp: 8, speed: 1.5,
   behavior: 'random', bullet: 'none', bulletSpeed: 3, bulletColor: '#00ffff', fireRate: 60,
   hazard: true, message: '', ...over,
+});
+
+// ── 宝箱（全プリセット共通） ────────────────────────────────────────────
+// リポジトリ同梱の RPGEN マップチップ（/assets/rpgen/map.png, 16pxグリッド）から
+// 閉/開の宝箱チップを切り出して使う。walk:smc:u:<url>#sx,sy,sw,sh は
+// 1コマだけのストリップとして解釈されるため、静止画の切り出しにも使える。
+const CHEST_CHIP_URL = '/assets/rpgen/map.png';
+const chestChipCrop = (col: number, row: number) => `${col * 16},${row * 16},16,16`;
+const CHEST_SPRITE_CLOSED = `walk:smc:u:${CHEST_CHIP_URL}#${chestChipCrop(18, 15)}`;
+const CHEST_SPRITE_OPEN = `walk:smc:u:${CHEST_CHIP_URL}#${chestChipCrop(19, 15)}`;
+const CHEST_OPEN_SOUND = 'https://rpgen-search.pages.dev/data/audio/sound/1Jl7OF.mp3';
+
+/** 一度だけ開けられる宝箱（セルフスイッチ A）。近づくと開き、頭上メッセージでアイテムを渡す。
+ *  openCmds が giveItem/changeGold を含んでいれば、その入手メッセージが自動で頭上に出るため、
+ *  呼び出し側で message コマンドを足す必要はない。openCmds が空なら「からっぽだった」を表示する。 */
+/** 内蔵 RPGEN マップチップ（/assets/rpgen/map.png, 16pxグリッド）から1マス切り出す。 */
+export const localSysTileUrl = (col: number, row: number) => `${CHEST_CHIP_URL}#${col * 16},${row * 16},16,16`;
+
+/** システムタイルのテンプレート。エディタの「システムオブジェクト」パネルから
+ *  gameData.tiles に1件追加する形で使う（追加後は通常タイルと同様にマップへペイントする）。 */
+export interface SystemTileTemplate {
+  key: string; label: string; special: string; imageUrl: string; imageRef: string; passable: boolean;
+}
+export const SYSTEM_TILE_TEMPLATES: SystemTileTemplate[] = [
+  { key: 'warp', label: 'シーン切替床', special: 'warp', imageUrl: localSysTileUrl(15, 10), imageRef: `url:${localSysTileUrl(15, 10)}`, passable: true },
+  { key: 'poison', label: 'どく沼', special: 'damage', imageUrl: localSysTileUrl(6, 0), imageRef: `url:${localSysTileUrl(6, 0)}`, passable: true },
+  { key: 'damageFloor', label: 'ダメージ床', special: 'damage', imageUrl: localSysTileUrl(13, 7), imageRef: `url:${localSysTileUrl(13, 7)}`, passable: true },
+  { key: 'ice-up', label: 'つるつる床（↑）', special: 'ice-up', imageUrl: localSysTileUrl(16, 13), imageRef: `url:${localSysTileUrl(16, 13)}`, passable: true },
+  { key: 'ice-right', label: 'つるつる床（→）', special: 'ice-right', imageUrl: localSysTileUrl(17, 13), imageRef: `url:${localSysTileUrl(17, 13)}`, passable: true },
+  { key: 'ice-left', label: 'つるつる床（←）', special: 'ice-left', imageUrl: localSysTileUrl(16, 14), imageRef: `url:${localSysTileUrl(16, 14)}`, passable: true },
+  { key: 'ice-down', label: 'つるつる床（↓）', special: 'ice-down', imageUrl: localSysTileUrl(17, 14), imageRef: `url:${localSysTileUrl(17, 14)}`, passable: true },
+];
+
+export const chest = (col: number, row: number, openCmds: EventCommand[]): ObjectDef => newObject({
+  emoji: '📦', col, row, behavior: 'still', hazard: false,
+  spriteRef: CHEST_SPRITE_CLOSED, spriteUrl: CHEST_CHIP_URL,
+  altSpriteRef: CHEST_SPRITE_OPEN, altSpriteUrl: CHEST_CHIP_URL,
+  pages: [
+    { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [] },
+    {
+      conditions: {},
+      commands: [
+        { type: 'playSound', src: CHEST_OPEN_SOUND },
+        ...(openCmds.length > 0 ? openCmds : [{ type: 'overheadMessage', text: 'からっぽだった。' } as EventCommand]),
+        { type: 'setSelfSwitch', id: 'A', value: true },
+      ],
+    },
+  ],
 });
