@@ -31,6 +31,7 @@ import {
   defaultTitleScreen, defaultEndingScreen,
   type Layout25D,
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
+  SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -108,7 +109,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'spell' | 'sound' | 'screen';
+type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'item' | 'spell' | 'sound' | 'screen';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -218,9 +219,7 @@ const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: '�
 
 // ── システムタイル（宝箱以外）: ワープ床・どく沼/ダメージ床・つるつる床 ──────────
 // special の値ごとに固定の効果音・挙動を持つ。画像は /assets/rpgen/map.png の16pxグリッドから
-// 切り出す（`localTileUrl` と同じ #sx,sy,16,16 記法）。
-const SYS_TILE_WARP_SFX = 'https://rpgen-search.pages.dev/data/audio/sound/vfCmoe.mp3';
-const SYS_TILE_DAMAGE_SFX = 'https://rpgen-search.pages.dev/audio/sound/4z7O4A.mp3';
+// 切り出す（`localTileUrl` と同じ #sx,sy,16,16 記法）。効果音URLは yume25d と共有（shared.ts）。
 const ICE_DIRS: Record<string, [number, number]> = {
   'ice-up': [0, -1], 'ice-right': [1, 0], 'ice-down': [0, 1], 'ice-left': [-1, 0],
 };
@@ -1036,13 +1035,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const switchValsRef = useRef<Record<number, boolean>>({});
   switchValsRef.current = switchVals;
   const [inventory, setInventory] = useState<Record<string, number>>({});
+  const inventoryRef = useRef<Record<string, number>>({});
+  inventoryRef.current = inventory;
+  /** スロットベースの持ち物（最大8個）。UI表示と操作はこちらを使う。 */
+  const MAX_INVENTORY = 8;
+  const [invSlots, setInvSlots] = useState<string[]>([]);
+  const invSlotsRef = useRef<string[]>([]);
+  invSlotsRef.current = invSlots;
+  const [invOpen, setInvOpen] = useState(false);
+  const invOpenRef = useRef(false);
+  invOpenRef.current = invOpen;
+  const [invMenu, setInvMenu] = useState<{ slotIdx: number } | null>(null);
+  const invMenuRef = useRef<{ slotIdx: number } | null>(null);
+  invMenuRef.current = invMenu;
+  const [invDetail, setInvDetail] = useState<string | null>(null);
+  const invDetailRef = useRef<string | null>(null);
+  invDetailRef.current = invDetail;
   const [shopModal, setShopModal] = useState<{ npcId: string; items: import('./game-presets/shared').ShopItem[] } | null>(null);
   const shopModalRef = useRef<typeof shopModal>(null);
   shopModalRef.current = shopModal;
   const [equipment, setEquipment] = useState<{ weapon?: string; armor?: string }>({});
   const equipmentRef = useRef<{ weapon?: string; armor?: string }>({});
-  const inventoryRef = useRef<Record<string, number>>({});
-  inventoryRef.current = inventory;
   const selfSwitchesRef = useRef<Record<string, Record<string, boolean>>>({});
   const eventRunningRef = useRef(false);
   const eventIdRef = useRef(0);
@@ -1861,6 +1874,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const parts: string[] = [];
     if (it.healHp) { const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + it.healHp); parts.push(`HPが ${pr.hp - before} かいふく`); }
     if (it.healMp) { const before = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + it.healMp); parts.push(`MPが ${pr.mp - before} かいふく`); }
+    // スロットからも除去
+    const idx = invSlotsRef.current.indexOf(it.id);
+    if (idx >= 0) {
+      const copy = [...invSlotsRef.current]; copy.splice(idx, 1);
+      setInvSlots(copy); invSlotsRef.current = copy;
+    }
     setInventory(p => { const n = { ...p }; n[it.id] = (n[it.id] ?? 0) - 1; if (n[it.id] <= 0) delete n[it.id]; return n; });
     playSfx(sfxRef.current.inn);
     forceHud(n => n + 1);
@@ -2071,25 +2090,44 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 30);
           break;
         }
-        case 'giveItem':
-          setInventory(p => { const n = { ...p }; n[cmd.itemId] = (n[cmd.itemId] ?? 0) + cmd.count; return n; });
-          {
-            const newItem = (gameDataRef.current.items ?? []).find(it => it.id === cmd.itemId);
-            if (newItem?.category === 'weapon' || newItem?.category === 'armor') {
-              const eq = { ...equipmentRef.current };
-              if (newItem.category === 'weapon') eq.weapon = newItem.id;
-              if (newItem.category === 'armor') eq.armor = newItem.id;
-              setEquipment(eq);
-              applyEquipment(eq);
-            }
-            itemGetRef.current = { text: `${newItem?.emoji ?? '🎒'} ${newItem?.name ?? cmd.itemId} ×${cmd.count} を てにいれた！`, startTime: performance.now() };
+        case 'giveItem': {
+          let added = 0;
+          const slots = [...invSlotsRef.current];
+          for (let i = 0; i < cmd.count; i++) {
+            if (slots.length >= MAX_INVENTORY) break;
+            slots.push(cmd.itemId);
+            added++;
+          }
+          if (added > 0) {
+            setInvSlots(slots); invSlotsRef.current = slots;
+            setInventory(p => { const n = { ...p }; n[cmd.itemId] = (n[cmd.itemId] ?? 0) + added; return n; });
+          }
+          const newItem = (gameDataRef.current.items ?? []).find(it => it.id === cmd.itemId);
+          if (newItem?.category === 'weapon' || newItem?.category === 'armor') {
+            const eq = { ...equipmentRef.current };
+            if (newItem.category === 'weapon') eq.weapon = newItem.id;
+            if (newItem.category === 'armor') eq.armor = newItem.id;
+            setEquipment(eq);
+            applyEquipment(eq);
+          }
+          const gotten = added > 0 ? added : 0;
+          itemGetRef.current = { text: `${newItem?.emoji ?? '🎒'} ${newItem?.name ?? cmd.itemId}${gotten > 0 ? ` ×${gotten}` : ' は いっぱいで もてなかった！'}`, startTime: performance.now() };
+          setTimeout(advance, 30);
+          break;
+        }
+        case 'removeItem': {
+          const slots2 = [...invSlotsRef.current];
+          let removed = 0;
+          for (let i = slots2.length - 1; i >= 0 && removed < cmd.count; i--) {
+            if (slots2[i] === cmd.itemId) { slots2.splice(i, 1); removed++; }
+          }
+          if (removed > 0) {
+            setInvSlots(slots2); invSlotsRef.current = slots2;
+            setInventory(p => { const n = { ...p }; n[cmd.itemId] = Math.max(0, (n[cmd.itemId] ?? 0) - removed); if (n[cmd.itemId] === 0) delete n[cmd.itemId]; return n; });
           }
           setTimeout(advance, 30);
           break;
-        case 'removeItem':
-          setInventory(p => { const n = { ...p }; n[cmd.itemId] = Math.max(0, (n[cmd.itemId] ?? 0) - cmd.count); if (n[cmd.itemId] === 0) delete n[cmd.itemId]; return n; });
-          setTimeout(advance, 30);
-          break;
+        }
         case 'warp':
           engineRef.current.player.x = cmd.col * TILE_SIZE;
           engineRef.current.player.y = cmd.row * TILE_SIZE;
@@ -2582,7 +2620,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setBattle(null);
       setBattleItemsOpen(false); setBagOpen(false);
       setSwitchVals({}); switchValsRef.current = {};
-      setInventory({}); inventoryRef.current = {};
+      setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
       selfSwitchesRef.current = {};
       eventRunningRef.current = false;
     } else {
@@ -2679,6 +2717,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (isInputTarget(e)) return;
       engineRef.current.keys.add(e.key);
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      if (e.key === 'i' || e.key === 'I') { touchRef.current.inv = true; setTimeout(() => { touchRef.current.inv = false; }, 80); e.preventDefault(); }
       if (e.key === 'f' || e.key === 'F') { setEditSpeedMult(prev => { const speeds = [1, 2, 4]; return speeds[(speeds.indexOf(prev) + 1) % speeds.length]; }); e.preventDefault(); }
     };
     const handleKeyUp = (e: KeyboardEvent) => { if (isInputTarget(e)) return; engineRef.current.keys.delete(e.key); };
@@ -3477,7 +3516,7 @@ const lose = (msg: string) => {
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
       // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || !!sceneTransRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current);
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || !!sceneTransRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || invOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current);
       
       // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
       if (justStartedRef.current && isPlaying && !frozen) {
@@ -5232,6 +5271,21 @@ const lose = (msg: string) => {
       }
       prevActionRef.current = isAction;
 
+      // ── I key / inv button: toggle inventory ──
+      const isInv = touchRef.current.inv;
+      if (isInv && !prevInvRef.current && isPlaying && !frozen && !activeDialogueRef.current && !eventRunningRef.current && !gameMsgRef.current && !shopModalRef.current) {
+        if (invMenuRef.current || invDetailRef.current) { setInvMenu(null); invMenuRef.current = null; setInvDetail(null); invDetailRef.current = null; }
+        else if (invSlotsRef.current.length === 0) { showGameMsg('なにも もっていない。', 'instant', () => {}); }
+        else if (battleRef.current.active) {
+          // 戦闘中は戦闘用アイテムメニューを開く
+          const bs = gameDataRef.current.battle?.style ?? 'classic';
+          if (bs === 'soul') { setSoulMenu('item'); }
+          else { setBattleItemsOpen(true); }
+        }
+        else { setInvOpen(p => !p); }
+      }
+      prevInvRef.current = isInv;
+
       // ── Z / X keys: place / delete object ──
       const isZ = keys.has('z') || keys.has('Z') || touchRef.current.action;
       const isX = keys.has('x') || keys.has('X') || touchRef.current.shoot;
@@ -6212,11 +6266,12 @@ const lose = (msg: string) => {
   }, [gameData, isPlaying, restart, editorTab, editSpeedMult]);
 
   // touch state via ref to avoid re-running the loop effect
-  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false, shoot: false, select: false });
+  const touchRef = useRef({ up: false, down: false, left: false, right: false, action: false, slow: false, bomb: false, shoot: false, select: false, inv: false });
   const prevActionRef = useRef(false);
   const prevZRef = useRef(false);
   const prevXRef = useRef(false);
   const prevBombRef = useRef(false);
+  const prevInvRef = useRef(false);
   const [, force] = useState(0);
   const setTouch = (key: keyof typeof touchRef.current, v: boolean) => { touchRef.current[key] = v; force(n => n + 1); };
 
@@ -6393,7 +6448,7 @@ const lose = (msg: string) => {
         tiles: {
           ...p.tiles,
           [id]: {
-            name: tpl.label, color: '#888888', passable: tpl.passable,
+            name: tpl.label, color: tpl.color, passable: tpl.passable,
             special: tpl.special, imageRef: tpl.imageRef, imageUrl: tpl.imageUrl,
           },
         },
@@ -6632,13 +6687,12 @@ const lose = (msg: string) => {
       });
     } else {
       // プレイ中
-      if (gameData.engine === 'rpg') {
-        // どうぐ袋をトグル
-        const hasOverlay = !!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult;
-        if (gameData.battle && !battle && !hasOverlay) {
-          setBagOpen(prev => !prev);
-        }
-      } else if (gameData.engine === 'yume25d') {
+      const hasOverlay = !!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult;
+      if (!hasOverlay && !battle && !activeDialogue && !eventRunningRef.current) {
+        setTouch('inv', true);
+        setTimeout(() => setTouch('inv', false), 80);
+      }
+      if (gameData.engine === 'yume25d') {
         setTouch('select', true);
         setTimeout(() => setTouch('select', false), 80);
       } else {
@@ -6685,6 +6739,44 @@ const lose = (msg: string) => {
     }
   };
 
+  // アイテム使用（healHp/healMp + 任意効果）
+  const useInventoryItem = (itemId: string) => {
+    const it = (gameData.items ?? []).find(x => x.id === itemId);
+    if (!it) return;
+    const consumable = it.consumable ?? !!(it.healHp || it.healMp);
+    // 効果適用
+    let parts: string[] = [];
+    const pr = progressRef.current;
+    if (it.healHp) { const b = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + it.healHp); parts.push(`HPが ${pr.hp - b} かいふく`); }
+    if (it.healMp) { const b = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + it.healMp); parts.push(`MPが ${pr.mp - b} かいふく`); }
+    // 消費
+    if (consumable) {
+      const idx = invSlotsRef.current.indexOf(itemId);
+      if (idx >= 0) {
+        const copy = [...invSlotsRef.current]; copy.splice(idx, 1);
+        setInvSlots(copy); invSlotsRef.current = copy;
+        setInventory(p => { const n = { ...p }; n[itemId] = (n[itemId] ?? 0) - 1; if (n[itemId] <= 0) delete n[itemId]; return n; });
+      }
+    }
+    playSfx(sfxRef.current.inn);
+    forceHud(n => n + 1);
+    setInvMenu(null); setInvDetail(null);
+    const msg = it.useMessage || `${it.emoji} ${it.name}を つかった！${parts.length > 0 ? '\n' + parts.join('、') : ''}`;
+    showGameMsg(msg, 'instant', () => {});
+  };
+  // アイテムすてる
+  const discardInventoryItem = (itemId: string) => {
+    const it = (gameData.items ?? []).find(x => x.id === itemId);
+    if (it && it.discardable === false) { showGameMsg(`${it.name}は すてられない。`, 'instant', () => {}); return; }
+    const idx = invSlotsRef.current.indexOf(itemId);
+    if (idx >= 0) {
+      const copy = [...invSlotsRef.current]; copy.splice(idx, 1);
+      setInvSlots(copy); invSlotsRef.current = copy;
+      setInventory(p => { const n = { ...p }; n[itemId] = (n[itemId] ?? 0) - 1; if (n[itemId] <= 0) delete n[itemId]; return n; });
+    }
+    setInvMenu(null); setInvDetail(null);
+    showGameMsg(`${it?.emoji ?? '?'} ${it?.name ?? itemId}を すてた。`, 'instant', () => {});
+  };
   return (
     <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}>
       {/* Header */}
@@ -7359,7 +7451,14 @@ const lose = (msg: string) => {
                           key={si.itemId}
                           disabled={!canAfford}
                           onClick={() => {
+                            const slots = [...invSlotsRef.current];
+                            if (slots.length >= MAX_INVENTORY) {
+                              showGameMsg('これいじょう もちものは もてない！', 'instant', () => {});
+                              return;
+                            }
                             progressRef.current.gold = (progressRef.current.gold ?? 0) - si.price;
+                            slots.push(si.itemId);
+                            setInvSlots(slots); invSlotsRef.current = slots;
                             setInventory(p => { const n = { ...p }; n[si.itemId] = (n[si.itemId] ?? 0) + 1; return n; });
                             // 武器・防具は購入と同時に装備（giveItem コマンドと同じ挙動）
                             if (itemDef?.category === 'weapon' || itemDef?.category === 'armor') {
@@ -7387,34 +7486,94 @@ const lose = (msg: string) => {
               </div>
             )}
 
-            {bagOpen && !battle && (
-              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => setBagOpen(false)}>
+            {/* ── アンダーテール風インベントリ（フィールドのみ） ── */}
+            {invOpen && !invMenu && !invDetail && !battle && (
+              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => setInvOpen(false)}>
                 <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
-                  <div className="text-amber-400 font-bold text-sm mb-2">🎒 どうぐ</div>
-                  <div className="text-yellow-300 text-xs mb-3">所持金: {progressRef.current.gold ?? 0} G</div>
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                    {(gameData.items ?? []).filter(it => (inventory[it.id] ?? 0) > 0).length === 0 && (
-                      <p className="text-[11px] text-gray-500">なにも もっていない。</p>
-                    )}
-                    {(gameData.items ?? []).filter(it => (inventory[it.id] ?? 0) > 0).map(it => {
-                      const equipped = equipment.weapon === it.id || equipment.armor === it.id;
-                      const usable = !!(it.healHp || it.healMp);
+                  <div className="text-amber-400 font-bold text-sm mb-2">🎒 もちもの</div>
+                  <div className="text-yellow-300 text-xs mb-3">
+                    もち: {invSlots.length}/{MAX_INVENTORY}
+                    {gameData.battle && <span className="ml-2">G: {progressRef.current.gold ?? 0}</span>}
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {invSlots.length === 0 && <p className="text-[11px] text-gray-500">なにも もっていない。</p>}
+                    {invSlots.map((itemId, idx) => {
+                      const it = (gameData.items ?? []).find(x => x.id === itemId);
+                      if (!it) return null;
                       return (
-                        <div key={it.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 text-xs text-white">
-                          <span className="min-w-0 truncate">
-                            {it.emoji} {it.name}
-                            {equipped && <span className="text-green-400 ml-1 font-bold">E</span>}
-                            <span className="text-gray-500 ml-1">×{inventory[it.id] ?? 0}</span>
-                          </span>
-                          {usable && (
-                            <button onClick={() => useHealItem(it, false)}
-                              className="shrink-0 px-2.5 py-1 bg-amber-700 active:bg-amber-600 text-white font-bold">つかう</button>
-                          )}
-                        </div>
+                        <button key={`${itemId}-${idx}`} onClick={() => setInvMenu({ slotIdx: idx })}
+                          className="w-full flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-xs text-white text-left">
+                          <span>{it.emoji}</span>
+                          <span className="flex-1 truncate">{it.name}</span>
+                          <span className="text-gray-500 text-[10px]">{idx + 1}</span>
+                        </button>
                       );
                     })}
                   </div>
-                  <button onClick={() => setBagOpen(false)} className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                  <button onClick={() => setInvOpen(false)}
+                    className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                </div>
+              </div>
+            )}
+            {/* ── アイテムアクションメニュー（Use/Details/Discard） ── */}
+            {invMenu && !invDetail && (
+              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => { setInvMenu(null); invMenuRef.current = null; }}>
+                <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
+                  {(() => {
+                    const itemId = invSlots[invMenu.slotIdx];
+                    const it = (gameData.items ?? []).find(x => x.id === itemId);
+                    if (!it) return <p className="text-gray-500">? ふめい</p>;
+                    const usable = !!(it.healHp || it.healMp);
+                    const discardable = it.discardable !== false;
+                    return (
+                      <>
+                        <div className="text-amber-400 font-bold text-sm mb-2">{it.emoji} {it.name}</div>
+                        <div className="space-y-1.5">
+                          {usable && (
+                            <button onClick={() => useInventoryItem(itemId)}
+                              className="w-full px-3 py-2 bg-amber-700 hover:bg-amber-600 active:bg-amber-500 text-white text-xs font-bold text-left">
+                              ❤ つかう
+                            </button>
+                          )}
+                          <button onClick={() => { setInvDetail(itemId); invDetailRef.current = itemId; }}
+                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold text-left">
+                            ❤ せつめい
+                          </button>
+                          {discardable && (
+                            <button onClick={() => discardInventoryItem(itemId)}
+                              className="w-full px-3 py-2 bg-red-800 hover:bg-red-700 active:bg-red-600 text-white text-xs font-bold text-left">
+                              ❤ すてる
+                            </button>
+                          )}
+                          <button onClick={() => { setInvMenu(null); invMenuRef.current = null; }}
+                            className="w-full px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold text-left">
+                            ❤ もどる
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+            {/* ── アイテム詳細 ── */}
+            {invDetail && (
+              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => { setInvDetail(null); invDetailRef.current = null; }}>
+                <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
+                  {(() => {
+                    const it = (gameData.items ?? []).find(x => x.id === invDetail);
+                    if (!it) return <p className="text-gray-500">? ふめい</p>;
+                    return (
+                      <>
+                        <div className="text-amber-400 font-bold text-sm mb-1">{it.emoji} {it.name}</div>
+                        <div className="text-gray-300 text-xs mb-3 leading-relaxed whitespace-pre-wrap">
+                          {it.description || 'せつめいのない どうぐ。'}
+                        </div>
+                        <button onClick={() => { setInvDetail(null); invDetailRef.current = null; }}
+                          className="w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -7600,6 +7759,7 @@ const lose = (msg: string) => {
                     } else if (gameData.engine === 'rpg') {
                       btnAActive = true; btnALabel = "決定";
                       btnBActive = true; btnBLabel = "取消";
+                      btnXActive = true; btnXLabel = "🎒";
                     } else if (gameData.engine === 'yume25d') {
                       btnAActive = true; btnALabel = "JUMP";
                       btnBActive = true; btnBLabel = "話す";
@@ -7642,9 +7802,9 @@ const lose = (msg: string) => {
                 </div>
               </div>
 
-              {/* 中央下部：SELECT / START ボタン */}
+              {/* 中央下部：SELECT / START / INV ボタン */}
               {!introOpen && (
-                <div className="flex gap-8 justify-center items-center mt-3 pt-1 border-t border-gray-800/40 w-full shrink-0 select-none">
+                <div className="flex gap-6 justify-center items-center mt-3 pt-1 border-t border-gray-800/40 w-full shrink-0 select-none">
                   {/* SELECT */}
                   <div className="flex flex-col items-center gap-0.5">
                     <button onClick={handleSelectPress}
@@ -7652,6 +7812,17 @@ const lose = (msg: string) => {
                       title="SELECT" />
                     <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">SELECT</span>
                   </div>
+                  {/* INV（もちもの） */}
+                  {isPlaying && (
+                    <div className="flex flex-col items-center gap-0.5">
+                      <button onClick={() => { setTouch('inv', true); setTimeout(() => setTouch('inv', false), 80); }}
+                        className="w-11 h-5 bg-amber-700 active:bg-amber-600 rounded border border-amber-900 shadow-md active:translate-y-0.5 transition touch-none cursor-pointer flex items-center justify-center"
+                        title="もちもの">
+                        <span className="text-[8px] leading-none font-bold text-white">🎒</span>
+                      </button>
+                      <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">INV</span>
+                    </div>
+                  )}
                   {/* START */}
                   <div className="flex flex-col items-center gap-0.5">
                     <button onClick={handleStartPress}
@@ -7739,6 +7910,7 @@ const lose = (msg: string) => {
                   ['map', 'マップ'],
                   ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ']] : []),
                   ['char', 'キャラ'],
+                  ['item', 'アイテム'],
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
                     className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
@@ -9461,6 +9633,106 @@ const lose = (msg: string) => {
                     </div>
                   );
                 })()}
+
+                {/* ── ITEM ── */}
+                {editorTab === 'item' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">🎒 アイテム定義</label>
+                      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                        {(gameData.items ?? []).length === 0 && <p className="text-[9px] text-gray-500 px-1">アイテムがありません。「追加」ボタンで作成してください。</p>}
+                        {(gameData.items ?? []).map((it, i) => (
+                          <div key={it.id} className="bg-gray-900 rounded-lg border border-gray-800 p-2.5 space-y-2">
+                            <div className="flex items-center gap-1.5">
+                              <input value={it.emoji} onChange={e => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], emoji: e.target.value.slice(0, 2) }; return { ...p, items: copy };
+                              })} className="w-8 bg-gray-800 border border-gray-700 rounded text-center text-sm outline-none" />
+                              <input value={it.name} onChange={e => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], name: e.target.value }; return { ...p, items: copy };
+                              })} placeholder="アイテム名" className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                              <button onClick={() => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; copy.splice(i, 1); return { ...p, items: copy.length > 0 ? copy : undefined };
+                              })} className="shrink-0 px-2 py-1 rounded text-[11px] text-red-400 hover:text-red-300 active:bg-red-500/15">削除</button>
+                            </div>
+                            <div>
+                              <textarea value={it.description ?? ''} onChange={e => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], description: e.target.value || undefined }; return { ...p, items: copy };
+                              })} placeholder="せつめい（省略可）" rows={2} className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-300 outline-none resize-none" />
+                            </div>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <label className="text-[9px] text-gray-400">
+                                カテゴリ
+                                <select value={it.category ?? ''} onChange={e => setGameData(p => {
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], category: e.target.value as any || undefined }; return { ...p, items: copy };
+                                })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none">
+                                  <option value="">なし</option>
+                                  <option value="consumable">消費</option>
+                                  <option value="weapon">武器</option>
+                                  <option value="armor">防具</option>
+                                  <option value="key">大事なもの</option>
+                                </select>
+                              </label>
+                              <label className="text-[9px] text-gray-400">
+                                回復HP
+                                <input type="text" inputMode="numeric" value={it.healHp ?? ''} onChange={e => setGameData(p => {
+                                  const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], healHp: v && !isNaN(v) ? v : undefined }; return { ...p, items: copy };
+                                })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                              </label>
+                              <label className="text-[9px] text-gray-400">
+                                回復MP
+                                <input type="text" inputMode="numeric" value={it.healMp ?? ''} onChange={e => setGameData(p => {
+                                  const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], healMp: v && !isNaN(v) ? v : undefined }; return { ...p, items: copy };
+                                })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                              </label>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <label className="text-[9px] text-gray-400">
+                                攻撃力
+                                <input type="text" inputMode="numeric" value={it.atkBonus ?? ''} onChange={e => setGameData(p => {
+                                  const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], atkBonus: v && !isNaN(v) ? v : undefined }; return { ...p, items: copy };
+                                })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                              </label>
+                              <label className="text-[9px] text-gray-400">
+                                防御力
+                                <input type="text" inputMode="numeric" value={it.defBonus ?? ''} onChange={e => setGameData(p => {
+                                  const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], defBonus: v && !isNaN(v) ? v : undefined }; return { ...p, items: copy };
+                                })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                              </label>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-1 text-[9px] text-gray-400 cursor-pointer">
+                                <input type="checkbox" checked={it.consumable ?? !!(it.healHp || it.healMp)} onChange={e => setGameData(p => {
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], consumable: e.target.checked || undefined }; return { ...p, items: copy };
+                                })} className="accent-amber-500" />
+                                消費する
+                              </label>
+                              <label className="flex items-center gap-1 text-[9px] text-gray-400 cursor-pointer">
+                                <input type="checkbox" checked={it.discardable !== false} onChange={e => setGameData(p => {
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], discardable: e.target.checked || undefined }; return { ...p, items: copy };
+                                })} className="accent-red-500" />
+                                すてられる
+                              </label>
+                            </div>
+                            <div>
+                              <input value={it.useMessage ?? ''} onChange={e => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], useMessage: e.target.value || undefined }; return { ...p, items: copy };
+                              })} placeholder="つかったときのメッセージ（省略可）" className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[9px] text-gray-300 outline-none" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <button onClick={() => setGameData(p => {
+                        const arr = p.items ?? []; const id = `item${Date.now()}`;
+                        return { ...p, items: [...arr, { id, name: `アイテム${arr.length + 1}`, emoji: '💊' }] };
+                      })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
+                        <Plus size={11} />アイテム追加</button>
+                    </div>
+                  </div>
+                )}
 
                 {/* ── SOUND ── */}
                 {editorTab === 'sound' && (

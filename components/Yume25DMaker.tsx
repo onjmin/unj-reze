@@ -27,6 +27,10 @@ const PAD_DEADZONE = 10;
 const TAP_MAX_MOVE = 8;
 /** Minecraft風の浮遊トグル：Space 2回押しがこのms以内なら浮遊モードをON/OFFする。 */
 const SPACE_DOUBLE_TAP_MS = 300;
+/** システム床（special 付き床テクスチャ）の2D見下ろしエディタ用マーカー。 */
+const SPECIAL_FLOOR_GLYPHS: Record<string, string> = {
+  warp: '◉', damage: '☠', 'ice-up': '↑', 'ice-right': '→', 'ice-down': '↓', 'ice-left': '←',
+};
 
 interface DialogueState { message: string; choices?: string[]; }
 
@@ -579,6 +583,16 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     ctx.lineWidth = 1;
     for (let c = 0; c <= L.cols; c++) { ctx.beginPath(); ctx.moveTo(c * CELL + 0.5, 0); ctx.lineTo(c * CELL + 0.5, L.rows * CELL); ctx.stroke(); }
     for (let r = 0; r <= L.rows; r++) { ctx.beginPath(); ctx.moveTo(0, r * CELL + 0.5); ctx.lineTo(L.cols * CELL, r * CELL + 0.5); ctx.stroke(); }
+    // システム床のマーカー（色だけでは種別が判別しづらいため記号を重ねる）
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
+      const sp = L.textures[L.floor[r]?.[c] ?? 0]?.special;
+      if (!sp) continue;
+      const glyph = SPECIAL_FLOOR_GLYPHS[sp];
+      if (glyph) ctx.fillText(glyph, (c + 0.5) * CELL, (r + 0.5) * CELL);
+    }
     // 壁（薄板＝辺の上の太線）。編集中の段以外はゴースト表示（他の段の配置を透かして見せる）。
     const sorted = [...L.walls].sort((a, b) => (Math.abs((a.level ?? 0) - level)) - (Math.abs((b.level ?? 0) - level))).reverse();
     for (const w of sorted) {

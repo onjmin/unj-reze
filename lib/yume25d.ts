@@ -2,7 +2,7 @@
 // three.js で低解像度レンダリングする。レイアウトは Layout25D（プレーンJSON）が唯一の真実で、
 // setLayout() でいつでも丸ごと再構築できる。使い終わったら必ず dispose() を呼ぶこと。
 import * as THREE from 'three';
-import type { Layout25D, Tex25D, Dir4, Billboard25D } from '@/components/game-presets/shared';
+import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D } from '@/components/game-presets/shared';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
 
@@ -24,6 +24,26 @@ const GRAVITY = 16;
 // 編集モードの空中浮遊：上昇/下降速度（マス/秒）と高度上限（マス）。
 const FLY_SPEED = 2.6;
 const FLY_MAX_ALT = 48;
+
+// ── システム床（Tex25D.special 付きの床）: 2Dエンジンのシステムタイルの yume25d 版 ──
+// warp=同一マップ内の座標転送（シーンが無いため）、damage=ゆめから さめて スタートへ戻る（HPが無いため）、
+// ice-*=矢印方向への強制スライド。ジャンプ中（hop>0）は床の効果を受けない＝飛び越えられる。
+const ICE_SLIDE_SPEED = 3.6;  // マス/秒。歩行より速く「滑ってる」感を出す
+const ICE_DIR_VEC: Record<string, [number, number]> = {
+  'ice-up': [0, -1], 'ice-right': [1, 0], 'ice-down': [0, 1], 'ice-left': [-1, 0],
+};
+const FADE_OUT_SEC = 0.25;
+const FADE_IN_SEC = 0.4;
+
+/** システム床の効果音。GameMaker の playSfx（direct・既定音量50）と同じ聞こえ方に合わせる。 */
+const playSysSfx = (src: string) => {
+  if (typeof Audio === 'undefined') return;
+  try {
+    const a = new Audio(src);
+    a.volume = 0.35;
+    a.play().catch(() => {});
+  } catch { /* noop */ }
+};
 
 /** 歩行グラ（walk: 参照）の足踏み速度。NPCビルボードは常時ゆっくりマーチ、プレイヤーは歩行時のみ。 */
 const BILLBOARD_ANIM_FPS = 4;
@@ -301,6 +321,17 @@ export class Yume25DEngine {
   private playerDir: WayKey = 'w';
   private playerMoving = false;
 
+  // ── システム床の実行状態 ──
+  // 画面フェード：カメラ直付けの板の不透明度を out→（onMid 実行）→in と往復させる。
+  private fadeMesh: THREE.Mesh;
+  private fadeMat: THREE.MeshBasicMaterial;
+  private fadeGeo: THREE.PlaneGeometry;
+  private fadeState: { phase: 'out' | 'in'; t: number; onMid: (() => void) | null } | null = null;
+  /** ワープ床の多重発動防止。転送先もワープ床のとき、降りるまで再発動しない。 */
+  private warpCooldown = false;
+  /** つるつる床：壁で止められたセル。同じセルに居る間は滑走を諦めて通常操作に戻す（ハマり防止）。 */
+  private iceBlockedCell: string | null = null;
+
   constructor(canvas: HTMLCanvasElement, layout: Layout25D, playerAppearance?: PlayerAppearance) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     this.renderer.setPixelRatio(1);
@@ -328,6 +359,19 @@ export class Yume25DEngine {
     this.playerMesh.visible = this.pov === 'third';
     this.scene.add(this.playerMesh);
 
+    // システム床の画面フェード：カメラの目の前に貼る板。カメラごとシーンへ入れて子を描画対象にする。
+    this.scene.add(this.camera);
+    this.fadeGeo = new THREE.PlaneGeometry(1, 1);
+    this.fadeMat = new THREE.MeshBasicMaterial({
+      color: '#000000', transparent: true, opacity: 0,
+      depthTest: false, depthWrite: false, fog: false, side: THREE.DoubleSide,
+    });
+    this.fadeMesh = new THREE.Mesh(this.fadeGeo, this.fadeMat);
+    this.fadeMesh.position.set(0, 0, -0.15);  // near(0.05) より奥・視野全体を覆う距離
+    this.fadeMesh.renderOrder = 2000;         // 頭上セリフ（999）より前面
+    this.fadeMesh.visible = false;
+    this.camera.add(this.fadeMesh);
+
     // 配置プレビュー（ゴースト）：worldObjects に入れず、buildScene のシーン再構築後も生き残らせる。
     this.ghostPlaneGeo = new THREE.PlaneGeometry(1, 1);
     this.ghostBillGeo = new THREE.PlaneGeometry(0.9, 0.9);
@@ -348,6 +392,8 @@ export class Yume25DEngine {
     this.yaw = YAW_FOR_DIR[s.dir];
     this.pitch = 0;
     this.vy = 0; this.hop = 0; this.grounded = true;
+    this.warpCooldown = false;
+    this.iceBlockedCell = null;
     this.clampToBounds();
     this.resolveWalls();
   }
@@ -652,6 +698,8 @@ export class Yume25DEngine {
     this.ghostPlaneGeo.dispose();
     this.ghostBillGeo.dispose();
     this.ghostMat.dispose();
+    this.fadeGeo.dispose();
+    this.fadeMat.dispose();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -961,6 +1009,45 @@ export class Yume25DEngine {
     return maxDist;
   }
 
+  // ── システム床（ワープ/ダメージ/つるつる） ────────────────────────────────
+  /** 足元セルの床テクスチャ定義（床なし・範囲外は undefined）。 */
+  private floorTexAt(x: number, z: number): Tex25D | undefined {
+    const c = Math.floor(x), r = Math.floor(z);
+    if (c < 0 || r < 0 || c >= this.layout.cols || r >= this.layout.rows) return undefined;
+    const t = this.layout.floor[r]?.[c] ?? 0;
+    return t > 0 ? this.layout.textures[t] : undefined;
+  }
+
+  /** 画面フェード開始。暗転しきったところで onMid（テレポート等）を実行し、明転して終わる。 */
+  private startFade(color: string, onMid: () => void) {
+    this.fadeMat.color.set(color);
+    this.fadeMat.opacity = 0;
+    this.fadeMesh.visible = true;
+    this.fadeState = { phase: 'out', t: 0, onMid };
+  }
+
+  private updateFade(dt: number) {
+    const f = this.fadeState;
+    if (!f) return;
+    f.t += dt;
+    if (f.phase === 'out') {
+      this.fadeMat.opacity = Math.min(1, f.t / FADE_OUT_SEC);
+      if (f.t >= FADE_OUT_SEC) {
+        f.onMid?.();
+        f.onMid = null;
+        f.phase = 'in';
+        f.t = 0;
+      }
+    } else {
+      this.fadeMat.opacity = Math.max(0, 1 - f.t / FADE_IN_SEC);
+      if (f.t >= FADE_IN_SEC) {
+        this.fadeState = null;
+        this.fadeMesh.visible = false;
+        this.fadeMat.opacity = 0;
+      }
+    }
+  }
+
   private step(dt: number) {
     const inp = this.input;
     let turn = (inp.turnL ? 1 : 0) - (inp.turnR ? 1 : 0);
@@ -979,7 +1066,30 @@ export class Yume25DEngine {
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     const H = this.layout.wallHeight;
     const hovering = this.editMode && this.hover;
-    if (move !== 0 || strafe !== 0) {
+
+    // ── つるつる床：地面に立っている間は矢印方向へ強制スライド（移動入力は無効）。
+    //    壁で進めなくなったらそのセルでは滑走を諦めて通常操作へ戻す（ハマり防止）。
+    //    ジャンプ中（hop>0）・編集/デモ中は床の効果を受けない。 ──
+    const specActive = !this.editMode && !this.demo && !hovering && this.grounded && this.hop <= 0;
+    let slideVec: [number, number] | null = null;
+    if (specActive) {
+      const cellKey = `${Math.floor(this.x)},${Math.floor(this.z)}`;
+      if (this.iceBlockedCell && this.iceBlockedCell !== cellKey) this.iceBlockedCell = null;
+      const vec = ICE_DIR_VEC[this.floorTexAt(this.x, this.z)?.special ?? ''];
+      if (vec && this.iceBlockedCell !== cellKey) {
+        const d = ICE_SLIDE_SPEED * dt;
+        const sx = this.x, sz = this.z;
+        this.moveX(vec[0] * d); this.moveZ(vec[1] * d);
+        this.clampToBounds();
+        this.resolveWalls();
+        if (Math.hypot(this.x - sx, this.z - sz) < d * 0.25) this.iceBlockedCell = cellKey;
+        else slideVec = vec;
+      }
+    } else {
+      this.iceBlockedCell = null;
+    }
+
+    if (!slideVec && (move !== 0 || strafe !== 0)) {
       const dashMult = (inp.dash && !this.demo) ? DASH_MULT : 1;
       const ms = move * MOVE_SPEED * dashMult * dt, ss = strafe * STRAFE_SPEED * dashMult * dt;
       if (hovering && this.hop >= H) {
@@ -996,8 +1106,13 @@ export class Yume25DEngine {
     }
     // 歩行アニメ用：移動状態と「カメラから見た向き」を更新。カメラはプレイヤーの後方に
     // 追従するので、前進中は背中(w)・後退は正面(s)・ストレイフは横向きが見える。
-    this.playerMoving = move !== 0 || strafe !== 0;
-    if (move > 0) this.playerDir = 'w';
+    this.playerMoving = !!slideVec || move !== 0 || strafe !== 0;
+    if (slideVec) {
+      // 強制スライド中はスライド方向をカメラ相対の向きへ変換して足踏みさせる
+      const df = slideVec[0] * fx + slideVec[1] * fz, dr = slideVec[0] * rx + slideVec[1] * rz;
+      this.playerDir = Math.abs(df) >= Math.abs(dr) ? (df > 0 ? 'w' : 's') : (dr > 0 ? 'd' : 'a');
+    }
+    else if (move > 0) this.playerDir = 'w';
     else if (move < 0) this.playerDir = 's';
     else if (strafe > 0) this.playerDir = 'd';
     else if (strafe < 0) this.playerDir = 'a';
@@ -1007,6 +1122,35 @@ export class Yume25DEngine {
       const expected = MOVE_SPEED * dt;
       // 壁に引っかかったらしばらく右に旋回して抜ける
       if (moved < expected * 0.35) this.demoTurnFrames = 25 + Math.floor(Math.random() * 50);
+    }
+
+    // ── ワープ床/ダメージ床：移動後の足元セルで判定。フェード中は再判定しない ──
+    if (specActive && !this.fadeState) {
+      const tex = this.floorTexAt(this.x, this.z);
+      const s = tex?.special;
+      if (s === 'warp') {
+        if (!this.warpCooldown) {
+          // 転送先もワープ床の場合に備え、ワープ床から降りるまで再発動しない
+          this.warpCooldown = true;
+          playSysSfx(SYS_TILE_WARP_SFX);
+          const dest = tex!.warpDest;
+          this.startFade('#000000', () => {
+            this.x = (dest?.col ?? this.layout.start.col) + 0.5;
+            this.z = (dest?.row ?? this.layout.start.row) + 0.5;
+            if (dest?.dir !== undefined) this.yaw = YAW_FOR_DIR[dest.dir];
+            this.iceBlockedCell = null;
+            this.clampToBounds();
+            this.resolveWalls();
+          });
+        }
+      } else {
+        this.warpCooldown = false;
+        if (s === 'damage') {
+          // yume25d に HP は無いので「ゆめから さめて スタート地点へ戻る」に読み替える
+          playSysSfx(SYS_TILE_DAMAGE_SFX);
+          this.startFade('#4a0a14', () => this.resetToStart());
+        }
+      }
     }
 
     // ── 高さ方向：浮遊（ホバー）中は押している間だけ上昇/下降・重力なし。
@@ -1054,5 +1198,7 @@ export class Yume25DEngine {
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;
     if (this.ghostKind === 'sprite') this.ghostMesh.rotation.y = this.yaw;
+
+    this.updateFade(dt);
   }
 }

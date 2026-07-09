@@ -5,7 +5,10 @@
 
 import { useEffect, useRef } from 'react';
 import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
-import { type Layout25D, type Tex25D } from './game-presets/shared';
+import {
+  type Layout25D, type Tex25D, type Dir4,
+  SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
+} from './game-presets/shared';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
 
 /** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
@@ -53,6 +56,40 @@ export default function Yume25DEditorPanel({
     if (tool === 'floor') onSelFloorChange(id);
     else if (tool === 'wall') onSelWallChange(id);
     else onSelSpriteChange(id);
+  };
+
+  /** 2Dエンジンの「シーン切替床」は yume25d ではマップ内転送なので表示名を読み替える。 */
+  const sysTileLabel = (tpl: SystemTileTemplate) => tpl.special === 'warp' ? 'ワープ床' : tpl.label;
+
+  /** システムタイルを special 付きの床テクスチャとして追加し、床ツール＋パレット選択まで済ませる。
+   *  以後は通常の床と同じ操作（2D/3Dビューで塗る・消す）で配置できる。 */
+  const addSystemFloorTex = (tpl: SystemTileTemplate) => {
+    const id = Math.max(0, ...Object.keys(layout.textures).map(Number)) + 1;
+    onLayoutChange(l => ({
+      ...l,
+      textures: {
+        ...l.textures,
+        [id]: {
+          id, name: sysTileLabel(tpl), kind: 'floor' as const,
+          color: tpl.color, imageRef: tpl.imageRef, imageUrl: tpl.imageUrl, special: tpl.special,
+          // ワープ先の初期値はスタート地点（テクスチャ設定でいつでも変更できる）
+          ...(tpl.special === 'warp' ? { warpDest: { col: l.start.col, row: l.start.row } } : {}),
+        },
+      },
+    }));
+    onToolChange('floor');
+    onSelFloorChange(id);
+  };
+
+  /** システム床テクスチャを削除する。塗られていたマスは床なし（奈落）に戻す。 */
+  const deleteFloorTex = (id: number) => {
+    onLayoutChange(l => {
+      const textures = { ...l.textures };
+      delete textures[id];
+      const floor = l.floor.map(row => row.map(v => (v === id ? 0 : v)));
+      return { ...l, textures, floor };
+    });
+    onSelFloorChange(0);
   };
 
   return (
@@ -114,7 +151,9 @@ export default function Yume25DEditorPanel({
             <button key={t.id} onClick={() => setPaletteSel(t.id)} title={t.name}
               className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm overflow-hidden ${paletteSel === t.id ? 'border-yellow-400' : 'border-gray-700'}`}
               style={{ background: t.imageUrl ? undefined : t.emoji ? '#1c1826' : t.color }}>
-              {paletteKind === 'sprite' && t.imageUrl ? (
+              {t.imageUrl && (paletteKind === 'sprite' || t.imageUrl.includes('#')) ? (
+                // #sx,sy,sw,sh クロップ付きURL（システム床の内蔵シート切り出し）は CSS background では
+                // 切り出せないため、クロップ対応の canvas サムネで描く
                 <SpriteThumb t={t} />
               ) : t.imageUrl ? (
                 <div className="w-full h-full" style={{ background: `url(${t.imageUrl}) center/contain no-repeat #1c1826` }} />
@@ -159,7 +198,46 @@ export default function Yume25DEditorPanel({
           <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
             <div className="flex items-center justify-between">
               <span className="font-bold text-violet-400">🎨 {t.name} の設定</span>
+              {t.special && (
+                <button onClick={() => deleteFloorTex(t.id)}
+                  className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                  削除
+                </button>
+              )}
             </div>
+            {t.special === 'warp' && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-purple-300">ワープ先</span>
+                <label className="flex items-center gap-1">X(列)
+                  <input type="number" min={0} max={layout.cols - 1} value={t.warpDest?.col ?? 0}
+                    onChange={e => { const col = Math.max(0, Math.min(layout.cols - 1, Number(e.target.value) || 0)); onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], warpDest: { ...(l.textures[t.id].warpDest ?? { col: 0, row: 0 }), col } } } })); }}
+                    className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+                </label>
+                <label className="flex items-center gap-1">Y(行)
+                  <input type="number" min={0} max={layout.rows - 1} value={t.warpDest?.row ?? 0}
+                    onChange={e => { const row = Math.max(0, Math.min(layout.rows - 1, Number(e.target.value) || 0)); onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], warpDest: { ...(l.textures[t.id].warpDest ?? { col: 0, row: 0 }), row } } } })); }}
+                    className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+                </label>
+                <label className="flex items-center gap-1">向き
+                  <select value={t.warpDest?.dir ?? ''}
+                    onChange={e => { const dir = e.target.value === '' ? undefined : Number(e.target.value) as Dir4; onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], warpDest: { ...(l.textures[t.id].warpDest ?? { col: 0, row: 0 }), dir } } } })); }}
+                    className="bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white">
+                    <option value="">そのまま</option>
+                    <option value={0}>北（上）</option>
+                    <option value={1}>東（右）</option>
+                    <option value={2}>南（下）</option>
+                    <option value={3}>西（左）</option>
+                  </select>
+                </label>
+                <span className="text-[9px] text-gray-500 w-full">ふむと同じマップ内の指定マスへ転送します（暗転演出つき）</span>
+              </div>
+            )}
+            {t.special === 'damage' && (
+              <p className="text-[9px] text-gray-500">ふむと ゆめから さめて スタート地点にもどります（ジャンプで飛び越えられます）</p>
+            )}
+            {t.special?.startsWith('ice-') && (
+              <p className="text-[9px] text-gray-500">ふむと矢印の方向へ強制的にすべります。壁に当たると止まります（ジャンプで飛び越えられます）</p>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
               <label className="flex items-center gap-1">名前:
                 <input type="text" value={t.name}
@@ -195,6 +273,22 @@ export default function Yume25DEditorPanel({
           </div>
         );
       })()}
+
+      {/* ── システムオブジェクト（ワープ床・どく沼/ダメージ床・つるつる床）──
+          2Dエンジンのシステムタイルの yume25d 版。special 付きの床テクスチャとして追加し、
+          床ツールで塗る。ワープはマップ内転送・ダメージは「めがさめる」に読み替える。 */}
+      <div className="rounded-lg border border-purple-700/50 bg-purple-950/20 p-2 space-y-1.5">
+        <p className="text-[11px] font-bold text-purple-300">システムオブジェクト</p>
+        <p className="text-[10px] text-gray-500">クリックで床パレットに追加されます。床ツールでマップに塗ってください。ワープ床は同じマップ内の指定マスへ転送、どく沼/ダメージ床はふむと ゆめから さめてスタートへ、つるつる床は矢印の方向へすべります（いずれもジャンプで飛び越え可）。</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {SYSTEM_TILE_TEMPLATES.map(tpl => (
+            <button key={tpl.key} onClick={() => addSystemFloorTex(tpl)}
+              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
+              ＋{sysTileLabel(tpl)}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* 設定パネル */}
       {settingsOpen && (

@@ -23,8 +23,11 @@ export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event' | 'platform';
 export interface SwitchDef { id: number; name: string; }
 
 /** アイテム定義。id は一意キー（英字推奨）。
- *  healHp/healMp があると rpg エンジンで「どうぐ」として使用可能（戦闘中・フィールド両方）。 */
-export interface ItemDef { id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; healHp?: number; healMp?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; }
+ *  healHp/healMp があると rpg エンジンで「どうぐ」として使用可能（戦闘中・フィールド両方）。
+ *  consumable: 使用時に消費される（デフォルト: healHp/healMp がある場合は true、それ以外は false）。
+ *  discardable: すてることができる（デフォルト: true）。
+ *  useMessage: 使用時に表示するメッセージ（未指定時は自動生成）。 */
+export interface ItemDef { id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; healHp?: number; healMp?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; consumable?: boolean; discardable?: boolean; useMessage?: string; }
 
 /** イベントページの発生条件。すべて AND。 */
 export interface EventCondition {
@@ -339,6 +342,13 @@ export interface Tex25D {
   emoji?: string;
   imageRef?: string;
   imageUrl?: string;
+  /** システム床の効果（kind==='floor' のみ）。2Dエンジンの TileDef.special と同じ値
+   *  （'warp' | 'damage' | 'ice-up' | 'ice-right' | 'ice-down' | 'ice-left'）。
+   *  yume25d にはシーンが無いので warp は同一マップ内の座標転送、damage は HP が無いので
+   *  「ゆめから さめて スタート地点へ戻る」に読み替える。 */
+  special?: string;
+  /** special==='warp'：同一マップ内の転送先セル。dir 指定で着地後の向きも変える。 */
+  warpDest?: { col: number; row: number; dir?: Dir4 };
 }
 
 /** 薄板1枚の壁。セルの北辺(dir=0)または西辺(dir=3)に正規化して保存する
@@ -492,19 +502,25 @@ const CHEST_OPEN_SOUND = 'https://rpgen-search.pages.dev/data/audio/sound/1Jl7OF
 export const localSysTileUrl = (col: number, row: number) => `${CHEST_CHIP_URL}#${col * 16},${row * 16},16,16`;
 
 /** システムタイルのテンプレート。エディタの「システムオブジェクト」パネルから
- *  gameData.tiles に1件追加する形で使う（追加後は通常タイルと同様にマップへペイントする）。 */
+ *  gameData.tiles に1件追加する形で使う（追加後は通常タイルと同様にマップへペイントする）。
+ *  yume25d では layout25d.textures に special 付きの床テクスチャとして追加し、床ツールで塗る。
+ *  color は画像が使えない場面（yume25d の 2D 見下ろしエディタ等）のフォールバック色。 */
 export interface SystemTileTemplate {
-  key: string; label: string; special: string; imageUrl: string; imageRef: string; passable: boolean;
+  key: string; label: string; special: string; imageUrl: string; imageRef: string; passable: boolean; color: string;
 }
 export const SYSTEM_TILE_TEMPLATES: SystemTileTemplate[] = [
-  { key: 'warp', label: 'シーン切替床', special: 'warp', imageUrl: localSysTileUrl(15, 10), imageRef: `url:${localSysTileUrl(15, 10)}`, passable: true },
-  { key: 'poison', label: 'どく沼', special: 'damage', imageUrl: localSysTileUrl(6, 0), imageRef: `url:${localSysTileUrl(6, 0)}`, passable: true },
-  { key: 'damageFloor', label: 'ダメージ床', special: 'damage', imageUrl: localSysTileUrl(13, 7), imageRef: `url:${localSysTileUrl(13, 7)}`, passable: true },
-  { key: 'ice-up', label: 'つるつる床（↑）', special: 'ice-up', imageUrl: localSysTileUrl(16, 13), imageRef: `url:${localSysTileUrl(16, 13)}`, passable: true },
-  { key: 'ice-right', label: 'つるつる床（→）', special: 'ice-right', imageUrl: localSysTileUrl(17, 13), imageRef: `url:${localSysTileUrl(17, 13)}`, passable: true },
-  { key: 'ice-left', label: 'つるつる床（←）', special: 'ice-left', imageUrl: localSysTileUrl(16, 14), imageRef: `url:${localSysTileUrl(16, 14)}`, passable: true },
-  { key: 'ice-down', label: 'つるつる床（↓）', special: 'ice-down', imageUrl: localSysTileUrl(17, 14), imageRef: `url:${localSysTileUrl(17, 14)}`, passable: true },
+  { key: 'warp', label: 'シーン切替床', special: 'warp', imageUrl: localSysTileUrl(15, 10), imageRef: `url:${localSysTileUrl(15, 10)}`, passable: true, color: '#7fd4ff' },
+  { key: 'poison', label: 'どく沼', special: 'damage', imageUrl: localSysTileUrl(6, 0), imageRef: `url:${localSysTileUrl(6, 0)}`, passable: true, color: '#3f6d34' },
+  { key: 'damageFloor', label: 'ダメージ床', special: 'damage', imageUrl: localSysTileUrl(13, 7), imageRef: `url:${localSysTileUrl(13, 7)}`, passable: true, color: '#8a4a2a' },
+  { key: 'ice-up', label: 'つるつる床（↑）', special: 'ice-up', imageUrl: localSysTileUrl(16, 13), imageRef: `url:${localSysTileUrl(16, 13)}`, passable: true, color: '#9fd8ea' },
+  { key: 'ice-right', label: 'つるつる床（→）', special: 'ice-right', imageUrl: localSysTileUrl(17, 13), imageRef: `url:${localSysTileUrl(17, 13)}`, passable: true, color: '#9fd8ea' },
+  { key: 'ice-left', label: 'つるつる床（←）', special: 'ice-left', imageUrl: localSysTileUrl(16, 14), imageRef: `url:${localSysTileUrl(16, 14)}`, passable: true, color: '#9fd8ea' },
+  { key: 'ice-down', label: 'つるつる床（↓）', special: 'ice-down', imageUrl: localSysTileUrl(17, 14), imageRef: `url:${localSysTileUrl(17, 14)}`, passable: true, color: '#9fd8ea' },
 ];
+
+/** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う直リンクmp3）。 */
+export const SYS_TILE_WARP_SFX = 'https://rpgen-search.pages.dev/data/audio/sound/vfCmoe.mp3';
+export const SYS_TILE_DAMAGE_SFX = 'https://rpgen-search.pages.dev/audio/sound/4z7O4A.mp3';
 
 export const chest = (col: number, row: number, openCmds: EventCommand[]): ObjectDef => newObject({
   emoji: '📦', col, row, behavior: 'still', hazard: false,
