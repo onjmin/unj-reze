@@ -1,5 +1,6 @@
-import { type PresetData, type SceneDef, type EventCommand, newObject, chest, TILE_SIZE } from './shared';
-import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-assets';
+import { type PresetData, type SceneDef, type EventCommand, type EnemyDialogueLine, newObject, chest, TILE_SIZE } from './shared';
+import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
+import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
 // id は rpgen-search API の id フィールド（ハッシュ文字列）
 const wr = (id: string) => `walk:auto:u:${sa(id)}`;
 const ir = (id: string) => `url:${sp(id)}`;
@@ -39,16 +40,18 @@ const M = (rows: string[]): number[][] => rows.map(r => [...r].map(ch => LEGEND[
 const foe = (o: {
   name: string; emoji: string; col: number; row: number;
   hp: number; atk: number; def: number; exp: number; gold: number;
-  moves?: { name: string; power: number; heal?: boolean; miniScript?: string }[];
+  moves?: { name: string; power: number; heal?: boolean; miniScript?: string; dialogue?: (string | EnemyDialogueLine)[] }[];
   behavior?: 'still' | 'random' | 'patrolH' | 'patrolV' | 'chase'; speed?: number; spriteId?: string;
   isBoss?: boolean; outroDialogue?: PresetData['objects'][number]['outroDialogue'];
   /** soul 戦闘の通常攻撃弾幕（MiniScript）。技側の miniScript が優先。 */
   miniScript?: string;
+  /** 通常攻撃の予告セリフ候補（HP割合／直前の「こうどう」技名で出し分け）。技側の dialogue が優先。 */
+  dialogue?: (string | EnemyDialogueLine)[];
 }) => newObject({
   emoji: o.emoji, name: o.name, col: o.col, row: o.row,
   hp: o.hp, atk: o.atk, def: o.def, exp: o.exp, gold: o.gold, moves: o.moves,
   behavior: o.behavior ?? 'still', speed: o.speed ?? 1.2, hazard: true,
-  isBoss: o.isBoss, outroDialogue: o.outroDialogue, miniScript: o.miniScript,
+  isBoss: o.isBoss, outroDialogue: o.outroDialogue, miniScript: o.miniScript, dialogue: o.dialogue,
   ...(o.spriteId ? { spriteRef: wr(o.spriteId), spriteUrl: sa(o.spriteId) } : {}),
 });
 
@@ -193,6 +196,13 @@ while true
   wait(16)
 end while
 `.trim(),
+      // 通常攻撃の予告セリフ：HPが減るほど厳しく、「はなす」を使った直後は専用のセリフになる
+      dialogue: [
+        { text: 'ママ「もう、しかたないわね」', actUsed: 'はなす' },
+        { text: 'ママ「そこまで するなら……」', hpBelowPct: 30 },
+        { text: 'ママ「まだまだ、あぶないわよ」', hpBelowPct: 60 },
+        'ママ「ごめんなさいね」',
+      ],
       moves: [{
         name: 'ふんわりファイア', power: 10,
         // 技専用：赤とオレンジ2色の火がやや密に降る
@@ -204,6 +214,10 @@ while true
   wait(14)
 end while
 `.trim(),
+        dialogue: [
+          { text: 'ママ「これで おわりに しましょう……」', hpBelowPct: 30 },
+          'ママ「ふんわり あたたかい ほのおよ」',
+        ],
       }] }),
     // 出口 → ゆきのまち
     warp('🚪', 14, 22, 'snowdin', 2, 11),
@@ -530,6 +544,13 @@ while true
   wait(22)
 end while
 `.trim(),
+      // 通常攻撃の予告セリフ：HP・直前の「ほめる」使用で出し分け
+      dialogue: [
+        { text: '王「……そんなに ほめられると てれるね」', actUsed: 'ほめる' },
+        { text: '王「もう すぐ おわりに しよう……」', hpBelowPct: 20 },
+        { text: '王「わるいね。ワシも ひくには ひけないんだ」', hpBelowPct: 50 },
+        '王「うけて おくれ」',
+      ],
       moves: [
         {
           name: 'ほのおのあめ', power: 14,
@@ -542,6 +563,10 @@ while true
   wait(7)
 end while
 `.trim(),
+          dialogue: [
+            { text: '王「これで さいごに しよう……」', hpBelowPct: 20 },
+            '王「ほのおの あめだ。すまないね」',
+          ],
         },
         {
           name: 'みつまたのやり', power: 18,
@@ -637,11 +662,11 @@ export const undertale: PresetData = {
   battleBgm: { ref: 'https://www.youtube.com/watch?v=g6aia0GQMRw', src: 'https://www.youtube.com/watch?v=g6aia0GQMRw', type: 'youtube' },
   bossBgm:   { ref: 'https://www.youtube.com/watch?v=42kI2lT0x6U', src: 'https://www.youtube.com/watch?v=42kI2lT0x6U', type: 'youtube' },
   sfx: {
-    levelup:  { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
-    purchase: { ref: `direct:${su('PEeN5M')}`, src: su('PEeN5M'), type: 'direct' as const },
-    inn:      { ref: 'direct:https://rpgen-search.pages.dev/audio/sound/3m3WX5.mp3', src: 'https://rpgen-search.pages.dev/audio/sound/3m3WX5.mp3', type: 'direct' as const },
-    save:     { ref: 'direct:https://rpgen-search.pages.dev/audio/sound/w07fng.mp3', src: 'https://rpgen-search.pages.dev/audio/sound/w07fng.mp3', type: 'direct' as const },
-    damage:   { ref: `direct:${su('HlYVmj')}`, src: su('HlYVmj'), type: 'direct' as const },
+    levelup:  { ref: `direct:${undertaleSfxUrl('snd_level_up')}`, src: undertaleSfxUrl('snd_level_up'), type: 'direct' as const },
+    purchase: { ref: `direct:${undertaleSfxUrl('snd_menu_confirm')}`, src: undertaleSfxUrl('snd_menu_confirm'), type: 'direct' as const },
+    inn:      { ref: `direct:${undertaleSfxUrl('snd_item_heal')}`, src: undertaleSfxUrl('snd_item_heal'), type: 'direct' as const },
+    save:     { ref: `direct:${undertaleSfxUrl('snd_save')}`, src: undertaleSfxUrl('snd_save'), type: 'direct' as const },
+    damage:   { ref: `direct:${undertaleSfxUrl('snd_hurt')}`, src: undertaleSfxUrl('snd_hurt'), type: 'direct' as const },
     clear:    { ref: 'clear' },
   },
 };

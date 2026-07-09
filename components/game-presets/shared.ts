@@ -220,6 +220,8 @@ export interface ObjectDef {
   miniScript?: string;
   /** SOUL移動モード（rpg エンジン・battle.style==='soul'）。攻撃（弾幕よけ）中のプレイヤー移動の制約。未指定は 'red'。 */
   soulMode?: SoulMode;
+  /** soul 戦闘：この敵の通常攻撃の予告セリフ候補（moves[].dialogue が優先）。HP割合／直前のこうどう技名で出し分け。 */
+  dialogue?: (string | EnemyDialogueLine)[];
   /** 所属フェーズ番号（touhou エンジン、phases 使用時）。未指定=0。 */
   phase?: number;
   /** action（マリオ系）: 上から踏むと倒せる敵（クリボー型）。SMC core 準拠。
@@ -300,12 +302,19 @@ export interface BattleMove { name: string; cost: number; power: number; heal?: 
  *  / purple=3本の横線をUp/Downで切替・Left/Rightで移動 / yellow=自由移動+Z/Enterで前方に弾を撃てる。 */
 export type SoulMode = 'red' | 'blue' | 'green' | 'purple' | 'yellow';
 
-/** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。
- *  soulMode を指定すると、この技の弾幕よけ中だけ SOUL の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。 */
-export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; }
+/** soul 戦闘の攻撃前セリフ（フキダシではなくバトルログに表示）。
+ *  hpBelowPct＝敵HPがこの%以下のときだけ選ばれる。actUsed＝プレイヤーが直前に使った「こうどう」技名と一致するときだけ選ばれる。
+ *  どちらも省略した行は無条件セリフ（フォールバック）。優先度：actUsed一致 ＞ hpBelowPct一致（最も厳しい条件） ＞ 無条件。 */
+export interface EnemyDialogueLine { text: string; hpBelowPct?: number; actUsed?: string; }
 
-/** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; }
+/** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。
+ *  soulMode を指定すると、この技の弾幕よけ中だけ SOUL の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。
+ *  dialogue を指定すると、この技を予告するとき敵本体の dialogue より優先して使われる。 */
+export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; }
+
+/** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。
+ *  dialogue＝通常攻撃（moves 抽選に外れたとき）の予告セリフ候補。 */
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; }
 
 /** ターン制戦闘設定（rpg エンジン：ドラクエ/ポケモン）。
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */

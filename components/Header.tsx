@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Menu, Timer } from 'lucide-react';
+import VolumeControl from './VolumeControl';
 
 interface HeaderProps {
   userId: string;
@@ -42,6 +43,7 @@ export default function Header({
           >
             {bbsMode}
           </button>
+          <VolumeControl />
           <button
             onClick={onOpenDrawer}
             className="p-1.5 hover:bg-gray-100/10 rounded-full transition-colors text-gray-500 hover:text-gray-300"

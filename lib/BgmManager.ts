@@ -1,17 +1,26 @@
 import type { AssetManifest } from './game-config';
+import { applyMasterVolume, subscribeMasterVolume } from './master-volume';
 
 interface BgmHandle {
   stop: () => void;
+  /** マスター音量変更時に即時反映するための再設定（対応できない再生方式は省略可）。 */
+  setBaseVolume?: (baseVolume: number) => void;
 }
 
 class BgmManager {
   private current: BgmHandle | null = null;
+  private baseVolume = 50;
+
+  constructor() {
+    subscribeMasterVolume(() => this.current?.setBaseVolume?.(this.baseVolume));
+  }
 
   async play(manifest: AssetManifest) {
     this.stop();
     if (!manifest.bgm || !manifest.bgm.src) return;
 
     const volume = (manifest.bgm as any).volume !== undefined ? (manifest.bgm as any).volume : 50;
+    this.baseVolume = volume;
 
     if (manifest.bgm.type === 'midi') {
       await this.playMidi(manifest.bgm.src, volume);
@@ -34,10 +43,11 @@ class BgmManager {
   private playDirect(url: string, volume: number = 50) {
     const audio = new Audio(url);
     audio.loop = true;
-    audio.volume = (volume / 100) * 0.6;
+    audio.volume = (applyMasterVolume(volume) / 100) * 0.6;
     audio.play().catch(() => {});
     this.current = {
       stop: () => { try { audio.pause(); audio.src = ''; } catch (e) { } },
+      setBaseVolume: (v) => { audio.volume = (applyMasterVolume(v) / 100) * 0.6; },
     };
   }
 
@@ -74,7 +84,7 @@ class BgmManager {
 
     const player = new MP.Player((evt: any) => {
       if (evt.name === 'Note on' && evt.velocity > 0) {
-        inst.play(evt.noteName, ctx.currentTime, { gain: (evt.velocity / 127) * (volume / 50), duration: 0.25 });
+        inst.play(evt.noteName, ctx.currentTime, { gain: (evt.velocity / 127) * (applyMasterVolume(volume) / 50), duration: 0.25 });
       }
     });
     player.on('endOfFile', () => { try { player.stop(); player.play(); } catch (e) { } });
@@ -101,7 +111,7 @@ class BgmManager {
     try {
       const bgm = playMML(mml, {
         audioContext: ctx,
-        volume: volume,
+        volume: applyMasterVolume(volume),
         loop: loopOption,
       });
 
@@ -111,6 +121,7 @@ class BgmManager {
           try { bgm.destroy(); } catch (e) {}
           ctx.close();
         },
+        setBaseVolume: (v) => { try { bgm.setVolume(applyMasterVolume(v)); } catch (e) {} },
       };
     } catch (err) {
       console.error('Error playing MML BGM:', err);
@@ -181,7 +192,7 @@ class BgmManager {
         },
         events: {
           onReady: (event: any) => {
-            event.target.setVolume(volume);
+            event.target.setVolume(applyMasterVolume(volume));
             event.target.playVideo();
           },
           onStateChange: (event: any) => {
@@ -198,6 +209,7 @@ class BgmManager {
         try { if (player && player.destroy) player.destroy(); } catch (e) {}
         container.remove();
       },
+      setBaseVolume: (v) => { try { player?.setVolume(applyMasterVolume(v)); } catch (e) {} },
     };
   }
 }

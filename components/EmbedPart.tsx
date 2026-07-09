@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { ExternalLink, X, Play, Music, Gamepad2, Loader2 } from 'lucide-react';
 import { EmbeddedMedia } from '@/lib/embed';
 import { useAudioFocus } from '@/lib/audio-focus-context';
+import { getMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 
 const ytRegex = /\/embed\/([a-zA-Z0-9_-]{11})/;
 const getYtThumb = (url: string) => {
@@ -17,6 +18,13 @@ interface EmbedPartProps {
 
 const uid = () => `e${Math.random().toString(36).slice(2, 9)}`;
 
+const sendYtVolume = (iframe: HTMLIFrameElement, volume: number) => {
+  iframe.contentWindow?.postMessage(
+    JSON.stringify({ event: 'command', func: 'setVolume', args: [volume] }),
+    'https://www.youtube.com',
+  );
+};
+
 export default function EmbedPart({ embed }: EmbedPartProps) {
   const { requestFocus, releaseFocus } = useAudioFocus();
   const [closed, setClosed] = useState(false);
@@ -27,6 +35,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(uid());
   const focusRegistered = useRef(false);
+  const isYt = !!getYtThumb(embed?.embedUrl ?? '');
 
   useEffect(() => {
     if (embed?.type !== 'video_file' || !playing || !videoRef.current) return;
@@ -55,6 +64,12 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
   }, [releaseFocus]);
 
   useEffect(() => {
+    return subscribeMasterVolume((v) => {
+      if (playing && iframeRef.current && isYt) sendYtVolume(iframeRef.current, v);
+    });
+  }, [playing, isYt]);
+
+  useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(([entry]) => {
@@ -76,7 +91,6 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
 
   if (!embed || closed) return null;
 
-  const isYt = !!getYtThumb(embed.embedUrl);
   const thumbUrl = getYtThumb(embed.embedUrl);
 
   const createIframe = (): HTMLIFrameElement => {
@@ -88,11 +102,14 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
     iframe.allow = allowValue;
     if (embed.type !== 'audio') iframe.allowFullscreen = true;
     iframe.sandbox = 'allow-forms allow-modals allow-popups allow-scripts allow-same-origin allow-presentation';
-    iframe.onload = () => setReady(true);
+    iframe.onload = () => {
+      setReady(true);
+      if (isYt) sendYtVolume(iframe, getMasterVolume());
+    };
     iframe.className = 'w-full h-full rounded-b-xl';
     iframe.style.border = 'none';
     if (isYt) {
-      iframe.src = `${embed.embedUrl}?autoplay=1`;
+      iframe.src = `${embed.embedUrl}?autoplay=1&enablejsapi=1`;
     } else {
       iframe.src = embed.embedUrl;
     }

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useId } from 'react';
+import { useEffect, useRef, useId, useState } from 'react';
 import { useAudioFocus } from '@/lib/audio-focus-context';
 import { getStudio } from '@/lib/dtm';
+import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 
 interface MmlPlayerProps {
   mml: string;
@@ -19,6 +20,9 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
   const focusRef = useRef({ requestFocus, releaseFocus });
   const focusRef_current = { requestFocus, releaseFocus };
   focusRef.current = focusRef_current;
+  const [volumeTick, setVolumeTick] = useState(0);
+
+  useEffect(() => subscribeMasterVolume(() => setVolumeTick((n) => n + 1)), []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -32,7 +36,7 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
     getStudio().then((studio) => {
       if (disposed || !el) return;
       inst = studio.mountPlayer(el, mml, {
-        volume: 50,
+        volume: applyMasterVolume(50),
         onStop: () => {
           claimedRef.current = false;
           focusRef.current.releaseFocus(id);
@@ -59,7 +63,7 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
       claimedRef.current = false;
       inst = null;
     };
-  }, [mml, id]);
+  }, [mml, id, volumeTick]);
 
   return <div ref={containerRef} className="mb-2.5" />;
 }

@@ -4,7 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
+import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
+import { applyMasterVolume } from '@/lib/master-volume';
 import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
@@ -25,7 +27,7 @@ import {
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
-  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type SoulMode,
+  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type SoulMode, type EnemyDialogueLine,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig,
   defaultTitleScreen, defaultEndingScreen,
@@ -253,7 +255,7 @@ const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData =
 
 async function playSfx(s?: SfxRef) {
   if (!s || !s.src) return;
-  const volume = s.ref ? getBgmVolume(s.ref) : 50;
+  const volume = applyMasterVolume(s.ref ? getBgmVolume(s.ref) : 50);
   if (s.type === 'direct') {
     const a = new Audio(s.src);
     a.volume = (volume / 100) * 0.7;
@@ -1138,8 +1140,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [battle, setBattle] = useState<BattleView | null>(null);
   const battleViewRef = useRef<BattleView | null>(null);
   battleViewRef.current = battle;
-  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode }[]; exp: number; gold: number; isBoss: boolean; mercy: number; miniScript?: string; soulMode?: SoulMode }>(
-    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, miniScript: undefined, soulMode: undefined });
+  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }[]; exp: number; gold: number; isBoss: boolean; mercy: number; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }>(
+    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, miniScript: undefined, soulMode: undefined, dialogue: undefined });
+  /** soul 戦闘：プレイヤーが直前に使った「こうどう」技名（敵セリフの actUsed 条件判定用）。バトル開始時にリセット。 */
+  const lastActRef = useRef<string | null>(null);
   /** バトル開始時のプレイヤー座標。終了後にここへ正確に戻す（シンボルエンカウントで敵側へ押し出されるのを防ぐ）。 */
   const battleReturnPosRef = useRef<{ x: number; y: number } | null>(null);
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
@@ -1535,7 +1539,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode }[]; miniScript?: string; soulMode?: SoulMode; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     // バトル開始位置を記録し、終了後はここへ正確に復帰させる
     const startEng = engineRef.current;
     battleReturnPosRef.current = { x: startEng.player.x, y: startEng.player.y };
@@ -1543,8 +1547,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
       enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
       gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss, mercy: 0,
-      miniScript: opts.miniScript, soulMode: opts.soulMode,
+      miniScript: opts.miniScript, soulMode: opts.soulMode, dialogue: opts.dialogue,
     };
+    lastActRef.current = null;
     setBattleItemsOpen(false); setBagOpen(false);
     setSoulPhase('menu'); setSoulMenu('root'); soulDodgeRef.current = null;
     bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
@@ -1561,7 +1566,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, dialogue: d.dialogue, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
   };
 
   // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
@@ -1687,7 +1692,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  /** soul: 敵ターン開始。回復技なら回復のみ、攻撃なら予告テキストを表示してボタン入力を待ってから弾幕よけへ。 */
+  /** soul: 敵のHP割合・直前にプレイヤーが使った「こうどう」技名から、条件に合うセリフを1つ選ぶ。
+   *  優先度：actUsed一致 ＞ hpBelowPct一致（最も厳しい＝小さい閾値を優先） ＞ 無条件セリフ。該当なしなら null。 */
+  const pickDialogue = (lines: (string | EnemyDialogueLine)[] | undefined, hpPct: number, lastAct: string | null): string | null => {
+    if (!lines?.length) return null;
+    const norm = lines.map(l => typeof l === 'string' ? { text: l } as EnemyDialogueLine : l);
+    if (lastAct) {
+      const m = norm.find(l => l.actUsed === lastAct);
+      if (m) return m.text;
+    }
+    const hpMatches = norm.filter(l => l.hpBelowPct != null && l.actUsed == null && hpPct <= l.hpBelowPct);
+    if (hpMatches.length) return hpMatches.sort((a, b) => a.hpBelowPct! - b.hpBelowPct!)[0].text;
+    return norm.find(l => l.hpBelowPct == null && l.actUsed == null)?.text ?? null;
+  };
+
+  /** soul: 敵ターン開始。回復技なら回復のみ、攻撃なら予告テキスト（条件付きセリフ優先）を表示してボタン入力を待ってから弾幕よけへ。 */
   const soulEnemyTurn = () => {
     const b = battleRef.current; const pr = progressRef.current;
     if (!b.active) return;
@@ -1699,7 +1718,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
     const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
-    appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`);
+    const hpPct = b.enemyMaxHp > 0 ? (b.enemyHp / b.enemyMaxHp) * 100 : 100;
+    const dlg = pickDialogue(move?.dialogue, hpPct, lastActRef.current) ?? pickDialogue(b.dialogue, hpPct, lastActRef.current);
+    appendLog(dlg ? `${b.enemyName}「${dlg}」` : (move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`));
     waitForSoulAdvance(() => {
       const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
       const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
@@ -1751,7 +1772,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (pr.mp < m.cost) { appendLog('MPが たりない！'); return; }
     pr.mp -= m.cost; forceHud(n => n + 1);
     if (m.mercy != null) {
-      // こうどう技：ダメージを与えず敵意ゲージを溜める
+      // こうどう技：ダメージを与えず敵意ゲージを溜める（次の敵ターンのセリフ選定用に記録）
+      lastActRef.current = m.name;
       const before = b.mercy;
       b.mercy = Math.min(100, b.mercy + m.mercy);
       const line = b.mercy >= 100
@@ -2485,7 +2507,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     previewStopRef.current = null;
     if (!asset?.src) return;
     if (asset.type === 'direct') {
-      const a = new Audio(asset.src); a.volume = 0.7; a.play().catch(() => {});
+      const a = new Audio(asset.src); a.volume = applyMasterVolume(70) / 100; a.play().catch(() => {});
       previewStopRef.current = () => { a.pause(); a.currentTime = 0; };
       return;
     }
@@ -2494,6 +2516,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const { playMML } = await import('@onjmin/dtm');
       const bgm = playMML(asset.src, {
         loop: false,
+        volume: applyMasterVolume(100),
         onStop: () => { previewStopRef.current = null; }
       });
       previewStopRef.current = () => { bgm.stop(); bgm.destroy(); };
@@ -5341,7 +5364,7 @@ const lose = (msg: string) => {
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, soulMode: boss.soulMode, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, soulMode: boss.soulMode, dialogue: boss.dialogue, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else {
@@ -7398,6 +7421,7 @@ const lose = (msg: string) => {
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          <VolumeControl />
           {/* 設定ボタン */}
           <div className="relative" ref={settingsRef}>
             <button

@@ -296,6 +296,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
           {/* BGM: mml post */}
           {mode === 'bgm' && bgmTab === 'mmlPost' && (
             <>
+              <p className="text-[10px] text-[#a3e635] mb-2">♪ MMLは楽譜データだけの超軽量BGM。音声ファイルを読み込まないので読み込みが一瞬で終わります。</p>
               <div className="relative mb-2">
                 <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
                 <input
@@ -341,6 +342,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
           {/* BGM: raw mml */}
           {mode === 'bgm' && bgmTab === 'mmlRaw' && (
             <div className="space-y-2">
+              <p className="text-[10px] text-[#a3e635]">♪ MMLは楽譜データだけの超軽量BGM。音声ファイルを読み込まないので読み込みが一瞬で終わります。</p>
               <label className="block text-[10px] text-gray-500">MML（短い効果音/メロディ向け）</label>
               <textarea
                 value={mmlInput}
