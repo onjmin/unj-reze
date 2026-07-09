@@ -7,6 +7,7 @@ import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { applyMasterVolume } from '@/lib/master-volume';
+import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
 import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
@@ -1349,7 +1350,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const bossDefeatedRef = useRef(false);
   /** NPCに接触中のセリフ表示（フキダシではなく頭上に1文字ずつ表示） */
-  const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number; wrapped?: string[] } | null>(null);
+  const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number; wrapped?: string[]; lastShown: number } | null>(null);
   /** アイテム取得演出（メッセージウィンドウではなく頭上に一定時間表示） */
   const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
   /** アンダーテール風戦闘：敵へのダメージ数値ポップアップ（黒文字・赤フチ・見崎フォント） */
@@ -1381,13 +1382,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   } | null>(null);
   const ENCOUNTER_ALERT_MS = 650;
   const ENCOUNTER_FLASH_MS = 450; // ハートが移動しながら明滅する演出の表示時間。SEの再生完了は待たない（短く保つ）
-  const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: 'https://rpgen-search.pages.dev/audio/sound/iUWDU1.mp3', type: 'direct' as const };
-  const UNDERTALE_DAMAGE_SFX = { ref: 'direct:undertale-damage', src: 'https://rpgen-search.pages.dev/audio/sound/VtNXk0.mp3', type: 'direct' as const };
+  const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: undertaleSfxUrl('snd_exclamation'), type: 'direct' as const };
+  const UNDERTALE_DAMAGE_SFX = { ref: 'direct:undertale-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const };
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
   /** バトル開始SE。現在のBGMを止めてから鳴らし、鳴り終わるまでバトルBGMは始めない。 */
-  const UNDERTALE_BATTLESTART_SFX = { ref: 'direct:undertale-battlestart', src: 'https://rpgen-search.pages.dev/audio/sound/KAQ5VF.mp3', type: 'direct' as const };
+  const UNDERTALE_BATTLESTART_SFX = { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_soul_move'), type: 'direct' as const };
   /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音。 */
   const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
+  /** アンダーテール系プリセット専用：メニューのカーソル移動（選択音）。 */
+  const UNDERTALE_MENU_SWITCH_SFX = { ref: 'direct:undertale-menu-switch', src: undertaleSfxUrl('snd_menu_switch'), type: 'direct' as const };
+  /** アンダーテール系プリセット専用：会話・戦闘ログの1文字ずつ表示に合わせて鳴らすテキスト送りブリップ音。 */
+  const UNDERTALE_TEXT_BLIP_SFX = { ref: 'direct:undertale-text-blip', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const };
   /** アンダーテール系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
@@ -1828,8 +1833,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setLogRevealCount(0);
     let i = 0;
     const id = setInterval(() => {
+      const ch = lastLogLine[i];
       i++;
       setLogRevealCount(i);
+      if (ch && ch.trim()) playSfx(UNDERTALE_TEXT_BLIP_SFX);
       if (i >= lastLogLine.length) clearInterval(id);
     }, 32);
     return () => clearInterval(id);
@@ -5171,14 +5178,14 @@ const lose = (msg: string) => {
               const text = 'ひぃっ！？も、もう堪忍してぇや…！';
               ctx.font = `bold 11px ${getPixelFontFamily()}`;
               const wrapped = wrapWithKinsoku(ctx, text, Math.min(PLAY_W - 16, 220));
-              npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped };
+              npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped, lastShown: 0 };
             }
             else if (d.message && !e.talked) {
               e.talked = true;
               const text = d.message;
               ctx.font = `bold 11px ${getPixelFontFamily()}`;
               const wrapped = wrapWithKinsoku(ctx, text, Math.min(PLAY_W - 16, 220));
-              npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped };
+              npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped, lastShown: 0 };
             }
           } else { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
         }
@@ -5608,6 +5615,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 2;
           if (menuDownEdge) c += 2;
           c = ((c % n) + n) % n;
+          if (c !== invCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
           invCursorRef.current = c; setInvCursor(c);
         }
       } else if (isPlaying && invMenuRef.current) {
@@ -5622,6 +5630,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % count) + count) % count;
+          if (c !== invMenuCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
           invMenuCursorRef.current = c; setInvMenuCursor(c);
         }
       } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulPhaseRef.current === 'menu') {
@@ -5631,6 +5640,7 @@ const lose = (msg: string) => {
             if (menuLeftEdge) c -= 1;
             if (menuRightEdge) c += 1;
             c = ((c % 4) + 4) % 4;
+            if (c !== soulRootCursorRef.current) playSfx(UNDERTALE_MENU_SWITCH_SFX);
             soulRootCursorRef.current = c; setSoulRootCursor(c);
           }
         } else {
@@ -5652,6 +5662,7 @@ const lose = (msg: string) => {
               if (menuDownEdge) c += 1;
             }
             c = ((c % count) + count) % count;
+            if (c !== soulSubCursorRef.current) playSfx(UNDERTALE_MENU_SWITCH_SFX);
             soulSubCursorRef.current = c; setSoulSubCursor(c);
           }
         }
@@ -5663,6 +5674,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
+          if (c !== eventChoiceCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
           eventChoiceCursorRef.current = c; setEventChoiceCursor(c);
         }
       } else if (isPlaying && shopModalRef.current) {
@@ -5673,6 +5685,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
+          if (c !== shopCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
           shopCursorRef.current = c; setShopCursor(c);
         }
       } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul') {
@@ -5707,6 +5720,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
+          if (c !== titleCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
           titleCursorRef.current = c; setTitleCursor(c);
         }
       }
@@ -6347,8 +6361,13 @@ const lose = (msg: string) => {
       }
       // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）。全スプライトより前面に出すため描画の最後で行う
       if (isPlaying && npcTalkRef.current) {
-        const { entity: e, text, startTime, wrapped } = npcTalkRef.current;
+        const talk = npcTalkRef.current;
+        const { entity: e, text, startTime, wrapped } = talk;
         const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
+        if (presetId === 'undertale' && shown > talk.lastShown) {
+          if (text.slice(talk.lastShown, shown).trim()) playSfx(UNDERTALE_TEXT_BLIP_SFX);
+          talk.lastShown = shown;
+        }
         if (shown > 0) {
           ctx.font = `bold 11px ${getPixelFontFamily()}`;
           ctx.textAlign = 'center';
