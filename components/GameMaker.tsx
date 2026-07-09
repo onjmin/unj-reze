@@ -1383,16 +1383,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const ENCOUNTER_ALERT_MS = 650;
   const ENCOUNTER_FLASH_MS = 450; // ハートが移動しながら明滅する演出の表示時間。SEの再生完了は待たない（短く保つ）
   const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: undertaleSfxUrl('snd_exclamation'), type: 'direct' as const };
-  const UNDERTALE_DAMAGE_SFX = { ref: 'direct:undertale-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const };
+  /** アンダーテール系プリセット専用：敵にダメージを与えたときの効果音（自分が被弾する場合は sfxRef.current.damage=snd_hurt を使う）。 */
+  const UNDERTALE_ENEMY_DAMAGE_SFX = { ref: 'direct:undertale-enemy-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const };
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
   /** バトル開始SE。現在のBGMを止めてから鳴らし、鳴り終わるまでバトルBGMは始めない。 */
   const UNDERTALE_BATTLESTART_SFX = { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_soul_move'), type: 'direct' as const };
-  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音。 */
+  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（アンダーテール系以外のプリセット用）。 */
   const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
   /** アンダーテール系プリセット専用：メニューのカーソル移動（選択音）。 */
   const UNDERTALE_MENU_SWITCH_SFX = { ref: 'direct:undertale-menu-switch', src: undertaleSfxUrl('snd_menu_switch'), type: 'direct' as const };
-  /** アンダーテール系プリセット専用：会話・戦闘ログの1文字ずつ表示に合わせて鳴らすテキスト送りブリップ音。 */
-  const UNDERTALE_TEXT_BLIP_SFX = { ref: 'direct:undertale-text-blip', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const };
+  /** アンダーテール系プリセット専用：メニューでの決定音。 */
+  const UNDERTALE_MENU_CONFIRM_SFX = { ref: 'direct:undertale-menu-confirm', src: undertaleSfxUrl('snd_menu_confirm'), type: 'direct' as const };
+  /** アンダーテール系プリセット専用：メニューでのキャンセル・戻る音。 */
+  const UNDERTALE_MENU_CANCEL_SFX = { ref: 'direct:undertale-menu-cancel', src: undertaleSfxUrl('snd_menu_cancel'), type: 'direct' as const };
+  /** アンダーテール系プリセット専用：メッセージウィンドウでの1文字ずつ表示に合わせて鳴らすテキスト送りブリップ音。 */
+  const UNDERTALE_TEXT_TYPER_SFX = { ref: 'direct:undertale-text-typer', src: undertaleSfxUrl('snd_text_voice_typer'), type: 'direct' as const };
+  /** アンダーテール系プリセット専用：キャラクターがしゃべっているときの1文字ずつ表示に合わせて鳴らすテキスト送りブリップ音。 */
+  const UNDERTALE_TEXT_VOICE_SFX = { ref: 'direct:undertale-text-voice', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const };
+  /** メニューで選択を決定したときのSE。アンダーテール系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
+  const playMenuConfirmSfx = () => playSfx(presetId === 'undertale' ? UNDERTALE_MENU_CONFIRM_SFX : MSG_ADVANCE_SFX);
+  /** メニューをキャンセル・後退したときのSE。アンダーテール系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
+  const playMenuCancelSfx = () => playSfx(presetId === 'undertale' ? UNDERTALE_MENU_CANCEL_SFX : MSG_ADVANCE_SFX);
   /** アンダーテール系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
@@ -1749,6 +1760,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const beforeHp = b.enemyHp;
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
     triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
+    playSfx(UNDERTALE_ENEMY_DAMAGE_SFX);
     setSoulPhase('menu');
     appendLog(`${mult >= 1.6 ? '会心の いちげき！ ' : ''}${dmg}のダメージ！`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
@@ -1798,6 +1810,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const beforeHp = b.enemyHp;
       b.enemyHp = Math.max(0, b.enemyHp - dmg);
       triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
+      if ((gameDataRef.current.battle?.style ?? 'classic') === 'soul') playSfx(UNDERTALE_ENEMY_DAMAGE_SFX);
       appendLog(`${m.name}！ ${dmg}のダメージ`, { canAct: false });
       if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     }
@@ -1836,7 +1849,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const ch = lastLogLine[i];
       i++;
       setLogRevealCount(i);
-      if (ch && ch.trim()) playSfx(UNDERTALE_TEXT_BLIP_SFX);
+      if (ch && ch.trim()) playSfx(UNDERTALE_TEXT_TYPER_SFX);
       if (i >= lastLogLine.length) clearInterval(id);
     }, 32);
     return () => clearInterval(id);
@@ -2086,7 +2099,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             pr.hp = Math.max(0, pr.hp - st.dmg);
             st.invuln = 45;
-            playSfx(presetId === 'undertale' ? UNDERTALE_DAMAGE_SFX : sfxRef.current.damage);
+            playSfx(sfxRef.current.damage);
             forceHud(n => n + 1);
             if (pr.hp <= 0) { alive = false; endBattle('lose'); return; }
             break;
@@ -5739,6 +5752,7 @@ const lose = (msg: string) => {
           playSfx(MSG_ADVANCE_SFX);
           dialogueCutsceneRef.current?.advance();
         } else if (invDetailRef.current) {
+          playMenuCancelSfx();
           setInvDetail(null); invDetailRef.current = null;
         } else if (invMenuRef.current) {
           const itemId = invSlotsRef.current[invMenuRef.current.slotIdx];
@@ -5748,14 +5762,14 @@ const lose = (msg: string) => {
             const discardable = it.discardable !== false;
             const actions: (() => void)[] = [];
             if (usable) actions.push(() => useInventoryItem(itemId));
-            actions.push(() => { playSfx(MSG_ADVANCE_SFX); setInvDetail(itemId); invDetailRef.current = itemId; });
+            actions.push(() => { playMenuConfirmSfx(); setInvDetail(itemId); invDetailRef.current = itemId; });
             if (discardable) actions.push(() => discardInventoryItem(itemId));
-            actions.push(() => { setInvMenu(null); invMenuRef.current = null; });
+            actions.push(() => { playMenuCancelSfx(); setInvMenu(null); invMenuRef.current = null; });
             const idx = Math.min(invMenuCursorRef.current, actions.length - 1);
             actions[idx]?.();
           }
         } else if (isPlaying && invOpenRef.current && invSlotsRef.current.length > 0 && !battleRef.current.active) {
-          playSfx(MSG_ADVANCE_SFX);
+          playMenuConfirmSfx();
           setInvMenu({ slotIdx: invCursorRef.current }); invMenuRef.current = { slotIdx: invCursorRef.current };
           setInvMenuCursor(0); invMenuCursorRef.current = 0;
         } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulPhaseRef.current === 'menu') {
@@ -5763,6 +5777,7 @@ const lose = (msg: string) => {
           if (soulMenuRef.current === 'root') {
             if (canMenuNow) {
               const r = soulRootCursorRef.current;
+              playSfx(UNDERTALE_MENU_CONFIRM_SFX);
               if (r === 0) setSoulPhase('attack');
               else if (r === 1) setSoulMenu('act');
               else if (r === 2) setSoulMenu('item');
@@ -5771,27 +5786,29 @@ const lose = (msg: string) => {
           } else if (soulMenuRef.current === 'act') {
             const moves = gameDataRef.current.battle?.moves ?? [];
             const idx = soulSubCursorRef.current;
-            if (idx < moves.length) { if (canMenuNow) { setSoulMenu('root'); doMove(moves[idx]); } }
-            else setSoulMenu('root');
+            if (idx < moves.length) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); doMove(moves[idx]); } }
+            else { playSfx(UNDERTALE_MENU_CANCEL_SFX); setSoulMenu('root'); }
           } else if (soulMenuRef.current === 'item') {
             const items = usableItems();
             const idx = soulSubCursorRef.current;
-            if (idx < items.length) { if (canMenuNow) { setSoulMenu('root'); useHealItem(items[idx], true); } }
-            else setSoulMenu('root');
+            if (idx < items.length) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); useHealItem(items[idx], true); } }
+            else { playSfx(UNDERTALE_MENU_CANCEL_SFX); setSoulMenu('root'); }
           } else if (soulMenuRef.current === 'mercy') {
             const idx = soulSubCursorRef.current;
-            if (idx === 0) { if (canMenuNow) { setSoulMenu('root'); doSpare(); } }
-            else if (idx === 1) { if (canMenuNow) { setSoulMenu('root'); doFlee(); } }
-            else setSoulMenu('root');
+            if (idx === 0) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); doSpare(); } }
+            else if (idx === 1) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); doFlee(); } }
+            else { playSfx(UNDERTALE_MENU_CANCEL_SFX); setSoulMenu('root'); }
           }
         } else if (isPlaying && eventChoiceRef.current) {
           const choice = eventChoiceRef.current;
           const idx = Math.min(eventChoiceCursorRef.current, choice.choices.length - 1);
+          playMenuConfirmSfx();
           choice.onPick(idx);
         } else if (isPlaying && shopModalRef.current) {
           const sm = shopModalRef.current;
           const idx = shopCursorRef.current;
           if (idx >= sm.items.length) {
+            playMenuCancelSfx();
             setShopModal(null);
           } else {
             const si = sm.items[idx];
@@ -5842,6 +5859,7 @@ const lose = (msg: string) => {
             else if (hasItem && idx === 2 + moves.length + (hasMercy ? 1 : 0)) setBattleItemsOpen(true);
           }
         } else if (showTitleRef.current && gameDataRef.current.titleScreen) {
+          playMenuConfirmSfx();
           startFromTitle();
         } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current) {
           placeObj();
@@ -6365,7 +6383,7 @@ const lose = (msg: string) => {
         const { entity: e, text, startTime, wrapped } = talk;
         const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
         if (presetId === 'undertale' && shown > talk.lastShown) {
-          if (text.slice(talk.lastShown, shown).trim()) playSfx(UNDERTALE_TEXT_BLIP_SFX);
+          if (text.slice(talk.lastShown, shown).trim()) playSfx(UNDERTALE_TEXT_VOICE_SFX);
           talk.lastShown = shown;
         }
         if (shown > 0) {
@@ -7403,7 +7421,7 @@ const lose = (msg: string) => {
       }
     }
     playSfx(sfxRef.current.inn);
-    playSfx(MSG_ADVANCE_SFX);
+    playMenuConfirmSfx();
     forceHud(n => n + 1);
     setInvMenu(null); setInvDetail(null);
     const msg = it.useMessage || `${it.emoji} ${it.name}を つかった！${parts.length > 0 ? '\n' + parts.join('、') : ''}`;
@@ -7413,7 +7431,7 @@ const lose = (msg: string) => {
   const discardInventoryItem = (itemId: string) => {
     const it = (gameData.items ?? []).find(x => x.id === itemId);
     if (it && it.discardable === false) { showGameMsg(`${it.name}は すてられない。`, 'instant', () => {}); return; }
-    playSfx(MSG_ADVANCE_SFX);
+    playMenuConfirmSfx();
     const idx = invSlotsRef.current.indexOf(itemId);
     if (idx >= 0) {
       const copy = [...invSlotsRef.current]; copy.splice(idx, 1);
@@ -7622,7 +7640,7 @@ const lose = (msg: string) => {
                   {gameData.titleScreen.subtitle && <p className="text-sm font-pixel opacity-90" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.subtitle}</p>}
                   <div className="flex flex-col gap-2 mt-2 w-52 max-w-full">
                     {gameData.titleScreen.menu.map((mi, i) => (
-                      <button key={i} onClick={() => { setTitleCursor(i); startFromTitle(); }}
+                      <button key={i} onClick={() => { setTitleCursor(i); playMenuConfirmSfx(); startFromTitle(); }}
                         className={`px-4 py-2 border-2 font-pixel text-sm ${titleCursor === i ? 'bg-white/30 border-white' : 'bg-white/15 hover:bg-white/25 border-white/40'}`}>
                         {titleCursor === i ? '❤ ' : ''}{mi.label}
                       </button>
@@ -8191,21 +8209,21 @@ const lose = (msg: string) => {
                       const it = (gameData.items ?? []).find(x => x.id === itemId);
                       if (!it) return null;
                       return (
-                        <button key={`${itemId}-${idx}`} onClick={() => { playSfx(MSG_ADVANCE_SFX); setInvCursor(idx); setInvMenu({ slotIdx: idx }); setInvMenuCursor(0); }}
+                        <button key={`${itemId}-${idx}`} onClick={() => { playMenuConfirmSfx(); setInvCursor(idx); setInvMenu({ slotIdx: idx }); setInvMenuCursor(0); }}
                           className={`text-left active:text-yellow-300 text-[11px] sm:text-xs py-0.5 truncate ${invCursor === idx ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
                           {invCursor === idx ? '❤ ' : '  '}{it.emoji} {it.name}
                         </button>
                       );
                     })}
                   </div>
-                  <button onClick={() => setInvOpen(false)}
+                  <button onClick={() => { playMenuCancelSfx(); setInvOpen(false); }}
                     className="mt-3 w-full py-1.5 border-2 border-white/40 text-gray-400 hover:text-white hover:border-white text-[11px] font-bold">とじる</button>
                 </div>
               </div>
             )}
             {/* ── アイテムアクションメニュー（Use/Details/Discard） ── */}
             {invMenu && !invDetail && (
-              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => { setInvMenu(null); invMenuRef.current = null; }}>
+              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => { playMenuCancelSfx(); setInvMenu(null); invMenuRef.current = null; }}>
                 <div className="bg-black border-4 border-white p-3 sm:p-4 w-full max-w-xs font-pixel" onClick={e => e.stopPropagation()}>
                   {(() => {
                     const itemId = invSlots[invMenu.slotIdx];
@@ -8215,9 +8233,9 @@ const lose = (msg: string) => {
                     const discardable = it.discardable !== false;
                     const actions: { key: string; label: string; onClick: () => void }[] = [];
                     if (usable) actions.push({ key: 'use', label: 'つかう', onClick: () => useInventoryItem(itemId) });
-                    actions.push({ key: 'detail', label: 'せつめい', onClick: () => { playSfx(MSG_ADVANCE_SFX); setInvDetail(itemId); invDetailRef.current = itemId; } });
+                    actions.push({ key: 'detail', label: 'せつめい', onClick: () => { playMenuConfirmSfx(); setInvDetail(itemId); invDetailRef.current = itemId; } });
                     if (discardable) actions.push({ key: 'discard', label: 'すてる', onClick: () => discardInventoryItem(itemId) });
-                    actions.push({ key: 'back', label: 'もどる', onClick: () => { setInvMenu(null); invMenuRef.current = null; } });
+                    actions.push({ key: 'back', label: 'もどる', onClick: () => { playMenuCancelSfx(); setInvMenu(null); invMenuRef.current = null; } });
                     return (
                       <>
                         <div className="text-white font-bold text-xs sm:text-sm mb-2">{it.emoji} {it.name}</div>
@@ -8237,7 +8255,7 @@ const lose = (msg: string) => {
             )}
             {/* ── アイテム詳細 ── */}
             {invDetail && (
-              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => { setInvDetail(null); invDetailRef.current = null; }}>
+              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => { playMenuCancelSfx(); setInvDetail(null); invDetailRef.current = null; }}>
                 <div className="bg-black border-4 border-white p-3 sm:p-4 w-full max-w-xs font-pixel" onClick={e => e.stopPropagation()}>
                   {(() => {
                     const it = (gameData.items ?? []).find(x => x.id === invDetail);
@@ -8248,7 +8266,7 @@ const lose = (msg: string) => {
                         <div className="text-gray-300 text-[11px] sm:text-xs mb-3 leading-relaxed whitespace-pre-wrap">
                           {it.description || 'せつめいのない どうぐ。'}
                         </div>
-                        <button onClick={() => { setInvDetail(null); invDetailRef.current = null; }}
+                        <button onClick={() => { playMenuCancelSfx(); setInvDetail(null); invDetailRef.current = null; }}
                           className="w-full py-1.5 border-2 border-white/40 text-gray-400 hover:text-white hover:border-white text-[11px] font-bold">とじる</button>
                       </>
                     );

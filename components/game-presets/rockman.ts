@@ -1,6 +1,7 @@
 import { type PresetData, type SceneDef, type ObjectDef, newObject, ROWS, TILE_SIZE } from './shared';
 import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
 import { mmScene1, mmScene2 } from './vglc-stages';
+import { megamanMusicUrl, megamanSfxUrl } from '@/lib/megaman-assets';
 // id は rpgen-search API の id フィールド（ハッシュ文字列）
 const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
 const ir  = (id: string) => `url:${sp(id)}`;
@@ -271,7 +272,7 @@ const bossMetal: SceneDef = {
     '####################',
   ]),
   exits: { right: 'wily1' },
-  bgm: { ref: 'https://www.youtube.com/watch?v=uB1kNcqPe2U', src: 'https://www.youtube.com/watch?v=uB1kNcqPe2U', type: 'youtube' },
+  bgm: { ref: `direct:${megamanMusicUrl('metalman')}`, src: megamanMusicUrl('metalman'), type: 'direct' },
   objects: [
     newObject({
       emoji: '⚙️', col: 15, row: 12,
@@ -419,9 +420,9 @@ export const rockman: PresetData = {
   bgm:     { ref: 'https://www.youtube.com/watch?v=wgP_PK_umKM', src: 'https://www.youtube.com/watch?v=wgP_PK_umKM', type: 'youtube' },
   bossBgm: { ref: 'https://www.youtube.com/watch?v=uB1kNcqPe2U', src: 'https://www.youtube.com/watch?v=uB1kNcqPe2U', type: 'youtube' },
   sfx: {
-    shot:   { ref: 'shot' },
-    jump:   { ref: 'jump' },
-    clear:  { ref: 'clear' },
-    damage: { ref: 'damage' },
+    shot:   { ref: `direct:${megamanSfxUrl('shot')}`, src: megamanSfxUrl('shot'), type: 'direct' },
+    jump:   { ref: `direct:${megamanSfxUrl('jump')}`, src: megamanSfxUrl('jump'), type: 'direct' },
+    clear:  { ref: `direct:${megamanSfxUrl('energyFill')}`, src: megamanSfxUrl('energyFill'), type: 'direct' },
+    damage: { ref: `direct:${megamanSfxUrl('damage')}`, src: megamanSfxUrl('damage'), type: 'direct' },
   },
 };

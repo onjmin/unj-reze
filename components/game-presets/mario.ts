@@ -2,6 +2,7 @@ import { type PresetData, type SceneDef, newObject, COLS, ROWS } from './shared'
 import { resolveSMCUrl } from '../../lib/smc-helper';
 import { sAnimUrl as sa } from '@/lib/rpgen-assets';
 import { smbOverworld, smbUnderground, smbOverworldEnemies, smbUndergroundEnemies } from './vglc-stages';
+import { sm127MusicUrl, sm127SfxUrl } from '@/lib/mario-sm127-assets';
 
 // SMC-released-sprites (Level-Share-Square/SMC-released-sprites) via jsDelivr CDN
 // ライセンス: 非商用無料、作者クレジット必須
@@ -169,6 +170,7 @@ const ugEnemies = smbUndergroundEnemies.map(({ col, row }) =>
 const scene2: SceneDef = {
   id: 'underground', name: '地下ステージ1',
   map: scene2Map,
+  bgm: { ref: `direct:${sm127MusicUrl('underground')}`, src: sm127MusicUrl('underground'), type: 'direct' },
   objects: [
     ...ugEnemies,
     // 地下ネズミ（オリジナル要素。SMCに対応スプライトなし → RPGen維持）
@@ -210,6 +212,7 @@ const scene3Map = Array.from({ length: ROWS }, (_, y) =>
 const scene3: SceneDef = {
   id: 'underground2', name: '秘密の地下ステージ',
   map: scene3Map,
+  bgm: { ref: `direct:${sm127MusicUrl('secretCourse')}`, src: sm127MusicUrl('secretCourse'), type: 'direct' },
   objects: [
     newObject({ emoji: '⬆️', col: COLS - 3, row: ROWS - 5, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'overworld', warpEntryCol: 40, warpEntryRow: 13 }),
@@ -261,9 +264,9 @@ export const mario: PresetData = {
   },
   bgm: { ref: 'https://www.youtube.com/watch?v=ps5akYt1WLQ', src: 'https://www.youtube.com/watch?v=ps5akYt1WLQ', type: 'youtube' },
   sfx: {
-    jump:   { ref: 'jump' },
-    clear:  { ref: 'clear' },
-    damage: { ref: 'damage' },
+    jump:   { ref: `direct:${sm127SfxUrl('jump')}`, src: sm127SfxUrl('jump'), type: 'direct' },
+    clear:  { ref: `direct:${sm127SfxUrl('starCoin')}`, src: sm127SfxUrl('starCoin'), type: 'direct' },
+    damage: { ref: `direct:${sm127SfxUrl('damage')}`, src: sm127SfxUrl('damage'), type: 'direct' },
     coin:   { ref: 'mml:t180o6l16b>e8', src: 't180o6l16b>e8', type: 'mml' },  // 定番のコイン音 (B→E)
   },
 };

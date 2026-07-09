@@ -10,6 +10,7 @@ import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
 import LocalAssetPanel from './LocalAssetPanel';
+import BuiltinGameSoundPanel from './BuiltinGameSoundPanel';
 
 export interface PickResult {
   ref: string;
@@ -28,11 +29,11 @@ interface ContentPickerProps {
 }
 
 type ImageTab = 'posts' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local';
-type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe';
+type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe' | 'builtinGame';
 
-// BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/URL、効果音はrpgen効果音/URLのみ。
-const BGM_TABS: BgmTab[] = ['youtube', 'mmlPost', 'mmlRaw', 'direct'];
-const SFX_TABS: BgmTab[] = ['rpgenSe', 'direct'];
+// BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
+const BGM_TABS: BgmTab[] = ['youtube', 'mmlPost', 'builtinGame', 'mmlRaw', 'direct'];
+const SFX_TABS: BgmTab[] = ['rpgenSe', 'builtinGame', 'direct'];
 
 // モーダルは閉じるたびにアンマウントされるため、タブ選択とスクロール位置をモジュール変数で覚えておき、
 // 再度開いたときに前回見ていた場所へ復元する。BGM欄/効果音欄は選べるタブが違うので別々に覚える。
@@ -197,6 +198,9 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
               )}
               {allowedBgmTabs.includes('rpgenSe') && (
                 <button className={tabBtn(bgmTab === 'rpgenSe')} onClick={() => changeBgmTab('rpgenSe')}>🔊 効果音</button>
+              )}
+              {allowedBgmTabs.includes('builtinGame') && (
+                <button className={tabBtn(bgmTab === 'builtinGame')} onClick={() => changeBgmTab('builtinGame')}>🎮 他ゲーム音源</button>
               )}
               {allowedBgmTabs.includes('mmlRaw') && (
                 <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => changeBgmTab('mmlRaw')}>♪ 直接</button>
@@ -377,6 +381,11 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
           {/* SE: RPGen sound library */}
           {mode === 'bgm' && bgmTab === 'rpgenSe' && (
             <RpgenAssetPanel kind="sound" onPick={onPick} />
+          )}
+
+          {/* BGM/SE: other game project sound library (Undertale/Mario127/MegamanJS) */}
+          {mode === 'bgm' && bgmTab === 'builtinGame' && (
+            <BuiltinGameSoundPanel kind={bgmKind === 'sfx' ? 'sfx' : 'bgm'} onPick={onPick} />
           )}
         </div>
       </div>
