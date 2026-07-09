@@ -218,6 +218,8 @@ export interface ObjectDef {
   spellScript?: SpellBlock[];
   /** MiniScript（touhou エンジン）。wave 敵の動き全般・ボスの弾幕パターンを記述する。 */
   miniScript?: string;
+  /** SOUL移動モード（rpg エンジン・battle.style==='soul'）。攻撃（弾幕よけ）中のプレイヤー移動の制約。未指定は 'red'。 */
+  soulMode?: SoulMode;
   /** 所属フェーズ番号（touhou エンジン、phases 使用時）。未指定=0。 */
   phase?: number;
   /** action（マリオ系）: 上から踏むと倒せる敵（クリボー型）。SMC core 準拠。
@@ -293,11 +295,17 @@ export interface ShopItem { itemId: string; price: number; }
  *  ゲージが満タン（または敵HPが2割以下）になると「みのがす」で戦闘を終了できる（labels.mercy 参照）。 */
 export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; }
 
-/** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。 */
-export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; }
+/** SOULの移動モード（battle.style==='soul' の弾幕よけ中）。
+ *  red=自由移動 / blue=重力+ジャンプ / green=シールド（移動不可・方向キーでその方向の矢弾を防ぐ）
+ *  / purple=3本の横線をUp/Downで切替・Left/Rightで移動 / yellow=自由移動+Z/Enterで前方に弾を撃てる。 */
+export type SoulMode = 'red' | 'blue' | 'green' | 'purple' | 'yellow';
+
+/** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。
+ *  soulMode を指定すると、この技の弾幕よけ中だけ SOUL の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。 */
+export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; }
 
 /** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; }
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; }
 
 /** ターン制戦闘設定（rpg エンジン：ドラクエ/ポケモン）。
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */

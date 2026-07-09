@@ -25,7 +25,7 @@ import {
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
-  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig,
+  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type SoulMode,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig,
   defaultTitleScreen, defaultEndingScreen,
@@ -1123,8 +1123,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
   interface BattleView { enemyName: string; enemyEmoji: string; enemyHp: number; enemyMaxHp: number; mercy: number; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
-  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string }[]; exp: number; gold: number; isBoss: boolean; mercy: number; miniScript?: string }>(
-    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, miniScript: undefined });
+  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode }[]; exp: number; gold: number; isBoss: boolean; mercy: number; miniScript?: string; soulMode?: SoulMode }>(
+    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, miniScript: undefined, soulMode: undefined });
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
@@ -1136,7 +1136,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // menu: コマンド選択 / attack: タイミングバー / dodge: バトルボックス内で弾幕よけ
   const [soulPhase, setSoulPhase] = useState<'menu' | 'attack' | 'dodge'>('menu');
   const [soulMenu, setSoulMenu] = useState<'root' | 'act' | 'item' | 'mercy'>('root');
-  const soulDodgeRef = useRef<{ frames: number; duration: number; pattern: number; dmg: number; bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string }[]; hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean } } | null>(null);
+  const soulDodgeRef = useRef<{
+    frames: number; duration: number; pattern: number; dmg: number;
+    bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string }[];
+    hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean };
+    mode: SoulMode;
+    gvy: number; grounded: boolean;                 // blue: 重力速度・接地判定
+    jumpHeld: number;                                // blue: ジャンプキー押下継続フレーム（可変ジャンプ）
+    shieldDir: 'up' | 'down' | 'left' | 'right' | null; // green: シールド方向
+    lane: number;                                    // purple: 現在のレーン(0-2)
+    shots: { x: number; y: number; vy: number }[];   // yellow: 自機弾
+    shotCool: number;                                // yellow: 連射防止クールダウン
+  } | null>(null);
   const soulBarRef = useRef({ pos: 0 });
   const soulBarElRef = useRef<HTMLDivElement | null>(null);
   const soulCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1287,6 +1298,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
+  /** アンダーテール風エンカウント演出：頭上に「！」を表示しSEを鳴らしてからバトル開始する */
+  const encounterAlertRef = useRef<{ startTime: number; fire: () => void } | null>(null);
+  const ENCOUNTER_ALERT_MS = 650;
+  const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: 'https://rpgen-search.pages.dev/audio/sound/iUWDU1.mp3', type: 'direct' as const };
+  const UNDERTALE_DAMAGE_SFX = { ref: 'direct:undertale-damage', src: 'https://rpgen-search.pages.dev/audio/sound/VtNXk0.mp3', type: 'direct' as const };
+  const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
+  /** アンダーテール系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。 */
+  const triggerEncounter = (fire: () => void) => {
+    if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
+    if (presetId === 'undertale') {
+      encounterAlertRef.current = { startTime: performance.now(), fire };
+      playSfx(UNDERTALE_ENCOUNTER_SFX);
+    } else {
+      fire();
+    }
+  };
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
   const phaseIndexRef = useRef(-1);
   /** 実行中の wave 出現スクリプトの停止ハンドル */
@@ -1420,12 +1447,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string }[]; miniScript?: string; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode }[]; miniScript?: string; soulMode?: SoulMode; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
       enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
       gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss, mercy: 0,
-      miniScript: opts.miniScript,
+      miniScript: opts.miniScript, soulMode: opts.soulMode,
     };
     setBattleItemsOpen(false); setBagOpen(false);
     setSoulPhase('menu'); setSoulMenu('root'); soulDodgeRef.current = null;
@@ -1443,7 +1470,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
   };
 
   const nudgePlayer = () => {
@@ -1574,7 +1601,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
     appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`);
     const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
-    soulDodgeRef.current = { frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [], hx: 88, hy: 118, invuln: 30, miniScript: script };
+    const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
+    // purple: 3本の横線の中央レーンから開始 / green: 中央に固定 / それ以外は通常の初期位置
+    const laneYs = [40, 88, 136];
+    soulDodgeRef.current = {
+      frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [],
+      hx: 88, hy: mode === 'purple' ? laneYs[1] : mode === 'green' ? 88 : 118, invuln: 30, miniScript: script,
+      mode, gvy: 0, grounded: true, jumpHeld: 0, shieldDir: null, lane: 1, shots: [], shotCool: 0,
+    };
     setSoulPhase('dodge');
   };
 
@@ -1784,27 +1818,75 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       runDodgeScript();
     }
 
-    const drawHeart = (x: number, y: number, s: number, color: string) => {
+    const drawHeart = (x: number, y: number, s: number, color: string, flip = false) => {
+      ctx.save();
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.moveTo(x, y + s * 0.9);
-      ctx.bezierCurveTo(x + s, y + s * 0.2, x + s * 0.8, y - s * 0.8, x, y - s * 0.2);
-      ctx.bezierCurveTo(x - s * 0.8, y - s * 0.8, x - s, y + s * 0.2, x, y + s * 0.9);
+      const dir = flip ? -1 : 1;
+      ctx.moveTo(x, y + s * 0.9 * dir);
+      ctx.bezierCurveTo(x + s, y + s * 0.2 * dir, x + s * 0.8, y - s * 0.8 * dir, x, y - s * 0.2 * dir);
+      ctx.bezierCurveTo(x - s * 0.8, y - s * 0.8 * dir, x - s, y + s * 0.2 * dir, x, y + s * 0.9 * dir);
       ctx.fill();
+      ctx.restore();
     };
+    const PURPLE_LANES = [40, 88, 136];
+    let prevUp = false, prevDown = false;
     const loop = () => {
       if (!alive) return;
       const pr = progressRef.current;
       st.frames++;
-      // 入力（メインエンジンと同じキーセットを読む）＋タッチはポインタで直接動かす
+      // 入力（メインエンジンと同じキーセットを読む）
       const keys = engineRef.current.keys;
+      const isLeft = keys.has('ArrowLeft') || keys.has('a') || keys.has('A');
+      const isRight = keys.has('ArrowRight') || keys.has('d') || keys.has('D');
+      const isUp = keys.has('ArrowUp') || keys.has('w') || keys.has('W');
+      const isDown = keys.has('ArrowDown') || keys.has('s') || keys.has('S');
+      const isFire = keys.has('z') || keys.has('Z') || keys.has('Enter') || keys.has(' ');
       const sp = 2.4;
-      if (keys.has('ArrowLeft') || keys.has('a') || keys.has('A')) st.hx -= sp;
-      if (keys.has('ArrowRight') || keys.has('d') || keys.has('D')) st.hx += sp;
-      if (keys.has('ArrowUp') || keys.has('w') || keys.has('W')) st.hy -= sp;
-      if (keys.has('ArrowDown') || keys.has('s') || keys.has('S')) st.hy += sp;
-      st.hx = Math.max(9, Math.min(W - 9, st.hx));
-      st.hy = Math.max(9, Math.min(H - 9, st.hy));
+      const mode = st.mode;
+
+      if (mode === 'green') {
+        // SOULは動かず、押した方向にシールドを構える
+        st.shieldDir = isUp ? 'up' : isDown ? 'down' : isLeft ? 'left' : isRight ? 'right' : null;
+      } else if (mode === 'blue') {
+        // 重力モード：左右移動＋Upでジャンプ（長押しでジャンプが高くなる）
+        if (isLeft) st.hx -= sp; if (isRight) st.hx += sp;
+        if (st.grounded) {
+          st.gvy = 0;
+          if (isUp) { st.gvy = -5.2; st.grounded = false; st.jumpHeld = 1; }
+        } else {
+          const holding = isUp && st.jumpHeld > 0 && st.jumpHeld < 16 && st.gvy < 0;
+          st.gvy += holding ? 0.18 : 0.42;
+          st.jumpHeld = holding ? st.jumpHeld + 1 : 0;
+        }
+        st.hy += st.gvy;
+        if (st.hy >= H - 9) { st.hy = H - 9; st.grounded = true; st.gvy = 0; }
+        if (st.hy <= 9) { st.hy = 9; st.gvy = 0; }
+      } else if (mode === 'purple') {
+        // クモの糸モード：Up/Downで3本のレーンを瞬時に切り替え、Left/Rightでレーン上を移動
+        if (isUp && !prevUp) st.lane = Math.max(0, st.lane - 1);
+        if (isDown && !prevDown) st.lane = Math.min(PURPLE_LANES.length - 1, st.lane + 1);
+        st.hy = PURPLE_LANES[st.lane];
+        if (isLeft) st.hx -= sp; if (isRight) st.hx += sp;
+      } else {
+        // red / yellow：全方向自由移動
+        if (isLeft) st.hx -= sp; if (isRight) st.hx += sp;
+        if (isUp) st.hy -= sp; if (isDown) st.hy += sp;
+      }
+      prevUp = isUp; prevDown = isDown;
+      if (mode !== 'green') {
+        st.hx = Math.max(9, Math.min(W - 9, st.hx));
+        st.hy = Math.max(9, Math.min(H - 9, st.hy));
+      }
+
+      // yellow：Z/Enterで前方（上方向）に弾を発射し、敵弾を撃ち落とせる
+      if (mode === 'yellow') {
+        if (st.shotCool > 0) st.shotCool--;
+        if (isFire && st.shotCool <= 0) { st.shots.push({ x: st.hx, y: st.hy - 8, vy: -4.2 }); st.shotCool = 12; playSfx(UNDERTALE_SHOOT_SFX); }
+        for (const s of st.shots) s.y += s.vy;
+        st.shots = st.shots.filter(s => s.y > -10);
+      }
+
       // 弾の生成（3パターン：あめ／ねらいうち／よこなぐり）
       if (!scriptSrc) {
         if (st.pattern === 0) {
@@ -1826,14 +1908,35 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       for (const bl of st.bullets) { bl.x += bl.vx; bl.y += bl.vy; }
       st.bullets = st.bullets.filter(bl => bl.x > -20 && bl.x < W + 20 && bl.y > -20 && bl.y < H + 20);
+
+      // yellow：自機弾が敵弾に当たったら双方を消す
+      if (mode === 'yellow' && st.shots.length && st.bullets.length) {
+        const shotsToRemove = new Set<number>();
+        const bulletsToRemove = new Set<number>();
+        st.shots.forEach((s, si) => {
+          st.bullets.forEach((bl, bi) => {
+            if (bulletsToRemove.has(bi)) return;
+            if (Math.hypot(bl.x - s.x, bl.y - s.y) < bl.r + 3) { shotsToRemove.add(si); bulletsToRemove.add(bi); }
+          });
+        });
+        if (shotsToRemove.size) st.shots = st.shots.filter((_, i) => !shotsToRemove.has(i));
+        if (bulletsToRemove.size) st.bullets = st.bullets.filter((_, i) => !bulletsToRemove.has(i));
+      }
+
       // 被弾判定（被弾後は無敵時間つき）
       if (st.invuln > 0) st.invuln--;
       else {
         for (const bl of st.bullets) {
           if (Math.hypot(bl.x - st.hx, bl.y - st.hy) < bl.r + HR - 1) {
+            // green：構えたシールドの方向から来た弾（矢弾）はブロックしてダメージ無効
+            if (mode === 'green' && st.shieldDir) {
+              const horizontal = Math.abs(bl.vx) >= Math.abs(bl.vy);
+              const incomingFrom = horizontal ? (bl.vx > 0 ? 'left' : 'right') : (bl.vy > 0 ? 'up' : 'down');
+              if (incomingFrom === st.shieldDir) { st.invuln = 8; break; }
+            }
             pr.hp = Math.max(0, pr.hp - st.dmg);
             st.invuln = 45;
-            playSfx(sfxRef.current.damage);
+            playSfx(presetId === 'undertale' ? UNDERTALE_DAMAGE_SFX : sfxRef.current.damage);
             forceHud(n => n + 1);
             if (pr.hp <= 0) { alive = false; endBattle('lose'); return; }
             break;
@@ -1843,8 +1946,40 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 描画
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
-      for (const bl of st.bullets) { ctx.fillStyle = bl.color ?? '#fff'; ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.fill(); }
-      if (st.invuln % 8 < 4) drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c');
+      if (mode === 'purple') {
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        for (const ly of PURPLE_LANES) { ctx.beginPath(); ctx.moveTo(4, ly); ctx.lineTo(W - 4, ly); ctx.stroke(); }
+      }
+      for (const bl of st.bullets) {
+        ctx.fillStyle = bl.color ?? '#fff';
+        if (mode === 'green') {
+          // 矢形の弾（進行方向を向く三角形）
+          const ang = Math.atan2(bl.vy, bl.vx);
+          ctx.save();
+          ctx.translate(bl.x, bl.y);
+          ctx.rotate(ang);
+          ctx.beginPath();
+          ctx.moveTo(bl.r + 3, 0); ctx.lineTo(-bl.r, bl.r); ctx.lineTo(-bl.r, -bl.r);
+          ctx.closePath(); ctx.fill();
+          ctx.restore();
+        } else {
+          ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      if (mode === 'yellow') {
+        ctx.fillStyle = '#ffe600';
+        for (const s of st.shots) ctx.fillRect(s.x - 1, s.y - 4, 2, 6);
+      }
+      if (mode === 'green' && st.shieldDir) {
+        ctx.fillStyle = '#5ac8ff';
+        const sx = st.hx, sy = st.hy;
+        if (st.shieldDir === 'left') ctx.fillRect(sx - 16, sy - 10, 4, 20);
+        else if (st.shieldDir === 'right') ctx.fillRect(sx + 12, sy - 10, 4, 20);
+        else if (st.shieldDir === 'up') ctx.fillRect(sx - 10, sy - 16, 20, 4);
+        else ctx.fillRect(sx - 10, sy + 12, 20, 4);
+      }
+      if (st.invuln % 8 < 4) drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c', mode === 'yellow');
       if (st.frames >= st.duration) {
         alive = false;
         setSoulPhase('menu'); setSoulMenu('root');
@@ -1858,8 +1993,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inBattle, battleStyle, soulPhase]);
 
-  /** soul: タッチ/マウスでハートを直接動かす。 */
+  /** soul: タッチ/マウスでハートを直接動かす。アンダーテールでは方向キー操作のみに限定するため無効化。 */
   const soulPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (presetId === 'undertale') return;
     const st = soulDodgeRef.current; const cv = soulCanvasRef.current;
     if (!st || !cv) return;
     const rect = cv.getBoundingClientRect();
@@ -3380,6 +3516,11 @@ const lose = (msg: string) => {
       if (starTimerRef.current > 0) starTimerRef.current--;
       if (bombInvulnRef.current > 0) bombInvulnRef.current--;
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
+      if (encounterAlertRef.current && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_ALERT_MS) {
+        const { fire } = encounterAlertRef.current;
+        encounterAlertRef.current = null;
+        fire();
+      }
 
       // マリオ巨大化変身タイマー
       if (marioTransformingRef.current > 0) {
@@ -3516,7 +3657,7 @@ const lose = (msg: string) => {
       // ミス/ゲームオーバー/クリア演出中、または残機制の死亡→復帰待ち中は操作を受け付けない
       // シーン遷移中は入力を凍結（スライド遷移もフェード遷移も）
       // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
-      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || !!sceneTransRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || invOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current);
+      const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || !!sceneTransRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || invOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current || !!encounterAlertRef.current);
       
       // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
       if (justStartedRef.current && isPlaying && !frozen) {
@@ -4090,7 +4231,7 @@ const lose = (msg: string) => {
                 if (encounterGaugeRef.current >= encounterNextRef.current) {
                   encounterGaugeRef.current = 0; encounterNextRef.current = 0;
                   const enemy = table[Math.floor(Math.random() * table.length)];
-                  beginBattle({ ...enemy, entity: null });
+                  triggerEncounter(() => beginBattle({ ...enemy, entity: null }));
                   dead = true;
                 }
               }
@@ -4181,7 +4322,7 @@ const lose = (msg: string) => {
 
       // ── play mode: entities / combat / win ──
       // ラウンド終了演出中（roundOver）は敵・弾・当たり判定も止める（残機の死亡中は継続）
-      if (isPlaying && !roundOverRef.current && !battleRef.current.active) {
+      if (isPlaying && !roundOverRef.current && !battleRef.current.active && !encounterAlertRef.current) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
         // ワープ直後の再発動抑制：入場座標から十分離れたら解除（overlap判定の半径 TILE_SIZE*1.1 より広めに取る）
         if (warpCooldownRef.current) {
@@ -4811,7 +4952,7 @@ const lose = (msg: string) => {
                 break;
               }
               if (!debugInvincibleRef.current) {
-                if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { startBattle(e); dead = true; } break; }
+                if (gameData.engine === 'rpg' && gameData.battle) { if (invulnRef.current <= 0) { triggerEncounter(() => startBattle(e)); dead = true; } break; }
                 if (gameData.engine === 'touhou') { if (!isPlayerDeadRef.current && invulnRef.current <= 0) { handlePlayerDeath(); dead = true; } break; }
                 // onjReze の hazard 接触ダメージは、円形のモブ判定に一本化するため下の専用ブロックで処理する（ここでは何もしない）
                 if (gameData.engine === 'onjReze') break;
@@ -5063,7 +5204,7 @@ const lose = (msg: string) => {
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, soulMode: boss.soulMode, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else {
@@ -5827,6 +5968,37 @@ const lose = (msg: string) => {
             ctx.fillText(l, px, boxBottom - (wrappedDisplay.length - 1 - i) * lineHeight);
           });
         }
+      }
+      // アンダーテール風エンカウント演出：プレイヤー頭上にドット絵の吹き出し「！」を表示
+      if (isPlaying && encounterAlertRef.current) {
+        const p2 = eng.player;
+        const t = performance.now() - encounterAlertRef.current.startTime;
+        const pop = Math.min(1, t / 120);
+        const bob = Math.round(Math.sin(pop * Math.PI) * -2); // 出現時のピョコッと弾む動き
+        const px = Math.round(p2.x + (gameData.player.w ?? TILE_SIZE) / 2);
+        const bw = 16, bh = 14;
+        const bx = px - bw / 2;
+        const by = Math.round(p2.y - 10 - bh) + bob;
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        // ドット吹き出し本体（黒枠+白地の角ばった矩形）
+        ctx.fillStyle = '#000';
+        ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(bx, by, bw, bh);
+        // 吹き出しの尻尾（プレイヤーを指す段差のついたピクセルノッチ）
+        ctx.fillStyle = '#000';
+        ctx.fillRect(px - 4, by + bh + 2, 8, 2);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(px - 2, by + bh, 4, 2);
+        ctx.fillRect(px - 2, by + bh + 2, 4, 2);
+        // 「！」本体
+        ctx.fillStyle = '#000';
+        ctx.font = `bold 11px ${getPixelFontFamily()}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', px, by + bh / 2 + 1);
+        ctx.restore();
       }
       // onjReze：近接攻撃の描画（振っている間だけ向きに合わせて表示）
       if (gameData.engine === 'onjReze' && isPlaying && swordRef.current.active > 0) {
@@ -8557,14 +8729,27 @@ const lose = (msg: string) => {
                                   
                                   {/* 1. 通常攻撃の弾幕 (soul style only) */}
                                   {gameData.battle.style === 'soul' && (
-                                    <label className="block text-[10px] text-gray-400">通常攻撃の弾幕 (MiniScript)
-                                      <textarea value={selObj.miniScript ?? ''} onChange={e => {
-                                        const v = e.target.value;
-                                        updObj(v ? { miniScript: v, bullet: 'none' } : { miniScript: undefined });
-                                      }} placeholder={'// 例:\nwhile true\n  shotRain(1.8, 4, 1)\n  wait(10)\nend while'}
-                                        rows={4} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-green-300 font-mono outline-none resize-y" />
-                                      <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">shot(x,y,vx,vy,r,色) / shotAngle(x,y,角度,速,r,色) / shotPlayer(x,y,速) / shotAimed(速) / shotRain(速) / shotSide(左?,y,速) / wait n / setDuration(f) / getPlayerX() / rand / range / sin / cos ・ 色=0〜8 ・ 画面=W×H(176px)</p>
-                                    </label>
+                                    <>
+                                      <label className="block text-[10px] text-gray-400">SOUL移動モード（既定）
+                                        <select value={selObj.soulMode ?? 'red'} onChange={e => updObj({ soulMode: e.target.value as SoulMode })}
+                                          className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
+                                          <option value="red">🔴 レッド（自由移動）</option>
+                                          <option value="blue">🔵 ブルー（重力・ジャンプ）</option>
+                                          <option value="green">🟢 グリーン（シールド・移動不可）</option>
+                                          <option value="purple">🟣 パープル（3本の糸）</option>
+                                          <option value="yellow">🟡 イエロー（自由移動＋射撃）</option>
+                                        </select>
+                                        <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">技ごとに個別指定しない限り、この敵の弾幕よけ全体に適用される既定モード</p>
+                                      </label>
+                                      <label className="block text-[10px] text-gray-400">通常攻撃の弾幕 (MiniScript)
+                                        <textarea value={selObj.miniScript ?? ''} onChange={e => {
+                                          const v = e.target.value;
+                                          updObj(v ? { miniScript: v, bullet: 'none' } : { miniScript: undefined });
+                                        }} placeholder={'// 例:\nwhile true\n  shotRain(1.8, 4, 1)\n  wait(10)\nend while'}
+                                          rows={4} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-green-300 font-mono outline-none resize-y" />
+                                        <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">shot(x,y,vx,vy,r,色) / shotAngle(x,y,角度,速,r,色) / shotPlayer(x,y,速) / shotAimed(速) / shotRain(速) / shotSide(左?,y,速) / wait n / setDuration(f) / getPlayerX() / rand / range / sin / cos ・ 色=0〜8 ・ 画面=W×H(176px)</p>
+                                      </label>
+                                    </>
                                   )}
 
                                   {/* 2. 特技/呪文の追加/編集 */}
@@ -8611,15 +8796,32 @@ const lose = (msg: string) => {
                                             </label>
                                           </div>
                                           {gameData.battle?.style === 'soul' && !m.heal && (
-                                            <label className="block text-[10px] text-gray-400">弾幕スクリプト (MiniScript)
-                                              <textarea value={m.miniScript ?? ''} onChange={e => {
-                                                const copy = [...(selObj.moves ?? [])];
-                                                const val = e.target.value;
-                                                copy[i] = { ...copy[i], miniScript: val || undefined };
-                                                updObj({ moves: copy });
-                                              }} placeholder="// この技専用の弾幕（省略時は通常攻撃の弾幕）"
-                                                rows={3} className="w-full mt-0.5 bg-gray-700 border border-gray-600 rounded px-1.5 py-1.5 text-[11px] text-green-300 font-mono outline-none resize-y" />
-                                            </label>
+                                            <>
+                                              <label className="block text-[10px] text-gray-400">SOUL移動モード（この技専用・省略時は既定値）
+                                                <select value={m.soulMode ?? ''} onChange={e => {
+                                                  const copy = [...(selObj.moves ?? [])];
+                                                  const val = e.target.value;
+                                                  copy[i] = { ...copy[i], soulMode: (val || undefined) as SoulMode | undefined };
+                                                  updObj({ moves: copy });
+                                                }} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none">
+                                                  <option value="">（既定値を使う）</option>
+                                                  <option value="red">🔴 レッド（自由移動）</option>
+                                                  <option value="blue">🔵 ブルー（重力・ジャンプ）</option>
+                                                  <option value="green">🟢 グリーン（シールド・移動不可）</option>
+                                                  <option value="purple">🟣 パープル（3本の糸）</option>
+                                                  <option value="yellow">🟡 イエロー（自由移動＋射撃）</option>
+                                                </select>
+                                              </label>
+                                              <label className="block text-[10px] text-gray-400">弾幕スクリプト (MiniScript)
+                                                <textarea value={m.miniScript ?? ''} onChange={e => {
+                                                  const copy = [...(selObj.moves ?? [])];
+                                                  const val = e.target.value;
+                                                  copy[i] = { ...copy[i], miniScript: val || undefined };
+                                                  updObj({ moves: copy });
+                                                }} placeholder="// この技専用の弾幕（省略時は通常攻撃の弾幕）"
+                                                  rows={3} className="w-full mt-0.5 bg-gray-700 border border-gray-600 rounded px-1.5 py-1.5 text-[11px] text-green-300 font-mono outline-none resize-y" />
+                                              </label>
+                                            </>
                                           )}
                                         </div>
                                       ))}
