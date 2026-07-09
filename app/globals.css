@@ -9,6 +9,12 @@
   to   { opacity: 1; transform: translateX(0)     scale(1); }
 }
 
+@keyframes dmgPopUp {
+  0% { transform: translateY(0); opacity: 1; }
+  70% { transform: translateY(-14px); opacity: 1; }
+  100% { transform: translateY(-20px); opacity: 0; }
+}
+
 @keyframes danmaku-slide {
   from { left: 105%; }
   to { left: -200%; }
@@ -44,6 +50,17 @@
 
 @utility font-pixel-en {
   font-family: var(--font-pixel-en), monospace;
+}
+
+@font-face {
+  font-family: 'misaki_gothic';
+  font-style: normal;
+  font-weight: 400;
+  src: url('https://unpkg.com/font-misaki@1.1.0/misaki/misaki_gothic.ttf') format('truetype');
+}
+
+@utility font-misaki {
+  font-family: 'misaki_gothic', monospace;
 }
 
 @media (prefers-color-scheme: dark) {

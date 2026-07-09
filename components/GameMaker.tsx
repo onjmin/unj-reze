@@ -1005,6 +1005,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const editorCoordRef = useRef<HTMLDivElement>(null);
   // ── タイトル／エンディング画面ランタイム ──
   const [showTitle, setShowTitle] = useState(false);
+  const showTitleRef = useRef(false);
+  showTitleRef.current = showTitle;
   const [showEnding, setShowEnding] = useState(false);
   const endingRef = useRef<EndingScreenConfig | undefined>(undefined);
   endingRef.current = gameData.ending;
@@ -1051,6 +1053,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [invDetail, setInvDetail] = useState<string | null>(null);
   const invDetailRef = useRef<string | null>(null);
   invDetailRef.current = invDetail;
+  /** 十字キー操作用カーソル：フィールドの持ち物一覧（2列グリッド） */
+  const [invCursor, setInvCursor] = useState(0);
+  const invCursorRef = useRef(0);
+  invCursorRef.current = invCursor;
+  /** 十字キー操作用カーソル：アイテムアクションメニュー（つかう/せつめい/すてる/もどる） */
+  const [invMenuCursor, setInvMenuCursor] = useState(0);
+  const invMenuCursorRef = useRef(0);
+  invMenuCursorRef.current = invMenuCursor;
   const [shopModal, setShopModal] = useState<{ npcId: string; items: import('./game-presets/shared').ShopItem[] } | null>(null);
   const shopModalRef = useRef<typeof shopModal>(null);
   shopModalRef.current = shopModal;
@@ -1118,13 +1128,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const editScrollYRef = useRef(0);
   editScrollRef.current = editScroll;
   editScrollYRef.current = editScrollY;
+  /** 現在のカメラのワールド座標オフセット。エンカウント演出でスクリーン固定位置へ変換するために毎フレーム更新する。 */
+  const camXRef = useRef(0);
+  const camYRef = useRef(0);
 
   // ── ターン制戦闘 ──
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
   interface BattleView { enemyName: string; enemyEmoji: string; enemyHp: number; enemyMaxHp: number; mercy: number; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
+  const battleViewRef = useRef<BattleView | null>(null);
+  battleViewRef.current = battle;
   const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode }[]; exp: number; gold: number; isBoss: boolean; mercy: number; miniScript?: string; soulMode?: SoulMode }>(
     { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, miniScript: undefined, soulMode: undefined });
+  /** バトル開始時のプレイヤー座標。終了後にここへ正確に戻す（シンボルエンカウントで敵側へ押し出されるのを防ぐ）。 */
+  const battleReturnPosRef = useRef<{ x: number; y: number } | null>(null);
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
@@ -1132,10 +1149,45 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const overlayAlphaRef = useRef(1);
   /** 戦闘コマンド「どうぐ」のサブメニュー開閉。 */
   const [battleItemsOpen, setBattleItemsOpen] = useState(false);
+  const battleItemsOpenRef = useRef(false);
+  battleItemsOpenRef.current = battleItemsOpen;
+  // ── 十字キー操作用カーソル（選択メニュー各種：常にトップの項目がデフォルト） ──
+  const [eventChoiceCursor, setEventChoiceCursor] = useState(0);
+  const eventChoiceCursorRef = useRef(0);
+  eventChoiceCursorRef.current = eventChoiceCursor;
+  const [shopCursor, setShopCursor] = useState(0);
+  const shopCursorRef = useRef(0);
+  shopCursorRef.current = shopCursor;
+  const [battleItemsCursor, setBattleItemsCursor] = useState(0);
+  const battleItemsCursorRef = useRef(0);
+  battleItemsCursorRef.current = battleItemsCursor;
+  const [classicBattleCursor, setClassicBattleCursor] = useState(0);
+  const classicBattleCursorRef = useRef(0);
+  classicBattleCursorRef.current = classicBattleCursor;
+  const [titleCursor, setTitleCursor] = useState(0);
+  const titleCursorRef = useRef(0);
+  titleCursorRef.current = titleCursor;
+  useEffect(() => { setEventChoiceCursor(0); }, [eventChoice]);
+  useEffect(() => { setShopCursor(0); }, [shopModal]);
+  useEffect(() => { setBattleItemsCursor(0); }, [battleItemsOpen]);
+  useEffect(() => { if (battle) setClassicBattleCursor(0); }, [battle?.canAct]);
   // ── アンダーテール風戦闘（battle.style === 'soul'）──
   // menu: コマンド選択 / attack: タイミングバー / dodge: バトルボックス内で弾幕よけ
   const [soulPhase, setSoulPhase] = useState<'menu' | 'attack' | 'dodge'>('menu');
+  const soulPhaseRef = useRef(soulPhase);
+  soulPhaseRef.current = soulPhase;
   const [soulMenu, setSoulMenu] = useState<'root' | 'act' | 'item' | 'mercy'>('root');
+  const soulMenuRef = useRef(soulMenu);
+  soulMenuRef.current = soulMenu;
+  /** 十字キー操作用カーソル：FIGHT/ACT/ITEM/MERCY（0-3） */
+  const [soulRootCursor, setSoulRootCursor] = useState(0);
+  const soulRootCursorRef = useRef(0);
+  soulRootCursorRef.current = soulRootCursor;
+  /** 十字キー操作用カーソル：ACT/ITEM/MERCY サブメニュー内の項目 */
+  const [soulSubCursor, setSoulSubCursor] = useState(0);
+  const soulSubCursorRef = useRef(0);
+  soulSubCursorRef.current = soulSubCursor;
+  useEffect(() => { setSoulSubCursor(0); }, [soulMenu]);
   const soulDodgeRef = useRef<{
     frames: number; duration: number; pattern: number; dmg: number;
     bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string }[];
@@ -1296,22 +1348,55 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number; wrapped?: string[] } | null>(null);
   /** アイテム取得演出（メッセージウィンドウではなく頭上に一定時間表示） */
   const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
+  /** アンダーテール風戦闘：敵へのダメージ数値ポップアップ（黒文字・赤フチ・見崎フォント） */
+  const [enemyDmgPopup, setEnemyDmgPopup] = useState<{ text: string; id: number } | null>(null);
+  /** アンダーテール風戦闘：敵HPゲージ。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
+  const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<{ pct: number; id: number } | null>(null);
+  const enemyFxIdRef = useRef(0);
+  /** 敵へダメージを与えた際に、ダメージ数値とHPゲージの減少演出をまとめて発火する。 */
+  const triggerEnemyDamageFx = (dmg: number, beforeHp: number, afterHp: number, maxHp: number) => {
+    const id = ++enemyFxIdRef.current;
+    const beforePct = Math.max(0, Math.min(100, (beforeHp / maxHp) * 100));
+    const afterPct = Math.max(0, Math.min(100, (afterHp / maxHp) * 100));
+    setEnemyDmgPopup({ text: String(dmg), id });
+    setEnemyGaugeAnim({ pct: beforePct, id });
+    // 次のフレームで実際のHP%へ更新し、CSSトランジションで減少アニメーションを見せる
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      setEnemyGaugeAnim(prev => (prev?.id === id ? { pct: afterPct, id } : prev));
+    }));
+    setTimeout(() => setEnemyDmgPopup(p => (p?.id === id ? null : p)), 700);
+    setTimeout(() => setEnemyGaugeAnim(p => (p?.id === id ? null : p)), 1200);
+  };
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
-  /** アンダーテール風エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅 → バトル開始 */
-  const encounterAlertRef = useRef<{ startTime: number; fire: () => void; phase: 'alert' | 'flash' } | null>(null);
+  /** アンダーテール風エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅しつつ
+   *  バトル画面のコマンド位置へ直線移動 → バトル開始 */
+  const encounterAlertRef = useRef<{
+    startTime: number; fire: () => void; phase: 'alert' | 'flash';
+    fromX: number; fromY: number; toX: number; toY: number;
+  } | null>(null);
   const ENCOUNTER_ALERT_MS = 650;
-  const ENCOUNTER_FLASH_MS = 900; // ハート明滅演出の最大表示時間（SEが早く終われば早める）
+  const ENCOUNTER_FLASH_MS = 450; // ハートが移動しながら明滅する演出の表示時間。SEの再生完了は待たない（短く保つ）
   const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: 'https://rpgen-search.pages.dev/audio/sound/iUWDU1.mp3', type: 'direct' as const };
   const UNDERTALE_DAMAGE_SFX = { ref: 'direct:undertale-damage', src: 'https://rpgen-search.pages.dev/audio/sound/VtNXk0.mp3', type: 'direct' as const };
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
   /** バトル開始SE。現在のBGMを止めてから鳴らし、鳴り終わるまでバトルBGMは始めない。 */
   const UNDERTALE_BATTLESTART_SFX = { ref: 'direct:undertale-battlestart', src: 'https://rpgen-search.pages.dev/audio/sound/KAQ5VF.mp3', type: 'direct' as const };
+  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音。 */
+  const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
   /** アンダーテール系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
     if (presetId === 'undertale') {
-      encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'alert' };
+      const p2 = engineRef.current.player;
+      const fromX = p2.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
+      const fromY = p2.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
+      // 移動先＝現在のカメラオフセットを基準に、画面上で常に中央下部（バトル画面の
+      // FIGHT/ACT/ITEM/MERCYコマンド位置）に一致するワールド座標を逆算する
+      // （プレイヤーがマップ端でカメラがクランプされていてもズレない）
+      const toX = camXRef.current + VIEW_W / 2;
+      const toY = camYRef.current + VIEW_H - 26;
+      encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'alert', fromX, fromY, toX, toY };
       playSfx(UNDERTALE_ENCOUNTER_SFX);
     } else {
       fire();
@@ -1451,6 +1536,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode }[]; miniScript?: string; soulMode?: SoulMode; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
+    // バトル開始位置を記録し、終了後はここへ正確に復帰させる
+    const startEng = engineRef.current;
+    battleReturnPosRef.current = { x: startEng.player.x, y: startEng.player.y };
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
       enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
@@ -1474,15 +1562,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const startBattle = (e: Entity) => {
     const d = e.def;
     beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
-  };
-
-  const nudgePlayer = () => {
-    const eng = engineRef.current; const b = battleRef.current; const p = eng.player; const pData = gameData.player;
-    if (!b.entity) return;
-    const dx = p.x - b.entity.x, dy = p.y - b.entity.y; const dist = Math.hypot(dx, dy) || 1;
-    const worldW = (gameData.scroll?.worldCols ?? COLS) * TILE_SIZE;
-    p.x = Math.max(0, Math.min(worldW - pData.w, p.x + (dx / dist) * TILE_SIZE * 1.3));
-    p.y = Math.max(0, Math.min(VIEW_H - pData.h, p.y + (dy / dist) * TILE_SIZE * 1.3));
   };
 
   // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
@@ -1534,7 +1613,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を たおした！${b.exp > 0 ? ` EXP+${b.exp}` : ''}${b.gold > 0 ? ` ${b.gold}G` : ''}`, ...(lvUp ? [lvUp] : [])].slice(-6) } : v));
       if (wasBoss) bossDefeatedRef.current = true;
     }
-    nudgePlayer();
+    // バトル開始位置へ正確に戻す（再エンカウントは invulnRef の無敵時間で防止する）
+    if (battleReturnPosRef.current) {
+      eng.player.x = battleReturnPosRef.current.x;
+      eng.player.y = battleReturnPosRef.current.y;
+      battleReturnPosRef.current = null;
+    }
     invulnRef.current = 60; forceHud(n => n + 1);
     setTimeout(() => {
       battleRef.current.active = false; battleRef.current.entity = null; setBattle(null); forceHud(n => n + 1);
@@ -1585,12 +1669,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (pr.hp <= 0) setTimeout(() => endBattle('lose'), 600);
   };
 
-  /** プレイヤーの行動後に敵ターンへ。soul スタイルなら弾幕よけ、classic なら従来の即時ダメージ。 */
-  const queueEnemyTurn = (delay = 750) => setTimeout(() => {
-    if ((gameDataRef.current.battle?.style ?? 'classic') === 'soul') soulEnemyTurn(); else enemyTurn();
-  }, delay);
+  /** soul: テキスト表示後、プレイヤーがボタン（Z/A）を押すまで進行を止めておくための予約関数。 */
+  const soulAdvanceRef = useRef<(() => void) | null>(null);
+  const [soulWaiting, setSoulWaiting] = useState(false);
+  const waitForSoulAdvance = (fn: () => void) => {
+    soulAdvanceRef.current = fn;
+    setSoulWaiting(true);
+  };
 
-  /** soul: 敵ターン開始。回復技なら回復のみ、攻撃ならバトルボックスを変形させて弾幕よけへ。 */
+  /** プレイヤーの行動後に敵ターンへ。soul スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
+   *  classic なら従来どおり一定時間後に即時ダメージ。 */
+  const queueEnemyTurn = (delay = 750) => {
+    if ((gameDataRef.current.battle?.style ?? 'classic') === 'soul') {
+      waitForSoulAdvance(() => soulEnemyTurn());
+    } else {
+      setTimeout(() => enemyTurn(), delay);
+    }
+  };
+
+  /** soul: 敵ターン開始。回復技なら回復のみ、攻撃なら予告テキストを表示してボタン入力を待ってから弾幕よけへ。 */
   const soulEnemyTurn = () => {
     const b = battleRef.current; const pr = progressRef.current;
     if (!b.active) return;
@@ -1603,16 +1700,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
     const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
     appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`);
-    const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
-    const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
-    // purple: 3本の横線の中央レーンから開始 / green: 中央に固定 / それ以外は通常の初期位置
-    const laneYs = [40, 88, 136];
-    soulDodgeRef.current = {
-      frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [],
-      hx: 88, hy: mode === 'purple' ? laneYs[1] : mode === 'green' ? 88 : 118, invuln: 30, miniScript: script,
-      mode, gvy: 0, grounded: true, jumpHeld: 0, shieldDir: null, lane: 1, shots: [], shotCool: 0,
-    };
-    setSoulPhase('dodge');
+    waitForSoulAdvance(() => {
+      const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
+      const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
+      // purple: 3本の横線の中央レーンから開始 / green: 中央に固定 / それ以外は通常の初期位置
+      const laneYs = [40, 88, 136];
+      soulDodgeRef.current = {
+        frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [],
+        hx: 88, hy: mode === 'purple' ? laneYs[1] : mode === 'green' ? 88 : 118, invuln: 30, miniScript: script,
+        mode, gvy: 0, grounded: true, jumpHeld: 0, shieldDir: null, lane: 1, shots: [], shotCool: 0,
+      };
+      setSoulPhase('dodge');
+    });
   };
 
   /** soul: タイミングバーの結果からダメージを与える。中央に近いほど高倍率。 */
@@ -1621,7 +1720,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const dist = Math.abs(pos - 0.5);
     const mult = dist < 0.06 ? 1.6 : dist < 0.18 ? 1.2 : dist < 0.32 ? 0.9 : 0.6;
     const dmg = Math.max(1, Math.round(calcDmg(pr.atk, b.enemyDef) * mult));
+    const beforeHp = b.enemyHp;
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
+    triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
     setSoulPhase('menu');
     appendLog(`${mult >= 1.6 ? '会心の いちげき！ ' : ''}${dmg}のダメージ！`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
@@ -1635,7 +1736,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   const doAttack = () => {
-    if (!battle?.canAct || battle.over) return;
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     const b = battleRef.current; const pr = progressRef.current;
     const dmg = calcDmg(pr.atk, b.enemyDef);
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
@@ -1645,7 +1746,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   const doMove = (m: BattleMove) => {
-    if (!battle?.canAct || battle.over) return;
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     const b = battleRef.current; const pr = progressRef.current;
     if (pr.mp < m.cost) { appendLog('MPが たりない！'); return; }
     pr.mp -= m.cost; forceHud(n => n + 1);
@@ -1667,7 +1768,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       appendLog(`${m.name}！ HPが ${pr.hp - before} かいふくした`, { canAct: false });
     } else {
       const dmg = Math.max(1, Math.round(m.power * (0.85 + Math.random() * 0.3)));
+      const beforeHp = b.enemyHp;
       b.enemyHp = Math.max(0, b.enemyHp - dmg);
+      triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
       appendLog(`${m.name}！ ${dmg}のダメージ`, { canAct: false });
       if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     }
@@ -1675,14 +1778,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   const doFlee = () => {
-    if (!battle?.canAct || battle.over) return;
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     if (Math.random() < 0.6) { appendLog('うまく にげきれた！', { canAct: false, over: true }); setTimeout(() => endBattle('flee'), 700); }
     else { appendLog('しかし まわりこまれてしまった！', { canAct: false }); queueEnemyTurn(); }
   };
 
   /** みのがす（labels.mercy 設定時のみUIに出る）。条件を満たしていなければターンを消費して失敗。 */
   const doSpare = () => {
-    if (!battle?.canAct || battle.over) return;
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     const b = battleRef.current;
     if (spareReady(b)) {
       appendLog(`${b.enemyName}は しずかに たちさった…`, { canAct: false, over: true });
@@ -1695,6 +1798,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const battleStyle = gameData.battle?.style ?? 'classic';
   const inBattle = !!battle;
+  // アンダーテール風戦闘のログ：最新行を1文字ずつ表示するタイプライター演出
+  const [logRevealCount, setLogRevealCount] = useState(0);
+  const lastLogLine = battle?.log.at(-1) ?? '';
+  useEffect(() => {
+    if (battleStyle !== 'soul' || !lastLogLine) { setLogRevealCount(0); return; }
+    setLogRevealCount(0);
+    let i = 0;
+    const id = setInterval(() => {
+      i++;
+      setLogRevealCount(i);
+      if (i >= lastLogLine.length) clearInterval(id);
+    }, 32);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastLogLine, battleStyle]);
 
   // soul: たたかう＝タイミングバー。バーが右端まで行くとミス。クリック/Z/Enter/Spaceで停止。
   useEffect(() => {
@@ -2056,6 +2174,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const dismissGameMsg = useCallback(() => {
     if (!gameMsgReadyRef.current) return;
+    playSfx(MSG_ADVANCE_SFX);
     if (gameMsgTimerRef.current) { clearTimeout(gameMsgTimerRef.current); gameMsgTimerRef.current = null; }
     setGameMsg(prev => {
       if (prev) { prev.onDismiss(); }
@@ -5441,16 +5560,273 @@ const lose = (msg: string) => {
           if (bs === 'soul') { setSoulMenu('item'); }
           else { setBattleItemsOpen(true); }
         }
-        else { setInvOpen(p => !p); }
+        else {
+          const opening = !invOpenRef.current;
+          setInvOpen(p => !p);
+          if (opening) { setInvCursor(0); invCursorRef.current = 0; }
+        }
       }
       prevInvRef.current = isInv;
 
-      // ── Z / X keys: place / delete object ──
+      // ── 十字キーでメニューを操作（持ち物一覧・アイテムメニュー・アンダーテール戦闘コマンド） ──
+      const menuUpEdge = isUp && !prevMenuUpRef.current;
+      const menuDownEdge = isDown && !prevMenuDownRef.current;
+      const menuLeftEdge = isLeft && !prevMenuLeftRef.current;
+      const menuRightEdge = isRight && !prevMenuRightRef.current;
+      prevMenuUpRef.current = isUp; prevMenuDownRef.current = isDown; prevMenuLeftRef.current = isLeft; prevMenuRightRef.current = isRight;
+
+      if (isPlaying && invOpenRef.current && !invMenuRef.current && !invDetailRef.current && !battleRef.current.active) {
+        // フィールドの持ち物一覧（2列グリッド）
+        const n = invSlotsRef.current.length;
+        if (n > 0 && (menuUpEdge || menuDownEdge || menuLeftEdge || menuRightEdge)) {
+          let c = invCursorRef.current;
+          if (menuLeftEdge) c -= 1;
+          if (menuRightEdge) c += 1;
+          if (menuUpEdge) c -= 2;
+          if (menuDownEdge) c += 2;
+          c = ((c % n) + n) % n;
+          invCursorRef.current = c; setInvCursor(c);
+        }
+      } else if (isPlaying && invMenuRef.current) {
+        // アイテムアクションメニュー（つかう/せつめい/すてる/もどる：縦一列）
+        const itemId = invSlotsRef.current[invMenuRef.current.slotIdx];
+        const it = (gameDataRef.current.items ?? []).find(x => x.id === itemId);
+        const usable = !!(it?.healHp || it?.healMp);
+        const discardable = it?.discardable !== false;
+        const count = (usable ? 1 : 0) + 1 /* せつめい */ + (discardable ? 1 : 0) + 1 /* もどる */;
+        if (count > 0 && (menuUpEdge || menuDownEdge)) {
+          let c = invMenuCursorRef.current;
+          if (menuUpEdge) c -= 1;
+          if (menuDownEdge) c += 1;
+          c = ((c % count) + count) % count;
+          invMenuCursorRef.current = c; setInvMenuCursor(c);
+        }
+      } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulPhaseRef.current === 'menu') {
+        if (soulMenuRef.current === 'root') {
+          if (menuLeftEdge || menuRightEdge) {
+            let c = soulRootCursorRef.current;
+            if (menuLeftEdge) c -= 1;
+            if (menuRightEdge) c += 1;
+            c = ((c % 4) + 4) % 4;
+            soulRootCursorRef.current = c; setSoulRootCursor(c);
+          }
+        } else {
+          // ACT / ITEM / MERCY サブメニュー
+          const bd2 = gameDataRef.current.battle;
+          let count = 1; let cols = 1;
+          if (soulMenuRef.current === 'act') { count = (bd2?.moves.length ?? 0) + 1; cols = 2; }
+          else if (soulMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
+          else if (soulMenuRef.current === 'mercy') { count = 3; cols = 1; }
+          if (count > 0 && (menuUpEdge || menuDownEdge || menuLeftEdge || menuRightEdge)) {
+            let c = soulSubCursorRef.current;
+            if (cols === 2) {
+              if (menuLeftEdge) c -= 1;
+              if (menuRightEdge) c += 1;
+              if (menuUpEdge) c -= 2;
+              if (menuDownEdge) c += 2;
+            } else {
+              if (menuUpEdge) c -= 1;
+              if (menuDownEdge) c += 1;
+            }
+            c = ((c % count) + count) % count;
+            soulSubCursorRef.current = c; setSoulSubCursor(c);
+          }
+        }
+      } else if (isPlaying && eventChoiceRef.current) {
+        // イベント選択肢（縦一列）
+        const n = eventChoiceRef.current.choices.length;
+        if (n > 0 && (menuUpEdge || menuDownEdge)) {
+          let c = eventChoiceCursorRef.current;
+          if (menuUpEdge) c -= 1;
+          if (menuDownEdge) c += 1;
+          c = ((c % n) + n) % n;
+          eventChoiceCursorRef.current = c; setEventChoiceCursor(c);
+        }
+      } else if (isPlaying && shopModalRef.current) {
+        // ショップ（アイテム一覧＋とじる：縦一列）
+        const n = shopModalRef.current.items.length + 1;
+        if (menuUpEdge || menuDownEdge) {
+          let c = shopCursorRef.current;
+          if (menuUpEdge) c -= 1;
+          if (menuDownEdge) c += 1;
+          c = ((c % n) + n) % n;
+          shopCursorRef.current = c; setShopCursor(c);
+        }
+      } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul') {
+        // ターン制（非soul）戦闘コマンド
+        if (battleItemsOpenRef.current) {
+          const n = usableItems().length + 1;
+          if (menuUpEdge || menuDownEdge) {
+            let c = battleItemsCursorRef.current;
+            if (menuUpEdge) c -= 1;
+            if (menuDownEdge) c += 1;
+            c = ((c % n) + n) % n;
+            battleItemsCursorRef.current = c; setBattleItemsCursor(c);
+          }
+        } else {
+          const bd3 = gameDataRef.current.battle;
+          const n = 2 + (bd3?.moves.length ?? 0) + (bd3?.labels.mercy ? 1 : 0) + (usableItems().length > 0 ? 1 : 0);
+          if (n > 0 && (menuUpEdge || menuDownEdge || menuLeftEdge || menuRightEdge)) {
+            let c = classicBattleCursorRef.current;
+            if (menuLeftEdge) c -= 1;
+            if (menuRightEdge) c += 1;
+            if (menuUpEdge) c -= 2;
+            if (menuDownEdge) c += 2;
+            c = ((c % n) + n) % n;
+            classicBattleCursorRef.current = c; setClassicBattleCursor(c);
+          }
+        }
+      } else if (showTitleRef.current && gameDataRef.current.titleScreen) {
+        // タイトル画面メニュー（縦一列）
+        const n = gameDataRef.current.titleScreen.menu.length;
+        if (n > 0 && (menuUpEdge || menuDownEdge)) {
+          let c = titleCursorRef.current;
+          if (menuUpEdge) c -= 1;
+          if (menuDownEdge) c += 1;
+          c = ((c % n) + n) % n;
+          titleCursorRef.current = c; setTitleCursor(c);
+        }
+      }
+
+      // ── Z / action：メッセージ送り・会話送り・メニュー確定（優先）／ 配置（編集モード） ──
       const isZ = keys.has('z') || keys.has('Z') || touchRef.current.action;
+      if (isZ && !prevZRef.current) {
+        if (soulAdvanceRef.current) {
+          const advance = soulAdvanceRef.current;
+          soulAdvanceRef.current = null;
+          setSoulWaiting(false);
+          advance();
+        } else if (gameMsgRef.current) {
+          dismissGameMsg();
+        } else if (activeDialogueRef.current) {
+          playSfx(MSG_ADVANCE_SFX);
+          dialogueCutsceneRef.current?.advance();
+        } else if (invDetailRef.current) {
+          setInvDetail(null); invDetailRef.current = null;
+        } else if (invMenuRef.current) {
+          const itemId = invSlotsRef.current[invMenuRef.current.slotIdx];
+          const it = (gameDataRef.current.items ?? []).find(x => x.id === itemId);
+          if (it) {
+            const usable = !!(it.healHp || it.healMp);
+            const discardable = it.discardable !== false;
+            const actions: (() => void)[] = [];
+            if (usable) actions.push(() => useInventoryItem(itemId));
+            actions.push(() => { playSfx(MSG_ADVANCE_SFX); setInvDetail(itemId); invDetailRef.current = itemId; });
+            if (discardable) actions.push(() => discardInventoryItem(itemId));
+            actions.push(() => { setInvMenu(null); invMenuRef.current = null; });
+            const idx = Math.min(invMenuCursorRef.current, actions.length - 1);
+            actions[idx]?.();
+          }
+        } else if (isPlaying && invOpenRef.current && invSlotsRef.current.length > 0 && !battleRef.current.active) {
+          playSfx(MSG_ADVANCE_SFX);
+          setInvMenu({ slotIdx: invCursorRef.current }); invMenuRef.current = { slotIdx: invCursorRef.current };
+          setInvMenuCursor(0); invMenuCursorRef.current = 0;
+        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulPhaseRef.current === 'menu') {
+          const canMenuNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
+          if (soulMenuRef.current === 'root') {
+            if (canMenuNow) {
+              const r = soulRootCursorRef.current;
+              if (r === 0) setSoulPhase('attack');
+              else if (r === 1) setSoulMenu('act');
+              else if (r === 2) setSoulMenu('item');
+              else setSoulMenu('mercy');
+            }
+          } else if (soulMenuRef.current === 'act') {
+            const moves = gameDataRef.current.battle?.moves ?? [];
+            const idx = soulSubCursorRef.current;
+            if (idx < moves.length) { if (canMenuNow) { setSoulMenu('root'); doMove(moves[idx]); } }
+            else setSoulMenu('root');
+          } else if (soulMenuRef.current === 'item') {
+            const items = usableItems();
+            const idx = soulSubCursorRef.current;
+            if (idx < items.length) { if (canMenuNow) { setSoulMenu('root'); useHealItem(items[idx], true); } }
+            else setSoulMenu('root');
+          } else if (soulMenuRef.current === 'mercy') {
+            const idx = soulSubCursorRef.current;
+            if (idx === 0) { if (canMenuNow) { setSoulMenu('root'); doSpare(); } }
+            else if (idx === 1) { if (canMenuNow) { setSoulMenu('root'); doFlee(); } }
+            else setSoulMenu('root');
+          }
+        } else if (isPlaying && eventChoiceRef.current) {
+          const choice = eventChoiceRef.current;
+          const idx = Math.min(eventChoiceCursorRef.current, choice.choices.length - 1);
+          choice.onPick(idx);
+        } else if (isPlaying && shopModalRef.current) {
+          const sm = shopModalRef.current;
+          const idx = shopCursorRef.current;
+          if (idx >= sm.items.length) {
+            setShopModal(null);
+          } else {
+            const si = sm.items[idx];
+            const itemDef = (gameDataRef.current.items ?? []).find(it => it.id === si.itemId);
+            const canAfford = (progressRef.current.gold ?? 0) >= si.price;
+            if (canAfford) {
+              const slots = [...invSlotsRef.current];
+              if (slots.length >= MAX_INVENTORY) {
+                showGameMsg('これいじょう もちものは もてない！', 'instant', () => {});
+              } else {
+                progressRef.current.gold = (progressRef.current.gold ?? 0) - si.price;
+                slots.push(si.itemId);
+                setInvSlots(slots); invSlotsRef.current = slots;
+                setInventory(p => { const n = { ...p }; n[si.itemId] = (n[si.itemId] ?? 0) + 1; return n; });
+                if (itemDef?.category === 'weapon' || itemDef?.category === 'armor') {
+                  const eq = { ...equipmentRef.current };
+                  if (itemDef.category === 'weapon') eq.weapon = itemDef.id;
+                  if (itemDef.category === 'armor') eq.armor = itemDef.id;
+                  setEquipment(eq);
+                  applyEquipment(eq);
+                }
+                playSfx(sfxRef.current.purchase);
+                itemGetRef.current = { text: `${itemDef?.emoji ?? '?'} ${itemDef?.name ?? si.itemId} を買った！`, startTime: performance.now() };
+                setShopModal(null);
+                forceHud(n => n + 1);
+              }
+            }
+          }
+        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul') {
+          const canActNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
+          if (battleItemsOpenRef.current) {
+            const items = usableItems();
+            const idx = battleItemsCursorRef.current;
+            if (idx < items.length) { if (canActNow) useHealItem(items[idx], true); }
+            else setBattleItemsOpen(false);
+          } else if (canActNow) {
+            const bd4 = gameDataRef.current.battle;
+            const moves = bd4?.moves ?? [];
+            const hasMercy = !!bd4?.labels.mercy;
+            const hasItem = usableItems().length > 0;
+            const idx = classicBattleCursorRef.current;
+            if (idx === 0) doAttack();
+            else if (idx === 1) doFlee();
+            else if (idx - 2 < moves.length) {
+              const m = moves[idx - 2];
+              if (progressRef.current.mp >= m.cost) doMove(m);
+            } else if (hasMercy && idx === 2 + moves.length) doSpare();
+            else if (hasItem && idx === 2 + moves.length + (hasMercy ? 1 : 0)) setBattleItemsOpen(true);
+          }
+        } else if (showTitleRef.current && gameDataRef.current.titleScreen) {
+          startFromTitle();
+        } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current) {
+          placeObj();
+        }
+      }
+
+      // ── X key: メニューの「キャンセル」（一段階もどる）／ オブジェクト削除（編集モード） ──
       const isX = keys.has('x') || keys.has('X') || touchRef.current.shoot;
-      if (!isPlaying && !battleRef.current.active && !eventRunningRef.current) {
-        if (isZ && !prevZRef.current) placeObj();
-        if (isX && !prevXRef.current && selectedObjIdRef.current) {
+      if (isX && !prevXRef.current) {
+        if (invDetailRef.current) {
+          setInvDetail(null); invDetailRef.current = null;
+        } else if (invMenuRef.current) {
+          setInvMenu(null); invMenuRef.current = null;
+        } else if (isPlaying && invOpenRef.current) {
+          setInvOpen(false);
+        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulMenuRef.current !== 'root') {
+          setSoulMenu('root');
+        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul' && battleItemsOpenRef.current) {
+          setBattleItemsOpen(false);
+        } else if (isPlaying && shopModalRef.current) {
+          setShopModal(null);
+        } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current && selectedObjIdRef.current) {
           setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) }));
           setSelectedObjId(null);
         }
@@ -5514,6 +5890,7 @@ const lose = (msg: string) => {
       }
 
       const finalCamX = camX, finalCamY = camY;
+      camXRef.current = finalCamX; camYRef.current = finalCamY;
 
       // 画面シェイク（ヒット・爆発・ゲームオーバー）
       if (shakeRef.current > 0) shakeRef.current--;
@@ -5876,10 +6253,9 @@ const lose = (msg: string) => {
         ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + ph, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
       ctx.fillStyle = gameData.player.color;
-      // 死亡中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）。
-      // バトル開始のハート明滅演出中は本来のプレイヤースプライトを隠す（ハート側で描画）
+      // 死亡中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）
       const blinkPeriod = gameData.engine === 'action' ? 2 : 4;
-      if (encounterAlertRef.current?.phase !== 'flash' && !isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
+      if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
         let drawH = pData.h;
         if (gameData.id === 'mario') {
           if (marioTransformingRef.current > 0) {
@@ -5988,14 +6364,24 @@ const lose = (msg: string) => {
           });
         }
       }
-      // アンダーテール風エンカウント演出：プレイヤーが明滅するハートに変わりバトルへ移行
+      // アンダーテール風エンカウント演出：プレイヤーの手前で明滅するハートが画面全体の
+      // 明滅（黒フラッシュ）と同期しつつ、バトル画面のコマンド位置へ一直線に移動する
       if (isPlaying && encounterAlertRef.current?.phase === 'flash') {
-        const p2 = eng.player;
-        const t = performance.now() - encounterAlertRef.current.startTime;
+        const alert = encounterAlertRef.current;
+        const t = performance.now() - alert.startTime;
+        const ratio = Math.min(1, t / ENCOUNTER_FLASH_MS);
+        const eased = ratio < 0.5 ? 2 * ratio * ratio : 1 - Math.pow(-2 * ratio + 2, 2) / 2; // ease-in-out
         const visible = Math.floor(t / 90) % 2 === 0; // 明滅
         if (visible) {
-          const cx = Math.round(p2.x + (gameData.player.w ?? TILE_SIZE) / 2);
-          const cy = Math.round(p2.y + (gameData.player.h ?? TILE_SIZE) / 2);
+          // 画面全体の黒フラッシュ（現在の座標変換をリセットしてキャンバス全体を覆う）
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.restore();
+          // ハート本体（プレイヤーの手前＝プレイヤー描画より後に重ねて描く）
+          const cx = Math.round(alert.fromX + (alert.toX - alert.fromX) * eased);
+          const cy = Math.round(alert.fromY + (alert.toY - alert.fromY) * eased);
           const s = 7;
           ctx.save();
           ctx.imageSmoothingEnabled = false;
@@ -6483,6 +6869,11 @@ const lose = (msg: string) => {
   const prevXRef = useRef(false);
   const prevBombRef = useRef(false);
   const prevInvRef = useRef(false);
+  // メニュー（持ち物一覧・戦闘コマンド）を十字キーで操作するためのエッジ検出
+  const prevMenuUpRef = useRef(false);
+  const prevMenuDownRef = useRef(false);
+  const prevMenuLeftRef = useRef(false);
+  const prevMenuRightRef = useRef(false);
   const [, force] = useState(0);
   const setTouch = (key: keyof typeof touchRef.current, v: boolean) => { touchRef.current[key] = v; force(n => n + 1); };
 
@@ -6970,6 +7361,7 @@ const lose = (msg: string) => {
       }
     }
     playSfx(sfxRef.current.inn);
+    playSfx(MSG_ADVANCE_SFX);
     forceHud(n => n + 1);
     setInvMenu(null); setInvDetail(null);
     const msg = it.useMessage || `${it.emoji} ${it.name}を つかった！${parts.length > 0 ? '\n' + parts.join('、') : ''}`;
@@ -6979,6 +7371,7 @@ const lose = (msg: string) => {
   const discardInventoryItem = (itemId: string) => {
     const it = (gameData.items ?? []).find(x => x.id === itemId);
     if (it && it.discardable === false) { showGameMsg(`${it.name}は すてられない。`, 'instant', () => {}); return; }
+    playSfx(MSG_ADVANCE_SFX);
     const idx = invSlotsRef.current.indexOf(itemId);
     if (idx >= 0) {
       const copy = [...invSlotsRef.current]; copy.splice(idx, 1);
@@ -7186,8 +7579,10 @@ const lose = (msg: string) => {
                   {gameData.titleScreen.subtitle && <p className="text-sm font-pixel opacity-90" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.titleScreen.subtitle}</p>}
                   <div className="flex flex-col gap-2 mt-2 w-52 max-w-full">
                     {gameData.titleScreen.menu.map((mi, i) => (
-                      <button key={i} onClick={startFromTitle}
-                        className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">{mi.label}</button>
+                      <button key={i} onClick={() => { setTitleCursor(i); startFromTitle(); }}
+                        className={`px-4 py-2 border-2 font-pixel text-sm ${titleCursor === i ? 'bg-white/30 border-white' : 'bg-white/15 hover:bg-white/25 border-white/40'}`}>
+                        {titleCursor === i ? '❤ ' : ''}{mi.label}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -7458,16 +7853,16 @@ const lose = (msg: string) => {
               />
             )}
 
-            {/* ── イベント選択肢 ── */}
+            {/* ── イベント選択肢（十字キー上下・Z/Aで確定、初期カーソルは先頭） ── */}
             {eventChoice && !battle && (
               <div className="absolute inset-0 flex items-end justify-center pb-16 px-4 font-pixel">
                 <div className="bg-[#1a1a2e] border-2 border-gray-400 p-3 shadow-2xl w-full max-w-xs">
                   <p className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap">{eventChoice.text}</p>
                   <div className="space-y-1.5">
                     {eventChoice.choices.map((ch, i) => (
-                      <button key={i} onClick={() => eventChoice.onPick(i)}
-                        className="w-full py-1.5 bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white text-xs font-bold text-left px-3">
-                        {ch.label}
+                      <button key={i} onClick={() => { setEventChoiceCursor(i); eventChoice.onPick(i); }}
+                        className={`w-full py-1.5 text-xs font-bold text-left px-3 ${eventChoiceCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white'}`}>
+                        {eventChoiceCursor === i ? '❤ ' : '  '}{ch.label}
                       </button>
                     ))}
                   </div>
@@ -7484,16 +7879,32 @@ const lose = (msg: string) => {
               const ready = spareReady(battle);
               return (
                 <div className="absolute inset-0 flex flex-col p-2 sm:p-3 bg-black/70 font-pixel select-none">
-                  {/* 敵 */}
-                  <div className="flex flex-col items-center mt-1 shrink-0">
+                  {/* 敵：HPゲージは被ダメージ時のみ一時的に表示（減少アニメーション付き）。それ以外のゲージは出さない。
+                      ブロック全体を固定の高さにして、ゲージ/ダメージ数値の表示有無でメッセージウィンドウの
+                      位置がズレないようにする。 */}
+                  <div className="flex flex-col items-center justify-center mt-4 sm:mt-6 shrink-0 h-28 sm:h-32">
+                    <div className="relative w-40 mb-1">
+                      {enemyDmgPopup && (
+                        <div key={enemyDmgPopup.id}
+                          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
+                          style={{
+                            color: '#000',
+                            textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
+                            animation: 'dmgPopUp 0.7s ease-out forwards',
+                          }}>
+                          {enemyDmgPopup.text}
+                        </div>
+                      )}
+                      <div className="w-40 h-2 overflow-hidden">
+                        {enemyGaugeAnim && (
+                          <div className="w-full h-full bg-gray-700">
+                            <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${enemyGaugeAnim.pct}%` }} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
                     <div className={`text-5xl sm:text-6xl leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>{battle.enemyEmoji}</div>
                     <div className={`mt-1 text-xs sm:text-sm ${ready ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}{ready ? ' ✦' : ''}</div>
-                    <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
-                      <div className="h-full bg-green-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
-                    </div>
-                    <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
-                      <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
-                    </div>
                   </div>
                   {/* バトルボックス（白枠がシームレスに変形する） */}
                   <div className="flex-1 flex items-center justify-center min-h-0">
@@ -7519,43 +7930,57 @@ const lose = (msg: string) => {
                         </div>
                       ) : (
                         <div className="absolute inset-0 p-2.5 text-white text-[11px] sm:text-sm leading-relaxed overflow-hidden">
-                          {soulMenu === 'root' && battle.log.slice(-3).map((l, i) => <p key={i}>＊ {l}</p>)}
+                          {soulMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
+                            <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
+                          ))}
+                          {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0) && (
+                            <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
+                          )}
                           {soulMenu === 'act' && (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                               {bd.moves.map((m, i) => (
                                 <button key={i} disabled={!canMenu || pr.mp < m.cost}
-                                  onClick={() => { setSoulMenu('root'); doMove(m); }}
-                                  className="text-left text-white hover:text-yellow-300 disabled:opacity-40 text-[11px] sm:text-xs py-0.5">
-                                  ❤ {m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
+                                  onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); doMove(m); }}
+                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                  {soulSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
                                 </button>
                               ))}
-                              <button onClick={() => setSoulMenu('root')} className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">❤ もどる</button>
+                              <button onClick={() => { setSoulSubCursor(bd.moves.length); setSoulMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === bd.moves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {soulSubCursor === bd.moves.length ? '❤ ' : '  '}もどる
+                              </button>
                             </div>
                           )}
                           {soulMenu === 'item' && (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                              {usableItems().map(it => (
+                              {usableItems().map((it, i) => (
                                 <button key={it.id} disabled={!canMenu}
-                                  onClick={() => { setSoulMenu('root'); useHealItem(it, true); }}
-                                  className="text-left text-white hover:text-yellow-300 disabled:opacity-40 text-[11px] sm:text-xs py-0.5">
-                                  ❤ {it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                                  onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); useHealItem(it, true); }}
+                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                  {soulSubCursor === i ? '❤ ' : '  '}{it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
                                 </button>
                               ))}
                               {usableItems().length === 0 && <p className="text-gray-500">もちものが ない…</p>}
-                              <button onClick={() => setSoulMenu('root')} className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">❤ もどる</button>
+                              <button onClick={() => { setSoulSubCursor(usableItems().length); setSoulMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === usableItems().length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {soulSubCursor === usableItems().length ? '❤ ' : '  '}もどる
+                              </button>
                             </div>
                           )}
                           {soulMenu === 'mercy' && (
                             <div className="flex flex-col gap-1">
-                              <button disabled={!canMenu} onClick={() => { setSoulMenu('root'); doSpare(); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : 'text-white hover:text-yellow-300'}`}>
-                                ❤ {bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
+                              <button disabled={!canMenu} onClick={() => { setSoulSubCursor(0); setSoulMenu('root'); doSpare(); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : soulSubCursor === 0 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                {soulSubCursor === 0 ? '❤ ' : '  '}{bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
                               </button>
-                              <button disabled={!canMenu} onClick={() => { setSoulMenu('root'); doFlee(); }}
-                                className="text-left text-white hover:text-yellow-300 disabled:opacity-40 text-[11px] sm:text-xs py-0.5">
-                                ❤ {bd.labels.flee}
+                              <button disabled={!canMenu} onClick={() => { setSoulSubCursor(1); setSoulMenu('root'); doFlee(); }}
+                                className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 1 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                {soulSubCursor === 1 ? '❤ ' : '  '}{bd.labels.flee}
                               </button>
-                              <button onClick={() => setSoulMenu('root')} className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">❤ もどる</button>
+                              <button onClick={() => { setSoulSubCursor(2); setSoulMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 2 ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {soulSubCursor === 2 ? '❤ ' : '  '}もどる
+                              </button>
                             </div>
                           )}
                         </div>
@@ -7566,7 +7991,7 @@ const lose = (msg: string) => {
                   <div className="text-center text-[10px] sm:text-xs text-white mb-1.5 shrink-0">
                     {bd.playerName}　LV {pr.level}　<span className="text-red-400">HP</span> {pr.hp}/{pr.maxHp}　<span className="text-cyan-300">MP</span> {pr.mp}/{pr.maxMp}
                   </div>
-                  {/* FIGHT / ACT / ITEM / MERCY */}
+                  {/* FIGHT / ACT / ITEM / MERCY（十字キー左右でカーソル移動、Z/Aで確定） */}
                   <div className="flex justify-center gap-1.5 sm:gap-2 shrink-0">
                     {([
                       { label: bd.labels.attack, sel: false, onClick: () => canMenu && setSoulPhase('attack') },
@@ -7574,11 +7999,11 @@ const lose = (msg: string) => {
                       { label: bd.labels.item ?? 'アイテム', sel: soulMenu === 'item', onClick: () => canMenu && setSoulMenu(m => m === 'item' ? 'root' : 'item') },
                       { label: bd.labels.mercy ?? 'みのがす', sel: soulMenu === 'mercy', mercy: true, onClick: () => canMenu && setSoulMenu(m => m === 'mercy' ? 'root' : 'mercy') },
                     ] as { label: string; sel: boolean; mercy?: boolean; onClick: () => void }[]).map((c, i) => (
-                      <button key={i} onClick={c.onClick} disabled={!canMenu}
+                      <button key={i} onClick={() => { setSoulRootCursor(i); c.onClick(); }} disabled={!canMenu}
                         className={`flex-1 max-w-[104px] py-2 border-2 bg-black text-[10px] sm:text-xs font-bold tracking-wider transition
-                          ${c.sel ? 'border-yellow-300 text-yellow-300' : c.mercy && ready ? 'border-yellow-400 text-yellow-300 animate-pulse' : 'border-orange-400 text-orange-300 hover:border-yellow-300 hover:text-yellow-300'}
+                          ${c.sel ? 'border-yellow-300 text-yellow-300' : c.mercy && ready ? 'border-yellow-400 text-yellow-300 animate-pulse' : soulMenu === 'root' && soulRootCursor === i ? 'border-yellow-300/70 text-yellow-300/90' : 'border-orange-400 text-orange-300 hover:border-yellow-300 hover:text-yellow-300'}
                           disabled:opacity-40`}>
-                        {c.sel ? '❤ ' : ''}{c.label}
+                        {(c.sel || (soulMenu === 'root' && soulRootCursor === i)) ? '❤ ' : ''}{c.label}
                       </button>
                     ))}
                   </div>
@@ -7609,38 +8034,43 @@ const lose = (msg: string) => {
                   </div>
                   {battle.canAct && !battle.over && (battleItemsOpen ? (
                     <div className="space-y-1.5">
-                      {usableItems().map(it => (
-                        <button key={it.id} onClick={() => useHealItem(it, true)}
-                          className="w-full flex justify-between items-center px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-[11px] font-bold">
-                          <span>{it.emoji} {it.name}</span>
+                      {usableItems().map((it, i) => (
+                        <button key={it.id} onClick={() => { setBattleItemsCursor(i); useHealItem(it, true); }}
+                          className={`w-full flex justify-between items-center px-3 py-1.5 text-[11px] font-bold ${battleItemsCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}>
+                          <span>{battleItemsCursor === i ? '❤ ' : '  '}{it.emoji} {it.name}</span>
                           <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
                         </button>
                       ))}
-                      <button onClick={() => setBattleItemsOpen(false)}
-                        className="w-full py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-bold">もどる</button>
+                      <button onClick={() => { setBattleItemsCursor(usableItems().length); setBattleItemsOpen(false); }}
+                        className={`w-full py-1.5 text-[11px] font-bold ${battleItemsCursor === usableItems().length ? 'bg-gray-600 text-yellow-300' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}>
+                        {battleItemsCursor === usableItems().length ? '❤ ' : '  '}もどる
+                      </button>
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 gap-1.5">
-                      <button onClick={doAttack} className="py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.attack}</button>
-                      <button onClick={doFlee} className="py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold">{gameData.battle?.labels.flee}</button>
-                      {(gameData.battle?.moves ?? []).map((m, i) => (
-                        <button key={i} onClick={() => doMove(m)} disabled={progressRef.current.mp < m.cost}
-                          className={`py-1.5 disabled:opacity-40 text-white text-[11px] font-bold ${m.mercy != null ? 'bg-teal-700 hover:bg-teal-600' : 'bg-indigo-700 hover:bg-indigo-600'}`}>
-                          {m.name}{m.cost > 0 && <span className={`ml-1 ${m.mercy != null ? 'text-teal-300' : 'text-indigo-300'}`}>{m.cost}</span>}
+                      {([
+                        { label: gameData.battle?.labels.attack, disabled: false, onClick: doAttack, cls: 'bg-gray-700 hover:bg-gray-600 text-white' },
+                        { label: gameData.battle?.labels.flee, disabled: false, onClick: doFlee, cls: 'bg-gray-700 hover:bg-gray-600 text-white' },
+                        ...(gameData.battle?.moves ?? []).map(m => ({
+                          label: <>{m.name}{m.cost > 0 && <span className={`ml-1 ${m.mercy != null ? 'text-teal-300' : 'text-indigo-300'}`}>{m.cost}</span>}</>,
+                          disabled: progressRef.current.mp < m.cost,
+                          onClick: () => doMove(m),
+                          cls: m.mercy != null ? 'bg-teal-700 hover:bg-teal-600 text-white' : 'bg-indigo-700 hover:bg-indigo-600 text-white',
+                        })),
+                        ...(gameData.battle?.labels.mercy ? [{
+                          label: gameData.battle.labels.mercy, disabled: false, onClick: doSpare,
+                          cls: spareReady(battle) ? 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse' : 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200/70',
+                        }] : []),
+                        ...(usableItems().length > 0 ? [{
+                          label: gameData.battle?.labels.item ?? 'どうぐ', disabled: false, onClick: () => setBattleItemsOpen(true),
+                          cls: 'bg-amber-700 hover:bg-amber-600 text-white',
+                        }] : []),
+                      ] as { label: React.ReactNode; disabled: boolean; onClick: () => void; cls: string }[]).map((c, i) => (
+                        <button key={i} onClick={() => { setClassicBattleCursor(i); c.onClick(); }} disabled={c.disabled}
+                          className={`py-1.5 disabled:opacity-40 text-[11px] sm:text-xs font-bold ${classicBattleCursor === i ? 'ring-2 ring-yellow-300 ring-inset' : ''} ${c.cls}`}>
+                          {c.label}
                         </button>
                       ))}
-                      {gameData.battle?.labels.mercy && (
-                        <button onClick={doSpare}
-                          className={`py-1.5 text-[11px] font-bold ${spareReady(battle) ? 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse' : 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200/70'}`}>
-                          {gameData.battle.labels.mercy}
-                        </button>
-                      )}
-                      {usableItems().length > 0 && (
-                        <button onClick={() => setBattleItemsOpen(true)}
-                          className="py-1.5 bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold">
-                          {gameData.battle?.labels.item ?? 'どうぐ'}
-                        </button>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -7654,7 +8084,7 @@ const lose = (msg: string) => {
                   <div className="text-yellow-400 font-bold text-sm mb-2">🏪 お店</div>
                   <div className="text-yellow-300 text-xs mb-3">所持金: {progressRef.current.gold ?? 0} G</div>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {shopModal.items.map(si => {
+                    {shopModal.items.map((si, i) => {
                       const itemDef = (gameData.items ?? []).find(it => it.id === si.itemId);
                       const canAfford = (progressRef.current.gold ?? 0) >= si.price;
                       return (
@@ -7662,6 +8092,7 @@ const lose = (msg: string) => {
                           key={si.itemId}
                           disabled={!canAfford}
                           onClick={() => {
+                            setShopCursor(i);
                             const slots = [...invSlotsRef.current];
                             if (slots.length >= MAX_INVENTORY) {
                               showGameMsg('これいじょう もちものは もてない！', 'instant', () => {});
@@ -7684,15 +8115,18 @@ const lose = (msg: string) => {
                             setShopModal(null);
                             forceHud(n => n + 1);
                           }}
-                          className={`w-full flex justify-between items-center px-3 py-2 text-xs ${canAfford ? 'bg-gray-700 text-white active:bg-yellow-600/30' : 'bg-gray-800 text-gray-500'}`}
+                          className={`w-full flex justify-between items-center px-3 py-2 text-xs ${shopCursor === i ? 'bg-gray-600' : 'bg-gray-700'} ${canAfford ? 'text-white active:bg-yellow-600/30' : 'bg-gray-800 text-gray-500'}`}
                         >
-                          <span>{itemDef?.emoji ?? '?'} {itemDef?.name ?? si.itemId}</span>
+                          <span>{shopCursor === i ? '❤ ' : '  '}{itemDef?.emoji ?? '?'} {itemDef?.name ?? si.itemId}</span>
                           <span className={canAfford ? 'text-yellow-400' : 'text-gray-600'}>{si.price} G</span>
                         </button>
                       );
                     })}
                   </div>
-                  <button onClick={() => setShopModal(null)} className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                  <button onClick={() => { setShopCursor(shopModal.items.length); setShopModal(null); }}
+                    className={`mt-3 w-full py-2 text-xs ${shopCursor === shopModal.items.length ? 'bg-gray-600 text-yellow-300' : 'bg-gray-700 text-gray-300 active:bg-gray-600'}`}>
+                    {shopCursor === shopModal.items.length ? '❤ ' : '  '}とじる
+                  </button>
                 </div>
               </div>
             )}
@@ -7714,9 +8148,9 @@ const lose = (msg: string) => {
                       const it = (gameData.items ?? []).find(x => x.id === itemId);
                       if (!it) return null;
                       return (
-                        <button key={`${itemId}-${idx}`} onClick={() => setInvMenu({ slotIdx: idx })}
-                          className="text-left text-white hover:text-yellow-300 active:text-yellow-300 text-[11px] sm:text-xs py-0.5 truncate">
-                          ❤ {it.emoji} {it.name}
+                        <button key={`${itemId}-${idx}`} onClick={() => { playSfx(MSG_ADVANCE_SFX); setInvCursor(idx); setInvMenu({ slotIdx: idx }); setInvMenuCursor(0); }}
+                          className={`text-left active:text-yellow-300 text-[11px] sm:text-xs py-0.5 truncate ${invCursor === idx ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                          {invCursor === idx ? '❤ ' : '  '}{it.emoji} {it.name}
                         </button>
                       );
                     })}
@@ -7736,30 +8170,21 @@ const lose = (msg: string) => {
                     if (!it) return <p className="text-gray-500 text-xs">? ふめい</p>;
                     const usable = !!(it.healHp || it.healMp);
                     const discardable = it.discardable !== false;
+                    const actions: { key: string; label: string; onClick: () => void }[] = [];
+                    if (usable) actions.push({ key: 'use', label: 'つかう', onClick: () => useInventoryItem(itemId) });
+                    actions.push({ key: 'detail', label: 'せつめい', onClick: () => { playSfx(MSG_ADVANCE_SFX); setInvDetail(itemId); invDetailRef.current = itemId; } });
+                    if (discardable) actions.push({ key: 'discard', label: 'すてる', onClick: () => discardInventoryItem(itemId) });
+                    actions.push({ key: 'back', label: 'もどる', onClick: () => { setInvMenu(null); invMenuRef.current = null; } });
                     return (
                       <>
                         <div className="text-white font-bold text-xs sm:text-sm mb-2">{it.emoji} {it.name}</div>
                         <div className="flex flex-col gap-1">
-                          {usable && (
-                            <button onClick={() => useInventoryItem(itemId)}
-                              className="text-left text-white hover:text-yellow-300 text-[11px] sm:text-xs py-0.5">
-                              ❤ つかう
+                          {actions.map((a, i) => (
+                            <button key={a.key} onClick={() => { setInvMenuCursor(i); a.onClick(); }}
+                              className={`text-left text-[11px] sm:text-xs py-0.5 ${a.key === 'back' ? (invMenuCursor === i ? 'text-yellow-300' : 'text-gray-400 hover:text-white') : (invMenuCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300')}`}>
+                              {invMenuCursor === i ? '❤ ' : '  '}{a.label}
                             </button>
-                          )}
-                          <button onClick={() => { setInvDetail(itemId); invDetailRef.current = itemId; }}
-                            className="text-left text-white hover:text-yellow-300 text-[11px] sm:text-xs py-0.5">
-                            ❤ せつめい
-                          </button>
-                          {discardable && (
-                            <button onClick={() => discardInventoryItem(itemId)}
-                              className="text-left text-white hover:text-yellow-300 text-[11px] sm:text-xs py-0.5">
-                              ❤ すてる
-                            </button>
-                          )}
-                          <button onClick={() => { setInvMenu(null); invMenuRef.current = null; }}
-                            className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">
-                            ❤ もどる
-                          </button>
+                          ))}
                         </div>
                       </>
                     );
@@ -7791,89 +8216,45 @@ const lose = (msg: string) => {
             {/* 操作方法のナビ */}
             {showControlGuide && (
               <div className="absolute inset-0 flex items-start justify-start p-3 z-50 pointer-events-none transition-opacity duration-300">
-                <div className="bg-gray-900/95 backdrop-blur-md border border-white/20 p-4 rounded-xl max-w-xs text-white text-center shadow-2xl pointer-events-auto">
-                  <h4 className="text-violet-400 font-bold text-xs mb-2.5">🎮 操作方法</h4>
-                  <div className="space-y-2 text-[10px] text-gray-300 text-left">
-                    <div className="flex items-center justify-between gap-4">
-                      <span>移動</span>
-                      <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[矢印キー] / [WASD]</span>
-                    </div>
+                <div className="bg-black border-2 border-white p-3 max-w-xs text-white font-pixel pointer-events-auto">
+                  <h4 className="text-yellow-300 font-bold text-xs mb-2">操作方法</h4>
+                  <ul className="text-[10px] text-white leading-relaxed list-disc list-inside marker:text-gray-500">
+                    <li>移動 … [矢印キー] / [WASD]</li>
 
                     {gameData.engine === 'action' && (
                       <>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ジャンプ</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Space] / [Z]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ショット / 攻撃</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ダッシュ</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Shift] / [C]</span>
-                        </div>
-                        {gameData.id === 'rockman' && (
-                          <div className="flex items-center justify-between gap-4">
-                            <span>武器切替</span>
-                            <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Q] / [E]</span>
-                          </div>
-                        )}
+                        <li>ジャンプ … [Space] / [Z]</li>
+                        <li>ショット / 攻撃 … [X]</li>
+                        <li>ダッシュ … [Shift] / [C]</li>
+                        {gameData.id === 'rockman' && <li>武器切替 … [Q] / [E]</li>}
                       </>
                     )}
 
                     {gameData.engine === 'rpg' && (
                       <>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>決定 / 調べる / 話す</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Z] / [Enter]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>キャンセル</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
-                        </div>
+                        <li>決定 / 調べる / 話す … [Z] / [Enter]</li>
+                        <li>キャンセル … [X]</li>
                       </>
                     )}
 
                     {gameData.engine === 'touhou' && (
                       <>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ショット</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Z]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ボム</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>低速移動</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Shift]</span>
-                        </div>
+                        <li>ショット … [Z]</li>
+                        <li>ボム … [X]</li>
+                        <li>低速移動 … [Shift]</li>
                       </>
                     )}
 
                     {gameData.engine === 'onjReze' && (
                       <>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>剣攻撃</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[Z]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ボム設置</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[C]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>ボム投擲</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[X]</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-4">
-                          <span>首爆弾投擲</span>
-                          <span className="font-mono bg-gray-800 border border-gray-700 px-1 py-0.5 rounded text-white">[V]</span>
-                        </div>
+                        <li>剣攻撃 … [Z]</li>
+                        <li>ボム設置 … [C]</li>
+                        <li>ボム投擲 … [X]</li>
+                        <li>首爆弾投擲 … [V]</li>
                       </>
                     )}
-                  </div>
-                  <div className="mt-3 text-[9px] text-gray-400 border-t border-gray-800 pt-2">
+                  </ul>
+                  <div className="mt-2 text-[9px] text-gray-400 border-t border-white/30 pt-1.5">
                     操作を行うとガイドは非表示になります
                   </div>
                 </div>
@@ -7946,6 +8327,7 @@ const lose = (msg: string) => {
                     let btnAActive = false; let btnALabel = "";
                     let btnBActive = false; let btnBLabel = "";
                     let btnXActive = false; let btnXLabel = "";
+                    let btnXKey: keyof typeof touchRef.current = 'slow';
                     let btnYActive = false; let btnYLabel = "";
 
                     if (!isPlaying && gameData.engine === 'yume25d') {
@@ -7970,7 +8352,7 @@ const lose = (msg: string) => {
                     } else if (gameData.engine === 'rpg') {
                       btnAActive = true; btnALabel = "決定";
                       btnBActive = true; btnBLabel = "取消";
-                      btnXActive = true; btnXLabel = "🎒";
+                      btnXActive = true; btnXLabel = "🎒"; btnXKey = 'inv';
                     } else if (gameData.engine === 'yume25d') {
                       btnAActive = true; btnALabel = "JUMP";
                       btnBActive = true; btnBLabel = "話す";
@@ -7987,7 +8369,7 @@ const lose = (msg: string) => {
                           {btnYLabel && <span className="text-[6px] font-pixel scale-90 mt-0.5 leading-none">{btnYLabel}</span>}
                         </button>
                         {/* Xボタン (上) */}
-                        <button disabled={!btnXActive} {...padProps('slow')}
+                        <button disabled={!btnXActive} {...padProps(btnXKey)}
                           className={`absolute top-0 w-11 h-11 rounded-full border-b-4 shadow-lg flex flex-col items-center justify-center transition touch-none select-none
                             ${btnXActive ? 'bg-purple-600 border-purple-800 active:border-b-0 active:translate-y-0.5 active:bg-purple-500 text-white' : 'bg-gray-800/20 border-gray-900/20 text-gray-700 opacity-20 pointer-events-none'}`}>
                           <span className="text-[9px] font-bold leading-none">X</span>
@@ -8076,8 +8458,8 @@ const lose = (msg: string) => {
               {/* ダイアログ送りボタン等 */}
               {isPlaying && activeDialogue && (
                 <button
-                  className="w-full py-2.5 mt-2 bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-bold text-xs active:bg-yellow-600 touch-none select-none rounded"
-                  onPointerDown={e => { e.preventDefault(); dialogueCutsceneRef.current?.advance(); }}
+                  className="w-full py-2.5 mt-2 bg-yellow-700/80 border border-yellow-500 text-yellow-100 font-pixel font-bold text-xs active:bg-yellow-600 touch-none select-none"
+                  onPointerDown={e => { e.preventDefault(); playSfx(MSG_ADVANCE_SFX); dialogueCutsceneRef.current?.advance(); }}
                 >
                   次へ ▼
                 </button>
