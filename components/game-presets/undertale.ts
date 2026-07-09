@@ -639,7 +639,8 @@ export const undertale: PresetData = {
   sfx: {
     levelup:  { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
     purchase: { ref: `direct:${su('PEeN5M')}`, src: su('PEeN5M'), type: 'direct' as const },
-    inn:      { ref: `direct:${su('L5Npni')}`, src: su('L5Npni'), type: 'direct' as const },
+    inn:      { ref: 'direct:https://rpgen-search.pages.dev/audio/sound/3m3WX5.mp3', src: 'https://rpgen-search.pages.dev/audio/sound/3m3WX5.mp3', type: 'direct' as const },
+    save:     { ref: 'direct:https://rpgen-search.pages.dev/audio/sound/w07fng.mp3', src: 'https://rpgen-search.pages.dev/audio/sound/w07fng.mp3', type: 'direct' as const },
     damage:   { ref: `direct:${su('HlYVmj')}`, src: su('HlYVmj'), type: 'direct' as const },
     clear:    { ref: 'clear' },
   },

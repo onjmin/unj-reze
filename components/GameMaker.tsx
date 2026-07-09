@@ -215,7 +215,7 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊', coin: 'コイン' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ' };
 
 // ── システムタイル（宝箱以外）: ワープ床・どく沼/ダメージ床・つるつる床 ──────────
 // special の値ごとに固定の効果音・挙動を持つ。画像は /assets/rpgen/map.png の16pxグリッドから
@@ -1298,17 +1298,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
-  /** アンダーテール風エンカウント演出：頭上に「！」を表示しSEを鳴らしてからバトル開始する */
-  const encounterAlertRef = useRef<{ startTime: number; fire: () => void } | null>(null);
+  /** アンダーテール風エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅 → バトル開始 */
+  const encounterAlertRef = useRef<{ startTime: number; fire: () => void; phase: 'alert' | 'flash' } | null>(null);
   const ENCOUNTER_ALERT_MS = 650;
+  const ENCOUNTER_FLASH_MS = 900; // ハート明滅演出の最大表示時間（SEが早く終われば早める）
   const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: 'https://rpgen-search.pages.dev/audio/sound/iUWDU1.mp3', type: 'direct' as const };
   const UNDERTALE_DAMAGE_SFX = { ref: 'direct:undertale-damage', src: 'https://rpgen-search.pages.dev/audio/sound/VtNXk0.mp3', type: 'direct' as const };
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
+  /** バトル開始SE。現在のBGMを止めてから鳴らし、鳴り終わるまでバトルBGMは始めない。 */
+  const UNDERTALE_BATTLESTART_SFX = { ref: 'direct:undertale-battlestart', src: 'https://rpgen-search.pages.dev/audio/sound/KAQ5VF.mp3', type: 'direct' as const };
   /** アンダーテール系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
     if (presetId === 'undertale') {
-      encounterAlertRef.current = { startTime: performance.now(), fire };
+      encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'alert' };
       playSfx(UNDERTALE_ENCOUNTER_SFX);
     } else {
       fire();
@@ -2303,6 +2306,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const z = onjRezeHpRef.current;
             z.hp = amt != null ? Math.min(z.max, z.hp + amt) : z.max;
           }
+          playSfx(sfxRef.current.inn);
           forceHud(n => n + 1);
           setTimeout(advance, 30);
           break;
@@ -2310,6 +2314,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         case 'restoreMp': {
           const pr3 = progressRef.current;
           pr3.mp = cmd.amount != null ? Math.min(pr3.maxMp, pr3.mp + (cmd.amount ?? 0)) : pr3.maxMp;
+          playSfx(sfxRef.current.inn);
           forceHud(n => n + 1);
           setTimeout(advance, 30);
           break;
@@ -3516,7 +3521,14 @@ const lose = (msg: string) => {
       if (starTimerRef.current > 0) starTimerRef.current--;
       if (bombInvulnRef.current > 0) bombInvulnRef.current--;
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
-      if (encounterAlertRef.current && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_ALERT_MS) {
+      if (encounterAlertRef.current?.phase === 'alert' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_ALERT_MS) {
+        // 「！」演出終了 → 現在のBGMを止め、バトル開始SEを鳴らしてハート明滅演出へ
+        const alert = encounterAlertRef.current;
+        alert.phase = 'flash';
+        alert.startTime = performance.now();
+        switchBgm(undefined);
+        playSfx(UNDERTALE_BATTLESTART_SFX);
+      } else if (encounterAlertRef.current?.phase === 'flash' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_FLASH_MS) {
         const { fire } = encounterAlertRef.current;
         encounterAlertRef.current = null;
         fire();
@@ -5864,9 +5876,10 @@ const lose = (msg: string) => {
         ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + ph, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
       ctx.fillStyle = gameData.player.color;
-      // 死亡中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）
+      // 死亡中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）。
+      // バトル開始のハート明滅演出中は本来のプレイヤースプライトを隠す（ハート側で描画）
       const blinkPeriod = gameData.engine === 'action' ? 2 : 4;
-      if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
+      if (encounterAlertRef.current?.phase !== 'flash' && !isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
         let drawH = pData.h;
         if (gameData.id === 'mario') {
           if (marioTransformingRef.current > 0) {
@@ -5975,8 +5988,28 @@ const lose = (msg: string) => {
           });
         }
       }
+      // アンダーテール風エンカウント演出：プレイヤーが明滅するハートに変わりバトルへ移行
+      if (isPlaying && encounterAlertRef.current?.phase === 'flash') {
+        const p2 = eng.player;
+        const t = performance.now() - encounterAlertRef.current.startTime;
+        const visible = Math.floor(t / 90) % 2 === 0; // 明滅
+        if (visible) {
+          const cx = Math.round(p2.x + (gameData.player.w ?? TILE_SIZE) / 2);
+          const cy = Math.round(p2.y + (gameData.player.h ?? TILE_SIZE) / 2);
+          const s = 7;
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.fillStyle = '#ff3355';
+          ctx.beginPath();
+          ctx.moveTo(cx, cy + s * 0.9);
+          ctx.bezierCurveTo(cx + s, cy + s * 0.2, cx + s * 0.8, cy - s * 0.8, cx, cy - s * 0.2);
+          ctx.bezierCurveTo(cx - s * 0.8, cy - s * 0.8, cx - s, cy + s * 0.2, cx, cy + s * 0.9);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
       // アンダーテール風エンカウント演出：プレイヤー頭上にドット絵の吹き出し「！」を表示
-      if (isPlaying && encounterAlertRef.current) {
+      if (isPlaying && encounterAlertRef.current?.phase === 'alert') {
         const p2 = eng.player;
         const t = performance.now() - encounterAlertRef.current.startTime;
         const pop = Math.min(1, t / 120);
@@ -6699,7 +6732,7 @@ const lose = (msg: string) => {
     })),
   });
 
-  const handleSave = () => onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
+  const handleSave = () => { playSfx(sfxRef.current.save); onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id }); };
 
   const handleExport = () => {
     const json = JSON.stringify(buildManifest(), null, 2);
@@ -7666,65 +7699,65 @@ const lose = (msg: string) => {
 
             {/* ── アンダーテール風インベントリ（フィールドのみ） ── */}
             {invOpen && !invMenu && !invDetail && !battle && (
-              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => setInvOpen(false)}>
-                <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
-                  <div className="text-amber-400 font-bold text-sm mb-2">🎒 もちもの</div>
-                  <div className="text-yellow-300 text-xs mb-3">
-                    もち: {invSlots.length}/{MAX_INVENTORY}
-                    {gameData.battle && <span className="ml-2">G: {progressRef.current.gold ?? 0}</span>}
+              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => setInvOpen(false)}>
+                <div className="bg-black border-4 border-white p-3 sm:p-4 w-full max-w-sm font-pixel" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between text-white text-xs sm:text-sm mb-2">
+                    <span className="font-bold tracking-widest">ITEM</span>
+                    <span>
+                      {invSlots.length}/{MAX_INVENTORY}
+                      {gameData.battle && <span className="ml-3 text-yellow-300">{progressRef.current.gold ?? 0} G</span>}
+                    </span>
                   </div>
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {invSlots.length === 0 && <p className="text-[11px] text-gray-500">なにも もっていない。</p>}
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 min-h-[4em] max-h-56 overflow-y-auto">
+                    {invSlots.length === 0 && <p className="col-span-2 text-[11px] text-gray-500">なにも もっていない。</p>}
                     {invSlots.map((itemId, idx) => {
                       const it = (gameData.items ?? []).find(x => x.id === itemId);
                       if (!it) return null;
                       return (
                         <button key={`${itemId}-${idx}`} onClick={() => setInvMenu({ slotIdx: idx })}
-                          className="w-full flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 text-xs text-white text-left">
-                          <span>{it.emoji}</span>
-                          <span className="flex-1 truncate">{it.name}</span>
-                          <span className="text-gray-500 text-[10px]">{idx + 1}</span>
+                          className="text-left text-white hover:text-yellow-300 active:text-yellow-300 text-[11px] sm:text-xs py-0.5 truncate">
+                          ❤ {it.emoji} {it.name}
                         </button>
                       );
                     })}
                   </div>
                   <button onClick={() => setInvOpen(false)}
-                    className="mt-3 w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                    className="mt-3 w-full py-1.5 border-2 border-white/40 text-gray-400 hover:text-white hover:border-white text-[11px] font-bold">とじる</button>
                 </div>
               </div>
             )}
             {/* ── アイテムアクションメニュー（Use/Details/Discard） ── */}
             {invMenu && !invDetail && (
-              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => { setInvMenu(null); invMenuRef.current = null; }}>
-                <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
+              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => { setInvMenu(null); invMenuRef.current = null; }}>
+                <div className="bg-black border-4 border-white p-3 sm:p-4 w-full max-w-xs font-pixel" onClick={e => e.stopPropagation()}>
                   {(() => {
                     const itemId = invSlots[invMenu.slotIdx];
                     const it = (gameData.items ?? []).find(x => x.id === itemId);
-                    if (!it) return <p className="text-gray-500">? ふめい</p>;
+                    if (!it) return <p className="text-gray-500 text-xs">? ふめい</p>;
                     const usable = !!(it.healHp || it.healMp);
                     const discardable = it.discardable !== false;
                     return (
                       <>
-                        <div className="text-amber-400 font-bold text-sm mb-2">{it.emoji} {it.name}</div>
-                        <div className="space-y-1.5">
+                        <div className="text-white font-bold text-xs sm:text-sm mb-2">{it.emoji} {it.name}</div>
+                        <div className="flex flex-col gap-1">
                           {usable && (
                             <button onClick={() => useInventoryItem(itemId)}
-                              className="w-full px-3 py-2 bg-amber-700 hover:bg-amber-600 active:bg-amber-500 text-white text-xs font-bold text-left">
+                              className="text-left text-white hover:text-yellow-300 text-[11px] sm:text-xs py-0.5">
                               ❤ つかう
                             </button>
                           )}
                           <button onClick={() => { setInvDetail(itemId); invDetailRef.current = itemId; }}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold text-left">
+                            className="text-left text-white hover:text-yellow-300 text-[11px] sm:text-xs py-0.5">
                             ❤ せつめい
                           </button>
                           {discardable && (
                             <button onClick={() => discardInventoryItem(itemId)}
-                              className="w-full px-3 py-2 bg-red-800 hover:bg-red-700 active:bg-red-600 text-white text-xs font-bold text-left">
+                              className="text-left text-white hover:text-yellow-300 text-[11px] sm:text-xs py-0.5">
                               ❤ すてる
                             </button>
                           )}
                           <button onClick={() => { setInvMenu(null); invMenuRef.current = null; }}
-                            className="w-full px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold text-left">
+                            className="text-left text-gray-400 hover:text-white text-[11px] sm:text-xs py-0.5">
                             ❤ もどる
                           </button>
                         </div>
@@ -7736,19 +7769,19 @@ const lose = (msg: string) => {
             )}
             {/* ── アイテム詳細 ── */}
             {invDetail && (
-              <div className="absolute inset-0 flex items-end justify-center pb-4 z-30 bg-black/30" onClick={() => { setInvDetail(null); invDetailRef.current = null; }}>
-                <div className="bg-gray-900 border border-amber-600 p-4 w-full max-w-xs mx-3 font-pixel" onClick={e => e.stopPropagation()}>
+              <div className="absolute inset-0 flex items-center justify-center p-4 z-30 bg-black/50" onClick={() => { setInvDetail(null); invDetailRef.current = null; }}>
+                <div className="bg-black border-4 border-white p-3 sm:p-4 w-full max-w-xs font-pixel" onClick={e => e.stopPropagation()}>
                   {(() => {
                     const it = (gameData.items ?? []).find(x => x.id === invDetail);
-                    if (!it) return <p className="text-gray-500">? ふめい</p>;
+                    if (!it) return <p className="text-gray-500 text-xs">? ふめい</p>;
                     return (
                       <>
-                        <div className="text-amber-400 font-bold text-sm mb-1">{it.emoji} {it.name}</div>
-                        <div className="text-gray-300 text-xs mb-3 leading-relaxed whitespace-pre-wrap">
+                        <div className="text-white font-bold text-xs sm:text-sm mb-1">{it.emoji} {it.name}</div>
+                        <div className="text-gray-300 text-[11px] sm:text-xs mb-3 leading-relaxed whitespace-pre-wrap">
                           {it.description || 'せつめいのない どうぐ。'}
                         </div>
                         <button onClick={() => { setInvDetail(null); invDetailRef.current = null; }}
-                          className="w-full py-2 bg-gray-700 text-gray-300 text-xs active:bg-gray-600">とじる</button>
+                          className="w-full py-1.5 border-2 border-white/40 text-gray-400 hover:text-white hover:border-white text-[11px] font-bold">とじる</button>
                       </>
                     );
                   })()}
