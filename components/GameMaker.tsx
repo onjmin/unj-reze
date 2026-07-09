@@ -4079,10 +4079,13 @@ const lose = (msg: string) => {
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
           // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
           const alreadyOverlapping = isBlockedByMob(p.x, p.y, pData.w, pData.h);
+          // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
+          const curZt1 = getTile(p.x, p.y), curZt2 = getTile(p.x + pData.w - 1, p.y + pData.h - 1);
+          const alreadyInWall = !curZt1?.info.passable || !curZt2?.info.passable;
           let zt1 = getTile(nx, p.y), zt2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-          if (zt1?.info.passable && zt2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
+          if ((alreadyInWall || (zt1?.info.passable && zt2?.info.passable)) && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           zt1 = getTile(p.x, ny); zt2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-          if (zt1?.info.passable && zt2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+          if ((alreadyInWall || (zt1?.info.passable && zt2?.info.passable)) && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           }
           // 向き更新（最後に押した方向。左右優先、無ければ上下）
           if (isLeft) onjRezeDirRef.current = { x: -1, y: 0 };
@@ -4209,10 +4212,13 @@ const lose = (msg: string) => {
           if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
           // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
           const alreadyOverlapping = mobBlockActive && isBlockedByMob(p.x, p.y, pData.w, pData.h);
+          // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
+          const curT1 = getTile(p.x, p.y), curT2 = getTile(p.x + pData.w - 1, p.y + pData.h - 1);
+          const alreadyInWall = !curT1?.info.passable || !curT2?.info.passable;
           let t1 = getTile(nx, p.y), t2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-          if (t1?.info.passable && t2?.info.passable && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
+          if ((alreadyInWall || (t1?.info.passable && t2?.info.passable)) && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
           t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-          if (t1?.info.passable && t2?.info.passable && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+          if ((alreadyInWall || (t1?.info.passable && t2?.info.passable)) && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           }
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
