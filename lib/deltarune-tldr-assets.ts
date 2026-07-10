@@ -51,6 +51,8 @@ export const TLDR_SFX = {
   uiCancel: 'snd_ui_cancel/snd_ui_cancel.wav',
   uiCantSelect: 'snd_ui_cant_select/snd_ui_cant_select.wav',
   spellCast: 'snd_spellcast/snd_spellcast.wav',
+  rudeBusterSwing: 'snd_rudebuster_swing/snd_rudebuster_swing.wav',
+  rudeBusterHit: 'snd_rudebuster_hit/snd_rudebuster_hit.wav',
   spearRise: 'snd_spearrise/snd_spearrise.wav',
   swallow: 'snd_swallow/snd_swallow.wav',
   splat: 'snd_splat/snd_splat.wav',

@@ -392,8 +392,14 @@ export const deltarune: PresetData = {
     party: [
       { id: 'kris',   name: 'クリス',   emoji: '🙂', maxHp: 26, color: TLDR_PARTY_UI.kris.color,
         battleSprites: { ...TLDR_PARTY_SPRITES.kris, icon: TLDR_PARTY_UI.kris.icon, iconHurt: TLDR_PARTY_UI.kris.iconHurt } },
+      // スージーのコマンドはラルセイ同様「まほう」（こうどうは使えない）。ルードバスターは
+      // tlDR Engine の item_s_rudebuster 準拠：TP50消費・タイミングバー無しの確定大ダメージ
+      // （原作の攻撃×11＋魔力×5をこのゲームのダメージスケールに換算）。SEも同エンジンの専用音源。
       { id: 'susie',  name: 'スージー', emoji: '😈', maxHp: 34, color: TLDR_PARTY_UI.susie.color,
-        battleSprites: { ...TLDR_PARTY_SPRITES.susie, icon: TLDR_PARTY_UI.susie.icon, iconHurt: TLDR_PARTY_UI.susie.iconHurt } },
+        battleSprites: { ...TLDR_PARTY_SPRITES.susie, icon: TLDR_PARTY_UI.susie.icon, iconHurt: TLDR_PARTY_UI.susie.iconHurt }, spells: [
+        { name: 'ルードバスター', tpCost: 50, power: 42,
+          castSfxUrl: tldrSfxUrl('rudeBusterSwing'), hitSfxUrl: tldrSfxUrl('rudeBusterHit') },
+      ] },
       { id: 'ralsei', name: 'ラルセイ', emoji: '🐐', maxHp: 22, color: TLDR_PARTY_UI.ralsei.color,
         battleSprites: { ...TLDR_PARTY_SPRITES.ralsei, icon: TLDR_PARTY_UI.ralsei.icon, iconHurt: TLDR_PARTY_UI.ralsei.iconHurt }, spells: [
         { name: 'ねがいのかぜ', tpCost: 20, power: 34, heal: true },

@@ -1269,47 +1269,46 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     mercyAdd: { ref: 'direct:dt-mercyadd', src: tldrSfxUrl('mercyAdd'), type: 'direct' as const },
   };
 
-  // オーディオコンテキストは一度だけ生成（コンポーネントの外やトップレベルに配置）
-  const audioContext = new AudioContext();
+  /** エンカウント和音用の AudioContext（遅延生成・単一インスタンス）とデコード済み音源キャッシュ。
+   *  レンダリングのたびに new AudioContext() すると同時生成数のブラウザ上限（Chrome で約6個）に
+   *  当たって以降の生成が例外になり音が出なくなるため、ref で一度だけ作って使い回す。
+   *  バッファは Promise ごとキャッシュして、並行呼び出し時のフェッチ重複も防ぐ。 */
+  const dtChordCtxRef = useRef<AudioContext | null>(null);
+  const dtChordBufRef = useRef<Promise<AudioBuffer> | null>(null);
 
-  /** デルタルーンのエンカウント演出音（Web Audio API 完全版）
-   * HTMLMediaElementのタイムストレッチを完全に回避し、MDNの仕様通り
-   * サンプリングレートを変更することで確実に「ピッチ違いの2連ホーン」を再現します。 */
+  /** デルタルーンのエンカウント演出音：単一の音源（snd_tensionhorn）を Web Audio API の
+   *  AudioBufferSourceNode.playbackRate で再生する。HTMLMediaElement の playbackRate と違い
+   *  ピッチ補正（タイムストレッチ）が入らないため、速度＝音程として確実にピッチが変わる。
+   *  tlDR Engine 準拠：o_enc_anim の Create_0（pitch 1.0）→ alarm[0]=8 フレーム後の
+   *  Alarm_0（pitch 1.1）＝ 30fps の 8f ≈ 266ms 遅れで高い方を重ねる。 */
   const playDtEncounterChord = async () => {
-    const url = tldrSfxUrl('tensionHorn');
     const volume = applyMasterVolume(getBgmVolume('direct:dt-tensionhorn-chord')) / 100 * 0.7;
-
     try {
-      // 1. 音声をフェッチしてデコード（2回目以降はキャッシュから一瞬で取得）
-      const response = await fetch(url);
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      const ctx = (dtChordCtxRef.current ??= new AudioContext());
+      // ユーザー操作前に生成されていた場合は autoplay 制限で suspended のままなので起こす
+      if (ctx.state === 'suspended') await ctx.resume();
 
-      // 音量調整用のゲインノード
-      const gainNode = audioContext.createGain();
+      // 初回だけフェッチ＋デコードし、以降はデコード済みバッファを即座に使い回す
+      dtChordBufRef.current ??= fetch(tldrSfxUrl('tensionHorn'))
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
+        .then(ab => ctx.decodeAudioData(ab));
+      const audioBuffer = await dtChordBufRef.current;
+
+      const gainNode = ctx.createGain();
       gainNode.gain.value = volume;
-      gainNode.connect(audioContext.destination);
+      gainNode.connect(ctx.destination);
 
-      const startTime = audioContext.currentTime;
-
-      // --- 1つめの音（Create_0.gml 相当：通常のサンプリングレート = 1.0） ---
-      const source1 = audioContext.createBufferSource();
-      source1.buffer = audioBuffer;
-      source1.playbackRate.value = 1.0; // 通常速度・通常ピッチ
-      source1.connect(gainNode);
-      source1.start(startTime);
-
-      // --- 2つめの音（Alarm_0.gml 相当：1.1倍のサンプリングレート = 1.1 / 120ms遅れ） ---
-      const source2 = audioContext.createBufferSource();
-      source2.buffer = audioBuffer;
-
-      // MDNの仕様通り、1.1を設定することで出力周波数が上がり、確実にピッチが高くなります
-      source2.playbackRate.value = 1.1;
-      source2.connect(gainNode);
-
-      source2.start(startTime + 0.266);
-
+      const startTime = ctx.currentTime;
+      for (const { rate, delay } of [{ rate: 1.0, delay: 0 }, { rate: 1.1, delay: 0.266 }]) {
+        const source = ctx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.playbackRate.value = rate;
+        source.connect(gainNode);
+        source.start(startTime + delay);
+      }
     } catch (err: unknown) {
+      // フェッチ/デコード失敗を Promise ごとキャッシュしたままにすると二度と鳴らなくなるので捨てる
+      dtChordBufRef.current = null;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`Unable to fetch or play the audio file. Error: ${message}`);
     }
@@ -1338,6 +1337,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  （倒れていれば defeat、まもる中なら defend）を表示する。seq は古いタイマーの誤消去防止。 */
   const [dtAnimFx, setDtAnimFx] = useState<Record<string, { kind: keyof PartyBattleSprites; seq: number } | undefined>>({});
   const dtAnimSeqRef = useRef(0);
+  /** メンバー被弾時に、そのキャラの頭上へダメージ量をポップアップ表示する（敵側の演出と同型）。 */
+  const [dtDmgPopups, setDtDmgPopups] = useState<Record<string, { text: string; id: number } | undefined>>({});
+  const dtDmgFxIdRef = useRef(0);
+  const triggerMemberDamageFx = (memberId: string, dmg: number) => {
+    const id = ++dtDmgFxIdRef.current;
+    setDtDmgPopups(p => ({ ...p, [memberId]: { text: String(dmg), id } }));
+    setTimeout(() => setDtDmgPopups(p => (p[memberId]?.id === id ? { ...p, [memberId]: undefined } : p)), 700);
+  };
   const dtPlayMemberAnim = (memberId: string, kind: keyof PartyBattleSprites, ms: number) => {
     if (gameDataRef.current.battle?.style !== 'deltarune') return;
     const seq = ++dtAnimSeqRef.current;
@@ -1505,8 +1512,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number; wrapped?: string[]; lastShown: number } | null>(null);
   /** アイテム取得演出（メッセージウィンドウではなく頭上に一定時間表示） */
   const itemGetRef = useRef<{ text: string; startTime: number } | null>(null);
-  /** アンダーテール風戦闘：敵へのダメージ数値ポップアップ（黒文字・赤フチ・見崎フォント） */
-  const [enemyDmgPopup, setEnemyDmgPopup] = useState<{ text: string; id: number } | null>(null);
+  /** アンダーテール風戦闘：敵へのダメージ数値ポップアップ（黒文字・赤フチ・見崎フォント）。
+   *  miss=true はダメージ数値の代わりに灰色の「MISS」を出す（こうげきをハズしたとき）。 */
+  const [enemyDmgPopup, setEnemyDmgPopup] = useState<{ text: string; id: number; miss?: boolean } | null>(null);
   /** アンダーテール風戦闘：敵HPゲージ。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<{ pct: number; id: number } | null>(null);
   const enemyFxIdRef = useRef(0);
@@ -1523,6 +1531,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }));
     setTimeout(() => setEnemyDmgPopup(p => (p?.id === id ? null : p)), 700);
     setTimeout(() => setEnemyGaugeAnim(p => (p?.id === id ? null : p)), 1200);
+  };
+  /** こうげきをハズしたとき：ダメージ数値の代わりに敵の頭上へ「MISS」を出す（HPゲージは出さない）。 */
+  const triggerEnemyMissFx = () => {
+    const id = ++enemyFxIdRef.current;
+    setEnemyDmgPopup({ text: 'MISS', id, miss: true });
+    setTimeout(() => setEnemyDmgPopup(p => (p?.id === id ? null : p)), 700);
   };
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
@@ -1738,6 +1752,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const reduced = dtDefendedRef.current.has(m.id) ? Math.max(1, Math.round(dmg * 2 / 3)) : dmg;
     dtSetHp(m.id, m.hp - reduced);
     dtPlayMemberAnim(m.id, 'hurt', 500);
+    triggerMemberDamageFx(m.id, reduced);
   };
   /** 回復処理（呪文用）。down 中のメンバーは、参考実装（HP=-maxHp/2 からの回復）に合わせて
    *  回復量が maxHp/2 を超えたときだけ復帰し、復帰HPは 17% を下限とする。復帰したら true を返す。 */
@@ -2115,6 +2130,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (gameDataRef.current.battle?.style === 'deltarune') {
       setDtAttackDone(p => ({ ...p, [dtTurnIdxRef.current]: { result: 'miss', pos: missPos } }));
     }
+    triggerEnemyMissFx();
     if (!dtNextIsAttack()) setSoulPhase('menu');
     appendLog('こうげきは ハズれた！', { canAct: false });
     dtAdvanceTurn();
@@ -2192,7 +2208,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     tpRef.current = nextTp; setTp(nextTp);
     const caster = dtParty()[dtTurnIdxRef.current];
     if (caster) dtPlayMemberAnim(caster.id, 'spell', 700);
-    playSfx(DT_SFX.spellCast);
+    // 呪文固有の詠唱SE（ルードバスターの snd_rudebuster_swing 等）があれば共通音の代わりに鳴らす
+    playSfx(spell.castSfxUrl
+      ? { ref: `direct:${spell.castSfxUrl}`, src: spell.castSfxUrl, type: 'direct' as const }
+      : DT_SFX.spellCast);
     const b = battleRef.current;
     if (spell.heal) {
       const party = gameDataRef.current.battle?.party ?? [];
@@ -2205,7 +2224,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const beforeHp = b.enemyHp;
       b.enemyHp = Math.max(0, b.enemyHp - dmg);
       triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
-      playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+      // 呪文固有の命中SE（ルードバスターの snd_rudebuster_hit 等）があれば共通音の代わりに鳴らす
+      playSfx(spell.hitSfxUrl
+        ? { ref: `direct:${spell.hitSfxUrl}`, src: spell.hitSfxUrl, type: 'direct' as const }
+        : (soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
       appendLog(`「${spell.name}」！ ${dmg}のダメージ`, { canAct: false });
       if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     }
@@ -2337,13 +2359,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       raf = requestAnimationFrame(step);
     };
+    // 押下が「その行への入力」として成立する棒の位置。これより右（早すぎる押下）は無視する。
+    // 参考実装（o_enc_fightstick）も x が的の手前一定範囲に入るまでは押しても解決しない
+    // （バーが光るだけ）。これが無いと、1回の早押しがその場でミス扱いになり、続く押下が
+    // まだ流れてもいない次のメンバーの行を次々つぶしてしまう（＝1押しで全員確定に見えるバグ）。
+    // 0.35＝有効ゾーン(0.26)の少し手前から。500ms間隔で流れる前後の行の受付時間が重ならない値。
+    const PRESSABLE = 0.35;
     const hit = () => {
       if (performance.now() < inputLockUntil) return; // 直前の解決から間もない入力は次の行に食い込ませない
       const cur = dtTurnIdxRef.current;
       const curOrder = rows.indexOf(cur);
       if (curOrder < 0 || resolvedLocal.has(cur)) return;
       const s = sOf(curOrder);
-      if (s >= 1) return; // まだ走り出していない（右端で待機中の）行は空振り扱いにしない
+      if (s > PRESSABLE) return; // 担当行の棒がまだ的に近づいていない：押下を無視（ミスにしない）
       resolvedLocal.add(cur);
       inputLockUntil = performance.now() + 250;
       resolveSoulAttack(Math.max(0, s), DT_FIGHT_TARGET);
@@ -6240,11 +6268,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             soulRootCursorRef.current = c; setSoulRootCursor(c);
           }
         } else {
-          // ACT / ITEM / MERCY サブメニュー（デルタルーンは ACT に現在ターンのメンバーの呪文も並ぶ）
+          // ACT / ITEM / MERCY サブメニュー。デルタルーンの2番目のコマンドはメンバーで中身が変わる：
+          // 呪文持ち（スージー/ラルセイ）＝「まほう」で自分の呪文のみ、呪文なし（クリス）＝「こうどう」でACT技のみ
           const bd2 = gameDataRef.current.battle;
           const curSpells = isDt ? (dtParty()[dtTurnIdxRef.current] ? (bd2?.party?.[dtTurnIdxRef.current]?.spells ?? []) : []) : [];
+          const curMoveCount = isDt && curSpells.length ? 0 : (bd2?.moves.length ?? 0);
           let count = 1; let cols = 1;
-          if (soulMenuRef.current === 'act') { count = (bd2?.moves.length ?? 0) + curSpells.length + 1; cols = 2; }
+          if (soulMenuRef.current === 'act') { count = curMoveCount + curSpells.length + 1; cols = 2; }
           else if (soulMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
           else if (soulMenuRef.current === 'mercy') { count = 3; cols = 1; }
           if (count > 0 && (upMove || downMove || leftMove || rightMove)) {
@@ -6373,9 +6403,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             }
           } else if (soulMenuRef.current === 'act') {
-            const moves = gameDataRef.current.battle?.moves ?? [];
             const curMember = isDt ? gameDataRef.current.battle?.party?.[dtTurnIdxRef.current] : undefined;
             const spells = curMember?.spells ?? [];
+            // 呪文持ちメンバーのメニューは「まほう」＝呪文のみ（ACT技は呪文なしのクリス専用）
+            const moves = isDt && spells.length ? [] : (gameDataRef.current.battle?.moves ?? []);
             const idx = soulSubCursorRef.current;
             if (idx < moves.length) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); doMove(moves[idx]); } }
             else if (idx < moves.length + spells.length) {
@@ -8572,7 +8603,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       {enemyDmgPopup && (
                         <div key={enemyDmgPopup.id}
                           className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
-                          style={{
+                          style={enemyDmgPopup.miss ? {
+                            color: '#9ca3af',
+                            textShadow: '1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000',
+                            animation: 'dmgPopUp 0.7s ease-out forwards',
+                          } : {
                             color: '#000',
                             textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
                             animation: 'dmgPopUp 0.7s ease-out forwards',
@@ -8590,9 +8625,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </div>
                     <div className={`leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
                       {battle.enemySprite ? (() => {
-                        // スプライト持ちの敵：被ダメージ演出中は hurt、みのがし可能になったら spare、通常は idle アニメ
+                        // スプライト持ちの敵：被ダメージ演出中は hurt（ミス表示中は除く）、みのがし可能になったら spare、通常は idle アニメ
                         const es = battle.enemySprite;
-                        const anim = enemyDmgPopup && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
+                        const anim = enemyDmgPopup && !enemyDmgPopup.miss && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
                         return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
                       })() : <span className="text-5xl sm:text-6xl">{battle.enemyEmoji}</span>}
                     </div>
@@ -8715,12 +8750,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const roster = dtParty();
               const curMember = bd.party?.[dtTurnIdx];
               const curSpells = curMember?.spells ?? [];
+              // 呪文持ちメンバー（スージー/ラルセイ）の2番目のコマンドは「まほう」＝自分の呪文だけが並ぶ。
+              // 呪文を持たないメンバー（クリス）だけが「こうどう」＝共通のACT技を使える（原作準拠：
+              // tlDR Engine でも ACT は item_s_act としてクリスの spells 枠に入っている構造）。
+              const curMoves = curSpells.length ? [] : bd.moves;
               const memberColor = (i: number) => bd.party?.[i]?.color ?? '#ffffff';
               // コマンド5種（tlDR Engine のボタンスプライト。frame0=通常/frame1=選択中）。
               // 2番目は呪文持ちなら POWER（まほう）、それ以外は ACT（こうどう）の絵柄になる。
               const cmds = [
                 { anim: TLDR_UI_SPRITES.btFight, label: bd.labels.attack, onClick: () => canMenu && dtChooseFight() },
-                { anim: curSpells.length ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: bd.labels.move, sel: soulMenu === 'act', onClick: () => canMenu && setSoulMenu(m => m === 'act' ? 'root' : 'act') },
+                { anim: curSpells.length ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: curSpells.length ? 'まほう' : bd.labels.move, sel: soulMenu === 'act', onClick: () => canMenu && setSoulMenu(m => m === 'act' ? 'root' : 'act') },
                 { anim: TLDR_UI_SPRITES.btItem, label: bd.labels.item ?? 'アイテム', sel: soulMenu === 'item', onClick: () => canMenu && setSoulMenu(m => m === 'item' ? 'root' : 'item') },
                 { anim: TLDR_UI_SPRITES.btSpare, label: bd.labels.mercy ?? 'みのがす', sel: soulMenu === 'mercy', mercy: true, onClick: () => canMenu && setSoulMenu(m => m === 'mercy' ? 'root' : 'mercy') },
                 { anim: TLDR_UI_SPRITES.btDefend, label: 'まもる', onClick: () => canMenu && doDefend() },
@@ -8754,12 +8793,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         // defend は「まもる」中ずっと表示され続ける状態なので、1周したら最終フレームで
                         // 静止させる（ループさせると屈み込む動作を延々と繰り返して見えるため）。
                         const oneShot = kind === 'attack' || kind === 'act' || kind === 'spell' || kind === 'item' || kind === 'defend';
+                        const dmgPop = dtDmgPopups[m.id];
                         return (
-                          <div key={m.id} className="h-16 sm:h-24 flex items-end">
+                          <div key={m.id} className="relative h-16 sm:h-24 flex items-end">
                             {anim
                               ? <BattleAnimSprite anim={anim} h={anim.h ? Math.min(92, anim.h * 1.7) : 76} once={oneShot}
                                 className={down ? 'opacity-60' : ''} />
                               : <span className={`text-5xl ${down ? 'opacity-40 grayscale' : ''}`}>{m.emoji}</span>}
+                            {/* 被弾ダメージ数値：キャラの頭上に敵側と同じ体裁（赤フチ・見崎フォント）で表示 */}
+                            {dmgPop && (
+                              <div key={dmgPop.id}
+                                className="absolute -top-1 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-xl sm:text-2xl whitespace-nowrap z-10"
+                                style={{
+                                  color: '#000',
+                                  textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
+                                  animation: 'dmgPopUp 0.7s ease-out forwards',
+                                }}>
+                                {dmgPop.text}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -8770,7 +8822,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         {enemyDmgPopup && (
                           <div key={enemyDmgPopup.id}
                             className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
-                            style={{
+                            style={enemyDmgPopup.miss ? {
+                              color: '#9ca3af',
+                              textShadow: '1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000',
+                              animation: 'dmgPopUp 0.7s ease-out forwards',
+                            } : {
                               color: '#000',
                               textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
                               animation: 'dmgPopUp 0.7s ease-out forwards',
@@ -8788,7 +8844,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </div>
                       {battle.enemySprite ? (() => {
                         const es = battle.enemySprite;
-                        const anim = enemyDmgPopup && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
+                        const anim = enemyDmgPopup && !enemyDmgPopup.miss && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
                         return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(160, anim.h * 2.4) : 120} />;
                       })() : <span className="text-7xl sm:text-8xl leading-none drop-shadow">{battle.enemyEmoji}</span>}
                       <div className={`mt-1 text-[10px] sm:text-xs flex items-center gap-1 ${ready ? 'text-yellow-300' : 'text-white'}`}>
@@ -8911,7 +8967,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     )}
                     {soulMenu === 'act' && (
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                        {bd.moves.map((m, i) => (
+                        {curMoves.map((m, i) => (
                           <button key={`m${i}`} disabled={!canMenu}
                             onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); doMove(m); }}
                             className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
@@ -8919,7 +8975,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </button>
                         ))}
                         {curSpells.map((sp, i) => {
-                          const idx = bd.moves.length + i;
+                          const idx = curMoves.length + i;
                           return (
                             <button key={`s${i}`} disabled={!canMenu || tp < sp.tpCost}
                               onClick={() => { setSoulSubCursor(idx); setSoulMenu('root'); castSpell(sp); }}
@@ -8928,9 +8984,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             </button>
                           );
                         })}
-                        <button onClick={() => { setSoulSubCursor(bd.moves.length + curSpells.length); setSoulMenu('root'); }}
-                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === bd.moves.length + curSpells.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                          {soulSubCursor === bd.moves.length + curSpells.length ? '❤ ' : '  '}もどる
+                        <button onClick={() => { setSoulSubCursor(curMoves.length + curSpells.length); setSoulMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === curMoves.length + curSpells.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {soulSubCursor === curMoves.length + curSpells.length ? '❤ ' : '  '}もどる
                         </button>
                       </div>
                     )}

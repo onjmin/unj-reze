@@ -320,8 +320,13 @@ export interface EnemyMove { name: string; power: number; heal?: boolean; miniSc
 export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; }
 
 /** battle.style==='deltarune' の呪文。TPを消費する（MPとは別のバトル専用リソース。戦闘開始時0にリセットされ、
- *  グレイズ／まもる で溜まる）。heal=true なら power の値だけパーティを回復、それ以外は power ダメージ。 */
-export interface PartySpell { name: string; tpCost: number; power: number; heal?: boolean; }
+ *  グレイズ／まもる で溜まる）。heal=true なら power の値だけパーティを回復、それ以外は power ダメージ
+ *  （タイミングバー無しの確定ダメージ）。 */
+export interface PartySpell {
+  name: string; tpCost: number; power: number; heal?: boolean;
+  /** 詠唱時・命中時の専用SE（省略時は共通の spellCast／enemyDamage）。ルードバスター等の固有演出用 */
+  castSfxUrl?: string; hitSfxUrl?: string;
+}
 
 /** バトル演出用のアニメ1本（フレーム順の画像URL列）。fps 省略時は 8。
  *  tlDR Engine のスプライト（lib/deltarune-tldr-assets.ts の TldrAnim）と構造互換。 */
