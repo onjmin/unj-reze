@@ -187,25 +187,25 @@ const sceneField: SceneDef = {
   // 南は弱く北は強い——は1テーブルでは表せないので、テーブルは弱〜中でまとめ、
   // 北側は強めのシンボルエンカウントで難度を出す。
   randomEncounters: [
-    { name: 'スライム',     emoji: '🟦', hp: 15,  atk: 9,  def: 2, exp: 3,  gold: 4  },
-    { name: 'スライム',     emoji: '🟦', hp: 15,  atk: 9,  def: 2, exp: 3,  gold: 4  },
-    { name: 'スライムベス', emoji: '🟥', hp: 20, atk: 11, def: 3, exp: 5,  gold: 7  },
-    { name: 'ドラキー',     emoji: '🦇', hp: 24, atk: 13, def: 4, exp: 7,  gold: 10 },
-    { name: 'ゴースト',     emoji: '👻', hp: 30, atk: 16, def: 6, exp: 10, gold: 14 },
-    { name: 'まどうし',     emoji: '🧙', hp: 38, atk: 18, def: 8, exp: 15, gold: 22, moves: [{ name: 'ギラ', power: 12 }] },
+    { name: 'スライム',     emoji: '🟦', hp: 22,  atk: 9,  def: 2, exp: 3,  gold: 4  },
+    { name: 'スライム',     emoji: '🟦', hp: 22,  atk: 9,  def: 2, exp: 3,  gold: 4  },
+    { name: 'スライムベス', emoji: '🟥', hp: 30, atk: 11, def: 3, exp: 5,  gold: 7  },
+    { name: 'ドラキー',     emoji: '🦇', hp: 36, atk: 13, def: 4, exp: 7,  gold: 10 },
+    { name: 'ゴースト',     emoji: '👻', hp: 45, atk: 16, def: 6, exp: 10, gold: 14 },
+    { name: 'まどうし',     emoji: '🧙', hp: 55, atk: 18, def: 8, exp: 15, gold: 22, moves: [{ name: 'ギラ', power: 12 }] },
   ],
   encounterRate: 15,
   bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
   objects: [
     // ── 南部（弱い敵）──
-    foe({ name: 'スライム', emoji: '🟦', col: 12, row: 14, hp: 15, atk: 9, def: 2, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6' }),
-    foe({ name: 'スライム', emoji: '🟦', col: 17, row: 20, hp: 15, atk: 9, def: 2, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6' }),
-    foe({ name: 'スライムベス', emoji: '🟥', col: 25, row: 13, hp: 20, atk: 11, def: 3, exp: 5, gold: 7, behavior: 'random', speed: 1.0, spriteId: 'hswBaA' }),
+    foe({ name: 'スライム', emoji: '🟦', col: 12, row: 14, hp: 22, atk: 9, def: 2, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6' }),
+    foe({ name: 'スライム', emoji: '🟦', col: 17, row: 20, hp: 22, atk: 9, def: 2, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6' }),
+    foe({ name: 'スライムベス', emoji: '🟥', col: 25, row: 13, hp: 30, atk: 11, def: 3, exp: 5, gold: 7, behavior: 'random', speed: 1.0, spriteId: 'hswBaA' }),
     // ── 北部（強い敵）──
-    foe({ name: 'ドラキー', emoji: '🦇', col: 8, row: 7, hp: 24, atk: 13, def: 4, exp: 7, gold: 10, behavior: 'random', spriteId: 'R42ett' }),
-    foe({ name: 'がいこつ', emoji: '💀', col: 16, row: 6, hp: 48, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
-    foe({ name: 'おおさそり', emoji: '🦂', col: 22, row: 7, hp: 52, atk: 30, def: 14, exp: 33, gold: 40, behavior: 'random' }),
-    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 6, hp: 90, atk: 48, def: 26, exp: 95, gold: 110, behavior: 'patrolV' }),
+    foe({ name: 'ドラキー', emoji: '🦇', col: 8, row: 7, hp: 36, atk: 13, def: 4, exp: 7, gold: 10, behavior: 'random', spriteId: 'R42ett' }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 16, row: 6, hp: 70, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
+    foe({ name: 'おおさそり', emoji: '🦂', col: 22, row: 7, hp: 75, atk: 30, def: 14, exp: 33, gold: 40, behavior: 'random' }),
+    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 6, hp: 120, atk: 48, def: 26, exp: 95, gold: 110, behavior: 'patrolV' }),
     // ── NPC ──
     npc('🧑‍🌾', 16, 11, '橋の北はまものが強い。レベル5……いや、くさりかたびらを買ってからのほうがいいぞ。'),
     npc('👴', 10, 19, '西の城がラダトーム城、東の町がリムルダールじゃ。北西の山には洞窟の入り口があるらしい。', 'M05nRh'),
@@ -354,11 +354,11 @@ const sceneCave: SceneDef = {
   id: 'cave', name: '沼地の洞窟',
   map: caveMap,
   randomEncounters: [
-    { name: 'メーダ',     emoji: '👁️', hp: 38, atk: 21, def: 9,  exp: 16, gold: 20, moves: [{ name: 'メラ', power: 11 }] },
-    { name: 'がいこつ',   emoji: '💀', hp: 48, atk: 26, def: 12, exp: 24, gold: 30 },
-    { name: 'まどうし',   emoji: '🧙', hp: 42, atk: 24, def: 10, exp: 28, gold: 36, moves: [{ name: 'ギラ', power: 14 }, { name: 'ホイミ', power: 18, heal: true }] },
-    { name: 'おおさそり', emoji: '🦂', hp: 52, atk: 30, def: 14, exp: 33, gold: 40 },
-    { name: 'リカント',   emoji: '🐺', hp: 60, atk: 34, def: 15, exp: 40, gold: 48 },
+    { name: 'メーダ',     emoji: '👁️', hp: 55, atk: 21, def: 9,  exp: 16, gold: 20, moves: [{ name: 'メラ', power: 11 }] },
+    { name: 'がいこつ',   emoji: '💀', hp: 70, atk: 26, def: 12, exp: 24, gold: 30 },
+    { name: 'まどうし',   emoji: '🧙', hp: 60, atk: 24, def: 10, exp: 28, gold: 36, moves: [{ name: 'ギラ', power: 14 }, { name: 'ホイミ', power: 18, heal: true }] },
+    { name: 'おおさそり', emoji: '🦂', hp: 75, atk: 30, def: 14, exp: 33, gold: 40 },
+    { name: 'リカント',   emoji: '🐺', hp: 85, atk: 34, def: 15, exp: 40, gold: 48 },
   ],
   encounterRate: 11,
   bgm: { ref: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', src: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', type: 'youtube' },
@@ -369,7 +369,7 @@ const sceneCave: SceneDef = {
     chest(7, 9, [
       { type: 'changeGold', amount: 120 },
     ]),
-    foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 48, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 70, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
     // 石板スイッチ（隠し部屋の封印を解く）
     newObject({
       emoji: '🪨', col: 14, row: 12, behavior: 'still', hazard: false,
@@ -382,7 +382,7 @@ const sceneCave: SceneDef = {
       ],
     }),
     // ── 隠し部屋（まほうのよろい）──
-    foe({ name: 'がいこつ', emoji: '💀', col: 11, row: 17, hp: 48, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 11, row: 17, hp: 70, atk: 26, def: 12, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
     newObject({
       emoji: '🔒', col: 7, row: 17, behavior: 'still', hazard: false,
       spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL'),
@@ -397,9 +397,9 @@ const sceneCave: SceneDef = {
       ],
     }),
     // ── 右の通路と最深部 ──
-    foe({ name: 'メーダ', emoji: '👁️', col: 26, row: 9, hp: 38, atk: 21, def: 9, exp: 16, gold: 20, moves: [{ name: 'メラ', power: 11 }], behavior: 'patrolV', spriteId: 'oE4l1x' }),
+    foe({ name: 'メーダ', emoji: '👁️', col: 26, row: 9, hp: 55, atk: 21, def: 9, exp: 16, gold: 20, moves: [{ name: 'メラ', power: 11 }], behavior: 'patrolV', spriteId: 'oE4l1x' }),
     // 番人ドラゴン
-    foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 120, atk: 44, def: 24, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 26 }], behavior: 'patrolV', speed: 1.4 }),
+    foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 155, atk: 44, def: 24, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 26 }], behavior: 'patrolV', speed: 1.4 }),
     // まほうのカギの宝箱
     chest(26, 15, [
       { type: 'giveItem', itemId: 'magicKey', count: 1 },
@@ -459,10 +459,10 @@ const sceneDragonCastle: SceneDef = {
   id: 'dragonCastle', name: '竜王の城',
   map: dragonCastleMap,
   randomEncounters: [
-    { name: 'キメラ',       emoji: '🦅', hp: 64, atk: 40, def: 16, exp: 60, gold: 70,  moves: [{ name: 'かえんのいき', power: 20 }] },
-    { name: 'しりょうのきし', emoji: '🧟', hp: 75, atk: 44, def: 22, exp: 75, gold: 85,  moves: [{ name: 'ベホイミ', power: 25, heal: true }] },
-    { name: 'だいまどう',   emoji: '🔮', hp: 68, atk: 42, def: 18, exp: 85, gold: 105, moves: [{ name: 'ベギラマ', power: 30 }] },
-    { name: 'よろいのきし', emoji: '🤺', hp: 90, atk: 48, def: 26, exp: 95, gold: 110 },
+    { name: 'キメラ',       emoji: '🦅', hp: 90, atk: 40, def: 16, exp: 60, gold: 70,  moves: [{ name: 'かえんのいき', power: 20 }] },
+    { name: 'しりょうのきし', emoji: '🧟', hp: 105, atk: 44, def: 22, exp: 75, gold: 85,  moves: [{ name: 'ベホイミ', power: 25, heal: true }] },
+    { name: 'だいまどう',   emoji: '🔮', hp: 95, atk: 42, def: 18, exp: 85, gold: 105, moves: [{ name: 'ベギラマ', power: 30 }] },
+    { name: 'よろいのきし', emoji: '🤺', hp: 120, atk: 48, def: 26, exp: 95, gold: 110 },
   ],
   encounterRate: 10,
   bgm: { ref: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', src: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', type: 'youtube' },
@@ -483,15 +483,15 @@ const sceneDragonCastle: SceneDef = {
       ],
     }),
     // ── 大広間 ──
-    foe({ name: 'しりょうのきし', emoji: '🧟', col: 10, row: 7, hp: 75, atk: 44, def: 22, exp: 75, gold: 85, moves: [{ name: 'ベホイミ', power: 25, heal: true }], behavior: 'patrolH' }),
-    foe({ name: 'キメラ', emoji: '🦅', col: 19, row: 8, hp: 64, atk: 40, def: 16, exp: 60, gold: 70, moves: [{ name: 'かえんのいき', power: 20 }], behavior: 'random' }),
+    foe({ name: 'しりょうのきし', emoji: '🧟', col: 10, row: 7, hp: 105, atk: 44, def: 22, exp: 75, gold: 85, moves: [{ name: 'ベホイミ', power: 25, heal: true }], behavior: 'patrolH' }),
+    foe({ name: 'キメラ', emoji: '🦅', col: 19, row: 8, hp: 90, atk: 40, def: 16, exp: 60, gold: 70, moves: [{ name: 'かえんのいき', power: 20 }], behavior: 'random' }),
     // 西翼：ロトのつるぎ（ストーンマンが守る）
-    foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 125, atk: 50, def: 30, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8 }),
+    foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 160, atk: 50, def: 30, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8 }),
     chest(3, 9, [
       { type: 'giveItem', itemId: 'lotoSword', count: 1 },
     ]),
     // 東翼：軍資金
-    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 90, atk: 48, def: 26, exp: 95, gold: 110, behavior: 'patrolH' }),
+    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 120, atk: 48, def: 26, exp: 95, gold: 110, behavior: 'patrolH' }),
     chest(26, 10, [
       { type: 'changeGold', amount: 300 },
     ]),

@@ -125,7 +125,7 @@ const sceneField: SceneDef = {
     chest(6, 13, [{ type: 'giveItem', itemId: 'darkCandy', count: 2 }]),
     chest(24, 13, [{ type: 'changeGold', amount: 25 }]),
     // 野原のモンスター
-    foe({ name: 'バイクにのった鬼', emoji: '🏍️', col: 8, row: 8, hp: 20, atk: 8, def: 2, exp: 3, gold: 12, behavior: 'patrolH', speed: 1.4,
+    foe({ name: 'バイクにのった鬼', emoji: '🏍️', col: 8, row: 8, hp: 30, atk: 8, def: 2, exp: 3, gold: 12, behavior: 'patrolH', speed: 1.4,
       miniScript: `
 while true
   shotSide(true, randF(20, 156), 2.2, 4, 0)
@@ -134,7 +134,7 @@ end while
 `.trim() }),
     // ウイルスくん（tlDR Engine の看板敵）：バトルスプライトの1コマ目がそのまま徘徊シンボルになる。
     // たたかわず「ちょうさ」→「みのがす」でも消える
-    foe({ name: 'ウイルスくん', emoji: '🦠', col: 12, row: 16, hp: 24, atk: 8, def: 2, exp: 4, gold: 14, behavior: 'random',
+    foe({ name: 'ウイルスくん', emoji: '🦠', col: 12, row: 16, hp: 35, atk: 8, def: 2, exp: 4, gold: 14, behavior: 'random',
       battleSprite: TLDR_ENEMY_SPRITES.virovirokun,
       ...symbolSprite(TLDR_ENEMY_SPRITES.virovirokun.idle),
       dialogue: [
@@ -148,9 +148,9 @@ while true
 end while
 `.trim() }),
     // ぼうしおばけ：ランダムエンカウント廃止に伴い徘徊シンボルとして再配置
-    foe({ name: 'ぼうしおばけ', emoji: '🎩', col: 20, row: 8, hp: 18, atk: 6, def: 3, exp: 2, gold: 10, behavior: 'random',
+    foe({ name: 'ぼうしおばけ', emoji: '🎩', col: 20, row: 8, hp: 26, atk: 6, def: 3, exp: 2, gold: 10, behavior: 'random',
       moves: [{ name: 'ハイタッチをもとめる', power: 6 }] }),
-    foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 22, atk: 9, def: 3, exp: 4, gold: 14, behavior: 'random',
+    foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 32, atk: 9, def: 3, exp: 4, gold: 14, behavior: 'random',
       moves: [{ name: 'かおのパーツこうげき', power: 8, miniScript: `
 while true
   shotRain(1.6, 4, 4)
@@ -230,8 +230,8 @@ const sceneTown: SceneDef = {
       ]}],
     }),
     // まちのモンスター
-    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 30, atk: 12, def: 5, exp: 8, gold: 16, behavior: 'random' }),
-    foe({ name: 'きれたマネキン', emoji: '🪞', col: 22, row: 16, hp: 34, atk: 13, def: 6, exp: 9, gold: 18, behavior: 'still',
+    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 44, atk: 12, def: 5, exp: 8, gold: 16, behavior: 'random' }),
+    foe({ name: 'きれたマネキン', emoji: '🪞', col: 22, row: 16, hp: 50, atk: 13, def: 6, exp: 9, gold: 18, behavior: 'still',
       moves: [{ name: 'ヒビわれた 笑顔', power: 10, miniScript: `
 while true
   shotPlayer(getPlayerX(), -6, 1.8, 5, 3)
