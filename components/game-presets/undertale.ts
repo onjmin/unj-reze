@@ -101,9 +101,9 @@ const sceneRuins: SceneDef = {
   id: 'ruins', name: 'いせき',
   map: ruinsMap,
   randomEncounters: [
-    { name: 'カエルさん',     emoji: '🐸', hp: 10, atk: 8, def: 2, exp: 3, gold: 5 },
-    { name: 'ひらひらむし',   emoji: '🦋', hp: 8,  atk: 7, def: 1, exp: 2, gold: 4 },
-    { name: 'ないてるおばけ', emoji: '👻', hp: 14, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+    { name: 'カエルさん',     emoji: '🐸', hp: 18, atk: 8, def: 2, exp: 3, gold: 5 },
+    { name: 'ひらひらむし',   emoji: '🦋', hp: 14,  atk: 7, def: 1, exp: 2, gold: 4 },
+    { name: 'ないてるおばけ', emoji: '👻', hp: 22, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
 while true
   shotRain(randF(1.2, 2.0), 3, 4)
   wait(9)
@@ -168,9 +168,9 @@ end while
       { type: 'changeGold', amount: 30 },
     ]),
     // 遺跡のモンスター
-    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 10, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
-    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 10, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
-    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 14, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 18, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
+    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 18, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
+    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 22, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
 while true
   shotRain(randF(1.2, 2.0), 3, 4)
   wait(9)
@@ -188,7 +188,7 @@ end while
         ]},
       ],
     }),
-    foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 90, atk: 14, def: 12, exp: 45, gold: 40,
+    foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 120, atk: 14, def: 12, exp: 45, gold: 40,
       // 通常攻撃：ゆっくり降るオレンジの火の粉（やさしい）
       miniScript: `
 while true
@@ -258,16 +258,16 @@ const sceneSnowdin: SceneDef = {
   id: 'snowdin', name: 'ゆきのまち',
   map: snowdinMap,
   randomEncounters: [
-    { name: 'ゆきのとり',   emoji: '🐦', hp: 18, atk: 12, def: 5, exp: 8, gold: 12, moves: [{ name: 'さむいダジャレ', power: 8 }] },
-    { name: 'アイスぼうや', emoji: '🧊', hp: 16, atk: 11, def: 6, exp: 7, gold: 10 },
-    { name: 'わんわん',     emoji: '🐕', hp: 20, atk: 13, def: 6, exp: 9, gold: 14 },
+    { name: 'ゆきのとり',   emoji: '🐦', hp: 28, atk: 12, def: 5, exp: 8, gold: 12, moves: [{ name: 'さむいダジャレ', power: 8 }] },
+    { name: 'アイスぼうや', emoji: '🧊', hp: 24, atk: 11, def: 6, exp: 7, gold: 10 },
+    { name: 'わんわん',     emoji: '🐕', hp: 30, atk: 13, def: 6, exp: 9, gold: 14 },
   ],
   encounterRate: 14,
   bgm: { ref: 'https://www.youtube.com/watch?v=vYyLL9QstbI', src: 'https://www.youtube.com/watch?v=vYyLL9QstbI', type: 'youtube' },
   objects: [
     // ホネの兄弟
     npc('💀', 5, 13, 'よう にんげん。ほねのある やつは きらいじゃないぜ。……おっと、おれの ことか。', 'BKRjJx'),
-    foe({ name: 'ハデなガイコツ', emoji: '💀', col: 21, row: 11, hp: 110, atk: 16, def: 14, exp: 55, gold: 60,
+    foe({ name: 'ハデなガイコツ', emoji: '💀', col: 21, row: 11, hp: 140, atk: 16, def: 14, exp: 55, gold: 60,
       // 通常攻撃：左右から交互に飛んでくるホネ
       miniScript: `
 while true
@@ -312,7 +312,7 @@ end while
       ]}],
     }),
     // 番犬・スノーマン
-    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 20, atk: 13, def: 6, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH' }),
+    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 30, atk: 13, def: 6, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH' }),
     newObject({
       emoji: '⛄', col: 8, row: 17, behavior: 'still', hazard: false,
       pages: [
@@ -400,9 +400,9 @@ const sceneWaterfall: SceneDef = {
   id: 'waterfall', name: 'みずのどうくつ',
   map: waterfallMap,
   randomEncounters: [
-    { name: 'キラキラくらげ', emoji: '🪼', hp: 24, atk: 16, def: 8, exp: 13, gold: 18 },
-    { name: 'うたうさかな',   emoji: '🐟', hp: 28, atk: 18, def: 9, exp: 15, gold: 22, moves: [{ name: 'ソウルフルなうた', power: 12 }] },
-    { name: 'テミー',         emoji: '🐱', hp: 6,  atk: 4,  def: 2, exp: 1,  gold: 50 },
+    { name: 'キラキラくらげ', emoji: '🪼', hp: 36, atk: 16, def: 8, exp: 13, gold: 18 },
+    { name: 'うたうさかな',   emoji: '🐟', hp: 42, atk: 18, def: 9, exp: 15, gold: 22, moves: [{ name: 'ソウルフルなうた', power: 12 }] },
+    { name: 'テミー',         emoji: '🐱', hp: 10,  atk: 4,  def: 2, exp: 1,  gold: 50 },
   ],
   encounterRate: 12,
   bgm: { ref: 'https://www.youtube.com/watch?v=DVUh7caufKU', src: 'https://www.youtube.com/watch?v=DVUh7caufKU', type: 'youtube' },
@@ -433,10 +433,10 @@ const sceneWaterfall: SceneDef = {
       { type: 'giveItem', itemId: 'tutu', count: 1 },
     ]),
     // どうくつのモンスター
-    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 28, atk: 18, def: 9, exp: 15, gold: 22, moves: [{ name: 'ソウルフルなうた', power: 12 }], behavior: 'random' }),
+    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 42, atk: 18, def: 9, exp: 15, gold: 22, moves: [{ name: 'ソウルフルなうた', power: 12 }], behavior: 'random' }),
     // 出口の通路をまもる さかなのヒーロー
     npc('🪧', 6, 16, '看板「この先 せまい通路。\n【えいゆう】が にんげんを まちかまえている とのこと」'),
-    foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 150, atk: 20, def: 16, exp: 80, gold: 80,
+    foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 180, atk: 20, def: 16, exp: 80, gold: 80,
       // 通常攻撃：画面端からハートを狙う水色のやり
       miniScript: `
 while true

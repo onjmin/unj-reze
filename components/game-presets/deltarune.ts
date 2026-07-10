@@ -91,11 +91,11 @@ const sceneField: SceneDef = {
   id: 'field', name: 'くらやみの野原',
   map: fieldMap,
   randomEncounters: [
-    { name: 'バイクにのった鬼',   emoji: '🏍️', hp: 12, atk: 8,  def: 2, exp: 3, gold: 12 },
-    { name: 'ぼうしおばけ',       emoji: '🎩', hp: 10, atk: 6,  def: 3, exp: 2, gold: 10, moves: [{ name: 'ハイタッチをもとめる', power: 6 }] },
-    { name: 'ぱずるにんぎょう',   emoji: '🧩', hp: 14, atk: 9,  def: 3, exp: 4, gold: 14 },
+    { name: 'バイクにのった鬼',   emoji: '🏍️', hp: 20, atk: 8,  def: 2, exp: 3, gold: 12 },
+    { name: 'ぼうしおばけ',       emoji: '🎩', hp: 18, atk: 6,  def: 3, exp: 2, gold: 10, moves: [{ name: 'ハイタッチをもとめる', power: 6 }] },
+    { name: 'ぱずるにんぎょう',   emoji: '🧩', hp: 22, atk: 9,  def: 3, exp: 4, gold: 14 },
     // tlDR Engine の看板敵。バトル画面ではスプライトで描画される
-    { name: 'ウイルスくん', emoji: '🦠', hp: 15, atk: 8, def: 2, exp: 4, gold: 14,
+    { name: 'ウイルスくん', emoji: '🦠', hp: 24, atk: 8, def: 2, exp: 4, gold: 14,
       battleSprite: TLDR_ENEMY_SPRITES.virovirokun,
       dialogue: [
         { text: 'ウイルスくんは さみしそうに こちらを みている', actUsed: 'ちょうさ' },
@@ -132,7 +132,7 @@ end while
     chest(6, 13, [{ type: 'giveItem', itemId: 'darkCandy', count: 2 }]),
     chest(24, 13, [{ type: 'changeGold', amount: 25 }]),
     // 野原のモンスター
-    foe({ name: 'バイクにのった鬼', emoji: '🏍️', col: 8, row: 8, hp: 12, atk: 8, def: 2, exp: 3, gold: 12, behavior: 'patrolH', speed: 1.4,
+    foe({ name: 'バイクにのった鬼', emoji: '🏍️', col: 8, row: 8, hp: 20, atk: 8, def: 2, exp: 3, gold: 12, behavior: 'patrolH', speed: 1.4,
       miniScript: `
 while true
   shotSide(true, randF(20, 156), 2.2, 4, 0)
@@ -140,7 +140,7 @@ while true
 end while
 `.trim() }),
     // ウイルスくん（シンボル版）：たたかわず「ちょうさ」→「みのがす」でも消える
-    foe({ name: 'ウイルスくん', emoji: '🦠', col: 12, row: 16, hp: 15, atk: 8, def: 2, exp: 4, gold: 14, behavior: 'random',
+    foe({ name: 'ウイルスくん', emoji: '🦠', col: 12, row: 16, hp: 24, atk: 8, def: 2, exp: 4, gold: 14, behavior: 'random',
       battleSprite: TLDR_ENEMY_SPRITES.virovirokun,
       dialogue: [
         { text: 'ウイルスくんは さみしそうに こちらを みている', actUsed: 'ちょうさ' },
@@ -152,7 +152,7 @@ while true
   wait(13)
 end while
 `.trim() }),
-    foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 14, atk: 9, def: 3, exp: 4, gold: 14, behavior: 'random',
+    foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 22, atk: 9, def: 3, exp: 4, gold: 14, behavior: 'random',
       moves: [{ name: 'かおのパーツこうげき', power: 8, miniScript: `
 while true
   shotRain(1.6, 4, 4)
@@ -198,8 +198,8 @@ const sceneTown: SceneDef = {
   id: 'town', name: 'フィールドタウン',
   map: townMap,
   randomEncounters: [
-    { name: 'でんせんおおかみ',   emoji: '🐺', hp: 20, atk: 12, def: 5, exp: 8,  gold: 16 },
-    { name: 'きれたマネキン',     emoji: '🪞', hp: 22, atk: 13, def: 6, exp: 9,  gold: 18, moves: [{ name: 'ヒビわれた 笑顔', power: 10 }] },
+    { name: 'でんせんおおかみ',   emoji: '🐺', hp: 30, atk: 12, def: 5, exp: 8,  gold: 16 },
+    { name: 'きれたマネキン',     emoji: '🪞', hp: 34, atk: 13, def: 6, exp: 9,  gold: 18, moves: [{ name: 'ヒビわれた 笑顔', power: 10 }] },
   ],
   encounterRate: 14,
   bgm: { ref: `direct:${tldrMusicUrl('exCity')}`, src: tldrMusicUrl('exCity'), type: 'direct' },
@@ -236,8 +236,8 @@ const sceneTown: SceneDef = {
       ]}],
     }),
     // まちのモンスター
-    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 20, atk: 12, def: 5, exp: 8, gold: 16, behavior: 'random' }),
-    foe({ name: 'きれたマネキン', emoji: '🪞', col: 22, row: 16, hp: 22, atk: 13, def: 6, exp: 9, gold: 18, behavior: 'still',
+    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 30, atk: 12, def: 5, exp: 8, gold: 16, behavior: 'random' }),
+    foe({ name: 'きれたマネキン', emoji: '🪞', col: 22, row: 16, hp: 34, atk: 13, def: 6, exp: 9, gold: 18, behavior: 'still',
       moves: [{ name: 'ヒビわれた 笑顔', power: 10, miniScript: `
 while true
   shotPlayer(getPlayerX(), -6, 1.8, 5, 3)
