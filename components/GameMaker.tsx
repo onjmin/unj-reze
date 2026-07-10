@@ -1283,6 +1283,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  'select'＝選択中（メニューを回している）／'execute'＝選択済みキューを順に実行中。 */
   const dtStageRef = useRef<'select' | 'execute'>('select');
   const dtQueueRef = useRef<{ idx: number; kind: 'act' | 'item' | 'spell' | 'attack' | 'defend'; move?: BattleMove; item?: ItemDef; spell?: PartySpell }[]>([]);
+  /** 選択フェーズで確定済みの行動の履歴（Xキーで1つ前のメンバーへ戻って取り消すため。tlDR o_enc の
+   *  CANCEL 処理＝action_queue の末尾 pop ＋ cancel() 準拠）。まもる(defend)はキューに積まれず選択時に
+   *  即適用されるため、取り消しに必要な undo 情報（メンバーID・実際に増えたTP量）を持つ。 */
+  const dtSelLogRef = useRef<{ idx: number; kind: 'act' | 'item' | 'spell' | 'attack' | 'defend'; memberId?: string; tpGained?: number }[]>([]);
   const dtExecPosRef = useRef(0);
   /** 実行フェーズ開始時に確定する「たたかう」担当メンバー一覧（キュー内の順）。参考実装（o_enc_fight）
    *  同様、選択が終わった全員ぶんのタイミングバーを縦に並べて同時表示し、1行ずつ順番に反応させる。 */
@@ -1761,7 +1765,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setPartyExtraHp(initHp); partyExtraHpRef.current = initHp;
       setDtTurnIdx(0); dtTurnIdxRef.current = 0;
       dtDefendedRef.current = new Set();
-      dtStageRef.current = 'select'; dtQueueRef.current = []; dtExecPosRef.current = 0;
+      dtStageRef.current = 'select'; dtQueueRef.current = []; dtSelLogRef.current = []; dtExecPosRef.current = 0;
       dtAttackRowsRef.current = []; setDtAttackDone({}); dtStickElsRef.current = {};
     }
     bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
@@ -1923,13 +1927,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       dtTurnIdxRef.current = next; setDtTurnIdx(next);
       setSoulMenu('root'); setSoulPhase('menu');
       setSoulRootCursor(0); soulRootCursorRef.current = 0;
-      // 直前の行動 appendLog で canAct=false になっているので、次のメンバーが行動できるよう戻す
-      // （ログのタイプライター表示を少し読ませてからボタンを出す）
-      setTimeout(() => setBattle(v => (v && !v.over ? { ...v, canAct: true } : v)), 700);
+      // 直前の行動 appendLog で canAct=false になっているので、次のメンバーが行動できるよう戻す。
+      // 原作は次のメンバーのコマンドが待ち時間なしで出る（tlDR の party_ui_lerp もボタン確定の
+      // 1〜2フレーム後には表示を始める）ため、ここで遅延は入れない
+      setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
     } else {
       // 全員コマンドを選び終えた → 実行フェーズへ（tlDR Engine の action_order 準拠：
       // こうどう(ACT)→アイテム→まほう(POWER)→たたかう(FIGHT)→まもる(DEFEND)の順で1件ずつ処理）
       dtStageRef.current = 'execute';
+      dtSelLogRef.current = []; // 実行が始まったらXキャンセルで戻れない
       const order: Record<string, number> = { act: 0, item: 1, spell: 2, attack: 3, defend: 4 };
       dtQueueRef.current = [...dtQueueRef.current].sort((a, b) => order[a.kind] - order[b.kind]);
       dtAttackRowsRef.current = dtQueueRef.current.filter(a => a.kind === 'attack').map(a => a.idx);
@@ -1972,6 +1978,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
       dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'attack' });
+      dtSelLogRef.current.push({ idx: dtTurnIdxRef.current, kind: 'attack' });
       setBattle(v => (v ? { ...v, canAct: false } : v));
       dtAdvanceTurn();
       return;
@@ -2084,6 +2091,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
       dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'act', move: m });
+      dtSelLogRef.current.push({ idx: dtTurnIdxRef.current, kind: 'act' });
       setBattle(v => (v ? { ...v, canAct: false } : v));
       dtAdvanceTurn();
       return;
@@ -2131,6 +2139,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
       if (tpRef.current < spell.tpCost) return;
       dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'spell', spell });
+      dtSelLogRef.current.push({ idx: dtTurnIdxRef.current, kind: 'spell' });
       setBattle(v => (v ? { ...v, canAct: false } : v));
       dtAdvanceTurn();
       return;
@@ -2171,6 +2180,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (!member) return;
       dtDefendedRef.current.add(member.id);
       const nextTp = Math.min(100, tpRef.current + 16);
+      // Xキャンセルで戻ったとき、100で頭打ちになった分まで引かないよう実際の増加量を記録する
+      dtSelLogRef.current.push({ idx: dtTurnIdxRef.current, kind: 'defend', memberId: member.id, tpGained: nextTp - tpRef.current });
       tpRef.current = nextTp; setTp(nextTp);
       appendLog(`${member.name}は みをまもっている……`, { canAct: false });
       dtAdvanceTurn();
@@ -2663,6 +2674,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
       if ((inventoryRef.current[it.id] ?? 0) <= 0) return;
       dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'item', item: it });
+      dtSelLogRef.current.push({ idx: dtTurnIdxRef.current, kind: 'item' });
       setBattle(v => (v ? { ...v, canAct: false } : v));
       setBattleItemsOpen(false);
       dtAdvanceTurn();
@@ -6122,6 +6134,14 @@ const lose = (msg: string) => {
       const menuLeftEdge = isLeft && !prevMenuLeftRef.current;
       const menuRightEdge = isRight && !prevMenuRightRef.current;
       prevMenuUpRef.current = isUp; prevMenuDownRef.current = isDown; prevMenuLeftRef.current = isLeft; prevMenuRightRef.current = isRight;
+      // デルタルーン戦闘コマンド用の押しっぱなしリピート（tlDR InputRepeat 準拠：30fps基準の
+      // predelay 10f・delay 2f を 60fps 換算で 20f/4f。押した瞬間＋一定時間後から連続入力扱い）
+      const hold = menuHoldRef.current;
+      hold.up = isUp ? hold.up + 1 : 0;
+      hold.down = isDown ? hold.down + 1 : 0;
+      hold.left = isLeft ? hold.left + 1 : 0;
+      hold.right = isRight ? hold.right + 1 : 0;
+      const menuRepeat = (n: number) => n === 1 || (n > 20 && (n - 20) % 4 === 0);
 
       if (isPlaying && invOpenRef.current && !invMenuRef.current && !invDetailRef.current && !battleRef.current.active) {
         // フィールドの持ち物一覧（2列グリッド）
@@ -6153,12 +6173,17 @@ const lose = (msg: string) => {
         }
       } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulPhaseRef.current === 'menu') {
         const isDt = gameDataRef.current.battle?.style === 'deltarune';
+        // デルタルーンは原作同様、押しっぱなしでカーソルが高速移動する（アンダーテールはエッジのみ）
+        const upMove = isDt ? menuRepeat(hold.up) : menuUpEdge;
+        const downMove = isDt ? menuRepeat(hold.down) : menuDownEdge;
+        const leftMove = isDt ? menuRepeat(hold.left) : menuLeftEdge;
+        const rightMove = isDt ? menuRepeat(hold.right) : menuRightEdge;
         if (soulMenuRef.current === 'root') {
-          if (menuLeftEdge || menuRightEdge) {
+          if (leftMove || rightMove) {
             const rootCount = isDt ? 5 : 4; // デルタルーンは FIGHT/ACT/ITEM/MERCY/DEFEND の5つ
             let c = soulRootCursorRef.current;
-            if (menuLeftEdge) c -= 1;
-            if (menuRightEdge) c += 1;
+            if (leftMove) c -= 1;
+            if (rightMove) c += 1;
             c = ((c % rootCount) + rootCount) % rootCount;
             if (c !== soulRootCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
             soulRootCursorRef.current = c; setSoulRootCursor(c);
@@ -6171,16 +6196,16 @@ const lose = (msg: string) => {
           if (soulMenuRef.current === 'act') { count = (bd2?.moves.length ?? 0) + curSpells.length + 1; cols = 2; }
           else if (soulMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
           else if (soulMenuRef.current === 'mercy') { count = 3; cols = 1; }
-          if (count > 0 && (menuUpEdge || menuDownEdge || menuLeftEdge || menuRightEdge)) {
+          if (count > 0 && (upMove || downMove || leftMove || rightMove)) {
             let c = soulSubCursorRef.current;
             if (cols === 2) {
-              if (menuLeftEdge) c -= 1;
-              if (menuRightEdge) c += 1;
-              if (menuUpEdge) c -= 2;
-              if (menuDownEdge) c += 2;
+              if (leftMove) c -= 1;
+              if (rightMove) c += 1;
+              if (upMove) c -= 2;
+              if (downMove) c += 2;
             } else {
-              if (menuUpEdge) c -= 1;
-              if (menuDownEdge) c += 1;
+              if (upMove) c -= 1;
+              if (downMove) c += 1;
             }
             c = ((c % count) + count) % count;
             if (c !== soulSubCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
@@ -6396,6 +6421,23 @@ const lose = (msg: string) => {
           setInvOpen(false);
         } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulMenuRef.current !== 'root') {
           setSoulMenu('root');
+        } else if (isPlaying && battleRef.current.active && gameDataRef.current.battle?.style === 'deltarune'
+          && soulPhaseRef.current === 'menu' && soulMenuRef.current === 'root'
+          && dtStageRef.current === 'select' && dtSelLogRef.current.length > 0 && !battleViewRef.current?.over) {
+          // ルートメニューでのX＝1つ前に選択を確定したメンバーへ戻り、その行動を取り消す
+          // （tlDR o_enc の CANCEL：party_selection を戻して action_queue 末尾を pop + cancel()）
+          const last = dtSelLogRef.current.pop()!;
+          if (last.kind === 'defend') {
+            if (last.memberId) dtDefendedRef.current.delete(last.memberId);
+            const nextTp = Math.max(0, tpRef.current - (last.tpGained ?? 0));
+            tpRef.current = nextTp; setTp(nextTp);
+          } else {
+            dtQueueRef.current.pop();
+          }
+          dtTurnIdxRef.current = last.idx; setDtTurnIdx(last.idx);
+          setSoulRootCursor(0); soulRootCursorRef.current = 0;
+          setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
+          playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel);
         } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style) && battleItemsOpenRef.current) {
           setBattleItemsOpen(false);
         } else if (isPlaying && shopModalRef.current) {
@@ -7457,6 +7499,8 @@ const lose = (msg: string) => {
   const prevMenuDownRef = useRef(false);
   const prevMenuLeftRef = useRef(false);
   const prevMenuRightRef = useRef(false);
+  /** デルタルーン戦闘コマンドのキー押しっぱなしリピート用ホールドフレーム数。 */
+  const menuHoldRef = useRef({ up: 0, down: 0, left: 0, right: 0 });
   const [, force] = useState(0);
   const setTouch = (key: keyof typeof touchRef.current, v: boolean) => { touchRef.current[key] = v; force(n => n + 1); };
 
