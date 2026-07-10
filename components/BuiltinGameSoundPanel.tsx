@@ -5,6 +5,7 @@ import { Play, Square } from 'lucide-react';
 import { SM127_MUSIC, SM127_SFX, sm127MusicUrl, sm127SfxUrl, type SM127MusicKey, type SM127SfxKey } from '@/lib/mario-sm127-assets';
 import { MEGAMAN_MUSIC, MEGAMAN_SFX, megamanMusicUrl, megamanSfxUrl, type MegamanMusicKey, type MegamanSfxKey } from '@/lib/megaman-assets';
 import { UNDERTALE_ENGINE_SOUNDS, undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
+import { TLDR_MUSIC, TLDR_SFX, tldrMusicUrl, tldrSfxUrl, type TldrMusicKey, type TldrSfxKey } from '@/lib/deltarune-tldr-assets';
 import type { PickResult } from './ContentPicker';
 
 interface BuiltinGameSoundPanelProps {
@@ -13,12 +14,13 @@ interface BuiltinGameSoundPanelProps {
   onPick: (res: PickResult) => void;
 }
 
-type Source = 'undertale' | 'mario' | 'megaman';
+type Source = 'undertale' | 'deltarune' | 'mario' | 'megaman';
 
 interface Entry { key: string; label: string; url: string; }
 
 const SOURCE_LABEL: Record<Source, string> = {
   undertale: '💀 アンダーテール',
+  deltarune: '🖤 デルタルーン',
   mario: '🍄 マリオ127',
   megaman: '🔫 ロックマンJS',
 };
@@ -29,6 +31,12 @@ function buildEntries(source: Source, kind: 'bgm' | 'sfx'): Entry[] {
   if (source === 'undertale') {
     if (kind === 'bgm') return [];
     return UNDERTALE_ENGINE_SOUNDS.map(name => ({ key: name, label: name, url: undertaleSfxUrl(name) }));
+  }
+  if (source === 'deltarune') {
+    if (kind === 'bgm') {
+      return (Object.keys(TLDR_MUSIC) as TldrMusicKey[]).map(k => ({ key: k, label: k, url: tldrMusicUrl(k) }));
+    }
+    return (Object.keys(TLDR_SFX) as TldrSfxKey[]).map(k => ({ key: k, label: k, url: tldrSfxUrl(k) }));
   }
   if (source === 'mario') {
     if (kind === 'bgm') {
@@ -43,9 +51,9 @@ function buildEntries(source: Source, kind: 'bgm' | 'sfx'): Entry[] {
   return (Object.keys(MEGAMAN_SFX) as MegamanSfxKey[]).map(k => ({ key: k, label: k, url: megamanSfxUrl(k) }));
 }
 
-const SOURCES: Source[] = ['undertale', 'mario', 'megaman'];
+const SOURCES: Source[] = ['undertale', 'deltarune', 'mario', 'megaman'];
 
-/** 内蔵の他プロジェクト音源タブ（アンダーテール／マリオ127／ロックマンJS）。
+/** 内蔵の他プロジェクト音源タブ（アンダーテール／デルタルーン／マリオ127／ロックマンJS）。
  *  いずれもGitHub raw CDNで直接配信されている音声を直リンク（type: 'direct'）として選択する。 */
 export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSoundPanelProps) {
   const sourcesAvailable = SOURCES.filter(s => buildEntries(s, kind).length > 0);

@@ -8,6 +8,7 @@ import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { applyMasterVolume } from '@/lib/master-volume';
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
+import { tldrSfxUrl, TLDR_SOUL_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
 import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
@@ -29,6 +30,7 @@ import {
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
   type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type SoulMode, type EnemyDialogueLine,
+  type PartySpell, type PartyMember, type BattleSpriteAnim, type PartyBattleSprites, type EnemyBattleSprite,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig,
   defaultTitleScreen, defaultEndingScreen,
@@ -977,6 +979,47 @@ function getBlastCanvas(): HTMLCanvasElement {
   return cnv;
 }
 
+/** バトル用スプライトアニメ（フレーム順の画像URLを fps で回す）。
+ *  once=true は最終フレームで停止（attack など1周モノは親がタイマーで idle に戻すが、
+ *  親の切替が遅れてもループ頭に巻き戻って見えないように）。高さ h に収めて幅は auto。
+ *  全フレームを一度に <img> として置き display を切り替える（src 差し替え方式だと
+ *  フレーム送りのたびに前のリクエストが abort されて初回表示がチラつくため）。 */
+function BattleAnimSprite({ anim, h, once = false, className = '', style }: {
+  anim: BattleSpriteAnim; h: number; once?: boolean; className?: string; style?: React.CSSProperties;
+}) {
+  const [fi, setFi] = useState(0);
+  useEffect(() => {
+    setFi(0);
+    if (anim.frames.length <= 1) return;
+    const id = setInterval(() => {
+      setFi(i => {
+        const next = i + 1;
+        if (next >= anim.frames.length) return once ? i : 0;
+        return next;
+      });
+    }, 1000 / (anim.fps ?? 8));
+    return () => clearInterval(id);
+  }, [anim, once]);
+  const cur = Math.min(fi, anim.frames.length - 1);
+  return (
+    <span className={`inline-block ${className}`} style={{ height: h, ...style }}>
+      {anim.frames.map((f, i) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={i} src={f} alt="" draggable={false}
+          style={{ height: h, width: 'auto', imageRendering: 'pixelated', display: i === cur ? 'block' : 'none' }} />
+      ))}
+    </span>
+  );
+}
+
+/** 弾幕よけキャンバス用の画像キャッシュ（SOULハートなど）。 */
+const dodgeImgCache: Record<string, HTMLImageElement> = {};
+function getDodgeImg(url: string): HTMLImageElement {
+  let img = dodgeImgCache[url];
+  if (!img) { img = new Image(); img.src = url; dodgeImgCache[url] = img; }
+  return img;
+}
+
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [presetId, setPresetId] = useState<PresetId>('onjReze');
@@ -1137,7 +1180,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── ターン制戦闘 ──
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
-  interface BattleView { enemyName: string; enemyEmoji: string; enemyHp: number; enemyMaxHp: number; mercy: number; log: string[]; canAct: boolean; over: boolean; }
+  interface BattleView { enemyName: string; enemyEmoji: string; enemySprite?: EnemyBattleSprite; enemyHp: number; enemyMaxHp: number; mercy: number; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
   const battleViewRef = useRef<BattleView | null>(null);
   battleViewRef.current = battle;
@@ -1193,11 +1236,80 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const soulSubCursorRef = useRef(0);
   soulSubCursorRef.current = soulSubCursor;
   useEffect(() => { setSoulSubCursor(0); }, [soulMenu]);
+  // ── デルタルーン風パーティ戦闘（battle.style === 'deltarune'）──
+  // 'soul' の弾幕よけ・タイミング攻撃はそのまま流用し、行動選択の手前にパーティ1人ずつの
+  // ターンを挟む。TPはMPとは独立の共有リソース（毎戦闘0開始・グレイズ/まもるで加算・呪文で消費）。
+  const [tp, setTp] = useState(0);
+  const tpRef = useRef(0);
+  tpRef.current = tp;
+  /** 2人目以降のパーティメンバーの戦闘中HP（先頭メンバーはフィールドの pr.hp を共有するためここには含めない）。
+   *  戦闘終了で破棄する一時状態＝フィールドへは持ち越さない。 */
+  const [partyExtraHp, setPartyExtraHp] = useState<Record<string, number>>({});
+  const partyExtraHpRef = useRef<Record<string, number>>({});
+  partyExtraHpRef.current = partyExtraHp;
+  /** 現在の行動選択ターンが party 配列の何番目か。生存者だけを順に進む。 */
+  const [dtTurnIdx, setDtTurnIdx] = useState(0);
+  const dtTurnIdxRef = useRef(0);
+  dtTurnIdxRef.current = dtTurnIdx;
+  /** このラウンドで「まもる」を選んだメンバーID（次の被弾ダメージを軽減）。 */
+  const dtDefendedRef = useRef<Set<string>>(new Set());
+  /** デルタルーン戦闘専用の追加SE（tlDR Engine 由来。undertale 側には対応音源が無いものたち）。 */
+  const DT_SFX = {
+    weaponPull: { ref: 'direct:dt-weaponpull', src: tldrSfxUrl('weaponPull'), type: 'direct' as const },
+    attack: { ref: 'direct:dt-attack', src: tldrSfxUrl('attack'), type: 'direct' as const },
+    crit: { ref: 'direct:dt-crit', src: tldrSfxUrl('criticalSwing'), type: 'direct' as const },
+    graze: { ref: 'direct:dt-graze', src: tldrSfxUrl('graze'), type: 'direct' as const },
+    spellCast: { ref: 'direct:dt-spellcast', src: tldrSfxUrl('spellCast'), type: 'direct' as const },
+    cure: { ref: 'direct:dt-cure', src: tldrSfxUrl('spellCure'), type: 'direct' as const },
+    spare: { ref: 'direct:dt-spare', src: tldrSfxUrl('spare'), type: 'direct' as const },
+    mercyAdd: { ref: 'direct:dt-mercyadd', src: tldrSfxUrl('mercyAdd'), type: 'direct' as const },
+  };
+  /** デルタルーンのエンカウント演出音：単一の音源（snd_tensionhorn）をソフトウェア的にピッチ違いで
+   *  2重再生し、緊迫した2音の和音にする（tlDR Engine の o_enc_anim は同じ音源を8フレームずらして
+   *  pitch 1.0→1.1 で2回鳴らすのを参考に、ここでは完全に同時・低音／高音(約1.5倍)の組にしている）。
+   *  アンダーテールのような「！」マーク・専用SEは出さない（Deltaruneの遭遇演出に準拠）。 */
+  const playDtEncounterChord = () => {
+    const url = tldrSfxUrl('tensionHorn');
+    const volume = applyMasterVolume(getBgmVolume('direct:dt-tensionhorn-chord')) / 100 * 0.7;
+    for (const rate of [0.75, 1.5]) {
+      const a = new Audio(url);
+      a.playbackRate = rate;
+      a.volume = volume;
+      a.play().catch(() => {});
+    }
+  };
+  /** デルタルーン風パーティ戦闘：全員のコマンド選択が終わるまでは実行せず、選び終わってから
+   *  action_order（tlDR Engine 準拠：こうどう→アイテム→まほう→たたかう→まもる）で1件ずつ処理する。
+   *  'select'＝選択中（メニューを回している）／'execute'＝選択済みキューを順に実行中。 */
+  const dtStageRef = useRef<'select' | 'execute'>('select');
+  const dtQueueRef = useRef<{ idx: number; kind: 'act' | 'item' | 'spell' | 'attack' | 'defend'; move?: BattleMove; item?: ItemDef; spell?: PartySpell }[]>([]);
+  const dtExecPosRef = useRef(0);
+  /** 実行フェーズ開始時に確定する「たたかう」担当メンバー一覧（キュー内の順）。参考実装（o_enc_fight）
+   *  同様、選択が終わった全員ぶんのタイミングバーを縦に並べて同時表示し、1行ずつ順番に反応させる。 */
+  const dtAttackRowsRef = useRef<number[]>([]);
+  /** 各メンバーの解決結果。pos＝止めた瞬間の棒の位置（1=右端→0=左端）で、行の表示を凍結するのに使う。 */
+  const [dtAttackDone, setDtAttackDone] = useState<Record<number, { result: 'hit' | 'crit' | 'miss'; pos: number }>>({});
+  /** 各行の走る棒のDOM要素。全行が並行して毎フレーム動くため、React再レンダリングを避けて直接 style.left を書く。 */
+  const dtStickElsRef = useRef<Record<number, HTMLDivElement | null>>({});
+  /** タイミングバーの的（パーフェクト）中心位置。左端固定（tlDR o_enc_fightstick の x84-90 相当）。
+   *  棒の位置 s は 1=右端 → 0=左端 で表す。 */
+  const DT_FIGHT_TARGET = 0.08;
+  /** メンバーごとの一時アニメ（attack/act/spell/item/hurt）。値が無いメンバーは idle
+   *  （倒れていれば defeat、まもる中なら defend）を表示する。seq は古いタイマーの誤消去防止。 */
+  const [dtAnimFx, setDtAnimFx] = useState<Record<string, { kind: keyof PartyBattleSprites; seq: number } | undefined>>({});
+  const dtAnimSeqRef = useRef(0);
+  const dtPlayMemberAnim = (memberId: string, kind: keyof PartyBattleSprites, ms: number) => {
+    if (gameDataRef.current.battle?.style !== 'deltarune') return;
+    const seq = ++dtAnimSeqRef.current;
+    setDtAnimFx(p => ({ ...p, [memberId]: { kind, seq } }));
+    setTimeout(() => setDtAnimFx(p => (p[memberId]?.seq === seq ? { ...p, [memberId]: undefined } : p)), ms);
+  };
   const soulDodgeRef = useRef<{
     frames: number; duration: number; pattern: number; dmg: number;
-    bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string }[];
+    bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string; grazed?: boolean }[];
     hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean };
     mode: SoulMode;
+    grazeFx?: number;                                // deltarune: グレイズ演出の残フレーム
     gvy: number; grounded: boolean;                 // blue: 重力速度・接地判定
     jumpHeld: number;                                // blue: ジャンプキー押下継続フレーム（可変ジャンプ）
     shieldDir: 'up' | 'down' | 'left' | 'right' | null; // green: シールド方向
@@ -1382,32 +1494,52 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   } | null>(null);
   const ENCOUNTER_ALERT_MS = 650;
   const ENCOUNTER_FLASH_MS = 450; // ハートが移動しながら明滅する演出の表示時間。SEの再生完了は待たない（短く保つ）
-  const UNDERTALE_ENCOUNTER_SFX = { ref: 'direct:undertale-encounter', src: undertaleSfxUrl('snd_exclamation'), type: 'direct' as const };
-  /** アンダーテール系プリセット専用：敵にダメージを与えたときの効果音（自分が被弾する場合は sfxRef.current.damage=snd_hurt を使う）。 */
-  const UNDERTALE_ENEMY_DAMAGE_SFX = { ref: 'direct:undertale-enemy-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const };
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
-  /** バトル開始SE。現在のBGMを止めてから鳴らし、鳴り終わるまでバトルBGMは始めない。 */
-  const UNDERTALE_BATTLESTART_SFX = { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_soul_move'), type: 'direct' as const };
-  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（アンダーテール系以外のプリセット用）。 */
+  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（SOUL戦闘系以外のプリセット用）。 */
   const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
-  /** アンダーテール系プリセット専用：メニューのカーソル移動（選択音）。 */
-  const UNDERTALE_MENU_SWITCH_SFX = { ref: 'direct:undertale-menu-switch', src: undertaleSfxUrl('snd_menu_switch'), type: 'direct' as const };
-  /** アンダーテール系プリセット専用：メニューでの決定音。 */
-  const UNDERTALE_MENU_CONFIRM_SFX = { ref: 'direct:undertale-menu-confirm', src: undertaleSfxUrl('snd_menu_confirm'), type: 'direct' as const };
-  /** アンダーテール系プリセット専用：メニューでのキャンセル・戻る音。 */
-  const UNDERTALE_MENU_CANCEL_SFX = { ref: 'direct:undertale-menu-cancel', src: undertaleSfxUrl('snd_menu_cancel'), type: 'direct' as const };
-  /** アンダーテール系プリセット専用：メッセージウィンドウでの1文字ずつ表示に合わせて鳴らすテキスト送りブリップ音。 */
-  const UNDERTALE_TEXT_TYPER_SFX = { ref: 'direct:undertale-text-typer', src: undertaleSfxUrl('snd_text_voice_typer'), type: 'direct' as const };
-  /** アンダーテール系プリセット専用：キャラクターがしゃべっているときの1文字ずつ表示に合わせて鳴らすテキスト送りブリップ音。 */
-  const UNDERTALE_TEXT_VOICE_SFX = { ref: 'direct:undertale-text-voice', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const };
-  /** メニューで選択を決定したときのSE。アンダーテール系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
-  const playMenuConfirmSfx = () => playSfx(presetId === 'undertale' ? UNDERTALE_MENU_CONFIRM_SFX : MSG_ADVANCE_SFX);
-  /** メニューをキャンセル・後退したときのSE。アンダーテール系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
-  const playMenuCancelSfx = () => playSfx(presetId === 'undertale' ? UNDERTALE_MENU_CANCEL_SFX : MSG_ADVANCE_SFX);
-  /** アンダーテール系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。 */
+  /** SOUL戦闘（FIGHT/ACT/ITEM/MERCY・弾幕よけ）を持つプリセットごとの専用SE一式。
+   *  アンダーテールとデルタルーンはどちらも同じ battle.style==='soul' を使うが、
+   *  出典が異なる音源（それぞれのエンジンのCDN）を鳴らし分ける。 */
+  const SOUL_SFX_BY_PRESET = {
+    undertale: {
+      encounter: { ref: 'direct:undertale-encounter', src: undertaleSfxUrl('snd_exclamation'), type: 'direct' as const },
+      enemyDamage: { ref: 'direct:undertale-enemy-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const },
+      battleStart: { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_soul_move'), type: 'direct' as const },
+      menuSwitch: { ref: 'direct:undertale-menu-switch', src: undertaleSfxUrl('snd_menu_switch'), type: 'direct' as const },
+      menuConfirm: { ref: 'direct:undertale-menu-confirm', src: undertaleSfxUrl('snd_menu_confirm'), type: 'direct' as const },
+      menuCancel: { ref: 'direct:undertale-menu-cancel', src: undertaleSfxUrl('snd_menu_cancel'), type: 'direct' as const },
+      textTyper: { ref: 'direct:undertale-text-typer', src: undertaleSfxUrl('snd_text_voice_typer'), type: 'direct' as const },
+      textVoice: { ref: 'direct:undertale-text-voice', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const },
+    },
+    deltarune: {
+      encounter: { ref: 'direct:deltarune-encounter', src: tldrSfxUrl('exclamation'), type: 'direct' as const },
+      enemyDamage: { ref: 'direct:deltarune-enemy-damage', src: tldrSfxUrl('damage'), type: 'direct' as const },
+      battleStart: { ref: 'direct:deltarune-battlestart', src: tldrSfxUrl('tensionHorn'), type: 'direct' as const },
+      menuSwitch: { ref: 'direct:deltarune-menu-switch', src: tldrSfxUrl('uiMove'), type: 'direct' as const },
+      menuConfirm: { ref: 'direct:deltarune-menu-confirm', src: tldrSfxUrl('uiSelect'), type: 'direct' as const },
+      menuCancel: { ref: 'direct:deltarune-menu-cancel', src: tldrSfxUrl('uiCancel'), type: 'direct' as const },
+      textTyper: { ref: 'direct:deltarune-text-typer', src: tldrSfxUrl('text'), type: 'direct' as const },
+      textVoice: { ref: 'direct:deltarune-text-voice', src: tldrSfxUrl('text'), type: 'direct' as const },
+    },
+  } as const;
+  const soulSfx = SOUL_SFX_BY_PRESET[presetId as keyof typeof SOUL_SFX_BY_PRESET];
+  const isSoulPreset = !!soulSfx;
+  /** メニューで選択を決定したときのSE。SOUL戦闘系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
+  const playMenuConfirmSfx = () => playSfx(soulSfx ? soulSfx.menuConfirm : MSG_ADVANCE_SFX);
+  /** メニューをキャンセル・後退したときのSE。SOUL戦闘系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
+  const playMenuCancelSfx = () => playSfx(soulSfx ? soulSfx.menuCancel : MSG_ADVANCE_SFX);
+  /** SOUL戦闘系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。
+   *  デルタルーンはアンダーテールと違い「！」マーク・専用SEを出さない（Deltarune本編の遭遇演出に
+   *  準拠）ため、'alert' フェーズを飛ばして直接 'flash'（BGM停止＋テンションホルンの和音＋
+   *  剣を抜く音＋黒フラッシュ）から始める。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
-    if (presetId === 'undertale') {
+    if (presetId === 'deltarune') {
+      encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'flash', fromX: 0, fromY: 0, toX: 0, toY: 0 };
+      switchBgm(undefined);
+      playDtEncounterChord();
+      setTimeout(() => playSfx(DT_SFX.weaponPull), 200);
+    } else if (soulSfx) {
       const p2 = engineRef.current.player;
       const fromX = p2.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
       const fromY = p2.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
@@ -1417,7 +1549,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const toX = camXRef.current + VIEW_W / 2;
       const toY = camYRef.current + VIEW_H - 26;
       encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'alert', fromX, fromY, toX, toY };
-      playSfx(UNDERTALE_ENCOUNTER_SFX);
+      playSfx(soulSfx.encounter);
     } else {
       fire();
     }
@@ -1532,6 +1664,55 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const calcDmg = (atk: number, def: number) => Math.max(1, Math.round((atk - def / 2) * (0.85 + Math.random() * 0.3)));
   const appendLog = (line: string, patch: Partial<BattleView> = {}) =>
     setBattle(v => (v ? { ...v, enemyHp: battleRef.current.enemyHp, mercy: battleRef.current.mercy, log: [...v.log, line].slice(-6), ...patch } : v));
+  /** battle.style が 'soul' の弾幕よけ・タイミング攻撃を流用するスタイルか（'soul' 本体 と 'deltarune'）。 */
+  const isDodgeBattleStyle = (s?: string) => s === 'soul' || s === 'deltarune';
+  /** デルタルーン風パーティの現在の状態一覧。先頭(index 0)はフィールドの pr.hp/pr.maxHp を共有し、
+   *  2人目以降は partyExtraHpRef の戦闘中一時HPを参照する。 */
+  const dtParty = (): { id: string; name: string; emoji: string; hp: number; maxHp: number }[] => {
+    const pr = progressRef.current;
+    // party 未設定（例: エディタでスタイルだけ 'deltarune' に切り替えた場合）は
+    // フィールドの操作キャラ1人だけのパーティとして扱う（'soul' と同等の見た目にフォールバック）。
+    const members = gameDataRef.current.battle?.party?.length
+      ? gameDataRef.current.battle.party
+      : [{ id: '__self', name: gameDataRef.current.battle?.playerName ?? 'プレイヤー', emoji: '❤️', maxHp: pr.maxHp }];
+    return members.map((m, i) => i === 0
+      ? { id: m.id, name: m.name, emoji: m.emoji, hp: pr.hp, maxHp: pr.maxHp }
+      : { id: m.id, name: m.name, emoji: m.emoji, hp: partyExtraHpRef.current[m.id] ?? m.maxHp, maxHp: m.maxHp });
+  };
+  /** 指定メンバーのHPを更新する（先頭メンバーはフィールドの pr.hp、以降は戦闘専用の一時HP）。 */
+  const dtSetHp = (id: string, hp: number) => {
+    const members = gameDataRef.current.battle?.party;
+    const clamped = Math.max(0, hp);
+    if (!members?.length ? id === '__self' : members[0].id === id) { progressRef.current.hp = clamped; forceHud(n => n + 1); }
+    else { const next = { ...partyExtraHpRef.current, [id]: clamped }; partyExtraHpRef.current = next; setPartyExtraHp(next); }
+  };
+  const dtAllDown = () => dtParty().length > 0 && dtParty().every(m => m.hp <= 0);
+  /** 弾幕の被弾ダメージを受けるメンバー。tlDR Engine の敵ターン標準（生存者からランダムに1人）と同じ。 */
+  const dtPickTarget = () => {
+    const alive = dtParty().filter(m => m.hp > 0);
+    return alive.length ? alive[Math.floor(Math.random() * alive.length)] : null;
+  };
+  /** 被弾処理。まもる中は 2/3 に軽減（tlDR Engine の damage() 準拠）。HP が尽きたら down（HP0で戦闘離脱、
+   *  全員 down で敗北。参考実装は HP=-maxHp/2 まで掘るが、負のHP表示を持たないため 0 止まりにしている）。 */
+  const dtDamageMember = (m: { id: string; hp: number }, dmg: number) => {
+    const reduced = dtDefendedRef.current.has(m.id) ? Math.max(1, Math.round(dmg * 2 / 3)) : dmg;
+    dtSetHp(m.id, m.hp - reduced);
+    dtPlayMemberAnim(m.id, 'hurt', 500);
+  };
+  /** 回復処理（呪文用）。down 中のメンバーは、参考実装（HP=-maxHp/2 からの回復）に合わせて
+   *  回復量が maxHp/2 を超えたときだけ復帰し、復帰HPは 17% を下限とする。復帰したら true を返す。 */
+  const dtHealMember = (id: string, heal: number): boolean => {
+    const cur = dtParty().find(x => x.id === id);
+    if (!cur) return false;
+    if (cur.hp <= 0) {
+      const fromDown = heal - Math.floor(cur.maxHp / 2);
+      if (fromDown <= 0) return false; // 回復量不足：たおれたまま
+      dtSetHp(id, Math.min(cur.maxHp, Math.max(Math.ceil(cur.maxHp * 0.17), fromDown)));
+      return true;
+    }
+    dtSetHp(id, Math.min(cur.maxHp, cur.hp + heal));
+    return false;
+  };
 
   const getCurrentFieldBgm = useCallback(() => {
     if (isPlaying && gameData.scenes && gameData.scenes.length > 0) {
@@ -1544,9 +1725,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return gameData.bgm;
   }, [isPlaying, gameData.bgm, gameData.scenes]);
 
-  /** BGM を即時切り替えるヘルパー。src がなければ停止。 */
+  /** BGM を即時切り替えるヘルパー。src がなければ停止。
+   *  type:'direct'（tlDR CDN等の直リンクmp3/ogg/wav）も他のBGM切替箇所（ボスBGM等）と同様に
+   *  bgmManager へそのまま渡す（以前は 'direct' だけ除外して停止していたため、
+   *  デルタルーンの battleBgm/bossBgm が一切再生されないバグになっていた）。 */
   const switchBgm = (bgm?: { src?: string; type?: 'youtube' | 'mml' | 'direct'; ref?: string }) => {
-    if (bgm?.src && bgm.type !== 'direct') {
+    if (bgm?.src) {
       const loopOption = getLoopOption(bgm.ref);
       const volume = getBgmVolume(bgm.ref);
       bgmManager.play({ bgm: { type: bgm.type ?? 'youtube', src: bgm.src, loop: loopOption, volume } as any, tileset: {} });
@@ -1555,7 +1739,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; entity?: Entity | null; isBoss?: boolean; outroDialogue?: DialogueLine[] }) => {
     // バトル開始位置を記録し、終了後はここへ正確に復帰させる
     const startEng = engineRef.current;
     battleReturnPosRef.current = { x: startEng.player.x, y: startEng.player.y };
@@ -1568,8 +1752,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     lastActRef.current = null;
     setBattleItemsOpen(false); setBagOpen(false);
     setSoulPhase('menu'); setSoulMenu('root'); soulDodgeRef.current = null;
+    // デルタルーン風パーティ戦闘：TPは毎戦闘0から、2人目以降のHPは各自 maxHp から再開、行動選択は先頭メンバーから
+    if (gameDataRef.current.battle?.style === 'deltarune') {
+      setTp(0); tpRef.current = 0;
+      const party = gameDataRef.current.battle.party ?? [];
+      const initHp: Record<string, number> = {};
+      party.slice(1).forEach(m => { initHp[m.id] = m.maxHp; });
+      setPartyExtraHp(initHp); partyExtraHpRef.current = initHp;
+      setDtTurnIdx(0); dtTurnIdxRef.current = 0;
+      dtDefendedRef.current = new Set();
+      dtStageRef.current = 'select'; dtQueueRef.current = []; dtExecPosRef.current = 0;
+      dtAttackRowsRef.current = []; setDtAttackDone({}); dtStickElsRef.current = {};
+    }
     bossOutroRef.current = opts.outroDialogue?.length ? opts.outroDialogue : null;
-    setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemyHp: opts.hp, enemyMaxHp: opts.hp, mercy: 0, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
+    setBattle({ enemyName: opts.name, enemyEmoji: opts.emoji, enemySprite: opts.battleSprite, enemyHp: opts.hp, enemyMaxHp: opts.hp, mercy: 0, log: [`${opts.name}が あらわれた！`], canAct: true, over: false });
     // バトルBGM切り替え
     if (opts.isBoss && gameDataRef.current.bossBgm?.src) {
       battleBgmActiveRef.current = 'boss';
@@ -1582,7 +1778,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, dialogue: d.dialogue, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, dialogue: d.dialogue, battleSprite: d.battleSprite, entity: e, isBoss: d.isBoss, outroDialogue: d.outroDialogue });
   };
 
   // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
@@ -1596,6 +1792,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     const wasBoss = b.isBoss;
+    // デルタルーン：先頭メンバー（フィールドの操作キャラ）が down のまま勝ち抜けた場合、
+    // tlDR Engine のオーバーワールド同様に最低HP1で立ち上がらせる（フィールド即ゲームオーバー防止）。
+    if (gameDataRef.current.battle?.style === 'deltarune' && pr.hp <= 0) { pr.hp = 1; forceHud(n => n + 1); }
     if (result === 'spare') {
       if (b.entity) { const idx = eng.entities.indexOf(b.entity); if (idx >= 0) eng.entities.splice(idx, 1); }
       pr.gold = (pr.gold ?? 0) + b.gold;
@@ -1701,11 +1900,83 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** プレイヤーの行動後に敵ターンへ。soul スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
    *  classic なら従来どおり一定時間後に即時ダメージ。 */
   const queueEnemyTurn = (delay = 750) => {
-    if ((gameDataRef.current.battle?.style ?? 'classic') === 'soul') {
+    if (isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
       waitForSoulAdvance(() => soulEnemyTurn());
     } else {
       setTimeout(() => enemyTurn(), delay);
     }
+  };
+
+  /** デルタルーン風パーティ戦闘：1人の行動が終わったあとに呼ぶ。まだ行動していない生存メンバーがいれば
+   *  その人の番へ進める（メニューへ戻る）。全員行動済みなら敵ターンへ進む。'soul'（パーティなし）は無関係。 */
+  const dtAdvanceTurn = () => {
+    if (gameDataRef.current.battle?.style !== 'deltarune') { queueEnemyTurn(); return; }
+    if (dtStageRef.current === 'execute') {
+      // 実行フェーズ：キューの次の行動へ（全消化したら敵ターンへ）
+      dtExecPosRef.current++;
+      dtRunQueueStep();
+      return;
+    }
+    const party = dtParty();
+    const next = party.findIndex((m, i) => i > dtTurnIdxRef.current && m.hp > 0);
+    if (next >= 0) {
+      dtTurnIdxRef.current = next; setDtTurnIdx(next);
+      setSoulMenu('root'); setSoulPhase('menu');
+      setSoulRootCursor(0); soulRootCursorRef.current = 0;
+      // 直前の行動 appendLog で canAct=false になっているので、次のメンバーが行動できるよう戻す
+      // （ログのタイプライター表示を少し読ませてからボタンを出す）
+      setTimeout(() => setBattle(v => (v && !v.over ? { ...v, canAct: true } : v)), 700);
+    } else {
+      // 全員コマンドを選び終えた → 実行フェーズへ（tlDR Engine の action_order 準拠：
+      // こうどう(ACT)→アイテム→まほう(POWER)→たたかう(FIGHT)→まもる(DEFEND)の順で1件ずつ処理）
+      dtStageRef.current = 'execute';
+      const order: Record<string, number> = { act: 0, item: 1, spell: 2, attack: 3, defend: 4 };
+      dtQueueRef.current = [...dtQueueRef.current].sort((a, b) => order[a.kind] - order[b.kind]);
+      dtAttackRowsRef.current = dtQueueRef.current.filter(a => a.kind === 'attack').map(a => a.idx);
+      setDtAttackDone({});
+      dtExecPosRef.current = 0;
+      dtRunQueueStep();
+    }
+  };
+
+  /** デルタルーン風パーティ戦闘：選択済みキューの現在位置の行動を実行する。
+   *  たたかう(attack)はタイミングバーUIを開くだけ（結果は resolveSoulAttack/missSoulAttack が処理）、
+   *  それ以外は対応する do/use 系関数を直接呼ぶ（各関数の末尾で dtAdvanceTurn を呼び、次の行動へ進む）。 */
+  const dtRunQueueStep = () => {
+    const q = dtQueueRef.current;
+    if (dtExecPosRef.current >= q.length) {
+      dtQueueRef.current = []; dtStageRef.current = 'select';
+      queueEnemyTurn();
+      return;
+    }
+    const action = q[dtExecPosRef.current];
+    dtTurnIdxRef.current = action.idx; setDtTurnIdx(action.idx);
+    setSoulMenu('root');
+    // 「たたかう」が連続するあいだは 'menu' を経由させない（複数行のタイミングバーが同時表示され続けるように、
+    // 行が切り替わる瞬間もオーバーレイをマウントしたままにする）。それ以外の行動は今まで通り一度 'menu' に戻す。
+    if (action.kind !== 'attack') setSoulPhase('menu');
+    setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
+    // setBattle の反映（canAct=true）を待ってから実行関数を呼ぶ（battleViewRef は render 時に同期されるため）
+    setTimeout(() => {
+      if (action.kind === 'attack') setSoulPhase('attack');
+      else if (action.kind === 'act' && action.move) doMove(action.move);
+      else if (action.kind === 'item' && action.item) useHealItem(action.item, true);
+      else if (action.kind === 'spell' && action.spell) castSpell(action.spell);
+      else if (action.kind === 'defend') doDefend();
+    }, 60);
+  };
+
+  /** デルタルーン風パーティ戦闘専用：「たたかう」選択。選択フェーズ中はキューに積むだけで、
+   *  実際のタイミングバーは全員の選択が終わった実行フェーズで開く。 */
+  const dtChooseFight = () => {
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
+    if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
+      dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'attack' });
+      setBattle(v => (v ? { ...v, canAct: false } : v));
+      dtAdvanceTurn();
+      return;
+    }
+    setSoulPhase('attack');
   };
 
   /** soul: 敵のHP割合・直前にプレイヤーが使った「こうどう」技名から、条件に合うセリフを1つ選ぶ。
@@ -1729,7 +2000,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const move = b.enemyMoves.length && Math.random() < 0.4 ? b.enemyMoves[Math.floor(Math.random() * b.enemyMoves.length)] : null;
     if (move?.heal) {
       const before = b.enemyHp; b.enemyHp = Math.min(b.enemyMaxHp, b.enemyHp + move.power);
-      appendLog(`${b.enemyName}は ${move.name}を つかった！ HPが ${b.enemyHp - before} かいふく`, { canAct: pr.hp > 0 });
+      if (gameDataRef.current.battle?.style === 'deltarune') {
+        dtDefendedRef.current = new Set();
+        const first = Math.max(0, dtParty().findIndex(m => m.hp > 0)); // downしたメンバーは飛ばして次ラウンド開始
+        dtTurnIdxRef.current = first; setDtTurnIdx(first);
+        appendLog(`${b.enemyName}は ${move.name}を つかった！ HPが ${b.enemyHp - before} かいふく`, { canAct: !dtAllDown() });
+      } else {
+        appendLog(`${b.enemyName}は ${move.name}を つかった！ HPが ${b.enemyHp - before} かいふく`, { canAct: pr.hp > 0 });
+      }
       return;
     }
     // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
@@ -1751,26 +2029,45 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     });
   };
 
-  /** soul: タイミングバーの結果からダメージを与える。中央に近いほど高倍率。 */
-  const resolveSoulAttack = (pos: number) => {
+  /** デルタルーン風パーティ戦闘：実行フェーズで、今解決した「たたかう」の次にまだ「たたかう」が
+   *  控えているか（＝複数行のタイミングバーをオーバーレイをたたまずに連続表示できるか）。 */
+  const dtNextIsAttack = () =>
+    dtStageRef.current === 'execute' && dtQueueRef.current[dtExecPosRef.current + 1]?.kind === 'attack';
+
+  /** soul: タイミングバーの結果からダメージを与える。的（target）に近いほど高倍率。
+   *  soul（アンダーテール）は的が中央（0.5）、デルタルーンは左端固定（DT_FIGHT_TARGET）。 */
+  const resolveSoulAttack = (pos: number, target = 0.5) => {
     const b = battleRef.current; const pr = progressRef.current;
-    const dist = Math.abs(pos - 0.5);
+    const dist = Math.abs(pos - target);
     const mult = dist < 0.06 ? 1.6 : dist < 0.18 ? 1.2 : dist < 0.32 ? 0.9 : 0.6;
     const dmg = Math.max(1, Math.round(calcDmg(pr.atk, b.enemyDef) * mult));
     const beforeHp = b.enemyHp;
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
     triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
-    playSfx(UNDERTALE_ENEMY_DAMAGE_SFX);
-    setSoulPhase('menu');
+    if (gameDataRef.current.battle?.style === 'deltarune') {
+      // 剣を振る音（会心なら専用SE重ね）＋現在ターンのメンバーの攻撃モーション
+      playSfx(DT_SFX.attack);
+      if (mult >= 1.6) playSfx(DT_SFX.crit);
+      const attacker = dtParty()[dtTurnIdxRef.current];
+      if (attacker) dtPlayMemberAnim(attacker.id, 'attack', 700);
+      setDtAttackDone(p => ({ ...p, [dtTurnIdxRef.current]: { result: mult >= 1.6 ? 'crit' : 'hit', pos } }));
+    }
+    playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+    // 次も「たたかう」が控えているあいだは 'attack' のままにして、複数行のタイミングバーオーバーレイを
+    // たたまずに連続表示する（reference の o_enc_fight が全員ぶんの棒を同時に見せているのを再現）。
+    if (!dtNextIsAttack()) setSoulPhase('menu');
     appendLog(`${mult >= 1.6 ? '会心の いちげき！ ' : ''}${dmg}のダメージ！`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
-    queueEnemyTurn();
+    dtAdvanceTurn();
   };
 
   const missSoulAttack = () => {
-    setSoulPhase('menu');
+    if (gameDataRef.current.battle?.style === 'deltarune') {
+      setDtAttackDone(p => ({ ...p, [dtTurnIdxRef.current]: { result: 'miss', pos: 0 } }));
+    }
+    if (!dtNextIsAttack()) setSoulPhase('menu');
     appendLog('こうげきは ハズれた！', { canAct: false });
-    queueEnemyTurn();
+    dtAdvanceTurn();
   };
 
   const doAttack = () => {
@@ -1785,6 +2082,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const doMove = (m: BattleMove) => {
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
+    if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
+      dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'act', move: m });
+      setBattle(v => (v ? { ...v, canAct: false } : v));
+      dtAdvanceTurn();
+      return;
+    }
     const b = battleRef.current; const pr = progressRef.current;
     if (pr.mp < m.cost) { appendLog('MPが たりない！'); return; }
     pr.mp -= m.cost; forceHud(n => n + 1);
@@ -1793,13 +2096,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       lastActRef.current = m.name;
       const before = b.mercy;
       b.mercy = Math.min(100, b.mercy + m.mercy);
+      if (gameDataRef.current.battle?.style === 'deltarune') {
+        const actor = dtParty()[dtTurnIdxRef.current];
+        if (actor) dtPlayMemberAnim(actor.id, 'act', 700);
+        if (b.mercy > before) playSfx(DT_SFX.mercyAdd);
+      }
       const line = b.mercy >= 100
         ? `「${m.name}」！ ${b.enemyName}は たたかう気を なくしたようだ…`
         : b.mercy > before
           ? `「${m.name}」！ ${b.enemyName}の 敵意が やわらいだ`
           : `「${m.name}」！ しかし ${b.enemyName}には とどかなかった`;
       appendLog(line, { canAct: false });
-      queueEnemyTurn();
+      dtAdvanceTurn();
       return;
     }
     if (m.heal) {
@@ -1810,11 +2118,71 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const beforeHp = b.enemyHp;
       b.enemyHp = Math.max(0, b.enemyHp - dmg);
       triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
-      if ((gameDataRef.current.battle?.style ?? 'classic') === 'soul') playSfx(UNDERTALE_ENEMY_DAMAGE_SFX);
+      if (isDodgeBattleStyle(gameDataRef.current.battle?.style)) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
       appendLog(`${m.name}！ ${dmg}のダメージ`, { canAct: false });
       if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     }
-    queueEnemyTurn();
+    dtAdvanceTurn();
+  };
+
+  /** デルタルーン風パーティ戦闘専用：TPを消費して呪文をとなえる（回復は仲間全員へ・downからの復帰あり、攻撃は敵へ）。 */
+  const castSpell = (spell: PartySpell) => {
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
+    if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
+      if (tpRef.current < spell.tpCost) return;
+      dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'spell', spell });
+      setBattle(v => (v ? { ...v, canAct: false } : v));
+      dtAdvanceTurn();
+      return;
+    }
+    if (tpRef.current < spell.tpCost) return;
+    const nextTp = tpRef.current - spell.tpCost;
+    tpRef.current = nextTp; setTp(nextTp);
+    const caster = dtParty()[dtTurnIdxRef.current];
+    if (caster) dtPlayMemberAnim(caster.id, 'spell', 700);
+    playSfx(DT_SFX.spellCast);
+    const b = battleRef.current;
+    if (spell.heal) {
+      const party = gameDataRef.current.battle?.party ?? [];
+      let revived: string | null = null;
+      party.forEach(m => { if (dtHealMember(m.id, spell.power)) revived = m.name; });
+      playSfx(DT_SFX.cure);
+      appendLog(revived ? `「${spell.name}」！ ${revived}が たちあがった！` : `「${spell.name}」！ なかまのHPが かいふくした`, { canAct: false });
+    } else {
+      const dmg = Math.max(1, Math.round(spell.power * (0.85 + Math.random() * 0.3)));
+      const beforeHp = b.enemyHp;
+      b.enemyHp = Math.max(0, b.enemyHp - dmg);
+      triggerEnemyDamageFx(dmg, beforeHp, b.enemyHp, b.enemyMaxHp);
+      playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+      appendLog(`「${spell.name}」！ ${dmg}のダメージ`, { canAct: false });
+      if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+    }
+    dtAdvanceTurn();
+  };
+
+  /** デルタルーン風パーティ戦闘専用：「まもる」。TPを加算し、このメンバーの次の被弾ダメージを軽減する。 */
+  const doDefend = () => {
+    if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
+    if (gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
+      // 参考実装（o_enc の __order_action_queue）は defend を実行キューに積まず、選択した瞬間に
+      // 効果を適用する：スプライトが即座に防御ポーズへ切り替わり、TP+16 も同じラウンドの
+      // 呪文選択にすぐ使える（クリスがまもる→そのTPでラルセイが呪文、が同ラウンドで成立）。
+      const member = dtParty()[dtTurnIdxRef.current];
+      if (!member) return;
+      dtDefendedRef.current.add(member.id);
+      const nextTp = Math.min(100, tpRef.current + 16);
+      tpRef.current = nextTp; setTp(nextTp);
+      appendLog(`${member.name}は みをまもっている……`, { canAct: false });
+      dtAdvanceTurn();
+      return;
+    }
+    const member = dtParty()[dtTurnIdxRef.current];
+    if (!member) return;
+    dtDefendedRef.current.add(member.id);
+    const nextTp = Math.min(100, tpRef.current + 16);
+    tpRef.current = nextTp; setTp(nextTp);
+    appendLog(`${member.name}は みをまもっている……`, { canAct: false });
+    dtAdvanceTurn();
   };
 
   const doFlee = () => {
@@ -1828,6 +2196,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     const b = battleRef.current;
     if (spareReady(b)) {
+      if (gameDataRef.current.battle?.style === 'deltarune') playSfx(DT_SFX.spare);
       appendLog(`${b.enemyName}は しずかに たちさった…`, { canAct: false, over: true });
       setTimeout(() => endBattle('spare'), 700);
     } else {
@@ -1842,23 +2211,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [logRevealCount, setLogRevealCount] = useState(0);
   const lastLogLine = battle?.log.at(-1) ?? '';
   useEffect(() => {
-    if (battleStyle !== 'soul' || !lastLogLine) { setLogRevealCount(0); return; }
+    if (!isDodgeBattleStyle(battleStyle) || !lastLogLine) { setLogRevealCount(0); return; }
     setLogRevealCount(0);
     let i = 0;
     const id = setInterval(() => {
       const ch = lastLogLine[i];
       i++;
       setLogRevealCount(i);
-      if (ch && ch.trim()) playSfx(UNDERTALE_TEXT_TYPER_SFX);
+      if (ch && ch.trim()) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textTyper);
       if (i >= lastLogLine.length) clearInterval(id);
     }, 32);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLogLine, battleStyle]);
 
-  // soul: たたかう＝タイミングバー。バーが右端まで行くとミス。クリック/Z/Enter/Spaceで停止。
+  // soul（アンダーテール系のみ）: たたかう＝タイミングバー。バーが右端まで行くとミス。
+  // クリック/Z/Enter/Spaceで停止。デルタルーンは下の専用マルチバー実装（dtFightPos）を使う。
   useEffect(() => {
-    if (!inBattle || battleStyle !== 'soul' || soulPhase !== 'attack') return;
+    if (!inBattle || !isDodgeBattleStyle(battleStyle) || battleStyle === 'deltarune' || soulPhase !== 'attack') return;
     soulBarRef.current = { pos: 0 };
     let raf = 0; let alive = true;
     const step = () => {
@@ -1874,12 +2244,78 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     window.addEventListener('pointerdown', stop);
     raf = requestAnimationFrame(step);
     return () => { alive = false; cancelAnimationFrame(raf); window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', stop); };
+  }, [inBattle, battleStyle, soulPhase]);
+
+  /** デルタルーン: 「たたかう」を選んだメンバー全員ぶんのタイミングバーを同時に動かす
+   *  （tlDR o_enc_fightstick 準拠）。全行の棒が並行して右端から左端の的へ流れ、行ごとに開始が
+   *  ずれるため、的への到達は上の行から順にやってくる＝参加メンバーの人数ぶん、上から順に
+   *  独立した押下チャンスがある（1回の押下で全員ぶんが決まることはない）。的は左端固定。
+   *  入力（Z/タップ）はキュー順の「現在の担当メンバー」の行だけに効き、棒が的を通り過ぎて
+   *  左端に達するとミス。棒の毎フレーム移動は React を介さず dtStickElsRef の style.left を
+   *  直接書く（巨大コンポーネントの60fps再レンダリング回避）。 */
+  useEffect(() => {
+    if (!inBattle || battleStyle !== 'deltarune' || soulPhase !== 'attack') return;
+    const rows = dtAttackRowsRef.current;
+    if (!rows.length) return;
+    const t0 = performance.now();
+    let alive = true; let raf = 0;
+    const resolvedLocal = new Set<number>();
+    // STAGGER＝行ごとの開始ずれ。的への到達間隔もこの値になるので、1人ずつはっきり分かれた
+    // 押下タイミングになるよう十分に空ける（250msだと3人が0.5秒内に集中し実質1押しで決まってしまう）。
+    const STAGGER_MS = 500, DURATION_MS = 1300;
+    // 押しっぱなし（キーリピート）や連打で複数行が一度に解決されないようにするガード
+    let keyHeld = false;
+    let inputLockUntil = 0;
+    // s＝棒の位置。1=右端 → 0=左端。行 i は i*STAGGER_MS 遅れて走り出す（それまで右端で待機）。
+    const sOf = (rowOrder: number) => 1 - Math.max(0, performance.now() - t0 - rowOrder * STAGGER_MS) / DURATION_MS;
+    const step = () => {
+      if (!alive) return;
+      rows.forEach((memberIdx, i) => {
+        if (resolvedLocal.has(memberIdx)) return;
+        const el = dtStickElsRef.current[memberIdx];
+        if (el) el.style.left = `${Math.max(0, Math.min(1, sOf(i))) * 100}%`;
+      });
+      const cur = dtTurnIdxRef.current;
+      const curOrder = rows.indexOf(cur);
+      if (curOrder >= 0 && !resolvedLocal.has(cur) && sOf(curOrder) <= 0) {
+        resolvedLocal.add(cur);
+        missSoulAttack();
+      }
+      raf = requestAnimationFrame(step);
+    };
+    const hit = () => {
+      if (performance.now() < inputLockUntil) return; // 直前の解決から間もない入力は次の行に食い込ませない
+      const cur = dtTurnIdxRef.current;
+      const curOrder = rows.indexOf(cur);
+      if (curOrder < 0 || resolvedLocal.has(cur)) return;
+      const s = sOf(curOrder);
+      if (s >= 1) return; // まだ走り出していない（右端で待機中の）行は空振り扱いにしない
+      resolvedLocal.add(cur);
+      inputLockUntil = performance.now() + 250;
+      resolveSoulAttack(Math.max(0, s), DT_FIGHT_TARGET);
+    };
+    const isFireKey = (k: string) => k === 'z' || k === 'Z' || k === 'Enter' || k === ' ';
+    const onKey = (e: KeyboardEvent) => {
+      if (!isFireKey(e.key)) return;
+      e.preventDefault();
+      if (keyHeld) return; // OSのキーリピートを無視：1押下=1回ぶんの判定
+      keyHeld = true;
+      hit();
+    };
+    const onKeyUp = (e: KeyboardEvent) => { if (isFireKey(e.key)) keyHeld = false; };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', hit);
+    raf = requestAnimationFrame(step);
+    return () => { alive = false; cancelAnimationFrame(raf); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKeyUp); window.removeEventListener('pointerdown', hit); };
+    // 担当メンバーは dtTurnIdxRef 経由で参照し、依存に入れない（入れると担当交代のたびに
+    // effect が張り直され、並行して走っている全行の棒がリセットされてしまう）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inBattle, battleStyle, soulPhase]);
 
   // soul: 敵ターン＝バトルボックス内の弾幕よけミニゲーム（176×176 の小キャンバス）。
   useEffect(() => {
-    if (!inBattle || battleStyle !== 'soul' || soulPhase !== 'dodge') return;
+    if (!inBattle || !isDodgeBattleStyle(battleStyle) || soulPhase !== 'dodge') return;
     const cv = soulCanvasRef.current; const st = soulDodgeRef.current;
     if (!cv || !st) return;
     const ctx = cv.getContext('2d'); if (!ctx) return;
@@ -2097,15 +2533,41 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const incomingFrom = horizontal ? (bl.vx > 0 ? 'left' : 'right') : (bl.vy > 0 ? 'up' : 'down');
               if (incomingFrom === st.shieldDir) { st.invuln = 8; break; }
             }
-            pr.hp = Math.max(0, pr.hp - st.dmg);
+            if (gameDataRef.current.battle?.style === 'deltarune') {
+              // デルタルーン風パーティ戦闘：生存メンバーからランダムに1人が被弾（「まもる」済みなら 2/3 に軽減）。
+              const target = dtPickTarget();
+              if (target) {
+                dtDamageMember(target, st.dmg);
+                playSfx(sfxRef.current.damage);
+                if (dtAllDown()) { alive = false; endBattle('lose'); return; }
+              }
+            } else {
+              pr.hp = Math.max(0, pr.hp - st.dmg);
+              playSfx(sfxRef.current.damage);
+              forceHud(n => n + 1);
+              if (pr.hp <= 0) { alive = false; endBattle('lose'); return; }
+            }
             st.invuln = 45;
-            playSfx(sfxRef.current.damage);
-            forceHud(n => n + 1);
-            if (pr.hp <= 0) { alive = false; endBattle('lose'); return; }
             break;
           }
         }
       }
+      // デルタルーン：グレイズ（弾がハートをかすめる）でTPが溜まる（tlDR Engine の o_enc_soul_grazer 相当）。
+      // 弾1発につき1回だけ加算し、被弾直後の無敵中は判定しない。
+      if (gameDataRef.current.battle?.style === 'deltarune' && st.invuln <= 0) {
+        for (const bl of st.bullets) {
+          if (bl.grazed) continue;
+          const d = Math.hypot(bl.x - st.hx, bl.y - st.hy);
+          if (d < bl.r + HR + 8 && d >= bl.r + HR - 1) {
+            bl.grazed = true;
+            const nextTp = Math.min(100, tpRef.current + 3);
+            tpRef.current = nextTp; setTp(nextTp);
+            st.grazeFx = 12;
+            playSfx(DT_SFX.graze);
+          }
+        }
+      }
+      if (st.grazeFx && st.grazeFx > 0) st.grazeFx--;
       // 描画
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
@@ -2142,11 +2604,40 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         else if (st.shieldDir === 'up') ctx.fillRect(sx - 10, sy - 16, 20, 4);
         else ctx.fillRect(sx - 10, sy + 12, 20, 4);
       }
-      if (st.invuln % 8 < 4) drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c', mode === 'yellow');
+      if (st.invuln % 8 < 4) {
+        // デルタルーンは tlDR Engine の spr_soul をそのまま描く（未ロード時はベジェのハートでフォールバック）
+        const soulImg = gameDataRef.current.battle?.style === 'deltarune' ? getDodgeImg(TLDR_SOUL_SPRITE.frames[0]) : null;
+        if (soulImg && soulImg.complete && soulImg.naturalWidth > 0) {
+          ctx.save();
+          ctx.translate(st.hx, st.hy);
+          if (mode === 'yellow') ctx.rotate(Math.PI); // yellow は逆さ（砲台）向き
+          ctx.drawImage(soulImg, -8, -8, 16, 16);
+          ctx.restore();
+        } else {
+          drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c', mode === 'yellow');
+        }
+      }
+      if (st.grazeFx && st.grazeFx > 0) {
+        // グレイズの白いリング（外→内に収束しながらフェード）
+        ctx.strokeStyle = `rgba(255,255,255,${(st.grazeFx / 12) * 0.8})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(st.hx, st.hy, HR + 12 - (12 - st.grazeFx) / 2, 0, Math.PI * 2); ctx.stroke();
+      }
       if (st.frames >= st.duration) {
         alive = false;
         setSoulPhase('menu'); setSoulMenu('root');
-        appendLog('…こうげきを しのいだ！', { canAct: progressRef.current.hp > 0 });
+        if (gameDataRef.current.battle?.style === 'deltarune') {
+          // 次のラウンドへ：全員また行動選択できるように「まもる」フラグと行動順をリセット
+          // （downしたメンバーは飛ばす）。弾幕をしのいだご褒美として少しTPを加算する。
+          dtDefendedRef.current = new Set();
+          const first = Math.max(0, dtParty().findIndex(m => m.hp > 0));
+          dtTurnIdxRef.current = first; setDtTurnIdx(first);
+          const nextTp = Math.min(100, tpRef.current + 8);
+          tpRef.current = nextTp; setTp(nextTp);
+          appendLog('…こうげきを しのいだ！', { canAct: !dtAllDown() });
+        } else {
+          appendLog('…こうげきを しのいだ！', { canAct: progressRef.current.hp > 0 });
+        }
         return;
       }
       raf = requestAnimationFrame(loop);
@@ -2156,9 +2647,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inBattle, battleStyle, soulPhase]);
 
-  /** soul: タッチ/マウスでハートを直接動かす。アンダーテールでは方向キー操作のみに限定するため無効化。 */
+  /** soul: タッチ/マウスでハートを直接動かす。SOUL戦闘系プリセットでは方向キー操作のみに限定するため無効化。 */
   const soulPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (presetId === 'undertale') return;
+    if (isSoulPreset) return;
     const st = soulDodgeRef.current; const cv = soulCanvasRef.current;
     if (!st || !cv) return;
     const rect = cv.getBoundingClientRect();
@@ -2168,6 +2659,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   /** healHp/healMp を持つアイテムを使う。inBattle=true ならターン消費して敵の反撃を受ける。 */
   const useHealItem = (it: ItemDef, inBattle: boolean) => {
+    if (inBattle && gameDataRef.current.battle?.style === 'deltarune' && dtStageRef.current === 'select') {
+      if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
+      if ((inventoryRef.current[it.id] ?? 0) <= 0) return;
+      dtQueueRef.current.push({ idx: dtTurnIdxRef.current, kind: 'item', item: it });
+      setBattle(v => (v ? { ...v, canAct: false } : v));
+      setBattleItemsOpen(false);
+      dtAdvanceTurn();
+      return;
+    }
     const pr = progressRef.current;
     if ((inventoryRef.current[it.id] ?? 0) <= 0) return;
     const parts: string[] = [];
@@ -2184,8 +2684,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     forceHud(n => n + 1);
     if (inBattle) {
       setBattleItemsOpen(false);
+      if (gameDataRef.current.battle?.style === 'deltarune') {
+        const user = dtParty()[dtTurnIdxRef.current];
+        if (user) dtPlayMemberAnim(user.id, 'item', 700);
+      }
       appendLog(`${it.name}を つかった！ ${parts.join('、')}`, { canAct: false });
-      queueEnemyTurn();
+      dtAdvanceTurn();
     } else {
       setBagOpen(false);
       showGameMsg(`${it.emoji} ${it.name}を つかった！\n${parts.join('、')}した`, 'instant', () => {});
@@ -2944,7 +3448,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (isPlaying && !hasOverlay && gameData.engine !== 'yume25d') {
       idleTimerRef.current = setTimeout(() => {
         setShowControlGuide(true);
-      }, 3500);
+      }, 15000);
     }
   }, [isPlaying, activeDialogue, gameMsg, shopModal, eventChoice, gameOverResult, gameData.engine]);
 
@@ -3685,11 +4189,12 @@ const lose = (msg: string) => {
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
       if (encounterAlertRef.current?.phase === 'alert' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_ALERT_MS) {
         // 「！」演出終了 → 現在のBGMを止め、バトル開始SEを鳴らしてハート明滅演出へ
+        // （デルタルーンはそもそも 'alert' フェーズを使わないため、ここは soul/undertale 系のみ通る）
         const alert = encounterAlertRef.current;
         alert.phase = 'flash';
         alert.startTime = performance.now();
         switchBgm(undefined);
-        playSfx(UNDERTALE_BATTLESTART_SFX);
+        playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).battleStart);
       } else if (encounterAlertRef.current?.phase === 'flash' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_FLASH_MS) {
         const { fire } = encounterAlertRef.current;
         encounterAlertRef.current = null;
@@ -5384,7 +5889,7 @@ const lose = (msg: string) => {
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, soulMode: boss.soulMode, dialogue: boss.dialogue, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, soulMode: boss.soulMode, dialogue: boss.dialogue, battleSprite: boss.battleSprite, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => {}); }
               } else {
@@ -5600,7 +6105,7 @@ const lose = (msg: string) => {
         else if (battleRef.current.active) {
           // 戦闘中は戦闘用アイテムメニューを開く
           const bs = gameDataRef.current.battle?.style ?? 'classic';
-          if (bs === 'soul') { setSoulMenu('item'); }
+          if (isDodgeBattleStyle(bs)) { setSoulMenu('item'); }
           else { setBattleItemsOpen(true); }
         }
         else {
@@ -5628,7 +6133,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 2;
           if (menuDownEdge) c += 2;
           c = ((c % n) + n) % n;
-          if (c !== invCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
+          if (c !== invCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
           invCursorRef.current = c; setInvCursor(c);
         }
       } else if (isPlaying && invMenuRef.current) {
@@ -5643,24 +6148,27 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % count) + count) % count;
-          if (c !== invMenuCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
+          if (c !== invMenuCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
           invMenuCursorRef.current = c; setInvMenuCursor(c);
         }
-      } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulPhaseRef.current === 'menu') {
+      } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulPhaseRef.current === 'menu') {
+        const isDt = gameDataRef.current.battle?.style === 'deltarune';
         if (soulMenuRef.current === 'root') {
           if (menuLeftEdge || menuRightEdge) {
+            const rootCount = isDt ? 5 : 4; // デルタルーンは FIGHT/ACT/ITEM/MERCY/DEFEND の5つ
             let c = soulRootCursorRef.current;
             if (menuLeftEdge) c -= 1;
             if (menuRightEdge) c += 1;
-            c = ((c % 4) + 4) % 4;
-            if (c !== soulRootCursorRef.current) playSfx(UNDERTALE_MENU_SWITCH_SFX);
+            c = ((c % rootCount) + rootCount) % rootCount;
+            if (c !== soulRootCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
             soulRootCursorRef.current = c; setSoulRootCursor(c);
           }
         } else {
-          // ACT / ITEM / MERCY サブメニュー
+          // ACT / ITEM / MERCY サブメニュー（デルタルーンは ACT に現在ターンのメンバーの呪文も並ぶ）
           const bd2 = gameDataRef.current.battle;
+          const curSpells = isDt ? (dtParty()[dtTurnIdxRef.current] ? (bd2?.party?.[dtTurnIdxRef.current]?.spells ?? []) : []) : [];
           let count = 1; let cols = 1;
-          if (soulMenuRef.current === 'act') { count = (bd2?.moves.length ?? 0) + 1; cols = 2; }
+          if (soulMenuRef.current === 'act') { count = (bd2?.moves.length ?? 0) + curSpells.length + 1; cols = 2; }
           else if (soulMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
           else if (soulMenuRef.current === 'mercy') { count = 3; cols = 1; }
           if (count > 0 && (menuUpEdge || menuDownEdge || menuLeftEdge || menuRightEdge)) {
@@ -5675,7 +6183,7 @@ const lose = (msg: string) => {
               if (menuDownEdge) c += 1;
             }
             c = ((c % count) + count) % count;
-            if (c !== soulSubCursorRef.current) playSfx(UNDERTALE_MENU_SWITCH_SFX);
+            if (c !== soulSubCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
             soulSubCursorRef.current = c; setSoulSubCursor(c);
           }
         }
@@ -5687,7 +6195,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== eventChoiceCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
+          if (c !== eventChoiceCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
           eventChoiceCursorRef.current = c; setEventChoiceCursor(c);
         }
       } else if (isPlaying && shopModalRef.current) {
@@ -5698,11 +6206,11 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== shopCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
+          if (c !== shopCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
           shopCursorRef.current = c; setShopCursor(c);
         }
-      } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul') {
-        // ターン制（非soul）戦闘コマンド
+      } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
+        // ターン制（classic）戦闘コマンド
         if (battleItemsOpenRef.current) {
           const n = usableItems().length + 1;
           if (menuUpEdge || menuDownEdge) {
@@ -5733,7 +6241,7 @@ const lose = (msg: string) => {
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== titleCursorRef.current && presetId === 'undertale') playSfx(UNDERTALE_MENU_SWITCH_SFX);
+          if (c !== titleCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
           titleCursorRef.current = c; setTitleCursor(c);
         }
       }
@@ -5772,32 +6280,43 @@ const lose = (msg: string) => {
           playMenuConfirmSfx();
           setInvMenu({ slotIdx: invCursorRef.current }); invMenuRef.current = { slotIdx: invCursorRef.current };
           setInvMenuCursor(0); invMenuCursorRef.current = 0;
-        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulPhaseRef.current === 'menu') {
+        } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulPhaseRef.current === 'menu') {
           const canMenuNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
+          const isDt = gameDataRef.current.battle?.style === 'deltarune';
           if (soulMenuRef.current === 'root') {
             if (canMenuNow) {
               const r = soulRootCursorRef.current;
-              playSfx(UNDERTALE_MENU_CONFIRM_SFX);
-              if (r === 0) setSoulPhase('attack');
-              else if (r === 1) setSoulMenu('act');
-              else if (r === 2) setSoulMenu('item');
-              else setSoulMenu('mercy');
+              if (isDt && r === 4) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); doDefend(); }
+              else if (isDt && r === 0) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); dtChooseFight(); }
+              else {
+                playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm);
+                if (r === 0) setSoulPhase('attack');
+                else if (r === 1) setSoulMenu('act');
+                else if (r === 2) setSoulMenu('item');
+                else setSoulMenu('mercy');
+              }
             }
           } else if (soulMenuRef.current === 'act') {
             const moves = gameDataRef.current.battle?.moves ?? [];
+            const curMember = isDt ? gameDataRef.current.battle?.party?.[dtTurnIdxRef.current] : undefined;
+            const spells = curMember?.spells ?? [];
             const idx = soulSubCursorRef.current;
-            if (idx < moves.length) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); doMove(moves[idx]); } }
-            else { playSfx(UNDERTALE_MENU_CANCEL_SFX); setSoulMenu('root'); }
+            if (idx < moves.length) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); doMove(moves[idx]); } }
+            else if (idx < moves.length + spells.length) {
+              const spell = spells[idx - moves.length];
+              if (canMenuNow && tpRef.current >= spell.tpCost) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); castSpell(spell); }
+            }
+            else { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel); setSoulMenu('root'); }
           } else if (soulMenuRef.current === 'item') {
             const items = usableItems();
             const idx = soulSubCursorRef.current;
-            if (idx < items.length) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); useHealItem(items[idx], true); } }
-            else { playSfx(UNDERTALE_MENU_CANCEL_SFX); setSoulMenu('root'); }
+            if (idx < items.length) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); useHealItem(items[idx], true); } }
+            else { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel); setSoulMenu('root'); }
           } else if (soulMenuRef.current === 'mercy') {
             const idx = soulSubCursorRef.current;
-            if (idx === 0) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); doSpare(); } }
-            else if (idx === 1) { if (canMenuNow) { playSfx(UNDERTALE_MENU_CONFIRM_SFX); setSoulMenu('root'); doFlee(); } }
-            else { playSfx(UNDERTALE_MENU_CANCEL_SFX); setSoulMenu('root'); }
+            if (idx === 0) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); doSpare(); } }
+            else if (idx === 1) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); doFlee(); } }
+            else { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel); setSoulMenu('root'); }
           }
         } else if (isPlaying && eventChoiceRef.current) {
           const choice = eventChoiceRef.current;
@@ -5837,7 +6356,7 @@ const lose = (msg: string) => {
               }
             }
           }
-        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul') {
+        } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
           const canActNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
           if (battleItemsOpenRef.current) {
             const items = usableItems();
@@ -5875,9 +6394,9 @@ const lose = (msg: string) => {
           setInvMenu(null); invMenuRef.current = null;
         } else if (isPlaying && invOpenRef.current) {
           setInvOpen(false);
-        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') === 'soul' && soulMenuRef.current !== 'root') {
+        } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulMenuRef.current !== 'root') {
           setSoulMenu('root');
-        } else if (isPlaying && battleRef.current.active && (gameDataRef.current.battle?.style ?? 'classic') !== 'soul' && battleItemsOpenRef.current) {
+        } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style) && battleItemsOpenRef.current) {
           setBattleItemsOpen(false);
         } else if (isPlaying && shopModalRef.current) {
           setShopModal(null);
@@ -6382,8 +6901,8 @@ const lose = (msg: string) => {
         const talk = npcTalkRef.current;
         const { entity: e, text, startTime, wrapped } = talk;
         const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
-        if (presetId === 'undertale' && shown > talk.lastShown) {
-          if (text.slice(talk.lastShown, shown).trim()) playSfx(UNDERTALE_TEXT_VOICE_SFX);
+        if (isSoulPreset && shown > talk.lastShown) {
+          if (text.slice(talk.lastShown, shown).trim()) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
           talk.lastShown = shown;
         }
         if (shown > 0) {
@@ -6439,19 +6958,23 @@ const lose = (msg: string) => {
           ctx.fillStyle = 'rgba(0,0,0,0.6)';
           ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.restore();
-          // ハート本体（プレイヤーの手前＝プレイヤー描画より後に重ねて描く）
-          const cx = Math.round(alert.fromX + (alert.toX - alert.fromX) * eased);
-          const cy = Math.round(alert.fromY + (alert.toY - alert.fromY) * eased);
-          const s = 7;
-          ctx.save();
-          ctx.imageSmoothingEnabled = false;
-          ctx.fillStyle = '#ff3355';
-          ctx.beginPath();
-          ctx.moveTo(cx, cy + s * 0.9);
-          ctx.bezierCurveTo(cx + s, cy + s * 0.2, cx + s * 0.8, cy - s * 0.8, cx, cy - s * 0.2);
-          ctx.bezierCurveTo(cx - s * 0.8, cy - s * 0.8, cx - s, cy + s * 0.2, cx, cy + s * 0.9);
-          ctx.fill();
-          ctx.restore();
+          // ハート本体（プレイヤーの手前＝プレイヤー描画より後に重ねて描く）。
+          // デルタルーンは「！」演出（'alert'フェーズ）自体を使わないので、その延長のハート移動も出さない
+          // （黒フラッシュの明滅のみ＝Deltarune本編の遭遇演出に合わせる）。
+          if (presetId !== 'deltarune') {
+            const cx = Math.round(alert.fromX + (alert.toX - alert.fromX) * eased);
+            const cy = Math.round(alert.fromY + (alert.toY - alert.fromY) * eased);
+            const s = 7;
+            ctx.save();
+            ctx.imageSmoothingEnabled = false;
+            ctx.fillStyle = '#ff3355';
+            ctx.beginPath();
+            ctx.moveTo(cx, cy + s * 0.9);
+            ctx.bezierCurveTo(cx + s, cy + s * 0.2, cx + s * 0.8, cy - s * 0.8, cx, cy - s * 0.2);
+            ctx.bezierCurveTo(cx - s * 0.8, cy - s * 0.8, cx - s, cy + s * 0.2, cx, cy + s * 0.9);
+            ctx.fill();
+            ctx.restore();
+          }
         }
       }
       // アンダーテール風エンカウント演出：プレイヤー頭上にドット絵の吹き出し「！」を表示
@@ -7681,6 +8204,7 @@ const lose = (msg: string) => {
                 touhou:  'from-purple-950 via-gray-900 to-gray-950',
                 rockman: 'from-cyan-950  via-gray-900 to-gray-950',
                 undertale: 'from-rose-950 via-gray-950 to-black',
+                deltarune: 'from-purple-950 via-gray-950 to-black',
                 yume: 'from-violet-950 via-gray-950 to-black',
               };
               const PRESET_RING: Record<PresetId, string> = {
@@ -7690,6 +8214,7 @@ const lose = (msg: string) => {
                 touhou:  'ring-purple-500/50',
                 rockman: 'ring-cyan-500/50',
                 undertale: 'ring-rose-500/50',
+                deltarune: 'ring-purple-500/50',
                 yume: 'ring-violet-500/50',
               };
               return (
@@ -7964,7 +8489,14 @@ const lose = (msg: string) => {
                         )}
                       </div>
                     </div>
-                    <div className={`text-5xl sm:text-6xl leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>{battle.enemyEmoji}</div>
+                    <div className={`leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                      {battle.enemySprite ? (() => {
+                        // スプライト持ちの敵：被ダメージ演出中は hurt、みのがし可能になったら spare、通常は idle アニメ
+                        const es = battle.enemySprite;
+                        const anim = enemyDmgPopup && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
+                        return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
+                      })() : <span className="text-5xl sm:text-6xl">{battle.enemyEmoji}</span>}
+                    </div>
                     <div className={`mt-1 text-xs sm:text-sm ${ready ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}{ready ? ' ✦' : ''}</div>
                   </div>
                   {/* バトルボックス（白枠がシームレスに変形する） */}
@@ -8000,7 +8532,7 @@ const lose = (msg: string) => {
                           {soulMenu === 'act' && (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                               {bd.moves.map((m, i) => (
-                                <button key={i} disabled={!canMenu || pr.mp < m.cost}
+                                <button key={`m${i}`} disabled={!canMenu || pr.mp < m.cost}
                                   onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); doMove(m); }}
                                   className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
                                   {soulSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
@@ -8072,7 +8604,275 @@ const lose = (msg: string) => {
               );
             })()}
 
-            {battle && battleStyle !== 'soul' && (
+            {/* ── デルタルーン風戦闘 ──
+                tlDR Engine（o_enc）のレイアウトを踏襲：左端に縦のTPバー、その隣にパーティの横向き
+                スプライトが縦に並び、敵は右側。下部はメンバーごとのステータスボックス（自分の番の
+                メンバーの上にコマンドボタン列が出る）＋全幅のテキスト/メニュー欄。
+                弾幕よけ（バトルボックス）とこうげきタイミングバーはフィールド中央に重ねて表示する。 */}
+            {battle && battleStyle === 'deltarune' && (() => {
+              const bd = gameData.battle!;
+              const canMenu = battle.canAct && !battle.over && soulPhase === 'menu';
+              const ready = spareReady(battle);
+              const roster = dtParty();
+              const curMember = bd.party?.[dtTurnIdx];
+              const curSpells = curMember?.spells ?? [];
+              const memberColor = (i: number) => bd.party?.[i]?.color ?? '#ffffff';
+              // コマンド5種（tlDR Engine のボタンスプライト。frame0=通常/frame1=選択中）。
+              // 2番目は呪文持ちなら POWER（まほう）、それ以外は ACT（こうどう）の絵柄になる。
+              const cmds = [
+                { anim: TLDR_UI_SPRITES.btFight, label: bd.labels.attack, onClick: () => canMenu && dtChooseFight() },
+                { anim: curSpells.length ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: bd.labels.move, sel: soulMenu === 'act', onClick: () => canMenu && setSoulMenu(m => m === 'act' ? 'root' : 'act') },
+                { anim: TLDR_UI_SPRITES.btItem, label: bd.labels.item ?? 'アイテム', sel: soulMenu === 'item', onClick: () => canMenu && setSoulMenu(m => m === 'item' ? 'root' : 'item') },
+                { anim: TLDR_UI_SPRITES.btSpare, label: bd.labels.mercy ?? 'みのがす', sel: soulMenu === 'mercy', mercy: true, onClick: () => canMenu && setSoulMenu(m => m === 'mercy' ? 'root' : 'mercy') },
+                { anim: TLDR_UI_SPRITES.btDefend, label: 'まもる', onClick: () => canMenu && doDefend() },
+              ] as { anim: BattleSpriteAnim; label: string; sel?: boolean; mercy?: boolean; onClick: () => void }[];
+              return (
+                <div className="absolute inset-0 flex flex-col bg-black font-pixel select-none"
+                  style={{ backgroundImage: 'repeating-linear-gradient(0deg, rgba(147,51,234,0.12) 0 1px, transparent 1px 24px), repeating-linear-gradient(90deg, rgba(147,51,234,0.12) 0 1px, transparent 1px 24px)' }}>
+                  {/* ── 上段：バトルフィールド ── */}
+                  <div className="flex-1 relative min-h-0 overflow-hidden">
+                    {/* TPバー（縦・左端） */}
+                    <div className="absolute left-1 sm:left-2 top-2 bottom-2 flex flex-col items-center z-10 w-6">
+                      <span className="text-white font-bold italic text-[10px] sm:text-xs leading-none">TP</span>
+                      <div className="flex-1 w-2.5 sm:w-3 my-1 relative" style={{ background: '#8f1616' }}>
+                        <div className={`absolute bottom-0 inset-x-0 transition-all duration-300 ${tp >= 100 ? 'bg-yellow-300' : 'bg-orange-500'}`} style={{ height: `${tp}%` }} />
+                        {tp < 100 && <div className="absolute inset-x-0 h-0.5 bg-white transition-all duration-300" style={{ bottom: `${tp}%` }} />}
+                      </div>
+                      {tp >= 100
+                        ? <span className="text-yellow-300 font-bold text-[9px] sm:text-[11px] leading-tight text-center">M<br />A<br />X</span>
+                        : <span className="text-white font-bold text-[9px] sm:text-[11px] leading-none">{tp}<span className="text-[7px]">%</span></span>}
+                    </div>
+                    {/* パーティ（左・縦列） */}
+                    <div className="absolute left-8 sm:left-11 inset-y-1 flex flex-col justify-center gap-0.5 z-0">
+                      {roster.map((m, i) => {
+                        const down = m.hp <= 0;
+                        const sprites = bd.party?.[i]?.battleSprites;
+                        const fx = dtAnimFx[m.id];
+                        const kind: keyof PartyBattleSprites = down ? 'defeat'
+                          : fx?.kind ?? (soulPhase === 'attack' && i === dtTurnIdx ? 'attackReady'
+                          : dtDefendedRef.current.has(m.id) ? 'defend' : 'idle');
+                        const anim = sprites ? (sprites[kind] ?? sprites.idle) : null;
+                        // defend は「まもる」中ずっと表示され続ける状態なので、1周したら最終フレームで
+                        // 静止させる（ループさせると屈み込む動作を延々と繰り返して見えるため）。
+                        const oneShot = kind === 'attack' || kind === 'act' || kind === 'spell' || kind === 'item' || kind === 'defend';
+                        return (
+                          <div key={m.id} className="h-16 sm:h-24 flex items-end">
+                            {anim
+                              ? <BattleAnimSprite anim={anim} h={anim.h ? Math.min(92, anim.h * 1.7) : 76} once={oneShot}
+                                  className={down ? 'opacity-60' : ''} />
+                              : <span className={`text-5xl ${down ? 'opacity-40 grayscale' : ''}`}>{m.emoji}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {/* 敵（右側） */}
+                    <div className={`absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col items-center z-0 transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                      <div className="relative w-32 mb-1">
+                        {enemyDmgPopup && (
+                          <div key={enemyDmgPopup.id}
+                            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
+                            style={{
+                              color: '#000',
+                              textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
+                              animation: 'dmgPopUp 0.7s ease-out forwards',
+                            }}>
+                            {enemyDmgPopup.text}
+                          </div>
+                        )}
+                        <div className="w-32 h-2 overflow-hidden mx-auto">
+                          {enemyGaugeAnim && (
+                            <div className="w-full h-full" style={{ background: '#5b1010' }}>
+                              <div className="h-full bg-lime-400 transition-all duration-500 ease-out" style={{ width: `${enemyGaugeAnim.pct}%` }} />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {battle.enemySprite ? (() => {
+                        const es = battle.enemySprite;
+                        const anim = enemyDmgPopup && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
+                        return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(160, anim.h * 2.4) : 120} />;
+                      })() : <span className="text-7xl sm:text-8xl leading-none drop-shadow">{battle.enemyEmoji}</span>}
+                      <div className={`mt-1 text-[10px] sm:text-xs flex items-center gap-1 ${ready ? 'text-yellow-300' : 'text-white'}`}>
+                        {battle.enemyName}
+                        {ready && <img src={TLDR_UI_SPRITES.spareStar.frames[0]} alt="" draggable={false} className="h-3 w-auto" style={{ imageRendering: 'pixelated' }} />}
+                      </div>
+                    </div>
+                    {/* 弾幕よけバトルボックス（メニュー中は出さない）。こうげきタイミングバーは
+                        下段のテキスト/メニュー欄に重ねて表示する（参考実装の o_enc_fight 同様、
+                        メッセージウィンドウの上にゲージが乗る配置）。 */}
+                    {soulPhase === 'dodge' && (
+                      <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                        <div className="bg-black border-4 border-white relative overflow-hidden pointer-events-auto" style={{ width: 184, height: 184 }}>
+                          <canvas ref={soulCanvasRef} width={176} height={176}
+                            className="w-full h-full touch-none cursor-crosshair" style={{ imageRendering: 'pixelated' }}
+                            onPointerMove={soulPointerMove} onPointerDown={soulPointerMove}
+                            onContextMenu={e => e.preventDefault()} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* ── 中段：メンバーステータスボックス（自分の番のメンバーの上にコマンドボタン列） ── */}
+                  <div className="shrink-0 flex justify-center items-end px-1 gap-0.5">
+                    {roster.map((m, i) => {
+                      const active = i === dtTurnIdx;
+                      const down = m.hp <= 0;
+                      const col = memberColor(i);
+                      const sprites = bd.party?.[i]?.battleSprites;
+                      const hurtNow = dtAnimFx[m.id]?.kind === 'hurt';
+                      const icon = hurtNow && sprites?.iconHurt ? sprites.iconHurt : sprites?.icon;
+                      const hpPct = Math.max(0, Math.min(100, (m.hp / m.maxHp) * 100));
+                      return (
+                        <div key={m.id} className="flex flex-col w-[32%] max-w-[168px]">
+                          {/* コマンドボタン（自分の番のときだけ現れる） */}
+                          <div className="h-7 sm:h-8 flex justify-center items-end gap-0.5 overflow-hidden">
+                            {active && canMenu && cmds.map((c, j) => {
+                              const selected = c.sel || (soulMenu === 'root' && soulRootCursor === j);
+                              return (
+                                <button key={j} onClick={() => { setSoulRootCursor(j); c.onClick(); }} title={c.label} className="block shrink-0">
+                                  <img src={c.anim.frames[selected ? 1 : 0]} alt={c.label} draggable={false}
+                                    className={`h-6 sm:h-7 w-auto ${c.mercy && ready && !selected ? 'animate-pulse' : ''}`}
+                                    style={{ imageRendering: 'pixelated' }} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="bg-black px-1 py-0.5 border-x-2"
+                            style={{
+                              borderTop: `2px solid ${active ? col : '#2a1a45'}`,
+                              borderBottom: `2px solid ${active ? col : '#2a1a45'}`,
+                              borderLeftColor: active ? col : 'transparent',
+                              borderRightColor: active ? col : 'transparent',
+                            }}>
+                            <div className="flex items-center gap-1">
+                              {icon
+                                ? <img src={icon.frames[0]} alt="" draggable={false} className="h-4 sm:h-5 w-auto" style={{ imageRendering: 'pixelated' }} />
+                                : <span className="text-[11px] sm:text-sm">{m.emoji}</span>}
+                              <span className={`text-[9px] sm:text-[11px] font-bold truncate ${down ? 'text-red-400' : 'text-white'}`}>{m.name}</span>
+                            </div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-[7px] sm:text-[8px] text-white font-bold">HP</span>
+                              <div className="flex-1 h-2 overflow-hidden" style={{ background: '#5b1010' }}>
+                                <div className="h-full transition-all" style={{ width: `${hpPct}%`, background: col }} />
+                              </div>
+                              <span className={`text-[8px] sm:text-[9px] whitespace-nowrap ${down ? 'text-red-400 font-bold' : hpPct <= 30 ? 'text-yellow-300' : 'text-white'}`}>
+                                {down ? 'DOWN' : `${m.hp}/${m.maxHp}`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* ── 下段：テキスト／メニュー欄（全幅） ── */}
+                  <div className="shrink-0 h-[84px] sm:h-24 bg-black border-t-2 px-2.5 py-1.5 text-white text-[11px] sm:text-sm leading-relaxed relative overflow-hidden"
+                    style={{ borderColor: '#3b2a55' }}>
+                    {/* こうげきタイミングバー：参考実装（o_enc_fight / o_enc_fightstick）同様、
+                        メッセージウィンドウの上にゲージを重ねる。全員のコマンド選択が終わった実行フェーズで
+                        「たたかう」を選んだメンバーぶんの行が同時に現れ、全行の棒が並行して（開始をわずかに
+                        ずらしながら）右端から左端の的へ流れる。的は左端固定。入力はキュー順の担当行に効く。 */}
+                    {soulPhase === 'attack' && dtAttackRowsRef.current.length > 0 && (
+                      <div className="absolute inset-0 z-10 bg-black/95 flex flex-col justify-center gap-1 px-2 py-1.5 overflow-hidden">
+                        {dtAttackRowsRef.current.map((memberIdx, row) => {
+                          const member = roster[memberIdx];
+                          if (!member) return null;
+                          const col = memberColor(memberIdx);
+                          const done = dtAttackDone[memberIdx];
+                          const isCurrent = memberIdx === dtTurnIdx && !done;
+                          return (
+                            <div key={memberIdx} className="flex items-center gap-1.5"
+                              style={{ animation: `dtGaugeSlideIn 0.22s ease-out ${row * 0.15}s both` }}>
+                              <span className="text-base sm:text-lg w-5 text-center shrink-0">{member.emoji}</span>
+                              <span className={`text-[8px] sm:text-[9px] w-8 shrink-0 tracking-wider font-bold ${done ? (done.result === 'miss' ? 'text-gray-500' : done.result === 'crit' ? 'text-yellow-300' : 'text-white') : isCurrent ? 'text-white' : 'text-white/40'}`}>
+                                {done ? (done.result === 'miss' ? 'ハズレ' : done.result === 'crit' ? '会心！' : 'ヒット') : 'PRESS'}
+                              </span>
+                              <div className="relative flex-1 h-6 sm:h-7 border-2 overflow-hidden bg-[#0c0c14]"
+                                style={{ borderColor: col, opacity: done?.result === 'miss' ? 0.5 : 1 }}>
+                                {/* 的（左端固定）：外側=有効ゾーン、内側=パーフェクトゾーン */}
+                                <div className="absolute inset-y-0" style={{ left: 0, width: '26%', background: `${col}22` }} />
+                                <div className="absolute inset-y-0 border" style={{ left: '2%', width: '12%', borderColor: col, background: `${col}55` }} />
+                                {/* 走る棒：右端→左端。未解決行は effect が毎フレーム left を書く。解決済みは止めた位置で凍結 */}
+                                {done ? (
+                                  <div className={`absolute inset-y-0 w-1 ${done.result === 'miss' ? 'bg-gray-600' : done.result === 'crit' ? 'bg-yellow-300' : 'bg-white'}`}
+                                    style={{ left: `${Math.max(0, Math.min(1, done.pos)) * 100}%` }} />
+                                ) : (
+                                  <div ref={el => { dtStickElsRef.current[memberIdx] = el; }}
+                                    className="absolute inset-y-0 w-1 bg-white" style={{ left: '100%' }} />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {soulMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
+                      <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
+                    ))}
+                    {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0) && (
+                      <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
+                    )}
+                    {soulMenu === 'act' && (
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                        {bd.moves.map((m, i) => (
+                          <button key={`m${i}`} disabled={!canMenu}
+                            onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); doMove(m); }}
+                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                            {soulSubCursor === i ? '❤ ' : '  '}{m.name}
+                          </button>
+                        ))}
+                        {curSpells.map((sp, i) => {
+                          const idx = bd.moves.length + i;
+                          return (
+                            <button key={`s${i}`} disabled={!canMenu || tp < sp.tpCost}
+                              onClick={() => { setSoulSubCursor(idx); setSoulMenu('root'); castSpell(sp); }}
+                              className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === idx ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                              {soulSubCursor === idx ? '❤ ' : '  '}✨{sp.name}<span className="text-orange-400 ml-1">{sp.tpCost}%TP</span>
+                            </button>
+                          );
+                        })}
+                        <button onClick={() => { setSoulSubCursor(bd.moves.length + curSpells.length); setSoulMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === bd.moves.length + curSpells.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {soulSubCursor === bd.moves.length + curSpells.length ? '❤ ' : '  '}もどる
+                        </button>
+                      </div>
+                    )}
+                    {soulMenu === 'item' && (
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                        {usableItems().map((it, i) => (
+                          <button key={it.id} disabled={!canMenu}
+                            onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); useHealItem(it, true); }}
+                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                            {soulSubCursor === i ? '❤ ' : '  '}{it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                          </button>
+                        ))}
+                        {usableItems().length === 0 && <p className="text-gray-500">もちものが ない…</p>}
+                        <button onClick={() => { setSoulSubCursor(usableItems().length); setSoulMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === usableItems().length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {soulSubCursor === usableItems().length ? '❤ ' : '  '}もどる
+                        </button>
+                      </div>
+                    )}
+                    {soulMenu === 'mercy' && (
+                      <div className="flex flex-col gap-0.5">
+                        <button disabled={!canMenu} onClick={() => { setSoulSubCursor(0); setSoulMenu('root'); doSpare(); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : soulSubCursor === 0 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                          {soulSubCursor === 0 ? '❤ ' : '  '}{bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
+                        </button>
+                        <button disabled={!canMenu} onClick={() => { setSoulSubCursor(1); setSoulMenu('root'); doFlee(); }}
+                          className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 1 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                          {soulSubCursor === 1 ? '❤ ' : '  '}{bd.labels.flee}
+                        </button>
+                        <button onClick={() => { setSoulSubCursor(2); setSoulMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 2 ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {soulSubCursor === 2 ? '❤ ' : '  '}もどる
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {battle && !isDodgeBattleStyle(battleStyle) && (
               <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40 font-pixel">
                 {/* 敵 */}
                 <div className="flex flex-col items-center mt-2">
@@ -9209,8 +10009,8 @@ const lose = (msg: string) => {
                                 <div className="mt-2.5 space-y-2.5 border-t border-gray-800 pt-2.5">
                                   <p className="text-[10px] text-gray-300 font-bold">敵の行動パターン設定</p>
                                   
-                                  {/* 1. 通常攻撃の弾幕 (soul style only) */}
-                                  {gameData.battle.style === 'soul' && (
+                                  {/* 1. 通常攻撃の弾幕 (soul / deltarune のみ) */}
+                                  {isDodgeBattleStyle(gameData.battle.style) && (
                                     <>
                                       <label className="block text-[10px] text-gray-400">SOUL移動モード（既定）
                                         <select value={selObj.soulMode ?? 'red'} onChange={e => updObj({ soulMode: e.target.value as SoulMode })}
@@ -9277,7 +10077,7 @@ const lose = (msg: string) => {
                                               </select>
                                             </label>
                                           </div>
-                                          {gameData.battle?.style === 'soul' && !m.heal && (
+                                          {isDodgeBattleStyle(gameData.battle?.style) && !m.heal && (
                                             <>
                                               <label className="block text-[10px] text-gray-400">SOUL移動モード（この技専用・省略時は既定値）
                                                 <select value={m.soulMode ?? ''} onChange={e => {

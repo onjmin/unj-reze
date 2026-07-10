@@ -11,7 +11,7 @@ export const VIEW_ROWS = 11;
 export const VIEW_W = VIEW_COLS * TILE_SIZE;  // 480 px
 export const VIEW_H = VIEW_ROWS * TILE_SIZE;  // 352 px
 
-export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'undertale' | 'yume';
+export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'undertale' | 'deltarune' | 'yume';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze' | 'yume25d';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
@@ -222,6 +222,8 @@ export interface ObjectDef {
   soulMode?: SoulMode;
   /** soul 戦闘：この敵の通常攻撃の予告セリフ候補（moves[].dialogue が優先）。HP割合／直前のこうどう技名で出し分け。 */
   dialogue?: (string | EnemyDialogueLine)[];
+  /** 戦闘オーバーレイで絵文字の代わりに描くスプライト（soul/deltarune 戦闘）。 */
+  battleSprite?: EnemyBattleSprite;
   /** 所属フェーズ番号（touhou エンジン、phases 使用時）。未指定=0。 */
   phase?: number;
   /** action（マリオ系）: 上から踏むと倒せる敵（クリボー型）。SMC core 準拠。
@@ -313,8 +315,37 @@ export interface EnemyDialogueLine { text: string; hpBelowPct?: number; actUsed?
 export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; }
 
 /** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。
- *  dialogue＝通常攻撃（moves 抽選に外れたとき）の予告セリフ候補。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; }
+ *  dialogue＝通常攻撃（moves 抽選に外れたとき）の予告セリフ候補。
+ *  battleSprite＝戦闘オーバーレイで絵文字の代わりに描くスプライト。 */
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; }
+
+/** battle.style==='deltarune' の呪文。TPを消費する（MPとは別のバトル専用リソース。戦闘開始時0にリセットされ、
+ *  グレイズ／まもる で溜まる）。heal=true なら power の値だけパーティを回復、それ以外は power ダメージ。 */
+export interface PartySpell { name: string; tpCost: number; power: number; heal?: boolean; }
+
+/** バトル演出用のアニメ1本（フレーム順の画像URL列）。fps 省略時は 8。
+ *  tlDR Engine のスプライト（lib/deltarune-tldr-assets.ts の TldrAnim）と構造互換。 */
+export interface BattleSpriteAnim { frames: string[]; fps?: number; w?: number; h?: number; }
+
+/** battle.style==='deltarune' のパーティメンバーの横向きバトルスプライト一式。
+ *  idle 以外は省略可（無い状態は idle で代用される）。attack/act/spell/item は行動時に1周だけ再生。 */
+export interface PartyBattleSprites {
+  idle: BattleSpriteAnim;
+  attackReady?: BattleSpriteAnim; attack?: BattleSpriteAnim;
+  hurt?: BattleSpriteAnim; defend?: BattleSpriteAnim; defeat?: BattleSpriteAnim;
+  act?: BattleSpriteAnim; spell?: BattleSpriteAnim; item?: BattleSpriteAnim;
+  /** ステータスボックス用の顔アイコン（通常／被ダメージ時）。省略時は emoji で代用。 */
+  icon?: BattleSpriteAnim; iconHurt?: BattleSpriteAnim;
+}
+
+/** 敵のバトル画面スプライト。設定すると戦闘オーバーレイで絵文字の代わりに描画される。
+ *  hurt=被ダメージ演出中、spare=みのがし可能（敵意が消えた）とき。 */
+export interface EnemyBattleSprite { idle: BattleSpriteAnim; hurt?: BattleSpriteAnim; spare?: BattleSpriteAnim; }
+
+/** battle.style==='deltarune' のパーティメンバー。先頭(index 0)はフィールド上の操作キャラと同一人物として
+ *  扱われ、そのHPは player.maxHp（進行データの pr.hp）を共有する。2人目以降はフィールドに実体を持たない
+ *  同行キャラのため、HPは戦闘中だけの一時状態（戦闘終了で破棄・次戦闘は毎回 maxHp から再開）。 */
+export interface PartyMember { id: string; name: string; emoji: string; spriteRef?: string; spriteUrl?: string; maxHp: number; spells?: PartySpell[]; battleSprites?: PartyBattleSprites; /** メンバーカラー（HPバー・ボックス枠。省略時は白） */ color?: string; }
 
 /** ターン制戦闘設定（rpg エンジン：ドラクエ/ポケモン）。
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */
@@ -323,12 +354,17 @@ export interface BattleConfig {
   maxHp: number; maxMp: number; atk: number; def: number;
   /** 戦闘スタイル。'soul'＝アンダーテール風：FIGHT/ACT/ITEM/MERCY の4コマンド、
    *  たたかう＝タイミングバー、敵ターン＝バトルボックスが変形してハート弾幕よけ。
+   *  'deltarune'＝デルタルーン風：'soul'の弾幕よけ・タイミング攻撃を流用しつつ、
+   *  パーティ（party）で1人ずつ行動選択（FIGHT/ACT/ITEM/まもる、ACT欄にSPELLも並ぶ）してから
+   *  敵ターンへ進む。TPは共有リソースでMPとは独立（グレイズ／まもる で加算、呪文で消費、毎戦闘0から）。
    *  省略時 'classic'＝従来のコマンド戦闘。 */
-  style?: 'classic' | 'soul';
+  style?: 'classic' | 'soul' | 'deltarune';
   moves: BattleMove[];
   /** コマンドの表示名（テーマ差し替え）。item 省略時は「どうぐ」。
    *  mercy を指定すると「みのがす」コマンドが出現する（アンダーテール系）。 */
   labels: { attack: string; move: string; flee: string; item?: string; mercy?: string };
+  /** style==='deltarune' のパーティ構成。先頭が操作キャラ本人。 */
+  party?: PartyMember[];
   /** 初期所持金。 */
   gold?: number;
   /** レベルアップテーブル。exp 到達時に対応ステータスへ上書き。 */
