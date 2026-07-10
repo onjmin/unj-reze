@@ -2113,9 +2113,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 剣を振る音（会心なら専用SE重ね）＋現在ターンのメンバーの攻撃モーション
       playSfx(DT_SFX.attack);
       if (inCritZone) playSfx(DT_SFX.crit);
-      const attacker = dtParty()[dtTurnIdxRef.current];
+      // 担当メンバーの index はここで確定させて updater に埋め込む。updater 内で
+      // dtTurnIdxRef.current を読むと、直後の dtAdvanceTurn が同期的に次のメンバーへ進めたあとに
+      // React が updater を実行するため、結果が「次のメンバー」のキーに記録されてしまう
+      // （1人目の確定で2人目の行が凍り、1人目の行が未解決のまま走り続けるバグの原因）。
+      const memberIdx = dtTurnIdxRef.current;
+      const attacker = dtParty()[memberIdx];
       if (attacker) dtPlayMemberAnim(attacker.id, 'attack', 700);
-      setDtAttackDone(p => ({ ...p, [dtTurnIdxRef.current]: { result: inCritZone ? 'crit' : 'hit', pos } }));
+      setDtAttackDone(p => ({ ...p, [memberIdx]: { result: inCritZone ? 'crit' : 'hit', pos } }));
     }
     playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
     // 次も「たたかう」が控えているあいだは 'attack' のままにして、複数行のタイミングバーオーバーレイを
@@ -2128,7 +2133,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const missSoulAttack = (missPos = 0) => {
     if (gameDataRef.current.battle?.style === 'deltarune') {
-      setDtAttackDone(p => ({ ...p, [dtTurnIdxRef.current]: { result: 'miss', pos: missPos } }));
+      // resolveSoulAttack 同様、updater 実行時には dtAdvanceTurn で担当が進んでいるため先に確定させる
+      const memberIdx = dtTurnIdxRef.current;
+      setDtAttackDone(p => ({ ...p, [memberIdx]: { result: 'miss', pos: missPos } }));
     }
     triggerEnemyMissFx();
     if (!dtNextIsAttack()) setSoulPhase('menu');

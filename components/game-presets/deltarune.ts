@@ -28,7 +28,8 @@ const LEGEND: Record<string, number> = { '.': 0, '#': 1, 'c': 2, 'f': 3, 'F': 4,
 const M = (rows: string[]): number[][] => rows.map(r => [...r].map(ch => LEGEND[ch] ?? 0));
 
 // ── オブジェクトのファクトリ ────────────────────────────────────────────
-/** シンボルエンカウント敵（たたかう/みのがす どちらでも消える）。 */
+/** シンボルエンカウント敵（たたかう/みのがす どちらでも消える）。
+ *  エンカウントはシンボル接触のみ（原作準拠：ランダムエンカウントは使わない）。 */
 const foe = (o: {
   name: string; emoji: string; col: number; row: number;
   hp: number; atk: number; def: number; exp: number; gold: number;
@@ -38,12 +39,22 @@ const foe = (o: {
   miniScript?: string;
   dialogue?: (string | EnemyDialogueLine)[];
   battleSprite?: EnemyBattleSprite;
+  spriteRef?: string; spriteUrl?: string;
 }) => newObject({
   emoji: o.emoji, name: o.name, col: o.col, row: o.row,
   hp: o.hp, atk: o.atk, def: o.def, exp: o.exp, gold: o.gold, moves: o.moves,
   behavior: o.behavior ?? 'still', speed: o.speed ?? 1.2, hazard: true,
   isBoss: o.isBoss, outroDialogue: o.outroDialogue, miniScript: o.miniScript, dialogue: o.dialogue,
   battleSprite: o.battleSprite,
+  spriteRef: o.spriteRef, spriteUrl: o.spriteUrl,
+});
+
+/** 敵のバトルスプライト（idle の1コマ目）をそのままフィールドの徘徊シンボルに使うための
+ *  spriteRef/spriteUrl の組。walk:smc:u:<url>#sx,sy,sw,sh,frames 形式（全面1コマのクロップ）で、
+ *  アスペクト比を保ってタイル高さに合わせ、左移動時は自動で水平反転される。 */
+const symbolSprite = (a: { frames: readonly string[]; w: number; h: number }) => ({
+  spriteRef: `walk:smc:u:${a.frames[0]}#0,0,${a.w},${a.h},1`,
+  spriteUrl: a.frames[0],
 });
 
 /** 会話 NPC（頭上セリフ）。 */
@@ -90,25 +101,7 @@ const fieldMap = M([
 const sceneField: SceneDef = {
   id: 'field', name: 'くらやみの野原',
   map: fieldMap,
-  randomEncounters: [
-    { name: 'バイクにのった鬼',   emoji: '🏍️', hp: 20, atk: 8,  def: 2, exp: 3, gold: 12 },
-    { name: 'ぼうしおばけ',       emoji: '🎩', hp: 18, atk: 6,  def: 3, exp: 2, gold: 10, moves: [{ name: 'ハイタッチをもとめる', power: 6 }] },
-    { name: 'ぱずるにんぎょう',   emoji: '🧩', hp: 22, atk: 9,  def: 3, exp: 4, gold: 14 },
-    // tlDR Engine の看板敵。バトル画面ではスプライトで描画される
-    { name: 'ウイルスくん', emoji: '🦠', hp: 24, atk: 8, def: 2, exp: 4, gold: 14,
-      battleSprite: TLDR_ENEMY_SPRITES.virovirokun,
-      dialogue: [
-        { text: 'ウイルスくんは さみしそうに こちらを みている', actUsed: 'ちょうさ' },
-        'ウイルスくんは ハリを ばらまいた！',
-      ],
-      miniScript: `
-while true
-  shotRain(randF(1.4, 2.0), 4, 1)
-  wait(13)
-end while
-`.trim() },
-  ],
-  encounterRate: 16,
+  // エンカウントはフィールドを徘徊するシンボルとの接触のみ（原作準拠。ランダムエンカウント無し）
   bgm: { ref: `direct:${tldrMusicUrl('exForest')}`, src: tldrMusicUrl('exForest'), type: 'direct' },
   objects: [
     // ラルセイ（同行NPC・回復とヒント）
@@ -139,9 +132,11 @@ while true
   wait(14)
 end while
 `.trim() }),
-    // ウイルスくん（シンボル版）：たたかわず「ちょうさ」→「みのがす」でも消える
+    // ウイルスくん（tlDR Engine の看板敵）：バトルスプライトの1コマ目がそのまま徘徊シンボルになる。
+    // たたかわず「ちょうさ」→「みのがす」でも消える
     foe({ name: 'ウイルスくん', emoji: '🦠', col: 12, row: 16, hp: 24, atk: 8, def: 2, exp: 4, gold: 14, behavior: 'random',
       battleSprite: TLDR_ENEMY_SPRITES.virovirokun,
+      ...symbolSprite(TLDR_ENEMY_SPRITES.virovirokun.idle),
       dialogue: [
         { text: 'ウイルスくんは さみしそうに こちらを みている', actUsed: 'ちょうさ' },
         'ウイルスくんは ハリを ばらまいた！',
@@ -152,6 +147,9 @@ while true
   wait(13)
 end while
 `.trim() }),
+    // ぼうしおばけ：ランダムエンカウント廃止に伴い徘徊シンボルとして再配置
+    foe({ name: 'ぼうしおばけ', emoji: '🎩', col: 20, row: 8, hp: 18, atk: 6, def: 3, exp: 2, gold: 10, behavior: 'random',
+      moves: [{ name: 'ハイタッチをもとめる', power: 6 }] }),
     foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 22, atk: 9, def: 3, exp: 4, gold: 14, behavior: 'random',
       moves: [{ name: 'かおのパーツこうげき', power: 8, miniScript: `
 while true
@@ -197,11 +195,7 @@ const townMap = M([
 const sceneTown: SceneDef = {
   id: 'town', name: 'フィールドタウン',
   map: townMap,
-  randomEncounters: [
-    { name: 'でんせんおおかみ',   emoji: '🐺', hp: 30, atk: 12, def: 5, exp: 8,  gold: 16 },
-    { name: 'きれたマネキン',     emoji: '🪞', hp: 34, atk: 13, def: 6, exp: 9,  gold: 18, moves: [{ name: 'ヒビわれた 笑顔', power: 10 }] },
-  ],
-  encounterRate: 14,
+  // まちも シンボルエンカウントのみ（でんせんおおかみ・きれたマネキンは objects 側に徘徊配置済み）
   bgm: { ref: `direct:${tldrMusicUrl('exCity')}`, src: tldrMusicUrl('exCity'), type: 'direct' },
   objects: [
     // 宿・回復ポイント
