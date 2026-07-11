@@ -28,12 +28,21 @@ export class RPGEngine extends BaseGameEngine {
     if (dx && dy) { dx *= 0.707; dy *= 0.707; }
 
     if (dx || dy) {
+      const r = 12;
       const nx = this.px + dx * this.speed * sc;
       const ny = this.py + dy * this.speed * sc;
-      const col = Math.floor(nx / this.ts);
-      const row = Math.floor(ny / this.ts);
-      if (this.isWalkable(col, row)) {
+      const row = Math.floor(this.py / this.ts);
+      if (
+        this.isWalkable(Math.floor((nx - r) / this.ts), row) &&
+        this.isWalkable(Math.floor((nx + r) / this.ts), row)
+      ) {
         this.px = nx;
+      }
+      const col = Math.floor(this.px / this.ts);
+      if (
+        this.isWalkable(col, Math.floor((ny - r) / this.ts)) &&
+        this.isWalkable(col, Math.floor((ny + r) / this.ts))
+      ) {
         this.py = ny;
       }
       if (dx > 0) this.dir = 'right';

@@ -4017,8 +4017,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return { id, rect: { x: col * TILE_SIZE, y: row * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE }, info: gameData.tiles[id] };
     };
     const isAllPassable = (x: number, y: number, w: number, h: number) => {
-      const tl = getTile(x, y), tr = getTile(x + w - 1, y);
-      const bl = getTile(x, y + h - 1), br = getTile(x + w - 1, y + h - 1);
+      // 当たり判定は見た目より少し内側に絞る。プレイヤーは連続移動でタイル境界に
+      // ぴったり揃わないため、余白なしだと「壁-通路-壁」の通路に対して横から
+      // 進入しようとした際、当たり判定の上端/下端が隣の壁タイルへわずかに
+      // はみ出して誤ってブロックされてしまう。
+      const inset = Math.min(6, w / 2 - 1, h / 2 - 1);
+      const ix = x + inset, iy = y + inset, iw = w - inset * 2, ih = h - inset * 2;
+      const tl = getTile(ix, iy), tr = getTile(ix + iw - 1, iy);
+      const bl = getTile(ix, iy + ih - 1), br = getTile(ix + iw - 1, iy + ih - 1);
       return !!tl?.info.passable && !!tr?.info.passable && !!bl?.info.passable && !!br?.info.passable;
     };
     // モブ（非hazardのNPC）との衝突判定（円形）。敵(hazard)はすり抜け・接触ダメージ等の既存挙動を維持するため対象外。
