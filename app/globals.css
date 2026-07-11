@@ -28,14 +28,6 @@
   100% { filter: brightness(2.5) contrast(1.5); opacity: 0; transform: scale(0.96) translateY(-18px); clip-path: inset(0 0 100% 0); }
 }
 
-/* nobita 戦闘：ひっさつ発動カットイン（帯が走り込んで一瞬とどまり、走り抜ける） */
-@keyframes ptCutinSlide {
-  0%   { transform: translateY(-50%) translateX(-110%) rotate(-6deg); opacity: 0; }
-  18%  { transform: translateY(-50%) translateX(0)     rotate(-6deg); opacity: 1; }
-  82%  { transform: translateY(-50%) translateX(0)     rotate(-6deg); opacity: 1; }
-  100% { transform: translateY(-50%) translateX(110%)  rotate(-6deg); opacity: 0; }
-}
-
 @keyframes danmaku-slide {
   from { left: 105%; }
   to { left: -200%; }

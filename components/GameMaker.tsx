@@ -15,6 +15,7 @@ import {
 } from '@/lib/walk-sprite';
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
 import ContentPicker, { type PickResult } from './ContentPicker';
+import WalkSpritePreview from './WalkSpritePreview';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
 
@@ -1016,6 +1017,53 @@ function BattleAnimSprite({ anim, h, once = false, className = '', style }: {
   );
 }
 
+/** MOTHER3風「ドラムロール」HP表示の1桁ぶん。0〜9を縦に並べた帯を transform: translateY で回し、
+ *  桁が変わるたびに CSS トランジションでスクロールさせる（数値を書き換えるだけの実装だと一瞬で切り替わってしまう）。
+ *  dir='up'（回復方向）なら常に前方向（0→1→…→9→0…）へ、dir='down'（被弾方向）なら常に後方向へだけ回転させ、
+ *  桁の繰り上がり/繰り下がり（例: 9→0, 0→9）でも回転方向が逆転しないよう、内部で "論理位置"（0〜9に収まらない
+ *  連続値）を保持して片方向にだけ進める。 */
+// 論理位置（0〜9に収まらない連続値）が届きうる範囲を先読みで帯に用意しておく数（片側）。
+// この範囲を超えて同方向へ回り続けた場合だけ、帯の外＝空白になる（実運用のHP変動量なら十分な余裕）。
+const DIGIT_REEL_PAD = 30;
+// 帯そのものは「論理位置 p → 表示する数字」の固定テーブルなので、桁の値に関係なく全インスタンスで共有できる。
+const DIGIT_REEL_STRIP = Array.from({ length: DIGIT_REEL_PAD * 2 + 1 }, (_, i) => ((((i - DIGIT_REEL_PAD) % 10) + 10) % 10));
+function DigitReel({ digit, dir, cellH = 16 }: { digit: number; dir: 'up' | 'down' | null; cellH?: number }) {
+  // 論理位置(pos)は 0〜9 に丸めない連続値。帯の中で pos に対応する数字が必ず digit と一致するよう、
+  // 初期値は digit そのもの（帯の中央 = 論理位置0 に相当する要素の数字は 0 なので、
+  // 実際に表示すべき要素の帯インデックスは pos + DIGIT_REEL_PAD）。
+  const posRef = useRef(digit);
+  const [pos, setPos] = useState(digit);
+  useEffect(() => {
+    const cur = posRef.current;
+    const curMod = ((cur % 10) + 10) % 10;
+    if (curMod === digit) return; // 桁は変わっていない
+    let next = cur;
+    if (dir === 'down') {
+      // 後方向へ：目標桁に到達するまで1ずつ減らす
+      do { next -= 1; } while (((next % 10) + 10) % 10 !== digit);
+    } else {
+      // 既定は前方向（回復・不明時も含む）：目標桁に到達するまで1ずつ増やす
+      do { next += 1; } while (((next % 10) + 10) % 10 !== digit);
+    }
+    posRef.current = next;
+    setPos(next);
+  }, [digit, dir]);
+  const stripIdx = Math.max(0, Math.min(DIGIT_REEL_STRIP.length - 1, pos + DIGIT_REEL_PAD));
+  return (
+    <span className="relative overflow-hidden inline-block bg-white" style={{ width: cellH * 0.8, height: cellH }}>
+      <span className="absolute left-0 top-0 w-full transition-transform ease-out"
+        style={{ transitionDuration: '260ms', transform: `translateY(${-stripIdx * cellH}px)` }}>
+        {DIGIT_REEL_STRIP.map((val, i) => (
+          <span key={i} className="flex items-center justify-center text-black font-mono font-bold" style={{ height: cellH, fontSize: cellH * 0.72, lineHeight: `${cellH}px` }}>{val}</span>
+        ))}
+      </span>
+      {/* 円筒シェーディング：上下を暗く・中央を明るくして、ドラムが回っているように見せる */}
+      <span className="absolute inset-0 pointer-events-none"
+        style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.45), rgba(0,0,0,0.08) 30%, rgba(255,255,255,0.15) 50%, rgba(0,0,0,0.08) 70%, rgba(0,0,0,0.45))' }} />
+    </span>
+  );
+}
+
 /** 弾幕よけキャンバス用の画像キャッシュ（UNDERTALEハートなど）。 */
 const dodgeImgCache: Record<string, HTMLImageElement> = {};
 function getDodgeImg(url: string): HTMLImageElement {
@@ -1284,55 +1332,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     mercyAdd: { ref: 'direct:dt-mercyadd', src: tldrSfxUrl('mercyAdd'), type: 'direct' as const },
   };
 
-  // ── パーティ制ターン戦闘（battle.style === 'ff' | 'nobita' | 'umimamo' | 'milky'）──
+  // ── パーティ制ターン戦闘（battle.style === 'ff' | 'mother3' | 'milky'）──
   // deltarune と同じ battle.party 設定を流用しつつ、弾幕よけを使わない独自のターン進行を持つ。
   // 2人目以降のHPは partyExtraHp（deltarune と共用）、MPは ptExtraMp に持つ（先頭は pr.hp/pr.mp を共有）。
-  // ff/nobita＝全員のコマンドを選んでから一斉実行するラウンド制（nobita は攻撃タイミング押し＋テンション）。
-  // umimamo＝毎ラウンド「ひとりで／ふたりで／どうぐ」をパーティ単位で選ぶ。
+  // ff/mother3＝全員のコマンドを選んでから一斉実行するラウンド制（mother3 はローリングHP、下記参照）。
   // milky＝行動値（av）が最小の者から行動するCTB。強い技ほど行動値コストが大きい。
-  interface PtAction { memberId: string; kind: 'attack' | 'ult' | 'skill' | 'item' | 'defend'; move?: BattleMove; item?: ItemDef; target?: number; targetMemberId?: string; }
+  interface PtAction { memberId: string; kind: 'attack' | 'skill' | 'item' | 'defend'; move?: BattleMove; item?: ItemDef; target?: number; targetMemberId?: string; }
   interface PtView {
-    /** select=コマンド選択中 / exec=キュー実行中 / timing=nobitaのタイミングバー / cutin=ひっさつカットイン
-     *  / enemy=敵ターン / idle=milkyの時間進行待ち */
-    phase: 'select' | 'exec' | 'timing' | 'cutin' | 'enemy' | 'idle';
-    /** ff/nobita/milky: いま行動選択中のメンバー index */
+    /** select=コマンド選択中 / exec=キュー実行中 / enemy=敵ターン / idle=milkyの時間進行待ち */
+    phase: 'select' | 'exec' | 'enemy' | 'idle';
+    /** ff/mother3/milky: いま行動選択中のメンバー index */
     turnIdx: number;
     menu: 'root' | 'skill' | 'item' | 'target' | 'member';
-    /** 対象選択待ちの保留行動（target=敵、member=味方。umimamo の pair は味方を2人選ぶ）。 */
-    pending: { kind: 'attack' | 'ult' | 'skill' | 'item' | 'solo' | 'pair'; move?: BattleMove; item?: ItemDef; firstMemberId?: string; secondMemberId?: string } | null;
-    /** nobita: ひっさつ発動カットイン表示 */
-    cutin: { name: string; emoji: string; ultName: string; color?: string } | null;
-    /** umimamo: きずな珠（ふたりで の消費リソース。毎ラウンド+1、最大5） */
-    gems: number;
+    /** 対象選択待ちの保留行動（target=敵、member=味方）。 */
+    pending: { kind: 'attack' | 'skill' | 'item'; move?: BattleMove; item?: ItemDef } | null;
     /** このラウンド「ぼうぎょ」中のメンバーID（被弾半減） */
     defended: string[];
+    /** 現在のメニュー内でのキーボードカーソル位置（root/skill/item/target/member 共通）。 */
+    menuCursor: number;
   }
-  const PT_INIT: PtView = { phase: 'select', turnIdx: 0, menu: 'root', pending: null, cutin: null, gems: 3, defended: [] };
+  const PT_INIT: PtView = { phase: 'select', turnIdx: 0, menu: 'root', pending: null, defended: [], menuCursor: 0 };
   const [pt, setPt] = useState<PtView>(PT_INIT);
   const ptRef = useRef(pt);
   ptRef.current = pt;
-  /** ref を同期更新しつつ state を書く（同フレーム内の連続ハンドラで最新値を読めるように）。 */
-  const ptPatch = (patch: Partial<PtView>) => { const next = { ...ptRef.current, ...patch }; ptRef.current = next; setPt(next); };
+  /** ref を同期更新しつつ state を書く（同フレーム内の連続ハンドラで最新値を読めるように）。
+   *  menu/pending が変わるときはキーボードカーソルを自動で先頭へ戻す。 */
+  const ptPatch = (patch: Partial<PtView>) => {
+    const menuChanged = ('menu' in patch && patch.menu !== ptRef.current.menu) || ('pending' in patch && patch.pending !== ptRef.current.pending);
+    const next = { ...ptRef.current, ...patch, ...(menuChanged && !('menuCursor' in patch) ? { menuCursor: 0 } : {}) };
+    ptRef.current = next; setPt(next);
+  };
   const ptQueueRef = useRef<PtAction[]>([]);
   const ptExecPosRef = useRef(0);
   /** 2人目以降のメンバーの戦闘中MP（先頭はフィールドの pr.mp を共有）。戦闘終了で破棄。 */
   const [ptExtraMp, setPtExtraMp] = useState<Record<string, number>>({});
   const ptExtraMpRef = useRef<Record<string, number>>({});
   ptExtraMpRef.current = ptExtraMp;
-  /** nobita: メンバーごとのテンションゲージ（0〜100。被弾で加算・ひっさつで消費）。 */
-  const [ptTension, setPtTension] = useState<Record<string, number>>({});
-  const ptTensionRef = useRef<Record<string, number>>({});
-  ptTensionRef.current = ptTension;
+  /** mother3: メンバーごとの「表示中のHP」（実HPへ向けて1ティックずつ回転しながら増減する）。
+   *  実HPが0以下になっても、この表示値が0へ落ちきるまでは戦闘不能にならない
+   *  （回復すれば表示値はそこから実HPへ向けて戻り、致命傷から生還できる＝MOTHER3のローリングHP）。 */
+  const mother3RollRef = useRef<Record<string, number>>({});
+  /** mother3: 実HPが0以下なのに表示がまだ残っている（＝虫の息）メンバーID集合。演出の多重発火防止に使う。 */
+  const mother3CritRef = useRef<Set<string>>(new Set());
   /** milky: 行動値。キーは 'm:<memberId>' / 'f:<foeIdx>'。値が最小の者から行動する。 */
   const milkyAvRef = useRef<Record<string, number>>({});
   const milkyActorRef = useRef<string | null>(null);
   /** milky: 行動順プレビュー（先の数手ぶん）。 */
   const [milkyOrder, setMilkyOrder] = useState<{ key: string; emoji: string; name: string; isFoe: boolean }[]>([]);
-  /** nobita: タイミングバーの走る棒（React再レンダリングを避けて rAF で直接 style.left を書く）。 */
-  const ptTimingElRef = useRef<HTMLDivElement | null>(null);
-  const ptTimingRef = useRef<{ pos: number; raf: number; resolved: boolean } | null>(null);
-  /** Zキー/タップで発火する現在有効なアクション（タイミングバーの停止など）。 */
-  const ptZRef = useRef<(() => void) | null>(null);
   /** パーティ制戦闘の進行タイマー（常に1本だけ。戦闘終了時は active/over ガードで自然消滅）。 */
   const ptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ptDelay = (fn: () => void, ms: number) => {
@@ -1345,7 +1391,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
   useEffect(() => () => {
     if (ptTimerRef.current) clearTimeout(ptTimerRef.current);
-    if (ptTimingRef.current) cancelAnimationFrame(ptTimingRef.current.raf);
   }, []);
 
   /** エンカウント和音用の AudioContext（遅延生成・単一インスタンス）とデコード済み音源キャッシュ。
@@ -1864,8 +1909,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const aliveFoeIdxs = () => battleRef.current.foes.map((f, i) => (f.gone ? -1 : i)).filter(i => i >= 0);
   /** battle.style が 'undertale' の弾幕よけ・タイミング攻撃を流用するスタイルか（'undertale' 本体 と 'deltarune'）。 */
   const isDodgeBattleStyle = (s?: string) => s === 'undertale' || s === 'deltarune';
-  /** battle.style がパーティ制ターン戦闘（弾幕なし）のスタイルか（ff/nobita/umimamo/milky）。 */
-  const isPartyBattleStyle = (s?: string) => s === 'ff' || s === 'nobita' || s === 'umimamo' || s === 'milky';
+  /** battle.style がパーティ制ターン戦闘（弾幕なし）のスタイルか（ff/mother3/milky）。 */
+  const isPartyBattleStyle = (s?: string) => s === 'ff' || s === 'mother3' || s === 'milky';
   /** デルタルーン風パーティの現在の状態一覧。先頭(index 0)はフィールドの pr.hp/pr.maxHp を共有し、
    *  2人目以降は partyExtraHpRef の戦闘中一時HPを参照する。 */
   const dtParty = (): { id: string; name: string; emoji: string; hp: number; maxHp: number }[] => {
@@ -1924,8 +1969,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       ? cfg.party
       : [{ id: '__self', name: cfg?.playerName ?? 'プレイヤー', emoji: gameDataRef.current.player.emoji || '🧝', maxHp: pr.maxHp }];
     return members.map((m, i) => i === 0
-      ? { id: m.id, name: m.name, emoji: m.emoji, color: m.color, ultName: m.ultName, battleSprites: m.battleSprites, hp: pr.hp, maxHp: pr.maxHp, mp: pr.mp, maxMp: pr.maxMp, atk: pr.atk, def: pr.def }
-      : { id: m.id, name: m.name, emoji: m.emoji, color: m.color, ultName: m.ultName, battleSprites: m.battleSprites, hp: partyExtraHpRef.current[m.id] ?? m.maxHp, maxHp: m.maxHp, mp: ptExtraMpRef.current[m.id] ?? (m.maxMp ?? pr.maxMp), maxMp: m.maxMp ?? pr.maxMp, atk: m.atk ?? pr.atk, def: m.def ?? pr.def });
+      ? { id: m.id, name: m.name, emoji: m.emoji, color: m.color, battleSprites: m.battleSprites, spriteRef: m.spriteRef ?? gameDataRef.current.player.spriteRef, spriteUrl: m.spriteUrl ?? gameDataRef.current.player.spriteUrl, hp: pr.hp, maxHp: pr.maxHp, mp: pr.mp, maxMp: pr.maxMp, atk: pr.atk, def: pr.def }
+      : { id: m.id, name: m.name, emoji: m.emoji, color: m.color, battleSprites: m.battleSprites, spriteRef: m.spriteRef, spriteUrl: m.spriteUrl, hp: partyExtraHpRef.current[m.id] ?? m.maxHp, maxHp: m.maxHp, mp: ptExtraMpRef.current[m.id] ?? (m.maxMp ?? pr.maxMp), maxMp: m.maxMp ?? pr.maxMp, atk: m.atk ?? pr.atk, def: m.def ?? pr.def });
+  };
+  /** ff/mother3: 歩行グラ（walk:...）をその場足踏みアニメで表示する。dir='s'=正面向き（mother3）、
+   *  dir='a'=左向き（FFのサイドビュー）。battleSprites が無いメンバーの絵文字フォールバックの手前で使う。 */
+  const partyWalkFrame = (spriteUrl: string | undefined, spriteRef: string | undefined, dir: 'a' | 's', size: number, walking = true) => {
+    if (!spriteUrl) return null;
+    const stdId = spriteRef ? parseWalkRef(spriteRef)?.stdId ?? 'auto' : 'auto';
+    return <WalkSpritePreview url={spriteUrl} stdId={stdId} dir={dir} walking={walking} size={size} className="[image-rendering:pixelated]" />;
   };
   /** 指定メンバーのMPを更新する（先頭はフィールドの pr.mp、以降は戦闘専用の一時MP）。 */
   const ptSetMp = (id: string, mp: number) => {
@@ -1934,20 +1986,60 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!members?.length ? id === '__self' : members[0].id === id) { progressRef.current.mp = clamped; forceHud(n => n + 1); }
     else { const next = { ...ptExtraMpRef.current, [id]: clamped }; ptExtraMpRef.current = next; setPtExtraMp(next); }
   };
-  /** パーティ制戦闘の被弾処理。ぼうぎょ中はダメージ半減。nobita はテンションゲージが溜まる。実ダメージを返す。 */
+  /** mother3: 現在「表示されている」HP。実HPへ向けて毎ティック回転しながら増減する演出値
+   *  （mother3Tick 参照）。mother3 以外のスタイルでは実HPをそのまま返す。 */
+  const ptDisplayHp = (m: { id: string; hp: number }) =>
+    gameDataRef.current.battle?.style === 'mother3' ? (mother3RollRef.current[m.id] ?? m.hp) : m.hp;
+  /** mother3 では表示HP（ローリング中の値）が0に落ちきるまでは戦闘不能扱いにしない。 */
+  const ptIsDown = (m: { id: string; hp: number }) => ptDisplayHp(m) <= 0;
+  /** パーティ制戦闘の被弾処理。ぼうぎょ中はダメージ半減。実ダメージを返す。 */
   const ptDamageMember = (m: { id: string; hp: number; maxHp: number }, dmg: number) => {
     const reduced = ptRef.current.defended.includes(m.id) ? Math.max(1, Math.ceil(dmg / 2)) : dmg;
     dtSetHp(m.id, m.hp - reduced);
     triggerMemberDamageFx(m.id, reduced);
-    if (gameDataRef.current.battle?.style === 'nobita') {
-      const gain = Math.max(10, Math.round((reduced / Math.max(1, m.maxHp)) * 130));
-      const next = { ...ptTensionRef.current, [m.id]: Math.min(100, (ptTensionRef.current[m.id] ?? 0) + gain) };
-      ptTensionRef.current = next; setPtTension(next);
-    }
     return reduced;
   };
-  const ptAliveMembers = () => ptParty().filter(mm => mm.hp > 0);
-  const ptAllDown = () => ptParty().every(mm => mm.hp <= 0);
+  const ptAliveMembers = () => ptParty().filter(mm => !ptIsDown(mm));
+  const ptAllDown = () => ptParty().every(mm => ptIsDown(mm));
+
+  /** mother3: 表示HPを実HPへ向けて少しずつ動かす（Mother3のローリングHP演出）。実HPが0以下でも
+   *  表示がまだ残っていれば「虫の息」として生存扱いのまま。表示が0へ落ちきった瞬間に本当の戦闘不能となり、
+   *  そのときパーティ全滅なら敗北を確定する。回復すれば表示は現在値からそのまま新しい実HPへ向け戻る。 */
+  const mother3Tick = () => {
+    if (!battleRef.current.active || battleViewRef.current?.over || gameDataRef.current.battle?.style !== 'mother3') return;
+    let changed = false;
+    for (const m of ptParty()) {
+      const disp = mother3RollRef.current[m.id] ?? m.hp;
+      if (disp === m.hp) { if (m.hp > 0) mother3CritRef.current.delete(m.id); continue; }
+      const diff = m.hp - disp;
+      const stepMag = Math.max(1, Math.round(Math.abs(diff) * 0.14));
+      let next = disp + Math.sign(diff) * stepMag;
+      if ((diff > 0 && next > m.hp) || (diff < 0 && next < m.hp)) next = m.hp;
+      mother3RollRef.current[m.id] = next;
+      changed = true;
+      if (m.hp <= 0) {
+        if (!mother3CritRef.current.has(m.id) && disp > 0) {
+          mother3CritRef.current.add(m.id);
+          shakeRef.current = 14;
+          playSfx(sfxRef.current.damage);
+          appendLog(`${m.name}に クリティカルダメージ！`, { canAct: ptRef.current.phase === 'select' });
+        }
+        if (next <= 0) {
+          mother3CritRef.current.delete(m.id);
+          if (ptAllDown()) setTimeout(() => endBattle('lose'), 500);
+        }
+      } else {
+        mother3CritRef.current.delete(m.id);
+      }
+    }
+    if (changed) forceHud(n => n + 1);
+  };
+  useEffect(() => {
+    if (gameData.battle?.style !== 'mother3') return;
+    const iv = setInterval(mother3Tick, 60);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameData.battle?.style]);
 
   const getCurrentFieldBgm = useCallback(() => {
     if (isPlaying && gameData.scenes && gameData.scenes.length > 0) {
@@ -2015,8 +2107,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       dtStageRef.current = 'select'; dtQueueRef.current = []; dtSelLogRef.current = []; dtExecPosRef.current = 0;
       dtAttackRowsRef.current = []; setDtAttackDone({}); dtStickElsRef.current = {};
     }
-    // パーティ制ターン戦闘（ff/nobita/umimamo/milky）：同行者のHP/MPは毎戦闘 maxHp/maxMp から、
-    // テンション・きずな珠・行動値も毎戦闘リセットする
+    // パーティ制ターン戦闘（ff/mother3/milky）：同行者のHP/MPは毎戦闘 maxHp/maxMp から、
+    // ローリングHP・行動値も毎戦闘リセットする
     if (partyStyle) {
       const cfg = gameDataRef.current.battle!;
       const party = cfg.party ?? [];
@@ -2025,12 +2117,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       party.slice(1).forEach(m => { initHp[m.id] = m.maxHp; initMp[m.id] = m.maxMp ?? progressRef.current.maxMp; });
       setPartyExtraHp(initHp); partyExtraHpRef.current = initHp;
       setPtExtraMp(initMp); ptExtraMpRef.current = initMp;
-      setPtTension({}); ptTensionRef.current = {};
+      mother3RollRef.current = { [party[0]?.id ?? '__self']: progressRef.current.hp, ...initHp };
+      mother3CritRef.current = new Set();
       ptQueueRef.current = []; ptExecPosRef.current = 0;
-      ptZRef.current = null;
-      if (ptTimingRef.current) { cancelAnimationFrame(ptTimingRef.current.raf); ptTimingRef.current = null; }
       if (ptTimerRef.current) { clearTimeout(ptTimerRef.current); ptTimerRef.current = null; }
-      const init: PtView = { phase: cfg.style === 'milky' ? 'idle' : 'select', turnIdx: 0, menu: 'root', pending: null, cutin: null, gems: 3, defended: [] };
+      const init: PtView = { phase: cfg.style === 'milky' ? 'idle' : 'select', turnIdx: 0, menu: 'root', pending: null, defended: [], menuCursor: 0 };
       ptRef.current = init; setPt(init);
       if (cfg.style === 'milky') {
         // 行動値の初期値：味方がわずかに先行し、敵は少し遅れて動き出す
@@ -2802,7 +2893,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   // ════════════════════════════════════════════════════════════════════════
-  // パーティ制ターン戦闘（ff / nobita / umimamo / milky）の進行ロジック
+  // パーティ制ターン戦闘（ff / mother3 / milky）の進行ロジック
   // ════════════════════════════════════════════════════════════════════════
   /** 敵1体へ確定ダメージを与えてログを出す。over＝全滅で戦闘終了を予約したか。
    *  milky ではHPが3割を切った瞬間に「つかれてきた」の一言を添える（疲労表情の演出と連動）。 */
@@ -2837,7 +2928,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     appendLog(`${userName ?? target.name}は ${it.name}を つかった！ ${target.name}の ${parts.join('、')}`, { canAct: false });
   };
 
-  /** ff/nobita/umimamo: 新しいラウンドの行動選択を開始する（umimamo はきずな珠を1つ回復）。
+  /** ff/mother3: 新しいラウンドの行動選択を開始する。
    *  milky はラウンドの概念がないので時間進行（milkyAdvance）へ戻る。 */
   const ptBeginRound = () => {
     if (!battleRef.current.active || battleViewRef.current?.over) return;
@@ -2848,20 +2939,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     ptQueueRef.current = []; ptExecPosRef.current = 0;
-    const first = ptParty().findIndex(mm => mm.hp > 0);
+    const first = ptParty().findIndex(mm => !ptIsDown(mm));
     ptPatch({
-      phase: 'select', menu: 'root', pending: null, cutin: null, defended: [],
+      phase: 'select', menu: 'root', pending: null, defended: [],
       turnIdx: Math.max(0, first),
-      gems: style === 'umimamo' ? Math.min(5, ptRef.current.gems + 1) : ptRef.current.gems,
     });
     setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
   };
 
-  /** ff/nobita: 現在のメンバーの行動を確定してキューに積み、次の生存メンバーへ。全員選んだら実行フェーズへ。 */
+  /** ff/mother3: 現在のメンバーの行動を確定してキューに積み、次の生存メンバーへ。全員選んだら実行フェーズへ。 */
   const ptChoose = (action: PtAction) => {
     if (ptRef.current.phase !== 'select') return;
     ptQueueRef.current.push(action);
-    const next = ptParty().findIndex((mm, i) => i > ptRef.current.turnIdx && mm.hp > 0);
+    const next = ptParty().findIndex((mm, i) => i > ptRef.current.turnIdx && !ptIsDown(mm));
     if (next >= 0) { ptPatch({ turnIdx: next, menu: 'root', pending: null }); return; }
     ptPatch({ phase: 'exec', menu: 'root', pending: null });
     setBattle(v => (v ? { ...v, canAct: false } : v));
@@ -2869,7 +2959,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     ptDelay(ptRunQueue, 350);
   };
 
-  /** ff/nobita: 選択フェーズで1つ前のメンバーの行動を取り消して戻る。 */
+  /** ff/mother3: 選択フェーズで1つ前のメンバーの行動を取り消して戻る。 */
   const ptUndo = () => {
     if (ptRef.current.phase !== 'select' || !ptQueueRef.current.length) return;
     const last = ptQueueRef.current.pop()!;
@@ -2877,7 +2967,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     ptPatch({ turnIdx: Math.max(0, idx), menu: 'root', pending: null });
   };
 
-  /** ff/nobita: 確定済みキューを1件ずつ実行する。nobita の通常攻撃はタイミングバーを挟む。 */
+  /** ff/mother3: 確定済みキューを1件ずつ実行する。 */
   const ptRunQueue = () => {
     if (!battleRef.current.active || battleViewRef.current?.over) return;
     const q = ptQueueRef.current;
@@ -2886,8 +2976,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const roster = ptParty();
     const actorIdx = roster.findIndex(mm => mm.id === action.memberId);
     const actor = roster[actorIdx];
-    const style = gameDataRef.current.battle?.style;
-    if (!actor || actor.hp <= 0) { ptRunQueue(); return; } // 選択後に倒れたメンバーは飛ばす
+    if (!actor || ptIsDown(actor)) { ptRunQueue(); return; } // 選択後に倒れたメンバーは飛ばす
     ptPatch({ turnIdx: Math.max(0, actorIdx) });
     if (action.kind === 'defend') {
       ptPatch({ defended: [...ptRef.current.defended, actor.id] });
@@ -2905,7 +2994,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (actor.mp < m.cost) { appendLog(`${actor.name}の ${m.name}！ しかしMPが たりない！`, { canAct: false }); ptDelay(ptRunQueue, 700); return; }
       ptSetMp(actor.id, actor.mp - m.cost);
       if (m.heal) {
-        const target = roster.find(mm => mm.id === (action.targetMemberId ?? actor.id) && mm.hp > 0) ?? actor;
+        const target = roster.find(mm => mm.id === (action.targetMemberId ?? actor.id) && !ptIsDown(mm)) ?? actor;
         const after = Math.min(target.maxHp, target.hp + m.power);
         dtSetHp(target.id, after);
         appendLog(`${actor.name}の ${m.name}！ ${target.name}のHPが ${after - target.hp} かいふく`, { canAct: false });
@@ -2917,74 +3006,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       return;
     }
-    if (action.kind === 'ult') {
-      // ひっさつ：テンションを消費してカットイン → 大ダメージ（タイミングバーなしの確定演出）
-      const nextTension = { ...ptTensionRef.current, [actor.id]: 0 };
-      ptTensionRef.current = nextTension; setPtTension(nextTension);
-      const ultName = actor.ultName || 'ひっさつわざ';
-      ptPatch({ phase: 'cutin', cutin: { name: actor.name, emoji: actor.emoji, ultName, color: actor.color } });
-      playSfx(sfxRef.current.levelup);
-      ptDelay(() => {
-        ptPatch({ phase: 'exec', cutin: null });
-        const dmg = Math.max(1, Math.round(calcDmg(actor.atk * 3, battleRef.current.enemyDef)));
-        const over = ptHitFoe(`${actor.name}の ${ultName}！`, dmg, action.target);
-        if (!over) ptDelay(ptRunQueue, 900);
-      }, 1400);
-      return;
-    }
     // 通常攻撃
-    if (style === 'nobita') {
-      ptPatch({ phase: 'timing' });
-      ptBeginTiming(actor, action.target);
-      return;
-    }
     const dmg = calcDmg(actor.atk, battleRef.current.enemyDef);
     const over = ptHitFoe(`${actor.name}の こうげき！`, dmg, action.target);
     if (!over) ptDelay(ptRunQueue, 850);
   };
 
-  /** nobita: 通常攻撃のタイミングバー。棒が右→左へ一度だけ走り、Z/タップで止める。
-   *  中央ゾーンで止めると通常ダメージのあとに「ついげき」（6割ダメージ）が追加で入る。 */
-  const ptBeginTiming = (actor: ReturnType<typeof ptParty>[number], targetIdx?: number) => {
-    ptTimingRef.current = { pos: 1, raf: 0, resolved: false };
-    const started = performance.now();
-    const DURATION = 1000;
-    const resolve = (manual: boolean) => {
-      const t = ptTimingRef.current;
-      if (!t || t.resolved) return;
-      t.resolved = true;
-      cancelAnimationFrame(t.raf);
-      ptZRef.current = null;
-      const just = manual && t.pos >= 0.38 && t.pos <= 0.62;
-      ptPatch({ phase: 'exec' });
-      const dmg = calcDmg(actor.atk, battleRef.current.enemyDef);
-      const over = ptHitFoe(`${actor.name}の こうげき！`, dmg, targetIdx);
-      if (over) return;
-      if (just) {
-        playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm);
-        ptDelay(() => {
-          const extra = Math.max(1, Math.round(calcDmg(actor.atk, battleRef.current.enemyDef) * 0.6));
-          const over2 = ptHitFoe(`ジャストミート！ ${actor.name}の ついげき！`, extra, targetIdx);
-          if (!over2) ptDelay(ptRunQueue, 850);
-        }, 450);
-      } else {
-        ptDelay(ptRunQueue, 850);
-      }
-    };
-    const step = (now: number) => {
-      const t = ptTimingRef.current;
-      if (!t || t.resolved) return;
-      if (!battleRef.current.active || battleViewRef.current?.over) { t.resolved = true; ptZRef.current = null; return; }
-      t.pos = Math.max(0, 1 - (now - started) / DURATION);
-      if (ptTimingElRef.current) ptTimingElRef.current.style.left = `${t.pos * 100}%`;
-      if (t.pos <= 0) { resolve(false); return; }
-      t.raf = requestAnimationFrame(step);
-    };
-    ptZRef.current = () => resolve(true);
-    ptTimingRef.current.raf = requestAnimationFrame(step);
-  };
-
-  /** ff/nobita/umimamo: 敵ターン。生存している敵が1体ずつ順に行動し、終わったら次のラウンドへ。 */
+  /** ff/mother3: 敵ターン。生存している敵が1体ずつ順に行動し、終わったら次のラウンドへ。 */
   const ptEnemyTurn = () => {
     if (!battleRef.current.active || battleViewRef.current?.over) return;
     ptPatch({ phase: 'enemy', menu: 'root', pending: null });
@@ -3060,11 +3088,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const pend = p.pending;
     const roster = ptParty();
     const actor = roster[p.turnIdx] ?? roster[0];
-    if (style === 'umimamo') {
-      if (pend.kind === 'solo' && pend.firstMemberId) { umiSolo(pend.firstMemberId, foeIdx); }
-      else if (pend.kind === 'pair' && pend.firstMemberId && pend.secondMemberId) { umiPair(pend.firstMemberId, pend.secondMemberId, foeIdx); }
-      return;
-    }
     if (style === 'milky') {
       if (!actor) return;
       if (pend.kind === 'attack') {
@@ -3083,71 +3106,81 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       return;
     }
-    // ff / nobita：選択をキューに積む
+    // ff：選択をキューに積む
     if (!actor) return;
     if (pend.kind === 'attack') ptChoose({ memberId: actor.id, kind: 'attack', target: foeIdx });
-    else if (pend.kind === 'ult') ptChoose({ memberId: actor.id, kind: 'ult', target: foeIdx });
     else if (pend.kind === 'skill' && pend.move) ptChoose({ memberId: actor.id, kind: 'skill', move: pend.move, target: foeIdx });
   };
 
-  /** 味方対象が必要な行動（回復技・どうぐ・umimamo の ひとりで/ふたりで）の対象確定。 */
+  /** 味方対象が必要な行動（回復技・どうぐ）の対象確定。 */
   const ptPickMember = (memberId: string) => {
     const p = ptRef.current;
     if (p.phase !== 'select' || !p.pending) return;
-    const style = gameDataRef.current.battle?.style;
     const pend = p.pending;
     const target = ptParty().find(mm => mm.id === memberId);
-    if (!target || target.hp <= 0) return;
-    if (style === 'umimamo') {
-      if (pend.kind === 'solo') {
-        ptWithTarget({ ...pend, firstMemberId: memberId });
-        return;
-      }
-      if (pend.kind === 'pair') {
-        if (!pend.firstMemberId) { ptPatch({ pending: { ...pend, firstMemberId: memberId } }); return; } // 続けて2人目を選ぶ
-        if (pend.firstMemberId === memberId) return;
-        ptWithTarget({ ...pend, secondMemberId: memberId });
-        return;
-      }
-      if (pend.kind === 'item' && pend.item) { umiItem(pend.item, memberId); }
-      return;
-    }
-    // ff / nobita
+    if (!target || ptIsDown(target)) return;
     const actor = ptParty()[p.turnIdx];
     if (!actor) return;
     if (pend.kind === 'skill' && pend.move) ptChoose({ memberId: actor.id, kind: 'skill', move: pend.move, targetMemberId: memberId });
     else if (pend.kind === 'item' && pend.item) ptChoose({ memberId: actor.id, kind: 'item', item: pend.item, targetMemberId: memberId });
   };
 
-  // ── umimamo（海と魔物のこどもたち風）────────────────────────────────────
-  /** ひとりで：選んだ1人が力をためて攻撃（1.4倍）。 */
-  const umiSolo = (memberId: string, targetIdx?: number) => {
-    const actor = ptParty().find(mm => mm.id === memberId);
-    if (!actor || actor.hp <= 0) return;
-    ptPatch({ phase: 'exec', menu: 'root', pending: null });
-    setBattle(v => (v ? { ...v, canAct: false } : v));
-    const dmg = Math.max(1, Math.round(calcDmg(actor.atk, battleRef.current.enemyDef) * 1.4));
-    const over = ptHitFoe(`${actor.name}の こうげき！`, dmg, targetIdx);
-    if (!over) ptDelay(ptEnemyTurn, 850);
-  };
-  /** ふたりで：きずな珠を1つ消費して2人の連携攻撃（攻撃力を合算して1.15倍）。 */
-  const umiPair = (idA: string, idB: string, targetIdx?: number) => {
+  /** ff/mother3/milky 共通：現在のメニュー（root/skill/item/target/member）に応じた選択肢一覧を返す。
+   *  JSX のボタン描画と、十字キー操作（上下でカーソル移動・Zで確定）の両方がこの1つの配列を参照することで、
+   *  マウス操作とキーボード操作が常に同じ並び・同じ挙動になる。 */
+  const ptMenuActions = (): { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] => {
+    const p = ptRef.current;
+    const bd = gameDataRef.current.battle;
+    if (!bd || p.phase !== 'select') return [];
+    const style = bd.style;
     const roster = ptParty();
-    const a = roster.find(mm => mm.id === idA);
-    const bM = roster.find(mm => mm.id === idB);
-    if (!a || !bM || a.hp <= 0 || bM.hp <= 0 || ptRef.current.gems <= 0) return;
-    ptPatch({ phase: 'exec', menu: 'root', pending: null, gems: ptRef.current.gems - 1 });
-    setBattle(v => (v ? { ...v, canAct: false } : v));
-    const dmg = Math.max(1, Math.round(calcDmg(a.atk + bM.atk, battleRef.current.enemyDef) * 1.15));
-    const over = ptHitFoe(`${a.name}と ${bM.name}の れんけいこうげき！`, dmg, targetIdx);
-    if (!over) ptDelay(ptEnemyTurn, 850);
-  };
-  /** どうぐ：対象メンバーへ使ってラウンド終了。 */
-  const umiItem = (it: ItemDef, memberId: string) => {
-    ptPatch({ phase: 'exec', menu: 'root', pending: null });
-    setBattle(v => (v ? { ...v, canAct: false } : v));
-    ptUseItemOn(it, memberId);
-    ptDelay(ptEnemyTurn, 850);
+    const cur = roster[Math.min(p.turnIdx, Math.max(0, roster.length - 1))];
+    const skillMoves = bd.moves.filter(m => m.mercy == null);
+    const items = usableItems();
+    if (p.menu === 'target') {
+      const list = battleRef.current.foes
+        .map((f, i) => ({ f, i }))
+        .filter(x => !x.f.gone)
+        .map(({ f, i }) => ({ label: f.name, onClick: () => ptPickTarget(i) }));
+      list.push({ label: 'もどる', onClick: () => ptPatch({ menu: 'root', pending: null }) });
+      return list;
+    }
+    if (p.menu === 'member') {
+      const list = roster.filter(m => !ptIsDown(m)).map(m => ({ label: m.name, onClick: () => ptPickMember(m.id) }));
+      list.push({ label: 'もどる', onClick: () => ptPatch({ menu: 'root', pending: null }) });
+      return list;
+    }
+    if (p.menu === 'skill') {
+      const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] = skillMoves.map(m => ({
+        label: m.name,
+        sub: style === 'milky' ? `WT${milkyMoveCost(m)}` : m.cost > 0 ? `${m.cost}` : undefined,
+        disabled: (cur?.mp ?? 0) < m.cost,
+        onClick: () => {
+          if (style === 'milky') { if (m.heal) milkySelfSkill(m); else ptWithTarget({ kind: 'skill', move: m }); }
+          else if (m.heal) ptPatch({ pending: { kind: 'skill', move: m }, menu: 'member' });
+          else ptWithTarget({ kind: 'skill', move: m });
+        },
+      }));
+      list.push({ label: 'もどる', onClick: () => ptPatch({ menu: 'root' }) });
+      return list;
+    }
+    if (p.menu === 'item') {
+      const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] = items.map(it => ({
+        label: it.name, sub: `×${inventory[it.id] ?? 0}`,
+        onClick: () => { if (style === 'milky') milkyItem(it); else ptPatch({ pending: { kind: 'item', item: it }, menu: 'member' }); },
+      }));
+      list.push({ label: 'もどる', onClick: () => ptPatch({ menu: 'root' }) });
+      return list;
+    }
+    // root
+    const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] = [];
+    list.push({ label: bd.labels.attack || 'こうげき', onClick: () => ptWithTarget({ kind: 'attack' }) });
+    if (skillMoves.length > 0) list.push({ label: bd.labels.move || 'とくぎ', onClick: () => ptPatch({ menu: 'skill' }) });
+    if (style !== 'milky') list.push({ label: 'ぼうぎょ', onClick: () => cur && ptChoose({ memberId: cur.id, kind: 'defend' }) });
+    if (items.length > 0) list.push({ label: bd.labels.item ?? 'どうぐ', onClick: () => ptPatch({ menu: 'item' }) });
+    list.push({ label: bd.labels.flee || 'にげる', onClick: ptFlee });
+    if (ptQueueRef.current.length > 0 && style !== 'milky') list.push({ label: '↩ ひとつもどす', onClick: ptUndo });
+    return list;
   };
 
   // ── milky（ミルキークエスト2風CTB）───────────────────────────────────────
@@ -4352,9 +4385,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       worldLayoutRef.current = null;
       return;
     }
-    scenesRef.current = gameData.scenes.map(s => ({ ...s })) as SceneDef[];
+    // objects/exits まで複製する（浅いコピーだと entity.def が gameData.scenes[i].objects[k] と同一参照になり、
+    // プレイ中の behavior/name 書き換えが React state を直接汚染して次回プレイに持ち越ってしまうため）。
+    scenesRef.current = gameData.scenes.map(s => ({
+      ...s,
+      objects: s.objects.map(o => ({ ...o })),
+      exits: s.exits ? { ...s.exits } : s.exits,
+    })) as SceneDef[];
     activeSceneIdxRef.current = 0;
     sceneTransRef.current = null;
+    sceneFadeRef.current = null;
     // 全シーンを1枚のワールドマップに合成（事前ロードでシームレス遷移）
     const layout = buildWorldLayout(scenesRef.current);
     worldLayoutRef.current = layout;
@@ -7231,6 +7271,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (c !== invMenuCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           invMenuCursorRef.current = c; setInvMenuCursor(c);
         }
+      } else if (isPlaying && battleRef.current.active && isPartyBattleStyle(gameDataRef.current.battle?.style) && ptRef.current.phase === 'select') {
+        // パーティ制戦闘（ff/mother3/milky）：上下でカーソル移動、ぼうぎょ等がある行は
+        // 2列表示ではなく縦一列なので上下のみで巡回する
+        const n = ptMenuActions().length;
+        if (n > 0 && (menuUpEdge || menuDownEdge)) {
+          let c = ptRef.current.menuCursor;
+          if (menuUpEdge) c -= 1;
+          if (menuDownEdge) c += 1;
+          c = ((c % n) + n) % n;
+          if (c !== ptRef.current.menuCursor) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+          ptPatch({ menuCursor: c });
+        }
       } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && undertalePhaseRef.current === 'menu') {
         const isDt = gameDataRef.current.battle?.style === 'deltarune';
         // デルタルーンは原作同様、押しっぱなしでカーソルが高速移動する（アンダーテールはエッジのみ）
@@ -7478,8 +7530,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
           }
         } else if (isPlaying && battleRef.current.active && isPartyBattleStyle(gameDataRef.current.battle?.style)) {
-          // パーティ制戦闘：Zはタイミングバーの停止などの「現在有効なアクション」を発火する
-          ptZRef.current?.();
+          // パーティ制戦闘：コマンド選択中はカーソルの指す項目を確定する
+          if (ptRef.current.phase === 'select') {
+            const actions = ptMenuActions();
+            const a = actions[Math.min(ptRef.current.menuCursor, actions.length - 1)];
+            if (a && !a.disabled) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); a.onClick(); }
+          }
         } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
           const canActNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
           if (battleItemsOpenRef.current) {
@@ -9068,12 +9124,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       bombInvulnRef.current = 0;
       isPlayerDeadRef.current = false;
       roundOverRef.current = false;
+      sceneTransRef.current = null;
+      sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
       setBattle(null);
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
       const pp = engineRef.current.player;
       const pw = gameData.player.w, ph = gameData.player.h;
       setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
       setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+      // プレイ中にシーンを切り替えていた場合、editSceneIdx はその都度 activeSceneIdxRef に追従するが、
+      // エディタの作業バッファ（gameData.map/objects）は switchEditScene 経由でしか同期されないため、
+      // ここで同期しないまま次回プレイの flushSceneEdits() が走ると「今 editSceneIdx が指しているシーン」に
+      // 「実際には別シーン（最後に編集タブで開いていたシーン）の古い map/objects」を上書きしてしまい、
+      // 次回プレイでそのシーンのオブジェクト座標が丸ごと入れ替わってしまう。編集に戻る瞬間に必ず同期する。
+      if (gameData.scenes?.length) {
+        const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
+        const activeScene = gameData.scenes[activeIdx];
+        if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
+          setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, objects: activeScene.objects }));
+          setEditSceneIdx(activeIdx);
+        }
+      }
       setShowEnding(false);
       setIsPlaying(false);
     } else {
@@ -9233,12 +9304,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               bombInvulnRef.current = 0;
               isPlayerDeadRef.current = false;
               roundOverRef.current = false;
+              sceneTransRef.current = null;
+              sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
               setBattle(null);
               battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
               const pp = engineRef.current.player;
               const pw = gameData.player.w, ph = gameData.player.h;
               setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
               setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+              // プレイ中にシーンを切り替えていた場合、editSceneIdx はその都度 activeSceneIdxRef に追従するが、
+              // エディタの作業バッファ（gameData.map/objects）は switchEditScene 経由でしか同期されないため、
+              // ここで同期しないまま次回プレイの flushSceneEdits() が走ると「今 editSceneIdx が指しているシーン」に
+              // 「実際には別シーン（最後に編集タブで開いていたシーン）の古い map/objects」を上書きしてしまい、
+              // 次回プレイでそのシーンのオブジェクト座標が丸ごと入れ替わってしまう。編集に戻る瞬間に必ず同期する。
+              if (gameData.scenes?.length) {
+                const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
+                const activeScene = gameData.scenes[activeIdx];
+                if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
+                  setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, objects: activeScene.objects }));
+                  setEditSceneIdx(activeIdx);
+                }
+              }
             }
             if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
             setActivePreviewKey(null);
@@ -10179,17 +10265,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             })()}
 
             {battle && isPartyBattleStyle(battleStyle) && (() => {
-              const bd = gameData.battle!;
               const roster = ptParty();
               const canSelect = battle.canAct && !battle.over && pt.phase === 'select';
               const curIdx = Math.min(pt.turnIdx, Math.max(0, roster.length - 1));
               const cur = roster[curIdx];
-              const skillMoves = bd.moves.filter(m => m.mercy == null);
               const pickingFoe = canSelect && pt.menu === 'target' && !!pt.pending;
               const pickingMember = canSelect && pt.menu === 'member' && !!pt.pending;
-              const items = usableItems();
               const logLines = battle.log.slice(-3);
-              const aliveMemberCount = roster.filter(m => m.hp > 0).length;
 
               /** 被弾ダメージ数値のポップアップ（deltarune と同じ体裁）。 */
               const memberDmgPop = (id: string) => {
@@ -10254,193 +10336,142 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 );
               };
 
-              /** ff/nobita: 戦場右側に立つメンバーの姿（味方対象選択中はタップで確定）。 */
+              /** ff/mother3: 戦場右側に立つメンバーの姿（味方対象選択中はタップで確定）。
+               *  自分の番のメンバーは前へ一歩踏み出して見えるよう左へずらす（FF風のサイドビュー演出）。 */
               const memberFigure = (m: (typeof roster)[number], i: number) => {
-                const down = m.hp <= 0;
+                const down = ptIsDown(m);
                 const active = canSelect && curIdx === i;
                 const clickable = pickingMember && !down;
                 const anim = m.battleSprites?.idle;
+                // battleSprites 未設定なら、歩行グラを左向き静止フレームとして流用する（サイドビューなので左向き）。
+                const walkFrame = !anim ? partyWalkFrame(m.spriteUrl, m.spriteRef, 'a', 56) : null;
                 return (
                   <button key={m.id} disabled={!clickable} onClick={() => ptPickMember(m.id)}
-                    className={`relative flex items-center gap-1 ${clickable ? 'animate-pulse cursor-pointer' : 'cursor-default'}`}>
+                    className={`relative flex items-center gap-1 transition-transform duration-200 ${clickable ? 'animate-pulse cursor-pointer' : 'cursor-default'}`}
+                    style={active ? { transform: 'translateX(-14px)' } : undefined}>
                     {active && <span className="text-yellow-300 text-[10px] sm:text-xs animate-pulse">▶</span>}
                     {anim
                       ? <BattleAnimSprite anim={anim} h={anim.h ? Math.min(64, anim.h * 1.5) : 52} className={down ? 'opacity-40 grayscale' : ''} />
-                      : <span className={`text-3xl sm:text-5xl ${down ? 'opacity-40 grayscale' : ''}`}>{m.emoji}</span>}
+                      : walkFrame
+                        ? <div className={down ? 'opacity-40 grayscale' : ''}>{walkFrame}</div>
+                        : <span className={`text-3xl sm:text-5xl ${down ? 'opacity-40 grayscale' : ''} ${active ? 'drop-shadow-[0_0_6px_rgba(250,204,21,0.6)]' : ''}`}>{m.emoji}</span>}
                     {memberDmgPop(m.id)}
                   </button>
                 );
               };
 
-              /** ff/nobita/milky 共通のコマンド窓の中身。選択中でなければ戦闘ログを流す。 */
-              const renderMenuWindow = () => {
+              /** ff/mother3/milky 共通のコマンド窓の中身。ptMenuActions() の並びをそのまま描画し、
+               *  キーボードのカーソル（pt.menuCursor）と常に同じ項目をハイライトする。選択中でなければログを流す。
+               *  light=true（mother3）は黒文字＋赤ハイライト（クリーム色の窓に合わせる）、falseは白文字＋黄色ハイライト。 */
+              const renderMenuWindow = (light = false) => {
+                const baseText = light ? 'text-black' : 'text-white';
+                const dimText = light ? 'text-black/50' : 'text-gray-500';
+                const backText = light ? 'text-black/40 hover:text-black' : 'text-gray-400 hover:text-white';
+                const selText = light ? 'text-red-700' : 'text-yellow-300';
+                const hoverText = light ? 'hover:text-red-700 active:text-red-700' : 'hover:text-yellow-300 active:text-yellow-300';
                 if (!canSelect) {
-                  return <div className="text-white text-[10px] sm:text-xs leading-relaxed">{logLines.map((l, i) => <p key={i}>{l}</p>)}</div>;
+                  return <div className={`${baseText} text-[10px] sm:text-xs leading-relaxed`}>{logLines.map((l, i) => <p key={i}>{l}</p>)}</div>;
                 }
-                if (pt.menu === 'target') return (
-                  <div className="text-[10px] sm:text-xs">
-                    <p className="text-yellow-300 mb-0.5">だれに？</p>
-                    {battle.foes.map((f, i) => !f.gone && (
-                      <button key={i} onClick={() => ptPickTarget(i)} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">▶ {f.name}</button>
-                    ))}
-                    <button onClick={() => ptPatch({ menu: 'root', pending: null })} className="block text-gray-400 hover:text-white py-0.5">もどる</button>
-                  </div>
-                );
-                if (pt.menu === 'member') return (
-                  <div className="text-[10px] sm:text-xs">
-                    <p className="text-yellow-300 mb-0.5">だれに つかう？</p>
-                    {roster.map(m => m.hp > 0 && (
-                      <button key={m.id} onClick={() => ptPickMember(m.id)} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">▶ {m.name}</button>
-                    ))}
-                    <button onClick={() => ptPatch({ menu: 'root', pending: null })} className="block text-gray-400 hover:text-white py-0.5">もどる</button>
-                  </div>
-                );
-                if (pt.menu === 'skill') return (
-                  <div className="text-[10px] sm:text-xs">
-                    {skillMoves.map((m, i) => {
-                      const noMp = (cur?.mp ?? 0) < m.cost;
-                      return (
-                        <button key={i} disabled={noMp} onClick={() => {
-                          if (battleStyle === 'milky') { if (m.heal) milkySelfSkill(m); else ptWithTarget({ kind: 'skill', move: m }); }
-                          else if (m.heal) ptPatch({ pending: { kind: 'skill', move: m }, menu: 'member' });
-                          else ptWithTarget({ kind: 'skill', move: m });
-                        }} className="flex w-full justify-between gap-1 text-left text-white hover:text-yellow-300 active:text-yellow-300 disabled:opacity-40 py-0.5">
-                          <span className="truncate">{m.name}</span>
-                          <span className="shrink-0">
-                            {m.cost > 0 && <span className="text-indigo-300">{m.cost}</span>}
-                            {battleStyle === 'milky' && <span className="text-amber-300 ml-1">WT{milkyMoveCost(m)}</span>}
-                          </span>
-                        </button>
-                      );
-                    })}
-                    {skillMoves.length === 0 && <p className="text-gray-500">とくぎが ない…</p>}
-                    <button onClick={() => ptPatch({ menu: 'root' })} className="block text-gray-400 hover:text-white py-0.5">もどる</button>
-                  </div>
-                );
-                if (pt.menu === 'item') return (
-                  <div className="text-[10px] sm:text-xs">
-                    {items.map(it => (
-                      <button key={it.id} onClick={() => {
-                        if (battleStyle === 'milky') milkyItem(it);
-                        else ptPatch({ pending: { kind: 'item', item: it }, menu: 'member' });
-                      }} className="flex w-full justify-between gap-1 text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">
-                        <span className="truncate">{it.emoji} {it.name}</span><span className="text-gray-400 shrink-0">×{inventory[it.id] ?? 0}</span>
-                      </button>
-                    ))}
-                    {items.length === 0 && <p className="text-gray-500">もちものが ない…</p>}
-                    <button onClick={() => ptPatch({ menu: 'root' })} className="block text-gray-400 hover:text-white py-0.5">もどる</button>
-                  </div>
-                );
-                // root
-                const tensionFull = battleStyle === 'nobita' && !!cur && (ptTension[cur.id] ?? 0) >= 100;
+                const actions = ptMenuActions();
+                const heading = pt.menu === 'target' ? 'だれに？' : pt.menu === 'member' ? 'だれに つかう？' : null;
                 return (
                   <div className="text-[11px] sm:text-xs">
-                    {cur && <p className="text-yellow-300 mb-0.5 truncate">▶ {cur.name}</p>}
-                    {tensionFull && (
-                      <button onClick={() => ptWithTarget({ kind: 'ult' })}
-                        className="block w-full text-left font-bold text-rose-300 hover:text-rose-200 active:text-rose-200 animate-pulse py-0.5">⚡ {cur?.ultName || 'ひっさつ'}</button>
-                    )}
-                    <button onClick={() => ptWithTarget({ kind: 'attack' })} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">{bd.labels.attack || 'こうげき'}</button>
-                    {skillMoves.length > 0 && <button onClick={() => ptPatch({ menu: 'skill' })} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">{bd.labels.move || 'とくぎ'}</button>}
-                    {battleStyle !== 'milky' && <button onClick={() => cur && ptChoose({ memberId: cur.id, kind: 'defend' })} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">ぼうぎょ</button>}
-                    {items.length > 0 && <button onClick={() => ptPatch({ menu: 'item' })} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">{bd.labels.item ?? 'どうぐ'}</button>}
-                    <button onClick={ptFlee} className="block w-full text-left text-white hover:text-yellow-300 active:text-yellow-300 py-0.5">{bd.labels.flee || 'にげる'}</button>
-                    {ptQueueRef.current.length > 0 && battleStyle !== 'milky' && (
-                      <button onClick={ptUndo} className="block w-full text-left text-gray-400 hover:text-white py-0.5">↩ ひとつもどす</button>
-                    )}
+                    {heading && <p className={`${selText} mb-0.5`}>{heading}</p>}
+                    {!light && pt.menu === 'root' && cur && <p className={`${selText} mb-0.5 truncate`}>▶ {cur.name}</p>}
+                    {actions.length === 0 && <p className={dimText}>（できることが ない）</p>}
+                    {actions.map((a, i) => (
+                      <button key={i} disabled={a.disabled} onClick={() => { ptPatch({ menuCursor: i }); a.onClick(); }}
+                        className={`flex w-full justify-between gap-1 text-left py-0.5 disabled:opacity-40 ${a.label === 'もどる' ? backText : pt.menuCursor === i ? selText : `${baseText} ${hoverText}`} ${a.label.startsWith('⚡') ? 'font-bold text-rose-500 hover:text-rose-400 animate-pulse' : ''}`}>
+                        <span className="truncate">{pt.menuCursor === i ? '▶ ' : '  '}{a.label}</span>
+                        {a.sub && <span className={`shrink-0 ${light ? 'text-red-800/70' : battleStyle === 'milky' ? 'text-amber-300' : 'text-indigo-300'}`}>{a.sub}</span>}
+                      </button>
+                    ))}
                   </div>
                 );
               };
 
-              const shellBg = battleStyle === 'ff'
-                ? { background: 'linear-gradient(180deg, #10102e 0%, #000016 65%, #000010 100%)' }
-                : battleStyle === 'nobita'
-                  ? { background: 'linear-gradient(180deg, #3b3b45 0%, #55555f 45%, #6b6b72 100%)' }
-                  : { background: 'linear-gradient(180deg, #34343f 0%, #17171f 100%)' };
-              const menuWinCls = battleStyle === 'ff'
-                ? 'bg-[#0a1c9c] border-[3px] border-white rounded shadow-[inset_0_0_0_2px_#6b8cff]'
-                : battleStyle === 'nobita'
-                  ? 'bg-[#10214f] border-2 border-white'
-                  : 'bg-black/85 border-2 border-gray-400';
+              /** mother3: 実HPへ向けて回転する数値を EarthBound 風の1桁ずつの箱（オドメーター）で描く。 */
+              const digitBoxes = (value: number, dir: 'up' | 'down' | null, width = 3) => {
+                const str = String(Math.max(0, Math.round(value))).padStart(width, ' ');
+                return str.split('').map((ch, i) => ch === ' '
+                  ? <span key={i} className="inline-block w-3.5 h-4 sm:w-4 sm:h-5 bg-white border border-black/40 rounded-[2px]" />
+                  : <DigitReel key={i} digit={Number(ch)} dir={dir} cellH={16} />);
+              };
 
-              // ── umimamo（海と魔物のこどもたち風）レイアウト ──
-              if (battleStyle === 'umimamo') {
-                const pend = pt.pending;
+              // ── mother3（MOTHER3風）レイアウト：単色の戦場＋敵を中央に大きく、パーティは画面下に小さく、
+              //    ステータスは丸窓＋1桁ずつの箱（オドメーター）で表示する。 ──
+              if (battleStyle === 'mother3') {
+                // フィールドに立つのは操作キャラ1人ぶんのスプライトだけ（原作同様、パーティは並べて立たせない）。
+                // 見た目未設定（battleSprites/歩行グラともに無し）のときだけ絵文字にフォールバックする。
+                const fieldMember = roster[0];
+                const fieldAnim = fieldMember?.battleSprites?.idle;
+                // battleSprites 未設定なら、歩行グラを正面向き（前を向いた）足踏みアニメとして流用する。
+                const fieldWalkFrame = !fieldAnim && fieldMember ? partyWalkFrame(fieldMember.spriteUrl, fieldMember.spriteRef, 's', 40, true) : null;
                 return (
-                  <div className="absolute inset-0 flex flex-col font-pixel select-none overflow-hidden"
-                    style={{ background: 'linear-gradient(180deg, #2e3d4d 0%, #55606b 40%, #8a765a 70%, #a08b66 100%)' }}>
-                    {/* 上段コマンドバー */}
-                    <div className="shrink-0 bg-[#0d1233] border-b-2 border-yellow-700/80 px-2 py-1 flex items-center gap-1.5 text-[11px] sm:text-sm text-white min-h-[36px] flex-wrap z-10">
-                      {canSelect && pt.menu === 'root' && !pend && (<>
-                        <span className="text-gray-300 mr-1">どうする？</span>
-                        <button onClick={() => ptPatch({ pending: { kind: 'solo' }, menu: 'member' })}
-                          className="px-2 py-0.5 hover:bg-white/10 active:bg-white/10 rounded font-bold">🗡 ひとりで</button>
-                        {aliveMemberCount >= 2 && (
-                          <button disabled={pt.gems <= 0} onClick={() => ptPatch({ pending: { kind: 'pair' }, menu: 'member' })}
-                            className="px-2 py-0.5 hover:bg-white/10 active:bg-white/10 rounded font-bold disabled:opacity-40">🐟 ふたりで</button>
-                        )}
-                        {items.length > 0 && (
-                          <button onClick={() => ptPatch({ menu: 'item', pending: null })}
-                            className="px-2 py-0.5 hover:bg-white/10 active:bg-white/10 rounded font-bold">🎒 {bd.labels.item ?? 'アイテム'}</button>
-                        )}
-                        <button onClick={ptFlee} className="px-2 py-0.5 hover:bg-white/10 active:bg-white/10 rounded">{bd.labels.flee || 'にげる'}</button>
-                        <span className="ml-auto tracking-tight" title="きずな珠（ふたりで で1つ消費）">
-                          <span className="text-red-400">{'◆'.repeat(pt.gems)}</span><span className="text-gray-600">{'◆'.repeat(Math.max(0, 5 - pt.gems))}</span>
-                        </span>
-                      </>)}
-                      {canSelect && pt.menu === 'item' && (<>
-                        {items.map(it => (
-                          <button key={it.id} onClick={() => ptPatch({ pending: { kind: 'item', item: it }, menu: 'member' })}
-                            className="px-2 py-0.5 hover:bg-white/10 active:bg-white/10 rounded">{it.emoji} {it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span></button>
-                        ))}
-                        <button onClick={() => ptPatch({ menu: 'root', pending: null })} className="px-2 py-0.5 text-gray-400 hover:text-white">もどる</button>
-                      </>)}
-                      {canSelect && pt.menu === 'member' && pend && (<>
-                        <span className="text-yellow-300 animate-pulse">
-                          {pend.kind === 'pair'
-                            ? (pend.firstMemberId ? 'ふたりめは？（したの なかまをタップ）' : 'ひとりめは？（したの なかまをタップ）')
-                            : pend.kind === 'item' ? 'だれに つかう？（なかまをタップ）' : 'だれが たたかう？（なかまをタップ）'}
-                        </span>
-                        <button onClick={() => ptPatch({ menu: 'root', pending: null })} className="ml-auto px-2 py-0.5 text-gray-400 hover:text-white">もどる</button>
-                      </>)}
-                      {canSelect && pt.menu === 'target' && (
-                        <span className="text-yellow-300 animate-pulse">だれに？（敵をタップ）</span>
+                  <div className="absolute inset-0 flex flex-col font-pixel select-none overflow-hidden" style={{ background: '#c8621f' }}>
+                    <div className="flex-1 relative min-h-0 flex items-center justify-center">
+                      {/* コマンド窓：原作同様、右上に内容へフィットする小さいクリーム色の窓（黒文字＋赤ハイライト）。 */}
+                      {canSelect && (
+                        <div className="absolute top-1.5 right-1.5 max-w-[62%] bg-[#fbead0] border-[3px] border-black rounded-xl px-2 py-1 max-h-28 overflow-y-auto z-10">
+                          {renderMenuWindow(true)}
+                        </div>
                       )}
-                      {!canSelect && <span className="text-gray-200 truncate">{battle.log.at(-1)}</span>}
+                      <div className="flex items-center justify-center gap-3">
+                        {battle.foes.map((_, i) => renderFoe(i, battle.foes.length > 1 ? 'md' : 'lg'))}
+                      </div>
                     </div>
-                    {/* 中段：敵 */}
-                    <div className="flex-1 min-h-0 flex items-center justify-center gap-3 sm:gap-6">
-                      {battle.foes.map((_, i) => renderFoe(i, battle.foes.length > 1 ? 'md' : 'lg'))}
-                    </div>
-                    {/* ログ1行 */}
-                    <div className="shrink-0 text-center text-white text-[10px] sm:text-xs px-2 pb-0.5 min-h-[1.3em] truncate">{canSelect ? battle.log.at(-1) : ''}</div>
-                    {/* 下段：メンバーボックス */}
-                    <div className="shrink-0 flex gap-1 p-1">
-                      {roster.map(m => {
-                        const down = m.hp <= 0;
-                        const selectedFirst = pend?.kind === 'pair' && pend.firstMemberId === m.id;
-                        const hpPct = Math.max(0, Math.min(100, (m.hp / m.maxHp) * 100));
+                    <div className="shrink-0 px-2 pb-1 text-white text-[10px] sm:text-xs min-h-[1.2em] truncate text-center drop-shadow">{canSelect ? '' : battle.log.at(-1)}</div>
+                    {/* パーティ人数ぶんだけ箱を並べて中央寄せする（1人なら1箱だけが画面中央に来る）。
+                        1箱ぶんの幅は固定なので、人数が増えるほど行全体の幅が伸びて中央基準で左右へ広がる。
+                        操作キャラのスプライトは常に「先頭の箱」の真上（その箱を基準に中央）に重ね、
+                        箱を z 順で上に置くことでスプライトの下半分が箱の裏へ隠れる（原作同様、窓が手前）。 */}
+                    <div className="shrink-0 flex justify-center gap-1 p-1.5 pt-8">
+                      {roster.map((m, i) => {
+                        const disp = Math.max(0, Math.round(ptDisplayHp(m)));
+                        const critical = mother3CritRef.current.has(m.id);
                         return (
-                          <button key={m.id} disabled={!pickingMember || down} onClick={() => ptPickMember(m.id)}
-                            className={`relative flex-1 min-w-0 bg-[#0d1233] border-2 px-1.5 py-1 text-left ${selectedFirst ? 'border-yellow-300' : 'border-yellow-700/80'} ${pickingMember && !down ? 'animate-pulse' : ''} disabled:cursor-default`}>
-                            <div className="flex items-center gap-1">
-                              <span className="text-sm sm:text-base">{m.emoji}</span>
-                              <span className={`text-[10px] sm:text-xs font-bold truncate ${down ? 'text-red-400' : 'text-white'}`}>{m.name}</span>
+                          <div key={m.id} className="relative w-[92px] sm:w-[104px] shrink-0">
+                            {i === 0 && fieldMember && (
+                              <div className={`absolute bottom-full left-1/2 -translate-x-1/2 translate-y-1/2 z-0 ${ptIsDown(fieldMember) ? 'opacity-40 grayscale' : ''}`}>
+                                {fieldAnim
+                                  ? <BattleAnimSprite anim={fieldAnim} h={fieldAnim.h ? Math.min(48, fieldAnim.h) : 40} />
+                                  : fieldWalkFrame ?? <span className="text-2xl sm:text-3xl leading-none">{fieldMember.emoji}</span>}
+                              </div>
+                            )}
+                            <div className={`relative z-10 bg-[#fbead0] border-2 rounded-lg px-1 py-0.5 ${critical ? 'border-red-600 animate-pulse' : 'border-black'}`}>
+                              <div className={`text-[8px] sm:text-[9px] font-bold truncate text-center ${canSelect && curIdx === i ? 'text-red-700' : 'text-black'}`}>{m.name}</div>
+                              {/* HP/PP は同じ幅のラベル＋3桁ボックスで縦に並べ、桁の列が揃うようにする（原作のオドメーター窓）。 */}
+                              <div className="flex items-center gap-0.5 mt-0.5">
+                                <span className="text-[6px] sm:text-[7px] font-bold text-black w-3.5 shrink-0">HP</span>
+                                <div className="flex gap-[1px]">{digitBoxes(disp, disp < m.hp ? 'up' : disp > m.hp ? 'down' : null, 3)}</div>
+                              </div>
+                              <div className="flex items-center gap-0.5 mt-0.5">
+                                <span className="text-[6px] sm:text-[7px] font-bold text-black w-3.5 shrink-0">PP</span>
+                                <div className="flex gap-[1px]">{digitBoxes(m.mp, null, 3)}</div>
+                              </div>
+                              {memberDmgPop(m.id)}
                             </div>
-                            <div className="text-[9px] sm:text-[10px] text-white mt-0.5">HP {m.hp}/{m.maxHp}</div>
-                            <div className="h-1.5 sm:h-2 bg-gray-900 border border-gray-700 overflow-hidden">
-                              <div className="h-full bg-green-400 transition-all" style={{ width: `${hpPct}%` }} />
-                            </div>
-                            {memberDmgPop(m.id)}
-                          </button>
+                          </div>
                         );
                       })}
                     </div>
+                    {mother3CritRef.current.size > 0 && (
+                      <div className="absolute inset-0 z-40 pointer-events-none flex items-start justify-center pt-6">
+                        <div className="bg-red-700/90 text-white font-black text-sm sm:text-base px-3 py-1 rounded shadow-lg animate-pulse">CRITICAL DAMAGE!</div>
+                      </div>
+                    )}
                   </div>
                 );
               }
 
-              // ── ff / nobita / milky レイアウト ──
+              const shellBg = battleStyle === 'ff'
+                ? { background: 'linear-gradient(180deg, #10102e 0%, #000016 65%, #000010 100%)' }
+                : { background: 'linear-gradient(180deg, #34343f 0%, #17171f 100%)' };
+              const menuWinCls = battleStyle === 'ff'
+                ? 'bg-[#0a1c9c] border-[3px] border-white rounded shadow-[inset_0_0_0_2px_#6b8cff]'
+                : 'bg-black/85 border-2 border-gray-400';
+
+              // ── ff / milky 共通レイアウト ──
               return (
                 <div className="absolute inset-0 flex flex-col font-pixel select-none overflow-hidden" style={shellBg}>
                   {/* 戦場 */}
@@ -10489,26 +10520,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           ))}
                         </div>
                       )}
-                      {battleStyle === 'nobita' && (
-                        <div className="flex flex-col justify-center gap-1 h-full">
-                          {roster.map(m => {
-                            const t = ptTension[m.id] ?? 0;
-                            return (
-                              <div key={m.id} className="relative flex items-center gap-1.5 text-[9px] sm:text-[10px] leading-tight">
-                                <span className="text-sm sm:text-base">{m.emoji}</span>
-                                <span className={`w-14 truncate font-bold ${m.hp <= 0 ? 'text-red-400' : 'text-white'}`}>{m.name}</span>
-                                <span className="text-white whitespace-nowrap">HP {m.hp}/{m.maxHp}</span>
-                                <span className="text-indigo-300 whitespace-nowrap">MP {m.mp}</span>
-                                <span className="ml-auto shrink-0 font-black italic text-red-600 bg-white/90 px-0.5 text-[8px]">TENSiON</span>
-                                <div className="w-14 sm:w-20 h-2 bg-gray-800 border border-gray-500 overflow-hidden shrink-0">
-                                  <div className={`h-full transition-all ${t >= 100 ? 'bg-yellow-300 animate-pulse' : 'bg-blue-500'}`} style={{ width: `${t}%` }} />
-                                </div>
-                                {memberDmgPop(m.id)}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
                       {battleStyle === 'milky' && (
                         <div className="flex gap-1 h-full items-stretch">
                           {roster.map((m, i) => {
@@ -10532,35 +10543,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       )}
                     </div>
                   </div>
-                  {/* nobita: タイミングバー（Z/タップで停止。中央ゾーンで「ついげき」） */}
-                  {battleStyle === 'nobita' && pt.phase === 'timing' && (
-                    <button className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/45"
-                      onClick={() => ptZRef.current?.()}>
-                      <div className="text-yellow-300 font-bold text-xs sm:text-sm mb-2 animate-pulse">タイミングよく おせ！</div>
-                      <div className="relative w-64 sm:w-80 h-8 bg-gray-950 border-2 border-white overflow-hidden">
-                        <div className="absolute inset-y-0" style={{ left: '38%', width: '24%', background: 'rgba(250,204,21,0.35)', borderLeft: '1px solid #facc15', borderRight: '1px solid #facc15' }} />
-                        <div ref={ptTimingElRef} className="absolute inset-y-0 w-1.5 bg-white" style={{ left: '100%' }} />
-                      </div>
-                      <div className="text-gray-300 text-[10px] mt-2">[Z] / タップ</div>
-                    </button>
-                  )}
-                  {/* nobita: ひっさつ発動カットイン */}
-                  {pt.cutin && (
-                    <div className="absolute inset-0 z-40 overflow-hidden pointer-events-none">
-                      <div className="absolute inset-0 bg-black/70" />
-                      <div className="absolute inset-x-[-15%] top-1/2 h-28 sm:h-36 flex items-center justify-center gap-3 sm:gap-5"
-                        style={{
-                          background: `linear-gradient(90deg, transparent, ${pt.cutin.color ?? '#e11d48'} 18%, ${pt.cutin.color ?? '#e11d48'} 82%, transparent)`,
-                          animation: 'ptCutinSlide 1.4s ease-in-out both',
-                        }}>
-                        <span className="text-6xl sm:text-7xl drop-shadow-lg">{pt.cutin.emoji}</span>
-                        <div className="text-white drop-shadow">
-                          <div className="text-[10px] sm:text-xs font-bold tracking-widest opacity-90">{pt.cutin.name}</div>
-                          <div className="text-xl sm:text-3xl font-black italic tracking-wider">{pt.cutin.ultName}！！</div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })()}
@@ -12246,8 +12228,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               <option value="undertale">ハート弾幕よけ（アンダーテール風）</option>
                               <option value="deltarune">パーティ×弾幕よけ（デルタルーン風）</option>
                               <option value="ff">サイドビュー パーティ戦闘（FF風）</option>
-                              <option value="nobita">タイミング＆ひっさつ戦闘（のび太戦記風）</option>
-                              <option value="umimamo">ひとりで／ふたりで 連携戦闘（海と魔物風）</option>
+                              <option value="mother3">ローリングHP戦闘（MOTHER3風）</option>
                               <option value="milky">行動値カウント戦闘（ミルキークエスト風）</option>
                             </select>
                           </label>
@@ -12256,8 +12237,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               {{
                                 deltarune: 'パーティで1人ずつ行動を選び、敵ターンはハート弾幕よけ。',
                                 ff: 'パーティ全員のコマンドを選んでから一斉に実行するラウンド制。',
-                                nobita: '通常攻撃はタイミングよく押すと追撃！ 被弾でテンションが溜まり、満タンでカットイン付きの「ひっさつ」。',
-                                umimamo: '毎ターン「ひとりで（単独攻撃）」か「ふたりで（きずな珠を消費した2人連携）」を選ぶ。',
+                                mother3: 'ローリングHP：被弾/回復でHP表示が実際の値へ向けて1ずつ回転しながら増減する。致命傷を受けても、表示が0に落ちきる前に回復すれば生存できる（クリティカルダメージ演出）。',
                                 milky: '行動値が0になった者から行動するカウント制。強い技ほど次の行動が遅れる。敵はHPが減ると疲れた表情に。',
                               }[gameData.battle.style as string]}
                             </p>
@@ -12327,15 +12307,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                         </label>
                                       ))}
                                     </div>
-                                  )}
-                                  {gameData.battle!.style === 'nobita' && (
-                                    <label className="block text-[10px] text-gray-400">ひっさつ技名（テンション満タンで発動）
-                                      <input value={m.ultName ?? ''} placeholder="例: 最強ミサイル" onChange={e => setGameData(p => {
-                                        const b = p.battle!; const next = [...(b.party ?? [])];
-                                        next[i] = { ...next[i], ultName: e.target.value || undefined };
-                                        return { ...p, battle: { ...b, party: next } };
-                                      })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" />
-                                    </label>
                                   )}
                                 </div>
                               ))}

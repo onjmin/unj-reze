@@ -361,13 +361,12 @@ export interface PartyBattleSprites {
  *  hurt=被ダメージ演出中、spare=みのがし可能（敵意が消えた）とき。 */
 export interface EnemyBattleSprite { idle: BattleSpriteAnim; hurt?: BattleSpriteAnim; spare?: BattleSpriteAnim; }
 
-/** パーティ制バトル（deltarune / ff / nobita / umimamo / milky）のメンバー。先頭(index 0)は
+/** パーティ制バトル（deltarune / ff / mother3 / milky）のメンバー。先頭(index 0)は
  *  フィールド上の操作キャラと同一人物として扱われ、そのHP/MPは player.maxHp（進行データの pr.hp/pr.mp）を
  *  共有する。2人目以降はフィールドに実体を持たない同行キャラのため、HP/MPは戦闘中だけの一時状態
  *  （戦闘終了で破棄・次戦闘は毎回 maxHp/maxMp から再開）。
- *  maxMp/atk/def は deltarune 以外のパーティ制スタイル用（省略時は先頭メンバー＝プレイヤーの現在値を流用）。
- *  ultName は nobita スタイルの「ひっさつ」の技名（テンションゲージ満タンで使用可）。 */
-export interface PartyMember { id: string; name: string; emoji: string; spriteRef?: string; spriteUrl?: string; maxHp: number; maxMp?: number; atk?: number; def?: number; ultName?: string; spells?: PartySpell[]; battleSprites?: PartyBattleSprites; /** メンバーカラー（HPバー・ボックス枠。省略時は白） */ color?: string; }
+ *  maxMp/atk/def は deltarune 以外のパーティ制スタイル用（省略時は先頭メンバー＝プレイヤーの現在値を流用）。 */
+export interface PartyMember { id: string; name: string; emoji: string; spriteRef?: string; spriteUrl?: string; maxHp: number; maxMp?: number; atk?: number; def?: number; spells?: PartySpell[]; battleSprites?: PartyBattleSprites; /** メンバーカラー（HPバー・ボックス枠。省略時は白） */ color?: string; }
 
 /** ターン制戦闘設定（rpg エンジン：ドラクエ/ポケモン）。
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */
@@ -380,14 +379,12 @@ export interface BattleConfig {
    *  パーティ（party）で1人ずつ行動選択（FIGHT/ACT/ITEM/まもる、ACT欄にSPELLも並ぶ）してから
    *  敵ターンへ進む。TPは共有リソースでMPとは独立（グレイズ／まもる で加算、呪文で消費、毎戦闘0から）。
    *  'ff'＝FF風サイドビュー：パーティ全員のコマンドを選んでから一斉実行するラウンド制。
-   *  'nobita'＝のび太戦記エース風：通常攻撃にタイミング押し（成功で追撃）、被弾でテンションゲージが
-   *  溜まり、満タンでカットイン付きの「ひっさつ」を放てる。
-   *  'umimamo'＝海と魔物のこどもたち風：毎ラウンド「ひとりで（単独攻撃）／ふたりで（きずな珠を消費して
-   *  2人連携攻撃）／どうぐ」を選ぶパーティ戦闘。
+   *  'mother3'＝MOTHER3風：ローリングHP。被弾/回復で表示HPが実HPへ向けて1ずつ数字が回転するように増減し、
+   *  表示が0に落ちきる前に回復すれば、実HPが0以下になる致命傷を受けていても生存できる（クリティカルダメージ演出）。
    *  'milky'＝ミルキークエスト2風：全員の行動値がカウントダウンし0になった者から行動するCTB。強い技ほど
    *  行動値コストが大きい。敵はHPが減ると疲れた表情になる。
    *  省略時 'classic'＝従来のコマンド戦闘。 */
-  style?: 'classic' | 'undertale' | 'deltarune' | 'ff' | 'nobita' | 'umimamo' | 'milky';
+  style?: 'classic' | 'undertale' | 'deltarune' | 'ff' | 'mother3' | 'milky';
   moves: BattleMove[];
   /** コマンドの表示名（テーマ差し替え）。item 省略時は「どうぐ」。
    *  mercy を指定すると「みのがす」コマンドが出現する（アンダーテール系）。 */
