@@ -20,6 +20,14 @@
   to   { transform: translateX(0);    opacity: 1; }
 }
 
+/* 敵撃破演出：一瞬白く発光してから、細かく分解しながら消えていく（アンダーテール風ヴェイパライズ） */
+@keyframes enemyVaporize {
+  0%   { filter: brightness(1) contrast(1); opacity: 1; transform: scale(1) translateY(0); clip-path: inset(0 0 0 0); }
+  15%  { filter: brightness(4) contrast(2); opacity: 1; transform: scale(1.03) translateY(0); clip-path: inset(0 0 0 0); }
+  40%  { filter: brightness(2.5) contrast(1.5); opacity: 0.9; transform: scale(1.02) translateY(-2px); clip-path: inset(0 0 15% 0); }
+  100% { filter: brightness(2.5) contrast(1.5); opacity: 0; transform: scale(0.96) translateY(-18px); clip-path: inset(0 0 100% 0); }
+}
+
 @keyframes danmaku-slide {
   from { left: 105%; }
   to { left: -200%; }

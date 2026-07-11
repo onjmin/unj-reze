@@ -1535,8 +1535,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [enemyDmgPopup, setEnemyDmgPopup] = useState<Record<number, { text: string; id: number; miss?: boolean } | undefined>>({});
   /** アンダーテール風戦闘：敵HPゲージ（敵ごと）。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<Record<number, { pct: number; id: number } | undefined>>({});
+  /** アンダーテール/デルタルーン風戦闘：撃破演出中（発光→分解して消える）の敵。foes 配列のインデックスをキーに
+   *  独立管理し、演出が終わるまでは f.gone=true でも描画を続ける（消える瞬間まで枠を占有させ、演出後に
+   *  ビュートランジションで残りの敵をなめらかに詰める）。 */
+  const [dyingFoes, setDyingFoes] = useState<Record<number, { id: number } | undefined>>({});
   const enemyFxIdRef = useRef(0);
   const ENEMY_DMG_POPUP_MS = 700;
+  const ENEMY_DEFEAT_FX_MS = 650;
   const ENEMY_BUBBLE_CHAR_MS = 45;
   const ENEMY_BUBBLE_HOLD_MS = 520;
   const ENEMY_BUBBLE_TO_COMBAT_MS = 120;
@@ -1577,6 +1582,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setEnemyDmgPopup(p => ({ ...p, [foeIdx]: { text: 'MISS', id, miss: true } }));
     setTimeout(() => setEnemyDmgPopup(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), ENEMY_DMG_POPUP_MS);
   };
+  /** ブラウザが View Transitions API に対応していれば使い、残りの敵が新しい位置へなめらかに詰まるように
+   *  する（各敵の枠に viewTransitionName を振っているため、対応ブラウザでは個別に位置/サイズが補間される）。
+   *  非対応ブラウザでは通常どおり即時に反映する。 */
+  const withViewTransition = (fn: () => void) => {
+    const doc = document as Document & { startViewTransition?: (cb: () => void) => void };
+    if (typeof doc.startViewTransition === 'function') {
+      doc.startViewTransition(() => flushSync(fn));
+    } else {
+      fn();
+    }
+  };
+  /** 敵を撃破したとき：一瞬発光してから分解して消えるヴェイパライズ演出＋SEを再生する。
+   *  f.gone は damageFoe 側で即座に立てているのでゲームロジックはそのまま進むが、描画上は
+   *  ENEMY_DEFEAT_FX_MS の間だけ枠を残し、消える瞬間に残りの敵をビュートランジションで詰める。 */
+  const triggerEnemyDefeatFx = (foeIdx: number) => {
+    const id = ++enemyFxIdRef.current;
+    setDyingFoes(p => ({ ...p, [foeIdx]: { id } }));
+    if (soulSfx) playSfx(soulSfx.defeat);
+    setTimeout(() => {
+      withViewTransition(() => {
+        setDyingFoes(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p));
+      });
+    }, ENEMY_DEFEAT_FX_MS);
+  };
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
   /** アンダーテール風エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅しつつ
@@ -1603,6 +1632,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       menuCancel: { ref: 'direct:undertale-menu-cancel', src: undertaleSfxUrl('snd_menu_cancel'), type: 'direct' as const },
       textTyper: { ref: 'direct:undertale-text-typer', src: undertaleSfxUrl('snd_text_voice_typer'), type: 'direct' as const },
       textVoice: { ref: 'direct:undertale-text-voice', src: undertaleSfxUrl('snd_text_voice_default'), type: 'direct' as const },
+      defeat: { ref: 'direct:undertale-defeat', src: undertaleSfxUrl('snd_vaporize'), type: 'direct' as const },
     },
     deltarune: {
       encounter: { ref: 'direct:deltarune-encounter', src: tldrSfxUrl('exclamation'), type: 'direct' as const },
@@ -1613,6 +1643,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       menuCancel: { ref: 'direct:deltarune-menu-cancel', src: tldrSfxUrl('uiCancel'), type: 'direct' as const },
       textTyper: { ref: 'direct:deltarune-text-typer', src: tldrSfxUrl('text'), type: 'direct' as const },
       textVoice: { ref: 'direct:deltarune-text-voice', src: tldrSfxUrl('text'), type: 'direct' as const },
+      defeat: { ref: 'direct:deltarune-defeat', src: tldrSfxUrl('break1'), type: 'direct' as const },
     },
   } as const;
   const soulSfx = SOUL_SFX_BY_PRESET[presetId as keyof typeof SOUL_SFX_BY_PRESET];
@@ -2017,7 +2048,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     f.hp = Math.max(0, f.hp - dmg);
     triggerEnemyDamageFx(foeIdx, dmg, before, f.hp, f.maxHp);
     const killed = f.hp <= 0;
-    if (killed) f.gone = 'dead';
+    if (killed) { f.gone = 'dead'; triggerEnemyDefeatFx(foeIdx); }
     syncFoesView();
     return { killed, over: endIfAllFoesGone() };
   };
@@ -2403,7 +2434,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
     // 次も「たたかう」が控えているあいだは 'attack' のままにして、複数行のタイミングバーオーバーレイを
     // たたまずに連続表示する（reference の o_enc_fight が全員ぶんの棒を同時に見せているのを再現）。
-    if (!dtNextIsAttack()) setSoulPhase('menu');
+    // ただしこの一撃で全滅させた場合は、以降の「たたかう」キューは実行されず dtAdvanceTurn も
+    // 呼ばれない（over で早期 return する）ため、'attack' のまま残してしまうとタイミングバーが
+    // 消えずに残り続け、この後に出す撃破/レベルアップ等のメッセージを覆い隠してしまう。
+    if (over || !dtNextIsAttack()) setSoulPhase('menu');
     const targetLabel = b.foes.length > 1 && targetFoe ? `${targetFoe.name}に ` : '';
     appendLog(`${inCritZone ? '会心の いちげき！ ' : ''}${targetLabel}${dmg}のダメージ！${killed && targetFoe ? ` ${targetFoe.name}を たおした！` : ''}`, { canAct: false });
     if (over) return;
@@ -9033,18 +9067,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       位置がズレないようにする。撃破/みのがし済みの敵は消える。
                       フキダシ位置は敵の形状と並びに応じて上下左右を切り替える。 */}
                   {(() => {
-                    const aliveIdxs = battle.foes.reduce<number[]>((a, f, i) => f.gone ? a : [...a, i], []);
+                    const aliveIdxs = battle.foes.reduce<number[]>((a, f, i) => (f.gone && !dyingFoes[i]) ? a : [...a, i], []);
                     const gapCls = aliveIdxs.length >= 3 ? 'gap-8 sm:gap-14' : aliveIdxs.length >= 2 ? 'gap-6 sm:gap-10' : 'gap-3 sm:gap-6';
                     return (
                       <div className={`flex flex-row items-end justify-center ${gapCls} mt-4 sm:mt-6 shrink-0 h-28 sm:h-32`}>
                         {battle.foes.map((f, i) => {
-                          if (f.gone) return null;
+                          const dying = dyingFoes[i];
+                          if (f.gone && !dying) return null;
                           const pop = enemyDmgPopup[i];
                           const gauge = enemyGaugeAnim[i];
                           const fReady = foeSpareReady(f);
                           const targeting = soulMenu === 'target' && soulTargetCursor === i;
                           return (
-                            <div key={i} className="relative flex flex-col items-center justify-end">
+                            <div key={i} className="relative flex flex-col items-center justify-end"
+                              style={{
+                                viewTransitionName: `enemy-slot-${i}`,
+                                ...(dying ? { animation: 'enemyVaporize 0.65s ease-in forwards', pointerEvents: 'none' as const } : {}),
+                              } as React.CSSProperties}>
                               <div className="relative w-24 mb-1">
                                 {pop && (
                                   <div key={pop.id}
@@ -9180,9 +9219,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       )}
                     </div>
                   </div>
-                  {/* プレイヤーステータス */}
-                  <div className="text-center text-[10px] sm:text-xs text-white mb-1.5 shrink-0">
-                    {bd.playerName}　LV {pr.level}　<span className="text-red-400">HP</span> {pr.hp}/{pr.maxHp}　<span className="text-cyan-300">MP</span> {pr.mp}/{pr.maxMp}
+                  {/* プレイヤーステータス：HPは数値だけでなく黄色いゲージでも見せる（アンダーテール本編準拠） */}
+                  <div className="flex items-center justify-center flex-wrap gap-x-1.5 gap-y-0.5 text-[10px] sm:text-xs text-white mb-1.5 shrink-0">
+                    <span>{bd.playerName}　LV {pr.level}</span>
+                    <span className="text-red-400 font-bold">HP</span>
+                    <div className="w-14 sm:w-20 h-2.5 shrink-0 bg-black border border-white/80 overflow-hidden">
+                      <div className="h-full bg-yellow-300 transition-all duration-500 ease-out"
+                        style={{ width: `${Math.max(0, Math.min(100, (pr.hp / pr.maxHp) * 100))}%` }} />
+                    </div>
+                    <span>{pr.hp}/{pr.maxHp}</span>
+                    <span className="text-cyan-300 font-bold ml-1">MP</span>
+                    <span>{pr.mp}/{pr.maxMp}</span>
                   </div>
                   {/* FIGHT / ACT / ITEM / MERCY（十字キー左右でカーソル移動、Z/Aで確定） */}
                   <div className="flex justify-center gap-1.5 sm:gap-2 shrink-0">
@@ -9286,18 +9333,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {/* 敵（右側・1〜3体を縦に並べる。tlDR o_enc の敵スタックと同じ配置） */}
                     <div className={`absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-0 transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
                       {(() => {
-                        const aliveCount = battle.foes.filter(f => !f.gone).length;
+                        const aliveCount = battle.foes.filter((f, i) => !f.gone || dyingFoes[i]).length;
                         // 複数体のときはスプライトを小さくして縦に収める
                         const sizeCap = aliveCount > 1 ? 84 : 160;
                         const sizeMul = aliveCount > 1 ? 1.4 : 2.4;
                         return battle.foes.map((f, i) => {
-                          if (f.gone) return null;
+                          const dying = dyingFoes[i];
+                          if (f.gone && !dying) return null;
                           const pop = enemyDmgPopup[i];
                           const gauge = enemyGaugeAnim[i];
                           const fReady = foeSpareReady(f);
                           const targeting = soulMenu === 'target' && soulTargetCursor === i;
                           return (
-                            <div key={i} className="relative flex flex-col items-center">
+                            <div key={i} className="relative flex flex-col items-center"
+                              style={{
+                                viewTransitionName: `enemy-slot-dt-${i}`,
+                                ...(dying ? { animation: 'enemyVaporize 0.65s ease-in forwards', pointerEvents: 'none' as const } : {}),
+                              } as React.CSSProperties}>
                               <div className="relative w-32 mb-0.5">
                                 {pop && (
                                   <div key={pop.id}

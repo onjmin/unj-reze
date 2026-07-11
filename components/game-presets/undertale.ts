@@ -135,26 +135,6 @@ end while
   encounterRate: 16,
   bgm: { ref: 'https://www.youtube.com/watch?v=oHZDWwW6iXs', src: 'https://www.youtube.com/watch?v=oHZDWwW6iXs', type: 'youtube' },
   objects: [
-    // はなのケモノ（オープニング）
-    newObject({
-      emoji: '🌼', col: 15, row: 4, behavior: 'still', hazard: false,
-      pages: [
-        { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [{ type: 'message', text: 'はな「…なんだよ。もう タネは ないってば。ヒヒヒ」' }] },
-        { conditions: {}, commands: [
-          { type: 'message', text: 'はな「こんにちは！ ボク、はなのケモノ！\nちかのせかいへ ようこそ！」' },
-          { type: 'choice', text: 'はな「ボクの【ゆうじょうのタネ】を うけとってくれる？」', choices: [
-            { label: 'はい', commands: [
-              { type: 'message', text: 'はな「ヒヒヒ…… ウソだよ！\nこのせかいは【コロスか コロサレるか】なんだ！」' },
-            ]},
-            { label: 'いいえ', commands: [
-              { type: 'message', text: 'はな「…つれないなぁ。まあ いいや。\nどうせ すぐに わかるよ。ヒヒヒ……」' },
-            ]},
-          ]},
-          { type: 'message', text: 'そのとき どこからか あたたかい ほのおが とんできて、\nはなのケモノは あわてて つちに もぐっていった。' },
-          { type: 'setSelfSwitch', id: 'A', value: true },
-        ]},
-      ],
-    }),
     // ヤギのママ（いえ・回復とパイ）
     newObject({
       emoji: '🐐', col: 4, row: 14, behavior: 'still', hazard: false,
