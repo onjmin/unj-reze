@@ -1807,6 +1807,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     lastActRef.current = null;
     setBattleItemsOpen(false); setBagOpen(false);
     setSoulPhase('menu'); setSoulMenu('root'); soulDodgeRef.current = null;
+    clearEnemyBubble();
     // デルタルーン風パーティ戦闘：TPは毎戦闘0から、2人目以降のHPは各自 maxHp から再開、行動選択は先頭メンバーから
     if (gameDataRef.current.battle?.style === 'deltarune') {
       setTp(0); tpRef.current = 0;
@@ -1952,6 +1953,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setSoulWaiting(true);
   };
 
+  // ── 敵の攻撃予告フキダシ（tlDR Engine の o_ui_actordialogue 相当） ─────────
+  /** 敵スプライト横のフキダシ。reveal＝タイプライターで表示済みの文字数。
+   *  攻撃予告（soulEnemyTurn）で出て、プレイヤーが送り（Z）で弾幕へ進むとき消える。 */
+  const [enemyBubble, setEnemyBubble] = useState<{ text: string; reveal: number; id: number } | null>(null);
+  const enemyBubbleRef = useRef<typeof enemyBubble>(null);
+  enemyBubbleRef.current = enemyBubble;
+  const enemyBubbleIdRef = useRef(0);
+  const showEnemyBubble = (text: string) => {
+    enemyBubbleIdRef.current++;
+    setEnemyBubble({ text, reveal: 0, id: enemyBubbleIdRef.current });
+  };
+  const clearEnemyBubble = () => {
+    enemyBubbleIdRef.current++; // 進行中のタイプライターを止める
+    setEnemyBubble(null);
+  };
+  // フキダシのタイプライター：45ms に1文字ずつ増やし、2文字ごとに敵ボイス音を鳴らす。
+  // Zキーの先送りで reveal が先に全文へ達したら（enemyBubbleRef 経由で検知）そこで止まる。
+  useEffect(() => {
+    const b0 = enemyBubbleRef.current;
+    if (!b0 || b0.reveal >= b0.text.length) return;
+    const id = b0.id; const text = b0.text;
+    let reveal = b0.reveal;
+    const iv = setInterval(() => {
+      if (enemyBubbleIdRef.current !== id) { clearInterval(iv); return; }
+      const cur = enemyBubbleRef.current;
+      if (cur?.id === id) reveal = Math.max(reveal, cur.reveal);
+      if (reveal >= text.length) { clearInterval(iv); return; }
+      const ch = text[reveal];
+      reveal++;
+      setEnemyBubble(c => (c && c.id === id && reveal > c.reveal ? { ...c, reveal } : c));
+      if (ch !== ' ' && ch !== '　' && ch !== '\n' && reveal % 2 === 1) {
+        playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
+      }
+    }, 45);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enemyBubble?.id]);
+  /** フキダシの描画（tlDR o_ui_actordialogue 相当：白い箱＋敵を指すしっぽ）。
+   *  side='left'＝敵の左側に出す（デルタルーン：敵が画面右端にいる）、'right'＝敵の右側（アンダーテール：敵が中央）。
+   *  箱の大きさは全文ぶんの不可視テキストで先に確定させ、その上に表示済み文字を重ねることで、
+   *  タイプ中に箱が伸び縮みせず 参考実装と同じ「箱の中で文字が打たれていく」見た目になる。 */
+  const renderEnemyBubble = (side: 'left' | 'right') => {
+    if (!enemyBubble) return null;
+    return (
+      <div className={`absolute top-1/2 -translate-y-1/2 z-30 pointer-events-none ${side === 'left' ? 'right-full mr-3' : 'left-full ml-3'}`}>
+        <div className="relative bg-white text-black font-pixel text-[10px] sm:text-xs leading-snug px-2 py-1.5 w-max max-w-[9.5rem] sm:max-w-[11rem] text-left">
+          <span className="invisible whitespace-pre-wrap break-words block">{enemyBubble.text}</span>
+          <span className="absolute left-2 top-1.5 right-2 bottom-1.5 whitespace-pre-wrap break-words">{enemyBubble.text.slice(0, enemyBubble.reveal)}</span>
+          {/* しっぽ：敵のいる側を指す三角 */}
+          <div className={`absolute top-1/2 -translate-y-1/2 w-0 h-0 border-y-[6px] border-y-transparent ${side === 'left' ? 'left-full border-l-[9px] border-l-white' : 'right-full border-r-[9px] border-r-white'}`} />
+        </div>
+      </div>
+    );
+  };
+
   /** プレイヤーの行動後に敵ターンへ。soul スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
    *  classic なら従来どおり一定時間後に即時ダメージ。 */
   const queueEnemyTurn = (delay = 750) => {
@@ -2037,18 +2093,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setSoulPhase('attack');
   };
 
-  /** soul: 敵のHP割合・直前にプレイヤーが使った「こうどう」技名から、条件に合うセリフを1つ選ぶ。
-   *  優先度：actUsed一致 ＞ hpBelowPct一致（最も厳しい＝小さい閾値を優先） ＞ 無条件セリフ。該当なしなら null。 */
-  const pickDialogue = (lines: (string | EnemyDialogueLine)[] | undefined, hpPct: number, lastAct: string | null): string | null => {
+  /** soul/deltarune: 敵セリフを条件で選ぶ。各行の条件（actUsed / hpBelowPct / hpAbovePct / mercyAbovePct）
+   *  は AND 判定：指定された条件を1つでも満たさない行は候補から外れる。候補のうち条件数が最多
+   *  （＝最も具体的）な行を採用し、同率なら hpBelowPct が小さい（より切迫した）行を優先、
+   *  なお同率ならランダムに1つ選ぶ。該当なしなら null。 */
+  const pickDialogue = (lines: (string | EnemyDialogueLine)[] | undefined, hpPct: number, lastAct: string | null, mercyPct = 0): string | null => {
     if (!lines?.length) return null;
     const norm = lines.map(l => typeof l === 'string' ? { text: l } as EnemyDialogueLine : l);
-    if (lastAct) {
-      const m = norm.find(l => l.actUsed === lastAct);
-      if (m) return m.text;
+    const matched: { line: EnemyDialogueLine; score: number }[] = [];
+    for (const l of norm) {
+      let score = 0;
+      if (l.actUsed != null) { if (l.actUsed !== lastAct) continue; score++; }
+      if (l.hpBelowPct != null) { if (hpPct > l.hpBelowPct) continue; score++; }
+      if (l.hpAbovePct != null) { if (hpPct <= l.hpAbovePct) continue; score++; }
+      if (l.mercyAbovePct != null) { if (mercyPct < l.mercyAbovePct) continue; score++; }
+      matched.push({ line: l, score });
     }
-    const hpMatches = norm.filter(l => l.hpBelowPct != null && l.actUsed == null && hpPct <= l.hpBelowPct);
-    if (hpMatches.length) return hpMatches.sort((a, b) => a.hpBelowPct! - b.hpBelowPct!)[0].text;
-    return norm.find(l => l.hpBelowPct == null && l.actUsed == null)?.text ?? null;
+    if (!matched.length) return null;
+    const top = Math.max(...matched.map(m => m.score));
+    let best = matched.filter(m => m.score === top);
+    const minHp = Math.min(...best.map(m => m.line.hpBelowPct ?? Infinity));
+    if (minHp !== Infinity) best = best.filter(m => (m.line.hpBelowPct ?? Infinity) === minHp);
+    return best[Math.floor(Math.random() * best.length)].line.text;
   };
 
   /** soul: 敵ターン開始。回復技なら回復のみ、攻撃なら予告テキスト（条件付きセリフ優先）を表示してボタン入力を待ってから弾幕よけへ。 */
@@ -2071,8 +2137,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
     const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
     const hpPct = b.enemyMaxHp > 0 ? (b.enemyHp / b.enemyMaxHp) * 100 : 100;
-    const dlg = pickDialogue(move?.dialogue, hpPct, lastActRef.current) ?? pickDialogue(b.dialogue, hpPct, lastActRef.current);
-    appendLog(dlg ? `${b.enemyName}「${dlg}」` : (move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`));
+    const dlg = pickDialogue(move?.dialogue, hpPct, lastActRef.current, b.mercy) ?? pickDialogue(b.dialogue, hpPct, lastActRef.current, b.mercy);
+    // セリフはバトルログではなく敵スプライト横のフキダシへ（1文字ずつタイプ表示）。
+    // ログには攻撃の予告行だけを流す。
+    if (dlg) showEnemyBubble(dlg);
+    appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`);
     waitForSoulAdvance(() => {
       const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
       const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
@@ -6363,10 +6432,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const isZ = keys.has('z') || keys.has('Z') || touchRef.current.action;
       if (isZ && !prevZRef.current) {
         if (soulAdvanceRef.current) {
-          const advance = soulAdvanceRef.current;
-          soulAdvanceRef.current = null;
-          setSoulWaiting(false);
-          advance();
+          const bub = enemyBubbleRef.current;
+          if (bub && bub.reveal < bub.text.length) {
+            // 1押し目：フキダシのタイプ表示を全文まで先送り
+            setEnemyBubble({ ...bub, reveal: bub.text.length });
+          } else {
+            const advance = soulAdvanceRef.current;
+            soulAdvanceRef.current = null;
+            setSoulWaiting(false);
+            clearEnemyBubble();
+            advance();
+          }
         } else if (gameMsgRef.current) {
           dismissGameMsg();
         } else if (activeDialogueRef.current) {
@@ -8630,13 +8706,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         )}
                       </div>
                     </div>
-                    <div className={`leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                    <div className={`relative leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
                       {battle.enemySprite ? (() => {
                         // スプライト持ちの敵：被ダメージ演出中は hurt（ミス表示中は除く）、みのがし可能になったら spare、通常は idle アニメ
                         const es = battle.enemySprite;
                         const anim = enemyDmgPopup && !enemyDmgPopup.miss && es.hurt ? es.hurt : ready && es.spare ? es.spare : es.idle;
                         return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
                       })() : <span className="text-5xl sm:text-6xl">{battle.enemyEmoji}</span>}
+                      {/* 攻撃予告セリフのフキダシ（敵の右側・左向きのしっぽ） */}
+                      {renderEnemyBubble('right')}
                     </div>
                     <div className={`mt-1 text-xs sm:text-sm ${ready ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}{ready ? ' ✦' : ''}</div>
                   </div>
@@ -8667,7 +8745,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {soulMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
                             <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                           ))}
-                          {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0) && (
+                          {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
+                      && (!enemyBubble || enemyBubble.reveal >= enemyBubble.text.length) && (
                             <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                           )}
                           {soulMenu === 'act' && (
@@ -8825,6 +8904,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </div>
                     {/* 敵（右側） */}
                     <div className={`absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col items-center z-0 transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                      {/* 攻撃予告セリフのフキダシ（敵の左側・右向きのしっぽ） */}
+                      {renderEnemyBubble('left')}
                       <div className="relative w-32 mb-1">
                         {enemyDmgPopup && (
                           <div key={enemyDmgPopup.id}
@@ -8969,7 +9050,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {soulMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
                       <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                     ))}
-                    {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0) && (
+                    {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
+                      && (!enemyBubble || enemyBubble.reveal >= enemyBubble.text.length) && (
                       <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                     )}
                     {soulMenu === 'act' && (

@@ -137,9 +137,13 @@ end while
     foe({ name: 'ウイルスくん', emoji: '🦠', col: 12, row: 16, hp: 35, atk: 8, def: 2, exp: 4, gold: 14, behavior: 'random',
       battleSprite: TLDR_ENEMY_SPRITES.virovirokun,
       ...symbolSprite(TLDR_ENEMY_SPRITES.virovirokun.idle),
+      // フキダシに出る攻撃前セリフ。条件は複数指定でき（AND）、最も具体的な行が選ばれる
       dialogue: [
-        { text: 'ウイルスくんは さみしそうに こちらを みている', actUsed: 'ちょうさ' },
-        'ウイルスくんは ハリを ばらまいた！',
+        { text: 'なかまに…… なってくれるの？', actUsed: 'ちょうさ', mercyAbovePct: 60 },
+        { text: '……ぼくのこと、みてくれるの？', actUsed: 'ちょうさ' },
+        { text: 'えへへ…… てれるなあ', actUsed: 'はげます' },
+        { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
+        'ハリを ばらまいちゃうぞ！',
       ],
       miniScript: `
 while true
@@ -312,11 +316,14 @@ while true
   wait(22)
 end while
 `.trim(),
+      // フキダシに出る攻撃前セリフ。actUsed＋hpBelowPct のように複数条件（AND）を組み合わせられる
       dialogue: [
-        { text: 'おうさま「……そこまで 本気だとはね」', actUsed: 'ちょうさ' },
-        { text: 'おうさま「もう すこしで おわる……」', hpBelowPct: 25 },
-        { text: 'おうさま「これでも まだ ひくわけには いかん」', hpBelowPct: 55 },
-        'おうさま「うけて もらおう」',
+        { text: 'その しらべは もう きかん……！', actUsed: 'ちょうさ', hpBelowPct: 25 },
+        { text: '……そこまで 本気だとはね', actUsed: 'ちょうさ' },
+        { text: 'もう すこしで おわる……', hpBelowPct: 25 },
+        { text: 'これでも まだ ひくわけには いかん', hpBelowPct: 55 },
+        { text: 'なぜ 剣を おさめられるのだ……', mercyAbovePct: 70 },
+        'うけて もらおう',
       ],
       moves: [
         {

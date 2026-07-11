@@ -198,10 +198,10 @@ end while
 `.trim(),
       // 通常攻撃の予告セリフ：HPが減るほど厳しく、「はなす」を使った直後は専用のセリフになる
       dialogue: [
-        { text: 'ママ「もう、しかたないわね」', actUsed: 'はなす' },
-        { text: 'ママ「そこまで するなら……」', hpBelowPct: 30 },
-        { text: 'ママ「まだまだ、あぶないわよ」', hpBelowPct: 60 },
-        'ママ「ごめんなさいね」',
+        { text: 'もう、しかたないわね', actUsed: 'はなす' },
+        { text: 'そこまで するなら……', hpBelowPct: 30 },
+        { text: 'まだまだ、あぶないわよ', hpBelowPct: 60 },
+        'ごめんなさいね',
       ],
       moves: [{
         name: 'ふんわりファイア', power: 10,
@@ -215,8 +215,8 @@ while true
 end while
 `.trim(),
         dialogue: [
-          { text: 'ママ「これで おわりに しましょう……」', hpBelowPct: 30 },
-          'ママ「ふんわり あたたかい ほのおよ」',
+          { text: 'これで おわりに しましょう……', hpBelowPct: 30 },
+          'ふんわり あたたかい ほのおよ',
         ],
       }] }),
     // 出口 → ゆきのまち
@@ -546,10 +546,10 @@ end while
 `.trim(),
       // 通常攻撃の予告セリフ：HP・直前の「ほめる」使用で出し分け
       dialogue: [
-        { text: '王「……そんなに ほめられると てれるね」', actUsed: 'ほめる' },
-        { text: '王「もう すぐ おわりに しよう……」', hpBelowPct: 20 },
-        { text: '王「わるいね。ワシも ひくには ひけないんだ」', hpBelowPct: 50 },
-        '王「うけて おくれ」',
+        { text: '……そんなに ほめられると てれるね', actUsed: 'ほめる' },
+        { text: 'もう すぐ おわりに しよう……', hpBelowPct: 20 },
+        { text: 'わるいね。ワシも ひくには ひけないんだ', hpBelowPct: 50 },
+        'うけて おくれ',
       ],
       moves: [
         {
@@ -564,8 +564,8 @@ while true
 end while
 `.trim(),
           dialogue: [
-            { text: '王「これで さいごに しよう……」', hpBelowPct: 20 },
-            '王「ほのおの あめだ。すまないね」',
+            { text: 'これで さいごに しよう……', hpBelowPct: 20 },
+            'ほのおの あめだ。すまないね',
           ],
         },
         {

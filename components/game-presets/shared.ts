@@ -304,10 +304,21 @@ export interface BattleMove { name: string; cost: number; power: number; heal?: 
  *  / purple=3本の横線をUp/Downで切替・Left/Rightで移動 / yellow=自由移動+Z/Enterで前方に弾を撃てる。 */
 export type SoulMode = 'red' | 'blue' | 'green' | 'purple' | 'yellow';
 
-/** soul 戦闘の攻撃前セリフ（フキダシではなくバトルログに表示）。
- *  hpBelowPct＝敵HPがこの%以下のときだけ選ばれる。actUsed＝プレイヤーが直前に使った「こうどう」技名と一致するときだけ選ばれる。
- *  どちらも省略した行は無条件セリフ（フォールバック）。優先度：actUsed一致 ＞ hpBelowPct一致（最も厳しい条件） ＞ 無条件。 */
-export interface EnemyDialogueLine { text: string; hpBelowPct?: number; actUsed?: string; }
+/** soul/deltarune 戦闘の攻撃前セリフ（敵スプライト横のフキダシに1文字ずつ表示される）。
+ *  条件フィールドは複数指定でき、指定した条件を すべて満たす（AND）行だけが候補になる。
+ *  候補のうち条件数が最も多い（＝最も具体的な）行が選ばれ、同率のときは hpBelowPct が
+ *  小さい（より切迫した）行を優先、なお同率ならランダムに1つ。全フィールド省略＝無条件セリフ。 */
+export interface EnemyDialogueLine {
+  text: string;
+  /** 直前のプレイヤーターンで この名前の「こうどう」が使われたとき */
+  actUsed?: string;
+  /** 敵の残りHPが この%以下のとき */
+  hpBelowPct?: number;
+  /** 敵の残りHPが この%より上のとき（まだ元気なうちだけのセリフ） */
+  hpAbovePct?: number;
+  /** 敵意（mercy）ゲージが この%以上のとき */
+  mercyAbovePct?: number;
+}
 
 /** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。
  *  soulMode を指定すると、この技の弾幕よけ中だけ SOUL の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。
