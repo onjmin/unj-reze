@@ -1536,6 +1536,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** アンダーテール風戦闘：敵HPゲージ（敵ごと）。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<Record<number, { pct: number; id: number } | undefined>>({});
   const enemyFxIdRef = useRef(0);
+  const ENEMY_DMG_POPUP_MS = 700;
+  const ENEMY_BUBBLE_CHAR_MS = 45;
+  const ENEMY_BUBBLE_HOLD_MS = 520;
+  const ENEMY_BUBBLE_TO_COMBAT_MS = 120;
+  const queuedSoulTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const enemyBubbleClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const soulCombatStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearQueuedSoulTurnTimer = () => {
+    if (queuedSoulTurnTimerRef.current) clearTimeout(queuedSoulTurnTimerRef.current);
+    queuedSoulTurnTimerRef.current = null;
+  };
+  const clearEnemyBubbleTimers = () => {
+    if (enemyBubbleClearTimerRef.current) clearTimeout(enemyBubbleClearTimerRef.current);
+    if (soulCombatStartTimerRef.current) clearTimeout(soulCombatStartTimerRef.current);
+    enemyBubbleClearTimerRef.current = null;
+    soulCombatStartTimerRef.current = null;
+  };
+  useEffect(() => () => {
+    clearQueuedSoulTurnTimer();
+    clearEnemyBubbleTimers();
+  }, []);
   /** 対象の敵へダメージを与えた際に、ダメージ数値とHPゲージの減少演出をまとめて発火する。 */
   const triggerEnemyDamageFx = (foeIdx: number, dmg: number, beforeHp: number, afterHp: number, maxHp: number) => {
     const id = ++enemyFxIdRef.current;
@@ -1547,14 +1568,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     requestAnimationFrame(() => requestAnimationFrame(() => {
       setEnemyGaugeAnim(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: { pct: afterPct, id } } : p));
     }));
-    setTimeout(() => setEnemyDmgPopup(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), 700);
+    setTimeout(() => setEnemyDmgPopup(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), ENEMY_DMG_POPUP_MS);
     setTimeout(() => setEnemyGaugeAnim(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), 1200);
   };
   /** こうげきをハズしたとき：ダメージ数値の代わりに対象の敵の頭上へ「MISS」を出す（HPゲージは出さない）。 */
   const triggerEnemyMissFx = (foeIdx: number) => {
     const id = ++enemyFxIdRef.current;
     setEnemyDmgPopup(p => ({ ...p, [foeIdx]: { text: 'MISS', id, miss: true } }));
-    setTimeout(() => setEnemyDmgPopup(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), 700);
+    setTimeout(() => setEnemyDmgPopup(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), ENEMY_DMG_POPUP_MS);
   };
   const bossWarnRef = useRef(false);    // ゴールでのボス未撃破警告を一度だけ出す
   const bossOutroRef = useRef<DialogueLine[] | null>(null); // ボス撃破後のセリフ
@@ -2037,21 +2058,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── 敵の攻撃予告フキダシ（tlDR Engine の o_ui_actordialogue 相当） ─────────
   /** 敵スプライト横のフキダシ。各敵インデックスごとに1つずつ表示できる。
-   *  攻撃予告（soulEnemyTurn）で出て、プレイヤーが送り（Z）で弾幕へ進むとき消える。 */
-  type EnemyBubbleState = { text: string; reveal: number; id: number };
+   *  攻撃予告（soulEnemyTurn）で出て、一定時間後に自動で消える。 */
+  type EnemyBubbleSide = 'left' | 'right' | 'top' | 'bottom';
+  type EnemyBubbleState = { text: string; reveal: number; id: number; side: EnemyBubbleSide };
   const [enemyBubbles, setEnemyBubbles] = useState<Map<number, EnemyBubbleState>>(new Map());
   const enemyBubblesRef = useRef<Map<number, EnemyBubbleState>>(new Map());
   enemyBubblesRef.current = enemyBubbles;
   const enemyBubbleIdRef = useRef(0);
-  const showEnemyBubble = (foeIdx: number, text: string) => {
+  const showEnemyBubbles = (entries: { foeIdx: number; text: string; side: EnemyBubbleSide }[]) => {
     enemyBubbleIdRef.current++;
-    setEnemyBubbles(prev => {
-      const next = new Map(prev);
-      next.set(foeIdx, { text, reveal: 0, id: enemyBubbleIdRef.current });
-      return next;
-    });
+    const id = enemyBubbleIdRef.current;
+    setEnemyBubbles(new Map(entries.map(entry => [
+      entry.foeIdx,
+      { text: entry.text, reveal: 0, id, side: entry.side },
+    ])));
   };
   const clearEnemyBubble = () => {
+    clearEnemyBubbleTimers();
     enemyBubbleIdRef.current++;
     setEnemyBubbles(new Map());
   };
@@ -2083,26 +2106,46 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (ch !== ' ' && ch !== '　' && ch !== '\n' && reveal % 2 === 1) {
           playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
         }
-      }, 45);
+      }, ENEMY_BUBBLE_CHAR_MS);
       ivs.push(iv);
     });
     return () => ivs.forEach(clearInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enemyBubbles.size, [...enemyBubbles.values()].map(b => b.id).join(',')]);
   /** フキダシの描画（tlDR o_ui_actordialogue 相当：白い箱＋敵を指すしっぽ）。
-   *  side='left'＝敵の左側に出す（デルタルーン：敵が画面右端にいる）、'right'＝敵の右側（アンダーテール：敵が中央）。
+   *  side='left'＝敵の左側、'right'＝敵の右側、'top'＝敵の上側、'bottom'＝敵の下側に出す。
    *  箱の大きさは全文ぶんの不可視テキストで先に確定させ、その上に表示済み文字を重ねることで、
    *  タイプ中に箱が伸び縮みせず 参考実装と同じ「箱の中で文字が打たれていく」見た目になる。 */
-  const renderEnemyBubble = (foeIdx: number, side: 'left' | 'right') => {
+  const renderEnemyBubble = (foeIdx: number) => {
     const eb = enemyBubbles.get(foeIdx);
     if (!eb) return null;
+    const side = eb.side;
+    const containerCls =
+      side === 'left'
+        ? 'top-1/2 -translate-y-1/2 right-full mr-5'
+        : side === 'right'
+          ? 'top-1/2 -translate-y-1/2 left-full ml-5'
+          : side === 'top'
+            ? 'bottom-full left-1/2 -translate-x-1/2 mb-2'
+            : 'top-full left-1/2 -translate-x-1/2 mt-2';
+    const bubbleCls =
+      side === 'top' || side === 'bottom'
+        ? 'relative bg-white text-black font-pixel text-[10px] sm:text-xs leading-snug px-2 py-1.5 w-max max-w-[7rem] sm:max-w-[8rem] text-left'
+        : 'relative bg-white text-black font-pixel text-[10px] sm:text-xs leading-snug px-2 py-1.5 w-max max-w-[9.5rem] sm:max-w-[11rem] text-left';
     return (
-      <div className={`absolute top-1/2 -translate-y-1/2 z-30 pointer-events-none ${side === 'left' ? 'right-full mr-3' : 'left-full ml-3'}`}>
-        <div className="relative bg-white text-black font-pixel text-[10px] sm:text-xs leading-snug px-2 py-1.5 w-max max-w-[9.5rem] sm:max-w-[11rem] text-left">
+      <div className={`absolute z-30 pointer-events-none ${containerCls}`}>
+        <div className={bubbleCls}>
           <span className="invisible whitespace-pre-wrap break-words block">{eb.text}</span>
-          <span className="absolute left-2 top-1.5 right-2 bottom-1.5 whitespace-pre-wrap break-words">{eb.text.slice(0, eb.reveal)}</span>
+          <span className="absolute left-2 top-1.5 right-2 bottom-1.5 whitespace-pre-wrap break-words" style={{ overflowWrap: 'anywhere' }}>{eb.text.slice(0, eb.reveal)}</span>
           {/* しっぽ：敵のいる側を指す三角 */}
-          <div className={`absolute top-1/2 -translate-y-1/2 w-0 h-0 border-y-[6px] border-y-transparent ${side === 'left' ? 'left-full border-l-[9px] border-l-white' : 'right-full border-r-[9px] border-r-white'}`} />
+          <div className={`absolute w-0 h-0 ${side === 'left'
+              ? 'top-1/2 -translate-y-1/2 left-full border-y-[6px] border-y-transparent border-l-[9px] border-l-white'
+              : side === 'right'
+                ? 'top-1/2 -translate-y-1/2 right-full border-y-[6px] border-y-transparent border-r-[9px] border-r-white'
+                : side === 'top'
+                  ? 'top-full left-1/2 -translate-x-1/2 border-x-[6px] border-x-transparent border-t-[9px] border-t-white'
+                  : 'bottom-full left-1/2 -translate-x-1/2 border-x-[6px] border-x-transparent border-b-[9px] border-b-white'
+            }`} />
         </div>
       </div>
     );
@@ -2110,9 +2153,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   /** プレイヤーの行動後に敵ターンへ。soul スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
    *  classic なら従来どおり一定時間後に即時ダメージ。 */
-  const queueEnemyTurn = (delay = 750) => {
+  const queueEnemyTurn = (delay = 1350) => {
     if (isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
-      waitForSoulAdvance(() => soulEnemyTurn());
+      clearQueuedSoulTurnTimer();
+      clearEnemyBubbleTimers();
+      queuedSoulTurnTimerRef.current = setTimeout(() => {
+        queuedSoulTurnTimerRef.current = null;
+        soulEnemyTurn();
+      }, delay);
     } else {
       setTimeout(() => enemyTurn(), delay);
     }
@@ -2219,10 +2267,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return best[Math.floor(Math.random() * best.length)].line.text;
   };
 
-  /** soul: 敵ターン開始。回復技なら回復のみ、攻撃なら予告テキスト（条件付きセリフ優先）を表示してボタン入力を待ってから弾幕よけへ。 */
+  const pickEnemyBubbleSide = (foeIdx: number, alive: number[]): EnemyBubbleSide => {
+    const foe = battleRef.current.foes[foeIdx];
+    const pos = alive.indexOf(foeIdx);
+    const last = alive.length - 1;
+    const sprite = foe?.sprite?.idle;
+    const spriteW = sprite?.w ?? 64;
+    const spriteH = sprite?.h ?? 64;
+    const tall = spriteH / Math.max(1, spriteW) >= 1.35;
+    const wide = spriteW / Math.max(1, spriteH) >= 1.35;
+    if (gameDataRef.current.battle?.style === 'deltarune') {
+      // Deltarune: left first. Fall back by shape + position.
+      if (alive.length === 1) return 'left';
+      if (tall) return 'left';
+      if (wide) {
+        if (pos === 0) return 'bottom';
+        if (pos === last) return 'top';
+      }
+      return 'left';
+    }
+    // Undertale: enemies sit in a horizontal row. A single enemy always gets the right side.
+    // With exactly two, face them toward each other (left one → right, right one → left) so
+    // both bubbles sit in the gap between them instead of overlapping a neighbor. With 3+,
+    // there's no gap wide enough to share, so fall back to top for the whole row.
+    if (alive.length === 1) return 'right';
+    if (alive.length === 2) return pos === 0 ? 'left' : 'right';
+    return 'top';
+  };
+
+  const beginSoulCombat = (move: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] } | null, dmg: number) => {
+    const b = battleRef.current;
+    const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
+    const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
+    const laneYs = [40, 88, 136];
+    soulDodgeRef.current = {
+      frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [],
+      attackers: Math.max(1, aliveFoeIdxs().length),
+      hx: 88, hy: mode === 'purple' ? laneYs[1] : mode === 'green' ? 88 : 118, invuln: 30, miniScript: script,
+      mode, gvy: 0, grounded: true, jumpHeld: 0, shieldDir: null, lane: 1, shots: [], shotCool: 0,
+    };
+    setSoulPhase('dodge');
+  };
+
+  /** soul: 敵ターン開始。ダメージ演出のあとに予告テキストを表示し、消えたら弾幕よけへ進む。 */
   const soulEnemyTurn = () => {
     const b = battleRef.current; const pr = progressRef.current;
     if (!b.active) return;
+    clearEnemyBubbleTimers();
     const move = b.enemyMoves.length && Math.random() < 0.4 ? b.enemyMoves[Math.floor(Math.random() * b.enemyMoves.length)] : null;
     const alive = aliveFoeIdxs();
     if (move?.heal) {
@@ -2241,34 +2332,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
     const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
-    // 各生存敵ごとに条件付きセリフを選んでフキダシに表示する
-    // 3体の中央敵はフキダシを表示しない（左右の敵と重なるため）
-    alive.forEach((fi, pos) => {
-      if (alive.length === 3 && pos === 1) return;
+    const bubbleEntries = alive.flatMap(fi => {
       const f = b.foes[fi];
       const hpPct = f.maxHp > 0 ? (f.hp / f.maxHp) * 100 : 100;
       const dlg = pickDialogue(move?.dialogue, hpPct, lastActRef.current, f.mercy ?? 0)
-               ?? pickDialogue(f.dialogue, hpPct, lastActRef.current, f.mercy ?? 0)
-               ?? pickDialogue(b.dialogue, hpPct, lastActRef.current, f.mercy ?? 0);
-      if (dlg) showEnemyBubble(fi, dlg);
+        ?? pickDialogue(f.dialogue, hpPct, lastActRef.current, f.mercy ?? 0)
+        ?? pickDialogue(b.dialogue, hpPct, lastActRef.current, f.mercy ?? 0);
+      return dlg ? [{ foeIdx: fi, text: dlg, side: pickEnemyBubbleSide(fi, alive) }] : [];
     });
     const firstAlive = b.foes[alive[0] ?? 0];
     const groupLabel = alive.length > 1 ? `${b.enemyName}たち` : (firstAlive?.name ?? b.enemyName);
     appendLog(move ? `${groupLabel}の ${move.name}！` : `${groupLabel}の こうげき！`);
-    waitForSoulAdvance(() => {
-      const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
-      const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
-      // purple: 3本の横線の中央レーンから開始 / green: 中央に固定 / それ以外は通常の初期位置
-      const laneYs = [40, 88, 136];
-      soulDodgeRef.current = {
-        frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [],
-        // 生きている敵の数だけ弾幕が同時に走る（数が減ると弾幕も薄くなる）
-        attackers: Math.max(1, aliveFoeIdxs().length),
-        hx: 88, hy: mode === 'purple' ? laneYs[1] : mode === 'green' ? 88 : 118, invuln: 30, miniScript: script,
-        mode, gvy: 0, grounded: true, jumpHeld: 0, shieldDir: null, lane: 1, shots: [], shotCool: 0,
-      };
-      setSoulPhase('dodge');
-    });
+    if (!bubbleEntries.length) {
+      soulCombatStartTimerRef.current = setTimeout(() => {
+        soulCombatStartTimerRef.current = null;
+        beginSoulCombat(move, dmg);
+      }, ENEMY_BUBBLE_TO_COMBAT_MS);
+      return;
+    }
+    showEnemyBubbles(bubbleEntries);
+    const revealMs = Math.max(...bubbleEntries.map(entry => entry.text.length)) * ENEMY_BUBBLE_CHAR_MS;
+    const bubbleMs = revealMs + ENEMY_BUBBLE_HOLD_MS;
+    enemyBubbleClearTimerRef.current = setTimeout(() => {
+      enemyBubbleClearTimerRef.current = null;
+      enemyBubbleIdRef.current++;
+      setEnemyBubbles(new Map());
+    }, bubbleMs);
+    soulCombatStartTimerRef.current = setTimeout(() => {
+      soulCombatStartTimerRef.current = null;
+      beginSoulCombat(move, dmg);
+    }, bubbleMs + ENEMY_BUBBLE_TO_COMBAT_MS);
   };
 
   /** デルタルーン風パーティ戦闘：実行フェーズで、今解決した「たたかう」の次にまだ「たたかう」が
@@ -3889,6 +3982,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const id = engineRef.current.map[row]?.[col] ?? 0;
       return { id, rect: { x: col * TILE_SIZE, y: row * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE }, info: gameData.tiles[id] };
     };
+    const isAllPassable = (x: number, y: number, w: number, h: number) => {
+      const tl = getTile(x, y), tr = getTile(x + w - 1, y);
+      const bl = getTile(x, y + h - 1), br = getTile(x + w - 1, y + h - 1);
+      return !!tl?.info.passable && !!tr?.info.passable && !!bl?.info.passable && !!br?.info.passable;
+    };
     // モブ（非hazardのNPC）との衝突判定（円形）。敵(hazard)はすり抜け・接触ダメージ等の既存挙動を維持するため対象外。
     const isBlockedByMob = (x: number, y: number, w: number, h: number) => {
       const cx = x + w / 2, cy = y + h / 2;
@@ -5084,8 +5182,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const moveSpd = pData.speed;
           const zAlreadyOverlapping0 = isBlockedByMob(p.x, p.y, pData.w, pData.h);
           const zCanStandAt = (x: number, y: number) => {
-            const ta = getTile(x, y), tb = getTile(x + pData.w - 1, y + pData.h - 1);
-            return !!ta?.info.passable && !!tb?.info.passable && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
+            return isAllPassable(x, y, pData.w, pData.h) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
               (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
           };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
@@ -5111,12 +5208,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
             const alreadyOverlapping = isBlockedByMob(p.x, p.y, pData.w, pData.h);
             // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
-            const curZt1 = getTile(p.x, p.y), curZt2 = getTile(p.x + pData.w - 1, p.y + pData.h - 1);
-            const alreadyInWall = !curZt1?.info.passable || !curZt2?.info.passable;
-            let zt1 = getTile(nx, p.y), zt2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-            if ((alreadyInWall || (zt1?.info.passable && zt2?.info.passable)) && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
-            zt1 = getTile(p.x, ny); zt2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-            if ((alreadyInWall || (zt1?.info.passable && zt2?.info.passable)) && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+            const alreadyInWall = !isAllPassable(p.x, p.y, pData.w, pData.h);
+            if ((alreadyInWall || isAllPassable(nx, p.y, pData.w, pData.h)) && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
+            if ((alreadyInWall || isAllPassable(p.x, ny, pData.w, pData.h)) && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           }
           // 向き更新（最後に押した方向。左右優先、無ければ上下）
           if (isLeft) onjRezeDirRef.current = { x: -1, y: 0 };
@@ -5217,8 +5311,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const prevPx = p.x, prevPy = p.y;
           const mobBlockActive = gameData.engine === 'rpg';
           const canStandAt = (x: number, y: number) => {
-            const ta = getTile(x, y), tb = getTile(x + pData.w - 1, y + pData.h - 1);
-            return !!ta?.info.passable && !!tb?.info.passable && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
+            return isAllPassable(x, y, pData.w, pData.h) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
               (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
           };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
@@ -5244,12 +5337,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
             const alreadyOverlapping = mobBlockActive && isBlockedByMob(p.x, p.y, pData.w, pData.h);
             // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
-            const curT1 = getTile(p.x, p.y), curT2 = getTile(p.x + pData.w - 1, p.y + pData.h - 1);
-            const alreadyInWall = !curT1?.info.passable || !curT2?.info.passable;
-            let t1 = getTile(nx, p.y), t2 = getTile(nx + pData.w - 1, p.y + pData.h - 1);
-            if ((alreadyInWall || (t1?.info.passable && t2?.info.passable)) && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
-            t1 = getTile(p.x, ny); t2 = getTile(p.x + pData.w - 1, ny + pData.h - 1);
-            if ((alreadyInWall || (t1?.info.passable && t2?.info.passable)) && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+            const alreadyInWall = !isAllPassable(p.x, p.y, pData.w, pData.h);
+            if ((alreadyInWall || isAllPassable(nx, p.y, pData.w, pData.h)) && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
+            if ((alreadyInWall || isAllPassable(p.x, ny, pData.w, pData.h)) && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
           }
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
@@ -8632,7 +8722,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 <div className="relative z-10 w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center select-none"
                   style={{ color: gameData.ending.textColor ?? '#ffffff' }}>
                   <h1 className="text-2xl sm:text-4xl font-pixel" style={{ textShadow: '0 2px 10px rgba(0,0,0,0.85)' }}>{gameData.ending.heading}</h1>
-                  {gameData.ending.message && <p className="text-sm font-pixel opacity-90 whitespace-pre-wrap" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)' }}>{gameData.ending.message}</p>}
+                  {gameData.ending.message && (
+                    <p
+                      className="text-sm font-pixel opacity-90 whitespace-pre-wrap break-words"
+                      style={{ textShadow: '0 1px 6px rgba(0,0,0,0.85)', overflowWrap: 'anywhere' }}
+                    >
+                      {gameData.ending.message}
+                    </p>
+                  )}
                   <div className="flex gap-2 mt-3">
                     {gameData.titleScreen && (
                       <button onClick={() => { setShowEnding(false); setShowTitle(true); }}
@@ -8745,7 +8842,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               >
                 <div className="bg-[#1a1a2e] border-2 border-gray-400 px-4 py-3 font-pixel"
                   style={{ imageRendering: 'pixelated' }}>
-                  <p className="text-white text-sm leading-relaxed whitespace-pre-wrap">{gameMsg.text}</p>
+                  <p
+                    className="text-white text-sm leading-relaxed whitespace-pre-wrap break-words"
+                    style={{ overflowWrap: 'anywhere' }}
+                  >
+                    {gameMsg.text}
+                  </p>
                   <div className="flex justify-end mt-1.5 h-4">
                     {gameMsgReadyRef.current
                       ? <span className="text-yellow-300 text-xs animate-bounce">▼</span>
@@ -8897,11 +8999,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             {eventChoice && !battle && (
               <div className="absolute inset-0 flex items-end justify-center pb-16 px-4 font-pixel">
                 <div className="bg-[#1a1a2e] border-2 border-gray-400 p-3 shadow-2xl w-full max-w-xs">
-                  <p className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap">{eventChoice.text}</p>
+                  <p
+                    className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap break-words"
+                    style={{ overflowWrap: 'anywhere' }}
+                  >
+                    {eventChoice.text}
+                  </p>
                   <div className="space-y-1.5">
                     {eventChoice.choices.map((ch, i) => (
                       <button key={i} onClick={() => { setEventChoiceCursor(i); eventChoice.onPick(i); }}
-                        className={`w-full py-1.5 text-xs font-bold text-left px-3 ${eventChoiceCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white'}`}>
+                        className={`w-full py-1.5 text-xs font-bold text-left px-3 whitespace-pre-wrap break-words ${eventChoiceCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white'}`}
+                        style={{ overflowWrap: 'anywhere' }}>
                         {eventChoiceCursor === i ? '❤ ' : '  '}{ch.label}
                       </button>
                     ))}
@@ -8923,69 +9031,59 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   {/* 敵（1〜3体を横並び）：HPゲージは被ダメージ時のみ一時的に表示（減少アニメーション付き）。
                       ブロック全体を固定の高さにして、ゲージ/ダメージ数値の表示有無でメッセージウィンドウの
                       位置がズレないようにする。撃破/みのがし済みの敵は消える。
-                      フキダシは左右の端敵のみ外側に表示（中央敵は重なるため省略）。 */}
+                      フキダシ位置は敵の形状と並びに応じて上下左右を切り替える。 */}
                   {(() => {
                     const aliveIdxs = battle.foes.reduce<number[]>((a, f, i) => f.gone ? a : [...a, i], []);
-                    const ac = aliveIdxs.length;
-                    // 1体: 右 / 2体: 左端→左・右端→右 / 3体: 左端→左・中央省略・右端→右
-                    const sideOf = (i: number): 'left' | 'right' | null => {
-                      if (ac <= 1) return 'right';
-                      const pos = aliveIdxs.indexOf(i);
-                      if (ac === 2) return pos === 0 ? 'left' : 'right';
-                      if (pos === 1) return null;
-                      return pos === 0 ? 'left' : 'right';
-                    };
-                    const gapCls = ac >= 3 ? 'gap-8 sm:gap-14' : ac >= 2 ? 'gap-6 sm:gap-10' : 'gap-3 sm:gap-6';
+                    const gapCls = aliveIdxs.length >= 3 ? 'gap-8 sm:gap-14' : aliveIdxs.length >= 2 ? 'gap-6 sm:gap-10' : 'gap-3 sm:gap-6';
                     return (
-                    <div className={`flex flex-row items-end justify-center ${gapCls} mt-4 sm:mt-6 shrink-0 h-28 sm:h-32`}>
-                    {battle.foes.map((f, i) => {
-                      if (f.gone) return null;
-                      const pop = enemyDmgPopup[i];
-                      const gauge = enemyGaugeAnim[i];
-                      const fReady = foeSpareReady(f);
-                      const targeting = soulMenu === 'target' && soulTargetCursor === i;
-                      const bs = sideOf(i);
-                      return (
-                        <div key={i} className="flex flex-col items-center justify-end">
-                          <div className="relative w-24 mb-1">
-                            {pop && (
-                              <div key={pop.id}
-                                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
-                                style={pop.miss ? {
-                                  color: '#9ca3af',
-                                  textShadow: '1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000',
-                                  animation: 'dmgPopUp 0.7s ease-out forwards',
-                                } : {
-                                  color: '#000',
-                                  textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
-                                  animation: 'dmgPopUp 0.7s ease-out forwards',
-                                }}>
-                                {pop.text}
-                              </div>
-                            )}
-                            <div className="w-24 h-2 overflow-hidden mx-auto">
-                              {gauge && (
-                                <div className="w-full h-full bg-gray-700">
-                                  <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
+                      <div className={`flex flex-row items-end justify-center ${gapCls} mt-4 sm:mt-6 shrink-0 h-28 sm:h-32`}>
+                        {battle.foes.map((f, i) => {
+                          if (f.gone) return null;
+                          const pop = enemyDmgPopup[i];
+                          const gauge = enemyGaugeAnim[i];
+                          const fReady = foeSpareReady(f);
+                          const targeting = soulMenu === 'target' && soulTargetCursor === i;
+                          return (
+                            <div key={i} className="relative flex flex-col items-center justify-end">
+                              <div className="relative w-24 mb-1">
+                                {pop && (
+                                  <div key={pop.id}
+                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
+                                    style={pop.miss ? {
+                                      color: '#9ca3af',
+                                      textShadow: '1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000',
+                                      animation: 'dmgPopUp 0.7s ease-out forwards',
+                                    } : {
+                                      color: '#000',
+                                      textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e',
+                                      animation: 'dmgPopUp 0.7s ease-out forwards',
+                                    }}>
+                                    {pop.text}
+                                  </div>
+                                )}
+                                <div className="w-24 h-2 overflow-hidden mx-auto">
+                                  {gauge && (
+                                    <div className="w-full h-full bg-gray-700">
+                                      <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
+                                    </div>
+                                  )}
                                 </div>
-                              )}
+                              </div>
+                              <div className={`relative leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                                {f.sprite ? (() => {
+                                  const es = f.sprite;
+                                  const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
+                                  return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
+                                })() : <span className="text-5xl sm:text-6xl">{f.emoji}</span>}
+                                {renderEnemyBubble(i)}
+                              </div>
+                              <div className={`mt-1 text-xs sm:text-sm ${targeting || fReady ? 'text-yellow-300' : 'text-white'}`}>
+                                {targeting ? '❤ ' : ''}{f.name}{fReady ? ' ✦' : ''}
+                              </div>
                             </div>
-                          </div>
-                          <div className={`relative leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
-                            {f.sprite ? (() => {
-                              const es = f.sprite;
-                              const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
-                              return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
-                            })() : <span className="text-5xl sm:text-6xl">{f.emoji}</span>}
-                            {bs && renderEnemyBubble(i, bs)}
-                          </div>
-                          <div className={`mt-1 text-xs sm:text-sm ${targeting || fReady ? 'text-yellow-300' : 'text-white'}`}>
-                            {targeting ? '❤ ' : ''}{f.name}{fReady ? ' ✦' : ''}
-                          </div>
-                        </div>
-                      );
-                    })}
-                    </div>
+                          );
+                        })}
+                      </div>
                     );
                   })()}
                   {/* バトルボックス（白枠がシームレスに変形する） */}
@@ -9016,9 +9114,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                           ))}
                           {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
-                      && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
-                            <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
-                          )}
+                            && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
+                              <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
+                            )}
                           {soulMenu === 'act' && (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                               {bd.moves.map((m, i) => (
@@ -9200,8 +9298,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           const targeting = soulMenu === 'target' && soulTargetCursor === i;
                           return (
                             <div key={i} className="relative flex flex-col items-center">
-                              {/* 攻撃予告セリフのフキダシ（敵の左側・右向きのしっぽ） */}
-                              {renderEnemyBubble(i, 'left')}
                               <div className="relative w-32 mb-0.5">
                                 {pop && (
                                   <div key={pop.id}
@@ -9226,11 +9322,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   )}
                                 </div>
                               </div>
-                              {f.sprite ? (() => {
-                                const es = f.sprite;
-                                const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
-                                return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(sizeCap, anim.h * sizeMul) : Math.min(sizeCap, 120)} />;
-                              })() : <span className={`${aliveCount > 1 ? 'text-5xl sm:text-6xl' : 'text-7xl sm:text-8xl'} leading-none drop-shadow`}>{f.emoji}</span>}
+                              <div className="relative leading-none">
+                                {f.sprite ? (() => {
+                                  const es = f.sprite;
+                                  const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
+                                  return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(sizeCap, anim.h * sizeMul) : Math.min(sizeCap, 120)} />;
+                                })() : <span className={`${aliveCount > 1 ? 'text-5xl sm:text-6xl' : 'text-7xl sm:text-8xl'} leading-none drop-shadow`}>{f.emoji}</span>}
+                                {/* 攻撃予告セリフのフキダシ（敵の形状・位置に応じて自動配置） */}
+                                {renderEnemyBubble(i)}
+                              </div>
                               <div className={`mt-0.5 text-[10px] sm:text-xs flex items-center gap-1 ${targeting || fReady ? 'text-yellow-300' : 'text-white'}`}>
                                 {targeting && <span className="text-red-500">❤</span>}
                                 {f.name}
@@ -9353,8 +9453,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     ))}
                     {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
                       && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
-                      <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
-                    )}
+                        <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
+                      )}
                     {soulMenu === 'act' && (
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                         {curMoves.map((m, i) => (

@@ -173,8 +173,8 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
         >
           <p className="text-yellow-300 text-xs font-bold mb-1 leading-none">{current.speaker}</p>
           <p
-            className="text-white text-sm leading-relaxed whitespace-pre-wrap transition-opacity duration-75"
-            style={{ opacity: textVisible ? 1 : 0 }}
+            className="text-white text-sm leading-relaxed whitespace-pre-wrap break-words transition-opacity duration-75"
+            style={{ opacity: textVisible ? 1 : 0, overflowWrap: 'anywhere' }}
           >
             {current.text}
           </p>

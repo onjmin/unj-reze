@@ -195,6 +195,7 @@ end while
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
       { text: 'けろ…… つよいの……', hpBelowPct: 30 },
+      { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] }),
     foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
@@ -202,6 +203,7 @@ end while
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
       { text: 'けろ…… つよいの……', hpBelowPct: 30 },
+      { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] }),
     foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 32, atk: 6, def: 3, exp: 4, gold: 6, dialogue: [

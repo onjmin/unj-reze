@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { ExternalLink, X, Play, Music, Gamepad2, Loader2 } from 'lucide-react';
 import { EmbeddedMedia } from '@/lib/embed';
 import { useAudioFocus } from '@/lib/audio-focus-context';
-import { getMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
+import { getMasterVolume, applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 
 const ytRegex = /\/embed\/([a-zA-Z0-9_-]{11})/;
 const getYtThumb = (url: string) => {
@@ -65,7 +65,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
 
   useEffect(() => {
     return subscribeMasterVolume((v) => {
-      if (playing && iframeRef.current && isYt) sendYtVolume(iframeRef.current, v);
+      if (playing && iframeRef.current && isYt) sendYtVolume(iframeRef.current, applyMasterVolume(v));
     });
   }, [playing, isYt]);
 
@@ -104,7 +104,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
     iframe.sandbox = 'allow-forms allow-modals allow-popups allow-scripts allow-same-origin allow-presentation';
     iframe.onload = () => {
       setReady(true);
-      if (isYt) sendYtVolume(iframe, getMasterVolume());
+      if (isYt) sendYtVolume(iframe, applyMasterVolume(getMasterVolume()));
     };
     iframe.className = 'w-full h-full rounded-b-xl';
     iframe.style.border = 'none';
