@@ -1186,7 +1186,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
   /** soul/deltarune 戦闘の敵1体ぶん。1回のエンカウントで同種の敵が1〜3体現れ（foes 配列）、
    *  HP・敵意ゲージ・撃破/みのがし状態は1体ずつ独立に持つ。atk/def/moves/弾幕は同種なので battleRef 共有。 */
-  interface BattleFoe { name: string; emoji: string; sprite?: EnemyBattleSprite; hp: number; maxHp: number; mercy: number; exp: number; gold: number; gone?: 'dead' | 'spared'; }
+  interface BattleFoe { name: string; emoji: string; sprite?: EnemyBattleSprite; hp: number; maxHp: number; mercy: number; exp: number; gold: number; gone?: 'dead' | 'spared'; dialogue?: (string | EnemyDialogueLine)[]; }
   interface BattleView { enemyName: string; enemyEmoji: string; enemySprite?: EnemyBattleSprite; enemyHp: number; enemyMaxHp: number; mercy: number; foes: BattleFoe[]; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
   const battleViewRef = useRef<BattleView | null>(null);
@@ -1833,6 +1833,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       emoji: opts.emoji, sprite: opts.battleSprite,
       hp: opts.hp, maxHp: opts.hp, mercy: 0,
       exp: opts.exp, gold: opts.gold ?? Math.round(opts.exp * 0.6),
+      dialogue: opts.dialogue,
     }));
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
@@ -2030,53 +2031,71 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   // ── 敵の攻撃予告フキダシ（tlDR Engine の o_ui_actordialogue 相当） ─────────
-  /** 敵スプライト横のフキダシ。reveal＝タイプライターで表示済みの文字数。
+  /** 敵スプライト横のフキダシ。各敵インデックスごとに1つずつ表示できる。
    *  攻撃予告（soulEnemyTurn）で出て、プレイヤーが送り（Z）で弾幕へ進むとき消える。 */
-  const [enemyBubble, setEnemyBubble] = useState<{ text: string; reveal: number; id: number } | null>(null);
-  const enemyBubbleRef = useRef<typeof enemyBubble>(null);
-  enemyBubbleRef.current = enemyBubble;
+  type EnemyBubbleState = { text: string; reveal: number; id: number };
+  const [enemyBubbles, setEnemyBubbles] = useState<Map<number, EnemyBubbleState>>(new Map());
+  const enemyBubblesRef = useRef<Map<number, EnemyBubbleState>>(new Map());
+  enemyBubblesRef.current = enemyBubbles;
   const enemyBubbleIdRef = useRef(0);
-  const showEnemyBubble = (text: string) => {
+  const showEnemyBubble = (foeIdx: number, text: string) => {
     enemyBubbleIdRef.current++;
-    setEnemyBubble({ text, reveal: 0, id: enemyBubbleIdRef.current });
+    setEnemyBubbles(prev => {
+      const next = new Map(prev);
+      next.set(foeIdx, { text, reveal: 0, id: enemyBubbleIdRef.current });
+      return next;
+    });
   };
   const clearEnemyBubble = () => {
-    enemyBubbleIdRef.current++; // 進行中のタイプライターを止める
-    setEnemyBubble(null);
+    enemyBubbleIdRef.current++;
+    setEnemyBubbles(new Map());
   };
   // フキダシのタイプライター：45ms に1文字ずつ増やし、2文字ごとに敵ボイス音を鳴らす。
-  // Zキーの先送りで reveal が先に全文へ達したら（enemyBubbleRef 経由で検知）そこで止まる。
+  // 各敵インデックスごとに独立したタイマーを走らせる。Zキーの先送りで
+  // reveal が全文に達したらそこで止まる。
   useEffect(() => {
-    const b0 = enemyBubbleRef.current;
-    if (!b0 || b0.reveal >= b0.text.length) return;
-    const id = b0.id; const text = b0.text;
-    let reveal = b0.reveal;
-    const iv = setInterval(() => {
-      if (enemyBubbleIdRef.current !== id) { clearInterval(iv); return; }
-      const cur = enemyBubbleRef.current;
-      if (cur?.id === id) reveal = Math.max(reveal, cur.reveal);
-      if (reveal >= text.length) { clearInterval(iv); return; }
-      const ch = text[reveal];
-      reveal++;
-      setEnemyBubble(c => (c && c.id === id && reveal > c.reveal ? { ...c, reveal } : c));
-      if (ch !== ' ' && ch !== '　' && ch !== '\n' && reveal % 2 === 1) {
-        playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
-      }
-    }, 45);
-    return () => clearInterval(iv);
+    const cur = enemyBubblesRef.current;
+    if (cur.size === 0) return;
+    const ivs: ReturnType<typeof setInterval>[] = [];
+    cur.forEach((b0, idx) => {
+      if (b0.reveal >= b0.text.length) return;
+      const id = b0.id; const text = b0.text;
+      let reveal = b0.reveal;
+      const iv = setInterval(() => {
+        if (enemyBubbleIdRef.current !== id) { clearInterval(iv); return; }
+        const latest = enemyBubblesRef.current.get(idx);
+        if (latest?.id === id) reveal = Math.max(reveal, latest.reveal);
+        if (reveal >= text.length) { clearInterval(iv); return; }
+        const ch = text[reveal];
+        reveal++;
+        const r = reveal;
+        setEnemyBubbles(prev => {
+          const next = new Map(prev);
+          const e = next.get(idx);
+          if (e && e.id === id && r > e.reveal) next.set(idx, { ...e, reveal: r });
+          return next;
+        });
+        if (ch !== ' ' && ch !== '　' && ch !== '\n' && reveal % 2 === 1) {
+          playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
+        }
+      }, 45);
+      ivs.push(iv);
+    });
+    return () => ivs.forEach(clearInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enemyBubble?.id]);
+  }, [enemyBubbles.size, [...enemyBubbles.values()].map(b => b.id).join(',')]);
   /** フキダシの描画（tlDR o_ui_actordialogue 相当：白い箱＋敵を指すしっぽ）。
    *  side='left'＝敵の左側に出す（デルタルーン：敵が画面右端にいる）、'right'＝敵の右側（アンダーテール：敵が中央）。
    *  箱の大きさは全文ぶんの不可視テキストで先に確定させ、その上に表示済み文字を重ねることで、
    *  タイプ中に箱が伸び縮みせず 参考実装と同じ「箱の中で文字が打たれていく」見た目になる。 */
-  const renderEnemyBubble = (side: 'left' | 'right') => {
-    if (!enemyBubble) return null;
+  const renderEnemyBubble = (foeIdx: number, side: 'left' | 'right') => {
+    const eb = enemyBubbles.get(foeIdx);
+    if (!eb) return null;
     return (
       <div className={`absolute top-1/2 -translate-y-1/2 z-30 pointer-events-none ${side === 'left' ? 'right-full mr-3' : 'left-full ml-3'}`}>
         <div className="relative bg-white text-black font-pixel text-[10px] sm:text-xs leading-snug px-2 py-1.5 w-max max-w-[9.5rem] sm:max-w-[11rem] text-left">
-          <span className="invisible whitespace-pre-wrap break-words block">{enemyBubble.text}</span>
-          <span className="absolute left-2 top-1.5 right-2 bottom-1.5 whitespace-pre-wrap break-words">{enemyBubble.text.slice(0, enemyBubble.reveal)}</span>
+          <span className="invisible whitespace-pre-wrap break-words block">{eb.text}</span>
+          <span className="absolute left-2 top-1.5 right-2 bottom-1.5 whitespace-pre-wrap break-words">{eb.text.slice(0, eb.reveal)}</span>
           {/* しっぽ：敵のいる側を指す三角 */}
           <div className={`absolute top-1/2 -translate-y-1/2 w-0 h-0 border-y-[6px] border-y-transparent ${side === 'left' ? 'left-full border-l-[9px] border-l-white' : 'right-full border-r-[9px] border-r-white'}`} />
         </div>
@@ -2217,14 +2236,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     // 弾1発あたりのダメージ（何発か被弾しうるので通常攻撃より小さめに割る）
     const dmg = move ? Math.max(1, Math.round(move.power * 0.35)) : Math.max(1, Math.round(calcDmg(b.enemyAtk, pr.def) * 0.4));
-    // セリフの条件（HP%・敵意）は生存している先頭の敵を代表として判定する
-    const lead = b.foes[alive[0] ?? 0];
-    const hpPct = lead && lead.maxHp > 0 ? (lead.hp / lead.maxHp) * 100 : 100;
-    const dlg = pickDialogue(move?.dialogue, hpPct, lastActRef.current, lead?.mercy ?? 0) ?? pickDialogue(b.dialogue, hpPct, lastActRef.current, lead?.mercy ?? 0);
-    // セリフはバトルログではなく敵スプライト横のフキダシへ（1文字ずつタイプ表示）。
-    // ログには攻撃の予告行だけを流す。
-    if (dlg) showEnemyBubble(dlg);
-    const groupLabel = alive.length > 1 ? `${b.enemyName}たち` : (lead?.name ?? b.enemyName);
+    // 各生存敵ごとに条件付きセリフを選んでフキダシに表示する
+    // 3体の中央敵はフキダシを表示しない（左右の敵と重なるため）
+    alive.forEach((fi, pos) => {
+      if (alive.length === 3 && pos === 1) return;
+      const f = b.foes[fi];
+      const hpPct = f.maxHp > 0 ? (f.hp / f.maxHp) * 100 : 100;
+      const dlg = pickDialogue(move?.dialogue, hpPct, lastActRef.current, f.mercy ?? 0)
+               ?? pickDialogue(f.dialogue, hpPct, lastActRef.current, f.mercy ?? 0)
+               ?? pickDialogue(b.dialogue, hpPct, lastActRef.current, f.mercy ?? 0);
+      if (dlg) showEnemyBubble(fi, dlg);
+    });
+    const firstAlive = b.foes[alive[0] ?? 0];
+    const groupLabel = alive.length > 1 ? `${b.enemyName}たち` : (firstAlive?.name ?? b.enemyName);
     appendLog(move ? `${groupLabel}の ${move.name}！` : `${groupLabel}の こうげき！`);
     waitForSoulAdvance(() => {
       const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
@@ -6608,10 +6632,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const isZ = keys.has('z') || keys.has('Z') || touchRef.current.action;
       if (isZ && !prevZRef.current) {
         if (soulAdvanceRef.current) {
-          const bub = enemyBubbleRef.current;
-          if (bub && bub.reveal < bub.text.length) {
-            // 1押し目：フキダシのタイプ表示を全文まで先送り
-            setEnemyBubble({ ...bub, reveal: bub.text.length });
+          const bubs = enemyBubblesRef.current;
+          const hasIncomplete = [...bubs.values()].some(b => b.reveal < b.text.length);
+          if (hasIncomplete) {
+            // 1押し目：全てのフキダシのタイプ表示を全文まで先送り
+            setEnemyBubbles(prev => {
+              const updated = new Map(prev);
+              updated.forEach((b, k) => { if (b.reveal < b.text.length) updated.set(k, { ...b, reveal: b.text.length }); });
+              return updated;
+            });
           } else {
             const advance = soulAdvanceRef.current;
             soulAdvanceRef.current = null;
@@ -8862,20 +8891,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const canMenu = battle.canAct && !battle.over && soulPhase === 'menu';
               // 1体でも みのがし可能な敵がいれば MERCY まわりを光らせる
               const ready = battle.foes.some(f => !f.gone && foeSpareReady(f));
-              // フキダシは右端の生存敵に付ける（右側に空きスペースがあるため）
-              const bubbleAnchor = battle.foes.reduce((acc, f, i) => (f.gone ? acc : i), -1);
               return (
                 <div className="absolute inset-0 flex flex-col p-2 sm:p-3 bg-black/70 font-pixel select-none">
                   {/* 敵（1〜3体を横並び）：HPゲージは被ダメージ時のみ一時的に表示（減少アニメーション付き）。
                       ブロック全体を固定の高さにして、ゲージ/ダメージ数値の表示有無でメッセージウィンドウの
-                      位置がズレないようにする。撃破/みのがし済みの敵は消える。 */}
-                  <div className="flex flex-row items-end justify-center gap-3 sm:gap-6 mt-4 sm:mt-6 shrink-0 h-28 sm:h-32">
+                      位置がズレないようにする。撃破/みのがし済みの敵は消える。
+                      フキダシは左右の端敵のみ外側に表示（中央敵は重なるため省略）。 */}
+                  {(() => {
+                    const aliveIdxs = battle.foes.reduce<number[]>((a, f, i) => f.gone ? a : [...a, i], []);
+                    const ac = aliveIdxs.length;
+                    // 1体: 右 / 2体: 左端→左・右端→右 / 3体: 左端→左・中央省略・右端→右
+                    const sideOf = (i: number): 'left' | 'right' | null => {
+                      if (ac <= 1) return 'right';
+                      const pos = aliveIdxs.indexOf(i);
+                      if (ac === 2) return pos === 0 ? 'left' : 'right';
+                      if (pos === 1) return null;
+                      return pos === 0 ? 'left' : 'right';
+                    };
+                    const gapCls = ac >= 3 ? 'gap-8 sm:gap-14' : ac >= 2 ? 'gap-6 sm:gap-10' : 'gap-3 sm:gap-6';
+                    return (
+                    <div className={`flex flex-row items-end justify-center ${gapCls} mt-4 sm:mt-6 shrink-0 h-28 sm:h-32`}>
                     {battle.foes.map((f, i) => {
                       if (f.gone) return null;
                       const pop = enemyDmgPopup[i];
                       const gauge = enemyGaugeAnim[i];
                       const fReady = foeSpareReady(f);
                       const targeting = soulMenu === 'target' && soulTargetCursor === i;
+                      const bs = sideOf(i);
                       return (
                         <div key={i} className="flex flex-col items-center justify-end">
                           <div className="relative w-24 mb-1">
@@ -8904,13 +8946,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </div>
                           <div className={`relative leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
                             {f.sprite ? (() => {
-                              // スプライト持ちの敵：被ダメージ演出中は hurt（ミス表示中は除く）、みのがし可能になったら spare、通常は idle アニメ
                               const es = f.sprite;
                               const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
                               return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
                             })() : <span className="text-5xl sm:text-6xl">{f.emoji}</span>}
-                            {/* 攻撃予告セリフのフキダシ（敵の右側・左向きのしっぽ） */}
-                            {i === bubbleAnchor && renderEnemyBubble('right')}
+                            {bs && renderEnemyBubble(i, bs)}
                           </div>
                           <div className={`mt-1 text-xs sm:text-sm ${targeting || fReady ? 'text-yellow-300' : 'text-white'}`}>
                             {targeting ? '❤ ' : ''}{f.name}{fReady ? ' ✦' : ''}
@@ -8918,7 +8958,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       );
                     })}
-                  </div>
+                    </div>
+                    );
+                  })()}
                   {/* バトルボックス（白枠がシームレスに変形する） */}
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="bg-black border-4 border-white relative overflow-hidden"
@@ -8947,7 +8989,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                           ))}
                           {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
-                      && (!enemyBubble || enemyBubble.reveal >= enemyBubble.text.length) && (
+                      && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
                             <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                           )}
                           {soulMenu === 'act' && (
@@ -9118,8 +9160,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </div>
                     {/* 敵（右側・1〜3体を縦に並べる。tlDR o_enc の敵スタックと同じ配置） */}
                     <div className={`absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-0 transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
-                      {/* 攻撃予告セリフのフキダシ（敵の左側・右向きのしっぽ） */}
-                      {renderEnemyBubble('left')}
                       {(() => {
                         const aliveCount = battle.foes.filter(f => !f.gone).length;
                         // 複数体のときはスプライトを小さくして縦に収める
@@ -9133,6 +9173,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           const targeting = soulMenu === 'target' && soulTargetCursor === i;
                           return (
                             <div key={i} className="relative flex flex-col items-center">
+                              {/* 攻撃予告セリフのフキダシ（敵の左側・右向きのしっぽ） */}
+                              {renderEnemyBubble(i, 'left')}
                               <div className="relative w-32 mb-0.5">
                                 {pop && (
                                   <div key={pop.id}
@@ -9283,7 +9325,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                     ))}
                     {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
-                      && (!enemyBubble || enemyBubble.reveal >= enemyBubble.text.length) && (
+                      && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
                       <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                     )}
                     {soulMenu === 'act' && (
