@@ -471,6 +471,8 @@ export interface Layout25D {
   pov?: 'first' | 'third';
   /** 三人称視点でのカメラ距離（マス単位）。未指定は 1.6。 */
   povDistance?: number;
+  /** ジャンプ高さ（速度）。未指定は 3.2。 */
+  jumpHeight?: number;
 }
 
 /** 壁の置き場所を北辺/西辺に正規化する。 */

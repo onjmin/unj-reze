@@ -339,6 +339,11 @@ export default function Yume25DEditorPanel({
                 onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
             </label>
           )}
+          <label className="flex items-center justify-between gap-1">ジャンプ高さ
+            <input type="number" min={0.5} max={12} step={0.1} value={layout.jumpHeight ?? 3.2}
+              onChange={e => onLayoutChange(l => ({ ...l, jumpHeight: Math.max(0.5, Math.min(12, Number(e.target.value) || 3.2)) }))}
+              className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+          </label>
         </div>
       )}
     </div>

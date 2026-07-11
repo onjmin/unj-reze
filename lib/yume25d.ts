@@ -17,8 +17,8 @@ const TURN_SPEED = 2.4;    // ラジアン/秒
 const DASH_MULT = 1.8;     // Shift（ダッシュ）中の速度倍率
 const EPS = 1e-3;
 
-// 短くポンと跳ねる程度のジャンプ（頭上の低い夢空間を想定）。
-const JUMP_VELOCITY = 3.2;
+// 短くポンと跳ねる程度のジャンプ（頭上の低い夢空間を想定）。レイアウト jumpHeight で上書き可。
+const JUMP_VELOCITY_DEFAULT = 3.2;
 const GRAVITY = 16;
 
 // 編集モードの空中浮遊：上昇/下降速度（マス/秒）と高度上限（マス）。
@@ -1167,7 +1167,7 @@ export class Yume25DEngine {
     } else {
       // ジャンプ（短い一段ジャンプ。地面着地でリセット）
       if (this.jumpQueued && this.grounded) {
-        this.vy = JUMP_VELOCITY;
+        this.vy = this.layout.jumpHeight ?? JUMP_VELOCITY_DEFAULT;
         this.grounded = false;
         this.jumpQueued = false;
       }
