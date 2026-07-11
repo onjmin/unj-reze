@@ -103,9 +103,29 @@ const sceneRuins: SceneDef = {
   id: 'ruins', name: 'いせき',
   map: ruinsMap,
   randomEncounters: [
-    { name: 'カエルさん',     emoji: '🐸', hp: 26, atk: 8, def: 2, exp: 3, gold: 5 },
-    { name: 'ひらひらむし',   emoji: '🦋', hp: 20,  atk: 7, def: 1, exp: 2, gold: 4 },
-    { name: 'ないてるおばけ', emoji: '👻', hp: 32, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+    { name: 'カエルさん',     emoji: '🐸', hp: 26, atk: 8, def: 2, exp: 3, gold: 5, dialogue: [
+      { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
+      { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
+      { text: 'けろ…… つよいの……', hpBelowPct: 30 },
+      { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
+      'かえず なくぞ！',
+    ] },
+    { name: 'ひらひらむし',   emoji: '🦋', hp: 20,  atk: 7, def: 1, exp: 2, gold: 4, dialogue: [
+      { text: 'ひらひら…… そっちに いくのも いいかな', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'ひらひら…… にげなくていいよ', actUsed: 'はなす' },
+      { text: 'きもちいい…… ありがとう', actUsed: 'ほめる' },
+      { text: 'ひらひら…… おちちゃいそう……', hpBelowPct: 30 },
+      'ひらひら とんでるだけだよ',
+    ] },
+    { name: 'ないてるおばけ', emoji: '👻', hp: 32, atk: 6, def: 3, exp: 4, gold: 6, dialogue: [
+      { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: '……はなしかけて くれるの？ うれしい……', actUsed: 'はなす' },
+      { text: '……ほめられても なきょうみ ないのに……', actUsed: 'ほめる' },
+      { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
+      { text: '……まだ ここに いたいな……', hpAbovePct: 80 },
+      'なきながら たたかうの…… ごめん……',
+    ], moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
 while true
   shotRain(randF(1.2, 2.0), 3, 4)
   wait(9)
@@ -170,9 +190,28 @@ end while
       { type: 'changeGold', amount: 30 },
     ]),
     // 遺跡のモンスター
-    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
-    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn' }),
-    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 32, atk: 6, def: 3, exp: 4, gold: 6, moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
+      { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
+      { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
+      { text: 'けろ…… つよいの……', hpBelowPct: 30 },
+      'かえず なくぞ！',
+    ] }),
+    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
+      { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
+      { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
+      { text: 'けろ…… つよいの……', hpBelowPct: 30 },
+      'かえず なくぞ！',
+    ] }),
+    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 32, atk: 6, def: 3, exp: 4, gold: 6, dialogue: [
+      { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: '……はなしかけて くれるの？ うれしい……', actUsed: 'はなす' },
+      { text: '……ほめられても なきょうみ ないのに……', actUsed: 'ほめる' },
+      { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
+      { text: '……まだ ここに いたいな……', hpAbovePct: 80 },
+      'なきながら たたかうの…… ごめん……',
+    ], moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
 while true
   shotRain(randF(1.2, 2.0), 3, 4)
   wait(9)
@@ -200,9 +239,12 @@ end while
 `.trim(),
       // 通常攻撃の予告セリフ：HPが減るほど厳しく、「はなす」を使った直後は専用のセリフになる
       dialogue: [
+        { text: 'あなたが そんなに いいたいなら…… いさせてあげる', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: 'もう、しかたないわね', actUsed: 'はなす' },
+        { text: '……そこまで やさしく されるとはね', actUsed: 'ほめる' },
         { text: 'そこまで するなら……', hpBelowPct: 30 },
         { text: 'まだまだ、あぶないわよ', hpBelowPct: 60 },
+        { text: 'やさしい にんげん なんだね', mercyAbovePct: 70 },
         'ごめんなさいね',
       ],
       moves: [{
@@ -217,6 +259,8 @@ while true
 end while
 `.trim(),
         dialogue: [
+          { text: '……そっちも やさしいのね', actUsed: 'ほめる' },
+          { text: 'ママは やりすぎちゃ ダメだからね', actUsed: 'Investigation', mercyAbovePct: 60 },
           { text: 'これで おわりに しましょう……', hpBelowPct: 30 },
           'ふんわり あたたかい ほのおよ',
         ],
@@ -260,9 +304,30 @@ const sceneSnowdin: SceneDef = {
   id: 'snowdin', name: 'ゆきのまち',
   map: snowdinMap,
   randomEncounters: [
-    { name: 'ゆきのとり',   emoji: '🐦', hp: 40, atk: 12, def: 5, exp: 8, gold: 12, moves: [{ name: 'さむいダジャレ', power: 8 }] },
-    { name: 'アイスぼうや', emoji: '🧊', hp: 35, atk: 11, def: 6, exp: 7, gold: 10 },
-    { name: 'わんわん',     emoji: '🐕', hp: 44, atk: 13, def: 6, exp: 9, gold: 14 },
+    { name: 'ゆきのとり',   emoji: '🐦', hp: 40, atk: 12, def: 5, exp: 8, gold: 12, dialogue: [
+      { text: '……そっちの せかいも さむいの？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'きー！ にげたげじゃないか！', actUsed: 'はなす' },
+      { text: 'きー？ なに おろしくないこと いってやがる', actUsed: 'ほめる' },
+      { text: 'きー…… さむすぎる……', hpBelowPct: 30 },
+      { text: 'きーきー！ だいじょうぶだぞ！', hpAbovePct: 80 },
+      'くささず うたうぞ！',
+    ], moves: [{ name: 'さむいダジャレ', power: 8 }] },
+    { name: 'アイスぼうや', emoji: '🧊', hp: 35, atk: 11, def: 6, exp: 7, gold: 10, dialogue: [
+      { text: '……ぼくの アイスぼうしを みにいく？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'ちょっと！ もうちょっと きいてよ！', actUsed: 'はなす' },
+      { text: 'えへへ…… もちろん そうだろう！', actUsed: 'ほめる' },
+      { text: 'ぼうし…… とれちゃった……', hpBelowPct: 30 },
+      { text: 'ぼくのぼうしは うでまえが いいんだぜ！', hpAbovePct: 80 },
+      'ぼくの アイスぼうしは ものすごいぞ！',
+    ] },
+    { name: 'わんわん',     emoji: '🐕', hp: 44, atk: 13, def: 6, exp: 9, gold: 14, dialogue: [
+      { text: 'わん！ なかまに なるわん！', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'わん？ なに いいわん？', actUsed: 'はなす' },
+      { text: 'わんわん！ こてこて するわん！', actUsed: 'ほめる' },
+      { text: 'ぐるる…… もう だめわん……', hpBelowPct: 30 },
+      { text: 'わんわん！ たのしいわん！', hpAbovePct: 80 },
+      'わん！ おえらびかたをもとめるわん！',
+    ] },
   ],
   encounterRate: 14,
   bgm: { ref: 'https://www.youtube.com/watch?v=vYyLL9QstbI', src: 'https://www.youtube.com/watch?v=vYyLL9QstbI', type: 'youtube' },
@@ -270,6 +335,15 @@ const sceneSnowdin: SceneDef = {
     // ホネの兄弟
     npc('💀', 5, 13, 'よう にんげん。ほねのある やつは きらいじゃないぜ。……おっと、おれの ことか。', 'BKRjJx'),
     foe({ name: 'ハデなガイコツ', emoji: '💀', col: 21, row: 11, hp: 175, atk: 16, def: 14, exp: 55, gold: 60,
+      dialogue: [
+        { text: 'こっちの チームに いられるのは おまえだけじゃないぜ', actUsed: 'Investigation', mercyAbovePct: 60 },
+        { text: 'おい なに じろじろ みてやがる', actUsed: 'はなす' },
+        { text: 'フン…… なに おだますようなこと いいやがる', actUsed: 'ほめる' },
+        { text: 'ぐぬぬ…… まだ たたかうぜ……', hpBelowPct: 30 },
+        { text: 'おれは ホネの マンスリーだぜ！', hpAbovePct: 80 },
+        { text: 'おまえ…… なかなか いいやつじゃねえか', mercyAbovePct: 70 },
+        'ホネは にげないぜ',
+      ],
       // 通常攻撃：左右から交互に飛んでくるホネ
       miniScript: `
 while true
@@ -314,7 +388,13 @@ end while
       ]}],
     }),
     // 番犬・スノーマン
-    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 44, atk: 13, def: 6, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH' }),
+    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 44, atk: 13, def: 6, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH', dialogue: [
+      { text: '……おまえの なかまに なるのはちょっと……', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'うるさい！ こっちを むかするな！', actUsed: 'はなす' },
+      { text: '……？ なぜ おだまきを お投げする？', actUsed: 'ほめる' },
+      { text: 'ぐわん…… マスター…… たすけて……', hpBelowPct: 30 },
+      'いのちがけで まもるぜ！',
+    ] }),
     newObject({
       emoji: '⛄', col: 8, row: 17, behavior: 'still', hazard: false,
       pages: [
@@ -402,9 +482,30 @@ const sceneWaterfall: SceneDef = {
   id: 'waterfall', name: 'みずのどうくつ',
   map: waterfallMap,
   randomEncounters: [
-    { name: 'キラキラくらげ', emoji: '🪼', hp: 52, atk: 16, def: 8, exp: 13, gold: 18 },
-    { name: 'うたうさかな',   emoji: '🐟', hp: 60, atk: 18, def: 9, exp: 15, gold: 22, moves: [{ name: 'ソウルフルなうた', power: 12 }] },
-    { name: 'テミー',         emoji: '🐱', hp: 15,  atk: 4,  def: 2, exp: 1,  gold: 50 },
+    { name: 'キラキラくらげ', emoji: '🪼', hp: 52, atk: 16, def: 8, exp: 13, gold: 18, dialogue: [
+      { text: 'キラキラ…… そっちも きらきらしてる？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'キラキラ…… にげなくていいんだよ', actUsed: 'はなす' },
+      { text: 'キラキラ！ きもちいいよ！', actUsed: 'ほめる' },
+      { text: 'キラキラ…… おちちゃいそう……', hpBelowPct: 30 },
+      { text: 'キラキラ！ うみは すごいよ！', hpAbovePct: 80 },
+      'キラキラ すいてあげるよ！',
+    ] },
+    { name: 'うたうさかな',   emoji: '🐟', hp: 60, atk: 18, def: 9, exp: 15, gold: 22, dialogue: [
+      { text: '♪…… いっしょに うたわない？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: '♪…… きいてくれるの？', actUsed: 'はなす' },
+      { text: '♪♪！ もっと うたってあげる！', actUsed: 'ほめる' },
+      { text: '♪…… もう うたえない……', hpBelowPct: 30 },
+      { text: '♪♪♪！ うみの おかしは おいしい！', hpAbovePct: 80 },
+      '♪ うたって しかえし するよ！',
+    ], moves: [{ name: 'ソウルフルなうた', power: 12 }] },
+    { name: 'テミー',         emoji: '🐱', hp: 15,  atk: 4,  def: 2, exp: 1,  gold: 50, dialogue: [
+      { text: 'え！？ テミーの なかまになりてぇの？ やばっ！', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: 'ちょっと！ もうちょっと みてよ！', actUsed: 'はなす' },
+      { text: 'えへへ…… テミーは かわいいに決まってるの！', actUsed: 'ほめる' },
+      { text: 'テミー…… グレードアップ できない……', hpBelowPct: 30 },
+      { text: 'テミーのよろいは ガチだから！', hpAbovePct: 80 },
+      'テミーのみせ！！ かって！！！',
+    ] },
   ],
   encounterRate: 12,
   bgm: { ref: 'https://www.youtube.com/watch?v=DVUh7caufKU', src: 'https://www.youtube.com/watch?v=DVUh7caufKU', type: 'youtube' },
@@ -435,10 +536,25 @@ const sceneWaterfall: SceneDef = {
       { type: 'giveItem', itemId: 'tutu', count: 1 },
     ]),
     // どうくつのモンスター
-    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 60, atk: 18, def: 9, exp: 15, gold: 22, moves: [{ name: 'ソウルフルなうた', power: 12 }], behavior: 'random' }),
+    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 60, atk: 18, def: 9, exp: 15, gold: 22, dialogue: [
+      { text: '♪…… いっしょに うたわない？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: '♪…… きいてくれるの？', actUsed: 'はなす' },
+      { text: '♪♪！ もっと うたってあげる！', actUsed: 'ほめる' },
+      { text: '♪…… もう うたえない……', hpBelowPct: 30 },
+      '♪ うたって しかえし するよ！',
+    ], moves: [{ name: 'ソウルフルなうた', power: 12 }], behavior: 'random' }),
     // 出口の通路をまもる さかなのヒーロー
     npc('🪧', 6, 16, '看板「この先 せまい通路。\n【えいゆう】が にんげんを まちかまえている とのこと」'),
     foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 220, atk: 20, def: 16, exp: 80, gold: 80,
+      dialogue: [
+        { text: 'ここは まもるべき ばしょなんだ…… いけない', actUsed: 'Investigation', mercyAbovePct: 60 },
+        { text: 'ふん！ なんの ひつようもない こうどうだ！', actUsed: 'はなす' },
+        { text: '……？ なに おだまきを お投げする！', actUsed: 'ほめる' },
+        { text: 'ぐぬぬ…… まだ たたかう……', hpBelowPct: 30 },
+        { text: 'えいゆうは にげない！ たたかうだけだ！', hpAbovePct: 80 },
+        { text: 'おまえ…… なかなか みりょくてきだ', mercyAbovePct: 70 },
+        'えいゆうは にげない！',
+      ],
       // 通常攻撃：画面端からハートを狙う水色のやり
       miniScript: `
 while true
@@ -548,9 +664,11 @@ end while
 `.trim(),
       // 通常攻撃の予告セリフ：HP・直前の「ほめる」使用で出し分け
       dialogue: [
+        { text: '……ワシも おうとしての つとめを はたすだけだ', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: '……そんなに ほめられると てれるね', actUsed: 'ほめる' },
-        { text: 'もう すぐ おわりに しよう……', hpBelowPct: 20 },
+        { text: 'もう すこしで おわりに しよう……', hpBelowPct: 20 },
         { text: 'わるいね。ワシも ひくには ひけないんだ', hpBelowPct: 50 },
+        { text: 'やさしい にんげん なんだね', mercyAbovePct: 70 },
         'うけて おくれ',
       ],
       moves: [
@@ -566,7 +684,10 @@ while true
 end while
 `.trim(),
           dialogue: [
+            { text: '……おまえも やさしいのだと おもうていたよ', actUsed: 'Investigation', mercyAbovePct: 60 },
+            { text: '……そっちも やさしいのね', actUsed: 'ほめる' },
             { text: 'これで さいごに しよう……', hpBelowPct: 20 },
+            { text: 'やさしい にんげん なんだね', mercyAbovePct: 70 },
             'ほのおの あめだ。すまないね',
           ],
         },

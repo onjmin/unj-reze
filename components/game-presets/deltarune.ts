@@ -128,6 +128,14 @@ const sceneField: SceneDef = {
     chest(24, 13, [{ type: 'changeGold', amount: 25 }]),
     // 野原のモンスター
     foe({ name: 'バイクにのった鬼', emoji: '🏍️', col: 8, row: 8, hp: 30, atk: 8, def: 2, exp: 3, gold: 12, behavior: 'patrolH', speed: 1.4,
+      dialogue: [
+        { text: 'ふん。おまえも こっちに くるのか？', actUsed: 'Investigation', mercyAbovePct: 60 },
+        { text: 'うるさい！ こっちを むかするな！', actUsed: 'はげます' },
+        { text: 'おっしゃって くれるじゃねえか', actUsed: 'ちょうさ' },
+        { text: 'ぐぬぬ…… もう いけねえ……', hpBelowPct: 30 },
+        { text: 'バイクは にげないぜ！', hpAbovePct: 80 },
+        'ブンブン！ いくぜ！',
+      ],
       miniScript: `
 while true
   shotSide(true, randF(20, 156), 2.2, 4, 0)
@@ -141,10 +149,13 @@ end while
       ...symbolSprite(TLDR_ENEMY_SPRITES.virovirokun.idle),
       // フキダシに出る攻撃前セリフ。条件は複数指定でき（AND）、最も具体的な行が選ばれる
       dialogue: [
+        { text: 'ぼくの なかまに なる？ すごい！', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: 'なかまに…… なってくれるの？', actUsed: 'ちょうさ', mercyAbovePct: 60 },
         { text: '……ぼくのこと、みてくれるの？', actUsed: 'ちょうさ' },
         { text: 'えへへ…… てれるなあ', actUsed: 'はげます' },
         { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
+        { text: 'ぜんぜん へいきだよ', hpAbovePct: 80 },
+        { text: 'やさしい にんげん なんだね', mercyAbovePct: 70 },
         'ハリを ばらまいちゃうぞ！',
       ],
       miniScript: `
@@ -155,8 +166,24 @@ end while
 `.trim() }),
     // ぼうしおばけ：ランダムエンカウント廃止に伴い徘徊シンボルとして再配置
     foe({ name: 'ぼうしおばけ', emoji: '🎩', col: 20, row: 8, hp: 26, atk: 6, def: 3, exp: 2, gold: 10, behavior: 'random',
+      dialogue: [
+        { text: 'ぼくの なかまに なる？ すごい！', actUsed: 'Investigation', mercyAbovePct: 60 },
+        { text: '……えへへ…… やさしく してくれるの？', actUsed: 'はげます' },
+        { text: '……もうちょっと しらべて……', actUsed: 'ちょうさ' },
+        { text: 'もう…… ボロボロ……', hpBelowPct: 30 },
+        { text: 'ぼうしが つよいんだぜ！', hpAbovePct: 80 },
+        'ハイタッチ するの！',
+      ],
       moves: [{ name: 'ハイタッチをもとめる', power: 6 }] }),
     foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 32, atk: 9, def: 3, exp: 4, gold: 14, behavior: 'random',
+      dialogue: [
+        { text: 'パズルの なかまに なるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
+        { text: 'すごい！ パズルが とける！', actUsed: 'はげます' },
+        { text: '……もうちょっと しらべて……', actUsed: 'ちょうさ' },
+        { text: 'パズルが…… こわれちゃった……', hpBelowPct: 30 },
+        { text: 'パズルは てごえが あるんだぜ！', hpAbovePct: 80 },
+        'かおの パーツで こうげき！',
+      ],
       moves: [{ name: 'かおのパーツこうげき', power: 8, miniScript: `
 while true
   shotRain(1.6, 4, 4)
@@ -236,8 +263,24 @@ const sceneTown: SceneDef = {
       ]}],
     }),
     // まちのモンスター
-    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 44, atk: 12, def: 5, exp: 8, gold: 16, behavior: 'random' }),
+    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 44, atk: 12, def: 5, exp: 8, gold: 16, behavior: 'random', dialogue: [
+      { text: 'おまえも くらやみに くろうか？', actUsed: 'Investigation', mercyAbovePct: 60 },
+      { text: '……？ なに おだまきを お投げする？', actUsed: 'はげます' },
+      { text: 'うるさい！ こっちを むかするな！', actUsed: 'ちょうさ' },
+      { text: 'ぐるる…… もう だめ……', hpBelowPct: 30 },
+      { text: 'おおきい！ だいじょうぶだぞ！', hpAbovePct: 80 },
+      'いのちがけで まもるぜ！',
+    ] }),
     foe({ name: 'きれたマネキン', emoji: '🪞', col: 22, row: 16, hp: 50, atk: 13, def: 6, exp: 9, gold: 18, behavior: 'still',
+      dialogue: [
+        { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
+        { text: '……ほめられても なきょうみ ないのに……', actUsed: 'はげます' },
+        { text: '……はなしかけて くれるの？ うれしい……', actUsed: 'ちょうさ' },
+        { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
+        { text: '……まだ ここに いたいな……', hpAbovePct: 80 },
+        { text: 'やさしい にんげん なんだね', mercyAbovePct: 70 },
+        'なきながら たたかうの…… ごめん……',
+      ],
       moves: [{ name: 'ヒビわれた 笑顔', power: 10, miniScript: `
 while true
   shotPlayer(getPlayerX(), -6, 1.8, 5, 3)
@@ -320,11 +363,14 @@ end while
 `.trim(),
       // フキダシに出る攻撃前セリフ。actUsed＋hpBelowPct のように複数条件（AND）を組み合わせられる
       dialogue: [
+        { text: 'おまえも くらやみに つかえるのか？', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: 'その しらべは もう きかん……！', actUsed: 'ちょうさ', hpBelowPct: 25 },
         { text: '……そこまで 本気だとはね', actUsed: 'ちょうさ' },
+        { text: '……そっちも やさしいのだな', actUsed: 'はげます' },
         { text: 'もう すこしで おわる……', hpBelowPct: 25 },
         { text: 'これでも まだ ひくわけには いかん', hpBelowPct: 55 },
-        { text: 'なぜ 剣を おさめられるのだ……', mercyAbovePct: 70 },
+        { text: 'やさしい にんげん なんだね', mercyAbovePct: 70 },
+        { text: 'なぜ 剣を おさめられるのだ……', actUsed: 'Investigation', mercyAbovePct: 70 },
         'うけて もらおう',
       ],
       moves: [

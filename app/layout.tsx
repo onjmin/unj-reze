@@ -43,9 +43,10 @@ export const metadata: Metadata = {
     icon: "https://avatars.githubusercontent.com/u/88383494",
   },
   other: {
-    "google-site-verification": "umOJryZRtZeDsWC10CFmGjDOJy7SjkpL3DWlXblOnyE",
+    "google-site-verification": "cMogkuhgfKNyue0pALIrQx9G9ClFbSeRo5CqLomVgVk",
     "Cache-Control": "no-cache",
   },
+
 };
 
 export default function RootLayout({
