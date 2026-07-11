@@ -193,6 +193,9 @@ export interface ObjectDef {
   moves?: EnemyMove[];
   /** シンボルエンカウントのボス。倒すまでゴールでクリアにならない。 */
   isBoss?: boolean;
+  /** soul/deltarune 戦闘：1回のエンカウントで現れる同種の敵の最大数（1〜3、省略時3）。
+   *  実際の出現数は 1〜この値のランダム。ストーリー上の一体キャラは 1 を指定する（ボスは常に1体）。 */
+  encounterMax?: number;
   /** ボス撃破後に流すセリフ（isBoss=true のとき使用）。 */
   outroDialogue?: DialogueLine[];
   /** スペルカード定義（touhou エンジン・isBoss=true のとき使用）。 */

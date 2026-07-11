@@ -43,6 +43,8 @@ const foe = (o: {
   moves?: { name: string; power: number; heal?: boolean; miniScript?: string; dialogue?: (string | EnemyDialogueLine)[] }[];
   behavior?: 'still' | 'random' | 'patrolH' | 'patrolV' | 'chase'; speed?: number; spriteId?: string;
   isBoss?: boolean; outroDialogue?: PresetData['objects'][number]['outroDialogue'];
+  /** 1回のエンカウントで現れる最大数（1〜3、省略時3）。ストーリー上の一体キャラは 1。 */
+  encounterMax?: number;
   /** soul 戦闘の通常攻撃弾幕（MiniScript）。技側の miniScript が優先。 */
   miniScript?: string;
   /** 通常攻撃の予告セリフ候補（HP割合／直前の「こうどう」技名で出し分け）。技側の dialogue が優先。 */
@@ -51,7 +53,7 @@ const foe = (o: {
   emoji: o.emoji, name: o.name, col: o.col, row: o.row,
   hp: o.hp, atk: o.atk, def: o.def, exp: o.exp, gold: o.gold, moves: o.moves,
   behavior: o.behavior ?? 'still', speed: o.speed ?? 1.2, hazard: true,
-  isBoss: o.isBoss, outroDialogue: o.outroDialogue, miniScript: o.miniScript, dialogue: o.dialogue,
+  isBoss: o.isBoss, encounterMax: o.encounterMax, outroDialogue: o.outroDialogue, miniScript: o.miniScript, dialogue: o.dialogue,
   ...(o.spriteId ? { spriteRef: wr(o.spriteId), spriteUrl: sa(o.spriteId) } : {}),
 });
 
@@ -188,7 +190,7 @@ end while
         ]},
       ],
     }),
-    foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 155, atk: 14, def: 12, exp: 45, gold: 40,
+    foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 155, atk: 14, def: 12, exp: 45, gold: 40, encounterMax: 1,
       // 通常攻撃：ゆっくり降るオレンジの火の粉（やさしい）
       miniScript: `
 while true
