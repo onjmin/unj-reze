@@ -1,12 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Pen, Grid3x3, Music, X, Gamepad2 } from 'lucide-react';
 
-import { Post, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
+import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import { decodeId } from '@/lib/sqids';
-import { getAvatarInfo } from '@/lib/avatar';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
@@ -19,7 +17,6 @@ import CollabSelector from '@/components/CollabSelector';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
 import LiveGameView from '@/components/LiveGameView';
 import PostComposer from '@/components/PostComposer';
-import OriginTypeModal from '@/components/OriginTypeModal';
 import SearchView from '@/components/SearchView';
 import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
@@ -29,7 +26,6 @@ import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
 const MmlEditor = dynamic(() => import('@/components/MmlEditor'), { ssr: false });
-const MmlPlayer = dynamic(() => import('@/components/MmlPlayer'), { ssr: false });
 
 export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -63,7 +59,6 @@ export default function App() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [attachedMml, setAttachedMml] = useState<string | null>(null);
   const [originType, setOriginType] = useState<OriginType | undefined>(undefined);
-  const [showOriginModal, setShowOriginModal] = useState(false);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
@@ -146,8 +141,6 @@ export default function App() {
       setLoading(false);
     }
   }, [userId]);
-
-  const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
 
   useEffect(() => {
     postsRef.current = posts;
@@ -633,122 +626,26 @@ export default function App() {
               {currentNav === 'home' && topTab !== 'game' && (
                 <>
                   {topTab !== 'ranking' && topTab !== 'game' && (
-                    <div className="p-3 border-b border-gray-800/80 flex flex-col space-y-2">
-                      <div className="flex items-start space-x-3">
-                        <div
-                          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-xs text-white relative overflow-hidden"
-                          style={getAvatarInfo(userId).style}
-                        >
-                          {(() => {
-                            const AvatarIcon = getAvatarInfo(userId).Icon;
-                            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
-                          })()}
-                        </div>
-                        <div className="flex-1">
-                          <textarea
-                            value={inputText}
-                            onChange={(e) => setInputText(e.target.value)}
-                            className="w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none h-20 text-gray-100"
-                            placeholder="いまどうしてる？ #お絵描き #ゲーム"
-                          />
-                          {attachedImage && (
-                            <div className="relative mt-2 rounded-lg overflow-hidden border border-gray-800 max-w-[180px]">
-                              <img src={attachedImage} alt="添付お絵描き" className="w-full h-auto" />
-                              <button
-                                onClick={() => setAttachedImage(null)}
-                                className="absolute top-1 right-1 bg-black/85 p-1 rounded-full text-white hover:bg-red-500"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          )}
-                          {gameDraft && (
-                            <div className="relative mt-2 flex items-center gap-2 rounded-lg border border-yellow-700/50 bg-yellow-500/10 px-3 py-2 max-w-[280px]">
-                              <Gamepad2 size={16} className="text-yellow-400 shrink-0" />
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold text-yellow-200 truncate">{gameDraft.title}</p>
-                                <p className="text-[10px] text-yellow-400/70">ゲームを添付中</p>
-                              </div>
-                              <button
-                                onClick={() => setGameDraft(null)}
-                                className="ml-auto text-yellow-300/70 hover:text-red-400 shrink-0"
-                              >
-                                <X size={14} />
-                              </button>
-                            </div>
-                          )}
-                          {attachedMml && (
-                            <div className="relative mt-2 rounded-lg border border-pink-700/50 bg-pink-500/10 px-3 py-2 max-w-[280px]">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[10px] font-bold text-pink-300 flex items-center gap-1">
-                                  <Music size={12} />
-                                  MMLを添付中（試聴できます）
-                                </span>
-                                <button
-                                  onClick={() => setAttachedMml(null)}
-                                  className="text-pink-300/70 hover:text-red-400 shrink-0"
-                                >
-                                  <X size={14} />
-                                </button>
-                              </div>
-                              <MmlPlayer mml={attachedMml} />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 pl-12 mb-1.5">
-                        <span className="text-[10px] text-gray-500 font-medium">権利表記</span>
-                        <button
-                          type="button"
-                          onClick={() => setShowOriginModal(true)}
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${originOption
-                            ? originOption.badgeClass
-                            : 'border-gray-700 text-gray-500 hover:text-gray-300'
-                            }`}
-                        >
-                          {originOption ? originOption.label : '申告なし'}
-                        </button>
-                      </div>
-                      <div className="flex justify-between items-center pl-12">
-                        <div className="flex space-x-2 text-gray-500">
-                          <button
-                            onClick={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
-                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-[#a3e635] transition-colors"
-                            title="お絵描き"
-                          >
-                            <Pen size={18} />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditor('dotdrawing')}
-                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-orange-400 transition-colors"
-                            title="ドット絵専用お絵描き"
-                          >
-                            <Grid3x3 size={18} />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditor('mml')}
-                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-pink-400 transition-colors"
-                            title="MML作曲"
-                          >
-                            <Music size={18} />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditor('gamemaker')}
-                            className="p-2 hover:bg-gray-100/10 rounded-full hover:text-yellow-400 transition-colors"
-                            title="ゲーム作成"
-                          >
-                            <Gamepad2 size={18} />
-                          </button>
-                        </div>
-                        <button
-                          onClick={handleCreatePost}
-                          disabled={!inputText.trim() && !attachedImage && !attachedMml && !gameDraft}
-                          className="bg-blue-600 text-white font-bold px-4 py-1.5 rounded-full text-xs hover:bg-blue-500 disabled:opacity-50 transition-colors"
-                        >
-                          投稿
-                        </button>
-                      </div>
-                    </div>
+                    <PostComposer
+                      inline
+                      userId={userId}
+                      text={inputText}
+                      setText={setInputText}
+                      image={attachedImage}
+                      setImage={setAttachedImage}
+                      mml={attachedMml}
+                      setMml={setAttachedMml}
+                      gameDraft={gameDraft}
+                      setGameDraft={setGameDraft}
+                      originType={originType}
+                      setOriginType={setOriginType}
+                      onClose={() => {}}
+                      onSubmit={handleCreatePost}
+                      onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
+                      onOpenDotDrawing={() => handleOpenEditor('dotdrawing')}
+                      onOpenMml={() => handleOpenEditor('mml')}
+                      onOpenGameMaker={() => handleOpenEditor('gamemaker')}
+                    />
                   )}
 
                   {topTab === 'ranking' && (
@@ -863,14 +760,6 @@ export default function App() {
             onOpenMml={() => handleOpenEditor('mml')}
             onOpenGameMaker={() => handleOpenEditor('gamemaker')}
             replyToDisplayName={replyTargetPost ? replyTargetPost.displayName : undefined}
-          />
-        )}
-
-        {showOriginModal && (
-          <OriginTypeModal
-            value={originType}
-            onClose={() => setShowOriginModal(false)}
-            onSelect={(v) => { setOriginType(v); setShowOriginModal(false); }}
           />
         )}
 

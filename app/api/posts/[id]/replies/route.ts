@@ -30,11 +30,18 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { displayName, content, parentPostId } = body;
+  const { displayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType } = body;
 
-  if (!displayName || !content) {
+  if (!displayName) {
     return NextResponse.json(
-      { error: 'displayName and content are required' },
+      { error: 'displayName is required' },
+      { status: 400 }
+    );
+  }
+
+  if (!content && !hasImage && !gameId) {
+    return NextResponse.json(
+      { error: 'content, image, or game is required' },
       { status: 400 }
     );
   }
@@ -44,7 +51,17 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid parentPostId' }, { status: 400 });
   }
 
-  const reply = await db.addReply(decodedId, { displayName, content, parentPostId: decodedParentPostId === null ? undefined : decodedParentPostId });
+  const reply = await db.addReply(decodedId, {
+    displayName,
+    content: content || '',
+    parentPostId: decodedParentPostId === null ? undefined : decodedParentPostId,
+    hasImage,
+    imageSrc,
+    imageAlt,
+    avatarColor,
+    gameId: gameId ? Number(gameId) : undefined,
+    originType,
+  });
   if (!reply) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
