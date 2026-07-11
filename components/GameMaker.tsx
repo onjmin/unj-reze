@@ -1659,6 +1659,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return () => document.removeEventListener('mousedown', handler);
   }, [settingsOpen]);
 
+  // ── 衝突バウンダリ表示 ──
+  const [showCollisionBoundaries, setShowCollisionBoundaries] = useState(false);
+  const showCollisionBoundariesRef = useRef(false);
+  useEffect(() => { showCollisionBoundariesRef.current = showCollisionBoundaries; }, [showCollisionBoundaries]);
+
   // ── デバッグ無敵 ──
   const [debugInvincible, setDebugInvincible] = useState(false);
   const debugInvincibleRef = useRef(false);
@@ -6912,6 +6917,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2;
           ctx.beginPath(); ctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); ctx.stroke();
           if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+          if (showCollisionBoundariesRef.current && !isPlaying && !info.passable) {
+            const px = x * TILE_SIZE + 5, py = y * TILE_SIZE + 5;
+            const ex = x * TILE_SIZE + TILE_SIZE - 5, ey = y * TILE_SIZE + TILE_SIZE - 5;
+            ctx.lineWidth = 3; ctx.strokeStyle = '#000';
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
+            ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff';
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
+          }
           return;
         }
         // imageUrl に #sx,sy,sw,sh が付いていればアトラスから単一スプライトを切り出す。
@@ -6957,6 +6970,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         else { ctx.fillStyle = info.color; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
         if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+        if (showCollisionBoundariesRef.current && !isPlaying && !info.passable) {
+          const px = x * TILE_SIZE + 5, py = y * TILE_SIZE + 5;
+          const ex = x * TILE_SIZE + TILE_SIZE - 5, ey = y * TILE_SIZE + TILE_SIZE - 5;
+          ctx.lineWidth = 3; ctx.strokeStyle = '#000';
+          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
+          ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff';
+          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
+        }
       };
       // 地面レイヤー：プレイヤーより先に描画
       for (let y = startRow; y < endRow; y++) {
@@ -8429,6 +8450,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
                 >
                   🌐 オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => setShowCollisionBoundaries(v => !v)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${showCollisionBoundaries ? 'bg-purple-500/20 text-purple-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                >
+                  🧱 衝突バウンダリ {showCollisionBoundaries ? 'ON' : 'OFF'}
                 </button>
 
                 <div className="border-t border-gray-700 my-1" />
