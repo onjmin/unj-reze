@@ -7,7 +7,7 @@ export const UNDERTALE_ENGINE_SOUNDS = [
   'snd_break_0',
   'snd_break_1',
   'snd_damage',
-  'snd_encounter_soul_move',
+  'snd_encounter_undertale_move',
   'snd_exclamation',
   'snd_flee',
   'snd_hurt',

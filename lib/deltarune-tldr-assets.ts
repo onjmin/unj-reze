@@ -94,8 +94,8 @@ const anim = (dir: string, w: number, h: number, fps: number, guids: string[]): 
   fps: Math.max(1, fps), w, h,
 });
 
-/** SOULハート（弾幕よけの自機）。frame0=通常、frame1=白抜き。 */
-export const TLDR_SOUL_SPRITE: TldrAnim = anim('spr_soul', 20, 20, 1, [
+/** UNDERTALEハート（弾幕よけの自機）。frame0=通常、frame1=白抜き。 */
+export const TLDR_UNDERTALE_SPRITE: TldrAnim = anim('spr_undertale', 20, 20, 1, [
   'ef311611-1808-4870-a23a-54770c7e3189',
   'fbd4d2b8-330f-4407-99cd-0b1a84f080ca',
 ]);
@@ -222,7 +222,7 @@ export const TLDR_UI_SPRITES = {
   btItem: anim('spr_ui_enc_bt_item_ja', 31, 32, 1, ['b79e83ea-970d-4d30-bb28-94490577f9ba', 'ef108a79-d401-49cc-a673-17a635ace7bf']),
   btSpare: anim('spr_ui_enc_bt_spare_ja', 31, 32, 1, ['887c5c8c-f7aa-48b7-8e79-0b16a9ff144c', '2e77e319-1b59-4a0b-9405-5f99a657820e']),
   btDefend: anim('spr_ui_enc_bt_defend_ja', 31, 32, 1, ['82ee5c2e-d5d5-4517-9771-1cd8378a1cff', '2caa8fb1-0d79-41bc-ae4a-1bd2f1ec4597']),
-  soulCursor: anim('spr_uisoul', 16, 16, 1, ['9e060760-3c10-4460-8e56-44c785b000b9']),
+  undertaleCursor: anim('spr_uiundertale', 16, 16, 1, ['9e060760-3c10-4460-8e56-44c785b000b9']),
   spareStar: anim('spr_ui_enc_sparestar', 16, 16, 1, ['eb3f1425-acf6-4bef-9c5a-8908f186cf22']),
 } as const;
 

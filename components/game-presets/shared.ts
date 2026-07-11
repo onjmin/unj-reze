@@ -193,7 +193,7 @@ export interface ObjectDef {
   moves?: EnemyMove[];
   /** シンボルエンカウントのボス。倒すまでゴールでクリアにならない。 */
   isBoss?: boolean;
-  /** soul/deltarune 戦闘：1回のエンカウントで現れる同種の敵の最大数（1〜3、省略時3）。
+  /** undertale/deltarune 戦闘：1回のエンカウントで現れる同種の敵の最大数（1〜3、省略時3）。
    *  実際の出現数は 1〜この値のランダム。ストーリー上の一体キャラは 1 を指定する（ボスは常に1体）。 */
   encounterMax?: number;
   /** ボス撃破後に流すセリフ（isBoss=true のとき使用）。 */
@@ -221,11 +221,11 @@ export interface ObjectDef {
   spellScript?: SpellBlock[];
   /** MiniScript（touhou エンジン）。wave 敵の動き全般・ボスの弾幕パターンを記述する。 */
   miniScript?: string;
-  /** SOUL移動モード（rpg エンジン・battle.style==='soul'）。攻撃（弾幕よけ）中のプレイヤー移動の制約。未指定は 'red'。 */
-  soulMode?: SoulMode;
-  /** soul 戦闘：この敵の通常攻撃の予告セリフ候補（moves[].dialogue が優先）。HP割合／直前のこうどう技名で出し分け。 */
+  /** UNDERTALE移動モード（rpg エンジン・battle.style==='undertale'）。攻撃（弾幕よけ）中のプレイヤー移動の制約。未指定は 'red'。 */
+  undertaleMode?: UndertaleMode;
+  /** undertale 戦闘：この敵の通常攻撃の予告セリフ候補（moves[].dialogue が優先）。HP割合／直前のこうどう技名で出し分け。 */
   dialogue?: (string | EnemyDialogueLine)[];
-  /** 戦闘オーバーレイで絵文字の代わりに描くスプライト（soul/deltarune 戦闘）。 */
+  /** 戦闘オーバーレイで絵文字の代わりに描くスプライト（undertale/deltarune 戦闘）。 */
   battleSprite?: EnemyBattleSprite;
   /** 所属フェーズ番号（touhou エンジン、phases 使用時）。未指定=0。 */
   phase?: number;
@@ -302,12 +302,12 @@ export interface ShopItem { itemId: string; price: number; }
  *  ゲージが満タン（または敵HPが2割以下）になると「みのがす」で戦闘を終了できる（labels.mercy 参照）。 */
 export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; }
 
-/** SOULの移動モード（battle.style==='soul' の弾幕よけ中）。
+/** UNDERTALEの移動モード（battle.style==='undertale' の弾幕よけ中）。
  *  red=自由移動 / blue=重力+ジャンプ / green=シールド（移動不可・方向キーでその方向の矢弾を防ぐ）
  *  / purple=3本の横線をUp/Downで切替・Left/Rightで移動 / yellow=自由移動+Z/Enterで前方に弾を撃てる。 */
-export type SoulMode = 'red' | 'blue' | 'green' | 'purple' | 'yellow';
+export type UndertaleMode = 'red' | 'blue' | 'green' | 'purple' | 'yellow';
 
-/** soul/deltarune 戦闘の攻撃前セリフ（敵スプライト横のフキダシに1文字ずつ表示される）。
+/** undertale/deltarune 戦闘の攻撃前セリフ（敵スプライト横のフキダシに1文字ずつ表示される）。
  *  条件フィールドは複数指定でき、指定した条件を すべて満たす（AND）行だけが候補になる。
  *  候補のうち条件数が最も多い（＝最も具体的な）行が選ばれ、同率のときは hpBelowPct が
  *  小さい（より切迫した）行を優先、なお同率ならランダムに1つ。全フィールド省略＝無条件セリフ。 */
@@ -324,14 +324,14 @@ export interface EnemyDialogueLine {
 }
 
 /** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。
- *  soulMode を指定すると、この技の弾幕よけ中だけ SOUL の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。
+ *  undertaleMode を指定すると、この技の弾幕よけ中だけ UNDERTALE の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。
  *  dialogue を指定すると、この技を予告するとき敵本体の dialogue より優先して使われる。 */
-export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; }
+export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; }
 
 /** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。
  *  dialogue＝通常攻撃（moves 抽選に外れたとき）の予告セリフ候補。
  *  battleSprite＝戦闘オーバーレイで絵文字の代わりに描くスプライト。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; }
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; }
 
 /** battle.style==='deltarune' の呪文。TPを消費する（MPとは別のバトル専用リソース。戦闘開始時0にリセットされ、
  *  グレイズ／まもる で溜まる）。heal=true なら power の値だけパーティを回復、それ以外は power ダメージ
@@ -374,9 +374,9 @@ export interface PartyMember { id: string; name: string; emoji: string; spriteRe
 export interface BattleConfig {
   playerName: string;
   maxHp: number; maxMp: number; atk: number; def: number;
-  /** 戦闘スタイル。'soul'＝アンダーテール風：FIGHT/ACT/ITEM/MERCY の4コマンド、
+  /** 戦闘スタイル。'undertale'＝アンダーテール風：FIGHT/ACT/ITEM/MERCY の4コマンド、
    *  たたかう＝タイミングバー、敵ターン＝バトルボックスが変形してハート弾幕よけ。
-   *  'deltarune'＝デルタルーン風：'soul'の弾幕よけ・タイミング攻撃を流用しつつ、
+   *  'deltarune'＝デルタルーン風：'undertale'の弾幕よけ・タイミング攻撃を流用しつつ、
    *  パーティ（party）で1人ずつ行動選択（FIGHT/ACT/ITEM/まもる、ACT欄にSPELLも並ぶ）してから
    *  敵ターンへ進む。TPは共有リソースでMPとは独立（グレイズ／まもる で加算、呪文で消費、毎戦闘0から）。
    *  'ff'＝FF風サイドビュー：パーティ全員のコマンドを選んでから一斉実行するラウンド制。
@@ -387,7 +387,7 @@ export interface BattleConfig {
    *  'milky'＝ミルキークエスト2風：全員の行動値がカウントダウンし0になった者から行動するCTB。強い技ほど
    *  行動値コストが大きい。敵はHPが減ると疲れた表情になる。
    *  省略時 'classic'＝従来のコマンド戦闘。 */
-  style?: 'classic' | 'soul' | 'deltarune' | 'ff' | 'nobita' | 'umimamo' | 'milky';
+  style?: 'classic' | 'undertale' | 'deltarune' | 'ff' | 'nobita' | 'umimamo' | 'milky';
   moves: BattleMove[];
   /** コマンドの表示名（テーマ差し替え）。item 省略時は「どうぐ」。
    *  mercy を指定すると「みのがす」コマンドが出現する（アンダーテール系）。 */

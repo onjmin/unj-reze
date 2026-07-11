@@ -45,7 +45,7 @@ const foe = (o: {
   isBoss?: boolean; outroDialogue?: PresetData['objects'][number]['outroDialogue'];
   /** 1回のエンカウントで現れる最大数（1〜3、省略時3）。ストーリー上の一体キャラは 1。 */
   encounterMax?: number;
-  /** soul 戦闘の通常攻撃弾幕（MiniScript）。技側の miniScript が優先。 */
+  /** undertale 戦闘の通常攻撃弾幕（MiniScript）。技側の miniScript が優先。 */
   miniScript?: string;
   /** 通常攻撃の予告セリフ候補（HP割合／直前の「こうどう」技名で出し分け）。技側の dialogue が優先。 */
   dialogue?: (string | EnemyDialogueLine)[];
@@ -714,7 +714,7 @@ export const undertale: PresetData = {
   scroll: { worldCols: 30, worldRows: 24 },
   battle: {
     playerName: 'ニンゲン',
-    style: 'soul',  // アンダーテール風戦闘（FIGHT/ACT/ITEM/MERCY・タイミング攻撃・弾幕よけ）
+    style: 'undertale',  // アンダーテール風戦闘（FIGHT/ACT/ITEM/MERCY・タイミング攻撃・弾幕よけ）
     maxHp: 24, maxMp: 12, atk: 8, def: 6,
     gold: 0,
     moves: [

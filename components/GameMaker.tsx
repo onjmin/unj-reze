@@ -8,7 +8,7 @@ import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { applyMasterVolume } from '@/lib/master-volume';
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
-import { tldrSfxUrl, TLDR_SOUL_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
+import { tldrSfxUrl, TLDR_UNDERTALE_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
 import {
   detectStandard, standardById, animatedCell, dirFromDelta,
   type WayKey, type WalkStandard,
@@ -29,7 +29,7 @@ import {
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
-  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type SoulMode, type EnemyDialogueLine,
+  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type UndertaleMode, type EnemyDialogueLine,
   type PartySpell, type PartyMember, type BattleSpriteAnim, type PartyBattleSprites, type EnemyBattleSprite,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig,
@@ -1016,7 +1016,7 @@ function BattleAnimSprite({ anim, h, once = false, className = '', style }: {
   );
 }
 
-/** 弾幕よけキャンバス用の画像キャッシュ（SOULハートなど）。 */
+/** 弾幕よけキャンバス用の画像キャッシュ（UNDERTALEハートなど）。 */
 const dodgeImgCache: Record<string, HTMLImageElement> = {};
 function getDodgeImg(url: string): HTMLImageElement {
   let img = dodgeImgCache[url];
@@ -1184,16 +1184,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── ターン制戦闘 ──
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
-  /** soul/deltarune 戦闘の敵1体ぶん。1回のエンカウントで同種の敵が1〜3体現れ（foes 配列）、
+  /** undertale/deltarune 戦闘の敵1体ぶん。1回のエンカウントで同種の敵が1〜3体現れ（foes 配列）、
    *  HP・敵意ゲージ・撃破/みのがし状態は1体ずつ独立に持つ。atk/def/moves/弾幕は同種なので battleRef 共有。 */
   interface BattleFoe { name: string; emoji: string; sprite?: EnemyBattleSprite; hp: number; maxHp: number; mercy: number; exp: number; gold: number; gone?: 'dead' | 'spared'; dialogue?: (string | EnemyDialogueLine)[]; }
   interface BattleView { enemyName: string; enemyEmoji: string; enemySprite?: EnemyBattleSprite; enemyHp: number; enemyMaxHp: number; mercy: number; foes: BattleFoe[]; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
   const battleViewRef = useRef<BattleView | null>(null);
   battleViewRef.current = battle;
-  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }[]; exp: number; gold: number; isBoss: boolean; mercy: number; foes: BattleFoe[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }>(
-    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [], miniScript: undefined, soulMode: undefined, dialogue: undefined });
-  /** soul 戦闘：プレイヤーが直前に使った「こうどう」技名（敵セリフの actUsed 条件判定用）。バトル開始時にリセット。 */
+  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }[]; exp: number; gold: number; isBoss: boolean; mercy: number; foes: BattleFoe[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }>(
+    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [], miniScript: undefined, undertaleMode: undefined, dialogue: undefined });
+  /** undertale 戦闘：プレイヤーが直前に使った「こうどう」技名（敵セリフの actUsed 条件判定用）。バトル開始時にリセット。 */
   const lastActRef = useRef<string | null>(null);
   /** バトル開始時のプレイヤー座標。終了後にここへ正確に戻す（シンボルエンカウントで敵側へ押し出されるのを防ぐ）。 */
   const battleReturnPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -1226,37 +1226,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   useEffect(() => { setShopCursor(0); }, [shopModal]);
   useEffect(() => { setBattleItemsCursor(0); }, [battleItemsOpen]);
   useEffect(() => { if (battle) setClassicBattleCursor(0); }, [battle?.canAct]);
-  // ── アンダーテール風戦闘（battle.style === 'soul'）──
+  // ── アンダーテール風戦闘（battle.style === 'undertale'）──
   // menu: コマンド選択 / attack: タイミングバー / dodge: バトルボックス内で弾幕よけ
-  const [soulPhase, setSoulPhase] = useState<'menu' | 'attack' | 'dodge'>('menu');
-  const soulPhaseRef = useRef(soulPhase);
-  soulPhaseRef.current = soulPhase;
-  const [soulMenu, setSoulMenu] = useState<'root' | 'act' | 'item' | 'mercy' | 'target'>('root');
-  const soulMenuRef = useRef(soulMenu);
-  soulMenuRef.current = soulMenu;
+  const [undertalePhase, setUndertalePhase] = useState<'menu' | 'attack' | 'dodge'>('menu');
+  const undertalePhaseRef = useRef(undertalePhase);
+  undertalePhaseRef.current = undertalePhase;
+  const [undertaleMenu, setUndertaleMenu] = useState<'root' | 'act' | 'item' | 'mercy' | 'target'>('root');
+  const undertaleMenuRef = useRef(undertaleMenu);
+  undertaleMenuRef.current = undertaleMenu;
   // ── 複数体戦のターゲット選択 ──
   /** 対象選択待ちの保留アクション。fight＝たたかう（確定後タイミングバーへ）、act＝こうどう、spell＝攻撃呪文。
    *  生存敵が1体だけのときは選択メニューを出さず即実行する。 */
-  const [soulTargetSel, setSoulTargetSel] = useState<{ kind: 'fight' | 'act' | 'spell'; move?: BattleMove; spell?: PartySpell } | null>(null);
-  const soulTargetSelRef = useRef<typeof soulTargetSel>(null);
-  soulTargetSelRef.current = soulTargetSel;
+  const [undertaleTargetSel, setUndertaleTargetSel] = useState<{ kind: 'fight' | 'act' | 'spell'; move?: BattleMove; spell?: PartySpell } | null>(null);
+  const undertaleTargetSelRef = useRef<typeof undertaleTargetSel>(null);
+  undertaleTargetSelRef.current = undertaleTargetSel;
   /** ターゲット選択カーソル（foes 配列のインデックス。生存敵の間だけを巡回する）。 */
-  const [soulTargetCursor, setSoulTargetCursor] = useState(0);
-  const soulTargetCursorRef = useRef(0);
-  soulTargetCursorRef.current = soulTargetCursor;
+  const [undertaleTargetCursor, setUndertaleTargetCursor] = useState(0);
+  const undertaleTargetCursorRef = useRef(0);
+  undertaleTargetCursorRef.current = undertaleTargetCursor;
   /** 確定済みの「たたかう」対象（タイミングバー解決時に参照。倒れていれば自動で付け替え）。 */
   const attackTargetRef = useRef(0);
   /** 十字キー操作用カーソル：FIGHT/ACT/ITEM/MERCY（0-3） */
-  const [soulRootCursor, setSoulRootCursor] = useState(0);
-  const soulRootCursorRef = useRef(0);
-  soulRootCursorRef.current = soulRootCursor;
+  const [undertaleRootCursor, setUndertaleRootCursor] = useState(0);
+  const undertaleRootCursorRef = useRef(0);
+  undertaleRootCursorRef.current = undertaleRootCursor;
   /** 十字キー操作用カーソル：ACT/ITEM/MERCY サブメニュー内の項目 */
-  const [soulSubCursor, setSoulSubCursor] = useState(0);
-  const soulSubCursorRef = useRef(0);
-  soulSubCursorRef.current = soulSubCursor;
-  useEffect(() => { setSoulSubCursor(0); }, [soulMenu]);
+  const [undertaleSubCursor, setUndertaleSubCursor] = useState(0);
+  const undertaleSubCursorRef = useRef(0);
+  undertaleSubCursorRef.current = undertaleSubCursor;
+  useEffect(() => { setUndertaleSubCursor(0); }, [undertaleMenu]);
   // ── デルタルーン風パーティ戦闘（battle.style === 'deltarune'）──
-  // 'soul' の弾幕よけ・タイミング攻撃はそのまま流用し、行動選択の手前にパーティ1人ずつの
+  // 'undertale' の弾幕よけ・タイミング攻撃はそのまま流用し、行動選択の手前にパーティ1人ずつの
   // ターンを挟む。TPはMPとは独立の共有リソース（毎戦闘0開始・グレイズ/まもるで加算・呪文で消費）。
   const [tp, setTp] = useState(0);
   const tpRef = useRef(0);
@@ -1430,13 +1430,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setDtAnimFx(p => ({ ...p, [memberId]: { kind, seq } }));
     setTimeout(() => setDtAnimFx(p => (p[memberId]?.seq === seq ? { ...p, [memberId]: undefined } : p)), ms);
   };
-  const soulDodgeRef = useRef<{
+  const undertaleDodgeRef = useRef<{
     frames: number; duration: number; pattern: number; dmg: number;
     /** 弾幕を放っている敵の数（生存数）。スクリプト/内蔵パターンがこの数だけ並走し、敵が減ると弾幕も薄くなる */
     attackers: number;
     bullets: { x: number; y: number; vx: number; vy: number; r: number; color?: string; grazed?: boolean }[];
     hx: number; hy: number; invuln: number; miniScript?: string; scriptCtx?: { cancelled: boolean };
-    mode: SoulMode;
+    mode: UndertaleMode;
     grazeFx?: number;                                // deltarune: グレイズ演出の残フレーム
     gvy: number; grounded: boolean;                 // blue: 重力速度・接地判定
     jumpHeld: number;                                // blue: ジャンプキー押下継続フレーム（可変ジャンプ）
@@ -1445,9 +1445,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     shots: { x: number; y: number; vy: number }[];   // yellow: 自機弾
     shotCool: number;                                // yellow: 連射防止クールダウン
   } | null>(null);
-  const soulBarRef = useRef({ pos: 0 });
-  const soulBarElRef = useRef<HTMLDivElement | null>(null);
-  const soulCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const undertaleBarRef = useRef({ pos: 0 });
+  const undertaleBarElRef = useRef<HTMLDivElement | null>(null);
+  const undertaleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   /** フィールドの 🎒 どうぐ袋モーダル開閉（rpg エンジン）。開いている間は移動を凍結。 */
   const [bagOpen, setBagOpen] = useState(false);
   const bagOpenRef = useRef(false);
@@ -1609,21 +1609,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const ENEMY_BUBBLE_CHAR_MS = 45;
   const ENEMY_BUBBLE_HOLD_MS = 520;
   const ENEMY_BUBBLE_TO_COMBAT_MS = 120;
-  const queuedSoulTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queuedUndertaleTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const enemyBubbleClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const soulCombatStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearQueuedSoulTurnTimer = () => {
-    if (queuedSoulTurnTimerRef.current) clearTimeout(queuedSoulTurnTimerRef.current);
-    queuedSoulTurnTimerRef.current = null;
+  const undertaleCombatStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearQueuedUndertaleTurnTimer = () => {
+    if (queuedUndertaleTurnTimerRef.current) clearTimeout(queuedUndertaleTurnTimerRef.current);
+    queuedUndertaleTurnTimerRef.current = null;
   };
   const clearEnemyBubbleTimers = () => {
     if (enemyBubbleClearTimerRef.current) clearTimeout(enemyBubbleClearTimerRef.current);
-    if (soulCombatStartTimerRef.current) clearTimeout(soulCombatStartTimerRef.current);
+    if (undertaleCombatStartTimerRef.current) clearTimeout(undertaleCombatStartTimerRef.current);
     enemyBubbleClearTimerRef.current = null;
-    soulCombatStartTimerRef.current = null;
+    undertaleCombatStartTimerRef.current = null;
   };
   useEffect(() => () => {
-    clearQueuedSoulTurnTimer();
+    clearQueuedUndertaleTurnTimer();
     clearEnemyBubbleTimers();
   }, []);
   /** 対象の敵へダメージを与えた際に、ダメージ数値とHPゲージの減少演出をまとめて発火する。 */
@@ -1663,7 +1663,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const triggerEnemyDefeatFx = (foeIdx: number) => {
     const id = ++enemyFxIdRef.current;
     setDyingFoes(p => ({ ...p, [foeIdx]: { id } }));
-    if (soulSfx) playSfx(soulSfx.defeat);
+    if (undertaleSfx) playSfx(undertaleSfx.defeat);
     setTimeout(() => {
       withViewTransition(() => {
         setDyingFoes(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p));
@@ -1681,16 +1681,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const ENCOUNTER_ALERT_MS = 650;
   const ENCOUNTER_FLASH_MS = 450; // ハートが移動しながら明滅する演出の表示時間。SEの再生完了は待たない（短く保つ）
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
-  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（SOUL戦闘系以外のプリセット用）。 */
+  /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（UNDERTALE戦闘系以外のプリセット用）。 */
   const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
-  /** SOUL戦闘（FIGHT/ACT/ITEM/MERCY・弾幕よけ）を持つプリセットごとの専用SE一式。
-   *  アンダーテールとデルタルーンはどちらも同じ battle.style==='soul' を使うが、
+  /** UNDERTALE戦闘（FIGHT/ACT/ITEM/MERCY・弾幕よけ）を持つプリセットごとの専用SE一式。
+   *  アンダーテールとデルタルーンはどちらも同じ battle.style==='undertale' を使うが、
    *  出典が異なる音源（それぞれのエンジンのCDN）を鳴らし分ける。 */
-  const SOUL_SFX_BY_PRESET = {
+  const UNDERTALE_SFX_BY_PRESET = {
     undertale: {
       encounter: { ref: 'direct:undertale-encounter', src: undertaleSfxUrl('snd_exclamation'), type: 'direct' as const },
       enemyDamage: { ref: 'direct:undertale-enemy-damage', src: undertaleSfxUrl('snd_damage'), type: 'direct' as const },
-      battleStart: { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_soul_move'), type: 'direct' as const },
+      battleStart: { ref: 'direct:undertale-battlestart', src: undertaleSfxUrl('snd_encounter_undertale_move'), type: 'direct' as const },
       menuSwitch: { ref: 'direct:undertale-menu-switch', src: undertaleSfxUrl('snd_menu_switch'), type: 'direct' as const },
       menuConfirm: { ref: 'direct:undertale-menu-confirm', src: undertaleSfxUrl('snd_menu_confirm'), type: 'direct' as const },
       menuCancel: { ref: 'direct:undertale-menu-cancel', src: undertaleSfxUrl('snd_menu_cancel'), type: 'direct' as const },
@@ -1710,13 +1710,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       defeat: { ref: 'direct:deltarune-defeat', src: tldrSfxUrl('break1'), type: 'direct' as const },
     },
   } as const;
-  const soulSfx = SOUL_SFX_BY_PRESET[presetId as keyof typeof SOUL_SFX_BY_PRESET];
-  const isSoulPreset = !!soulSfx;
-  /** メニューで選択を決定したときのSE。SOUL戦闘系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
-  const playMenuConfirmSfx = () => playSfx(soulSfx ? soulSfx.menuConfirm : MSG_ADVANCE_SFX);
-  /** メニューをキャンセル・後退したときのSE。SOUL戦闘系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
-  const playMenuCancelSfx = () => playSfx(soulSfx ? soulSfx.menuCancel : MSG_ADVANCE_SFX);
-  /** SOUL戦闘系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。
+  const undertaleSfx = UNDERTALE_SFX_BY_PRESET[presetId as keyof typeof UNDERTALE_SFX_BY_PRESET];
+  const isUndertalePreset = !!undertaleSfx;
+  /** メニューで選択を決定したときのSE。UNDERTALE戦闘系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
+  const playMenuConfirmSfx = () => playSfx(undertaleSfx ? undertaleSfx.menuConfirm : MSG_ADVANCE_SFX);
+  /** メニューをキャンセル・後退したときのSE。UNDERTALE戦闘系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
+  const playMenuCancelSfx = () => playSfx(undertaleSfx ? undertaleSfx.menuCancel : MSG_ADVANCE_SFX);
+  /** UNDERTALE戦闘系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。
    *  デルタルーンはアンダーテールと違い「！」マーク・専用SEを出さない（Deltarune本編の遭遇演出に
    *  準拠）ため、'alert' フェーズを飛ばして直接 'flash'（BGM停止＋テンションホルンの和音＋
    *  剣を抜く音＋黒フラッシュ）から始める。 */
@@ -1727,7 +1727,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       switchBgm(undefined);
       playDtEncounterChord();
       setTimeout(() => playSfx(DT_SFX.weaponPull), 400);
-    } else if (soulSfx) {
+    } else if (undertaleSfx) {
       const p2 = engineRef.current.player;
       const fromX = p2.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
       const fromY = p2.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
@@ -1737,7 +1737,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const toX = camXRef.current + VIEW_W / 2;
       const toY = camYRef.current + VIEW_H - 26;
       encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'alert', fromX, fromY, toX, toY };
-      playSfx(soulSfx.encounter);
+      playSfx(undertaleSfx.encounter);
     } else {
       fire();
     }
@@ -1862,8 +1862,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setBattle(v => (v ? { ...v, foes: battleRef.current.foes.map(f => ({ ...f })) } : v));
   /** まだ戦っている（撃破もみのがしもされていない）敵の foes 配列インデックス一覧。 */
   const aliveFoeIdxs = () => battleRef.current.foes.map((f, i) => (f.gone ? -1 : i)).filter(i => i >= 0);
-  /** battle.style が 'soul' の弾幕よけ・タイミング攻撃を流用するスタイルか（'soul' 本体 と 'deltarune'）。 */
-  const isDodgeBattleStyle = (s?: string) => s === 'soul' || s === 'deltarune';
+  /** battle.style が 'undertale' の弾幕よけ・タイミング攻撃を流用するスタイルか（'undertale' 本体 と 'deltarune'）。 */
+  const isDodgeBattleStyle = (s?: string) => s === 'undertale' || s === 'deltarune';
   /** battle.style がパーティ制ターン戦闘（弾幕なし）のスタイルか（ff/nobita/umimamo/milky）。 */
   const isPartyBattleStyle = (s?: string) => s === 'ff' || s === 'nobita' || s === 'umimamo' || s === 'milky';
   /** デルタルーン風パーティの現在の状態一覧。先頭(index 0)はフィールドの pr.hp/pr.maxHp を共有し、
@@ -1871,7 +1871,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const dtParty = (): { id: string; name: string; emoji: string; hp: number; maxHp: number }[] => {
     const pr = progressRef.current;
     // party 未設定（例: エディタでスタイルだけ 'deltarune' に切り替えた場合）は
-    // フィールドの操作キャラ1人だけのパーティとして扱う（'soul' と同等の見た目にフォールバック）。
+    // フィールドの操作キャラ1人だけのパーティとして扱う（'undertale' と同等の見た目にフォールバック）。
     const members = gameDataRef.current.battle?.party?.length
       ? gameDataRef.current.battle.party
       : [{ id: '__self', name: gameDataRef.current.battle?.playerName ?? 'プレイヤー', emoji: '❤️', maxHp: pr.maxHp }];
@@ -1974,11 +1974,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; entity?: Entity | null; isBoss?: boolean; encounterMax?: number; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; entity?: Entity | null; isBoss?: boolean; encounterMax?: number; outroDialogue?: DialogueLine[] }) => {
     // バトル開始位置を記録し、終了後はここへ正確に復帰させる
     const startEng = engineRef.current;
     battleReturnPosRef.current = { x: startEng.player.x, y: startEng.player.y };
-    // soul/deltarune のシンボルエンカウントは同種の敵が1〜3体現れる（ボスは常に1体、
+    // undertale/deltarune のシンボルエンカウントは同種の敵が1〜3体現れる（ボスは常に1体、
     // encounterMax=1 のストーリーキャラも1体固定）。
     // 2体以上のときは Ａ/Ｂ/Ｃ を付けて呼び分ける（原作の Froggit Ａ/Ｂ 方式）。
     const dodgeStyle = isDodgeBattleStyle(gameDataRef.current.battle?.style);
@@ -1997,11 +1997,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
       enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
       gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss, mercy: 0, foes,
-      miniScript: opts.miniScript, soulMode: opts.soulMode, dialogue: opts.dialogue,
+      miniScript: opts.miniScript, undertaleMode: opts.undertaleMode, dialogue: opts.dialogue,
     };
     lastActRef.current = null;
     setBattleItemsOpen(false); setBagOpen(false);
-    setSoulPhase('menu'); setSoulMenu('root'); soulDodgeRef.current = null;
+    setUndertalePhase('menu'); setUndertaleMenu('root'); undertaleDodgeRef.current = null;
     clearEnemyBubble();
     // デルタルーン風パーティ戦闘：TPは毎戦闘0から、2人目以降のHPは各自 maxHp から再開、行動選択は先頭メンバーから
     if (gameDataRef.current.battle?.style === 'deltarune') {
@@ -2064,7 +2064,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, soulMode: d.soulMode, dialogue: d.dialogue, battleSprite: d.battleSprite, entity: e, isBoss: d.isBoss, encounterMax: d.encounterMax, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, undertaleMode: d.undertaleMode, dialogue: d.dialogue, battleSprite: d.battleSprite, entity: e, isBoss: d.isBoss, encounterMax: d.encounterMax, outroDialogue: d.outroDialogue });
   };
 
   // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
@@ -2082,7 +2082,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // tlDR Engine のオーバーワールド同様に最低HP1で立ち上がらせる（フィールド即ゲームオーバー防止）。
     const styleNow = gameDataRef.current.battle?.style;
     if ((styleNow === 'deltarune' || isPartyBattleStyle(styleNow)) && pr.hp <= 0) { pr.hp = 1; forceHud(n => n + 1); }
-    // 複数体戦（soul/deltarune/パーティ制）：撃破した敵から EXP＋ゴールド、みのがした敵からはゴールドのみを合算。
+    // 複数体戦（undertale/deltarune/パーティ制）：撃破した敵から EXP＋ゴールド、みのがした敵からはゴールドのみを合算。
     // classic（常に1体・gone を使わない）は従来どおり battleRef の合計値を使う。
     const usesFoes = isDodgeBattleStyle(styleNow) || isPartyBattleStyle(styleNow);
     const expGain = usesFoes ? b.foes.reduce((s, f) => s + (f.gone === 'dead' ? f.exp : 0), 0) : b.exp;
@@ -2212,17 +2212,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (pr.hp <= 0) setTimeout(() => endBattle('lose'), 600);
   };
 
-  /** soul: テキスト表示後、プレイヤーがボタン（Z/A）を押すまで進行を止めておくための予約関数。 */
-  const soulAdvanceRef = useRef<(() => void) | null>(null);
-  const [soulWaiting, setSoulWaiting] = useState(false);
-  const waitForSoulAdvance = (fn: () => void) => {
-    soulAdvanceRef.current = fn;
-    setSoulWaiting(true);
+  /** undertale: テキスト表示後、プレイヤーがボタン（Z/A）を押すまで進行を止めておくための予約関数。 */
+  const undertaleAdvanceRef = useRef<(() => void) | null>(null);
+  const [undertaleWaiting, setUndertaleWaiting] = useState(false);
+  const waitForUndertaleAdvance = (fn: () => void) => {
+    undertaleAdvanceRef.current = fn;
+    setUndertaleWaiting(true);
   };
 
   // ── 敵の攻撃予告フキダシ（tlDR Engine の o_ui_actordialogue 相当） ─────────
   /** 敵スプライト横のフキダシ。各敵インデックスごとに1つずつ表示できる。
-   *  攻撃予告（soulEnemyTurn）で出て、一定時間後に自動で消える。 */
+   *  攻撃予告（undertaleEnemyTurn）で出て、一定時間後に自動で消える。 */
   type EnemyBubbleSide = 'left' | 'right' | 'top' | 'bottom';
   type EnemyBubbleState = { text: string; reveal: number; id: number; side: EnemyBubbleSide };
   const [enemyBubbles, setEnemyBubbles] = useState<Map<number, EnemyBubbleState>>(new Map());
@@ -2268,7 +2268,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           return next;
         });
         if (ch !== ' ' && ch !== '　' && ch !== '\n' && reveal % 2 === 1) {
-          playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
+          playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).textVoice);
         }
       }, ENEMY_BUBBLE_CHAR_MS);
       ivs.push(iv);
@@ -2303,27 +2303,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           <span className="absolute left-2 top-1.5 right-2 bottom-1.5 whitespace-pre-wrap break-words" style={{ overflowWrap: 'anywhere' }}>{eb.text.slice(0, eb.reveal)}</span>
           {/* しっぽ：敵のいる側を指す三角 */}
           <div className={`absolute w-0 h-0 ${side === 'left'
-              ? 'top-1/2 -translate-y-1/2 left-full border-y-[6px] border-y-transparent border-l-[9px] border-l-white'
-              : side === 'right'
-                ? 'top-1/2 -translate-y-1/2 right-full border-y-[6px] border-y-transparent border-r-[9px] border-r-white'
-                : side === 'top'
-                  ? 'top-full left-1/2 -translate-x-1/2 border-x-[6px] border-x-transparent border-t-[9px] border-t-white'
-                  : 'bottom-full left-1/2 -translate-x-1/2 border-x-[6px] border-x-transparent border-b-[9px] border-b-white'
+            ? 'top-1/2 -translate-y-1/2 left-full border-y-[6px] border-y-transparent border-l-[9px] border-l-white'
+            : side === 'right'
+              ? 'top-1/2 -translate-y-1/2 right-full border-y-[6px] border-y-transparent border-r-[9px] border-r-white'
+              : side === 'top'
+                ? 'top-full left-1/2 -translate-x-1/2 border-x-[6px] border-x-transparent border-t-[9px] border-t-white'
+                : 'bottom-full left-1/2 -translate-x-1/2 border-x-[6px] border-x-transparent border-b-[9px] border-b-white'
             }`} />
         </div>
       </div>
     );
   };
 
-  /** プレイヤーの行動後に敵ターンへ。soul スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
+  /** プレイヤーの行動後に敵ターンへ。undertale スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
    *  classic なら従来どおり一定時間後に即時ダメージ。 */
   const queueEnemyTurn = (delay = 1350) => {
     if (isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
-      clearQueuedSoulTurnTimer();
+      clearQueuedUndertaleTurnTimer();
       clearEnemyBubbleTimers();
-      queuedSoulTurnTimerRef.current = setTimeout(() => {
-        queuedSoulTurnTimerRef.current = null;
-        soulEnemyTurn();
+      queuedUndertaleTurnTimerRef.current = setTimeout(() => {
+        queuedUndertaleTurnTimerRef.current = null;
+        undertaleEnemyTurn();
       }, delay);
     } else {
       setTimeout(() => enemyTurn(), delay);
@@ -2331,7 +2331,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   /** デルタルーン風パーティ戦闘：1人の行動が終わったあとに呼ぶ。まだ行動していない生存メンバーがいれば
-   *  その人の番へ進める（メニューへ戻る）。全員行動済みなら敵ターンへ進む。'soul'（パーティなし）は無関係。 */
+   *  その人の番へ進める（メニューへ戻る）。全員行動済みなら敵ターンへ進む。'undertale'（パーティなし）は無関係。 */
   const dtAdvanceTurn = () => {
     if (gameDataRef.current.battle?.style !== 'deltarune') { queueEnemyTurn(); return; }
     if (dtStageRef.current === 'execute') {
@@ -2344,8 +2344,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const next = party.findIndex((m, i) => i > dtTurnIdxRef.current && m.hp > 0);
     if (next >= 0) {
       dtTurnIdxRef.current = next; setDtTurnIdx(next);
-      setSoulMenu('root'); setSoulPhase('menu');
-      setSoulRootCursor(0); soulRootCursorRef.current = 0;
+      setUndertaleMenu('root'); setUndertalePhase('menu');
+      setUndertaleRootCursor(0); undertaleRootCursorRef.current = 0;
       // 直前の行動 appendLog で canAct=false になっているので、次のメンバーが行動できるよう戻す。
       // 原作は次のメンバーのコマンドが待ち時間なしで出る（tlDR の party_ui_lerp もボタン確定の
       // 1〜2フレーム後には表示を始める）ため、ここで遅延は入れない
@@ -2365,7 +2365,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   /** デルタルーン風パーティ戦闘：選択済みキューの現在位置の行動を実行する。
-   *  たたかう(attack)はタイミングバーUIを開くだけ（結果は resolveSoulAttack/missSoulAttack が処理）、
+   *  たたかう(attack)はタイミングバーUIを開くだけ（結果は resolveUndertaleAttack/missUndertaleAttack が処理）、
    *  それ以外は対応する do/use 系関数を直接呼ぶ（各関数の末尾で dtAdvanceTurn を呼び、次の行動へ進む）。 */
   const dtRunQueueStep = () => {
     const q = dtQueueRef.current;
@@ -2376,16 +2376,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     const action = q[dtExecPosRef.current];
     dtTurnIdxRef.current = action.idx; setDtTurnIdx(action.idx);
-    setSoulMenu('root');
+    setUndertaleMenu('root');
     // 「たたかう」が連続するあいだは 'menu' を経由させない（複数行のタイミングバーが同時表示され続けるように、
     // 行が切り替わる瞬間もオーバーレイをマウントしたままにする）。それ以外の行動は今まで通り一度 'menu' に戻す。
-    if (action.kind !== 'attack') setSoulPhase('menu');
+    if (action.kind !== 'attack') setUndertalePhase('menu');
     setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
     // 「たたかう」の対象は選択時に確定済み（対象が倒れていれば解決時に自動で付け替える）
     if (action.kind === 'attack') attackTargetRef.current = action.target ?? aliveFoeIdxs()[0] ?? 0;
     // setBattle の反映（canAct=true）を待ってから実行関数を呼ぶ（battleViewRef は render 時に同期されるため）
     setTimeout(() => {
-      if (action.kind === 'attack') setSoulPhase('attack');
+      if (action.kind === 'attack') setUndertalePhase('attack');
       else if (action.kind === 'act' && action.move) doMove(action.move, action.target);
       else if (action.kind === 'item' && action.item) useHealItem(action.item, true);
       else if (action.kind === 'spell' && action.spell) castSpell(action.spell, action.target);
@@ -2404,10 +2404,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       dtAdvanceTurn();
       return;
     }
-    setSoulPhase('attack');
+    setUndertalePhase('attack');
   };
 
-  /** soul/deltarune: 敵セリフを条件で選ぶ。各行の条件（actUsed / hpBelowPct / hpAbovePct / mercyAbovePct）
+  /** undertale/deltarune: 敵セリフを条件で選ぶ。各行の条件（actUsed / hpBelowPct / hpAbovePct / mercyAbovePct）
    *  は AND 判定：指定された条件を1つでも満たさない行は候補から外れる。候補のうち条件数が最多
    *  （＝最も具体的）な行を採用し、同率なら hpBelowPct が小さい（より切迫した）行を優先、
    *  なお同率ならランダムに1つ選ぶ。該当なしなら null。 */
@@ -2459,22 +2459,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return 'top';
   };
 
-  const beginSoulCombat = (move: { name: string; power: number; heal?: boolean; miniScript?: string; soulMode?: SoulMode; dialogue?: (string | EnemyDialogueLine)[] } | null, dmg: number) => {
+  const beginUndertaleCombat = (move: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] } | null, dmg: number) => {
     const b = battleRef.current;
     const script = move?.miniScript || b.entity?.def?.miniScript || b.miniScript;
-    const mode: SoulMode = move?.soulMode ?? b.entity?.def?.soulMode ?? b.soulMode ?? 'red';
+    const mode: UndertaleMode = move?.undertaleMode ?? b.entity?.def?.undertaleMode ?? b.undertaleMode ?? 'red';
     const laneYs = [40, 88, 136];
-    soulDodgeRef.current = {
+    undertaleDodgeRef.current = {
       frames: 0, duration: 240, pattern: Math.floor(Math.random() * 3), dmg, bullets: [],
       attackers: Math.max(1, aliveFoeIdxs().length),
       hx: 88, hy: mode === 'purple' ? laneYs[1] : mode === 'green' ? 88 : 118, invuln: 30, miniScript: script,
       mode, gvy: 0, grounded: true, jumpHeld: 0, shieldDir: null, lane: 1, shots: [], shotCool: 0,
     };
-    setSoulPhase('dodge');
+    setUndertalePhase('dodge');
   };
 
-  /** soul: 敵ターン開始。ダメージ演出のあとに予告テキストを表示し、消えたら弾幕よけへ進む。 */
-  const soulEnemyTurn = () => {
+  /** undertale: 敵ターン開始。ダメージ演出のあとに予告テキストを表示し、消えたら弾幕よけへ進む。 */
+  const undertaleEnemyTurn = () => {
     const b = battleRef.current; const pr = progressRef.current;
     if (!b.active) return;
     clearEnemyBubbleTimers();
@@ -2508,9 +2508,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const groupLabel = alive.length > 1 ? `${b.enemyName}たち` : (firstAlive?.name ?? b.enemyName);
     appendLog(move ? `${groupLabel}の ${move.name}！` : `${groupLabel}の こうげき！`);
     if (!bubbleEntries.length) {
-      soulCombatStartTimerRef.current = setTimeout(() => {
-        soulCombatStartTimerRef.current = null;
-        beginSoulCombat(move, dmg);
+      undertaleCombatStartTimerRef.current = setTimeout(() => {
+        undertaleCombatStartTimerRef.current = null;
+        beginUndertaleCombat(move, dmg);
       }, ENEMY_BUBBLE_TO_COMBAT_MS);
       return;
     }
@@ -2522,9 +2522,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       enemyBubbleIdRef.current++;
       setEnemyBubbles(new Map());
     }, bubbleMs);
-    soulCombatStartTimerRef.current = setTimeout(() => {
-      soulCombatStartTimerRef.current = null;
-      beginSoulCombat(move, dmg);
+    undertaleCombatStartTimerRef.current = setTimeout(() => {
+      undertaleCombatStartTimerRef.current = null;
+      beginUndertaleCombat(move, dmg);
     }, bubbleMs + ENEMY_BUBBLE_TO_COMBAT_MS);
   };
 
@@ -2533,16 +2533,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const dtNextIsAttack = () =>
     dtStageRef.current === 'execute' && dtQueueRef.current[dtExecPosRef.current + 1]?.kind === 'attack';
 
-  /** soul: タイミングバーの結果からダメージを与える。的（target）の有効ゾーン内で止めたときのみダメージ。
+  /** undertale: タイミングバーの結果からダメージを与える。的（target）の有効ゾーン内で止めたときのみダメージ。
    *  ゾーン外＝ミス、ゾーン内＝ヒット、的のピンポイント内＝会心。
-   *  soul（アンダーテール）は的が中央（0.5）、デルタルーンは左端固定（DT_FIGHT_TARGET）。 */
-  const resolveSoulAttack = (pos: number, target = 0.5) => {
+   *  undertale（アンダーテール）は的が中央（0.5）、デルタルーンは左端固定（DT_FIGHT_TARGET）。 */
+  const resolveUndertaleAttack = (pos: number, target = 0.5) => {
     const b = battleRef.current; const pr = progressRef.current;
     const dist = Math.abs(pos - target);
     const isDR = gameDataRef.current.battle?.style === 'deltarune';
     // 的の有効ゾーン判定：デルタルーンは左端 fixed（0〜0.26）、アンダーテールは中央（±0.07）
     const inHitZone = isDR ? (pos >= 0.0 && pos <= 0.26) : dist < 0.07;
-    if (!inHitZone) { missSoulAttack(pos); return; }
+    if (!inHitZone) { missUndertaleAttack(pos); return; }
     // ピンポイント判定：デルタルーン（0.02〜0.14）、アンダーテール（±0.02）
     const inCritZone = isDR ? (pos >= 0.02 && pos <= 0.14) : dist < 0.02;
     const mult = inCritZone ? 1.6 : 1.2;
@@ -2564,27 +2564,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (attacker) dtPlayMemberAnim(attacker.id, 'attack', 700);
       setDtAttackDone(p => ({ ...p, [memberIdx]: { result: inCritZone ? 'crit' : 'hit', pos } }));
     }
-    playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+    playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
     // 次も「たたかう」が控えているあいだは 'attack' のままにして、複数行のタイミングバーオーバーレイを
     // たたまずに連続表示する（reference の o_enc_fight が全員ぶんの棒を同時に見せているのを再現）。
     // ただしこの一撃で全滅させた場合は、以降の「たたかう」キューは実行されず dtAdvanceTurn も
     // 呼ばれない（over で早期 return する）ため、'attack' のまま残してしまうとタイミングバーが
     // 消えずに残り続け、この後に出す撃破/レベルアップ等のメッセージを覆い隠してしまう。
-    if (over || !dtNextIsAttack()) setSoulPhase('menu');
+    if (over || !dtNextIsAttack()) setUndertalePhase('menu');
     const targetLabel = b.foes.length > 1 && targetFoe ? `${targetFoe.name}に ` : '';
     appendLog(`${inCritZone ? '会心の いちげき！ ' : ''}${targetLabel}${dmg}のダメージ！${killed && targetFoe ? ` ${targetFoe.name}を たおした！` : ''}`, { canAct: false });
     if (over) return;
     dtAdvanceTurn();
   };
 
-  const missSoulAttack = (missPos = 0) => {
+  const missUndertaleAttack = (missPos = 0) => {
     if (gameDataRef.current.battle?.style === 'deltarune') {
-      // resolveSoulAttack 同様、updater 実行時には dtAdvanceTurn で担当が進んでいるため先に確定させる
+      // resolveUndertaleAttack 同様、updater 実行時には dtAdvanceTurn で担当が進んでいるため先に確定させる
       const memberIdx = dtTurnIdxRef.current;
       setDtAttackDone(p => ({ ...p, [memberIdx]: { result: 'miss', pos: missPos } }));
     }
     triggerEnemyMissFx(retargetFoe(attackTargetRef.current));
-    if (!dtNextIsAttack()) setSoulPhase('menu');
+    if (!dtNextIsAttack()) setUndertalePhase('menu');
     appendLog('こうげきは ハズれた！', { canAct: false });
     dtAdvanceTurn();
   };
@@ -2653,7 +2653,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const dmg = Math.max(1, Math.round(m.power * (0.85 + Math.random() * 0.3)));
       if (dodge && foe) {
         const { killed, over } = damageFoe(tIdx, dmg);
-        playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+        playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
         appendLog(`${m.name}！ ${b.foes.length > 1 ? `${foe.name}に ` : ''}${dmg}のダメージ${killed ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
         if (over) return;
       } else {
@@ -2701,7 +2701,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 呪文固有の命中SE（ルードバスターの snd_rudebuster_hit 等）があれば共通音の代わりに鳴らす
       playSfx(spell.hitSfxUrl
         ? { ref: `direct:${spell.hitSfxUrl}`, src: spell.hitSfxUrl, type: 'direct' as const }
-        : (soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+        : (undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
       appendLog(`「${spell.name}」！ ${b.foes.length > 1 && foe ? `${foe.name}に ` : ''}${dmg}のダメージ${killed && foe ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
       if (over) return;
     }
@@ -2711,12 +2711,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // ── 複数体戦：行動対象の選択 ────────────────────────────────────────────
   /** 選ばれた対象で保留アクションを実行する。 */
   const dispatchTarget = (sel: { kind: 'fight' | 'act' | 'spell'; move?: BattleMove; spell?: PartySpell }, foeIdx: number) => {
-    setSoulMenu('root');
-    setSoulTargetSel(null); soulTargetSelRef.current = null;
+    setUndertaleMenu('root');
+    setUndertaleTargetSel(null); undertaleTargetSelRef.current = null;
     if (sel.kind === 'fight') {
       attackTargetRef.current = foeIdx;
       if (gameDataRef.current.battle?.style === 'deltarune') dtChooseFight(foeIdx);
-      else setSoulPhase('attack');
+      else setUndertalePhase('attack');
     } else if (sel.kind === 'act' && sel.move) {
       doMove(sel.move, foeIdx);
     } else if (sel.kind === 'spell' && sel.spell) {
@@ -2727,9 +2727,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const beginTargetSelect = (sel: { kind: 'fight' | 'act' | 'spell'; move?: BattleMove; spell?: PartySpell }) => {
     const alive = aliveFoeIdxs();
     if (alive.length <= 1) { dispatchTarget(sel, alive[0] ?? 0); return; }
-    setSoulTargetSel(sel); soulTargetSelRef.current = sel;
-    setSoulTargetCursor(alive[0]); soulTargetCursorRef.current = alive[0];
-    setSoulMenu('target');
+    setUndertaleTargetSel(sel); undertaleTargetSelRef.current = sel;
+    setUndertaleTargetCursor(alive[0]); undertaleTargetCursorRef.current = alive[0];
+    setUndertaleMenu('target');
   };
 
   /** デルタルーン風パーティ戦闘専用：「まもる」。TPを加算し、このメンバーの次の被弾ダメージを軽減する。 */
@@ -2813,7 +2813,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!foe || foe.gone) return false;
     const beforePct = foe.maxHp > 0 ? foe.hp / foe.maxHp : 0;
     const { killed, over } = damageFoe(tIdx, dmg);
-    playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).enemyDamage);
+    playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
     const tiredNow = gameDataRef.current.battle?.style === 'milky' && !killed
       && beforePct > 0.3 && foe.maxHp > 0 && foe.hp / foe.maxHp <= 0.3;
     const targetLabel = b.foes.length > 1 ? `${foe.name}に ` : '';
@@ -2961,7 +2961,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const over = ptHitFoe(`${actor.name}の こうげき！`, dmg, targetIdx);
       if (over) return;
       if (just) {
-        playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm);
+        playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm);
         ptDelay(() => {
           const extra = Math.max(1, Math.round(calcDmg(actor.atk, battleRef.current.enemyDef) * 0.6));
           const over2 = ptHitFoe(`ジャストミート！ ${actor.name}の ついげき！`, extra, targetIdx);
@@ -3262,33 +3262,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const ch = lastLogLine[i];
       i++;
       setLogRevealCount(i);
-      if (ch && ch.trim()) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textTyper);
+      if (ch && ch.trim()) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).textTyper);
       if (i >= lastLogLine.length) clearInterval(id);
     }, 32);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastLogLine, battleStyle]);
 
-  // soul（アンダーテール系のみ）: たたかう＝タイミングバー。バーが右端まで行くとミス。
+  // undertale（アンダーテール系のみ）: たたかう＝タイミングバー。バーが右端まで行くとミス。
   // クリック/Z/Enter/Spaceで停止。デルタルーンは下の専用マルチバー実装（dtFightPos）を使う。
   useEffect(() => {
-    if (!inBattle || !isDodgeBattleStyle(battleStyle) || battleStyle === 'deltarune' || soulPhase !== 'attack') return;
-    soulBarRef.current = { pos: 0 };
+    if (!inBattle || !isDodgeBattleStyle(battleStyle) || battleStyle === 'deltarune' || undertalePhase !== 'attack') return;
+    undertaleBarRef.current = { pos: 0 };
     let raf = 0; let alive = true;
     const step = () => {
       if (!alive) return;
-      soulBarRef.current.pos += 0.013;
-      if (soulBarElRef.current) soulBarElRef.current.style.left = `${Math.min(100, soulBarRef.current.pos * 100)}%`;
-      if (soulBarRef.current.pos >= 1) { alive = false; missSoulAttack(soulBarRef.current.pos); return; }
+      undertaleBarRef.current.pos += 0.013;
+      if (undertaleBarElRef.current) undertaleBarElRef.current.style.left = `${Math.min(100, undertaleBarRef.current.pos * 100)}%`;
+      if (undertaleBarRef.current.pos >= 1) { alive = false; missUndertaleAttack(undertaleBarRef.current.pos); return; }
       raf = requestAnimationFrame(step);
     };
-    const stop = () => { if (!alive) return; alive = false; cancelAnimationFrame(raf); resolveSoulAttack(soulBarRef.current.pos); };
+    const stop = () => { if (!alive) return; alive = false; cancelAnimationFrame(raf); resolveUndertaleAttack(undertaleBarRef.current.pos); };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'z' || e.key === 'Z' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stop(); } };
     window.addEventListener('keydown', onKey);
     window.addEventListener('pointerdown', stop);
     raf = requestAnimationFrame(step);
     return () => { alive = false; cancelAnimationFrame(raf); window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', stop); };
-  }, [inBattle, battleStyle, soulPhase]);
+  }, [inBattle, battleStyle, undertalePhase]);
 
   /** デルタルーン: 「たたかう」を選んだメンバー全員ぶんのタイミングバーを同時に動かす
    *  （tlDR o_enc_fightstick 準拠）。全行の棒が並行して右端から左端の的へ流れ、行ごとに開始が
@@ -3298,7 +3298,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  左端に達するとミス。棒の毎フレーム移動は React を介さず dtStickElsRef の style.left を
    *  直接書く（巨大コンポーネントの60fps再レンダリング回避）。 */
   useEffect(() => {
-    if (!inBattle || battleStyle !== 'deltarune' || soulPhase !== 'attack') return;
+    if (!inBattle || battleStyle !== 'deltarune' || undertalePhase !== 'attack') return;
     const rows = dtAttackRowsRef.current;
     if (!rows.length) return;
     const t0 = performance.now();
@@ -3323,7 +3323,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const curOrder = rows.indexOf(cur);
       if (curOrder >= 0 && !resolvedLocal.has(cur) && sOf(curOrder) <= 0) {
         resolvedLocal.add(cur);
-        missSoulAttack();
+        missUndertaleAttack();
       }
       raf = requestAnimationFrame(step);
     };
@@ -3342,7 +3342,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (s > PRESSABLE) return; // 担当行の棒がまだ的に近づいていない：押下を無視（ミスにしない）
       resolvedLocal.add(cur);
       inputLockUntil = performance.now() + 250;
-      resolveSoulAttack(Math.max(0, s), DT_FIGHT_TARGET);
+      resolveUndertaleAttack(Math.max(0, s), DT_FIGHT_TARGET);
     };
     const isFireKey = (k: string) => k === 'z' || k === 'Z' || k === 'Enter' || k === ' ';
     const onKey = (e: KeyboardEvent) => {
@@ -3361,12 +3361,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 担当メンバーは dtTurnIdxRef 経由で参照し、依存に入れない（入れると担当交代のたびに
     // effect が張り直され、並行して走っている全行の棒がリセットされてしまう）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inBattle, battleStyle, soulPhase]);
+  }, [inBattle, battleStyle, undertalePhase]);
 
-  // soul: 敵ターン＝バトルボックス内の弾幕よけミニゲーム（176×176 の小キャンバス）。
+  // undertale: 敵ターン＝バトルボックス内の弾幕よけミニゲーム（176×176 の小キャンバス）。
   useEffect(() => {
-    if (!inBattle || !isDodgeBattleStyle(battleStyle) || soulPhase !== 'dodge') return;
-    const cv = soulCanvasRef.current; const st = soulDodgeRef.current;
+    if (!inBattle || !isDodgeBattleStyle(battleStyle) || undertalePhase !== 'dodge') return;
+    const cv = undertaleCanvasRef.current; const st = undertaleDodgeRef.current;
     if (!cv || !st) return;
     const ctx = cv.getContext('2d'); if (!ctx) return;
     const W = 176, H = 176, HR = 6;
@@ -3499,7 +3499,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const mode = st.mode;
 
       if (mode === 'green') {
-        // SOULは動かず、押した方向にシールドを構える
+        // UNDERTALEは動かず、押した方向にシールドを構える
         st.shieldDir = isUp ? 'up' : isDown ? 'down' : isLeft ? 'left' : isRight ? 'right' : null;
       } else if (mode === 'blue') {
         // 重力モード：左右移動＋Upでジャンプ（長押しでジャンプが高くなる）
@@ -3611,7 +3611,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
         }
       }
-      // デルタルーン：グレイズ（弾がハートをかすめる）でTPが溜まる（tlDR Engine の o_enc_soul_grazer 相当）。
+      // デルタルーン：グレイズ（弾がハートをかすめる）でTPが溜まる（tlDR Engine の o_enc_undertale_grazer 相当）。
       // 弾1発につき1回だけ加算し、被弾直後の無敵中は判定しない。
       if (gameDataRef.current.battle?.style === 'deltarune' && st.invuln <= 0) {
         for (const bl of st.bullets) {
@@ -3664,13 +3664,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         else ctx.fillRect(sx - 10, sy + 12, 20, 4);
       }
       if (st.invuln % 8 < 4) {
-        // デルタルーンは tlDR Engine の spr_soul をそのまま描く（未ロード時はベジェのハートでフォールバック）
-        const soulImg = gameDataRef.current.battle?.style === 'deltarune' ? getDodgeImg(TLDR_SOUL_SPRITE.frames[0]) : null;
-        if (soulImg && soulImg.complete && soulImg.naturalWidth > 0) {
+        // デルタルーンは tlDR Engine の spr_undertale をそのまま描く（未ロード時はベジェのハートでフォールバック）
+        const undertaleImg = gameDataRef.current.battle?.style === 'deltarune' ? getDodgeImg(TLDR_UNDERTALE_SPRITE.frames[0]) : null;
+        if (undertaleImg && undertaleImg.complete && undertaleImg.naturalWidth > 0) {
           ctx.save();
           ctx.translate(st.hx, st.hy);
           if (mode === 'yellow') ctx.rotate(Math.PI); // yellow は逆さ（砲台）向き
-          ctx.drawImage(soulImg, -8, -8, 16, 16);
+          ctx.drawImage(undertaleImg, -8, -8, 16, 16);
           ctx.restore();
         } else {
           drawHeart(st.hx, st.hy, HR + 2, '#ff1e3c', mode === 'yellow');
@@ -3684,7 +3684,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       if (st.frames >= st.duration) {
         alive = false;
-        setSoulPhase('menu'); setSoulMenu('root');
+        setUndertalePhase('menu'); setUndertaleMenu('root');
         if (gameDataRef.current.battle?.style === 'deltarune') {
           // 次のラウンドへ：全員また行動選択できるように「まもる」フラグと行動順をリセット
           // （downしたメンバーは飛ばす）。弾幕をしのいだご褒美として少しTPを加算する。
@@ -3704,12 +3704,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     raf = requestAnimationFrame(loop);
     return () => { alive = false; scriptCtx.cancelled = true; cancelAnimationFrame(raf); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inBattle, battleStyle, soulPhase]);
+  }, [inBattle, battleStyle, undertalePhase]);
 
-  /** soul: タッチ/マウスでハートを直接動かす。SOUL戦闘系プリセットでは方向キー操作のみに限定するため無効化。 */
-  const soulPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (isSoulPreset) return;
-    const st = soulDodgeRef.current; const cv = soulCanvasRef.current;
+  /** undertale: タッチ/マウスでハートを直接動かす。UNDERTALE戦闘系プリセットでは方向キー操作のみに限定するため無効化。 */
+  const undertalePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (isUndertalePreset) return;
+    const st = undertaleDodgeRef.current; const cv = undertaleCanvasRef.current;
     if (!st || !cv) return;
     const rect = cv.getBoundingClientRect();
     st.hx = Math.max(9, Math.min(167, (e.clientX - rect.left) / rect.width * 176));
@@ -5260,12 +5260,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
       if (encounterAlertRef.current?.phase === 'alert' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_ALERT_MS) {
         // 「！」演出終了 → 現在のBGMを止め、バトル開始SEを鳴らしてハート明滅演出へ
-        // （デルタルーンはそもそも 'alert' フェーズを使わないため、ここは soul/undertale 系のみ通る）
+        // （デルタルーンはそもそも 'alert' フェーズを使わないため、ここは undertale/undertale 系のみ通る）
         const alert = encounterAlertRef.current;
         alert.phase = 'flash';
         alert.startTime = performance.now();
         switchBgm(undefined);
-        playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).battleStart);
+        playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).battleStart);
       } else if (encounterAlertRef.current?.phase === 'flash' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_FLASH_MS) {
         const { fire } = encounterAlertRef.current;
         encounterAlertRef.current = null;
@@ -6960,7 +6960,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, soulMode: boss.soulMode, dialogue: boss.dialogue, battleSprite: boss.battleSprite, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, undertaleMode: boss.undertaleMode, dialogue: boss.dialogue, battleSprite: boss.battleSprite, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => { }); }
               } else {
@@ -7176,7 +7176,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         else if (battleRef.current.active) {
           // 戦闘中は戦闘用アイテムメニューを開く
           const bs = gameDataRef.current.battle?.style ?? 'classic';
-          if (isDodgeBattleStyle(bs)) { setSoulMenu('item'); }
+          if (isDodgeBattleStyle(bs)) { setUndertaleMenu('item'); }
           else if (isPartyBattleStyle(bs)) { if (ptRef.current.phase === 'select') ptPatch({ menu: 'item', pending: null }); }
           else { setBattleItemsOpen(true); }
         }
@@ -7213,7 +7213,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 2;
           if (menuDownEdge) c += 2;
           c = ((c % n) + n) % n;
-          if (c !== invCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== invCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           invCursorRef.current = c; setInvCursor(c);
         }
       } else if (isPlaying && invMenuRef.current) {
@@ -7228,37 +7228,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % count) + count) % count;
-          if (c !== invMenuCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== invMenuCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           invMenuCursorRef.current = c; setInvMenuCursor(c);
         }
-      } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulPhaseRef.current === 'menu') {
+      } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && undertalePhaseRef.current === 'menu') {
         const isDt = gameDataRef.current.battle?.style === 'deltarune';
         // デルタルーンは原作同様、押しっぱなしでカーソルが高速移動する（アンダーテールはエッジのみ）
         const upMove = isDt ? menuRepeat(hold.up) : menuUpEdge;
         const downMove = isDt ? menuRepeat(hold.down) : menuDownEdge;
         const leftMove = isDt ? menuRepeat(hold.left) : menuLeftEdge;
         const rightMove = isDt ? menuRepeat(hold.right) : menuRightEdge;
-        if (soulMenuRef.current === 'root') {
+        if (undertaleMenuRef.current === 'root') {
           if (leftMove || rightMove) {
             const rootCount = isDt ? 5 : 4; // デルタルーンは FIGHT/ACT/ITEM/MERCY/DEFEND の5つ
-            let c = soulRootCursorRef.current;
+            let c = undertaleRootCursorRef.current;
             if (leftMove) c -= 1;
             if (rightMove) c += 1;
             c = ((c % rootCount) + rootCount) % rootCount;
-            if (c !== soulRootCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
-            soulRootCursorRef.current = c; setSoulRootCursor(c);
+            if (c !== undertaleRootCursorRef.current) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+            undertaleRootCursorRef.current = c; setUndertaleRootCursor(c);
           }
-        } else if (soulMenuRef.current === 'target') {
+        } else if (undertaleMenuRef.current === 'target') {
           // ターゲット選択：生きている敵の間だけをカーソルが巡回する
           const alive = aliveFoeIdxs();
           if (alive.length > 0 && (upMove || downMove || leftMove || rightMove)) {
-            let n = Math.max(0, alive.indexOf(soulTargetCursorRef.current));
+            let n = Math.max(0, alive.indexOf(undertaleTargetCursorRef.current));
             if (upMove || leftMove) n -= 1;
             if (downMove || rightMove) n += 1;
             n = ((n % alive.length) + alive.length) % alive.length;
             const idx = alive[n];
-            if (idx !== soulTargetCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
-            soulTargetCursorRef.current = idx; setSoulTargetCursor(idx);
+            if (idx !== undertaleTargetCursorRef.current) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+            undertaleTargetCursorRef.current = idx; setUndertaleTargetCursor(idx);
           }
         } else {
           // ACT / ITEM / MERCY サブメニュー。デルタルーンの2番目のコマンドはメンバーで中身が変わる：
@@ -7267,11 +7267,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const curSpells = isDt ? (dtParty()[dtTurnIdxRef.current] ? (bd2?.party?.[dtTurnIdxRef.current]?.spells ?? []) : []) : [];
           const curMoveCount = isDt && curSpells.length ? 0 : (bd2?.moves.length ?? 0);
           let count = 1; let cols = 1;
-          if (soulMenuRef.current === 'act') { count = curMoveCount + curSpells.length + 1; cols = 2; }
-          else if (soulMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
-          else if (soulMenuRef.current === 'mercy') { count = 3; cols = 1; }
+          if (undertaleMenuRef.current === 'act') { count = curMoveCount + curSpells.length + 1; cols = 2; }
+          else if (undertaleMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
+          else if (undertaleMenuRef.current === 'mercy') { count = 3; cols = 1; }
           if (count > 0 && (upMove || downMove || leftMove || rightMove)) {
-            let c = soulSubCursorRef.current;
+            let c = undertaleSubCursorRef.current;
             if (cols === 2) {
               if (leftMove) c -= 1;
               if (rightMove) c += 1;
@@ -7282,8 +7282,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (downMove) c += 1;
             }
             c = ((c % count) + count) % count;
-            if (c !== soulSubCursorRef.current) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
-            soulSubCursorRef.current = c; setSoulSubCursor(c);
+            if (c !== undertaleSubCursorRef.current) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
+            undertaleSubCursorRef.current = c; setUndertaleSubCursor(c);
           }
         }
       } else if (isPlaying && eventChoiceRef.current) {
@@ -7294,7 +7294,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== eventChoiceCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== eventChoiceCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           eventChoiceCursorRef.current = c; setEventChoiceCursor(c);
         }
       } else if (isPlaying && shopModalRef.current) {
@@ -7305,7 +7305,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== shopCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== shopCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           shopCursorRef.current = c; setShopCursor(c);
         }
       } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style) && !isPartyBattleStyle(gameDataRef.current.battle?.style)) {
@@ -7340,7 +7340,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (menuUpEdge) c -= 1;
           if (menuDownEdge) c += 1;
           c = ((c % n) + n) % n;
-          if (c !== titleCursorRef.current && isSoulPreset) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuSwitch);
+          if (c !== titleCursorRef.current && isUndertalePreset) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           titleCursorRef.current = c; setTitleCursor(c);
         }
       }
@@ -7348,7 +7348,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // ── Z / action：メッセージ送り・会話送り・メニュー確定（優先）／ 配置（編集モード） ──
       const isZ = keys.has('z') || keys.has('Z') || touchRef.current.action;
       if (isZ && !prevZRef.current) {
-        if (soulAdvanceRef.current) {
+        if (undertaleAdvanceRef.current) {
           const bubs = enemyBubblesRef.current;
           const hasIncomplete = [...bubs.values()].some(b => b.reveal < b.text.length);
           if (hasIncomplete) {
@@ -7359,9 +7359,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               return updated;
             });
           } else {
-            const advance = soulAdvanceRef.current;
-            soulAdvanceRef.current = null;
-            setSoulWaiting(false);
+            const advance = undertaleAdvanceRef.current;
+            undertaleAdvanceRef.current = null;
+            setUndertaleWaiting(false);
             clearEnemyBubble();
             advance();
           }
@@ -7391,53 +7391,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           playMenuConfirmSfx();
           setInvMenu({ slotIdx: invCursorRef.current }); invMenuRef.current = { slotIdx: invCursorRef.current };
           setInvMenuCursor(0); invMenuCursorRef.current = 0;
-        } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulPhaseRef.current === 'menu') {
+        } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && undertalePhaseRef.current === 'menu') {
           const canMenuNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
           const isDt = gameDataRef.current.battle?.style === 'deltarune';
-          if (soulMenuRef.current === 'root') {
+          if (undertaleMenuRef.current === 'root') {
             if (canMenuNow) {
-              const r = soulRootCursorRef.current;
-              if (isDt && r === 4) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); doDefend(); }
-              else if (r === 0) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); beginTargetSelect({ kind: 'fight' }); }
+              const r = undertaleRootCursorRef.current;
+              if (isDt && r === 4) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); doDefend(); }
+              else if (r === 0) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); beginTargetSelect({ kind: 'fight' }); }
               else {
-                playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm);
-                if (r === 1) setSoulMenu('act');
-                else if (r === 2) setSoulMenu('item');
-                else setSoulMenu('mercy');
+                playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm);
+                if (r === 1) setUndertaleMenu('act');
+                else if (r === 2) setUndertaleMenu('item');
+                else setUndertaleMenu('mercy');
               }
             }
-          } else if (soulMenuRef.current === 'target') {
+          } else if (undertaleMenuRef.current === 'target') {
             // ターゲット選択の確定：保留していた行動を選んだ敵へ実行
-            if (canMenuNow && soulTargetSelRef.current) {
-              playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm);
-              dispatchTarget(soulTargetSelRef.current, soulTargetCursorRef.current);
+            if (canMenuNow && undertaleTargetSelRef.current) {
+              playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm);
+              dispatchTarget(undertaleTargetSelRef.current, undertaleTargetCursorRef.current);
             }
-          } else if (soulMenuRef.current === 'act') {
+          } else if (undertaleMenuRef.current === 'act') {
             const curMember = isDt ? gameDataRef.current.battle?.party?.[dtTurnIdxRef.current] : undefined;
             const spells = curMember?.spells ?? [];
             // 呪文持ちメンバーのメニューは「まほう」＝呪文のみ（ACT技は呪文なしのクリス専用）
             const moves = isDt && spells.length ? [] : (gameDataRef.current.battle?.moves ?? []);
-            const idx = soulSubCursorRef.current;
+            const idx = undertaleSubCursorRef.current;
             if (idx < moves.length) {
               // 自分回復のこうどうは対象不要。それ以外（敵意/ダメージ）は対象の敵を選んでから実行
               const m = moves[idx];
-              if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); if (m.heal) doMove(m); else beginTargetSelect({ kind: 'act', move: m }); }
+              if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); if (m.heal) doMove(m); else beginTargetSelect({ kind: 'act', move: m }); }
             }
             else if (idx < moves.length + spells.length) {
               const spell = spells[idx - moves.length];
-              if (canMenuNow && tpRef.current >= spell.tpCost) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); if (spell.heal) castSpell(spell); else beginTargetSelect({ kind: 'spell', spell }); }
+              if (canMenuNow && tpRef.current >= spell.tpCost) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); if (spell.heal) castSpell(spell); else beginTargetSelect({ kind: 'spell', spell }); }
             }
-            else { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel); setSoulMenu('root'); }
-          } else if (soulMenuRef.current === 'item') {
+            else { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel); setUndertaleMenu('root'); }
+          } else if (undertaleMenuRef.current === 'item') {
             const items = usableItems();
-            const idx = soulSubCursorRef.current;
-            if (idx < items.length) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); useHealItem(items[idx], true); } }
-            else { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel); setSoulMenu('root'); }
-          } else if (soulMenuRef.current === 'mercy') {
-            const idx = soulSubCursorRef.current;
-            if (idx === 0) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); doSpare(); } }
-            else if (idx === 1) { if (canMenuNow) { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuConfirm); setSoulMenu('root'); doFlee(); } }
-            else { playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel); setSoulMenu('root'); }
+            const idx = undertaleSubCursorRef.current;
+            if (idx < items.length) { if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); useHealItem(items[idx], true); } }
+            else { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel); setUndertaleMenu('root'); }
+          } else if (undertaleMenuRef.current === 'mercy') {
+            const idx = undertaleSubCursorRef.current;
+            if (idx === 0) { if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); doSpare(); } }
+            else if (idx === 1) { if (canMenuNow) { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuConfirm); setUndertaleMenu('root'); doFlee(); } }
+            else { playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel); setUndertaleMenu('root'); }
           }
         } else if (isPlaying && eventChoiceRef.current) {
           const choice = eventChoiceRef.current;
@@ -7518,10 +7518,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setInvMenu(null); invMenuRef.current = null;
         } else if (isPlaying && invOpenRef.current) {
           setInvOpen(false);
-        } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && soulMenuRef.current !== 'root') {
-          setSoulMenu('root');
+        } else if (isPlaying && battleRef.current.active && isDodgeBattleStyle(gameDataRef.current.battle?.style) && undertaleMenuRef.current !== 'root') {
+          setUndertaleMenu('root');
         } else if (isPlaying && battleRef.current.active && gameDataRef.current.battle?.style === 'deltarune'
-          && soulPhaseRef.current === 'menu' && soulMenuRef.current === 'root'
+          && undertalePhaseRef.current === 'menu' && undertaleMenuRef.current === 'root'
           && dtStageRef.current === 'select' && dtSelLogRef.current.length > 0 && !battleViewRef.current?.over) {
           // ルートメニューでのX＝1つ前に選択を確定したメンバーへ戻り、その行動を取り消す
           // （tlDR o_enc の CANCEL：party_selection を戻して action_queue 末尾を pop + cancel()）
@@ -7534,9 +7534,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             dtQueueRef.current.pop();
           }
           dtTurnIdxRef.current = last.idx; setDtTurnIdx(last.idx);
-          setSoulRootCursor(0); soulRootCursorRef.current = 0;
+          setUndertaleRootCursor(0); undertaleRootCursorRef.current = 0;
           setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
-          playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).menuCancel);
+          playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuCancel);
         } else if (isPlaying && battleRef.current.active && isPartyBattleStyle(gameDataRef.current.battle?.style)) {
           // パーティ制戦闘のX：サブメニュー/対象選択中なら一段もどる。ルートなら直前の選択を取り消す
           if (ptRef.current.phase === 'select') {
@@ -8064,8 +8064,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const talk = npcTalkRef.current;
         const { entity: e, text, startTime, wrapped } = talk;
         const shown = Math.min(text.length, Math.floor((performance.now() - startTime) / 50));
-        if (isSoulPreset && shown > talk.lastShown) {
-          if (text.slice(talk.lastShown, shown).trim()) playSfx((soulSfx ?? SOUL_SFX_BY_PRESET.undertale).textVoice);
+        if (isUndertalePreset && shown > talk.lastShown) {
+          if (text.slice(talk.lastShown, shown).trim()) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).textVoice);
           talk.lastShown = shown;
         }
         if (shown > 0) {
@@ -9650,11 +9650,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             )}
 
             {/* ── ターン制戦闘オーバーレイ ── */}
-            {/* ── アンダーテール風戦闘（soul）── */}
-            {battle && battleStyle === 'soul' && (() => {
+            {/* ── アンダーテール風戦闘（undertale）── */}
+            {battle && battleStyle === 'undertale' && (() => {
               const pr = progressRef.current;
               const bd = gameData.battle!;
-              const canMenu = battle.canAct && !battle.over && soulPhase === 'menu';
+              const canMenu = battle.canAct && !battle.over && undertalePhase === 'menu';
               // 1体でも みのがし可能な敵がいれば MERCY まわりを光らせる
               const ready = battle.foes.some(f => !f.gone && foeSpareReady(f));
               return (
@@ -9674,7 +9674,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           const pop = enemyDmgPopup[i];
                           const gauge = enemyGaugeAnim[i];
                           const fReady = foeSpareReady(f);
-                          const targeting = soulMenu === 'target' && soulTargetCursor === i;
+                          const targeting = undertaleMenu === 'target' && undertaleTargetCursor === i;
                           return (
                             <div key={i} className="relative flex flex-col items-center justify-end"
                               style={{
@@ -9705,7 +9705,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   )}
                                 </div>
                               </div>
-                              <div className={`relative leading-none drop-shadow transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                              <div className={`relative leading-none drop-shadow transition-transform ${undertalePhase === 'dodge' ? 'scale-90' : ''}`}>
                                 {f.sprite ? (() => {
                                   const es = f.sprite;
                                   const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
@@ -9726,89 +9726,89 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="bg-black border-4 border-white relative overflow-hidden"
                       style={{
-                        width: soulPhase === 'dodge' ? 184 : 'min(100%, 440px)',
-                        height: soulPhase === 'dodge' ? 184 : 128,
+                        width: undertalePhase === 'dodge' ? 184 : 'min(100%, 440px)',
+                        height: undertalePhase === 'dodge' ? 184 : 128,
                         transition: 'width 0.35s ease-in-out, height 0.35s ease-in-out',
                       }}>
-                      {soulPhase === 'dodge' ? (
-                        <canvas ref={soulCanvasRef} width={176} height={176}
+                      {undertalePhase === 'dodge' ? (
+                        <canvas ref={undertaleCanvasRef} width={176} height={176}
                           className="w-full h-full touch-none cursor-crosshair" style={{ imageRendering: 'pixelated' }}
-                          onPointerMove={soulPointerMove} onPointerDown={soulPointerMove}
+                          onPointerMove={undertalePointerMove} onPointerDown={undertalePointerMove}
                           onContextMenu={e => e.preventDefault()} />
-                      ) : soulPhase === 'attack' ? (
+                      ) : undertalePhase === 'attack' ? (
                         <div className="absolute inset-0 flex flex-col items-center justify-center px-3 gap-1.5">
                           <div className="text-white/70 text-[10px]">タイミングよく タップ / Zキー！</div>
                           <div className="relative w-full h-10 border-2 border-white/80 bg-[#0c0c14] overflow-hidden">
                             <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[14%] bg-emerald-500/25" />
                             <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[4%] bg-emerald-400/70" />
-                            <div ref={soulBarElRef} className="absolute inset-y-0 w-1 bg-white" style={{ left: '0%' }} />
+                            <div ref={undertaleBarElRef} className="absolute inset-y-0 w-1 bg-white" style={{ left: '0%' }} />
                           </div>
                         </div>
                       ) : (
                         <div className="absolute inset-0 p-2.5 text-white text-[11px] sm:text-sm leading-relaxed overflow-hidden">
-                          {soulMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
+                          {undertaleMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
                             <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                           ))}
-                          {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
+                          {undertaleWaiting && undertaleMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
                             && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
                               <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                             )}
-                          {soulMenu === 'act' && (
+                          {undertaleMenu === 'act' && (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                               {bd.moves.map((m, i) => (
                                 <button key={`m${i}`} disabled={!canMenu || pr.mp < m.cost}
-                                  onClick={() => { setSoulSubCursor(i); if (m.heal) { setSoulMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
-                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                                  {soulSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
+                                  onClick={() => { setUndertaleSubCursor(i); if (m.heal) { setUndertaleMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
+                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                  {undertaleSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
                                 </button>
                               ))}
-                              <button onClick={() => { setSoulSubCursor(bd.moves.length); setSoulMenu('root'); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === bd.moves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                                {soulSubCursor === bd.moves.length ? '❤ ' : '  '}もどる
+                              <button onClick={() => { setUndertaleSubCursor(bd.moves.length); setUndertaleMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === bd.moves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {undertaleSubCursor === bd.moves.length ? '❤ ' : '  '}もどる
                               </button>
                             </div>
                           )}
-                          {soulMenu === 'target' && (
+                          {undertaleMenu === 'target' && (
                             <div className="flex flex-col gap-1">
                               <p className="text-gray-400 text-[10px] sm:text-xs">＊ だれに？</p>
                               {battle.foes.map((f, i) => !f.gone && (
                                 <button key={i} disabled={!canMenu}
-                                  onClick={() => { setSoulTargetCursor(i); soulTargetCursorRef.current = i; if (soulTargetSelRef.current) dispatchTarget(soulTargetSelRef.current, i); }}
-                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulTargetCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                                  {soulTargetCursor === i ? '❤ ' : '  '}{f.name}
+                                  onClick={() => { setUndertaleTargetCursor(i); undertaleTargetCursorRef.current = i; if (undertaleTargetSelRef.current) dispatchTarget(undertaleTargetSelRef.current, i); }}
+                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleTargetCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                  {undertaleTargetCursor === i ? '❤ ' : '  '}{f.name}
                                 </button>
                               ))}
                             </div>
                           )}
-                          {soulMenu === 'item' && (
+                          {undertaleMenu === 'item' && (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
                               {usableItems().map((it, i) => (
                                 <button key={it.id} disabled={!canMenu}
-                                  onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); useHealItem(it, true); }}
-                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                                  {soulSubCursor === i ? '❤ ' : '  '}{it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                                  onClick={() => { setUndertaleSubCursor(i); setUndertaleMenu('root'); useHealItem(it, true); }}
+                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                  {undertaleSubCursor === i ? '❤ ' : '  '}{it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
                                 </button>
                               ))}
                               {usableItems().length === 0 && <p className="text-gray-500">もちものが ない…</p>}
-                              <button onClick={() => { setSoulSubCursor(usableItems().length); setSoulMenu('root'); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === usableItems().length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                                {soulSubCursor === usableItems().length ? '❤ ' : '  '}もどる
+                              <button onClick={() => { setUndertaleSubCursor(usableItems().length); setUndertaleMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === usableItems().length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {undertaleSubCursor === usableItems().length ? '❤ ' : '  '}もどる
                               </button>
                             </div>
                           )}
-                          {soulMenu === 'mercy' && (
+                          {undertaleMenu === 'mercy' && (
                             <div className="flex flex-col gap-1">
-                              <button disabled={!canMenu} onClick={() => { setSoulSubCursor(0); setSoulMenu('root'); doSpare(); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : soulSubCursor === 0 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                                {soulSubCursor === 0 ? '❤ ' : '  '}{bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
+                              <button disabled={!canMenu} onClick={() => { setUndertaleSubCursor(0); setUndertaleMenu('root'); doSpare(); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : undertaleSubCursor === 0 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                {undertaleSubCursor === 0 ? '❤ ' : '  '}{bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
                               </button>
-                              <button disabled={!canMenu} onClick={() => { setSoulSubCursor(1); setSoulMenu('root'); doFlee(); }}
-                                className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 1 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                                {soulSubCursor === 1 ? '❤ ' : '  '}{bd.labels.flee}
+                              <button disabled={!canMenu} onClick={() => { setUndertaleSubCursor(1); setUndertaleMenu('root'); doFlee(); }}
+                                className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === 1 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                {undertaleSubCursor === 1 ? '❤ ' : '  '}{bd.labels.flee}
                               </button>
-                              <button onClick={() => { setSoulSubCursor(2); setSoulMenu('root'); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 2 ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                                {soulSubCursor === 2 ? '❤ ' : '  '}もどる
+                              <button onClick={() => { setUndertaleSubCursor(2); setUndertaleMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === 2 ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {undertaleSubCursor === 2 ? '❤ ' : '  '}もどる
                               </button>
                             </div>
                           )}
@@ -9831,16 +9831,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   {/* FIGHT / ACT / ITEM / MERCY（十字キー左右でカーソル移動、Z/Aで確定） */}
                   <div className="flex justify-center gap-1.5 sm:gap-2 shrink-0">
                     {([
-                      { label: bd.labels.attack, sel: soulMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
-                      { label: bd.labels.move, sel: soulMenu === 'act', onClick: () => canMenu && setSoulMenu(m => m === 'act' ? 'root' : 'act') },
-                      { label: bd.labels.item ?? 'アイテム', sel: soulMenu === 'item', onClick: () => canMenu && setSoulMenu(m => m === 'item' ? 'root' : 'item') },
-                      { label: bd.labels.mercy ?? 'みのがす', sel: soulMenu === 'mercy', mercy: true, onClick: () => canMenu && setSoulMenu(m => m === 'mercy' ? 'root' : 'mercy') },
+                      { label: bd.labels.attack, sel: undertaleMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
+                      { label: bd.labels.move, sel: undertaleMenu === 'act', onClick: () => canMenu && setUndertaleMenu(m => m === 'act' ? 'root' : 'act') },
+                      { label: bd.labels.item ?? 'アイテム', sel: undertaleMenu === 'item', onClick: () => canMenu && setUndertaleMenu(m => m === 'item' ? 'root' : 'item') },
+                      { label: bd.labels.mercy ?? 'みのがす', sel: undertaleMenu === 'mercy', mercy: true, onClick: () => canMenu && setUndertaleMenu(m => m === 'mercy' ? 'root' : 'mercy') },
                     ] as { label: string; sel: boolean; mercy?: boolean; onClick: () => void }[]).map((c, i) => (
-                      <button key={i} onClick={() => { setSoulRootCursor(i); c.onClick(); }} disabled={!canMenu}
+                      <button key={i} onClick={() => { setUndertaleRootCursor(i); c.onClick(); }} disabled={!canMenu}
                         className={`flex-1 max-w-[104px] py-2 border-2 bg-black text-[10px] sm:text-xs font-bold tracking-wider transition
-                          ${c.sel ? 'border-yellow-300 text-yellow-300' : c.mercy && ready ? 'border-yellow-400 text-yellow-300 animate-pulse' : soulMenu === 'root' && soulRootCursor === i ? 'border-yellow-300/70 text-yellow-300/90' : 'border-orange-400 text-orange-300 hover:border-yellow-300 hover:text-yellow-300'}
+                          ${c.sel ? 'border-yellow-300 text-yellow-300' : c.mercy && ready ? 'border-yellow-400 text-yellow-300 animate-pulse' : undertaleMenu === 'root' && undertaleRootCursor === i ? 'border-yellow-300/70 text-yellow-300/90' : 'border-orange-400 text-orange-300 hover:border-yellow-300 hover:text-yellow-300'}
                           disabled:opacity-40`}>
-                        {(c.sel || (soulMenu === 'root' && soulRootCursor === i)) ? '❤ ' : ''}{c.label}
+                        {(c.sel || (undertaleMenu === 'root' && undertaleRootCursor === i)) ? '❤ ' : ''}{c.label}
                       </button>
                     ))}
                   </div>
@@ -9855,7 +9855,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 弾幕よけ（バトルボックス）とこうげきタイミングバーはフィールド中央に重ねて表示する。 */}
             {battle && battleStyle === 'deltarune' && (() => {
               const bd = gameData.battle!;
-              const canMenu = battle.canAct && !battle.over && soulPhase === 'menu';
+              const canMenu = battle.canAct && !battle.over && undertalePhase === 'menu';
               // 1体でも みのがし可能な敵がいれば SPARE ボタンを光らせる
               const ready = battle.foes.some(f => !f.gone && foeSpareReady(f));
               const roster = dtParty();
@@ -9869,10 +9869,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // コマンド5種（tlDR Engine のボタンスプライト。frame0=通常/frame1=選択中）。
               // 2番目は呪文持ちなら POWER（まほう）、それ以外は ACT（こうどう）の絵柄になる。
               const cmds = [
-                { anim: TLDR_UI_SPRITES.btFight, label: bd.labels.attack, sel: soulMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
-                { anim: curSpells.length ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: curSpells.length ? 'まほう' : bd.labels.move, sel: soulMenu === 'act', onClick: () => canMenu && setSoulMenu(m => m === 'act' ? 'root' : 'act') },
-                { anim: TLDR_UI_SPRITES.btItem, label: bd.labels.item ?? 'アイテム', sel: soulMenu === 'item', onClick: () => canMenu && setSoulMenu(m => m === 'item' ? 'root' : 'item') },
-                { anim: TLDR_UI_SPRITES.btSpare, label: bd.labels.mercy ?? 'みのがす', sel: soulMenu === 'mercy', mercy: true, onClick: () => canMenu && setSoulMenu(m => m === 'mercy' ? 'root' : 'mercy') },
+                { anim: TLDR_UI_SPRITES.btFight, label: bd.labels.attack, sel: undertaleMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
+                { anim: curSpells.length ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: curSpells.length ? 'まほう' : bd.labels.move, sel: undertaleMenu === 'act', onClick: () => canMenu && setUndertaleMenu(m => m === 'act' ? 'root' : 'act') },
+                { anim: TLDR_UI_SPRITES.btItem, label: bd.labels.item ?? 'アイテム', sel: undertaleMenu === 'item', onClick: () => canMenu && setUndertaleMenu(m => m === 'item' ? 'root' : 'item') },
+                { anim: TLDR_UI_SPRITES.btSpare, label: bd.labels.mercy ?? 'みのがす', sel: undertaleMenu === 'mercy', mercy: true, onClick: () => canMenu && setUndertaleMenu(m => m === 'mercy' ? 'root' : 'mercy') },
                 { anim: TLDR_UI_SPRITES.btDefend, label: 'まもる', onClick: () => canMenu && doDefend() },
               ] as { anim: BattleSpriteAnim; label: string; sel?: boolean; mercy?: boolean; onClick: () => void }[];
               return (
@@ -9898,7 +9898,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         const sprites = bd.party?.[i]?.battleSprites;
                         const fx = dtAnimFx[m.id];
                         const kind: keyof PartyBattleSprites = down ? 'defeat'
-                          : fx?.kind ?? (soulPhase === 'attack' && i === dtTurnIdx ? 'attackReady'
+                          : fx?.kind ?? (undertalePhase === 'attack' && i === dtTurnIdx ? 'attackReady'
                             : dtDefendedRef.current.has(m.id) ? 'defend' : 'idle');
                         const anim = sprites ? (sprites[kind] ?? sprites.idle) : null;
                         // defend は「まもる」中ずっと表示され続ける状態なので、1周したら最終フレームで
@@ -9928,7 +9928,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       })}
                     </div>
                     {/* 敵（右側・1〜3体を縦に並べる。tlDR o_enc の敵スタックと同じ配置） */}
-                    <div className={`absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-0 transition-transform ${soulPhase === 'dodge' ? 'scale-90' : ''}`}>
+                    <div className={`absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1 z-0 transition-transform ${undertalePhase === 'dodge' ? 'scale-90' : ''}`}>
                       {(() => {
                         const aliveCount = battle.foes.filter((f, i) => !f.gone || dyingFoes[i]).length;
                         // 複数体のときはスプライトを小さくして縦に収める
@@ -9940,7 +9940,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           const pop = enemyDmgPopup[i];
                           const gauge = enemyGaugeAnim[i];
                           const fReady = foeSpareReady(f);
-                          const targeting = soulMenu === 'target' && soulTargetCursor === i;
+                          const targeting = undertaleMenu === 'target' && undertaleTargetCursor === i;
                           return (
                             <div key={i} className="relative flex flex-col items-center"
                               style={{
@@ -9993,12 +9993,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {/* 弾幕よけバトルボックス（メニュー中は出さない）。こうげきタイミングバーは
                         下段のテキスト/メニュー欄に重ねて表示する（参考実装の o_enc_fight 同様、
                         メッセージウィンドウの上にゲージが乗る配置）。 */}
-                    {soulPhase === 'dodge' && (
+                    {undertalePhase === 'dodge' && (
                       <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
                         <div className="bg-black border-4 border-white relative overflow-hidden pointer-events-auto" style={{ width: 184, height: 184 }}>
-                          <canvas ref={soulCanvasRef} width={176} height={176}
+                          <canvas ref={undertaleCanvasRef} width={176} height={176}
                             className="w-full h-full touch-none cursor-crosshair" style={{ imageRendering: 'pixelated' }}
-                            onPointerMove={soulPointerMove} onPointerDown={soulPointerMove}
+                            onPointerMove={undertalePointerMove} onPointerDown={undertalePointerMove}
                             onContextMenu={e => e.preventDefault()} />
                         </div>
                       </div>
@@ -10019,9 +10019,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {/* コマンドボタン（自分の番のときだけ現れる） */}
                           <div className="h-7 sm:h-8 flex justify-center items-end gap-0.5 overflow-hidden">
                             {active && canMenu && cmds.map((c, j) => {
-                              const selected = c.sel || (soulMenu === 'root' && soulRootCursor === j);
+                              const selected = c.sel || (undertaleMenu === 'root' && undertaleRootCursor === j);
                               return (
-                                <button key={j} onClick={() => { setSoulRootCursor(j); c.onClick(); }} title={c.label} className="block shrink-0">
+                                <button key={j} onClick={() => { setUndertaleRootCursor(j); c.onClick(); }} title={c.label} className="block shrink-0">
                                   <img src={c.anim.frames[selected ? 1 : 0]} alt={c.label} draggable={false}
                                     className={`h-6 sm:h-7 w-auto ${c.mercy && ready && !selected ? 'animate-pulse' : ''}`}
                                     style={{ imageRendering: 'pixelated' }} />
@@ -10063,7 +10063,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         メッセージウィンドウの上にゲージを重ねる。全員のコマンド選択が終わった実行フェーズで
                         「たたかう」を選んだメンバーぶんの行が同時に現れ、全行の棒が並行して（開始をわずかに
                         ずらしながら）右端から左端の的へ流れる。的は左端固定。入力はキュー順の担当行に効く。 */}
-                    {soulPhase === 'attack' && dtAttackRowsRef.current.length > 0 && (
+                    {undertalePhase === 'attack' && dtAttackRowsRef.current.length > 0 && (
                       <div className="absolute inset-0 z-10 bg-black/95 flex flex-col justify-center gap-1 px-2 py-1.5 overflow-hidden">
                         {dtAttackRowsRef.current.map((memberIdx, row) => {
                           const member = roster[memberIdx];
@@ -10097,79 +10097,79 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         })}
                       </div>
                     )}
-                    {soulMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
+                    {undertaleMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
                       <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                     ))}
-                    {soulWaiting && soulMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
+                    {undertaleWaiting && undertaleMenu === 'root' && logRevealCount >= (battle.log.at(-1)?.length ?? 0)
                       && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
                         <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                       )}
-                    {soulMenu === 'act' && (
+                    {undertaleMenu === 'act' && (
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                         {curMoves.map((m, i) => (
                           <button key={`m${i}`} disabled={!canMenu}
-                            onClick={() => { setSoulSubCursor(i); if (m.heal) { setSoulMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
-                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                            {soulSubCursor === i ? '❤ ' : '  '}{m.name}
+                            onClick={() => { setUndertaleSubCursor(i); if (m.heal) { setUndertaleMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
+                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                            {undertaleSubCursor === i ? '❤ ' : '  '}{m.name}
                           </button>
                         ))}
                         {curSpells.map((sp, i) => {
                           const idx = curMoves.length + i;
                           return (
                             <button key={`s${i}`} disabled={!canMenu || tp < sp.tpCost}
-                              onClick={() => { setSoulSubCursor(idx); if (sp.heal) { setSoulMenu('root'); castSpell(sp); } else beginTargetSelect({ kind: 'spell', spell: sp }); }}
-                              className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === idx ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                              {soulSubCursor === idx ? '❤ ' : '  '}✨{sp.name}<span className="text-orange-400 ml-1">{sp.tpCost}%TP</span>
+                              onClick={() => { setUndertaleSubCursor(idx); if (sp.heal) { setUndertaleMenu('root'); castSpell(sp); } else beginTargetSelect({ kind: 'spell', spell: sp }); }}
+                              className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === idx ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                              {undertaleSubCursor === idx ? '❤ ' : '  '}✨{sp.name}<span className="text-orange-400 ml-1">{sp.tpCost}%TP</span>
                             </button>
                           );
                         })}
-                        <button onClick={() => { setSoulSubCursor(curMoves.length + curSpells.length); setSoulMenu('root'); }}
-                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === curMoves.length + curSpells.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                          {soulSubCursor === curMoves.length + curSpells.length ? '❤ ' : '  '}もどる
+                        <button onClick={() => { setUndertaleSubCursor(curMoves.length + curSpells.length); setUndertaleMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === curMoves.length + curSpells.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {undertaleSubCursor === curMoves.length + curSpells.length ? '❤ ' : '  '}もどる
                         </button>
                       </div>
                     )}
-                    {soulMenu === 'target' && (
+                    {undertaleMenu === 'target' && (
                       <div className="flex flex-col gap-0.5">
                         <p className="text-gray-400 text-[10px] sm:text-xs">＊ だれに？</p>
                         {battle.foes.map((f, i) => !f.gone && (
                           <button key={i} disabled={!canMenu}
-                            onClick={() => { setSoulTargetCursor(i); soulTargetCursorRef.current = i; if (soulTargetSelRef.current) dispatchTarget(soulTargetSelRef.current, i); }}
-                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulTargetCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                            {soulTargetCursor === i ? '❤ ' : '  '}{f.name}
+                            onClick={() => { setUndertaleTargetCursor(i); undertaleTargetCursorRef.current = i; if (undertaleTargetSelRef.current) dispatchTarget(undertaleTargetSelRef.current, i); }}
+                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleTargetCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                            {undertaleTargetCursor === i ? '❤ ' : '  '}{f.name}
                           </button>
                         ))}
                       </div>
                     )}
-                    {soulMenu === 'item' && (
+                    {undertaleMenu === 'item' && (
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                         {usableItems().map((it, i) => (
                           <button key={it.id} disabled={!canMenu}
-                            onClick={() => { setSoulSubCursor(i); setSoulMenu('root'); useHealItem(it, true); }}
-                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                            {soulSubCursor === i ? '❤ ' : '  '}{it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                            onClick={() => { setUndertaleSubCursor(i); setUndertaleMenu('root'); useHealItem(it, true); }}
+                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                            {undertaleSubCursor === i ? '❤ ' : '  '}{it.name} <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
                           </button>
                         ))}
                         {usableItems().length === 0 && <p className="text-gray-500">もちものが ない…</p>}
-                        <button onClick={() => { setSoulSubCursor(usableItems().length); setSoulMenu('root'); }}
-                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === usableItems().length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                          {soulSubCursor === usableItems().length ? '❤ ' : '  '}もどる
+                        <button onClick={() => { setUndertaleSubCursor(usableItems().length); setUndertaleMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === usableItems().length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {undertaleSubCursor === usableItems().length ? '❤ ' : '  '}もどる
                         </button>
                       </div>
                     )}
-                    {soulMenu === 'mercy' && (
+                    {undertaleMenu === 'mercy' && (
                       <div className="flex flex-col gap-0.5">
-                        <button disabled={!canMenu} onClick={() => { setSoulSubCursor(0); setSoulMenu('root'); doSpare(); }}
-                          className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : soulSubCursor === 0 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                          {soulSubCursor === 0 ? '❤ ' : '  '}{bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
+                        <button disabled={!canMenu} onClick={() => { setUndertaleSubCursor(0); setUndertaleMenu('root'); doSpare(); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 disabled:opacity-40 ${ready ? 'text-yellow-300 animate-pulse' : undertaleSubCursor === 0 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                          {undertaleSubCursor === 0 ? '❤ ' : '  '}{bd.labels.mercy ?? 'みのがす'}{ready ? ' ✦' : ''}
                         </button>
-                        <button disabled={!canMenu} onClick={() => { setSoulSubCursor(1); setSoulMenu('root'); doFlee(); }}
-                          className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 1 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                          {soulSubCursor === 1 ? '❤ ' : '  '}{bd.labels.flee}
+                        <button disabled={!canMenu} onClick={() => { setUndertaleSubCursor(1); setUndertaleMenu('root'); doFlee(); }}
+                          className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === 1 ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                          {undertaleSubCursor === 1 ? '❤ ' : '  '}{bd.labels.flee}
                         </button>
-                        <button onClick={() => { setSoulSubCursor(2); setSoulMenu('root'); }}
-                          className={`text-left text-[11px] sm:text-xs py-0.5 ${soulSubCursor === 2 ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                          {soulSubCursor === 2 ? '❤ ' : '  '}もどる
+                        <button onClick={() => { setUndertaleSubCursor(2); setUndertaleMenu('root'); }}
+                          className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === 2 ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                          {undertaleSubCursor === 2 ? '❤ ' : '  '}もどる
                         </button>
                       </div>
                     )}
@@ -11702,11 +11702,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <div className="mt-2.5 space-y-2.5 border-t border-gray-800 pt-2.5">
                                   <p className="text-[10px] text-gray-300 font-bold">敵の行動パターン設定</p>
 
-                                  {/* 1. 通常攻撃の弾幕 (soul / deltarune のみ) */}
+                                  {/* 1. 通常攻撃の弾幕 (undertale / deltarune のみ) */}
                                   {isDodgeBattleStyle(gameData.battle.style) && (
                                     <>
-                                      <label className="block text-[10px] text-gray-400">SOUL移動モード（既定）
-                                        <select value={selObj.soulMode ?? 'red'} onChange={e => updObj({ soulMode: e.target.value as SoulMode })}
+                                      <label className="block text-[10px] text-gray-400">UNDERTALE移動モード（既定）
+                                        <select value={selObj.undertaleMode ?? 'red'} onChange={e => updObj({ undertaleMode: e.target.value as UndertaleMode })}
                                           className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
                                           <option value="red">🔴 レッド（自由移動）</option>
                                           <option value="blue">🔵 ブルー（重力・ジャンプ）</option>
@@ -11772,11 +11772,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                           </div>
                                           {isDodgeBattleStyle(gameData.battle?.style) && !m.heal && (
                                             <>
-                                              <label className="block text-[10px] text-gray-400">SOUL移動モード（この技専用・省略時は既定値）
-                                                <select value={m.soulMode ?? ''} onChange={e => {
+                                              <label className="block text-[10px] text-gray-400">UNDERTALE移動モード（この技専用・省略時は既定値）
+                                                <select value={m.undertaleMode ?? ''} onChange={e => {
                                                   const copy = [...(selObj.moves ?? [])];
                                                   const val = e.target.value;
-                                                  copy[i] = { ...copy[i], soulMode: (val || undefined) as SoulMode | undefined };
+                                                  copy[i] = { ...copy[i], undertaleMode: (val || undefined) as UndertaleMode | undefined };
                                                   updObj({ moves: copy });
                                                 }} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none">
                                                   <option value="">（既定値を使う）</option>
@@ -12243,7 +12243,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               setGameData(p => ({ ...p, battle: { ...p.battle!, style } }));
                             }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
                               <option value="classic">コマンド戦闘（ドラクエ風）</option>
-                              <option value="soul">ハート弾幕よけ（アンダーテール風）</option>
+                              <option value="undertale">ハート弾幕よけ（アンダーテール風）</option>
                               <option value="deltarune">パーティ×弾幕よけ（デルタルーン風）</option>
                               <option value="ff">サイドビュー パーティ戦闘（FF風）</option>
                               <option value="nobita">タイミング＆ひっさつ戦闘（のび太戦記風）</option>

@@ -106,21 +106,6 @@ const sceneField: SceneDef = {
   // エンカウントはフィールドを徘徊するシンボルとの接触のみ（原作準拠。ランダムエンカウント無し）
   bgm: { ref: `direct:${tldrMusicUrl('exForest')}`, src: tldrMusicUrl('exForest'), type: 'direct' },
   objects: [
-    // ラルセイ（同行NPC・回復とヒント）
-    newObject({
-      emoji: '🐐', col: 15, row: 3, behavior: 'still', hazard: false,
-      pages: [
-        {
-          name: 'ヒントとやすらぎ',
-          conditions: {},
-          commands: [
-            { type: 'message', text: 'ラルセイ「やあ、きみ。ここは くらやみの せかい。\nつかれたら いつでも やすんで いいからね」' },
-            { type: 'restoreHp' }, { type: 'restoreMp' },
-            { type: 'message', text: 'ラルセイ「HPと TP が回復したよ。\nてきは たおさなくても【ちょうさ】で みのがせる」' },
-          ],
-        },
-      ],
-    }),
     // スージー（同行NPC・強気なコメント）
     npc('😈', 20, 3, 'スージー「はっ、こんな くらい ところ ビビらせようったって そうはいかないっての」'),
     // 宝物庫
@@ -423,7 +408,7 @@ export const deltarune: PresetData = {
   scroll: { worldCols: 30, worldRows: 24 },
   battle: {
     playerName: 'クリス',
-    // デルタルーン風パーティ戦闘：'soul'の弾幕よけ・タイミング攻撃を流用しつつ、party（クリス/スージー/ラルセイ）
+    // デルタルーン風パーティ戦闘：'undertale'の弾幕よけ・タイミング攻撃を流用しつつ、party（クリス/スージー/ラルセイ）
     // が1人ずつ行動選択する。TPはMPとは別の共有リソース（毎戦闘0開始・グレイズ/まもるで加算・呪文で消費）。
     style: 'deltarune',
     maxHp: 26, maxMp: 0, atk: 9, def: 6,
