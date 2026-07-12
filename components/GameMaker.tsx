@@ -5,12 +5,12 @@ import { flushSync } from 'react-dom';
 import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
-import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
+import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { applyMasterVolume } from '@/lib/master-volume';
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
 import { tldrSfxUrl, TLDR_UNDERTALE_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
 import {
-  detectStandard, standardById, animatedCell, dirFromDelta,
+  detectStandard, standardById, animatedCell, animatedCellInRect, dirFromDelta,
   type WayKey, type WalkStandard,
 } from '@/lib/walk-sprite';
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
@@ -881,13 +881,20 @@ const SpriteThumbnail = ({
       sy = syOffset;
       sw = swOffset;
       sh = shOffset;
-    } else if (walk?.crop) {
+    } else if (walk?.crop && walk.stdId === 'smc') {
       const [csx, csy, csw, csh] = walk.crop;
       const frames = smcFrameCount(walk.crop, walk.frames);
       sw = csw / frames;
       sh = csh;
       sx = csx;
       sy = csy;
+    } else if (walk?.crop) {
+      // 連結シートから規格（RPGEN/ツクール等）でキャラ1体分を切り出した参照。
+      // crop矩形の中でその規格の格子計算を行い、待機ポーズ（中央フレーム正面）を出す。
+      let std = walk.stdId === 'auto' ? detectStandard(walk.crop[2], walk.crop[3]) : standardById(walk.stdId);
+      if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
+      const rect = animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0 });
+      sx = rect.sx; sy = rect.sy; sw = rect.sw; sh = rect.sh;
     } else {
       const hashIdx = resolvedUrl!.indexOf('#');
       if (hashIdx !== -1) {
@@ -4898,8 +4905,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         let std = walkStdCache.get(resolvedUrl);
         if (!std) {
           std = walk.stdId === 'auto'
-            ? detectStandard(img!.naturalWidth, img!.naturalHeight)
+            ? detectStandard(...(walk.crop ? [walk.crop[2], walk.crop[3]] as const : [img!.naturalWidth, img!.naturalHeight] as const))
             : standardById(walk.stdId);
+          if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
           walkStdCache.set(resolvedUrl, std);
         }
 
@@ -4907,18 +4915,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const srcImg: CanvasImageSource = keyedCache.current.get(resolvedUrl) ?? img!;
         const imgW = img!.naturalWidth;
         const imgH = img!.naturalHeight;
-        if (walk.crop) {
+        // 下端揃え位置（下端からの距離px・既定0）と表示倍率（小数可・未指定ならセルに合わせて自動フィット）。
+        const offsetY = walk.offsetY ?? 0;
+        const renderScale = walk.renderScale;
+
+        if (walk.crop && walk.stdId === 'smc') {
           // SMC専用ロジック（lib/smc-sprite.ts）: ストリップを分割。
           // 右向き素材なので、左移動時は水平反転して描く。
           const rect = smcFrameRect(walk.crop, { moving: animMoving, timeSec: performance.now() / 1000, fps: 7, frames: walk.frames });
 
-          // アスペクト比を保ち、縦幅を h に合わせ、横幅をスケーリングして中央揃えにする。
-          const baseH = rect.sh;
-          const zoom = h / baseH;
+          // 倍率指定時はそれをそのまま使い、未指定ならアスペクト比を保って縦幅をhに合わせる。
+          const zoom = renderScale ?? h / rect.sh;
           const destW = rect.sw * zoom;
           const destH = rect.sh * zoom;
           const destX = x + (w - destW) / 2;
-          const destY = y + (h - destH); // 下端を合わせる
+          const destY = y + (h - destH) - offsetY; // 下端揃え + オフセット
 
           if (dir === 'a') {
             ctx.save();
@@ -4928,6 +4939,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             ctx.restore();
           } else {
             ctx.drawImage(srcImg, rect.sx, rect.sy, rect.sw, rect.sh, destX, destY, destW, destH);
+          }
+          return;
+        }
+
+        if (walk.crop) {
+          // 連結シートから規格（RPGEN/ツクール等）でキャラ1体分を切り出した参照。
+          // crop矩形内でその規格の 方向×フレーム 格子計算を行う（stdは上のキャッシュ済みのもの）。
+          const cell = animatedCellInRect(std, walk.crop, {
+            dir: std.flipH ? 'd' : dir,
+            moving: animMoving, timeSec: performance.now() / 1000, fps: 7,
+          });
+          // 倍率未指定時はセルにぴったり合わせる（従来どおり）。指定時はコマ実寸×倍率（小数可）で描く。
+          const destW = renderScale ? cell.sw * renderScale : w;
+          const destH = renderScale ? cell.sh * renderScale : h;
+          const destX = x + (w - destW) / 2;
+          const destY = y + (h - destH) - offsetY;
+          const flipLeft = std.flipH && dir === 'a';
+          if (flipLeft) {
+            ctx.save();
+            ctx.translate(destX + destW, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh, 0, destY, destW, destH);
+            ctx.restore();
+          } else {
+            ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh, destX, destY, destW, destH);
           }
           return;
         }
@@ -13434,7 +13470,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         </div>
       </div>
 
-      {picker && (
+      {picker && picker.mode === 'image' && (() => {
+        // このゲーム内で現在使われている画像参照の一覧（履歴タブ用）。同じ ref は重複させない。
+        const seen = new Set<string>();
+        const usedImageAssets: { ref: string; url?: string; label: string }[] = [];
+        const addUsed = (ref: string | undefined, url: string | undefined, label: string) => {
+          if (!ref || !isImageRef(ref) || seen.has(ref)) return;
+          seen.add(ref);
+          usedImageAssets.push({ ref, url, label });
+        };
+        addUsed(gameData.player.spriteRef, gameData.player.spriteUrl, '主人公');
+        for (const o of gameData.objects) addUsed(o.spriteRef, o.spriteUrl, o.name || `オブジェ: ${o.emoji}`);
+        for (const [id, t] of Object.entries(gameData.tiles)) addUsed(t.imageRef, t.imageUrl, t.name || `タイル#${id}`);
+
+        return (
+          <ContentPicker
+            mode={picker.mode}
+            bgmKind={picker.target.t === 'sfx' ? 'sfx' : 'bgm'}
+            userId={userId}
+            usedAssets={usedImageAssets}
+            onPick={applyPick}
+            onClose={() => setPicker(null)}
+          />
+        );
+      })()}
+      {picker && picker.mode === 'bgm' && (
         <ContentPicker
           mode={picker.mode}
           bgmKind={picker.target.t === 'sfx' ? 'sfx' : 'bgm'}

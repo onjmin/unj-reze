@@ -5,7 +5,9 @@ let _path: typeof import('path') | null = null;
 
 async function loadFs() {
   if (_fs) return { fs: _fs, path: _path! };
-  const [fsMod, pathMod] = await Promise.all([import('fs'), import('path')]);
+  const fsModuleName = 'fs';
+  const pathModuleName = 'path';
+  const [fsMod, pathMod] = await Promise.all([import(fsModuleName), import(pathModuleName)]);
   _fs = fsMod.default ?? fsMod;
   _path = pathMod.default ?? pathMod;
   return { fs: _fs, path: _path! };

@@ -172,7 +172,7 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
         <div className="text-[10px] text-gray-500">
           該当アニメーション ({filteredAnims.length}件):
         </div>
-        <div className="grid grid-cols-3 gap-2 overflow-y-auto max-h-[220px] scrollbar-none pr-1">
+        <div className="grid grid-cols-6 gap-2 overflow-y-auto max-h-[220px] scrollbar-none pr-1">
           {filteredAnims.map(animName => (
             <button
               key={animName}
@@ -191,7 +191,7 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
             </button>
           ))}
           {filteredAnims.length === 0 && (
-            <div className="col-span-3 text-center py-6 text-[10px] text-gray-500">
+            <div className="col-span-6 text-center py-6 text-[10px] text-gray-500">
               条件に一致するアニメーションがありません。
             </div>
           )}

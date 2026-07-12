@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType } = body;
 
-    if (!displayName || !content) {
+    if (!displayName || (!content && !hasImage)) {
       return NextResponse.json(
         { error: 'displayName and content are required' },
         { status: 400 }

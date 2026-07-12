@@ -233,6 +233,10 @@ export interface WalkRef {
    * 非正方形コマ（縦長の敵など）のとき #sx,sy,sw,sh,frames の5番目で明示する。
    */
   frames?: number;
+  /** セル下端からの距離(px)。正で上に、負で下にずらして揃える（既定0）。#…,frames,offsetY の6番目。 */
+  offsetY?: number;
+  /** 表示倍率（小数可）。指定時はセルへの自動フィットをせず、コマ実寸×この倍率で描く。#…,offsetY,scale の7番目。 */
+  renderScale?: number;
 }
 
 const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc', 'smc_json']);
@@ -274,15 +278,19 @@ export function parseWalkRef(raw: string): WalkRef | null {
         let url = rawUrl;
         let crop: [number, number, number, number] | undefined;
         let frames: number | undefined;
+        let offsetY: number | undefined;
+        let renderScale: number | undefined;
         if (hashIdx !== -1) {
           url = rawUrl.slice(0, hashIdx);
           const parts = rawUrl.slice(hashIdx + 1).split(',').map(Number);
           if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
             crop = parts.slice(0, 4) as [number, number, number, number];
             if (parts.length >= 5 && !isNaN(parts[4]) && parts[4] > 0) frames = parts[4];
+            if (parts.length >= 6 && !isNaN(parts[5])) offsetY = parts[5];
+            if (parts.length >= 7 && !isNaN(parts[6]) && parts[6] > 0) renderScale = parts[6];
           }
         }
-        return { stdId: maybeStd, source: { kind: 'url', url }, crop, frames };
+        return { stdId: maybeStd, source: { kind: 'url', url }, crop, frames, offsetY, renderScale };
       }
       if (srcStr.startsWith('p:')) {
         const id = parseInt(srcStr.slice(2), 10);

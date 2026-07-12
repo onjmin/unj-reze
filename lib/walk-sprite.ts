@@ -155,6 +155,22 @@ export function animatedCell(
   return cellRect(std, imgW, imgH, opts.dir, frame);
 }
 
+/**
+ * 大きな1枚のシート内、キャラ1体分の矩形(crop)だけを対象に animatedCell と同じ計算を行う。
+ * 複数キャラが連結したシートから、テンプレート規格（RPGEN/ツクール等）でキャラ単位に
+ * 切り出した際の描画に使う（WalkRef.crop + 汎用stdId の組み合わせ）。
+ * SMC専用のストリップ分割（lib/smc-sprite.ts）とは別物。
+ */
+export function animatedCellInRect(
+  std: WalkStandard,
+  crop: [number, number, number, number],
+  opts: { dir: WayKey; moving: boolean; timeSec: number; fps?: number },
+): SpriteRect {
+  const [csx, csy, csw, csh] = crop;
+  const cell = animatedCell(std, csw, csh, opts);
+  return { sx: csx + cell.sx, sy: csy + cell.sy, sw: cell.sw, sh: cell.sh };
+}
+
 // ───────────────── 規格の自動推定 ─────────────────
 
 /**

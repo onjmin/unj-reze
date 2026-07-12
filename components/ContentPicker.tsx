@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
+import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Square, Pencil, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
@@ -11,6 +11,7 @@ import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
 import LocalAssetPanel from './LocalAssetPanel';
 import BuiltinGameSoundPanel from './BuiltinGameSoundPanel';
+import PostSlicePanel from './PostSlicePanel';
 
 export interface PickResult {
   ref: string;
@@ -24,11 +25,13 @@ interface ContentPickerProps {
   /** mode==='bgm' のときのみ有効。'bgm'=BGM欄（YouTube/MML/URL）、'sfx'=効果音欄（rpgen効果音/URL）でタブを出し分ける。 */
   bgmKind?: 'bgm' | 'sfx';
   userId: string;
+  /** mode==='image' のときのみ有効。このゲーム内で現在使われている画像参照の一覧（履歴タブで再選択できる）。 */
+  usedAssets?: { ref: string; url?: string; label: string }[];
   onPick: (result: PickResult) => void;
   onClose: () => void;
 }
 
-type ImageTab = 'posts' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local';
+type ImageTab = 'posts' | 'slice' | 'history' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local';
 type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe' | 'builtinGame';
 
 // BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
@@ -41,7 +44,7 @@ let lastImageTab: ImageTab = 'posts';
 const lastBgmTabByKind: Record<'bgm' | 'sfx', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe' };
 const scrollPositions = new Map<string, number>();
 
-export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, onClose }: ContentPickerProps) {
+export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -53,6 +56,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
   });
   const [urlInput, setUrlInput] = useState('');
   const [mmlInput, setMmlInput] = useState('T120 o4 c d e f g a b');
+  const [editingHistoryAsset, setEditingHistoryAsset] = useState<{ ref: string; url: string; label: string } | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -181,6 +185,10 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
           {mode === 'image' ? (
             <>
               <button className={tabBtn(imageTab === 'posts')} onClick={() => changeImageTab('posts')}><ImageIcon size={12} />画像投稿</button>
+              <button className={tabBtn(imageTab === 'slice')} onClick={() => changeImageTab('slice')}>✂️ 投稿から切り出し</button>
+              {usedAssets.length > 0 && (
+                <button className={tabBtn(imageTab === 'history')} onClick={() => changeImageTab('history')}>🕘 使用履歴</button>
+              )}
               <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
               <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 素材</button>
               <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 歩行グラ</button>
@@ -246,6 +254,57 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, onPick, o
                 </div>
               )}
             </>
+          )}
+
+          {/* Image: slice (post image → sprite sheet crop) */}
+          {mode === 'image' && imageTab === 'slice' && (
+            <PostSlicePanel userId={userId} onPick={onPick} />
+          )}
+
+          {/* Image: history（このゲーム内で既に使われている画像を再選択・再編集） */}
+          {mode === 'image' && imageTab === 'history' && (
+            editingHistoryAsset ? (
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={() => setEditingHistoryAsset(null)}
+                  className="flex items-center gap-1 text-[10px] text-blue-500 hover:underline font-bold w-fit"
+                >
+                  <ArrowLeft size={11} />履歴に戻る
+                </button>
+                <PostSlicePanel userId={userId} onPick={onPick} initialAsset={editingHistoryAsset} />
+              </div>
+            ) : (
+              <div className="grid grid-cols-6 gap-2">
+                {usedAssets.map((a, i) => (
+                  <button
+                    key={`${a.ref}-${i}`}
+                    onClick={() => onPick(a)}
+                    className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative"
+                  >
+                    {a.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.url} alt="" className="w-full h-full object-cover" style={{ imageRendering: a.ref.startsWith('walk:') ? 'pixelated' : 'auto' }} />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">?</div>
+                    )}
+                    {a.url && (
+                      <span
+                        role="button"
+                        onClick={(e) => { e.stopPropagation(); setEditingHistoryAsset({ ref: a.ref, url: a.url!, label: a.label }); }}
+                        className="absolute top-1 right-1 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-gray-300 hover:text-blue-400 hover:bg-black/90"
+                        title="切り出し設定を編集"
+                      >
+                        <Pencil size={11} />
+                      </span>
+                    )}
+                    <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">{a.label}</span>
+                  </button>
+                ))}
+                {usedAssets.length === 0 && (
+                  <p className="col-span-6 text-center text-[11px] text-gray-600 py-8">このゲームではまだ画像が使われていません</p>
+                )}
+              </div>
+            )
           )}
 
           {/* Image: url */}
