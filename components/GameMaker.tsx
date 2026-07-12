@@ -115,7 +115,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'object' | 'char' | 'battle' | 'asset' | 'item' | 'spell' | 'sound' | 'screen' | 'scene';
+type EditorTab = 'map' | 'object' | 'char' | 'battle' | 'switch' | 'item' | 'spell' | 'sound' | 'screen' | 'scene';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -9210,30 +9210,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // SELECT ボタンが押されたとき
   const handleSelectPress = () => {
     if (introOpen) return;
-    if (!isPlaying) {
-      // 編集モード：速度切り替え (1x => 2x => 4x)
-      setEditSpeedMult(prev => {
-        const speeds = [1, 2, 4];
-        return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
-      });
-    } else {
-      // プレイ中
-      const hasOverlay = !!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult;
-      if (!hasOverlay && !battle && !activeDialogue && !eventRunningRef.current) {
-        setTouch('inv', true);
-        setTimeout(() => setTouch('inv', false), 80);
-      }
-      if (gameData.engine === 'yume25d') {
-        setTouch('select', true);
-        setTimeout(() => setTouch('select', false), 80);
-      } else {
-        // その他：速度切り替え (Fキー相当) もできるようにしておくと便利
-        setEditSpeedMult(prev => {
-          const speeds = [1, 2, 4];
-          return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
-        });
-      }
-    }
+    // 編集・プレイ共通：速度切り替え (1x => 2x => 4x)
+    setEditSpeedMult(prev => {
+      const speeds = [1, 2, 4];
+      return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
+    });
   };
 
   // START ボタンが押されたとき
@@ -9243,35 +9224,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     if (isPlaying) {
-      // 編集に戻る
-      resetSceneState();
-      invulnRef.current = 0;
-      bombInvulnRef.current = 0;
-      isPlayerDeadRef.current = false;
-      roundOverRef.current = false;
-      sceneTransRef.current = null;
-      sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
-      setBattle(null);
-      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
-      const pp = engineRef.current.player;
-      const pw = gameData.player.w, ph = gameData.player.h;
-      setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
-      setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
-      // プレイ中にシーンを切り替えていた場合、editSceneIdx はその都度 activeSceneIdxRef に追従するが、
-      // エディタの作業バッファ（gameData.map/objects）は switchEditScene 経由でしか同期されないため、
-      // ここで同期しないまま次回プレイの flushSceneEdits() が走ると「今 editSceneIdx が指しているシーン」に
-      // 「実際には別シーン（最後に編集タブで開いていたシーン）の古い map/objects」を上書きしてしまい、
-      // 次回プレイでそのシーンのオブジェクト座標が丸ごと入れ替わってしまう。編集に戻る瞬間に必ず同期する。
-      if (gameData.scenes?.length) {
-        const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
-        const activeScene = gameData.scenes[activeIdx];
-        if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
-          setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, objects: activeScene.objects }));
-          setEditSceneIdx(activeIdx);
-        }
-      }
-      setShowEnding(false);
-      setIsPlaying(false);
+      // STARTボタンでもちものを開閉
+      setTouch('inv', true);
+      setTimeout(() => setTouch('inv', false), 80);
     } else {
       // テストプレイ開始
       setActivePreviewKey(null);
@@ -10875,8 +10830,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       );
                     })}
                   </div>
-                  <button onClick={() => { playMenuCancelSfx(); setInvOpen(false); }}
-                    className="mt-3 w-full py-1.5 border-2 border-white/40 text-gray-400 hover:text-white hover:border-white text-[11px] font-bold">とじる</button>
                 </div>
               </div>
             )}
@@ -11050,7 +11003,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     let btnXKey: keyof typeof touchRef.current = 'slow';
                     let btnYActive = false; let btnYLabel = "";
 
-                    if (!isPlaying && gameData.engine === 'yume25d') {
+                    const hasOverlay = isPlaying && (!!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult || invOpen || !!battle);
+
+                    if (hasOverlay) {
+                      btnAActive = true; btnALabel = "決定";
+                      btnBActive = true; btnBLabel = "取消";
+                    } else if (!isPlaying && gameData.engine === 'yume25d') {
                       // ゆめにっき3D：十字キーでカーソルを動かし、Aボタンで現在のツール（床/壁/スプライト/開始等）を配置する。
                       btnAActive = true; btnALabel = yume25dTool === 'erase' ? '消す' : '配置';
                     } else if (!isPlaying) {
@@ -11072,7 +11030,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     } else if (gameData.engine === 'rpg') {
                       btnAActive = true; btnALabel = "決定";
                       btnBActive = true; btnBLabel = "取消";
-                      btnXActive = true; btnXLabel = "🎒"; btnXKey = 'inv';
                     } else if (gameData.engine === 'yume25d') {
                       btnAActive = true; btnALabel = "JUMP";
                       btnBActive = true; btnBLabel = "話す";
@@ -11125,17 +11082,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       title="SELECT" />
                     <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">SELECT</span>
                   </div>
-                  {/* INV（もちもの） */}
-                  {isPlaying && (
-                    <div className="flex flex-col items-center gap-0.5">
-                      <button onClick={() => { setTouch('inv', true); setTimeout(() => setTouch('inv', false), 80); }}
-                        className="w-11 h-5 bg-amber-700 active:bg-amber-600 rounded border border-amber-900 shadow-md active:translate-y-0.5 transition touch-none cursor-pointer flex items-center justify-center"
-                        title="もちもの">
-                        <span className="text-[8px] leading-none font-bold text-white">🎒</span>
-                      </button>
-                      <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">INV</span>
-                    </div>
-                  )}
+
                   {/* START */}
                   <div className="flex flex-col items-center gap-0.5">
                     <button onClick={handleStartPress}
@@ -11240,7 +11187,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
                 {/* 詳細タブ（showAdvancedTabs=trueのとき表示） */}
                 {showAdvancedTabs && ([
-                  ['asset', '設定'], ['sound', 'サウンド'],
+                  ['switch', 'スイッチ'], ['sound', 'サウンド'],
                   ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
                   ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
@@ -11618,6 +11565,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                       className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
                                   </label>
                                 )}
+                                <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
+                                  <span className="text-[10px] text-gray-400">画像（任意）</span>
+                                  <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded">
+                                    <ImageIcon size={12} /> {tile.imageRef ? '画像を変更' : '画像を参照'}
+                                  </button>
+                                  {tile.imageRef && (
+                                    <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1"><Trash2 size={14} /></button>
+                                  )}
+                                </div>
+                                <p className="text-[9px] text-gray-500">画像は既存の投稿・歩行グラ・URLを参照します。</p>
                               </div>
                             )}
                           </div>
@@ -11626,17 +11583,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </div>
                     <button onClick={addTile} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />タイルを追加</button>
 
-                    {/* ── システムオブジェクト（宝箱・ワープ床・どく沼/ダメージ床・つるつる床）── */}
+                    {/* ── システムタイル（ワープ床・どく沼/ダメージ床・つるつる床）── */}
                     {(gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
                       <div className="rounded-lg border border-purple-700/50 bg-purple-950/20 p-2.5 space-y-2">
-                        <p className="text-[11px] font-bold text-purple-300">システムオブジェクト</p>
-                        <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきで追加されます（宝箱はプレイヤー位置に配置、床タイルはタイル一覧に追加されるのでマップに塗ってください）。
+                        <p className="text-[11px] font-bold text-purple-300">システムタイル</p>
+                        <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきの床タイルがタイル一覧に追加されるので、マップに塗ってください。
                           {gameData.engine === 'action' && '重力で移動するこのエンジンでは、つるつる床は左右方向のみ効果があります。'}
                         </p>
-                        <button onClick={addChestObject}
-                          className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[11px] text-purple-200 hover:bg-purple-900/70">
-                          <Plus size={12} />宝箱を追加
-                        </button>
                         <div className="grid grid-cols-2 gap-1.5">
                           {SYSTEM_TILE_TEMPLATES.filter(tpl => gameData.engine !== 'action' || (tpl.special !== 'ice-up' && tpl.special !== 'ice-down')).map(tpl => (
                             <button key={tpl.key} onClick={() => addSystemTile(tpl)}
@@ -13365,12 +13318,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )}
 
-                {/* ── ASSET（タブ表示名は「設定」）── */}
-                {editorTab === 'asset' && (
+                {/* ── SWITCH（イベント制御用変数）── */}
+                {editorTab === 'switch' && (
                   <div className="space-y-4">
                     {/* ── スイッチ一覧エディタ ── */}
                     <div>
-                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">🔘 スイッチ</label>
+                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">🔘 スイッチ（イベントフラグ）</label>
                       <div className="space-y-1 max-h-40 overflow-y-auto">
                         {(gameData.switches ?? []).length === 0 && <p className="text-[9px] text-gray-500 px-1">（なし）</p>}
                         {(gameData.switches ?? []).map((s, i) => (
@@ -13392,24 +13345,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         return { ...p, switches: [...arr, { id, name: `スイッチ${id}` }] };
                       })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
                         <Plus size={11} />スイッチ追加</button>
-                    </div>
-
-                    <div>
-                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1"><ImageIcon size={12} />タイル画像（任意・参照のみ）</label>
-                      <div className="space-y-1.5">
-                        {Object.entries(gameData.tiles).filter(([id]) => Number(id) !== 0).map(([id, tile]) => (
-                          <div key={id} className="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1.5 border border-gray-800">
-                            <div className="w-6 h-6 shrink-0 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: tile.color }}>
-                              {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
-                            </div>
-                            <span className="text-[10px] text-gray-400 flex-1 truncate">{tile.name}</span>
-                            {tile.imageRef && <button onClick={() => setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { ...p.tiles[Number(id)], imageRef: undefined, imageUrl: undefined } } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
-                            <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id: Number(id) } })} className="text-[10px] text-blue-400 hover:text-blue-300 shrink-0">参照</button>
-                          </div>
-                        ))}
-                      </div>
-                      <button onClick={addTile} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"> <Plus size={13} />タイル定義を増やす</button>
-                      <p className="text-[10px] text-gray-600 mt-1.5">画像は既存の投稿・歩行グラ・URLを参照（実体は保存しません）。</p>
                     </div>
                   </div>
                 )}
