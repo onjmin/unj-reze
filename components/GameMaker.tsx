@@ -990,7 +990,7 @@ function getBlastCanvas(): HTMLCanvasElement {
  *  全フレームを一度に <img> として置き display を切り替える（src 差し替え方式だと
  *  フレーム送りのたびに前のリクエストが abort されて初回表示がチラつくため）。 */
 function BattleAnimSprite({ anim, h, once = false, className = '', style }: {
-  anim: BattleSpriteAnim; h: number; once?: boolean; className?: string; style?: React.CSSProperties;
+  anim: BattleSpriteAnim; h: number | string; once?: boolean; className?: string; style?: React.CSSProperties;
 }) {
   const [fi, setFi] = useState(0);
   useEffect(() => {
@@ -1074,6 +1074,23 @@ function getDodgeImg(url: string): HTMLImageElement {
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // canvas エリア（親フレックス）の実測サイズを ResizeObserver で追いかけ、PLAY_W:PLAY_H を保った
+  // まま contain フィットさせる。CSS の aspect-ratio + width:auto;height:auto だけに頼ると、親の高さが
+  // 子（このボックス）に依存し子の高さが親に依存する循環になり、ブラウザ/構成によって 0px に潰れる
+  // ケースがあった（特に yume25d の Three.js canvas が absolute inset-0 で追従して 0x0 になる）ため、
+  // JS で実測して明示的な px を与える。
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
+  const [canvasAreaSize, setCanvasAreaSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const box = entries[0]?.contentRect;
+      if (box) setCanvasAreaSize({ w: box.width, h: box.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [presetId, setPresetId] = useState<PresetId>('onjReze');
   const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.onjReze));
   const [title, setTitle] = useState(PRESETS.onjReze.name);
@@ -9419,9 +9436,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       {/* Main */}
       <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
         {/* Canvas */}
-        <div className={`flex flex-col items-center justify-center bg-black overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1 portrait:flex-none'}`}>
-          <div className="relative w-full mx-auto overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
-            style={{ aspectRatio: `${PLAY_W}/${PLAY_H}`, maxWidth: PLAY_W + 'px' }}>
+        <div ref={canvasAreaRef} className={`flex flex-col items-center justify-center bg-black overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1 portrait:flex-none'}`}>
+          <div className="relative mx-auto overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
+            style={(() => {
+              const { w, h } = canvasAreaSize;
+              if (!w || !h) return { aspectRatio: `${PLAY_W}/${PLAY_H}`, width: 'auto', height: 'auto', maxWidth: `min(100%, ${PLAY_W}px)`, maxHeight: '100%' };
+              const scale = Math.min(w / PLAY_W, h / PLAY_H, 1);
+              return { width: `${PLAY_W * scale}px`, height: `${PLAY_H * scale}px` };
+            })()}>
             {gameData.engine === 'yume25d' ? (
               <Yume25DMaker
                 ref={yume25dMakerRef}
@@ -9839,10 +9861,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 viewTransitionName: `enemy-slot-${i}`,
                                 ...(dying ? { animation: 'enemyVaporize 0.65s ease-in forwards', pointerEvents: 'none' as const } : {}),
                               } as React.CSSProperties}>
-                              <div className="relative w-24 mb-1">
+                              <div className={`relative leading-none drop-shadow transition-transform ${undertalePhase === 'dodge' ? 'scale-90' : ''}`}>
                                 {pop && (
                                   <div key={pop.id}
-                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
+                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap z-10"
                                     style={pop.miss ? {
                                       color: '#9ca3af',
                                       textShadow: '1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000',
@@ -9855,24 +9877,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {pop.text}
                                   </div>
                                 )}
-                                <div className="w-24 h-2 overflow-hidden mx-auto">
-                                  {gauge && (
-                                    <div className="w-full h-full bg-gray-700">
-                                      <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className={`relative leading-none drop-shadow transition-transform ${undertalePhase === 'dodge' ? 'scale-90' : ''}`}>
                                 {f.sprite ? (() => {
                                   const es = f.sprite;
                                   const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
                                   return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
                                 })() : <span className="text-5xl sm:text-6xl">{f.emoji}</span>}
+                                {gauge && (
+                                  <div className="absolute left-1/2 top-1/3 -translate-x-1/2 w-16 h-1.5 overflow-hidden bg-gray-700/80 z-10">
+                                    <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
+                                  </div>
+                                )}
+                                {targeting && <span className="absolute -left-4 top-1/2 -translate-y-1/2 text-red-500 animate-pulse z-10">❤</span>}
                                 {renderEnemyBubble(i)}
-                              </div>
-                              <div className={`mt-1 text-xs sm:text-sm ${targeting || fReady ? 'text-yellow-300' : 'text-white'}`}>
-                                {targeting ? '❤ ' : ''}{f.name}{fReady ? ' ✦' : ''}
                               </div>
                             </div>
                           );
@@ -9883,9 +9899,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   {/* バトルボックス（白枠がシームレスに変形する） */}
                   <div className="flex-1 flex items-center justify-center min-h-0">
                     <div className="bg-black border-4 border-white relative overflow-hidden"
-                      style={{
-                        width: undertalePhase === 'dodge' ? 184 : 'min(100%, 440px)',
-                        height: undertalePhase === 'dodge' ? 184 : 128,
+                      style={undertalePhase === 'dodge' ? {
+                        aspectRatio: '1 / 1', width: 'auto', height: '100%', maxWidth: '184px', maxHeight: '184px',
+                        transition: 'width 0.35s ease-in-out, height 0.35s ease-in-out',
+                      } : {
+                        width: 'min(100%, 440px)', height: 'min(128px, 32vh)', maxHeight: '100%',
                         transition: 'width 0.35s ease-in-out, height 0.35s ease-in-out',
                       }}>
                       {undertalePhase === 'dodge' ? (
@@ -9903,7 +9921,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </div>
                         </div>
                       ) : (
-                        <div className="absolute inset-0 p-2.5 text-white text-[11px] sm:text-sm leading-relaxed overflow-hidden">
+                        <div className="absolute inset-0 p-1.5 sm:p-2.5 text-white text-[9px] sm:text-sm leading-snug sm:leading-relaxed overflow-hidden">
                           {undertaleMenu === 'root' && battle.log.slice(-3).map((l, i, arr) => (
                             <p key={i}>＊ {i === arr.length - 1 ? l.slice(0, logRevealCount) : l}</p>
                           ))}
@@ -10066,9 +10084,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         return (
                           <div key={m.id} className="relative h-16 sm:h-24 flex items-end">
                             {anim
-                              ? <BattleAnimSprite anim={anim} h={anim.h ? Math.min(92, anim.h * 1.7) : 76} once={oneShot}
+                              ? <BattleAnimSprite anim={anim} h={anim.h ? `clamp(40px, 11vw, ${Math.min(92, anim.h * 1.7)}px)` : 'clamp(32px, 9vw, 76px)'} once={oneShot}
                                 className={down ? 'opacity-60' : ''} />
-                              : <span className={`text-5xl ${down ? 'opacity-40 grayscale' : ''}`}>{m.emoji}</span>}
+                              : <span className={`text-3xl sm:text-5xl ${down ? 'opacity-40 grayscale' : ''}`}>{m.emoji}</span>}
                             {/* 被弾ダメージ数値：キャラの頭上に敵側と同じ体裁（赤フチ・見崎フォント）で表示 */}
                             {dmgPop && (
                               <div key={dmgPop.id}
@@ -10105,10 +10123,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 viewTransitionName: `enemy-slot-dt-${i}`,
                                 ...(dying ? { animation: 'enemyVaporize 0.65s ease-in forwards', pointerEvents: 'none' as const } : {}),
                               } as React.CSSProperties}>
-                              <div className="relative w-32 mb-0.5">
+                              <div className="relative leading-none">
                                 {pop && (
                                   <div key={pop.id}
-                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap"
+                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 pointer-events-none font-misaki text-2xl sm:text-3xl whitespace-nowrap z-10"
                                     style={pop.miss ? {
                                       color: '#9ca3af',
                                       textShadow: '1px 1px #000, -1px -1px #000, 1px -1px #000, -1px 1px #000',
@@ -10121,27 +10139,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {pop.text}
                                   </div>
                                 )}
-                                <div className="w-32 h-2 overflow-hidden mx-auto">
-                                  {gauge && (
-                                    <div className="w-full h-full" style={{ background: '#5b1010' }}>
-                                      <div className="h-full bg-lime-400 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="relative leading-none">
                                 {f.sprite ? (() => {
                                   const es = f.sprite;
                                   const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
-                                  return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(sizeCap, anim.h * sizeMul) : Math.min(sizeCap, 120)} />;
+                                  const cap = Math.min(sizeCap, anim.h ? anim.h * sizeMul : 120);
+                                  return <BattleAnimSprite anim={anim} h={`clamp(36px, ${aliveCount > 1 ? 12 : 20}vw, ${cap}px)`} />;
                                 })() : <span className={`${aliveCount > 1 ? 'text-5xl sm:text-6xl' : 'text-7xl sm:text-8xl'} leading-none drop-shadow`}>{f.emoji}</span>}
+                                {gauge && (
+                                  <div className="absolute left-1/2 top-1/3 -translate-x-1/2 w-20 h-1.5 overflow-hidden z-10" style={{ background: '#5b1010' }}>
+                                    <div className="h-full bg-lime-400 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
+                                  </div>
+                                )}
+                                {fReady && (
+                                  <img src={TLDR_UI_SPRITES.spareStar.frames[0]} alt="" draggable={false}
+                                    className="absolute -top-1 -right-1 h-4 w-auto z-10" style={{ imageRendering: 'pixelated' }} />
+                                )}
+                                {targeting && <span className="absolute -left-4 top-1/2 -translate-y-1/2 text-red-500 animate-pulse z-10">❤</span>}
                                 {/* 攻撃予告セリフのフキダシ（敵の形状・位置に応じて自動配置） */}
                                 {renderEnemyBubble(i)}
-                              </div>
-                              <div className={`mt-0.5 text-[10px] sm:text-xs flex items-center gap-1 ${targeting || fReady ? 'text-yellow-300' : 'text-white'}`}>
-                                {targeting && <span className="text-red-500">❤</span>}
-                                {f.name}
-                                {fReady && <img src={TLDR_UI_SPRITES.spareStar.frames[0]} alt="" draggable={false} className="h-3 w-auto" style={{ imageRendering: 'pixelated' }} />}
                               </div>
                             </div>
                           );
@@ -10153,7 +10168,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         メッセージウィンドウの上にゲージが乗る配置）。 */}
                     {undertalePhase === 'dodge' && (
                       <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                        <div className="bg-black border-4 border-white relative overflow-hidden pointer-events-auto" style={{ width: 184, height: 184 }}>
+                        <div className="bg-black border-4 border-white relative overflow-hidden pointer-events-auto" style={{ aspectRatio: '1 / 1', width: 'auto', height: '100%', maxWidth: '184px', maxHeight: '184px' }}>
                           <canvas ref={undertaleCanvasRef} width={176} height={176}
                             className="w-full h-full touch-none cursor-crosshair" style={{ imageRendering: 'pixelated' }}
                             onPointerMove={undertalePointerMove} onPointerDown={undertalePointerMove}
@@ -10215,7 +10230,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     })}
                   </div>
                   {/* ── 下段：テキスト／メニュー欄（全幅） ── */}
-                  <div className="shrink-0 h-[84px] sm:h-24 bg-black border-t-2 px-2.5 py-1.5 text-white text-[11px] sm:text-sm leading-relaxed relative overflow-hidden"
+                  <div className="shrink-0 h-24 bg-black border-t-2 px-1.5 py-1 sm:px-2.5 sm:py-1.5 text-white text-[9px] sm:text-sm leading-relaxed relative overflow-hidden"
                     style={{ borderColor: '#3b2a55' }}>
                     {/* こうげきタイミングバー：参考実装（o_enc_fight / o_enc_fightstick）同様、
                         メッセージウィンドウの上にゲージを重ねる。全員のコマンド選択が終わった実行フェーズで
@@ -10288,15 +10303,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </div>
                     )}
                     {undertaleMenu === 'target' && (
-                      <div className="flex flex-col gap-0.5">
+                      <div className="flex flex-col gap-1">
                         <p className="text-gray-400 text-[10px] sm:text-xs">＊ だれに？</p>
-                        {battle.foes.map((f, i) => !f.gone && (
-                          <button key={i} disabled={!canMenu}
-                            onClick={() => { setUndertaleTargetCursor(i); undertaleTargetCursorRef.current = i; if (undertaleTargetSelRef.current) dispatchTarget(undertaleTargetSelRef.current, i); }}
-                            className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleTargetCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                            {undertaleTargetCursor === i ? '❤ ' : '  '}{f.name}
-                          </button>
-                        ))}
+                        {battle.foes.map((f, i) => {
+                          if (f.gone) return null;
+                          const fHpPct = Math.max(0, Math.min(100, (f.hp / f.maxHp) * 100));
+                          const fSpareReady = foeSpareReady(f);
+                          const sel = undertaleTargetCursor === i;
+                          return (
+                            <button key={i} disabled={!canMenu}
+                              onClick={() => { setUndertaleTargetCursor(i); undertaleTargetCursorRef.current = i; if (undertaleTargetSelRef.current) dispatchTarget(undertaleTargetSelRef.current, i); }}
+                              className={`flex items-center gap-2 text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${sel ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                              <span className="shrink-0">{sel ? '❤' : '  '}</span>
+                              <span className="truncate">{f.name}</span>
+                              <span className="flex items-center gap-1 ml-auto shrink-0">
+                                <span className="text-[8px] sm:text-[9px] text-gray-300">HP</span>
+                                <div className="w-10 h-1.5 overflow-hidden bg-gray-700">
+                                  <div className={`h-full ${fHpPct <= 30 ? 'bg-red-500' : 'bg-lime-400'}`} style={{ width: `${fHpPct}%` }} />
+                                </div>
+                                {fSpareReady && <img src={TLDR_UI_SPRITES.spareStar.frames[0]} alt="みのがし可" draggable={false} className="h-3 w-auto" style={{ imageRendering: 'pixelated' }} />}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                     {undertaleMenu === 'item' && (
