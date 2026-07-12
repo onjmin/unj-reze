@@ -1377,8 +1377,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** milky: 行動値。キーは 'm:<memberId>' / 'f:<foeIdx>'。値が最小の者から行動する。 */
   const milkyAvRef = useRef<Record<string, number>>({});
   const milkyActorRef = useRef<string | null>(null);
-  /** milky: 行動順プレビュー（先の数手ぶん）。 */
-  const [milkyOrder, setMilkyOrder] = useState<{ key: string; emoji: string; name: string; isFoe: boolean }[]>([]);
+  /** milky: 行動値が0になって「選ばれた」が、まだ実行されていない予約中の行動（もう一度0に達したら実行）。 */
+  const milkyPendingRef = useRef<Record<string, () => boolean | void>>({});
+  /** milky: 行動値を同時カウントダウンさせる interval（常に1本だけ）。 */
+  const milkyTickTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** milky: 現在選択中（予約中）の技名。常時表示のステータス窓に出す。 */
+  const [milkyAllySkillName, setMilkyAllySkillName] = useState('');
+  const [milkyEnemySkillName, setMilkyEnemySkillName] = useState('');
   /** パーティ制戦闘の進行タイマー（常に1本だけ。戦闘終了時は active/over ガードで自然消滅）。 */
   const ptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ptDelay = (fn: () => void, ms: number) => {
@@ -1391,6 +1396,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
   useEffect(() => () => {
     if (ptTimerRef.current) clearTimeout(ptTimerRef.current);
+    if (milkyTickTimerRef.current) clearInterval(milkyTickTimerRef.current);
   }, []);
 
   /** エンカウント和音用の AudioContext（遅延生成・単一インスタンス）とデコード済み音源キャッシュ。
@@ -2075,8 +2081,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 2体以上のときは Ａ/Ｂ/Ｃ を付けて呼び分ける（原作の Froggit Ａ/Ｂ 方式）。
     const dodgeStyle = isDodgeBattleStyle(gameDataRef.current.battle?.style);
     const partyStyle = isPartyBattleStyle(gameDataRef.current.battle?.style);
+    const milkyStyle = gameDataRef.current.battle?.style === 'milky';
     const maxCount = Math.max(1, Math.min(3, opts.encounterMax ?? 3));
-    const foeCount = (dodgeStyle || partyStyle) && !opts.isBoss ? 1 + Math.floor(Math.random() * maxCount) : 1;
+    // milky はミルキークエスト2風の完全1対1決闘なので、複数体エンカウントでも常に1体だけを相手にする。
+    const foeCount = milkyStyle ? 1 : (dodgeStyle || partyStyle) && !opts.isBoss ? 1 + Math.floor(Math.random() * maxCount) : 1;
     const suffix = ['Ａ', 'Ｂ', 'Ｃ'];
     const foes: BattleFoe[] = Array.from({ length: foeCount }, (_, i) => ({
       name: foeCount > 1 ? `${opts.name}${suffix[i]}` : opts.name,
@@ -2130,10 +2138,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         foes.forEach((_, i) => { av[`f:${i}`] = 70 + i * 18 + Math.floor(Math.random() * 30); });
         milkyAvRef.current = av;
         milkyActorRef.current = null;
-        milkyUpdateOrder();
+        milkyPendingRef.current = {};
+        setMilkyAllySkillName(''); setMilkyEnemySkillName('');
         // エンカウントメッセージを見せてから時間進行を開始する
         setTimeout(() => {
-          if (battleRef.current.active && gameDataRef.current.battle?.style === 'milky' && !battleViewRef.current?.over) milkyAdvance();
+          if (battleRef.current.active && gameDataRef.current.battle?.style === 'milky' && !battleViewRef.current?.over) milkyStartTicking();
         }, 900);
       }
     }
@@ -2161,6 +2170,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
   // ボスをみのがした場合も撃破と同様にクリア扱い（不殺ルート）。
   const endBattle = (result: 'win' | 'lose' | 'flee' | 'spare') => {
+    milkyStopTicking();
+    milkyPendingRef.current = {};
     const b = battleRef.current; const pr = progressRef.current; const eng = engineRef.current;
     if (result === 'lose') {
       battleRef.current.active = false; setBattle(null);
@@ -2929,13 +2940,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   /** ff/mother3: 新しいラウンドの行動選択を開始する。
-   *  milky はラウンドの概念がないので時間進行（milkyAdvance）へ戻る。 */
+   *  milky はラウンドの概念がないので時間進行（milkyStartTicking）へ戻る。 */
   const ptBeginRound = () => {
     if (!battleRef.current.active || battleViewRef.current?.over) return;
     const style = gameDataRef.current.battle?.style;
     if (style === 'milky') {
       ptPatch({ phase: 'idle', menu: 'root', pending: null, defended: [] });
-      ptDelay(milkyAdvance, 400);
+      ptDelay(milkyStartTicking, 400);
       return;
     }
     ptQueueRef.current = []; ptExecPosRef.current = 0;
@@ -3059,7 +3070,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (gameDataRef.current.battle?.style === 'milky') {
       milkyChargeCurrent(100);
       ptPatch({ phase: 'idle', menu: 'root', pending: null });
-      ptDelay(milkyAdvance, 800);
+      ptDelay(milkyStartTicking, 800);
     } else {
       ptQueueRef.current = [];
       ptPatch({ phase: 'exec', menu: 'root', pending: null });
@@ -3090,19 +3101,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const actor = roster[p.turnIdx] ?? roster[0];
     if (style === 'milky') {
       if (!actor) return;
+      const key = `m:${actor.id}`;
       if (pend.kind === 'attack') {
         ptPatch({ pending: null, menu: 'root' });
-        const dmg = calcDmg(actor.atk, battleRef.current.enemyDef);
-        const over = ptHitFoe(`${actor.name}の こうげき！`, dmg, foeIdx);
-        milkyAfterAction(100, over);
+        milkyQueueAction(key, milkyBaseAttackCost(actor.atk), 'ふつうのこうげき', () => {
+          const dmg = calcDmg(actor.atk, battleRef.current.enemyDef);
+          return ptHitFoe(`${actor.name}の こうげき！`, dmg, foeIdx);
+        });
       } else if (pend.kind === 'skill' && pend.move) {
         const m = pend.move;
         if (actor.mp < m.cost) return;
         ptPatch({ pending: null, menu: 'root' });
         ptSetMp(actor.id, actor.mp - m.cost);
-        const dmg = Math.max(1, Math.round(m.power * (0.85 + Math.random() * 0.3)));
-        const over = ptHitFoe(`${actor.name}の ${m.name}！`, dmg, foeIdx);
-        milkyAfterAction(milkyMoveCost(m), over);
+        milkyQueueAction(key, milkyMoveCost(m), m.name, () => {
+          const dmg = Math.max(1, Math.round(m.power * (0.85 + Math.random() * 0.3)));
+          return ptHitFoe(`${actor.name}の ${m.name}！`, dmg, foeIdx);
+        });
       }
       return;
     }
@@ -3151,13 +3165,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return list;
     }
     if (p.menu === 'skill') {
+      if (style === 'milky') {
+        const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] =
+          milkySkillList().map(x => ({ label: x.name, sub: x.sub, disabled: x.disabled, onClick: x.onClick }));
+        list.push({ label: 'もどる', onClick: () => ptPatch({ menu: 'root' }) });
+        return list;
+      }
       const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] = skillMoves.map(m => ({
         label: m.name,
-        sub: style === 'milky' ? `WT${milkyMoveCost(m)}` : m.cost > 0 ? `${m.cost}` : undefined,
+        sub: m.cost > 0 ? `${m.cost}` : undefined,
         disabled: (cur?.mp ?? 0) < m.cost,
         onClick: () => {
-          if (style === 'milky') { if (m.heal) milkySelfSkill(m); else ptWithTarget({ kind: 'skill', move: m }); }
-          else if (m.heal) ptPatch({ pending: { kind: 'skill', move: m }, menu: 'member' });
+          if (m.heal) ptPatch({ pending: { kind: 'skill', move: m }, menu: 'member' });
           else ptWithTarget({ kind: 'skill', move: m });
         },
       }));
@@ -3174,8 +3193,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     // root
     const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] = [];
-    list.push({ label: bd.labels.attack || 'こうげき', onClick: () => ptWithTarget({ kind: 'attack' }) });
-    if (skillMoves.length > 0) list.push({ label: bd.labels.move || 'とくぎ', onClick: () => ptPatch({ menu: 'skill' }) });
+    if (style === 'milky') {
+      // milky: こうげきラベルはそのまま技めくり画面（← ふつうのこうげき →）への入口
+      list.push({ label: bd.labels.attack || 'こうげき', onClick: () => ptPatch({ menu: 'skill', menuCursor: 0 }) });
+    } else {
+      list.push({ label: bd.labels.attack || 'こうげき', onClick: () => ptWithTarget({ kind: 'attack' }) });
+      if (skillMoves.length > 0) list.push({ label: bd.labels.move || 'とくぎ', onClick: () => ptPatch({ menu: 'skill' }) });
+    }
     if (style !== 'milky') list.push({ label: 'ぼうぎょ', onClick: () => cur && ptChoose({ memberId: cur.id, kind: 'defend' }) });
     if (items.length > 0) list.push({ label: bd.labels.item ?? 'どうぐ', onClick: () => ptPatch({ menu: 'item' }) });
     list.push({ label: bd.labels.flee || 'にげる', onClick: ptFlee });
@@ -3185,48 +3209,90 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── milky（ミルキークエスト2風CTB）───────────────────────────────────────
   /** 現在戦っている全コンバタントの行動値キー一覧。 */
-  const milkyKeys = () => [
-    ...ptParty().filter(mm => mm.hp > 0).map(mm => `m:${mm.id}`),
-    ...aliveFoeIdxs().map(i => `f:${i}`),
-  ];
+  const milkyKeys = () => {
+    // milky は同行者が何人いても常に先頭(生存中)の1人だけが戦う完全1対1決闘。
+    const front = ptParty().find(mm => mm.hp > 0);
+    return [
+      ...(front ? [`m:${front.id}`] : []),
+      ...aliveFoeIdxs().slice(0, 1).map(i => `f:${i}`),
+    ];
+  };
   /** 現在行動中の者の行動値にコストを積む。 */
   const milkyChargeCurrent = (cost: number) => {
     const cur = milkyActorRef.current;
     if (cur) milkyAvRef.current[cur] = (milkyAvRef.current[cur] ?? 0) + cost;
   };
-  /** 技の行動値コスト。強い技ほど大きい（通常攻撃=100）。 */
+  /** 技の行動値コスト。強い技ほど大きい（通常攻撃の基準値=100）。 */
   const milkyMoveCost = (m: BattleMove) => Math.min(260, 100 + Math.round(m.power * 1.2));
-  /** 行動順プレビュー（先の6手）を再計算する。 */
-  const milkyUpdateOrder = () => {
-    const av = { ...milkyAvRef.current };
-    const keys = milkyKeys();
+  /** ふつうのこうげきの行動値コスト。atkが高い（＝強い）ほど動きが遅く、atkが低い（＝スライムのような雑魚）ほど
+   *  身軽で行動値の溜まりが早い＝手数が多くなるようにする（一律100固定だと弱い敵も強い敵も同じ頻度で動いてしまう）。 */
+  const milkyBaseAttackCost = (atk: number) => Math.max(70, Math.min(160, Math.round(60 + atk * 2)));
+  /** milky: 「ふつうのこうげき」を先頭に据えた、犯す(こうげき)から入る一本の技リスト（← →でめくる）。 */
+  const milkySkillList = (): { name: string; sub: string; disabled?: boolean; onClick: () => void }[] => {
+    const bd = gameDataRef.current.battle!;
     const roster = ptParty();
-    const out: { key: string; emoji: string; name: string; isFoe: boolean }[] = [];
-    for (let n = 0; n < 6 && keys.length; n++) {
-      let best = keys[0];
-      for (const k of keys) if ((av[k] ?? 0) < (av[best] ?? 0)) best = k;
-      if (best.startsWith('m:')) {
-        const mm = roster.find(x => x.id === best.slice(2));
-        out.push({ key: `${best}:${n}`, emoji: mm?.emoji ?? '❓', name: mm?.name ?? '', isFoe: false });
-      } else {
-        const f = battleRef.current.foes[Number(best.slice(2))];
-        out.push({ key: `${best}:${n}`, emoji: f?.emoji ?? '👾', name: f?.name ?? '', isFoe: true });
-      }
-      av[best] = (av[best] ?? 0) + 100;
-    }
-    setMilkyOrder(out);
+    const cur = roster[Math.min(ptRef.current.turnIdx, Math.max(0, roster.length - 1))];
+    const skillMoves = bd.moves.filter(m => m.mercy == null);
+    const atkCost = milkyBaseAttackCost(cur?.atk ?? 10);
+    const list: { name: string; sub: string; disabled?: boolean; onClick: () => void }[] = [
+      { name: 'ふつうのこうげき', sub: `WT${atkCost}`, onClick: () => ptWithTarget({ kind: 'attack' }) },
+    ];
+    skillMoves.forEach(m => {
+      list.push({
+        name: m.name, sub: `WT${milkyMoveCost(m)}`,
+        disabled: (cur?.mp ?? 0) < m.cost,
+        onClick: () => { if (m.heal) milkySelfSkill(m); else ptWithTarget({ kind: 'skill', move: m }); },
+      });
+    });
+    return list;
   };
-  /** 時間を進めて、行動値が最小の者に行動させる。メンバーならコマンド選択へ、敵なら即行動して次へ。 */
-  const milkyAdvance = () => {
+  /** 行動値カウントダウンの1目盛りぶんの減少量・間隔。 */
+  const MILKY_TICK_STEP = 4;
+  const MILKY_TICK_MS = 90;
+  /** カウントダウンを止める。 */
+  const milkyStopTicking = () => {
+    if (milkyTickTimerRef.current) { clearInterval(milkyTickTimerRef.current); milkyTickTimerRef.current = null; }
+  };
+  /** 敵味方全員の行動値を同時にカウントダウンさせる。減るたびに効果音を鳴らし、
+   *  誰かが0に達したらそこで止めて行動を実行する。 */
+  const milkyStartTicking = () => {
+    milkyStopTicking();
+    milkyTickTimerRef.current = setInterval(() => {
+      if (!battleRef.current.active || battleViewRef.current?.over) { milkyStopTicking(); return; }
+      const keys = milkyKeys();
+      if (!keys.length) { milkyStopTicking(); return; }
+      let zeroKey: string | null = null;
+      for (const k of keys) {
+        const next = Math.max(0, (milkyAvRef.current[k] ?? 0) - MILKY_TICK_STEP);
+        milkyAvRef.current[k] = next;
+        if (next <= 0 && !zeroKey) zeroKey = k;
+      }
+      playSfx(sfxRef.current.graze);
+      forceHud(n => n + 1);
+      if (zeroKey) {
+        milkyStopTicking();
+        playSfx(sfxRef.current.coin);
+        milkyResolveActor(zeroKey);
+      }
+    }, MILKY_TICK_MS);
+  };
+  /** 行動値が0に達した者を処理する。メンバーは「選ぶ」というUI上の操作があるため予約制（選択→行動値セット→
+   *  再び0で発動）にするが、敵にはその操作がないので選ぶ＝即発動でよい（でないと敵の行動値が0になっても
+   *  何も起きないまま無言で再チャージするだけに見えてしまうバグになる）。すでに予約中の行動（＝メンバーが選んだ技）が
+   *  あれば、そこでようやく発動させる。 */
+  const milkyResolveActor = (best: string) => {
     if (!battleRef.current.active || battleViewRef.current?.over) return;
-    const keys = milkyKeys();
-    if (!keys.length) return;
-    let best = keys[0];
-    for (const k of keys) if ((milkyAvRef.current[k] ?? 0) < (milkyAvRef.current[best] ?? 0)) best = k;
-    const min = milkyAvRef.current[best] ?? 0;
-    for (const k of keys) milkyAvRef.current[k] = Math.max(0, (milkyAvRef.current[k] ?? 0) - min);
     milkyActorRef.current = best;
-    milkyUpdateOrder();
+    const pendingFn = milkyPendingRef.current[best];
+    if (pendingFn) {
+      // 予約済みの行動（メンバーが選んだ技）が行動値0に達した＝発動のとき
+      delete milkyPendingRef.current[best];
+      const over = pendingFn();
+      if (over || !battleRef.current.active || battleViewRef.current?.over) return;
+      milkyAvRef.current[best] = 100;
+      ptDelay(milkyStartTicking, 700);
+      return;
+    }
     if (best.startsWith('m:')) {
       const roster = ptParty();
       const idx = roster.findIndex(mm => `m:${mm.id}` === best);
@@ -3234,18 +3300,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
       return;
     }
-    // 敵の行動
+    // 敵：選ぶと同時にその場で行動する（弱い敵ほどコストが軽く、手数が多い）
     const b = battleRef.current;
     const f = b.foes[Number(best.slice(2))];
-    if (!f || f.gone) { ptDelay(milkyAdvance, 60); return; }
+    if (!f || f.gone) { ptDelay(milkyStartTicking, 60); return; }
     const move = b.enemyMoves.length && Math.random() < 0.4 ? b.enemyMoves[Math.floor(Math.random() * b.enemyMoves.length)] : null;
+    setMilkyEnemySkillName(move?.name ?? 'ふつうのこうげき');
     if (move?.heal) {
       const before = f.hp; f.hp = Math.min(f.maxHp, f.hp + move.power); syncFoesView();
       appendLog(`${f.name}は ${move.name}を となえた！ HPが ${f.hp - before} かいふく`, { canAct: false });
     } else {
       const targets = ptAliveMembers();
       const target = targets[Math.floor(Math.random() * targets.length)];
-      if (!target) return;
+      if (!target) { ptDelay(milkyStartTicking, 60); return; }
       const raw = move ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3))) : calcDmg(b.enemyAtk, target.def);
       const dealt = ptDamageMember(target, raw);
       playSfx(sfxRef.current.damage);
@@ -3253,33 +3320,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       appendLog(`${f.name}の ${move ? move.name : 'こうげき'}！ ${target.name}に ${dealt}のダメージ`, { canAct: false });
       if (ptAllDown()) { setTimeout(() => endBattle('lose'), 700); return; }
     }
-    milkyAvRef.current[best] = (milkyAvRef.current[best] ?? 0) + 100;
-    ptDelay(milkyAdvance, 950);
+    milkyAvRef.current[best] = move ? Math.min(260, 100 + Math.round(move.power * 1.2)) : milkyBaseAttackCost(b.enemyAtk);
+    ptDelay(milkyStartTicking, 700);
   };
-  /** milky: プレイヤー行動の解決後に呼ぶ。行動値コストを積んで時間進行へ戻る。 */
-  const milkyAfterAction = (cost: number, over: boolean) => {
-    if (over) return;
-    milkyChargeCurrent(cost);
+  /** milky: 選んだ行動を即実行せず予約する。行動値をコストぶんセットし、再び0になったときに実行される。 */
+  const milkyQueueAction = (key: string, cost: number, skillName: string, fn: () => boolean | void) => {
+    milkyPendingRef.current[key] = fn;
+    milkyAvRef.current[key] = cost;
+    setMilkyAllySkillName(skillName);
     ptPatch({ phase: 'idle', menu: 'root', pending: null });
     setBattle(v => (v ? { ...v, canAct: false } : v));
-    ptDelay(milkyAdvance, 800);
+    ptDelay(milkyStartTicking, 500);
   };
   /** milky: 回復技は自分にかける（対象選択を挟まないぶん行動が軽い）。 */
   const milkySelfSkill = (m: BattleMove) => {
     const actor = ptParty()[ptRef.current.turnIdx];
     if (!actor || actor.mp < m.cost) return;
     ptSetMp(actor.id, actor.mp - m.cost);
-    const after = Math.min(actor.maxHp, actor.hp + m.power);
-    dtSetHp(actor.id, after);
-    appendLog(`${actor.name}の ${m.name}！ HPが ${after - actor.hp} かいふく`, { canAct: false });
-    milkyAfterAction(milkyMoveCost(m), false);
+    milkyQueueAction(`m:${actor.id}`, milkyMoveCost(m), m.name, () => {
+      const cur = ptParty().find(mm => mm.id === actor.id);
+      if (!cur) return;
+      const after = Math.min(cur.maxHp, cur.hp + m.power);
+      dtSetHp(cur.id, after);
+      appendLog(`${cur.name}の ${m.name}！ HPが ${after - cur.hp} かいふく`, { canAct: false });
+    });
   };
   /** milky: どうぐは行動中のメンバー自身に使う（行動値コスト80）。 */
   const milkyItem = (it: ItemDef) => {
     const actor = ptParty()[ptRef.current.turnIdx];
     if (!actor) return;
-    ptUseItemOn(it, actor.id);
-    milkyAfterAction(80, false);
+    milkyQueueAction(`m:${actor.id}`, 80, it.name, () => { ptUseItemOn(it, actor.id); });
   };
 
   const battleStyle = gameData.battle?.style ?? 'classic';
@@ -7273,12 +7343,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       } else if (isPlaying && battleRef.current.active && isPartyBattleStyle(gameDataRef.current.battle?.style) && ptRef.current.phase === 'select') {
         // パーティ制戦闘（ff/mother3/milky）：上下でカーソル移動、ぼうぎょ等がある行は
-        // 2列表示ではなく縦一列なので上下のみで巡回する
+        // 2列表示ではなく縦一列なので上下のみで巡回する。
+        // milky の技めくり画面（← →）だけは左右キーでも同じくカーソルを動かせるようにする。
+        const isMilkySkill = gameDataRef.current.battle?.style === 'milky' && ptRef.current.menu === 'skill';
         const n = ptMenuActions().length;
-        if (n > 0 && (menuUpEdge || menuDownEdge)) {
+        if (n > 0 && (menuUpEdge || menuDownEdge || (isMilkySkill && (menuLeftEdge || menuRightEdge)))) {
           let c = ptRef.current.menuCursor;
-          if (menuUpEdge) c -= 1;
-          if (menuDownEdge) c += 1;
+          if (menuUpEdge || (isMilkySkill && menuLeftEdge)) c -= 1;
+          if (menuDownEdge || (isMilkySkill && menuRightEdge)) c += 1;
           c = ((c % n) + n) % n;
           if (c !== ptRef.current.menuCursor) playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).menuSwitch);
           ptPatch({ menuCursor: c });
@@ -10476,18 +10548,46 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 <div className="absolute inset-0 flex flex-col font-pixel select-none overflow-hidden" style={shellBg}>
                   {/* 戦場 */}
                   <div className="flex-1 relative min-h-0 flex items-center px-3 sm:px-8 gap-2">
-                    {/* milky: 行動順プレビュー（左端の縦列） */}
-                    {battleStyle === 'milky' && (
-                      <div className="absolute left-1 top-1 flex flex-col gap-0.5 z-10">
-                        <span className="text-[8px] text-gray-300 text-center">じゅんばん</span>
-                        {milkyOrder.map((o, n) => (
-                          <div key={o.key} title={o.name}
-                            className={`w-7 h-7 sm:w-8 sm:h-8 grid place-items-center border bg-black/50 ${n === 0 ? 'border-yellow-300' : o.isFoe ? 'border-red-900' : 'border-gray-600'}`}>
-                            <span className="text-sm sm:text-base leading-none">{o.emoji}</span>
+                    {/* milky: 完全1対1決闘。名前・HPは出さず、攻撃/防御/行動値/選択中の技だけを枠なしで常時表示する。
+                        HPバーは別枠（敵＝画面左上／味方＝画面右下）に常時表示する。 */}
+                    {battleStyle === 'milky' && battle.foes[0] && (() => {
+                      const foe = battle.foes[0];
+                      const foeHpPct = Math.max(0, Math.min(100, (foe.hp / foe.maxHp) * 100));
+                      return (
+                        <>
+                          <div className="absolute right-1 top-1 z-10 px-2 py-1 text-right">
+                            <div className="text-[9px] sm:text-[10px] text-gray-200">攻撃　{battleRef.current.enemyAtk}</div>
+                            <div className="text-[9px] sm:text-[10px] text-gray-200">防御　{battleRef.current.enemyDef}</div>
+                            <div className="text-[9px] sm:text-[10px] text-amber-300">行動　{Math.round(milkyAvRef.current['f:0'] ?? 0)}</div>
+                            <div className="text-[9px] sm:text-[10px] text-white">技　{milkyEnemySkillName || '－'}</div>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                          {/* 敵HPバー：画面左上に固定表示（枠なし・数値なし） */}
+                          <div className="absolute left-1 top-1 z-10 w-24 sm:w-32 h-2 bg-gray-900/70 overflow-hidden">
+                            <div className="h-full bg-red-500 transition-all" style={{ width: `${foeHpPct}%` }} />
+                          </div>
+                        </>
+                      );
+                    })()}
+                    {battleStyle === 'milky' && (() => {
+                      const m = roster.find(mm => mm.hp > 0) ?? roster[0];
+                      if (!m) return null;
+                      const hpPct = Math.max(0, Math.min(100, (m.hp / m.maxHp) * 100));
+                      return (
+                        <>
+                          <div className="absolute left-1 bottom-1 z-10 px-2 py-1 text-left">
+                            <div className="text-[9px] sm:text-[10px] text-gray-200">攻撃　{m.atk}</div>
+                            <div className="text-[9px] sm:text-[10px] text-gray-200">防御　{m.def}</div>
+                            <div className="text-[9px] sm:text-[10px] text-amber-300">行動　{Math.round(milkyAvRef.current[`m:${m.id}`] ?? 0)}</div>
+                            <div className="text-[9px] sm:text-[10px] text-white">技　{milkyAllySkillName || '－'}</div>
+                            {memberDmgPop(m.id)}
+                          </div>
+                          {/* 味方HPバー：画面右下に固定表示（枠なし・数値なし） */}
+                          <div className="absolute right-1 bottom-1 z-10 w-24 sm:w-32 h-2 bg-gray-900/70 overflow-hidden">
+                            <div className="h-full bg-green-400 transition-all" style={{ width: `${hpPct}%` }} />
+                          </div>
+                        </>
+                      );
+                    })()}
                     <div className={`flex ${battle.foes.length > 1 ? 'flex-col' : ''} items-center justify-center gap-1.5 ${battleStyle === 'milky' ? 'mx-auto' : 'mr-auto'}`}>
                       {battle.foes.map((_, i) => renderFoe(i, battle.foes.length > 1 ? 'md' : 'lg'))}
                     </div>
@@ -10499,50 +10599,69 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                   {/* ログ1行（選択中でも直近の出来事が見えるように） */}
                   <div className="shrink-0 px-2 pb-0.5 text-white text-[10px] sm:text-xs min-h-[1.3em] truncate">{canSelect ? battle.log.at(-1) : ''}</div>
-                  {/* 下段：コマンド窓＋ステータス窓 */}
-                  <div className="shrink-0 flex gap-1 p-1.5 items-stretch">
-                    <div className={`${menuWinCls} w-[44%] max-w-[230px] px-2 py-1.5 overflow-y-auto max-h-32`}>{renderMenuWindow()}</div>
-                    <div className={`${menuWinCls} flex-1 min-w-0 px-2 py-1.5 overflow-y-auto max-h-32`}>
-                      {battleStyle === 'ff' && (
-                        <div className="flex flex-col justify-center gap-0.5 h-full text-[10px] sm:text-xs">
-                          <div className="flex items-center gap-2 text-indigo-200 text-[9px] sm:text-[10px]">
-                            <span className="flex-1" />
-                            <span className="w-16 text-right">ＨＰ</span>
-                            <span className="w-10 text-right">ＭＰ</span>
-                          </div>
-                          {roster.map((m, i) => (
-                            <div key={m.id} className="relative flex items-center gap-2 leading-tight">
-                              <span className={`flex-1 truncate ${canSelect && curIdx === i ? 'text-yellow-300' : m.hp <= 0 ? 'text-red-400' : 'text-white'}`}>{m.name}</span>
-                              <span className={`w-16 text-right ${m.hp <= 0 ? 'text-red-400 font-bold' : m.hp / m.maxHp <= 0.25 ? 'text-yellow-300' : 'text-white'}`}>{m.hp}/{m.maxHp}</span>
-                              <span className="w-10 text-right text-indigo-200">{m.mp}</span>
-                              {memberDmgPop(m.id)}
+                  {/* 下段：milkyはコマンド選択中のみ枠つきウィンドウ、それ以外（技めくり中など）は枠なしのプレーン表示。
+                      ff/mother3系は従来どおりコマンド窓＋ステータス窓を横並びで常時表示する。 */}
+                  {battleStyle === 'milky' ? (
+                    pt.menu === 'root' ? (
+                      <div className="shrink-0 flex justify-center p-1.5">
+                        <div className={`${menuWinCls} w-full max-w-[230px] px-2 py-1.5 overflow-y-auto max-h-32`}>{renderMenuWindow()}</div>
+                      </div>
+                    ) : (
+                      <div className="shrink-0 px-2 py-1.5">
+                        {!canSelect && (
+                          <div className="text-[10px] sm:text-xs text-white leading-relaxed">{logLines.map((l, i) => <p key={i}>{l}</p>)}</div>
+                        )}
+                        {canSelect && pt.menu === 'skill' && (() => {
+                          const moves = milkySkillList();
+                          if (!moves.length) return null;
+                          const idx = Math.min(pt.menuCursor, moves.length - 1);
+                          const mv = moves[idx];
+                          const actor = roster[Math.min(pt.turnIdx, Math.max(0, roster.length - 1))];
+                          const cycle = (d: number) => { const n = ((idx + d) % moves.length + moves.length) % moves.length; ptPatch({ menuCursor: n }); };
+                          return (
+                            <div className="text-[11px] sm:text-xs text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button onClick={() => cycle(-1)} className="text-white hover:text-yellow-300 px-1">←</button>
+                                <span className="text-yellow-300 truncate">{actor?.name ?? ''}({idx + 1}/{moves.length})</span>
+                                <button onClick={() => cycle(1)} className="text-white hover:text-yellow-300 px-1">→</button>
+                              </div>
+                              <button disabled={mv.disabled} onClick={mv.onClick}
+                                className={`mt-0.5 ${mv.disabled ? 'text-gray-500' : 'text-white hover:text-yellow-300'}`}>
+                                {mv.name}
+                              </button>
+                              <button onClick={() => ptPatch({ menu: 'root' })} className="block mx-auto mt-1 text-gray-400 hover:text-white text-[10px]">もどる</button>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                      {battleStyle === 'milky' && (
-                        <div className="flex gap-1 h-full items-stretch">
-                          {roster.map((m, i) => {
-                            const hpPct = Math.max(0, Math.min(100, (m.hp / m.maxHp) * 100));
-                            return (
-                              <div key={m.id} className={`relative flex-1 min-w-0 border-2 px-1 py-0.5 ${canSelect && curIdx === i ? 'border-yellow-300 bg-yellow-300/5' : 'border-gray-600'}`}>
-                                <div className="flex items-center gap-1">
-                                  <span className="text-sm">{m.emoji}</span>
-                                  <span className={`text-[9px] sm:text-[10px] font-bold truncate ${m.hp <= 0 ? 'text-red-400' : 'text-white'}`}>{m.name}</span>
-                                </div>
-                                <div className="text-[8px] sm:text-[9px] text-white">HP {m.hp}/{m.maxHp}</div>
-                                <div className="h-1.5 bg-gray-900 border border-gray-700 overflow-hidden">
-                                  <div className="h-full bg-green-400 transition-all" style={{ width: `${hpPct}%` }} />
-                                </div>
-                                <div className="text-[8px] text-amber-300 mt-0.5">WT {Math.round(milkyAvRef.current[`m:${m.id}`] ?? 0)}</div>
+                          );
+                        })()}
+                        {canSelect && pt.menu !== 'skill' && (
+                          <div className="text-[11px] sm:text-xs">{renderMenuWindow()}</div>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    <div className="shrink-0 flex gap-1 p-1.5 items-stretch">
+                      <div className={`${menuWinCls} w-[44%] max-w-[230px] px-2 py-1.5 overflow-y-auto max-h-32`}>{renderMenuWindow()}</div>
+                      <div className={`${menuWinCls} flex-1 min-w-0 px-2 py-1.5 overflow-y-auto max-h-32`}>
+                        {battleStyle === 'ff' && (
+                          <div className="flex flex-col justify-center gap-0.5 h-full text-[10px] sm:text-xs">
+                            <div className="flex items-center gap-2 text-indigo-200 text-[9px] sm:text-[10px]">
+                              <span className="flex-1" />
+                              <span className="w-16 text-right">ＨＰ</span>
+                              <span className="w-10 text-right">ＭＰ</span>
+                            </div>
+                            {roster.map((m, i) => (
+                              <div key={m.id} className="relative flex items-center gap-2 leading-tight">
+                                <span className={`flex-1 truncate ${canSelect && curIdx === i ? 'text-yellow-300' : m.hp <= 0 ? 'text-red-400' : 'text-white'}`}>{m.name}</span>
+                                <span className={`w-16 text-right ${m.hp <= 0 ? 'text-red-400 font-bold' : m.hp / m.maxHp <= 0.25 ? 'text-yellow-300' : 'text-white'}`}>{m.hp}/{m.maxHp}</span>
+                                <span className="w-10 text-right text-indigo-200">{m.mp}</span>
                                 {memberDmgPop(m.id)}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             })()}
