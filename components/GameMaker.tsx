@@ -115,7 +115,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'object' | 'char' | 'asset' | 'item' | 'spell' | 'sound' | 'screen';
+type EditorTab = 'map' | 'object' | 'char' | 'battle' | 'asset' | 'item' | 'spell' | 'sound' | 'screen' | 'scene';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -1118,7 +1118,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 新規作成時の入口ヒーロー（デモ再生＋あそぶ/改造の選択）。playOnly/編集再開/埋め込み時は出さない。 */
   const [introOpen, setIntroOpen] = useState(!playOnly && !initialManifest && !embedded);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
-  /** 詳細タブ（アセット・サウンド・画面・会話）の表示フラグ。初回は非表示で圧迫感を減らす。 */
+  /** 詳細タブ（設定・サウンド・画面・フェーズ）の表示フラグ。初回は非表示で圧迫感を減らす。 */
   const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
@@ -11216,6 +11216,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             </div>
           ) : (
             <>
+              {/* ── タイトル：どのタブからでも常に見えるよう固定表示 ── */}
+              <div className="px-3 pt-3 pb-1 shrink-0">
+                <label className="block text-[11px] text-gray-400 mb-1">タイトル</label>
+                <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200" />
+              </div>
+
               {/* ── タブバー：基本3つ＋詳細▼ で圧迫感を抑える ── */}
               <div className="flex flex-wrap border-b border-gray-800 shrink-0">
                 {/* 基本タブ（常時表示） */}
@@ -11223,6 +11229,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   ['map', 'マップ'],
                   ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ']] : []),
                   ['char', 'キャラ'],
+                  ...(gameData.battle ? [['battle', '戦闘']] : []),
                   ['item', 'アイテム'],
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
@@ -11233,9 +11240,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
                 {/* 詳細タブ（showAdvancedTabs=trueのとき表示） */}
                 {showAdvancedTabs && ([
-                  ['asset', 'アセット'], ['sound', 'サウンド'],
+                  ['asset', '設定'], ['sound', 'サウンド'],
                   ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
-                  ...(gameData.engine === 'touhou' ? [['spell', '会話']] : []),
+                  ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
                     className={`flex-none py-3 px-3 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-600 hover:text-gray-400'}`}>
@@ -11245,8 +11252,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
                 {/* シーンタブ（scenes 定義済み preset のみ） */}
                 {gameData.scenes && (
-                  <button onClick={() => setEditorTab('scene' as EditorTab)}
-                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === ('scene' as EditorTab) ? 'text-violet-400 border-b-2 border-violet-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
+                  <button onClick={() => setEditorTab('scene')}
+                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === 'scene' ? 'text-violet-400 border-b-2 border-violet-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
                     シーン
                   </button>
                 )}
@@ -11255,7 +11262,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 <button
                   onClick={() => {
                     setShowAdvancedTabs(v => {
-                      if (v && !['map', 'object', 'char'].includes(editorTab)) setEditorTab('map');
+                      if (v && !['map', 'object', 'char', 'battle', 'item'].includes(editorTab)) setEditorTab('map');
                       return !v;
                     });
                   }}
@@ -11603,27 +11610,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   </select>
                                 </div>
                                 {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
-                                  <div className="space-y-1">
-                                    <label className="text-[10px] text-gray-400 flex items-center gap-1">🚪 遷移先シーン
-                                      <select value={tile.warpSceneId ?? ''} onChange={e => updateTile(id, { warpSceneId: e.target.value || undefined })}
-                                        className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none">
-                                        <option value="">（未設定）</option>
-                                        {(gameData.scenes ?? []).map(s => <option key={s.id} value={s.id}>{s.name ?? s.id}</option>)}
-                                      </select>
-                                    </label>
-                                    {tile.warpSceneId && (
-                                      <div className="grid grid-cols-2 gap-1.5">
-                                        <label className="text-[10px] text-gray-400">入場X(列)
-                                          <input type="number" value={tile.warpEntryCol ?? 1} onChange={e => updateTile(id, { warpEntryCol: Number(e.target.value) })}
-                                            className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
-                                        </label>
-                                        <label className="text-[10px] text-gray-400">入場Y(行)
-                                          <input type="number" value={tile.warpEntryRow ?? 1} onChange={e => updateTile(id, { warpEntryRow: Number(e.target.value) })}
-                                            className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
-                                        </label>
-                                      </div>
-                                    )}
-                                  </div>
+                                  <p className="text-[10px] text-gray-500">🚪 ワープ先の設定は「シーン」タブで行えます。</p>
                                 )}
                                 {tile.special === 'damage' && (
                                   <label className="text-[10px] text-gray-400 flex items-center gap-1">被ダメージ量
@@ -12187,51 +12174,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         )}
                         {/* Warp 設定 */}
                         {(selObj.objType ?? 'enemy') === 'warp' && (
-                          <div className="space-y-2">
-                            {/* シーン間ワープ（シーンが複数あるときのみ表示） */}
-                            {(gameData.scenes?.length ?? 0) > 0 && (
-                              <div className="space-y-1.5">
-                                <label className="text-[10px] text-gray-400 flex items-center gap-1">
-                                  🚪 遷移先シーン
-                                </label>
-                                <select value={selObj.warpSceneId ?? ''}
-                                  onChange={e => updObj({ warpSceneId: e.target.value || undefined })}
-                                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none">
-                                  <option value="">（同シーン内ワープ）</option>
-                                  {(gameData.scenes ?? []).map(s => (
-                                    <option key={s.id} value={s.id}>{s.name ?? s.id}</option>
-                                  ))}
-                                </select>
-                                {selObj.warpSceneId && (
-                                  <div className="grid grid-cols-2 gap-1.5">
-                                    <label className="text-[10px] text-gray-400">入場X(列)
-                                      <input type="number" value={selObj.warpEntryCol ?? 1}
-                                        onChange={e => updObj({ warpEntryCol: Number(e.target.value) })}
-                                        className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                    </label>
-                                    <label className="text-[10px] text-gray-400">入場Y(行)
-                                      <input type="number" value={selObj.warpEntryRow ?? 1}
-                                        onChange={e => updObj({ warpEntryRow: Number(e.target.value) })}
-                                        className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                    </label>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {/* 同シーン内ワープ座標（シーン間ワープ未選択時のみ） */}
-                            {!selObj.warpSceneId && (
-                              <div className="grid grid-cols-2 gap-2">
-                                <label className="text-[10px] text-gray-400">ワープ先X(列)
-                                  <input type="number" value={selObj.warpTarget?.col ?? 0} onChange={e => updObj({ warpTarget: { ...selObj.warpTarget ?? { col: 0, row: 0 }, col: Number(e.target.value) } })}
-                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                </label>
-                                <label className="text-[10px] text-gray-400">ワープ先Y(行)
-                                  <input type="number" value={selObj.warpTarget?.row ?? 0} onChange={e => updObj({ warpTarget: { ...selObj.warpTarget ?? { col: 0, row: 0 }, row: Number(e.target.value) } })}
-                                    className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
-                                </label>
-                              </div>
-                            )}
-                          </div>
+                          <WarpDestinationEditor
+                            scenes={gameData.scenes}
+                            sceneId={selObj.warpSceneId}
+                            onSceneChange={warpSceneId => updObj({ warpSceneId })}
+                            entryCol={selObj.warpEntryCol ?? 1}
+                            entryRow={selObj.warpEntryRow ?? 1}
+                            onEntryChange={(warpEntryCol, warpEntryRow) => updObj({ warpEntryCol, warpEntryRow })}
+                            sameSceneTarget={selObj.warpTarget}
+                            onSameSceneTargetChange={(col, row) => updObj({ warpTarget: { col, row } })}
+                          />
                         )}
                       </div>
                       {/* ── イベントページエディタ（全objType共通） ── */}
@@ -12363,8 +12315,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
                       </label>
                     )}
-                    {gameData.battle && (
-                      <div className="border-t border-gray-700 pt-3 space-y-4">
+                    <p className="text-[10px] text-gray-500">マップの広さやプレイヤー初期位置は「マップ」タブで設定できます。</p>
+                  </div>
+                )}
+
+                {/* ── BATTLE（RPG戦闘設定） ── */}
+                {editorTab === 'battle' && gameData.battle && (
+                  <div className="space-y-4">
                         <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
 
                         {/* 1. 基本ステータス */}
@@ -12680,9 +12637,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             ))}
                           </div>
                         </div>
-                      </div>
-                    )}
-                    <p className="text-[10px] text-gray-500">マップの広さやプレイヤー初期位置は「マップ」タブで設定できます。</p>
                   </div>
                 )}
 
@@ -13286,9 +13240,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )}
 
-                {/* ── ASSET ── */}
                 {/* ── SCENE ── */}
-                {editorTab === ('scene' as EditorTab) && gameData.scenes && (
+                {editorTab === 'scene' && gameData.scenes && (
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] text-gray-400 font-bold">シーン一覧</span>
@@ -13379,6 +13332,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       );
                     })}
 
+                    {/* ── ワープ床の設定（マップタブで special: シーン切替床 に設定したタイル） ── */}
+                    {Object.entries(gameData.tiles).filter(([, t]) => t.special === 'warp').length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-gray-800">
+                        <span className="text-[11px] text-gray-400 font-bold flex items-center gap-1">🚪 ワープ床の設定</span>
+                        {Object.entries(gameData.tiles).filter(([, t]) => t.special === 'warp').map(([idStr, tile]) => {
+                          const id = Number(idStr);
+                          return (
+                            <div key={id} className="rounded-lg border border-gray-700 bg-gray-900/40 p-2 space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-5 h-5 shrink-0 rounded border border-gray-600" style={{ backgroundColor: tile.color }} />
+                                <span className="text-[10px] text-gray-300 truncate">{tile.name}</span>
+                              </div>
+                              <WarpDestinationEditor
+                                scenes={gameData.scenes}
+                                sceneId={tile.warpSceneId}
+                                onSceneChange={warpSceneId => updateTile(id, { warpSceneId })}
+                                entryCol={tile.warpEntryCol ?? 1}
+                                entryRow={tile.warpEntryRow ?? 1}
+                                onEntryChange={(warpEntryCol, warpEntryRow) => updateTile(id, { warpEntryCol, warpEntryRow })}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     <p className="text-[9px] text-gray-600 leading-relaxed">
                       シーンを選択するとマップ・オブジェクトタブで編集できます。<br />
                       プレイ中に指定した辺に到達するとスライドで遷移します。
@@ -13386,13 +13365,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )}
 
+                {/* ── ASSET（タブ表示名は「設定」）── */}
                 {editorTab === 'asset' && (
                   <div className="space-y-4">
-                    <div>
-                      <label className="block text-[11px] text-gray-400 mb-1">タイトル</label>
-                      <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200" />
-                    </div>
-
                     {/* ── スイッチ一覧エディタ ── */}
                     <div>
                       <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">🔘 スイッチ</label>
@@ -13417,32 +13392,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         return { ...p, switches: [...arr, { id, name: `スイッチ${id}` }] };
                       })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
                         <Plus size={11} />スイッチ追加</button>
-                    </div>
-                    {/* ── アイテム一覧エディタ ── */}
-                    <div>
-                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">🎒 アイテム</label>
-                      <div className="space-y-1 max-h-40 overflow-y-auto">
-                        {(gameData.items ?? []).length === 0 && <p className="text-[9px] text-gray-500 px-1">（なし）</p>}
-                        {(gameData.items ?? []).map((it, i) => (
-                          <div key={it.id} className="flex items-center gap-1 bg-gray-900 rounded px-1.5 py-1 border border-gray-800">
-                            <input value={it.emoji} onChange={e => setGameData(p => {
-                              const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], emoji: e.target.value.slice(0, 2) }; return { ...p, items: copy };
-                            })} className="w-6 bg-transparent text-center text-sm outline-none" />
-                            <input value={it.name} onChange={e => setGameData(p => {
-                              const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], name: e.target.value }; return { ...p, items: copy };
-                            })} className="flex-1 min-w-0 bg-transparent text-[10px] text-gray-300 outline-none" />
-                            <span className="text-[9px] text-gray-500">×{inventory[it.id] ?? 0}</span>
-                            <button onClick={() => setGameData(p => {
-                              const copy = [...(p.items ?? [])]; copy.splice(i, 1); return { ...p, items: copy.length > 0 ? copy : undefined };
-                            })} className="shrink-0 px-2.5 py-1.5 rounded-md text-[11px] text-red-400 hover:text-red-300 active:bg-red-500/15">削除</button>
-                          </div>
-                        ))}
-                      </div>
-                      <button onClick={() => setGameData(p => {
-                        const arr = p.items ?? []; const id = `item${Date.now()}`;
-                        return { ...p, items: [...arr, { id, name: `アイテム${arr.length + 1}`, emoji: '💊' }] };
-                      })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
-                        <Plus size={11} />アイテム追加</button>
                     </div>
 
                     <div>
@@ -13502,6 +13451,60 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           onPick={applyPick}
           onClose={() => setPicker(null)}
         />
+      )}
+    </div>
+  );
+}
+
+// ── ワープ先設定（マップ:警備床タイル / オブジェ:warpオブジェクト で共用） ──
+function WarpDestinationEditor({
+  scenes, sceneId, onSceneChange, entryCol, entryRow, onEntryChange,
+  sameSceneTarget, onSameSceneTargetChange,
+}: {
+  scenes: SceneDef[] | undefined;
+  sceneId: string | undefined; onSceneChange: (id: string | undefined) => void;
+  entryCol: number; entryRow: number; onEntryChange: (col: number, row: number) => void;
+  /** オブジェクトのワープ設定のみ：シーン未選択時に同シーン内の座標へワープさせるフォールバック。 */
+  sameSceneTarget?: { col: number; row: number };
+  onSameSceneTargetChange?: (col: number, row: number) => void;
+}) {
+  const hasScenes = (scenes?.length ?? 0) > 0;
+  return (
+    <div className="space-y-1.5">
+      {hasScenes && (
+        <label className="text-[10px] text-gray-400 flex items-center gap-1">🚪 遷移先シーン
+          <select value={sceneId ?? ''} onChange={e => onSceneChange(e.target.value || undefined)}
+            className="flex-1 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none">
+            <option value="">{onSameSceneTargetChange ? '（同シーン内ワープ）' : '（未設定）'}</option>
+            {(scenes ?? []).map(s => <option key={s.id} value={s.id}>{s.name ?? s.id}</option>)}
+          </select>
+        </label>
+      )}
+      {hasScenes && sceneId && (
+        <div className="grid grid-cols-2 gap-1.5">
+          <label className="text-[10px] text-gray-400">入場X(列)
+            <input type="number" value={entryCol} onChange={e => onEntryChange(Number(e.target.value), entryRow)}
+              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+          </label>
+          <label className="text-[10px] text-gray-400">入場Y(行)
+            <input type="number" value={entryRow} onChange={e => onEntryChange(entryCol, Number(e.target.value))}
+              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+          </label>
+        </div>
+      )}
+      {!sceneId && onSameSceneTargetChange && (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[10px] text-gray-400">ワープ先X(列)
+            <input type="number" value={sameSceneTarget?.col ?? 0}
+              onChange={e => onSameSceneTargetChange(Number(e.target.value), sameSceneTarget?.row ?? 0)}
+              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+          </label>
+          <label className="text-[10px] text-gray-400">ワープ先Y(行)
+            <input type="number" value={sameSceneTarget?.row ?? 0}
+              onChange={e => onSameSceneTargetChange(sameSceneTarget?.col ?? 0, Number(e.target.value))}
+              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
+          </label>
+        </div>
       )}
     </div>
   );
