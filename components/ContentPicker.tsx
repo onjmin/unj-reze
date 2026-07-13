@@ -5,7 +5,7 @@ import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Squa
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
-import { youtubeRefFromUrl } from '@/lib/asset-ref';
+import { youtubeRefFromUrl, toYoutubeWatchUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
@@ -27,6 +27,8 @@ interface ContentPickerProps {
   userId: string;
   /** mode==='image' のときのみ有効。このゲーム内で現在使われている画像参照の一覧（履歴タブで再選択できる）。 */
   usedAssets?: { ref: string; url?: string; label: string }[];
+  /** mode==='bgm' のときのみ有効。現在選択済みのBGM/効果音の参照。再編集時にタブとURL/MML欄へ復元する。 */
+  currentRef?: string;
   onPick: (result: PickResult) => void;
   onClose: () => void;
 }
@@ -44,18 +46,37 @@ let lastImageTab: ImageTab = 'posts';
 const lastBgmTabByKind: Record<'bgm' | 'sfx', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe' };
 const scrollPositions = new Map<string, number>();
 
-export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], onPick, onClose }: ContentPickerProps) {
+export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], currentRef, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [imageTab, setImageTab] = useState<ImageTab>(lastImageTab);
   const allowedBgmTabs = bgmKind === 'sfx' ? SFX_TABS : BGM_TABS;
+  // 現在選択中のBGM/効果音がある場合は、それが属するタブとURL/MML欄をあらかじめ復元する
+  // （従来は毎回タブ・入力欄が空になり、既存の設定を再編集できなかった）。
+  const currentRefBase = currentRef?.split('#')[0];
   const [bgmTab, setBgmTab] = useState<BgmTab>(() => {
+    if (mode === 'bgm' && currentRefBase) {
+      if (currentRefBase.startsWith('youtube:') && allowedBgmTabs.includes('youtube')) return 'youtube';
+      if (currentRefBase.startsWith('direct:') && allowedBgmTabs.includes('direct')) return 'direct';
+      if (currentRefBase.startsWith('mml:post:') && allowedBgmTabs.includes('mmlPost')) return 'mmlPost';
+      if (currentRefBase.startsWith('mml:') && allowedBgmTabs.includes('mmlRaw')) return 'mmlRaw';
+    }
     const last = lastBgmTabByKind[bgmKind];
     return allowedBgmTabs.includes(last) ? last : allowedBgmTabs[0];
   });
-  const [urlInput, setUrlInput] = useState('');
-  const [mmlInput, setMmlInput] = useState('T120 o4 c d e f g a b');
+  const [urlInput, setUrlInput] = useState(() => {
+    if (mode !== 'bgm' || !currentRefBase) return '';
+    if (currentRefBase.startsWith('youtube:')) return toYoutubeWatchUrl(currentRefBase.replace(/^youtube:/, ''));
+    if (currentRefBase.startsWith('direct:')) return currentRefBase.replace(/^direct:/, '');
+    return '';
+  });
+  const [mmlInput, setMmlInput] = useState(() => {
+    if (mode === 'bgm' && currentRefBase && currentRefBase.startsWith('mml:') && !currentRefBase.startsWith('mml:post:')) {
+      return currentRefBase.replace(/^mml:/, '');
+    }
+    return 'T120 o4 c d e f g a b';
+  });
   const [editingHistoryAsset, setEditingHistoryAsset] = useState<{ ref: string; url: string; label: string } | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);

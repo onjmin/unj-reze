@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import { Play, Square } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, Play, Square } from 'lucide-react';
 import { SM127_MUSIC, SM127_SFX, sm127MusicUrl, sm127SfxUrl, type SM127MusicKey, type SM127SfxKey } from '@/lib/mario-sm127-assets';
 import { MEGAMAN_MUSIC, MEGAMAN_SFX, megamanMusicUrl, megamanSfxUrl, type MegamanMusicKey, type MegamanSfxKey } from '@/lib/megaman-assets';
 import { UNDERTALE_ENGINE_SOUNDS, undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
@@ -69,6 +69,11 @@ export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSound
     setPreviewKey(null);
   };
 
+  // 試聴中に他タブへ切り替え・ピッカーを閉じるなどでこのコンポーネントがアンマウントされても、
+  // new Audio() で作った要素はブラウザ側で再生され続け、参照を失うため二度と止められなくなる。
+  // アンマウント時に必ず止める。
+  useEffect(() => () => { audioRef.current?.pause(); audioRef.current = null; }, []);
+
   const preview = (entry: Entry) => {
     if (previewKey === entry.key) { stopPreview(); return; }
     stopPreview();
@@ -81,6 +86,7 @@ export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSound
   };
 
   const pick = (entry: Entry) => {
+    stopPreview();
     onPick({ ref: `direct:${entry.url}`, url: entry.url, label: `${SOURCE_LABEL[source]} ${entry.label}` });
   };
 
@@ -104,13 +110,18 @@ export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSound
             <div key={entry.key} className="flex items-center gap-1.5 p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900">
               <button
                 onClick={() => preview(entry)}
-                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
-                title={isPrev ? '停止' : '試聴'}
+                className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-300'}`}
+                title={isPrev ? '試聴を停止' : '試聴（この曲は選択されません）'}
               >
                 {isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
               </button>
-              <button onClick={() => pick(entry)} className="flex-1 min-w-0 text-left">
-                <span className="text-[11px] text-gray-300 font-bold truncate block">{entry.label}</span>
+              <span className="flex-1 min-w-0 text-[11px] text-gray-300 font-bold truncate">{entry.label}</span>
+              <button
+                onClick={() => pick(entry)}
+                className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-bold bg-[#a3e635]/20 text-[#a3e635] hover:bg-[#a3e635]/30 active:bg-[#a3e635]/40"
+                title="この曲をBGMとして選択"
+              >
+                <Check size={12} />選択
               </button>
             </div>
           );

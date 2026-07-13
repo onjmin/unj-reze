@@ -4455,6 +4455,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       previewStopRef.current = () => { a.pause(); a.currentTime = 0; };
       return;
     }
+    if (asset.type === 'youtube') {
+      // YouTube BGM は再生手段が bgmManager 経由の iframe 埋め込みしかないため、
+      // 他タイプ同様ここで直接再生できるようにする（従来 mml/direct 以外は無反応で「試聴」が効かなかった）。
+      bgmManager.play({ bgm: { type: 'youtube', src: asset.src, volume: applyMasterVolume(70) } as any, tileset: {} });
+      previewStopRef.current = () => { bgmManager.stop(); };
+      return;
+    }
     if (asset.type !== 'mml') return;
     try {
       const { playMML } = await import('@onjmin/dtm');
@@ -13776,6 +13783,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       <label className="flex text-[11px] text-gray-400 mb-1 items-center gap-1">
                         <Music size={12} />{gameData.engine === 'touhou' ? '道中BGM' : 'BGM'}
                       </label>
+                      {(gameData.scenes?.length ?? 0) > 0 && (
+                        <p className="text-[10px] text-amber-400 mb-1.5 leading-relaxed">
+                          ⚠ シーンを使用中は、シーンごとのBGM設定がここでの設定より優先されます。
+                          「シーン固有BGM」が空欄のシーンだけ、ここでの設定が使われます。
+                        </p>
+                      )}
                       <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'bgm' } })}
                         className="w-full flex items-center justify-between py-2 px-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300">
                         <span className="truncate">{gameData.bgm ? refLabel(gameData.bgm.ref) : '未設定（YouTube / MML / URL）'}</span>
@@ -13796,6 +13809,48 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             onChange={(newRef) => setGameData(p => ({ ...p, bgm: p.bgm ? { ...p.bgm, ref: newRef } : undefined }))}
                           />
                         </>
+                      )}
+                      {gameData.scenes && gameData.scenes.length > 0 && (
+                        <div className="mt-2.5 pt-2.5 border-t border-gray-700/50 space-y-2">
+                          <p className="text-[10px] text-gray-400">シーンごとのBGM（空欄のシーンは上の全体BGMを使用）</p>
+                          {gameData.scenes.map((sc, idx) => (
+                            <div key={sc.id} className="space-y-1.5 rounded-lg border border-gray-800 bg-gray-900/60 p-2">
+                              <div className="flex items-center justify-between text-[10px] text-gray-400">
+                                <span className="truncate">
+                                  {sc.name ?? `シーン${idx + 1}`}
+                                  {idx === editSceneIdx && <span className="ml-1 text-blue-400">（編集中）</span>}
+                                </span>
+                                {sc.bgm && (
+                                  <button onClick={() => setGameData(p => ({ ...p, scenes: p.scenes!.map((s, i) => i === idx ? { ...s, bgm: undefined } : s) }))}
+                                    className="shrink-0 px-2 py-1 -my-1 text-gray-500 hover:text-red-400">外す</button>
+                                )}
+                              </div>
+                              <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'sceneBgm', idx } })}
+                                className="w-full flex items-center justify-between py-1.5 px-2 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300">
+                                <span className="truncate">{sc.bgm ? refLabel(sc.bgm.ref) : '未設定（全体のBGMを使用）'}</span>
+                                <Music size={12} className="shrink-0 ml-1" />
+                              </button>
+                              {sc.bgm && (
+                                <>
+                                  <BgmVolumeSettings
+                                    bgm={sc.bgm}
+                                    onChange={(newRef) => setGameData(p => ({
+                                      ...p,
+                                      scenes: p.scenes!.map((s, i) => i === idx ? { ...s, bgm: { ...s.bgm!, ref: newRef } } : s)
+                                    }))}
+                                  />
+                                  <MmlLoopSettings
+                                    bgm={sc.bgm}
+                                    onChange={(newRef) => setGameData(p => ({
+                                      ...p,
+                                      scenes: p.scenes!.map((s, i) => i === idx ? { ...s, bgm: { ...s.bgm!, ref: newRef } } : s)
+                                    }))}
+                                  />
+                                </>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
 
@@ -14076,15 +14131,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           />
         );
       })()}
-      {picker && picker.mode === 'bgm' && (
-        <ContentPicker
-          mode={picker.mode}
-          bgmKind={picker.target.t === 'sfx' ? 'sfx' : 'bgm'}
-          userId={userId}
-          onPick={applyPick}
-          onClose={() => setPicker(null)}
-        />
-      )}
+      {picker && picker.mode === 'bgm' && (() => {
+        // 再編集時にタブ・URL/MML欄を復元できるよう、対象スロットの現在の参照を渡す。
+        const target = picker.target;
+        const currentRef =
+          target.t === 'bgm' ? gameData.bgm?.ref :
+          target.t === 'battleBgm' ? gameData.battleBgm?.ref :
+          target.t === 'bossBgm' ? gameData.bossBgm?.ref :
+          target.t === 'sfx' ? gameData.sfx[target.trigger]?.ref :
+          target.t === 'titleBgm' ? gameData.titleScreen?.bgmRef :
+          target.t === 'endingBgm' ? gameData.ending?.bgmRef :
+          target.t === 'sceneBgm' ? gameData.scenes?.[target.idx]?.bgm?.ref :
+          undefined;
+        return (
+          <ContentPicker
+            mode={picker.mode}
+            bgmKind={target.t === 'sfx' ? 'sfx' : 'bgm'}
+            userId={userId}
+            currentRef={currentRef}
+            onPick={applyPick}
+            onClose={() => setPicker(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
