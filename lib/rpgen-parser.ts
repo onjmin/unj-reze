@@ -256,7 +256,20 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
         return { type: 'message', text };
       }
       case 'SEL': {
-        const choiceNode: EventCommand = { type: 'choice', text: '', choices: [] };
+        // RawCommand.parse() は choices/clearMessage しか返さず、元の x/y パラメータの有無は
+        // 捨てられてしまう。x/y省略時のランダム判定に必要なので、toString() で元テキストへ
+        // 戻し、先頭行（パラメータ行）に x:/y: が含まれるかを直接見る。
+        const rawText = typeof rawCmd.toString === 'function' ? String(rawCmd.toString()) : '';
+        const paramsLine = rawText.match(/^#SEL\d*[ \t]*(.*?)\r?\n/)?.[1] ?? '';
+        const hasXY = /(?:^|,)\s*x:/.test(paramsLine) && /(?:^|,)\s*y:/.test(paramsLine);
+
+        const choiceNode: EventCommand = {
+          type: 'choice', text: '', choices: [],
+          random: !hasXY,
+          // ライブラリの clearMessage は params.c === '1' そのもの。RPGENの実際の挙動は
+          // c:1で直前のメッセージウィンドウを表示したままにする、というものなのでそのまま使う。
+          keepMessage: cmd.clearMessage === true,
+        };
         if (cmd.choices) {
           for (const [label, sequence] of cmd.choices.entries()) {
             choiceNode.choices.push({

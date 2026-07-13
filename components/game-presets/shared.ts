@@ -39,7 +39,14 @@ export interface EventCondition {
 /** イベントコマンド（順次実行）。 */
 export type EventCommand =
   | { type: 'message'; text: string }
-  | { type: 'choice'; text: string; choices: { label: string; commands: EventCommand[] }[]; cancelIndex?: number }
+  | {
+      type: 'choice'; text: string; choices: { label: string; commands: EventCommand[] }[]; cancelIndex?: number;
+      /** RPGEN #SEL の x/y 省略時の挙動。true のとき選択肢UIを出さず、ランダムに1つ選んで即実行する。 */
+      random?: boolean;
+      /** RPGEN #SEL の c フラグ。true(c:1)なら直前のメッセージウィンドウを表示したままにする。
+       *  false(c:0/省略)なら選択肢を出す前にメッセージウィンドウを閉じる。 */
+      keepMessage?: boolean;
+    }
   | { type: 'ifSwitch'; switchId: number; value: boolean; then: EventCommand[]; else?: EventCommand[] }
   | { type: 'ifItem'; itemId: string; has: boolean; then: EventCommand[]; else?: EventCommand[] }
   | { type: 'ifGold'; amount: number; then: EventCommand[]; else?: EventCommand[] }

@@ -4103,7 +4103,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           playSfx({ ref: `direct:${cmd.src}`, src: cmd.src, type: 'direct' });
           setTimeout(advance, 0);
           break;
-        case 'choice':
+        case 'choice': {
+          // RPGEN #SEL の c:0（既定）は選択肢を出す前に直前のメッセージウィンドウを閉じる。
+          // c:1（keepMessage）のときだけ表示したままにする。
+          if (!cmd.keepMessage) {
+            if (gameMsgTimerRef.current) { clearTimeout(gameMsgTimerRef.current); gameMsgTimerRef.current = null; }
+            setGameMsg(null);
+            gameMsgReadyRef.current = false;
+          }
+          // RPGEN #SEL の x/y 省略時は選択肢UIを出さず、ランダムに1つ選んで即実行する。
+          if (cmd.random) {
+            if (cmd.choices.length === 0) { setTimeout(advance, 0); break; }
+            const idx = Math.floor(Math.random() * cmd.choices.length);
+            runEventCommands(objId, cmd.choices[idx].commands, advance);
+            break;
+          }
           eventChoiceRef.current = {
             text: cmd.text, choices: cmd.choices,
             onPick: (idx: number) => {
@@ -4118,6 +4132,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           };
           setEventChoice(eventChoiceRef.current);
           break;
+        }
         case 'ifSwitch': {
           const cond = (switchValsRef.current[cmd.switchId] ?? false) === cmd.value;
           const sub = cond ? cmd.then : cmd.else ?? [];
@@ -5008,6 +5023,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (!id) return null;
       return { id, col, row, info: gameData.tiles[id] };
     };
+    // 床タイルが通行可でも、その上に置かれたオブジェクト層タイル（壁・家具等）が通行不可なら
+    // そちらを優先してブロックする。木の上部/屋根のように意図的に通行可（passable:true）で
+    // 置かれているオブジェクト層タイル（プレイヤーが下を歩ける演出用）はそのまま通れる。
+    const isCornerPassable = (px: number, py: number) => {
+      const floor = getTile(px, py);
+      if (!floor?.info.passable) return false;
+      const overlay = getOverlayTileAt(Math.floor(px / TILE_SIZE), Math.floor(py / TILE_SIZE));
+      if (overlay?.info && !overlay.info.passable) return false;
+      return true;
+    };
     const isAllPassable = (x: number, y: number, w: number, h: number) => {
       // 当たり判定は見た目より少し内側に絞る。プレイヤーは連続移動でタイル境界に
       // ぴったり揃わないため、余白なしだと「壁-通路-壁」の通路に対して横から
@@ -5015,9 +5040,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // はみ出して誤ってブロックされてしまう。
       const inset = Math.min(6, w / 2 - 1, h / 2 - 1);
       const ix = x + inset, iy = y + inset, iw = w - inset * 2, ih = h - inset * 2;
-      const tl = getTile(ix, iy), tr = getTile(ix + iw - 1, iy);
-      const bl = getTile(ix, iy + ih - 1), br = getTile(ix + iw - 1, iy + ih - 1);
-      return !!tl?.info.passable && !!tr?.info.passable && !!bl?.info.passable && !!br?.info.passable;
+      return isCornerPassable(ix, iy) && isCornerPassable(ix + iw - 1, iy) &&
+        isCornerPassable(ix, iy + ih - 1) && isCornerPassable(ix + iw - 1, iy + ih - 1);
     };
     // モブ（非hazardのNPC）との衝突判定（円形）。敵(hazard)はすり抜け・接触ダメージ等の既存挙動を維持するため対象外。
     const isBlockedByMob = (x: number, y: number, w: number, h: number) => {
