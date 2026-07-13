@@ -1,4 +1,4 @@
-import { RPGMap, RawCommand } from "@rpgja/rpgen-map";
+import { RPGMap, RawCommand, checkWalkableTile, checkDamageTile, checkTreasureBoxTile, checkTableTile, checkDoorTile } from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
 import type { EventCommand, EventPage } from '@/components/game-presets/shared';
 import { newObject } from '@/components/game-presets/shared';
@@ -135,10 +135,16 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       else if (tkBase === '17_13') special = 'ice-right';
       else if (tkBase === '16_14') special = 'ice-left';
       else if (tkBase === '17_14') special = 'ice-down';
+      else if (checkDoorTile(tkBase)) special = 'door';
+      else if (checkTableTile(tkBase)) special = 'table';
+      else if (checkTreasureBoxTile(tkBase)) special = 'treasure';
+      else if (checkDamageTile(tkBase)) special = 'damage';
 
       if (tk.includes('_')) {
         const [cStr, rStr] = tk.split('_');
         imageUrl = `/assets/rpgen/map.png#${parseInt(cStr, 10) * 16},${parseInt(rStr, 10) * 16},16,16`;
+        // map.png タイルは checkWalkableTile の判定を C フラグより優先する
+        passable = checkWalkableTile(tkBase);
       } else {
         const id = Number(tk.replace('C', ''));
         const hash = idToHash.get(id);

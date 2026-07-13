@@ -38,7 +38,7 @@ import {
   defaultTitleScreen, defaultEndingScreen,
   type Layout25D,
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
-  SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX,
+  SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -5000,6 +5000,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const id = engineRef.current.map[row]?.[col] ?? 0;
       return { id, rect: { x: col * TILE_SIZE, y: row * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE }, info: gameData.tiles[id] };
     };
+    // 床レイヤーより上に置かれるオブジェクト層タイル（扉など）を col/row で参照する。
+    const getOverlayTileAt = (col: number, row: number) => {
+      if (col < 0 || col >= worldCols || row < 0 || row >= worldRows) return null;
+      const overlay = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
+      const id = overlay?.[row]?.[col] ?? 0;
+      if (!id) return null;
+      return { id, col, row, info: gameData.tiles[id] };
+    };
     const isAllPassable = (x: number, y: number, w: number, h: number) => {
       // 当たり判定は見た目より少し内側に絞る。プレイヤーは連続移動でタイル境界に
       // ぴったり揃わないため、余白なしだと「壁-通路-壁」の通路に対して横から
@@ -7641,7 +7649,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // ── action key: trigger event/message on overlapping object ──
       if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current && !frozen) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
-        const target = (isPlaying ? eng.entities : gameData.objects).find(o => {
+        const pCol = Math.floor(pcx / TILE_SIZE), pRow = Math.floor(pcy / TILE_SIZE);
+        const ADJ_DIRS: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+        const specialAt = (col: number, row: number) => getOverlayTileAt(col, row)?.info ?? getTile(col * TILE_SIZE, row * TILE_SIZE)?.info;
+
+        // ── システムタイル：扉（examineで開いて通れるようにする。オブジェクト層に配置） ──
+        const doorNeighbor = ADJ_DIRS.map(([dx, dy]) => getOverlayTileAt(pCol + dx, pRow + dy)).find(t => t?.info?.special === 'door');
+        if (doorNeighbor) {
+          playSfx({ ref: `direct:${SYS_TILE_DOOR_SFX}`, src: SYS_TILE_DOOR_SFX, type: 'direct' });
+          const overlay = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
+          if (overlay?.[doorNeighbor.row]) overlay[doorNeighbor.row][doorNeighbor.col] = 0;
+        }
+
+        // ── テーブル越しに向かい側のNPCへ話しかける（examineボタンでテーブル1マス先の相手と対話） ──
+        const acrossTable = ADJ_DIRS.map(([dx, dy]) => {
+          if (specialAt(pCol + dx, pRow + dy)?.special !== 'table') return undefined;
+          const acrossCol = pCol + dx * 2, acrossRow = pRow + dy * 2;
+          return (isPlaying ? eng.entities : gameData.objects).find(o => {
+            const oc = isPlaying ? Math.floor((o as Entity).x / TILE_SIZE) : (o as ObjectDef).col;
+            const or_ = isPlaying ? Math.floor((o as Entity).y / TILE_SIZE) : (o as ObjectDef).row;
+            return oc === acrossCol && or_ === acrossRow;
+          });
+        }).find(Boolean);
+
+        const target = acrossTable ?? (isPlaying ? eng.entities : gameData.objects).find(o => {
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
           const oy = isPlaying ? (o as Entity).y : (o as ObjectDef).row * TILE_SIZE;
           // モブ衝突が円形になり隣接タイルへ入れなくなったため、話しかけ判定も円形かつ広めに取る
@@ -9749,6 +9780,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const text = rpgenInputText;
       if (!text.trim()) return;
       const manifest = await parseRpgen(text);
+
+      // シーンモードで編集中なら、ゲーム全体を作り直すのではなく「今開いているシーン」だけを
+      // 上書きする。BGM・イベント（オブジェクト）・マップは丸ごと差し替え、それ以外
+      // （プリセット・エンジン・プレイヤー設定・他シーン等）はそのまま維持する。
+      if (gameData.scenes && gameData.scenes.length > 0) {
+        // タイルIDはゲーム全体で共有されるため、インポートしたタイルは既存タイルとIDが衝突しないよう
+        // 空きIDへ振り直してからマップ/上層マップの参照を書き換える（id=0の「なし」だけは共通で再利用）。
+        const existingIds = Object.keys(gameData.tiles).map(Number);
+        let nextTileId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+        const tileIdRemap = new Map<number, number>([[0, 0]]);
+        const mergedTiles = { ...gameData.tiles };
+        for (const [idStr, tile] of Object.entries(manifest.tiles)) {
+          const id = Number(idStr);
+          if (id === 0) continue;
+          const newId = nextTileId++;
+          tileIdRemap.set(id, newId);
+          mergedTiles[newId] = tile;
+        }
+        const remapGrid = (grid: number[][]) => grid.map(row => row.map(cell => tileIdRemap.get(cell) ?? 0));
+        const remappedMap = remapGrid(manifest.map);
+        const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : undefined;
+        const importedBgm = hydrateBgmFromRef(manifest.bgm);
+
+        const idx = editSceneIdx;
+        setGameData(prev => ({
+          ...prev,
+          tiles: mergedTiles,
+          map: remappedMap,
+          overlayMap: remappedOverlayMap,
+          objects: manifest.objects,
+          scenes: prev.scenes!.map((s, i) => i === idx ? {
+            ...s,
+            map: remappedMap,
+            overlayMap: remappedOverlayMap,
+            objects: manifest.objects,
+            bgm: importedBgm,
+          } : s),
+        }));
+        const eng = engineRef.current;
+        eng.map = JSON.parse(JSON.stringify(remappedMap));
+        eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+        setIsPlaying(false); setSelectedObjId(null);
+        setShowRpgenModal(false);
+        setRpgenInputText('');
+        return;
+      }
+
       const preset = manifest.preset as PresetId;
       const base = clone(PRESETS[preset]);
       const data: PresetData = {

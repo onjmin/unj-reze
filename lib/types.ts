@@ -5,24 +5,20 @@ export const POST_BODY_COLLAPSE_LINES = 8;
 
 /** 自己申告の権利表記。未設定(undefined)は「申告なし」 */
 export type OriginType =
-  | 'full_original'
-  | 'others_work'
-  | 'derivative_of_others'
-  | 'ai'
-  | 'trace'
-  | 'copy'
-  | 'ear_copy'
-  | 'cover';
+  | 'own_modify_ok'
+  | 'own_modify_ng'
+  | 'own_no_unauthorized_use'
+  | 'others_modify_ok'
+  | 'others_modify_ng'
+  | 'others_no_unauthorized_use';
 
 export const ORIGIN_TYPE_OPTIONS: { value: OriginType; label: string; badgeClass: string }[] = [
-  { value: 'full_original', label: '完全自作', badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' },
-  { value: 'others_work', label: '他者著作物', badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
-  { value: 'derivative_of_others', label: '他者著作物の二次加工', badgeClass: 'bg-orange-500/20 text-orange-400 border-orange-500/40' },
-  { value: 'ai', label: 'AI作品', badgeClass: 'bg-sky-500/20 text-sky-400 border-sky-500/40' },
-  { value: 'trace', label: 'トレス', badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/40' },
-  { value: 'copy', label: '模写', badgeClass: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' },
-  { value: 'ear_copy', label: '耳コピ', badgeClass: 'bg-pink-500/20 text-pink-400 border-pink-500/40' },
-  { value: 'cover', label: 'カバー', badgeClass: 'bg-teal-500/20 text-teal-400 border-teal-500/40' },
+  { value: 'own_modify_ok', label: '自作 & 改変OK', badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' },
+  { value: 'own_modify_ng', label: '自作 & 改変NG', badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
+  { value: 'own_no_unauthorized_use', label: '自作 & 無断使用禁止', badgeClass: 'bg-orange-500/20 text-orange-400 border-orange-500/40' },
+  { value: 'others_modify_ok', label: '自作以外 & 改変OK', badgeClass: 'bg-sky-500/20 text-sky-400 border-sky-500/40' },
+  { value: 'others_modify_ng', label: '自作以外 & 改変NG', badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/40' },
+  { value: 'others_no_unauthorized_use', label: '自作以外 & 無断使用禁止', badgeClass: 'bg-pink-500/20 text-pink-400 border-pink-500/40' },
 ];
 
 export interface Post {

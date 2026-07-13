@@ -655,6 +655,7 @@ export const SYSTEM_TILE_TEMPLATES: SystemTileTemplate[] = [
 /** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う直リンクmp3）。 */
 export const SYS_TILE_WARP_SFX = 'https://rpgen-search.pages.dev/data/audio/sound/vfCmoe.mp3';
 export const SYS_TILE_DAMAGE_SFX = 'https://rpgen-search.pages.dev/audio/sound/4z7O4A.mp3';
+export const SYS_TILE_DOOR_SFX = 'https://rpgen-search.pages.dev/audio/sound/HMyV1k.mp3';
 
 export const chest = (col: number, row: number, openCmds: EventCommand[]): ObjectDef => newObject({
   emoji: '📦', col, row, behavior: 'still', hazard: false,
