@@ -5043,6 +5043,59 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return isCornerPassable(ix, iy) && isCornerPassable(ix + iw - 1, iy) &&
         isCornerPassable(ix, iy + ih - 1) && isCornerPassable(ix + iw - 1, iy + ih - 1);
     };
+    // 1フレーム分の移動を「軸分離＋角丸め（コーナースライド）」で解決してプレイヤー座標へ書き込む。
+    // 単一方向にだけ入力しているのに壁の角へ引っかかって進めないとき、通路の開口へ向けて
+    // 垂直方向へ assist px 以内で寄せ、角を回り込めるようにする。これがないと、通行可マスを
+    // T字型に並べたときの「縦棒（1マス幅の通路）」へ、少しでも軸がずれていると入れなくなる。
+    const resolveMoveWithCornerSlide = (
+      p: { x: number; y: number },
+      nx: number, ny: number, w: number, h: number, assist: number,
+      input: { left: boolean; right: boolean; up: boolean; down: boolean },
+      alreadyInWall: boolean,
+      mobBlocks: (x: number, y: number) => boolean,
+    ) => {
+      const inX = input.left || input.right;
+      const inY = input.up || input.down;
+      const canGo = (gx: number, gy: number) =>
+        gx >= 0 && gx <= worldW - w && gy >= 0 && gy <= worldH - h &&
+        (alreadyInWall || isAllPassable(gx, gy, w, h)) && !mobBlocks(gx, gy);
+
+      // 横移動
+      if (nx !== p.x) {
+        if (canGo(nx, p.y)) {
+          p.x = nx;
+        } else if (!alreadyInWall && inX && !inY) {
+          // 縦に少しずらせば通れる開口を近い順に探し、見つかった側へ assist 以内で寄せる。
+          for (let d = 1; d <= TILE_SIZE; d++) {
+            let dir = 0;
+            if (p.y + d <= worldH - h && isAllPassable(nx, p.y + d, w, h)) dir = 1;
+            else if (p.y - d >= 0 && isAllPassable(nx, p.y - d, w, h)) dir = -1;
+            if (dir) {
+              const ay = p.y + dir * Math.min(assist, d);
+              if (canGo(p.x, ay)) p.y = ay;
+              break;
+            }
+          }
+        }
+      }
+      // 縦移動
+      if (ny !== p.y) {
+        if (canGo(p.x, ny)) {
+          p.y = ny;
+        } else if (!alreadyInWall && inY && !inX) {
+          for (let d = 1; d <= TILE_SIZE; d++) {
+            let dir = 0;
+            if (p.x + d <= worldW - w && isAllPassable(p.x + d, ny, w, h)) dir = 1;
+            else if (p.x - d >= 0 && isAllPassable(p.x - d, ny, w, h)) dir = -1;
+            if (dir) {
+              const ax = p.x + dir * Math.min(assist, d);
+              if (canGo(ax, p.y)) p.x = ax;
+              break;
+            }
+          }
+        }
+      }
+    };
     // モブ（非hazardのNPC）との衝突判定（円形）。敵(hazard)はすり抜け・接触ダメージ等の既存挙動を維持するため対象外。
     const isBlockedByMob = (x: number, y: number, w: number, h: number) => {
       const cx = x + w / 2, cy = y + h / 2;
@@ -6317,8 +6370,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const alreadyOverlapping = isBlockedByMob(p.x, p.y, pData.w, pData.h);
             // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
             const alreadyInWall = !isAllPassable(p.x, p.y, pData.w, pData.h);
-            if ((alreadyInWall || isAllPassable(nx, p.y, pData.w, pData.h)) && nx >= 0 && nx <= worldW - pData.w && (alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
-            if ((alreadyInWall || isAllPassable(p.x, ny, pData.w, pData.h)) && ny >= 0 && ny <= worldH - pData.h && (alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+            resolveMoveWithCornerSlide(
+              p, nx, ny, pData.w, pData.h, Math.max(3, moveSpd),
+              { left: isLeft, right: isRight, up: isUp, down: isDown },
+              alreadyInWall,
+              (gx, gy) => !alreadyOverlapping && isBlockedByMob(gx, gy, pData.w, pData.h),
+            );
           }
           // 向き更新（最後に押した方向。左右優先、無ければ上下）
           if (isLeft) onjRezeDirRef.current = { x: -1, y: 0 };
@@ -6457,8 +6514,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const alreadyOverlapping = mobBlockActive && isBlockedByMob(p.x, p.y, pData.w, pData.h);
             // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
             const alreadyInWall = !isAllPassable(p.x, p.y, pData.w, pData.h);
-            if ((alreadyInWall || isAllPassable(nx, p.y, pData.w, pData.h)) && nx >= 0 && nx <= worldW - pData.w && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(nx, p.y, pData.w, pData.h))) p.x = nx;
-            if ((alreadyInWall || isAllPassable(p.x, ny, pData.w, pData.h)) && ny >= 0 && ny <= worldH - pData.h && (!mobBlockActive || alreadyOverlapping || !isBlockedByMob(p.x, ny, pData.w, pData.h))) p.y = ny;
+            resolveMoveWithCornerSlide(
+              p, nx, ny, pData.w, pData.h, Math.max(3, moveSpd),
+              { left: isLeft, right: isRight, up: isUp, down: isDown },
+              alreadyInWall,
+              (gx, gy) => mobBlockActive && !alreadyOverlapping && isBlockedByMob(gx, gy, pData.w, pData.h),
+            );
           }
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
