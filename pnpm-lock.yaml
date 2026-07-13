@@ -23,6 +23,9 @@ importers:
       '@onjmin/oekaki':
         specifier: 1.0.59
         version: 1.0.59
+      '@rpgja/rpgen-map':
+        specifier: 1.0.2
+        version: 1.0.2
       lucide-react:
         specifier: 1.17.0
         version: 1.17.0(react@19.2.4)
@@ -593,6 +596,9 @@ packages:
 
   '@onjmin/oekaki@1.0.59':
     resolution: {integrity: sha512-p+2M8FuySg1tTZQpKi1YWqV1hFoRyba52vScjnYg3Epz9YzNTC5Z9uHiqJ0C++UbyhKum0bahsrC3STcEB6S5A==}
+
+  '@rpgja/rpgen-map@1.0.2':
+    resolution: {integrity: sha512-yI30czjVm5U0cvC5A+JI9cy8/c5FZfrk7jXS/3fW2JDiXTK04lPMAIdskmH6rNL46RlTZaNWV7IHdxlUINjplQ==}
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
@@ -2911,6 +2917,8 @@ snapshots:
   '@onjmin/koe@1.0.4': {}
 
   '@onjmin/oekaki@1.0.59': {}
+
+  '@rpgja/rpgen-map@1.0.2': {}
 
   '@rtsao/scc@1.1.0': {}
 

@@ -58,7 +58,15 @@ export type EventCommand =
   /** プレイヤー頭上に一時的なメッセージを表示する（メッセージウィンドウは開かない）。 */
   | { type: 'overheadMessage'; text: string }
   /** 効果音を1回再生する（直リンクmp3のURL）。 */
-  | { type: 'playSound'; src: string };
+  | { type: 'playSound'; src: string }
+  | { type: 'changeSprite'; spriteRef: string; spriteUrl?: string; objId: string }
+  | { type: 'changeBackground'; bgRef: string; bgUrl?: string }
+  | { type: 'showImage'; imgId: string; url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean }
+  | { type: 'hideImage'; imgId: string }
+  | { type: 'moveCamera'; tx: number; ty: number; duration: number }
+  | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number }
+  | { type: 'screenEffect'; effectType: string; color?: string }
+  | { type: 'changePhase'; phaseIndex: number };
 
 export interface EventPage {
   name?: string;
@@ -183,6 +191,8 @@ export interface ObjectDef {
   behavior: NpcBehavior; bullet: BulletType; bulletSpeed: number; bulletColor: string; fireRate: number;
   hazard: boolean; message: string;
   w?: number; h?: number;
+  /** エディタ時のみ表示するスプライト（システム用ポイントの半透明表示など） */
+  editorSprite?: string;
   /** オブジェクト種別（エディタで表示項目を切り替え）。未指定=enemy。 */
   objType?: ObjType;
   /** ターン制戦闘用ステータス（rpg + battle のとき使用。未指定なら hp から自動算出）。 */

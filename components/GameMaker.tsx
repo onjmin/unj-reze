@@ -18,6 +18,7 @@ import ContentPicker, { type PickResult } from './ContentPicker';
 import WalkSpritePreview from './WalkSpritePreview';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
+import { parseRpgen } from '@/lib/rpgen-parser';
 
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
@@ -133,7 +134,7 @@ export interface GameManifestDraft {
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number;
   };
   tiles: Record<number, {
-    name: string; color: string; passable: boolean; special?: string; imageRef?: string;
+    name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string;
     warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number; damageAmount?: number
   }>;
   map: number[][];
@@ -287,6 +288,7 @@ interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; 
 interface Entity {
   def: ObjectDef; x: number; y: number; homeX: number; homeY: number;
   hp: number; timer: number; vx: number; vy: number; talked: boolean;
+  spriteRef?: string; spriteUrl?: string;
   isGrounded?: boolean; // 横スク（action）敵の接地状態
   spellState?: SpellExecState;
   moveTarget?: MoveTarget;
@@ -586,7 +588,7 @@ function runEntityScript(
 
 interface GameEngine {
   map: number[][];
-  player: { x: number; y: number; vx: number; vy: number; isGrounded: boolean };
+  player: { x: number; y: number; vx: number; vy: number; isGrounded: boolean; spriteRef?: string; spriteUrl?: string };
   keys: Set<string>;
   bullets: Bullet[];
   enemyBullets: EnemyBullet[];
@@ -1253,6 +1255,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 現在のカメラのワールド座標オフセット。エンカウント演出でスクリーン固定位置へ変換するために毎フレーム更新する。 */
   const camXRef = useRef(0);
   const camYRef = useRef(0);
+  const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 });
+  const cameraPanRef = useRef({ x: 0, y: 0 });
+  const [overlayImages, setOverlayImages] = useState<Record<string, { url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean }>>({});
+  const overlayImagesRef = useRef<Record<string, { url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean }>>({});
+  overlayImagesRef.current = overlayImages;
+  const [screenEffect, setScreenEffect] = useState<{ type: string; color?: string } | null>(null);
+  const screenEffectRef = useRef<{ type: string; color?: string } | null>(null);
+  screenEffectRef.current = screenEffect;
 
   // ── ターン制戦闘 ──
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
@@ -4178,6 +4188,66 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(runNext, 0);
           break;
         }
+        case 'changeSprite': {
+          const target = !cmd.objId ? 'player' : cmd.objId;
+          if (target === 'player') {
+            engineRef.current.player.spriteRef = cmd.spriteRef;
+            engineRef.current.player.spriteUrl = cmd.spriteUrl;
+          } else {
+            const obj = engineRef.current.entities?.find(o => o.def.id === target);
+            if (obj) {
+              obj.spriteRef = cmd.spriteRef;
+              obj.spriteUrl = cmd.spriteUrl;
+            }
+          }
+          setTimeout(advance, 0);
+          break;
+        }
+        case 'changeBackground':
+          gameDataRef.current.mapBgRef = cmd.bgRef;
+          gameDataRef.current.mapBgUrl = cmd.bgUrl;
+          setTimeout(advance, 0);
+          break;
+        case 'showImage':
+          setOverlayImages(prev => ({ ...prev, [cmd.imgId]: { url: cmd.url, x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h, opacity: cmd.opacity, isPercent: cmd.isPercent } }));
+          setTimeout(advance, 0);
+          break;
+        case 'hideImage':
+          setOverlayImages(prev => { const next = { ...prev }; delete next[cmd.imgId]; return next; });
+          setTimeout(advance, 0);
+          break;
+        case 'moveCamera':
+          setCameraPan({ x: cmd.tx, y: cmd.ty });
+          cameraPanRef.current = { x: cmd.tx, y: cmd.ty };
+          setTimeout(advance, cmd.duration > 0 ? cmd.duration : 0);
+          break;
+        case 'moveNpc': {
+          const target = !cmd.objId ? 'player' : cmd.objId;
+          if (target === 'player') {
+            if (cmd.tx != null) engineRef.current.player.x = cmd.tx * TILE_SIZE;
+            if (cmd.ty != null) engineRef.current.player.y = cmd.ty * TILE_SIZE;
+            if (cmd.dx != null) engineRef.current.player.x += cmd.dx * TILE_SIZE;
+            if (cmd.dy != null) engineRef.current.player.y += cmd.dy * TILE_SIZE;
+          } else {
+            const obj = engineRef.current.entities?.find(o => o.def.id === target);
+            if (obj) {
+              if (cmd.tx != null) obj.x = cmd.tx * TILE_SIZE;
+              if (cmd.ty != null) obj.y = cmd.ty * TILE_SIZE;
+              if (cmd.dx != null) obj.x += cmd.dx * TILE_SIZE;
+              if (cmd.dy != null) obj.y += cmd.dy * TILE_SIZE;
+            }
+          }
+          setTimeout(advance, cmd.duration ?? 0);
+          break;
+        }
+        case 'screenEffect':
+          setScreenEffect({ type: cmd.effectType, color: cmd.color });
+          setTimeout(advance, 0);
+          break;
+        case 'changePhase':
+          // TODO: Implement phase transition if supported by engine
+          setTimeout(advance, 0);
+          break;
         default:
           setTimeout(advance, 0);
       }
@@ -4304,7 +4374,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   useEffect(() => {
     ensureImageFromRef(gameData.player.spriteRef, gameData.player.spriteUrl);
     Object.values(gameData.tiles).forEach(t => ensureImage(t.imageUrl));
-    gameData.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl));
+    gameData.objects.forEach(o => { ensureImageFromRef(o.spriteRef, o.spriteUrl); if (o.editorSprite) ensureImage(o.editorSprite); });
     ensureImageFromRef(objTemplate.spriteRef, objTemplate.spriteUrl);
     ensureImage(gameData.mapBgUrl);
     ensureImage(gameData.titleScreen?.bgUrl);
@@ -7791,7 +7861,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         camY = trans.startCamY + (trans.endCamY - trans.startCamY) * ratio;
       }
 
-      const finalCamX = camX, finalCamY = camY;
+      const finalCamX = camX + cameraPanRef.current.x;
+      const finalCamY = camY + cameraPanRef.current.y;
       camXRef.current = finalCamX; camYRef.current = finalCamY;
 
       // 画面シェイク（ヒット・爆発・ゲームオーバー）
@@ -8106,6 +8177,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (isSel) {
             ctx.fillStyle = 'rgba(255,255,0,0.15)';
             ctx.fillRect(o.col * TILE_SIZE, o.row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+          }
+        }
+        for (const o of gameData.objects) {
+          if (o.editorSprite) {
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            drawSprite({ emoji: '', spriteUrl: o.editorSprite, spriteRef: undefined }, o.col * TILE_SIZE, (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE), o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `objEditor${o.id}`);
+            ctx.restore();
           }
         }
         // プレイヤー初期位置を常時表示（🏁ドラッグで移動可能）
@@ -8463,6 +8542,45 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       ctx.restore();
+
+      // ── RPGEN オーバーレイ描画 ──────────────────────────────────────────
+      Object.values(overlayImagesRef.current).forEach(img => {
+        const url = img.url;
+        ensureImage(url);
+        const domImg = imgCache.current.get(url);
+        if (domImg) {
+          ctx.save();
+          if (img.opacity !== undefined) ctx.globalAlpha = img.opacity / 100;
+          let drawW = img.w ?? domImg.width;
+          let drawH = img.h ?? domImg.height;
+          let drawX = img.x;
+          let drawY = img.y;
+          if (img.isPercent) {
+            drawX = (img.x / 100) * PLAY_W;
+            drawY = (img.y / 100) * PLAY_H;
+          }
+          ctx.drawImage(domImg, drawX, drawY, drawW, drawH);
+          ctx.restore();
+        }
+      });
+
+      const effect = screenEffectRef.current;
+      if (effect) {
+        ctx.save();
+        if (effect.type === 'EF_GR' || effect.type === 'EF_RGR' || effect.type === 'WT_RN' || effect.type === 'WT_SN') {
+          if (effect.type === 'WT_RN') {
+            ctx.fillStyle = 'rgba(0,50,200,0.3)';
+          } else if (effect.type === 'WT_SN') {
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          } else if (effect.color) {
+            ctx.fillStyle = effect.color;
+          } else {
+            ctx.fillStyle = 'rgba(0,0,0,0)';
+          }
+          ctx.fillRect(0, 0, PLAY_W, PLAY_H);
+        }
+        ctx.restore();
+      }
 
       // ── シーン間フェード遷移（土管・扉）──────────────────────────────────
       const fade = sceneFadeRef.current;
@@ -9119,6 +9237,43 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     e.target.value = '';
   };
 
+  const [showRpgenModal, setShowRpgenModal] = useState(false);
+  const [rpgenInputText, setRpgenInputText] = useState('');
+
+  const submitRpgenImport = async () => {
+    try {
+      const text = rpgenInputText;
+      if (!text.trim()) return;
+      const manifest = await parseRpgen(text);
+      const preset = manifest.preset as PresetId;
+      const base = clone(PRESETS[preset]);
+      const data: PresetData = {
+        ...base,
+        engine: manifest.engine,
+        name: manifest.name,
+        gravity: manifest.gravity,
+        friction: manifest.friction,
+        player: manifest.player,
+        tiles: manifest.tiles,
+        map: manifest.map,
+        overlayMap: manifest.overlayMap,
+        objects: manifest.objects,
+        mapBgRef: manifest.mapBgRef,
+        bgm: manifest.bgm ? { ref: manifest.bgm } : undefined,
+      };
+      setPresetId(preset as PresetId);
+      setGameData(data);
+      setTitle(manifest.name);
+      const eng = engineRef.current;
+      eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
+      eng.map = JSON.parse(JSON.stringify(data.map));
+      eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+      setIsPlaying(false); setSelectedObjId(null);
+      setShowRpgenModal(false);
+      setRpgenInputText('');
+    } catch (err) { alert('RPGENの読み込みに失敗しました。'); console.error(err); }
+  };
+
   // ── シーン管理ヘルパー ────────────────────────────────────────────────────
   /** エディタで選択シーンを切り替える。現在の map/objects を scenes に書き戻してから切り替え。 */
   const switchEditScene = useCallback((newIdx: number) => {
@@ -9346,6 +9501,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <Upload size={13} />データをインポート (.json)
                 </button>
                 <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+                <button
+                  onClick={() => { setShowRpgenModal(true); setSettingsOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                >
+                  <Upload size={13} />RPGENをインポート (テキスト)
+                </button>
                 {/* SMC素材クレジット（マリオプリセット使用時） */}
                 {gameData.id === 'mario' && (
                   <>
@@ -9539,6 +9700,35 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     )}
                     <button onClick={() => setShowEnding(false)}
                       className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">とじる</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── RPGEN インポート モーダル ── */}
+            {showRpgenModal && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+                <div className="bg-gray-900 border border-gray-700 rounded p-4 w-full max-w-lg flex flex-col shadow-2xl">
+                  <h3 className="text-sm font-bold text-gray-200 mb-2">RPGEN テキストをインポート</h3>
+                  <textarea
+                    value={rpgenInputText}
+                    onChange={(e) => setRpgenInputText(e.target.value)}
+                    placeholder="ここにRPGENのテキストデータを貼り付けてください"
+                    className="w-full h-48 bg-gray-950 border border-gray-700 rounded p-2 text-xs text-gray-300 outline-none focus:border-blue-500 mb-3 resize-none"
+                  />
+                  <div className="flex justify-end gap-2 mt-auto">
+                    <button
+                      onClick={() => setShowRpgenModal(false)}
+                      className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded transition"
+                    >
+                      キャンセル
+                    </button>
+                    <button
+                      onClick={submitRpgenImport}
+                      className="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-500 rounded transition font-bold"
+                    >
+                      インポート実行
+                    </button>
                   </div>
                 </div>
               </div>
@@ -13454,6 +13644,8 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   restoreHp: 'HP回復', restoreMp: 'MP回復',
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
   overheadMessage: '頭上メッセージ', playSound: '効果音再生',
+  changeSprite: '画像変更', changeBackground: '背景変更', showImage: '画像表示', hideImage: '画像消去',
+  moveCamera: 'カメラ移動', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', changePhase: 'フェーズ変更',
 };
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
@@ -13503,14 +13695,14 @@ function EventPageEditor({ pages, setPages, switches, items }:
       {pages.length === 0 && <p className="text-[9px] text-gray-500">ページがありません。追加してイベントを定義してください。</p>}
       {pages.map((page, pi) => (
         <div key={pi} className="border border-gray-700/60 rounded bg-gray-800/30 overflow-hidden">
-          <button onClick={() => setExpanded(expanded === pi ? -1 : pi)}
-            className="w-full flex items-center gap-1 px-2 py-1.5 text-[10px] text-left font-bold text-gray-300 hover:bg-gray-700/30">
+          <div onClick={() => setExpanded(expanded === pi ? -1 : pi)}
+            className="w-full flex items-center gap-1 px-2 py-1.5 text-[10px] text-left font-bold text-gray-300 hover:bg-gray-700/30 cursor-pointer">
             <span className="text-gray-500">{expanded === pi ? '▼' : '▶'}</span>
             <span className="flex-1 truncate">{page.name}</span>
             <span className="text-[9px] text-gray-500">{page.commands.length}コマンド</span>
             {pages.length > 1 && <button onClick={e => { e.stopPropagation(); delPage(pi); }}
               className="text-red-400 hover:text-red-300 text-[9px] px-1">削除</button>}
-          </button>
+          </div>
           {expanded === pi && (
             <div className="px-2 pb-2 space-y-1.5">
               {/* ページ名 */}
@@ -13591,9 +13783,18 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         case 'restoreMp': return { type: 'restoreMp' };
         case 'overheadMessage': return { type: 'overheadMessage', text: '' };
         case 'playSound': return { type: 'playSound', src: '' };
+        case 'changeSprite': return { type: 'changeSprite', spriteRef: '', objId: '' };
+        case 'changeBackground': return { type: 'changeBackground', bgRef: '' };
+        case 'showImage': return { type: 'showImage', imgId: '', url: '', x: 0, y: 0 };
+        case 'hideImage': return { type: 'hideImage', imgId: '' };
+        case 'moveCamera': return { type: 'moveCamera', tx: 0, ty: 0, duration: 0 };
+        case 'moveNpc': return { type: 'moveNpc', objId: 'player' };
+        case 'screenEffect': return { type: 'screenEffect', effectType: '' };
+        case 'changePhase': return { type: 'changePhase', phaseIndex: 0 };
+        default: return { type: 'message', text: '' };
       }
     })();
-    onChange(base);
+    onChange(base as Partial<EventCommand>);
   };
   const inputCls = 'bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none w-full';
   return (
