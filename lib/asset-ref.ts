@@ -171,8 +171,11 @@ export function bgmRefToAsset(
     valStr = valStr.slice(0, hashIdx);
   }
 
-  if (ref.scheme === 'youtube') return { type: 'youtube', src: valStr, volume };
-  if (ref.scheme === 'url') return { type: 'youtube', src: valStr, volume };
+  // BgmManager.extractVideoId は "v=" / "youtu.be/" / "/embed/" を含む URL を前提にしているため、
+  // youtube: scheme の値が素の動画ID（"youtube:VIDEO_ID" が本来の規約）のときはそのまま渡すと
+  // マッチせず再生されない。常にフルURLへ復元してから渡す。
+  if (ref.scheme === 'youtube') return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
+  if (ref.scheme === 'url') return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
   if (ref.scheme === 'mml') {
     if (valStr.startsWith('post:')) {
       return rawMml ? { type: 'mml', src: rawMml, loop: loopOption, volume } : null;
@@ -206,6 +209,14 @@ export function refLabel(raw: string): string {
 export function youtubeRefFromUrl(url: string): string {
   const m = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
   return m ? `youtube:${m[1]}` : `youtube:${url}`;
+}
+
+/** youtube: scheme の値（素の動画ID、または生のYouTube URLも許容）を、BgmManager.extractVideoId
+ *  が確実に解釈できるフル視聴URLへ正規化する。値が既に11桁のIDならそのまま埋め込む。 */
+export function toYoutubeWatchUrl(val: string): string {
+  const m = val.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
+  const id = m ? m[1] : val;
+  return `https://www.youtube.com/watch?v=${id}`;
 }
 
 // ───────────────── 歩行グラ（アニメーション付きキャラチップ） ─────────────────

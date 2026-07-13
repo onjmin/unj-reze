@@ -3,6 +3,7 @@ import type { GameManifestDraft } from '@/components/GameMaker';
 import type { EventCommand, EventPage } from '@/components/game-presets/shared';
 import { newObject } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
+import { youtubeRefFromUrl } from '@/lib/asset-ref';
 
 export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   const rpgMap = RPGMap.parse(text);
@@ -111,7 +112,9 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     map: [],
     overlayMap: [],
     objects: [],
-    bgm: rpgMap.bgmUrl ? `direct:${rpgMap.bgmUrl}` : '',
+    bgm: rpgMap.bgmUrl
+      ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : `direct:${rpgMap.bgmUrl}`)
+      : '',
     mapBgRef: rpgMap.backgroundImageUrl ? `url:${rpgMap.backgroundImageUrl}` : undefined,
     sfx: {},
     switches: [],

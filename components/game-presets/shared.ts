@@ -561,6 +561,9 @@ export interface SceneDef {
 
 export interface PresetData {
   id: PresetId; name: string; engine: EngineKind; gravity: number; friction: number;
+  /** つるつる床（システムタイル ice-*）の強制スライド速度（px/frame）。未指定時は既定値を使う。
+   *  rpg / onjReze エンジン（グリッド4/8方向移動）でのみ使用。action は friction ベースの物理挙動のため対象外。 */
+  iceSlideSpeed?: number;
   player: PlayerDef; tiles: Record<number, TileDef>; map: number[][];
   /** 上層レイヤー（木の上部・屋根など）。map と同サイズのグリッド。プレイヤーより手前に描画され、
    *  真下付近にいる間は半透明化する（gomi.html の drawMapLower/drawMapUpper 相当）。 */

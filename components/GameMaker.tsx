@@ -137,6 +137,8 @@ const hydrateBgmFromRef = (ref?: string): { ref: string; src?: string; type?: 'y
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
   preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
+  /** つるつる床の強制スライド速度（px/frame）。未指定時は既定値。 */
+  iceSlideSpeed?: number;
   player: {
     emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string;
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number;
@@ -242,6 +244,9 @@ const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: '�
 const ICE_DIRS: Record<string, [number, number]> = {
   'ice-up': [0, -1], 'ice-right': [1, 0], 'ice-down': [0, 1], 'ice-left': [-1, 0],
 };
+/** つるつる床の強制スライド既定速度（px/frame）。プレイヤーの通常移動速度より明確に速くする。
+ *  gameData.iceSlideSpeed で上書き可能（rpg/onjReze のみ対象。action は friction ベースの物理挙動）。 */
+const DEFAULT_ICE_SLIDE_SPEED = 6;
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
@@ -313,6 +318,8 @@ interface Entity {
   rezeStateTimer?: number;
   /** 味方モブが攻撃されて怯え、プレイヤーから逃げるようになった状態。 */
   fleeing?: boolean;
+  /** つるつる床の強制スライド中の目標タイル（プレイヤーの iceSlideRef と同等の仕組みを敵/NPCにも適用）。 */
+  iceSlide?: { targetX: number; targetY: number };
 }
 // onjReze: 近接攻撃の剣スプライト（素材は右向きが基準）
 const SWORD_SPRITE_URL = 'https://rpgen-search.pages.dev/data/images/sprites/BkIGjOn.png';
@@ -1297,6 +1304,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   screenEffectRef.current = screenEffect;
 
   const camOverrideRef = useRef<{ startX: number; startY: number; endX: number; endY: number; startTime: number; duration: number; easing?: number } | null>(null);
+  const originalMapBgRef = useRef<{ ref?: string; url?: string } | null>(null);
 
   // ── ターン制戦闘 ──
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
@@ -4418,6 +4426,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setEventChoice(null);
     eventChoiceRef.current = null;
     setShopModal(null);
+    setOverlayImages({});
+    setFollowImages({});
+    setScreenEffect(null);
+    // つるつる床の強制スライド状態も編集モード移行・シーン切り替え時に必ず解除する。
+    // 残ったままだと、次にプレイ再開した瞬間に本来ありえない座標へ強制移動が再開してしまう。
+    iceSlideRef.current = null;
+    lastIceTileRef.current = null;
+    for (const e of engineRef.current.entities ?? []) { e.iceSlide = undefined; }
   }, []);
 
   const runObjectEvent = useCallback((obj: ObjectDef) => {
@@ -4603,6 +4619,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         name: initialManifest.name,
         gravity: initialManifest.gravity,
         friction: initialManifest.friction,
+        iceSlideSpeed: initialManifest.iceSlideSpeed ?? base.iceSlideSpeed,
         player: { ...base.player, ...initialManifest.player, spriteUrl: hydrateUrlFromRef(initialManifest.player.spriteRef) },
         tiles: Object.fromEntries(
           Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
@@ -6222,18 +6239,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // onjReze: トップビュー 4/8方向移動 ＋ 剣（近接）＋ 剣ビーム（HP満タン時）
           p.vx = 0; p.vy = 0;
           const moveSpd = pData.speed;
+          const iceSpd = gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED;
           const zAlreadyOverlapping0 = isBlockedByMob(p.x, p.y, pData.w, pData.h);
           const zCanStandAt = (x: number, y: number) => {
             return isAllPassable(x, y, pData.w, pData.h) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
               (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
           };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
+          const zStandingTile = getTile(p.x + pData.w / 2, p.y + pData.h / 2);
+          const zStandingSpecial = zStandingTile?.info?.special;
+          const zOnIceTile = !!(zStandingSpecial && ICE_DIRS[zStandingSpecial]);
           if (iceSlideRef.current) {
             const slide = iceSlideRef.current;
             const dxz = slide.targetX - p.x, dyz = slide.targetY - p.y;
             const distz = Math.hypot(dxz, dyz);
-            if (distz <= moveSpd || distz === 0) { p.x = slide.targetX; p.y = slide.targetY; }
-            else { p.x += (dxz / distz) * moveSpd; p.y += (dyz / distz) * moveSpd; }
+            if (distz <= iceSpd || distz === 0) { p.x = slide.targetX; p.y = slide.targetY; }
+            else { p.x += (dxz / distz) * iceSpd; p.y += (dyz / distz) * iceSpd; }
             if (p.x === slide.targetX && p.y === slide.targetY) {
               iceSlideRef.current = null;
               const landed = getTile(p.x, p.y);
@@ -6243,6 +6264,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 if (zCanStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
               }
             }
+          } else if (zOnIceTile) {
+            // つるつる床の上に立っている間は、スライドが（モブ等で）一時的に塞がれていても
+            // 自由入力を受け付けない。塞がりが解消され次第、毎フレーム再スライドを試みる。
+            const [dxz, dyz] = ICE_DIRS[zStandingSpecial!];
+            const tx = zStandingTile!.rect.x + dxz * TILE_SIZE, ty = zStandingTile!.rect.y + dyz * TILE_SIZE;
+            if (zCanStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
           } else {
             let nx = p.x, ny = p.y;
             if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
@@ -6350,6 +6377,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           p.vx = 0; p.vy = 0;
           const isSlow = gameData.engine === 'touhou' && (keys.has('Shift') || touchRef.current.slow);
           const moveSpd = isSlow ? pData.speed * 0.45 : pData.speed;
+          const iceSpd = gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED;
           const prevPx = p.x, prevPy = p.y;
           const mobBlockActive = gameData.engine === 'rpg';
           const canStandAt = (x: number, y: number) => {
@@ -6357,12 +6385,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
           };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
+          const standingTile = gameData.engine === 'rpg' ? getTile(p.x + pData.w / 2, p.y + pData.h / 2) : undefined;
+          const standingSpecial = standingTile?.info?.special;
+          const onIceTile = !!(standingSpecial && ICE_DIRS[standingSpecial]);
           if (gameData.engine === 'rpg' && iceSlideRef.current) {
             const slide = iceSlideRef.current;
             const dx = slide.targetX - p.x, dy = slide.targetY - p.y;
             const dist = Math.hypot(dx, dy);
-            if (dist <= moveSpd || dist === 0) { p.x = slide.targetX; p.y = slide.targetY; }
-            else { p.x += (dx / dist) * moveSpd; p.y += (dy / dist) * moveSpd; }
+            if (dist <= iceSpd || dist === 0) { p.x = slide.targetX; p.y = slide.targetY; }
+            else { p.x += (dx / dist) * iceSpd; p.y += (dy / dist) * iceSpd; }
             if (p.x === slide.targetX && p.y === slide.targetY) {
               iceSlideRef.current = null;
               const landed = getTile(p.x, p.y);
@@ -6372,6 +6403,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 if (canStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
               }
             }
+          } else if (gameData.engine === 'rpg' && onIceTile) {
+            // つるつる床の上に立っている間は、スライドが（モブ等で）一時的に塞がれていても
+            // 自由入力を受け付けない。塞がりが解消され次第、毎フレーム再スライドを試みる。
+            // これをしないと閉ループ上でも一時的に操作権が戻り、抜け出せてしまう（要修正のバグだった）。
+            const [dx, dy] = ICE_DIRS[standingSpecial!];
+            const tx = standingTile!.rect.x + dx * TILE_SIZE, ty = standingTile!.rect.y + dy * TILE_SIZE;
+            if (canStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
           } else {
             let nx = p.x, ny = p.y;
             if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
@@ -6650,8 +6688,39 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (et1?.info.passable && et2?.info.passable && nex >= 0 && nex <= worldW - TILE_SIZE) e.x = nex;
             const et3 = getTile(e.x, ney), et4 = getTile(e.x + TILE_SIZE - 1, ney + TILE_SIZE - 1);
             if (et3?.info.passable && et4?.info.passable && ney >= 0 && ney <= worldH - TILE_SIZE) e.y = ney;
+          } else if (e.iceSlide) {
+            // つるつる床：強制スライド中は behavior による移動を無視し、目標タイルへ直進する（プレイヤーと同様）。
+            const slide = e.iceSlide;
+            const slideSpd = gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED;
+            const dx = slide.targetX - e.x, dy = slide.targetY - e.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist <= slideSpd || dist === 0) { e.x = slide.targetX; e.y = slide.targetY; }
+            else { e.x += (dx / dist) * slideSpd; e.y += (dy / dist) * slideSpd; }
+            if (e.x === slide.targetX && e.y === slide.targetY) {
+              e.iceSlide = undefined;
+              const landed = getTile(e.x, e.y);
+              const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
+              if (nextDir) {
+                const tx = e.x + nextDir[0] * TILE_SIZE, ty = e.y + nextDir[1] * TILE_SIZE;
+                const ta = getTile(tx, ty), tb = getTile(tx + TILE_SIZE - 1, ty + TILE_SIZE - 1);
+                if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+                  e.iceSlide = { targetX: tx, targetY: ty };
+                }
+              }
+            }
           } else {
-            if (d.behavior === 'random') {
+            const eStandingTile = getTile(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2);
+            const eStandingSpecial = eStandingTile?.info?.special;
+            if (eStandingSpecial && ICE_DIRS[eStandingSpecial]) {
+              // つるつる床に乗った瞬間：behavior による移動を無視し、強制スライドを開始する。
+              // 塞がっていて開始できない場合も自由に振る舞わせず、次フレーム以降に再試行させる。
+              const [idx, idy] = ICE_DIRS[eStandingSpecial];
+              const tx = eStandingTile!.rect.x + idx * TILE_SIZE, ty = eStandingTile!.rect.y + idy * TILE_SIZE;
+              const ta = getTile(tx, ty), tb = getTile(tx + TILE_SIZE - 1, ty + TILE_SIZE - 1);
+              if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+                e.iceSlide = { targetX: tx, targetY: ty };
+              }
+            } else if (d.behavior === 'random') {
               if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
               e.x += e.vx; e.y += e.vy;
             } else if (d.behavior === 'chase' || d.behavior === 'flee') {
@@ -8018,13 +8087,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       }
 
-      // カメラ：touhou は画面固定（常に原点）、他はプレイヤー中心追従
+      // カメラ：touhou は画面固定（常に原点）、他はプレイヤー中心追従。
+      // 編集モードでは「プレイヤーが初期位置から動いていない」ときだけエディタのスクロール位置を使う。
+      // この判定は必ず X/Y 両軸セットで行うこと：軸ごとに個別判定すると、歩行中に片方の座標が
+      // たまたま初期値と一致した瞬間（整数速度・タイルスナップで頻発）だけカメラがスクロール座標へ
+      // 1フレーム飛んで戻る「瞬間テレポート」が起きる。
+      const playerAtStart = p.x === gameData.player.start.x && p.y === gameData.player.start.y;
       let camX = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMax,
-        isPlaying || p.x !== gameData.player.start.x
+        isPlaying || !playerAtStart
           ? p.x + pData.w / 2 - VIEW_W / 2
           : editScrollRef.current));
       let camY = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMaxY,
-        isPlaying || p.y !== gameData.player.start.y
+        isPlaying || !playerAtStart
           ? p.y + pData.h / 2 - VIEW_H / 2
           : editScrollYRef.current));
 
@@ -8391,14 +8465,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             ctx.fillRect(o.col * TILE_SIZE, o.row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           }
         }
-        for (const o of gameData.objects) {
-          if (o.editorSprite) {
-            ctx.save();
-            ctx.globalAlpha = 0.5;
-            drawSprite({ emoji: '', spriteUrl: o.editorSprite, spriteRef: undefined }, o.col * TILE_SIZE, (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE), o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `objEditor${o.id}`);
-            ctx.restore();
-          }
-        }
         // プレイヤー初期位置を常時表示（🏁ドラッグで移動可能）
         if (editorTab === 'map') {
           const sx = gameData.player.start.x, sy = gameData.player.start.y;
@@ -8478,7 +8544,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.save();
           ctx.filter = `hue-rotate(${(performance.now() / 2.0) % 360}deg) brightness(1.25)`;
         }
-        drawSprite({ emoji: pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
+        drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
           gameData.engine === 'touhou' ? 'w' : undefined);
         if (isStar) {
           ctx.restore();
@@ -8530,6 +8596,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
         }
         ctx.globalAlpha = 1;
+      }
+      // イベントポイント・見る場所などのエディタ用マーカー：上層レイヤー（木の上部・屋根など）より
+      // 手前に重ねて描画し、編集モードで常に視認できるようにする。
+      if (!isPlaying) {
+        for (const o of gameData.objects) {
+          if (o.editorSprite) {
+            ctx.save();
+            ctx.globalAlpha = 0.5;
+            drawSprite({ emoji: '', spriteUrl: o.editorSprite, spriteRef: undefined }, o.col * TILE_SIZE, (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE), o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `objEditor${o.id}`);
+            ctx.restore();
+          }
+        }
       }
       // NPCセリフ（フキダシではなく頭上に1文字ずつ表示）。全スプライトより前面に出すため描画の最後で行う
       if (isPlaying && npcTalkRef.current) {
@@ -9544,7 +9622,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const buildManifest = (): GameManifestDraft => ({
     preset: gameData.id, engine: gameData.engine, name: title.trim() || gameData.name,
-    gravity: gameData.gravity, friction: gameData.friction,
+    gravity: gameData.gravity, friction: gameData.friction, iceSlideSpeed: gameData.iceSlideSpeed,
     player: {
       emoji: gameData.player.emoji, color: gameData.player.color, speed: gameData.player.speed,
       jumpPower: gameData.player.jumpPower, w: gameData.player.w, h: gameData.player.h,
@@ -9614,6 +9692,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           name: manifest.name,
           gravity: manifest.gravity,
           friction: manifest.friction,
+          iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
           player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
           tiles: Object.fromEntries(
             Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
@@ -9677,7 +9756,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         overlayMap: manifest.overlayMap,
         objects: manifest.objects,
         mapBgRef: manifest.mapBgRef,
-        bgm: manifest.bgm ? { ref: manifest.bgm } : undefined,
+        bgm: hydrateBgmFromRef(manifest.bgm),
       };
       setPresetId(preset as PresetId);
       setGameData(data);
@@ -12206,6 +12285,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             </button>
                           ))}
                         </div>
+                        {(gameData.engine === 'rpg' || gameData.engine === 'onjReze') && (
+                          <label className="flex items-center gap-2 pt-1.5 mt-1 border-t border-purple-700/40 text-[10px] text-gray-400">
+                            つるつる床のスライド速度
+                            <input type="number" min={1} max={20} step={0.5}
+                              value={gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED}
+                              onChange={e => setGameData(p => ({ ...p, iceSlideSpeed: Math.max(1, Math.min(20, Number(e.target.value) || DEFAULT_ICE_SLIDE_SPEED)) }))}
+                              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                            <span className="text-gray-500">px/frame</span>
+                          </label>
+                        )}
                       </div>
                     )}
 
