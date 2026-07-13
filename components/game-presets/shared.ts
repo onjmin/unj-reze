@@ -50,7 +50,7 @@ export type EventCommand =
   | { type: 'changeGold'; amount: number }
   | { type: 'restoreHp'; amount?: number }
   | { type: 'restoreMp'; amount?: number }
-  | { type: 'warp'; col: number; row: number }
+  | { type: 'warp'; col: number; row: number; mapId?: string }
   | { type: 'wait'; frames: number }
   | { type: 'comment'; text: string }
   | { type: 'label'; name: string }
@@ -61,11 +61,51 @@ export type EventCommand =
   | { type: 'playSound'; src: string }
   | { type: 'changeSprite'; spriteRef: string; spriteUrl?: string; objId: string }
   | { type: 'changeBackground'; bgRef: string; bgUrl?: string }
-  | { type: 'showImage'; imgId: string; url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean }
+  | { 
+      type: 'showImage'; 
+      imgId: string; 
+      url: string; 
+      x: number; 
+      y: number; 
+      w?: number; 
+      h?: number; 
+      opacity?: number; 
+      isPercent?: boolean;
+      m?: boolean;
+      c?: boolean;
+      sxp?: boolean;
+      swp?: boolean;
+      xp?: boolean;
+      wp?: boolean;
+      lp?: boolean;
+      ms?: number;
+      frames?: {
+        url: string;
+        sx: number; sy: number;
+        sw: number; sh: number;
+        ox: number; oy: number;
+        r: number;
+        a: number;
+      }[];
+    }
   | { type: 'hideImage'; imgId: string }
-  | { type: 'moveCamera'; tx: number; ty: number; duration: number }
+  | { 
+      type: 'followImage';
+      imgId: string;
+      targetObjId: string; // 'player' or 'obj-human-X-Y'
+      directions: Record<'U' | 'D' | 'L' | 'R', {
+        url: string; x: number; y: number; w?: number; h?: number; opacity?: number;
+        m?: boolean; c?: boolean; sxp?: boolean; swp?: boolean; xp?: boolean; wp?: boolean;
+        sx?: number; sy?: number; sw?: number; sh?: number; ox?: number; oy?: number; r?: number;
+      } | undefined>;
+    }
+  | { type: 'pauseImage'; imgId?: string; layer?: number }
+  | { type: 'resumeImage'; imgId?: string; layer?: number }
+  | { type: 'resetCamera'; duration: number; easing?: number }
+  | { type: 'moveCamera'; tx: number; ty: number; duration: number; dx?: number; dy?: number; easing?: number; blocking?: boolean }
   | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number }
-  | { type: 'screenEffect'; effectType: string; color?: string }
+  | { type: 'clearScreenEffect' }
+  | { type: 'screenEffect'; effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] }
   | { type: 'changePhase'; phaseIndex: number };
 
 export interface EventPage {

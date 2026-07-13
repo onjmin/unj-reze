@@ -1,4 +1,4 @@
-import { RPGMap } from "@rpgja/rpgen-map";
+import { RPGMap, RawCommand } from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
 import type { EventCommand, EventPage } from '@/components/game-presets/shared';
 import { newObject } from '@/components/game-presets/shared';
@@ -6,6 +6,7 @@ import { DQ_CHARACTERS } from '@/lib/local-assets';
 
 export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   const rpgMap = RPGMap.parse(text);
+  console.log(rpgMap)
 
   const idsToTranslate = new Set<number>();
 
@@ -44,14 +45,22 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   for (const ep of rpgMap.eventPoints) {
     ep.phases.forEach((ph: any) => {
       if (ph && ph.sequence) {
-        ph.sequence.forEach((c: any) => {
-          let cmd;
-          try { cmd = c.parse(); } catch { return; }
+        const scanCommand = (cmd: any) => {
           if (cmd.type === 'CH_SP' && cmd.params?.n) {
             const nStr = String(cmd.params.n);
             const idNum = Number(nStr.replace('A', ''));
             if (!isNaN(idNum)) idsToTranslate.add(idNum);
           }
+          if (cmd.choices) {
+            for (const seq of cmd.choices.values()) {
+              seq.forEach(scanCommand);
+            }
+          }
+        };
+        ph.sequence.forEach((c: any) => {
+          let cmd;
+          try { cmd = c.parse(); } catch { return; }
+          scanCommand(cmd);
         });
       }
     });
@@ -102,7 +111,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     map: [],
     overlayMap: [],
     objects: [],
-    bgm: rpgMap.bgmUrl || '',
+    bgm: rpgMap.bgmUrl ? `direct:${rpgMap.bgmUrl}` : '',
     mapBgRef: rpgMap.backgroundImageUrl ? `url:${rpgMap.backgroundImageUrl}` : undefined,
     sfx: {},
     switches: [],
@@ -150,65 +159,105 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     draft.overlayMap!.push(rowObj);
   }
 
-  for (const human of rpgMap.humans) {
-    let spriteUrl: string | undefined = undefined;
-    let spriteRef: string | undefined = undefined;
-    if (human.sprite.type === 1) {
-      const match = DQ_CHARACTERS.find(c => c.surface === (human.sprite as any).surface);
-      if (match) spriteRef = `walk:auto:u:${match.url}`;
-    } else if (human.sprite.type === 2) {
-      const hash = idToHash.get(Number((human.sprite as any).id));
-      if (hash) spriteUrl = `https://rpgen-search.pages.dev/images/sprites/${hash}.png`;
-    } else if (human.sprite.type === 3) {
-      const hash = idToHash.get(Number((human.sprite as any).id));
-      if (hash) spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/images/sAnims/${hash}.png`;
-    }
-
-    let behavior: 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' = 'still';
-    if (human.behavior === 1 || human.behavior === 2) behavior = 'random';
-    if (human.behavior === 3) behavior = 'patrolH';
-    if (human.behavior === 4) behavior = 'patrolV';
-    if (human.behavior === 5) behavior = 'chase';
-    if (human.behavior === 6) behavior = 'flee';
-
-    draft.objects.push(newObject({
-      col: human.position.x, row: human.position.y,
-      emoji: (spriteUrl || spriteRef) ? undefined : '🧍',
-      spriteUrl,
-      spriteRef,
-      behavior,
-      hazard: false,
-      message: human.message || '', objType: 'npc'
-    }));
-  }
-
-  for (const tbox of rpgMap.treasureBoxPoints) {
-    draft.objects.push(newObject({
-      col: tbox.position.x, row: tbox.position.y, emoji: '📦',
-      behavior: 'still', hazard: false,
-      message: tbox.message || '', objType: 'npc'
-    }));
-  }
-
-  for (const spoint of rpgMap.lookPoints) {
-    draft.objects.push(newObject({
-      col: spoint.position.x, row: spoint.position.y, emoji: '',
-      behavior: 'still', hazard: false,
-      editorSprite: '/assets/rpgen/map.png#352,128,16,16',
-      message: spoint.message || '', objType: 'npc'
-    }));
-  }
-
   const translateRpgenCommand = (rawCmd: any): EventCommand | null => {
-    let cmd;
-    try {
-      cmd = rawCmd.parse();
-    } catch {
-      return null;
+    let cmd = rawCmd;
+    if (typeof rawCmd.parse === 'function') {
+      try {
+        cmd = rawCmd.parse();
+      } catch {
+        return null;
+      }
     }
     
     switch (cmd.type) {
-      case 'MSG': return { type: 'message', text: cmd.content || '' };
+      case 'MSG': {
+        const text = cmd.content || '';
+        if (text.startsWith('#DW_IMA') || text.startsWith('#DW_IMG')) {
+          const lines = text.split('\n');
+          const paramsStr = lines.slice(1).join('\n').trim();
+          const params: Record<string, string> = {};
+          paramsStr.split(',').forEach((pair: string) => {
+            const idx = pair.indexOf(':');
+            if (idx >= 0) params[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
+          });
+          
+          const resolveUrl = (u: string) => {
+            if (!u) return '';
+            if (u.startsWith('http')) return u;
+            if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
+            const hash = idToHash.get(parseInt(u));
+            return hash ? `https://rpgen-search.pages.dev/images/sprites/${hash}.png` : '';
+          };
+
+          const frames: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[] = [];
+          for (let i = 1; i <= 30; i++) {
+            const sfx = i === 1 ? '' : String(i);
+            const hasAnyParam = ['u', 'sx', 'sy', 'sw', 'sh', 'ox', 'oy', 'r', 'a'].some(k => params[`${k}${sfx}`] !== undefined);
+            if (!hasAnyParam) break;
+            const prevFrame = i > 1 ? frames[frames.length - 1] : null;
+            const u = params[`u${sfx}`];
+            frames.push({
+              url: u ? resolveUrl(u) : (prevFrame ? prevFrame.url : ''),
+              sx: parseInt(params[`sx${sfx}`] || '0'),
+              sy: parseInt(params[`sy${sfx}`] || '0'),
+              sw: parseInt(params[`sw${sfx}`] || '100'),
+              sh: parseInt(params[`sh${sfx}`] || '100'),
+              ox: parseInt(params[`ox${sfx}`] || '0'),
+              oy: parseInt(params[`oy${sfx}`] || '0'),
+              r: parseInt(params[`r${sfx}`] || '0'),
+              a: parseInt(params[`a${sfx}`] || (i === 1 ? '100' : (prevFrame ? String(prevFrame.a) : '100')))
+            });
+          }
+
+          return {
+            type: 'showImage',
+            imgId: params.i || '1',
+            url: frames.length > 0 ? frames[0].url : '',
+            x: parseInt(params.x || '0'),
+            y: parseInt(params.y || '0'),
+            w: parseInt(params.w || '0'),
+            h: parseInt(params.h || '0'),
+            opacity: parseInt(params.a || '100'),
+            isPercent: params.xp !== '1',
+            m: params.m === '1',
+            c: params.c === '1',
+            sxp: params.sxp === '1',
+            swp: params.swp === '1',
+            xp: params.xp === '1',
+            wp: params.wp === '1',
+            lp: params.lp === '1',
+            ms: parseInt(params.ms || '100'),
+            frames
+          };
+        }
+        if (text.startsWith('#ST_IMA') || text.startsWith('#ST_IMG')) {
+          const lines = text.split('\n');
+          const paramsStr = lines.slice(1).join('\n').trim();
+          const params: Record<string, string> = {};
+          paramsStr.split(',').forEach((pair: string) => {
+            const idx = pair.indexOf(':');
+            if (idx >= 0) params[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
+          });
+          return { type: 'hideImage', imgId: params.i || '1' };
+        }
+        if (text.startsWith('#ED')) {
+          // Backward compatibility if some #ED are still left as MSG
+          return null;
+        }
+        return { type: 'message', text };
+      }
+      case 'SEL': {
+        const choiceNode: EventCommand = { type: 'choice', text: '', choices: [] };
+        if (cmd.choices) {
+          for (const [label, sequence] of cmd.choices.entries()) {
+            choiceNode.choices.push({
+              label,
+              commands: sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[]
+            });
+          }
+        }
+        return choiceNode;
+      }
       case 'WAIT': return { type: 'wait', frames: Math.floor((cmd.delay || 1000) / 16) };
       case 'CH_SP': {
         const nStr = String(cmd.params?.n || '');
@@ -230,37 +279,237 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       case 'MV_CA': return { type: 'moveCamera', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
       case 'MV_NA': return { type: 'moveNpc', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
       case 'MV_PA': return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
-      case 'DW_IMG': return { type: 'showImage', imgId: cmd.params?.i || '1', url: cmd.params?.u || '', x: parseInt(cmd.params?.x || '0'), y: parseInt(cmd.params?.y || '0'), w: parseInt(cmd.params?.w || '0'), h: parseInt(cmd.params?.h || '0'), opacity: parseInt(cmd.params?.a || '100'), isPercent: cmd.params?.xp !== '1' };
+      case 'DW_IMA':
+      case 'DW_IMG': {
+        const params = cmd.params || {};
+        const resolveUrl = (u: string) => {
+          if (!u) return '';
+          if (u.startsWith('http')) return u;
+          if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
+          const hash = idToHash.get(parseInt(u));
+          return hash ? `https://rpgen-search.pages.dev/images/sprites/${hash}.png` : '';
+        };
+
+        const frames: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[] = [];
+        for (let i = 1; i <= 30; i++) {
+          const sfx = i === 1 ? '' : String(i);
+          const hasAnyParam = ['u', 'sx', 'sy', 'sw', 'sh', 'ox', 'oy', 'r', 'a'].some(k => params[`${k}${sfx}`] !== undefined);
+          if (!hasAnyParam) break;
+          const prevFrame = i > 1 ? frames[frames.length - 1] : null;
+          const u = params[`u${sfx}`];
+          frames.push({
+            url: u ? resolveUrl(u) : (prevFrame ? prevFrame.url : ''),
+            sx: parseInt(params[`sx${sfx}`] || '0'),
+            sy: parseInt(params[`sy${sfx}`] || '0'),
+            sw: parseInt(params[`sw${sfx}`] || '100'),
+            sh: parseInt(params[`sh${sfx}`] || '100'),
+            ox: parseInt(params[`ox${sfx}`] || '0'),
+            oy: parseInt(params[`oy${sfx}`] || '0'),
+            r: parseInt(params[`r${sfx}`] || '0'),
+            a: parseInt(params[`a${sfx}`] || (i === 1 ? '100' : (prevFrame ? String(prevFrame.a) : '100')))
+          });
+        }
+
+        return { 
+          type: 'showImage', 
+          imgId: params.i || '1', 
+          url: frames.length > 0 ? frames[0].url : '', 
+          x: parseInt(params.x || '0'), 
+          y: parseInt(params.y || '0'), 
+          w: parseInt(params.w || '0'), 
+          h: parseInt(params.h || '0'), 
+          opacity: parseInt(params.a || '100'), 
+          isPercent: params.xp !== '1',
+          m: params.m === '1',
+          c: params.c === '1',
+          sxp: params.sxp === '1',
+          swp: params.swp === '1',
+          xp: params.xp === '1',
+          wp: params.wp === '1',
+          lp: params.lp === '1',
+          ms: parseInt(params.ms || '100'),
+          frames
+        };
+      }
+      case 'ST_IMA':
       case 'ST_IMG': return { type: 'hideImage', imgId: cmd.params?.i || '1' };
+      case 'DW_FL': {
+        const params = cmd.params || {};
+        const targetObjId = (params.nx !== undefined && params.ny !== undefined) ? `obj-human-${params.nx}-${params.ny}` : 'player';
+        
+        const resolveUrl = (u: string) => {
+          if (!u) return '';
+          if (u.startsWith('http')) return u;
+          if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
+          const hash = idToHash.get(parseInt(u));
+          return hash ? `https://rpgen-search.pages.dev/images/sprites/${hash}.png` : '';
+        };
+
+        const dirs: Record<'U' | 'D' | 'L' | 'R', any> = { U: undefined, D: undefined, L: undefined, R: undefined };
+        ['U', 'D', 'L', 'R'].forEach(dir => {
+          const u = params[`u${dir}`];
+          if (u || params[`x${dir}`] !== undefined) {
+            dirs[dir as 'U'|'D'|'L'|'R'] = {
+              url: resolveUrl(u || ''),
+              x: parseInt(params[`x${dir}`] || '0'),
+              y: parseInt(params[`y${dir}`] || '0'),
+              w: parseInt(params[`w${dir}`] || '0'),
+              h: parseInt(params[`h${dir}`] || '0'),
+              opacity: parseInt(params[`a${dir}`] || '100'),
+              xp: params[`xp${dir}`] === '1',
+              wp: params[`wp${dir}`] === '1',
+              sxp: params[`sxp${dir}`] === '1',
+              swp: params[`swp${dir}`] === '1',
+              m: params[`m${dir}`] === '1',
+              c: params[`c${dir}`] === '1',
+              sx: parseInt(params[`sx${dir}`] || '0'),
+              sy: parseInt(params[`sy${dir}`] || '0'),
+              sw: parseInt(params[`sw${dir}`] || '100'),
+              sh: parseInt(params[`sh${dir}`] || '100'),
+              ox: parseInt(params[`ox${dir}`] || '0'),
+              oy: parseInt(params[`oy${dir}`] || '0'),
+              r: parseInt(params[`r${dir}`] || '0')
+            };
+          }
+        });
+
+        return {
+          type: 'followImage',
+          imgId: params.i || '1',
+          targetObjId,
+          directions: dirs
+        };
+      }
+      case 'PS_IMG': return { type: 'pauseImage', imgId: cmd.params?.i || '1' };
+      case 'RS_IMG': return { type: 'resumeImage', imgId: cmd.params?.i || '1' };
+      case 'PS_LAY': return { type: 'pauseImage', layer: parseInt(cmd.params?.l || '0') };
+      case 'RS_LAY': return { type: 'resumeImage', layer: parseInt(cmd.params?.l || '0') };
       case 'PL_SD': return { type: 'playSound', src: cmd.params?.i || '' };
       case 'CH_YB': return { type: 'changeBackground', bgRef: '', bgUrl: cmd.params?.v };
       case 'SET_GLD': return { type: 'changeGold', amount: parseInt(cmd.params?.v || '0') };
       case 'CH_PH': return { type: 'changePhase', phaseIndex: parseInt(cmd.params?.p || '1') };
       case 'ON_SW': return { type: 'setSwitch', switchId: parseInt(cmd.params?.n || '0'), value: true };
       case 'OFF_SW': return { type: 'setSwitch', switchId: parseInt(cmd.params?.n || '0'), value: false };
-      case 'MV_MP': return { type: 'warp', col: parseInt(cmd.params?.tx || '0'), row: parseInt(cmd.params?.ty || '0') };
+      case 'MV_MP': return { type: 'warp', col: parseInt(cmd.params?.tx || '0'), row: parseInt(cmd.params?.ty || '0'), mapId: cmd.params?.n };
       case 'CM_EV': return { type: 'comment', text: cmd.params?.m || '' };
-      case 'EF_GR': 
-      case 'EF_RGR':
+      case 'EF_RGR': return { type: 'clearScreenEffect' };
+      case 'EF_GR': {
+        const effects = [];
+        for (let idx = 0; idx < 10; idx++) {
+          const iStr = cmd.params?.[`i${idx}`];
+          if (!iStr) continue;
+          const kvs = iStr.split('+').reduce((acc: any, kv: string) => {
+            const [k, v] = kv.split('=');
+            if (k) acc[k] = v;
+            return acc;
+          }, {});
+          effects.push({
+            type: kvs.t === '1' ? 'gradient' : 'solid',
+            color: kvs.c || '',
+            c1: kvs.c1 || '',
+            c2: kvs.c2 || '',
+            pos: kvs.p || '',
+            stops: kvs.s || ''
+          });
+        }
+        return { type: 'screenEffect', effects: effects as any };
+      }
+      case 'MV_CF': return { type: 'resetCamera', duration: parseInt(cmd.params?.t || '300') };
+      case 'MV_CD': {
+        const tx = parseInt(cmd.params?.tx || '0');
+        const ty = parseInt(cmd.params?.ty || '0');
+        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.w === '1' };
+      }
+      case 'MV_CA': {
+        const tx = parseInt(cmd.params?.tx || '0');
+        const ty = parseInt(cmd.params?.ty || '0');
+        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.w === '1' };
+      }
+      case 'MV_CR': {
+        const dx = parseInt(cmd.params?.tx || '0');
+        const dy = parseInt(cmd.params?.ty || '0');
+        return { type: 'moveCamera', tx: 0, ty: 0, dx, dy, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.w === '1' };
+      }
       case 'WT_RN':
-      case 'WT_SN': return { type: 'screenEffect', effectType: cmd.type, color: cmd.params?.c || cmd.params?.c1 || '' };
+      case 'WT_SN': return { type: 'screenEffect', effects: [{ type: 'solid', color: cmd.params?.c || cmd.params?.c1 || '', c1: '', c2: '', pos: '', stops: '' }] };
       default: return { type: 'comment', text: `Unimplemented: ${cmd.type}` };
     }
   };
 
+  // RPGENの message は本来「#DW_IMA/#MSG/#SEL...」等のコマンド列を含むスクリプトになりうる。
+  // 単なる表示テキストとして扱うと fade-in/message/fade-out のような演出が逐次実行されないため、
+  // スクリプトらしき内容は translateRpgenCommand でコマンド列化して pages に変換する。
+  const messageToPages = (message: string): EventPage[] | undefined => {
+    if (!/^\s*#[A-Z_]+/.test(message)) return undefined;
+    const commands = RawCommand.parseSequence(message).map(translateRpgenCommand).filter(Boolean) as EventCommand[];
+    if (commands.length === 0) return undefined;
+    return [{ name: 'Phase 0', conditions: {}, commands }];
+  };
+
+  for (const human of rpgMap.humans) {
+    let spriteUrl: string | undefined = undefined;
+    let spriteRef: string | undefined = undefined;
+    if (human.sprite.type === 1) {
+      const match = DQ_CHARACTERS.find(c => c.surface === (human.sprite as any).surface);
+      if (match) spriteRef = `walk:auto:u:${match.url}`;
+    } else if (human.sprite.type === 2) {
+      const hash = idToHash.get(Number((human.sprite as any).id));
+      if (hash) spriteUrl = `https://rpgen-search.pages.dev/images/sprites/${hash}.png`;
+    } else if (human.sprite.type === 3) {
+      const hash = idToHash.get(Number((human.sprite as any).id));
+      if (hash) spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/images/sAnims/${hash}.png`;
+    }
+
+    let behavior: 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' = 'still';
+    if (human.behavior === 1 || human.behavior === 2) behavior = 'random';
+    if (human.behavior === 3) behavior = 'patrolH';
+    if (human.behavior === 4) behavior = 'patrolV';
+    if (human.behavior === 5) behavior = 'chase';
+    if (human.behavior === 6) behavior = 'flee';
+
+    const pages = messageToPages(human.message || '');
+    draft.objects.push(newObject({
+      col: human.position.x, row: human.position.y,
+      emoji: (spriteUrl || spriteRef) ? undefined : '🧍',
+      spriteUrl,
+      spriteRef,
+      behavior,
+      hazard: false,
+      message: pages ? '' : (human.message || ''), objType: 'npc',
+      pages
+    }));
+  }
+
+  for (const tbox of rpgMap.treasureBoxPoints) {
+    const pages = messageToPages(tbox.message || '');
+    draft.objects.push(newObject({
+      col: tbox.position.x, row: tbox.position.y, emoji: '📦',
+      behavior: 'still', hazard: false,
+      message: pages ? '' : (tbox.message || ''), objType: 'npc',
+      pages
+    }));
+  }
+
+  for (const spoint of rpgMap.lookPoints) {
+    const pages = messageToPages(spoint.message || '');
+    draft.objects.push(newObject({
+      col: spoint.position.x, row: spoint.position.y, emoji: '',
+      behavior: 'still', hazard: false,
+      editorSprite: '/assets/rpgen/map.png#352,128,16,16',
+      message: pages ? '' : (spoint.message || ''), objType: 'npc',
+      pages
+    }));
+  }
+
   for (const ep of rpgMap.eventPoints) {
     const pages: EventPage[] = [];
     ep.phases.forEach((ph: any, idx: number) => {
-      if (!ph || !ph.sequence) return;
-      const commands: EventCommand[] = [];
-      ph.sequence.forEach((c: any) => {
-        const translated = translateRpgenCommand(c);
-        if (translated) commands.push(translated);
-      });
+      const parsedCommands = ph.sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[];
+
       pages.push({
         name: `Phase ${idx}`,
         conditions: {},
-        commands
+        commands: parsedCommands
       });
     });
     

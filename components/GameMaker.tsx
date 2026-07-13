@@ -126,6 +126,14 @@ const hydrateUrlFromRef = (ref?: string): string | undefined => {
   return url && (url.startsWith('http') || url.startsWith('/') || url.startsWith('data:')) ? url : undefined;
 };
 
+const hydrateBgmFromRef = (ref?: string): { ref: string; src?: string; type?: 'youtube' | 'mml' | 'direct' } | undefined => {
+  if (!ref || ref === 'none') return undefined;
+  const type = ref.startsWith('mml:') ? 'mml' : ref.startsWith('direct:') ? 'direct' : 'youtube';
+  const src = type === 'mml' ? ref.replace(/^mml:/, '') : type === 'direct' ? ref.replace(/^direct:/, '') : `https://www.youtube.com/watch?v=${ref.replace(/^youtube:/, '')}`;
+  return { ref, type, src };
+};
+
+
 /** 保存用マニフェスト（テキスト/参照のみ）。docs/game-feature-design.md §4 */
 export interface GameManifestDraft {
   preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
@@ -1127,6 +1135,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const isDraggingStartRef = useRef(false);
   const justStartedRef = useRef(false);
   const editorCoordRef = useRef<HTMLDivElement>(null);
+
+  // ── プレビュー用 ──
+  const [previewCommand, setPreviewCommand] = useState<EventCommand | null>(null);
+  const previewCommandRef = useRef<EventCommand | null>(null);
+  previewCommandRef.current = previewCommand;
+
   // ── タイトル／エンディング画面ランタイム ──
   const [showTitle, setShowTitle] = useState(false);
   const showTitleRef = useRef(false);
@@ -1257,12 +1271,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const camYRef = useRef(0);
   const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 });
   const cameraPanRef = useRef({ x: 0, y: 0 });
-  const [overlayImages, setOverlayImages] = useState<Record<string, { url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean }>>({});
-  const overlayImagesRef = useRef<Record<string, { url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean }>>({});
+  type OverlayImageType = {
+    url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean;
+    m?: boolean; c?: boolean; sxp?: boolean; swp?: boolean; xp?: boolean; wp?: boolean; lp?: boolean;
+    ms?: number;
+    startTime?: number;
+    pausedAt?: number;
+    pauseOffset?: number;
+    frames?: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[];
+  };
+  const [overlayImages, setOverlayImages] = useState<Record<string, OverlayImageType>>({});
+  const overlayImagesRef = useRef<Record<string, OverlayImageType>>({});
   overlayImagesRef.current = overlayImages;
-  const [screenEffect, setScreenEffect] = useState<{ type: string; color?: string } | null>(null);
-  const screenEffectRef = useRef<{ type: string; color?: string } | null>(null);
+
+  type FollowImageType = {
+    targetObjId: string;
+    directions: Record<'U' | 'D' | 'L' | 'R', any>;
+  };
+  const [followImages, setFollowImages] = useState<Record<string, FollowImageType>>({});
+  const followImagesRef = useRef<Record<string, FollowImageType>>({});
+  followImagesRef.current = followImages;
+
+  const [screenEffect, setScreenEffect] = useState<{ effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] } | null>(null);
+  const screenEffectRef = useRef<{ effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] } | null>(null);
   screenEffectRef.current = screenEffect;
+
+  const camOverrideRef = useRef<{ startX: number; startY: number; endX: number; endY: number; startTime: number; duration: number; easing?: number } | null>(null);
 
   // ── ターン制戦闘 ──
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
@@ -3919,11 +3953,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!gameMsgReadyRef.current) return;
     playSfx(MSG_ADVANCE_SFX);
     if (gameMsgTimerRef.current) { clearTimeout(gameMsgTimerRef.current); gameMsgTimerRef.current = null; }
-    setGameMsg(prev => {
-      if (prev) { prev.onDismiss(); }
-      return null;
-    });
+    
+    // Call onDismiss outside of the state updater to avoid React Strict Mode calling it twice!
+    const onDismiss = gameMsgRef.current?.onDismiss;
+    setGameMsg(null);
     gameMsgReadyRef.current = false;
+
+    if (onDismiss) {
+      onDismiss();
+    }
   }, []);
 
   useEffect(() => () => { if (gameMsgTimerRef.current) clearTimeout(gameMsgTimerRef.current); }, []);
@@ -4040,13 +4078,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         return;
       }
       const cmd = cmds[index];
+      console.log(cmd.type)
       switch (cmd.type) {
         case 'message':
+          console.log(index);
           showGameMsg(cmd.text, 'instant', advance);
+          console.log(index);
           break;
         case 'overheadMessage':
           itemGetRef.current = { text: cmd.text, startTime: performance.now() };
+          console.log(index);
           setTimeout(advance, 30);
+          console.log(index);
           break;
         case 'playSound':
           playSfx({ ref: `direct:${cmd.src}`, src: cmd.src, type: 'direct' });
@@ -4130,9 +4173,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           break;
         }
         case 'warp':
-          engineRef.current.player.x = cmd.col * TILE_SIZE;
-          engineRef.current.player.y = cmd.row * TILE_SIZE;
-          setTimeout(advance, 50);
+          if (cmd.mapId) {
+            const targetSceneId = `rpgen_map_${cmd.mapId}`;
+            const ex = cmd.col * TILE_SIZE;
+            const ey = cmd.row * TILE_SIZE;
+            sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: targetSceneId, entryX: ex, entryY: ey };
+            setTimeout(advance, 0);
+          } else {
+            engineRef.current.player.x = cmd.col * TILE_SIZE;
+            engineRef.current.player.y = cmd.row * TILE_SIZE;
+            setTimeout(advance, 50);
+          }
           break;
         case 'wait':
           setTimeout(advance, cmd.frames * 16);
@@ -4209,11 +4260,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         case 'showImage':
-          setOverlayImages(prev => ({ ...prev, [cmd.imgId]: { url: cmd.url, x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h, opacity: cmd.opacity, isPercent: cmd.isPercent } }));
-          setTimeout(advance, 0);
+          setOverlayImages(prev => ({
+            ...prev, [cmd.imgId]: {
+              url: cmd.url, x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h, opacity: cmd.opacity, isPercent: cmd.isPercent,
+              m: cmd.m, c: cmd.c, sxp: cmd.sxp, swp: cmd.swp, xp: cmd.xp, wp: cmd.wp, lp: cmd.lp,
+              ms: cmd.ms, frames: cmd.frames, startTime: Date.now()
+            }
+          }));
+          if (cmd.frames && cmd.frames.length > 0 && !cmd.lp && cmd.ms) {
+            const duration = cmd.frames.length * cmd.ms;
+            setTimeout(advance, duration);
+          } else {
+            setTimeout(advance, 0);
+          }
           break;
         case 'hideImage':
           setOverlayImages(prev => { const next = { ...prev }; delete next[cmd.imgId]; return next; });
+          setFollowImages(prev => { const next = { ...prev }; delete next[cmd.imgId]; return next; });
+          setTimeout(advance, 0);
+          break;
+        case 'followImage':
+          setFollowImages(prev => ({
+            ...prev,
+            [cmd.imgId]: { targetObjId: cmd.targetObjId, directions: cmd.directions }
+          }));
+          setTimeout(advance, 0);
+          break;
+        case 'pauseImage':
+          if (cmd.imgId) {
+            const id = cmd.imgId;
+            setOverlayImages(prev => {
+              const img = prev[id];
+              if (!img || img.pausedAt) return prev;
+              return { ...prev, [id]: { ...img, pausedAt: Date.now() } };
+            });
+          }
+          setTimeout(advance, 0);
+          break;
+        case 'resumeImage':
+          if (cmd.imgId) {
+            const id = cmd.imgId;
+            setOverlayImages(prev => {
+              const img = prev[id];
+              if (!img || !img.pausedAt) return prev;
+              const pauseDuration = Date.now() - img.pausedAt;
+              return { ...prev, [id]: { ...img, pausedAt: undefined, startTime: (img.startTime || Date.now()) + pauseDuration } };
+            });
+          }
           setTimeout(advance, 0);
           break;
         case 'moveCamera':
@@ -4240,10 +4333,64 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, cmd.duration ?? 0);
           break;
         }
-        case 'screenEffect':
-          setScreenEffect({ type: cmd.effectType, color: cmd.color });
+        case 'clearScreenEffect':
+          setScreenEffect(null);
           setTimeout(advance, 0);
           break;
+        case 'screenEffect':
+          setScreenEffect({ effects: cmd.effects });
+          setTimeout(advance, 0);
+          break;
+        case 'resetCamera':
+          if (camOverrideRef.current) {
+            const now = Date.now();
+            const elapsed = now - camOverrideRef.current.startTime;
+            let currentX = camOverrideRef.current.endX;
+            let currentY = camOverrideRef.current.endY;
+            if (elapsed < camOverrideRef.current.duration && camOverrideRef.current.duration > 0) {
+              const r = elapsed / camOverrideRef.current.duration;
+              currentX = camOverrideRef.current.startX + (camOverrideRef.current.endX - camOverrideRef.current.startX) * r;
+              currentY = camOverrideRef.current.startY + (camOverrideRef.current.endY - camOverrideRef.current.startY) * r;
+            }
+            camOverrideRef.current = {
+              startX: currentX, startY: currentY,
+              endX: -1, endY: -1, // Use -1 as a flag to return to player
+              startTime: now, duration: cmd.duration, easing: cmd.easing
+            };
+          }
+          setTimeout(advance, cmd.duration);
+          break;
+        case 'moveCamera': {
+          const now = Date.now();
+          let startX = camXRef.current;
+          let startY = camYRef.current;
+          if (camOverrideRef.current) {
+            const elapsed = now - camOverrideRef.current.startTime;
+            if (elapsed < camOverrideRef.current.duration && camOverrideRef.current.duration > 0) {
+              const r = elapsed / camOverrideRef.current.duration;
+              startX = camOverrideRef.current.startX + (camOverrideRef.current.endX - camOverrideRef.current.startX) * r;
+              startY = camOverrideRef.current.startY + (camOverrideRef.current.endY - camOverrideRef.current.startY) * r;
+            } else {
+              startX = camOverrideRef.current.endX;
+              startY = camOverrideRef.current.endY;
+            }
+          }
+          let endX = cmd.tx * TILE_SIZE;
+          let endY = cmd.ty * TILE_SIZE;
+          if (cmd.dx !== undefined || cmd.dy !== undefined) {
+            endX = startX + (cmd.dx || 0) * TILE_SIZE;
+            endY = startY + (cmd.dy || 0) * TILE_SIZE;
+          }
+          camOverrideRef.current = {
+            startX, startY, endX, endY, startTime: now, duration: cmd.duration, easing: cmd.easing
+          };
+          if (cmd.blocking) {
+            setTimeout(advance, cmd.duration);
+          } else {
+            setTimeout(advance, 0);
+          }
+          break;
+        }
         case 'changePhase':
           // TODO: Implement phase transition if supported by engine
           setTimeout(advance, 0);
@@ -4373,9 +4520,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   useEffect(() => {
     ensureImageFromRef(gameData.player.spriteRef, gameData.player.spriteUrl);
+    const preloadEvents = (cmds: EventCommand[]) => {
+      cmds.forEach(cmd => {
+        if (cmd.type === 'showImage') {
+          if (cmd.frames) {
+            cmd.frames.forEach(f => {
+              if (f.url) ensureImage(f.url);
+            });
+          }
+          if (cmd.url) ensureImage(cmd.url);
+        } else if (cmd.type === 'choice') {
+          cmd.choices.forEach(ch => preloadEvents(ch.commands));
+        } else if (cmd.type === 'changeSprite') {
+          ensureImageFromRef(cmd.spriteRef, cmd.spriteUrl);
+        }
+      });
+    };
+
     Object.values(gameData.tiles).forEach(t => ensureImage(t.imageUrl));
-    gameData.objects.forEach(o => { ensureImageFromRef(o.spriteRef, o.spriteUrl); if (o.editorSprite) ensureImage(o.editorSprite); });
+    gameData.objects.forEach(o => {
+      ensureImageFromRef(o.spriteRef, o.spriteUrl);
+      if (o.editorSprite) ensureImage(o.editorSprite);
+      if (o.pages) o.pages.forEach(p => preloadEvents(p.commands));
+    });
     ensureImageFromRef(objTemplate.spriteRef, objTemplate.spriteUrl);
+    if (objTemplate.pages) objTemplate.pages.forEach(p => preloadEvents(p.commands));
+
     ensureImage(gameData.mapBgUrl);
     ensureImage(gameData.titleScreen?.bgUrl);
     ensureImage(gameData.ending?.bgUrl);
@@ -4446,9 +4616,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ending: initialManifest.ending ?? base.ending,
         battle: initialManifest.battle ?? base.battle,
         layout25d: initialManifest.layout25d ?? base.layout25d,
-        bgm: initialManifest.bgm && initialManifest.bgm !== 'none' ? { ref: initialManifest.bgm } : undefined,
-        battleBgm: initialManifest.battleBgm ? { ref: initialManifest.battleBgm } : undefined,
-        bossBgm: initialManifest.bossBgm ? { ref: initialManifest.bossBgm } : undefined,
+        scenes: initialManifest.scenes?.map(s => ({
+          ...s,
+          objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
+          bgm: hydrateBgmFromRef(s.bgm),
+        })),
+        bgm: hydrateBgmFromRef(initialManifest.bgm),
+        battleBgm: hydrateBgmFromRef(initialManifest.battleBgm),
+        bossBgm: hydrateBgmFromRef(initialManifest.bossBgm),
         sfx: Object.fromEntries(
           Object.entries(initialManifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
         ) as PresetData['sfx'],
@@ -5056,7 +5231,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       if (loaded) {
-        ctx.drawImage(keyedCache.current.get(resolvedUrl!) ?? img!, x, y, w, h);
+        const srcToDraw = keyedCache.current.get(resolvedUrl!) ?? img!;
+        const hashIdx = resolvedUrl!.indexOf('#');
+        if (hashIdx !== -1) {
+          const parts = resolvedUrl!.slice(hashIdx + 1).split(',');
+          if (parts.length >= 4) {
+            const sx = Number(parts[0]);
+            const sy = Number(parts[1]);
+            const sw = Number(parts[2]);
+            const sh = Number(parts[3]);
+            ctx.drawImage(srcToDraw, sx, sy, sw, sh, x, y, w, h);
+            return;
+          }
+        }
+        ctx.drawImage(srcToDraw, x, y, w, h);
       } else {
         ctx.font = `${w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
         ctx.fillText(def.emoji, x + w / 2, y + h + 4);
@@ -7840,6 +8028,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ? p.y + pData.h / 2 - VIEW_H / 2
           : editScrollYRef.current));
 
+      if (camOverrideRef.current) {
+        const ovr = camOverrideRef.current;
+        if (ovr.endX === -1) {
+          const elapsed = Date.now() - ovr.startTime;
+          if (elapsed >= ovr.duration || ovr.duration <= 0) {
+            camOverrideRef.current = null;
+          } else {
+            const r = elapsed / ovr.duration;
+            camX = ovr.startX + (camX - ovr.startX) * r;
+            camY = ovr.startY + (camY - ovr.startY) * r;
+          }
+        } else {
+          const elapsed = Date.now() - ovr.startTime;
+          if (elapsed >= ovr.duration || ovr.duration <= 0) {
+            camX = ovr.endX;
+            camY = ovr.endY;
+          } else {
+            const r = Math.min(1, elapsed / ovr.duration);
+            camX = ovr.startX + (ovr.endX - ovr.startX) * r;
+            camY = ovr.startY + (ovr.endY - ovr.startY) * r;
+          }
+        }
+      }
+
       // ── シーン切り替えモードでのカメラ境界クランプ ──
       if (isPlaying && gameData.engine === 'action' && scenesRef.current.length > 0 && worldLayoutRef.current) {
         const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
@@ -8545,40 +8757,246 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── RPGEN オーバーレイ描画 ──────────────────────────────────────────
       Object.values(overlayImagesRef.current).forEach(img => {
-        const url = img.url;
-        ensureImage(url);
-        const domImg = imgCache.current.get(url);
-        if (domImg) {
+        let currentUrl = img.url;
+        let tX = 0, tY = 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
+
+        if (img.frames && img.frames.length > 0 && img.ms) {
+          const now = img.pausedAt || Date.now();
+          const elapsed = now - (img.startTime || now);
+          const totalFrames = img.frames.length;
+          const frameIdx = img.lp
+            ? Math.floor(elapsed / img.ms) % totalFrames
+            : Math.min(Math.floor(elapsed / img.ms), totalFrames - 1);
+          const frame = img.frames[frameIdx];
+          currentUrl = frame.url;
+          tX = frame.sx;
+          tY = frame.sy;
+          tW = frame.sw;
+          tH = frame.sh;
+          tR = frame.r;
+          tA = frame.a;
+          tOx = frame.ox;
+          tOy = frame.oy;
+        }
+
+        ensureImage(currentUrl);
+        const domImg = imgCache.current.get(currentUrl);
+        if (domImg && domImg.complete && domImg.naturalWidth > 0) {
           ctx.save();
-          if (img.opacity !== undefined) ctx.globalAlpha = img.opacity / 100;
-          let drawW = img.w ?? domImg.width;
-          let drawH = img.h ?? domImg.height;
-          let drawX = img.x;
-          let drawY = img.y;
-          if (img.isPercent) {
-            drawX = (img.x / 100) * PLAY_W;
-            drawY = (img.y / 100) * PLAY_H;
+          ctx.globalAlpha = tA / 100;
+
+          let sW = img.swp ? tW : domImg.naturalWidth * (tW / 100);
+          let sH = img.swp ? tH : domImg.naturalHeight * (tH / 100);
+          let sX = img.sxp ? tX : domImg.naturalWidth * (tX / 100);
+          let sY = img.sxp ? tY : domImg.naturalHeight * (tY / 100);
+
+          let dW = sW;
+          let dH = sH;
+          if (img.w !== undefined && img.w !== 0) {
+            dW = img.wp ? img.w : sW * (img.w / 100);
           }
-          ctx.drawImage(domImg, drawX, drawY, drawW, drawH);
+          if (img.h !== undefined && img.h !== 0) {
+            dH = img.wp ? img.h : sH * (img.h / 100);
+          }
+
+          let drawX = img.xp ? img.x : (img.x / 100) * PLAY_W;
+          let drawY = img.xp ? img.y : (img.y / 100) * PLAY_H;
+
+          if (img.m) {
+            drawX -= camXRef.current;
+            drawY -= camYRef.current;
+          }
+
+          if (img.c) {
+            drawX -= dW / 2;
+            drawY -= dH / 2;
+          }
+
+          ctx.translate(drawX, drawY);
+          ctx.translate(tOx, tOy);
+          ctx.rotate(tR * Math.PI / 180);
+          ctx.translate(-tOx, -tOy);
+          if (sW > 0 && sH > 0 && dW > 0 && dH > 0) {
+            ctx.drawImage(domImg, sX, sY, sW, sH, 0, 0, dW, dH);
+          }
+          ctx.restore();
+        }
+      });
+
+      // ── プレビュー用画像描画 (DW_IMA プレビュー) ─────────────────────────
+      if (previewCommandRef.current && previewCommandRef.current.type === 'showImage') {
+        const img = previewCommandRef.current as any;
+        if (img.url) {
+          let tX = img.x ?? 0, tY = img.y ?? 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
+          let currentUrl = img.url;
+          
+          if (img.frames && img.frames.length > 0) {
+            const now = Date.now();
+            const ms = img.ms || 100;
+            const totalDuration = ms * img.frames.length;
+            const elapsed = now % totalDuration;
+            const frameIndex = Math.min(Math.floor(elapsed / ms), img.frames.length - 1);
+            const frame = img.frames[frameIndex];
+            currentUrl = frame.url || currentUrl;
+            tX = frame.sx ?? 0; tY = frame.sy ?? 0;
+            tW = frame.sw ?? 100; tH = frame.sh ?? 100;
+            tR = frame.r ?? 0; tA = frame.a ?? 100;
+            tOx = frame.ox ?? 0; tOy = frame.oy ?? 0;
+          } else {
+            tX = img.sx ?? 0; tY = img.sy ?? 0;
+            tW = img.sw ?? 100; tH = img.sh ?? 100;
+            tR = img.r ?? 0; tA = img.opacity ?? 100;
+            tOx = img.ox ?? 0; tOy = img.oy ?? 0;
+          }
+
+          ensureImage(currentUrl);
+          const domImg = imgCache.current.get(currentUrl);
+          if (domImg && domImg.complete && domImg.naturalWidth > 0) {
+            ctx.save();
+            ctx.globalAlpha = tA / 100;
+
+            let sW = img.swp ? tW : domImg.naturalWidth * (tW / 100);
+            let sH = img.swp ? tH : domImg.naturalHeight * (tH / 100);
+            let sX = img.sxp ? tX : domImg.naturalWidth * (tX / 100);
+            let sY = img.sxp ? tY : domImg.naturalHeight * (tY / 100);
+
+            let dW = sW;
+            let dH = sH;
+            if (img.w !== undefined && img.w !== 0) {
+              dW = img.wp ? img.w : sW * (img.w / 100);
+            }
+            if (img.h !== undefined && img.h !== 0) {
+              dH = img.wp ? img.h : sH * (img.h / 100);
+            }
+
+            let drawX = img.xp ? (img.x || 0) : ((img.x || 0) / 100) * PLAY_W;
+            let drawY = img.xp ? (img.y || 0) : ((img.y || 0) / 100) * PLAY_H;
+
+            if (img.m) {
+              drawX -= camXRef.current;
+              drawY -= camYRef.current;
+            }
+
+            if (img.c) {
+              drawX -= dW / 2;
+              drawY -= dH / 2;
+            }
+
+            ctx.translate(drawX, drawY);
+            ctx.translate(tOx, tOy);
+            ctx.rotate(tR * Math.PI / 180);
+            ctx.translate(-tOx, -tOy);
+            if (sW > 0 && sH > 0 && dW > 0 && dH > 0) {
+              ctx.drawImage(domImg, sX, sY, sW, sH, 0, 0, dW, dH);
+            }
+            ctx.restore();
+          }
+        }
+      }
+
+      // ── RPGEN 追随画像描画 (DW_FL) ──────────────────────────────────────────
+      Object.values(followImagesRef.current).forEach(img => {
+        let targetEnt: any = null;
+        let tDir = 'd';
+        let targetW = TILE_SIZE, targetH = TILE_SIZE;
+
+        if (img.targetObjId === 'player') {
+          targetEnt = engineRef.current.player;
+          targetW = gameData.player.w;
+          targetH = gameData.player.h;
+          tDir = walkInst.get('player')?.dir ?? 's';
+        } else {
+          targetEnt = engineRef.current.entities?.find(e => e.def.id === img.targetObjId) || null;
+          if (targetEnt) {
+            targetW = targetEnt.w;
+            targetH = targetEnt.h;
+            tDir = targetEnt.dir ?? 's';
+          }
+        }
+        if (!targetEnt) return;
+
+        const dirMapping: Record<string, 'U' | 'D' | 'L' | 'R'> = { w: 'U', s: 'D', a: 'L', d: 'R', up: 'U', down: 'D', left: 'L', right: 'R' };
+        const dir = dirMapping[tDir] || 'D';
+        const dirData = img.directions[dir];
+        if (!dirData) return;
+
+        ensureImage(dirData.url);
+        const domImg = imgCache.current.get(dirData.url);
+        if (domImg && domImg.complete && domImg.naturalWidth > 0) {
+          ctx.save();
+          ctx.globalAlpha = (dirData.opacity ?? 100) / 100;
+
+          const tW = dirData.sw ?? 100;
+          const tH = dirData.sh ?? 100;
+          const tX = dirData.sx ?? 0;
+          const tY = dirData.sy ?? 0;
+
+          let sW = dirData.swp ? tW : domImg.naturalWidth * (tW / 100);
+          let sH = dirData.swp ? tH : domImg.naturalHeight * (tH / 100);
+          let sX = dirData.sxp ? tX : domImg.naturalWidth * (tX / 100);
+          let sY = dirData.sxp ? tY : domImg.naturalHeight * (tY / 100);
+
+          let dW = sW;
+          let dH = sH;
+          if (dirData.w !== undefined && dirData.w !== 0) {
+            dW = dirData.wp ? dirData.w : sW * (dirData.w / 100);
+          }
+          if (dirData.h !== undefined && dirData.h !== 0) {
+            dH = dirData.wp ? dirData.h : sH * (dirData.h / 100);
+          }
+
+          let drawX = dirData.xp ? (dirData.x || 0) : ((dirData.x || 0) / 100) * PLAY_W;
+          let drawY = dirData.xp ? (dirData.y || 0) : ((dirData.y || 0) / 100) * PLAY_H;
+
+          // 追随画像は対象の座標を基準にする
+          const targetWorldX = targetEnt.x + (targetW / 2);
+          const targetWorldY = targetEnt.y + (targetH / 2);
+          const screenX = targetWorldX - camXRef.current;
+          const screenY = targetWorldY - camYRef.current;
+
+          drawX += screenX;
+          drawY += screenY;
+
+          if (dirData.c) {
+            drawX -= dW / 2;
+            drawY -= dH / 2;
+          }
+
+          const tOx = dirData.ox ?? 0;
+          const tOy = dirData.oy ?? 0;
+          const tR = dirData.r ?? 0;
+
+          ctx.translate(drawX, drawY);
+          ctx.translate(tOx, tOy);
+          ctx.rotate(tR * Math.PI / 180);
+          ctx.translate(-tOx, -tOy);
+          if (sW > 0 && sH > 0 && dW > 0 && dH > 0) {
+            ctx.drawImage(domImg, sX, sY, sW, sH, 0, 0, dW, dH);
+          }
           ctx.restore();
         }
       });
 
       const effect = screenEffectRef.current;
-      if (effect) {
+      if (effect && effect.effects) {
         ctx.save();
-        if (effect.type === 'EF_GR' || effect.type === 'EF_RGR' || effect.type === 'WT_RN' || effect.type === 'WT_SN') {
-          if (effect.type === 'WT_RN') {
-            ctx.fillStyle = 'rgba(0,50,200,0.3)';
-          } else if (effect.type === 'WT_SN') {
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-          } else if (effect.color) {
-            ctx.fillStyle = effect.color;
-          } else {
-            ctx.fillStyle = 'rgba(0,0,0,0)';
+        effect.effects.forEach(ef => {
+          if (ef.type === 'solid') {
+            const rgba = ef.color ? `rgba(${ef.color.split('-').map((c, i) => i === 3 ? parseInt(c) / 100 : c).join(',')})` : 'transparent';
+            ctx.fillStyle = rgba;
+            ctx.fillRect(0, 0, PLAY_W, PLAY_H);
+          } else if (ef.type === 'gradient') {
+            const [ax, ay, bx, by] = (ef.pos || '0-0-100-100').split('-').map(Number);
+            const grad = ctx.createLinearGradient((ax / 100) * PLAY_W, (ay / 100) * PLAY_H, (bx / 100) * PLAY_W, (by / 100) * PLAY_H);
+            const [s1, s2] = (ef.stops || '0-100').split('-').map(Number);
+            const rgba1 = ef.c1 ? `rgba(${ef.c1.split('-').map((c, i) => i === 3 ? parseInt(c) / 100 : c).join(',')})` : 'transparent';
+            const rgba2 = ef.c2 ? `rgba(${ef.c2.split('-').map((c, i) => i === 3 ? parseInt(c) / 100 : c).join(',')})` : 'transparent';
+            grad.addColorStop(s1 / 100, rgba1);
+            grad.addColorStop(s2 / 100, rgba2);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, PLAY_W, PLAY_H);
           }
-          ctx.fillRect(0, 0, PLAY_W, PLAY_H);
-        }
+        });
         ctx.restore();
       }
 
@@ -9214,11 +9632,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           scenes: manifest.scenes?.map(s => ({
             ...s,
             objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-            bgm: s.bgm ? { ref: s.bgm } : undefined,
+            bgm: hydrateBgmFromRef(s.bgm),
           })),
-          bgm: manifest.bgm && manifest.bgm !== 'none' ? { ref: manifest.bgm } : undefined,
-          battleBgm: manifest.battleBgm ? { ref: manifest.battleBgm } : undefined,
-          bossBgm: manifest.bossBgm ? { ref: manifest.bossBgm } : undefined,
+          bgm: hydrateBgmFromRef(manifest.bgm),
+          battleBgm: hydrateBgmFromRef(manifest.battleBgm),
+          bossBgm: hydrateBgmFromRef(manifest.bossBgm),
           sfx: Object.fromEntries(
             Object.entries(manifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
           ) as PresetData['sfx'],
@@ -9832,7 +10250,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 onClick={dismissGameMsg}
                 onTouchEnd={e => { e.preventDefault(); dismissGameMsg(); }}
               >
-                <div className="bg-[#1a1a2e] border-2 border-gray-400 px-4 py-3 font-pixel"
+                <div className="bg-[#1a1a2e]/90 border-2 border-gray-400 px-4 py-3 font-pixel"
                   style={{ imageRendering: 'pixelated' }}>
                   <p
                     className="text-white text-sm leading-relaxed whitespace-pre-wrap break-words"
@@ -12336,6 +12754,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           setPages={pages => updObj({ pages: pages.length > 0 ? pages : undefined })}
                           switches={gameData.switches ?? []}
                           items={gameData.items ?? []}
+                          setPreviewCommand={setPreviewCommand}
                         />
                       )}
                     </>) : (
@@ -12465,321 +12884,321 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── BATTLE（RPG戦闘設定） ── */}
                 {editorTab === 'battle' && gameData.battle && (
                   <div className="space-y-4">
-                        <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
+                    <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">⚔ 戦闘設定 (RPG)</p>
 
-                        {/* 1. 基本ステータス */}
-                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                          <p className="text-[10px] text-gray-300 font-bold">基本ステータス</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <label className="text-[10px] text-gray-400">プレイヤー名
-                              <input type="text" value={gameData.battle.playerName} onChange={e => {
-                                const playerName = e.target.value;
-                                setGameData(p => ({ ...p, battle: { ...p.battle!, playerName } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                            <label className="text-[10px] text-gray-400">初期最大HP
-                              <input type="text" inputMode="numeric" value={gameData.battle.maxHp} onChange={e => {
-                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, maxHp: v } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                            <label className="text-[10px] text-gray-400">初期最大MP
-                              <input type="text" inputMode="numeric" value={gameData.battle.maxMp} onChange={e => {
-                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, maxMp: v } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                            <label className="text-[10px] text-gray-400">初期攻撃力
-                              <input type="text" inputMode="numeric" value={gameData.battle.atk} onChange={e => {
-                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, atk: v } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                            <label className="text-[10px] text-gray-400">初期防御力
-                              <input type="text" inputMode="numeric" value={gameData.battle.def} onChange={e => {
-                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, def: v } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                            <label className="text-[10px] text-gray-400">初期ゴールド
-                              <input type="text" inputMode="numeric" value={gameData.battle.gold ?? 0} onChange={e => {
-                                const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, gold: v } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                          </div>
-                          <label className="block text-[10px] text-gray-400">戦闘スタイル
-                            <select value={gameData.battle.style ?? 'classic'} onChange={e => {
-                              const style = e.target.value as BattleConfig['style'];
-                              setGameData(p => ({ ...p, battle: { ...p.battle!, style } }));
-                            }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
-                              <option value="classic">コマンド戦闘（ドラクエ風）</option>
-                              <option value="undertale">ハート弾幕よけ（アンダーテール風）</option>
-                              <option value="deltarune">パーティ×弾幕よけ（デルタルーン風）</option>
-                              <option value="ff">サイドビュー パーティ戦闘（FF風）</option>
-                              <option value="mother3">ローリングHP戦闘（MOTHER3風）</option>
-                              <option value="milky">行動値カウント戦闘（ミルキークエスト風）</option>
-                            </select>
+                    {/* 1. 基本ステータス */}
+                    <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                      <p className="text-[10px] text-gray-300 font-bold">基本ステータス</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="text-[10px] text-gray-400">プレイヤー名
+                          <input type="text" value={gameData.battle.playerName} onChange={e => {
+                            const playerName = e.target.value;
+                            setGameData(p => ({ ...p, battle: { ...p.battle!, playerName } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="text-[10px] text-gray-400">初期最大HP
+                          <input type="text" inputMode="numeric" value={gameData.battle.maxHp} onChange={e => {
+                            const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, maxHp: v } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="text-[10px] text-gray-400">初期最大MP
+                          <input type="text" inputMode="numeric" value={gameData.battle.maxMp} onChange={e => {
+                            const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, maxMp: v } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="text-[10px] text-gray-400">初期攻撃力
+                          <input type="text" inputMode="numeric" value={gameData.battle.atk} onChange={e => {
+                            const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, atk: v } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="text-[10px] text-gray-400">初期防御力
+                          <input type="text" inputMode="numeric" value={gameData.battle.def} onChange={e => {
+                            const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, def: v } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                        <label className="text-[10px] text-gray-400">初期ゴールド
+                          <input type="text" inputMode="numeric" value={gameData.battle.gold ?? 0} onChange={e => {
+                            const v = parseInt(e.target.value); if (!isNaN(v)) setGameData(p => ({ ...p, battle: { ...p.battle!, gold: v } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                      </div>
+                      <label className="block text-[10px] text-gray-400">戦闘スタイル
+                        <select value={gameData.battle.style ?? 'classic'} onChange={e => {
+                          const style = e.target.value as BattleConfig['style'];
+                          setGameData(p => ({ ...p, battle: { ...p.battle!, style } }));
+                        }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
+                          <option value="classic">コマンド戦闘（ドラクエ風）</option>
+                          <option value="undertale">ハート弾幕よけ（アンダーテール風）</option>
+                          <option value="deltarune">パーティ×弾幕よけ（デルタルーン風）</option>
+                          <option value="ff">サイドビュー パーティ戦闘（FF風）</option>
+                          <option value="mother3">ローリングHP戦闘（MOTHER3風）</option>
+                          <option value="milky">行動値カウント戦闘（ミルキークエスト風）</option>
+                        </select>
+                      </label>
+                      {(gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style)) && (
+                        <p className="text-[9px] text-gray-500 leading-relaxed">
+                          {{
+                            deltarune: 'パーティで1人ずつ行動を選び、敵ターンはハート弾幕よけ。',
+                            ff: 'パーティ全員のコマンドを選んでから一斉に実行するラウンド制。',
+                            mother3: 'ローリングHP：被弾/回復でHP表示が実際の値へ向けて1ずつ回転しながら増減する。致命傷を受けても、表示が0に落ちきる前に回復すれば生存できる（クリティカルダメージ演出）。',
+                            milky: '行動値が0になった者から行動するカウント制。強い技ほど次の行動が遅れる。敵はHPが減ると疲れた表情に。',
+                          }[gameData.battle.style as string]}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* 1.2 パーティ編成（パーティ制スタイルのみ） */}
+                    {(gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style)) && (
+                      <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                        <div className="flex justify-between items-center">
+                          <p className="text-[10px] text-gray-300 font-bold">パーティ編成</p>
+                          <button onClick={() => setGameData(p => {
+                            const b = p.battle!;
+                            const party = b.party ?? [];
+                            // 空のときは先頭に主人公を自動で置いてから、同行者を1人足す
+                            const seeded = party.length === 0
+                              ? [{ id: `pm-${Date.now().toString(36)}`, name: b.playerName || '主人公', emoji: p.player.emoji || '🧝', maxHp: b.maxHp } as PartyMember]
+                              : party;
+                            const nm: PartyMember = {
+                              id: `pm-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`,
+                              name: `なかま${seeded.length}`, emoji: '🧑',
+                              maxHp: Math.max(1, Math.round(b.maxHp * 0.9)), maxMp: b.maxMp, atk: b.atk, def: b.def,
+                            };
+                            return { ...p, battle: { ...b, party: [...seeded, nm] } };
+                          })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                        </div>
+                        <p className="text-[9px] text-gray-500 leading-relaxed">先頭のメンバーが主人公（フィールドのHP/MP・レベルアップに追従）。未設定なら主人公ひとりで戦います。</p>
+                        <div className="space-y-2 max-h-72 overflow-y-auto">
+                          {(gameData.battle.party ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - 主人公ひとりで戦う）</p>}
+                          {(gameData.battle.party ?? []).map((m, i) => (
+                            <div key={m.id} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
+                              <div className="flex gap-1.5 items-center">
+                                <input value={m.emoji} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.party ?? [])];
+                                  next[i] = { ...next[i], emoji: e.target.value.slice(0, 2) };
+                                  return { ...p, battle: { ...b, party: next } };
+                                })} className="w-10 shrink-0 bg-gray-700 rounded px-1 py-1.5 text-center text-base outline-none" />
+                                <input value={m.name} placeholder="名前" onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.party ?? [])];
+                                  next[i] = { ...next[i], name: e.target.value };
+                                  return { ...p, battle: { ...b, party: next } };
+                                })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" />
+                                <input type="color" value={m.color ?? '#ffffff'} title="メンバーカラー" onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.party ?? [])];
+                                  next[i] = { ...next[i], color: e.target.value };
+                                  return { ...p, battle: { ...b, party: next } };
+                                })} className="w-9 h-9 -my-0.5 shrink-0 bg-transparent border border-gray-700 rounded cursor-pointer" />
+                                <button onClick={() => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.party ?? [])]; next.splice(i, 1);
+                                  return { ...p, battle: { ...b, party: next } };
+                                })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
+                              </div>
+                              {i === 0 ? (
+                                <p className="text-[9px] text-violet-300/80">主人公：HP/MP・攻/防は基本ステータスとレベルに追従します</p>
+                              ) : (
+                                <div className="grid grid-cols-4 gap-1.5">
+                                  {([
+                                    ['maxHp', '最大HP'], ['maxMp', '最大MP'], ['atk', '攻撃'], ['def', '防御'],
+                                  ] as ['maxHp' | 'maxMp' | 'atk' | 'def', string][]).map(([key, label]) => (
+                                    <label key={key} className="text-[10px] text-gray-400">{label}
+                                      <input type="text" inputMode="numeric" value={m[key] ?? ''} placeholder="主人公" onChange={e => setGameData(p => {
+                                        const b = p.battle!; const next = [...(b.party ?? [])];
+                                        const v = parseInt(e.target.value);
+                                        next[i] = { ...next[i], [key]: key === 'maxHp' ? (!isNaN(v) ? v : next[i].maxHp) : (!isNaN(v) ? v : undefined) };
+                                        return { ...p, battle: { ...b, party: next } };
+                                      })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 1.5 コマンド表示名 */}
+                    <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                      <p className="text-[10px] text-gray-300 font-bold">コマンド表示名</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          ['attack', 'こうげき', false], ['move', 'とくぎ/こうどう', false],
+                          ['flee', 'にげる', false], ['item', 'どうぐ', false],
+                        ] as [('attack' | 'move' | 'flee' | 'item'), string, boolean][]).map(([key, ph]) => (
+                          <label key={key} className="text-[10px] text-gray-400">{ph}
+                            <input type="text" value={gameData.battle!.labels[key] ?? ''} placeholder={ph} onChange={e => {
+                              const v = e.target.value;
+                              setGameData(p => ({ ...p, battle: { ...p.battle!, labels: { ...p.battle!.labels, [key]: key === 'item' ? (v || undefined) : v } } }));
+                            }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none" />
                           </label>
-                          {(gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style)) && (
-                            <p className="text-[9px] text-gray-500 leading-relaxed">
-                              {{
-                                deltarune: 'パーティで1人ずつ行動を選び、敵ターンはハート弾幕よけ。',
-                                ff: 'パーティ全員のコマンドを選んでから一斉に実行するラウンド制。',
-                                mother3: 'ローリングHP：被弾/回復でHP表示が実際の値へ向けて1ずつ回転しながら増減する。致命傷を受けても、表示が0に落ちきる前に回復すれば生存できる（クリティカルダメージ演出）。',
-                                milky: '行動値が0になった者から行動するカウント制。強い技ほど次の行動が遅れる。敵はHPが減ると疲れた表情に。',
-                              }[gameData.battle.style as string]}
-                            </p>
-                          )}
-                        </div>
+                        ))}
+                        <label className="text-[10px] text-gray-400 col-span-2">みのがす（空欄にすると「みのがす」コマンド自体が無効）
+                          <input type="text" value={gameData.battle.labels.mercy ?? ''} placeholder="例: みのがす（空欄=無効）" onChange={e => {
+                            const v = e.target.value;
+                            setGameData(p => ({ ...p, battle: { ...p.battle!, labels: { ...p.battle!.labels, mercy: v || undefined } } }));
+                          }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none" />
+                        </label>
+                      </div>
+                    </div>
 
-                        {/* 1.2 パーティ編成（パーティ制スタイルのみ） */}
-                        {(gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style)) && (
-                          <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                            <div className="flex justify-between items-center">
-                              <p className="text-[10px] text-gray-300 font-bold">パーティ編成</p>
+                    {/* 2. みのがし条件 */}
+                    {gameData.battle.labels.mercy && (
+                      <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                        <p className="text-[10px] text-gray-300 font-bold">みのがし条件</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="text-[10px] text-gray-400">ゲージ満タンの閾値 (%)
+                            <input type="text" inputMode="numeric" placeholder="100" defaultValue={gameData.battle.mercyThreshold ?? 100} onBlur={e => {
+                              const v = parseInt(e.target.value);
+                              setGameData(p => ({ ...p, battle: { ...p.battle!, mercyThreshold: !isNaN(v) ? v : undefined } }));
+                            }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                          </label>
+                          <label className="text-[10px] text-gray-400">HP割合の閾値 (%)
+                            <input type="text" inputMode="numeric" placeholder="20" defaultValue={gameData.battle.hpSpareThreshold ?? 20} onBlur={e => {
+                              const v = parseInt(e.target.value);
+                              setGameData(p => ({ ...p, battle: { ...p.battle!, hpSpareThreshold: !isNaN(v) ? v : undefined } }));
+                            }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3. 技 / 呪文 (Moves) */}
+                    <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                      <div className="flex justify-between items-center">
+                        <p className="text-[10px] text-gray-300 font-bold">戦闘コマンド・こうどう・魔法</p>
+                        <button onClick={() => setGameData(p => {
+                          const b = p.battle!;
+                          return { ...p, battle: { ...b, moves: [...b.moves, { name: '新しい技', cost: 0, power: 10 }] } };
+                        })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {gameData.battle.moves.map((m, i) => (
+                          <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
+                            <div className="flex gap-1.5 items-center">
+                              <input value={m.name} onChange={e => setGameData(p => {
+                                const b = p.battle!; const next = [...b.moves];
+                                next[i] = { ...next[i], name: e.target.value };
+                                return { ...p, battle: { ...b, moves: next } };
+                              })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" placeholder="技名" />
                               <button onClick={() => setGameData(p => {
-                                const b = p.battle!;
-                                const party = b.party ?? [];
-                                // 空のときは先頭に主人公を自動で置いてから、同行者を1人足す
-                                const seeded = party.length === 0
-                                  ? [{ id: `pm-${Date.now().toString(36)}`, name: b.playerName || '主人公', emoji: p.player.emoji || '🧝', maxHp: b.maxHp } as PartyMember]
-                                  : party;
-                                const nm: PartyMember = {
-                                  id: `pm-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`,
-                                  name: `なかま${seeded.length}`, emoji: '🧑',
-                                  maxHp: Math.max(1, Math.round(b.maxHp * 0.9)), maxMp: b.maxMp, atk: b.atk, def: b.def,
-                                };
-                                return { ...p, battle: { ...b, party: [...seeded, nm] } };
-                              })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                                const b = p.battle!; const next = [...b.moves]; next.splice(i, 1);
+                                return { ...p, battle: { ...b, moves: next } };
+                              })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
                             </div>
-                            <p className="text-[9px] text-gray-500 leading-relaxed">先頭のメンバーが主人公（フィールドのHP/MP・レベルアップに追従）。未設定なら主人公ひとりで戦います。</p>
-                            <div className="space-y-2 max-h-72 overflow-y-auto">
-                              {(gameData.battle.party ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - 主人公ひとりで戦う）</p>}
-                              {(gameData.battle.party ?? []).map((m, i) => (
-                                <div key={m.id} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
-                                  <div className="flex gap-1.5 items-center">
-                                    <input value={m.emoji} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.party ?? [])];
-                                      next[i] = { ...next[i], emoji: e.target.value.slice(0, 2) };
-                                      return { ...p, battle: { ...b, party: next } };
-                                    })} className="w-10 shrink-0 bg-gray-700 rounded px-1 py-1.5 text-center text-base outline-none" />
-                                    <input value={m.name} placeholder="名前" onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.party ?? [])];
-                                      next[i] = { ...next[i], name: e.target.value };
-                                      return { ...p, battle: { ...b, party: next } };
-                                    })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" />
-                                    <input type="color" value={m.color ?? '#ffffff'} title="メンバーカラー" onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.party ?? [])];
-                                      next[i] = { ...next[i], color: e.target.value };
-                                      return { ...p, battle: { ...b, party: next } };
-                                    })} className="w-9 h-9 -my-0.5 shrink-0 bg-transparent border border-gray-700 rounded cursor-pointer" />
-                                    <button onClick={() => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.party ?? [])]; next.splice(i, 1);
-                                      return { ...p, battle: { ...b, party: next } };
-                                    })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
-                                  </div>
-                                  {i === 0 ? (
-                                    <p className="text-[9px] text-violet-300/80">主人公：HP/MP・攻/防は基本ステータスとレベルに追従します</p>
-                                  ) : (
-                                    <div className="grid grid-cols-4 gap-1.5">
-                                      {([
-                                        ['maxHp', '最大HP'], ['maxMp', '最大MP'], ['atk', '攻撃'], ['def', '防御'],
-                                      ] as ['maxHp' | 'maxMp' | 'atk' | 'def', string][]).map(([key, label]) => (
-                                        <label key={key} className="text-[10px] text-gray-400">{label}
-                                          <input type="text" inputMode="numeric" value={m[key] ?? ''} placeholder="主人公" onChange={e => setGameData(p => {
-                                            const b = p.battle!; const next = [...(b.party ?? [])];
-                                            const v = parseInt(e.target.value);
-                                            next[i] = { ...next[i], [key]: key === 'maxHp' ? (!isNaN(v) ? v : next[i].maxHp) : (!isNaN(v) ? v : undefined) };
-                                            return { ...p, battle: { ...b, party: next } };
-                                          })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                        </label>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* 1.5 コマンド表示名 */}
-                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                          <p className="text-[10px] text-gray-300 font-bold">コマンド表示名</p>
-                          <div className="grid grid-cols-2 gap-2">
-                            {([
-                              ['attack', 'こうげき', false], ['move', 'とくぎ/こうどう', false],
-                              ['flee', 'にげる', false], ['item', 'どうぐ', false],
-                            ] as [('attack' | 'move' | 'flee' | 'item'), string, boolean][]).map(([key, ph]) => (
-                              <label key={key} className="text-[10px] text-gray-400">{ph}
-                                <input type="text" value={gameData.battle!.labels[key] ?? ''} placeholder={ph} onChange={e => {
-                                  const v = e.target.value;
-                                  setGameData(p => ({ ...p, battle: { ...p.battle!, labels: { ...p.battle!.labels, [key]: key === 'item' ? (v || undefined) : v } } }));
-                                }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none" />
-                              </label>
-                            ))}
-                            <label className="text-[10px] text-gray-400 col-span-2">みのがす（空欄にすると「みのがす」コマンド自体が無効）
-                              <input type="text" value={gameData.battle.labels.mercy ?? ''} placeholder="例: みのがす（空欄=無効）" onChange={e => {
-                                const v = e.target.value;
-                                setGameData(p => ({ ...p, battle: { ...p.battle!, labels: { ...p.battle!.labels, mercy: v || undefined } } }));
-                              }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none" />
-                            </label>
-                          </div>
-                        </div>
-
-                        {/* 2. みのがし条件 */}
-                        {gameData.battle.labels.mercy && (
-                          <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                            <p className="text-[10px] text-gray-300 font-bold">みのがし条件</p>
-                            <div className="grid grid-cols-2 gap-2">
-                              <label className="text-[10px] text-gray-400">ゲージ満タンの閾値 (%)
-                                <input type="text" inputMode="numeric" placeholder="100" defaultValue={gameData.battle.mercyThreshold ?? 100} onBlur={e => {
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <label className="text-[10px] text-gray-400">消費MP
+                                <input type="text" inputMode="numeric" value={m.cost} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...b.moves];
                                   const v = parseInt(e.target.value);
-                                  setGameData(p => ({ ...p, battle: { ...p.battle!, mercyThreshold: !isNaN(v) ? v : undefined } }));
-                                }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                                  next[i] = { ...next[i], cost: !isNaN(v) ? v : 0 };
+                                  return { ...p, battle: { ...b, moves: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                               </label>
-                              <label className="text-[10px] text-gray-400">HP割合の閾値 (%)
-                                <input type="text" inputMode="numeric" placeholder="20" defaultValue={gameData.battle.hpSpareThreshold ?? 20} onBlur={e => {
+                              <label className="text-[10px] text-gray-400">{m.mercy != null ? 'ゲージ上昇' : '威力/回復量'}
+                                <input type="text" inputMode="numeric" value={m.mercy != null ? m.mercy : m.power} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...b.moves];
                                   const v = parseInt(e.target.value);
-                                  setGameData(p => ({ ...p, battle: { ...p.battle!, hpSpareThreshold: !isNaN(v) ? v : undefined } }));
-                                }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                                  if (m.mercy != null) {
+                                    next[i] = { ...next[i], mercy: !isNaN(v) ? v : 0 };
+                                  } else {
+                                    next[i] = { ...next[i], power: !isNaN(v) ? v : 0 };
+                                  }
+                                  return { ...p, battle: { ...b, moves: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
+                              <label className="text-[10px] text-gray-400 block">種別
+                                <select value={m.mercy != null ? 'mercy' : m.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...b.moves];
+                                  const type = e.target.value;
+                                  if (type === 'mercy') {
+                                    next[i] = { name: next[i].name, cost: next[i].cost, power: 0, mercy: 40 };
+                                  } else if (type === 'heal') {
+                                    next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10, heal: true };
+                                  } else {
+                                    next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10 };
+                                  }
+                                  return { ...p, battle: { ...b, moves: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1.5 text-[11px] text-white outline-none">
+                                  <option value="attack">ダメージ</option>
+                                  <option value="heal">HP回復</option>
+                                  {gameData.battle?.labels.mercy && <option value="mercy">こうどう(敵意)</option>}
+                                </select>
                               </label>
                             </div>
                           </div>
-                        )}
+                        ))}
+                      </div>
+                    </div>
 
-                        {/* 3. 技 / 呪文 (Moves) */}
-                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                          <div className="flex justify-between items-center">
-                            <p className="text-[10px] text-gray-300 font-bold">戦闘コマンド・こうどう・魔法</p>
-                            <button onClick={() => setGameData(p => {
-                              const b = p.battle!;
-                              return { ...p, battle: { ...b, moves: [...b.moves, { name: '新しい技', cost: 0, power: 10 }] } };
-                            })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                    {/* 4. レベルアップ成長テーブル */}
+                    <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                      <div className="flex justify-between items-center">
+                        <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長表</p>
+                        <button onClick={() => setGameData(p => {
+                          const b = p.battle!;
+                          const table = b.levelTable ?? [];
+                          const nextLv = table.length > 0 ? Math.max(...table.map(e => e.level)) + 1 : 2;
+                          const prevExp = table.length > 0 ? table[table.length - 1].exp : 0;
+                          return { ...p, battle: { ...b, levelTable: [...table, { level: nextLv, exp: prevExp + 10, maxHp: b.maxHp + 8, maxMp: b.maxMp + 2, atk: b.atk + 3, def: b.def + 2 }] } };
+                        })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto">
+                        {(gameData.battle.levelTable ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - レベル固定）</p>}
+                        {(gameData.battle.levelTable ?? []).map((le, i) => (
+                          <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[10px] text-yellow-400 font-bold">Lv {le.level}</span>
+                              <button onClick={() => setGameData(p => {
+                                const b = p.battle!; const next = [...(b.levelTable ?? [])]; next.splice(i, 1);
+                                return { ...p, battle: { ...b, levelTable: next } };
+                              })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1.5">
+                              <label className="text-[10px] text-gray-400">必要累計EXP
+                                <input type="text" inputMode="numeric" value={le.exp} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                  const v = parseInt(e.target.value);
+                                  next[i] = { ...next[i], exp: !isNaN(v) ? v : 0 };
+                                  return { ...p, battle: { ...b, levelTable: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
+                              <label className="text-[10px] text-gray-400">最大HP
+                                <input type="text" inputMode="numeric" value={le.maxHp ?? ''} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                  const v = parseInt(e.target.value);
+                                  next[i] = { ...next[i], maxHp: !isNaN(v) ? v : undefined };
+                                  return { ...p, battle: { ...b, levelTable: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
+                              <label className="text-[10px] text-gray-400">最大MP
+                                <input type="text" inputMode="numeric" value={le.maxMp ?? ''} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                  const v = parseInt(e.target.value);
+                                  next[i] = { ...next[i], maxMp: !isNaN(v) ? v : undefined };
+                                  return { ...p, battle: { ...b, levelTable: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
+                              <label className="text-[10px] text-gray-400">攻撃力
+                                <input type="text" inputMode="numeric" value={le.atk ?? ''} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                  const v = parseInt(e.target.value);
+                                  next[i] = { ...next[i], atk: !isNaN(v) ? v : undefined };
+                                  return { ...p, battle: { ...b, levelTable: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
+                              <label className="text-[10px] text-gray-400">防御力
+                                <input type="text" inputMode="numeric" value={le.def ?? ''} onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
+                                  const v = parseInt(e.target.value);
+                                  next[i] = { ...next[i], def: !isNaN(v) ? v : undefined };
+                                  return { ...p, battle: { ...b, levelTable: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
+                            </div>
                           </div>
-                          <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {gameData.battle.moves.map((m, i) => (
-                              <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
-                                <div className="flex gap-1.5 items-center">
-                                  <input value={m.name} onChange={e => setGameData(p => {
-                                    const b = p.battle!; const next = [...b.moves];
-                                    next[i] = { ...next[i], name: e.target.value };
-                                    return { ...p, battle: { ...b, moves: next } };
-                                  })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" placeholder="技名" />
-                                  <button onClick={() => setGameData(p => {
-                                    const b = p.battle!; const next = [...b.moves]; next.splice(i, 1);
-                                    return { ...p, battle: { ...b, moves: next } };
-                                  })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
-                                </div>
-                                <div className="grid grid-cols-3 gap-1.5">
-                                  <label className="text-[10px] text-gray-400">消費MP
-                                    <input type="text" inputMode="numeric" value={m.cost} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...b.moves];
-                                      const v = parseInt(e.target.value);
-                                      next[i] = { ...next[i], cost: !isNaN(v) ? v : 0 };
-                                      return { ...p, battle: { ...b, moves: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                  <label className="text-[10px] text-gray-400">{m.mercy != null ? 'ゲージ上昇' : '威力/回復量'}
-                                    <input type="text" inputMode="numeric" value={m.mercy != null ? m.mercy : m.power} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...b.moves];
-                                      const v = parseInt(e.target.value);
-                                      if (m.mercy != null) {
-                                        next[i] = { ...next[i], mercy: !isNaN(v) ? v : 0 };
-                                      } else {
-                                        next[i] = { ...next[i], power: !isNaN(v) ? v : 0 };
-                                      }
-                                      return { ...p, battle: { ...b, moves: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                  <label className="text-[10px] text-gray-400 block">種別
-                                    <select value={m.mercy != null ? 'mercy' : m.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...b.moves];
-                                      const type = e.target.value;
-                                      if (type === 'mercy') {
-                                        next[i] = { name: next[i].name, cost: next[i].cost, power: 0, mercy: 40 };
-                                      } else if (type === 'heal') {
-                                        next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10, heal: true };
-                                      } else {
-                                        next[i] = { name: next[i].name, cost: next[i].cost, power: next[i].power || 10 };
-                                      }
-                                      return { ...p, battle: { ...b, moves: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1.5 text-[11px] text-white outline-none">
-                                      <option value="attack">ダメージ</option>
-                                      <option value="heal">HP回復</option>
-                                      {gameData.battle?.labels.mercy && <option value="mercy">こうどう(敵意)</option>}
-                                    </select>
-                                  </label>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* 4. レベルアップ成長テーブル */}
-                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                          <div className="flex justify-between items-center">
-                            <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長表</p>
-                            <button onClick={() => setGameData(p => {
-                              const b = p.battle!;
-                              const table = b.levelTable ?? [];
-                              const nextLv = table.length > 0 ? Math.max(...table.map(e => e.level)) + 1 : 2;
-                              const prevExp = table.length > 0 ? table[table.length - 1].exp : 0;
-                              return { ...p, battle: { ...b, levelTable: [...table, { level: nextLv, exp: prevExp + 10, maxHp: b.maxHp + 8, maxMp: b.maxMp + 2, atk: b.atk + 3, def: b.def + 2 }] } };
-                            })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
-                          </div>
-                          <div className="space-y-2 max-h-60 overflow-y-auto">
-                            {(gameData.battle.levelTable ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - レベル固定）</p>}
-                            {(gameData.battle.levelTable ?? []).map((le, i) => (
-                              <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[10px] text-yellow-400 font-bold">Lv {le.level}</span>
-                                  <button onClick={() => setGameData(p => {
-                                    const b = p.battle!; const next = [...(b.levelTable ?? [])]; next.splice(i, 1);
-                                    return { ...p, battle: { ...b, levelTable: next } };
-                                  })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
-                                </div>
-                                <div className="grid grid-cols-3 gap-1.5">
-                                  <label className="text-[10px] text-gray-400">必要累計EXP
-                                    <input type="text" inputMode="numeric" value={le.exp} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                      const v = parseInt(e.target.value);
-                                      next[i] = { ...next[i], exp: !isNaN(v) ? v : 0 };
-                                      return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                  <label className="text-[10px] text-gray-400">最大HP
-                                    <input type="text" inputMode="numeric" value={le.maxHp ?? ''} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                      const v = parseInt(e.target.value);
-                                      next[i] = { ...next[i], maxHp: !isNaN(v) ? v : undefined };
-                                      return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                  <label className="text-[10px] text-gray-400">最大MP
-                                    <input type="text" inputMode="numeric" value={le.maxMp ?? ''} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                      const v = parseInt(e.target.value);
-                                      next[i] = { ...next[i], maxMp: !isNaN(v) ? v : undefined };
-                                      return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                  <label className="text-[10px] text-gray-400">攻撃力
-                                    <input type="text" inputMode="numeric" value={le.atk ?? ''} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                      const v = parseInt(e.target.value);
-                                      next[i] = { ...next[i], atk: !isNaN(v) ? v : undefined };
-                                      return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                  <label className="text-[10px] text-gray-400">防御力
-                                    <input type="text" inputMode="numeric" value={le.def ?? ''} onChange={e => setGameData(p => {
-                                      const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                      const v = parseInt(e.target.value);
-                                      next[i] = { ...next[i], def: !isNaN(v) ? v : undefined };
-                                      return { ...p, battle: { ...b, levelTable: next } };
-                                    })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                  </label>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -13645,14 +14064,16 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
   overheadMessage: '頭上メッセージ', playSound: '効果音再生',
   changeSprite: '画像変更', changeBackground: '背景変更', showImage: '画像表示', hideImage: '画像消去',
+  followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
   moveCamera: 'カメラ移動', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', changePhase: 'フェーズ変更',
 };
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
 
-function EventPageEditor({ pages, setPages, switches, items }:
-  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[] }) {
+function EventPageEditor({ pages, setPages, switches, items, setPreviewCommand }:
+  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; setPreviewCommand: (cmd: EventCommand | null) => void; }) {
   const [expanded, setExpanded] = useState<number>(0);
+  const [detailsCmdIndex, setDetailsCmdIndex] = useState<{ pi: number; ci: number } | null>(null);
   const addPage = () => {
     setPages([...pages, { name: `ページ${pages.length + 1}`, conditions: {}, commands: [] }]);
     setExpanded(pages.length);
@@ -13685,6 +14106,17 @@ function EventPageEditor({ pages, setPages, switches, items }:
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+      {detailsCmdIndex && (
+        <ImageCommandDetailsModal
+          cmd={pages[detailsCmdIndex.pi].commands[detailsCmdIndex.ci]}
+          onChange={(patch) => {
+            const newCmd = { ...pages[detailsCmdIndex.pi].commands[detailsCmdIndex.ci], ...patch } as EventCommand;
+            updCmd(detailsCmdIndex.pi, detailsCmdIndex.ci, patch);
+            setPreviewCommand(newCmd);
+          }}
+          onClose={() => { setDetailsCmdIndex(null); setPreviewCommand(null); }}
+        />
+      )}
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-gray-400 font-bold">イベントページ</span>
         <button onClick={addPage}
@@ -13734,6 +14166,10 @@ function EventPageEditor({ pages, setPages, switches, items }:
                   onChange={patch => updCmd(pi, ci, patch)}
                   onDelete={() => delCmd(pi, ci)}
                   onMove={dir => moveCmd(pi, ci, dir)}
+                  onShowDetails={() => {
+                    setDetailsCmdIndex({ pi, ci });
+                    setPreviewCommand(cmd);
+                  }}
                 />
               ))}
               <button onClick={() => addCmd(pi)}
@@ -13750,10 +14186,116 @@ function EventPageEditor({ pages, setPages, switches, items }:
 
 // ── 単一イベントコマンドエディタ ──
 
-function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete, onMove }:
+function ImageCommandDetailsModal({ cmd, onChange, onClose }: { cmd: EventCommand; onChange: (patch: Partial<EventCommand>) => void; onClose: () => void }) {
+  if (cmd.type !== 'showImage' && cmd.type !== 'changeSprite') return null;
+  const isImg = cmd.type === 'showImage';
+  const c = cmd as any;
+
+  const numInput = (label: string, key: string, max?: number, min?: number) => (
+    <label className="flex flex-col text-[9px] text-gray-400 gap-0.5">
+      {label}
+      <input type="number" value={c[key] ?? 0} onChange={e => onChange({ [key]: Number(e.target.value) })}
+        max={max} min={min}
+        className="bg-gray-800 border border-gray-700 rounded px-1 py-1 text-gray-200 outline-none w-full" />
+    </label>
+  );
+
+  const checkInput = (label: string, key: string) => (
+    <label className="flex items-center gap-1 text-[9px] text-gray-300">
+      <input type="checkbox" checked={!!c[key]} onChange={e => onChange({ [key]: e.target.checked })} />
+      {label}
+    </label>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[100] flex flex-col justify-end md:flex-row md:justify-end md:items-center p-2 md:p-4 pointer-events-none">
+      <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-full max-w-sm flex flex-col max-h-[50vh] md:max-h-[90vh] pointer-events-auto mt-auto md:mt-0">
+        <div className="px-3 py-2 border-b border-gray-800 flex justify-between items-center bg-gray-800/50 rounded-t-lg">
+          <span className="text-[11px] font-bold text-gray-300">画像コマンド詳細 ({isImg ? 'DW_IMA' : 'DW_FL'})</span>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={14} /></button>
+        </div>
+        <div className="p-3 overflow-y-auto space-y-4">
+          {/* 基本 */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">基本設定</div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col text-[9px] text-gray-400 gap-0.5">
+                {isImg ? '画像ID (i)' : '対象ID (target)'}
+                <input value={isImg ? (c.imgId ?? '') : (c.objId ?? '')} onChange={e => onChange(isImg ? { imgId: e.target.value } : { objId: e.target.value })}
+                  className="bg-gray-800 border border-gray-700 rounded px-1 py-1 text-gray-200 outline-none" />
+              </label>
+              <label className="flex flex-col text-[9px] text-gray-400 gap-0.5">
+                画像URL (u)
+                <input value={isImg ? (c.url ?? '') : (c.spriteRef ?? '')} onChange={e => onChange(isImg ? { url: e.target.value } : { spriteRef: e.target.value })}
+                  className="bg-gray-800 border border-gray-700 rounded px-1 py-1 text-gray-200 outline-none" />
+              </label>
+            </div>
+          </div>
+
+          {/* 描画先 */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">描画先 (Destination)</div>
+            <div className="grid grid-cols-4 gap-2">
+              {numInput('X', 'x')}
+              {numInput('Y', 'y')}
+              {numInput('W', 'w')}
+              {numInput('H', 'h')}
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {checkInput('X,Yは%指定 (xp)', 'xp')}
+              {checkInput('W,Hは%指定 (wp)', 'wp')}
+              {isImg && checkInput('マップ座標追従 (m)', 'm')}
+              {checkInput('中央基準 (c)', 'c')}
+            </div>
+          </div>
+
+          {/* クロップ */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">クロップ元 (Source)</div>
+            <div className="grid grid-cols-4 gap-2">
+              {numInput('Crop X (sx)', 'sx')}
+              {numInput('Crop Y (sy)', 'sy')}
+              {numInput('Crop W (sw)', 'sw')}
+              {numInput('Crop H (sh)', 'sh')}
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {checkInput('sx,syは%指定 (sxp)', 'sxp')}
+              {checkInput('sw,shは%指定 (swp)', 'swp')}
+            </div>
+          </div>
+
+          {/* アニメーション・その他 */}
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">変形・アニメーション</div>
+            <div className="grid grid-cols-4 gap-2">
+              {numInput('原点 X (ox)', 'ox')}
+              {numInput('原点 Y (oy)', 'oy')}
+              {numInput('回転 (r)', 'r')}
+              {numInput('不透明度 (a)', 'opacity', 100, 0)}
+            </div>
+            {isImg && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {numInput('コマ間隔ms (ms)', 'ms')}
+                <div className="flex items-center mt-3">
+                  {checkInput('ループ再生 (lp)', 'lp')}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="text-[9px] text-gray-500 pt-2 border-t border-gray-800">
+            ※プレビューはキャンバス上にリアルタイムで表示されます。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete, onMove, onShowDetails }:
   {
     cmd: EventCommand; index: number; count: number; switches: SwitchDef[]; items: ItemDef[];
-    onChange: (patch: Partial<EventCommand>) => void; onDelete: () => void; onMove: (dir: -1 | 1) => void
+    onChange: (patch: Partial<EventCommand>) => void; onDelete: () => void; onMove: (dir: -1 | 1) => void;
+    onShowDetails: () => void;
   }) {
   const type = cmd.type;
   const setType = (t: EventCommand['type']) => {
@@ -13915,6 +14457,80 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         {type === 'playSound' && (
           <input value={(cmd as any).src ?? ''} onChange={e => onChange({ src: e.target.value })}
             className={inputCls} placeholder="効果音URL（mp3）" />
+        )}
+        {type === 'changeSprite' && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1">
+              <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                className={inputCls} placeholder="対象ID (player 等)" />
+              <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
+                className={inputCls} placeholder="画像URL (sprite: 等)" />
+            </div>
+            {(cmd as any).spriteRef && (
+              <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1">
+                <img src={(cmd as any).spriteRef.replace('sprite:', '')} className="max-h-16 object-contain" alt="preview" />
+              </div>
+            )}
+          </div>
+        )}
+        {type === 'changeBackground' && (
+          <div className="space-y-1">
+            <input value={(cmd as any).bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
+              className={inputCls} placeholder="背景画像URL (bg: 等)" />
+            {(cmd as any).bgRef && (
+              <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1">
+                <img src={(cmd as any).bgRef.replace('bg:', '')} className="max-h-16 object-contain" alt="preview" />
+              </div>
+            )}
+          </div>
+        )}
+        {type === 'showImage' && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1">
+              <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="画像ID" />
+              <input value={(cmd as any).url ?? ''} onChange={e => onChange({ url: e.target.value })}
+                className={inputCls} placeholder="画像URL" />
+              <button onClick={onShowDetails} className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white rounded px-2 py-0.5 text-[9px]">詳細</button>
+            </div>
+            <div className="flex items-center gap-1">
+              <input type="number" value={(cmd as any).x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
+                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="X" />
+              <input type="number" value={(cmd as any).y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
+                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="Y" />
+            </div>
+            {(cmd as any).url && (
+              <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1">
+                <img src={(cmd as any).url} className="max-h-16 object-contain" alt="preview" />
+              </div>
+            )}
+          </div>
+        )}
+        {type === 'hideImage' && (
+          <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+            className={inputCls} placeholder="消去する画像ID" />
+        )}
+        {type === 'moveCamera' && (
+          <div className="flex items-center gap-1">
+            <input type="number" value={(cmd as any).tx ?? 0} onChange={e => onChange({ tx: Number(e.target.value) })}
+              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="目標X" />
+            <input type="number" value={(cmd as any).ty ?? 0} onChange={e => onChange({ ty: Number(e.target.value) })}
+              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="目標Y" />
+            <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
+              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="フレーム数" />
+          </div>
+        )}
+        {type === 'moveNpc' && (
+          <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+            className={inputCls} placeholder="対象NPCのID" />
+        )}
+        {type === 'screenEffect' && (
+          <input value={(cmd as any).effectType ?? ''} onChange={e => onChange({ effectType: e.target.value })}
+            className={inputCls} placeholder="エフェクト種別 (flash, shake等)" />
+        )}
+        {type === 'changePhase' && (
+          <input type="number" value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
+            className={inputCls} placeholder="移行先フェーズ番号" />
         )}
       </div>
     </div>
