@@ -5023,15 +5023,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (!id) return null;
       return { id, col, row, info: gameData.tiles[id] };
     };
-    // 床タイルが通行可でも、その上に置かれたオブジェクト層タイル（壁・家具等）が通行不可なら
-    // そちらを優先してブロックする。木の上部/屋根のように意図的に通行可（passable:true）で
-    // 置かれているオブジェクト層タイル（プレイヤーが下を歩ける演出用）はそのまま通れる。
-    const isCornerPassable = (px: number, py: number) => {
-      const floor = getTile(px, py);
-      if (!floor?.info.passable) return false;
+    // セル単位の実効通行可否：オブジェクト層タイル（壁・家具・橋など）があれば、床の可否に
+    // 関係なくそちらを優先する（上のレイヤーが優先）。木の上部/屋根のように意図的に通行可
+    // （passable:true）で置かれているオブジェクト層タイルはそのまま通れるし、逆に床が
+    // checkWalkableTile:false（通行不可）でも、上に checkWalkableTile:true のオブジェクト層
+    // タイル（橋・足場等）があればそちらに従って通行可になる。オブジェクト層が無いマスは
+    // 床タイルの可否をそのまま使う。
+    const isCellPassable = (px: number, py: number) => {
       const overlay = getOverlayTileAt(Math.floor(px / TILE_SIZE), Math.floor(py / TILE_SIZE));
-      if (overlay?.info && !overlay.info.passable) return false;
-      return true;
+      if (overlay?.info) return overlay.info.passable;
+      const floor = getTile(px, py);
+      return !!floor?.info.passable;
     };
     const isAllPassable = (x: number, y: number, w: number, h: number) => {
       // 当たり判定は見た目より少し内側に絞る。プレイヤーは連続移動でタイル境界に
@@ -5040,8 +5042,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // はみ出して誤ってブロックされてしまう。
       const inset = Math.min(6, w / 2 - 1, h / 2 - 1);
       const ix = x + inset, iy = y + inset, iw = w - inset * 2, ih = h - inset * 2;
-      return isCornerPassable(ix, iy) && isCornerPassable(ix + iw - 1, iy) &&
-        isCornerPassable(ix, iy + ih - 1) && isCornerPassable(ix + iw - 1, iy + ih - 1);
+      const cornersOk = isCellPassable(ix, iy) && isCellPassable(ix + iw - 1, iy) &&
+        isCellPassable(ix, iy + ih - 1) && isCellPassable(ix + iw - 1, iy + ih - 1);
+      if (cornersOk) return true;
+      // 4隅のどれかがブロックされていても、それが「壁タイルの角へ斜めにかすっただけ」
+      // （T字/L字通路の内側の凹角）であれば実際には塞がっていない。辺の中点で改めて
+      // 判定し、そちらが全て通行可ならブロックしない（角の誤検出による詰まりを救済）。
+      const cx = ix + iw / 2, cy = iy + ih / 2;
+      return isCellPassable(cx, iy) && isCellPassable(cx, iy + ih - 1) &&
+        isCellPassable(ix, cy) && isCellPassable(ix + iw - 1, cy);
     };
     // 1フレーム分の移動を「軸分離＋角丸め（コーナースライド）」で解決してプレイヤー座標へ書き込む。
     // 単一方向にだけ入力しているのに壁の角へ引っかかって進めないとき、通路の開口へ向けて
