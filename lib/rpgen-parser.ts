@@ -111,6 +111,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     },
     map: [],
     overlayMap: [],
+    overheadMap: [],
     objects: [],
     bgm: rpgMap.bgmUrl
       ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : `direct:${rpgMap.bgmUrl}`)
@@ -160,12 +161,15 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
   for (let y = 0; y < rows; y++) {
     const rowFloor: number[] = [];
     const rowObj: number[] = [];
+    const rowOverhead: number[] = [];
     for (let x = 0; x < cols; x++) {
       rowFloor.push(parseTile(rpgMap.floor.getRaw(x, y)));
       rowObj.push(parseTile(rpgMap.objects.getRaw(x, y)));
+      rowOverhead.push(0);
     }
     draft.map.push(rowFloor);
     draft.overlayMap!.push(rowObj);
+    draft.overheadMap!.push(rowOverhead);
   }
 
   const translateRpgenCommand = (rawCmd: any): EventCommand | null => {

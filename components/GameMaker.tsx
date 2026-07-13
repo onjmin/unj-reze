@@ -149,6 +149,7 @@ export interface GameManifestDraft {
   }>;
   map: number[][];
   overlayMap?: number[][];
+  overheadMap?: number[][];
   objects: Array<Omit<ObjectDef, 'spriteUrl'>>;
   bgm: string;
   battleBgm?: string;
@@ -183,6 +184,7 @@ const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
 function buildWorldLayout(scenes: SceneDef[]): {
   map: number[][];
   overlayMap: number[][];
+  overheadMap: number[][];
   layouts: Array<{ sceneIdx: number; originX: number; originY: number; sceneW: number; sceneH: number }>;
   worldCols: number;
   worldRows: number;
@@ -190,6 +192,7 @@ function buildWorldLayout(scenes: SceneDef[]): {
   if (!scenes.length) return {
     map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
     overlayMap: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
+    overheadMap: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
     layouts: [], worldCols: COLS, worldRows: ROWS,
   };
   const layouts: Array<{ sceneIdx: number; originX: number; originY: number; sceneW: number; sceneH: number }> = [];
@@ -217,15 +220,18 @@ function buildWorldLayout(scenes: SceneDef[]): {
   }
   const map: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
   const overlayMap: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
+  const overheadMap: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
   for (const { sceneIdx, originX, originY, sceneW, sceneH } of layouts) {
     const sm = scenes[sceneIdx].map;
     const som = scenes[sceneIdx].overlayMap;
+    const sohm = scenes[sceneIdx].overheadMap;
     for (let r = 0; r < sceneH; r++) for (let c = 0; c < sceneW; c++) {
       map[originY + r][originX + c] = sm[r]?.[c] ?? 0;
       overlayMap[originY + r][originX + c] = som?.[r]?.[c] ?? 0;
+      overheadMap[originY + r][originX + c] = sohm?.[r]?.[c] ?? 0;
     }
   }
-  return { map, overlayMap, layouts, worldCols: maxC, worldRows: maxR };
+  return { map, overlayMap, overheadMap, layouts, worldCols: maxC, worldRows: maxR };
 }
 
 /** map と同サイズの空グリッド（overlayMap の既定値）を作る。 */
@@ -272,7 +278,8 @@ const applyWorldSize = (d: PresetData, cols: number, rows: number): PresetData =
   const h = Math.max(ROWS, Math.round(rows));
   const map = resizeGrid(d.map, w, h);
   const overlayMap = resizeGrid(d.overlayMap ?? emptyGridLike(d.map), w, h);
-  return { ...d, map, overlayMap, scroll: (w > COLS || h > ROWS) ? { worldCols: w, worldRows: h } : undefined };
+  const overheadMap = resizeGrid(d.overheadMap ?? emptyGridLike(d.map), w, h);
+  return { ...d, map, overlayMap, overheadMap, scroll: (w > COLS || h > ROWS) ? { worldCols: w, worldRows: h } : undefined };
 };
 
 async function playSfx(s?: SfxRef) {
@@ -1156,8 +1163,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const endingRef = useRef<EndingScreenConfig | undefined>(undefined);
   endingRef.current = gameData.ending;
   const [selectedTileId, setSelectedTileId] = useState(1);
-  /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=上層(プレイヤーより手前・半透明化)。 */
-  const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay'>('base');
+  /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=置物(当たり判定あり・プレイヤーの後ろ) / 'overhead'=天蓋(当たり判定なし・手前・半透明化)。 */
+  const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay' | 'overhead'>('base');
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
   const [editModeType, setEditModeType] = useState<'move_place' | 'panel_input'>('panel_input');
@@ -1324,8 +1331,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
   const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
   const invulnRef = useRef(0);
-  /** 上層タイル(overlay)の描画アルファ。プレイヤーが真下にいる間だけ滑らかに半透明化する。 */
-  const overlayAlphaRef = useRef(1);
+  /** 天蓋タイル(overhead)の描画アルファ。プレイヤーが真下にいる間だけ滑らかに半透明化する。 */
+  const overheadAlphaRef = useRef(1);
   /** 戦闘コマンド「どうぐ」のサブメニュー開閉。 */
   const [battleItemsOpen, setBattleItemsOpen] = useState(false);
   const battleItemsOpenRef = useRef(false);
@@ -4648,6 +4655,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ),
         map: initialManifest.map,
         overlayMap: initialManifest.overlayMap ?? emptyGridLike(initialManifest.map),
+        overheadMap: initialManifest.overheadMap ?? emptyGridLike(initialManifest.map),
         objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
         scroll: initialManifest.scroll ?? base.scroll,
         phases: initialManifest.phases ?? base.phases,
@@ -4657,6 +4665,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         layout25d: initialManifest.layout25d ?? base.layout25d,
         scenes: initialManifest.scenes?.map(s => ({
           ...s,
+          overheadMap: s.overheadMap ?? emptyGridLike(s.map),
           objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
           bgm: hydrateBgmFromRef(s.bgm),
         })),
@@ -8378,8 +8387,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (tileId !== 0 && info) drawTileCell(x, y, tileId, info);
         }
       }
-      // 上層レイヤー（木の上部・屋根など）：地面と同じ座標範囲・タイル定義を使う別グリッド
+      // 置物レイヤー（オブジェクトレイヤー）：プレイヤーより先に描画
       const overlayMap = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
+      if (overlayMap) {
+        for (let y = startRow; y < endRow; y++) {
+          for (let x = startCol; x < endCol; x++) {
+            const tileId = overlayMap[y]?.[x] ?? 0;
+            const info = gameData.tiles[tileId];
+            if (tileId !== 0 && info) drawTileCell(x, y, tileId, info);
+          }
+        }
+      }
 
       // ── アニメーション中ブロックの描画 ──
       if (isPlaying) {
@@ -8707,22 +8725,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
         }
       }
-      // 上層レイヤー：木の上部や屋根などプレイヤーより手前に重ねて描画。
+      // 天蓋レイヤー：木の上部や屋根などプレイヤーより手前に重ねて描画。
       // プレイヤーがその真下付近にいる間は半透明化し、奥のプレイヤーが見えるようにする（gomi.html の drawMapUpper 相当）。
-      if (overlayMap) {
+      const overheadMap = worldLayoutRef.current?.overheadMap ?? gameData.overheadMap;
+      if (overheadMap) {
         const ptx = Math.floor((p.x + pData.w / 2) / TILE_SIZE);
         const pty = Math.floor((p.y + pData.h) / TILE_SIZE);
-        let underOverlay = false;
-        for (let dy = -1; dy <= 0 && !underOverlay; dy++) {
-          if ((overlayMap[pty + dy]?.[ptx] ?? 0) !== 0) underOverlay = true;
+        let underOverhead = false;
+        for (let dy = -1; dy <= 0 && !underOverhead; dy++) {
+          if ((overheadMap[pty + dy]?.[ptx] ?? 0) !== 0) underOverhead = true;
         }
-        const targetAlpha = underOverlay ? 0.5 : 1.0;
-        overlayAlphaRef.current += (targetAlpha - overlayAlphaRef.current) * 0.15;
-        if (Math.abs(overlayAlphaRef.current - targetAlpha) < 0.01) overlayAlphaRef.current = targetAlpha;
-        ctx.globalAlpha = overlayAlphaRef.current;
+        const targetAlpha = underOverhead ? 0.5 : 1.0;
+        overheadAlphaRef.current += (targetAlpha - overheadAlphaRef.current) * 0.15;
+        if (Math.abs(overheadAlphaRef.current - targetAlpha) < 0.01) overheadAlphaRef.current = targetAlpha;
+        ctx.globalAlpha = overheadAlphaRef.current;
         for (let y = startRow; y < endRow; y++) {
           for (let x = startCol; x < endCol; x++) {
-            const tileId = overlayMap[y]?.[x] ?? 0;
+            const tileId = overheadMap[y]?.[x] ?? 0;
             const info = gameData.tiles[tileId];
             if (tileId !== 0 && info) drawTileCell(x, y, tileId, info);
           }
@@ -9603,6 +9622,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           newOverlay[row][col] = selectedTileId;
           return { ...prev, overlayMap: newOverlay };
         });
+      } else if (editMapLayer === 'overhead') {
+        setGameData(prev => {
+          const newOverhead = (prev.overheadMap ?? emptyGridLike(prev.map)).map(r => [...r]);
+          newOverhead[row][col] = selectedTileId;
+          return { ...prev, overheadMap: newOverhead };
+        });
       } else {
         setGameData(prev => {
           const newMap = prev.map.map(r => [...r]);
@@ -9773,6 +9798,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }])),
     map: gameData.map,
     overlayMap: gameData.overlayMap,
+    overheadMap: gameData.overheadMap,
     objects: gameData.objects.map(({ spriteUrl, ...o }) => o),
     mapBgRef: gameData.mapBgRef,
     scroll: gameData.scroll,
@@ -9791,6 +9817,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       id: s.id, name: s.name, exits: s.exits,
       map: s.map,
       overlayMap: s.overlayMap,
+      overheadMap: s.overheadMap,
       objects: s.objects.map(({ spriteUrl, ...o }) => o),
       bgm: s.bgm?.ref,
       randomEncounters: s.randomEncounters,
@@ -9831,6 +9858,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ),
           map: manifest.map,
           overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
+          overheadMap: manifest.overheadMap ?? emptyGridLike(manifest.map),
           objects: manifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
           mapBgRef: manifest.mapBgRef,
           mapBgUrl: undefined,
@@ -9842,6 +9870,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           layout25d: manifest.layout25d ?? base.layout25d,
           scenes: manifest.scenes?.map(s => ({
             ...s,
+            overheadMap: s.overheadMap ?? emptyGridLike(s.map),
             objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
             bgm: hydrateBgmFromRef(s.bgm),
           })),
@@ -9895,6 +9924,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const remapGrid = (grid: number[][]) => grid.map(row => row.map(cell => tileIdRemap.get(cell) ?? 0));
         const remappedMap = remapGrid(manifest.map);
         const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : undefined;
+        const remappedOverheadMap = manifest.overheadMap ? remapGrid(manifest.overheadMap) : undefined;
         const importedBgm = hydrateBgmFromRef(manifest.bgm);
 
         const idx = editSceneIdx;
@@ -9903,11 +9933,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           tiles: mergedTiles,
           map: remappedMap,
           overlayMap: remappedOverlayMap,
+          overheadMap: remappedOverheadMap,
           objects: manifest.objects,
           scenes: prev.scenes!.map((s, i) => i === idx ? {
             ...s,
             map: remappedMap,
             overlayMap: remappedOverlayMap,
+            overheadMap: remappedOverheadMap,
             objects: manifest.objects,
             bgm: importedBgm,
           } : s),
@@ -9933,6 +9965,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         tiles: manifest.tiles,
         map: manifest.map,
         overlayMap: manifest.overlayMap,
+        overheadMap: manifest.overheadMap,
         objects: manifest.objects,
         mapBgRef: manifest.mapBgRef,
         bgm: hydrateBgmFromRef(manifest.bgm),
@@ -9956,10 +9989,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setGameData(prev => {
       if (!prev.scenes) return prev;
       const scenes = prev.scenes.map((s, i) =>
-        i === editSceneIdx ? { ...s, map: prev.map, overlayMap: prev.overlayMap, objects: prev.objects } : s
+        i === editSceneIdx ? { ...s, map: prev.map, overlayMap: prev.overlayMap, overheadMap: prev.overheadMap, objects: prev.objects } : s
       );
       const next = scenes[newIdx];
-      return { ...prev, scenes, map: next.map, overlayMap: next.overlayMap, objects: next.objects };
+      return { ...prev, scenes, map: next.map, overlayMap: next.overlayMap, overheadMap: next.overheadMap, objects: next.objects };
     });
     setEditSceneIdx(newIdx);
     setSelectedObjId(null);
@@ -9977,7 +10010,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setGameData(prev => {
       if (!prev.scenes) return prev;
       const scenes = prev.scenes.map((s, i) =>
-        i === editSceneIdx ? { ...s, map: prev.map, overlayMap: prev.overlayMap, objects: prev.objects } : s
+        i === editSceneIdx ? { ...s, map: prev.map, overlayMap: prev.overlayMap, overheadMap: prev.overheadMap, objects: prev.objects } : s
       );
       return { ...prev, scenes };
     });
@@ -9990,11 +10023,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       Array.from({ length: COLS }, (_, x) => (y >= ROWS - 2 ? 1 : 0))
     );
     const emptyOverlay = emptyGridLike(emptyMap);
-    const newScene: SceneDef = { id: newId, name: `シーン${(gameData.scenes?.length ?? 0) + 1}`, map: emptyMap, overlayMap: emptyOverlay, objects: [] };
+    const emptyOverhead = emptyGridLike(emptyMap);
+    const newScene: SceneDef = { id: newId, name: `シーン${(gameData.scenes?.length ?? 0) + 1}`, map: emptyMap, overlayMap: emptyOverlay, overheadMap: emptyOverhead, objects: [] };
     flushSceneEdits();
     setGameData(prev => {
       const scenes = [...(prev.scenes ?? []), newScene];
-      return { ...prev, scenes, map: newScene.map, overlayMap: newScene.overlayMap, objects: newScene.objects };
+      return { ...prev, scenes, map: newScene.map, overlayMap: newScene.overlayMap, overheadMap: newScene.overheadMap, objects: newScene.objects };
     });
     setEditSceneIdx((gameData.scenes?.length ?? 0));
     setSelectedObjId(null);
@@ -10007,7 +10041,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (!prev.scenes) return prev;
       const scenes = prev.scenes.filter((_, i) => i !== idx);
       const nextIdx = Math.min(editSceneIdx, scenes.length - 1);
-      return { ...prev, scenes, map: scenes[nextIdx].map, overlayMap: scenes[nextIdx].overlayMap, objects: scenes[nextIdx].objects };
+      return { ...prev, scenes, map: scenes[nextIdx].map, overlayMap: scenes[nextIdx].overlayMap, overheadMap: scenes[nextIdx].overheadMap, objects: scenes[nextIdx].objects };
     });
     setEditSceneIdx(prev => Math.max(0, prev - (idx <= editSceneIdx ? 1 : 0)));
     setSelectedObjId(null);
@@ -10238,7 +10272,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
                 const activeScene = gameData.scenes[activeIdx];
                 if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
-                  setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, objects: activeScene.objects }));
+                  setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, overheadMap: activeScene.overheadMap ?? prev.overheadMap, objects: activeScene.objects }));
                   setEditSceneIdx(activeIdx);
                 }
               }
@@ -12377,14 +12411,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     )}
 
                     {/* ── 描画レイヤー切り替え ── */}
-                    <div className="flex rounded-lg border border-gray-700 overflow-hidden text-[11px]">
+                    <div className="flex rounded-lg border border-gray-700 overflow-hidden text-[10px] sm:text-[11px]">
                       <button onClick={() => setEditMapLayer('base')}
-                        className={`flex-1 py-1.5 ${editMapLayer === 'base' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>地面（当たり判定）</button>
+                        className={`flex-1 py-1.5 px-1 border-r border-gray-700 ${editMapLayer === 'base' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>下層(地面)</button>
                       <button onClick={() => setEditMapLayer('overlay')}
-                        className={`flex-1 py-1.5 ${editMapLayer === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>上層（木の上部等・手前）</button>
+                        className={`flex-1 py-1.5 px-1 border-r border-gray-700 ${editMapLayer === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>中層(置物)</button>
+                      <button onClick={() => setEditMapLayer('overhead')}
+                        className={`flex-1 py-1.5 px-1 ${editMapLayer === 'overhead' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>天蓋(手前)</button>
                     </div>
+                    {editMapLayer === 'base' && (
+                      <p className="text-[10px] text-gray-500">下層は最も奥に描画され、タイルの通行可/不可などの当たり判定が適用されます。</p>
+                    )}
                     {editMapLayer === 'overlay' && (
-                      <p className="text-[10px] text-gray-500">上層はプレイヤーより手前に描画され、当たり判定を持ちません。プレイヤーが真下付近にいる間は半透明化します。</p>
+                      <p className="text-[10px] text-gray-500">中層は下層の上、かつプレイヤーの後ろに描画されます。装飾や草などの配置に適しています。</p>
+                    )}
+                    {editMapLayer === 'overhead' && (
+                      <p className="text-[10px] text-gray-500">天蓋は最も手前（プレイヤーの前面）に描画されます。プレイヤーが真下に入ると自動で半透明になります。</p>
                     )}
                     {/* ── タイル塗りヒント ── */}
                     <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> タイルを選択して画面をタップ／ドラッグ</p>
@@ -14395,7 +14437,7 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   overheadMessage: '頭上メッセージ', playSound: '効果音再生',
   changeSprite: '画像変更', changeBackground: '背景変更', showImage: '画像表示', hideImage: '画像消去',
   followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
-  moveCamera: 'カメラ移動', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', changePhase: 'フェーズ変更',
+  moveCamera: 'カメラ移動', resetCamera: 'カメラリセット', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', clearScreenEffect: '画面エフェクト消去', changePhase: 'フェーズ変更',
 };
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
@@ -14660,8 +14702,10 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         case 'showImage': return { type: 'showImage', imgId: '', url: '', x: 0, y: 0 };
         case 'hideImage': return { type: 'hideImage', imgId: '' };
         case 'moveCamera': return { type: 'moveCamera', tx: 0, ty: 0, duration: 0 };
+        case 'resetCamera': return { type: 'resetCamera', duration: 0 };
         case 'moveNpc': return { type: 'moveNpc', objId: 'player' };
-        case 'screenEffect': return { type: 'screenEffect', effectType: '' };
+        case 'clearScreenEffect': return { type: 'clearScreenEffect' };
+        case 'screenEffect': return { type: 'screenEffect', effects: [] };
         case 'changePhase': return { type: 'changePhase', phaseIndex: 0 };
         default: return { type: 'message', text: '' };
       }
@@ -14855,8 +14899,26 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
             className={inputCls} placeholder="対象NPCのID" />
         )}
         {type === 'screenEffect' && (
-          <input value={(cmd as any).effectType ?? ''} onChange={e => onChange({ effectType: e.target.value })}
-            className={inputCls} placeholder="エフェクト種別 (flash, shake等)" />
+          <input
+            value={(cmd as any).effects?.[0]?.color ?? ''}
+            onChange={e => {
+              const color = e.target.value;
+              onChange({
+                effects: [
+                  {
+                    type: 'solid',
+                    color,
+                    c1: '',
+                    c2: '',
+                    pos: '',
+                    stops: '',
+                  },
+                ],
+              });
+            }}
+            className={inputCls}
+            placeholder="エフェクト色 (例: 255-0-0-50)"
+          />
         )}
         {type === 'changePhase' && (
           <input type="number" value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
