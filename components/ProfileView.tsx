@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Post, OshiItem } from '@/lib/types';
+import { Post, OshiItem, AnonymousUser } from '@/lib/types';
 import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil, Play, Pause } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -67,8 +67,29 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const oshiAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
+
+  useEffect(() => {
+    const getCookie = (name: string): string | undefined => {
+      if (typeof document === 'undefined') return undefined;
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop()?.split(';').shift();
+    };
+    const sessionId = getCookie('unj_reze_session');
+    if (sessionId) {
+      api.auth.anonymous(sessionId).then(setCurrentUser).catch(() => {});
+    }
+  }, []);
+
   const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
-  const isSelf = currentUserId === userId;
+  const isSelf = useMemo(() => {
+    if (!userId) return false;
+    if (currentUser) {
+      return currentUser.slug === userId || currentUser.displayName === userId || currentUser.id === userId;
+    }
+    return currentUserId === userId;
+  }, [currentUserId, userId, currentUser]);
 
   const resolvedName = displayName || myPosts[0]?.displayName || userId;
   const avatarInfo = getAvatarInfo(resolvedName);
@@ -109,7 +130,8 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     setAvatarUrl(dataUrl);
     try {
       const res = await api.upload.image({ image: dataUrl });
-      await api.auth.updateDisplayName(currentUserId || userId, avatarInfo.username, res.url);
+      const targetUserId = currentUser?.id || currentUserId || userId;
+      await api.auth.updateDisplayName(targetUserId, avatarInfo.username, res.url);
       setAvatarUrl(res.url);
       onProfileUpdate?.(avatarInfo.username, res.url);
     } catch (err: any) {
@@ -124,7 +146,8 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     setIsSaving(true);
     setEditError(null);
     try {
-      await api.auth.updateDisplayName(currentUserId || userId, avatarInfo.username, undefined, editBio.trim());
+      const targetUserId = currentUser?.id || currentUserId || userId;
+      await api.auth.updateDisplayName(targetUserId, avatarInfo.username, undefined, editBio.trim());
       setBio(editBio.trim());
       setIsEditModalOpen(false);
     } catch (err: any) {
@@ -377,12 +400,9 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
             {oshiItems.length > 0 ? (
               <div className="flex space-x-2.5 overflow-x-auto scrollbar-none pb-1">
                 {oshiItems.map(item => (
-                  <a
+                  <div
                     key={item.id}
-                    href={item.viewUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 w-24"
+                    className="shrink-0 w-24 select-none"
                   >
                     <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-gray-800 border border-gray-800 flex items-center justify-center">
                       {item.artworkUrl ? (
@@ -415,7 +435,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                     </div>
                     <div className="text-[10px] text-gray-300 font-bold truncate mt-1">{item.title}</div>
                     {item.subtitle && <div className="text-[9px] text-gray-500 truncate">{item.subtitle}</div>}
-                  </a>
+                  </div>
                 ))}
               </div>
             ) : (

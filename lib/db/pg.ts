@@ -1029,8 +1029,18 @@ export const pgStore: DataStore = {
   async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
     const client = await getPool().connect();
     try {
-      const userRes = await client.query('SELECT slug FROM anonymous_users WHERE id = $1', [userId]);
-      const oldSlug = userRes.rows.length > 0 ? userRes.rows[0].slug : null;
+      let userRes = await client.query('SELECT id, slug FROM anonymous_users WHERE id = $1', [userId]);
+      if (userRes.rows.length === 0) {
+        userRes = await client.query('SELECT id, slug FROM anonymous_users WHERE slug = $1', [userId]);
+      }
+      if (userRes.rows.length === 0) {
+        userRes = await client.query('SELECT id, slug FROM anonymous_users WHERE display_name = $1', [userId]);
+      }
+      if (userRes.rows.length === 0) {
+        return;
+      }
+      const realId = userRes.rows[0].id;
+      const oldSlug = userRes.rows[0].slug;
 
       const slug = deriveSlugPg(displayName);
       const sets = ['display_name = $1', 'slug = $2'];
@@ -1043,7 +1053,7 @@ export const pgStore: DataStore = {
         sets.push(`bio = $${values.length + 1}`);
         values.push(bio);
       }
-      values.push(userId);
+      values.push(realId);
       await client.query(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = $${values.length}`, values);
 
       if (oldSlug) {

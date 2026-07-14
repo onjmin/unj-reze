@@ -973,8 +973,18 @@ export const sqliteStore: DataStore = {
 
   async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
     const d = await getDb();
-    const userRows = rowsToObjects(d, 'SELECT slug FROM anonymous_users WHERE id = ?', [userId]);
-    const oldSlug = userRows.length > 0 ? userRows[0].slug : null;
+    let userRows = rowsToObjects(d, 'SELECT id, slug FROM anonymous_users WHERE id = ?', [userId]);
+    if (userRows.length === 0) {
+      userRows = rowsToObjects(d, 'SELECT id, slug FROM anonymous_users WHERE slug = ?', [userId]);
+    }
+    if (userRows.length === 0) {
+      userRows = rowsToObjects(d, 'SELECT id, slug FROM anonymous_users WHERE display_name = ?', [userId]);
+    }
+    if (userRows.length === 0) {
+      return;
+    }
+    const realId = userRows[0].id;
+    const oldSlug = userRows[0].slug;
 
     const slug = deriveSlugSqlite(displayName);
     const sets: string[] = ['display_name = ?', 'slug = ?'];
@@ -987,7 +997,7 @@ export const sqliteStore: DataStore = {
       sets.push('bio = ?');
       values.push(bio);
     }
-    values.push(userId);
+    values.push(realId);
     d.run(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = ?`, values);
 
     if (oldSlug) {

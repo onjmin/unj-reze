@@ -211,7 +211,15 @@ class MockDB {
   }
 
   updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string): void {
-    const stored = this.anonUserData.get(userId);
+    let stored = this.anonUserData.get(userId);
+    if (!stored) {
+      for (const u of this.anonUserData.values()) {
+        if (u.slug === userId || u.displayName === userId) {
+          stored = u;
+          break;
+        }
+      }
+    }
     if (stored) {
       const oldSlug = stored.slug;
       stored.displayName = displayName;
