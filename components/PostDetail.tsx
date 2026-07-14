@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
-import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
+import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -229,7 +229,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       const res = await fetch('/api/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: replyGameDraft.preset, title: replyGameDraft.title, manifest: replyGameDraft.manifest }),
+        body: JSON.stringify({ preset: replyGameDraft.preset, title: replyGameDraft.title, manifest: replyGameDraft.manifest, creatorSlug: userSlug }),
       });
       if (res.ok) {
         const savedGame = await res.json();
@@ -331,6 +331,33 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     router.refresh();
   };
 
+  const handleEditArt = () => {
+    setMenuOpen(false);
+    setCollabImageUrl(post.imageSrc);
+    setActiveScreen('edit-drawing');
+  };
+
+  const handleSaveEditedArt = async (canvasData: string) => {
+    const updated = await api.posts.edit(post.id, userId, post.content, post.originType, canvasData);
+    setPost(updated);
+    setActiveScreen(null);
+    setCollabImageUrl(undefined);
+    router.refresh();
+  };
+
+  const handleEditMusic = () => {
+    setMenuOpen(false);
+    setActiveScreen('edit-mml');
+  };
+
+  const handleSaveEditedMusic = async (mml: string) => {
+    const newContent = `${stripMmlLine(post.content)}\n#mml ${mml}`.trim();
+    const updated = await api.posts.edit(post.id, userId, newContent, post.originType);
+    setPost(updated);
+    setActiveScreen(null);
+    router.refresh();
+  };
+
   const handleSelectOriginType = async (ot: OriginType | undefined) => {
     const updated = await api.posts.edit(post.id, userId, post.content, ot);
     setPost(updated);
@@ -401,6 +428,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   <button role="menuitem" onClick={handleMenuOriginType} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Pencil size={12} className="shrink-0" />
                     <span>権利表記を設定</span>
+                  </button>
+                )}
+                {isSelf && post.hasImage && (
+                  <button role="menuitem" onClick={handleEditArt} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>作品を編集</span>
+                  </button>
+                )}
+                {isSelf && mmlCode && (
+                  <button role="menuitem" onClick={handleEditMusic} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>曲を編集</span>
                   </button>
                 )}
                 {isSelf && (
@@ -604,6 +643,20 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <MmlEditor
           onClose={() => setActiveScreen(null)}
           onSave={handleSaveMml}
+        />
+      )}
+      {activeScreen === 'edit-drawing' && (
+        <DrawingEditor
+          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
+          onSave={handleSaveEditedArt}
+          collabImageUrl={collabImageUrl}
+        />
+      )}
+      {activeScreen === 'edit-mml' && (
+        <MmlEditor
+          onClose={() => setActiveScreen(null)}
+          onSave={handleSaveEditedMusic}
+          initialMml={mmlCode ?? undefined}
         />
       )}
 

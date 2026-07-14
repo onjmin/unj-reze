@@ -92,11 +92,11 @@ export async function PATCH(
   if (decodedId === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
-  const { userId, content, originType } = await request.json();
+  const { userId, content, originType, imageSrc } = await request.json();
   if (!userId || typeof content !== 'string') {
     return NextResponse.json({ error: 'userId and content are required' }, { status: 400 });
   }
-  const result = await db.editPost(decodedId, userId, content, originType);
+  const result = await db.editPost(decodedId, userId, content, originType, imageSrc);
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }

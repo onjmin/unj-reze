@@ -56,6 +56,9 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
+  const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef(1);
   const [gridW, setGridW] = useState(32);
   const [gridH, setGridH] = useState(32);
   const [showPresets, setShowPresets] = useState(false);
@@ -832,6 +835,38 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const zoomIn = () => setZoom(v => Math.min(4, Math.round((v + 0.25) * 100) / 100));
   const zoomOut = () => setZoom(v => Math.max(0.25, Math.round((v - 0.25) * 100) / 100));
 
+  // 二本指ピンチでキャンバスをズーム。1本指の描画はcanvas側のpointer captureが処理するため干渉しない。
+  const handlePinchPointerDown = (e: React.PointerEvent) => {
+    pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchPointsRef.current.size === 2) {
+      const [p1, p2] = Array.from(pinchPointsRef.current.values());
+      pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      pinchStartZoomRef.current = zoom;
+    }
+  };
+
+  const handlePinchPointerMove = (e: React.PointerEvent) => {
+    if (!pinchPointsRef.current.has(e.pointerId)) return;
+    pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchPointsRef.current.size === 2 && pinchStartDistRef.current) {
+      const [p1, p2] = Array.from(pinchPointsRef.current.values());
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const ratio = dist / pinchStartDistRef.current;
+      const next = Math.min(4, Math.max(0.25, Math.round(pinchStartZoomRef.current * ratio * 100) / 100));
+      setZoom(next);
+    }
+  };
+
+  const handlePinchPointerUp = (e: React.PointerEvent) => {
+    pinchPointsRef.current.delete(e.pointerId);
+    pinchStartDistRef.current = null;
+    if (pinchPointsRef.current.size === 2) {
+      const [p1, p2] = Array.from(pinchPointsRef.current.values());
+      pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      pinchStartZoomRef.current = zoom;
+    }
+  };
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey) {
@@ -919,7 +954,13 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         </div>
       )}
 
-      <div className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' ring-4 ring-blue-400/60' : '')}>
+      <div
+        className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' ring-4 ring-blue-400/60' : '')}
+        onPointerDown={handlePinchPointerDown}
+        onPointerMove={handlePinchPointerMove}
+        onPointerUp={handlePinchPointerUp}
+        onPointerCancel={handlePinchPointerUp}
+      >
         <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})` }} />
       </div>
 

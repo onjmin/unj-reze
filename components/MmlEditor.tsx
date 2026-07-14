@@ -7,13 +7,14 @@ import { getStudio } from '@/lib/dtm';
 interface MmlEditorProps {
   onClose: () => void;
   onSave: (mml: string) => void;
+  initialMml?: string;
 }
 
 // 編集UIは @onjmin/dtm の createDtmStudio().mountModeSwitch() に差し替え。
 // mountModeSwitch はシンプル/アドバンスのモード切替UIを差し込み、編集UI（mountEditor）の
 // マウント・再マウント（MML引き継ぎ）まで面倒を見る。ピアノロール・楽器プリセット・ドラム・
 // MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
-export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
+export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const modeSwitchRef = useRef<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,6 +30,7 @@ export default function MmlEditor({ onClose, onSave }: MmlEditorProps) {
           editorTarget: mountRef.current,
           mode: 'simple',
           position: 'prepend',
+          editorOptions: initialMml ? { initialMML: initialMml } : undefined,
         });
       }
       setLoading(false);

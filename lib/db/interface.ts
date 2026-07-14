@@ -7,6 +7,7 @@ export interface CreateGameParams {
   preset: string;
   title: string;
   manifest: GameManifestDraft;
+  creatorSlug?: string;
 }
 
 export interface CreatePostParams {
@@ -57,7 +58,7 @@ export interface DataStore {
   repostPost(id: number): Promise<DbPost | null>;
   getReplies(postId: number, userId?: string): Promise<DbPost[]>;
   addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
-  editPost(id: number, userId: string, content: string, originType?: OriginType | null): Promise<DbPost | null>;
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string): Promise<DbPost | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
   getUserPostsBySlug(slug: string, userId?: string): Promise<DbPost[]>;
@@ -96,6 +97,7 @@ export interface DataStore {
   reportContent(data: ReportParams): Promise<void>;
   createGame(data: CreateGameParams): Promise<DbGameRecord>;
   getGame(id: number): Promise<DbGameRecord | null>;
+  updateGame(id: number, data: { title: string; manifest: GameManifestDraft }): Promise<DbGameRecord | null>;
   listAllGames(): Promise<DbGameRecord[]>;
   getLiveGameInfo(ipAddress: string): Promise<{ gameId: number | null; gameTitle: string; gamePreset: string; hourSlot: string; postId: number | null; nextCandidates: GameVoteCandidate[]; myVote: number | null }>;
   voteGame(gameId: number, ipAddress: string): Promise<void>;

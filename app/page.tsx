@@ -62,7 +62,7 @@ export default function App() {
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
-  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string } | null>(null);
+  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string; gameId?: string; creatorSlug?: string } | null>(null);
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
   const [discardModalConfig, setDiscardModalConfig] = useState<{
@@ -342,7 +342,7 @@ export default function App() {
       const res = await fetch('/api/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest }),
+        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest, creatorSlug: currentUser?.slug }),
       });
       if (res.ok) {
         const savedGame = await res.json();
@@ -413,7 +413,7 @@ export default function App() {
       const res = await fetch('/api/games', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest }),
+        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest, creatorSlug: currentUser?.slug }),
       });
       if (res.ok) {
         const savedGame = await res.json();
@@ -482,9 +482,23 @@ export default function App() {
       const game = await res.json();
       setPostGameDanmaku([]);
       postGameLastIdRef.current = 0;
-      setPlayingGame({ manifest: game.manifest, title: game.title, postId });
+      setPlayingGame({ manifest: game.manifest, title: game.title, postId, gameId, creatorSlug: game.creatorSlug });
       setActiveScreen('postgame');
     } catch {}
+  };
+
+  const handleSaveEditedGame = async (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
+    if (!playingGame?.gameId) return;
+    try {
+      await fetch(`/api/games/${playingGame.gameId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: meta.title, manifest, userSlug: currentUser?.slug }),
+      });
+    } catch {}
+    setActiveScreen(null);
+    setPlayingGame(null);
+    setPostGameDanmaku([]);
   };
 
   const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
@@ -577,7 +591,8 @@ export default function App() {
           onClose={() => { setActiveScreen(null); setPlayingGame(null); setPostGameDanmaku([]); }}
           userId={userId}
           initialManifest={playingGame.manifest}
-          playOnly
+          playOnly={!(!!currentUser?.slug && playingGame.creatorSlug === currentUser.slug)}
+          onSave={!!currentUser?.slug && playingGame.creatorSlug === currentUser.slug ? handleSaveEditedGame : undefined}
           postId={playingGame.postId}
           danmakuComments={postGameDanmaku}
           onComment={async (text, displayName) => {

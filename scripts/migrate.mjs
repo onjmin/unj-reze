@@ -26,6 +26,12 @@ const migrations = [
     sql: `
       ALTER TABLE anonymous_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
     `
+  },
+  {
+    name: '03_add_creator_slug_to_games',
+    sql: `
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS creator_slug TEXT;
+    `
   }
 ];
 

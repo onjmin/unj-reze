@@ -42,8 +42,8 @@ export const mockStore: DataStore = {
     return mockDb.addReply(postId, data);
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
-    return mockDb.editPost(id, userId, content, originType);
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
+    return mockDb.editPost(id, userId, content, originType, imageSrc);
   },
 
   async deletePost(id: number, userId: string) {
@@ -188,13 +188,21 @@ export const mockStore: DataStore = {
 
   async createGame(data: CreateGameParams): Promise<DbGameRecord> {
     const id = Date.now() + Math.floor(Math.random() * 1000);
-    const record: DbGameRecord = { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: new Date().toISOString() };
+    const record: DbGameRecord = { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: new Date().toISOString(), creatorSlug: data.creatorSlug };
     gameStore.set(id, record);
     return record;
   },
 
   async getGame(id: number): Promise<DbGameRecord | null> {
     return gameStore.get(id) ?? null;
+  },
+
+  async updateGame(id: number, data: { title: string; manifest: CreateGameParams['manifest'] }): Promise<DbGameRecord | null> {
+    const existing = gameStore.get(id);
+    if (!existing) return null;
+    const updated: DbGameRecord = { ...existing, title: data.title, manifest: data.manifest };
+    gameStore.set(id, updated);
+    return updated;
   },
 
   async listAllGames() {

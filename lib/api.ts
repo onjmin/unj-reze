@@ -76,8 +76,8 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return encodePost(post);
     },
-    edit: async (id: string, userId: string, content: string, originType?: OriginType | null) => {
-      const post = mockDbInstance.editPost(decodeIdOrThrow(id), userId, content, originType);
+    edit: async (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => {
+      const post = mockDbInstance.editPost(decodeIdOrThrow(id), userId, content, originType, imageSrc);
       if (!post) throw new Error('Post not found or not owned');
       return encodePost(post);
     },
@@ -224,7 +224,7 @@ const liveApi = {
     dislike: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
     heart: (id: string, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
     repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
-    edit: (id: string, userId: string, content: string, originType?: OriginType | null) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType }) }),
+    edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc }) }),
     remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
     replies: {
       list: (postId: string, userId?: string) => {

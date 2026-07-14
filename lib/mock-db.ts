@@ -680,23 +680,25 @@ class MockDB {
     return post.displayName === userId || post.slug === this.slugForUser(userId);
   }
 
-  editPost(id: number, userId: string, content: string, originType?: OriginType | null): Post | null {
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post || !this.ownsPost(post, userId)) return null;
     const hasContentChanged = post.content !== content;
     const hasOriginTypeChanged = originType !== undefined && (post.originType !== (originType == null ? undefined : originType));
-    if (hasContentChanged || hasOriginTypeChanged) {
+    if (hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined) {
       post.isEdited = true;
     }
     post.content = content;
     if (originType !== undefined) post.originType = originType == null ? undefined : originType;
+    if (imageSrc !== undefined) post.imageSrc = imageSrc;
     // 親スレッドの replies 配列内の同一投稿も更新
     for (const thread of this.posts) {
       const child = thread.replies?.find(r => r.id === id);
       if (child) {
         child.content = content;
         if (originType !== undefined) child.originType = originType == null ? undefined : originType;
-        if (hasContentChanged || hasOriginTypeChanged) {
+        if (imageSrc !== undefined) child.imageSrc = imageSrc;
+        if (hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined) {
           child.isEdited = true;
         }
       }

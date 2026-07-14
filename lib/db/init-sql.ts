@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS games (
   preset TEXT NOT NULL,
   title TEXT NOT NULL,
   manifest TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  creator_slug TEXT
 );
 
 -- いいね/わるい 投票テーブル (1ユーザー1投票)

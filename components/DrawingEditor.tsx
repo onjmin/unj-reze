@@ -58,6 +58,10 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const onionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [onionSkin, setOnionSkin] = useState(false);
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
+  const [zoom, setZoom] = useState(1);
+  const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartDistRef = useRef<number | null>(null);
+  const pinchStartZoomRef = useRef(1);
 
   toolRef.current = tool;
   colorRef.current = color;
@@ -533,6 +537,38 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     onSave(oekaki.render().toDataURL());
   };
 
+  // 二本指ピンチでキャンバスをズーム。1本指の描画はoekaki側のpointer captureが処理するため干渉しない。
+  const handlePinchPointerDown = (e: React.PointerEvent) => {
+    pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchPointsRef.current.size === 2) {
+      const [p1, p2] = Array.from(pinchPointsRef.current.values());
+      pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      pinchStartZoomRef.current = zoom;
+    }
+  };
+
+  const handlePinchPointerMove = (e: React.PointerEvent) => {
+    if (!pinchPointsRef.current.has(e.pointerId)) return;
+    pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchPointsRef.current.size === 2 && pinchStartDistRef.current) {
+      const [p1, p2] = Array.from(pinchPointsRef.current.values());
+      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const ratio = dist / pinchStartDistRef.current;
+      const next = Math.min(4, Math.max(0.25, Math.round(pinchStartZoomRef.current * ratio * 100) / 100));
+      setZoom(next);
+    }
+  };
+
+  const handlePinchPointerUp = (e: React.PointerEvent) => {
+    pinchPointsRef.current.delete(e.pointerId);
+    pinchStartDistRef.current = null;
+    if (pinchPointsRef.current.size === 2) {
+      const [p1, p2] = Array.from(pinchPointsRef.current.values());
+      pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      pinchStartZoomRef.current = zoom;
+    }
+  };
+
   const toolBtn = (t: Tool, icon: React.ReactNode, label: string) => (
     <button
       onClick={() => { setTool(t); toolRef.current = t; }}
@@ -563,8 +599,14 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         </div>
       </div>
 
-      <div className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center">
-        <div ref={mountRef} className="w-full h-full" />
+      <div
+        className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center"
+        onPointerDown={handlePinchPointerDown}
+        onPointerMove={handlePinchPointerMove}
+        onPointerUp={handlePinchPointerUp}
+        onPointerCancel={handlePinchPointerUp}
+      >
+        <div ref={mountRef} className="w-full h-full" style={{ transform: `scale(${zoom})` }} />
       </div>
 
       {animMode && (

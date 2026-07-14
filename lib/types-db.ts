@@ -40,6 +40,7 @@ export interface DbGameRecord {
   title: string;
   manifest: GameManifestDraft;
   createdAt: string;
+  creatorSlug?: string;
 }
 
 export interface DbNotification {

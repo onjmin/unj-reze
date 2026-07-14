@@ -568,7 +568,7 @@ export const sqliteStore: DataStore = {
     };
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
     const d = await getDb();
     const rows = rowsToObjects(d, 'SELECT slug, display_name, content, origin_type FROM posts WHERE id = ?', [id]);
     if (rows.length === 0) return null;
@@ -577,21 +577,21 @@ export const sqliteStore: DataStore = {
 
     const hasContentChanged = rows[0].content !== content;
     const hasOriginTypeChanged = originType !== undefined && (rows[0].origin_type !== (originType ?? null));
-    const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged;
+    const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined;
 
-    if (shouldMarkEdited) {
-      if (originType === undefined) {
-        d.run('UPDATE posts SET content = ?, is_edited = 1 WHERE id = ?', [content, id]);
-      } else {
-        d.run('UPDATE posts SET content = ?, origin_type = ?, is_edited = 1 WHERE id = ?', [content, originType, id]);
-      }
-    } else {
-      if (originType === undefined) {
-        d.run('UPDATE posts SET content = ? WHERE id = ?', [content, id]);
-      } else {
-        d.run('UPDATE posts SET content = ?, origin_type = ? WHERE id = ?', [content, originType, id]);
-      }
+    const sets: string[] = ['content = ?'];
+    const values: (string | number)[] = [content];
+    if (originType !== undefined) {
+      sets.push('origin_type = ?');
+      values.push(originType as string);
     }
+    if (imageSrc !== undefined) {
+      sets.push('image_src = ?');
+      values.push(imageSrc);
+    }
+    if (shouldMarkEdited) sets.push('is_edited = 1');
+    values.push(id);
+    d.run(`UPDATE posts SET ${sets.join(', ')} WHERE id = ?`, values);
     saveDb();
     const updated = rowsToObjects(d, `${VOTED_SELECT} WHERE p.id = ?`, [userId, id]);
     if (updated.length === 0) return null;
@@ -1052,11 +1052,11 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO games (id, preset, title, manifest, created_at) VALUES (?, ?, ?, ?, ?)`,
-      [id, data.preset, data.title, JSON.stringify(data.manifest), now]
+      `INSERT INTO games (id, preset, title, manifest, created_at, creator_slug) VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, data.preset, data.title, JSON.stringify(data.manifest), now, data.creatorSlug || null]
     );
     saveDb();
-    return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now };
+    return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug };
   },
 
   async getGame(id) {
@@ -1064,7 +1064,14 @@ export const sqliteStore: DataStore = {
     const rows = rowsToObjects(d, 'SELECT * FROM games WHERE id = ?', [id]);
     if (rows.length === 0) return null;
     const r = rows[0];
-    return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at };
+    return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined };
+  },
+
+  async updateGame(id, data) {
+    const d = await getDb();
+    d.run('UPDATE games SET title = ?, manifest = ? WHERE id = ?', [data.title, JSON.stringify(data.manifest), id]);
+    saveDb();
+    return this.getGame(id);
   },
 
   async listAllGames() {

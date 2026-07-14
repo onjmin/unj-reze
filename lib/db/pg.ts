@@ -488,7 +488,7 @@ export const pgStore: DataStore = {
     }
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
     const client = await getPool().connect();
     try {
       const postResult = await client.query('SELECT slug, display_name, content, origin_type FROM posts WHERE id = $1', [id]);
@@ -499,21 +499,22 @@ export const pgStore: DataStore = {
 
       const hasContentChanged = row.content !== content;
       const hasOriginTypeChanged = originType !== undefined && (row.origin_type !== (originType ?? null));
-      const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged;
+      const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined;
 
-      if (shouldMarkEdited) {
-        if (originType === undefined) {
-          await client.query('UPDATE posts SET content = $1, is_edited = TRUE WHERE id = $2', [content, id]);
-        } else {
-          await client.query('UPDATE posts SET content = $1, origin_type = $2, is_edited = TRUE WHERE id = $3', [content, originType, id]);
-        }
-      } else {
-        if (originType === undefined) {
-          await client.query('UPDATE posts SET content = $1 WHERE id = $2', [content, id]);
-        } else {
-          await client.query('UPDATE posts SET content = $1, origin_type = $2 WHERE id = $3', [content, originType, id]);
-        }
+      const sets: string[] = ['content = $1'];
+      const values: unknown[] = [content];
+      if (originType !== undefined) {
+        sets.push(`origin_type = $${values.length + 1}`);
+        values.push(originType);
       }
+      if (imageSrc !== undefined) {
+        sets.push(`image_src = $${values.length + 1}`);
+        values.push(imageSrc);
+      }
+      if (shouldMarkEdited) sets.push('is_edited = TRUE');
+      values.push(id);
+      await client.query(`UPDATE posts SET ${sets.join(', ')} WHERE id = $${values.length}`, values);
+
       return await getPostWithVotes(client, id, userId);
     } finally {
       client.release();
@@ -1177,10 +1178,10 @@ export const pgStore: DataStore = {
       const id = Date.now() + Math.floor(Math.random() * 1000);
       const now = new Date().toISOString();
       await client.query(
-        `INSERT INTO games (id, preset, title, manifest, created_at) VALUES ($1, $2, $3, $4, NOW())`,
-        [id, data.preset, data.title, JSON.stringify(data.manifest)]
+        `INSERT INTO games (id, preset, title, manifest, created_at, creator_slug) VALUES ($1, $2, $3, $4, NOW(), $5)`,
+        [id, data.preset, data.title, JSON.stringify(data.manifest), data.creatorSlug || null]
       );
-      return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now };
+      return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug };
     } finally {
       client.release();
     }
@@ -1193,7 +1194,23 @@ export const pgStore: DataStore = {
       if (result.rows.length === 0) return null;
       const r = result.rows[0];
       const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt };
+      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
+    } finally {
+      client.release();
+    }
+  },
+
+  async updateGame(id, data) {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query(
+        `UPDATE games SET title = $1, manifest = $2 WHERE id = $3 RETURNING *`,
+        [data.title, JSON.stringify(data.manifest), id]
+      );
+      if (result.rows.length === 0) return null;
+      const r = result.rows[0];
+      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
     } finally {
       client.release();
     }
