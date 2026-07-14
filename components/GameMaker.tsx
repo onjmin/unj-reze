@@ -4736,10 +4736,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setIsPlaying(true);
   }, [restart]);
 
-  /** ゲームオーバーリザルトから「終了」（エディタへ戻る） */
   const handleGameOverExit = useCallback(() => {
-    restart();
-  }, [restart]);
+    if (playOnly) {
+      onClose();
+    } else {
+      restart();
+    }
+  }, [playOnly, restart, onClose]);
 
   // BGM
   useEffect(() => {
@@ -9571,9 +9574,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [, force] = useState(0);
   const setTouch = (key: keyof typeof touchRef.current, v: boolean) => { touchRef.current[key] = v; force(n => n + 1); };
 
-  // Canvas tap: select object (object tab) or paint tile (map tab)
   const handleCanvasAction = (e: React.MouseEvent | React.TouchEvent) => {
-    if (isPlaying) return;
+    if (isPlaying || playOnly) return;
     let clientX: number, clientY: number;
     if ('touches' in e && e.touches.length > 0) {
       clientX = e.touches[0].clientX; clientY = e.touches[0].clientY;
@@ -10244,49 +10246,51 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             )}
           </div>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
-          <button onClick={() => {
-            if (introOpen) {
-              enterEditFromIntro();
-              return;
-            }
-            if (isPlaying) {
-              resetSceneState();
-              invulnRef.current = 0;
-              bombInvulnRef.current = 0;
-              isPlayerDeadRef.current = false;
-              roundOverRef.current = false;
-              sceneTransRef.current = null;
-              sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
-              setBattle(null);
-              battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
-              const pp = engineRef.current.player;
-              const pw = gameData.player.w, ph = gameData.player.h;
-              setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
-              setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
-              // プレイ中にシーンを切り替えていた場合、editSceneIdx はその都度 activeSceneIdxRef に追従するが、
-              // エディタの作業バッファ（gameData.map/objects）は switchEditScene 経由でしか同期されないため、
-              // ここで同期しないまま次回プレイの flushSceneEdits() が走ると「今 editSceneIdx が指しているシーン」に
-              // 「実際には別シーン（最後に編集タブで開いていたシーン）の古い map/objects」を上書きしてしまい、
-              // 次回プレイでそのシーンのオブジェクト座標が丸ごと入れ替わってしまう。編集に戻る瞬間に必ず同期する。
-              if (gameData.scenes?.length) {
-                const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
-                const activeScene = gameData.scenes[activeIdx];
-                if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
-                  setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, overheadMap: activeScene.overheadMap ?? prev.overheadMap, objects: activeScene.objects }));
-                  setEditSceneIdx(activeIdx);
+          {!playOnly && (
+            <button onClick={() => {
+              if (introOpen) {
+                enterEditFromIntro();
+                return;
+              }
+              if (isPlaying) {
+                resetSceneState();
+                invulnRef.current = 0;
+                bombInvulnRef.current = 0;
+                isPlayerDeadRef.current = false;
+                roundOverRef.current = false;
+                sceneTransRef.current = null;
+                sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
+                setBattle(null);
+                battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
+                const pp = engineRef.current.player;
+                const pw = gameData.player.w, ph = gameData.player.h;
+                setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
+                setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+                // プレイ中にシーンを切り替えていた場合、editSceneIdx はその都度 activeSceneIdxRef に追従するが、
+                // エディタの作業バッファ（gameData.map/objects）は switchEditScene 経由でしか同期されないため、
+                // ここで同期しないまま次回プレイの flushSceneEdits() が走ると「今 editSceneIdx が指しているシーン」に
+                // 「実際には別シーン（最後に編集タブで開いていたシーン）の古い map/objects」を上書きしてしまい、
+                // 次回プレイでそのシーンのオブジェクト座標が丸ごと入れ替わってしまう。編集に戻る瞬間に必ず同期する。
+                if (gameData.scenes?.length) {
+                  const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
+                  const activeScene = gameData.scenes[activeIdx];
+                  if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
+                    setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, overheadMap: activeScene.overheadMap ?? prev.overheadMap, objects: activeScene.objects }));
+                    setEditSceneIdx(activeIdx);
+                  }
                 }
               }
-            }
-            if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
-            setActivePreviewKey(null);
-            flushSceneEdits();
-            if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
-            setIsPlaying(true);
-            justStartedRef.current = true;
-          }}
-            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
-            {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
-          </button>
+              if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
+              setActivePreviewKey(null);
+              flushSceneEdits();
+              if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
+              setIsPlaying(true);
+              justStartedRef.current = true;
+            }}
+              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
+              {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
+            </button>
+          )}
           {onSave && (
             <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
               <Save size={14} /><span className="hidden sm:inline">投稿に添付</span>
@@ -10367,7 +10371,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {gameData.titleScreen.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ (
                   <img src={gameData.titleScreen.bgUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
                 )}
-                {!embedded && (
+                {!embedded && !playOnly && (
                   <button onClick={() => setShowTitle(false)} className="absolute top-2 right-2 z-20 p-1.5 bg-black/50 text-white/80 hover:text-white"><X size={16} /></button>
                 )}
                 <div className="relative z-10 w-full h-full flex flex-col items-center justify-center gap-3 px-6 text-center select-none"
@@ -10408,7 +10412,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       <button onClick={() => { setShowEnding(false); setShowTitle(true); }}
                         className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">タイトルへ</button>
                     )}
-                    <button onClick={() => setShowEnding(false)}
+                    <button onClick={() => {
+                      setShowEnding(false);
+                      if (playOnly) {
+                        onClose();
+                      }
+                    }}
                       className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">とじる</button>
                   </div>
                 </div>
@@ -11857,10 +11866,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           {(isPlaying || playOnly || editModeType === 'move_place') ? (
             <div className="flex-1 flex flex-col p-4 select-none bg-[#0e0f14] min-h-[220px]">
-              {/* コントローラーのヘッダー情報 */}
               <div className="flex justify-between items-center px-1 mb-2 text-[9px] text-gray-500 font-pixel font-bold leading-none">
                 <span>SYSTEM: {gameData.engine.toUpperCase()} ENGINE</span>
-                <span>{isPlaying ? "MODE: PLAY" : `MODE: EDIT (${editSpeedMult}x)`}</span>
+                <span>{playOnly || isPlaying ? "MODE: PLAY" : `MODE: EDIT (${editSpeedMult}x)`}</span>
               </div>
 
               <div className="flex-1 flex items-center justify-center">

@@ -83,8 +83,14 @@ function ensureTableMigrations(d: SqlJsDatabase) {
     preset TEXT NOT NULL,
     title TEXT NOT NULL,
     manifest TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    creator_slug TEXT
   )`);
+  const gameCols = d.exec("PRAGMA table_info(games)");
+  const gameColNames = gameCols.length > 0 ? gameCols[0].values.map((v: any) => v[1]) : [];
+  if (!gameColNames.includes('creator_slug')) {
+    d.run("ALTER TABLE games ADD COLUMN creator_slug TEXT");
+  }
   d.run(`CREATE TABLE IF NOT EXISTS game_schedule (
     hour_slot TEXT PRIMARY KEY,
     game_id INTEGER NOT NULL
