@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Search, Play, Pause, Check } from 'lucide-react';
 import { api } from '@/lib/api';
 import { OshiItem, OshiItemKind } from '@/lib/types';
+import { applyMasterVolume, subscribeMasterVolume, subscribeMuted } from '@/lib/master-volume';
 
 interface MusicShareModalProps {
   userSlug: string;
@@ -86,6 +87,16 @@ export default function MusicShareModal({ userSlug, oshiItems, onAdd, onRemove, 
 
   useEffect(() => () => { audioRef.current?.pause(); }, []);
 
+  // マスター音量/ミュートの変更を再生中のプレビューへ即時反映する。
+  useEffect(() => {
+    const applyVolume = () => {
+      if (audioRef.current) audioRef.current.volume = applyMasterVolume(100) / 100;
+    };
+    const unsubVolume = subscribeMasterVolume(applyVolume);
+    const unsubMuted = subscribeMuted(applyVolume);
+    return () => { unsubVolume(); unsubMuted(); };
+  }, []);
+
   const togglePreview = (url?: string) => {
     if (!url) return;
     if (playingUrl === url) {
@@ -95,6 +106,7 @@ export default function MusicShareModal({ userSlug, oshiItems, onAdd, onRemove, 
     }
     audioRef.current?.pause();
     const audio = new Audio(url);
+    audio.volume = applyMasterVolume(100) / 100;
     audio.play().catch(() => {});
     audio.onended = () => setPlayingUrl(null);
     audioRef.current = audio;

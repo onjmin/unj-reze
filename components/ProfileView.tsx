@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Post, OshiItem } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, Upload, X, Loader2, Music2, Pencil } from 'lucide-react';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
@@ -53,14 +53,15 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const [bio, setBio] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editAvatar, setEditAvatar] = useState<string | null>(null);
   const [editBio, setEditBio] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [isAvatarSaving, setIsAvatarSaving] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [oshiItems, setOshiItems] = useState<OshiItem[]>([]);
   const [isMusicModalOpen, setIsMusicModalOpen] = useState(false);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
 
   const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
   const isSelf = currentUserId === userId;
@@ -70,12 +71,10 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
 
   useEffect(() => {
     if (isEditModalOpen) {
-      setEditName(avatarInfo.username);
-      setEditAvatar(avatarUrl || null);
       setEditBio(bio);
       setEditError(null);
     }
-  }, [isEditModalOpen, avatarInfo.username, avatarUrl, bio]);
+  }, [isEditModalOpen, bio]);
 
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -83,49 +82,46 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setEditError('画像ファイルを選択してください');
+      setAvatarError('画像ファイルを選択してください');
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      setEditError(null);
+      setAvatarError(null);
       setCropSrc(event.target?.result as string);
     };
     reader.onerror = () => {
-      setEditError('画像の読み込みに失敗しました');
+      setAvatarError('画像の読み込みに失敗しました');
     };
     reader.readAsDataURL(file);
   };
 
-  const handleCropConfirm = (dataUrl: string) => {
-    setEditAvatar(dataUrl);
+  const handleCropConfirm = async (dataUrl: string) => {
     setCropSrc(null);
+    setIsAvatarSaving(true);
+    setAvatarError(null);
+    const previousAvatarUrl = avatarUrl;
+    setAvatarUrl(dataUrl);
+    try {
+      const res = await api.upload.image({ image: dataUrl });
+      await api.auth.updateDisplayName(currentUserId || userId, avatarInfo.username, res.url);
+      setAvatarUrl(res.url);
+      onProfileUpdate?.(avatarInfo.username, res.url);
+    } catch (err: any) {
+      setAvatarUrl(previousAvatarUrl);
+      setAvatarError(err.message || 'アイコンの保存に失敗しました');
+    } finally {
+      setIsAvatarSaving(false);
+    }
   };
 
-  const handleSaveProfile = async () => {
-    if (!editName.trim()) {
-      setEditError('ユーザー名を入力してください');
-      return;
-    }
+  const handleSaveBio = async () => {
     setIsSaving(true);
     setEditError(null);
     try {
-      let finalAvatarUrl = avatarUrl;
-      if (editAvatar === null) {
-        finalAvatarUrl = '';
-      } else if (editAvatar.startsWith('data:')) {
-        const res = await api.upload.image({ image: editAvatar });
-        finalAvatarUrl = res.url;
-      }
-
-      await api.auth.updateDisplayName(currentUserId || userId, editName, finalAvatarUrl || undefined, editBio.trim());
-
-      setAvatarUrl(finalAvatarUrl || undefined);
+      await api.auth.updateDisplayName(currentUserId || userId, avatarInfo.username, undefined, editBio.trim());
       setBio(editBio.trim());
-      if (onProfileUpdate) {
-        onProfileUpdate(editName, finalAvatarUrl || undefined);
-      }
       setIsEditModalOpen(false);
     } catch (err: any) {
       setEditError(err.message || '保存に失敗しました');
@@ -235,8 +231,8 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
         <div className="flex items-start space-x-3.5 mb-3">
           <div className="relative shrink-0">
             <div
-              onClick={isSelf ? () => setIsEditModalOpen(true) : undefined}
-              className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 overflow-hidden ${isSelf ? 'cursor-pointer' : ''}`}
+              onClick={isSelf ? () => avatarFileInputRef.current?.click() : undefined}
+              className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 overflow-hidden ${isSelf ? 'cursor-pointer' : ''} ${isAvatarSaving ? 'opacity-50' : ''}`}
               style={avatarUrl ? undefined : avatarInfo.style}
             >
               {avatarUrl ? (
@@ -249,13 +245,23 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
               )}
             </div>
             {isSelf && (
-              <button
-                onClick={() => setIsEditModalOpen(true)}
-                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-600 border-2 border-[#0b0e14] flex items-center justify-center text-white hover:bg-blue-500 transition-colors"
-                aria-label="プロフィール画像を編集"
-              >
-                <Pencil size={10} />
-              </button>
+              <>
+                <button
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  disabled={isAvatarSaving}
+                  className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-600 border-2 border-[#0b0e14] flex items-center justify-center text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+                  aria-label="プロフィール画像を編集"
+                >
+                  {isAvatarSaving ? <Loader2 size={10} className="animate-spin" /> : <Pencil size={10} />}
+                </button>
+                <input
+                  ref={avatarFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarFileChange}
+                  className="hidden"
+                />
+              </>
             )}
           </div>
           <div className="flex-1 min-w-0">
@@ -265,6 +271,9 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
             <p className="text-xs text-gray-400 leading-relaxed mt-2 whitespace-pre-wrap">
               {bio || (isSelf ? '自己紹介を追加してみましょう' : '')}
             </p>
+            {avatarError && (
+              <p className="text-[10px] text-red-400 mt-1">{avatarError}</p>
+            )}
           </div>
         </div>
         <div className="flex space-x-4 text-xs mt-0.5">
@@ -308,8 +317,9 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
               {isSelf && (
                 <button
                   onClick={() => setIsMusicModalOpen(true)}
-                  className="text-[10px] text-gray-500 hover:text-white transition-colors"
+                  className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-pink-600 text-white hover:bg-pink-500 transition-colors flex items-center gap-1"
                 >
+                  <Pencil size={10} />
                   編集
                 </button>
               )}
@@ -534,59 +544,8 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                 <X size={16} />
               </button>
             </div>
-            
+
             <div className="p-5 flex flex-col items-center space-y-4">
-              {/* Avatar upload & crop container */}
-              <div className="relative group">
-                <div
-                  className="w-20 h-20 rounded-full flex items-center justify-center font-bold text-2xl text-white border border-gray-700 overflow-hidden relative"
-                  style={editAvatar ? undefined : avatarInfo.style}
-                >
-                  {editAvatar ? (
-                    <img src={editAvatar} alt="preview" className="w-full h-full object-cover" />
-                  ) : (
-                    (() => {
-                      const AvatarIcon = avatarInfo.Icon;
-                      return <AvatarIcon className="w-12 h-12 text-white/40" />;
-                    })()
-                  )}
-                </div>
-                
-                {/* Upload overlay */}
-                <label className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity text-[10px] text-gray-300 font-bold gap-1 select-none">
-                  <Upload size={14} />
-                  <span>変更</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarFileChange}
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              {editAvatar && (
-                <button
-                  onClick={() => setEditAvatar(null)}
-                  className="text-[10px] text-red-400 hover:text-red-300 hover:underline transition-colors"
-                >
-                  アイコンを削除
-                </button>
-              )}
-
-              {/* Username Input */}
-              <div className="w-full flex flex-col space-y-1.5">
-                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">ユーザー名</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  maxLength={15}
-                  className="w-full bg-gray-950 border border-gray-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-600 outline-none transition-all"
-                  placeholder="ユーザー名を入力"
-                />
-              </div>
-
               {/* Bio Textarea */}
               <div className="w-full flex flex-col space-y-1.5">
                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">自己紹介</label>
@@ -595,6 +554,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                   onChange={(e) => setEditBio(e.target.value)}
                   maxLength={140}
                   rows={3}
+                  autoFocus
                   className="w-full bg-gray-950 border border-gray-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-600 outline-none transition-all resize-none"
                   placeholder="自己紹介を入力（140文字まで）"
                 />
@@ -617,7 +577,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                 キャンセル
               </button>
               <button
-                onClick={handleSaveProfile}
+                onClick={handleSaveBio}
                 disabled={isSaving}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-900/10 flex items-center space-x-1.5 disabled:opacity-50"
               >

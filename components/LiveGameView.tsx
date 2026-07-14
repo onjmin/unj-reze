@@ -34,6 +34,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
   const syncRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [danmakuComments, setDanmakuComments] = useState<string[]>([]);
   const commentLastIdRef = useRef(0);
+  const commentBaselineSetRef = useRef(false);
 
   // 残り時間カウントダウン
   useEffect(() => {
@@ -91,6 +92,12 @@ export default function LiveGameView({ userId, sessionId }: Props) {
           const res = await fetch(`/api/posts/${postId}/replies`);
           if (res.ok) {
             const replies: { id: string; displayName: string; content: string }[] = await res.json();
+            if (!commentBaselineSetRef.current) {
+              // ゲーム開始前に存在した返信は流れるコメントとして表示しない
+              commentBaselineSetRef.current = true;
+              commentLastIdRef.current = replies.reduce((max, r) => Math.max(max, decodeId(r.id) || 0), 0);
+              return;
+            }
             const newOnes = replies.filter(r => (decodeId(r.id) || 0) > commentLastIdRef.current);
             if (newOnes.length > 0) {
               commentLastIdRef.current = Math.max(...newOnes.map(r => decodeId(r.id) || 0));
