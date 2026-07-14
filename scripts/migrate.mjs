@@ -32,6 +32,32 @@ const migrations = [
     sql: `
       ALTER TABLE games ADD COLUMN IF NOT EXISTS creator_slug TEXT;
     `
+  },
+  {
+    name: '04_add_bio_to_users',
+    sql: `
+      ALTER TABLE anonymous_users ADD COLUMN IF NOT EXISTS bio TEXT;
+    `
+  },
+  {
+    name: '05_create_oshi_items',
+    sql: `
+      CREATE TABLE IF NOT EXISTS oshi_items (
+        id BIGINT PRIMARY KEY,
+        user_slug TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        track_id BIGINT,
+        collection_id BIGINT,
+        artist_id BIGINT,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        artwork_url TEXT,
+        view_url TEXT,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_oshi_items_user_slug ON oshi_items(user_slug);
+    `
   }
 ];
 

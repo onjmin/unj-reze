@@ -1,6 +1,6 @@
 import Sqids from 'sqids';
-import type { Post as ApiPost, GameRecord as ApiGame, Notification as ApiNotification } from './types';
-import type { DbPost, DbGameRecord, DbNotification } from './types-db';
+import type { Post as ApiPost, GameRecord as ApiGame, Notification as ApiNotification, OshiItem as ApiOshiItem } from './types';
+import type { DbPost, DbGameRecord, DbNotification, DbOshiItem } from './types-db';
 
 const sqids = new Sqids({
   alphabet: 'FsaJLNPRTVXZbdfhjklnpqrtvwxyz8u64o20mYWGUSQOMKIECAegicBDH31975',
@@ -53,6 +53,21 @@ export function encodeGame(game: DbGameRecord): ApiGame {
     ...game,
     id: encodeId(game.id),
   } as ApiGame;
+}
+
+export function encodeOshiItem(item: DbOshiItem): ApiOshiItem {
+  return {
+    id: encodeId(item.id),
+    kind: item.kind,
+    trackId: item.trackId,
+    collectionId: item.collectionId,
+    artistId: item.artistId,
+    title: item.title,
+    subtitle: item.subtitle,
+    artworkUrl: item.artworkUrl,
+    viewUrl: item.viewUrl,
+    position: item.position,
+  };
 }
 
 export function encodeNotification(notification: DbNotification): ApiNotification {

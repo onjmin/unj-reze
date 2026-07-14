@@ -1,6 +1,6 @@
 import { Pool as NeonPool, neonConfig } from '@neondatabase/serverless';
 import { AnonymousUser, OriginType } from '../types';
-import { DbPost as Post, DbNotification as Notification } from '../types-db';
+import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -44,6 +44,25 @@ function getPool(): any {
     pool = new NeonPool({ connectionString });
   }
   return pool;
+}
+
+function rowToOshiItemPg(row: any): DbOshiItem {
+  const createdAt = typeof row.created_at === 'object' && row.created_at?.toISOString
+    ? row.created_at.toISOString() : String(row.created_at);
+  return {
+    id: row.id,
+    userSlug: row.user_slug,
+    kind: row.kind,
+    trackId: row.track_id ?? undefined,
+    collectionId: row.collection_id ?? undefined,
+    artistId: row.artist_id ?? undefined,
+    title: row.title,
+    subtitle: row.subtitle ?? undefined,
+    artworkUrl: row.artwork_url ?? undefined,
+    viewUrl: row.view_url ?? undefined,
+    position: row.position,
+    createdAt,
+  };
 }
 
 async function rowToPost(row: any): Promise<Post> {
@@ -689,6 +708,53 @@ export const pgStore: DataStore = {
     }
   },
 
+  async getUserBio(slug: string) {
+    const client = await getPool().connect();
+    try {
+      const r = await client.query('SELECT bio FROM anonymous_users WHERE slug = $1 LIMIT 1', [slug]);
+      return r.rows.length > 0 ? r.rows[0].bio || undefined : undefined;
+    } finally {
+      client.release();
+    }
+  },
+
+  async listOshiItems(userSlug: string) {
+    const client = await getPool().connect();
+    try {
+      const r = await client.query('SELECT * FROM oshi_items WHERE user_slug = $1 ORDER BY position ASC, id ASC', [userSlug]);
+      return r.rows.map(rowToOshiItemPg);
+    } finally {
+      client.release();
+    }
+  },
+
+  async addOshiItem(userSlug: string, data) {
+    const client = await getPool().connect();
+    try {
+      const id = Date.now() + Math.floor(Math.random() * 1000);
+      const posRes = await client.query('SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM oshi_items WHERE user_slug = $1', [userSlug]);
+      const position = posRes.rows[0].next_pos;
+      const result = await client.query(
+        `INSERT INTO oshi_items (id, user_slug, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, position, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+         RETURNING *`,
+        [id, userSlug, data.kind, data.trackId ?? null, data.collectionId ?? null, data.artistId ?? null, data.title, data.subtitle ?? null, data.artworkUrl ?? null, data.viewUrl ?? null, position]
+      );
+      return rowToOshiItemPg(result.rows[0]);
+    } finally {
+      client.release();
+    }
+  },
+
+  async removeOshiItem(userSlug: string, id: number) {
+    const client = await getPool().connect();
+    try {
+      await client.query('DELETE FROM oshi_items WHERE id = $1 AND user_slug = $2', [id, userSlug]);
+    } finally {
+      client.release();
+    }
+  },
+
   async getNotifications(userId?: string) {
     const client = await getPool().connect();
     try {
@@ -907,6 +973,7 @@ export const pgStore: DataStore = {
           slug: row.slug,
           avatarColor: row.avatar_color,
           avatarUrl: row.avatar_url ?? undefined,
+          bio: row.bio ?? undefined,
           createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
             ? row.created_at.toISOString() : String(row.created_at),
         } as AnonymousUser;
@@ -928,6 +995,7 @@ export const pgStore: DataStore = {
           slug: row.slug,
           avatarColor: row.avatar_color,
           avatarUrl: row.avatar_url ?? undefined,
+          bio: row.bio ?? undefined,
           createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
             ? row.created_at.toISOString() : String(row.created_at),
         } as AnonymousUser;
@@ -957,24 +1025,25 @@ export const pgStore: DataStore = {
     }
   },
 
-  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string) {
+  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
     const client = await getPool().connect();
     try {
       const userRes = await client.query('SELECT slug FROM anonymous_users WHERE id = $1', [userId]);
       const oldSlug = userRes.rows.length > 0 ? userRes.rows[0].slug : null;
 
       const slug = deriveSlugPg(displayName);
+      const sets = ['display_name = $1', 'slug = $2'];
+      const values: unknown[] = [displayName, slug];
       if (avatarUrl !== undefined) {
-        await client.query(
-          'UPDATE anonymous_users SET display_name = $1, slug = $2, avatar_url = $3 WHERE id = $4',
-          [displayName, slug, avatarUrl, userId]
-        );
-      } else {
-        await client.query(
-          'UPDATE anonymous_users SET display_name = $1, slug = $2 WHERE id = $3',
-          [displayName, slug, userId]
-        );
+        sets.push(`avatar_url = $${values.length + 1}`);
+        values.push(avatarUrl);
       }
+      if (bio !== undefined) {
+        sets.push(`bio = $${values.length + 1}`);
+        values.push(bio);
+      }
+      values.push(userId);
+      await client.query(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = $${values.length}`, values);
 
       if (oldSlug) {
         await client.query(

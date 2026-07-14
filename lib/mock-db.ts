@@ -1,5 +1,5 @@
 import { AnonymousUser, OriginType } from './types';
-import { DbPost as Post, DbNotification as Notification } from './types-db';
+import { DbPost as Post, DbNotification as Notification, DbOshiItem } from './types-db';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
 import { cleanContentForTrends, isValidTrendKeyword } from './mml';
@@ -87,7 +87,8 @@ class MockDB {
   private votes: Map<string, 'like' | 'dislike'> = new Map();
   private heartCounts: Map<number, number> = new Map();
   private heartEntries: { postId: number; userId: string }[] = [];
-  private anonUserData: Map<string, { id: string; ipAddress: string; sessionId: string; displayName: string; slug: string; avatarColor: string; avatarUrl?: string; createdAt: string; lastSeenAt: string }> = new Map();
+  private anonUserData: Map<string, { id: string; ipAddress: string; sessionId: string; displayName: string; slug: string; avatarColor: string; avatarUrl?: string; bio?: string; createdAt: string; lastSeenAt: string }> = new Map();
+  private oshiItems: DbOshiItem[] = [];
   private ipToUser: Map<string, string> = new Map();
   private sessionToUser: Map<string, string> = new Map();
   private follows: { followerId: string; followedId: string }[] = [];
@@ -150,12 +151,42 @@ class MockDB {
     return user?.avatarUrl;
   }
 
+  getUserBio(slug: string): string | undefined {
+    const user = this.getUserInfoBySlug(slug);
+    return user?.bio;
+  }
+
+  listOshiItems(userSlug: string): DbOshiItem[] {
+    return this.oshiItems.filter(o => o.userSlug === userSlug).sort((a, b) => a.position - b.position);
+  }
+
+  addOshiItem(userSlug: string, data: {
+    kind: DbOshiItem['kind'];
+    trackId?: number;
+    collectionId?: number;
+    artistId?: number;
+    title: string;
+    subtitle?: string;
+    artworkUrl?: string;
+    viewUrl?: string;
+  }): DbOshiItem {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const position = this.oshiItems.filter(o => o.userSlug === userSlug).length;
+    const item: DbOshiItem = { id, userSlug, position, createdAt: this.now(), ...data };
+    this.oshiItems.push(item);
+    return item;
+  }
+
+  removeOshiItem(userSlug: string, id: number): void {
+    this.oshiItems = this.oshiItems.filter(o => !(o.id === id && o.userSlug === userSlug));
+  }
+
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): AnonymousUser {
     const existingBySession = this.sessionToUser.get(sessionId);
     if (existingBySession) {
       const stored = this.anonUserData.get(existingBySession)!;
       stored.lastSeenAt = this.now();
-      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, createdAt: stored.createdAt };
+      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, bio: stored.bio, createdAt: stored.createdAt };
     }
 
     const existingByIp = this.ipToUser.get(ipAddress);
@@ -163,7 +194,7 @@ class MockDB {
       const stored = this.anonUserData.get(existingByIp)!;
       this.sessionToUser.set(sessionId, stored.id);
       stored.lastSeenAt = this.now();
-      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, createdAt: stored.createdAt };
+      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, bio: stored.bio, createdAt: stored.createdAt };
     }
 
     const id = this.generateId();
@@ -178,7 +209,7 @@ class MockDB {
     return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt };
   }
 
-  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string): void {
+  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string): void {
     const stored = this.anonUserData.get(userId);
     if (stored) {
       const oldSlug = stored.slug;
@@ -186,6 +217,9 @@ class MockDB {
       stored.slug = generateSlug(displayName);
       if (avatarUrl !== undefined) {
         stored.avatarUrl = avatarUrl;
+      }
+      if (bio !== undefined) {
+        stored.bio = bio;
       }
 
       // Propagate changes to posts written by this user in memory

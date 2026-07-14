@@ -1,7 +1,7 @@
 import type { Database as SqlJsDatabase } from 'sql.js';
 import { INIT_SQL } from './init-sql';
 import { AnonymousUser, OriginType } from '../types';
-import { DbPost as Post, DbNotification as Notification } from '../types-db';
+import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
@@ -72,6 +72,9 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   const userColNames = userCols.length > 0 ? userCols[0].values.map((v: any) => v[1]) : [];
   if (!userColNames.includes('avatar_url')) {
     d.run("ALTER TABLE anonymous_users ADD COLUMN avatar_url TEXT");
+  }
+  if (!userColNames.includes('bio')) {
+    d.run("ALTER TABLE anonymous_users ADD COLUMN bio TEXT");
   }
   const msgCols = d.exec("PRAGMA table_info(messages)");
   const msgColNames = msgCols.length > 0 ? msgCols[0].values.map((v: any) => v[1]) : [];
@@ -162,6 +165,20 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!auColNames.includes('hide_from_search')) d.run("ALTER TABLE anonymous_users ADD COLUMN hide_from_search INTEGER NOT NULL DEFAULT 0");
   if (!auColNames.includes('hide_reactions')) d.run("ALTER TABLE anonymous_users ADD COLUMN hide_reactions INTEGER NOT NULL DEFAULT 0");
   if (!colNames.includes('read')) d.run("ALTER TABLE notifications ADD COLUMN read INTEGER NOT NULL DEFAULT 0");
+  d.run(`CREATE TABLE IF NOT EXISTS oshi_items (
+    id INTEGER PRIMARY KEY,
+    user_slug TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    track_id INTEGER,
+    collection_id INTEGER,
+    artist_id INTEGER,
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    artwork_url TEXT,
+    view_url TEXT,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
 }
 
 function snippetSqlite(text: string): string {
@@ -205,6 +222,23 @@ function getHiddenSlugsSqlite(d: SqlJsDatabase, userId?: string): Set<string> {
 
 function saveDb() {
   // インメモリSQLモックのため、物理ファイルへの保存は行いません。
+}
+
+function rowToOshiItemSqlite(row: any): DbOshiItem {
+  return {
+    id: row.id,
+    userSlug: row.user_slug,
+    kind: row.kind,
+    trackId: row.track_id ?? undefined,
+    collectionId: row.collection_id ?? undefined,
+    artistId: row.artist_id ?? undefined,
+    title: row.title,
+    subtitle: row.subtitle ?? undefined,
+    artworkUrl: row.artwork_url ?? undefined,
+    viewUrl: row.view_url ?? undefined,
+    position: row.position,
+    createdAt: row.created_at,
+  };
 }
 
 function rowToPost(row: any): Post {
@@ -713,6 +747,40 @@ export const sqliteStore: DataStore = {
     return rows.length > 0 ? rows[0].avatar_url || undefined : undefined;
   },
 
+  async getUserBio(slug: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT bio FROM anonymous_users WHERE slug = ? LIMIT 1', [slug]);
+    return rows.length > 0 ? rows[0].bio || undefined : undefined;
+  },
+
+  async listOshiItems(userSlug: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM oshi_items WHERE user_slug = ? ORDER BY position ASC, id ASC', [userSlug]);
+    return rows.map(rowToOshiItemSqlite);
+  },
+
+  async addOshiItem(userSlug: string, data) {
+    const d = await getDb();
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const posRows = rowsToObjects(d, 'SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM oshi_items WHERE user_slug = ?', [userSlug]);
+    const position = posRows[0].next_pos;
+    const now = new Date().toISOString();
+    d.run(
+      `INSERT INTO oshi_items (id, user_slug, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, position, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, userSlug, data.kind, data.trackId ?? null, data.collectionId ?? null, data.artistId ?? null, data.title, data.subtitle ?? null, data.artworkUrl ?? null, data.viewUrl ?? null, position, now]
+    );
+    saveDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM oshi_items WHERE id = ?', [id]);
+    return rowToOshiItemSqlite(rows[0]);
+  },
+
+  async removeOshiItem(userSlug: string, id: number) {
+    const d = await getDb();
+    d.run('DELETE FROM oshi_items WHERE id = ? AND user_slug = ?', [id, userSlug]);
+    saveDb();
+  },
+
   async getNotifications(userId?: string) {
     const d = await getDb();
     let rows;
@@ -854,6 +922,7 @@ export const sqliteStore: DataStore = {
         slug: row.slug,
         avatarColor: row.avatar_color,
         avatarUrl: row.avatar_url ?? undefined,
+        bio: row.bio ?? undefined,
         createdAt: row.created_at,
       } as AnonymousUser;
     }
@@ -876,6 +945,7 @@ export const sqliteStore: DataStore = {
         slug: row.slug,
         avatarColor: row.avatar_color,
         avatarUrl: row.avatar_url ?? undefined,
+        bio: row.bio ?? undefined,
         createdAt: row.created_at,
       } as AnonymousUser;
     }
@@ -896,23 +966,24 @@ export const sqliteStore: DataStore = {
     return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt: now } as AnonymousUser;
   },
 
-  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string) {
+  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
     const d = await getDb();
     const userRows = rowsToObjects(d, 'SELECT slug FROM anonymous_users WHERE id = ?', [userId]);
     const oldSlug = userRows.length > 0 ? userRows[0].slug : null;
 
     const slug = deriveSlugSqlite(displayName);
+    const sets: string[] = ['display_name = ?', 'slug = ?'];
+    const values: (string | number)[] = [displayName, slug];
     if (avatarUrl !== undefined) {
-      d.run(
-        'UPDATE anonymous_users SET display_name = ?, slug = ?, avatar_url = ? WHERE id = ?',
-        [displayName, slug, avatarUrl, userId]
-      );
-    } else {
-      d.run(
-        'UPDATE anonymous_users SET display_name = ?, slug = ? WHERE id = ?',
-        [displayName, slug, userId]
-      );
+      sets.push('avatar_url = ?');
+      values.push(avatarUrl);
     }
+    if (bio !== undefined) {
+      sets.push('bio = ?');
+      values.push(bio);
+    }
+    values.push(userId);
+    d.run(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = ?`, values);
 
     if (oldSlug) {
       d.run(

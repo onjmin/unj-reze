@@ -3,6 +3,8 @@ import { OriginType } from '../types';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, ReportParams } from './interface';
 import type { DbGameRecord } from '../types-db';
 
+
+
 const gameStore = new Map<number, DbGameRecord>();
 
 export const mockStore: DataStore = {
@@ -118,12 +120,28 @@ export const mockStore: DataStore = {
     return mockDb.getOrCreateAnonymousUser(sessionId, ipAddress);
   },
 
-  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string) {
-    return mockDb.updateUserDisplayName(userId, displayName, avatarUrl);
+  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
+    return mockDb.updateUserDisplayName(userId, displayName, avatarUrl, bio);
   },
 
   async getUserAvatarUrl(slug: string) {
     return mockDb.getUserAvatarUrl(slug);
+  },
+
+  async getUserBio(slug: string) {
+    return mockDb.getUserBio(slug);
+  },
+
+  async listOshiItems(userSlug: string) {
+    return mockDb.listOshiItems(userSlug);
+  },
+
+  async addOshiItem(userSlug: string, data) {
+    return mockDb.addOshiItem(userSlug, data);
+  },
+
+  async removeOshiItem(userSlug: string, id: number) {
+    return mockDb.removeOshiItem(userSlug, id);
   },
 
   async getUserSettings(slug: string) {

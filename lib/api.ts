@@ -1,7 +1,7 @@
-import { Post, AnonymousUser, OriginType, Notification } from './types';
+import { Post, AnonymousUser, OriginType, Notification, OshiItem, OshiItemKind } from './types';
 import { db as mockDbInstance } from './mock-db';
 import type { Message, Trend } from './mock-db';
-import { decodeIdOrThrow, encodePost, encodeNotification, encodeId } from './sqids';
+import { decodeIdOrThrow, encodePost, encodeNotification, encodeId, encodeOshiItem } from './sqids';
 
 const BASE = '/api';
 const useStaticMockData = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' || process.env.GITHUB_ACTIONS === 'true';
@@ -23,8 +23,8 @@ const staticApi = {
     anonymous: async (sessionId: string, _ipAddress?: string) => {
       return mockDbInstance.getOrCreateAnonymousUser(sessionId, _ipAddress || '127.0.0.1');
     },
-    updateDisplayName: async (userId: string, displayName: string, avatarUrl?: string) => {
-      mockDbInstance.updateUserDisplayName(userId, displayName, avatarUrl);
+    updateDisplayName: async (userId: string, displayName: string, avatarUrl?: string, bio?: string) => {
+      mockDbInstance.updateUserDisplayName(userId, displayName, avatarUrl, bio);
     },
     getSettings: async (slug: string) => mockDbInstance.getUserSettings(slug),
     updateSettings: async (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) => {
@@ -167,7 +167,26 @@ const staticApi = {
       }
       const displayName = mockDbInstance.getUserDisplayName(id) || id;
       const avatarUrl = mockDbInstance.getUserAvatarUrl(id);
-      return { id, displayName, avatarUrl, posts, postCount: posts.length };
+      const bio = mockDbInstance.getUserBio(id);
+      return { id, displayName, avatarUrl, bio, posts, postCount: posts.length };
+    },
+  },
+  oshi: {
+    list: async (userSlug: string) => mockDbInstance.listOshiItems(userSlug).map(encodeOshiItem),
+    add: async (userSlug: string, item: {
+      kind: OshiItemKind; trackId?: number; collectionId?: number; artistId?: number;
+      title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string;
+    }) => encodeOshiItem(mockDbInstance.addOshiItem(userSlug, item)),
+    remove: async (userSlug: string, id: string) => {
+      mockDbInstance.removeOshiItem(userSlug, decodeIdOrThrow(id));
+      return { success: true };
+    },
+  },
+  music: {
+    search: async (term: string, entity: 'song' | 'album' | 'musicArtist') => {
+      const params = new URLSearchParams({ term, entity, limit: '25', country: 'jp' });
+      const res = await fetch(`https://itunes.apple.com/search?${params.toString()}`);
+      return res.json();
     },
   },
   follow: {
@@ -197,8 +216,8 @@ const liveApi = {
       const qs = `?sessionId=${encodeURIComponent(sessionId)}`;
       return fetcher<AnonymousUser>(`/auth/anonymous${qs}`);
     },
-    updateDisplayName: (userId: string, displayName: string, avatarUrl?: string) =>
-      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName, avatarUrl }) }),
+    updateDisplayName: (userId: string, displayName: string, avatarUrl?: string, bio?: string) =>
+      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName, avatarUrl, bio }) }),
     getSettings: (slug: string) => fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>(`/auth/settings?slug=${encodeURIComponent(slug)}`),
     updateSettings: (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) =>
       fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>('/auth/settings', { method: 'PUT', body: JSON.stringify({ slug, settings }) }),
@@ -285,8 +304,20 @@ const liveApi = {
       if (userId) params.set('userId', userId);
       if (tab) params.set('tab', tab);
       const qs = params.toString() ? `?${params.toString()}` : '';
-      return fetcher<{ id: string; displayName: string; avatarUrl?: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}${qs}`);
+      return fetcher<{ id: string; displayName: string; avatarUrl?: string; bio?: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}${qs}`);
     },
+  },
+  oshi: {
+    list: (userSlug: string) => fetcher<OshiItem[]>(`/oshi?slug=${encodeURIComponent(userSlug)}`),
+    add: (userSlug: string, item: {
+      kind: OshiItemKind; trackId?: number; collectionId?: number; artistId?: number;
+      title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string;
+    }) => fetcher<OshiItem>('/oshi', { method: 'POST', body: JSON.stringify({ userSlug, ...item }) }),
+    remove: (userSlug: string, id: string) => fetcher<{ success: boolean }>(`/oshi/${id}`, { method: 'DELETE', body: JSON.stringify({ userSlug }) }),
+  },
+  music: {
+    search: (term: string, entity: 'song' | 'album' | 'musicArtist') =>
+      fetcher<{ resultCount: number; results: any[] }>(`/music/search?term=${encodeURIComponent(term)}&entity=${entity}`),
   },
   follow: {
     getCounts: (userId: string) => fetcher<{ followers: number; following: number }>(`/follow?userId=${encodeURIComponent(userId)}`),

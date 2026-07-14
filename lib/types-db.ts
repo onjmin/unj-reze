@@ -1,5 +1,5 @@
 import type { GameManifestDraft } from '@/components/GameMaker';
-import type { OriginType } from './types';
+import type { OriginType, OshiItemKind } from './types';
 
 export interface DbPost {
   id: number;
@@ -41,6 +41,21 @@ export interface DbGameRecord {
   manifest: GameManifestDraft;
   createdAt: string;
   creatorSlug?: string;
+}
+
+export interface DbOshiItem {
+  id: number;
+  userSlug: string;
+  kind: OshiItemKind;
+  trackId?: number;
+  collectionId?: number;
+  artistId?: number;
+  title: string;
+  subtitle?: string;
+  artworkUrl?: string;
+  viewUrl?: string;
+  position: number;
+  createdAt: string;
 }
 
 export interface DbNotification {

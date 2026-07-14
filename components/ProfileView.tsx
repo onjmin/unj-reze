@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Post } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, Upload, X, Loader2 } from 'lucide-react';
+import { Post, OshiItem } from '@/lib/types';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, Upload, X, Loader2, Music2, Pencil } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
@@ -14,6 +14,8 @@ import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
+const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false });
+const MusicShareModal = dynamic(() => import('./MusicShareModal'), { ssr: false });
 
 interface ProfileViewProps {
   userId: string;
@@ -49,11 +51,16 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
   const [isFollow, setIsFollow] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [bio, setBio] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editAvatar, setEditAvatar] = useState<string | null>(null);
+  const [editBio, setEditBio] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [oshiItems, setOshiItems] = useState<OshiItem[]>([]);
+  const [isMusicModalOpen, setIsMusicModalOpen] = useState(false);
 
   const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
   const isSelf = currentUserId === userId;
@@ -65,12 +72,14 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     if (isEditModalOpen) {
       setEditName(avatarInfo.username);
       setEditAvatar(avatarUrl || null);
+      setEditBio(bio);
       setEditError(null);
     }
-  }, [isEditModalOpen, avatarInfo.username, avatarUrl]);
+  }, [isEditModalOpen, avatarInfo.username, avatarUrl, bio]);
 
   const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
@@ -80,34 +89,18 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      const img = new window.Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          setEditError('画像処理に失敗しました');
-          return;
-        }
-
-        const size = 128;
-        canvas.width = size;
-        canvas.height = size;
-
-        const minDim = Math.min(img.width, img.height);
-        const sx = (img.width - minDim) / 2;
-        const sy = (img.height - minDim) / 2;
-        
-        ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
-        
-        const base64Data = canvas.toDataURL('image/png');
-        setEditAvatar(base64Data);
-      };
-      img.onerror = () => {
-        setEditError('画像の読み込みに失敗しました');
-      };
-      img.src = event.target?.result as string;
+      setEditError(null);
+      setCropSrc(event.target?.result as string);
+    };
+    reader.onerror = () => {
+      setEditError('画像の読み込みに失敗しました');
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleCropConfirm = (dataUrl: string) => {
+    setEditAvatar(dataUrl);
+    setCropSrc(null);
   };
 
   const handleSaveProfile = async () => {
@@ -126,9 +119,10 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
         finalAvatarUrl = res.url;
       }
 
-      await api.auth.updateDisplayName(currentUserId || userId, editName, finalAvatarUrl || undefined);
-      
+      await api.auth.updateDisplayName(currentUserId || userId, editName, finalAvatarUrl || undefined, editBio.trim());
+
       setAvatarUrl(finalAvatarUrl || undefined);
+      setBio(editBio.trim());
       if (onProfileUpdate) {
         onProfileUpdate(editName, finalAvatarUrl || undefined);
       }
@@ -145,13 +139,11 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     const promises: Promise<any>[] = [
       api.users.profile(slug, userId).then(data => {
         setMyPosts(data.posts);
-        if (data.avatarUrl) {
-          setAvatarUrl(data.avatarUrl);
-        } else {
-          setAvatarUrl(undefined);
-        }
+        setAvatarUrl(data.avatarUrl || undefined);
+        setBio(data.bio || '');
       }).catch(() => setMyPosts([])),
       api.follow.getCounts(userId).then(c => { setFollowers(c.followers); setFollowing(c.following); }).catch(() => {}),
+      api.oshi.list(slug).then(setOshiItems).catch(() => setOshiItems([])),
     ];
     if (currentUserId && !isSelf) {
       promises.push(
@@ -241,29 +233,37 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     <div className="flex flex-col h-full">
       <div className="p-4 border-b border-gray-800 bg-gradient-to-b from-gray-100/[0.03] to-transparent">
         <div className="flex items-start space-x-3.5 mb-3">
-          <div
-            className="w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 shrink-0 relative overflow-hidden"
-            style={avatarUrl ? undefined : avatarInfo.style}
-          >
-            {avatarUrl ? (
-              <img src={avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
-            ) : (
-              (() => {
-                const AvatarIcon = avatarInfo.Icon;
-                return <AvatarIcon className="w-8 h-8 text-white/40 leading-none" />;
-              })()
+          <div className="relative shrink-0">
+            <div
+              onClick={isSelf ? () => setIsEditModalOpen(true) : undefined}
+              className={`w-14 h-14 rounded-full flex items-center justify-center font-bold text-lg text-white border border-gray-700 overflow-hidden ${isSelf ? 'cursor-pointer' : ''}`}
+              style={avatarUrl ? undefined : avatarInfo.style}
+            >
+              {avatarUrl ? (
+                <img src={avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+              ) : (
+                (() => {
+                  const AvatarIcon = avatarInfo.Icon;
+                  return <AvatarIcon className="w-8 h-8 text-white/40 leading-none" />;
+                })()
+              )}
+            </div>
+            {isSelf && (
+              <button
+                onClick={() => setIsEditModalOpen(true)}
+                className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-blue-600 border-2 border-[#0b0e14] flex items-center justify-center text-white hover:bg-blue-500 transition-colors"
+                aria-label="プロフィール画像を編集"
+              >
+                <Pencil size={10} />
+              </button>
             )}
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="font-bold text-base text-white truncate">{avatarInfo.username}</h2>
             <span className="text-[10px] text-gray-500 block truncate">@{resolvedName}</span>
             <span className="text-[11px] text-gray-500 block mt-0.5">登録: 2026-06-13</span>
-            <p className="text-xs text-gray-400 leading-relaxed mt-2">
-              {resolvedName === '名無しvFZ' ? 'お絵描きとゲーム制作が趣味です。たまに作曲も。' : '自己紹介を追加してみましょう'}
-            </p>
-            <p className="text-xs text-gray-500 mt-1.5 flex items-center space-x-1.5">
-              <span className="text-yellow-500">♪</span>
-              <span>推し: Lofi Beats / 東方アレンジ / ドット絵</span>
+            <p className="text-xs text-gray-400 leading-relaxed mt-2 whitespace-pre-wrap">
+              {bio || (isSelf ? '自己紹介を追加してみましょう' : '')}
             </p>
           </div>
         </div>
@@ -298,6 +298,49 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
             </button>
           )}
         </div>
+
+        {(oshiItems.length > 0 || isSelf) && (
+          <div className="mt-3.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] text-gray-400 font-bold flex items-center gap-1">
+                <span className="text-yellow-500">☆</span> 推しリスト
+              </span>
+              {isSelf && (
+                <button
+                  onClick={() => setIsMusicModalOpen(true)}
+                  className="text-[10px] text-gray-500 hover:text-white transition-colors"
+                >
+                  編集
+                </button>
+              )}
+            </div>
+            {oshiItems.length > 0 ? (
+              <div className="flex space-x-2.5 overflow-x-auto scrollbar-none pb-1">
+                {oshiItems.map(item => (
+                  <a
+                    key={item.id}
+                    href={item.viewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 w-24"
+                  >
+                    <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-800 border border-gray-800 flex items-center justify-center">
+                      {item.artworkUrl ? (
+                        <img src={item.artworkUrl} alt={item.title} className="w-full h-full object-cover" />
+                      ) : (
+                        <Music2 size={20} className="text-gray-600" />
+                      )}
+                    </div>
+                    <div className="text-[10px] text-gray-300 font-bold truncate mt-1">{item.title}</div>
+                    {item.subtitle && <div className="text-[9px] text-gray-500 truncate">{item.subtitle}</div>}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-600">好きな曲やアーティストを追加してみましょう</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex border-b border-gray-800 overflow-x-auto scrollbar-none">
@@ -544,6 +587,20 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                 />
               </div>
 
+              {/* Bio Textarea */}
+              <div className="w-full flex flex-col space-y-1.5">
+                <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">自己紹介</label>
+                <textarea
+                  value={editBio}
+                  onChange={(e) => setEditBio(e.target.value)}
+                  maxLength={140}
+                  rows={3}
+                  className="w-full bg-gray-950 border border-gray-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-600 outline-none transition-all resize-none"
+                  placeholder="自己紹介を入力（140文字まで）"
+                />
+                <span className="text-[10px] text-gray-600 self-end">{editBio.length}/140</span>
+              </div>
+
               {editError && (
                 <div className="text-[11px] text-red-400 text-center bg-red-950/20 border border-red-900/30 rounded-xl py-1.5 px-3 w-full">
                   {editError}
@@ -570,6 +627,24 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
             </div>
           </div>
         </div>
+      )}
+
+      {cropSrc && (
+        <CropAvatarModal
+          imageSrc={cropSrc}
+          onCancel={() => setCropSrc(null)}
+          onConfirm={handleCropConfirm}
+        />
+      )}
+
+      {isMusicModalOpen && (
+        <MusicShareModal
+          userSlug={slug}
+          oshiItems={oshiItems}
+          onAdd={(item) => setOshiItems(prev => [...prev, item])}
+          onRemove={(id) => setOshiItems(prev => prev.filter(o => o.id !== id))}
+          onClose={() => setIsMusicModalOpen(false)}
+        />
       )}
     </div>
   );

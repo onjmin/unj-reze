@@ -32,13 +32,13 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const body = await request.json();
-  const { userId, displayName, avatarUrl } = body;
+  const { userId, displayName, avatarUrl, bio } = body;
 
   if (!userId || !displayName) {
     return NextResponse.json({ error: 'userId and displayName are required' }, { status: 400 });
   }
 
-  await db.updateUserDisplayName(userId, displayName, avatarUrl);
+  await db.updateUserDisplayName(userId, displayName, avatarUrl, bio);
 
   return NextResponse.json({ success: true });
 }

@@ -1,5 +1,5 @@
-import { AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType } from '../types';
-import { DbPost, DbGameRecord, DbNotification } from '../types-db';
+import { AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
+import { DbPost, DbGameRecord, DbNotification, DbOshiItem } from '../types-db';
 import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
 
@@ -8,6 +8,17 @@ export interface CreateGameParams {
   title: string;
   manifest: GameManifestDraft;
   creatorSlug?: string;
+}
+
+export interface AddOshiItemParams {
+  kind: OshiItemKind;
+  trackId?: number;
+  collectionId?: number;
+  artistId?: number;
+  title: string;
+  subtitle?: string;
+  artworkUrl?: string;
+  viewUrl?: string;
 }
 
 export interface CreatePostParams {
@@ -77,8 +88,12 @@ export interface DataStore {
   searchPosts(query: string, userId?: string): Promise<DbPost[]>;
   getPostsByHashtag(tag: string, userId?: string): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
-  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string): Promise<void>;
+  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string): Promise<void>;
   getUserAvatarUrl(slug: string): Promise<string | undefined>;
+  getUserBio(slug: string): Promise<string | undefined>;
+  listOshiItems(userSlug: string): Promise<DbOshiItem[]>;
+  addOshiItem(userSlug: string, data: AddOshiItemParams): Promise<DbOshiItem>;
+  removeOshiItem(userSlug: string, id: number): Promise<void>;
   getUserSettings(slug: string): Promise<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>;
   updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>): Promise<void>;
   issueMigrationToken(userId: string): Promise<string>;

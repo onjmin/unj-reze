@@ -72,7 +72,23 @@ export interface AnonymousUser {
   slug: string;
   avatarColor: string;
   avatarUrl?: string;
+  bio?: string;
   createdAt: string;
+}
+
+export type OshiItemKind = 'song' | 'album' | 'artist';
+
+export interface OshiItem {
+  id: string;
+  kind: OshiItemKind;
+  trackId?: number;
+  collectionId?: number;
+  artistId?: number;
+  title: string;
+  subtitle?: string;
+  artworkUrl?: string;
+  viewUrl?: string;
+  position: number;
 }
 
 export interface GhostPlayer {
