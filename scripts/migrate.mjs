@@ -20,6 +20,12 @@ const migrations = [
       ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_edited BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE posts DROP COLUMN IF EXISTS is_original;
     `
+  },
+  {
+    name: '02_add_avatar_url_to_users',
+    sql: `
+      ALTER TABLE anonymous_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    `
   }
 ];
 

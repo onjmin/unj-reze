@@ -19,15 +19,14 @@ export function getAvatarInfo(userId: string | null | undefined) {
     };
   }
 
-  // IDの3文字を切り出し、「名無し」＋「3文字」にする
-  let idPart = '';
-  if (userId.startsWith('名無し') && userId.length > 3) {
-    idPart = userId.substring(3, 6);
+  let username = '';
+  const isGenerated = /^[a-zA-Z0-9]{15}$/.test(userId);
+  if (isGenerated) {
+    const idPart = userId.substring(0, 3) || '???';
+    username = `名無し${idPart}`;
   } else {
-    idPart = userId.substring(0, 3);
+    username = userId;
   }
-  if (!idPart) idPart = '???';
-  const username = `名無し${idPart}`;
 
   // Simple string hashing
   let hash = 0;

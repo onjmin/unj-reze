@@ -27,11 +27,13 @@ export async function GET(
   }
 
   const displayName = (await db.getUserDisplayName(id)) || id;
+  const avatarUrl = await db.getUserAvatarUrl(id);
   await attachGameInfo(posts);
 
   return NextResponse.json({
     id,
     displayName,
+    avatarUrl,
     posts: posts.map(encodePost),
     postCount: posts.length,
   });

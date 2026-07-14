@@ -19,6 +19,7 @@ export interface DbPost {
   imageSrc?: string;
   imageAlt?: string;
   avatarColor: string;
+  avatarUrl?: string;
   hasCollabButton?: boolean;
   heartsTotal: number;
   hasGame?: boolean;

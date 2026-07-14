@@ -52,6 +52,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [blocked, setBlocked] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [userId, setUserId] = useState('名無しvFZ');
+  const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
 
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyImage, setReplyImage] = useState<string | null>(null);
@@ -66,11 +67,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showOriginModal, setShowOriginModal] = useState(false);
 
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+
   useEffect(() => {
     const sessionId = getCookie('unj_reze_session');
     if (sessionId) {
       api.auth.anonymous(sessionId).then(user => {
         setUserId(user.displayName);
+        setUserSlug(user.slug);
+        setAvatarUrl(user.avatarUrl);
       }).catch(() => {});
     }
   }, []);
@@ -232,20 +237,28 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       }
     }
 
-    const reply = await api.posts.replies.create(post.id, {
-      displayName: userId,
-      content,
-      parentPostId: targetParent.id,
-      hasImage: !!replyImage,
-      imageSrc,
-      gameId,
-      originType: replyOriginType,
-    });
+    try {
+      const reply = await api.posts.replies.create(post.id, {
+        displayName: userId,
+        content,
+        parentPostId: targetParent.id,
+        hasImage: !!replyImage,
+        imageSrc,
+        gameId,
+        originType: replyOriginType,
+      });
 
-    setPost(p => ({
-      ...p,
-      replies: p.replies.map(r => r.id === tempId ? reply : r)
-    }));
+      setPost(p => ({
+        ...p,
+        replies: p.replies.map(r => r.id === tempId ? reply : r)
+      }));
+    } catch {
+      setPost(p => ({
+        ...p,
+        replies: p.replies.filter(r => r.id !== tempId),
+        repliesCount: Math.max(0, p.repliesCount - 1),
+      }));
+    }
     setReplyTo(null);
   };
 
@@ -315,18 +328,21 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     const updated = await api.posts.edit(post.id, userId, newContent, post.originType);
     setPost(updated);
     setShowEditModal(false);
+    router.refresh();
   };
 
   const handleSelectOriginType = async (ot: OriginType | undefined) => {
     const updated = await api.posts.edit(post.id, userId, post.content, ot);
     setPost(updated);
     setShowOriginModal(false);
+    router.refresh();
   };
 
   const handleConfirmDelete = async () => {
     await api.posts.remove(post.id, userId);
     setShowDeleteModal(false);
     router.push('/');
+    router.refresh();
   };
 
   const handleMenuEdit = () => {
@@ -344,7 +360,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setMenuOpen(false);
   };
 
-  const isSelf = (post.slug || post.displayName) === userId;
+  const isSelf = !!userSlug && (post.slug || post.displayName) === userSlug;
 
   const mmlCode = extractMmlFromContent(post.content);
   const chordRes = extractChordsFromContent(post.content);
@@ -420,12 +436,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <Link
           href={`/user/${post.slug || post.displayName}`}
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden"
-          style={getAvatarInfo(post.displayName).style}
+          style={post.avatarUrl ? undefined : getAvatarInfo(post.displayName).style}
         >
-          {(() => {
-            const AvatarIcon = getAvatarInfo(post.displayName).Icon;
-            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
-          })()}
+          {post.avatarUrl ? (
+            <img src={post.avatarUrl} alt={getAvatarInfo(post.displayName).username} className="w-full h-full object-cover" />
+          ) : (
+            (() => {
+              const AvatarIcon = getAvatarInfo(post.displayName).Icon;
+              return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+            })()
+          )}
         </Link>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
@@ -524,7 +544,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div className="border-t border-gray-800 px-3 py-3 space-y-2">
           <span className="text-[11px] text-gray-500 font-bold">返信</span>
           {post.replies.filter(r => r.parentPostId === post.id).map(reply => (
-            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} onEdit={handleEditReply} onDelete={handleDeleteReply} />
+            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} />
           ))}
         </div>
       )}
@@ -542,6 +562,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       {composerOpen && (
         <PostComposer
           userId={userId}
+          avatarUrl={avatarUrl}
           text={replyText}
           setText={setReplyText}
           image={replyImage}
@@ -619,7 +640,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply, userId, onEdit, onDelete }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void> }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void> }) {
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [localPost, setLocalPost] = useState<Post>(post);
@@ -727,7 +748,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, onEdit, onDelete
   const mmlCode = extractMmlFromContent(localPost.content);
   const chordRes = extractChordsFromContent(localPost.content);
   const avatarInfo = getAvatarInfo(localPost.displayName);
-  const isSelf = (localPost.slug || localPost.displayName) === userId;
+  const isSelf = !!userSlug && (localPost.slug || localPost.displayName) === userSlug;
 
   return (
     <div style={{ marginLeft: depth * 12 }} className={depth > 0 ? 'pl-3 border-l-2 border-gray-800/40' : ''}>
@@ -735,12 +756,16 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, onEdit, onDelete
         <Link
           href={`/user/${localPost.slug || localPost.displayName}`}
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden"
-          style={avatarInfo.style}
+          style={localPost.avatarUrl ? undefined : avatarInfo.style}
         >
-          {(() => {
-            const AvatarIcon = avatarInfo.Icon;
-            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
-          })()}
+          {localPost.avatarUrl ? (
+            <img src={localPost.avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+          ) : (
+            (() => {
+              const AvatarIcon = avatarInfo.Icon;
+              return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+            })()
+          )}
         </Link>
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-baseline mb-0.5">
@@ -867,7 +892,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, onEdit, onDelete
       {!collapsed && children.length > 0 && (
         <div>
           {children.map(child => (
-            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} onEdit={onEdit} onDelete={onDelete} />
+            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </div>
       )}

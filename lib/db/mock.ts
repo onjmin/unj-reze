@@ -118,8 +118,12 @@ export const mockStore: DataStore = {
     return mockDb.getOrCreateAnonymousUser(sessionId, ipAddress);
   },
 
-  async updateUserDisplayName(userId: string, displayName: string) {
-    return mockDb.updateUserDisplayName(userId, displayName);
+  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string) {
+    return mockDb.updateUserDisplayName(userId, displayName, avatarUrl);
+  },
+
+  async getUserAvatarUrl(slug: string) {
+    return mockDb.getUserAvatarUrl(slug);
   },
 
   async getUserSettings(slug: string) {

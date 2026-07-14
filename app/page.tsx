@@ -142,6 +142,17 @@ export default function App() {
     }
   }, [userId]);
 
+  const handleProfileUpdate = useCallback((newDisplayName: string, newAvatarUrl?: string) => {
+    setUserId(newDisplayName);
+    if (currentUser) {
+      setCurrentUser({
+        ...currentUser,
+        displayName: newDisplayName,
+        avatarUrl: newAvatarUrl,
+      });
+    }
+  }, [currentUser]);
+
   useEffect(() => {
     postsRef.current = posts;
   }, [posts]);
@@ -265,18 +276,28 @@ export default function App() {
       postsRef.current = next;
       return next;
     });
-    const reply = await api.posts.replies.create(postId, {
-      displayName: userId,
-      content: replyText,
-      parentPostId: postId,
-    });
-    setPosts(prev => {
-      const next = prev.map(p => p.id === postId
-        ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
-        : p);
-      postsRef.current = next;
-      return next;
-    });
+    try {
+      const reply = await api.posts.replies.create(postId, {
+        displayName: userId,
+        content: replyText,
+        parentPostId: postId,
+      });
+      setPosts(prev => {
+        const next = prev.map(p => p.id === postId
+          ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
+          : p);
+        postsRef.current = next;
+        return next;
+      });
+    } catch {
+      setPosts(prev => {
+        const next = prev.map(p => p.id === postId
+          ? { ...p, repliesCount: Math.max(0, p.repliesCount - 1), replies: p.replies.filter(r => r.id !== tempId) }
+          : p);
+        postsRef.current = next;
+        return next;
+      });
+    }
   };
 
   const handleCreateReplyFromComposer = async (postId: string) => {
@@ -629,6 +650,7 @@ export default function App() {
                     <PostComposer
                       inline
                       userId={userId}
+                      avatarUrl={currentUser?.avatarUrl}
                       text={inputText}
                       setText={setInputText}
                       image={attachedImage}
@@ -715,13 +737,14 @@ export default function App() {
               {currentNav === 'profile' && (
                 <ProfileView
                   userId={userId}
-                  displayName={userId}
+                  displayName={currentUser?.displayName || userId}
                   currentUserId={userId}
                   onLike={handleLike}
                   onDislike={handleDislike}
                   onHeart={handleHeart}
                   onRepost={handleRepost}
                   openCollab={handleOpenCollab}
+                  onProfileUpdate={handleProfileUpdate}
                 />
               )}
             </div>
@@ -735,6 +758,7 @@ export default function App() {
         {composerOpen && (
           <PostComposer
             userId={userId}
+            avatarUrl={currentUser?.avatarUrl}
             text={inputText}
             setText={setInputText}
             image={attachedImage}

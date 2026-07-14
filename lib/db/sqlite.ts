@@ -68,6 +68,11 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!colNames.includes('target_user')) {
     d.run("ALTER TABLE notifications ADD COLUMN target_user TEXT");
   }
+  const userCols = d.exec("PRAGMA table_info(anonymous_users)");
+  const userColNames = userCols.length > 0 ? userCols[0].values.map((v: any) => v[1]) : [];
+  if (!userColNames.includes('avatar_url')) {
+    d.run("ALTER TABLE anonymous_users ADD COLUMN avatar_url TEXT");
+  }
   const msgCols = d.exec("PRAGMA table_info(messages)");
   const msgColNames = msgCols.length > 0 ? msgCols[0].values.map((v: any) => v[1]) : [];
   if (!msgColNames.includes('recipient')) {
@@ -216,6 +221,7 @@ function rowToPost(row: any): Post {
     imageSrc: row.image_src ?? undefined,
     imageAlt: row.image_alt ?? undefined,
     avatarColor: row.avatar_color,
+    avatarUrl: row.avatar_url ?? undefined,
     hasCollabButton: !!row.has_collab_button,
     heartsTotal: row.hearts_total ?? 0,
     hasGame: !!row.has_game,
@@ -271,9 +277,22 @@ function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[]
 
 const VOTED_SELECT = `
   SELECT p.*,
+    COALESCE(au.display_name, p.display_name) as display_name,
+    au.avatar_url as avatar_url,
     COALESCE((SELECT vote_type FROM post_votes pv WHERE pv.post_id = p.id AND pv.user_id = ?), '') as vote_type,
     (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
   FROM posts p
+  LEFT JOIN anonymous_users au ON p.slug = au.slug
+`;
+
+const UNVOTED_SELECT = `
+  SELECT p.*,
+    COALESCE(au.display_name, p.display_name) as display_name,
+    au.avatar_url as avatar_url,
+    0 as liked, 0 as disliked,
+    (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+  FROM posts p
+  LEFT JOIN anonymous_users au ON p.slug = au.slug
 `;
 
 function applyVoteRow(obj: any, userId?: string): any {
@@ -293,7 +312,12 @@ async function getThreadRepliesSqlite(d: SqlJsDatabase, threadIds: number[]): Pr
   const placeholders = threadIds.map(() => '?').join(',');
   const rows = rowsToObjects(
     d,
-    `SELECT * FROM posts WHERE thread_id IN (${placeholders}) AND id != thread_id ORDER BY id`,
+    `SELECT p.*,
+       COALESCE(au.display_name, p.display_name) as display_name,
+       au.avatar_url as avatar_url
+     FROM posts p
+     LEFT JOIN anonymous_users au ON p.slug = au.slug
+     WHERE p.thread_id IN (${placeholders}) AND p.id != p.thread_id ORDER BY p.id`,
     threadIds
   );
   const map = new Map<number, Post[]>();
@@ -318,7 +342,7 @@ export const sqliteStore: DataStore = {
     } else {
       rows = rowsToObjects(
         d,
-        `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.thread_id = p.id ORDER BY p.id DESC`
+        `${UNVOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC`
       );
     }
     if (rows.length === 0) return [];
@@ -342,7 +366,7 @@ export const sqliteStore: DataStore = {
     } else {
       rows = rowsToObjects(
         d,
-        `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`,
+        `${UNVOTED_SELECT} WHERE p.id = ?`,
         [id]
       );
     }
@@ -353,7 +377,12 @@ export const sqliteStore: DataStore = {
     if (post.threadId === post.id) {
       const repliesRows = rowsToObjects(
         d,
-        'SELECT * FROM posts WHERE thread_id = ? AND id != thread_id ORDER BY id',
+        `SELECT p.*,
+           COALESCE(au.display_name, p.display_name) as display_name,
+           au.avatar_url as avatar_url
+         FROM posts p
+         LEFT JOIN anonymous_users au ON p.slug = au.slug
+         WHERE p.thread_id = ? AND p.id != p.thread_id ORDER BY p.id`,
         [id]
       );
       post.replies = repliesRows.map(rowToPost);
@@ -630,7 +659,15 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     const rows = rowsToObjects(
       d,
-      `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = ? ORDER BY p.id DESC`,
+      `SELECT p.*,
+         COALESCE(au.display_name, p.display_name) as display_name,
+         au.avatar_url as avatar_url,
+         0 as liked, 0 as disliked,
+         (SELECT COUNT(*) FROM post_hearts ph2 WHERE ph2.post_id = p.id) as hearts_total
+       FROM posts p
+       LEFT JOIN anonymous_users au ON p.slug = au.slug
+       JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = ?
+       ORDER BY p.id DESC`,
       [userId]
     );
     return rows.map(rowToPost);
@@ -648,7 +685,7 @@ export const sqliteStore: DataStore = {
     } else {
       rows = rowsToObjects(
         d,
-        `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.slug = ? AND p.thread_id = p.id ORDER BY p.id DESC`,
+        `${UNVOTED_SELECT} WHERE p.slug = ? AND p.thread_id = p.id ORDER BY p.id DESC`,
         [slug]
       );
     }
@@ -658,8 +695,16 @@ export const sqliteStore: DataStore = {
 
   async getUserDisplayName(slug: string) {
     const d = await getDb();
+    const userRows = rowsToObjects(d, 'SELECT display_name FROM anonymous_users WHERE slug = ? LIMIT 1', [slug]);
+    if (userRows.length > 0) return userRows[0].display_name;
     const rows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE slug = ? LIMIT 1', [slug]);
     return rows.length > 0 ? rows[0].display_name : undefined;
+  },
+
+  async getUserAvatarUrl(slug: string) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT avatar_url FROM anonymous_users WHERE slug = ? LIMIT 1', [slug]);
+    return rows.length > 0 ? rows[0].avatar_url || undefined : undefined;
   },
 
   async getNotifications(userId?: string) {
@@ -752,16 +797,12 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     const rows = rowsToObjects(
       d,
-      `SELECT p.*,
-        0 as liked,
-        0 as disliked,
-        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
-      FROM posts p
+      `${UNVOTED_SELECT}
       WHERE p.thread_id = p.id
-        AND (p.content LIKE ? OR p.display_name LIKE ?)
-        AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), 0) = 0
+        AND (p.content LIKE ? OR p.display_name LIKE ? OR (au.display_name IS NOT NULL AND au.display_name LIKE ?))
+        AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), 0) = 0
       ORDER BY p.id DESC`,
-      [`%${query}%`, `%${query}%`]
+      [`%${query}%`, `%${query}%`, `%${query}%`]
     );
     const hidden = getHiddenSlugsSqlite(d, userId);
     return rows.map(rowToPost).filter(p => !hidden.has(p.slug ?? ''));
@@ -772,12 +813,10 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     const rows = rowsToObjects(
       d,
-      `SELECT p.*, 0 as liked, 0 as disliked,
-        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
-      FROM posts p
+      `${UNVOTED_SELECT}
       WHERE p.thread_id = p.id
         AND p.content LIKE ?
-        AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), 0) = 0
+        AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), 0) = 0
       ORDER BY p.id DESC`,
       [`%${normalized}%`]
     );
@@ -808,6 +847,7 @@ export const sqliteStore: DataStore = {
         displayName: row.display_name,
         slug: row.slug,
         avatarColor: row.avatar_color,
+        avatarUrl: row.avatar_url ?? undefined,
         createdAt: row.created_at,
       } as AnonymousUser;
     }
@@ -829,6 +869,7 @@ export const sqliteStore: DataStore = {
         displayName: row.display_name,
         slug: row.slug,
         avatarColor: row.avatar_color,
+        avatarUrl: row.avatar_url ?? undefined,
         createdAt: row.created_at,
       } as AnonymousUser;
     }
@@ -846,16 +887,33 @@ export const sqliteStore: DataStore = {
     );
     saveDb();
 
-    return { id, displayName, slug, avatarColor, createdAt: now } as AnonymousUser;
+    return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt: now } as AnonymousUser;
   },
 
-  async updateUserDisplayName(userId: string, displayName: string) {
+  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string) {
     const d = await getDb();
+    const userRows = rowsToObjects(d, 'SELECT slug FROM anonymous_users WHERE id = ?', [userId]);
+    const oldSlug = userRows.length > 0 ? userRows[0].slug : null;
+
     const slug = deriveSlugSqlite(displayName);
-    d.run(
-      'UPDATE anonymous_users SET display_name = ?, slug = ? WHERE id = ?',
-      [displayName, slug, userId]
-    );
+    if (avatarUrl !== undefined) {
+      d.run(
+        'UPDATE anonymous_users SET display_name = ?, slug = ?, avatar_url = ? WHERE id = ?',
+        [displayName, slug, avatarUrl, userId]
+      );
+    } else {
+      d.run(
+        'UPDATE anonymous_users SET display_name = ?, slug = ? WHERE id = ?',
+        [displayName, slug, userId]
+      );
+    }
+
+    if (oldSlug) {
+      d.run(
+        'UPDATE posts SET display_name = ?, slug = ? WHERE slug = ?',
+        [displayName, slug, oldSlug]
+      );
+    }
     saveDb();
   },
 

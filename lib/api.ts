@@ -23,8 +23,8 @@ const staticApi = {
     anonymous: async (sessionId: string, _ipAddress?: string) => {
       return mockDbInstance.getOrCreateAnonymousUser(sessionId, _ipAddress || '127.0.0.1');
     },
-    updateDisplayName: async (userId: string, displayName: string) => {
-      mockDbInstance.updateUserDisplayName(userId, displayName);
+    updateDisplayName: async (userId: string, displayName: string, avatarUrl?: string) => {
+      mockDbInstance.updateUserDisplayName(userId, displayName, avatarUrl);
     },
     getSettings: async (slug: string) => mockDbInstance.getUserSettings(slug),
     updateSettings: async (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) => {
@@ -166,7 +166,8 @@ const staticApi = {
         posts = (await mockDbInstance.getUserPostsBySlug(id, userId)).map(encodePost);
       }
       const displayName = mockDbInstance.getUserDisplayName(id) || id;
-      return { id, displayName, posts, postCount: posts.length };
+      const avatarUrl = mockDbInstance.getUserAvatarUrl(id);
+      return { id, displayName, avatarUrl, posts, postCount: posts.length };
     },
   },
   follow: {
@@ -196,8 +197,8 @@ const liveApi = {
       const qs = `?sessionId=${encodeURIComponent(sessionId)}`;
       return fetcher<AnonymousUser>(`/auth/anonymous${qs}`);
     },
-    updateDisplayName: (userId: string, displayName: string) =>
-      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName }) }),
+    updateDisplayName: (userId: string, displayName: string, avatarUrl?: string) =>
+      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName, avatarUrl }) }),
     getSettings: (slug: string) => fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>(`/auth/settings?slug=${encodeURIComponent(slug)}`),
     updateSettings: (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) =>
       fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>('/auth/settings', { method: 'PUT', body: JSON.stringify({ slug, settings }) }),
@@ -284,7 +285,7 @@ const liveApi = {
       if (userId) params.set('userId', userId);
       if (tab) params.set('tab', tab);
       const qs = params.toString() ? `?${params.toString()}` : '';
-      return fetcher<{ id: string; displayName: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}${qs}`);
+      return fetcher<{ id: string; displayName: string; avatarUrl?: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}${qs}`);
     },
   },
   follow: {

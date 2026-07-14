@@ -224,12 +224,16 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
         <div
           onClick={(e) => { e.stopPropagation(); router.push(`/user/${post.slug || post.displayName}`); }}
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity"
-          style={avatarInfo.style}
+          style={post.avatarUrl ? undefined : avatarInfo.style}
         >
-          {(() => {
-            const AvatarIcon = avatarInfo.Icon;
-            return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
-          })()}
+          {post.avatarUrl ? (
+            <img src={post.avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+          ) : (
+            (() => {
+              const AvatarIcon = avatarInfo.Icon;
+              return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+            })()
+          )}
           <button
             onClick={(e) => { e.stopPropagation(); onQuickPost(); }}
             className="absolute -bottom-1 -right-1 bg-gray-900 rounded-full p-0.5 border border-gray-800 hover:bg-blue-600 transition-colors cursor-pointer"
@@ -559,7 +563,14 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
   }, [index]);
 
   const reply = replies[index];
-  const maxAvatars = Math.min(replies.length, 5);
+
+  const uniqueReplies = Array.from(
+    replies.reduce((map, r) => {
+      map.set(r.slug || r.displayName, r);
+      return map;
+    }, new Map<string, Post>()).values()
+  );
+  const maxAvatars = Math.min(uniqueReplies.length, 5);
   const extraCount = replies.length - maxAvatars;
 
   const activeAvatarInfo = getAvatarInfo(reply?.displayName);
@@ -581,12 +592,16 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
                   ? 'border-2 border-[#a3e635] ring-2 ring-[#a3e635]/40 ' + (pop ? 'animate-pop' : '')
                   : 'border border-gray-900'
                   }`}
-                style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i, ...rAvatarInfo.style }}
+                style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i, ...(r.avatarUrl ? {} : rAvatarInfo.style) }}
               >
-                {(() => {
-                  const RAvatarIcon = rAvatarInfo.Icon;
-                  return <RAvatarIcon className="w-3 h-3 text-white/40 leading-none" />;
-                })()}
+                {r.avatarUrl ? (
+                  <img src={r.avatarUrl} alt={rAvatarInfo.username} className="w-full h-full object-cover" />
+                ) : (
+                  (() => {
+                    const RAvatarIcon = rAvatarInfo.Icon;
+                    return <RAvatarIcon className="w-3 h-3 text-white/40 leading-none" />;
+                  })()
+                )}
               </div>
             );
           })}

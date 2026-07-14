@@ -11,6 +11,7 @@ const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
 interface PostComposerProps {
   userId: string;
+  avatarUrl?: string;
   text: string;
   setText: (v: string) => void;
   image: string | null;
@@ -48,7 +49,7 @@ function ToolbarButton({ onClick, title, hoverColor, children }: {
   );
 }
 
-export default function PostComposer({ userId, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, replyToDisplayName, inline }: PostComposerProps) {
+export default function PostComposer({ userId, avatarUrl, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, replyToDisplayName, inline }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showOriginModal, setShowOriginModal] = useState(false);
@@ -202,12 +203,16 @@ export default function PostComposer({ userId, text, setText, image, setImage, m
   const avatar = (
     <div
       className={`rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-white relative overflow-hidden ${md ? 'w-9 h-9 md:w-12 md:h-12 text-xs md:text-sm' : 'w-9 h-9 text-xs'}`}
-      style={avatarInfo.style}
+      style={avatarUrl ? undefined : avatarInfo.style}
     >
-      {(() => {
-        const AvatarIcon = avatarInfo.Icon;
-        return <AvatarIcon className={`text-white/40 leading-none ${md ? 'w-5 h-5 md:w-7 md:h-7' : 'w-5 h-5'}`} />;
-      })()}
+      {avatarUrl ? (
+        <img src={avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+      ) : (
+        (() => {
+          const AvatarIcon = avatarInfo.Icon;
+          return <AvatarIcon className={`text-white/40 leading-none ${md ? 'w-5 h-5 md:w-7 md:h-7' : 'w-5 h-5'}`} />;
+        })()
+      )}
     </div>
   );
 

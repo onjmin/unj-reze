@@ -39,6 +39,7 @@ export interface Post {
   imageSrc?: string;
   imageAlt?: string;
   avatarColor: string;
+  avatarUrl?: string;
   hasCollabButton?: boolean;
   heartsTotal: number;
   hasGame?: boolean;
@@ -70,6 +71,7 @@ export interface AnonymousUser {
   displayName: string;
   slug: string;
   avatarColor: string;
+  avatarUrl?: string;
   createdAt: string;
 }
 

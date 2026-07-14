@@ -78,6 +78,7 @@ async function rowToPost(row: any): Promise<Post> {
     imageSrc: row.image_src ?? undefined,
     imageAlt: row.image_alt ?? undefined,
     avatarColor: row.avatar_color,
+    avatarUrl: row.avatar_url ?? undefined,
     hasCollabButton: row.has_collab_button,
     heartsTotal: row.hearts_total ?? 0,
     hasGame: row.has_game,
@@ -94,7 +95,12 @@ async function rowToPost(row: any): Promise<Post> {
 async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<number, Post[]>> {
   if (threadIds.length === 0) return new Map();
   const result = await client.query(
-    `SELECT * FROM posts WHERE thread_id = ANY($1::int[]) AND id != thread_id ORDER BY id`,
+    `SELECT p.*,
+       COALESCE(au.display_name, p.display_name) as display_name,
+       au.avatar_url as avatar_url
+     FROM posts p
+     LEFT JOIN anonymous_users au ON p.slug = au.slug
+     WHERE p.thread_id = ANY($1::int[]) AND p.id != p.thread_id ORDER BY p.id`,
     [threadIds]
   );
   const map = new Map<number, Post[]>();
@@ -111,10 +117,13 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
   if (userId) {
     result = await client.query(`
       SELECT p.*,
+        COALESCE(au.display_name, p.display_name) as display_name,
+        au.avatar_url as avatar_url,
         COALESCE(pv.vote_type = 'like', false) as liked,
         COALESCE(pv.vote_type = 'dislike', false) as disliked,
         (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
       FROM posts p
+      LEFT JOIN anonymous_users au ON p.slug = au.slug
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
       WHERE p.thread_id = p.id
       ORDER BY p.id DESC
@@ -122,10 +131,13 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
   } else {
     result = await client.query(`
       SELECT p.*,
+        COALESCE(au.display_name, p.display_name) as display_name,
+        au.avatar_url as avatar_url,
         false as liked,
         false as disliked,
         (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
       FROM posts p
+      LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.thread_id = p.id
       ORDER BY p.id DESC
     `);
@@ -148,20 +160,26 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
   if (userId) {
     result = await client.query(`
       SELECT p.*,
+        COALESCE(au.display_name, p.display_name) as display_name,
+        au.avatar_url as avatar_url,
         COALESCE(pv.vote_type = 'like', false) as liked,
         COALESCE(pv.vote_type = 'dislike', false) as disliked,
         (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
       FROM posts p
+      LEFT JOIN anonymous_users au ON p.slug = au.slug
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
       WHERE p.id = $2
     `, [userId, id]);
   } else {
     result = await client.query(`
       SELECT p.*,
+        COALESCE(au.display_name, p.display_name) as display_name,
+        au.avatar_url as avatar_url,
         false as liked,
         false as disliked,
         (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
       FROM posts p
+      LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.id = $1
     `, [id]);
   }
@@ -172,7 +190,12 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
   if (post.threadId === post.id) {
     // It's a thread, load replies
     const repliesResult = await client.query(
-      'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
+      `SELECT p.*,
+         COALESCE(au.display_name, p.display_name) as display_name,
+         au.avatar_url as avatar_url
+       FROM posts p
+       LEFT JOIN anonymous_users au ON p.slug = au.slug
+       WHERE p.thread_id = $1 AND p.id != p.thread_id ORDER BY p.id`,
       [id]
     );
     post.replies = await Promise.all(repliesResult.rows.map(rowToPost));
@@ -416,6 +439,9 @@ export const pgStore: DataStore = {
   async addReply(postId: number, data: ReplyParams) {
     const client = await getPool().connect();
     try {
+      await client.query('BEGIN');
+      // 同時投稿によるID重複(採番の競合)を防ぐため、ID採番からINSERTまでをアドバイザリロックで直列化する。
+      await client.query('SELECT pg_advisory_xact_lock(42)');
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
@@ -452,7 +478,11 @@ export const pgStore: DataStore = {
           }
         }
       }
+      await client.query('COMMIT');
       return await rowToPost(result.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
       client.release();
     }
@@ -540,10 +570,13 @@ export const pgStore: DataStore = {
     try {
       const result = await client.query(`
         SELECT p.*,
+          COALESCE(au.display_name, p.display_name) as display_name,
+          au.avatar_url as avatar_url,
           COALESCE(pv.vote_type = 'like', false) as liked,
           COALESCE(pv.vote_type = 'dislike', false) as disliked,
           (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
         FROM posts p
+        LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'like'
         ORDER BY p.id DESC
       `, [userId]);
@@ -558,10 +591,13 @@ export const pgStore: DataStore = {
     try {
       const result = await client.query(`
         SELECT p.*,
+          COALESCE(au.display_name, p.display_name) as display_name,
+          au.avatar_url as avatar_url,
           COALESCE(pv.vote_type = 'like', false) as liked,
           COALESCE(pv.vote_type = 'dislike', false) as disliked,
           (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
         FROM posts p
+        LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'dislike'
         ORDER BY p.id DESC
       `, [userId]);
@@ -576,10 +612,13 @@ export const pgStore: DataStore = {
     try {
       const result = await client.query(`
         SELECT p.*,
+          COALESCE(au.display_name, p.display_name) as display_name,
+          au.avatar_url as avatar_url,
           false as liked,
           false as disliked,
-          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          (SELECT COUNT(*) FROM post_hearts ph2 WHERE ph2.post_id = p.id) as hearts_total
         FROM posts p
+        LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = $1
         ORDER BY p.id DESC
       `, [userId]);
@@ -596,10 +635,13 @@ export const pgStore: DataStore = {
       if (userId) {
         result = await client.query(`
           SELECT p.*,
+            COALESCE(au.display_name, p.display_name) as display_name,
+            au.avatar_url as avatar_url,
             COALESCE(pv.vote_type = 'like', false) as liked,
             COALESCE(pv.vote_type = 'dislike', false) as disliked,
             (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
           FROM posts p
+          LEFT JOIN anonymous_users au ON p.slug = au.slug
           LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
           WHERE p.slug = $2 AND p.thread_id = p.id
           ORDER BY p.id DESC
@@ -607,10 +649,13 @@ export const pgStore: DataStore = {
       } else {
         result = await client.query(`
           SELECT p.*,
+            COALESCE(au.display_name, p.display_name) as display_name,
+            au.avatar_url as avatar_url,
             false as liked,
             false as disliked,
             (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
           FROM posts p
+          LEFT JOIN anonymous_users au ON p.slug = au.slug
           WHERE p.slug = $1 AND p.thread_id = p.id
           ORDER BY p.id DESC
         `, [slug]);
@@ -624,8 +669,20 @@ export const pgStore: DataStore = {
   async getUserDisplayName(slug: string) {
     const client = await getPool().connect();
     try {
+      const r1 = await client.query('SELECT display_name FROM anonymous_users WHERE slug = $1 LIMIT 1', [slug]);
+      if (r1.rows.length > 0) return r1.rows[0].display_name;
       const result = await client.query('SELECT display_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
       return result.rows[0]?.display_name;
+    } finally {
+      client.release();
+    }
+  },
+
+  async getUserAvatarUrl(slug: string) {
+    const client = await getPool().connect();
+    try {
+      const r = await client.query('SELECT avatar_url FROM anonymous_users WHERE slug = $1 LIMIT 1', [slug]);
+      return r.rows.length > 0 ? r.rows[0].avatar_url || undefined : undefined;
     } finally {
       client.release();
     }
@@ -783,13 +840,16 @@ export const pgStore: DataStore = {
     try {
       const result = await client.query(`
         SELECT p.*,
+          COALESCE(au.display_name, p.display_name) as display_name,
+          au.avatar_url as avatar_url,
           false as liked,
           false as disliked,
           (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
         FROM posts p
+        LEFT JOIN anonymous_users au ON p.slug = au.slug
         WHERE p.thread_id = p.id
-          AND (p.content ILIKE $1 OR p.display_name ILIKE $1)
-          AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), false) = false
+          AND (p.content ILIKE $1 OR p.display_name ILIKE $1 OR au.display_name ILIKE $1)
+          AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
       `, [`%${query}%`]);
       const posts = await Promise.all(result.rows.map(rowToPost));
@@ -806,10 +866,13 @@ export const pgStore: DataStore = {
     try {
       const result = await client.query(`
         SELECT p.*,
+          COALESCE(au.display_name, p.display_name) as display_name,
+          au.avatar_url as avatar_url,
           false as liked,
           false as disliked,
           (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
         FROM posts p
+        LEFT JOIN anonymous_users au ON p.slug = au.slug
         WHERE p.thread_id = p.id
           AND p.content ~ ('(^|[[:space:]])' || $1 || '([[:space:]]|$)')
           AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), false) = false
@@ -842,6 +905,7 @@ export const pgStore: DataStore = {
           displayName: row.display_name,
           slug: row.slug,
           avatarColor: row.avatar_color,
+          avatarUrl: row.avatar_url ?? undefined,
           createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
             ? row.created_at.toISOString() : String(row.created_at),
         } as AnonymousUser;
@@ -862,6 +926,7 @@ export const pgStore: DataStore = {
           displayName: row.display_name,
           slug: row.slug,
           avatarColor: row.avatar_color,
+          avatarUrl: row.avatar_url ?? undefined,
           createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
             ? row.created_at.toISOString() : String(row.created_at),
         } as AnonymousUser;
@@ -883,6 +948,7 @@ export const pgStore: DataStore = {
         displayName,
         slug,
         avatarColor,
+        avatarUrl: undefined,
         createdAt: new Date().toISOString(),
       } as AnonymousUser;
     } finally {
@@ -890,14 +956,31 @@ export const pgStore: DataStore = {
     }
   },
 
-  async updateUserDisplayName(userId: string, displayName: string) {
+  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string) {
     const client = await getPool().connect();
     try {
+      const userRes = await client.query('SELECT slug FROM anonymous_users WHERE id = $1', [userId]);
+      const oldSlug = userRes.rows.length > 0 ? userRes.rows[0].slug : null;
+
       const slug = deriveSlugPg(displayName);
-      await client.query(
-        'UPDATE anonymous_users SET display_name = $1, slug = $2 WHERE id = $3',
-        [displayName, slug, userId]
-      );
+      if (avatarUrl !== undefined) {
+        await client.query(
+          'UPDATE anonymous_users SET display_name = $1, slug = $2, avatar_url = $3 WHERE id = $4',
+          [displayName, slug, avatarUrl, userId]
+        );
+      } else {
+        await client.query(
+          'UPDATE anonymous_users SET display_name = $1, slug = $2 WHERE id = $3',
+          [displayName, slug, userId]
+        );
+      }
+
+      if (oldSlug) {
+        await client.query(
+          'UPDATE posts SET display_name = $1, slug = $2 WHERE slug = $3',
+          [displayName, slug, oldSlug]
+        );
+      }
     } finally {
       client.release();
     }

@@ -43,6 +43,12 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
     }
   } else if (activeTab === 'following') {
     displayPosts = displayPosts.filter(p => p.id === encodeId(3) || p.id === encodeId(6));
+  } else {
+    const lastActivity = (p: Post) => p.replies.reduce(
+      (latest, r) => Math.max(latest, new Date(r.createdAt).getTime()),
+      new Date(p.createdAt).getTime()
+    );
+    displayPosts.sort((a, b) => lastActivity(b) - lastActivity(a));
   }
 
   if (bbsMode === '掲示板モード') {

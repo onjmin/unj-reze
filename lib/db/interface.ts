@@ -76,7 +76,8 @@ export interface DataStore {
   searchPosts(query: string, userId?: string): Promise<DbPost[]>;
   getPostsByHashtag(tag: string, userId?: string): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
-  updateUserDisplayName(userId: string, displayName: string): Promise<void>;
+  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string): Promise<void>;
+  getUserAvatarUrl(slug: string): Promise<string | undefined>;
   getUserSettings(slug: string): Promise<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>;
   updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>): Promise<void>;
   issueMigrationToken(userId: string): Promise<string>;

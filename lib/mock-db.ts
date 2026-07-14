@@ -87,7 +87,7 @@ class MockDB {
   private votes: Map<string, 'like' | 'dislike'> = new Map();
   private heartCounts: Map<number, number> = new Map();
   private heartEntries: { postId: number; userId: string }[] = [];
-  private anonUserData: Map<string, { id: string; ipAddress: string; sessionId: string; displayName: string; slug: string; avatarColor: string; createdAt: string; lastSeenAt: string }> = new Map();
+  private anonUserData: Map<string, { id: string; ipAddress: string; sessionId: string; displayName: string; slug: string; avatarColor: string; avatarUrl?: string; createdAt: string; lastSeenAt: string }> = new Map();
   private ipToUser: Map<string, string> = new Map();
   private sessionToUser: Map<string, string> = new Map();
   private follows: { followerId: string; followedId: string }[] = [];
@@ -135,12 +135,27 @@ class MockDB {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
+  private getUserInfoBySlug(slug: string | null | undefined) {
+    if (!slug) return null;
+    for (const user of this.anonUserData.values()) {
+      if (user.slug === slug) {
+        return user;
+      }
+    }
+    return null;
+  }
+
+  getUserAvatarUrl(slug: string): string | undefined {
+    const user = this.getUserInfoBySlug(slug);
+    return user?.avatarUrl;
+  }
+
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): AnonymousUser {
     const existingBySession = this.sessionToUser.get(sessionId);
     if (existingBySession) {
       const stored = this.anonUserData.get(existingBySession)!;
       stored.lastSeenAt = this.now();
-      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, createdAt: stored.createdAt };
+      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, createdAt: stored.createdAt };
     }
 
     const existingByIp = this.ipToUser.get(ipAddress);
@@ -148,7 +163,7 @@ class MockDB {
       const stored = this.anonUserData.get(existingByIp)!;
       this.sessionToUser.set(sessionId, stored.id);
       stored.lastSeenAt = this.now();
-      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, createdAt: stored.createdAt };
+      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, createdAt: stored.createdAt };
     }
 
     const id = this.generateId();
@@ -156,18 +171,42 @@ class MockDB {
     const slug = generateSlug(displayName);
     const avatarColor = randomGradient();
     const createdAt = this.now();
-    const stored = { id, ipAddress, sessionId, displayName, slug, avatarColor, createdAt, lastSeenAt: createdAt };
+    const stored = { id, ipAddress, sessionId, displayName, slug, avatarColor, avatarUrl: undefined, createdAt, lastSeenAt: createdAt };
     this.anonUserData.set(id, stored);
     this.ipToUser.set(ipAddress, id);
     this.sessionToUser.set(sessionId, id);
-    return { id, displayName, slug, avatarColor, createdAt };
+    return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt };
   }
 
-  updateUserDisplayName(userId: string, displayName: string): void {
+  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string): void {
     const stored = this.anonUserData.get(userId);
     if (stored) {
+      const oldSlug = stored.slug;
       stored.displayName = displayName;
       stored.slug = generateSlug(displayName);
+      if (avatarUrl !== undefined) {
+        stored.avatarUrl = avatarUrl;
+      }
+
+      // Propagate changes to posts written by this user in memory
+      if (oldSlug) {
+        for (const post of this.posts) {
+          if (post.slug === oldSlug) {
+            post.displayName = stored.displayName;
+            post.slug = stored.slug;
+            post.avatarUrl = stored.avatarUrl;
+          }
+          if (post.replies) {
+            for (const r of post.replies) {
+              if (r.slug === oldSlug) {
+                r.displayName = stored.displayName;
+                r.slug = stored.slug;
+                r.avatarUrl = stored.avatarUrl;
+              }
+            }
+          }
+        }
+      }
     }
   }
 
@@ -190,6 +229,12 @@ class MockDB {
       post.disliked = false;
     }
     post.heartsTotal = this.heartCounts.get(post.id) ?? post.heartsTotal;
+
+    const user = this.getUserInfoBySlug(post.slug);
+    if (user) {
+      post.displayName = user.displayName;
+      post.avatarUrl = user.avatarUrl;
+    }
     return post;
   }
 
@@ -199,7 +244,7 @@ class MockDB {
       .filter(p => p.id === p.threadId)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => this.canViewAuthor(p.slug ?? '', p.displayName, userId))
-      .map(p => this.applyUserState({ ...p, replies: [...p.replies].filter(r => !hidden.has(r.slug ?? '')) }, userId));
+      .map(p => this.applyUserState({ ...p, replies: [...p.replies].filter(r => !hidden.has(r.slug ?? '')).map(r => this.applyUserState(r, userId)) }, userId));
   }
 
   getUserPostsBySlug(slug: string, userId?: string): Post[] {
@@ -208,7 +253,7 @@ class MockDB {
     const posts = this.posts.filter(p => p.slug === slug);
     const author = posts[0];
     if (author && !this.canViewAuthor(slug, author.displayName, userId)) return [];
-    return posts.map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return posts.map(p => this.applyUserState({ ...p, replies: [...p.replies].map(r => this.applyUserState(r, userId)) }, userId));
   }
 
   getLikedPosts(userId: string): Post[] {
