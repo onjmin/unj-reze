@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { userSlug, kind, trackId, collectionId, artistId, title, subtitle, artworkUrl, viewUrl } = body;
+  const { userSlug, kind, trackId, collectionId, artistId, title, subtitle, artworkUrl, viewUrl, previewUrl } = body;
 
   if (!userSlug || !kind || !title) {
     return NextResponse.json({ error: 'userSlug, kind and title are required' }, { status: 400 });
@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     subtitle,
     artworkUrl,
     viewUrl,
+    previewUrl,
   });
   return NextResponse.json(encodeOshiItem(item), { status: 201 });
 }

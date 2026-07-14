@@ -176,9 +176,13 @@ function ensureTableMigrations(d: SqlJsDatabase) {
     subtitle TEXT,
     artwork_url TEXT,
     view_url TEXT,
+    preview_url TEXT,
     position INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
+  const oshiCols = d.exec("PRAGMA table_info(oshi_items)");
+  const oshiColNames = oshiCols.length > 0 ? oshiCols[0].values.map((v: any) => v[1]) : [];
+  if (!oshiColNames.includes('preview_url')) d.run("ALTER TABLE oshi_items ADD COLUMN preview_url TEXT");
 }
 
 function snippetSqlite(text: string): string {
@@ -236,6 +240,7 @@ function rowToOshiItemSqlite(row: any): DbOshiItem {
     subtitle: row.subtitle ?? undefined,
     artworkUrl: row.artwork_url ?? undefined,
     viewUrl: row.view_url ?? undefined,
+    previewUrl: row.preview_url ?? undefined,
     position: row.position,
     createdAt: row.created_at,
   };
@@ -766,9 +771,9 @@ export const sqliteStore: DataStore = {
     const position = posRows[0].next_pos;
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO oshi_items (id, user_slug, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, position, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, userSlug, data.kind, data.trackId ?? null, data.collectionId ?? null, data.artistId ?? null, data.title, data.subtitle ?? null, data.artworkUrl ?? null, data.viewUrl ?? null, position, now]
+      `INSERT INTO oshi_items (id, user_slug, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, preview_url, position, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, userSlug, data.kind, data.trackId ?? null, data.collectionId ?? null, data.artistId ?? null, data.title, data.subtitle ?? null, data.artworkUrl ?? null, data.viewUrl ?? null, data.previewUrl ?? null, position, now]
     );
     saveDb();
     const rows = rowsToObjects(d, 'SELECT * FROM oshi_items WHERE id = ?', [id]);

@@ -175,7 +175,7 @@ const staticApi = {
     list: async (userSlug: string) => mockDbInstance.listOshiItems(userSlug).map(encodeOshiItem),
     add: async (userSlug: string, item: {
       kind: OshiItemKind; trackId?: number; collectionId?: number; artistId?: number;
-      title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string;
+      title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string; previewUrl?: string;
     }) => encodeOshiItem(mockDbInstance.addOshiItem(userSlug, item)),
     remove: async (userSlug: string, id: string) => {
       mockDbInstance.removeOshiItem(userSlug, decodeIdOrThrow(id));
@@ -311,7 +311,7 @@ const liveApi = {
     list: (userSlug: string) => fetcher<OshiItem[]>(`/oshi?slug=${encodeURIComponent(userSlug)}`),
     add: (userSlug: string, item: {
       kind: OshiItemKind; trackId?: number; collectionId?: number; artistId?: number;
-      title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string;
+      title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string; previewUrl?: string;
     }) => fetcher<OshiItem>('/oshi', { method: 'POST', body: JSON.stringify({ userSlug, ...item }) }),
     remove: (userSlug: string, id: string) => fetcher<{ success: boolean }>(`/oshi/${id}`, { method: 'DELETE', body: JSON.stringify({ userSlug }) }),
   },

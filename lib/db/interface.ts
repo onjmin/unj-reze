@@ -19,6 +19,7 @@ export interface AddOshiItemParams {
   subtitle?: string;
   artworkUrl?: string;
   viewUrl?: string;
+  previewUrl?: string;
 }
 
 export interface CreatePostParams {

@@ -169,6 +169,7 @@ class MockDB {
     subtitle?: string;
     artworkUrl?: string;
     viewUrl?: string;
+    previewUrl?: string;
   }): DbOshiItem {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const position = this.oshiItems.filter(o => o.userSlug === userSlug).length;

@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Post, OshiItem } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil } from 'lucide-react';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil, Play, Pause } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
+import { applyMasterVolume, subscribeMasterVolume, subscribeMuted } from '@/lib/master-volume';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -61,7 +62,10 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [oshiItems, setOshiItems] = useState<OshiItem[]>([]);
   const [isMusicModalOpen, setIsMusicModalOpen] = useState(false);
+  const [playingOshiId, setPlayingOshiId] = useState<string | null>(null);
+  const [removingOshiId, setRemovingOshiId] = useState<string | null>(null);
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
+  const oshiAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
   const isSelf = currentUserId === userId;
@@ -148,6 +152,52 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     }
     Promise.all(promises).finally(() => setLoading(false));
   }, [userId, slug, currentUserId, isSelf]);
+
+  useEffect(() => () => { oshiAudioRef.current?.pause(); }, []);
+
+  // マスター音量/ミュートの変更を再生中の推しリストプレビューへ即時反映する。
+  useEffect(() => {
+    const applyVolume = () => {
+      if (oshiAudioRef.current) oshiAudioRef.current.volume = applyMasterVolume(100) / 100;
+    };
+    const unsubVolume = subscribeMasterVolume(applyVolume);
+    const unsubMuted = subscribeMuted(applyVolume);
+    return () => { unsubVolume(); unsubMuted(); };
+  }, []);
+
+  const handleToggleOshiPreview = (e: React.MouseEvent, item: OshiItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!item.previewUrl) return;
+    if (playingOshiId === item.id) {
+      oshiAudioRef.current?.pause();
+      setPlayingOshiId(null);
+      return;
+    }
+    oshiAudioRef.current?.pause();
+    const audio = new Audio(item.previewUrl);
+    audio.volume = applyMasterVolume(100) / 100;
+    audio.play().catch(() => {});
+    audio.onended = () => setPlayingOshiId(null);
+    oshiAudioRef.current = audio;
+    setPlayingOshiId(item.id);
+  };
+
+  const handleRemoveOshi = async (e: React.MouseEvent, item: OshiItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setRemovingOshiId(item.id);
+    try {
+      await api.oshi.remove(slug, item.id);
+      setOshiItems(prev => prev.filter(o => o.id !== item.id));
+      if (playingOshiId === item.id) {
+        oshiAudioRef.current?.pause();
+        setPlayingOshiId(null);
+      }
+    } catch {} finally {
+      setRemovingOshiId(null);
+    }
+  };
 
   const handleFollow = async () => {
     if (!currentUserId) return;
@@ -334,11 +384,33 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                     rel="noopener noreferrer"
                     className="shrink-0 w-24"
                   >
-                    <div className="w-24 h-24 rounded-lg overflow-hidden bg-gray-800 border border-gray-800 flex items-center justify-center">
+                    <div className="relative w-24 h-24 rounded-lg overflow-hidden bg-gray-800 border border-gray-800 flex items-center justify-center">
                       {item.artworkUrl ? (
                         <img src={item.artworkUrl} alt={item.title} className="w-full h-full object-cover" />
                       ) : (
                         <Music2 size={20} className="text-gray-600" />
+                      )}
+                      {playingOshiId === item.id && (
+                        <div className="absolute inset-0 bg-black/20" />
+                      )}
+                      {item.previewUrl && (
+                        <button
+                          onClick={(e) => handleToggleOshiPreview(e, item)}
+                          className="absolute bottom-1 left-1 w-6 h-6 rounded-full bg-black/70 flex items-center justify-center text-white hover:bg-black/90 transition-colors"
+                          aria-label={playingOshiId === item.id ? '一時停止' : '試聴する'}
+                        >
+                          {playingOshiId === item.id ? <Pause size={12} /> : <Play size={12} />}
+                        </button>
+                      )}
+                      {isSelf && (
+                        <button
+                          onClick={(e) => handleRemoveOshi(e, item)}
+                          disabled={removingOshiId === item.id}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                          aria-label="推しリストから削除"
+                        >
+                          {removingOshiId === item.id ? <Loader2 size={10} className="animate-spin" /> : <X size={10} />}
+                        </button>
                       )}
                     </div>
                     <div className="text-[10px] text-gray-300 font-bold truncate mt-1">{item.title}</div>

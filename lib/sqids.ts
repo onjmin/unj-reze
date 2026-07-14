@@ -66,6 +66,7 @@ export function encodeOshiItem(item: DbOshiItem): ApiOshiItem {
     subtitle: item.subtitle,
     artworkUrl: item.artworkUrl,
     viewUrl: item.viewUrl,
+    previewUrl: item.previewUrl,
     position: item.position,
   };
 }

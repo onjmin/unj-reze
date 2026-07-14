@@ -58,6 +58,12 @@ const migrations = [
       );
       CREATE INDEX IF NOT EXISTS idx_oshi_items_user_slug ON oshi_items(user_slug);
     `
+  },
+  {
+    name: '06_add_preview_url_to_oshi_items',
+    sql: `
+      ALTER TABLE oshi_items ADD COLUMN IF NOT EXISTS preview_url TEXT;
+    `
   }
 ];
 

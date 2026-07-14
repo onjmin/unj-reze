@@ -60,6 +60,7 @@ function rowToOshiItemPg(row: any): DbOshiItem {
     subtitle: row.subtitle ?? undefined,
     artworkUrl: row.artwork_url ?? undefined,
     viewUrl: row.view_url ?? undefined,
+    previewUrl: row.preview_url ?? undefined,
     position: row.position,
     createdAt,
   };
@@ -735,10 +736,10 @@ export const pgStore: DataStore = {
       const posRes = await client.query('SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM oshi_items WHERE user_slug = $1', [userSlug]);
       const position = posRes.rows[0].next_pos;
       const result = await client.query(
-        `INSERT INTO oshi_items (id, user_slug, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, position, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        `INSERT INTO oshi_items (id, user_slug, kind, track_id, collection_id, artist_id, title, subtitle, artwork_url, view_url, preview_url, position, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
          RETURNING *`,
-        [id, userSlug, data.kind, data.trackId ?? null, data.collectionId ?? null, data.artistId ?? null, data.title, data.subtitle ?? null, data.artworkUrl ?? null, data.viewUrl ?? null, position]
+        [id, userSlug, data.kind, data.trackId ?? null, data.collectionId ?? null, data.artistId ?? null, data.title, data.subtitle ?? null, data.artworkUrl ?? null, data.viewUrl ?? null, data.previewUrl ?? null, position]
       );
       return rowToOshiItemPg(result.rows[0]);
     } finally {

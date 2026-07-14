@@ -34,12 +34,12 @@ const TABS: { id: OshiItemKind; entity: 'song' | 'album' | 'musicArtist'; label:
   { id: 'artist', entity: 'musicArtist', label: 'アーティスト' },
 ];
 
-function resultToItem(kind: OshiItemKind, r: AppleMusicResult): { kind: OshiItemKind; trackId?: number; collectionId?: number; artistId?: number; title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string } {
+function resultToItem(kind: OshiItemKind, r: AppleMusicResult): { kind: OshiItemKind; trackId?: number; collectionId?: number; artistId?: number; title: string; subtitle?: string; artworkUrl?: string; viewUrl?: string; previewUrl?: string } {
   if (kind === 'song') {
-    return { kind, trackId: r.trackId, title: r.trackName || '', subtitle: `${r.artistName || ''} · ${r.collectionName || ''}`, artworkUrl: r.artworkUrl100, viewUrl: r.trackViewUrl };
+    return { kind, trackId: r.trackId, title: r.trackName || '', subtitle: `${r.artistName || ''} · ${r.collectionName || ''}`, artworkUrl: r.artworkUrl100, viewUrl: r.trackViewUrl, previewUrl: r.previewUrl };
   }
   if (kind === 'album') {
-    return { kind, collectionId: r.collectionId, title: r.collectionName || '', subtitle: r.artistName, artworkUrl: r.artworkUrl100, viewUrl: r.collectionViewUrl };
+    return { kind, collectionId: r.collectionId, title: r.collectionName || '', subtitle: r.artistName, artworkUrl: r.artworkUrl100, viewUrl: r.collectionViewUrl, previewUrl: r.previewUrl };
   }
   return { kind, artistId: r.artistId, title: r.artistName || '', subtitle: 'アーティスト', artworkUrl: r.artworkUrl100, viewUrl: r.artistViewUrl };
 }

@@ -88,6 +88,7 @@ export interface OshiItem {
   subtitle?: string;
   artworkUrl?: string;
   viewUrl?: string;
+  previewUrl?: string;
   position: number;
 }
 

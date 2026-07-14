@@ -54,6 +54,7 @@ export interface DbOshiItem {
   subtitle?: string;
   artworkUrl?: string;
   viewUrl?: string;
+  previewUrl?: string;
   position: number;
   createdAt: string;
 }
