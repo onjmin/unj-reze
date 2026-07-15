@@ -227,7 +227,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           style={post.avatarUrl ? undefined : avatarInfo.style}
         >
           {post.avatarUrl ? (
-            <img src={post.avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+            <img src={post.avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover rounded-full" />
           ) : (
             (() => {
               const AvatarIcon = avatarInfo.Icon;
@@ -595,7 +595,7 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
                 style={{ zIndex: isActive ? maxAvatars + 1 : maxAvatars - i, ...(r.avatarUrl ? {} : rAvatarInfo.style) }}
               >
                 {r.avatarUrl ? (
-                  <img src={r.avatarUrl} alt={rAvatarInfo.username} className="w-full h-full object-cover" />
+                  <img src={r.avatarUrl} alt={rAvatarInfo.username} className="w-full h-full object-cover rounded-full" />
                 ) : (
                   (() => {
                     const RAvatarIcon = rAvatarInfo.Icon;

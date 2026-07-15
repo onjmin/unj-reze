@@ -206,7 +206,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       style={avatarUrl ? undefined : avatarInfo.style}
     >
       {avatarUrl ? (
-        <img src={avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+        <img src={avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover rounded-full" />
       ) : (
         (() => {
           const AvatarIcon = avatarInfo.Icon;

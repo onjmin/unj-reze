@@ -478,7 +478,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           style={post.avatarUrl ? undefined : getAvatarInfo(post.displayName).style}
         >
           {post.avatarUrl ? (
-            <img src={post.avatarUrl} alt={getAvatarInfo(post.displayName).username} className="w-full h-full object-cover" />
+            <img src={post.avatarUrl} alt={getAvatarInfo(post.displayName).username} className="w-full h-full object-cover rounded-full" />
           ) : (
             (() => {
               const AvatarIcon = getAvatarInfo(post.displayName).Icon;
@@ -812,7 +812,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           style={localPost.avatarUrl ? undefined : avatarInfo.style}
         >
           {localPost.avatarUrl ? (
-            <img src={localPost.avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover" />
+            <img src={localPost.avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover rounded-full" />
           ) : (
             (() => {
               const AvatarIcon = avatarInfo.Icon;
