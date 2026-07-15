@@ -835,7 +835,9 @@ type PickTarget =
   | { t: 'sfx'; trigger: SfxTrigger } | { t: 'objsprite' } | { t: 'selObjSprite' } | { t: 'mapBg' }
   | { t: 'titleBg' } | { t: 'endingBg' } | { t: 'titleBgm' } | { t: 'endingBgm' }
   | { t: 'sceneBgm'; idx: number }
-  | { t: 'yumeTex'; id: number };
+  | { t: 'yumeTex'; id: number }
+  | { t: 'yumeSky' }
+  | { t: 'yumeTexSound'; id: number };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -10020,6 +10022,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const textures = { ...p.layout25d.textures };
         if (textures[target.id]) {
           textures[target.id] = { ...textures[target.id], imageRef: res.ref, imageUrl: res.url };
+        }
+        return { ...p, layout25d: { ...p.layout25d, textures } };
+      });
+    }
+    else if (target.t === 'yumeSky') {
+      setGameData(p => p.layout25d ? { ...p, layout25d: { ...p.layout25d, skyRef: res.ref, skyUrl: res.url } } : p);
+    }
+    else if (target.t === 'yumeTexSound') {
+      const s = bgmLike();
+      setGameData(p => {
+        if (!p.layout25d) return p;
+        const textures = { ...p.layout25d.textures };
+        if (textures[target.id]) {
+          // 届く距離・音量の既存設定は保ったまま音源だけ差し替える
+          textures[target.id] = { ...textures[target.id], sound: { ...textures[target.id].sound, ref: s.ref, src: s.src, type: s.type } };
         }
         return { ...p, layout25d: { ...p.layout25d, textures } };
       });

@@ -35,6 +35,31 @@ const ICE_DIR_VEC: Record<string, [number, number]> = {
 const FADE_OUT_SEC = 0.25;
 const FADE_IN_SEC = 0.4;
 
+// ── 遊べるオブジェクト（システムスプライト） ──
+// ボール：プレイヤーが触れると離れる方向へ転がり、壁・マップ端で跳ね返って減速する。
+const BALL_RADIUS = 0.22;
+const KICK_SPEED = 4.5;      // 蹴った直後の速度（マス/秒）
+const BALL_FRICTION = 1.4;   // 転がり減速（1秒あたりの速度割合）
+const BALL_BOUNCE = 0.7;     // 壁反射の反発係数
+const BALL_STOP_EPS = 0.05;  // これ未満の速度は停止扱い
+// スピーカー：距離減衰は逆二乗の「近似」として (1 - d/radius)² を使う。
+// 真の 1/d² は d→0 で発散し、無限遠までゼロにならないため結局クランプ＋カットオフが必要になる。
+// この近似は d=0 で最大音量・radius でちょうど 0 になり、パラメータが直感的で計算も安い。
+const SPEAKER_DEFAULT_RADIUS = 8;
+const SPEAKER_DEFAULT_VOLUME = 0.7;
+const SPEAKER_PAUSE_EPS = 0.005;  // これ未満の音量になったら pause してリソースを空ける
+
+// ── 照明・背景 ──
+// three の物理ライティングでは AmbientLight(白, π) × MeshLambertMaterial ＝ テクスチャ等倍
+// （従来の MeshBasicMaterial と同じ見た目）になる。ambientLight=1 がフルブライトの基準。
+const AMBIENT_SCALE = Math.PI;
+// ランタン（プレイヤー光源）：intensity 1 で約1マス先がほぼ等倍で照る強さ。
+const LANTERN_SCALE = 4 * Math.PI;
+const LANTERN_DEFAULT_COLOR = '#ffd9a0';
+// 背景画像（円筒パノラマ）：霧より遠く・カメラの far(100) より近い半径で常にカメラへ追従する。
+const SKY_RADIUS = 45;
+const SKY_HEIGHT = 36;
+
 // ダメージ床のHP制。2Dエンジン（既定3ダメージ・45フレーム≒0.75秒無敵）に合わせ、
 // 一発で「ゆめから さめる」のではなく HP が尽きたときだけスタートへ戻す。
 const YUME_MAX_HP = 6;             // 1ハート=2HP × 3ハート（2DのonjReze初期値と同じ）
@@ -322,7 +347,24 @@ export class Yume25DEngine {
   private playerTexture: THREE.CanvasTexture;
   private playerMesh: THREE.Mesh;
   private playerGeo: THREE.PlaneGeometry;
-  private playerMat: THREE.MeshBasicMaterial;
+  private playerMat: THREE.MeshLambertMaterial;
+
+  // ── 遊べるオブジェクト ──
+  /** 蹴れるボール（special==='ball' のスプライト）。home はレイアウト上の定位置で、リセットで戻る。 */
+  private balls: { mesh: THREE.Mesh; homeX: number; homeZ: number; x: number; z: number; vx: number; vz: number }[] = [];
+  /** スピーカー（special==='speaker'）。同じ音源のスプライト群を1本の Audio にまとめ、最寄り距離で音量を決める。 */
+  private speakers: { src: string; positions: [number, number][]; radius: number; volume: number }[] = [];
+  private speakerAudio = new Map<string, HTMLAudioElement>();
+
+  // ── 照明・背景 ──
+  private ambientLightObj!: THREE.AmbientLight;
+  private lantern!: THREE.PointLight;
+  private skyMesh: THREE.Mesh | null = null;
+  private skyMat: THREE.MeshBasicMaterial | null = null;
+  private skyGeo: THREE.CylinderGeometry | null = null;
+  private skyCanvas: HTMLCanvasElement | null = null;
+  private skyTexture: THREE.CanvasTexture | null = null;
+  private skyUrlLoaded: string | undefined;
   // 歩行グラプレイヤーのアニメ状態。lastKey は「向き:フレーム」で再描画の要否を判定する。
   private playerAnim: { img: HTMLImageElement; std: WalkStandard; lastKey: string } | null = null;
   private playerDir: WayKey = 'w';
@@ -367,7 +409,7 @@ export class Yume25DEngine {
     this.playerTexture.colorSpace = THREE.SRGBColorSpace;
     this.applyPlayerAppearance();
     this.playerGeo = new THREE.PlaneGeometry(0.8, 0.8);
-    this.playerMat = new THREE.MeshBasicMaterial({ map: this.playerTexture, alphaTest: 0.5, side: THREE.DoubleSide });
+    this.playerMat = new THREE.MeshLambertMaterial({ map: this.playerTexture, alphaTest: 0.5, side: THREE.DoubleSide });
     this.playerMesh = new THREE.Mesh(this.playerGeo, this.playerMat);
     this.playerMesh.visible = this.pov === 'third';
     this.scene.add(this.playerMesh);
@@ -393,6 +435,14 @@ export class Yume25DEngine {
     this.ghostMesh.visible = false;
     this.scene.add(this.ghostMesh);
 
+    // 照明：環境光（全体の明るさ/色）＋プレイヤー光源（ランタン）。
+    // ワールドの材質は Lambert なので、環境光 π（=ambientLight 1.0）でフルブライトになる。
+    this.ambientLightObj = new THREE.AmbientLight('#ffffff', AMBIENT_SCALE);
+    this.scene.add(this.ambientLightObj);
+    this.lantern = new THREE.PointLight(LANTERN_DEFAULT_COLOR, 0, 8, 2);
+    this.lantern.visible = false;
+    this.scene.add(this.lantern);
+
     this.buildScene();
     this.resetToStart();
   }
@@ -410,6 +460,11 @@ export class Yume25DEngine {
     this.hp = this.maxHp;
     this.invuln = 0;
     this.onHpChange?.(this.hp, this.maxHp);
+    // ボールを定位置へ戻す（プレイ開始・ゆめから さめたとき）
+    for (const b of this.balls) {
+      b.x = b.homeX; b.z = b.homeZ; b.vx = 0; b.vz = 0;
+      b.mesh.position.x = b.x; b.mesh.position.z = b.z;
+    }
     this.clampToBounds();
     this.resolveWalls();
   }
@@ -701,6 +756,8 @@ export class Yume25DEngine {
   stop() {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    // 3Dビューを離れてもループ再生が残らないようスピーカーを止める
+    for (const audio of this.speakerAudio.values()) audio.pause();
   }
 
   dispose() {
@@ -716,6 +773,11 @@ export class Yume25DEngine {
     this.ghostMat.dispose();
     this.fadeGeo.dispose();
     this.fadeMat.dispose();
+    this.skyGeo?.dispose();
+    this.skyMat?.dispose();
+    this.skyTexture?.dispose();
+    for (const audio of this.speakerAudio.values()) audio.pause();
+    this.speakerAudio.clear();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -840,6 +902,18 @@ export class Yume25DEngine {
     this.scene.background = new THREE.Color(L.skyColor);
     this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor), L.fogNear, L.fogFar);
 
+    // 照明：環境光（明るさ・色）とランタン（プレイヤー光源）の設定を反映
+    this.ambientLightObj.color.set(L.ambientColor ?? '#ffffff');
+    this.ambientLightObj.intensity = (L.ambientLight ?? 1) * AMBIENT_SCALE;
+    const pl = L.playerLight;
+    this.lantern.visible = !!pl?.enabled;
+    if (pl?.enabled) {
+      this.lantern.color.set(pl.color ?? LANTERN_DEFAULT_COLOR);
+      this.lantern.intensity = (pl.intensity ?? 1) * LANTERN_SCALE;
+      this.lantern.distance = pl.distance ?? 8;
+    }
+    this.updateSky(L);
+
     // 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
     this.hEdges.clear(); this.vEdges.clear();
     for (const w of L.walls) {
@@ -870,7 +944,8 @@ export class Yume25DEngine {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       geo.setIndex(idx);
-      const mat = new THREE.MeshBasicMaterial({
+      geo.computeVertexNormals();  // Lambert（照明対応）に必要
+      const mat = new THREE.MeshLambertMaterial({
         map: this.getTex(texId),
         side: doubleSided ? THREE.DoubleSide : THREE.FrontSide,
       });
@@ -918,10 +993,13 @@ export class Yume25DEngine {
     for (const [texId, quads] of wallQuads) makeMergedMesh(texId, quads, true);
 
     // ── ビルボード：透過スプライト。alphaTest で深度バグ（奥の板が透けて欠ける）を防ぐ ──
+    this.balls = [];
+    this.speakers = [];
+    const speakerCells = new Map<number, [number, number][]>();  // texId -> スピーカー位置
     for (const b of L.billboards) {
       const s = b.scale ?? 1;
       const geo = new THREE.PlaneGeometry(s * 0.9, s * 0.9);
-      const mat = new THREE.MeshBasicMaterial({
+      const mat = new THREE.MeshLambertMaterial({
         map: this.getTex(b.tex),
         alphaTest: 0.5,       // transparent:false のまま切り抜き → 深度ソート不要で描画順バグが出ない
         side: THREE.DoubleSide,
@@ -936,6 +1014,152 @@ export class Yume25DEngine {
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);
+
+      // 遊べるオブジェクト：テクスチャの special で判定（システム床と同じパターン）
+      const def = L.textures[b.tex];
+      if (def?.special === 'ball' && (b.level ?? 0) === 0) {
+        this.balls.push({ mesh, homeX: b.col + 0.5, homeZ: b.row + 0.5, x: b.col + 0.5, z: b.row + 0.5, vx: 0, vz: 0 });
+      } else if (def?.special === 'speaker' && def.sound?.src && (def.sound.type ?? 'direct') === 'direct') {
+        const arr = speakerCells.get(b.tex) ?? [];
+        arr.push([b.col + 0.5, b.row + 0.5]);
+        speakerCells.set(b.tex, arr);
+      }
+    }
+    for (const [texId, positions] of speakerCells) {
+      const snd = L.textures[texId].sound!;
+      this.speakers.push({
+        src: snd.src!, positions,
+        radius: snd.radius ?? SPEAKER_DEFAULT_RADIUS,
+        volume: snd.volume ?? SPEAKER_DEFAULT_VOLUME,
+      });
+    }
+    // 参照されなくなった音源は止めて破棄する（編集で消した/差し替えたケース）
+    const liveSrcs = new Set(this.speakers.map(s => s.src));
+    for (const [src, audio] of this.speakerAudio) {
+      if (!liveSrcs.has(src)) { audio.pause(); this.speakerAudio.delete(src); }
+    }
+  }
+
+  /** 背景画像（skyUrl）：横360°の円筒パノラマとしてカメラに追従させる。
+   *  ワールドより先に描き（renderOrder 負・depthWrite なし）、霧の影響は受けない。
+   *  画像ロード中や上下の余白には scene.background（skyColor）が見える。 */
+  private updateSky(L: Layout25D) {
+    if (!L.skyUrl) {
+      this.skyUrlLoaded = undefined;
+      if (this.skyMesh) this.skyMesh.visible = false;
+      return;
+    }
+    if (!this.skyMesh) {
+      this.skyCanvas = document.createElement('canvas');
+      this.skyCanvas.width = 1024; this.skyCanvas.height = 512;
+      this.skyTexture = new THREE.CanvasTexture(this.skyCanvas);
+      this.skyTexture.magFilter = THREE.NearestFilter;
+      this.skyTexture.minFilter = THREE.NearestFilter;
+      this.skyTexture.generateMipmaps = false;
+      this.skyTexture.colorSpace = THREE.SRGBColorSpace;
+      this.skyGeo = new THREE.CylinderGeometry(SKY_RADIUS, SKY_RADIUS, SKY_HEIGHT, 24, 1, true);
+      this.skyMat = new THREE.MeshBasicMaterial({
+        map: this.skyTexture, side: THREE.BackSide, fog: false,
+        transparent: true, depthWrite: false,
+      });
+      this.skyMesh = new THREE.Mesh(this.skyGeo, this.skyMat);
+      this.skyMesh.renderOrder = -1000;
+      this.skyMesh.frustumCulled = false;
+      this.scene.add(this.skyMesh);
+    }
+    this.skyMesh.visible = true;
+    if (this.skyUrlLoaded !== L.skyUrl) {
+      this.skyUrlLoaded = L.skyUrl;
+      const { url, crop } = splitCropUrl(L.skyUrl);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (this.disposed || this.skyUrlLoaded !== L.skyUrl || !this.skyCanvas || !this.skyTexture) return;
+        const cv = this.skyCanvas;
+        const ctx = cv.getContext('2d')!;
+        ctx.imageSmoothingEnabled = false;
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        const [sx, sy, sw, sh] = crop ?? [0, 0, img.naturalWidth, img.naturalHeight];
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+        this.skyTexture.needsUpdate = true;
+      };
+      img.src = url;
+    }
+  }
+
+  /** 遊べるオブジェクトの毎フレーム更新。編集モード中はボールを定位置へ戻し、音も止める。 */
+  private updatePlayObjects(dt: number) {
+    // ── ボール：触れると離れる方向へ転がり、壁・マップ端で跳ね返って減速する ──
+    if (this.editMode) {
+      for (const b of this.balls) {
+        if (b.x !== b.homeX || b.z !== b.homeZ) {
+          b.x = b.homeX; b.z = b.homeZ; b.vx = 0; b.vz = 0;
+          b.mesh.position.x = b.x; b.mesh.position.z = b.z;
+        }
+      }
+    } else {
+      for (const b of this.balls) {
+        // 蹴る（ジャンプで頭上を越えているときは触れない）
+        const dx = b.x - this.x, dz = b.z - this.z;
+        const d = Math.hypot(dx, dz);
+        if (d < PLAYER_RADIUS + BALL_RADIUS && this.hop < this.layout.wallHeight * 0.5) {
+          const inv = d > 1e-4 ? 1 / d : 0;
+          b.vx = (inv ? dx * inv : 1) * KICK_SPEED;
+          b.vz = (inv ? dz * inv : 0) * KICK_SPEED;
+        }
+        if (b.vx === 0 && b.vz === 0) continue;
+        const decel = Math.max(0, 1 - BALL_FRICTION * dt);
+        b.vx *= decel; b.vz *= decel;
+        if (Math.hypot(b.vx, b.vz) < BALL_STOP_EPS) { b.vx = 0; b.vz = 0; continue; }
+        // X → Z の順に進め、壁の辺・マップ端で速度を反転（プレイヤーと同じ辺集合を使う）
+        let nx = b.x + b.vx * dt;
+        if (b.vx > 0) {
+          const c0 = Math.floor(b.x + BALL_RADIUS), c1 = Math.floor(nx + BALL_RADIUS);
+          if ((c1 > c0 && this.blockedV(c1, b.z)) || nx > this.layout.cols - BALL_RADIUS) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+        } else if (b.vx < 0) {
+          const c0 = Math.floor(b.x - BALL_RADIUS), c1 = Math.floor(nx - BALL_RADIUS);
+          if ((c1 < c0 && this.blockedV(c0, b.z)) || nx < BALL_RADIUS) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+        }
+        b.x = nx;
+        let nz = b.z + b.vz * dt;
+        if (b.vz > 0) {
+          const r0 = Math.floor(b.z + BALL_RADIUS), r1 = Math.floor(nz + BALL_RADIUS);
+          if ((r1 > r0 && this.blockedH(r1, b.x)) || nz > this.layout.rows - BALL_RADIUS) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+        } else if (b.vz < 0) {
+          const r0 = Math.floor(b.z - BALL_RADIUS), r1 = Math.floor(nz - BALL_RADIUS);
+          if ((r1 < r0 && this.blockedH(r0, b.x)) || nz < BALL_RADIUS) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+        }
+        b.z = nz;
+        b.mesh.position.x = b.x;
+        b.mesh.position.z = b.z;
+      }
+    }
+
+    // ── スピーカー：最寄りのスプライトまでの距離 d から音量 = volume × (1 - d/radius)²。
+    //    逆二乗則の近似（0距離で有限・radius でちょうど無音）。プレイ中のみ鳴らす。 ──
+    const audible = !this.editMode && !this.demo;
+    for (const s of this.speakers) {
+      let d2 = Infinity;
+      for (const [px, pz] of s.positions) {
+        const dd = (px - this.x) * (px - this.x) + (pz - this.z) * (pz - this.z);
+        if (dd < d2) d2 = dd;
+      }
+      const t = Math.max(0, 1 - Math.sqrt(d2) / s.radius);
+      const vol = audible ? Math.min(1, s.volume * t * t) : 0;
+      let audio = this.speakerAudio.get(s.src);
+      if (vol > SPEAKER_PAUSE_EPS) {
+        if (!audio) {
+          audio = new Audio(s.src);
+          audio.loop = true;
+          audio.crossOrigin = 'anonymous';
+          this.speakerAudio.set(s.src, audio);
+        }
+        audio.volume = vol;
+        // 初回はブラウザの自動再生制限で失敗することがある。操作後のフレームで再試行される
+        if (audio.paused) audio.play().catch(() => {});
+      } else if (audio && !audio.paused) {
+        audio.pause();
+      }
     }
   }
 
@@ -1182,6 +1406,9 @@ export class Yume25DEngine {
       }
     }
 
+    // ── 遊べるオブジェクト（ボール・スピーカー） ──
+    this.updatePlayObjects(dt);
+
     // ── 高さ方向：浮遊（ホバー）中は押している間だけ上昇/下降・重力なし。
     //    それ以外（プレイ中・編集の通常モード・浮遊解除直後）は重力とジャンプが働く ──
     if (hovering) {
@@ -1224,6 +1451,10 @@ export class Yume25DEngine {
       this.camera.rotation.y = this.yaw;
       this.camera.rotation.x = this.pitch;
     }
+    // ランタンはプレイヤー位置（目の高さ）から照らし、背景パノラマはカメラへ追従させる
+    if (this.lantern.visible) this.lantern.position.set(this.x, eyeY, this.z);
+    if (this.skyMesh?.visible) this.skyMesh.position.copy(this.camera.position);
+
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;
     if (this.ghostKind === 'sprite') this.ghostMesh.rotation.y = this.yaw;

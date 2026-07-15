@@ -487,6 +487,10 @@ export interface Tex25D {
   warpDest?: { col: number; row: number; dir?: Dir4 };
   /** special==='damage'：被ダメージ量。未指定時は3（2Dの TileDef.damageAmount と同じ既定値）。 */
   damageAmount?: number;
+  /** special==='speaker'（kind==='sprite'）：近づくと聞こえる音源（ライブステージ/スピーカー）。
+   *  距離減衰は (1 - d/radius)² の近似（radius マスでちょうど無音）。direct 音源のみ再生できる。
+   *  radius 未指定は8マス、volume（最大音量 0〜1）未指定は0.7。 */
+  sound?: { ref: string; src?: string; type?: 'youtube' | 'mml' | 'direct'; radius?: number; volume?: number };
 }
 
 /** 薄板1枚の壁。セルの北辺(dir=0)または西辺(dir=3)に正規化して保存する
@@ -522,6 +526,16 @@ export interface Layout25D {
   wallHeight: number;
   skyColor: string;
   fogColor: string; fogNear: number; fogFar: number;
+  /** 背景画像（横360°の円筒パノラマ）。カメラ位置に追従し、霧の影響を受けない。
+   *  上下の余白には skyColor が見える。未指定なら skyColor 一色。 */
+  skyRef?: string; skyUrl?: string;
+  /** ワールド全体の明るさ（環境光）。1=従来のフルブライト。0.1〜2。未指定は1。 */
+  ambientLight?: number;
+  /** 環境光の色。未指定は白（テクスチャそのままの色）。 */
+  ambientColor?: string;
+  /** プレイヤー光源（ランタン）。enabled のときプレイヤー位置から周囲を照らす。
+   *  intensity は 1=標準（隣接マスがほぼ等倍で照る）、distance は届くマス数。 */
+  playerLight?: { enabled: boolean; color?: string; intensity?: number; distance?: number };
   start: { col: number; row: number; dir: Dir4 };
   /** 視点モード。first=一人称、third=三人称（プレイヤー自身のスプライトが見える）。未指定は first。 */
   pov?: 'first' | 'third';
@@ -661,6 +675,16 @@ export const SYSTEM_TILE_TEMPLATES: SystemTileTemplate[] = [
   { key: 'ice-right', label: 'つるつる床（→）', special: 'ice-right', imageUrl: localSysTileUrl(17, 13), imageRef: `url:${localSysTileUrl(17, 13)}`, passable: true, color: '#9fd8ea' },
   { key: 'ice-left', label: 'つるつる床（←）', special: 'ice-left', imageUrl: localSysTileUrl(16, 14), imageRef: `url:${localSysTileUrl(16, 14)}`, passable: true, color: '#9fd8ea' },
   { key: 'ice-down', label: 'つるつる床（↓）', special: 'ice-down', imageUrl: localSysTileUrl(17, 14), imageRef: `url:${localSysTileUrl(17, 14)}`, passable: true, color: '#9fd8ea' },
+];
+
+/** yume25d の遊べるシステムスプライト（蹴れるボール・近づくと聞こえるスピーカー）。
+ *  システム床と同様「special 付きのスプライトテクスチャ」として追加し、スプライトツールで配置する。 */
+export interface SystemSpriteTemplate {
+  key: string; label: string; special: string; emoji: string; color: string;
+}
+export const SYSTEM_SPRITE_TEMPLATES: SystemSpriteTemplate[] = [
+  { key: 'ball', label: 'サッカーボール', special: 'ball', emoji: '⚽', color: '#e8e8e8' },
+  { key: 'speaker', label: 'スピーカー', special: 'speaker', emoji: '🔊', color: '#8ab4ff' },
 ];
 
 /** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う直リンクmp3）。 */

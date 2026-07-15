@@ -8,6 +8,7 @@ import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFlo
 import {
   type Layout25D, type Tex25D, type Dir4,
   SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
+  SYSTEM_SPRITE_TEMPLATES, type SystemSpriteTemplate,
 } from './game-presets/shared';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
 
@@ -26,7 +27,7 @@ function SpriteThumb({ t }: { t: Tex25D }) {
 interface Yume25DEditorPanelProps {
   layout: Layout25D;
   onLayoutChange: (updater: (l: Layout25D) => Layout25D) => void;
-  onPickImage?: (target: { t: 'yumeTex'; id: number }) => void;
+  onPickImage?: (target: { t: 'yumeTex'; id: number } | { t: 'yumeSky' } | { t: 'yumeTexSound'; id: number }) => void;
   view: '2d' | '3d';
   onViewChange: (v: '2d' | '3d') => void;
   tool: Yume25DTool;
@@ -81,15 +82,33 @@ export default function Yume25DEditorPanel({
     onSelFloorChange(id);
   };
 
-  /** システム床テクスチャを削除する。塗られていたマスは床なし（奈落）に戻す。 */
+  /** システムスプライト（ボール・スピーカー）を special 付きスプライトテクスチャとして追加し、
+   *  スプライトツール＋パレット選択まで済ませる。 */
+  const addSystemSpriteTex = (tpl: SystemSpriteTemplate) => {
+    const id = Math.max(0, ...Object.keys(layout.textures).map(Number)) + 1;
+    onLayoutChange(l => ({
+      ...l,
+      textures: {
+        ...l.textures,
+        [id]: { id, name: tpl.label, kind: 'sprite' as const, color: tpl.color, emoji: tpl.emoji, special: tpl.special },
+      },
+    }));
+    onToolChange('sprite');
+    onSelSpriteChange(id);
+  };
+
+  /** システムテクスチャを削除する。塗られていた床は奈落に戻し、配置済みスプライトも取り除く。 */
   const deleteFloorTex = (id: number) => {
+    const kind = layout.textures[id]?.kind;
     onLayoutChange(l => {
       const textures = { ...l.textures };
       delete textures[id];
       const floor = l.floor.map(row => row.map(v => (v === id ? 0 : v)));
-      return { ...l, textures, floor };
+      const billboards = l.billboards.filter(b => b.tex !== id);
+      return { ...l, textures, floor, billboards };
     });
-    onSelFloorChange(0);
+    if (kind === 'sprite') onSelSpriteChange(yume25dTexList(layout, 'sprite').find(t => t.id !== id)?.id ?? 0);
+    else onSelFloorChange(0);
   };
 
   return (
@@ -245,6 +264,41 @@ export default function Yume25DEditorPanel({
             {t.special?.startsWith('ice-') && (
               <p className="text-[9px] text-gray-500">ふむと矢印の方向へ強制的にすべります。壁に当たると止まります（ジャンプで飛び越えられます）</p>
             )}
+            {t.special === 'ball' && (
+              <p className="text-[9px] text-gray-500">触れると蹴った方向へ転がります。壁やマップ端で跳ね返り、だんだん減速して止まります（プレイ/デモ中のみ。リスタートで元の位置に戻ります）</p>
+            )}
+            {t.special === 'speaker' && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-bold text-purple-300">音源</span>
+                  <span className="flex-1 min-w-0 truncate text-gray-400">{t.sound?.ref ? t.sound.ref.slice(0, 36) : '未設定'}</span>
+                  {t.sound && (
+                    <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], sound: undefined } } }))}
+                      className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                      消去
+                    </button>
+                  )}
+                  <button onClick={() => onPickImage?.({ t: 'yumeTexSound', id: t.id })}
+                    className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
+                    音源参照...
+                  </button>
+                </div>
+                {t.sound?.ref && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="flex items-center gap-1">届く距離
+                      <input type="range" min={2} max={20} step={1} value={t.sound.radius ?? 8}
+                        onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], sound: { ...l.textures[t.id].sound!, radius: Number(e.target.value) } } } }))} className="w-20" />
+                      <span className="text-gray-400">{t.sound.radius ?? 8}マス</span>
+                    </label>
+                    <label className="flex items-center gap-1">音量
+                      <input type="range" min={0.1} max={1} step={0.05} value={t.sound.volume ?? 0.7}
+                        onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], sound: { ...l.textures[t.id].sound!, volume: Number(e.target.value) } } } }))} className="w-20" />
+                    </label>
+                  </div>
+                )}
+                <p className="text-[9px] text-gray-500">近づくと聞こえ、離れるほど小さくなります（距離減衰は (1−d/距離)² の近似）。直リンク音源（RPGen効果音など）のみ再生できます。プレイ中のみ鳴ります</p>
+              </div>
+            )}
             <div className="flex items-center gap-2 flex-wrap">
               <label className="flex items-center gap-1">名前:
                 <input type="text" value={t.name}
@@ -295,6 +349,15 @@ export default function Yume25DEditorPanel({
             </button>
           ))}
         </div>
+        <p className="text-[10px] text-gray-500 pt-1">遊べるオブジェクト：スプライトパレットに追加され、スプライトツールで配置します。ボールは蹴って転がせて、スピーカーは設定した音源が近づくと聞こえます。</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {SYSTEM_SPRITE_TEMPLATES.map(tpl => (
+            <button key={tpl.key} onClick={() => addSystemSpriteTex(tpl)}
+              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
+              ＋{tpl.emoji} {tpl.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 設定パネル */}
@@ -330,6 +393,52 @@ export default function Yume25DEditorPanel({
             <input type="color" value={layout.skyColor}
               onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
           </label>
+          {/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）と色 */}
+          <label className="flex items-center justify-between gap-1">明るさ
+            <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? 1}
+              onChange={e => onLayoutChange(l => ({ ...l, ambientLight: Number(e.target.value) }))} className="w-20" />
+          </label>
+          <label className="flex items-center justify-between gap-1">光の色
+            <input type="color" value={layout.ambientColor ?? '#ffffff'}
+              onChange={e => onLayoutChange(l => ({ ...l, ambientColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+          </label>
+          {/* 背景画像：横360°の円筒パノラマ。上下の余白には空の色が見える */}
+          <div className="flex items-center justify-between gap-1 col-span-2">
+            <span>背景画像{layout.skyUrl ? '：設定中' : '：なし'}</span>
+            <span className="flex items-center gap-1">
+              {layout.skyUrl && (
+                <button onClick={() => onLayoutChange(l => ({ ...l, skyRef: undefined, skyUrl: undefined }))}
+                  className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                  消去
+                </button>
+              )}
+              <button onClick={() => onPickImage?.({ t: 'yumeSky' })}
+                className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
+                画像参照...
+              </button>
+            </span>
+          </div>
+          {/* プレイヤー光源（ランタン）：暗くした夢空間で足元だけ照らす演出用 */}
+          <label className="flex items-center justify-between gap-1 col-span-2">ランタン（プレイヤー光源）
+            <input type="checkbox" checked={!!layout.playerLight?.enabled}
+              onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight, enabled: e.target.checked } }))} />
+          </label>
+          {layout.playerLight?.enabled && (
+            <>
+              <label className="flex items-center justify-between gap-1">光源の色
+                <input type="color" value={layout.playerLight.color ?? '#ffd9a0'}
+                  onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, color: e.target.value } }))} className="w-8 h-5 bg-transparent" />
+              </label>
+              <label className="flex items-center justify-between gap-1">光源の強さ
+                <input type="range" min={0.2} max={3} step={0.1} value={layout.playerLight.intensity ?? 1}
+                  onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, intensity: Number(e.target.value) } }))} className="w-20" />
+              </label>
+              <label className="flex items-center justify-between gap-1 col-span-2">光の届く距離
+                <input type="range" min={2} max={20} step={1} value={layout.playerLight.distance ?? 8}
+                  onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, distance: Number(e.target.value) } }))} className="w-28" />
+              </label>
+            </>
+          )}
           <label className="flex items-center justify-between gap-1 col-span-2">視点
             <span className="flex overflow-hidden rounded border border-gray-600">
               {(['first', 'third'] as const).map(m => (
