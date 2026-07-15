@@ -178,9 +178,13 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     }
   };
 
+  // Main data fetch: posts, avatar, bio, follow counts, oshi list.
+  // isSelf is intentionally excluded — it only affects the follow-status check
+  // below, and including it here caused a full re-fetch + loading-spinner reset
+  // every time the session cookie resolved (~200ms after mount).
   useEffect(() => {
     setLoading(true);
-    const promises: Promise<any>[] = [
+    Promise.all([
       api.users.profile(slug, userId).then(data => {
         setMyPosts(data.posts);
         setAvatarUrl(data.avatarUrl || undefined);
@@ -188,14 +192,15 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
       }).catch(() => setMyPosts([])),
       api.follow.getCounts(userId).then(c => { setFollowers(c.followers); setFollowing(c.following); }).catch(() => {}),
       api.oshi.list(slug).then(setOshiItems).catch(() => setOshiItems([])),
-    ];
-    if (currentUserId && !isSelf) {
-      promises.push(
-        api.follow.isFollowing(currentUserId, userId).then(r => setIsFollow(r.isFollowing)).catch(() => {})
-      );
-    }
-    Promise.all(promises).finally(() => setLoading(false));
-  }, [userId, slug, currentUserId, isSelf]);
+    ]).finally(() => setLoading(false));
+  }, [userId, slug, currentUserId]);
+
+  // Separate effect: only checks follow status, and only when we know isSelf.
+  // Runs independently so it never triggers a reload of the main data.
+  useEffect(() => {
+    if (!currentUserId || isSelf) return;
+    api.follow.isFollowing(currentUserId, userId).then(r => setIsFollow(r.isFollowing)).catch(() => {});
+  }, [currentUserId, userId, isSelf]);
 
   useEffect(() => () => { oshiAudioRef.current?.pause(); }, []);
 
