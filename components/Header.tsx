@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Menu, Timer } from 'lucide-react';
+import { Menu, Hourglass } from 'lucide-react';
 import VolumeControl from './VolumeControl';
 
 interface HeaderProps {
@@ -15,13 +15,24 @@ interface HeaderProps {
 export default function Header({
   userId, server, bbsMode, onOpenDrawer, onToggleBbsMode,
 }: HeaderProps) {
-  const [currentTime, setCurrentTime] = useState('02:03:04');
+  const [currentTime, setCurrentTime] = useState('00:00:00');
 
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0);
+
+      const diffMs = tomorrow.getTime() - now.getTime();
+      const totalSecs = Math.max(0, Math.floor(diffMs / 1000));
+
+      const hours = Math.floor(totalSecs / 3600);
+      const minutes = Math.floor((totalSecs % 3600) / 60);
+      const seconds = totalSecs % 60;
+
       const pad = (n: number) => String(n).padStart(2, '0');
-      setCurrentTime(`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`);
+      setCurrentTime(`${pad(hours)}:${pad(minutes)}:${pad(seconds)}`);
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -63,7 +74,7 @@ export default function Header({
           <span className="text-[#a3e635] font-bold">{server}</span>
         </div>
         <div className="flex items-center space-x-1 bg-gray-100/10 rounded-full px-2 py-0.5">
-          <Timer size={10} className="text-orange-400" />
+          <Hourglass size={10} className="text-orange-400 animate-pulse" />
           <span className="font-mono text-gray-400">{currentTime}</span>
         </div>
       </div>

@@ -672,7 +672,7 @@ export const pgStore: DataStore = {
           FROM posts p
           LEFT JOIN anonymous_users au ON p.slug = au.slug
           LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
-          WHERE p.slug = $2 AND p.thread_id = p.id
+          WHERE p.slug = $2
           ORDER BY p.id DESC
         `, [userId, slug]);
       } else {
@@ -685,7 +685,7 @@ export const pgStore: DataStore = {
             (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
           FROM posts p
           LEFT JOIN anonymous_users au ON p.slug = au.slug
-          WHERE p.slug = $1 AND p.thread_id = p.id
+          WHERE p.slug = $1
           ORDER BY p.id DESC
         `, [slug]);
       }

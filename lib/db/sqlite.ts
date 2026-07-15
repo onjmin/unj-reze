@@ -724,13 +724,13 @@ export const sqliteStore: DataStore = {
     if (userId) {
       rows = rowsToObjects(
         d,
-        `${VOTED_SELECT} WHERE p.slug = ? AND p.thread_id = p.id ORDER BY p.id DESC`,
+        `${VOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC`,
         [userId, slug]
       );
     } else {
       rows = rowsToObjects(
         d,
-        `${UNVOTED_SELECT} WHERE p.slug = ? AND p.thread_id = p.id ORDER BY p.id DESC`,
+        `${UNVOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC`,
         [slug]
       );
     }

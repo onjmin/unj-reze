@@ -45,13 +45,61 @@ export default function UserActionMenu({
 
   const avatarInfo = getAvatarInfo(targetUserDisplayName);
 
+  // Cache update helper that merges updates with existing cache data
+  const updateCache = (updates: Partial<{ bio: string; avatarUrl: string; followers: number; following: number }>) => {
+    if (typeof localStorage === 'undefined') return;
+    const key = `unj_cached_profile_${targetIdOrSlug}`;
+    const existingStr = localStorage.getItem(key);
+    let existing: any = {};
+    if (existingStr) {
+      try {
+        existing = JSON.parse(existingStr) || {};
+      } catch {}
+    }
+    const updated = {
+      ...existing,
+      ...updates,
+    };
+    localStorage.setItem(key, JSON.stringify(updated));
+  };
+
   useEffect(() => {
     if (!isOpen) return;
 
-    setLoading(true);
+    // Reset state first to avoid showing previous target's data
+    setBio('');
+    setAvatarUrl(undefined);
+    setFollowers(0);
+    setFollowing(0);
+    setIsFollowingTarget(false);
     setShowDmInput(false);
     setDmText('');
     setDmSuccess(false);
+
+    // Check localStorage cache first
+    let hasCache = false;
+    if (typeof localStorage !== 'undefined') {
+      const cached = localStorage.getItem(`unj_cached_profile_${targetIdOrSlug}`);
+      if (cached) {
+        try {
+          const data = JSON.parse(cached);
+          if (data) {
+            setBio(data.bio || '');
+            setAvatarUrl(data.avatarUrl || undefined);
+            setFollowers(data.followers || 0);
+            setFollowing(data.following || 0);
+            setLoading(false);
+            hasCache = true;
+          }
+        } catch (e) {
+          console.error('Failed to parse cached popover profile', e);
+        }
+      }
+    }
+
+    if (!hasCache) {
+      setLoading(true);
+    }
 
     // The profile card (bio + avatar) is the primary content — spinner clears
     // as soon as it arrives. Counts and follow status fire at the same time
@@ -60,13 +108,18 @@ export default function UserActionMenu({
       .then(data => {
         setBio(data.bio || '');
         setAvatarUrl(data.avatarUrl || undefined);
+        updateCache({ bio: data.bio || '', avatarUrl: data.avatarUrl || undefined });
       })
       .catch(() => {})
       .finally(() => setLoading(false));
 
     // Silent population — no spinner.
     api.follow.getCounts(targetUserDisplayName)
-      .then(c => { setFollowers(c.followers); setFollowing(c.following); })
+      .then(c => {
+        setFollowers(c.followers);
+        setFollowing(c.following);
+        updateCache({ followers: c.followers, following: c.following });
+      })
       .catch(() => {});
 
     if (currentUserId && !isSelf) {
@@ -84,11 +137,19 @@ export default function UserActionMenu({
       if (isFollowingTarget) {
         await api.follow.unfollow(currentUserId, targetUserDisplayName);
         setIsFollowingTarget(false);
-        setFollowers(prev => Math.max(0, prev - 1));
+        setFollowers(prev => {
+          const next = Math.max(0, prev - 1);
+          updateCache({ followers: next });
+          return next;
+        });
       } else {
         await api.follow.follow(currentUserId, targetUserDisplayName);
         setIsFollowingTarget(true);
-        setFollowers(prev => prev + 1);
+        setFollowers(prev => {
+          const next = prev + 1;
+          updateCache({ followers: next });
+          return next;
+        });
       }
     } catch {}
   };

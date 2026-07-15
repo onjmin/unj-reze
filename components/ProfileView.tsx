@@ -344,7 +344,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
 
   const threads = useMemo(() => myPosts.filter(p => p.id === p.threadId), [myPosts]);
   const replies = useMemo(() => myPosts.filter(p => p.id !== p.threadId), [myPosts]);
-  const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage), [myPosts]);
+  const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage || p.hasGame || !!extractMmlFromContent(p.content)), [myPosts]);
 
   const totalHearts = useMemo(() => myPosts.reduce((s, p) => s + Number(p.heartsTotal), 0), [myPosts]);
   const totalLikes = useMemo(() => myPosts.reduce((s, p) => s + Number(p.likes), 0), [myPosts]);
