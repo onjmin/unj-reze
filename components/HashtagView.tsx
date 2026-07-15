@@ -27,6 +27,12 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 
   const normalized = tag.startsWith('#') ? tag : `#${tag}`;
 
+  // Keep a ref so fetchPosts can read the latest userId without depending on it —
+  // avoids re-creating the callback (and triggering a second fetch) when the
+  // session cookie resolves and userId updates.
+  const userIdRef = useRef(userId);
+  useEffect(() => { userIdRef.current = userId; }, [userId]);
+
   useEffect(() => {
     if (inited.current) return;
     inited.current = true;
@@ -41,11 +47,11 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 
   const fetchPosts = useCallback(() => {
     setLoading(true);
-    api.hashtag.posts(normalized, userId || undefined)
+    api.hashtag.posts(normalized, userIdRef.current || undefined)
       .then(setPosts)
       .catch(() => setPosts([]))
       .finally(() => setLoading(false));
-  }, [normalized, userId]);
+  }, [normalized]); // userId deliberately omitted — read via ref to prevent double-fetch
 
   useEffect(() => { fetchPosts(); }, [fetchPosts]);
 

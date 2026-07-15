@@ -178,21 +178,28 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     }
   };
 
-  // Main data fetch: posts, avatar, bio, follow counts, oshi list.
-  // isSelf is intentionally excluded — it only affects the follow-status check
-  // below, and including it here caused a full re-fetch + loading-spinner reset
-  // every time the session cookie resolved (~200ms after mount).
+  // Posts are the primary content — the spinner waits only for these.
+  // Follow counts and the oshi list are secondary; they fire at the same time
+  // but populate silently so each section appears the moment its data arrives,
+  // rather than everything waiting for the slowest fetch.
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      api.users.profile(slug, userId).then(data => {
+    api.users.profile(slug, userId)
+      .then(data => {
         setMyPosts(data.posts);
         setAvatarUrl(data.avatarUrl || undefined);
         setBio(data.bio || '');
-      }).catch(() => setMyPosts([])),
-      api.follow.getCounts(userId).then(c => { setFollowers(c.followers); setFollowing(c.following); }).catch(() => {}),
-      api.oshi.list(slug).then(setOshiItems).catch(() => setOshiItems([])),
-    ]).finally(() => setLoading(false));
+      })
+      .catch(() => setMyPosts([]))
+      .finally(() => setLoading(false));
+
+    // Fire concurrently — no spinner, just silent population.
+    api.follow.getCounts(userId)
+      .then(c => { setFollowers(c.followers); setFollowing(c.following); })
+      .catch(() => {});
+    api.oshi.list(slug)
+      .then(setOshiItems)
+      .catch(() => setOshiItems([]));
   }, [userId, slug, currentUserId]);
 
   // Separate effect: only checks follow status, and only when we know isSelf.

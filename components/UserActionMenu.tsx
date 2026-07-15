@@ -53,26 +53,27 @@ export default function UserActionMenu({
     setDmText('');
     setDmSuccess(false);
 
-    const promises: Promise<any>[] = [
-      api.users.profile(targetIdOrSlug, currentUserId).then(data => {
+    // The profile card (bio + avatar) is the primary content — spinner clears
+    // as soon as it arrives. Counts and follow status fire at the same time
+    // but populate silently into the already-visible card.
+    api.users.profile(targetIdOrSlug, currentUserId)
+      .then(data => {
         setBio(data.bio || '');
         setAvatarUrl(data.avatarUrl || undefined);
-      }).catch(() => {}),
-      api.follow.getCounts(targetUserDisplayName).then(c => {
-        setFollowers(c.followers);
-        setFollowing(c.following);
-      }).catch(() => {}),
-    ];
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+
+    // Silent population — no spinner.
+    api.follow.getCounts(targetUserDisplayName)
+      .then(c => { setFollowers(c.followers); setFollowing(c.following); })
+      .catch(() => {});
 
     if (currentUserId && !isSelf) {
-      promises.push(
-        api.follow.isFollowing(currentUserId, targetUserDisplayName).then(r => {
-          setIsFollowingTarget(r.isFollowing);
-        }).catch(() => {})
-      );
+      api.follow.isFollowing(currentUserId, targetUserDisplayName)
+        .then(r => setIsFollowingTarget(r.isFollowing))
+        .catch(() => {});
     }
-
-    Promise.all(promises).finally(() => setLoading(false));
   }, [isOpen, targetIdOrSlug, targetUserDisplayName, currentUserId, isSelf]);
 
   if (!isOpen) return null;
