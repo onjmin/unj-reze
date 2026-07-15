@@ -23,6 +23,7 @@ interface ProfileViewProps {
   userId: string;
   displayName?: string;
   currentUserId?: string;
+  currentUserSlug?: string;
   onLike?: (id: string) => void;
   onDislike?: (id: string) => void;
   onHeart?: (id: string) => void;
@@ -30,6 +31,8 @@ interface ProfileViewProps {
   onRepost?: (id: string) => void;
   openCollab?: (post: Post) => void;
   onProfileUpdate?: (displayName: string, avatarUrl?: string) => void;
+  onEditImage?: (post: Post) => void;
+  onEditMml?: (post: Post) => void;
 }
 
 const tabs = [
@@ -41,7 +44,7 @@ const tabs = [
   { id: 'media', label: 'メディア', icon: Image },
 ];
 
-export default function ProfileView({ userId, displayName, currentUserId, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, onProfileUpdate }: ProfileViewProps) {
+export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, onProfileUpdate, onEditImage, onEditMml }: ProfileViewProps) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('threads');
   const [myPosts, setMyPosts] = useState<Post[]>([]);
@@ -623,7 +626,18 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                           target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;
                         }}
                       />
-                      {p.hasCollabButton && (
+                      {currentUserSlug && p.slug === currentUserSlug ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditImage?.(p);
+                          }}
+                          className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-blue-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
+                        >
+                          <Pencil size={11} />
+                          <span>編集</span>
+                        </button>
+                      ) : p.hasCollabButton && (
                         <button
                           onClick={(e) => { e.stopPropagation(); openCollab?.(p); }}
                           className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
@@ -656,7 +670,22 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
 
                   {(() => {
                     const mmlCode = extractMmlFromContent(p.content);
-                    if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+                    if (mmlCode) {
+                      return (
+                        <div onClick={e => e.stopPropagation()} className="relative">
+                          <MmlPlayer mml={mmlCode} />
+                          {currentUserSlug && p.slug === currentUserSlug && (
+                            <button
+                              onClick={() => onEditMml?.(p)}
+                              className="absolute top-2 right-2 bg-black/75 hover:bg-black/90 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-gray-800 font-bold active:scale-95 transition-all flex items-center gap-1"
+                            >
+                              <Pencil size={10} />
+                              <span>編集</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
                     const chordRes = extractChordsFromContent(p.content);
                     if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
                     if (p.hasImage || p.hasGame) return null;

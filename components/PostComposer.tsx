@@ -99,12 +99,27 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       {image && (
         <div className={`relative mt-2 rounded-lg overflow-hidden border border-gray-800 ${md ? 'max-w-[180px] md:max-w-[260px]' : 'max-w-[180px]'}`}>
           <img src={image} alt="添付画像" className="w-full h-auto" />
-          <button
-            onClick={() => setImage(null)}
-            className="absolute top-1 right-1 bg-black/85 p-1 rounded-full text-white hover:bg-red-500"
-          >
-            <X size={14} />
-          </button>
+          <div className="absolute top-1 right-1 flex items-center gap-1.5">
+            <button
+              onClick={() => {
+                if (text.includes('#ドット絵')) {
+                  onOpenDotDrawing();
+                } else {
+                  onOpenDrawing();
+                }
+              }}
+              className="bg-black/85 px-2 py-0.5 rounded-full text-blue-400 hover:bg-blue-600 hover:text-white text-[10px] font-bold active:scale-95 transition-all"
+              title="編集"
+            >
+              編集
+            </button>
+            <button
+              onClick={() => setImage(null)}
+              className="bg-black/85 p-1 rounded-full text-white hover:bg-red-500 active:scale-95 transition-all"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       )}
       {mml && (
@@ -114,12 +129,20 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
               <Music size={12} />
               MMLを添付中（試聴できます）
             </span>
-            <button
-              onClick={() => setMml(null)}
-              className="text-pink-300/70 hover:text-red-400 shrink-0"
-            >
-              <X size={14} />
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={onOpenMml}
+                className="text-pink-300 hover:text-pink-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-pink-700/40 hover:bg-pink-500/25 active:scale-95 transition-all"
+              >
+                編集
+              </button>
+              <button
+                onClick={() => setMml(null)}
+                className="text-pink-300/70 hover:text-red-400 shrink-0"
+              >
+                <X size={14} />
+              </button>
+            </div>
           </div>
           <MmlPlayer mml={mml} />
         </div>
@@ -127,16 +150,24 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       {gameDraft && (
         <div className={`relative mt-2 flex items-center gap-2 rounded-lg border border-yellow-700/50 bg-yellow-500/10 px-3 py-2 max-w-[280px] ${md ? 'md:px-4 md:py-3 md:max-w-[420px]' : ''}`}>
           <Gamepad2 size={16} className="text-yellow-400 shrink-0" />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-bold text-yellow-200 truncate">{gameDraft.title}</p>
             <p className="text-[10px] text-yellow-400/70">ゲームを添付中</p>
           </div>
-          <button
-            onClick={() => setGameDraft(null)}
-            className="ml-auto text-yellow-300/70 hover:text-red-400 shrink-0"
-          >
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={onOpenGameMaker}
+              className="text-yellow-300 hover:text-yellow-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-yellow-700/40 hover:bg-yellow-500/25 active:scale-95 transition-all"
+            >
+              編集
+            </button>
+            <button
+              onClick={() => setGameDraft(null)}
+              className="text-yellow-300/70 hover:text-red-400 shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </div>
       )}
     </>

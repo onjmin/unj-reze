@@ -18,6 +18,10 @@ interface SearchViewProps {
   openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
+  currentUserSlug?: string;
+  currentUserDisplayName?: string;
+  onEditImage?: (post: Post) => void;
+  onEditMml?: (post: Post) => void;
 }
 
 export default function SearchView(props: SearchViewProps) {
@@ -108,6 +112,10 @@ export default function SearchView(props: SearchViewProps) {
                 openGame={props.openGame}
                 openCollab={props.openCollab}
                 openMml={props.openMml}
+                currentUserSlug={props.currentUserSlug}
+                currentUserDisplayName={props.currentUserDisplayName}
+                onEditImage={props.onEditImage}
+                onEditMml={props.onEditMml}
               />
             </VirtualizedItem>
           ))}

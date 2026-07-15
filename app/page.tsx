@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import { decodeId } from '@/lib/sqids';
+import { stripMmlLine } from '@/lib/mml';
 import Header from '@/components/Header';
 import TopTabs from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
@@ -79,6 +80,7 @@ export default function App() {
     discardType: 'image' | 'mml' | 'game';
     targetScreen: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker';
   } | null>(null);
+  const [editingPost, setEditingPost] = useState<Post | null>(null);
 
   const heartQueue = useRef<Map<string, number>>(new Map());
   const heartTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -518,21 +520,67 @@ export default function App() {
     setCollabImageUrl(undefined);
   }, []);
 
-  const handleSaveDrawing = (canvasData: string) => {
+  const handleEditPostImage = (post: Post) => {
+    setEditingPost(post);
+    setCollabImageUrl(post.imageSrc);
+    if (post.content.includes('#ドット絵')) {
+      setActiveScreen('dotdrawing');
+    } else {
+      setActiveScreen('drawing');
+    }
+  };
+
+  const handleEditPostMml = (post: Post) => {
+    setEditingPost(post);
+    setActiveScreen('mml');
+  };
+
+  const handleSaveDrawing = async (canvasData: string) => {
+    if (editingPost) {
+      try {
+        await api.posts.edit(editingPost.id, userId, editingPost.content, editingPost.originType, canvasData);
+        fetchPosts();
+      } catch {}
+      setEditingPost(null);
+      setActiveScreen(null);
+      setCollabImageUrl(undefined);
+      return;
+    }
     setAttachedImage(canvasData);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
     setInputText("#お絵描き 自作イラスト完成！");
   };
 
-  const handleSaveDotDrawing = (canvasData: string) => {
+  const handleSaveDotDrawing = async (canvasData: string) => {
+    if (editingPost) {
+      try {
+        await api.posts.edit(editingPost.id, userId, editingPost.content, editingPost.originType, canvasData);
+        fetchPosts();
+      } catch {}
+      setEditingPost(null);
+      setActiveScreen(null);
+      setCollabImageUrl(undefined);
+      return;
+    }
     setAttachedImage(canvasData);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
     setInputText("#ドット絵 自作ドット絵完成！");
   };
 
-  const handleSaveMml = (mml: string) => {
+  const handleSaveMml = async (mml: string) => {
+    if (editingPost) {
+      try {
+        const stripped = stripMmlLine(editingPost.content);
+        const newContent = `${stripped}\n#mml ${mml}`.trim();
+        await api.posts.edit(editingPost.id, userId, newContent, editingPost.originType);
+        fetchPosts();
+      } catch {}
+      setEditingPost(null);
+      setActiveScreen(null);
+      return;
+    }
     setActiveScreen(null);
     setAttachedMml(mml);
   };
@@ -646,7 +694,7 @@ export default function App() {
         />
       )}
       {activeScreen === 'gamemaker' && (
-        <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} />
+        <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} initialManifest={gameDraft?.manifest} />
       )}
       {activeScreen === 'postgame' && playingGame && (
         <GameMaker
@@ -668,6 +716,7 @@ export default function App() {
         <MmlEditor
           onClose={() => setActiveScreen(null)}
           onSave={handleSaveMml}
+          initialMml={attachedMml || undefined}
         />
       )}
 
@@ -740,8 +789,8 @@ export default function App() {
                       setOriginType={setOriginType}
                       onClose={() => {}}
                       onSubmit={handleCreatePost}
-                      onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
-                      onOpenDotDrawing={() => handleOpenEditor('dotdrawing')}
+                      onOpenDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('drawing'); }}
+                      onOpenDotDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('dotdrawing'); }}
                       onOpenMml={() => handleOpenEditor('mml')}
                       onOpenGameMaker={() => handleOpenEditor('gamemaker')}
                     />
@@ -790,6 +839,8 @@ export default function App() {
                       setReplyTargetPost(post);
                       setComposerOpen(true);
                     }}
+                    onEditImage={handleEditPostImage}
+                    onEditMml={handleEditPostMml}
                   />
                 </>
               )}
@@ -807,6 +858,10 @@ export default function App() {
                   }}
                   openCollab={handleOpenCollab}
                   openMml={() => setActiveScreen('mml')}
+                  currentUserSlug={currentUser?.slug}
+                  currentUserDisplayName={currentUser?.displayName}
+                  onEditImage={handleEditPostImage}
+                  onEditMml={handleEditPostMml}
                 />
               )}
               {currentNav === 'notifications' && <NotificationView userId={userId} />}
@@ -816,12 +871,15 @@ export default function App() {
                   userId={userId}
                   displayName={currentUser?.displayName || userId}
                   currentUserId={userId}
+                  currentUserSlug={currentUser?.slug}
                   onLike={handleLike}
                   onDislike={handleDislike}
                   onHeart={handleHeart}
                   onRepost={handleRepost}
                   openCollab={handleOpenCollab}
                   onProfileUpdate={handleProfileUpdate}
+                  onEditImage={handleEditPostImage}
+                  onEditMml={handleEditPostMml}
                 />
               )}
             </div>
@@ -856,8 +914,8 @@ export default function App() {
               setComposerOpen(false);
               setReplyTargetPost(null);
             }}
-            onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenEditor('drawing'); }}
-            onOpenDotDrawing={() => handleOpenEditor('dotdrawing')}
+            onOpenDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('drawing'); }}
+            onOpenDotDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('dotdrawing'); }}
             onOpenMml={() => handleOpenEditor('mml')}
             onOpenGameMaker={() => handleOpenEditor('gamemaker')}
             replyToDisplayName={replyTargetPost ? replyTargetPost.displayName : undefined}

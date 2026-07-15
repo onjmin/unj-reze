@@ -40,9 +40,11 @@ interface PostContainerProps {
   currentUserDisplayName?: string;
   onModerationChange?: () => void;
   onReplyClick?: (post: Post) => void;
+  onEditImage?: (post: Post) => void;
+  onEditMml?: (post: Post) => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml }: PostContainerProps) {
   const router = useRouter();
   const avatarInfo = getAvatarInfo(post.displayName);
   const [showReplyInput, setShowReplyInput] = useState(false);
@@ -395,7 +397,18 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                   target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;
                 }}
               />
-              {post.hasCollabButton && (
+              {currentUserSlug && post.slug === currentUserSlug ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditImage?.(post);
+                  }}
+                  className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-blue-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
+                >
+                  <Pencil size={11} />
+                  <span>編集</span>
+                </button>
+              ) : post.hasCollabButton && (
                 <button
                   onClick={() => openCollab(post)}
                   className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
@@ -433,7 +446,22 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {(() => {
             const mmlCode = extractMmlFromContent(post.content);
-            if (mmlCode) return <div onClick={e => e.stopPropagation()}><MmlPlayer mml={mmlCode} /></div>;
+            if (mmlCode) {
+              return (
+                <div onClick={e => e.stopPropagation()} className="relative">
+                  <MmlPlayer mml={mmlCode} />
+                  {currentUserSlug && post.slug === currentUserSlug && (
+                    <button
+                      onClick={() => onEditMml?.(post)}
+                      className="absolute top-2 right-2 bg-black/75 hover:bg-black/90 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-gray-800 font-bold active:scale-95 transition-all flex items-center gap-1"
+                    >
+                      <Pencil size={10} />
+                      <span>編集</span>
+                    </button>
+                  )}
+                </div>
+              );
+            }
             const chordRes = extractChordsFromContent(post.content);
             if (chordRes) return <div onClick={e => e.stopPropagation()}><ChordPlayer chords={chordRes.chords} /></div>;
             if (post.hasImage || post.hasGame) return null;

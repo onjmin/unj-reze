@@ -339,7 +339,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const handleEditArt = () => {
     setMenuOpen(false);
     setCollabImageUrl(post.imageSrc);
-    setActiveScreen('edit-drawing');
+    if (post.content.includes('#ドット絵')) {
+      setActiveScreen('edit-dotdrawing');
+    } else {
+      setActiveScreen('edit-drawing');
+    }
   };
 
   const handleSaveEditedArt = async (canvasData: string) => {
@@ -554,13 +558,43 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           })()}
 
           {post.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+            <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
               <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
+              {isSelf && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditArt();
+                  }}
+                  className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-blue-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
+                >
+                  <Pencil size={11} />
+                  <span>編集</span>
+                </button>
+              )}
             </div>
           )}
 
           {(() => {
-            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            if (mmlCode) {
+              return (
+                <div className="relative">
+                  <MmlPlayer mml={mmlCode} />
+                  {isSelf && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditMusic();
+                      }}
+                      className="absolute top-2 right-2 bg-black/75 hover:bg-black/90 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-gray-800 font-bold active:scale-95 transition-all flex items-center gap-1"
+                    >
+                      <Pencil size={10} />
+                      <span>編集</span>
+                    </button>
+                  )}
+                </div>
+              );
+            }
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
             if (post.hasImage || post.hasGame) return null;
             const embed = extractFirstEmbed(post.content);
@@ -659,6 +693,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       )}
       {activeScreen === 'edit-drawing' && (
         <DrawingEditor
+          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
+          onSave={handleSaveEditedArt}
+          collabImageUrl={collabImageUrl}
+        />
+      )}
+      {activeScreen === 'edit-dotdrawing' && (
+        <DotDrawingEditor
           onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
           onSave={handleSaveEditedArt}
           collabImageUrl={collabImageUrl}

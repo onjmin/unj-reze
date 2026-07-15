@@ -26,9 +26,11 @@ interface FeedListProps {
   onModerationChange?: () => void;
   loading?: boolean;
   onReplyClick?: (post: Post) => void;
+  onEditImage?: (post: Post) => void;
+  onEditMml?: (post: Post) => void;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick }: FeedListProps) {
+export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -105,6 +107,8 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
             currentUserDisplayName={currentUserDisplayName}
             onModerationChange={onModerationChange}
             onReplyClick={onReplyClick}
+            onEditImage={onEditImage}
+            onEditMml={onEditMml}
           />
         </VirtualizedItem>
       ))}
