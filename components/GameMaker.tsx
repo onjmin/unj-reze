@@ -1571,7 +1571,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
       player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
       tiles: Object.fromEntries(
-        Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
+        Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
       ),
       map: manifest.map,
       overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
@@ -4860,7 +4860,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         iceSlideSpeed: initialManifest.iceSlideSpeed ?? base.iceSlideSpeed,
         player: { ...base.player, ...initialManifest.player, spriteUrl: hydrateUrlFromRef(initialManifest.player.spriteRef) },
         tiles: Object.fromEntries(
-          Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
+          Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
         ),
         map: initialManifest.map,
         overlayMap: initialManifest.overlayMap ?? emptyGridLike(initialManifest.map),
@@ -10005,6 +10005,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     },
     tiles: Object.fromEntries(Object.entries(gameData.tiles).map(([k, t]) => [k, {
       name: t.name, color: t.color, passable: t.passable, special: t.special, imageRef: t.imageRef,
+      // imageRef がない場合（RPGEN インポート等で直 URL が入っている場合）は imageUrl も保存する。
+      // ロード時は hydrateUrlFromRef で imageRef → imageUrl に変換されるが、
+      // imageRef がなければ imageUrl をそのまま使う。
+      imageUrl: t.imageRef ? undefined : t.imageUrl,
       warpSceneId: t.warpSceneId, warpEntryCol: t.warpEntryCol, warpEntryRow: t.warpEntryRow, damageAmount: t.damageAmount,
     }])),
     map: gameData.map,
@@ -10069,7 +10073,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
           player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
           tiles: Object.fromEntries(
-            Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
+            Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
           ),
           map: manifest.map,
           overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
