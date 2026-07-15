@@ -71,14 +71,8 @@ async function rowToPost(row: any): Promise<Post> {
     ? row.created_at.toISOString()
     : String(row.created_at);
 
-  let likes = row.likes;
-  let dislikes = row.dislikes;
-  try {
-    const kvLikes = await kvGet(`post:${row.id}:likes`);
-    const kvDislikes = await kvGet(`post:${row.id}:dislikes`);
-    if (kvLikes !== null) likes = parseInt(kvLikes, 10);
-    if (kvDislikes !== null) dislikes = parseInt(kvDislikes, 10);
-  } catch {}
+  const likes = row.likes;
+  const dislikes = row.dislikes;
 
   return {
     id: row.id,
@@ -124,10 +118,13 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
     [threadIds]
   );
   const map = new Map<number, Post[]>();
-  for (const row of result.rows) {
+  const posts = await Promise.all(result.rows.map((row: any) => rowToPost(row)));
+  for (let i = 0; i < result.rows.length; i++) {
+    const row = result.rows[i];
+    const post = posts[i];
     const pid = row.thread_id;
     if (!map.has(pid)) map.set(pid, []);
-    map.get(pid)!.push(await rowToPost(row));
+    map.get(pid)!.push(post);
   }
   return map;
 }
@@ -255,15 +252,17 @@ async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>
   if (!userId) return hidden;
   const viewerSlug = await resolveViewerSlug(client, userId);
   if (!viewerSlug) return hidden;
-  const blocks = await client.query(
-    'SELECT blocker_slug, blocked_slug FROM user_blocks WHERE blocker_slug = $1 OR blocked_slug = $1',
-    [viewerSlug]
-  );
+  const [blocks, mutes] = await Promise.all([
+    client.query(
+      'SELECT blocker_slug, blocked_slug FROM user_blocks WHERE blocker_slug = $1 OR blocked_slug = $1',
+      [viewerSlug]
+    ),
+    client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [viewerSlug])
+  ]);
   for (const r of blocks.rows) {
     if (r.blocker_slug === viewerSlug) hidden.add(r.blocked_slug);
     if (r.blocked_slug === viewerSlug) hidden.add(r.blocker_slug);
   }
-  const mutes = await client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [viewerSlug]);
   for (const r of mutes.rows) hidden.add(r.muted_slug);
   return hidden;
 }
@@ -299,14 +298,12 @@ export const pgStore: DataStore = {
       const insertResult = await client.query(
         `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
          VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10)
-         RETURNING id`,
+         RETURNING *`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
          !!data.gameId, data.gameId || null, data.originType ?? null]
       );
-      const newId = insertResult.rows[0].id;
-      const result = await client.query('SELECT * FROM posts WHERE id = $1', [newId]);
-      return { ...(await rowToPost(result.rows[0])), replies: [] };
+      return { ...(await rowToPost(insertResult.rows[0])), replies: [] };
     } finally {
       client.release();
     }
@@ -338,7 +335,7 @@ export const pgStore: DataStore = {
           ['like', id, userId]
         );
         await client.query('UPDATE posts SET likes = likes + 1, dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
-        try { await kvIncr(`post:${id}:likes`); await kvDecr(`post:${id}:dislikes`); } catch {}
+        try { await Promise.all([kvIncr(`post:${id}:likes`), kvDecr(`post:${id}:dislikes`)]); } catch {}
       } else {
         await client.query(
           'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
@@ -386,7 +383,7 @@ export const pgStore: DataStore = {
           ['dislike', id, userId]
         );
         await client.query('UPDATE posts SET dislikes = dislikes + 1, likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
-        try { await kvIncr(`post:${id}:dislikes`); await kvDecr(`post:${id}:likes`); } catch {}
+        try { await Promise.all([kvIncr(`post:${id}:dislikes`), kvDecr(`post:${id}:likes`)]); } catch {}
       } else {
         await client.query(
           'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
@@ -412,12 +409,16 @@ export const pgStore: DataStore = {
       const postResult = await client.query('SELECT id, display_name, content FROM posts WHERE id = $1', [id]);
       if (postResult.rows.length === 0) return null;
 
+      const insertPromises = [];
       for (let i = 0; i < count; i++) {
-        await client.query(
-          'INSERT INTO post_hearts (post_id, user_id) VALUES ($1, $2)',
-          [id, userId]
+        insertPromises.push(
+          client.query(
+            'INSERT INTO post_hearts (post_id, user_id) VALUES ($1, $2)',
+            [id, userId]
+          )
         );
       }
+      await Promise.all(insertPromises);
       const author = postResult.rows[0];
       await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: snippetPg(author.content ?? ''), postId: id });
       return await getPostWithVotes(client, id);
@@ -487,16 +488,20 @@ export const pgStore: DataStore = {
       const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
       if (mentions) {
         const seen = new Set<string>();
+        const mentionPromises = [];
         for (const m of mentions) {
           const slug = m.slice(1);
           if (seen.has(slug)) continue;
           seen.add(slug);
-          const mres = await client.query('SELECT display_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
-          const mname = mres.rows[0]?.display_name;
-          if (mname && mname !== parentAuthor) {
-            await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: snippetPg(data.content), postId: result.rows[0].id });
-          }
+          mentionPromises.push((async () => {
+            const mres = await client.query('SELECT display_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
+            const mname = mres.rows[0]?.display_name;
+            if (mname && mname !== parentAuthor) {
+              await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: snippetPg(data.content), postId: result.rows[0].id });
+            }
+          })());
         }
+        await Promise.all(mentionPromises);
       }
       await client.query('COMMIT');
       return await rowToPost(result.rows[0]);
@@ -511,9 +516,11 @@ export const pgStore: DataStore = {
   async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
     const client = await getPool().connect();
     try {
-      const postResult = await client.query('SELECT slug, display_name, content, origin_type FROM posts WHERE id = $1', [id]);
+      const [postResult, viewerSlug] = await Promise.all([
+        client.query('SELECT slug, display_name, content, origin_type FROM posts WHERE id = $1', [id]),
+        resolveViewerSlug(client, userId)
+      ]);
       if (postResult.rows.length === 0) return null;
-      const viewerSlug = await resolveViewerSlug(client, userId);
       const row = postResult.rows[0];
       if (row.display_name !== userId && row.slug !== viewerSlug) return null;
 
@@ -920,8 +927,10 @@ export const pgStore: DataStore = {
           AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
       `, [`%${query}%`]);
-      const posts = await Promise.all(result.rows.map(rowToPost));
-      const hidden = await getHiddenSlugs(client, userId);
+      const [posts, hidden] = await Promise.all([
+        Promise.all(result.rows.map(rowToPost)),
+        getHiddenSlugs(client, userId)
+      ]);
       return hidden.size === 0 ? posts : posts.filter(p => !hidden.has(p.slug ?? ''));
     } finally {
       client.release();
@@ -946,8 +955,10 @@ export const pgStore: DataStore = {
           AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
       `, [normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')]);
-      const posts = await Promise.all(result.rows.map(rowToPost));
-      const hidden = await getHiddenSlugs(client, userId);
+      const [posts, hidden] = await Promise.all([
+        Promise.all(result.rows.map(rowToPost)),
+        getHiddenSlugs(client, userId)
+      ]);
       return hidden.size === 0 ? posts : posts.filter(p => !hidden.has(p.slug ?? ''));
     } finally {
       client.release();

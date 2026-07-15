@@ -49,7 +49,6 @@ CREATE TABLE IF NOT EXISTS posts (
   hearts_total INTEGER NOT NULL DEFAULT 0,
   has_game INTEGER NOT NULL DEFAULT 0,
   game_id INTEGER,
-  is_original INTEGER,
   origin_type TEXT,
   is_false_declaration INTEGER NOT NULL DEFAULT 0,
   is_edited INTEGER NOT NULL DEFAULT 0
@@ -61,7 +60,8 @@ CREATE TABLE IF NOT EXISTS games (
   preset TEXT NOT NULL,
   title TEXT NOT NULL,
   manifest TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  creator_slug TEXT
 );
 
 -- いいね/わるい 投票テーブル (1ユーザー1投票)
@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS anonymous_users (
   display_name TEXT NOT NULL,
   slug TEXT,
   avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+  avatar_url TEXT,
+  bio TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -104,6 +106,24 @@ CREATE TABLE IF NOT EXISTS user_follows (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (follower_id, followed_id)
 );
+
+-- 推しアイテムテーブル
+CREATE TABLE IF NOT EXISTS oshi_items (
+  id INTEGER PRIMARY KEY,
+  user_slug TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  track_id INTEGER,
+  collection_id INTEGER,
+  artist_id INTEGER,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  artwork_url TEXT,
+  view_url TEXT,
+  preview_url TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_oshi_items_user_slug ON oshi_items(user_slug);
 
 -- 通知データ
 INSERT INTO notifications (id, user_name, action, target, created_at) VALUES

@@ -50,7 +50,11 @@ CREATE TABLE IF NOT EXISTS posts (
   avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
   has_collab_button BOOLEAN NOT NULL DEFAULT FALSE,
   hearts_total INTEGER NOT NULL DEFAULT 0,
-  has_game BOOLEAN NOT NULL DEFAULT FALSE
+  has_game BOOLEAN NOT NULL DEFAULT FALSE,
+  game_id INTEGER,
+  origin_type TEXT,
+  is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE,
+  is_edited BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 -- いいね/わるい 投票テーブル (1ユーザー1投票)
@@ -79,6 +83,8 @@ CREATE TABLE IF NOT EXISTS anonymous_users (
   display_name TEXT NOT NULL,
   slug TEXT,
   avatar_color TEXT NOT NULL DEFAULT 'from-blue-500 to-indigo-600',
+  avatar_url TEXT,
+  bio TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -93,6 +99,24 @@ CREATE TABLE IF NOT EXISTS user_follows (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (follower_id, followed_id)
 );
+
+-- 推しアイテムテーブル
+CREATE TABLE IF NOT EXISTS oshi_items (
+  id BIGINT PRIMARY KEY,
+  user_slug TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  track_id BIGINT,
+  collection_id BIGINT,
+  artist_id BIGINT,
+  title TEXT NOT NULL,
+  subtitle TEXT,
+  artwork_url TEXT,
+  view_url TEXT,
+  preview_url TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_oshi_items_user_slug ON oshi_items(user_slug);
 
 -- === 通知データ ===
 INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, created_at) VALUES
