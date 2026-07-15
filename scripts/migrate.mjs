@@ -64,6 +64,33 @@ const migrations = [
     sql: `
       ALTER TABLE oshi_items ADD COLUMN IF NOT EXISTS preview_url TEXT;
     `
+  },
+  {
+    name: '07_create_blocks_mutes_reports',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_blocks (
+        blocker_slug TEXT NOT NULL,
+        blocked_slug TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (blocker_slug, blocked_slug)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_mutes (
+        muter_slug TEXT NOT NULL,
+        muted_slug TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (muter_slug, muted_slug)
+      );
+
+      CREATE TABLE IF NOT EXISTS reports (
+        id SERIAL PRIMARY KEY,
+        reporter_slug TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
   }
 ];
 

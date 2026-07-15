@@ -107,6 +107,32 @@ CREATE TABLE IF NOT EXISTS user_follows (
   UNIQUE (follower_id, followed_id)
 );
 
+-- ブロックテーブル
+CREATE TABLE IF NOT EXISTS user_blocks (
+  blocker_slug TEXT NOT NULL,
+  blocked_slug TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (blocker_slug, blocked_slug)
+);
+
+-- ミュートテーブル
+CREATE TABLE IF NOT EXISTS user_mutes (
+  muter_slug TEXT NOT NULL,
+  muted_slug TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (muter_slug, muted_slug)
+);
+
+-- 通報テーブル
+CREATE TABLE IF NOT EXISTS reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  reporter_slug TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 推しアイテムテーブル
 CREATE TABLE IF NOT EXISTS oshi_items (
   id INTEGER PRIMARY KEY,
