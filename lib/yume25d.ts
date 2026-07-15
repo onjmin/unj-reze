@@ -445,6 +445,11 @@ export class Yume25DEngine {
 
     this.buildScene();
     this.resetToStart();
+
+    // 開発時のみ：ブラウザコンソールから位置・ボール等の内部状態を確認するためのハンドル
+    if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+      (window as unknown as { __yume25d?: Yume25DEngine }).__yume25d = this;
+    }
   }
 
   get pose() { return { x: this.x, z: this.z, yaw: this.yaw }; }

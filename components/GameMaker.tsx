@@ -12729,7 +12729,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <Yume25DEditorPanel
                     layout={gameData.layout25d!}
                     onLayoutChange={updater => setGameData(prev => prev.layout25d ? { ...prev, layout25d: updater(prev.layout25d) } : prev)}
-                    onPickImage={(target) => setPicker({ mode: 'image', target })}
+                    onPickImage={(target) => setPicker({ mode: target.t === 'yumeTexSound' ? 'bgm' : 'image', target })}
                     view={yume25dView}
                     onViewChange={setYume25dView}
                     tool={yume25dTool}
