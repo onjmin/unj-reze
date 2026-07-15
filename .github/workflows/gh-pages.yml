@@ -40,8 +40,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Remove API routes (incompatible with static export)
-        run: rm -rf app/api
+      - name: Remove API routes and adjust config for static export
+        run: |
+          rm -rf app/api
+          sed -i "s/export const dynamic = 'force-dynamic';/export const dynamic = 'force-static';/g" app/sitemap.ts
 
       - name: Build static site
         run: pnpm run build
