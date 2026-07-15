@@ -122,6 +122,32 @@ export default function App() {
     });
   }, []);
 
+  // Load cached posts from localStorage on mount to show content instantly
+  useEffect(() => {
+    if (typeof localStorage !== 'undefined') {
+      const cached = localStorage.getItem('unj_cached_posts');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPosts(parsed);
+            postsRef.current = parsed;
+            setLoading(false);
+          }
+        } catch (e) {
+          console.error('Failed to parse cached posts', e);
+        }
+      }
+    }
+  }, []);
+
+  // Update localStorage cache whenever posts are successfully updated/loaded
+  useEffect(() => {
+    if (posts.length > 0 && typeof localStorage !== 'undefined') {
+      localStorage.setItem('unj_cached_posts', JSON.stringify(posts));
+    }
+  }, [posts]);
+
   useEffect(() => {
     if (activeScreen !== 'postgame' || !playingGame?.postId) return;
     const pid = playingGame.postId;

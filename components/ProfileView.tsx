@@ -178,12 +178,64 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
     }
   };
 
-  // Posts are the primary content — the spinner waits only for these.
-  // Follow counts and the oshi list are secondary; they fire at the same time
-  // but populate silently so each section appears the moment its data arrives,
-  // rather than everything waiting for the slowest fetch.
+  // Load cached profile data from localStorage immediately on mount/slug change
   useEffect(() => {
+    if (!slug) return;
+    
+    // Reset state first to avoid showing previous user's data
+    setMyPosts([]);
+    setAvatarUrl(undefined);
+    setBio('');
+    setFollowers(0);
+    setFollowing(0);
+    setOshiItems([]);
     setLoading(true);
+
+    if (typeof localStorage !== 'undefined') {
+      const cached = localStorage.getItem(`unj_cached_profile_${slug}`);
+      if (cached) {
+        try {
+          const data = JSON.parse(cached);
+          if (data) {
+            if (Array.isArray(data.posts)) setMyPosts(data.posts);
+            if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
+            if (data.bio) setBio(data.bio || '');
+            if (typeof data.followers === 'number') setFollowers(data.followers);
+            if (typeof data.following === 'number') setFollowing(data.following);
+            if (Array.isArray(data.oshiItems)) setOshiItems(data.oshiItems);
+            setLoading(false); // Stop loading since we have cached content
+          }
+        } catch (e) {
+          console.error('Failed to parse cached profile', e);
+        }
+      }
+    }
+  }, [slug]);
+
+  // Update localStorage cache whenever profile data is updated
+  useEffect(() => {
+    if (!slug || typeof localStorage === 'undefined') return;
+    if (myPosts.length > 0 || bio || avatarUrl || followers > 0 || following > 0 || oshiItems.length > 0) {
+      const dataToCache = {
+        posts: myPosts,
+        avatarUrl,
+        bio,
+        followers,
+        following,
+        oshiItems,
+      };
+      localStorage.setItem(`unj_cached_profile_${slug}`, JSON.stringify(dataToCache));
+    }
+  }, [slug, myPosts, avatarUrl, bio, followers, following, oshiItems]);
+
+  // Posts are the primary content — the spinner waits only for these (if not already cached).
+  // Follow counts and the oshi list are secondary; they fire at the same time
+  // but populate silently so each section appears the moment its data arrives.
+  useEffect(() => {
+    // Only show loading spinner if we don't already have posts from cache/previous fetch
+    if (myPosts.length === 0) {
+      setLoading(true);
+    }
     api.users.profile(slug, userId)
       .then(data => {
         setMyPosts(data.posts);
