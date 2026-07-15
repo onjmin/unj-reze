@@ -480,11 +480,13 @@ export interface Tex25D {
   imageUrl?: string;
   /** システム床の効果（kind==='floor' のみ）。2Dエンジンの TileDef.special と同じ値
    *  （'warp' | 'damage' | 'ice-up' | 'ice-right' | 'ice-down' | 'ice-left'）。
-   *  yume25d にはシーンが無いので warp は同一マップ内の座標転送、damage は HP が無いので
-   *  「ゆめから さめて スタート地点へ戻る」に読み替える。 */
+   *  yume25d にはシーンが無いので warp は同一マップ内の座標転送、damage は HP を削り、
+   *  尽きたら「ゆめから さめて スタート地点へ戻る」。 */
   special?: string;
   /** special==='warp'：同一マップ内の転送先セル。dir 指定で着地後の向きも変える。 */
   warpDest?: { col: number; row: number; dir?: Dir4 };
+  /** special==='damage'：被ダメージ量。未指定時は3（2Dの TileDef.damageAmount と同じ既定値）。 */
+  damageAmount?: number;
 }
 
 /** 薄板1枚の壁。セルの北辺(dir=0)または西辺(dir=3)に正規化して保存する

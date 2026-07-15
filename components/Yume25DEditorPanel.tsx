@@ -233,7 +233,14 @@ export default function Yume25DEditorPanel({
               </div>
             )}
             {t.special === 'damage' && (
-              <p className="text-[9px] text-gray-500">ふむと ゆめから さめて スタート地点にもどります（ジャンプで飛び越えられます）</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="flex items-center gap-1">ダメージ量
+                  <input type="number" min={1} max={6} value={t.damageAmount ?? 3}
+                    onChange={e => { const damageAmount = Math.max(1, Math.min(6, Number(e.target.value) || 3)); onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], damageAmount } } })); }}
+                    className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+                </label>
+                <span className="text-[9px] text-gray-500 w-full">ふむとHP（ハート6=3個）がへります。HPがなくなると ゆめから さめて スタート地点にもどります（ジャンプで飛び越えられます）</span>
+              </div>
             )}
             {t.special?.startsWith('ice-') && (
               <p className="text-[9px] text-gray-500">ふむと矢印の方向へ強制的にすべります。壁に当たると止まります（ジャンプで飛び越えられます）</p>

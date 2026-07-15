@@ -35,6 +35,13 @@ const ICE_DIR_VEC: Record<string, [number, number]> = {
 const FADE_OUT_SEC = 0.25;
 const FADE_IN_SEC = 0.4;
 
+// ダメージ床のHP制。2Dエンジン（既定3ダメージ・45フレーム≒0.75秒無敵）に合わせ、
+// 一発で「ゆめから さめる」のではなく HP が尽きたときだけスタートへ戻す。
+const YUME_MAX_HP = 6;             // 1ハート=2HP × 3ハート（2DのonjReze初期値と同じ）
+const DAMAGE_DEFAULT = 3;          // Tex25D.damageAmount 未指定時の被ダメージ量
+const DAMAGE_INVULN_SEC = 0.75;
+const HIT_FLASH_PEAK = 0.45;       // 非致死ヒットの赤フラッシュの最大不透明度
+
 /** システム床の効果音。GameMaker の playSfx（direct・既定音量50）と同じ聞こえ方に合わせる。 */
 const playSysSfx = (src: string) => {
   if (typeof Audio === 'undefined') return;
@@ -326,11 +333,17 @@ export class Yume25DEngine {
   private fadeMesh: THREE.Mesh;
   private fadeMat: THREE.MeshBasicMaterial;
   private fadeGeo: THREE.PlaneGeometry;
-  private fadeState: { phase: 'out' | 'in'; t: number; onMid: (() => void) | null } | null = null;
+  private fadeState: { phase: 'out' | 'in'; t: number; onMid: (() => void) | null; peak?: number } | null = null;
   /** ワープ床の多重発動防止。転送先もワープ床のとき、降りるまで再発動しない。 */
   private warpCooldown = false;
   /** つるつる床：壁で止められたセル。同じセルに居る間は滑走を諦めて通常操作に戻す（ハマり防止）。 */
   private iceBlockedCell: string | null = null;
+  /** ダメージ床のHP制。尽きたときだけ「ゆめから さめて」スタートへ戻る（戻ったら全回復）。 */
+  hp = YUME_MAX_HP;
+  readonly maxHp = YUME_MAX_HP;
+  private invuln = 0;
+  /** HP変化通知（HUD用）。被弾・リセットでの全回復の両方で呼ばれる。 */
+  onHpChange: ((hp: number, max: number) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, layout: Layout25D, playerAppearance?: PlayerAppearance) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
@@ -394,6 +407,9 @@ export class Yume25DEngine {
     this.vy = 0; this.hop = 0; this.grounded = true;
     this.warpCooldown = false;
     this.iceBlockedCell = null;
+    this.hp = this.maxHp;
+    this.invuln = 0;
+    this.onHpChange?.(this.hp, this.maxHp);
     this.clampToBounds();
     this.resolveWalls();
   }
@@ -1026,6 +1042,14 @@ export class Yume25DEngine {
     this.fadeState = { phase: 'out', t: 0, onMid };
   }
 
+  /** 非致死ダメージの赤フラッシュ。暗転（out）を経ずに peak → 0 へ明転だけ行う。 */
+  private startFlash(color: string, peak: number) {
+    this.fadeMat.color.set(color);
+    this.fadeMat.opacity = peak;
+    this.fadeMesh.visible = true;
+    this.fadeState = { phase: 'in', t: 0, onMid: null, peak };
+  }
+
   private updateFade(dt: number) {
     const f = this.fadeState;
     if (!f) return;
@@ -1039,7 +1063,7 @@ export class Yume25DEngine {
         f.t = 0;
       }
     } else {
-      this.fadeMat.opacity = Math.max(0, 1 - f.t / FADE_IN_SEC);
+      this.fadeMat.opacity = Math.max(0, 1 - f.t / FADE_IN_SEC) * (f.peak ?? 1);
       if (f.t >= FADE_IN_SEC) {
         this.fadeState = null;
         this.fadeMesh.visible = false;
@@ -1049,6 +1073,7 @@ export class Yume25DEngine {
   }
 
   private step(dt: number) {
+    if (this.invuln > 0) this.invuln -= dt;
     const inp = this.input;
     let turn = (inp.turnL ? 1 : 0) - (inp.turnR ? 1 : 0);
     let move = (inp.forward ? 1 : 0) - (inp.back ? 1 : 0);
@@ -1145,10 +1170,14 @@ export class Yume25DEngine {
         }
       } else {
         this.warpCooldown = false;
-        if (s === 'damage') {
-          // yume25d に HP は無いので「ゆめから さめて スタート地点へ戻る」に読み替える
+        if (s === 'damage' && this.invuln <= 0) {
+          // 2Dエンジンと同じHP制：無敵時間つきで削り、尽きたら「ゆめから さめて スタート地点へ戻る」
+          this.invuln = DAMAGE_INVULN_SEC;
           playSysSfx(SYS_TILE_DAMAGE_SFX);
-          this.startFade('#4a0a14', () => this.resetToStart());
+          this.hp = Math.max(0, this.hp - (tex?.damageAmount ?? DAMAGE_DEFAULT));
+          this.onHpChange?.(this.hp, this.maxHp);
+          if (this.hp <= 0) this.startFade('#4a0a14', () => this.resetToStart());
+          else this.startFlash('#a01828', HIT_FLASH_PEAK);
         }
       }
     }

@@ -103,6 +103,8 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
   const setTalkTargetId = onTalkTargetChange;
   /** 「はなす」で開く会話ウィンドウ。開いている間は仮想ボタン一式を非表示にする。 */
   const [dialogue, setDialogue] = useState<DialogueState | null>(null);
+  /** ダメージ床のHP制（ハート表示）。エンジンの onHpChange 通知で同期する。 */
+  const [hpState, setHpState] = useState<{ hp: number; max: number } | null>(null);
   const [showControlGuide, setShowControlGuide] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogueRef = useRef<DialogueState | null>(null);
@@ -199,6 +201,8 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     const cv = glCanvasRef.current;
     if (!cv) return;
     const eng = new Yume25DEngine(cv, layoutRef.current, playerAppearance);
+    eng.onHpChange = (hp, max) => setHpState({ hp, max });
+    setHpState({ hp: eng.hp, max: eng.maxHp });
     engineRef.current = eng;
     return () => { eng.dispose(); engineRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -912,6 +916,21 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
             onPointerMove={e => { if ((e.buttons & 1) === 1) { const { sx, sy } = pointerToCanvas(e); applyEdit(sx, sy, true); } }}
             onContextMenu={e => e.preventDefault()}
           />
+        </div>
+      )}
+
+      {/* HPハート（ダメージ床のHP制）。2Dエンジン同様 1ハート=2HP。プレイ中のみ表示（デモ・編集では非表示）。 */}
+      {playing && !demo && hpState && (
+        <div className="absolute top-2 right-2 z-20 flex gap-0.5 text-[15px] leading-none pointer-events-none select-none"
+          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
+          {Array.from({ length: Math.ceil(hpState.max / 2) }, (_, i) => {
+            const v = hpState.hp - i * 2;
+            return (
+              <span key={i} className={v >= 2 ? 'text-red-500' : v === 1 ? 'text-red-500 opacity-50' : 'text-gray-600'}>
+                {v >= 1 ? '♥' : '♡'}
+              </span>
+            );
+          })}
         </div>
       )}
 
