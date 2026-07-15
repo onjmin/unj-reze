@@ -15,20 +15,20 @@ export async function GET(
   const userId = url.searchParams.get('userId') || undefined;
   const tab = url.searchParams.get('tab');
 
-  let posts: DbPost[];
-  if (tab === 'likes' && userId) {
-    posts = await db.getLikedPosts(userId);
-  } else if (tab === 'dislikes' && userId) {
-    posts = await db.getDislikedPosts(userId);
-  } else if (tab === 'hearts' && userId) {
-    posts = await db.getHeartedPosts(userId);
-  } else {
-    posts = await db.getUserPostsBySlug(id, userId);
-  }
+  const [posts, displayNameResult, avatarUrl, bio] = await Promise.all([
+    tab === 'likes' && userId
+      ? db.getLikedPosts(userId)
+      : tab === 'dislikes' && userId
+      ? db.getDislikedPosts(userId)
+      : tab === 'hearts' && userId
+      ? db.getHeartedPosts(userId)
+      : db.getUserPostsBySlug(id, userId),
+    db.getUserDisplayName(id),
+    db.getUserAvatarUrl(id),
+    db.getUserBio(id),
+  ]);
 
-  const displayName = (await db.getUserDisplayName(id)) || id;
-  const avatarUrl = await db.getUserAvatarUrl(id);
-  const bio = await db.getUserBio(id);
+  const displayName = displayNameResult || id;
   await attachGameInfo(posts);
 
   return NextResponse.json({

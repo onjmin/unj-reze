@@ -69,6 +69,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [showOriginModal, setShowOriginModal] = useState(false);
 
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [avatarColor, setAvatarColor] = useState('from-blue-500 to-indigo-600');
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
 
   useEffect(() => {
@@ -78,6 +79,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         setUserId(user.displayName);
         setUserSlug(user.slug);
         setAvatarUrl(user.avatarUrl);
+        if (user.avatarColor) setAvatarColor(user.avatarColor);
       }).catch(() => {});
     }
   }, []);
@@ -205,7 +207,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
-      avatarColor: "from-blue-500 to-indigo-600",
+      avatarColor: avatarColor,
+      avatarUrl: avatarUrl,
       heartsTotal: 0, replies: [],
       threadId: post.id, parentPostId: targetParent.id,
       hasImage: !!replyImage,

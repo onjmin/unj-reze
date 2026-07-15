@@ -215,7 +215,7 @@ export default function App() {
 
   const handleQuickPost = (text?: string) => {
     setComposerOpen(true);
-    if (text) {
+    if (text && typeof text === 'string') {
       setInputText(prev => prev ? `${prev} ${text} ` : `${text} `);
     }
   };
@@ -414,7 +414,8 @@ export default function App() {
       id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
-      avatarColor: "from-blue-500 to-indigo-600",
+      avatarColor: currentUser?.avatarColor || "from-blue-500 to-indigo-600",
+      avatarUrl: currentUser?.avatarUrl,
       heartsTotal: 0, replies: [],
       threadId: tempId, parentPostId: undefined,
       hasImage: !!attachedImage,
@@ -791,7 +792,7 @@ export default function App() {
 
             <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} />
 
-            <FAB openText={handleQuickPost} />
+            <FAB openText={() => handleQuickPost()} />
           </>
         )}
 

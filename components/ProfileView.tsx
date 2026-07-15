@@ -493,12 +493,16 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
                   <div
                     onClick={(e) => { e.stopPropagation(); router.push(`/user/${p.slug || p.displayName}`); }}
                     className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity overflow-hidden"
-                    style={pAvatarInfo.style}
+                    style={p.avatarUrl ? undefined : pAvatarInfo.style}
                   >
-                    {(() => {
-                      const AvatarIcon = pAvatarInfo.Icon;
-                      return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
-                    })()}
+                    {p.avatarUrl ? (
+                      <img src={p.avatarUrl} alt={pAvatarInfo.username} className="w-full h-full object-cover rounded-full" />
+                    ) : (
+                      (() => {
+                        const AvatarIcon = pAvatarInfo.Icon;
+                        return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
+                      })()
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline mb-0.5">
