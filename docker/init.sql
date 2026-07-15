@@ -57,6 +57,49 @@ CREATE TABLE IF NOT EXISTS posts (
   is_edited BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+-- ゲームテーブル
+CREATE TABLE IF NOT EXISTS games (
+  id SERIAL PRIMARY KEY,
+  preset TEXT NOT NULL,
+  title TEXT NOT NULL,
+  manifest TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  creator_slug TEXT
+);
+
+-- ゲームスケジュールテーブル
+CREATE TABLE IF NOT EXISTS game_schedule (
+  hour_slot TEXT PRIMARY KEY,
+  game_id INTEGER NOT NULL
+);
+
+-- ゲーム投票テーブル
+CREATE TABLE IF NOT EXISTS game_votes (
+  id SERIAL PRIMARY KEY,
+  game_id INTEGER NOT NULL,
+  ip_address TEXT NOT NULL,
+  hour_slot TEXT NOT NULL,
+  UNIQUE(ip_address, hour_slot)
+);
+
+-- ゲームプレイヤーテーブル
+CREATE TABLE IF NOT EXISTS game_players (
+  session_id TEXT NOT NULL,
+  game_id INTEGER NOT NULL,
+  x REAL NOT NULL DEFAULT 0,
+  y REAL NOT NULL DEFAULT 0,
+  emoji TEXT NOT NULL DEFAULT '🎮',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (session_id, game_id)
+);
+
+-- マイグレーショントークンテーブル
+CREATE TABLE IF NOT EXISTS migration_tokens (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- いいね/わるい 投票テーブル (1ユーザー1投票)
 CREATE TABLE IF NOT EXISTS post_votes (
   id SERIAL PRIMARY KEY,

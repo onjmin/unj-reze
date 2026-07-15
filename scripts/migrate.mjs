@@ -91,6 +91,39 @@ const migrations = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `
+  },
+  {
+    name: '08_create_game_tables',
+    sql: `
+      CREATE TABLE IF NOT EXISTS game_schedule (
+        hour_slot TEXT PRIMARY KEY,
+        game_id INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS game_votes (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER NOT NULL,
+        ip_address TEXT NOT NULL,
+        hour_slot TEXT NOT NULL,
+        UNIQUE(ip_address, hour_slot)
+      );
+
+      CREATE TABLE IF NOT EXISTS game_players (
+        session_id TEXT NOT NULL,
+        game_id INTEGER NOT NULL,
+        x REAL NOT NULL DEFAULT 0,
+        y REAL NOT NULL DEFAULT 0,
+        emoji TEXT NOT NULL DEFAULT '🎮',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (session_id, game_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS migration_tokens (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `
   }
 ];
 
