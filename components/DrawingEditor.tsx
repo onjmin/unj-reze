@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
-  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload
+  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -11,6 +11,8 @@ import type { LayerEntry } from './LayerPanel';
 import AnimationBar from './AnimationBar';
 import type { FrameData } from './AnimationBar';
 import ImportDialog from './ImportDialog';
+import HistoryModal from './HistoryModal';
+import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, serializeLayers, deserializeLayers, serializeFrames, deserializeFrames, DrawingEditorState } from '@/lib/history';
 
 interface DrawingEditorProps {
   onClose: () => void;
@@ -59,6 +61,14 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [onionSkin, setOnionSkin] = useState(false);
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
   const [zoom, setZoom] = useState(1);
+
+  // History & Autosave States
+  const [showHistory, setShowHistory] = useState(false);
+  const [hasAutosave, setHasAutosave] = useState(false);
+  const [autosaveData, setAutosaveData] = useState<DrawingEditorState | null>(null);
+  const [restoredState, setRestoredState] = useState<DrawingEditorState | null>(null);
+  const [initKey, setInitKey] = useState(0);
+  const storageKey = getStorageKey('drawing');
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef(1);
@@ -120,6 +130,87 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     ctx.globalAlpha = 1;
   };
 
+  // Check autosave on mount
+  useEffect(() => {
+    const autosave = getAutosave(storageKey);
+    if (autosave && autosave.data) {
+      setAutosaveData(autosave.data);
+      setHasAutosave(true);
+    }
+  }, [storageKey]);
+
+  // Periodic autosave (every 10s) and history snapshot (every 30m)
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveAutosave(storageKey, state);
+      }
+    }, 10000);
+
+    const historyInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveHistory(storageKey, state, 'drawing', 50);
+      }
+    }, 1800000);
+
+    return () => {
+      clearInterval(autosaveInterval);
+      clearInterval(historyInterval);
+    };
+  }, [storageKey, animMode, zoom, fpsRef.current]);
+
+  const handleRestoreAutosave = () => {
+    if (!autosaveData) return;
+    setRestoredState(autosaveData);
+    setInitKey(k => k + 1);
+    setHasAutosave(false);
+    clearAutosave(storageKey);
+  };
+
+  const handleIgnoreAutosave = () => {
+    setHasAutosave(false);
+    clearAutosave(storageKey);
+  };
+
+  const handleRestoreHistory = (state: DrawingEditorState) => {
+    setRestoredState(state);
+    setInitKey(k => k + 1);
+  };
+
+  const getCurrentState = (): DrawingEditorState | null => {
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    if (!active) return null;
+    const canvas = active.canvas;
+    const w = canvas.width;
+    const h = canvas.height;
+    if (animMode) {
+      framesRef.current[currentFrameRef.current] = captureFrame();
+      return {
+        mode: 'anim',
+        width: w,
+        height: h,
+        gridW: 32,
+        gridH: 32,
+        zoom,
+        frames: serializeFrames(framesRef.current, w, h),
+        currentFrame: currentFrameRef.current,
+        fps: fpsRef.current
+      };
+    } else {
+      return {
+        mode: 'standard',
+        width: w,
+        height: h,
+        gridW: 32,
+        gridH: 32,
+        zoom,
+        layers: serializeLayers(oekaki.getLayers(), w, h)
+      };
+    }
+  };
+
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
@@ -127,8 +218,9 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     const availW = parent ? parent.clientWidth : 640;
     const availH = parent ? parent.clientHeight : 480;
     const cap = 1024;
-    const w = Math.min(availW, cap) | 0;
-    const h = Math.min(availH, cap) | 0;
+    
+    const w = restoredState ? restoredState.width : (Math.min(availW, cap) | 0);
+    const h = restoredState ? restoredState.height : (Math.min(availH, cap) | 0);
     el.innerHTML = '';
     oekaki.init(el, w, h);
 
@@ -139,51 +231,78 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     oekaki.brushSize.value = brushSize;
     oekaki.eraserSize.value = eraserSize;
 
-    // g_layers is empty after init — create initial user layers
-    const bgLayer = new oekaki.LayeredCanvas('白背景');
-    bgLayer.fill('#FFF');
-    bgLayer.trace();
-    new oekaki.LayeredCanvas('レイヤー #1');
-    layerCounterRef.current = 2;
-
-    // collaboration: load existing image as base layer
-    if (collabRef.current) {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.src = collabRef.current;
-      img.onload = () => {
-        // remove white background layer, paste image on first layer
-        bgLayer.delete();
-        const layers = oekaki.getLayers();
-        const target = layers[0];
-        if (target) {
-          target.name = 'コラボ';
-          target.paste(img);
-          target.trace();
-          new oekaki.LayeredCanvas('レイヤー #2');
-          layerCounterRef.current = 3;
+    const loadCanvasContent = async () => {
+      if (restoredState) {
+        if (restoredState.mode === 'anim' && restoredState.frames) {
+          const deserializedFrames = await deserializeFrames(restoredState.frames, w, h);
+          framesRef.current = deserializedFrames;
+          currentFrameRef.current = restoredState.currentFrame || 0;
+          fpsRef.current = restoredState.fps || 8;
+          setAnimMode(true);
+          applyFrame(deserializedFrames[currentFrameRef.current]);
+        } else if (restoredState.layers) {
+          for (const l of oekaki.getLayers()) l.delete();
+          oekaki.refresh();
+          const deserializedLayers = await deserializeLayers(restoredState.layers, w, h);
+          for (const { name, visible, locked, data } of deserializedLayers) {
+            const l = new oekaki.LayeredCanvas(name);
+            l.visible = visible;
+            l.locked = locked;
+            l.data = new Uint8ClampedArray(data);
+          }
+          syncLayerEntries();
         }
-        // re-populate layer entries
-        const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
-          instance: inst,
-          name: inst.name,
-        })).reverse();
-        setLayerEntries(updated);
-        layerEntriesRef.current = updated;
-        setActiveLayerIndex(0);
-        activeLayerIndexRef.current = 0;
-      };
-    }
+        setRestoredState(null);
+      } else {
+        // g_layers is empty after init — create initial user layers
+        const bgLayer = new oekaki.LayeredCanvas('白背景');
+        bgLayer.fill('#FFF');
+        bgLayer.trace();
+        new oekaki.LayeredCanvas('レイヤー #1');
+        layerCounterRef.current = 2;
 
-    // populate layer entries (topmost first)
-    const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
-      instance: inst,
-      name: inst.name,
-    })).reverse();
-    setLayerEntries(initEntries);
-    layerEntriesRef.current = initEntries;
-    setActiveLayerIndex(0);
-    activeLayerIndexRef.current = 0;
+        // collaboration: load existing image as base layer
+        if (collabRef.current) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = collabRef.current;
+          img.onload = () => {
+            // remove white background layer, paste image on first layer
+            bgLayer.delete();
+            const layers = oekaki.getLayers();
+            const target = layers[0];
+            if (target) {
+              target.name = 'コラボ';
+              target.paste(img);
+              target.trace();
+              new oekaki.LayeredCanvas('レイヤー #2');
+              layerCounterRef.current = 3;
+            }
+            // re-populate layer entries
+            const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
+              instance: inst,
+              name: inst.name,
+            })).reverse();
+            setLayerEntries(updated);
+            layerEntriesRef.current = updated;
+            setActiveLayerIndex(0);
+            activeLayerIndexRef.current = 0;
+          };
+        }
+      }
+      
+      // populate layer entries (topmost first)
+      const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
+        instance: inst,
+        name: inst.name,
+      })).reverse();
+      setLayerEntries(initEntries);
+      layerEntriesRef.current = initEntries;
+      setActiveLayerIndex(0);
+      activeLayerIndexRef.current = 0;
+    };
+
+    loadCanvasContent();
 
     // onion skin canvas
     const onionCanvas = document.createElement('canvas');
@@ -259,7 +378,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       onionCanvasRef.current = null;
       if (mountRef.current) mountRef.current.innerHTML = '';
     };
-  }, []);
+  }, [initKey]);
 
   useEffect(() => {
     if (mountRef.current) {
@@ -534,6 +653,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   };
 
   const handleSave = () => {
+    clearAutosave(storageKey);
     onSave(oekaki.render().toDataURL());
   };
 
@@ -598,6 +718,22 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           ><Film size={12} />アニメ</button>
         </div>
       </div>
+
+      {hasAutosave && (
+        <div className="bg-yellow-600/20 border-b border-yellow-800/30 px-4 py-2 flex items-center justify-between text-xs text-yellow-200 shrink-0">
+          <span className="flex items-center gap-1.5">
+            ⚠️ 未保存のデータ（自動保存）があります。復元しますか？
+          </span>
+          <div className="flex gap-2">
+            <button onClick={handleRestoreAutosave} className="bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold px-3 py-1 rounded text-[10px] active:scale-95 transition-transform">
+              復元する
+            </button>
+            <button onClick={handleIgnoreAutosave} className="text-gray-400 hover:text-gray-200 px-2 py-1 rounded text-[10px]">
+              無視
+            </button>
+          </div>
+        </div>
+      )}
 
       <div
         className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center"
@@ -741,6 +877,10 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
             <Upload size={11} />
             <span>読込</span>
           </button>
+          <button onClick={() => setShowHistory(true)} className="px-2 h-7 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center space-x-1 text-[10px] transition-colors">
+            <History size={11} />
+            <span>履歴</span>
+          </button>
           <button onClick={handleSave} className="h-7 rounded bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold flex items-center space-x-1.5 px-3 text-[10px] transition-colors">
             <Save size={11} />
             <span>投稿する</span>
@@ -766,6 +906,14 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         onImport={handleImport}
         walkMode={false}
         walkPresets={[]}
+      />
+      <HistoryModal
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        storageKey={storageKey}
+        type="drawing"
+        onRestore={handleRestoreHistory}
+        getCurrentData={getCurrentState}
       />
     </div>
   );

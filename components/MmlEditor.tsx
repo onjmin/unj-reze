@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { X, Music, Loader2 } from 'lucide-react';
+import { X, Music, Loader2, History } from 'lucide-react';
 import { getStudio } from '@/lib/dtm';
+import HistoryModal from '@/components/HistoryModal';
+import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory } from '@/lib/history';
 
 interface MmlEditorProps {
   onClose: () => void;
@@ -19,6 +21,12 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
   const modeSwitchRef = useRef<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // History / Autosave state
+  const [showHistory, setShowHistory] = useState(false);
+  const [hasAutosave, setHasAutosave] = useState(false);
+  const [autosaveData, setAutosaveData] = useState<string | null>(null);
+  const storageKey = getStorageKey('mml');
 
   useEffect(() => {
     let disposed = false;
@@ -49,13 +57,100 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
     };
   }, []);
 
+  // Check autosave on mount
+  useEffect(() => {
+    const autosave = getAutosave(storageKey);
+    if (autosave && autosave.data && autosave.data !== initialMml) {
+      setAutosaveData(autosave.data);
+      setHasAutosave(true);
+    }
+  }, [initialMml, storageKey]);
+
+  // Periodic autosave (every 10s) and history snapshot (every 30m)
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      const daw = modeSwitchRef.current?.getDaw();
+      if (!daw) return;
+      try {
+        const currentMml = daw.getMML()?.minified?.trim();
+        if (currentMml) {
+          saveAutosave(storageKey, currentMml);
+        }
+      } catch (e) {
+        // ignore if getMML fails during mode switch
+      }
+    }, 10000);
+
+    const historyInterval = setInterval(() => {
+      const daw = modeSwitchRef.current?.getDaw();
+      if (!daw) return;
+      try {
+        const currentMml = daw.getMML()?.minified?.trim();
+        if (currentMml) {
+          saveHistory(storageKey, currentMml, 'mml', 50);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }, 1800000);
+
+    return () => {
+      clearInterval(autosaveInterval);
+      clearInterval(historyInterval);
+    };
+  }, [storageKey]);
+
+  const handleRestoreAutosave = () => {
+    if (!autosaveData) return;
+    const daw = modeSwitchRef.current?.getDaw();
+    if (daw) {
+      try {
+        daw.loadMML(autosaveData);
+      } catch (e) {
+        console.error('Failed to load autosaved MML', e);
+      }
+    }
+    setHasAutosave(false);
+    clearAutosave(storageKey);
+  };
+
+  const handleIgnoreAutosave = () => {
+    setHasAutosave(false);
+    clearAutosave(storageKey);
+  };
+
+  const handleRestoreHistory = (restoredMml: string) => {
+    const daw = modeSwitchRef.current?.getDaw();
+    if (daw) {
+      try {
+        daw.loadMML(restoredMml);
+      } catch (e) {
+        console.error('Failed to load MML history', e);
+      }
+    }
+  };
+
+  const getCurrentMml = () => {
+    const daw = modeSwitchRef.current?.getDaw();
+    if (!daw) return null;
+    try {
+      return daw.getMML()?.minified?.trim() || null;
+    } catch (e) {
+      return null;
+    }
+  };
+
   const handleSave = useCallback(() => {
     // モード切替で daw が差し替わるため、現在の DawInstance を都度取得する。
     const daw = modeSwitchRef.current?.getDaw();
     if (!daw) return;
     const mml = daw.getMML().minified.trim();
-    if (mml) onSave(mml);
-  }, [onSave]);
+    if (mml) {
+      // Clear autosave on manual save/post
+      clearAutosave(storageKey);
+      onSave(mml);
+    }
+  }, [onSave, storageKey]);
 
   return (
     <div className="absolute inset-0 bg-[#0b0e14] z-50 flex flex-col select-none">
@@ -67,6 +162,15 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
         <span className="text-gray-600 mx-1.5 text-[10px]">›</span>
         <span className="text-gray-400 text-xs">MML作曲エディタ</span>
         <div className="flex-1" />
+        
+        <button
+          onClick={() => setShowHistory(true)}
+          disabled={loading || !!error}
+          className="mr-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold py-1.5 px-3 rounded-lg text-[11px] disabled:opacity-50 flex items-center space-x-1 transition-colors"
+        >
+          <History size={13} /> <span>履歴</span>
+        </button>
+
         <button
           onClick={handleSave}
           disabled={loading || !!error}
@@ -75,6 +179,22 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
           <Music size={13} /> <span>投稿</span>
         </button>
       </div>
+
+      {hasAutosave && (
+        <div className="bg-yellow-600/20 border-b border-yellow-800/30 px-4 py-2 flex items-center justify-between text-xs text-yellow-200 shrink-0">
+          <span className="flex items-center gap-1.5">
+            ⚠️ 未保存のデータ（自動保存）があります。復元しますか？
+          </span>
+          <div className="flex gap-2">
+            <button onClick={handleRestoreAutosave} className="bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold px-3 py-1 rounded text-[10px] active:scale-95 transition-transform">
+              復元する
+            </button>
+            <button onClick={handleIgnoreAutosave} className="text-gray-400 hover:text-gray-200 px-2 py-1 rounded text-[10px]">
+              無視
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto bg-[#0a0c12] relative">
         <div ref={mountRef} />
@@ -90,6 +210,15 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
           </div>
         )}
       </div>
+
+      <HistoryModal
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        storageKey={storageKey}
+        type="mml"
+        onRestore={handleRestoreHistory}
+        getCurrentData={getCurrentMml}
+      />
     </div>
   );
 }

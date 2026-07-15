@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { applyMasterVolume } from '@/lib/master-volume';
+import HistoryModal from './HistoryModal';
+import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
 import { tldrSfxUrl, TLDR_UNDERTALE_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
 import {
@@ -1413,6 +1415,213 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     cure: { ref: 'direct:dt-cure', src: tldrSfxUrl('spellCure'), type: 'direct' as const },
     spare: { ref: 'direct:dt-spare', src: tldrSfxUrl('spare'), type: 'direct' as const },
     mercyAdd: { ref: 'direct:dt-mercyadd', src: tldrSfxUrl('mercyAdd'), type: 'direct' as const },
+  };
+
+  const [, forceRender] = useState(0);
+
+  // ── History & Autosave Integration ──
+  interface SavedGameplayState {
+    activeSceneIdx: number;
+    playerX: number;
+    playerY: number;
+    checkpoint: { x: number; y: number } | null;
+    progress: typeof progressRef.current;
+    inventory: typeof inventoryRef.current;
+    invSlots: string[];
+    equipment: { weapon?: string; armor?: string };
+    switchVals: Record<number, boolean>;
+    selfSwitches: Record<string, Record<string, boolean>>;
+    tp: number;
+    partyExtraHp: Record<string, number>;
+  }
+
+  const [showHistory, setShowHistory] = useState(false);
+  const [hasAutosaveEdit, setHasAutosaveEdit] = useState(false);
+  const [autosaveEditData, setAutosaveEditData] = useState<GameManifestDraft | null>(null);
+  const [hasAutosavePlay, setHasAutosavePlay] = useState(false);
+  const [autosavePlayData, setAutosavePlayData] = useState<SavedGameplayState | null>(null);
+
+  const suffix = postId ? `post-${postId}` : (initialManifest?.preset ? `preset-${initialManifest.preset}` : 'new');
+  const editStorageKey = `unj-gamemaker-history-${suffix}`;
+  const playStorageKey = `unj-gameplay-history-${suffix}`;
+
+  // Check autosave on mount (Edit mode)
+  useEffect(() => {
+    if (playOnly) return;
+    const autosave = getAutosave(editStorageKey);
+    if (autosave && autosave.data) {
+      setAutosaveEditData(autosave.data);
+      setHasAutosaveEdit(true);
+    }
+  }, [editStorageKey, playOnly]);
+
+  // Check autosave when entering play mode
+  useEffect(() => {
+    if (isPlaying || playOnly) {
+      const autosave = getAutosave(playStorageKey);
+      if (autosave && autosave.data) {
+        setAutosavePlayData(autosave.data);
+        setHasAutosavePlay(true);
+      }
+    }
+  }, [playStorageKey, isPlaying, playOnly]);
+
+  // Periodic autosave (every 10s) and history snapshot (every 30m)
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      if (isPlaying || playOnly) {
+        const state = getCurrentPlayState();
+        if (state) saveAutosave(playStorageKey, state);
+      } else {
+        const manifest = buildManifest();
+        if (manifest) saveAutosave(editStorageKey, manifest);
+      }
+    }, 10000);
+
+    const historyInterval = setInterval(() => {
+      if (isPlaying || playOnly) {
+        const state = getCurrentPlayState();
+        if (state) saveHistory(playStorageKey, state, 'gameplay', 50);
+      } else {
+        const manifest = buildManifest();
+        if (manifest) saveHistory(editStorageKey, manifest, 'gamemaker', 50);
+      }
+    }, 1800000);
+
+    return () => {
+      clearInterval(autosaveInterval);
+      clearInterval(historyInterval);
+    };
+  }, [editStorageKey, playStorageKey, isPlaying, playOnly, title, gameData]);
+
+  const handleRestoreEditAutosave = () => {
+    if (!autosaveEditData) return;
+    loadManifest(autosaveEditData);
+    setHasAutosaveEdit(false);
+    clearAutosave(editStorageKey);
+  };
+
+  const handleIgnoreEditAutosave = () => {
+    setHasAutosaveEdit(false);
+    clearAutosave(editStorageKey);
+  };
+
+  const handleRestorePlayAutosave = () => {
+    if (!autosavePlayData) return;
+    handleRestorePlayState(autosavePlayData);
+    setHasAutosavePlay(false);
+    clearAutosave(playStorageKey);
+  };
+
+  const handleIgnorePlayAutosave = () => {
+    setHasAutosavePlay(false);
+    clearAutosave(playStorageKey);
+  };
+
+  const getCurrentPlayState = (): SavedGameplayState | null => {
+    if (!engineRef.current?.player) return null;
+    return {
+      activeSceneIdx: activeSceneIdxRef.current,
+      playerX: engineRef.current.player.x,
+      playerY: engineRef.current.player.y,
+      checkpoint: checkpointRef.current,
+      progress: progressRef.current,
+      inventory: inventoryRef.current,
+      invSlots: invSlotsRef.current,
+      equipment: equipmentRef.current,
+      switchVals: switchValsRef.current,
+      selfSwitches: selfSwitchesRef.current,
+      tp: tpRef.current,
+      partyExtraHp: partyExtraHpRef.current
+    };
+  };
+
+  const handleRestorePlayState = (state: SavedGameplayState) => {
+    if (!state) return;
+    activeSceneIdxRef.current = state.activeSceneIdx;
+    if (engineRef.current?.player) {
+      engineRef.current.player.x = state.playerX;
+      engineRef.current.player.y = state.playerY;
+      engineRef.current.player.vx = 0;
+      engineRef.current.player.vy = 0;
+    }
+    checkpointRef.current = state.checkpoint;
+    progressRef.current = state.progress;
+    inventoryRef.current = state.inventory;
+    setInventory(state.inventory);
+    setInvSlots(state.invSlots);
+    equipmentRef.current = state.equipment;
+    setEquipment(state.equipment);
+    setSwitchVals(state.switchVals);
+    selfSwitchesRef.current = state.selfSwitches;
+    setTp(state.tp);
+    setPartyExtraHp(state.partyExtraHp);
+    forceRender(n => n + 1);
+  };
+
+  const loadManifest = (manifest: GameManifestDraft) => {
+    const preset = PRESETS[manifest.preset] ? manifest.preset : 'dq';
+    const base = clone(PRESETS[preset]);
+    const data: PresetData = {
+      ...base,
+      engine: manifest.engine,
+      name: manifest.name,
+      gravity: manifest.gravity,
+      friction: manifest.friction,
+      iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
+      player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
+      tiles: Object.fromEntries(
+        Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) }])
+      ),
+      map: manifest.map,
+      overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
+      overheadMap: manifest.overheadMap ?? emptyGridLike(manifest.map),
+      objects: manifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
+      mapBgRef: manifest.mapBgRef,
+      mapBgUrl: undefined,
+      scroll: manifest.scroll ?? base.scroll,
+      phases: manifest.phases ?? base.phases,
+      titleScreen: manifest.titleScreen ?? base.titleScreen,
+      ending: manifest.ending ?? base.ending,
+      battle: manifest.battle ?? base.battle,
+      layout25d: manifest.layout25d ?? base.layout25d,
+      scenes: manifest.scenes?.map(s => ({
+        ...s,
+        overheadMap: s.overheadMap ?? emptyGridLike(s.map),
+        objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
+        bgm: hydrateBgmFromRef(s.bgm),
+      })),
+      bgm: hydrateBgmFromRef(manifest.bgm),
+      battleBgm: hydrateBgmFromRef(manifest.battleBgm),
+      bossBgm: hydrateBgmFromRef(manifest.bossBgm),
+      sfx: Object.fromEntries(
+        Object.entries(manifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
+      ) as PresetData['sfx'],
+    };
+    setPresetId(preset);
+    setGameData(data);
+    setTitle(manifest.name);
+    const eng = engineRef.current;
+    eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
+    eng.map = JSON.parse(JSON.stringify(data.map));
+    eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+    setIsPlaying(false); setSelectedObjId(null);
+  };
+
+  const handleRestoreHistory = (data: any) => {
+    if (isPlaying || playOnly) {
+      handleRestorePlayState(data);
+    } else {
+      loadManifest(data);
+    }
+  };
+
+  const getCurrentDataForHistory = () => {
+    if (isPlaying || playOnly) {
+      return getCurrentPlayState();
+    } else {
+      return buildManifest();
+    }
   };
 
   // ── パーティ制ターン戦闘（battle.style === 'ff' | 'mother3' | 'milky'）──
@@ -9827,7 +10036,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     })),
   });
 
-  const handleSave = () => { playSfx(sfxRef.current.save); onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id }); };
+  const handleSave = () => {
+    clearAutosave(editStorageKey);
+    playSfx(sfxRef.current.save);
+    onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
+  };
 
   const handleExport = () => {
     const json = JSON.stringify(buildManifest(), null, 2);
@@ -10245,6 +10458,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               </div>
             )}
           </div>
+          <button
+            onClick={() => setShowHistory(true)}
+            className="p-2 text-gray-400 hover:text-white bg-gray-700/50"
+            title="履歴・スナップショット"
+          >
+            <History size={14} />
+          </button>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
           {!playOnly && (
             <button onClick={() => {
@@ -14376,6 +14596,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           />
         );
       })()}
+      <HistoryModal
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        storageKey={isPlaying || playOnly ? playStorageKey : editStorageKey}
+        type={isPlaying || playOnly ? 'gameplay' : 'gamemaker'}
+        onRestore={handleRestoreHistory}
+        getCurrentData={getCurrentDataForHistory}
+      />
     </div>
   );
 }

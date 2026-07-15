@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Eraser, PaintBucket, Pipette,
-  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload
+  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload, History
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -13,6 +13,8 @@ import type { FrameData } from './AnimationBar';
 import WalkCyclePanel from './WalkCyclePanel';
 import ImportDialog from './ImportDialog';
 import { presets as walkPresets, detectPreset, type WalkPreset } from '@/lib/walk-cycle';
+import HistoryModal from './HistoryModal';
+import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, serializeLayers, deserializeLayers, serializeFrames, deserializeFrames, serializeWalkLayers, deserializeWalkLayers, DrawingEditorState } from '@/lib/history';
 
 interface DotDrawingEditorProps {
   onClose: () => void;
@@ -84,6 +86,13 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
   const [isDragover, setIsDragover] = useState(false);
   const [showImport, setShowImport] = useState(false);
+
+  // History & Autosave States
+  const [showHistory, setShowHistory] = useState(false);
+  const [hasAutosave, setHasAutosave] = useState(false);
+  const [autosaveData, setAutosaveData] = useState<DrawingEditorState | null>(null);
+  const [restoredState, setRestoredState] = useState<DrawingEditorState | null>(null);
+  const storageKey = getStorageKey('dotdrawing');
 
   toolRef.current = tool;
   colorRef.current = color;
@@ -341,84 +350,255 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     forceRender(n => n + 1);
   };
 
+  // Check autosave on mount
+  useEffect(() => {
+    const autosave = getAutosave(storageKey);
+    if (autosave && autosave.data) {
+      setAutosaveData(autosave.data);
+      setHasAutosave(true);
+    }
+  }, [storageKey]);
+
+  // Periodic autosave (every 10s) and history snapshot (every 30m)
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveAutosave(storageKey, state);
+      }
+    }, 10000);
+
+    const historyInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveHistory(storageKey, state, 'dotdrawing', 50);
+      }
+    }, 1800000);
+
+    return () => {
+      clearInterval(autosaveInterval);
+      clearInterval(historyInterval);
+    };
+  }, [storageKey, animMode, walkMode, zoom, walkActiveIndex, gridH]);
+
+  const handleRestoreAutosave = () => {
+    if (!autosaveData) return;
+    setRestoredState(autosaveData);
+    setInitKey(k => k + 1);
+    setHasAutosave(false);
+    clearAutosave(storageKey);
+  };
+
+  const handleIgnoreAutosave = () => {
+    setHasAutosave(false);
+    clearAutosave(storageKey);
+  };
+
+  const handleRestoreHistory = (state: DrawingEditorState) => {
+    setRestoredState(state);
+    setInitKey(k => k + 1);
+  };
+
+  const getCurrentState = (): DrawingEditorState | null => {
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    if (!active) return null;
+    const canvas = active.canvas;
+    const w = canvas.width;
+    const h = canvas.height;
+
+    if (walkModeRef.current) {
+      const prev = walkActiveIndexRef.current;
+      const prevLayers = oekaki.getLayers();
+      walkLayersRef.current.set(prev, {
+        layers: prevLayers.map(l => ({
+          name: l.name,
+          visible: l.visible,
+          locked: l.locked,
+          data: new Uint8ClampedArray(l.data),
+        }))
+      });
+      return {
+        mode: 'walk',
+        width: w,
+        height: h,
+        gridW,
+        gridH,
+        zoom,
+        walkPreset,
+        walkActiveIndex: walkActiveIndexRef.current,
+        walkLayers: serializeWalkLayers(walkLayersRef.current, w, h)
+      };
+    } else if (animMode) {
+      framesRef.current[currentFrameRef.current] = captureFrame();
+      return {
+        mode: 'anim',
+        width: w,
+        height: h,
+        gridW,
+        gridH,
+        zoom,
+        frames: serializeFrames(framesRef.current, w, h),
+        currentFrame: currentFrameRef.current,
+        fps: fpsRef.current
+      };
+    } else {
+      return {
+        mode: 'standard',
+        width: w,
+        height: h,
+        gridW,
+        gridH,
+        zoom,
+        layers: serializeLayers(oekaki.getLayers(), w, h)
+      };
+    }
+  };
+
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
     el.innerHTML = '';
 
-    const isWalk = walkModeRef.current;
-    const canvasW = isWalk ? Math.floor(CANVAS_SIZE * (walkPresetRef.current.w / walkPresetRef.current.h)) : CANVAS_SIZE;
+    const isWalk = restoredState ? (restoredState.mode === 'walk') : walkModeRef.current;
+    const preset = restoredState ? restoredState.walkPreset : walkPresetRef.current;
+    const canvasW = isWalk ? Math.floor(CANVAS_SIZE * (preset.w / preset.h)) : CANVAS_SIZE;
     const canvasH = CANVAS_SIZE;
-    oekaki.init(el, canvasW, canvasH);
+    
+    const w = restoredState ? restoredState.width : canvasW;
+    const h = restoredState ? restoredState.height : canvasH;
+    
+    oekaki.init(el, w, h);
     if (isWalk) {
-      oekaki.setDotSize(1, walkPresetRef.current.h);
+      oekaki.setDotSize(1, preset.h);
     } else {
-      oekaki.setDotSize(1, gridH);
+      oekaki.setDotSize(1, restoredState ? restoredState.gridH : gridH);
     }
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
     oekaki.color.value = colorRef.current;
 
-    if (isWalk) {
-      const cellData = walkLayersRef.current.get(walkActiveIndexRef.current);
-      if (cellData && cellData.layers.length > 0) {
-        for (const { name, visible, locked, data } of cellData.layers) {
-          const l = new oekaki.LayeredCanvas(name);
-          l.visible = visible;
-          l.locked = locked;
-          l.data = new Uint8ClampedArray(data);
-        }
-      } else {
-        new oekaki.LayeredCanvas('レイヤー #1');
-      }
-      layerCounterRef.current = 2;
-    } else {
-      const bgLayer = new oekaki.LayeredCanvas('白背景');
-      bgLayer.fill('#FFF');
-      bgLayer.trace();
-      new oekaki.LayeredCanvas('レイヤー #1');
-      layerCounterRef.current = 2;
-
-      if (collabRef.current) {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = collabRef.current;
-        img.onload = () => {
-          bgLayer.delete();
-          const layers = oekaki.getLayers();
-          const target = layers[0];
-          if (target) {
-            target.name = 'コラボ';
-            target.paste(img);
-            target.trace();
-            new oekaki.LayeredCanvas('レイヤー #2');
-            layerCounterRef.current = 3;
+    const loadCanvasContent = async () => {
+      if (restoredState) {
+        setGridW(restoredState.gridW);
+        setGridH(restoredState.gridH);
+        setZoom(restoredState.zoom);
+        
+        if (restoredState.mode === 'walk' && restoredState.walkLayers) {
+          const deserializedWalkLayers = await deserializeWalkLayers(restoredState.walkLayers, w, h);
+          walkLayersRef.current = deserializedWalkLayers;
+          
+          walkDataRef.current.clear();
+          for (const [key, val] of deserializedWalkLayers.entries()) {
+            const temp = document.createElement('canvas');
+            temp.width = w;
+            temp.height = h;
+            const tempCtx = temp.getContext('2d');
+            if (tempCtx) {
+              const id = tempCtx.createImageData(w, h);
+              id.data.set(val.layers[0].data);
+              tempCtx.putImageData(id, 0, 0);
+              walkDataRef.current.set(key, temp.toDataURL('image/png'));
+            }
           }
-          const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
-            instance: inst,
-            name: inst.name,
-          })).reverse();
-          setLayerEntries(updated);
-          layerEntriesRef.current = updated;
-          setActiveLayerIndex(0);
-          activeLayerIndexRef.current = 0;
-        };
-      }
-    }
+          
+          setWalkPreset(restoredState.walkPreset);
+          setWalkActiveIndex(restoredState.walkActiveIndex || 0);
+          walkActiveIndexRef.current = restoredState.walkActiveIndex || 0;
+          setWalkMode(true);
+          
+          for (const l of oekaki.getLayers()) l.delete();
+          oekaki.refresh();
+          const cellData = deserializedWalkLayers.get(restoredState.walkActiveIndex || 0);
+          if (cellData && cellData.layers.length > 0) {
+            for (const { name, visible, locked, data } of cellData.layers) {
+              const l = new oekaki.LayeredCanvas(name);
+              l.visible = visible;
+              l.locked = locked;
+              l.data = new Uint8ClampedArray(data);
+            }
+          } else {
+            new oekaki.LayeredCanvas('レイヤー #1');
+          }
+        } else if (restoredState.mode === 'anim' && restoredState.frames) {
+          const deserializedFrames = await deserializeFrames(restoredState.frames, w, h);
+          framesRef.current = deserializedFrames;
+          currentFrameRef.current = restoredState.currentFrame || 0;
+          fpsRef.current = restoredState.fps || 8;
+          setAnimMode(true);
+          applyFrame(deserializedFrames[currentFrameRef.current]);
+        } else if (restoredState.layers) {
+          for (const l of oekaki.getLayers()) l.delete();
+          oekaki.refresh();
+          const deserializedLayers = await deserializeLayers(restoredState.layers, w, h);
+          for (const { name, visible, locked, data } of deserializedLayers) {
+            const l = new oekaki.LayeredCanvas(name);
+            l.visible = visible;
+            l.locked = locked;
+            l.data = new Uint8ClampedArray(data);
+          }
+        }
+        setRestoredState(null);
+      } else {
+        if (isWalk) {
+          const cellData = walkLayersRef.current.get(walkActiveIndexRef.current);
+          if (cellData && cellData.layers.length > 0) {
+            for (const { name, visible, locked, data } of cellData.layers) {
+              const l = new oekaki.LayeredCanvas(name);
+              l.visible = visible;
+              l.locked = locked;
+              l.data = new Uint8ClampedArray(data);
+            }
+          } else {
+            new oekaki.LayeredCanvas('レイヤー #1');
+          }
+          layerCounterRef.current = 2;
+        } else {
+          const bgLayer = new oekaki.LayeredCanvas('白背景');
+          bgLayer.fill('#FFF');
+          bgLayer.trace();
+          new oekaki.LayeredCanvas('レイヤー #1');
+          layerCounterRef.current = 2;
 
-    const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
-      instance: inst,
-      name: inst.name,
-    })).reverse();
-    setLayerEntries(initEntries);
-    layerEntriesRef.current = initEntries;
-    setActiveLayerIndex(0);
-    activeLayerIndexRef.current = 0;
+          if (collabRef.current) {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = collabRef.current;
+            img.onload = () => {
+              bgLayer.delete();
+              const layers = oekaki.getLayers();
+              const target = layers[0];
+              if (target) {
+                target.name = 'コラボ';
+                target.paste(img);
+                target.trace();
+                new oekaki.LayeredCanvas('レイヤー #2');
+                layerCounterRef.current = 3;
+              }
+              const updated: LayerEntry[] = oekaki.getLayers().map(inst => ({
+                instance: inst,
+                name: inst.name,
+              })).reverse();
+              setLayerEntries(updated);
+              layerEntriesRef.current = updated;
+              setActiveLayerIndex(0);
+              activeLayerIndexRef.current = 0;
+            };
+          }
+        }
+      }
+      
+      // populate layer entries (topmost first)
+      syncLayerEntries();
+      updateOnionSkin();
+      forceRender(n => n + 1);
+    };
+
+    loadCanvasContent();
 
     const onionCanvas = document.createElement('canvas');
-    onionCanvas.width = canvasW;
-    onionCanvas.height = canvasH;
+    onionCanvas.width = w;
+    onionCanvas.height = h;
     onionCanvas.style.position = 'absolute';
     onionCanvas.style.zIndex = '2';
     onionCanvas.style.left = '0';
@@ -828,6 +1008,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   });
 
   const handleSave = () => {
+    clearAutosave(storageKey);
     const canvas = oekaki.render();
     onSave(canvas.toDataURL('image/png'));
   };
@@ -939,6 +1120,22 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           )}
         </div>
       </div>
+
+      {hasAutosave && (
+        <div className="bg-yellow-600/20 border-b border-yellow-800/30 px-4 py-2 flex items-center justify-between text-xs text-yellow-200 shrink-0">
+          <span className="flex items-center gap-1.5">
+            ⚠️ 未保存のデータ（自動保存）があります。復元しますか？
+          </span>
+          <div className="flex gap-2">
+            <button onClick={handleRestoreAutosave} className="bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold px-3 py-1 rounded text-[10px] active:scale-95 transition-transform">
+              復元する
+            </button>
+            <button onClick={handleIgnoreAutosave} className="text-gray-400 hover:text-gray-200 px-2 py-1 rounded text-[10px]">
+              無視
+            </button>
+          </div>
+        </div>
+      )}
 
       {!walkMode && showPresets && (
         <div className="absolute top-10 right-3 z-50 bg-[#1a1b26] border border-gray-700 rounded-lg shadow-xl p-2 grid grid-cols-4 gap-1">
@@ -1071,6 +1268,10 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
               <Upload size={10} />
               <span>読込</span>
             </button>
+            <button onClick={() => setShowHistory(true)} className="px-2 h-6 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center space-x-1 text-[9px] transition-colors">
+              <History size={10} />
+              <span>履歴</span>
+            </button>
             <button onClick={handleUndo} className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40">
               <Undo size={10} />
               <span>戻る</span>
@@ -1105,6 +1306,14 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         onImport={handleImport}
         walkMode={walkMode}
         walkPresets={walkPresets}
+      />
+      <HistoryModal
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        storageKey={storageKey}
+        type="dotdrawing"
+        onRestore={handleRestoreHistory}
+        getCurrentData={getCurrentState}
       />
     </div>
   );
