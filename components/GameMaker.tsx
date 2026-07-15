@@ -41,6 +41,7 @@ import {
   type Layout25D,
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
+  convertMapToLayout25D, convertLayout25DToMap,
 } from './game-presets/shared';
 import type { SceneDef, SceneExit } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
@@ -4811,16 +4812,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     ensureImage(gameData.ending?.bgUrl);
   }, [gameData, objTemplate, ensureImage, smcMetadata]);
 
-  const resetGame = useCallback((id: PresetId) => {
-    const data = clone(PRESETS[id]);
-    // シーンモードなら scenes[0] の map/objects を初期表示に使う
-    if (data.scenes?.length) {
-      data.map = JSON.parse(JSON.stringify(data.scenes[0].map));
-      data.objects = JSON.parse(JSON.stringify(data.scenes[0].objects));
-    }
+  /** プリセットデータを編集ステートへ丸ごと適用する（resetGame / エンジン変更の共通処理）。 */
+  const applyPresetData = useCallback((id: PresetId, data: PresetData, titleStr: string) => {
     setPresetId(id);
     setGameData(data);
-    setTitle(PRESETS[id].name);
+    setTitle(titleStr);
     setEditorTab('map');
     setEditSceneIdx(0);
     const eng = engineRef.current;
@@ -4835,6 +4831,60 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setIsPlaying(false); setSelectedObjId(null);
     setShowTitle(false); setShowEnding(false);
   }, []);
+
+  const resetGame = useCallback((id: PresetId) => {
+    const data = clone(PRESETS[id]);
+    // シーンモードなら scenes[0] の map/objects を初期表示に使う
+    if (data.scenes?.length) {
+      data.map = JSON.parse(JSON.stringify(data.scenes[0].map));
+      data.objects = JSON.parse(JSON.stringify(data.scenes[0].objects));
+    }
+    applyPresetData(id, data, PRESETS[id].name);
+  }, [applyPresetData]);
+
+  /** 設定メニューの「エンジン変更」：編集中のゲームを別プリセット（別エンジン）へ切り替える。
+   *  タイトル・プレイヤーの見た目・BGMを引き継いだうえで、マップは可能な範囲で変換する：
+   *  - 2Dエンジン同士：タイル・3レイヤー・オブジェクト・シーンをそのまま引き継ぐ
+   *  - 2D → yume25d：床/壁/ビルボードへ近似変換（convertMapToLayout25D）
+   *  - yume25d → 2D：床→タイル・ビルボード→NPCへ近似変換（薄板壁は失われる） */
+  const switchEngine = (id: PresetId) => {
+    const prev = gameData;
+    const data = clone(PRESETS[id]);
+    if (data.scenes?.length) {
+      data.map = JSON.parse(JSON.stringify(data.scenes[0].map));
+      data.objects = JSON.parse(JSON.stringify(data.scenes[0].objects));
+    }
+    // ゲームの同一性に関わるタイトルと、エンジン非依存のプレイヤーの見た目・BGMは常に引き継ぐ
+    data.player = { ...data.player, emoji: prev.player.emoji, color: prev.player.color, spriteRef: prev.player.spriteRef, spriteUrl: prev.player.spriteUrl };
+    if (prev.bgm) data.bgm = prev.bgm;
+
+    const prevIs3d = prev.engine === 'yume25d', nextIs3d = data.engine === 'yume25d';
+    if (!prevIs3d && !nextIs3d) {
+      // 2Dエンジン同士はマップ形式が共通なので丸ごと引き継ぐ
+      const keep = clone(prev);
+      data.tiles = keep.tiles;
+      data.map = keep.map;
+      data.overlayMap = keep.overlayMap;
+      data.overheadMap = keep.overheadMap;
+      data.objects = keep.objects;
+      data.scroll = keep.scroll;
+      data.scenes = keep.scenes;
+      data.player.start = { ...prev.player.start };
+    } else if (!prevIs3d && nextIs3d && data.layout25d) {
+      data.layout25d = convertMapToLayout25D(prev, data.layout25d);
+    } else if (prevIs3d && !nextIs3d && prev.layout25d) {
+      const conv = convertLayout25DToMap(prev.layout25d);
+      data.tiles = conv.tiles;
+      data.map = conv.map;
+      data.overlayMap = conv.overlayMap;
+      data.overheadMap = conv.overheadMap;
+      data.objects = conv.objects;
+      data.scroll = conv.scroll;
+      data.scenes = undefined;
+      data.player.start = conv.startPx;
+    }
+    applyPresetData(id, data, title);
+  };
 
   const restart = useCallback(() => {
     const eng = engineRef.current;
@@ -10470,6 +10520,32 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 >
                   <Upload size={13} />RPGENをインポート (テキスト)
                 </button>
+                {/* エンジン変更：編集中のゲームを別プリセット（別エンジン）へ切り替える。
+                    タイトル・プレイヤーの見た目・BGMを引き継ぎ、マップは可能な範囲で変換する（ロッシー）。 */}
+                {!playOnly && !isPlaying && (
+                  <>
+                    <div className="border-t border-gray-700 my-1" />
+                    <div className="px-3 py-2">
+                      <div className="text-[10px] font-bold text-gray-400 mb-1">🔧 エンジン変更</div>
+                      <select
+                        value={presetId}
+                        onChange={e => {
+                          const id = e.target.value as PresetId;
+                          if (id === presetId) return;
+                          if (!window.confirm(`「${PRESETS[id].name}」エンジンへ切り替えますか？\nマップはできるだけ変換して引き継ぎますが、完全には再現されません（元に戻すには再度切り替えても戻りません）`)) return;
+                          switchEngine(id);
+                          setSettingsOpen(false);
+                        }}
+                        className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
+                      >
+                        {PRESET_ORDER.map(pid => (
+                          <option key={pid} value={pid}>{PRESETS[pid].name}{pid === presetId ? '（現在）' : ''}</option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[9px] text-gray-500 leading-relaxed">タイトル・見た目・BGMに加え、マップも近似変換で引き継ぎます（2D⇄3Dは一部が失われます）</p>
+                    </div>
+                  </>
+                )}
                 {/* SMC素材クレジット（マリオプリセット使用時） */}
                 {gameData.id === 'mario' && (
                   <>

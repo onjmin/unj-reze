@@ -684,3 +684,150 @@ export const chest = (col: number, row: number, openCmds: EventCommand[]): Objec
     },
   ],
 });
+
+// ── エンジン切替時のマップ変換（ロッシー） ──────────────────────────────────
+// 2Dエンジン ⇄ yume25d（2.5D）でマップ構造を「ある程度」引き継ぐための近似変換。
+// 完全な再現はしない：2D→2.5D では天蓋は2段目の浮遊ビルボードに、進入不可タイル/置物は
+// 境界の壁になる。2.5D→2D では辺単位の薄板壁をセル単位のタイルで表現できず消える。
+
+/** 2Dマップ → Layout25D。
+ *  - 地面タイル → 床テクスチャ（damage/ice-* の特殊効果も引き継ぐ。warp はシーン依存のため落とす）
+ *  - 進入不可のタイル/置物 → 通行可能マスとの境界の辺に壁を立てる（ブロックの輪郭だけ壁化）
+ *  - 天蓋レイヤー → 2段目（level=1）に浮かぶビルボード
+ *  - オブジェクト → ビルボード（message があれば「はなす」対象）
+ *  スカイ/フォグ/壁高さ等の雰囲気は base（切替先プリセットの初期レイアウト）から継承する。 */
+export const convertMapToLayout25D = (src: PresetData, base: Layout25D): Layout25D => {
+  const rows = src.map.length;
+  const cols = src.map[0]?.length ?? 0;
+  const textures: Record<number, Tex25D> = {};
+  const tileIds = Object.keys(src.tiles).map(Number);
+  const maxTile = tileIds.length ? Math.max(...tileIds) : 0;
+  const floorTexId = (tid: number) => tid + 1;           // 0 は「床なし」予約なので +1
+  const wallTexId = (tid: number) => maxTile + 2 + tid;  // 床テクスチャ群の後ろへ壁用を並べる
+  let nextId = maxTile * 2 + 3;
+
+  for (const tid of tileIds) {
+    const t = src.tiles[tid];
+    const special = (t.special === 'damage' || t.special?.startsWith('ice-')) ? t.special : undefined;
+    textures[floorTexId(tid)] = {
+      id: floorTexId(tid), name: t.name, kind: 'floor', color: t.color,
+      imageRef: t.imageRef, imageUrl: t.imageUrl,
+      ...(special ? { special } : {}),
+      ...(special === 'damage' && t.damageAmount !== undefined ? { damageAmount: t.damageAmount } : {}),
+    };
+  }
+
+  // マスの実効タイル（置物があれば置物優先）と通行可否
+  const effTile = (c: number, r: number): { id: number; def?: TileDef } => {
+    const ov = src.overlayMap?.[r]?.[c] ?? 0;
+    const id = ov > 0 ? ov : (src.map[r]?.[c] ?? 0);
+    return { id, def: src.tiles[id] };
+  };
+  const isPassable = (c: number, r: number) => effTile(c, r).def?.passable !== false;
+
+  const floor: number[][] = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => floorTexId(src.map[r]?.[c] ?? 0)));
+
+  // 進入不可マス：通行可能な隣接マスとの境界の辺へ壁を立てる
+  const walls: Wall25D[] = [];
+  const DIRS: [number, number, Dir4][] = [[0, -1, 0], [1, 0, 1], [0, 1, 2], [-1, 0, 3]];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (isPassable(c, r)) continue;
+    const { id, def } = effTile(c, r);
+    if (!def) continue;
+    if (!textures[wallTexId(id)]) {
+      textures[wallTexId(id)] = {
+        id: wallTexId(id), name: `${def.name}（壁）`, kind: 'wall',
+        color: def.color, imageRef: def.imageRef, imageUrl: def.imageUrl,
+      };
+    }
+    for (const [dx, dy, dir] of DIRS) {
+      const nc = c + dx, nr = r + dy;
+      if (nc < 0 || nr < 0 || nc >= cols || nr >= rows) continue;
+      if (isPassable(nc, nr)) walls.push(normalizeWall25D(c, r, dir, wallTexId(id)));
+    }
+  }
+
+  // 天蓋レイヤー → 2段目（level=1）に浮かぶビルボード。メッシュ数の暴発を防ぐため上限で打ち切る
+  const billboards: Billboard25D[] = [];
+  const overheadTexIds = new Map<number, number>();
+  const OVERHEAD_BB_MAX = 300;
+  outer: for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const oh = src.overheadMap?.[r]?.[c] ?? 0;
+    if (oh <= 0) continue;
+    const t = src.tiles[oh];
+    if (!t) continue;
+    if (!overheadTexIds.has(oh)) {
+      textures[nextId] = { id: nextId, name: `${t.name}（天蓋）`, kind: 'sprite', color: t.color, imageRef: t.imageRef, imageUrl: t.imageUrl };
+      overheadTexIds.set(oh, nextId); nextId++;
+    }
+    billboards.push({ id: `cv-oh-${c}-${r}`, col: c, row: r, tex: overheadTexIds.get(oh)!, scale: 1, level: 1 });
+    if (billboards.length >= OVERHEAD_BB_MAX) break outer;
+  }
+
+  // オブジェクト → ビルボード（見た目＝スプライト/絵文字。message 持ちは「はなす」対象）
+  for (const o of src.objects) {
+    if (o.col < 0 || o.row < 0 || o.col >= cols || o.row >= rows) continue;
+    textures[nextId] = {
+      id: nextId, name: o.name || o.emoji || 'オブジェ', kind: 'sprite', color: '#c8c8dc',
+      emoji: o.emoji || undefined, imageRef: o.spriteRef, imageUrl: o.spriteUrl,
+    };
+    billboards.push({
+      id: `cv-obj-${o.id}`, col: o.col, row: o.row, tex: nextId, scale: 1,
+      ...(o.message ? { interactive: true, message: o.message } : {}),
+    });
+    nextId++;
+  }
+
+  // 天井用テクスチャ（初期はOFFだが、後で設定からONにできるよう1枚用意しておく）
+  const ceilBase = base.textures[base.ceilingTex];
+  const ceilingTex = nextId;
+  textures[ceilingTex] = { ...(ceilBase ?? { name: '天井', color: '#191430' }), id: ceilingTex, kind: 'wall' };
+
+  const startCol = Math.max(0, Math.min(cols - 1, Math.round(src.player.start.x / TILE_SIZE)));
+  const startRow = Math.max(0, Math.min(rows - 1, Math.round(src.player.start.y / TILE_SIZE)));
+
+  return {
+    cols, rows, floor, walls, billboards, textures,
+    ceiling: false, ceilingTex,
+    wallHeight: base.wallHeight, skyColor: base.skyColor,
+    fogColor: base.fogColor, fogNear: base.fogNear, fogFar: base.fogFar,
+    start: { col: startCol, row: startRow, dir: 0 },
+    pov: base.pov, povDistance: base.povDistance, jumpHeight: base.jumpHeight,
+  };
+};
+
+/** Layout25D → 2Dマップ。床テクスチャ→タイル・地上ビルボード→NPCオブジェクトの近似変換。
+ *  薄板壁（辺単位）はセル単位のタイルで表現できないため失われる。床なし(0)は進入不可タイルになる。 */
+export const convertLayout25DToMap = (l: Layout25D): Pick<PresetData, 'tiles' | 'map' | 'overlayMap' | 'overheadMap' | 'objects' | 'scroll'> & { startPx: { x: number; y: number } } => {
+  const tiles: Record<number, TileDef> = {
+    0: { name: '奈落', color: '#0d0a14', passable: false },
+  };
+  for (const t of Object.values(l.textures)) {
+    if (t.kind !== 'floor' || t.id <= 0) continue;
+    tiles[t.id] = {
+      name: t.name, color: t.color, passable: true, imageRef: t.imageRef, imageUrl: t.imageUrl,
+      ...(t.special && t.special !== 'warp' ? { special: t.special } : {}),
+      ...(t.damageAmount !== undefined ? { damageAmount: t.damageAmount } : {}),
+    };
+  }
+  const map = Array.from({ length: l.rows }, (_, r) => Array.from({ length: l.cols }, (_, c) => l.floor[r]?.[c] ?? 0));
+  const objects: ObjectDef[] = l.billboards.filter(b => (b.level ?? 0) === 0).map(b => {
+    const t = l.textures[b.tex];
+    return {
+      id: `cv-bb-${b.id}`, kind: 'npc' as const, objType: 'npc' as const,
+      emoji: t?.emoji ?? '❓', spriteRef: t?.imageRef, spriteUrl: t?.imageUrl,
+      col: b.col, row: b.row, hp: 3, speed: 0,
+      behavior: 'still' as const, bullet: 'none' as const, bulletSpeed: 0, bulletColor: '#ffffff', fireRate: 0,
+      hazard: false, message: b.message ?? '', name: t?.name,
+    };
+  });
+  return {
+    tiles, map,
+    overlayMap: map.map(row => row.map(() => 0)),
+    overheadMap: map.map(row => row.map(() => 0)),
+    objects,
+    scroll: { worldCols: l.cols, worldRows: l.rows },
+    startPx: { x: l.start.col * TILE_SIZE, y: l.start.row * TILE_SIZE },
+  };
+};
