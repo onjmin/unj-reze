@@ -4,7 +4,7 @@ import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../t
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
-import { kvIncr, kvDecr, kvGet } from '../kv';
+// kvIncr / kvDecr / kvGet: no longer used for read-path; KV writes removed as DB is source of truth
 
 // Node.js環境（マイグレーション実行時など）での WebSocket ポリフィル
 if (typeof window === 'undefined' && !process.env.NEXT_RUNTIME) {
@@ -22,6 +22,10 @@ if (typeof window === 'undefined' && !process.env.NEXT_RUNTIME) {
     } catch {}
   }
 }
+
+// Reuse WebSocket connection across invocations within the same Edge worker isolate.
+// This eliminates the WS handshake overhead (~300–800ms) on warm requests.
+neonConfig.fetchConnectionCache = true;
 
 let pool: any = null;
 
@@ -271,8 +275,11 @@ export const pgStore: DataStore = {
   async getPosts(userId?: string) {
     const client = await getPool().connect();
     try {
-      const posts = await getPostsWithVotes(client, userId);
-      const hidden = await getHiddenSlugs(client, userId);
+      // Run posts query and hidden-slugs lookup concurrently — they are independent.
+      const [posts, hidden] = await Promise.all([
+        getPostsWithVotes(client, userId),
+        getHiddenSlugs(client, userId),
+      ]);
       if (hidden.size === 0) return posts;
       return posts
         .filter(p => !hidden.has(p.slug ?? ''))
@@ -328,21 +335,18 @@ export const pgStore: DataStore = {
       if (existingVote === 'like') {
         await client.query('DELETE FROM post_votes WHERE post_id = $1 AND user_id = $2', [id, userId]);
         await client.query('UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
-        try { await kvDecr(`post:${id}:likes`); } catch {}
       } else if (existingVote === 'dislike') {
         await client.query(
           'UPDATE post_votes SET vote_type = $1 WHERE post_id = $2 AND user_id = $3',
           ['like', id, userId]
         );
         await client.query('UPDATE posts SET likes = likes + 1, dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
-        try { await Promise.all([kvIncr(`post:${id}:likes`), kvDecr(`post:${id}:dislikes`)]); } catch {}
       } else {
         await client.query(
           'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
           [id, userId, 'like']
         );
         await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
-        try { await kvIncr(`post:${id}:likes`); } catch {}
         const author = postResult.rows[0];
         await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', action: 'がいいねしました', target: snippetPg(author.content ?? ''), postId: id });
       }
@@ -376,21 +380,18 @@ export const pgStore: DataStore = {
       if (existingVote === 'dislike') {
         await client.query('DELETE FROM post_votes WHERE post_id = $1 AND user_id = $2', [id, userId]);
         await client.query('UPDATE posts SET dislikes = GREATEST(dislikes - 1, 0) WHERE id = $1', [id]);
-        try { await kvDecr(`post:${id}:dislikes`); } catch {}
       } else if (existingVote === 'like') {
         await client.query(
           'UPDATE post_votes SET vote_type = $1 WHERE post_id = $2 AND user_id = $3',
           ['dislike', id, userId]
         );
         await client.query('UPDATE posts SET dislikes = dislikes + 1, likes = GREATEST(likes - 1, 0) WHERE id = $1', [id]);
-        try { await Promise.all([kvIncr(`post:${id}:dislikes`), kvDecr(`post:${id}:likes`)]); } catch {}
       } else {
         await client.query(
           'INSERT INTO post_votes (post_id, user_id, vote_type) VALUES ($1, $2, $3)',
           [id, userId, 'dislike']
         );
         await client.query('UPDATE posts SET dislikes = dislikes + 1 WHERE id = $1', [id]);
-        try { await kvIncr(`post:${id}:dislikes`); } catch {}
       }
 
       await client.query('COMMIT');

@@ -52,6 +52,16 @@ export default function App() {
   useEffect(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
     if (saved) setBbsModeRaw(saved);
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const mention = params.get('mention');
+      if (mention) {
+        handleQuickPost(`@${mention}`);
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, '', newUrl);
+      }
+    }
   }, []);
   const [notifCount, setNotifCount] = useState(0);
   const [messageCount, setMessageCount] = useState(0);

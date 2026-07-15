@@ -13,6 +13,7 @@ import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
+import UserActionMenu from './UserActionMenu';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false });
@@ -68,6 +69,7 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
   const oshiAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
+  const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
 
   useEffect(() => {
     const getCookie = (name: string): string | undefined => {
@@ -491,7 +493,15 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
               <div key={p.id} className="flex relative transition-all hover:bg-gray-100/5">
                 <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
                   <div
-                    onClick={(e) => { e.stopPropagation(); router.push(`/user/${p.slug || p.displayName}`); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const isSelfPost = currentUser && (p.slug === currentUser.slug || p.displayName === currentUser.displayName);
+                      if (isSelfPost) {
+                        router.push(`/user/${p.slug || p.displayName}`);
+                      } else {
+                        setSelectedUser({ displayName: p.displayName, slug: p.slug || undefined });
+                      }
+                    }}
                     className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity overflow-hidden"
                     style={p.avatarUrl ? undefined : pAvatarInfo.style}
                   >
@@ -719,6 +729,20 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
           onAdd={(item) => setOshiItems(prev => [...prev, item])}
           onRemove={(id) => setOshiItems(prev => prev.filter(o => o.id !== id))}
           onClose={() => setIsMusicModalOpen(false)}
+        />
+      )}
+
+      {selectedUser && (
+        <UserActionMenu
+          isOpen={true}
+          onClose={() => setSelectedUser(null)}
+          targetUserDisplayName={selectedUser.displayName}
+          targetUserSlug={selectedUser.slug}
+          currentUserId={currentUser?.displayName}
+          currentUserSlug={currentUser?.slug}
+          onMention={(username) => {
+            router.push(`/?mention=${encodeURIComponent(username)}`);
+          }}
         />
       )}
     </div>
