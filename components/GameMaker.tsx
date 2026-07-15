@@ -1852,6 +1852,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const livesRef = useRef(3);            // 残機数
   const scoreRef = useRef(0);            // スコア
   const actionDirRef = useRef<1 | -1>(1);     // action エンジン：プレイヤー向き
+  /** rpg/touhou: 入力中の方向（移動不可でも向きを更新するために使用）*/
+  const playerInputDirRef = useRef<WayKey | null>(null);
+  /** rpg: ブロックされたときの向き（静止中に overrideDir として渡すために保持）*/
+  const playerBlockedDirRef = useRef<WayKey | null>(null);
+  /** rpg: 直前フレームのプレイヤー描画位置（静止判定に使用）*/
+  const lastDrawnPlayerPosRef = useRef<{ x: number; y: number } | null>(null);
   const actionShootCoolRef = useRef(0);        // action エンジン：射撃クールダウン
   const actionWeaponsRef = useRef<string[]>([]);
   const actionWeaponIdxRef = useRef<number>(0);
@@ -6740,16 +6746,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             let nx = p.x, ny = p.y;
             if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
             if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
+            // 入力方向を記録（移動不可でも向きを更新するために使用）
+            {
+              const dx = nx - p.x, dy = ny - p.y;
+              playerInputDirRef.current = (dx !== 0 || dy !== 0) ? (dirFromDelta(dx, dy) ?? null) : null;
+            }
             // 既にモブと重なっている場合はブロック判定を無視し、動けなくなる（すり抜けられない）事態を防ぐ
             const alreadyOverlapping = mobBlockActive && isBlockedByMob(p.x, p.y, pData.w, pData.h);
             // 既に壁に埋まっている場合も同様にブロック判定を無視し、通行可能な方向へ動けるようにする
             const alreadyInWall = !isAllPassable(p.x, p.y, pData.w, pData.h);
+            const preX = p.x, preY = p.y;
             resolveMoveWithCornerSlide(
               p, nx, ny, pData.w, pData.h, Math.max(3, moveSpd),
               { left: isLeft, right: isRight, up: isUp, down: isDown },
               alreadyInWall,
               (gx, gy) => mobBlockActive && !alreadyOverlapping && isBlockedByMob(gx, gy, pData.w, pData.h),
             );
+            // 入力があったが、意図した軸方向へ移動できなかった場合（壁/NPCにブロックされた）→ walkInst の向きだけ更新する。
+            // コーナースライドで垂直方向に動いた場合も「正面方向はブロックされた」ので向きを更新する。
+            const blockedInInputDir = playerInputDirRef.current && (
+              ((isLeft || isRight) && p.x === preX) ||
+              ((isUp || isDown) && p.y === preY)
+            );
+            if (blockedInInputDir) {
+              // walkInst の事前更新と合わせて、overrideDir 用の ref にも記録する
+              playerBlockedDirRef.current = playerInputDirRef.current;
+              walkInst.set('player', { px: p.x, py: p.y, dir: playerInputDirRef.current! });
+            } else if (p.x !== preX || p.y !== preY) {
+              // 実際に移動できた場合はブロック向きをクリアする（通常の向き更新に戻す）
+              playerBlockedDirRef.current = null;
+            }
           }
           // ── ランダムエンカウント（rpg・シーンに randomEncounters があるとき）──
           // 歩いた距離をゲージに貯め、しきい値（encounterRate 歩 ±40%）を超えたら抽選開始。
@@ -8906,8 +8932,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.save();
           ctx.filter = `hue-rotate(${(performance.now() / 2.0) % 360}deg) brightness(1.25)`;
         }
+        // 移動不可でも入力方向があれば向きを更新する（壁際・NPC前で向きが変わる）。
+        // playerBlockedDirRef に方向がある（ブロックされた）かつ静止中は overrideDir として渡す。
+        // touhou は常に上向き固定。action エンジンは横向きのみで別途管理。
+        const lastPos = lastDrawnPlayerPosRef.current;
+        const isStationary = lastPos && p.x === lastPos.x && p.y === lastPos.y;
+        const blockedOverride = gameData.engine === 'rpg' && isStationary && playerBlockedDirRef.current
+          ? playerBlockedDirRef.current : undefined;
+        lastDrawnPlayerPosRef.current = { x: p.x, y: p.y };
         drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
-          gameData.engine === 'touhou' ? 'w' : undefined);
+          gameData.engine === 'touhou' ? 'w' : blockedOverride);
         if (isStar) {
           ctx.restore();
         }
