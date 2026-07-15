@@ -4186,7 +4186,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!gameMsgReadyRef.current) return;
     playSfx(MSG_ADVANCE_SFX);
     if (gameMsgTimerRef.current) { clearTimeout(gameMsgTimerRef.current); gameMsgTimerRef.current = null; }
-    
+
     // Call onDismiss outside of the state updater to avoid React Strict Mode calling it twice!
     const onDismiss = gameMsgRef.current?.onDismiss;
     setGameMsg(null);
@@ -5205,7 +5205,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (isPlaying && !hasOverlay && gameData.engine !== 'yume25d') {
       idleTimerRef.current = setTimeout(() => {
         setShowControlGuide(true);
-      }, 15000);
+      }, 30_000);
     }
   }, [isPlaying, activeDialogue, gameMsg, shopModal, eventChoice, gameOverResult, gameData.engine]);
 
@@ -9356,7 +9356,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (img.url) {
           let tX = img.x ?? 0, tY = img.y ?? 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
           let currentUrl = img.url;
-          
+
           if (img.frames && img.frames.length > 0) {
             const now = Date.now();
             const ms = img.ms || 100;
@@ -14709,13 +14709,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const target = picker.target;
         const currentRef =
           target.t === 'bgm' ? gameData.bgm?.ref :
-          target.t === 'battleBgm' ? gameData.battleBgm?.ref :
-          target.t === 'bossBgm' ? gameData.bossBgm?.ref :
-          target.t === 'sfx' ? gameData.sfx[target.trigger]?.ref :
-          target.t === 'titleBgm' ? gameData.titleScreen?.bgmRef :
-          target.t === 'endingBgm' ? gameData.ending?.bgmRef :
-          target.t === 'sceneBgm' ? gameData.scenes?.[target.idx]?.bgm?.ref :
-          undefined;
+            target.t === 'battleBgm' ? gameData.battleBgm?.ref :
+              target.t === 'bossBgm' ? gameData.bossBgm?.ref :
+                target.t === 'sfx' ? gameData.sfx[target.trigger]?.ref :
+                  target.t === 'titleBgm' ? gameData.titleScreen?.bgmRef :
+                    target.t === 'endingBgm' ? gameData.ending?.bgmRef :
+                      target.t === 'sceneBgm' ? gameData.scenes?.[target.idx]?.bgm?.ref :
+                        undefined;
         return (
           <ContentPicker
             mode={picker.mode}

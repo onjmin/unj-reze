@@ -237,7 +237,7 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     if (playing && !dialogue && !demo) {
       idleTimerRef.current = setTimeout(() => {
         setShowControlGuide(true);
-      }, 3500);
+      }, 30_000);
     }
   }, [playing, dialogue, demo]);
 
@@ -349,7 +349,7 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     inp.flyUp = fly && virtualKeys.action;
     inp.flyDown = fly && virtualKeys.shoot;
   }, [virtualKeys?.up, virtualKeys?.down, virtualKeys?.left, virtualKeys?.right, virtualKeys?.slow,
-      virtualKeys?.action, virtualKeys?.shoot, is3d, playing, demo, hoverMode]);
+  virtualKeys?.action, virtualKeys?.shoot, is3d, playing, demo, hoverMode]);
 
   // Aボタン(Z): ジャンプ / ダイアログ進行（浮遊モード中は上の転送処理が「上昇」として扱う）
   useEffect(() => {
