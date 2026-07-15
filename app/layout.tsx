@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, DotGothic16, Press_Start_2P } from "next/font/google
 import "./globals.css";
 import { AudioFocusProvider } from '@/lib/audio-focus-context';
 import DemoNoticeModal from '@/components/DemoNoticeModal';
+import { SITE_NAME, SITE_URL } from '@/lib/site';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,16 +29,30 @@ const pressStart2P = Press_Start_2P({
   preload: false,
 });
 
+const description = "お絵描き・ゲーム・雑談ができる匿名掲示板コミュニティ。";
+
 export const metadata: Metadata = {
-  title: "うんｊレゼ",
-  description: "お絵描き・ゲーム・雑談ができる匿名掲示板コミュニティ。",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: SITE_NAME,
+    template: `%s | ${SITE_NAME}`,
+  },
+  description,
+  alternates: {
+    canonical: '/',
+  },
   openGraph: {
-    title: "うんｊレゼ",
-    description: "お絵描き・ゲーム・雑談ができる匿名掲示板コミュニティ。",
+    title: SITE_NAME,
+    description,
+    url: SITE_URL,
+    siteName: SITE_NAME,
     type: "website",
+    locale: "ja_JP",
   },
   twitter: {
     card: "summary_large_image",
+    title: SITE_NAME,
+    description,
   },
   icons: {
     icon: "https://avatars.githubusercontent.com/u/88383494",
@@ -46,7 +61,14 @@ export const metadata: Metadata = {
     "google-site-verification": "cMogkuhgfKNyue0pALIrQx9G9ClFbSeRo5CqLomVgVk",
     "Cache-Control": "no-cache",
   },
+};
 
+const websiteJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: SITE_NAME,
+  url: SITE_URL,
+  description,
 };
 
 export default function RootLayout({
@@ -59,6 +81,13 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${dotGothic16.variable} ${pressStart2P.variable} h-full antialiased`}
     >
+      <head>
+        <script
+          type="application/ld+json"
+          // eslint-disable-next-line react/no-danger
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+        />
+      </head>
       <body className="min-h-full flex flex-col"><AudioFocusProvider>{children}</AudioFocusProvider>{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
     </html>
   );

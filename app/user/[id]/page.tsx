@@ -1,13 +1,26 @@
+import type { Metadata } from 'next';
 import { db } from '@/lib/db';
 import { db as mockDb } from '@/lib/mock-db';
 import ProfileView from '@/components/ProfileView';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
+import { SITE_URL } from '@/lib/site';
 
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
   const slugs = new Set(mockDb.getPosts().map(p => p.slug));
   return Array.from(slugs).map(slug => ({ id: slug! }));
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const displayName = await db.getUserDisplayName(id);
+  const title = displayName ? `${displayName}のプロフィール` : 'プロフィール';
+  return {
+    title,
+    alternates: { canonical: `${SITE_URL}/user/${id}` },
+    openGraph: { title, url: `${SITE_URL}/user/${id}` },
+  };
 }
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {

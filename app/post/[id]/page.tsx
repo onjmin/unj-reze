@@ -1,10 +1,23 @@
 import type { Metadata } from 'next';
+import { cache } from 'react';
 import { db } from '@/lib/db';
 import { db as mockDb } from '@/lib/mock-db';
 import PostDetail from '@/components/PostDetail';
 import Link from 'next/link';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachGameInfo } from '@/lib/game-embed';
+import { getDisplayContent } from '@/lib/mml';
+import { SITE_NAME, SITE_URL } from '@/lib/site';
+
+const DEFAULT_USER_ID = '名無しvFZ';
+
+// generateMetadata と page 本体で同じ投稿を二重フェッチしないよう、リクエスト単位でメモ化する
+const getCachedPost = cache(async (decodedId: number) => {
+  const post = await db.getPost(decodedId, DEFAULT_USER_ID);
+  if (!post) return null;
+  await attachGameInfo(post);
+  return post;
+});
 
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
@@ -15,19 +28,33 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const decodedId = decodeId(id);
   if (decodedId === null) return {};
-  const post = await db.getPost(decodedId);
+  const post = await getCachedPost(decodedId);
   if (!post) return {};
-  await attachGameInfo(post);
 
   const title = post.hasGame && post.gameTitle ? post.gameTitle : `${post.displayName}の投稿`;
-  const description = post.content.slice(0, 100);
+  const description = getDisplayContent(post.content).slice(0, 100) || `${post.displayName}による投稿です。`;
   const image = post.hasGame ? post.gameThumbnail : (post.hasImage ? post.imageSrc : undefined);
+  const url = `${SITE_URL}/post/${id}`;
 
   return {
     title,
     description,
-    openGraph: { title, description, type: 'article', ...(image ? { images: [image] } : {}) },
-    twitter: { card: image ? 'summary_large_image' : 'summary' },
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      url,
+      siteName: SITE_NAME,
+      type: 'article',
+      locale: 'ja_JP',
+      ...(image ? { images: [{ url: image }] } : {}),
+    },
+    twitter: {
+      card: image ? 'summary_large_image' : 'summary',
+      title,
+      description,
+      ...(image ? { images: [image] } : {}),
+    },
   };
 }
 
@@ -42,8 +69,7 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
       </div>
     );
   }
-  const userId = '名無しvFZ';
-  const post = await db.getPost(decodedId, userId);
+  const post = await getCachedPost(decodedId);
   if (!post) {
     return (
       <div className="bg-[#0b0e14] text-gray-100 min-h-dvh flex flex-col items-center justify-center space-y-3">
@@ -52,12 +78,33 @@ export default async function PostPage({ params }: { params: Promise<{ id: strin
       </div>
     );
   }
-  await attachGameInfo(post);
+
+  const encoded = encodePost(post);
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'DiscussionForumPosting',
+    headline: post.hasGame && post.gameTitle ? post.gameTitle : `${post.displayName}の投稿`,
+    text: getDisplayContent(post.content),
+    url: `${SITE_URL}/post/${id}`,
+    datePublished: post.createdAt,
+    dateModified: post.createdAt,
+    author: { '@type': 'Person', name: post.displayName },
+    ...(post.hasImage && post.imageSrc ? { image: post.imageSrc } : {}),
+    interactionStatistic: [
+      { '@type': 'InteractionCounter', interactionType: 'https://schema.org/LikeAction', userInteractionCount: post.likes },
+      { '@type': 'InteractionCounter', interactionType: 'https://schema.org/ReplyAction', userInteractionCount: post.repliesCount },
+    ],
+  };
 
   return (
     <div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
-        <PostDetail post={encodePost(post)} />
+        <PostDetail post={encoded} />
       </div>
     </div>
   );
