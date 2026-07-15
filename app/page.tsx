@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import { decodeId } from '@/lib/sqids';
 import { stripMmlLine } from '@/lib/mml';
 import Header from '@/components/Header';
+import EditPostModal from '@/components/EditPostModal';
 import TopTabs from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
 import RankingSubTabs from '@/components/RankingSubTabs';
@@ -81,6 +82,7 @@ export default function App() {
     targetScreen: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker';
   } | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [showGlobalEditModal, setShowGlobalEditModal] = useState(false);
 
   const heartQueue = useRef<Map<string, number>>(new Map());
   const heartTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -520,9 +522,15 @@ export default function App() {
     setCollabImageUrl(undefined);
   }, []);
 
+  const handleEditPost = (post: Post) => {
+    setEditingPost(post);
+    setShowGlobalEditModal(true);
+  };
+
   const handleEditPostImage = (post: Post) => {
     setEditingPost(post);
     setCollabImageUrl(post.imageSrc);
+    setShowGlobalEditModal(false);
     if (post.content.includes('#ドット絵')) {
       setActiveScreen('dotdrawing');
     } else {
@@ -532,18 +540,16 @@ export default function App() {
 
   const handleEditPostMml = (post: Post) => {
     setEditingPost(post);
+    setShowGlobalEditModal(false);
     setActiveScreen('mml');
   };
 
   const handleSaveDrawing = async (canvasData: string) => {
     if (editingPost) {
-      try {
-        await api.posts.edit(editingPost.id, userId, editingPost.content, editingPost.originType, canvasData);
-        fetchPosts();
-      } catch {}
-      setEditingPost(null);
+      setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
       setActiveScreen(null);
       setCollabImageUrl(undefined);
+      setShowGlobalEditModal(true);
       return;
     }
     setAttachedImage(canvasData);
@@ -554,13 +560,10 @@ export default function App() {
 
   const handleSaveDotDrawing = async (canvasData: string) => {
     if (editingPost) {
-      try {
-        await api.posts.edit(editingPost.id, userId, editingPost.content, editingPost.originType, canvasData);
-        fetchPosts();
-      } catch {}
-      setEditingPost(null);
+      setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
       setActiveScreen(null);
       setCollabImageUrl(undefined);
+      setShowGlobalEditModal(true);
       return;
     }
     setAttachedImage(canvasData);
@@ -571,14 +574,11 @@ export default function App() {
 
   const handleSaveMml = async (mml: string) => {
     if (editingPost) {
-      try {
-        const stripped = stripMmlLine(editingPost.content);
-        const newContent = `${stripped}\n#mml ${mml}`.trim();
-        await api.posts.edit(editingPost.id, userId, newContent, editingPost.originType);
-        fetchPosts();
-      } catch {}
-      setEditingPost(null);
+      const stripped = stripMmlLine(editingPost.content);
+      const newContent = `${stripped}\n#mml ${mml}`.trim();
+      setEditingPost(prev => prev ? { ...prev, content: newContent } : null);
       setActiveScreen(null);
+      setShowGlobalEditModal(true);
       return;
     }
     setActiveScreen(null);
@@ -586,6 +586,7 @@ export default function App() {
   };
 
   const handleOpenPostGame = async (gameId: string, postId?: string) => {
+    setShowGlobalEditModal(false);
     try {
       const res = await fetch(`/api/games/${gameId}`);
       if (!res.ok) return;
@@ -609,6 +610,9 @@ export default function App() {
     setActiveScreen(null);
     setPlayingGame(null);
     setPostGameDanmaku([]);
+    if (editingPost) {
+      setShowGlobalEditModal(true);
+    }
   };
 
   const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
@@ -698,11 +702,18 @@ export default function App() {
       )}
       {activeScreen === 'postgame' && playingGame && (
         <GameMaker
-          onClose={() => { setActiveScreen(null); setPlayingGame(null); setPostGameDanmaku([]); }}
+          onClose={() => {
+            setActiveScreen(null);
+            setPlayingGame(null);
+            setPostGameDanmaku([]);
+            if (editingPost) {
+              setShowGlobalEditModal(true);
+            }
+          }}
           userId={userId}
           initialManifest={playingGame.manifest}
-          playOnly={!(!!currentUser?.slug && playingGame.creatorSlug === currentUser.slug)}
-          onSave={!!currentUser?.slug && playingGame.creatorSlug === currentUser.slug ? handleSaveEditedGame : undefined}
+          playOnly={!editingPost}
+          onSave={editingPost && !!currentUser?.slug && playingGame.creatorSlug === currentUser.slug ? handleSaveEditedGame : undefined}
           postId={playingGame.postId}
           danmakuComments={postGameDanmaku}
           onComment={async (text, displayName) => {
@@ -841,6 +852,7 @@ export default function App() {
                     }}
                     onEditImage={handleEditPostImage}
                     onEditMml={handleEditPostMml}
+                    onEditPost={handleEditPost}
                   />
                 </>
               )}
@@ -862,6 +874,7 @@ export default function App() {
                   currentUserDisplayName={currentUser?.displayName}
                   onEditImage={handleEditPostImage}
                   onEditMml={handleEditPostMml}
+                  onEditPost={handleEditPost}
                 />
               )}
               {currentNav === 'notifications' && <NotificationView userId={userId} />}
@@ -927,6 +940,30 @@ export default function App() {
             onClose={() => setDiscardModalConfig(null)}
             onConfirm={handleConfirmDiscard}
             discardType={discardModalConfig.discardType}
+          />
+        )}
+
+        {showGlobalEditModal && editingPost && (
+          <EditPostModal
+            initialContent={editingPost.content}
+            onClose={() => {
+              setShowGlobalEditModal(false);
+              setEditingPost(null);
+            }}
+            onSave={async (newContent, nextImageSrc) => {
+              try {
+                await api.posts.edit(editingPost.id, userId, newContent, editingPost.originType, nextImageSrc === null ? '' : nextImageSrc);
+                fetchPosts();
+              } catch {}
+              setShowGlobalEditModal(false);
+              setEditingPost(null);
+            }}
+            imageSrc={editingPost.imageSrc}
+            onEditImage={() => handleEditPostImage(editingPost)}
+            onEditMml={() => handleEditPostMml(editingPost)}
+            hasGame={editingPost.hasGame}
+            gameTitle={editingPost.gameTitle}
+            onEditGame={() => handleOpenPostGame(editingPost.gameId || '', editingPost.id)}
           />
         )}
       </div>

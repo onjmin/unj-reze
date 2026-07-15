@@ -22,6 +22,7 @@ interface SearchViewProps {
   currentUserDisplayName?: string;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditPost?: (post: Post) => void;
 }
 
 export default function SearchView(props: SearchViewProps) {
@@ -116,6 +117,7 @@ export default function SearchView(props: SearchViewProps) {
                 currentUserDisplayName={props.currentUserDisplayName}
                 onEditImage={props.onEditImage}
                 onEditMml={props.onEditMml}
+                onEditPost={props.onEditPost}
               />
             </VirtualizedItem>
           ))}

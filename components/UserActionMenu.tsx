@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, User, UserPlus, UserMinus, MessageSquare, AtSign, Loader2, Send } from 'lucide-react';
+import { User, UserPlus, UserMinus, AtSign, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
-import { Post } from '@/lib/types';
 
 interface UserActionMenuProps {
   isOpen: boolean;
@@ -15,6 +14,7 @@ interface UserActionMenuProps {
   currentUserId?: string; // currentUserDisplayName
   currentUserSlug?: string;
   onMention: (username: string) => void;
+  position?: { x: number; y: number } | null;
 }
 
 export default function UserActionMenu({
@@ -25,14 +25,10 @@ export default function UserActionMenu({
   currentUserId,
   currentUserSlug,
   onMention,
+  position,
 }: UserActionMenuProps) {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  const [followers, setFollowers] = useState(0);
-  const [following, setFollowing] = useState(0);
   const [isFollowingTarget, setIsFollowingTarget] = useState(false);
-  const [bio, setBio] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
 
   // DM states
   const [showDmInput, setShowDmInput] = useState(false);
@@ -42,11 +38,10 @@ export default function UserActionMenu({
 
   const targetIdOrSlug = targetUserSlug || targetUserDisplayName;
   const isSelf = currentUserId === targetUserDisplayName || currentUserSlug === targetUserSlug;
-
   const avatarInfo = getAvatarInfo(targetUserDisplayName);
 
   // Cache update helper that merges updates with existing cache data
-  const updateCache = (updates: Partial<{ bio: string; avatarUrl: string; followers: number; following: number }>) => {
+  const updateCache = (updates: Partial<{ followers: number; following: number }>) => {
     if (typeof localStorage === 'undefined') return;
     const key = `unj_cached_profile_${targetIdOrSlug}`;
     const existingStr = localStorage.getItem(key);
@@ -56,78 +51,24 @@ export default function UserActionMenu({
         existing = JSON.parse(existingStr) || {};
       } catch {}
     }
-    const updated = {
-      ...existing,
-      ...updates,
-    };
+    const updated = { ...existing, ...updates };
     localStorage.setItem(key, JSON.stringify(updated));
   };
 
   useEffect(() => {
     if (!isOpen) return;
 
-    // Reset state first to avoid showing previous target's data
-    setBio('');
-    setAvatarUrl(undefined);
-    setFollowers(0);
-    setFollowing(0);
     setIsFollowingTarget(false);
     setShowDmInput(false);
     setDmText('');
     setDmSuccess(false);
-
-    // Check localStorage cache first
-    let hasCache = false;
-    if (typeof localStorage !== 'undefined') {
-      const cached = localStorage.getItem(`unj_cached_profile_${targetIdOrSlug}`);
-      if (cached) {
-        try {
-          const data = JSON.parse(cached);
-          if (data) {
-            setBio(data.bio || '');
-            setAvatarUrl(data.avatarUrl || undefined);
-            setFollowers(data.followers || 0);
-            setFollowing(data.following || 0);
-            setLoading(false);
-            hasCache = true;
-          }
-        } catch (e) {
-          console.error('Failed to parse cached popover profile', e);
-        }
-      }
-    }
-
-    if (!hasCache) {
-      setLoading(true);
-    }
-
-    // The profile card (bio + avatar) is the primary content — spinner clears
-    // as soon as it arrives. Counts and follow status fire at the same time
-    // but populate silently into the already-visible card.
-    api.users.profile(targetIdOrSlug, currentUserId)
-      .then(data => {
-        setBio(data.bio || '');
-        setAvatarUrl(data.avatarUrl || undefined);
-        updateCache({ bio: data.bio || '', avatarUrl: data.avatarUrl || undefined });
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-
-    // Silent population — no spinner.
-    api.follow.getCounts(targetUserDisplayName)
-      .then(c => {
-        setFollowers(c.followers);
-        setFollowing(c.following);
-        updateCache({ followers: c.followers, following: c.following });
-      })
-      .catch(() => {});
 
     if (currentUserId && !isSelf) {
       api.follow.isFollowing(currentUserId, targetUserDisplayName)
         .then(r => setIsFollowingTarget(r.isFollowing))
         .catch(() => {});
     }
-  }, [isOpen, targetIdOrSlug, targetUserDisplayName, currentUserId, isSelf]);
+  }, [isOpen, targetUserDisplayName, currentUserId, isSelf]);
 
   if (!isOpen) return null;
 
@@ -137,19 +78,15 @@ export default function UserActionMenu({
       if (isFollowingTarget) {
         await api.follow.unfollow(currentUserId, targetUserDisplayName);
         setIsFollowingTarget(false);
-        setFollowers(prev => {
-          const next = Math.max(0, prev - 1);
-          updateCache({ followers: next });
-          return next;
-        });
+        api.follow.getCounts(targetUserDisplayName).then(c => {
+          updateCache({ followers: c.followers, following: c.following });
+        }).catch(() => {});
       } else {
         await api.follow.follow(currentUserId, targetUserDisplayName);
         setIsFollowingTarget(true);
-        setFollowers(prev => {
-          const next = prev + 1;
-          updateCache({ followers: next });
-          return next;
-        });
+        api.follow.getCounts(targetUserDisplayName).then(c => {
+          updateCache({ followers: c.followers, following: c.following });
+        }).catch(() => {});
       }
     } catch {}
   };
@@ -165,179 +102,121 @@ export default function UserActionMenu({
       });
       setDmSuccess(true);
       setDmText('');
-      setTimeout(() => setShowDmInput(false), 1500);
+      setTimeout(() => {
+        setShowDmInput(false);
+        onClose();
+      }, 1200);
     } catch {} finally {
       setSendingDm(false);
     }
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fade-in"
-      onClick={onClose}
-    >
+    <>
+      {/* Transparent overlay backdrop to close dropdown on outside clicks */}
+      <div className="fixed inset-0 z-50 cursor-default" onClick={onClose} />
+
       <div
-        className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-scale-in"
+        style={{
+          position: 'absolute',
+          left: position ? `${position.x}px` : '50%',
+          top: position ? `${position.y}px` : '50%',
+          transform: position ? 'none' : 'translate(-50%, -50%)',
+        }}
+        className={`z-50 w-44 rounded-lg border border-gray-800 bg-[#161922] shadow-2xl py-1 text-xs text-gray-300 animate-fade-in-up ${
+          position ? 'mt-1' : ''
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="p-4 border-b border-gray-800 flex justify-between items-center bg-gradient-to-r from-gray-900 via-gray-900/90 to-gray-850">
-          <span className="font-bold text-sm text-gray-200">ユーザーメニュー</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
-            <X size={16} />
-          </button>
-        </div>
+        <button
+          onClick={() => {
+            onClose();
+            router.push(`/user/${targetIdOrSlug}`);
+          }}
+          className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
+        >
+          <User size={14} className="shrink-0 text-gray-400" />
+          <span>プロフページ</span>
+        </button>
 
-        {/* User Card Body */}
-        <div className="p-5 flex flex-col items-center">
-          {/* Avatar */}
-          <div
-            className="w-16 h-16 rounded-full border border-gray-700/50 flex items-center justify-center text-xl font-bold text-white relative overflow-hidden mb-3"
-            style={avatarUrl ? undefined : avatarInfo.style}
+        {!isSelf && currentUserId && (
+          <button
+            onClick={handleFollowToggle}
+            className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
           >
-            {avatarUrl ? (
-              <img src={avatarUrl} alt={avatarInfo.username} className="w-full h-full object-cover rounded-full" />
+            {isFollowingTarget ? (
+              <>
+                <UserMinus size={14} className="shrink-0 text-gray-400" />
+                <span>フォロー解除</span>
+              </>
             ) : (
-              (() => {
-                const AvatarIcon = avatarInfo.Icon;
-                return <AvatarIcon className="w-8 h-8 text-white/40 leading-none" />;
-              })()
+              <>
+                <UserPlus size={14} className="shrink-0 text-gray-400" />
+                <span>フォローする</span>
+              </>
             )}
-          </div>
+          </button>
+        )}
 
-          <span className="font-bold text-sm text-gray-200 mb-1">{avatarInfo.username}</span>
-          <span className="text-[10px] text-gray-500 mb-3">@{targetUserSlug || targetUserDisplayName}</span>
-
-          {loading ? (
-            <div className="py-6 flex items-center justify-center">
-              <Loader2 className="animate-spin text-blue-500" size={20} />
-            </div>
-          ) : (
-            <>
-              {/* Followers / Following */}
-              <div className="flex gap-4 text-xs text-gray-400 mb-3 select-none">
-                <span>
-                  <strong className="text-gray-200">{following}</strong> フォロー中
-                </span>
-                <span>
-                  <strong className="text-gray-200">{followers}</strong> フォロワー
-                </span>
-              </div>
-
-              {/* Bio */}
-              {bio && (
-                <p className="text-[11px] text-gray-400 bg-gray-950/40 border border-gray-800/50 rounded-xl px-3 py-2 text-center w-full max-h-20 overflow-y-auto mb-4 leading-relaxed">
-                  {bio}
-                </p>
-              )}
-
-              {/* Action Buttons */}
-              <div className="w-full flex flex-col gap-2">
-                {/* Profile Link */}
-                <button
-                  onClick={() => {
-                    onClose();
-                    router.push(`/user/${targetIdOrSlug}`);
-                  }}
-                  className="w-full py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2"
-                >
-                  <User size={13} />
-                  プロフィールを表示
-                </button>
-
-                {/* Follow Button */}
-                {!isSelf && currentUserId && (
-                  <button
-                    onClick={handleFollowToggle}
-                    className={`w-full py-2 border rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 ${
-                      isFollowingTarget
-                        ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
-                        : 'bg-[#a3e635]/10 border-[#a3e635]/30 text-[#a3e635] hover:bg-[#a3e635]/20'
-                    }`}
-                  >
-                    {isFollowingTarget ? (
-                      <>
-                        <UserMinus size={13} />
-                        フォロー解除
-                      </>
-                    ) : (
-                      <>
-                        <UserPlus size={13} />
-                        フォローする
-                      </>
-                    )}
-                  </button>
-                )}
-
-                {/* Mention Button */}
-                <button
-                  onClick={() => {
-                    onClose();
-                    onMention(avatarInfo.username);
-                  }}
-                  className="w-full py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2"
-                >
-                  <AtSign size={13} />
-                  メンションする
-                </button>
-
-                {/* Send DM Button */}
-                {!isSelf && currentUserId && (
-                  <div className="w-full flex flex-col gap-1.5">
-                    <button
-                      onClick={() => setShowDmInput(!showDmInput)}
-                      className={`w-full py-2 border rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 ${
-                        showDmInput
-                          ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/20'
-                          : 'bg-gray-800 border-gray-700 text-gray-200 hover:bg-gray-700'
-                      }`}
-                    >
-                      <MessageSquare size={13} />
-                      DMを送信
-                    </button>
-
-                    {/* Expandable DM Composer */}
-                    {showDmInput && (
-                      <div className="border border-gray-800 rounded-xl p-2 bg-gray-950/60 mt-1 flex flex-col gap-2">
-                        {dmSuccess ? (
-                          <div className="text-[10px] text-green-400 font-bold text-center py-2 animate-pulse">
-                            メッセージを送信しました！
-                          </div>
-                        ) : (
-                          <>
-                            <textarea
-                              value={dmText}
-                              onChange={(e) => setDmText(e.target.value)}
-                              placeholder="メッセージを入力..."
-                              rows={2}
-                              maxLength={200}
-                              className="w-full bg-transparent text-xs text-white placeholder-gray-600 outline-none resize-none"
-                            />
-                            <div className="flex justify-between items-center pt-1 border-t border-gray-900">
-                              <span className="text-[9px] text-gray-600">{dmText.length}/200</span>
-                              <button
-                                onClick={handleSendDm}
-                                disabled={sendingDm || !dmText.trim()}
-                                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-full p-1.5 transition-colors"
-                              >
-                                {sendingDm ? (
-                                  <Loader2 size={11} className="animate-spin" />
-                                ) : (
-                                  <Send size={11} />
-                                )}
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
+        {!isSelf && currentUserId && (
+          <>
+            {showDmInput ? (
+              <div className="px-3 py-2 border-t border-gray-800/80 bg-gray-950/20 flex flex-col gap-1.5">
+                {dmSuccess ? (
+                  <div className="text-[10px] text-green-400 font-bold text-center py-1 animate-pulse">
+                    送信しました！
                   </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={dmText}
+                      onChange={(e) => setDmText(e.target.value)}
+                      placeholder="メッセージを入力"
+                      className="w-full bg-gray-900/50 hover:bg-gray-900/80 border border-gray-800 rounded px-2 py-1 text-[11px] outline-none text-white focus:border-blue-600 transition-colors"
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        onClick={() => setShowDmInput(false)}
+                        className="text-gray-400 text-[10px] px-1.5 py-0.5 hover:bg-gray-100/10 rounded transition-colors"
+                      >
+                        キャンセル
+                      </button>
+                      <button
+                        onClick={handleSendDm}
+                        disabled={sendingDm || !dmText.trim()}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-[10px] px-2 py-0.5 rounded font-bold transition-all active:scale-95"
+                      >
+                        {sendingDm ? '送信中...' : '送信'}
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
-            </>
-          )}
-        </div>
+            ) : (
+              <button
+                onClick={() => setShowDmInput(true)}
+                className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
+              >
+                <Mail size={14} className="shrink-0 text-gray-400" />
+                <span>DMする</span>
+              </button>
+            )}
+          </>
+        )}
+
+        <button
+          onClick={() => {
+            onClose();
+            onMention(avatarInfo.username);
+          }}
+          className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
+        >
+          <AtSign size={14} className="shrink-0 text-gray-400" />
+          <span>@メンションする</span>
+        </button>
       </div>
-    </div>
+    </>
   );
 }

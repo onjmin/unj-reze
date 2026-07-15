@@ -42,9 +42,10 @@ interface PostContainerProps {
   onReplyClick?: (post: Post) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditPost?: (post: Post) => void;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditPost }: PostContainerProps) {
   const router = useRouter();
   const avatarInfo = getAvatarInfo(post.displayName);
   const [showReplyInput, setShowReplyInput] = useState(false);
@@ -58,6 +59,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [showOriginModal, setShowOriginModal] = useState(false);
   const [bodyExpanded, setBodyExpanded] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const targetSlug = post.slug || post.displayName;
@@ -132,20 +134,24 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     e.stopPropagation();
     setMenuOpen(false);
     if (!currentUserSlug) return;
-    setShowEditModal(true);
-  }, [currentUserSlug]);
+    if (onEditPost) {
+      onEditPost(post);
+    } else {
+      setShowEditModal(true);
+    }
+  }, [currentUserSlug, onEditPost, post]);
 
-  const handleSaveEdit = useCallback(async (next: string) => {
+  const handleSaveEdit = useCallback(async (next: string, nextImageSrc?: string | null) => {
     setShowEditModal(false);
     if (!currentUserDisplayName) return;
     try {
-      await api.posts.edit(post.id, currentUserDisplayName, next);
+      await api.posts.edit(post.id, currentUserDisplayName, next, post.originType, nextImageSrc === null ? '' : nextImageSrc);
       onModerationChange?.();
       // /post/[id] はサーバーコンポーネントでDBから直接取得するため、
       // 編集直後に開いても本文が古いまま残らないようRouterキャッシュを破棄する
       router.refresh();
     } catch { /* noop */ }
-  }, [currentUserDisplayName, post.id, onModerationChange, router]);
+  }, [currentUserDisplayName, post.id, post.originType, onModerationChange, router]);
 
   const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -231,6 +237,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             if (isSelf) {
               router.push(`/user/${post.slug || post.displayName}`);
             } else {
+              const rect = e.currentTarget.getBoundingClientRect();
+              setAvatarMenuPos({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
               setUserMenuOpen(true);
             }
           }}
@@ -397,18 +405,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                   target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;
                 }}
               />
-              {currentUserSlug && post.slug === currentUserSlug ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEditImage?.(post);
-                  }}
-                  className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-blue-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
-                >
-                  <Pencil size={11} />
-                  <span>編集</span>
-                </button>
-              ) : post.hasCollabButton && (
+              {post.hasCollabButton && (
                 <button
                   onClick={() => openCollab(post)}
                   className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
@@ -446,22 +443,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {(() => {
             const mmlCode = extractMmlFromContent(post.content);
-            if (mmlCode) {
-              return (
-                <div onClick={e => e.stopPropagation()} className="relative">
-                  <MmlPlayer mml={mmlCode} />
-                  {currentUserSlug && post.slug === currentUserSlug && (
-                    <button
-                      onClick={() => onEditMml?.(post)}
-                      className="absolute top-2 right-2 bg-black/75 hover:bg-black/90 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-gray-800 font-bold active:scale-95 transition-all flex items-center gap-1"
-                    >
-                      <Pencil size={10} />
-                      <span>編集</span>
-                    </button>
-                  )}
-                </div>
-              );
-            }
+            if (mmlCode) return <div onClick={e => e.stopPropagation()}><MmlPlayer mml={mmlCode} /></div>;
             const chordRes = extractChordsFromContent(post.content);
             if (chordRes) return <div onClick={e => e.stopPropagation()}><ChordPlayer chords={chordRes.chords} /></div>;
             if (post.hasImage || post.hasGame) return null;
@@ -561,6 +543,21 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           initialContent={post.content}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
+          imageSrc={post.imageSrc}
+          onEditImage={() => {
+            onEditImage?.(post);
+            setShowEditModal(false);
+          }}
+          onEditMml={() => {
+            onEditMml?.(post);
+            setShowEditModal(false);
+          }}
+          hasGame={post.hasGame}
+          gameTitle={post.gameTitle}
+          onEditGame={() => {
+            openGame(post.gameId, post.id);
+            setShowEditModal(false);
+          }}
         />
       )}
       {showDeleteModal && (
@@ -586,6 +583,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
         onMention={(username) => {
           onQuickPost(`@${username}`);
         }}
+        position={avatarMenuPos}
       />
     </div>
   );

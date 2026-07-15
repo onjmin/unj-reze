@@ -73,6 +73,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
+  const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const getCookie = (name: string): string | undefined => {
@@ -566,6 +567,8 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                       if (isSelfPost) {
                         router.push(`/user/${p.slug || p.displayName}`);
                       } else {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setAvatarMenuPos({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
                         setSelectedUser({ displayName: p.displayName, slug: p.slug || undefined });
                       }
                     }}
@@ -626,18 +629,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                           target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;
                         }}
                       />
-                      {currentUserSlug && p.slug === currentUserSlug ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onEditImage?.(p);
-                          }}
-                          className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-blue-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
-                        >
-                          <Pencil size={11} />
-                          <span>編集</span>
-                        </button>
-                      ) : p.hasCollabButton && (
+                      {p.hasCollabButton && (
                         <button
                           onClick={(e) => { e.stopPropagation(); openCollab?.(p); }}
                           className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
@@ -670,22 +662,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
                   {(() => {
                     const mmlCode = extractMmlFromContent(p.content);
-                    if (mmlCode) {
-                      return (
-                        <div onClick={e => e.stopPropagation()} className="relative">
-                          <MmlPlayer mml={mmlCode} />
-                          {currentUserSlug && p.slug === currentUserSlug && (
-                            <button
-                              onClick={() => onEditMml?.(p)}
-                              className="absolute top-2 right-2 bg-black/75 hover:bg-black/90 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-gray-800 font-bold active:scale-95 transition-all flex items-center gap-1"
-                            >
-                              <Pencil size={10} />
-                              <span>編集</span>
-                            </button>
-                          )}
-                        </div>
-                      );
-                    }
+                    if (mmlCode) return <MmlPlayer mml={mmlCode} />;
                     const chordRes = extractChordsFromContent(p.content);
                     if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
                     if (p.hasImage || p.hasGame) return null;
@@ -836,6 +813,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
           onMention={(username) => {
             router.push(`/?mention=${encodeURIComponent(username)}`);
           }}
+          position={avatarMenuPos}
         />
       )}
     </div>

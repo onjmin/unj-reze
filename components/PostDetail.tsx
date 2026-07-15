@@ -71,6 +71,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
   const [avatarColor, setAvatarColor] = useState('from-blue-500 to-indigo-600');
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
+  const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  const handleAvatarClick = useCallback((user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => {
+    setSelectedUser(user);
+    setAvatarMenuPos(pos);
+  }, []);
 
   useEffect(() => {
     const sessionId = getCookie('unj_reze_session');
@@ -329,8 +335,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setReplyText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
   };
 
-  const handleSaveEdit = async (newContent: string) => {
-    const updated = await api.posts.edit(post.id, userId, newContent, post.originType);
+  const handleSaveEdit = async (newContent: string, nextImageSrc?: string | null) => {
+    const updated = await api.posts.edit(post.id, userId, newContent, post.originType, nextImageSrc === null ? '' : nextImageSrc);
     setPost(updated);
     setShowEditModal(false);
     router.refresh();
@@ -487,7 +493,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             if (isSelf) {
               router.push(`/user/${post.slug || post.displayName}`);
             } else {
-              setSelectedUser({ displayName: post.displayName, slug: post.slug || undefined });
+              const rect = e.currentTarget.getBoundingClientRect();
+              handleAvatarClick(
+                { displayName: post.displayName, slug: post.slug || undefined },
+                { x: rect.left + window.scrollX, y: rect.bottom + window.scrollY }
+              );
             }
           }}
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
@@ -558,43 +568,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           })()}
 
           {post.hasImage && (
-            <div className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
               <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
-              {isSelf && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditArt();
-                  }}
-                  className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-blue-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
-                >
-                  <Pencil size={11} />
-                  <span>編集</span>
-                </button>
-              )}
             </div>
           )}
 
           {(() => {
-            if (mmlCode) {
-              return (
-                <div className="relative">
-                  <MmlPlayer mml={mmlCode} />
-                  {isSelf && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditMusic();
-                      }}
-                      className="absolute top-2 right-2 bg-black/75 hover:bg-black/90 px-2 py-0.5 rounded text-[10px] text-pink-400 border border-gray-800 font-bold active:scale-95 transition-all flex items-center gap-1"
-                    >
-                      <Pencil size={10} />
-                      <span>編集</span>
-                    </button>
-                  )}
-                </div>
-              );
-            }
+            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
             if (post.hasImage || post.hasGame) return null;
             const embed = extractFirstEmbed(post.content);
@@ -629,7 +609,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div className="border-t border-gray-800 px-3 py-3 space-y-2">
           <span className="text-[11px] text-gray-500 font-bold">返信</span>
           {post.replies.filter(r => r.parentPostId === post.id).map(reply => (
-            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={setSelectedUser} />
+            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} />
           ))}
         </div>
       )}
@@ -727,6 +707,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           initialContent={post.content}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
+          imageSrc={post.imageSrc}
+          onEditImage={() => {
+            handleEditArt();
+            setShowEditModal(false);
+          }}
+          onEditMml={() => {
+            handleEditMusic();
+            setShowEditModal(false);
+          }}
+          hasGame={post.hasGame}
+          gameTitle={post.gameTitle}
         />
       )}
       {showDeleteModal && (
@@ -753,13 +744,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           onMention={(username) => {
             setReplyText(prev => prev ? `${prev} @${username} ` : `@${username} `);
           }}
+          position={avatarMenuPos}
         />
       )}
     </>
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }) => void }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void }) {
   const router = useRouter();
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
@@ -800,7 +792,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
     setMenuOpen(false);
   };
 
-  const handleSaveEdit = async (newContent: string) => {
+  const handleSaveEdit = async (newContent: string, nextImageSrc?: string | null) => {
     await onEdit(localPost.id, newContent, localPost.originType);
     setLocalPost(p => ({ ...p, content: newContent, isEdited: true }));
     setShowEditModal(false);
@@ -879,7 +871,11 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
             if (isSelf) {
               router.push(`/user/${localPost.slug || localPost.displayName}`);
             } else {
-              onAvatarClick({ displayName: localPost.displayName, slug: localPost.slug || undefined });
+              const rect = e.currentTarget.getBoundingClientRect();
+              onAvatarClick(
+                { displayName: localPost.displayName, slug: localPost.slug || undefined },
+                { x: rect.left + window.scrollX, y: rect.bottom + window.scrollY }
+              );
             }
           }}
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
