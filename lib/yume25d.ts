@@ -36,11 +36,14 @@ const FADE_OUT_SEC = 0.25;
 const FADE_IN_SEC = 0.4;
 
 // ── 遊べるオブジェクト（システムスプライト） ──
-// ボール：プレイヤーが触れると離れる方向へ転がり、壁・マップ端で跳ね返って減速する。
-const BALL_RADIUS = 0.22;
-const KICK_SPEED = 4.5;      // 蹴った直後の速度（マス/秒）
-const BALL_FRICTION = 1.4;   // 転がり減速（1秒あたりの速度割合）
+// ボール：本物の球体メッシュ（模様なし・単色＋焼き込み陰影）。プレイヤーが触れると
+// 蹴った方向へ転がり、壁・マップ端で跳ね返って減速する。常に重力で自由落下する。
+const BALL_RADIUS = 0.22;    // 半径の既定値（Tex25D.ballRadius で変更可）
+const KICK_SPEED = 4.5;      // 蹴った直後の水平速度（マス/秒）
+const KICK_UP = 2.2;         // 蹴った直後の上向き速度（軽く浮いてバウンドする）
+const BALL_FRICTION = 1.4;   // 接地中の転がり減速（1秒あたりの速度割合）。空中では効かない
 const BALL_BOUNCE = 0.7;     // 壁反射の反発係数
+const BALL_BOUNCE_Y = 0.5;   // 地面バウンドの反発係数
 const BALL_STOP_EPS = 0.05;  // これ未満の速度は停止扱い
 // スピーカー：距離減衰は逆二乗の「近似」として (1 - d/radius)² を使う。
 // 真の 1/d² は d→0 で発散し、無限遠までゼロにならないため結局クランプ＋カットオフが必要になる。
@@ -350,8 +353,16 @@ export class Yume25DEngine {
   private playerMat: THREE.MeshLambertMaterial;
 
   // ── 遊べるオブジェクト ──
-  /** 蹴れるボール（special==='ball' のスプライト）。home はレイアウト上の定位置で、リセットで戻る。 */
-  private balls: { mesh: THREE.Mesh; homeX: number; homeZ: number; x: number; z: number; vx: number; vz: number }[] = [];
+  /** 蹴れるボール（special==='ball' のスプライト）。home はレイアウト上の定位置で、リセットで戻る。
+   *  y/vy は自由落下用（2段目以上に置くと落ちてくる）。r は球の半径。 */
+  private balls: {
+    mesh: THREE.Mesh; r: number;
+    homeX: number; homeZ: number; homeY: number;
+    x: number; z: number; y: number;
+    vx: number; vz: number; vy: number;
+  }[] = [];
+  /** 球体ボール用の焼き込み陰影テクスチャ（上が明るい縦グラデ）。環境光だけでも球に見せる。 */
+  private ballShadeTex: THREE.CanvasTexture | null = null;
   /** スピーカー（special==='speaker'）。同じ音源のスプライト群を1本の Audio にまとめ、最寄り距離で音量を決める。 */
   private speakers: { src: string; positions: [number, number][]; radius: number; volume: number }[] = [];
   private speakerAudio = new Map<string, HTMLAudioElement>();
@@ -467,8 +478,9 @@ export class Yume25DEngine {
     this.onHpChange?.(this.hp, this.maxHp);
     // ボールを定位置へ戻す（プレイ開始・ゆめから さめたとき）
     for (const b of this.balls) {
-      b.x = b.homeX; b.z = b.homeZ; b.vx = 0; b.vz = 0;
-      b.mesh.position.x = b.x; b.mesh.position.z = b.z;
+      b.x = b.homeX; b.z = b.homeZ; b.y = b.homeY;
+      b.vx = 0; b.vz = 0; b.vy = 0;
+      b.mesh.position.set(b.x, b.y, b.z);
     }
     this.clampToBounds();
     this.resolveWalls();
@@ -783,6 +795,7 @@ export class Yume25DEngine {
     this.skyTexture?.dispose();
     for (const audio of this.speakerAudio.values()) audio.pause();
     this.speakerAudio.clear();
+    this.ballShadeTex?.dispose();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -1002,6 +1015,27 @@ export class Yume25DEngine {
     this.speakers = [];
     const speakerCells = new Map<number, [number, number][]>();  // texId -> スピーカー位置
     for (const b of L.billboards) {
+      const def = L.textures[b.tex];
+
+      // ボールはビルボードではなく本物の球体（模様なし・単色×焼き込み陰影）。
+      // 2段目以上に置くと自由落下で落ちてくる（重力は updatePlayObjects が常時かける）。
+      if (def?.special === 'ball') {
+        const r = def.ballRadius ?? BALL_RADIUS;
+        const geo = new THREE.SphereGeometry(r, 12, 8);
+        const mat = new THREE.MeshLambertMaterial({ map: this.getBallShadeTex(), color: def.color });
+        this.ownedGeometries.push(geo);
+        this.ownedMaterials.push(mat);
+        const mesh = new THREE.Mesh(geo, mat);
+        const x = b.col + 0.5, z = b.row + 0.5;
+        const y = (b.level ?? 0) * H + r;
+        mesh.position.set(x, y, z);
+        mesh.userData.bbLevel = b.level ?? 0;
+        this.scene.add(mesh);
+        this.worldObjects.push(mesh);
+        this.balls.push({ mesh, r, homeX: x, homeZ: z, homeY: y, x, z, y, vx: 0, vz: 0, vy: 0 });
+        continue;
+      }
+
       const s = b.scale ?? 1;
       const geo = new THREE.PlaneGeometry(s * 0.9, s * 0.9);
       const mat = new THREE.MeshLambertMaterial({
@@ -1020,11 +1054,8 @@ export class Yume25DEngine {
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);
 
-      // 遊べるオブジェクト：テクスチャの special で判定（システム床と同じパターン）
-      const def = L.textures[b.tex];
-      if (def?.special === 'ball' && (b.level ?? 0) === 0) {
-        this.balls.push({ mesh, homeX: b.col + 0.5, homeZ: b.row + 0.5, x: b.col + 0.5, z: b.row + 0.5, vx: 0, vz: 0 });
-      } else if (def?.special === 'speaker' && def.sound?.src && (def.sound.type ?? 'direct') === 'direct') {
+      // スピーカー：テクスチャの special で判定（システム床と同じパターン）
+      if (def?.special === 'speaker' && def.sound?.src && (def.sound.type ?? 'direct') === 'direct') {
         const arr = speakerCells.get(b.tex) ?? [];
         arr.push([b.col + 0.5, b.row + 0.5]);
         speakerCells.set(b.tex, arr);
@@ -1092,51 +1123,88 @@ export class Yume25DEngine {
     }
   }
 
+  /** 球体ボール用の焼き込み陰影（上ほど明るい縦グラデ）。環境光しかない場面でも球に見えるようにする。
+   *  material.color と乗算されるので、テクスチャの color がそのままボールの色になる。 */
+  private getBallShadeTex(): THREE.CanvasTexture {
+    if (!this.ballShadeTex) {
+      const cv = document.createElement('canvas');
+      cv.width = 8; cv.height = 64;
+      const ctx = cv.getContext('2d')!;
+      const g = ctx.createLinearGradient(0, 0, 0, 64);
+      g.addColorStop(0, '#ffffff');
+      g.addColorStop(0.55, '#cfcfcf');
+      g.addColorStop(1, '#5e5e66');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      this.ballShadeTex = new THREE.CanvasTexture(cv);
+      this.ballShadeTex.colorSpace = THREE.SRGBColorSpace;
+    }
+    return this.ballShadeTex;
+  }
+
   /** 遊べるオブジェクトの毎フレーム更新。編集モード中はボールを定位置へ戻し、音も止める。 */
   private updatePlayObjects(dt: number) {
-    // ── ボール：触れると離れる方向へ転がり、壁・マップ端で跳ね返って減速する ──
+    // ── ボール：触れると蹴った方向へ転がり、壁・マップ端で跳ね返って減速する。
+    //    高さ方向は例外なく常に自由落下（2段目以上に置かれたボールも落ちてくる） ──
     if (this.editMode) {
       for (const b of this.balls) {
-        if (b.x !== b.homeX || b.z !== b.homeZ) {
-          b.x = b.homeX; b.z = b.homeZ; b.vx = 0; b.vz = 0;
-          b.mesh.position.x = b.x; b.mesh.position.z = b.z;
+        if (b.x !== b.homeX || b.z !== b.homeZ || b.y !== b.homeY) {
+          b.x = b.homeX; b.z = b.homeZ; b.y = b.homeY;
+          b.vx = 0; b.vz = 0; b.vy = 0;
+          b.mesh.position.set(b.x, b.y, b.z);
         }
       }
     } else {
       for (const b of this.balls) {
-        // 蹴る（ジャンプで頭上を越えているときは触れない）
+        // 蹴る（足の届く高さにあるときだけ。ジャンプで頭上を越えているときは触れない）
         const dx = b.x - this.x, dz = b.z - this.z;
         const d = Math.hypot(dx, dz);
-        if (d < PLAYER_RADIUS + BALL_RADIUS && this.hop < this.layout.wallHeight * 0.5) {
+        if (d < PLAYER_RADIUS + b.r && this.hop < this.layout.wallHeight * 0.5 && b.y - b.r < 0.6) {
           const inv = d > 1e-4 ? 1 / d : 0;
           b.vx = (inv ? dx * inv : 1) * KICK_SPEED;
           b.vz = (inv ? dz * inv : 0) * KICK_SPEED;
+          b.vy = KICK_UP;
         }
-        if (b.vx === 0 && b.vz === 0) continue;
-        const decel = Math.max(0, 1 - BALL_FRICTION * dt);
-        b.vx *= decel; b.vz *= decel;
-        if (Math.hypot(b.vx, b.vz) < BALL_STOP_EPS) { b.vx = 0; b.vz = 0; continue; }
-        // X → Z の順に進め、壁の辺・マップ端で速度を反転（プレイヤーと同じ辺集合を使う）
-        let nx = b.x + b.vx * dt;
-        if (b.vx > 0) {
-          const c0 = Math.floor(b.x + BALL_RADIUS), c1 = Math.floor(nx + BALL_RADIUS);
-          if ((c1 > c0 && this.blockedV(c1, b.z)) || nx > this.layout.cols - BALL_RADIUS) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
-        } else if (b.vx < 0) {
-          const c0 = Math.floor(b.x - BALL_RADIUS), c1 = Math.floor(nx - BALL_RADIUS);
-          if ((c1 < c0 && this.blockedV(c0, b.z)) || nx < BALL_RADIUS) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+
+        // 高さ方向：常に重力。地面（y = 半径）でバウンドし、弱くなったら静止する
+        const wasAirborne = b.y > b.r + 1e-3;
+        b.vy -= GRAVITY * dt;
+        b.y += b.vy * dt;
+        if (b.y <= b.r) {
+          b.y = b.r;
+          b.vy = b.vy < -1 ? -b.vy * BALL_BOUNCE_Y : 0;
         }
-        b.x = nx;
-        let nz = b.z + b.vz * dt;
-        if (b.vz > 0) {
-          const r0 = Math.floor(b.z + BALL_RADIUS), r1 = Math.floor(nz + BALL_RADIUS);
-          if ((r1 > r0 && this.blockedH(r1, b.x)) || nz > this.layout.rows - BALL_RADIUS) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
-        } else if (b.vz < 0) {
-          const r0 = Math.floor(b.z - BALL_RADIUS), r1 = Math.floor(nz - BALL_RADIUS);
-          if ((r1 < r0 && this.blockedH(r0, b.x)) || nz < BALL_RADIUS) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+
+        // 水平方向：接地中だけ転がり摩擦をかける（空中では減速しない）
+        if (b.vx !== 0 || b.vz !== 0) {
+          if (!wasAirborne) {
+            const decel = Math.max(0, 1 - BALL_FRICTION * dt);
+            b.vx *= decel; b.vz *= decel;
+            if (Math.hypot(b.vx, b.vz) < BALL_STOP_EPS) { b.vx = 0; b.vz = 0; }
+          }
+          // X → Z の順に進め、壁の辺・マップ端で速度を反転（プレイヤーと同じ辺集合を使う）。
+          // 壁より高く飛んでいる間は壁を越えられる（当たり判定があるのは地上段の壁のみ）
+          const hitsWall = b.y - b.r < this.layout.wallHeight;
+          let nx = b.x + b.vx * dt;
+          if (b.vx > 0) {
+            const c0 = Math.floor(b.x + b.r), c1 = Math.floor(nx + b.r);
+            if ((hitsWall && c1 > c0 && this.blockedV(c1, b.z)) || nx > this.layout.cols - b.r) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+          } else if (b.vx < 0) {
+            const c0 = Math.floor(b.x - b.r), c1 = Math.floor(nx - b.r);
+            if ((hitsWall && c1 < c0 && this.blockedV(c0, b.z)) || nx < b.r) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+          }
+          b.x = nx;
+          let nz = b.z + b.vz * dt;
+          if (b.vz > 0) {
+            const r0 = Math.floor(b.z + b.r), r1 = Math.floor(nz + b.r);
+            if ((hitsWall && r1 > r0 && this.blockedH(r1, b.x)) || nz > this.layout.rows - b.r) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+          } else if (b.vz < 0) {
+            const r0 = Math.floor(b.z - b.r), r1 = Math.floor(nz - b.r);
+            if ((hitsWall && r1 < r0 && this.blockedH(r0, b.x)) || nz < b.r) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+          }
+          b.z = nz;
         }
-        b.z = nz;
-        b.mesh.position.x = b.x;
-        b.mesh.position.z = b.z;
+        b.mesh.position.set(b.x, b.y, b.z);
       }
     }
 

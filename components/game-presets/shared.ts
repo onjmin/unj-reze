@@ -487,6 +487,9 @@ export interface Tex25D {
   warpDest?: { col: number; row: number; dir?: Dir4 };
   /** special==='damage'：被ダメージ量。未指定時は3（2Dの TileDef.damageAmount と同じ既定値）。 */
   damageAmount?: number;
+  /** special==='ball'（kind==='sprite'）：球の半径（マス単位）。未指定は0.22。
+   *  ボールはビルボードではなく本物の球体メッシュ（模様なし・color の単色＋陰影）で描画される。 */
+  ballRadius?: number;
   /** special==='speaker'（kind==='sprite'）：近づくと聞こえる音源（ライブステージ/スピーカー）。
    *  距離減衰は (1 - d/radius)² の近似（radius マスでちょうど無音）。direct 音源のみ再生できる。
    *  radius 未指定は8マス、volume（最大音量 0〜1）未指定は0.7。 */

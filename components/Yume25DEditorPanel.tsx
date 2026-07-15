@@ -265,7 +265,14 @@ export default function Yume25DEditorPanel({
               <p className="text-[9px] text-gray-500">ふむと矢印の方向へ強制的にすべります。壁に当たると止まります（ジャンプで飛び越えられます）</p>
             )}
             {t.special === 'ball' && (
-              <p className="text-[9px] text-gray-500">触れると蹴った方向へ転がります。壁やマップ端で跳ね返り、だんだん減速して止まります（プレイ/デモ中のみ。リスタートで元の位置に戻ります）</p>
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-center gap-1">大きさ（半径）
+                  <input type="range" min={0.1} max={0.8} step={0.05} value={t.ballRadius ?? 0.22}
+                    onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], ballRadius: Number(e.target.value) } } }))} className="w-20" />
+                  <span className="text-gray-400">{(t.ballRadius ?? 0.22).toFixed(2)}マス</span>
+                </label>
+                <p className="text-[9px] text-gray-500">模様なしの球体（色は「色」設定）。触れると蹴った方向へ転がり、常に重力で落下・バウンドします。壁やマップ端で跳ね返り、だんだん減速して止まります。2段目以上に置くと落ちてきます（リスタートで元の位置に戻ります）</p>
+              </div>
             )}
             {t.special === 'speaker' && (
               <div className="flex flex-col gap-1.5">
