@@ -532,6 +532,11 @@ export interface Layout25D {
   /** 背景画像（横360°の円筒パノラマ）。カメラ位置に追従し、霧の影響を受けない。
    *  上下の余白には skyColor が見える。未指定なら skyColor 一色。 */
   skyRef?: string; skyUrl?: string;
+  /** 海（水面）の高さ。0/未指定=水なし。この高さから下（底まで）がすべて水になり、
+   *  プレイヤーは泳げる（水中はゆっくり沈む・ジャンプ入力でひとかき上昇・移動は減速）。 */
+  waterLevel?: number;
+  /** 水の色。未指定は青緑。 */
+  waterColor?: string;
   /** ワールド全体の明るさ（環境光）。1=従来のフルブライト。0.1〜2。未指定は1。 */
   ambientLight?: number;
   /** 環境光の色。未指定は白（テクスチャそのままの色）。 */
@@ -688,6 +693,7 @@ export interface SystemSpriteTemplate {
 export const SYSTEM_SPRITE_TEMPLATES: SystemSpriteTemplate[] = [
   { key: 'ball', label: 'サッカーボール', special: 'ball', emoji: '⚽', color: '#e8e8e8' },
   { key: 'speaker', label: 'スピーカー', special: 'speaker', emoji: '🔊', color: '#8ab4ff' },
+  { key: 'block', label: 'ブロック', special: 'block', emoji: '🧱', color: '#a97a50' },
 ];
 
 /** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う直リンクmp3）。 */

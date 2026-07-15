@@ -45,6 +45,17 @@ const BALL_FRICTION = 1.4;   // 接地中の転がり減速（1秒あたりの�
 const BALL_BOUNCE = 0.7;     // 壁反射の反発係数
 const BALL_BOUNCE_Y = 0.5;   // 地面バウンドの反発係数
 const BALL_STOP_EPS = 0.05;  // これ未満の速度は停止扱い
+// ブロック：一辺1マスの立方体（サイズ固定）。上に乗れる・接地中は1段までよじ登れる（Build/Doom風の階段）。
+const BLOCK_SIZE = 1;
+const BLOCK_CLIMB = BLOCK_SIZE + 0.05;  // 接地中に自動でよじ登れる段差
+const PLAYER_BODY_H = 0.9;              // ブロック側面判定に使う体の高さ
+// 海（水面）：waterLevel から下がすべて水。落下は水の抵抗で沈降速度へ収束し「ゆっくり沈む」。
+const WATER_SINK_V = -0.7;    // 沈降速度（マス/秒）
+const WATER_DRAG = 3.0;       // 水の抵抗（1/秒。落下の勢いがこの速さで沈降速度へ収束）
+const SWIM_UP_V = 1.7;        // ひとかき（ジャンプ入力）の上昇速度
+const WATER_MOVE_MULT = 0.55; // 水中の移動速度倍率
+const RIPPLE_PERIOD = 0.9;    // 入水中の波紋アニメ1周期（秒）
+const WATER_DEFAULT_COLOR = '#2f7fa8';
 // スピーカー：距離減衰は逆二乗の「近似」として (1 - d/radius)² を使う。
 // 真の 1/d² は d→0 で発散し、無限遠までゼロにならないため結局クランプ＋カットオフが必要になる。
 // この近似は d=0 で最大音量・radius でちょうど 0 になり、パラメータが直感的で計算も安い。
@@ -363,6 +374,17 @@ export class Yume25DEngine {
   }[] = [];
   /** 球体ボール用の焼き込み陰影テクスチャ（上が明るい縦グラデ）。環境光だけでも球に見せる。 */
   private ballShadeTex: THREE.CanvasTexture | null = null;
+  /** ブロック（special==='block'）の上面高さ一覧。key='c,r'。足場・側面判定に使う。 */
+  private blockTops = new Map<string, number[]>();
+
+  // ── 海（水面） ──
+  private waterMesh: THREE.Mesh | null = null;
+  private waterMat: THREE.MeshLambertMaterial | null = null;
+  private waterGeo: THREE.PlaneGeometry | null = null;
+  private rippleMesh: THREE.Mesh | null = null;
+  private rippleMat: THREE.MeshBasicMaterial | null = null;
+  private rippleGeo: THREE.RingGeometry | null = null;
+  private rippleT = 0;
   /** スピーカー（special==='speaker'）。同じ音源のスプライト群を1本の Audio にまとめ、最寄り距離で音量を決める。 */
   private speakers: { src: string; positions: [number, number][]; radius: number; volume: number }[] = [];
   private speakerAudio = new Map<string, HTMLAudioElement>();
@@ -796,6 +818,10 @@ export class Yume25DEngine {
     for (const audio of this.speakerAudio.values()) audio.pause();
     this.speakerAudio.clear();
     this.ballShadeTex?.dispose();
+    this.waterGeo?.dispose();
+    this.waterMat?.dispose();
+    this.rippleGeo?.dispose();
+    this.rippleMat?.dispose();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -931,6 +957,7 @@ export class Yume25DEngine {
       this.lantern.distance = pl.distance ?? 8;
     }
     this.updateSky(L);
+    this.updateWater(L);
 
     // 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
     this.hEdges.clear(); this.vEdges.clear();
@@ -1013,9 +1040,29 @@ export class Yume25DEngine {
     // ── ビルボード：透過スプライト。alphaTest で深度バグ（奥の板が透けて欠ける）を防ぐ ──
     this.balls = [];
     this.speakers = [];
+    this.blockTops.clear();
     const speakerCells = new Map<number, [number, number][]>();  // texId -> スピーカー位置
     for (const b of L.billboards) {
       const def = L.textures[b.tex];
+
+      // 立方体ブロック：一辺1マスの箱。上に乗れる足場になる（段=BLOCK_SIZE単位で積める）
+      if (def?.special === 'block') {
+        const base = (b.level ?? 0) * BLOCK_SIZE;
+        const geo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        const mat = new THREE.MeshLambertMaterial({ map: this.getTex(b.tex) });
+        this.ownedGeometries.push(geo);
+        this.ownedMaterials.push(mat);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(b.col + 0.5, base + BLOCK_SIZE / 2, b.row + 0.5);
+        mesh.userData.bbLevel = b.level ?? 0;
+        this.scene.add(mesh);
+        this.worldObjects.push(mesh);
+        const key = `${b.col},${b.row}`;
+        const tops = this.blockTops.get(key) ?? [];
+        tops.push(base + BLOCK_SIZE);
+        this.blockTops.set(key, tops);
+        continue;
+      }
 
       // ボールはビルボードではなく本物の球体（模様なし・単色×焼き込み陰影）。
       // 2段目以上に置くと自由落下で落ちてくる（重力は updatePlayObjects が常時かける）。
@@ -1123,6 +1170,55 @@ export class Yume25DEngine {
     }
   }
 
+  /** (x,z) のセルで below 以下にある最も高い足場（地面0＋ブロック上面）。 */
+  private groundAt(x: number, z: number, below: number): number {
+    const tops = this.blockTops.get(`${Math.floor(x)},${Math.floor(z)}`);
+    let g = 0;
+    if (tops) for (const t of tops) if (t <= below + 1e-3 && t > g) g = t;
+    return g;
+  }
+
+  /** 高さ範囲 [y0,y1] がセル(c,r)のブロックと重なるか（側面すり抜け防止用）。 */
+  private blockSolidAt(c: number, r: number, y0: number, y1: number): boolean {
+    const tops = this.blockTops.get(`${c},${r}`);
+    if (!tops) return false;
+    for (const t of tops) if (t - BLOCK_SIZE < y1 && t > y0) return true;
+    return false;
+  }
+
+  /** 海（水面）：マップ全面を覆う半透明の板と、入水中の波紋リングを用意/更新する。 */
+  private updateWater(L: Layout25D) {
+    const lv = L.waterLevel ?? 0;
+    if (lv <= 0) {
+      if (this.waterMesh) this.waterMesh.visible = false;
+      if (this.rippleMesh) this.rippleMesh.visible = false;
+      return;
+    }
+    if (!this.waterMesh) {
+      this.waterGeo = new THREE.PlaneGeometry(1, 1);
+      this.waterMat = new THREE.MeshLambertMaterial({
+        color: WATER_DEFAULT_COLOR, transparent: true, opacity: 0.55,
+        side: THREE.DoubleSide, depthWrite: false,
+      });
+      this.waterMesh = new THREE.Mesh(this.waterGeo, this.waterMat);
+      this.waterMesh.rotation.x = -Math.PI / 2;
+      this.scene.add(this.waterMesh);
+
+      this.rippleGeo = new THREE.RingGeometry(0.55, 0.7, 20);
+      this.rippleMat = new THREE.MeshBasicMaterial({
+        color: '#dff4ff', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+      });
+      this.rippleMesh = new THREE.Mesh(this.rippleGeo, this.rippleMat);
+      this.rippleMesh.rotation.x = -Math.PI / 2;
+      this.rippleMesh.visible = false;
+      this.scene.add(this.rippleMesh);
+    }
+    this.waterMesh.visible = true;
+    this.waterMesh.scale.set(L.cols, L.rows, 1);
+    this.waterMesh.position.set(L.cols / 2, lv, L.rows / 2);
+    this.waterMat!.color.set(L.waterColor ?? WATER_DEFAULT_COLOR);
+  }
+
   /** 球体ボール用の焼き込み陰影（上ほど明るい縦グラデ）。環境光しかない場面でも球に見えるようにする。
    *  material.color と乗算されるので、テクスチャの color がそのままボールの色になる。 */
   private getBallShadeTex(): THREE.CanvasTexture {
@@ -1166,12 +1262,13 @@ export class Yume25DEngine {
           b.vy = KICK_UP;
         }
 
-        // 高さ方向：常に重力。地面（y = 半径）でバウンドし、弱くなったら静止する
-        const wasAirborne = b.y > b.r + 1e-3;
+        // 高さ方向：常に重力。足場（地面0＋ブロック上面）でバウンドし、弱くなったら静止する
+        const floorY = this.groundAt(b.x, b.z, b.y) + b.r;
+        const wasAirborne = b.y > floorY + 1e-3;
         b.vy -= GRAVITY * dt;
         b.y += b.vy * dt;
-        if (b.y <= b.r) {
-          b.y = b.r;
+        if (b.y <= floorY) {
+          b.y = floorY;
           b.vy = b.vy < -1 ? -b.vy * BALL_BOUNCE_Y : 0;
         }
 
@@ -1182,25 +1279,30 @@ export class Yume25DEngine {
             b.vx *= decel; b.vz *= decel;
             if (Math.hypot(b.vx, b.vz) < BALL_STOP_EPS) { b.vx = 0; b.vz = 0; }
           }
-          // X → Z の順に進め、壁の辺・マップ端で速度を反転（プレイヤーと同じ辺集合を使う）。
+          // X → Z の順に進め、壁の辺・ブロック側面・マップ端で速度を反転（壁はプレイヤーと同じ辺集合）。
           // 壁より高く飛んでいる間は壁を越えられる（当たり判定があるのは地上段の壁のみ）
           const hitsWall = b.y - b.r < this.layout.wallHeight;
+          const by0 = b.y - b.r * 0.6, by1 = b.y + b.r * 0.6;
           let nx = b.x + b.vx * dt;
           if (b.vx > 0) {
             const c0 = Math.floor(b.x + b.r), c1 = Math.floor(nx + b.r);
-            if ((hitsWall && c1 > c0 && this.blockedV(c1, b.z)) || nx > this.layout.cols - b.r) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+            const blocked = c1 > c0 && ((hitsWall && this.blockedV(c1, b.z)) || this.blockSolidAt(c1, Math.floor(b.z), by0, by1));
+            if (blocked || nx > this.layout.cols - b.r) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
           } else if (b.vx < 0) {
             const c0 = Math.floor(b.x - b.r), c1 = Math.floor(nx - b.r);
-            if ((hitsWall && c1 < c0 && this.blockedV(c0, b.z)) || nx < b.r) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
+            const blocked = c1 < c0 && ((hitsWall && this.blockedV(c0, b.z)) || this.blockSolidAt(c1, Math.floor(b.z), by0, by1));
+            if (blocked || nx < b.r) { nx = b.x; b.vx = -b.vx * BALL_BOUNCE; }
           }
           b.x = nx;
           let nz = b.z + b.vz * dt;
           if (b.vz > 0) {
             const r0 = Math.floor(b.z + b.r), r1 = Math.floor(nz + b.r);
-            if ((hitsWall && r1 > r0 && this.blockedH(r1, b.x)) || nz > this.layout.rows - b.r) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+            const blocked = r1 > r0 && ((hitsWall && this.blockedH(r1, b.x)) || this.blockSolidAt(Math.floor(b.x), r1, by0, by1));
+            if (blocked || nz > this.layout.rows - b.r) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
           } else if (b.vz < 0) {
             const r0 = Math.floor(b.z - b.r), r1 = Math.floor(nz - b.r);
-            if ((hitsWall && r1 < r0 && this.blockedH(r0, b.x)) || nz < b.r) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
+            const blocked = r1 < r0 && ((hitsWall && this.blockedH(r0, b.x)) || this.blockSolidAt(Math.floor(b.x), r1, by0, by1));
+            if (blocked || nz < b.r) { nz = b.z; b.vz = -b.vz * BALL_BOUNCE; }
           }
           b.z = nz;
         }
@@ -1280,15 +1382,31 @@ export class Yume25DEngine {
     }
   }
 
+  /** ブロック側面：これから入るセルが体の高さで塞がっているか。
+   *  接地中はブロック1段（BLOCK_CLIMB）までを「よじ登れる段差」として通し、
+   *  実際の持ち上げは step() の足場処理が行う。空中では側面をすり抜けない。 */
+  private blockedByBlockX(c: number, z: number): boolean {
+    const step = this.grounded ? BLOCK_CLIMB : 0.05;
+    const r0 = Math.floor(z - PLAYER_RADIUS * 0.9), r1 = Math.floor(z + PLAYER_RADIUS * 0.9);
+    for (let r = r0; r <= r1; r++) if (this.blockSolidAt(c, r, this.hop + step, this.hop + PLAYER_BODY_H)) return true;
+    return false;
+  }
+  private blockedByBlockZ(r: number, x: number): boolean {
+    const step = this.grounded ? BLOCK_CLIMB : 0.05;
+    const c0 = Math.floor(x - PLAYER_RADIUS * 0.9), c1 = Math.floor(x + PLAYER_RADIUS * 0.9);
+    for (let c = c0; c <= c1; c++) if (this.blockSolidAt(c, r, this.hop + step, this.hop + PLAYER_BODY_H)) return true;
+    return false;
+  }
+
   private moveX(dx: number) {
     if (dx === 0) return;
     let nx = this.x + dx;
     if (dx > 0) {
       const b = Math.floor(this.x + PLAYER_RADIUS), nb = Math.floor(nx + PLAYER_RADIUS);
-      if (nb > b && this.blockedV(nb, this.z)) nx = nb - PLAYER_RADIUS - EPS;
+      if (nb > b && (this.blockedV(nb, this.z) || this.blockedByBlockX(nb, this.z))) nx = nb - PLAYER_RADIUS - EPS;
     } else {
       const b = Math.floor(this.x - PLAYER_RADIUS), nb = Math.floor(nx - PLAYER_RADIUS);
-      if (nb < b && this.blockedV(b, this.z)) nx = b + PLAYER_RADIUS + EPS;
+      if (nb < b && (this.blockedV(b, this.z) || this.blockedByBlockX(nb, this.z))) nx = b + PLAYER_RADIUS + EPS;
     }
     this.x = nx;
   }
@@ -1297,10 +1415,10 @@ export class Yume25DEngine {
     let nz = this.z + dz;
     if (dz > 0) {
       const b = Math.floor(this.z + PLAYER_RADIUS), nb = Math.floor(nz + PLAYER_RADIUS);
-      if (nb > b && this.blockedH(nb, this.x)) nz = nb - PLAYER_RADIUS - EPS;
+      if (nb > b && (this.blockedH(nb, this.x) || this.blockedByBlockZ(nb, this.x))) nz = nb - PLAYER_RADIUS - EPS;
     } else {
       const b = Math.floor(this.z - PLAYER_RADIUS), nb = Math.floor(nz - PLAYER_RADIUS);
-      if (nb < b && this.blockedH(b, this.x)) nz = b + PLAYER_RADIUS + EPS;
+      if (nb < b && (this.blockedH(b, this.x) || this.blockedByBlockZ(nb, this.x))) nz = b + PLAYER_RADIUS + EPS;
     }
     this.z = nz;
   }
@@ -1388,6 +1506,9 @@ export class Yume25DEngine {
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     const H = this.layout.wallHeight;
     const hovering = this.editMode && this.hover;
+    // 海：waterLevel より足元が下なら入水中（泳ぎ・波紋・沈降のすべてに使う）
+    const waterLv = this.layout.waterLevel ?? 0;
+    const inWater = waterLv > 0 && this.hop < waterLv - 1e-3 && !hovering;
 
     // ── つるつる床：地面に立っている間は矢印方向へ強制スライド（移動入力は無効）。
     //    壁で進めなくなったらそのセルでは滑走を諦めて通常操作へ戻す（ハマり防止）。
@@ -1413,7 +1534,8 @@ export class Yume25DEngine {
 
     if (!slideVec && (move !== 0 || strafe !== 0)) {
       const dashMult = (inp.dash && !this.demo) ? DASH_MULT : 1;
-      const ms = move * MOVE_SPEED * dashMult * dt, ss = strafe * STRAFE_SPEED * dashMult * dt;
+      const swimMult = inWater ? WATER_MOVE_MULT : 1;  // 水中は泳ぎでゆっくり進む
+      const ms = move * MOVE_SPEED * dashMult * swimMult * dt, ss = strafe * STRAFE_SPEED * dashMult * swimMult * dt;
       if (hovering && this.hop >= H) {
         // 壁の上端より高く浮遊している間は遮る物がない（当たり判定を持つのは地上段の壁のみ）
         this.x += fx * ms + rx * ss;
@@ -1491,19 +1613,28 @@ export class Yume25DEngine {
         if (this.hop < H) this.resolveWalls();  // 壁の高さより下へ降りたら壁の中に居座らないよう押し出す
       }
       this.vy = 0;
-      this.grounded = this.hop <= 0;
+      this.grounded = this.hop <= this.groundAt(this.x, this.z, this.hop) + 1e-3;
       this.jumpQueued = false;
     } else {
-      // ジャンプ（短い一段ジャンプ。地面着地でリセット）
-      if (this.jumpQueued && this.grounded) {
-        this.vy = this.layout.jumpHeight ?? JUMP_VELOCITY_DEFAULT;
+      // ジャンプ（地上）／ひとかき上昇（水中はいつでも）
+      if (this.jumpQueued && (this.grounded || inWater)) {
+        this.vy = inWater ? SWIM_UP_V : (this.layout.jumpHeight ?? JUMP_VELOCITY_DEFAULT);
         this.grounded = false;
         this.jumpQueued = false;
       }
-      if (!this.grounded || this.hop > 0) {
-        this.vy -= GRAVITY * dt;
+      // 足場＝地面0＋ブロック上面。接地中はブロック1段まで自動でよじ登る（moveX/Z が通した段差）
+      const ground = this.groundAt(this.x, this.z, this.hop + (this.grounded ? BLOCK_CLIMB : 0));
+      if (this.grounded && this.hop < ground) this.hop = ground;                  // 段差を上がる
+      else if (this.grounded && this.hop > ground + 1e-3) this.grounded = false;  // 足場から出た → 落下開始
+      if (!this.grounded || this.hop > ground) {
+        if (inWater) {
+          // 水中：自由落下せず、水の抵抗で沈降速度へ収束する（高所から飛び込んでも急減速してゆっくり沈む）
+          this.vy += (WATER_SINK_V - this.vy) * Math.min(1, WATER_DRAG * dt);
+        } else {
+          this.vy -= GRAVITY * dt;
+        }
         this.hop += this.vy * dt;
-        if (this.hop <= 0) { this.hop = 0; this.vy = 0; this.grounded = true; }
+        if (this.vy <= 0 && this.hop <= ground) { this.hop = ground; this.vy = 0; this.grounded = true; }
       }
     }
 
@@ -1527,6 +1658,18 @@ export class Yume25DEngine {
     // ランタンはプレイヤー位置（目の高さ）から照らし、背景パノラマはカメラへ追従させる
     if (this.lantern.visible) this.lantern.position.set(this.x, eyeY, this.z);
     if (this.skyMesh?.visible) this.skyMesh.position.copy(this.camera.position);
+
+    // 入水中の波紋：水面上のプレイヤー位置で「拡大しながら薄くなる」リングをループ再生する
+    if (this.rippleMesh && this.rippleMat) {
+      this.rippleMesh.visible = inWater;
+      if (inWater) {
+        this.rippleT = (this.rippleT + dt) % RIPPLE_PERIOD;
+        const k = this.rippleT / RIPPLE_PERIOD;
+        this.rippleMesh.position.set(this.x, waterLv + 0.02, this.z);
+        this.rippleMesh.scale.setScalar(0.5 + k * 1.6);
+        this.rippleMat.opacity = 0.55 * (1 - k);
+      }
+    }
 
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;

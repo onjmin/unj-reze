@@ -274,6 +274,9 @@ export default function Yume25DEditorPanel({
                 <p className="text-[9px] text-gray-500">模様なしの球体（色は「色」設定）。触れると蹴った方向へ転がり、常に重力で落下・バウンドします。壁やマップ端で跳ね返り、だんだん減速して止まります。2段目以上に置くと落ちてきます（リスタートで元の位置に戻ります）</p>
               </div>
             )}
+            {t.special === 'block' && (
+              <p className="text-[9px] text-gray-500">一辺1マスの立方体（サイズ固定）。上に乗れて、歩くと1段まで自動でよじ登れます。「高さ」を上げて配置すると積み上げられます。画像参照でテクスチャも貼れます</p>
+            )}
             {t.special === 'speaker' && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -400,6 +403,18 @@ export default function Yume25DEditorPanel({
             <input type="color" value={layout.skyColor}
               onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
           </label>
+          {/* 海：この高さから下がすべて水になる（0=なし）。プレイヤーは泳げる */}
+          <label className="flex items-center justify-between gap-1">水面の高さ
+            <input type="range" min={0} max={3} step={0.05} value={layout.waterLevel ?? 0}
+              onChange={e => onLayoutChange(l => ({ ...l, waterLevel: Number(e.target.value) || undefined }))} className="w-20" />
+          </label>
+          <label className="flex items-center justify-between gap-1">水の色
+            <input type="color" value={layout.waterColor ?? '#2f7fa8'}
+              onChange={e => onLayoutChange(l => ({ ...l, waterColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+          </label>
+          {(layout.waterLevel ?? 0) > 0 && (
+            <p className="col-span-2 text-[9px] text-gray-500">水面の高さ {(layout.waterLevel ?? 0).toFixed(2)} マスから下が海になります。水中はゆっくり沈み、ジャンプ入力のひとかきで上昇して泳げます。ブロックを積めば水面から顔を出す足場が作れます</p>
+          )}
           {/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）と色 */}
           <label className="flex items-center justify-between gap-1">明るさ
             <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? 1}
