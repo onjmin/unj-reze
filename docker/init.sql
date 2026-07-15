@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   type TEXT NOT NULL DEFAULT 'like',
   post_id INTEGER,
   target_user TEXT,
+  read BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS posts (
   has_collab_button BOOLEAN NOT NULL DEFAULT FALSE,
   hearts_total INTEGER NOT NULL DEFAULT 0,
   has_game BOOLEAN NOT NULL DEFAULT FALSE,
-  game_id INTEGER,
+  game_id BIGINT,
   origin_type TEXT,
   is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE,
   is_edited BOOLEAN NOT NULL DEFAULT FALSE
@@ -59,7 +60,7 @@ CREATE TABLE IF NOT EXISTS posts (
 
 -- ゲームテーブル
 CREATE TABLE IF NOT EXISTS games (
-  id SERIAL PRIMARY KEY,
+  id BIGSERIAL PRIMARY KEY,
   preset TEXT NOT NULL,
   title TEXT NOT NULL,
   manifest TEXT NOT NULL,
@@ -70,13 +71,13 @@ CREATE TABLE IF NOT EXISTS games (
 -- ゲームスケジュールテーブル
 CREATE TABLE IF NOT EXISTS game_schedule (
   hour_slot TEXT PRIMARY KEY,
-  game_id INTEGER NOT NULL
+  game_id BIGINT NOT NULL
 );
 
 -- ゲーム投票テーブル
 CREATE TABLE IF NOT EXISTS game_votes (
   id SERIAL PRIMARY KEY,
-  game_id INTEGER NOT NULL,
+  game_id BIGINT NOT NULL,
   ip_address TEXT NOT NULL,
   hour_slot TEXT NOT NULL,
   UNIQUE(ip_address, hour_slot)
@@ -85,7 +86,7 @@ CREATE TABLE IF NOT EXISTS game_votes (
 -- ゲームプレイヤーテーブル
 CREATE TABLE IF NOT EXISTS game_players (
   session_id TEXT NOT NULL,
-  game_id INTEGER NOT NULL,
+  game_id BIGINT NOT NULL,
   x REAL NOT NULL DEFAULT 0,
   y REAL NOT NULL DEFAULT 0,
   emoji TEXT NOT NULL DEFAULT '🎮',

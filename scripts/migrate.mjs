@@ -124,6 +124,20 @@ const migrations = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `
+  },
+  {
+    name: '09_fix_notifications_read_and_game_id_bigint',
+    sql: `
+      -- Fix notifications table missing read column
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT FALSE;
+
+      -- Fix games and reference columns to support 64-bit integer IDs (Date.now())
+      ALTER TABLE games ALTER COLUMN id TYPE BIGINT;
+      ALTER TABLE game_schedule ALTER COLUMN game_id TYPE BIGINT;
+      ALTER TABLE game_votes ALTER COLUMN game_id TYPE BIGINT;
+      ALTER TABLE game_players ALTER COLUMN game_id TYPE BIGINT;
+      ALTER TABLE posts ALTER COLUMN game_id TYPE BIGINT;
+    `
   }
 ];
 
