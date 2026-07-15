@@ -5331,8 +5331,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const cx = x + w / 2, cy = y + h / 2;
       const playerR = Math.min(w, h) / 2 * 0.7;
       return engineRef.current.entities.some(e => {
-        // 敵、ワープ、アイテムは「モブ」ではないため衝突対象から除外（踏んで発動する挙動を維持）
-        if (e.def.hazard || e.def.objType === 'warp' || e.def.objType === 'item') return false;
+        // 敵、ワープ、アイテム、イベントは「モブ」ではないため衝突対象から除外（踏んで/触れて発動する挙動を維持）
+        if (e.def.hazard || e.def.objType === 'warp' || e.def.objType === 'item' || e.def.objType === 'event') return false;
         const ew = e.def.w ?? TILE_SIZE, eh = e.def.h ?? TILE_SIZE;
         const ecx = e.x + ew / 2, ecy = e.y + eh / 2;
         const mobR = Math.min(ew, eh) / 2 * 0.7;
