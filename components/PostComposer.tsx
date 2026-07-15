@@ -216,11 +216,22 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
     </div>
   );
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
+      e.preventDefault();
+      const canSubmit = text.trim() || image || mml || gameDraft;
+      if (canSubmit) {
+        onSubmit();
+      }
+    }
+  };
+
   const textarea = (
     <textarea
       ref={textareaRef}
       value={text}
       onChange={(e) => setText(e.target.value)}
+      onKeyDown={handleKeyDown}
       className={`w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none text-gray-100 ${md ? 'md:px-5 md:py-4 md:text-lg h-24 md:h-48' : 'h-20'}`}
       placeholder={replyAvatarInfo ? '返信を書き込む...' : 'いまどうしてる？ #お絵描き #ゲーム'}
     />

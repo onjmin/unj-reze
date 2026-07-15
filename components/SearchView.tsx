@@ -14,7 +14,7 @@ interface SearchViewProps {
   onRepost: (id: string) => void;
   onHeart: (id: string) => void;
   onAddReply: (id: string, text: string) => void;
-  onQuickPost: () => void;
+  onQuickPost: (text?: string) => void;
   openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, ZoomIn, ZoomOut, Check, MoveHorizontal, MoveVertical } from 'lucide-react';
+import { X, ZoomIn, ZoomOut, Check, MoveHorizontal, MoveVertical, FlipHorizontal } from 'lucide-react';
 
 interface CropAvatarModalProps {
   imageSrc: string;
@@ -21,6 +21,7 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isFlipped, setIsFlipped] = useState(false);
 
   const pointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
@@ -34,6 +35,7 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
       setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
       setZoom(1);
       setPan({ x: 0, y: 0 });
+      setIsFlipped(false);
     };
     img.src = imageSrc;
   }, [imageSrc]);
@@ -134,7 +136,14 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
     const cx = OUTPUT_SIZE / 2 + pan.x * factor;
     const cy = OUTPUT_SIZE / 2 + pan.y * factor;
 
+    ctx.save();
+    if (isFlipped) {
+      ctx.translate(cx, cy);
+      ctx.scale(-1, 1);
+      ctx.translate(-cx, -cy);
+    }
     ctx.drawImage(img, cx - imgW / 2, cy - imgH / 2, imgW, imgH);
+    ctx.restore();
     onConfirm(canvas.toDataURL('image/png'));
   };
 
@@ -169,7 +178,7 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
                 style={{
                   width: naturalSize.w * displayScale,
                   height: naturalSize.h * displayScale,
-                  transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px)`,
+                  transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scaleX(${isFlipped ? -1 : 1})`,
                 }}
               />
             )}
@@ -224,6 +233,24 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
               onChange={(e) => applyPanY(parseFloat(e.target.value))}
               className="flex-1 accent-blue-500 disabled:opacity-40"
             />
+          </div>
+ 
+          <div className="w-full flex items-center justify-between gap-2.5 pt-1">
+            <span className="text-xs text-gray-400 flex items-center gap-1.5 select-none">
+              <FlipHorizontal size={13} />
+              左右反転
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsFlipped(!isFlipped)}
+              className={`text-xs font-bold px-3 py-1 rounded-full transition-all border ${
+                isFlipped
+                  ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/20'
+                  : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              {isFlipped ? 'オン' : 'オフ'}
+            </button>
           </div>
 
           <p className="text-[10px] text-gray-500 text-center">ドラッグやスライダーで位置を調整・ピンチ/ホイールで拡大縮小できます</p>

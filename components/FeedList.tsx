@@ -17,7 +17,7 @@ interface FeedListProps {
   onRepost: (id: string) => void;
   onHeart: (id: string) => void;
   onAddReply: (id: string, text: string, replyToNum?: number) => void;
-  onQuickPost: () => void;
+  onQuickPost: (text?: string) => void;
   openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;

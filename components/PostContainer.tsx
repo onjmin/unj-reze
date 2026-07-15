@@ -18,6 +18,7 @@ import EmbedPart from './EmbedPart';
 import EditPostModal from './EditPostModal';
 import DeletePostModal from './DeletePostModal';
 import OriginTypeModal from './OriginTypeModal';
+import UserActionMenu from './UserActionMenu';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
@@ -31,7 +32,7 @@ interface PostContainerProps {
   onRepost: (id: string) => void;
   onHeart: (id: string) => void;
   onAddReply: (id: string, text: string) => void;
-  onQuickPost: () => void;
+  onQuickPost: (text?: string) => void;
   openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
   openMml: () => void;
@@ -54,6 +55,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showOriginModal, setShowOriginModal] = useState(false);
   const [bodyExpanded, setBodyExpanded] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const targetSlug = post.slug || post.displayName;
@@ -222,7 +224,14 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
       <div className="flex-1 p-3 flex space-x-2.5 min-w-0 pr-4">
         <div
-          onClick={(e) => { e.stopPropagation(); router.push(`/user/${post.slug || post.displayName}`); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isSelf) {
+              router.push(`/user/${post.slug || post.displayName}`);
+            } else {
+              setUserMenuOpen(true);
+            }
+          }}
           className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white relative cursor-pointer hover:opacity-80 transition-opacity"
           style={post.avatarUrl ? undefined : avatarInfo.style}
         >
@@ -539,6 +548,17 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           onSelect={handleSelectOriginType}
         />
       )}
+      <UserActionMenu
+        isOpen={userMenuOpen}
+        onClose={() => setUserMenuOpen(false)}
+        targetUserDisplayName={post.displayName}
+        targetUserSlug={post.slug || undefined}
+        currentUserId={currentUserDisplayName}
+        currentUserSlug={currentUserSlug}
+        onMention={(username) => {
+          onQuickPost(`@${username}`);
+        }}
+      />
     </div>
   );
 }

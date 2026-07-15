@@ -145,11 +145,33 @@ export default function App() {
   const handleProfileUpdate = useCallback((newDisplayName: string, newAvatarUrl?: string) => {
     setUserId(newDisplayName);
     if (currentUser) {
+      const oldSlug = currentUser.slug;
+      const oldDisplayName = currentUser.displayName;
       setCurrentUser({
         ...currentUser,
         displayName: newDisplayName,
         avatarUrl: newAvatarUrl,
       });
+
+      const updatePost = (p: Post): Post => {
+        const isUserPost = p.slug === oldSlug || p.displayName === oldDisplayName || p.displayName === newDisplayName;
+        return {
+          ...p,
+          displayName: isUserPost ? newDisplayName : p.displayName,
+          avatarUrl: isUserPost ? newAvatarUrl : p.avatarUrl,
+          replies: p.replies?.map(r => {
+            const isUserReply = r.slug === oldSlug || r.displayName === oldDisplayName || r.displayName === newDisplayName;
+            return {
+              ...r,
+              displayName: isUserReply ? newDisplayName : r.displayName,
+              avatarUrl: isUserReply ? newAvatarUrl : r.avatarUrl,
+            };
+          }) || [],
+        };
+      };
+
+      setPosts(prev => prev.map(updatePost));
+      setNewPosts(prev => prev.map(updatePost));
     }
   }, [currentUser]);
 
@@ -191,8 +213,11 @@ export default function App() {
     document.getElementById('scrollable-content')?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleQuickPost = () => {
+  const handleQuickPost = (text?: string) => {
     setComposerOpen(true);
+    if (text) {
+      setInputText(prev => prev ? `${prev} ${text} ` : `${text} `);
+    }
   };
 
   const handleLike = (postId: string) => {

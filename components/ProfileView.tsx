@@ -134,6 +134,25 @@ export default function ProfileView({ userId, displayName, currentUserId, onLike
       await api.auth.updateDisplayName(targetUserId, avatarInfo.username, res.url);
       setAvatarUrl(res.url);
       onProfileUpdate?.(avatarInfo.username, res.url);
+
+      const updatePost = (p: Post): Post => {
+        const isUserPost = p.slug === currentUser?.slug || p.displayName === currentUser?.displayName || p.displayName === avatarInfo.username;
+        return {
+          ...p,
+          avatarUrl: isUserPost ? res.url : p.avatarUrl,
+          replies: p.replies?.map(r => {
+            const isUserReply = r.slug === currentUser?.slug || r.displayName === currentUser?.displayName || r.displayName === avatarInfo.username;
+            return {
+              ...r,
+              avatarUrl: isUserReply ? res.url : r.avatarUrl,
+            };
+          }) || [],
+        };
+      };
+      setMyPosts(prev => prev.map(updatePost));
+      setLikedPosts(prev => prev.map(updatePost));
+      setDislikedPosts(prev => prev.map(updatePost));
+      setHeartedPosts(prev => prev.map(updatePost));
     } catch (err: any) {
       setAvatarUrl(previousAvatarUrl);
       setAvatarError(err.message || 'アイコンの保存に失敗しました');

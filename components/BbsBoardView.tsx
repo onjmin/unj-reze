@@ -9,7 +9,7 @@ interface BbsBoardViewProps {
   posts: Post[];
   activeTab: string;
   rankCategory: string;
-  onQuickPost: () => void;
+  onQuickPost: (text?: string) => void;
   loading?: boolean;
 }
 
@@ -68,7 +68,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
           {autoUpdate && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
         </button>
         <button
-          onClick={onQuickPost}
+          onClick={() => onQuickPost()}
           className="ml-auto flex items-center gap-1 bg-gray-700 hover:bg-gray-600 text-gray-100 px-2.5 py-1 rounded text-[11px] font-bold transition-colors"
         >
           <Plus size={11} /> スレ作成

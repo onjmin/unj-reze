@@ -24,7 +24,8 @@ const PostComposer = dynamic(() => import('./PostComposer'), { ssr: false });
 const EditPostModal = dynamic(() => import('./EditPostModal'), { ssr: false });
 const DeletePostModal = dynamic(() => import('./DeletePostModal'), { ssr: false });
 const OriginTypeModal = dynamic(() => import('./OriginTypeModal'), { ssr: false });
-const CollabSelector = dynamic(() => import('./CollabSelector'), { ssr: false });
+import CollabSelector from './CollabSelector';
+import UserActionMenu from './UserActionMenu';
 
 interface PostDetailProps {
   post: Post;
@@ -68,6 +69,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [showOriginModal, setShowOriginModal] = useState(false);
 
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
 
   useEffect(() => {
     const sessionId = getCookie('unj_reze_session');
@@ -472,9 +474,16 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       </div>
 
       <div className="flex p-3 space-x-2.5">
-        <Link
-          href={`/user/${post.slug || post.displayName}`}
-          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden"
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isSelf) {
+              router.push(`/user/${post.slug || post.displayName}`);
+            } else {
+              setSelectedUser({ displayName: post.displayName, slug: post.slug || undefined });
+            }
+          }}
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
           style={post.avatarUrl ? undefined : getAvatarInfo(post.displayName).style}
         >
           {post.avatarUrl ? (
@@ -485,7 +494,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
             })()
           )}
-        </Link>
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline space-x-1.5 mb-0.5">
             <span className="font-bold text-xs text-gray-200">{getAvatarInfo(post.displayName).username}</span>
@@ -583,7 +592,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div className="border-t border-gray-800 px-3 py-3 space-y-2">
           <span className="text-[11px] text-gray-500 font-bold">返信</span>
           {post.replies.filter(r => r.parentPostId === post.id).map(reply => (
-            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} />
+            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={setSelectedUser} />
           ))}
         </div>
       )}
@@ -689,11 +698,25 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           onSelect={handleSelectOriginType}
         />
       )}
+      {selectedUser && (
+        <UserActionMenu
+          isOpen={true}
+          onClose={() => setSelectedUser(null)}
+          targetUserDisplayName={selectedUser.displayName}
+          targetUserSlug={selectedUser.slug}
+          currentUserId={userId}
+          currentUserSlug={userSlug}
+          onMention={(username) => {
+            setReplyText(prev => prev ? `${prev} @${username} ` : `@${username} `);
+          }}
+        />
+      )}
     </>
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void> }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }) => void }) {
+  const router = useRouter();
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
   const [localPost, setLocalPost] = useState<Post>(post);
@@ -806,9 +829,16 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
   return (
     <div style={{ marginLeft: depth * 12 }} className={depth > 0 ? 'pl-3 border-l-2 border-gray-800/40' : ''}>
       <div className="flex p-3 space-x-2.5">
-        <Link
-          href={`/user/${localPost.slug || localPost.displayName}`}
-          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden"
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (isSelf) {
+              router.push(`/user/${localPost.slug || localPost.displayName}`);
+            } else {
+              onAvatarClick({ displayName: localPost.displayName, slug: localPost.slug || undefined });
+            }
+          }}
+          className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
           style={localPost.avatarUrl ? undefined : avatarInfo.style}
         >
           {localPost.avatarUrl ? (
@@ -819,7 +849,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
               return <AvatarIcon className="w-5 h-5 text-white/40 leading-none" />;
             })()
           )}
-        </Link>
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex justify-between items-baseline mb-0.5">
             <div className="flex items-baseline space-x-1.5">
@@ -945,7 +975,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
       {!collapsed && children.length > 0 && (
         <div>
           {children.map(child => (
-            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} />
+            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} onAvatarClick={onAvatarClick} />
           ))}
         </div>
       )}
