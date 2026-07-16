@@ -75,11 +75,15 @@ interface Yume25DMakerProps {
    *  状態も呼び出し側で保持する。上昇/下降のホールド操作は engineRef を持つこちら側で imperative handle として公開する。 */
   hoverMode: boolean;
   onHoverModeChange: (v: boolean) => void;
+  onDeath?: () => void;
 }
 
 export interface Yume25DMakerHandle {
   setFlyUp: (active: boolean) => void;
   setFlyDown: (active: boolean) => void;
+  resetToStart: () => void;
+  start: () => void;
+  stop: () => void;
 }
 
 export const yume25dTexList = (l: Layout25D | undefined, kind: Tex25D['kind']): Tex25D[] =>
@@ -92,7 +96,7 @@ export const yume25dResizeFloor = (floor: number[][], cols: number, rows: number
 const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function Yume25DMaker({
   layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage, virtualKeys,
   view, tool, level, selFloor, selWall, selSprite, talkTargetId, onTalkTargetChange,
-  hoverMode, onHoverModeChange,
+  hoverMode, onHoverModeChange, onDeath,
 }, ref) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -210,6 +214,15 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     return () => { eng.dispose(); engineRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // onDeath コールバック：エンジン側の onDeath に最新の props を反映する
+  const onDeathRef = useRef(onDeath);
+  onDeathRef.current = onDeath;
+  useEffect(() => {
+    const eng = engineRef.current;
+    if (!eng) return;
+    eng.onDeath = onDeathRef.current ? () => { onDeathRef.current?.(); } : null;
+  });
 
   // レイアウト編集 → シーン再構築
   useEffect(() => { engineRef.current?.setLayout(layout); }, [layout]);
@@ -393,6 +406,9 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
   useImperativeHandle(ref, () => ({
     setFlyUp: (active: boolean) => { const inp = engineRef.current?.input; if (inp) inp.flyUp = active; },
     setFlyDown: (active: boolean) => { const inp = engineRef.current?.input; if (inp) inp.flyDown = active; },
+    resetToStart: () => { engineRef.current?.resetToStart(); },
+    start: () => { engineRef.current?.start(); },
+    stop: () => { engineRef.current?.stop(); },
   }), []);
 
   const holdProps = (prop: 'forward' | 'back' | 'turnL' | 'turnR' | 'strafeL' | 'strafeR' | 'dash' | 'flyUp' | 'flyDown') => ({

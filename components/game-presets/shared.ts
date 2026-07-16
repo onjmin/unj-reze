@@ -348,6 +348,18 @@ export interface EndingScreenConfig {
   textColor?: string;
 }
 
+/** 死亡画面スタイル。minecraft=Minecraft風（背景赤暗化＋見出し＋ボタン）。gameOver=汎用ゲームオーバー。none=従来通り（フェード復帰のみ）。 */
+export type DeathScreenStyle = 'minecraft' | 'gameOver' | 'none';
+
+/** 死亡画面設定（yume25d エンジン専用）。プレイヤーのHPが0になったとき表示する画面の種別と文言をカスタマイズする。 */
+export interface DeathScreenConfig {
+  style: DeathScreenStyle;
+  heading: string;        // 大見出し（例: 「死んでしまった！」「You Died」）
+  retryLabel: string;     // リスポーンボタンの文言
+  exitLabel: string;      // タイトル/終了ボタンの文言
+  textColor?: string;     // 文字色（Minecraft風スタイル時の見出し）
+}
+
 /** レベルアップ時のステータス成長テーブル。exp 以上になったとき適用。 */
 export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?: number; atk?: number; def?: number; }
 
@@ -628,6 +640,8 @@ export interface PresetData {
   titleScreen?: TitleScreenConfig;
   /** エンディング画面（東方以外）。enabled=true でクリア時に表示。 */
   ending?: EndingScreenConfig;
+  /** 死亡画面（yume25d エンジン専用）。未設定時はフェード復帰のみ（none 相当）。 */
+  deathScreen?: DeathScreenConfig;
 }
 
 /** タイトル画面のデフォルト設定（エディタで「有効化」したとき生成）。 */
@@ -644,6 +658,15 @@ export const defaultEndingScreen = (): EndingScreenConfig => ({
   enabled: true,
   heading: 'THE END',
   message: 'クリアおめでとう！',
+  textColor: '#ffffff',
+});
+
+/** 死亡画面のデフォルト設定（Minecraft風）。 */
+export const defaultDeathScreen = (): DeathScreenConfig => ({
+  style: 'minecraft',
+  heading: '死んでしまった！',
+  retryLabel: 'リスポーン',
+  exitLabel: 'タイトル画面',
   textColor: '#ffffff',
 });
 

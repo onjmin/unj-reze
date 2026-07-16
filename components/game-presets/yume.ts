@@ -2,7 +2,7 @@
 // マップの実体は layout25d（床グリッド＋薄板壁＋ビルボード）で、既存の map/tiles は使わない。
 import {
   type PresetData, type Layout25D, type Wall25D, type Billboard25D, type Dir4,
-  normalizeWall25D, TILE_SIZE, COLS, ROWS,
+  normalizeWall25D, TILE_SIZE, COLS, ROWS, defaultDeathScreen,
 } from './shared';
 
 const YCOLS = 16, YROWS = 16;
@@ -119,4 +119,5 @@ export const yume: PresetData = {
   objects: [],
   sfx: {},
   layout25d,
+  deathScreen: defaultDeathScreen(),
 };

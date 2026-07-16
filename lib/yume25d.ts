@@ -446,6 +446,8 @@ export class Yume25DEngine {
   private invuln = 0;
   /** HP変化通知（HUD用）。被弾・リセットでの全回復の両方で呼ばれる。 */
   onHpChange: ((hp: number, max: number) => void) | null = null;
+  /** HP が 0 になったとき（フェードアウト開始直前）に呼ばれる。死亡画面表示用。 */
+  onDeath: (() => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, layout: Layout25D, playerAppearance?: PlayerAppearance) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
@@ -1550,7 +1552,12 @@ export class Yume25DEngine {
     playSysSfx('https://rpgen-search.pages.dev/audio/sound/XaNbgp.mp3');
 
     if (this.hp <= 0) {
-      this.startFade('#4a0a14', () => this.resetToStart());
+      // onDeath が登録されている場合は呼び出し元が死亡画面を管理する（リセットは resetToStart() を呼ぶ）
+      if (this.onDeath) {
+        this.startFade('#4a0a14', () => { this.onDeath?.(); });
+      } else {
+        this.startFade('#4a0a14', () => this.resetToStart());
+      }
     } else {
       this.startFlash('#a01828', HIT_FLASH_PEAK);
     }

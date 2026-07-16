@@ -36,8 +36,8 @@ import {
   type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type UndertaleMode, type EnemyDialogueLine,
   type PartySpell, type PartyMember, type BattleSpriteAnim, type PartyBattleSprites, type EnemyBattleSprite,
   type EventCommand, type EventPage, type EventCondition,
-  type TitleScreenConfig, type EndingScreenConfig,
-  defaultTitleScreen, defaultEndingScreen,
+  type TitleScreenConfig, type EndingScreenConfig, type DeathScreenConfig, type DeathScreenStyle,
+  defaultTitleScreen, defaultEndingScreen, defaultDeathScreen,
   type Layout25D,
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
@@ -165,6 +165,7 @@ export interface GameManifestDraft {
   phases?: StagePhase[];
   titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
   ending?: Omit<EndingScreenConfig, 'bgUrl'>;
+  deathScreen?: DeathScreenConfig;
   /** 2.5Dエンジン（yume25d）のレイアウト。 */
   layout25d?: Layout25D;
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
@@ -1167,6 +1168,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [showEnding, setShowEnding] = useState(false);
   const endingRef = useRef<EndingScreenConfig | undefined>(undefined);
   endingRef.current = gameData.ending;
+  const [showDeathScreen, setShowDeathScreen] = useState(false);
+  const deathScreenRef = useRef<DeathScreenConfig | undefined>(undefined);
+  deathScreenRef.current = gameData.deathScreen;
   const [selectedTileId, setSelectedTileId] = useState(1);
   /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=置物(当たり判定あり・プレイヤーの後ろ) / 'overhead'=天蓋(当たり判定なし・手前・半透明化)。 */
   const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay' | 'overhead'>('base');
@@ -1586,6 +1590,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       phases: manifest.phases ?? base.phases,
       titleScreen: manifest.titleScreen ?? base.titleScreen,
       ending: manifest.ending ?? base.ending,
+      deathScreen: manifest.deathScreen ?? base.deathScreen,
       battle: manifest.battle ?? base.battle,
       layout25d: manifest.layout25d ?? base.layout25d,
       scenes: manifest.scenes?.map(s => ({
@@ -4901,7 +4906,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     roundOverRef.current = false;
     warpCooldownRef.current = null;
     setIsPlaying(false); setSelectedObjId(null);
-    setShowEnding(false); setGameOverResult(null);
+    setShowEnding(false); setGameOverResult(null); setShowDeathScreen(false);
   }, [gameData]);
 
   useEffect(() => {
@@ -4928,6 +4933,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         phases: initialManifest.phases ?? base.phases,
         titleScreen: initialManifest.titleScreen ?? base.titleScreen,
         ending: initialManifest.ending ?? base.ending,
+        deathScreen: initialManifest.deathScreen ?? base.deathScreen,
         battle: initialManifest.battle ?? base.battle,
         layout25d: initialManifest.layout25d ?? base.layout25d,
         scenes: initialManifest.scenes?.map(s => ({
@@ -10127,6 +10133,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     phases: gameData.phases,
     titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
     ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
+    deathScreen: gameData.deathScreen,
     battle: gameData.battle,
     layout25d: gameData.layout25d,
     scenes: gameData.scenes?.map(s => ({
@@ -10186,6 +10193,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           phases: manifest.phases ?? base.phases,
           titleScreen: manifest.titleScreen ?? base.titleScreen,
           ending: manifest.ending ?? base.ending,
+          deathScreen: manifest.deathScreen ?? base.deathScreen,
           battle: manifest.battle ?? base.battle,
           layout25d: manifest.layout25d ?? base.layout25d,
           scenes: manifest.scenes?.map(s => ({
@@ -10390,6 +10398,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // ── タイトル／エンディング画面の更新ヘルパ ──
   const updTitle = (patch: Partial<TitleScreenConfig>) => setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, ...patch } }) : p);
   const updEnding = (patch: Partial<EndingScreenConfig>) => setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, ...patch } }) : p);
+  const updDeath = (patch: Partial<DeathScreenConfig>) => setGameData(p => p.deathScreen ? ({ ...p, deathScreen: { ...p.deathScreen, ...patch } }) : p);
   const startFromTitle = () => { setShowTitle(false); setIsPlaying(true); };
 
   // SELECT ボタンが押されたとき
@@ -10681,6 +10690,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 onTalkTargetChange={setYume25dTalkTargetId}
                 hoverMode={yume25dHoverMode}
                 onHoverModeChange={setYume25dHoverMode}
+                onDeath={() => {
+                  const ds = deathScreenRef.current;
+                  if (!ds || ds.style === 'none') {
+                    // 死亡画面なし → エンジン側のリセットのみ（従来の動作）
+                    yume25dMakerRef.current?.resetToStart();
+                  } else {
+                    setShowDeathScreen(true);
+                  }
+                }}
               />
             ) : (
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
@@ -10993,6 +11011,83 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )
             )}
+
+            {/* ── yume25d 死亡画面 ── */}
+            {showDeathScreen && gameData.deathScreen && (() => {
+              const ds = gameData.deathScreen;
+              const handleRespawn = () => {
+                setShowDeathScreen(false);
+                yume25dMakerRef.current?.resetToStart();
+              };
+              const handleDeathExit = () => {
+                setShowDeathScreen(false);
+                yume25dMakerRef.current?.resetToStart();
+                if (gameData.titleScreen?.enabled) { restart(); setShowTitle(true); }
+                else if (playOnly) { onClose(); }
+                else { restart(); }
+              };
+              if (ds.style === 'minecraft') {
+                return (
+                  <div className="absolute inset-0 z-50 flex flex-col items-center justify-center font-pixel"
+                    style={{ background: 'rgba(70,0,0,0.72)', animation: 'mcDeathFadeIn 0.6s ease-out' }}>
+                    <style>{`
+                      @keyframes mcDeathFadeIn { from { opacity:0 } to { opacity:1 } }
+                      @keyframes mcDeathTitle { from { opacity:0; transform:translateY(-16px) } to { opacity:1; transform:translateY(0) } }
+                      @keyframes mcDeathBtn { from { opacity:0; transform:scaleX(0.85) } to { opacity:1; transform:scaleX(1) } }
+                    `}</style>
+                    {/* 見出し */}
+                    <p style={{
+                      animation: 'mcDeathTitle 0.5s 0.15s ease-out both',
+                      color: ds.textColor ?? '#ffffff',
+                      fontSize: 28, fontWeight: 900, letterSpacing: 2,
+                      textShadow: '2px 2px 0 #000, 3px 3px 8px rgba(0,0,0,0.9)',
+                      marginBottom: 32, textAlign: 'center', maxWidth: 320, lineHeight: 1.3,
+                    }}>{ds.heading}</p>
+                    {/* ボタン */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: 240, animation: 'mcDeathBtn 0.4s 0.35s ease-out both' }}>
+                      <button id="yume-death-respawn" onClick={handleRespawn} style={{
+                        padding: '10px 0', background: 'rgba(120,120,120,0.85)',
+                        color: '#fff', border: '2px solid rgba(200,200,200,0.5)',
+                        fontSize: 13, fontWeight: 'bold', letterSpacing: 1, cursor: 'pointer',
+                        boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.2), inset 0 -2px 0 rgba(0,0,0,0.3)',
+                        transition: 'background 0.1s',
+                      }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(160,160,160,0.9)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'rgba(120,120,120,0.85)')}
+                      >{ds.retryLabel}</button>
+                      <button id="yume-death-exit" onClick={handleDeathExit} style={{
+                        padding: '10px 0', background: 'rgba(120,120,120,0.85)',
+                        color: '#fff', border: '2px solid rgba(200,200,200,0.5)',
+                        fontSize: 13, fontWeight: 'bold', letterSpacing: 1, cursor: 'pointer',
+                        boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.2), inset 0 -2px 0 rgba(0,0,0,0.3)',
+                        transition: 'background 0.1s',
+                      }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(160,160,160,0.9)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'rgba(120,120,120,0.85)')}
+                      >{ds.exitLabel}</button>
+                    </div>
+                  </div>
+                );
+              }
+              // style === 'gameOver' 汎用ゲームオーバー
+              return (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-50">
+                  <div className="bg-gray-950 border-2 border-red-600 px-8 py-7 text-center min-w-[200px] space-y-4 font-pixel">
+                    <p className="text-red-400 text-2xl font-bold tracking-widest">{ds.heading}</p>
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button id="yume-death-respawn2" onClick={handleRespawn}
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold tracking-wide transition-colors">
+                        ▶ {ds.retryLabel}
+                      </button>
+                      <button id="yume-death-exit2" onClick={handleDeathExit}
+                        className="w-full py-2 bg-gray-700 hover:bg-gray-600 active:bg-gray-800 text-gray-200 text-sm font-bold tracking-wide transition-colors">
+                        ✕ {ds.exitLabel}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── セリフカットシーン（ゲーム中） ── */}
             {activeDialogue && (
@@ -13002,6 +13097,45 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {/* ── 死亡画面（yume25d 専用） ── */}
+                {editorTab === 'screen' && gameData.engine === 'yume25d' && (
+                  <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[12px] font-bold text-gray-200">💀 死亡画面</p>
+                      {gameData.deathScreen && (
+                        <button onClick={() => setGameData(p => ({ ...p, deathScreen: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                      )}
+                    </div>
+                    {!gameData.deathScreen ? (
+                      <button onClick={() => setGameData(p => ({ ...p, deathScreen: { ...defaultDeathScreen() } }))}
+                        className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />死亡画面を追加</button>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-[10px] text-gray-400 font-bold">スタイル</p>
+                        <div className="flex gap-1 flex-wrap">
+                          {(['minecraft', 'gameOver', 'none'] as DeathScreenStyle[]).map(s => (
+                            <button key={s} onClick={() => updDeath({ style: s })}
+                              className={`px-2 py-1 rounded text-[10px] font-bold border transition ${gameData.deathScreen!.style === s ? 'bg-red-600 border-red-400 text-white' : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'}`}>
+                              {s === 'minecraft' ? '⛏ Minecraft風' : s === 'gameOver' ? '🎮 ゲームオーバー' : '🚫 なし'}
+                            </button>
+                          ))}
+                        </div>
+                        {gameData.deathScreen.style !== 'none' && (<>
+                          <input value={gameData.deathScreen.heading} onChange={e => updDeath({ heading: e.target.value })} placeholder="見出し（例: 死んでしまった！）"
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[12px] text-gray-100 outline-none" />
+                          <input value={gameData.deathScreen.retryLabel} onChange={e => updDeath({ retryLabel: e.target.value })} placeholder="リスポーンボタン"
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 outline-none" />
+                          <input value={gameData.deathScreen.exitLabel} onChange={e => updDeath({ exitLabel: e.target.value })} placeholder="タイトル/終了ボタン"
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-300 outline-none" />
+                          {gameData.deathScreen.style === 'minecraft' && (
+                            <label className="flex items-center gap-2 text-[10px] text-gray-400">文字色<input type="color" value={gameData.deathScreen.textColor ?? '#ffffff'} onChange={e => updDeath({ textColor: e.target.value })} className="w-9 h-9 rounded-lg border border-gray-700 bg-transparent cursor-pointer" /></label>
+                          )}
+                        </>)}
+                      </div>
+                    )}
                   </div>
                 )}
 
