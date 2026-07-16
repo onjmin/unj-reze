@@ -1857,6 +1857,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** システムタイル（どく沼/ダメージ床/ワープ床）：無敵時間中の多重発動防止に invulnRef を流用。 */
   const roundOverRef = useRef(false);    // ミス/ゲームオーバー/クリア演出中（操作・進行を凍結）
   const isPlayerDeadRef = useRef(false); // 残機制：死亡→復帰待ち中
+  const gameOverActiveRef = useRef(false); // ゲームオーバー画面表示中（プレイヤーを非表示にする）
   const livesRef = useRef(3);            // 残機数
   const scoreRef = useRef(0);            // スコア
   const actionDirRef = useRef<1 | -1>(1);     // action エンジン：プレイヤー向き
@@ -2482,7 +2483,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (result === 'lose') {
       battleRef.current.active = false; setBattle(null);
       battleBgmActiveRef.current = 'none';
-      shakeRef.current = 18; playSfx(sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => setGameOverResult({ score: scoreRef.current }));
+      shakeRef.current = 18; playSfx(sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => { gameOverActiveRef.current = true; setGameOverResult({ score: scoreRef.current }); });
       return;
     }
     const wasBoss = b.isBoss;
@@ -4903,6 +4904,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     invulnRef.current = 0;
     bombInvulnRef.current = 0;
     isPlayerDeadRef.current = false;
+    gameOverActiveRef.current = false;
     roundOverRef.current = false;
     warpCooldownRef.current = null;
     setIsPlaying(false); setSelectedObjId(null);
@@ -5690,7 +5692,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         playSfx(sfxRef.current.damage);
         if (onjRezeHpRef.current.hp <= 0) {
           // 体力0 → 専用ゲームオーバー演出
-          setTimeout(() => { setGameOverResult({ score: scoreRef.current, marioDeathAnim: true }); }, 1200);
+          setTimeout(() => { gameOverActiveRef.current = true; setGameOverResult({ score: scoreRef.current, marioDeathAnim: true }); }, 1200);
         } else {
           // 体力残あり → チェックポイントまたはスタート地点に戻す
           const p2 = engineRef.current.player;
@@ -5726,7 +5728,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         return;
       }
 
-      shakeRef.current = 18; showGameMsg(msg, 'timed', () => setGameOverResult({ score: scoreRef.current }));
+      shakeRef.current = 18; showGameMsg(msg, 'timed', () => { gameOverActiveRef.current = true; setGameOverResult({ score: scoreRef.current }); });
     };
     const hitShake = () => { shakeRef.current = Math.max(shakeRef.current, 10); };
 
@@ -8985,9 +8987,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ctx.beginPath(); ctx.ellipse(p.x + pData.w / 2, p.y + ph, pData.w / 2, 4, 0, 0, Math.PI * 2); ctx.fill();
       }
       ctx.fillStyle = gameData.player.color;
-      // 死亡中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）
+      // 死亡中またはゲームオーバー画面表示中は非表示。無敵中は点滅（action=2f周期でロックマン風、他=4f周期）
       const blinkPeriod = gameData.engine === 'action' ? 2 : 4;
-      if (!isPlayerDeadRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
+      if (!isPlayerDeadRef.current && !gameOverActiveRef.current && !(invulnRef.current > 0 && Math.floor(invulnRef.current / blinkPeriod) % 2 === 0)) {
         let drawH = pData.h;
         if (gameData.id === 'mario') {
           if (marioTransformingRef.current > 0) {
