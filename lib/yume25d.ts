@@ -17,6 +17,7 @@ const MOVE_SPEED = 2.4;    // マス/秒
 const STRAFE_SPEED = 2.0;  // マス/秒
 const TURN_SPEED = 2.4;    // ラジアン/秒
 const DASH_MULT = 1.8;     // Shift（ダッシュ）中の速度倍率
+const AI_DASH_MULT = 2.6;  // NPCランダムダッシュの速度倍率（AI基準速度1.0マス/秒に対して）
 const EPS = 1e-3;
 
 // 短くポンと跳ねる程度のジャンプ（頭上の低い夢空間を想定）。レイアウト jumpHeight で上書き可。
@@ -325,7 +326,10 @@ export interface BillboardInstance {
   startX: number;
   startZ: number;
   mixer?: THREE.AnimationMixer;
-  action?: THREE.AnimationAction;
+  /** 3Dモデルの移動用アニメ一式。idle/run は該当クリップが無いモデルでは undefined
+   *  （idle なし＝歩きを先頭コマで固定、run なし＝歩きの早回しで代用）。 */
+  anims?: { idle?: THREE.AnimationAction; walk: THREE.AnimationAction; run?: THREE.AnimationAction };
+  currentAction?: THREE.AnimationAction | null;
 }
 
 export class Yume25DEngine {
@@ -551,10 +555,7 @@ export class Yume25DEngine {
       if (is3DModel) {
         ab.object.rotation.y = ab.data.dir !== undefined ? YAW_FOR_DIR[ab.data.dir] : 0;
       }
-      if (ab.action) {
-        ab.action.paused = true;
-        ab.action.time = 0;
-      }
+      this.applyModelAnim(ab, 'idle');
     }
     this.clampToBounds();
     this.resolveWalls();
@@ -1166,27 +1167,26 @@ export class Yume25DEngine {
           // SkinnedMesh（Fox/Soldier等）は通常の clone だと骨の参照が壊れるため SkeletonUtils を使う
           const inst = cloneWithSkeleton(root);
 
-          // Play animation if available
+          // 移動用アニメ：クリップ名から idle/walk/run を拾う（Fox の Survey/Walk/Run、
+          // Soldier の Idle/Walk/Run 等）。walk 相当が無ければ先頭クリップを歩きとして使う。
           if (animations && animations.length > 0) {
             const mixer = new THREE.AnimationMixer(inst);
-            // Search for walk, run, or fly animations, otherwise default to first clip
-            const clip = animations.find(c => {
+            const find = (words: string[]) => animations.find(c => {
               const name = c.name.toLowerCase();
-              return name.includes('walk') || name.includes('run') || name.includes('fly');
-            }) || animations[0];
-            
-            const action = mixer.clipAction(clip);
-            action.play();
-            
-            const behavior = b.behavior || 'still';
-            if (behavior === 'still') {
-              action.paused = true;
-              action.time = 0;
-            }
-
+              return words.some(w => name.includes(w));
+            });
+            const walkClip = find(['walk', 'fly', 'swim']) ?? animations[0];
+            const runClip = find(['run', 'gallop', 'dash']);
+            const idleClip = find(['idle', 'survey', 'stand', 'wait']);
+            abInstance.anims = {
+              walk: mixer.clipAction(walkClip),
+              run: runClip && runClip !== walkClip ? mixer.clipAction(runClip) : undefined,
+              idle: idleClip && idleClip !== walkClip ? mixer.clipAction(idleClip) : undefined,
+            };
             this.mixers.push(mixer);
             abInstance.mixer = mixer;
-            abInstance.action = action;
+            // 初期状態：still は直立、それ以外は歩きから始めてAI更新に引き継ぐ
+            this.applyModelAnim(abInstance, (b.behavior || 'still') === 'still' ? 'idle' : 'walk');
           }
 
           // 正規化：最大辺が s マスになる縮尺 → 足元(バウンディングボックスの底)を床・中心をセル中央へ
@@ -1653,6 +1653,39 @@ export class Yume25DEngine {
     }
   }
 
+  /** 3Dモデルのアニメを移動状態に合わせて切り替える（クロスフェード付き）。
+   *  idle クリップが無いモデルは歩きを先頭コマで固定して直立、run が無ければ歩きの早回しで代用する。 */
+  private applyModelAnim(ab: BillboardInstance, mode: 'idle' | 'walk' | 'run', timeScale = 1) {
+    const anims = ab.anims;
+    if (!anims) return;
+    if (mode === 'idle' && !anims.idle) {
+      if (ab.currentAction && ab.currentAction !== anims.walk) ab.currentAction.stop();
+      anims.walk.play();
+      anims.walk.paused = true;
+      anims.walk.time = 0;
+      anims.walk.timeScale = 1;
+      ab.currentAction = anims.walk;
+      return;
+    }
+    let target: THREE.AnimationAction;
+    if (mode === 'idle') {
+      target = anims.idle!;
+    } else if (mode === 'run') {
+      target = anims.run ?? anims.walk;
+      if (!anims.run) timeScale *= 1.6;
+    } else {
+      target = anims.walk;
+    }
+    if (ab.currentAction !== target) {
+      const prev = ab.currentAction;
+      target.reset().play();
+      if (prev) target.crossFadeFrom(prev, 0.2, false);
+      ab.currentAction = target;
+    }
+    target.paused = false;
+    target.timeScale = timeScale;
+  }
+
   private updateBillboardAI(dt: number) {
     if (this.editMode) return;
     const speed = 1.0;
@@ -1662,10 +1695,7 @@ export class Yume25DEngine {
       if (behavior === 'still') {
         ab.vx = 0;
         ab.vz = 0;
-        if (ab.action) {
-          ab.action.paused = true;
-          ab.action.time = 0;
-        }
+        this.applyModelAnim(ab, 'idle');
         const is3DModel = !!this.layout.textures[b.tex]?.modelUrl;
         if (is3DModel) {
           ab.object.rotation.y = b.dir !== undefined ? YAW_FOR_DIR[b.dir] : 0;
@@ -1688,6 +1718,21 @@ export class Yume25DEngine {
             ab.vx = 0;
             ab.vz = 0;
             ab.aiTimer = 0.5 + Math.random() * 1.5;
+          }
+        }
+      } else if (behavior === 'randomDash') {
+        // ランダムダッシュ：ランダム移動の駆け足版。短く一気に駆けて、止まって息継ぎする
+        ab.aiTimer -= dt;
+        if (ab.aiTimer <= 0) {
+          if (ab.vx === 0 && ab.vz === 0) {
+            const theta = Math.random() * Math.PI * 2;
+            ab.vx = Math.cos(theta) * speed * AI_DASH_MULT;
+            ab.vz = Math.sin(theta) * speed * AI_DASH_MULT;
+            ab.aiTimer = 0.35 + Math.random() * 0.5;
+          } else {
+            ab.vx = 0;
+            ab.vz = 0;
+            ab.aiTimer = 0.6 + Math.random() * 1.6;
           }
         }
       } else if (behavior === 'chase') {
@@ -1737,15 +1782,21 @@ export class Yume25DEngine {
         const theta = Math.random() * Math.PI * 2;
         ab.vx = Math.cos(theta) * speed;
         ab.vz = Math.sin(theta) * speed;
+      } else if (behavior === 'randomDash' && (ab.vx !== 0 || ab.vz !== 0)
+        && Math.hypot(ab.x - prevX, ab.z - prevZ) < 1e-4) {
+        // 壁に頭から突っ込んだら、そこでダッシュを打ち切って息継ぎへ
+        ab.vx = 0;
+        ab.vz = 0;
+        ab.aiTimer = 0.4 + Math.random() * 0.8;
       }
 
-      if (ab.action) {
-        if (ab.vx !== 0 || ab.vz !== 0) {
-          ab.action.paused = false;
-        } else {
-          ab.action.paused = true;
-          ab.action.time = 0;
-        }
+      // 移動速度に応じたアニメ：ダッシュ級なら走り、通常は歩き（速度でテンポも変える）、停止中は直立
+      const sp = Math.hypot(ab.vx, ab.vz);
+      if (sp > 1e-4) {
+        if (sp > speed * 1.5) this.applyModelAnim(ab, 'run');
+        else this.applyModelAnim(ab, 'walk', Math.min(1.6, Math.max(0.75, sp / speed)));
+      } else {
+        this.applyModelAnim(ab, 'idle');
       }
 
       const s = b.scale ?? 1;

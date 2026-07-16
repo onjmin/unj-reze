@@ -242,7 +242,7 @@ function buildWorldLayout(scenes: SceneDef[]): {
 const emptyGridLike = (map: number[][]): number[][] =>
   map.map(row => new Array(row.length).fill(0));
 
-const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
+const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', randomDash: 'ランダムダッシュ', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
@@ -7052,6 +7052,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (d.behavior === 'random') {
                 if (e.timer % 50 === 0) e.vx = (Math.random() < 0.5 ? -1 : 1) * sp;
                 else if (e.vx === 0) e.vx = sp;
+              } else if (d.behavior === 'randomDash') {
+                // ランダムダッシュ：短い駆け足（30F）と立ち止まり（60F）を繰り返す
+                if (e.timer % 90 === 0) e.vx = (Math.random() < 0.5 ? -1 : 1) * sp * 2.5;
+                else if (e.timer % 90 === 30) e.vx = 0;
               } else if (d.behavior === 'chase' || d.behavior === 'flee') {
                 const dir = Math.sign(pcx - ecx) || 1;
                 e.vx = (d.behavior === 'chase' ? dir : -dir) * sp;
@@ -7136,6 +7140,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             } else if (d.behavior === 'random') {
               if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
+              e.x += e.vx; e.y += e.vy;
+            } else if (d.behavior === 'randomDash') {
+              // ランダムダッシュ：短い駆け足（30F）と立ち止まり（60F）を繰り返す
+              if (e.timer % 90 === 0) {
+                const th = Math.random() * Math.PI * 2;
+                e.vx = Math.cos(th) * sp * 2.5; e.vy = Math.sin(th) * sp * 2.5;
+              } else if (e.timer % 90 === 30) { e.vx = 0; e.vy = 0; }
               e.x += e.vx; e.y += e.vy;
             } else if (d.behavior === 'chase' || d.behavior === 'flee') {
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;

@@ -12,6 +12,7 @@ import {
 } from './game-presets/shared';
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
+import { billboardGroups, canShiftGroup, shiftBillboardGroup } from '@/lib/yume25d-macros';
 
 /** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
 function SpriteThumb({ t }: { t: Tex25D }) {
@@ -87,6 +88,15 @@ export default function Yume25DEditorPanel({
   const [modelSearchOpen, setModelSearchOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
 
+  // マクロ（一括編集）パネル：同じ見た目のスプライト/3Dモデルのグループをまとめて動かす
+  const [macroOpen, setMacroOpen] = useState(false);
+  const [macroTex, setMacroTex] = useState(0);
+  const macroGroups = billboardGroups(layout);
+  // 選択中のグループが消えていたら（削除・全消去）先頭グループへフォールバック
+  const macroSel = macroGroups.some(g => g.tex === macroTex) ? macroTex : (macroGroups[0]?.tex ?? 0);
+  const runShiftMacro = (dc: number, dr: number, dlv = 0) =>
+    onLayoutChange(l => shiftBillboardGroup(l, macroSel, dc, dr, dlv));
+
   /** 検索モーダルで選んだ3Dモデルをスプライトテクスチャとして追加し、
    *  スプライトツール＋パレット選択まで済ませる。 */
   const addModelTex = (m: ModelCatalogEntry) => {
@@ -144,11 +154,63 @@ export default function Yume25DEditorPanel({
             </button>
           ))}
         </div>
+        <button onClick={() => setMacroOpen(!macroOpen)}
+          className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${macroOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+          マクロ
+        </button>
         <button onClick={() => onSettingsOpenChange(!settingsOpen)}
-          className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+          className={`px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
           設定
         </button>
       </div>
+
+      {/* マクロパネル：マップ一括編集。プロトタイプは「同じ見た目のグループを1マスずつ平行移動」 */}
+      {macroOpen && (
+        <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+          <p className="font-bold text-violet-300">🔁 マクロ（一括編集）</p>
+          {macroGroups.length === 0 ? (
+            <p className="text-gray-500">マップにスプライト/3Dモデルが配置されていません。スプライトツールで配置すると、同じ見た目のグループをまとめて動かせます</p>
+          ) : (
+            <>
+              <label className="flex items-center gap-1.5">対象グループ
+                <select value={macroSel} onChange={e => setMacroTex(Number(e.target.value))}
+                  className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                  {macroGroups.map(g => (
+                    <option key={g.tex} value={g.tex}>{g.emoji ? `${g.emoji} ` : ''}{g.name} ×{g.count}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-gray-400">1マスずつ移動</span>
+                  <div className="grid grid-cols-3 gap-0.5">
+                    <span />
+                    <button onClick={() => runShiftMacro(0, -1)} disabled={!canShiftGroup(layout, macroSel, 0, -1)}
+                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">↑</button>
+                    <span />
+                    <button onClick={() => runShiftMacro(-1, 0)} disabled={!canShiftGroup(layout, macroSel, -1, 0)}
+                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">←</button>
+                    <button onClick={() => runShiftMacro(0, 1)} disabled={!canShiftGroup(layout, macroSel, 0, 1)}
+                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">↓</button>
+                    <button onClick={() => runShiftMacro(1, 0)} disabled={!canShiftGroup(layout, macroSel, 1, 0)}
+                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">→</button>
+                  </div>
+                </div>
+                <div className="flex flex-col items-center gap-0.5">
+                  <span className="text-gray-400">高さ（段）</span>
+                  <div className="flex flex-col gap-0.5">
+                    <button onClick={() => runShiftMacro(0, 0, 1)} disabled={!canShiftGroup(layout, macroSel, 0, 0, 1)}
+                      className="w-12 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[11px] font-bold disabled:opacity-30">＋1段</button>
+                    <button onClick={() => runShiftMacro(0, 0, -1)} disabled={!canShiftGroup(layout, macroSel, 0, 0, -1)}
+                      className="w-12 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[11px] font-bold disabled:opacity-30">−1段</button>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[9px] text-gray-500">選んだグループ（同じ見た目のスプライト/3Dモデル全部）をまとめて1マスずつ平行移動します。1体でもマップ外に出てしまう方向へは動かせません（形は崩れません）</p>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ツール：2D/3D どちらのビューでも使える（3Dはタップした視線の先のマスへ配置）。 */}
       <div className="flex items-center gap-1 flex-wrap">
@@ -227,6 +289,7 @@ export default function Yume25DEditorPanel({
                 className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
                 <option value="still">静止 (Still)</option>
                 <option value="random">ランダム移動 (Random)</option>
+                <option value="randomDash">ランダムダッシュ (Random Dash)</option>
                 <option value="chase">追いかける (Chase Player)</option>
                 <option value="flee">逃げる (Flee Player)</option>
                 <option value="patrolH">左右巡回 (Patrol H)</option>
