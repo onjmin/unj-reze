@@ -411,6 +411,7 @@ export class Yume25DEngine {
   private rippleMat: THREE.MeshBasicMaterial | null = null;
   private rippleGeo: THREE.RingGeometry | null = null;
   private rippleT = 0;
+  private peakHop = 0;
   /** スピーカー（special==='speaker'）。同じ音源のスプライト群を1本の Audio にまとめ、最寄り距離で音量を決める。 */
   private speakers: { src: string; positions: [number, number][]; radius: number; volume: number }[] = [];
   private speakerAudio = new Map<string, HTMLAudioElement>();
@@ -555,6 +556,7 @@ export class Yume25DEngine {
     }
     this.clampToBounds();
     this.resolveWalls();
+    this.peakHop = this.hop;
   }
 
   /** レイアウト差し替え。シーンを丸ごと作り直す（カメラ位置は維持）。 */
@@ -1541,6 +1543,19 @@ export class Yume25DEngine {
     }
   }
 
+  private takeDamage(amount: number) {
+    if (this.hp <= 0) return;
+    this.hp = Math.max(0, this.hp - amount);
+    this.onHpChange?.(this.hp, this.maxHp);
+    playSysSfx('https://rpgen-search.pages.dev/audio/sound/XaNbgp.mp3');
+
+    if (this.hp <= 0) {
+      this.startFade('#4a0a14', () => this.resetToStart());
+    } else {
+      this.startFlash('#a01828', HIT_FLASH_PEAK);
+    }
+  }
+
   private resolveBillboardWalls(ab: BillboardInstance) {
     const r = 0.22;
     for (let pass = 0; pass < 2; pass++) {
@@ -1997,10 +2012,7 @@ export class Yume25DEngine {
           // 2Dエンジンと同じHP制：無敵時間つきで削り、尽きたら「ゆめから さめて スタート地点へ戻る」
           this.invuln = DAMAGE_INVULN_SEC;
           playSysSfx(SYS_TILE_DAMAGE_SFX);
-          this.hp = Math.max(0, this.hp - (tex?.damageAmount ?? DAMAGE_DEFAULT));
-          this.onHpChange?.(this.hp, this.maxHp);
-          if (this.hp <= 0) this.startFade('#4a0a14', () => this.resetToStart());
-          else this.startFlash('#a01828', HIT_FLASH_PEAK);
+          this.takeDamage(tex?.damageAmount ?? DAMAGE_DEFAULT);
         }
       }
     }
@@ -2034,11 +2046,39 @@ export class Yume25DEngine {
         if (inWater) {
           // 水中：自由落下せず、水の抵抗で沈降速度へ収束する（高所から飛び込んでも急減速してゆっくり沈む）
           this.vy += (WATER_SINK_V - this.vy) * Math.min(1, WATER_DRAG * dt);
+          this.peakHop = this.hop;
         } else {
           this.vy -= GRAVITY * dt;
         }
         this.hop += this.vy * dt;
-        if (this.vy <= 0 && this.hop <= ground) { this.hop = ground; this.vy = 0; this.grounded = true; }
+
+        if (!inWater && !hovering) {
+          this.peakHop = Math.max(this.peakHop, this.hop);
+        } else {
+          this.peakHop = this.hop;
+        }
+
+        if (this.vy <= 0 && this.hop <= ground) {
+          const fallDist = this.peakHop - ground;
+          this.hop = ground;
+          this.vy = 0;
+          this.grounded = true;
+
+          if (!inWater && !hovering) {
+            if (fallDist > 1.2) {
+              playSysSfx('https://rpgen-search.pages.dev/audio/sound/PUMNHM.mp3');
+            }
+            if (fallDist > 3.0) {
+              const damage = Math.floor((fallDist - 3.0) * 2.0);
+              if (damage > 0) {
+                this.takeDamage(damage);
+              }
+            }
+          }
+          this.peakHop = ground;
+        }
+      } else {
+        this.peakHop = this.hop;
       }
     }
 
