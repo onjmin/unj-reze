@@ -517,6 +517,8 @@ export interface Billboard25D {
   message?: string;
   /** 選択肢（あれば「はなす」でメッセージの下に並ぶ。実行結果は無く、選ぶと会話が閉じるだけ）。 */
   choices?: string[];
+  behavior?: NpcBehavior;
+  collidable?: boolean;
 }
 
 /** 2.5Dエンジンのレイアウト全体。プレーンJSONとしてそのまま保存できる。 */

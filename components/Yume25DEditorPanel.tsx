@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
 import {
-  type Layout25D, type Tex25D, type Dir4,
+  type Layout25D, type Tex25D, type Dir4, type NpcBehavior,
   SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYSTEM_SPRITE_TEMPLATES, type SystemSpriteTemplate,
 } from './game-presets/shared';
@@ -215,6 +215,23 @@ export default function Yume25DEditorPanel({
               <input type="checkbox" checked={!!target.interactive}
                 onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, interactive: e.target.checked } : b) }))} />
               はなせる（「はなす」ボタンの対象にする）
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={!!target.collidable}
+                onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, collidable: e.target.checked } : b) }))} />
+              当たり判定あり（すり抜け不可）
+            </label>
+            <label className="flex items-center gap-1.5">AI行動
+              <select value={target.behavior ?? 'still'}
+                onChange={e => { const behavior = e.target.value as NpcBehavior; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, behavior } : b) })); }}
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                <option value="still">静止 (Still)</option>
+                <option value="random">ランダム移動 (Random)</option>
+                <option value="chase">追いかける (Chase Player)</option>
+                <option value="flee">逃げる (Flee Player)</option>
+                <option value="patrolH">左右巡回 (Patrol H)</option>
+                <option value="patrolV">前後巡回 (Patrol V)</option>
+              </select>
             </label>
             <label className="flex items-center gap-1.5">メッセージ
               <input type="text" value={target.message ?? ''} placeholder="……"

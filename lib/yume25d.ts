@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneWithSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D } from '@/components/game-presets/shared';
+import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D, type NpcBehavior } from '@/components/game-presets/shared';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
 
@@ -313,6 +313,19 @@ export const drawPlayerIconCanvas = (cv: HTMLCanvasElement, a: PlayerAppearance,
   drawPlayerCanvas(cv, a, onUpdate);
 };
 
+export interface BillboardInstance {
+  data: Billboard25D;
+  object: THREE.Object3D;
+  x: number;
+  z: number;
+  y: number;
+  vx: number;
+  vz: number;
+  aiTimer: number;
+  startX: number;
+  startZ: number;
+}
+
 export class Yume25DEngine {
   readonly input: Input25D = { forward: false, back: false, turnL: false, turnR: false, strafeL: false, strafeR: false, dash: false, flyUp: false, flyDown: false };
   /** デモ再生（イントロ用）：自動で前進し、壁に当たったら向きを変える。 */
@@ -384,6 +397,7 @@ export class Yume25DEngine {
   /** URL → ロード済みシーン（原本）とアニメーション。配置ごとに clone して使い回す。失敗は null。 */
   private modelCache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null>>();
   private mixers: THREE.AnimationMixer[] = [];
+  private activeBillboards: BillboardInstance[] = [];
   /** buildScene の世代番号。非同期ロード完了時に古い世代への差し込みを防ぐ。 */
   private buildGen = 0;
 
@@ -513,6 +527,25 @@ export class Yume25DEngine {
       b.x = b.homeX; b.z = b.homeZ; b.y = b.homeY;
       b.vx = 0; b.vz = 0; b.vy = 0;
       b.mesh.position.set(b.x, b.y, b.z);
+    }
+    const H = this.layout.wallHeight;
+    for (const ab of this.activeBillboards) {
+      ab.x = ab.data.col + 0.5;
+      ab.z = ab.data.row + 0.5;
+      ab.y = (ab.data.level ?? 0) * H;
+      ab.vx = 0;
+      ab.vz = 0;
+      ab.aiTimer = 0;
+      ab.startX = ab.x;
+      ab.startZ = ab.z;
+      
+      const s = ab.data.scale ?? 1;
+      const is3DModel = !!this.layout.textures[ab.data.tex]?.modelUrl;
+      const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
+      ab.object.position.set(ab.x, objectY, ab.z);
+      if (is3DModel) {
+        ab.object.rotation.y = 0;
+      }
     }
     this.clampToBounds();
     this.resolveWalls();
@@ -792,6 +825,7 @@ export class Yume25DEngine {
       const dt = Math.min(0.05, (t - this.lastT) / 1000);
       this.lastT = t;
       this.step(dt);
+      this.updateBillboardAI(dt);
 
       for (const mixer of this.mixers) {
         mixer.update(dt);
@@ -865,6 +899,7 @@ export class Yume25DEngine {
     this.worldObjects = [];
     this.billboardMeshes = [];
     this.mixers = [];
+    this.activeBillboards = [];
     for (const g of this.ownedGeometries) g.dispose();
     this.ownedGeometries = [];
     for (const m of this.ownedMaterials) m.dispose();
@@ -1082,6 +1117,18 @@ export class Yume25DEngine {
         holder.position.set(b.col + 0.5, baseY, b.row + 0.5);
         this.scene.add(holder);
         this.worldObjects.push(holder);  // clearWorld でシーンから外すため（Group はレイキャスト対象外）
+        this.activeBillboards.push({
+          data: b,
+          object: holder,
+          x: b.col + 0.5,
+          z: b.row + 0.5,
+          y: baseY,
+          vx: 0,
+          vz: 0,
+          aiTimer: 0,
+          startX: b.col + 0.5,
+          startZ: b.row + 0.5,
+        });
         const proxyGeo = new THREE.BoxGeometry(Math.min(1, s * 0.8), s, Math.min(1, s * 0.8));
         const proxyMat = new THREE.MeshBasicMaterial();
         this.ownedGeometries.push(proxyGeo);
@@ -1183,6 +1230,18 @@ export class Yume25DEngine {
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);
+      this.activeBillboards.push({
+        data: b,
+        object: mesh,
+        x: b.col + 0.5,
+        z: b.row + 0.5,
+        y: (b.level ?? 0) * H,
+        vx: 0,
+        vz: 0,
+        aiTimer: 0,
+        startX: b.col + 0.5,
+        startZ: b.row + 0.5,
+      });
 
       // スピーカー：テクスチャの special で判定（システム床と同じパターン）
       if (def?.special === 'speaker' && def.sound?.src && (def.sound.type ?? 'direct') === 'direct') {
@@ -1456,6 +1515,185 @@ export class Yume25DEngine {
     }
   }
 
+  private resolveBillboardWalls(ab: BillboardInstance) {
+    const r = 0.22;
+    for (let pass = 0; pass < 2; pass++) {
+      let moved = false;
+      const c0 = Math.ceil(ab.x - r), c1 = Math.floor(ab.x + r);
+      for (let c = c0; c <= c1; c++) {
+        const r0 = Math.floor(ab.z - r * 0.9), r1 = Math.floor(ab.z + r * 0.9);
+        let blocked = false;
+        for (let row = r0; row <= r1; row++) {
+          if (this.vEdges.has(`${c},${row}`)) { blocked = true; break; }
+        }
+        if (blocked) {
+          ab.x = ab.x < c ? c - r - EPS : c + r + EPS;
+          moved = true;
+        }
+      }
+      const r0 = Math.ceil(ab.z - r), r1 = Math.floor(ab.z + r);
+      for (let rr = r0; rr <= r1; rr++) {
+        const c0_v = Math.floor(ab.x - r * 0.9), c1_v = Math.floor(ab.x + r * 0.9);
+        let blocked = false;
+        for (let col = c0_v; col <= c1_v; col++) {
+          if (this.hEdges.has(`${col},${rr}`)) { blocked = true; break; }
+        }
+        if (blocked) {
+          ab.z = ab.z < rr ? rr - r - EPS : rr + r + EPS;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
+    const r_bound = 0.22;
+    ab.x = Math.max(r_bound + EPS, Math.min(this.layout.cols - r_bound - EPS, ab.x));
+    ab.z = Math.max(r_bound + EPS, Math.min(this.layout.rows - r_bound - EPS, ab.z));
+    this.resolveBillboardCollisionsForNpc(ab);
+  }
+
+  private resolveBillboardCollisions() {
+    const pr = PLAYER_RADIUS;
+    const H = this.layout.wallHeight;
+    const playerLevel = Math.round(this.hop / H);
+    
+    for (const ab of this.activeBillboards) {
+      if (!ab.data.collidable) continue;
+      const abLevel = ab.data.level ?? 0;
+      if (abLevel !== playerLevel) continue;
+
+      const br = 0.22 * (ab.data.scale ?? 1);
+      const dx = this.x - ab.x;
+      const dz = this.z - ab.z;
+      const dist = Math.hypot(dx, dz);
+      const minDist = pr + br;
+      if (dist < minDist) {
+        const pushDist = minDist - dist;
+        if (dist > 1e-4) {
+          this.x += (dx / dist) * pushDist;
+          this.z += (dz / dist) * pushDist;
+        } else {
+          this.x += minDist;
+        }
+      }
+    }
+  }
+
+  private resolveBillboardCollisionsForNpc(ab: BillboardInstance) {
+    const pr = 0.22;
+    for (const other of this.activeBillboards) {
+      if (other === ab || !other.data.collidable) continue;
+      
+      const abLevel = ab.data.level ?? 0;
+      const otherLevel = other.data.level ?? 0;
+      if (abLevel !== otherLevel) continue;
+
+      const br = 0.22 * (other.data.scale ?? 1);
+      const dx = ab.x - other.x;
+      const dz = ab.z - other.z;
+      const dist = Math.hypot(dx, dz);
+      const minDist = pr + br;
+      if (dist < minDist) {
+        const pushDist = minDist - dist;
+        if (dist > 1e-4) {
+          ab.x += (dx / dist) * pushDist;
+          ab.z += (dz / dist) * pushDist;
+        } else {
+          ab.x += minDist;
+        }
+      }
+    }
+  }
+
+  private updateBillboardAI(dt: number) {
+    if (this.editMode) return;
+    const speed = 1.0;
+    for (const ab of this.activeBillboards) {
+      const b = ab.data;
+      const behavior = b.behavior || 'still';
+      if (behavior === 'still') {
+        ab.vx = 0;
+        ab.vz = 0;
+        continue;
+      }
+
+      const prevX = ab.x;
+      const prevZ = ab.z;
+
+      if (behavior === 'random') {
+        ab.aiTimer -= dt;
+        if (ab.aiTimer <= 0) {
+          if (ab.vx === 0 && ab.vz === 0) {
+            const theta = Math.random() * Math.PI * 2;
+            ab.vx = Math.cos(theta) * speed;
+            ab.vz = Math.sin(theta) * speed;
+            ab.aiTimer = 1.0 + Math.random() * 2.0;
+          } else {
+            ab.vx = 0;
+            ab.vz = 0;
+            ab.aiTimer = 0.5 + Math.random() * 1.5;
+          }
+        }
+      } else if (behavior === 'chase') {
+        const dx = this.x - ab.x;
+        const dz = this.z - ab.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 8.0 && dist > 0.5) {
+          ab.vx = (dx / dist) * speed;
+          ab.vz = (dz / dist) * speed;
+        } else {
+          ab.vx = 0;
+          ab.vz = 0;
+        }
+      } else if (behavior === 'flee') {
+        const dx = ab.x - this.x;
+        const dz = ab.z - this.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 5.0) {
+          ab.vx = (dx / dist) * speed * 1.3;
+          ab.vz = (dz / dist) * speed * 1.3;
+        } else {
+          ab.vx = 0;
+          ab.vz = 0;
+        }
+      } else if (behavior === 'patrolH') {
+        if (ab.vx === 0) ab.vx = speed;
+      } else if (behavior === 'patrolV') {
+        if (ab.vz === 0) ab.vz = speed;
+      } else if (behavior === 'walker') {
+        if (ab.vx === 0 && ab.vz === 0) {
+          const theta = Math.random() * Math.PI * 2;
+          ab.vx = Math.cos(theta) * speed;
+          ab.vz = Math.sin(theta) * speed;
+        }
+      }
+
+      ab.x += ab.vx * dt;
+      ab.z += ab.vz * dt;
+
+      this.resolveBillboardWalls(ab);
+
+      if (behavior === 'patrolH' && Math.abs(ab.x - prevX) < 1e-4) {
+        ab.vx = -ab.vx;
+      } else if (behavior === 'patrolV' && Math.abs(ab.z - prevZ) < 1e-4) {
+        ab.vz = -ab.vz;
+      } else if (behavior === 'walker' && Math.hypot(ab.x - prevX, ab.z - prevZ) < 1e-4 * speed) {
+        const theta = Math.random() * Math.PI * 2;
+        ab.vx = Math.cos(theta) * speed;
+        ab.vz = Math.sin(theta) * speed;
+      }
+
+      const s = b.scale ?? 1;
+      const is3DModel = !!this.layout.textures[b.tex]?.modelUrl;
+      const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
+      ab.object.position.set(ab.x, objectY, ab.z);
+
+      if (is3DModel && (ab.vx !== 0 || ab.vz !== 0)) {
+        ab.object.rotation.y = Math.atan2(ab.vx, ab.vz);
+      }
+    }
+  }
+
   // ── 移動・当たり判定 ─────────────────────────────────────────────────────
   private clampToBounds() {
     this.x = Math.max(PLAYER_RADIUS + EPS, Math.min(this.layout.cols - PLAYER_RADIUS - EPS, this.x));
@@ -1498,6 +1736,7 @@ export class Yume25DEngine {
       }
       if (!moved) break;
     }
+    this.resolveBillboardCollisions();
   }
 
   /** ブロック側面：これから入るセルが体の高さで塞がっているか。
