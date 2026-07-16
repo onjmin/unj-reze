@@ -10061,11 +10061,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   const addTile = () => {
-    setGameData(p => {
-      const ids = Object.keys(p.tiles).map(Number);
-      const id = Math.max(...ids) + 1;
-      return { ...p, tiles: { ...p.tiles, [id]: { name: `タイル${id}`, color: '#888888', passable: false } } };
-    });
+    const id = Math.max(...Object.keys(gameData.tiles).map(Number)) + 1;
+    setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { name: `タイル${id}`, color: '#888888', passable: false } } }));
+    // 追加したタイルをそのまま選択し、パレット下の詳細設定を開く（yume25d の追加系と同じ流れ）
+    setSelectedTileId(id);
   };
   const updateTile = (id: number, patch: Partial<TileDef>) =>
     setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { ...p.tiles[id], ...patch } } }));
@@ -12896,83 +12895,103 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {/* ── タイル塗りヒント ── */}
                     <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> タイルを選択して画面をタップ／ドラッグ</p>
                     <p className="text-[10px] text-green-400 flex items-center gap-1">🏁 マーカーをドラッグしてプレイヤーの初期位置を変更</p>
-                    <div className="space-y-1.5">
+                    {/* ── タイルパレット：yume25d と同じ横並びスウォッチ。選ぶと下に詳細設定が開く ── */}
+                    <div className="flex items-center gap-1 flex-wrap">
                       {Object.entries(gameData.tiles).map(([idStr, tile]) => {
                         const id = Number(idStr);
                         return (
-                          <div key={id} className={`rounded-lg border ${selectedTileId === id ? 'border-blue-500 bg-gray-800' : 'border-gray-700 bg-gray-900'}`}>
-                            <div className="flex items-center gap-2 p-2">
-                              <button onClick={() => setSelectedTileId(id)} className="w-6 h-6 shrink-0 rounded border border-gray-600 overflow-hidden" style={{ backgroundColor: tile.color }}>
-                                {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
-                              </button>
-                              <input value={tile.name} onChange={e => updateTile(id, { name: e.target.value })}
-                                className="flex-1 min-w-0 bg-transparent text-[11px] text-gray-200 outline-none border-b border-transparent focus:border-gray-600" />
-                              <input type="color" value={tile.color} onChange={e => updateTile(id, { color: e.target.value })}
-                                className="w-6 h-6 rounded bg-transparent border border-gray-700 cursor-pointer shrink-0" title="色" />
-                              {id !== 0 && <button onClick={() => deleteTile(id)} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
-                            </div>
-                            {selectedTileId === id && (
-                              <div className="px-2 pb-2 space-y-1.5">
-                                <div className="flex items-center gap-3 text-[10px] text-gray-400">
-                                  <label className="flex items-center gap-1"><input type="checkbox" checked={tile.passable} onChange={e => updateTile(id, { passable: e.target.checked })} className="accent-blue-500" />通行可</label>
-                                  <select value={tile.special || ''} onChange={e => updateTile(id, { special: e.target.value || undefined })} className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
-                                    <option value="">特殊なし</option>
-                                    <option value="goal">ゴール</option>
-                                    <option value="trap">トラップ</option>
-                                    <option value="item">アイテム</option>
-                                    <option value="grass">草むら</option>
-                                    <option value="warp">システム: シーン切替床</option>
-                                    <option value="damage">システム: どく沼/ダメージ床</option>
-                                    <option value="ice-up">システム: つるつる床（↑）</option>
-                                    <option value="ice-right">システム: つるつる床（→）</option>
-                                    <option value="ice-down">システム: つるつる床（↓）</option>
-                                    <option value="ice-left">システム: つるつる床（←）</option>
-                                  </select>
-                                </div>
-                                {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
-                                  <p className="text-[10px] text-gray-500">🚪 ワープ先の設定は「シーン」タブで行えます。</p>
-                                )}
-                                {tile.special === 'damage' && (
-                                  <label className="text-[10px] text-gray-400 flex items-center gap-1">被ダメージ量
-                                    <input type="number" value={tile.damageAmount ?? 3} onChange={e => updateTile(id, { damageAmount: Number(e.target.value) })}
-                                      className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
-                                  </label>
-                                )}
-                                <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
-                                  <span className="text-[10px] text-gray-400">画像（任意）</span>
-                                  <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded">
-                                    <ImageIcon size={12} /> {tile.imageRef ? '画像を変更' : '画像を参照'}
-                                  </button>
-                                  {tile.imageRef && (
-                                    <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1"><Trash2 size={14} /></button>
-                                  )}
-                                </div>
-                                <p className="text-[9px] text-gray-500">画像は既存の投稿・歩行グラ・URLを参照します。</p>
-                              </div>
-                            )}
-                          </div>
+                          <button key={id} onClick={() => setSelectedTileId(id)} title={tile.name}
+                            className={`w-7 h-7 shrink-0 rounded border-2 overflow-hidden ${selectedTileId === id ? 'border-yellow-400' : 'border-gray-700'}`}
+                            style={{ backgroundColor: tile.color }}>
+                            {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
+                          </button>
                         );
                       })}
+                      <button onClick={addTile} title="タイルを追加"
+                        className="w-7 h-7 shrink-0 rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5 grid place-items-center">
+                        <Plus size={13} />
+                      </button>
                     </div>
-                    <button onClick={addTile} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5"><Plus size={13} />タイルを追加</button>
+
+                    {/* 選択中タイルの詳細設定（yume25d のテクスチャ個別設定と同じ構成） */}
+                    {(() => {
+                      const tile = gameData.tiles[selectedTileId];
+                      if (!tile) return null;
+                      const id = selectedTileId;
+                      return (
+                        <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[12px] font-bold text-gray-200">🎨 {tile.name || 'タイル'} の設定</span>
+                            {id !== 0 && (
+                              <button onClick={() => deleteTile(id)} className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">削除</button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <label className="flex items-center gap-1">名前:
+                              <input value={tile.name} onChange={e => updateTile(id, { name: e.target.value })}
+                                className="w-24 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white outline-none" />
+                            </label>
+                            <label className="flex items-center gap-1">色:
+                              <input type="color" value={tile.color} onChange={e => updateTile(id, { color: e.target.value })}
+                                className="w-6 h-4 bg-transparent cursor-pointer" title="色" />
+                            </label>
+                            <label className="flex items-center gap-1 text-gray-400"><input type="checkbox" checked={tile.passable} onChange={e => updateTile(id, { passable: e.target.checked })} className="accent-blue-500" />通行可</label>
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                            <select value={tile.special || ''} onChange={e => updateTile(id, { special: e.target.value || undefined })} className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
+                              <option value="">特殊なし</option>
+                              <option value="goal">ゴール</option>
+                              <option value="trap">トラップ</option>
+                              <option value="item">アイテム</option>
+                              <option value="grass">草むら</option>
+                              <option value="warp">システム: シーン切替床</option>
+                              <option value="damage">システム: どく沼/ダメージ床</option>
+                              <option value="ice-up">システム: つるつる床（↑）</option>
+                              <option value="ice-right">システム: つるつる床（→）</option>
+                              <option value="ice-down">システム: つるつる床（↓）</option>
+                              <option value="ice-left">システム: つるつる床（←）</option>
+                            </select>
+                          </div>
+                          {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
+                            <p className="text-[10px] text-gray-500">🚪 ワープ先の設定は「シーン」タブで行えます。</p>
+                          )}
+                          {tile.special === 'damage' && (
+                            <label className="text-[10px] text-gray-400 flex items-center gap-1">被ダメージ量
+                              <input type="number" value={tile.damageAmount ?? 3} onChange={e => updateTile(id, { damageAmount: Number(e.target.value) })}
+                                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                            </label>
+                          )}
+                          <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
+                            <span className="text-[10px] text-gray-400">画像（任意）</span>
+                            <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded">
+                              <ImageIcon size={12} /> {tile.imageRef ? '画像を変更' : '画像を参照'}
+                            </button>
+                            {tile.imageRef && (
+                              <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1"><Trash2 size={14} /></button>
+                            )}
+                          </div>
+                          <p className="text-[9px] text-gray-500">画像は既存の投稿・歩行グラ・URLを参照します。</p>
+                        </div>
+                      );
+                    })()}
 
                     {/* ── システムタイル（ワープ床・どく沼/ダメージ床・つるつる床）── */}
                     {(gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
-                      <div className="rounded-lg border border-purple-700/50 bg-purple-950/20 p-2.5 space-y-2">
-                        <p className="text-[11px] font-bold text-purple-300">システムタイル</p>
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[12px] font-bold text-gray-200">⚙️ システムタイル</p>
                         <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきの床タイルがタイル一覧に追加されるので、マップに塗ってください。
                           {gameData.engine === 'action' && '重力で移動するこのエンジンでは、つるつる床は左右方向のみ効果があります。'}
                         </p>
                         <div className="grid grid-cols-2 gap-1.5">
                           {SYSTEM_TILE_TEMPLATES.filter(tpl => gameData.engine !== 'action' || (tpl.special !== 'ice-up' && tpl.special !== 'ice-down')).map(tpl => (
                             <button key={tpl.key} onClick={() => addSystemTile(tpl)}
-                              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
+                              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
                               <Plus size={11} />{tpl.label}
                             </button>
                           ))}
                         </div>
                         {(gameData.engine === 'rpg' || gameData.engine === 'onjReze') && (
-                          <label className="flex items-center gap-2 pt-1.5 mt-1 border-t border-purple-700/40 text-[10px] text-gray-400">
+                          <label className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50 text-[10px] text-gray-400">
                             つるつる床のスライド速度
                             <input type="number" min={1} max={20} step={0.5}
                               value={gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED}

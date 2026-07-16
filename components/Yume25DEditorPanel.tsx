@@ -4,6 +4,7 @@
 // absolute オーバーレイだったが、GameMaker のサイドバーへ吸収し縦積みのリストとして表示する。
 
 import { useEffect, useRef, useState } from 'react';
+import { Plus, Image as ImageIcon, Music } from 'lucide-react';
 import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
 import {
   type Layout25D, type Tex25D, type Dir4, type NpcBehavior,
@@ -149,7 +150,7 @@ export default function Yume25DEditorPanel({
         <div className="flex overflow-hidden rounded border border-gray-600">
           {(['2d', '3d'] as const).map(v => (
             <button key={v} onClick={() => onViewChange(v)}
-              className={`px-2.5 py-1 text-[11px] font-bold ${view === v ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+              className={`px-2.5 py-1 text-[11px] font-bold ${view === v ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
               {v === '2d' ? '2D 表示' : '3D 表示'}
             </button>
           ))}
@@ -166,8 +167,8 @@ export default function Yume25DEditorPanel({
 
       {/* マクロパネル：マップ一括編集。プロトタイプは「同じ見た目のグループを1マスずつ平行移動」 */}
       {macroOpen && (
-        <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
-          <p className="font-bold text-violet-300">🔁 マクロ（一括編集）</p>
+        <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
+          <p className="text-[12px] font-bold text-gray-200">🔁 マクロ（一括編集）</p>
           {macroGroups.length === 0 ? (
             <p className="text-gray-500">マップにスプライト/3Dモデルが配置されていません。スプライトツールで配置すると、同じ見た目のグループをまとめて動かせます</p>
           ) : (
@@ -232,7 +233,7 @@ export default function Yume25DEditorPanel({
           <span className="text-[10px] text-gray-400 px-0.5">高さ</span>
           <button onClick={() => onLevelChange(Math.max(0, level - 1))} disabled={level === 0}
             className="w-7 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-300 text-[13px] font-bold disabled:opacity-40">−</button>
-          <span className="h-7 min-w-14 px-1.5 rounded border-2 border-yellow-400 bg-violet-700 text-white text-[11px] font-bold flex items-center justify-center">
+          <span className="h-7 min-w-14 px-1.5 rounded border-2 border-gray-600 bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center">
             {level + 1}段目
           </span>
           <button onClick={() => onLevelChange(level + 1)}
@@ -272,7 +273,8 @@ export default function Yume25DEditorPanel({
           <p className="text-[10px] text-gray-500 px-1">スプライトをタップして選択してください</p>
         );
         return (
-          <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+          <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
+            <p className="text-[12px] font-bold text-gray-200">💬 会話・AI設定</p>
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={!!target.interactive}
                 onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, interactive: e.target.checked } : b) }))} />
@@ -315,19 +317,19 @@ export default function Yume25DEditorPanel({
         const t = layout.textures[paletteSel];
         if (!t) return null;
         return (
-          <div className="flex flex-col gap-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
+          <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
             <div className="flex items-center justify-between">
-              <span className="font-bold text-violet-400">🎨 {t.name} の設定</span>
+              <span className="text-[12px] font-bold text-gray-200">🎨 {t.name} の設定</span>
               {t.special && (
                 <button onClick={() => deleteFloorTex(t.id)}
-                  className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                  className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">
                   削除
                 </button>
               )}
             </div>
             {t.special === 'warp' && (
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-purple-300">ワープ先</span>
+                <span className="font-bold text-gray-400">ワープ先</span>
                 <label className="flex items-center gap-1">X(列)
                   <input type="number" min={0} max={layout.cols - 1} value={t.warpDest?.col ?? 0}
                     onChange={e => { const col = Math.max(0, Math.min(layout.cols - 1, Number(e.target.value) || 0)); onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], warpDest: { ...(l.textures[t.id].warpDest ?? { col: 0, row: 0 }), col } } } })); }}
@@ -391,17 +393,17 @@ export default function Yume25DEditorPanel({
             {t.special === 'speaker' && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-bold text-purple-300">音源</span>
+                  <span className="font-bold text-gray-400">音源</span>
                   <span className="flex-1 min-w-0 truncate text-gray-400">{t.sound?.ref ? t.sound.ref.slice(0, 36) : '未設定'}</span>
                   {t.sound && (
                     <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], sound: undefined } } }))}
-                      className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                      className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">
                       消去
                     </button>
                   )}
                   <button onClick={() => onPickImage?.({ t: 'yumeTexSound', id: t.id })}
-                    className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
-                    音源参照...
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                    <Music size={12} /> 音源を参照
                   </button>
                 </div>
                 {t.sound?.ref && (
@@ -442,13 +444,13 @@ export default function Yume25DEditorPanel({
               <div className="flex items-center gap-1 ml-auto">
                 {t.imageUrl && (
                   <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], imageRef: undefined, imageUrl: undefined } } }))}
-                    className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
+                    className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">
                     画像消去
                   </button>
                 )}
                 <button onClick={() => onPickImage?.({ t: 'yumeTex', id: t.id })}
-                  className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
-                  画像参照...
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                  <ImageIcon size={12} /> 画像を参照
                 </button>
               </div>
             </div>
@@ -459,28 +461,28 @@ export default function Yume25DEditorPanel({
       {/* ── システムオブジェクト（ワープ床・どく沼/ダメージ床・つるつる床）──
           2Dエンジンのシステムタイルの yume25d 版。special 付きの床テクスチャとして追加し、
           床ツールで塗る。ワープはマップ内転送・ダメージは「めがさめる」に読み替える。 */}
-      <div className="rounded-lg border border-purple-700/50 bg-purple-950/20 p-2 space-y-1.5">
-        <p className="text-[11px] font-bold text-purple-300">システムオブジェクト</p>
+      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+        <p className="text-[12px] font-bold text-gray-200">⚙️ システムオブジェクト</p>
         <p className="text-[10px] text-gray-500">クリックで床パレットに追加されます。床ツールでマップに塗ってください。ワープ床は同じマップ内の指定マスへ転送、どく沼/ダメージ床はふむと ゆめから さめてスタートへ、つるつる床は矢印の方向へすべります（いずれもジャンプで飛び越え可）。</p>
         <div className="grid grid-cols-2 gap-1.5">
           {SYSTEM_TILE_TEMPLATES.map(tpl => (
             <button key={tpl.key} onClick={() => addSystemFloorTex(tpl)}
-              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
-              ＋{sysTileLabel(tpl)}
+              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
+              <Plus size={11} />{sysTileLabel(tpl)}
             </button>
           ))}
         </div>
-        <p className="text-[10px] text-gray-500 pt-1">遊べるオブジェクト：スプライトパレットに追加され、スプライトツールで配置します。ボールは蹴って転がせて、スピーカーは設定した音源が近づくと聞こえます。</p>
+        <p className="text-[10px] text-gray-500 pt-1.5 mt-1 border-t border-gray-700/50">遊べるオブジェクト：スプライトパレットに追加され、スプライトツールで配置します。ボールは蹴って転がせて、スピーカーは設定した音源が近づくと聞こえます。</p>
         <div className="grid grid-cols-2 gap-1.5">
           {SYSTEM_SPRITE_TEMPLATES.map(tpl => (
             <button key={tpl.key} onClick={() => addSystemSpriteTex(tpl)}
-              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
-              ＋{tpl.emoji} {tpl.label}
+              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
+              <Plus size={11} />{tpl.emoji} {tpl.label}
             </button>
           ))}
           <button onClick={() => { setModelQuery(''); setModelSearchOpen(true); }}
-            className="col-span-2 flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
-            ＋🗿 3Dモデル（キーワード検索）
+            className="col-span-2 flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
+            <Plus size={11} />🗿 3Dモデル（キーワード検索）
           </button>
         </div>
       </div>
@@ -492,7 +494,7 @@ export default function Yume25DEditorPanel({
           <div className="w-full max-w-md max-h-[75vh] bg-[#12121c] border border-gray-700 rounded-lg p-3 flex flex-col gap-2"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-bold text-violet-300">🗿 サンプル3Dモデルをさがす</span>
+              <span className="text-[12px] font-bold text-gray-200">🗿 サンプル3Dモデルをさがす</span>
               <button onClick={() => setModelSearchOpen(false)}
                 className="px-2 py-0.5 text-gray-400 hover:text-white text-sm">×</button>
             </div>
@@ -500,12 +502,12 @@ export default function Yume25DEditorPanel({
               autoFocus type="text" value={modelQuery}
               onChange={e => setModelQuery(e.target.value)}
               placeholder="キーワード（例: 鳥 / robot / くるま）"
-              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-[12px] text-white outline-none focus:border-violet-500"
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-[12px] text-white outline-none focus:border-blue-500"
             />
             <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-1.5 content-start">
               {searchModels(modelQuery).map(m => (
                 <button key={m.key} onClick={() => addModelTex(m)}
-                  className="flex flex-col items-start gap-0.5 px-2 py-1.5 rounded-lg border border-gray-700 bg-gray-800/70 hover:bg-violet-900/40 hover:border-violet-600 text-left">
+                  className="flex flex-col items-start gap-0.5 px-2 py-1.5 rounded-lg border border-gray-700 bg-gray-800/70 hover:bg-blue-900/30 hover:border-blue-600 text-left">
                   <span className="text-[11px] text-gray-100">{m.emoji} {m.label}</span>
                   <span className="text-[8px] text-gray-500">{m.source === 'three.js' ? 'three.js examples' : 'glTF-Sample-Assets'}</span>
                 </button>
@@ -519,118 +521,142 @@ export default function Yume25DEditorPanel({
         </div>
       )}
 
-      {/* 設定パネル */}
+      {/* 設定パネル：他タブのセクションと同じ「見出し＋グループ」構成で並べる */}
       {settingsOpen && (
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 p-2 bg-gray-900/90 rounded border border-gray-700 text-[10px] text-gray-300">
-          <label className="flex items-center justify-between gap-1">広さ(列)
-            <input type="number" min={4} max={48} value={layout.cols}
-              onChange={e => { const cols = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, cols, floor: yume25dResizeFloor(l.floor, cols, l.rows), walls: l.walls.filter(w => w.col <= cols - (w.dir === 3 ? 0 : 1) && w.col >= 0), billboards: l.billboards.filter(b => b.col < cols), start: { ...l.start, col: Math.min(l.start.col, cols - 1) } })); }}
-              className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
-          </label>
-          <label className="flex items-center justify-between gap-1">広さ(行)
-            <input type="number" min={4} max={48} value={layout.rows}
-              onChange={e => { const rows = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, rows, floor: yume25dResizeFloor(l.floor, l.cols, rows), walls: l.walls.filter(w => w.row <= rows - (w.dir === 0 ? 0 : 1) && w.row >= 0), billboards: l.billboards.filter(b => b.row < rows), start: { ...l.start, row: Math.min(l.start.row, rows - 1) } })); }}
-              className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
-          </label>
-          <label className="flex items-center justify-between gap-1">壁の高さ
-            <input type="range" min={0.5} max={2} step={0.1} value={layout.wallHeight}
-              onChange={e => onLayoutChange(l => ({ ...l, wallHeight: Number(e.target.value) }))} className="w-20" />
-          </label>
-          <label className="flex items-center justify-between gap-1">天井
-            <input type="checkbox" checked={layout.ceiling}
-              onChange={e => onLayoutChange(l => ({ ...l, ceiling: e.target.checked }))} />
-          </label>
-          <label className="flex items-center justify-between gap-1">霧の距離
-            <input type="range" min={3} max={30} step={1} value={layout.fogFar}
-              onChange={e => onLayoutChange(l => ({ ...l, fogFar: Number(e.target.value), fogNear: Math.min(l.fogNear, Number(e.target.value) - 1) }))} className="w-20" />
-          </label>
-          <label className="flex items-center justify-between gap-1">霧の色
-            <input type="color" value={layout.fogColor}
-              onChange={e => onLayoutChange(l => ({ ...l, fogColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-          </label>
-          <label className="flex items-center justify-between gap-1">空の色
-            <input type="color" value={layout.skyColor}
-              onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-          </label>
-          {/* 海：この高さから下がすべて水になる（0=なし）。プレイヤーは泳げる */}
-          <label className="flex items-center justify-between gap-1">水面の高さ
-            <input type="range" min={0} max={3} step={0.05} value={layout.waterLevel ?? 0}
-              onChange={e => onLayoutChange(l => ({ ...l, waterLevel: Number(e.target.value) || undefined }))} className="w-20" />
-          </label>
-          <label className="flex items-center justify-between gap-1">水の色
-            <input type="color" value={layout.waterColor ?? '#2f7fa8'}
-              onChange={e => onLayoutChange(l => ({ ...l, waterColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-          </label>
-          {(layout.waterLevel ?? 0) > 0 && (
-            <p className="col-span-2 text-[9px] text-gray-500">水面の高さ {(layout.waterLevel ?? 0).toFixed(2)} マスから下が海になります。水中はゆっくり沈み、ジャンプ入力のひとかきで上昇して泳げます。ブロックを積めば水面から顔を出す足場が作れます</p>
-          )}
-          {/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）と色 */}
-          <label className="flex items-center justify-between gap-1">明るさ
-            <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? 1}
-              onChange={e => onLayoutChange(l => ({ ...l, ambientLight: Number(e.target.value) }))} className="w-20" />
-          </label>
-          <label className="flex items-center justify-between gap-1">光の色
-            <input type="color" value={layout.ambientColor ?? '#ffffff'}
-              onChange={e => onLayoutChange(l => ({ ...l, ambientColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-          </label>
-          {/* 背景画像：横360°の円筒パノラマ。上下の余白には空の色が見える */}
-          <div className="flex items-center justify-between gap-1 col-span-2">
-            <span>背景画像{layout.skyUrl ? '：設定中' : '：なし'}</span>
-            <span className="flex items-center gap-1">
-              {layout.skyUrl && (
-                <button onClick={() => onLayoutChange(l => ({ ...l, skyRef: undefined, skyUrl: undefined }))}
-                  className="px-2 py-0.5 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded border border-red-800/60">
-                  消去
-                </button>
-              )}
-              <button onClick={() => onPickImage?.({ t: 'yumeSky' })}
-                className="px-2 py-0.5 bg-violet-950/40 hover:bg-violet-900/60 text-violet-300 rounded border border-violet-800/60">
-                画像参照...
-              </button>
-            </span>
-          </div>
-          {/* プレイヤー光源（ランタン）：暗くした夢空間で足元だけ照らす演出用 */}
-          <label className="flex items-center justify-between gap-1 col-span-2">ランタン（プレイヤー光源）
-            <input type="checkbox" checked={!!layout.playerLight?.enabled}
-              onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight, enabled: e.target.checked } }))} />
-          </label>
-          {layout.playerLight?.enabled && (
-            <>
-              <label className="flex items-center justify-between gap-1">光源の色
-                <input type="color" value={layout.playerLight.color ?? '#ffd9a0'}
-                  onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, color: e.target.value } }))} className="w-8 h-5 bg-transparent" />
-              </label>
-              <label className="flex items-center justify-between gap-1">光源の強さ
-                <input type="range" min={0.2} max={3} step={0.1} value={layout.playerLight.intensity ?? 1}
-                  onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, intensity: Number(e.target.value) } }))} className="w-20" />
-              </label>
-              <label className="flex items-center justify-between gap-1 col-span-2">光の届く距離
-                <input type="range" min={2} max={20} step={1} value={layout.playerLight.distance ?? 8}
-                  onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, distance: Number(e.target.value) } }))} className="w-28" />
-              </label>
-            </>
-          )}
-          <label className="flex items-center justify-between gap-1 col-span-2">視点
-            <span className="flex overflow-hidden rounded border border-gray-600">
-              {(['first', 'third'] as const).map(m => (
-                <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
-                  className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-violet-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-                  {m === 'first' ? '一人称' : '三人称'}
-                </button>
-              ))}
-            </span>
-          </label>
-          {(layout.pov ?? 'first') === 'third' && (
-            <label className="flex items-center justify-between gap-1 col-span-2">カメラ距離
-              <input type="range" min={0.4} max={3.5} step={0.1} value={layout.povDistance ?? 1.6}
-                onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
+        <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2 text-[10px] text-gray-300">
+          <p className="text-[12px] font-bold text-gray-200">⚙️ ワールド設定</p>
+
+          {/* マップ：広さ・壁・天井・ジャンプ */}
+          <p className="font-bold text-gray-400">マップ</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1">広さ(列)
+              <input type="number" min={4} max={48} value={layout.cols}
+                onChange={e => { const cols = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, cols, floor: yume25dResizeFloor(l.floor, cols, l.rows), walls: l.walls.filter(w => w.col <= cols - (w.dir === 3 ? 0 : 1) && w.col >= 0), billboards: l.billboards.filter(b => b.col < cols), start: { ...l.start, col: Math.min(l.start.col, cols - 1) } })); }}
+                className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
             </label>
-          )}
-          <label className="flex items-center justify-between gap-1">ジャンプ高さ
-            <input type="number" min={0.5} max={12} step={0.1} value={layout.jumpHeight ?? 3.2}
-              onChange={e => onLayoutChange(l => ({ ...l, jumpHeight: Math.max(0.5, Math.min(12, Number(e.target.value) || 3.2)) }))}
-              className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
-          </label>
+            <label className="flex items-center justify-between gap-1">広さ(行)
+              <input type="number" min={4} max={48} value={layout.rows}
+                onChange={e => { const rows = Math.max(4, Math.min(48, Number(e.target.value) || 4)); onLayoutChange(l => ({ ...l, rows, floor: yume25dResizeFloor(l.floor, l.cols, rows), walls: l.walls.filter(w => w.row <= rows - (w.dir === 0 ? 0 : 1) && w.row >= 0), billboards: l.billboards.filter(b => b.row < rows), start: { ...l.start, row: Math.min(l.start.row, rows - 1) } })); }}
+                className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+            </label>
+            <label className="flex items-center justify-between gap-1">壁の高さ
+              <input type="range" min={0.5} max={2} step={0.1} value={layout.wallHeight}
+                onChange={e => onLayoutChange(l => ({ ...l, wallHeight: Number(e.target.value) }))} className="w-20" />
+            </label>
+            <label className="flex items-center justify-between gap-1">天井
+              <input type="checkbox" checked={layout.ceiling}
+                onChange={e => onLayoutChange(l => ({ ...l, ceiling: e.target.checked }))} />
+            </label>
+            <label className="flex items-center justify-between gap-1">ジャンプ高さ
+              <input type="number" min={0.5} max={12} step={0.1} value={layout.jumpHeight ?? 3.2}
+                onChange={e => onLayoutChange(l => ({ ...l, jumpHeight: Math.max(0.5, Math.min(12, Number(e.target.value) || 3.2)) }))}
+                className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+            </label>
+          </div>
+
+          {/* 空と霧：空の色・霧・背景パノラマ */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">空と霧</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1">空の色
+              <input type="color" value={layout.skyColor}
+                onChange={e => onLayoutChange(l => ({ ...l, skyColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+            </label>
+            <label className="flex items-center justify-between gap-1">霧の色
+              <input type="color" value={layout.fogColor}
+                onChange={e => onLayoutChange(l => ({ ...l, fogColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+            </label>
+            <label className="flex items-center justify-between gap-1">霧の距離
+              <input type="range" min={3} max={30} step={1} value={layout.fogFar}
+                onChange={e => onLayoutChange(l => ({ ...l, fogFar: Number(e.target.value), fogNear: Math.min(l.fogNear, Number(e.target.value) - 1) }))} className="w-20" />
+            </label>
+            {/* 背景画像：横360°の円筒パノラマ。上下の余白には空の色が見える */}
+            <div className="flex items-center justify-between gap-1 col-span-2">
+              <span>背景画像（360°パノラマ）{layout.skyUrl ? '：設定中' : '：なし'}</span>
+              <span className="flex items-center gap-1">
+                {layout.skyUrl && (
+                  <button onClick={() => onLayoutChange(l => ({ ...l, skyRef: undefined, skyUrl: undefined }))}
+                    className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">
+                    消去
+                  </button>
+                )}
+                <button onClick={() => onPickImage?.({ t: 'yumeSky' })}
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300">
+                  <ImageIcon size={12} /> 画像を参照
+                </button>
+              </span>
+            </div>
+          </div>
+
+          {/* 海：この高さから下がすべて水になる（0=なし）。プレイヤーは泳げる */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">海</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1">水面の高さ
+              <input type="range" min={0} max={3} step={0.05} value={layout.waterLevel ?? 0}
+                onChange={e => onLayoutChange(l => ({ ...l, waterLevel: Number(e.target.value) || undefined }))} className="w-20" />
+            </label>
+            <label className="flex items-center justify-between gap-1">水の色
+              <input type="color" value={layout.waterColor ?? '#2f7fa8'}
+                onChange={e => onLayoutChange(l => ({ ...l, waterColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+            </label>
+            {(layout.waterLevel ?? 0) > 0 && (
+              <p className="col-span-2 text-[9px] text-gray-500">水面の高さ {(layout.waterLevel ?? 0).toFixed(2)} マスから下が海になります。水中はゆっくり沈み、ジャンプ入力のひとかきで上昇して泳げます。ブロックを積めば水面から顔を出す足場が作れます</p>
+            )}
+          </div>
+
+          {/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）とランタン */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">照明</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1">明るさ
+              <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? 1}
+                onChange={e => onLayoutChange(l => ({ ...l, ambientLight: Number(e.target.value) }))} className="w-20" />
+            </label>
+            <label className="flex items-center justify-between gap-1">光の色
+              <input type="color" value={layout.ambientColor ?? '#ffffff'}
+                onChange={e => onLayoutChange(l => ({ ...l, ambientColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+            </label>
+            {/* プレイヤー光源（ランタン）：暗くした夢空間で足元だけ照らす演出用 */}
+            <label className="flex items-center justify-between gap-1 col-span-2">ランタン（プレイヤー光源）
+              <input type="checkbox" checked={!!layout.playerLight?.enabled}
+                onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight, enabled: e.target.checked } }))} />
+            </label>
+            {layout.playerLight?.enabled && (
+              <>
+                <label className="flex items-center justify-between gap-1">光源の色
+                  <input type="color" value={layout.playerLight.color ?? '#ffd9a0'}
+                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, color: e.target.value } }))} className="w-8 h-5 bg-transparent" />
+                </label>
+                <label className="flex items-center justify-between gap-1">光源の強さ
+                  <input type="range" min={0.2} max={3} step={0.1} value={layout.playerLight.intensity ?? 1}
+                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, intensity: Number(e.target.value) } }))} className="w-20" />
+                </label>
+                <label className="flex items-center justify-between gap-1 col-span-2">光の届く距離
+                  <input type="range" min={2} max={20} step={1} value={layout.playerLight.distance ?? 8}
+                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, distance: Number(e.target.value) } }))} className="w-28" />
+                </label>
+              </>
+            )}
+          </div>
+
+          {/* 視点 */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">視点</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1 col-span-2">視点
+              <span className="flex overflow-hidden rounded border border-gray-600">
+                {(['first', 'third'] as const).map(m => (
+                  <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
+                    className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                    {m === 'first' ? '一人称' : '三人称'}
+                  </button>
+                ))}
+              </span>
+            </label>
+            {(layout.pov ?? 'first') === 'third' && (
+              <label className="flex items-center justify-between gap-1 col-span-2">カメラ距離
+                <input type="range" min={0.4} max={3.5} step={0.1} value={layout.povDistance ?? 1.6}
+                  onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
+              </label>
+            )}
+          </div>
         </div>
       )}
     </div>
