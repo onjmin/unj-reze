@@ -109,6 +109,9 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogueRef = useRef<DialogueState | null>(null);
   dialogueRef.current = dialogue;
+  const [editDir, setEditDir] = useState<Dir4>(2);
+  const editDirRef = useRef<Dir4>(2);
+  editDirRef.current = editDir;
 
   const playing = isPlaying || !!demo;
   const is3d = playing || view === '3d';
@@ -322,6 +325,13 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
         else engineRef.current?.jump();
         return;
       }
+      if (e.key === 'r' || e.key === 'R') {
+        if (!playing && tool === 'sprite') {
+          e.preventDefault();
+          setEditDir(prev => ((prev + 1) % 4) as Dir4);
+          return;
+        }
+      }
       if (e.key === 'e' || e.key === 'E' || e.key === 'f' || e.key === 'F') {
         const b = engineRef.current?.getInteractable();
         if (b) setDialogue({ message: b.message || '……', choices: b.choices });
@@ -424,11 +434,11 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
       const w = normalizeWall25D(c, r, dists[0][1], selWall, lv);
       return { kind: 'wall', col: w.col, row: w.row, dir: w.dir, level: lv, tex: selWall };
     }
-    if (tool === 'sprite') return { kind: 'sprite', col: c, row: r, level: lv, tex: selSprite };
+    if (tool === 'sprite') return { kind: 'sprite', col: c, row: r, level: lv, tex: selSprite, dir: editDir };
     if (tool === 'start') return { kind: 'cell', col: c, row: r, level: 0, color: '#7fffd4' };
     if (tool === 'talk') return { kind: 'cell', col: c, row: r, level: lv, color: '#38bdf8' };
     return { kind: 'cell', col: c, row: r, level: lv, color: '#ef4444' };  // erase
-  }, [tool, selFloor, selWall, selSprite]);
+  }, [tool, selFloor, selWall, selSprite, editDir]);
 
   const updateGhost = (clientX: number, clientY: number) => {
     lastHoverRef.current = { x: clientX, y: clientY };
@@ -728,9 +738,12 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     if (tool === 'sprite') {
       onLayoutChange(l => {
         const hit = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === lv);
-        if (hit && hit.tex === selSprite) return { ...l, billboards: l.billboards.filter(b => b !== hit) };
-        if (hit) return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, tex: selSprite } : b) };
-        return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1, ...(lv > 0 ? { level: lv } : {}) }] };
+        if (hit && hit.tex === selSprite) {
+          const nextDir = (((hit.dir ?? 2) + 1) % 4) as Dir4;
+          return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, dir: nextDir } : b) };
+        }
+        if (hit) return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, tex: selSprite, dir: editDir } : b) };
+        return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1, dir: editDir, ...(lv > 0 ? { level: lv } : {}) }] };
       });
       return;
     }
@@ -806,6 +819,11 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
         e.preventDefault();
         const cur = cursorRef.current;
         applyEditAt(Math.floor(cur.col), Math.floor(cur.row), false, 0, 0);
+      } else if (keyLower === 'r') {
+        if (tool === 'sprite') {
+          e.preventDefault();
+          setEditDir(prev => ((prev + 1) % 4) as Dir4);
+        }
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {

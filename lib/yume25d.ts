@@ -184,7 +184,7 @@ export type PovMode = 'first' | 'third';
 export type GhostSpec =
   | { kind: 'floor'; col: number; row: number; tex: number }
   | { kind: 'wall'; col: number; row: number; dir: Dir4; level: number; tex: number }
-  | { kind: 'sprite'; col: number; row: number; level: number; tex: number }
+  | { kind: 'sprite'; col: number; row: number; level: number; tex: number; dir?: Dir4 }
   | { kind: 'cell'; col: number; row: number; level: number; color: string };
 
 const GHOST_OPACITY = 0.45;
@@ -324,6 +324,8 @@ export interface BillboardInstance {
   aiTimer: number;
   startX: number;
   startZ: number;
+  mixer?: THREE.AnimationMixer;
+  action?: THREE.AnimationAction;
 }
 
 export class Yume25DEngine {
@@ -544,7 +546,11 @@ export class Yume25DEngine {
       const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
       ab.object.position.set(ab.x, objectY, ab.z);
       if (is3DModel) {
-        ab.object.rotation.y = 0;
+        ab.object.rotation.y = ab.data.dir !== undefined ? YAW_FOR_DIR[ab.data.dir] : 0;
+      }
+      if (ab.action) {
+        ab.action.paused = true;
+        ab.action.time = 0;
       }
     }
     this.clampToBounds();
@@ -689,7 +695,13 @@ export class Yume25DEngine {
         else { m.rotation.y = Math.PI / 2; m.position.set(spec.col, y, spec.row + 0.5); }  // 西辺
       } else {
         m.geometry = this.ghostBillGeo;
-        m.rotation.y = this.yaw;  // 以後は step() がビルボード同様カメラへ正対させる
+        m.userData.tex = spec.tex;
+        const is3DModel = !!this.layout.textures[spec.tex]?.modelUrl;
+        if (is3DModel) {
+          m.rotation.y = spec.dir !== undefined ? YAW_FOR_DIR[spec.dir] : 0;
+        } else {
+          m.rotation.y = this.yaw;  // 以後は step() がビルボード同様カメラへ正対させる
+        }
         m.position.set(spec.col + 0.5, spec.level * H + 0.45, spec.row + 0.5);
       }
     }
@@ -1115,9 +1127,12 @@ export class Yume25DEngine {
         const baseY = (b.level ?? 0) * H;
         const holder = new THREE.Group();
         holder.position.set(b.col + 0.5, baseY, b.row + 0.5);
+        if (b.dir !== undefined) {
+          holder.rotation.y = YAW_FOR_DIR[b.dir];
+        }
         this.scene.add(holder);
         this.worldObjects.push(holder);  // clearWorld でシーンから外すため（Group はレイキャスト対象外）
-        this.activeBillboards.push({
+        const abInstance: BillboardInstance = {
           data: b,
           object: holder,
           x: b.col + 0.5,
@@ -1128,7 +1143,8 @@ export class Yume25DEngine {
           aiTimer: 0,
           startX: b.col + 0.5,
           startZ: b.row + 0.5,
-        });
+        };
+        this.activeBillboards.push(abInstance);
         const proxyGeo = new THREE.BoxGeometry(Math.min(1, s * 0.8), s, Math.min(1, s * 0.8));
         const proxyMat = new THREE.MeshBasicMaterial();
         this.ownedGeometries.push(proxyGeo);
@@ -1155,8 +1171,18 @@ export class Yume25DEngine {
               return name.includes('walk') || name.includes('run') || name.includes('fly');
             }) || animations[0];
             
-            mixer.clipAction(clip).play();
+            const action = mixer.clipAction(clip);
+            action.play();
+            
+            const behavior = b.behavior || 'still';
+            if (behavior === 'still') {
+              action.paused = true;
+              action.time = 0;
+            }
+
             this.mixers.push(mixer);
+            abInstance.mixer = mixer;
+            abInstance.action = action;
           }
 
           // 正規化：最大辺が s マスになる縮尺 → 足元(バウンディングボックスの底)を床・中心をセル中央へ
@@ -1614,6 +1640,14 @@ export class Yume25DEngine {
       if (behavior === 'still') {
         ab.vx = 0;
         ab.vz = 0;
+        if (ab.action) {
+          ab.action.paused = true;
+          ab.action.time = 0;
+        }
+        const is3DModel = !!this.layout.textures[b.tex]?.modelUrl;
+        if (is3DModel) {
+          ab.object.rotation.y = b.dir !== undefined ? YAW_FOR_DIR[b.dir] : 0;
+        }
         continue;
       }
 
@@ -1683,13 +1717,26 @@ export class Yume25DEngine {
         ab.vz = Math.sin(theta) * speed;
       }
 
+      if (ab.action) {
+        if (ab.vx !== 0 || ab.vz !== 0) {
+          ab.action.paused = false;
+        } else {
+          ab.action.paused = true;
+          ab.action.time = 0;
+        }
+      }
+
       const s = b.scale ?? 1;
       const is3DModel = !!this.layout.textures[b.tex]?.modelUrl;
       const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
       ab.object.position.set(ab.x, objectY, ab.z);
 
-      if (is3DModel && (ab.vx !== 0 || ab.vz !== 0)) {
-        ab.object.rotation.y = Math.atan2(ab.vx, ab.vz);
+      if (is3DModel) {
+        if (ab.vx !== 0 || ab.vz !== 0) {
+          ab.object.rotation.y = Math.atan2(ab.vx, ab.vz);
+        } else {
+          ab.object.rotation.y = b.dir !== undefined ? YAW_FOR_DIR[b.dir] : 0;
+        }
       }
     }
   }
@@ -2030,7 +2077,12 @@ export class Yume25DEngine {
 
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;
-    if (this.ghostKind === 'sprite') this.ghostMesh.rotation.y = this.yaw;
+    if (this.ghostKind === 'sprite') {
+      const is3DModel = !!this.layout.textures[this.ghostMesh.userData.tex]?.modelUrl;
+      if (!is3DModel) {
+        this.ghostMesh.rotation.y = this.yaw;
+      }
+    }
 
     this.updateFade(dt);
   }

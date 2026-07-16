@@ -519,6 +519,7 @@ export interface Billboard25D {
   choices?: string[];
   behavior?: NpcBehavior;
   collidable?: boolean;
+  dir?: Dir4;
 }
 
 /** 2.5Dエンジンのレイアウト全体。プレーンJSONとしてそのまま保存できる。 */
