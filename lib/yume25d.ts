@@ -78,7 +78,7 @@ const SKY_HEIGHT = 36;
 
 // ダメージ床のHP制。2Dエンジン（既定3ダメージ・45フレーム≒0.75秒無敵）に合わせ、
 // 一発で「ゆめから さめる」のではなく HP が尽きたときだけスタートへ戻す。
-const YUME_MAX_HP = 6;             // 1ハート=2HP × 3ハート（2DのonjReze初期値と同じ）
+const YUME_MAX_HP = 20;            // 1ハート=2HP × 10ハート（Minecraftのデフォルトと同じ）
 const DAMAGE_DEFAULT = 3;          // Tex25D.damageAmount 未指定時の被ダメージ量
 const DAMAGE_INVULN_SEC = 0.75;
 const HIT_FLASH_PEAK = 0.45;       // 非致死ヒットの赤フラッシュの最大不透明度
