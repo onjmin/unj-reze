@@ -487,6 +487,11 @@ export interface Tex25D {
   warpDest?: { col: number; row: number; dir?: Dir4 };
   /** special==='damage'：被ダメージ量。未指定時は3（2Dの TileDef.damageAmount と同じ既定値）。 */
   damageAmount?: number;
+  /** サンプル3Dモデル（glb）のURL（kind==='sprite'）。指定時はビルボードの代わりに
+   *  GLTFモデルを配置する（当たり判定なし・すり抜け）。model-catalog.ts の検索モーダルから設定する。 */
+  modelUrl?: string;
+  /** モデルの大きさ（最大辺のマス数）。未指定は1。 */
+  modelScale?: number;
   /** special==='ball'（kind==='sprite'）：球の半径（マス単位）。未指定は0.22。
    *  ボールはビルボードではなく本物の球体メッシュ（模様なし・color の単色＋陰影）で描画される。 */
   ballRadius?: number;

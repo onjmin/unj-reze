@@ -3,13 +3,14 @@
 // yume25d（ゆめにっき3D）の編集パネル。かつては Yume25DMaker 内でキャンバスに重ねる
 // absolute オーバーレイだったが、GameMaker のサイドバーへ吸収し縦積みのリストとして表示する。
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
 import {
   type Layout25D, type Tex25D, type Dir4,
   SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYSTEM_SPRITE_TEMPLATES, type SystemSpriteTemplate,
 } from './game-presets/shared';
+import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
 
 /** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
@@ -80,6 +81,26 @@ export default function Yume25DEditorPanel({
     }));
     onToolChange('floor');
     onSelFloorChange(id);
+  };
+
+  // サンプル3Dモデルの検索モーダル（スプライト検索と同様のキーワード検索）
+  const [modelSearchOpen, setModelSearchOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState('');
+
+  /** 検索モーダルで選んだ3Dモデルをスプライトテクスチャとして追加し、
+   *  スプライトツール＋パレット選択まで済ませる。 */
+  const addModelTex = (m: ModelCatalogEntry) => {
+    const id = Math.max(0, ...Object.keys(layout.textures).map(Number)) + 1;
+    onLayoutChange(l => ({
+      ...l,
+      textures: {
+        ...l.textures,
+        [id]: { id, name: m.label, kind: 'sprite' as const, color: '#9fb4c8', emoji: m.emoji, modelUrl: m.url },
+      },
+    }));
+    onToolChange('sprite');
+    onSelSpriteChange(id);
+    setModelSearchOpen(false);
   };
 
   /** システムスプライト（ボール・スピーカー）を special 付きスプライトテクスチャとして追加し、
@@ -277,6 +298,16 @@ export default function Yume25DEditorPanel({
             {t.special === 'block' && (
               <p className="text-[9px] text-gray-500">一辺1マスの立方体（サイズ固定）。上に乗れて、歩くと1段まで自動でよじ登れます。「高さ」を上げて配置すると積み上げられます。画像参照でテクスチャも貼れます</p>
             )}
+            {t.modelUrl && (
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-center gap-1">大きさ
+                  <input type="range" min={0.25} max={4} step={0.25} value={t.modelScale ?? 1}
+                    onChange={e => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], modelScale: Number(e.target.value) } } }))} className="w-20" />
+                  <span className="text-gray-400">{(t.modelScale ?? 1).toFixed(2)}マス</span>
+                </label>
+                <p className="text-[9px] text-gray-500 break-all">サンプル3Dモデル（CDN読み込み）：{t.modelUrl.replace('https://cdn.jsdelivr.net/gh/', '')}。当たり判定はありません（すり抜け）。「高さ」を上げると宙に浮かせられます</p>
+              </div>
+            )}
             {t.special === 'speaker' && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -367,8 +398,46 @@ export default function Yume25DEditorPanel({
               ＋{tpl.emoji} {tpl.label}
             </button>
           ))}
+          <button onClick={() => { setModelQuery(''); setModelSearchOpen(true); }}
+            className="col-span-2 flex items-center justify-center gap-1 py-1.5 rounded-lg border border-purple-600 bg-purple-900/40 text-[10px] text-purple-200 hover:bg-purple-900/70">
+            ＋🗿 3Dモデル（キーワード検索）
+          </button>
         </div>
       </div>
+
+      {/* サンプル3Dモデルの検索モーダル：three.js / glTF-Sample-Assets の公式サンプルをキーワードで絞り込む */}
+      {modelSearchOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4"
+          onClick={() => setModelSearchOpen(false)}>
+          <div className="w-full max-w-md max-h-[75vh] bg-[#12121c] border border-gray-700 rounded-lg p-3 flex flex-col gap-2"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <span className="text-[12px] font-bold text-violet-300">🗿 サンプル3Dモデルをさがす</span>
+              <button onClick={() => setModelSearchOpen(false)}
+                className="px-2 py-0.5 text-gray-400 hover:text-white text-sm">×</button>
+            </div>
+            <input
+              autoFocus type="text" value={modelQuery}
+              onChange={e => setModelQuery(e.target.value)}
+              placeholder="キーワード（例: 鳥 / robot / くるま）"
+              className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-[12px] text-white outline-none focus:border-violet-500"
+            />
+            <div className="flex-1 overflow-y-auto grid grid-cols-2 gap-1.5 content-start">
+              {searchModels(modelQuery).map(m => (
+                <button key={m.key} onClick={() => addModelTex(m)}
+                  className="flex flex-col items-start gap-0.5 px-2 py-1.5 rounded-lg border border-gray-700 bg-gray-800/70 hover:bg-violet-900/40 hover:border-violet-600 text-left">
+                  <span className="text-[11px] text-gray-100">{m.emoji} {m.label}</span>
+                  <span className="text-[8px] text-gray-500">{m.source === 'three.js' ? 'three.js examples' : 'glTF-Sample-Assets'}</span>
+                </button>
+              ))}
+              {searchModels(modelQuery).length === 0 && (
+                <p className="col-span-2 text-[10px] text-gray-500 py-3 text-center">みつかりませんでした</p>
+              )}
+            </div>
+            <p className="text-[9px] text-gray-500">three.js / Khronos の公式サンプルモデルを CDN（jsDelivr）から読み込みます。選ぶとスプライトパレットに追加され、スプライトツールで配置できます</p>
+          </div>
+        </div>
+      )}
 
       {/* 設定パネル */}
       {settingsOpen && (

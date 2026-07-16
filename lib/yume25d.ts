@@ -2,6 +2,8 @@
 // three.js で低解像度レンダリングする。レイアウトは Layout25D（プレーンJSON）が唯一の真実で、
 // setLayout() でいつでも丸ごと再構築できる。使い終わったら必ず dispose() を呼ぶこと。
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneWithSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D } from '@/components/game-presets/shared';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
@@ -376,6 +378,13 @@ export class Yume25DEngine {
   private ballShadeTex: THREE.CanvasTexture | null = null;
   /** ブロック（special==='block'）の上面高さ一覧。key='c,r'。足場・側面判定に使う。 */
   private blockTops = new Map<string, number[]>();
+
+  // ── サンプル3Dモデル（Tex25D.modelUrl） ──
+  private modelLoader: GLTFLoader | null = null;
+  /** URL → ロード済みシーン（原本）。配置ごとに clone して使い回す。失敗は null。 */
+  private modelCache = new Map<string, Promise<THREE.Group | null>>();
+  /** buildScene の世代番号。非同期ロード完了時に古い世代への差し込みを防ぐ。 */
+  private buildGen = 0;
 
   // ── 海（水面） ──
   private waterMesh: THREE.Mesh | null = null;
@@ -822,6 +831,17 @@ export class Yume25DEngine {
     this.waterMat?.dispose();
     this.rippleGeo?.dispose();
     this.rippleMat?.dispose();
+    // 3Dモデルキャッシュ：原本のジオメトリ/マテリアル/テクスチャを解放（クローンは共有なので原本だけでよい）
+    for (const p of this.modelCache.values()) {
+      p.then(root => root?.traverse(o => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry.dispose();
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) { (m as THREE.MeshLambertMaterial).map?.dispose(); m.dispose(); }
+      }));
+    }
+    this.modelCache.clear();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -1041,9 +1061,50 @@ export class Yume25DEngine {
     this.balls = [];
     this.speakers = [];
     this.blockTops.clear();
+    this.buildGen++;
     const speakerCells = new Map<number, [number, number][]>();  // texId -> スピーカー位置
     for (const b of L.billboards) {
       const def = L.textures[b.tex];
+
+      // サンプル3Dモデル：非同期ロードして正規化（最大辺=modelScaleマス・足元をセルの床へ）した実体を差し込む。
+      // 当たり判定は持たない（すり抜け）。編集ピッキング用に不可視のプロキシ箱だけ置く。
+      if (def?.modelUrl) {
+        const s = (b.scale ?? 1) * (def.modelScale ?? 1);
+        const baseY = (b.level ?? 0) * H;
+        const holder = new THREE.Group();
+        holder.position.set(b.col + 0.5, baseY, b.row + 0.5);
+        this.scene.add(holder);
+        this.worldObjects.push(holder);  // clearWorld でシーンから外すため（Group はレイキャスト対象外）
+        const proxyGeo = new THREE.BoxGeometry(Math.min(1, s * 0.8), s, Math.min(1, s * 0.8));
+        const proxyMat = new THREE.MeshBasicMaterial();
+        this.ownedGeometries.push(proxyGeo);
+        this.ownedMaterials.push(proxyMat);
+        const proxy = new THREE.Mesh(proxyGeo, proxyMat);
+        proxy.visible = false;  // 不可視でもレイキャストには当たる（編集の消去・配置先判定用）
+        proxy.position.set(b.col + 0.5, baseY + s / 2, b.row + 0.5);
+        proxy.userData.bbLevel = b.level ?? 0;
+        this.scene.add(proxy);
+        this.worldObjects.push(proxy);
+        const gen = this.buildGen;
+        this.loadModel(def.modelUrl).then(root => {
+          if (this.disposed || gen !== this.buildGen || !root) return;
+          // SkinnedMesh（Fox/Soldier等）は通常の clone だと骨の参照が壊れるため SkeletonUtils を使う
+          const inst = cloneWithSkeleton(root);
+          // 正規化：最大辺が s マスになる縮尺 → 足元(バウンディングボックスの底)を床・中心をセル中央へ
+          const box = new THREE.Box3().setFromObject(inst);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+          inst.scale.setScalar(s / Math.max(size.x, size.y, size.z, 1e-6));
+          const box2 = new THREE.Box3().setFromObject(inst);
+          inst.position.set(
+            -(box2.min.x + box2.max.x) / 2,
+            -box2.min.y,
+            -(box2.min.z + box2.max.z) / 2,
+          );
+          holder.add(inst);
+        });
+        continue;
+      }
 
       // 立方体ブロック：一辺1マスの箱。上に乗れる足場になる（段=BLOCK_SIZE単位で積める）
       if (def?.special === 'block') {
@@ -1217,6 +1278,41 @@ export class Yume25DEngine {
     this.waterMesh.scale.set(L.cols, L.rows, 1);
     this.waterMesh.position.set(L.cols / 2, lv, L.rows / 2);
     this.waterMat!.color.set(L.waterColor ?? WATER_DEFAULT_COLOR);
+  }
+
+  /** サンプル3Dモデルのロード（URLごとに1回だけ。配置ごとに clone して使い回す）。
+   *  PBR（Standard）素材はエンジンの見た目に合わせて Lambert へ変換する
+   *  （環境マップの無いこのエンジンでは金属マテリアルが真っ黒になるため）。 */
+  private loadModel(url: string): Promise<THREE.Group | null> {
+    let p = this.modelCache.get(url);
+    if (!p) {
+      this.modelLoader ??= new GLTFLoader();
+      p = this.modelLoader.loadAsync(url).then(gltf => {
+        const root = gltf.scene;
+        root.traverse(o => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const conv = (m: THREE.Material): THREE.Material => {
+            const src = m as THREE.MeshStandardMaterial;
+            return new THREE.MeshLambertMaterial({
+              map: src.map ?? null,
+              color: src.color ? src.color.clone() : new THREE.Color('#ffffff'),
+              transparent: src.transparent,
+              opacity: src.opacity,
+              alphaTest: src.alphaTest,
+              side: src.side,
+            });
+          };
+          mesh.material = Array.isArray(mesh.material) ? mesh.material.map(conv) : conv(mesh.material);
+        });
+        return root;
+      }).catch(err => {
+        console.warn('yume25d: 3Dモデルのロードに失敗:', url, err);
+        return null;
+      });
+      this.modelCache.set(url, p);
+    }
+    return p;
   }
 
   /** 球体ボール用の焼き込み陰影（上ほど明るい縦グラデ）。環境光しかない場面でも球に見えるようにする。
