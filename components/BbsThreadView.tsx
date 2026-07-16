@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { ArrowLeft, Share2, Image, Pen, Mic, MoreHorizontal, ThumbsUp } from 'lucide-react';
+import { ArrowLeft, Share2, ThumbsUp } from 'lucide-react';
 import Link from 'next/link';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
@@ -11,6 +11,8 @@ import ChordPlayer from './ChordPlayer';
 import { extractFirstEmbed } from '@/lib/embed';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
+import PostComposer from './PostComposer';
+import { OriginType } from '@/lib/types';
 
 interface BbsThreadViewProps {
   post: Post;
@@ -59,7 +61,12 @@ function getCookie(name: string): string | undefined {
 export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const [post, setPost] = useState<Post>(initial);
   const [replyText, setReplyText] = useState('');
+  const [replyImage, setReplyImage] = useState<string | null>(null);
+  const [replyMml, setReplyMml] = useState<string | null>(null);
+  const [replyGameDraft, setReplyGameDraft] = useState<{ title: string } | null>(null);
+  const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [replyTo, setReplyTo] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
   const heartQueue = useRef(0);
   const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,7 +85,9 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const indexMap = new Map<string, number>(allPosts.map((p, i) => [p.id, i + 1]));
 
   const handleAddReply = async () => {
-    if (!replyText.trim()) return;
+    if (!replyText.trim() && !replyImage && !replyMml && !replyGameDraft) return;
+    if (submitting) return;
+    setSubmitting(true);
     const replyNum = replyTo !== null ? `>>${replyTo}\n` : '';
     const tempId = `temp-${Date.now()}`;
     const optimisticReply: Post = {
@@ -93,21 +102,34 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
       heartsTotal: 0, replies: [],
       threadId: post.id,
       parentPostId: post.id,
+      hasImage: !!replyImage,
+      imageSrc: replyImage ?? undefined,
     };
     setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
+    const capturedText = replyText;
+    const capturedImage = replyImage;
     setReplyText('');
+    setReplyImage(null);
+    setReplyMml(null);
+    setReplyGameDraft(null);
+    setReplyOriginType(undefined);
     setReplyTo(null);
 
-    const reply = await api.posts.replies.create(post.id, {
-      displayName: userId,
-      content: replyNum + replyText,
-      parentPostId: post.id,
-    });
-
-    setPost(p => ({
-      ...p,
-      replies: p.replies.map(r => r.id === tempId ? reply : r)
-    }));
+    try {
+      const reply = await api.posts.replies.create(post.id, {
+        displayName: userId,
+        content: replyNum + capturedText,
+        parentPostId: post.id,
+        hasImage: !!capturedImage,
+        imageSrc: capturedImage ?? undefined,
+      });
+      setPost(p => ({
+        ...p,
+        replies: p.replies.map(r => r.id === tempId ? reply : r),
+      }));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleHeart = useCallback((targetPost: Post) => {
@@ -231,43 +253,38 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
       </div>
 
       {/* Reply composer */}
-      <div className="border-t border-gray-800 px-3 pt-3 pb-4 mt-2">
+      <div className="border-t border-gray-800 mt-2">
         {replyTo !== null && (
-          <div className="flex items-center justify-between text-[10px] text-gray-500 mb-1.5">
-            <span className="text-green-400">&gt;&gt;{replyTo}</span>
-            <button onClick={() => setReplyTo(null)} className="text-gray-600 hover:text-gray-400 transition-colors">取消</button>
+          <div className="flex items-center justify-between px-3 pt-2 text-[10px] text-gray-500">
+            <span className="text-green-400">&gt;&gt;{replyTo} に返信中</span>
+            <button
+              onClick={() => setReplyTo(null)}
+              className="text-gray-600 hover:text-gray-400 transition-colors"
+            >
+              取消
+            </button>
           </div>
         )}
-        <div className="text-[10px] text-gray-600 mb-1.5">レスを投稿</div>
-        <textarea
-          value={replyText}
-          onChange={e => setReplyText(e.target.value)}
-          placeholder={replyTo !== null ? `>>${replyTo} へ返信` : '本文を入力（先頭に >>N でそのレスへ返信）'}
-          className="w-full bg-gray-100/5 hover:bg-gray-100/8 focus:bg-gray-100/8 rounded-lg px-3 py-2.5 text-[13px] text-gray-100 placeholder:text-gray-600 outline-none resize-none h-[100px] border border-gray-800 focus:border-gray-700 transition-colors"
-          onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleAddReply(); }}
+        <PostComposer
+          inline
+          userId={userId}
+          text={replyText}
+          setText={setReplyText}
+          image={replyImage}
+          setImage={setReplyImage}
+          mml={replyMml}
+          setMml={setReplyMml}
+          gameDraft={replyGameDraft}
+          setGameDraft={setReplyGameDraft}
+          originType={replyOriginType}
+          setOriginType={setReplyOriginType}
+          onClose={() => {}}
+          onSubmit={handleAddReply}
+          onOpenDrawing={() => {}}
+          onOpenDotDrawing={() => {}}
+          onOpenMml={() => {}}
+          onOpenGameMaker={() => {}}
         />
-        <div className="flex items-center gap-2 mt-2">
-          <button className="p-2 text-gray-600 hover:text-gray-400 hover:bg-gray-800/50 rounded-lg transition-colors">
-            <Image size={16} />
-          </button>
-          <button className="p-2 text-gray-600 hover:text-gray-400 hover:bg-gray-800/50 rounded-lg transition-colors">
-            <Pen size={16} />
-          </button>
-          <button className="p-2 text-gray-600 hover:text-gray-400 hover:bg-gray-800/50 rounded-lg transition-colors">
-            <Mic size={16} />
-          </button>
-          <button className="p-2 text-gray-600 hover:text-gray-400 hover:bg-gray-800/50 rounded-lg transition-colors">
-            <MoreHorizontal size={16} />
-          </button>
-          <span className="text-[10px] text-gray-600 tabular-nums">{replyText.length}</span>
-          <button
-            onClick={handleAddReply}
-            disabled={!replyText.trim()}
-            className="ml-auto bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold text-xs px-4 py-2 rounded-lg transition-colors"
-          >
-            返信
-          </button>
-        </div>
       </div>
     </>
   );
