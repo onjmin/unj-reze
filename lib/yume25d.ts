@@ -381,8 +381,9 @@ export class Yume25DEngine {
 
   // ── サンプル3Dモデル（Tex25D.modelUrl） ──
   private modelLoader: GLTFLoader | null = null;
-  /** URL → ロード済みシーン（原本）。配置ごとに clone して使い回す。失敗は null。 */
-  private modelCache = new Map<string, Promise<THREE.Group | null>>();
+  /** URL → ロード済みシーン（原本）とアニメーション。配置ごとに clone して使い回す。失敗は null。 */
+  private modelCache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null>>();
+  private mixers: THREE.AnimationMixer[] = [];
   /** buildScene の世代番号。非同期ロード完了時に古い世代への差し込みを防ぐ。 */
   private buildGen = 0;
 
@@ -791,6 +792,11 @@ export class Yume25DEngine {
       const dt = Math.min(0.05, (t - this.lastT) / 1000);
       this.lastT = t;
       this.step(dt);
+
+      for (const mixer of this.mixers) {
+        mixer.update(dt);
+      }
+
       if (this.editMode) this.onEditFrame?.();  // 移動・浮遊でカメラが動いてもプレビューを追従させる
       this.updateSpeeches(t);
       this.updateTexAnimations(t / 1000);
@@ -833,7 +839,7 @@ export class Yume25DEngine {
     this.rippleMat?.dispose();
     // 3Dモデルキャッシュ：原本のジオメトリ/マテリアル/テクスチャを解放（クローンは共有なので原本だけでよい）
     for (const p of this.modelCache.values()) {
-      p.then(root => root?.traverse(o => {
+      p.then(res => res?.scene.traverse(o => {
         const mesh = o as THREE.Mesh;
         if (!mesh.isMesh) return;
         mesh.geometry.dispose();
@@ -858,6 +864,7 @@ export class Yume25DEngine {
     for (const o of this.worldObjects) this.scene.remove(o);
     this.worldObjects = [];
     this.billboardMeshes = [];
+    this.mixers = [];
     for (const g of this.ownedGeometries) g.dispose();
     this.ownedGeometries = [];
     for (const m of this.ownedMaterials) m.dispose();
@@ -1086,10 +1093,25 @@ export class Yume25DEngine {
         this.scene.add(proxy);
         this.worldObjects.push(proxy);
         const gen = this.buildGen;
-        this.loadModel(def.modelUrl).then(root => {
-          if (this.disposed || gen !== this.buildGen || !root) return;
+        this.loadModel(def.modelUrl).then(res => {
+          if (this.disposed || gen !== this.buildGen || !res) return;
+          const { scene: root, animations } = res;
           // SkinnedMesh（Fox/Soldier等）は通常の clone だと骨の参照が壊れるため SkeletonUtils を使う
           const inst = cloneWithSkeleton(root);
+
+          // Play animation if available
+          if (animations && animations.length > 0) {
+            const mixer = new THREE.AnimationMixer(inst);
+            // Search for walk, run, or fly animations, otherwise default to first clip
+            const clip = animations.find(c => {
+              const name = c.name.toLowerCase();
+              return name.includes('walk') || name.includes('run') || name.includes('fly');
+            }) || animations[0];
+            
+            mixer.clipAction(clip).play();
+            this.mixers.push(mixer);
+          }
+
           // 正規化：最大辺が s マスになる縮尺 → 足元(バウンディングボックスの底)を床・中心をセル中央へ
           const box = new THREE.Box3().setFromObject(inst);
           const size = new THREE.Vector3();
@@ -1283,7 +1305,7 @@ export class Yume25DEngine {
   /** サンプル3Dモデルのロード（URLごとに1回だけ。配置ごとに clone して使い回す）。
    *  PBR（Standard）素材はエンジンの見た目に合わせて Lambert へ変換する
    *  （環境マップの無いこのエンジンでは金属マテリアルが真っ黒になるため）。 */
-  private loadModel(url: string): Promise<THREE.Group | null> {
+  private loadModel(url: string): Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null> {
     let p = this.modelCache.get(url);
     if (!p) {
       this.modelLoader ??= new GLTFLoader();
@@ -1305,7 +1327,7 @@ export class Yume25DEngine {
           };
           mesh.material = Array.isArray(mesh.material) ? mesh.material.map(conv) : conv(mesh.material);
         });
-        return root;
+        return { scene: root, animations: gltf.animations };
       }).catch(err => {
         console.warn('yume25d: 3Dモデルのロードに失敗:', url, err);
         return null;
