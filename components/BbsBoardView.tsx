@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus, Loader2 } from 'lucide-react';
 import { Post } from '@/lib/types';
+import { extractFirstEmbed, getEmbedThumbnail } from '@/lib/embed';
 
 interface BbsBoardViewProps {
   posts: Post[];
@@ -141,11 +142,23 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
               </div>
 
               {/* Thumbnail */}
-              {post.hasImage && post.imageSrc && (
-                <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
-                  <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
-                </div>
-              )}
+              {(() => {
+                if (post.hasImage && post.imageSrc) {
+                  return (
+                    <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
+                      <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  );
+                }
+                const embed = extractFirstEmbed(post.content);
+                const thumb = embed ? getEmbedThumbnail(embed) : null;
+                if (!thumb) return null;
+                return (
+                  <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
+                    <img src={thumb} alt="" className="w-full h-full object-cover" />
+                  </div>
+                );
+              })()}
             </div>
           ))
         )}

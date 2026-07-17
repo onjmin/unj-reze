@@ -258,3 +258,24 @@ export function extractFirstEmbed(content: string): EmbeddedMedia | null {
   }
   return null;
 }
+
+const DIRECT_IMAGE_SITE_IDS = new Set([
+  401, 402, 405, 411, 412, 413,
+  801, 802, 811, 812, 813, 831,
+  4099,
+]);
+
+export function getEmbedThumbnail(embed: EmbeddedMedia): string | null {
+  if (embed.siteId === 1601) {
+    const m = embed.embedUrl.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+    return m ? `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg` : null;
+  }
+  if (embed.siteId === 421) {
+    const m = embed.rawUrl.match(/gyazo\.com\/([a-f0-9]+)/);
+    return m ? `https://i.gyazo.com/${m[1]}.png` : null;
+  }
+  if (DIRECT_IMAGE_SITE_IDS.has(embed.siteId)) {
+    return embed.embedUrl;
+  }
+  return null;
+}
