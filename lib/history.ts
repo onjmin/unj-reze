@@ -2,6 +2,7 @@ export interface SavedLayer {
   name: string;
   visible: boolean;
   locked: boolean;
+  opacity?: number;
   dataUrl: string;
 }
 
@@ -78,6 +79,7 @@ export const serializeLayers = (layers: any[], w: number, h: number): SavedLayer
     name: l.name,
     visible: l.visible,
     locked: l.locked,
+    opacity: l.opacity ?? 100,
     dataUrl: layerToDataUrl(l.data, w, h)
   }));
 };
@@ -89,6 +91,7 @@ export const deserializeLayers = async (savedLayers: SavedLayer[], w: number, h:
       name: sl.name,
       visible: sl.visible,
       locked: sl.locked,
+      opacity: sl.opacity ?? 100,
       data
     };
   });

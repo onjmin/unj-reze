@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Eraser, PaintBucket, Pipette,
-  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload, History
+  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload, History, FlipHorizontal
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -51,13 +51,14 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [walkActiveIndex, setWalkActiveIndex] = useState(0);
   const [initKey, setInitKey] = useState(0);
   const walkDataRef = useRef<Map<number, string>>(new Map());
-  const walkLayersRef = useRef<Map<number, { layers: { name: string; visible: boolean; locked: boolean; data: Uint8ClampedArray }[] }>>(new Map());
+  const walkLayersRef = useRef<Map<number, { layers: { name: string; visible: boolean; locked: boolean; opacity: number; data: Uint8ClampedArray }[] }>>(new Map());
   const walkModeRef = useRef(walkMode);
   const walkPresetRef = useRef(walkPreset);
   const walkActiveIndexRef = useRef(0);
   const [tool, setTool] = useState<Tool>('pen');
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
+  const [flipped, setFlipped] = useState(false);
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef(1);
@@ -175,7 +176,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         if (!ctx) return;
         ctx.imageSmoothingEnabled = false;
         const total = preset.frames * preset.ways.length;
-        const newMap = new Map<number, { layers: { name: string; visible: boolean; locked: boolean; data: Uint8ClampedArray }[] }>();
+        const newMap = new Map<number, { layers: { name: string; visible: boolean; locked: boolean; opacity: number; data: Uint8ClampedArray }[] }>();
         for (let i = 0; i < total; i++) {
           const cellX = i % preset.frames;
           const cellY = Math.floor(i / preset.frames);
@@ -203,7 +204,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
               }
             }
           }
-          newMap.set(i, { layers: [{ name: 'レイヤー #1', visible: true, locked: false, data: buf }] });
+          newMap.set(i, { layers: [{ name: 'レイヤー #1', visible: true, locked: false, opacity: 100, data: buf }] });
         }
         walkDataRef.current.clear();
         for (let i = 0; i < total; i++) {
@@ -414,6 +415,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           name: l.name,
           visible: l.visible,
           locked: l.locked,
+          opacity: l.opacity,
           data: new Uint8ClampedArray(l.data),
         }))
       });
@@ -511,10 +513,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           oekaki.refresh();
           const cellData = deserializedWalkLayers.get(restoredState.walkActiveIndex || 0);
           if (cellData && cellData.layers.length > 0) {
-            for (const { name, visible, locked, data } of cellData.layers) {
+            for (const { name, visible, locked, opacity, data } of cellData.layers) {
               const l = new oekaki.LayeredCanvas(name);
               l.visible = visible;
               l.locked = locked;
+              l.opacity = opacity;
               l.data = new Uint8ClampedArray(data);
             }
           } else {
@@ -531,10 +534,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           for (const l of oekaki.getLayers()) l.delete();
           oekaki.refresh();
           const deserializedLayers = await deserializeLayers(restoredState.layers, w, h);
-          for (const { name, visible, locked, data } of deserializedLayers) {
+          for (const { name, visible, locked, opacity, data } of deserializedLayers) {
             const l = new oekaki.LayeredCanvas(name);
             l.visible = visible;
             l.locked = locked;
+            l.opacity = opacity;
             l.data = new Uint8ClampedArray(data);
           }
         }
@@ -543,10 +547,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         if (isWalk) {
           const cellData = walkLayersRef.current.get(walkActiveIndexRef.current);
           if (cellData && cellData.layers.length > 0) {
-            for (const { name, visible, locked, data } of cellData.layers) {
+            for (const { name, visible, locked, opacity, data } of cellData.layers) {
               const l = new oekaki.LayeredCanvas(name);
               l.visible = visible;
               l.locked = locked;
+              l.opacity = opacity;
               l.data = new Uint8ClampedArray(data);
             }
           } else {
@@ -693,6 +698,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         name: l.name,
         visible: l.visible,
         locked: l.locked,
+        opacity: l.opacity,
         data: new Uint8ClampedArray(l.data),
       }))
     });
@@ -701,10 +707,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     oekaki.refresh();
     const cellData = walkLayersRef.current.get(walkActiveIndex);
     if (cellData && cellData.layers.length > 0) {
-      for (const { name, visible, locked, data } of cellData.layers) {
+      for (const { name, visible, locked, opacity, data } of cellData.layers) {
         const l = new oekaki.LayeredCanvas(name);
         l.visible = visible;
         l.locked = locked;
+        l.opacity = opacity;
         l.data = new Uint8ClampedArray(data);
       }
     } else {
@@ -729,6 +736,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         name: l.name,
         visible: l.visible,
         locked: l.locked,
+        opacity: l.opacity,
         data: new Uint8ClampedArray(l.data),
       }))
     });
@@ -833,6 +841,13 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     forceRender(n => n + 1);
   };
 
+  const setLayerOpacity = (i: number, opacity: number) => {
+    const entry = layerEntriesRef.current[i];
+    if (!entry) return;
+    entry.instance.opacity = opacity;
+    forceRender(n => n + 1);
+  };
+
   // ── Animation ──
 
   const syncLayerEntries = () => {
@@ -849,6 +864,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       name: l.name,
       visible: l.visible,
       locked: l.locked,
+      opacity: l.opacity,
       data: new Uint8ClampedArray(l.data),
     })),
   });
@@ -856,10 +872,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const applyFrame = (frame: FrameData) => {
     for (const l of oekaki.getLayers()) l.delete();
     oekaki.refresh();
-    for (const { name, visible, locked, data } of frame.layers) {
+    for (const { name, visible, locked, opacity, data } of frame.layers) {
       const l = new oekaki.LayeredCanvas(name);
       l.visible = visible;
       l.locked = locked;
+      l.opacity = opacity;
       l.data = new Uint8ClampedArray(data);
     }
     syncLayerEntries();
@@ -880,6 +897,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         name: l.name,
         visible: l.visible,
         locked: l.locked,
+        opacity: l.opacity,
         data: new Uint8ClampedArray(l.canvas.width * l.canvas.height * 4),
       })),
     };
@@ -1221,6 +1239,13 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           >
             <Layers size={13} />
           </button>
+          <button
+            onClick={() => { oekaki.flipped.value = !oekaki.flipped.value; setFlipped(oekaki.flipped.value); }}
+            className={'w-8 h-8 rounded-lg flex items-center justify-center transition-colors ' + (flipped ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
+            title="左右反転"
+          >
+            <FlipHorizontal size={13} />
+          </button>
         </div>
 
         <div className="flex items-center space-x-1.5">
@@ -1295,6 +1320,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           onReorder={reorderLayers}
           onToggleVisibility={toggleVisibility}
           onToggleLock={toggleLock}
+          onOpacityChange={setLayerOpacity}
           onAdd={addLayer}
           onDelete={deleteLayer}
           onClose={() => setShowLayerPanel(false)}

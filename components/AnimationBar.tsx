@@ -7,6 +7,7 @@ export interface FrameData {
     name: string;
     visible: boolean;
     locked: boolean;
+    opacity: number;
     data: Uint8ClampedArray;
   }[];
 }

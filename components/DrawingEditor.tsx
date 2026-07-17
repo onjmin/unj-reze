@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
-  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History
+  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History, FlipHorizontal
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -61,6 +61,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [onionSkin, setOnionSkin] = useState(false);
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
   const [zoom, setZoom] = useState(1);
+  const [flipped, setFlipped] = useState(false);
 
   // History & Autosave States
   const [showHistory, setShowHistory] = useState(false);
@@ -244,10 +245,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           for (const l of oekaki.getLayers()) l.delete();
           oekaki.refresh();
           const deserializedLayers = await deserializeLayers(restoredState.layers, w, h);
-          for (const { name, visible, locked, data } of deserializedLayers) {
+          for (const { name, visible, locked, opacity, data } of deserializedLayers) {
             const l = new oekaki.LayeredCanvas(name);
             l.visible = visible;
             l.locked = locked;
+            l.opacity = opacity;
             l.data = new Uint8ClampedArray(data);
           }
           syncLayerEntries();
@@ -474,6 +476,13 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     forceRender(n => n + 1);
   };
 
+  const setLayerOpacity = (i: number, opacity: number) => {
+    const entry = layerEntriesRef.current[i];
+    if (!entry) return;
+    entry.instance.opacity = opacity;
+    forceRender(n => n + 1);
+  };
+
   // ── Animation ──
 
   const syncLayerEntries = () => {
@@ -490,6 +499,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       name: l.name,
       visible: l.visible,
       locked: l.locked,
+      opacity: l.opacity,
       data: new Uint8ClampedArray(l.data),
     })),
   });
@@ -497,10 +507,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const applyFrame = (frame: FrameData) => {
     for (const l of oekaki.getLayers()) l.delete();
     oekaki.refresh();
-    for (const { name, visible, locked, data } of frame.layers) {
+    for (const { name, visible, locked, opacity, data } of frame.layers) {
       const l = new oekaki.LayeredCanvas(name);
       l.visible = visible;
       l.locked = locked;
+      l.opacity = opacity;
       l.data = new Uint8ClampedArray(data);
     }
     syncLayerEntries();
@@ -521,6 +532,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         name: l.name,
         visible: l.visible,
         locked: l.locked,
+        opacity: l.opacity,
         data: new Uint8ClampedArray(l.canvas.width * l.canvas.height * 4),
       })),
     };
@@ -787,6 +799,13 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           >
             <Layers size={15} />
           </button>
+          <button
+            onClick={() => { oekaki.flipped.value = !oekaki.flipped.value; setFlipped(oekaki.flipped.value); }}
+            className={'w-9 h-9 rounded-lg flex items-center justify-center transition-colors ' + (flipped ? 'bg-blue-600 text-white shadow' : 'bg-gray-100/10 text-gray-300 hover:bg-gray-100/20')}
+            title="左右反転"
+          >
+            <FlipHorizontal size={15} />
+          </button>
         </div>
 
         <div className="flex items-center space-x-3">
@@ -895,6 +914,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           onReorder={reorderLayers}
           onToggleVisibility={toggleVisibility}
           onToggleLock={toggleLock}
+          onOpacityChange={setLayerOpacity}
           onAdd={addLayer}
           onDelete={deleteLayer}
           onClose={() => setShowLayerPanel(false)}
