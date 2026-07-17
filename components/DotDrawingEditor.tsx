@@ -105,8 +105,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const applyColor = (c: string) => {
     setColor(c);
     oekaki.color.value = c;
-    setTool('pen');
-    toolRef.current = 'pen';
     setRecentColors(prev => {
       const filtered = prev.filter(x => x !== c);
       return [c, ...filtered].slice(0, 8);
@@ -1240,6 +1238,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         onPointerMove={handlePinchPointerMove}
         onPointerUp={handlePinchPointerUp}
         onPointerCancel={handlePinchPointerUp}
+        onContextMenu={(e) => e.preventDefault()}
       >
         <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }} />
       </div>
