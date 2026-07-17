@@ -260,6 +260,57 @@ const DEFAULT_ICE_SLIDE_SPEED = 6;
 
 const clone = (d: PresetData): PresetData => JSON.parse(JSON.stringify(d));
 
+/** 保存/エクスポートされたマニフェストから編集用 PresetData を再構築する
+ *  （既存ゲームの初期ロード・履歴復元・JSONインポートの共通処理）。
+ *  欠けている項目はプリセットの既定値で補い、古い/部分的なマニフェストでも読み込めるようにする。 */
+const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId; data: PresetData } => {
+  const presetId = PRESETS[manifest.preset] ? manifest.preset : 'dq';
+  const base = clone(PRESETS[presetId]);
+  const map = manifest.map ?? base.map;
+  const data: PresetData = {
+    ...base,
+    engine: manifest.engine ?? base.engine,
+    name: manifest.name ?? base.name,
+    gravity: manifest.gravity ?? base.gravity,
+    friction: manifest.friction ?? base.friction,
+    iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
+    player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player?.spriteRef) },
+    tiles: manifest.tiles
+      ? Object.fromEntries(
+        Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
+      )
+      : base.tiles,
+    map,
+    overlayMap: manifest.overlayMap ?? emptyGridLike(map),
+    overheadMap: manifest.overheadMap ?? emptyGridLike(map),
+    objects: (manifest.objects ?? []).map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
+    mapBgRef: manifest.mapBgRef,
+    mapBgUrl: undefined,
+    scroll: manifest.scroll ?? base.scroll,
+    switches: manifest.switches ?? base.switches,
+    items: manifest.items ?? base.items,
+    phases: manifest.phases ?? base.phases,
+    titleScreen: manifest.titleScreen ?? base.titleScreen,
+    ending: manifest.ending ?? base.ending,
+    deathScreen: manifest.deathScreen ?? base.deathScreen,
+    battle: manifest.battle ?? base.battle,
+    layout25d: manifest.layout25d ?? base.layout25d,
+    scenes: manifest.scenes?.map(s => ({
+      ...s,
+      overheadMap: s.overheadMap ?? emptyGridLike(s.map),
+      objects: (s.objects ?? []).map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
+      bgm: hydrateBgmFromRef(s.bgm),
+    })),
+    bgm: hydrateBgmFromRef(manifest.bgm),
+    battleBgm: hydrateBgmFromRef(manifest.battleBgm),
+    bossBgm: hydrateBgmFromRef(manifest.bossBgm),
+    sfx: Object.fromEntries(
+      Object.entries(manifest.sfx ?? {}).map(([k, v]) => [k, v ? { ref: v } : undefined])
+    ) as PresetData['sfx'],
+  };
+  return { presetId, data };
+};
+
 /** 現在のワールド幅／高さ（タイル数）。scroll 優先、無ければマップ実寸。 */
 const curWorldCols = (d: PresetData): number => d.scroll?.worldCols ?? d.map[0]?.length ?? COLS;
 const curWorldRows = (d: PresetData): number => d.scroll?.worldRows ?? d.map.length ?? ROWS;
@@ -1571,54 +1622,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     forceRender(n => n + 1);
   };
 
-  const loadManifest = (manifest: GameManifestDraft) => {
-    const preset = PRESETS[manifest.preset] ? manifest.preset : 'dq';
-    const base = clone(PRESETS[preset]);
-    const data: PresetData = {
-      ...base,
-      engine: manifest.engine,
-      name: manifest.name,
-      gravity: manifest.gravity,
-      friction: manifest.friction,
-      iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
-      player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
-      tiles: Object.fromEntries(
-        Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
-      ),
-      map: manifest.map,
-      overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
-      overheadMap: manifest.overheadMap ?? emptyGridLike(manifest.map),
-      objects: manifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-      mapBgRef: manifest.mapBgRef,
-      mapBgUrl: undefined,
-      scroll: manifest.scroll ?? base.scroll,
-      phases: manifest.phases ?? base.phases,
-      titleScreen: manifest.titleScreen ?? base.titleScreen,
-      ending: manifest.ending ?? base.ending,
-      deathScreen: manifest.deathScreen ?? base.deathScreen,
-      battle: manifest.battle ?? base.battle,
-      layout25d: manifest.layout25d ?? base.layout25d,
-      scenes: manifest.scenes?.map(s => ({
-        ...s,
-        overheadMap: s.overheadMap ?? emptyGridLike(s.map),
-        objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-        bgm: hydrateBgmFromRef(s.bgm),
-      })),
-      bgm: hydrateBgmFromRef(manifest.bgm),
-      battleBgm: hydrateBgmFromRef(manifest.battleBgm),
-      bossBgm: hydrateBgmFromRef(manifest.bossBgm),
-      sfx: Object.fromEntries(
-        Object.entries(manifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
-      ) as PresetData['sfx'],
-    };
-    setPresetId(preset);
-    setGameData(data);
-    setTitle(manifest.name);
-    const eng = engineRef.current;
-    eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
-    eng.map = JSON.parse(JSON.stringify(data.map));
-    eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
-    setIsPlaying(false); setSelectedObjId(null);
+  const loadManifest = (manifest: GameManifestDraft, titleOverride?: string) => {
+    const { presetId: preset, data } = manifestToPresetData(manifest);
+    applyPresetData(preset, data, titleOverride || manifest.name || data.name);
   };
 
   const handleRestoreHistory = (data: any) => {
@@ -4920,48 +4926,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   useEffect(() => {
     if (initialManifest) {
       // 既存ゲームを読み込む
-      const preset = PRESETS[initialManifest.preset] ? initialManifest.preset : 'dq';
-      const base = clone(PRESETS[preset]);
-      const data: PresetData = {
-        ...base,
-        engine: initialManifest.engine,
-        name: initialManifest.name,
-        gravity: initialManifest.gravity,
-        friction: initialManifest.friction,
-        iceSlideSpeed: initialManifest.iceSlideSpeed ?? base.iceSlideSpeed,
-        player: { ...base.player, ...initialManifest.player, spriteUrl: hydrateUrlFromRef(initialManifest.player.spriteRef) },
-        tiles: Object.fromEntries(
-          Object.entries(initialManifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
-        ),
-        map: initialManifest.map,
-        overlayMap: initialManifest.overlayMap ?? emptyGridLike(initialManifest.map),
-        overheadMap: initialManifest.overheadMap ?? emptyGridLike(initialManifest.map),
-        objects: initialManifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-        scroll: initialManifest.scroll ?? base.scroll,
-        phases: initialManifest.phases ?? base.phases,
-        titleScreen: initialManifest.titleScreen ?? base.titleScreen,
-        ending: initialManifest.ending ?? base.ending,
-        deathScreen: initialManifest.deathScreen ?? base.deathScreen,
-        battle: initialManifest.battle ?? base.battle,
-        layout25d: initialManifest.layout25d ?? base.layout25d,
-        scenes: initialManifest.scenes?.map(s => ({
-          ...s,
-          overheadMap: s.overheadMap ?? emptyGridLike(s.map),
-          objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-          bgm: hydrateBgmFromRef(s.bgm),
-        })),
-        bgm: hydrateBgmFromRef(initialManifest.bgm),
-        battleBgm: hydrateBgmFromRef(initialManifest.battleBgm),
-        bossBgm: hydrateBgmFromRef(initialManifest.bossBgm),
-        sfx: Object.fromEntries(
-          Object.entries(initialManifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
-        ) as PresetData['sfx'],
-        mapBgRef: initialManifest.mapBgRef,
-        mapBgUrl: undefined,
-      };
+      const { presetId: preset, data } = manifestToPresetData(initialManifest);
       setPresetId(preset);
       setGameData(data);
-      setTitle(initialManifest.name);
+      setTitle(data.name);
       const eng = engineRef.current;
       eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
       eng.map = JSON.parse(JSON.stringify(data.map));
@@ -10228,55 +10196,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const manifest = JSON.parse(ev.target?.result as string) as GameManifestDraft;
-        const preset = PRESETS[manifest.preset] ? manifest.preset : 'dq';
-        const base = clone(PRESETS[preset]);
-        const data: PresetData = {
-          ...base,
-          engine: manifest.engine,
-          name: manifest.name,
-          gravity: manifest.gravity,
-          friction: manifest.friction,
-          iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
-          player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player.spriteRef) },
-          tiles: Object.fromEntries(
-            Object.entries(manifest.tiles).map(([k, t]) => [k, { ...t, imageUrl: hydrateUrlFromRef(t.imageRef) ?? t.imageUrl }])
-          ),
-          map: manifest.map,
-          overlayMap: manifest.overlayMap ?? emptyGridLike(manifest.map),
-          overheadMap: manifest.overheadMap ?? emptyGridLike(manifest.map),
-          objects: manifest.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-          mapBgRef: manifest.mapBgRef,
-          mapBgUrl: undefined,
-          scroll: manifest.scroll ?? base.scroll,
-          phases: manifest.phases ?? base.phases,
-          titleScreen: manifest.titleScreen ?? base.titleScreen,
-          ending: manifest.ending ?? base.ending,
-          deathScreen: manifest.deathScreen ?? base.deathScreen,
-          battle: manifest.battle ?? base.battle,
-          layout25d: manifest.layout25d ?? base.layout25d,
-          scenes: manifest.scenes?.map(s => ({
-            ...s,
-            overheadMap: s.overheadMap ?? emptyGridLike(s.map),
-            objects: s.objects.map(o => ({ ...o, spriteUrl: hydrateUrlFromRef(o.spriteRef) })),
-            bgm: hydrateBgmFromRef(s.bgm),
-          })),
-          bgm: hydrateBgmFromRef(manifest.bgm),
-          battleBgm: hydrateBgmFromRef(manifest.battleBgm),
-          bossBgm: hydrateBgmFromRef(manifest.bossBgm),
-          sfx: Object.fromEntries(
-            Object.entries(manifest.sfx).map(([k, v]) => [k, v ? { ref: v } : undefined])
-          ) as PresetData['sfx'],
-        };
-        setPresetId(preset);
-        setGameData(data);
-        setTitle(manifest.name);
-        const eng = engineRef.current;
-        eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
-        eng.map = JSON.parse(JSON.stringify(data.map));
-        eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
-        setIsPlaying(false); setSelectedObjId(null);
-      } catch { alert('JSONの解析に失敗しました'); }
+        const raw = JSON.parse(ev.target?.result as string);
+        // DBレコードやAPIレスポンス（{ title, manifest: {...} }）で包まれていても中身を取り出す
+        const manifest = (raw && typeof raw === 'object' && raw.manifest && typeof raw.manifest === 'object'
+          ? raw.manifest : raw) as GameManifestDraft;
+        if (!manifest || typeof manifest !== 'object' || (!manifest.map && !manifest.layout25d && !manifest.scenes)) {
+          alert('ゲームのJSONではないようです（map / layout25d / scenes が見つかりません）');
+          return;
+        }
+        loadManifest(manifest, typeof raw.title === 'string' && raw.title ? raw.title : undefined);
+      } catch (err) {
+        console.error('game JSON import failed', err);
+        alert(`JSONの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+      }
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -10357,14 +10289,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         mapBgRef: manifest.mapBgRef,
         bgm: hydrateBgmFromRef(manifest.bgm),
       };
-      setPresetId(preset as PresetId);
-      setGameData(data);
-      setTitle(manifest.name);
-      const eng = engineRef.current;
-      eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
-      eng.map = JSON.parse(JSON.stringify(data.map));
-      eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
-      setIsPlaying(false); setSelectedObjId(null);
+      applyPresetData(preset as PresetId, data, manifest.name);
       setShowRpgenModal(false);
       setRpgenInputText('');
     } catch (err) { alert('RPGENの読み込みに失敗しました。'); console.error(err); }
@@ -10560,6 +10485,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             >
               <Settings size={14} />
             </button>
+            <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             {settingsOpen && (
               <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
                 {/* 無敵モード */}
@@ -10598,7 +10524,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 >
                   <Upload size={13} />データをインポート (.json)
                 </button>
-                <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
                 <button
                   onClick={() => { setShowRpgenModal(true); setSettingsOpen(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
