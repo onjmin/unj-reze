@@ -1945,7 +1945,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const onjRezeHpRef = useRef<{ hp: number; max: number }>({ hp: 6, max: 6 }); // ハート（1ハート=2HP）
   const checkpointRef = useRef<{ x: number; y: number } | null>(null);
   // onjReze: 原作のボム挙動の再現（💣設置・🎯投げ・💀首爆弾・爆発）。すべてフレーム単位（60fps想定）。
-  const onjBombsRef = useRef<{ x: number; y: number; fuse: number; maxFuse: number; r: number; dmg: number; head: boolean; srcUrl?: string; owner?: Entity }[]>([]);   // 着地済み・導火線カウント中のボム（中心座標）
+  // thrown: プレイヤーが投げたボム（🎯/💀）のみ true。爆発時の地形破壊はこのボムだけが起こす。
+  const onjBombsRef = useRef<{ x: number; y: number; fuse: number; maxFuse: number; r: number; dmg: number; head: boolean; thrown?: boolean; srcUrl?: string; owner?: Entity }[]>([]);   // 着地済み・導火線カウント中のボム（中心座標）
   const onjFliesRef = useRef<{ fx: number; fy: number; tx: number; ty: number; t: number; dur: number; fuse: number; r: number; dmg: number; head: boolean; srcUrl?: string; owner?: Entity }[]>([]); // 放物線で飛行中のボム/首
   const onjBlastsRef = useRef<{ x: number; y: number; life: number; maxLife: number; r: number }[]>([]);  // 爆発エフェクト
   const onjBombCoolRef = useRef(0);   // 💣設置のクールダウン（長押し連打）
@@ -6727,7 +6728,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           for (let i = onjFliesRef.current.length - 1; i >= 0; i--) {
             const fb = onjFliesRef.current[i]; fb.t++;
             if (fb.t >= fb.dur) {
-              onjBombsRef.current.push({ x: fb.tx, y: fb.ty, fuse: fb.fuse, maxFuse: fb.fuse, r: fb.r, dmg: fb.dmg, head: fb.head, srcUrl: fb.srcUrl, owner: fb.owner });
+              onjBombsRef.current.push({ x: fb.tx, y: fb.ty, fuse: fb.fuse, maxFuse: fb.fuse, r: fb.r, dmg: fb.dmg, head: fb.head, thrown: !fb.owner, srcUrl: fb.srcUrl, owner: fb.owner });
               onjFliesRef.current.splice(i, 1);
             }
           }
@@ -6744,6 +6745,43 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             onjBlastsRef.current.push({ x: bm.x, y: bm.y, life: B_BLAST, maxLife: B_BLAST, r: bm.r });
             hitShake(); playSfx(sfxRef.current.damage);
+            // 🧱 地形破壊：プレイヤーが投げたボム（🎯/💀）のみ、爆風範囲内の通行不可タイルを破壊する。
+            // special 付きタイル（移動ポイント 'warp' 等の機能タイル）は破壊しない——移動ポイントを
+            // 壊すとプレイヤーが脱出不能になって詰むため。ワープオブジェクト（objType==='warp'）は
+            // 下の敵ダメージループで既に除外済み。eng.map / eng.overlayMap はプレイ開始時の
+            // ディープコピーなので、書き換えてもエディタ側データには影響しない。
+            if (bm.thrown && !bm.owner) {
+              const cMin = Math.max(0, Math.floor((bm.x - bm.r) / TILE_SIZE));
+              const cMax = Math.min(worldCols - 1, Math.floor((bm.x + bm.r) / TILE_SIZE));
+              const rMin = Math.max(0, Math.floor((bm.y - bm.r) / TILE_SIZE));
+              const rMax = Math.min(worldRows - 1, Math.floor((bm.y + bm.r) / TILE_SIZE));
+              // 置き換え先の床：爆心周辺で最も多い「通行可・特殊効果なし」の床タイル（見た目を周囲に馴染ませる）
+              const fillCounts = new Map<number, number>();
+              for (let rr = rMin; rr <= rMax; rr++) for (let cc = cMin; cc <= cMax; cc++) {
+                const id = eng.map[rr]?.[cc] ?? 0;
+                const inf = gameData.tiles[id];
+                if (inf?.passable && !inf.special) fillCounts.set(id, (fillCounts.get(id) ?? 0) + 1);
+              }
+              let fillId = -1, fillN = 0;
+              fillCounts.forEach((n, id) => { if (n > fillN) { fillN = n; fillId = id; } });
+              if (fillId < 0) {
+                const k = Object.keys(gameData.tiles).find(key => { const ti = gameData.tiles[Number(key)]; return ti?.passable && !ti.special; });
+                if (k !== undefined) fillId = Number(k);
+              }
+              for (let rr = rMin; rr <= rMax; rr++) for (let cc = cMin; cc <= cMax; cc++) {
+                const tcx = cc * TILE_SIZE + TILE_SIZE / 2, tcy = rr * TILE_SIZE + TILE_SIZE / 2;
+                if (Math.hypot(tcx - bm.x, tcy - bm.y) > bm.r) continue;
+                // オブジェクト層（重ね置きの壁・木など）：通行不可なら取り除いて下の床を見せる
+                const ovRow = eng.overlayMap?.[rr];
+                if (ovRow?.[cc]) {
+                  const oi = gameData.tiles[ovRow[cc]];
+                  if (oi && !oi.passable && !oi.special) ovRow[cc] = 0;
+                }
+                // 床レイヤー：通行不可タイルを周囲に馴染む通行可タイルへ置き換える
+                const fi = gameData.tiles[eng.map[rr]?.[cc] ?? 0];
+                if (fillId >= 0 && fi && !fi.passable && !fi.special) eng.map[rr][cc] = fillId;
+              }
+            }
             for (let k = eng.entities.length - 1; k >= 0; k--) {
               const ent = eng.entities[k];
               if (ent.def.objType === 'warp') continue; // 扉などのワープオブジェクトは攻撃で破壊されない
