@@ -228,13 +228,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     oekaki.flipped.value = false;
     setFlipped(false);
     canvasSizeRef.current = { w, h };
-    el.style.width = `${w * zoom}px`;
-    el.style.height = `${h * zoom}px`;
-    const canvases = el.querySelectorAll('canvas');
-    for (const c of canvases) {
-      c.style.width = `${w * zoom}px`;
-      c.style.height = `${h * zoom}px`;
-    }
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
@@ -408,15 +401,44 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
-    const { w, h } = canvasSizeRef.current;
-    if (!w || !h) return;
-    el.style.width = `${w * zoom}px`;
-    el.style.height = `${h * zoom}px`;
-    const canvases = el.querySelectorAll('canvas');
-    for (const c of canvases) {
-      c.style.width = `${w * zoom}px`;
-      c.style.height = `${h * zoom}px`;
-    }
+    const correctCoords = (e: PointerEvent) => {
+      const canvas = oekaki.upperLayer.value?.canvas;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const sx = canvas.width / rect.width;
+      const sy = canvas.height / rect.height;
+      if (sx === 1 && sy === 1) return;
+      Object.defineProperty(e, 'clientX', { value: rect.left + (e.clientX - rect.left) * sx, configurable: true });
+      Object.defineProperty(e, 'clientY', { value: rect.top + (e.clientY - rect.top) * sy, configurable: true });
+    };
+    const patchCoalesced = (e: PointerEvent) => {
+      for (const ce of e.getCoalescedEvents()) correctCoords(ce);
+    };
+    const onPointer = (e: PointerEvent) => { correctCoords(e); patchCoalesced(e); };
+    const onClick = (e: MouseEvent) => {
+      const canvas = oekaki.upperLayer.value?.canvas;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const sx = canvas.width / rect.width;
+      const sy = canvas.height / rect.height;
+      if (sx === 1 && sy === 1) return;
+      Object.defineProperty(e, 'clientX', { value: rect.left + (e.clientX - rect.left) * sx, configurable: true });
+      Object.defineProperty(e, 'clientY', { value: rect.top + (e.clientY - rect.top) * sy, configurable: true });
+    };
+    el.addEventListener('pointerdown', onPointer, { capture: true, passive: true });
+    el.addEventListener('pointermove', onPointer, { capture: true, passive: true });
+    el.addEventListener('pointerup', onPointer, { capture: true, passive: true });
+    el.addEventListener('click', onClick, { capture: true, passive: true });
+    el.addEventListener('auxclick', onClick, { capture: true, passive: true });
+    return () => {
+      el.removeEventListener('pointerdown', onPointer, { capture: true });
+      el.removeEventListener('pointermove', onPointer, { capture: true });
+      el.removeEventListener('pointerup', onPointer, { capture: true });
+      el.removeEventListener('click', onClick, { capture: true });
+      el.removeEventListener('auxclick', onClick, { capture: true });
+    };
   }, [zoom]);
 
   const clearCanvas = () => {
@@ -779,7 +801,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         onPointerUp={handlePinchPointerUp}
         onPointerCancel={handlePinchPointerUp}
       >
-        <div ref={mountRef} className="inline-block" />
+        <div ref={mountRef} className="inline-block" style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }} />
       </div>
 
       {animMode && (
