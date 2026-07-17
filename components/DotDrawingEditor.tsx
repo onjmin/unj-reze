@@ -470,6 +470,8 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     const h = restoredState ? restoredState.height : canvasH;
     
     oekaki.init(el, w, h);
+    oekaki.flipped.value = false;
+    setFlipped(false);
     if (isWalk) {
       oekaki.setDotSize(1, preset.h);
     } else {

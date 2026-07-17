@@ -224,6 +224,8 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     const h = restoredState ? restoredState.height : (Math.min(availH, cap) | 0);
     el.innerHTML = '';
     oekaki.init(el, w, h);
+    oekaki.flipped.value = false;
+    setFlipped(false);
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
