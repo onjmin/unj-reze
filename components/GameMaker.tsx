@@ -614,6 +614,11 @@ function runEntityScript(
 
 interface GameEngine {
   map: number[][];
+  /** 現在アクティブなシーンの置物/天蓋レイヤー。ワープ／シーン切替のたびに map と一緒に差し替える
+   *  （worldLayoutRef はシーンに exits が無い場合 scenesRef.current[0] のみを含んだまま固定されるため、
+   *   ワープ先シーンの overlayMap/overheadMap を反映できない）。 */
+  overlayMap?: number[][];
+  overheadMap?: number[][];
   player: { x: number; y: number; vx: number; vy: number; isGrounded: boolean; spriteRef?: string; spriteUrl?: string };
   keys: Set<string>;
   bullets: Bullet[];
@@ -1273,7 +1278,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   onPositionChangeRef.current = onPositionChange;
 
   const engineRef = useRef<GameEngine>({
-    map: [], player: { x: 50, y: 50, vx: 0, vy: 0, isGrounded: false },
+    map: [], overlayMap: [], overheadMap: [], player: { x: 50, y: 50, vx: 0, vy: 0, isGrounded: false },
     keys: new Set(), bullets: [], enemyBullets: [], entities: [], shotTimer: 0, animId: 0,
   });
   const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
@@ -5064,6 +5069,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const layout = buildWorldLayout(scenesRef.current);
     worldLayoutRef.current = layout;
     engineRef.current.map = JSON.parse(JSON.stringify(layout.map));
+    engineRef.current.overlayMap = JSON.parse(JSON.stringify(layout.overlayMap));
+    engineRef.current.overheadMap = JSON.parse(JSON.stringify(layout.overheadMap));
     // シーン0の原点でプレイヤー位置を補正
     const s0 = layout.layouts.find(l => l.sceneIdx === 0);
     if (s0) {
@@ -5305,7 +5312,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 床レイヤーより上に置かれるオブジェクト層タイル（扉など）を col/row で参照する。
     const getOverlayTileAt = (col: number, row: number) => {
       if (col < 0 || col >= worldCols || row < 0 || row >= worldRows) return null;
-      const overlay = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
+      const overlay = engineRef.current.overlayMap ?? worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
       const id = overlay?.[row]?.[col] ?? 0;
       if (!id) return null;
       return { id, col, row, info: gameData.tiles[id] };
@@ -8069,7 +8076,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const doorNeighbor = ADJ_DIRS.map(([dx, dy]) => getOverlayTileAt(pCol + dx, pRow + dy)).find(t => t?.info?.special === 'door');
         if (doorNeighbor) {
           playSfx({ ref: `direct:${SYS_TILE_DOOR_SFX}`, src: SYS_TILE_DOOR_SFX, type: 'direct' });
-          const overlay = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
+          const overlay = engineRef.current.overlayMap ?? worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
           if (overlay?.[doorNeighbor.row]) overlay[doorNeighbor.row][doorNeighbor.col] = 0;
         }
 
@@ -8697,7 +8704,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       }
       // 置物レイヤー（オブジェクトレイヤー）：プレイヤーより先に描画
-      const overlayMap = worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
+      const overlayMap = engineRef.current.overlayMap ?? worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
       if (overlayMap) {
         for (let y = startRow; y < endRow; y++) {
           for (let x = startCol; x < endCol; x++) {
@@ -9044,7 +9051,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       // 天蓋レイヤー：木の上部や屋根などプレイヤーより手前に重ねて描画。
       // プレイヤーがその真下付近にいる間は半透明化し、奥のプレイヤーが見えるようにする（gomi.html の drawMapUpper 相当）。
-      const overheadMap = worldLayoutRef.current?.overheadMap ?? gameData.overheadMap;
+      const overheadMap = engineRef.current.overheadMap ?? worldLayoutRef.current?.overheadMap ?? gameData.overheadMap;
       if (overheadMap) {
         const ptx = Math.floor((p.x + pData.w / 2) / TILE_SIZE);
         const pty = Math.floor((p.y + pData.h) / TILE_SIZE);
@@ -9562,6 +9569,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const next = scenesRef.current[nextIdx];
             activeSceneIdxRef.current = nextIdx;
             eng.map = JSON.parse(JSON.stringify(next.map));
+            eng.overlayMap = JSON.parse(JSON.stringify(next.overlayMap ?? emptyGridLike(next.map)));
+            eng.overheadMap = JSON.parse(JSON.stringify(next.overheadMap ?? emptyGridLike(next.map)));
             eng.entities = next.objects.map(o => ({
               x: o.col * TILE_SIZE, y: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
               homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
