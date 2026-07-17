@@ -23,10 +23,6 @@ if (typeof window === 'undefined' && !process.env.NEXT_RUNTIME) {
   }
 }
 
-// Reuse WebSocket connection across invocations within the same Edge worker isolate.
-// This eliminates the WS handshake overhead (~300–800ms) on warm requests.
-neonConfig.fetchConnectionCache = true;
-
 let pool: any = null;
 
 
