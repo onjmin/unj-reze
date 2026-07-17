@@ -349,7 +349,7 @@ export default function App() {
       });
       setPosts(prev => {
         const next = prev.map(p => p.id === postId
-          ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
+          ? { ...p, replies: p.replies.map(r => r.id === tempId ? { ...reply, avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl } : r) }
           : p);
         postsRef.current = next;
         return next;
@@ -427,7 +427,7 @@ export default function App() {
 
     setPosts(prev => {
       const next = prev.map(p => p.id === postId
-        ? { ...p, replies: p.replies.map(r => r.id === tempId ? reply : r) }
+        ? { ...p, replies: p.replies.map(r => r.id === tempId ? { ...reply, avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl } : r) }
         : p);
       postsRef.current = next;
       return next;
@@ -496,7 +496,7 @@ export default function App() {
       originType,
     });
     setPosts(prev => {
-      const next = prev.map(p => p.id === tempId ? post : p);
+      const next = prev.map(p => p.id === tempId ? { ...post, avatarUrl: post.avatarUrl ?? currentUser?.avatarUrl } : p);
       postsRef.current = next;
       return next;
     });
