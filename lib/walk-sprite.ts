@@ -117,6 +117,12 @@ export interface SpriteRect {
   sx: number; sy: number; sw: number; sh: number;
 }
 
+// Chromium系のCanvas実装のctx.drawImageのバグ対策
+// 隣のセルへのサンプリング回り込みを防ぐため、切り出し幅・高さをわずかに内側に狭める
+// 16px に対して 15.9px にすることで、右隣の境界線（32px目）のサンプリングを完全に回避する
+const SAFE_OFFSET_XY = 0.1;
+const SAFE_OFFSET_WH = 0.2;
+
 /**
  * シート画像の実寸(imgW,imgH)から、指定の向き・フレームの矩形を求める。
  * 規格のセル寸法ではなく「実寸 / グリッド数」でセルを割り出すので、拡大縮小されたシートでも破綻しない。
@@ -135,7 +141,12 @@ export function cellRect(
   const way = resolveWay(std, key);
   const rowIdx = std.ways.indexOf(way);
   const colIdx = ((frame % cols) + cols) % cols;
-  return { sx: colIdx * cw, sy: rowIdx * ch, sw: cw, sh: ch };
+  return { 
+    sx: colIdx * cw + SAFE_OFFSET_XY, 
+    sy: rowIdx * ch + SAFE_OFFSET_XY, 
+    sw: cw - SAFE_OFFSET_WH,
+    sh: ch - SAFE_OFFSET_WH
+  };
 }
 
 /**
