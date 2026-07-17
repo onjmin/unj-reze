@@ -43,6 +43,7 @@ const PALETTE_PICO8 = [
 
 export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: DotDrawingEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
   const toolRef = useRef<Tool>('pen');
   const colorRef = useRef('#000000');
   const collabRef = useRef(collabImageUrl);
@@ -683,7 +684,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   useEffect(() => {
     if (walkModeRef.current) return;
     oekaki.setDotSize(1, gridH);
-    document.documentElement.style.setProperty('--grid-cell-size', `${oekaki.getDotSize() * zoom}px`);
+    document.documentElement.style.setProperty('--grid-cell-size', `${oekaki.getDotSize()}px`);
   }, [gridW, gridH]);
 
   useEffect(() => {
@@ -728,6 +729,20 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       el.removeEventListener('auxclick', onClick, { capture: true });
     };
   }, [zoom]);
+
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom(v => {
+        const next = e.deltaY < 0 ? v + 0.25 : v - 0.25;
+        return Math.min(4, Math.max(0.25, Math.round(next * 100) / 100));
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
 
 
@@ -1219,6 +1234,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       )}
 
       <div
+        ref={canvasAreaRef}
         className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' ring-4 ring-blue-400/60' : '')}
         onPointerDown={handlePinchPointerDown}
         onPointerMove={handlePinchPointerMove}

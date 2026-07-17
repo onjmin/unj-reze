@@ -30,6 +30,7 @@ const PRESET_COLORS = [
 
 export default function DrawingEditor({ onClose, onSave, collabImageUrl }: DrawingEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const canvasAreaRef = useRef<HTMLDivElement>(null);
   const toolRef = useRef<Tool>('pen');
   const colorRef = useRef('#ffffff');
   const collabRef = useRef(collabImageUrl);
@@ -441,6 +442,20 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     };
   }, [zoom]);
 
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom(v => {
+        const next = e.deltaY < 0 ? v + 0.25 : v - 0.25;
+        return Math.min(4, Math.max(0.25, Math.round(next * 100) / 100));
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   const clearCanvas = () => {
     const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
     if (!active) return;
@@ -795,6 +810,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       )}
 
       <div
+        ref={canvasAreaRef}
         className="flex-1 bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden relative flex items-center justify-center"
         onPointerDown={handlePinchPointerDown}
         onPointerMove={handlePinchPointerMove}
