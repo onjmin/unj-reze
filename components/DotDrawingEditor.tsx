@@ -59,6 +59,8 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
+  const [displayScale, setDisplayScale] = useState(1);
+  const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef(1);
@@ -472,6 +474,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     oekaki.init(el, w, h);
     oekaki.flipped.value = false;
     setFlipped(false);
+    canvasSizeRef.current = { w, h };
     if (isWalk) {
       oekaki.setDotSize(1, preset.h);
     } else {
@@ -683,6 +686,18 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     oekaki.setDotSize(1, gridH);
     document.documentElement.style.setProperty('--grid-cell-size', `${oekaki.getDotSize()}px`);
   }, [gridW, gridH]);
+
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el) return;
+    const { w, h } = canvasSizeRef.current;
+    if (!w || !h) return;
+    const canvases = el.querySelectorAll('canvas');
+    for (const c of canvases) {
+      c.style.width = `${w * displayScale}px`;
+      c.style.height = `${h * displayScale}px`;
+    }
+  }, [displayScale]);
 
   const changeSize = (w: number, h: number) => {
     setGridW(w);
@@ -1248,6 +1263,17 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           >
             <FlipHorizontal size={13} />
           </button>
+          <button
+            onClick={() => setDisplayScale(v => Math.max(0.25, Math.round((v - 0.25) * 100) / 100))}
+            className="w-6 h-6 rounded flex items-center justify-center bg-gray-100/10 text-gray-400 text-xs hover:bg-gray-100/20"
+            title="表示縮小"
+          >−</button>
+          <span className="text-[10px] text-gray-400 w-8 text-center font-mono">{Math.round(displayScale * 100)}%</span>
+          <button
+            onClick={() => setDisplayScale(v => Math.min(4, Math.round((v + 0.25) * 100) / 100))}
+            className="w-6 h-6 rounded flex items-center justify-center bg-gray-100/10 text-gray-400 text-xs hover:bg-gray-100/20"
+            title="表示拡大"
+          >+</button>
         </div>
 
         <div className="flex items-center space-x-1.5">

@@ -62,6 +62,8 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
+  const [displayScale, setDisplayScale] = useState(1);
+  const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
 
   // History & Autosave States
   const [showHistory, setShowHistory] = useState(false);
@@ -226,6 +228,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     oekaki.init(el, w, h);
     oekaki.flipped.value = false;
     setFlipped(false);
+    canvasSizeRef.current = { w, h };
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
@@ -386,7 +389,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   useEffect(() => {
     if (mountRef.current) {
-      mountRef.current.className = showGrid ? 'unj-canvas-grid' : '';
+      mountRef.current.className = 'inline-block' + (showGrid ? ' unj-canvas-grid' : '');
     }
   }, [showGrid]);
 
@@ -395,6 +398,18 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     oekaki.brushSize.value = brushSize;
     oekaki.eraserSize.value = eraserSize;
   }, [penSize, brushSize, eraserSize]);
+
+  useEffect(() => {
+    const el = mountRef.current;
+    if (!el) return;
+    const { w, h } = canvasSizeRef.current;
+    if (!w || !h) return;
+    const canvases = el.querySelectorAll('canvas');
+    for (const c of canvases) {
+      c.style.width = `${w * displayScale}px`;
+      c.style.height = `${h * displayScale}px`;
+    }
+  }, [displayScale]);
 
   const clearCanvas = () => {
     const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
@@ -756,7 +771,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         onPointerUp={handlePinchPointerUp}
         onPointerCancel={handlePinchPointerUp}
       >
-        <div ref={mountRef} className="w-full h-full" style={{ transform: `scale(${zoom})` }} />
+        <div ref={mountRef} className="inline-block" style={{ transform: `scale(${zoom})` }} />
       </div>
 
       {animMode && (
@@ -808,6 +823,17 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           >
             <FlipHorizontal size={15} />
           </button>
+          <button
+            onClick={() => setDisplayScale(v => Math.max(0.25, Math.round((v - 0.25) * 100) / 100))}
+            className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 transition-colors"
+            title="表示縮小"
+          >−</button>
+          <span className="text-[10px] text-gray-400 w-9 text-center font-mono">{Math.round(displayScale * 100)}%</span>
+          <button
+            onClick={() => setDisplayScale(v => Math.min(4, Math.round((v + 0.25) * 100) / 100))}
+            className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 transition-colors"
+            title="表示拡大"
+          >+</button>
         </div>
 
         <div className="flex items-center space-x-3">
