@@ -59,7 +59,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
-  const [displayScale, setDisplayScale] = useState(1);
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
@@ -467,14 +466,21 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     const preset = restoredState ? restoredState.walkPreset : walkPresetRef.current;
     const canvasW = isWalk ? Math.floor(CANVAS_SIZE * (preset.w / preset.h)) : CANVAS_SIZE;
     const canvasH = CANVAS_SIZE;
-    
+
     const w = restoredState ? restoredState.width : canvasW;
     const h = restoredState ? restoredState.height : canvasH;
-    
+
     oekaki.init(el, w, h);
     oekaki.flipped.value = false;
     setFlipped(false);
     canvasSizeRef.current = { w, h };
+    el.style.width = `${w * zoom}px`;
+    el.style.height = `${h * zoom}px`;
+    const canvases = el.querySelectorAll('canvas');
+    for (const c of canvases) {
+      c.style.width = `${w * zoom}px`;
+      c.style.height = `${h * zoom}px`;
+    }
     if (isWalk) {
       oekaki.setDotSize(1, preset.h);
     } else {
@@ -490,11 +496,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         setGridW(restoredState.gridW);
         setGridH(restoredState.gridH);
         setZoom(restoredState.zoom);
-        
+
         if (restoredState.mode === 'walk' && restoredState.walkLayers) {
           const deserializedWalkLayers = await deserializeWalkLayers(restoredState.walkLayers, w, h);
           walkLayersRef.current = deserializedWalkLayers;
-          
+
           walkDataRef.current.clear();
           for (const [key, val] of deserializedWalkLayers.entries()) {
             const temp = document.createElement('canvas');
@@ -508,12 +514,12 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
               walkDataRef.current.set(key, temp.toDataURL('image/png'));
             }
           }
-          
+
           setWalkPreset(restoredState.walkPreset);
           setWalkActiveIndex(restoredState.walkActiveIndex || 0);
           walkActiveIndexRef.current = restoredState.walkActiveIndex || 0;
           setWalkMode(true);
-          
+
           for (const l of oekaki.getLayers()) l.delete();
           oekaki.refresh();
           const cellData = deserializedWalkLayers.get(restoredState.walkActiveIndex || 0);
@@ -597,7 +603,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           }
         }
       }
-      
+
       // populate layer entries (topmost first)
       syncLayerEntries();
       updateOnionSkin();
@@ -692,12 +698,14 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     if (!el) return;
     const { w, h } = canvasSizeRef.current;
     if (!w || !h) return;
+    el.style.width = `${w * zoom}px`;
+    el.style.height = `${h * zoom}px`;
     const canvases = el.querySelectorAll('canvas');
     for (const c of canvases) {
-      c.style.width = `${w * displayScale}px`;
-      c.style.height = `${h * displayScale}px`;
+      c.style.width = `${w * zoom}px`;
+      c.style.height = `${h * zoom}px`;
     }
-  }, [displayScale]);
+  }, [zoom]);
 
   const changeSize = (w: number, h: number) => {
     setGridW(w);
@@ -1193,7 +1201,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         onPointerUp={handlePinchPointerUp}
         onPointerCancel={handlePinchPointerUp}
       >
-        <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})` }} />
+        <div ref={mountRef} className="inline-block unj-canvas-grid" />
       </div>
 
       {animMode && (
@@ -1263,17 +1271,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           >
             <FlipHorizontal size={13} />
           </button>
-          <button
-            onClick={() => setDisplayScale(v => Math.max(0.25, Math.round((v - 0.25) * 100) / 100))}
-            className="w-6 h-6 rounded flex items-center justify-center bg-gray-100/10 text-gray-400 text-xs hover:bg-gray-100/20"
-            title="表示縮小"
-          >−</button>
-          <span className="text-[10px] text-gray-400 w-8 text-center font-mono">{Math.round(displayScale * 100)}%</span>
-          <button
-            onClick={() => setDisplayScale(v => Math.min(4, Math.round((v + 0.25) * 100) / 100))}
-            className="w-6 h-6 rounded flex items-center justify-center bg-gray-100/10 text-gray-400 text-xs hover:bg-gray-100/20"
-            title="表示拡大"
-          >+</button>
         </div>
 
         <div className="flex items-center space-x-1.5">

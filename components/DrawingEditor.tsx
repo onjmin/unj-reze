@@ -62,7 +62,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [onionSkinOpacity, setOnionSkinOpacity] = useState(20);
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
-  const [displayScale, setDisplayScale] = useState(1);
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
 
   // History & Autosave States
@@ -221,7 +220,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     const availW = parent ? parent.clientWidth : 640;
     const availH = parent ? parent.clientHeight : 480;
     const cap = 1024;
-    
+
     const w = restoredState ? restoredState.width : (Math.min(availW, cap) | 0);
     const h = restoredState ? restoredState.height : (Math.min(availH, cap) | 0);
     el.innerHTML = '';
@@ -229,6 +228,13 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     oekaki.flipped.value = false;
     setFlipped(false);
     canvasSizeRef.current = { w, h };
+    el.style.width = `${w * zoom}px`;
+    el.style.height = `${h * zoom}px`;
+    const canvases = el.querySelectorAll('canvas');
+    for (const c of canvases) {
+      c.style.width = `${w * zoom}px`;
+      c.style.height = `${h * zoom}px`;
+    }
 
     oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
@@ -297,7 +303,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           };
         }
       }
-      
+
       // populate layer entries (topmost first)
       const initEntries: LayerEntry[] = oekaki.getLayers().map(inst => ({
         instance: inst,
@@ -404,12 +410,14 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     if (!el) return;
     const { w, h } = canvasSizeRef.current;
     if (!w || !h) return;
+    el.style.width = `${w * zoom}px`;
+    el.style.height = `${h * zoom}px`;
     const canvases = el.querySelectorAll('canvas');
     for (const c of canvases) {
-      c.style.width = `${w * displayScale}px`;
-      c.style.height = `${h * displayScale}px`;
+      c.style.width = `${w * zoom}px`;
+      c.style.height = `${h * zoom}px`;
     }
-  }, [displayScale]);
+  }, [zoom]);
 
   const clearCanvas = () => {
     const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
@@ -771,7 +779,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         onPointerUp={handlePinchPointerUp}
         onPointerCancel={handlePinchPointerUp}
       >
-        <div ref={mountRef} className="inline-block" style={{ transform: `scale(${zoom})` }} />
+        <div ref={mountRef} className="inline-block" />
       </div>
 
       {animMode && (
@@ -823,17 +831,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           >
             <FlipHorizontal size={15} />
           </button>
-          <button
-            onClick={() => setDisplayScale(v => Math.max(0.25, Math.round((v - 0.25) * 100) / 100))}
-            className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 transition-colors"
-            title="表示縮小"
-          >−</button>
-          <span className="text-[10px] text-gray-400 w-9 text-center font-mono">{Math.round(displayScale * 100)}%</span>
-          <button
-            onClick={() => setDisplayScale(v => Math.min(4, Math.round((v + 0.25) * 100) / 100))}
-            className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100/10 text-gray-300 hover:bg-gray-100/20 transition-colors"
-            title="表示拡大"
-          >+</button>
         </div>
 
         <div className="flex items-center space-x-3">
