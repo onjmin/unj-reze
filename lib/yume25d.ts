@@ -48,9 +48,11 @@ const BALL_FRICTION = 1.4;   // 接地中の転がり減速（1秒あたりの�
 const BALL_BOUNCE = 0.7;     // 壁反射の反発係数
 const BALL_BOUNCE_Y = 0.5;   // 地面バウンドの反発係数
 const BALL_STOP_EPS = 0.05;  // これ未満の速度は停止扱い
-// ブロック：一辺1マスの立方体（サイズ固定）。上に乗れる・接地中は1段までよじ登れる（Build/Doom風の階段）。
+// ブロック：一辺1マスの立方体（サイズ固定）。上に乗れる・接地中は2段までよじ登れる（Build/Doom風の階段）。
+// よじ登りは瞬間ワープではなく CLIMB_SPEED で「よいしょ」と時間をかけて上る。
 const BLOCK_SIZE = 1;
-const BLOCK_CLIMB = BLOCK_SIZE + 0.05;  // 接地中に自動でよじ登れる段差
+const BLOCK_CLIMB_MAX = BLOCK_SIZE * 2 + 0.05;  // 自動でよじ登れる最大段差（2段まで。3段以上は壁）
+const CLIMB_SPEED = 3.4;                        // よじ登りの上昇速度（マス/秒）≒1段0.3秒
 const PLAYER_BODY_H = 0.9;              // ブロック側面判定に使う体の高さ
 // 海（水面）：waterLevel から下がすべて水。落下は水の抵抗で沈降速度へ収束し「ゆっくり沈む」。
 const WATER_SINK_V = -0.7;    // 沈降速度（マス/秒）
@@ -59,6 +61,20 @@ const SWIM_UP_V = 1.7;        // ひとかき（ジャンプ入力）の上昇�
 const WATER_MOVE_MULT = 0.55; // 水中の移動速度倍率
 const RIPPLE_PERIOD = 0.9;    // 入水中の波紋アニメ1周期（秒）
 const WATER_DEFAULT_COLOR = '#2f7fa8';
+// 波：水面はプレーンな板ではなく分割メッシュで、動き（プレイヤー・NPC・ボールの移動）があるとき
+// だけ頂点変位のさざ波を立てる。静止すると凪に戻る。波の陰影は水面専用のライトレイヤーで付ける
+// （ワールドは環境光のみなので、専用ライトが無いと頂点変位が見えない）。
+const WATER_LIGHT_LAYER = 2;      // 水面だけを照らすライトのレイヤー番号
+const WAVE_SEG_MAX = 80;          // 水面メッシュの最大分割数（負荷上限）
+const WAVE_RADIUS = 5;            // 波源1つのさざ波が届く距離（マス）
+const WAVE_SRC_MAX = 8;           // 1フレームに拾う波源の最大数
+const WAVE_FADE = 2.2;            // 波の立ち上がり/凪への収束速度（1/秒）
+// 水中：カメラが水面下に入ったら視界を海の色に合わせて狭め、プレイヤーから泡を出す
+const UNDERWATER_FOG_NEAR = 0.4;
+const UNDERWATER_FOG_FAR = 8;
+const BUBBLE_MAX = 24;            // 泡パーティクルのプール数
+const BUBBLE_RISE_V = 0.9;        // 泡の上昇速度（マス/秒）
+const BUBBLE_INTERVAL = 0.16;     // 泡の発生間隔（秒）。泳いで動いている間は倍出る
 // スピーカー：距離減衰は逆二乗の「近似」として (1 - d/radius)² を使う。
 // 真の 1/d² は d→0 で発散し、無限遠までゼロにならないため結局クランプ＋カットオフが必要になる。
 // この近似は d=0 で最大音量・radius でちょうど 0 になり、パラメータが直感的で計算も安い。
@@ -361,6 +377,9 @@ export class Yume25DEngine {
   private povDistance = 1.6;
   private hEdges = new Set<string>();  // セル(c,r)の北辺（z=r, x∈[c,c+1]）
   private vEdges = new Set<string>();  // セル(c,r)の西辺（x=c, z∈[r,r+1]）
+  /** 薄壁の上端高さ（全段）。key=セル。プレイヤーが壁の面から半径以内にいる間の「壁の上に立つ」足場判定に使う。 */
+  private wallTopsH = new Map<string, number[]>();
+  private wallTopsV = new Map<string, number[]>();
   private billboardMeshes: THREE.Mesh[] = [];
   private worldObjects: THREE.Object3D[] = [];
   private ownedGeometries: THREE.BufferGeometry[] = [];
@@ -411,6 +430,19 @@ export class Yume25DEngine {
   private waterMesh: THREE.Mesh | null = null;
   private waterMat: THREE.MeshLambertMaterial | null = null;
   private waterGeo: THREE.PlaneGeometry | null = null;
+  private waterSun: THREE.DirectionalLight | null = null;  // 水面専用ライト（波の陰影用）
+  private waterGeoCols = 0;  // 波用ジオメトリを作ったときのマップサイズ（変わったら作り直す）
+  private waterGeoRows = 0;
+  private waveT = 0;         // 波アニメの経過時間
+  private waveEnergy = 0;    // 波の強さ 0〜1（動きがあると立ち上がり、静止すると凪へ収束）
+  private waterFlat = true;  // 頂点が平らな状態か（凪のとき毎フレームの頂点更新を省く）
+  private underwater = false;  // カメラが水面下にあるか（視界・背景の切り替え済みか）
+  private bubblePts: THREE.Points | null = null;
+  private bubbleGeo: THREE.BufferGeometry | null = null;
+  private bubbleMat: THREE.PointsMaterial | null = null;
+  /** 泡パーティクルのプール。y<0 は非アクティブ。 */
+  private bubbles: { x: number; y: number; z: number; vy: number; phase: number }[] = [];
+  private bubbleSpawnT = 0;
   private rippleMesh: THREE.Mesh | null = null;
   private rippleMat: THREE.MeshBasicMaterial | null = null;
   private rippleGeo: THREE.RingGeometry | null = null;
@@ -525,7 +557,8 @@ export class Yume25DEngine {
     this.x = s.col + 0.5; this.z = s.row + 0.5;
     this.yaw = YAW_FOR_DIR[s.dir];
     this.pitch = 0;
-    this.vy = 0; this.hop = 0; this.grounded = true;
+    // スタート地点にブロックが積んであれば、その頂面から開始する（ブロック内に埋まってのスポーン防止）
+    this.vy = 0; this.hop = this.groundAt(this.x, this.z, Number.POSITIVE_INFINITY); this.grounded = true;
     this.warpCooldown = false;
     this.iceBlockedCell = null;
     this.hp = this.maxHp;
@@ -888,6 +921,8 @@ export class Yume25DEngine {
     this.waterMat?.dispose();
     this.rippleGeo?.dispose();
     this.rippleMat?.dispose();
+    this.bubbleGeo?.dispose();
+    this.bubbleMat?.dispose();
     // 3Dモデルキャッシュ：原本のジオメトリ/マテリアル/テクスチャを解放（クローンは共有なので原本だけでよい）
     for (const p of this.modelCache.values()) {
       p.then(res => res?.scene.traverse(o => {
@@ -1024,6 +1059,7 @@ export class Yume25DEngine {
 
     this.scene.background = new THREE.Color(L.skyColor);
     this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor), L.fogNear, L.fogFar);
+    this.underwater = false;  // フォグを通常に戻したので、水中なら次フレームで再適用される
 
     // 照明：環境光（明るさ・色）とランタン（プレイヤー光源）の設定を反映
     this.ambientLightObj.color.set(L.ambientColor ?? '#ffffff');
@@ -1039,8 +1075,17 @@ export class Yume25DEngine {
     this.updateWater(L);
 
     // 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
+    // 壁の上端高さ（全段）も記録し、「壁の上に立つ」足場判定（groundAt）に使う。
     this.hEdges.clear(); this.vEdges.clear();
+    this.wallTopsH.clear(); this.wallTopsV.clear();
     for (const w of L.walls) {
+      const key = `${w.col},${w.row}`;
+      const top = ((w.level ?? 0) + 1) * H;
+      if (w.dir === 0) {
+        const a = this.wallTopsH.get(key) ?? []; a.push(top); this.wallTopsH.set(key, a);
+      } else if (w.dir === 3) {
+        const a = this.wallTopsV.get(key) ?? []; a.push(top); this.wallTopsV.set(key, a);
+      }
       if ((w.level ?? 0) !== 0) continue;
       if (w.dir === 0) this.hEdges.add(`${w.col},${w.row}`);
       else if (w.dir === 3) this.vEdges.add(`${w.col},${w.row}`);
@@ -1352,10 +1397,33 @@ export class Yume25DEngine {
   }
 
   /** (x,z) のセルで below 以下にある最も高い足場（地面0＋ブロック上面）。 */
-  private groundAt(x: number, z: number, below: number): number {
+  /** 足場の高さ。地面0＋ブロック上面に加え、wallMaxTop（プレイヤーの現在の足元）を渡すと
+   *  薄壁の上端も足場になる：壁の面から半径以内にいる間は壁の上に立てる（綱渡り）。
+   *  wallMaxTop 以下の上端だけを拾うので、壁の横を歩いていて勝手に壁の上へ登ることはなく、
+   *  上から着地したときだけ乗れる。半径から外れると支えを失い、体が壁面から抜けた位置で
+   *  落下が始まる（壁に体が刺さったまま落ちる「真っ二つ」見た目の防止）。 */
+  private groundAt(x: number, z: number, below: number, wallMaxTop?: number): number {
     const tops = this.blockTops.get(`${Math.floor(x)},${Math.floor(z)}`);
     let g = 0;
     if (tops) for (const t of tops) if (t <= below + 1e-3 && t > g) g = t;
+    if (wallMaxTop !== undefined) {
+      const R = PLAYER_RADIUS;
+      const lim = Math.min(below, wallMaxTop);
+      const cx = Math.round(x);
+      if (Math.abs(x - cx) <= R) {
+        for (const r of [Math.floor(z - R * 0.9), Math.floor(z + R * 0.9)]) {
+          const ts = this.wallTopsV.get(`${cx},${r}`);
+          if (ts) for (const t of ts) if (t <= lim + 1e-3 && t > g) g = t;
+        }
+      }
+      const cz = Math.round(z);
+      if (Math.abs(z - cz) <= R) {
+        for (const c of [Math.floor(x - R * 0.9), Math.floor(x + R * 0.9)]) {
+          const ts = this.wallTopsH.get(`${c},${cz}`);
+          if (ts) for (const t of ts) if (t <= lim + 1e-3 && t > g) g = t;
+        }
+      }
+    }
     return g;
   }
 
@@ -1373,17 +1441,24 @@ export class Yume25DEngine {
     if (lv <= 0) {
       if (this.waterMesh) this.waterMesh.visible = false;
       if (this.rippleMesh) this.rippleMesh.visible = false;
+      if (this.bubblePts) this.bubblePts.visible = false;
+      this.setUnderwater(false);
       return;
     }
     if (!this.waterMesh) {
-      this.waterGeo = new THREE.PlaneGeometry(1, 1);
       this.waterMat = new THREE.MeshLambertMaterial({
         color: WATER_DEFAULT_COLOR, transparent: true, opacity: 0.55,
         side: THREE.DoubleSide, depthWrite: false,
       });
-      this.waterMesh = new THREE.Mesh(this.waterGeo, this.waterMat);
+      this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.waterMat);
       this.waterMesh.rotation.x = -Math.PI / 2;
+      // 波の陰影用ライト：ワールドは環境光（無指向）だけなので、専用の平行光を水面レイヤーにだけ当てる
+      this.waterMesh.layers.enable(WATER_LIGHT_LAYER);
       this.scene.add(this.waterMesh);
+      this.waterSun = new THREE.DirectionalLight('#ffffff', 1.1);
+      this.waterSun.position.set(0.45, 1, 0.3);
+      this.waterSun.layers.set(WATER_LIGHT_LAYER);
+      this.scene.add(this.waterSun);
 
       this.rippleGeo = new THREE.RingGeometry(0.55, 0.7, 20);
       this.rippleMat = new THREE.MeshBasicMaterial({
@@ -1393,11 +1468,134 @@ export class Yume25DEngine {
       this.rippleMesh.rotation.x = -Math.PI / 2;
       this.rippleMesh.visible = false;
       this.scene.add(this.rippleMesh);
+
+      // 泡パーティクル（水中でプレイヤーから立ちのぼる）。プール方式で使い回す
+      this.bubbles = Array.from({ length: BUBBLE_MAX }, () => ({ x: 0, y: -1, z: 0, vy: 0, phase: 0 }));
+      this.bubbleGeo = new THREE.BufferGeometry();
+      this.bubbleGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BUBBLE_MAX * 3).fill(-100), 3));
+      this.bubbleMat = new THREE.PointsMaterial({
+        color: '#dff4ff', size: 0.07, sizeAttenuation: true, transparent: true, opacity: 0.75, depthWrite: false,
+      });
+      this.bubblePts = new THREE.Points(this.bubbleGeo, this.bubbleMat);
+      this.bubblePts.frustumCulled = false;
+      this.scene.add(this.bubblePts);
+    }
+    // 波の頂点変位用に分割したジオメトリ。マップサイズが変わったときだけ作り直す
+    if (!this.waterGeo || this.waterGeoCols !== L.cols || this.waterGeoRows !== L.rows) {
+      this.waterGeo?.dispose();
+      const segX = Math.min(WAVE_SEG_MAX, L.cols * 2), segY = Math.min(WAVE_SEG_MAX, L.rows * 2);
+      this.waterGeo = new THREE.PlaneGeometry(L.cols, L.rows, segX, segY);
+      this.waterMesh.geometry = this.waterGeo;
+      this.waterGeoCols = L.cols; this.waterGeoRows = L.rows;
+      this.waterFlat = true;
     }
     this.waterMesh.visible = true;
-    this.waterMesh.scale.set(L.cols, L.rows, 1);
+    this.waterMesh.scale.set(1, 1, 1);
     this.waterMesh.position.set(L.cols / 2, lv, L.rows / 2);
     this.waterMat!.color.set(L.waterColor ?? WATER_DEFAULT_COLOR);
+    if (this.bubblePts) this.bubblePts.visible = true;
+  }
+
+  /** カメラが水面下に入った/出たときの視界切り替え：海の色に合わせた濃いフォグと背景。 */
+  private setUnderwater(on: boolean) {
+    if (on === this.underwater) return;
+    this.underwater = on;
+    const L = this.layout;
+    if (on) {
+      const wc = new THREE.Color(L.waterColor ?? WATER_DEFAULT_COLOR).multiplyScalar(0.55);
+      this.scene.fog = new THREE.Fog(wc, UNDERWATER_FOG_NEAR, UNDERWATER_FOG_FAR);
+      this.scene.background = wc;
+      if (this.skyMesh) this.skyMesh.visible = false;
+    } else {
+      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor), L.fogNear, L.fogFar);
+      this.scene.background = new THREE.Color(L.skyColor);
+      if (this.skyMesh) this.skyMesh.visible = !!L.skyUrl && this.skyUrlLoaded === L.skyUrl;
+    }
+  }
+
+  /** 海面の波と水中演出（毎フレーム）。波は「動き」があるときだけ立つ：プレイヤー・NPC・ボールの
+   *  移動を波源として集め、各波源から同心円のさざ波を頂点変位で立てる。全員が静止すると凪へ戻る。 */
+  private updateWaterFX(dt: number, inWater: boolean, waterLv: number) {
+    if (waterLv <= 0 || !this.waterMesh?.visible || !this.waterGeo) {
+      this.setUnderwater(false);
+      return;
+    }
+    this.waveT += dt;
+
+    // ── 波源集め：動いているものだけが水面を揺らす ──
+    const srcs: { x: number; z: number; amp: number }[] = [];
+    if (inWater && this.playerMoving) srcs.push({ x: this.x, z: this.z, amp: 1 });
+    for (const ab of this.activeBillboards) {
+      if (srcs.length >= WAVE_SRC_MAX) break;
+      if ((Math.abs(ab.vx) > 0.05 || Math.abs(ab.vz) > 0.05) && ab.y < waterLv) {
+        srcs.push({ x: ab.x, z: ab.z, amp: 0.7 });
+      }
+    }
+    for (const b of this.balls) {
+      if (srcs.length >= WAVE_SRC_MAX) break;
+      if (Math.hypot(b.vx, b.vz) > BALL_STOP_EPS && b.y - b.r < waterLv) {
+        srcs.push({ x: b.x, z: b.z, amp: 0.6 });
+      }
+    }
+    const target = srcs.length > 0 ? 1 : 0;
+    this.waveEnergy += (target - this.waveEnergy) * Math.min(1, WAVE_FADE * dt);
+
+    // ── 頂点変位：凪（エネルギーほぼ0）のときは一度だけ平らへ戻して以降スキップ ──
+    const E = this.waveEnergy;
+    if (E < 0.02) {
+      if (!this.waterFlat) {
+        const pos = this.waterGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) pos.setZ(i, 0);
+        pos.needsUpdate = true;
+        this.waterGeo.computeVertexNormals();
+        this.waterFlat = true;
+      }
+    } else {
+      const pos = this.waterGeo.attributes.position;
+      const cx = this.waterMesh.position.x, cz = this.waterMesh.position.z;
+      const t = this.waveT;
+      for (let i = 0; i < pos.count; i++) {
+        const wx = pos.getX(i) + cx, wz = cz - pos.getY(i);
+        // ゆるいうねり＋波源からの同心円さざ波（距離減衰つき）
+        let y = 0.02 * Math.sin(wx * 1.7 + t * 1.6) * Math.sin(wz * 1.4 + t * 1.1);
+        for (const s of srcs) {
+          const d = Math.hypot(wx - s.x, wz - s.z);
+          if (d >= WAVE_RADIUS) continue;
+          y += s.amp * 0.035 * (1 - d / WAVE_RADIUS) * Math.sin(d * 5.5 - t * 7);
+        }
+        pos.setZ(i, y * E);
+      }
+      pos.needsUpdate = true;
+      this.waterGeo.computeVertexNormals();
+      this.waterFlat = false;
+    }
+
+    // ── 水中の視界と泡：カメラが水面下に入ったら発動 ──
+    this.setUnderwater(this.camera.position.y < waterLv - 0.02);
+    if (this.bubbleGeo && this.bubblePts?.visible) {
+      const submerged = inWater && this.hop + 0.55 < waterLv;  // 頭まで水中
+      this.bubbleSpawnT -= dt;
+      if (submerged && this.bubbleSpawnT <= 0) {
+        this.bubbleSpawnT = this.playerMoving ? BUBBLE_INTERVAL * 0.5 : BUBBLE_INTERVAL;
+        const b = this.bubbles.find(v => v.y < 0);
+        if (b) {
+          b.x = this.x + (Math.random() - 0.5) * 0.3;
+          b.z = this.z + (Math.random() - 0.5) * 0.3;
+          b.y = Math.max(0.05, this.hop + 0.2 + Math.random() * 0.35);
+          b.vy = BUBBLE_RISE_V * (0.7 + Math.random() * 0.6);
+          b.phase = Math.random() * Math.PI * 2;
+        }
+      }
+      const arr = this.bubbleGeo.attributes.position;
+      for (let i = 0; i < this.bubbles.length; i++) {
+        const b = this.bubbles[i];
+        if (b.y < 0) { arr.setXYZ(i, -100, -100, -100); continue; }
+        b.y += b.vy * dt;
+        if (b.y >= waterLv - 0.03) { b.y = -1; arr.setXYZ(i, -100, -100, -100); continue; }
+        arr.setXYZ(i, b.x + Math.sin(this.waveT * 5 + b.phase) * 0.04, b.y, b.z);
+      }
+      arr.needsUpdate = true;
+    }
   }
 
   /** サンプル3Dモデルのロード（URLごとに1回だけ。配置ごとに clone して使い回す）。
@@ -1868,19 +2066,29 @@ export class Yume25DEngine {
     this.resolveBillboardCollisions();
   }
 
-  /** ブロック側面：これから入るセルが体の高さで塞がっているか。
-   *  接地中はブロック1段（BLOCK_CLIMB）までを「よじ登れる段差」として通し、
-   *  実際の持ち上げは step() の足場処理が行う。空中では側面をすり抜けない。 */
+  /** ブロック側面：これから入るセル(c,r)がブロックで塞がっているか。
+   *  接地中は2段（BLOCK_CLIMB_MAX）までの段差を「よじ登れる」として通し、実際の持ち上げは
+   *  step() の足場処理が時間をかけて行う。3段以上の壁面はよじ登れず進入不可。
+   *  よじ登り先の足場の上に体高（PLAYER_BODY_H）ぶんの空きが無い場合も進入不可。
+   *  空中では側面をすり抜けない（段差 0.05 のみ許容）。 */
+  private blockedByBlockCell(c: number, r: number): boolean {
+    const tops = this.blockTops.get(`${c},${r}`);
+    if (!tops || tops.length === 0) return false;
+    // 入った後に立つことになる足場：今の足元から climb 以内で登れる最も高い上面（無ければ今の高さ）
+    const climb = this.grounded ? BLOCK_CLIMB_MAX : 0.05;
+    let ng = this.hop;
+    for (const t of tops) if (t <= this.hop + climb + 1e-3 && t > ng) ng = t;
+    // その足場の上に体が収まらなければ（登れない高さの側面・低すぎる天井）進入禁止
+    return this.blockSolidAt(c, r, ng + 1e-3, ng + PLAYER_BODY_H);
+  }
   private blockedByBlockX(c: number, z: number): boolean {
-    const step = this.grounded ? BLOCK_CLIMB : 0.05;
     const r0 = Math.floor(z - PLAYER_RADIUS * 0.9), r1 = Math.floor(z + PLAYER_RADIUS * 0.9);
-    for (let r = r0; r <= r1; r++) if (this.blockSolidAt(c, r, this.hop + step, this.hop + PLAYER_BODY_H)) return true;
+    for (let r = r0; r <= r1; r++) if (this.blockedByBlockCell(c, r)) return true;
     return false;
   }
   private blockedByBlockZ(r: number, x: number): boolean {
-    const step = this.grounded ? BLOCK_CLIMB : 0.05;
     const c0 = Math.floor(x - PLAYER_RADIUS * 0.9), c1 = Math.floor(x + PLAYER_RADIUS * 0.9);
-    for (let c = c0; c <= c1; c++) if (this.blockSolidAt(c, r, this.hop + step, this.hop + PLAYER_BODY_H)) return true;
+    for (let c = c0; c <= c1; c++) if (this.blockedByBlockCell(c, r)) return true;
     return false;
   }
 
@@ -2096,7 +2304,7 @@ export class Yume25DEngine {
         if (this.hop < H) this.resolveWalls();  // 壁の高さより下へ降りたら壁の中に居座らないよう押し出す
       }
       this.vy = 0;
-      this.grounded = this.hop <= this.groundAt(this.x, this.z, this.hop) + 1e-3;
+      this.grounded = this.hop <= this.groundAt(this.x, this.z, this.hop, this.hop) + 1e-3;
       this.jumpQueued = false;
     } else {
       // ジャンプ（地上）／ひとかき上昇（水中はいつでも）
@@ -2105,9 +2313,11 @@ export class Yume25DEngine {
         this.grounded = false;
         this.jumpQueued = false;
       }
-      // 足場＝地面0＋ブロック上面。接地中はブロック1段まで自動でよじ登る（moveX/Z が通した段差）
-      const ground = this.groundAt(this.x, this.z, this.hop + (this.grounded ? BLOCK_CLIMB : 0));
-      if (this.grounded && this.hop < ground) this.hop = ground;                  // 段差を上がる
+      // 足場＝地面0＋ブロック上面＋薄壁の上端（壁面から半径以内にいる間）。
+      // 接地中はブロック2段まで自動でよじ登る（moveX/Z が通した段差）。持ち上げは瞬間ではなく
+      // CLIMB_SPEED で時間をかけて上る（よじ登りモーション）。
+      const ground = this.groundAt(this.x, this.z, this.hop + (this.grounded ? BLOCK_CLIMB_MAX : 0), this.hop);
+      if (this.grounded && this.hop < ground) this.hop = Math.min(ground, this.hop + CLIMB_SPEED * dt);  // 段差をよいしょと上がる
       else if (this.grounded && this.hop > ground + 1e-3) this.grounded = false;  // 足場から出た → 落下開始
       if (!this.grounded || this.hop > ground) {
         if (inWater) {
@@ -2169,6 +2379,9 @@ export class Yume25DEngine {
     // ランタンはプレイヤー位置（目の高さ）から照らし、背景パノラマはカメラへ追従させる
     if (this.lantern.visible) this.lantern.position.set(this.x, eyeY, this.z);
     if (this.skyMesh?.visible) this.skyMesh.position.copy(this.camera.position);
+
+    // 海面の波（動きがあるときだけ立つ）・水中の視界・泡
+    this.updateWaterFX(dt, inWater, waterLv);
 
     // 入水中の波紋：水面上のプレイヤー位置で「拡大しながら薄くなる」リングをループ再生する
     if (this.rippleMesh && this.rippleMat) {
