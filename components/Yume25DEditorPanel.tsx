@@ -13,7 +13,8 @@ import {
 } from './game-presets/shared';
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
-import { billboardGroups, canShiftGroup, shiftBillboardGroup } from '@/lib/yume25d-macros';
+import { billboardGroups, canShiftGroup, shiftBillboardGroup, generateYumeTerrain } from '@/lib/yume25d-macros';
+import type { TerrainWater } from '@/lib/terrain-gen';
 
 /** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
 function SpriteThumb({ t }: { t: Tex25D }) {
@@ -97,6 +98,10 @@ export default function Yume25DEditorPanel({
   const macroSel = macroGroups.some(g => g.tex === macroTex) ? macroTex : (macroGroups[0]?.tex ?? 0);
   const runShiftMacro = (dc: number, dr: number, dlv = 0) =>
     onLayoutChange(l => shiftBillboardGroup(l, macroSel, dc, dr, dlv));
+  // 地形自動生成マクロ：押すたびにランダムシードで生成し直す
+  const [terrainWater, setTerrainWater] = useState<TerrainWater>('mid');
+  const runTerrainMacro = () =>
+    onLayoutChange(l => generateYumeTerrain(l, (Math.random() * 0xffffffff) >>> 0, terrainWater));
 
   /** 検索モーダルで選んだ3Dモデルをスプライトテクスチャとして追加し、
    *  スプライトツール＋パレット選択まで済ませる。 */
@@ -169,6 +174,26 @@ export default function Yume25DEditorPanel({
       {macroOpen && (
         <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
           <p className="text-[12px] font-bold text-gray-200">🔁 マクロ（一括編集）</p>
+
+          {/* 地形自動生成：パーリンノイズで床＋草ブロックの丘＋木を丸ごと作る */}
+          <p className="font-bold text-gray-400">🌍 地形の自動生成</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="flex items-center gap-1.5">水の量
+              <select value={terrainWater} onChange={e => setTerrainWater(e.target.value as TerrainWater)}
+                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                <option value="low">少なめ</option>
+                <option value="mid">ふつう</option>
+                <option value="high">多め</option>
+              </select>
+            </label>
+            <button onClick={runTerrainMacro}
+              className="px-2.5 py-1 rounded border-2 border-gray-600 bg-blue-600 text-white text-[11px] font-bold">
+              🎲 地形を生成
+            </button>
+          </div>
+          <p className="text-[9px] text-gray-500">マイクラと同じパーリンノイズで、床を 海・砂浜・草原 に塗り分け、丘は草ブロックを積み、森に🌲を立てます（内蔵素材を使用）。押すたびに別の地形になります。床と草ブロック/木は描き替えますが、ほかのスプライトは残ります。スタート周辺は平地になります</p>
+
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">↔️ グループ平行移動</p>
           {macroGroups.length === 0 ? (
             <p className="text-gray-500">マップにスプライト/3Dモデルが配置されていません。スプライトツールで配置すると、同じ見た目のグループをまとめて動かせます</p>
           ) : (

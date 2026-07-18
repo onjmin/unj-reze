@@ -51,6 +51,7 @@ import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList } from './Yume25DMaker';
 import Yume25DEditorPanel from './Yume25DEditorPanel';
+import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
 
 export type { PresetId };
 
@@ -1230,6 +1231,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [selectedTileId, setSelectedTileId] = useState(1);
   /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=置物(当たり判定あり・プレイヤーの後ろ) / 'overhead'=天蓋(当たり判定なし・手前・半透明化)。 */
   const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay' | 'overhead'>('base');
+  /** 地形自動生成マクロの「水の量」（見下ろし型のみ。actionは横視点の起伏地形なので使わない）。 */
+  const [terrainWater, setTerrainWater] = useState<TerrainWater>('mid');
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
   const [editSpeedMult, setEditSpeedMult] = useState(1);
   const [editModeType, setEditModeType] = useState<'move_place' | 'panel_input'>('panel_input');
@@ -10085,6 +10088,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
   const updateTile = (id: number, patch: Partial<TileDef>) =>
     setGameData(p => ({ ...p, tiles: { ...p.tiles, [id]: { ...p.tiles[id], ...patch } } }));
+  /** 地形自動生成マクロ：編集中シーンの下層(地面)レイヤーをパーリンノイズ地形で丸ごと描き替える。
+   *  action は横視点の起伏地形、それ以外は見下ろしのバイオーム塗り分け。押すたびにランダムシード。 */
+  const runTerrainMacro = () => {
+    setGameData(p => {
+      const startCol = Math.floor(p.player.start.x / TILE_SIZE);
+      const startRow = Math.floor(p.player.start.y / TILE_SIZE);
+      const seed = (Math.random() * 0xffffffff) >>> 0;
+      const r = p.engine === 'action'
+        ? generateSideViewTerrain(p.map, p.tiles, startCol, startRow, seed)
+        : generateTopDownTerrain(p.map, p.tiles, startCol, startRow, seed, terrainWater);
+      return { ...p, map: r.map, tiles: r.tiles };
+    });
+  };
   /** システムタイル（ワープ床/どく沼・ダメージ床/つるつる床）をテンプレートから新規タイルとして追加する。 */
   const addSystemTile = (tpl: SystemTileTemplate) => {
     setGameData(p => {
@@ -12845,6 +12861,34 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
                         </label>
                         <p className="text-[10px] text-gray-500">{COLS}×{ROWS} で1画面固定。広げるとカメラが追従します。</p>
+                      </div>
+                    )}
+
+                    {/* ── 地形の自動生成（マクロ）：パーリンノイズで下層(地面)を丸ごと描き替える ── */}
+                    {gameData.engine !== 'touhou' && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[11px] font-bold text-gray-300">🌍 地形の自動生成（マクロ）</p>
+                        <div className="flex items-center gap-2 flex-wrap text-[10px] text-gray-300">
+                          {gameData.engine !== 'action' && (
+                            <label className="flex items-center gap-1.5">水の量
+                              <select value={terrainWater} onChange={e => setTerrainWater(e.target.value as TerrainWater)}
+                                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                                <option value="low">少なめ</option>
+                                <option value="mid">ふつう</option>
+                                <option value="high">多め</option>
+                              </select>
+                            </label>
+                          )}
+                          <button onClick={runTerrainMacro}
+                            className="px-2.5 py-1 rounded border-2 border-gray-600 bg-blue-600 text-white text-[11px] font-bold">
+                            🎲 地形を生成
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-gray-500">
+                          {gameData.engine === 'action'
+                            ? 'マイクラと同じパーリンノイズで、地表の起伏（草ブロック・土・岩盤）を作ります（内蔵素材を使用）。押すたびに別の地形になり、編集中シーンの下層(地面)レイヤーを丸ごと描き替えます。スタート地点の足元は地表に均されます。'
+                            : 'マイクラと同じパーリンノイズで、深い海・海・砂浜・草原・森・山を塗り分けます（内蔵素材を使用）。押すたびに別の地形になり、編集中シーンの下層(地面)レイヤーを丸ごと描き替えます（中層・天蓋・オブジェクトは残ります）。スタート周辺は草原になります。'}
+                        </p>
                       </div>
                     )}
 

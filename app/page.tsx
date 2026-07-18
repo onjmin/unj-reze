@@ -42,7 +42,15 @@ export default function App() {
   const [replyTargetPost, setReplyTargetPost] = useState<Post | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [userId, setUserId] = useState('');
-  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(() => {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const cached = localStorage.getItem('unj_current_user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [server, setServer] = useState('/main');
   const [bbsMode, setBbsModeRaw] = useState('SNSモード');
 
@@ -115,6 +123,7 @@ export default function App() {
     api.auth.anonymous(sessionId).then(user => {
       setUserId(user.displayName);
       setCurrentUser(user);
+      localStorage.setItem('unj_current_user', JSON.stringify(user));
       api.notifications.unreadCount(user.displayName).then(({ count }) => {
         setNotifCount(count);
       }).catch(() => {});
@@ -187,11 +196,13 @@ export default function App() {
     if (currentUser) {
       const oldSlug = currentUser.slug;
       const oldDisplayName = currentUser.displayName;
-      setCurrentUser({
+      const updatedUser = {
         ...currentUser,
         displayName: newDisplayName,
         avatarUrl: newAvatarUrl,
-      });
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem('unj_current_user', JSON.stringify(updatedUser));
 
       const updatePost = (p: Post): Post => {
         const isUserPost = p.slug === oldSlug || p.displayName === oldDisplayName || p.displayName === newDisplayName;
