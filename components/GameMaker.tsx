@@ -1012,7 +1012,8 @@ const SpriteThumbnail = ({
         // VX/MV standard first frame might be down-facing, column 1
         const idleCol = std.frames === 3 ? 1 : 0;
         sx = idleCol * sw;
-        sy = 0;
+        const frontIdx = std.ways.findIndex(w => w.key === 's');
+        sy = (frontIdx >= 0 ? frontIdx : 0) * sh;
       }
     }
 

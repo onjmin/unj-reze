@@ -83,7 +83,9 @@ function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?:
           const rows = std.ways.length;
           sw = imgW / cols; sh = imgH / rows;
           const idleCol = std.frames === 3 ? 1 : 0;
-          sx = idleCol * sw; sy = 0;
+          sx = idleCol * sw;
+          const frontIdx = std.ways.findIndex(w => w.key === 's');
+          sy = (frontIdx >= 0 ? frontIdx : 0) * sh;
         }
         ctx.clearRect(0, 0, size, size);
         const zoom = Math.min(size / sw, size / sh);
