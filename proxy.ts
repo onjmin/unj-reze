@@ -13,6 +13,7 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function getClientIp(request: NextRequest): string {
   return (
+    request.headers.get('x-nf-client-connection-ip') ||
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     request.headers.get('x-real-ip') ||
     '127.0.0.1'
