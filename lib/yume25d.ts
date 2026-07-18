@@ -7,6 +7,7 @@ import { clone as cloneWithSkeleton } from 'three/examples/jsm/utils/SkeletonUti
 import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D } from '@/components/game-presets/shared';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
+import { buildMinecraftModel, type MinecraftLimbs } from '@/lib/minecraft-model';
 import { applyMasterVolume } from '@/lib/master-volume';
 
 /** 内部レンダリング解像度。CSS 側で pixelated 拡大してドット感を出す。 */
@@ -380,6 +381,9 @@ export interface BillboardInstance {
   /** NPC自身の向き（単位ベクトル）。移動で更新され、停止中は最後の向きを保つ。歩行グラNPCのみ使用。 */
   faceX?: number;
   faceZ?: number;
+  /** マイクラモデル専用：腕脚のピボット（歩行スイング用）と位相。 */
+  mcLimbs?: MinecraftLimbs;
+  mcPhase?: number;
 }
 
 export class Yume25DEngine {
@@ -452,6 +456,8 @@ export class Yume25DEngine {
   private modelLoader: GLTFLoader | null = null;
   /** URL → ロード済みシーン（原本）とアニメーション。配置ごとに clone して使い回す。失敗は null。 */
   private modelCache = new Map<string, Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null>>();
+  /** Minecraftスキン画像のキャッシュ（URL → テクスチャ）。モデルは配置ごとに組み立てる。失敗は null。 */
+  private mcSkinCache = new Map<string, Promise<THREE.Texture | null>>();
   private mixers: THREE.AnimationMixer[] = [];
   private activeBillboards: BillboardInstance[] = [];
   /** buildScene の世代番号。非同期ロード完了時に古い世代への差し込みを防ぐ。 */
@@ -650,7 +656,7 @@ export class Yume25DEngine {
       }
 
       const s = ab.data.scale ?? 1;
-      const is3DModel = !!this.layout.textures[ab.data.tex]?.modelUrl;
+      const is3DModel = this.isModel3D(ab.data.tex);
       const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
       ab.object.position.set(ab.x, objectY, ab.z);
       if (is3DModel) {
@@ -811,7 +817,7 @@ export class Yume25DEngine {
       } else {
         m.geometry = this.ghostBillGeo;
         m.userData.tex = spec.tex;
-        const is3DModel = !!this.layout.textures[spec.tex]?.modelUrl;
+        const is3DModel = this.isModel3D(spec.tex);
         if (is3DModel) {
           m.rotation.y = spec.dir !== undefined ? YAW_FOR_DIR[spec.dir] : 0;
         } else {
@@ -1010,6 +1016,8 @@ export class Yume25DEngine {
       }));
     }
     this.modelCache.clear();
+    for (const p of this.mcSkinCache.values()) p.then(t => t?.dispose());
+    this.mcSkinCache.clear();
     for (const e of this.texEntries.values()) e.texture.dispose();
     this.texEntries.clear();
     // forceContextLoss() は呼ばない：canvas 要素が同一のまま Strict Mode の
@@ -1113,6 +1121,29 @@ export class Yume25DEngine {
       drawCellContain(entry.canvas, a.img, rect.sx, rect.sy, rect.sw, rect.sh);
       entry.texture.needsUpdate = true;
     }
+  }
+
+  /** Minecraftスキン画像をロードしてキャッシュする（ドット絵前提：最近傍・ミップマップなし）。 */
+  private loadMcSkin(url: string): Promise<THREE.Texture | null> {
+    let p = this.mcSkinCache.get(url);
+    if (!p) {
+      p = new THREE.TextureLoader().loadAsync(url).then(t => {
+        t.magFilter = THREE.NearestFilter;
+        t.minFilter = THREE.NearestFilter;
+        t.generateMipmaps = false;
+        t.colorSpace = THREE.SRGBColorSpace;
+        return t;
+      }).catch(() => null);
+      this.mcSkinCache.set(url, p);
+    }
+    return p;
+  }
+
+  /** このテクスチャIDが3Dモデル（GLTF/マイクラスキン）として描画されるか。
+   *  向き（rotation.y）の扱いがビルボード（常にカメラ正対）と異なる箇所で使う。 */
+  private isModel3D(texId: number): boolean {
+    const t = this.layout.textures[texId];
+    return !!(t?.modelUrl || t?.minecraftSkin);
   }
 
   /** 歩行グラNPCの向き別表示：NPC自身の向きとカメラの向きから、見えるべき行（正面/横/背面）を選んで
@@ -1342,6 +1373,56 @@ export class Yume25DEngine {
             -(box2.min.z + box2.max.z) / 2,
           );
           holder.add(inst);
+        });
+        continue;
+      }
+
+      // マイクラスキン：Minecraft（Slim型）のプレイヤーモデルをスキン画像から組み立てて配置する。
+      // GLTFモデルと同じくホルダー原点＝足元・当たり判定なし。編集ピッキング用の不可視プロキシを置く。
+      if (def?.minecraftSkin) {
+        const s = b.scale ?? 1;
+        const baseY = (b.level ?? 0) * H;
+        const holder = new THREE.Group();
+        holder.position.set(b.col + 0.5, baseY, b.row + 0.5);
+        if (b.dir !== undefined) holder.rotation.y = YAW_FOR_DIR[b.dir];
+        this.scene.add(holder);
+        this.worldObjects.push(holder);
+        const abInstance: BillboardInstance = {
+          data: b,
+          object: holder,
+          x: b.col + 0.5,
+          z: b.row + 0.5,
+          y: baseY,
+          vx: 0,
+          vz: 0,
+          aiTimer: 0,
+          startX: b.col + 0.5,
+          startZ: b.row + 0.5,
+        };
+        this.activeBillboards.push(abInstance);
+        const proxyGeo = new THREE.BoxGeometry(0.55 * s, 0.95 * s, 0.35 * s);
+        const proxyMat = new THREE.MeshBasicMaterial();
+        this.ownedGeometries.push(proxyGeo);
+        this.ownedMaterials.push(proxyMat);
+        const proxy = new THREE.Mesh(proxyGeo, proxyMat);
+        proxy.visible = false;  // 不可視でもレイキャストには当たる（編集の消去・配置先判定用）
+        proxy.position.set(b.col + 0.5, baseY + (0.95 * s) / 2, b.row + 0.5);
+        proxy.userData.bbLevel = b.level ?? 0;
+        this.scene.add(proxy);
+        this.worldObjects.push(proxy);
+        const gen = this.buildGen;
+        this.loadMcSkin(def.minecraftSkin).then(tex => {
+          if (this.disposed || gen !== this.buildGen || !tex) return;
+          const { group, limbs } = buildMinecraftModel(tex, 0.95 * s);
+          group.traverse(o => {
+            const m = o as THREE.Mesh;
+            if (m.isMesh) {
+              this.ownedGeometries.push(m.geometry);
+              this.ownedMaterials.push(m.material as THREE.Material);
+            }
+          });
+          holder.add(group);
+          abInstance.mcLimbs = limbs;
         });
         continue;
       }
@@ -2035,8 +2116,7 @@ export class Yume25DEngine {
         ab.vx = 0;
         ab.vz = 0;
         this.applyModelAnim(ab, 'idle');
-        const is3DModel = !!this.layout.textures[b.tex]?.modelUrl;
-        if (is3DModel) {
+        if (this.isModel3D(b.tex)) {
           ab.object.rotation.y = b.dir !== undefined ? YAW_FOR_DIR[b.dir] : 0;
         }
         continue;
@@ -2143,8 +2223,22 @@ export class Yume25DEngine {
         this.applyModelAnim(ab, 'idle');
       }
 
+      // マイクラモデルの手足スイング：移動中は速度に合わせて前後に振り、停止でゆっくり直立へ戻す
+      if (ab.mcLimbs) {
+        const L = ab.mcLimbs;
+        if (sp > 1e-4) {
+          ab.mcPhase = (ab.mcPhase ?? 0) + dt * (5 + sp * 4);
+          const a = Math.sin(ab.mcPhase) * Math.min(0.8, 0.35 + sp * 0.25);
+          L.rArm.rotation.x = a; L.lArm.rotation.x = -a;
+          L.rLeg.rotation.x = -a; L.lLeg.rotation.x = a;
+        } else {
+          const k = Math.max(0, 1 - dt * 8);
+          for (const limb of [L.rArm, L.lArm, L.rLeg, L.lLeg]) limb.rotation.x *= k;
+        }
+      }
+
       const s = b.scale ?? 1;
-      const is3DModel = !!this.layout.textures[b.tex]?.modelUrl;
+      const is3DModel = this.isModel3D(b.tex);
       const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
       ab.object.position.set(ab.x, objectY, ab.z);
 
@@ -2636,8 +2730,7 @@ export class Yume25DEngine {
     // ビルボードはY軸回転のみでカメラへ正対（Buildエンジン風）
     for (const m of this.billboardMeshes) m.rotation.y = this.yaw;
     if (this.ghostKind === 'sprite') {
-      const is3DModel = !!this.layout.textures[this.ghostMesh.userData.tex]?.modelUrl;
-      if (!is3DModel) {
+      if (!this.isModel3D(this.ghostMesh.userData.tex)) {
         this.ghostMesh.rotation.y = this.yaw;
       }
     }

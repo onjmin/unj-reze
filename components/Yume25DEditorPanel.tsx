@@ -12,6 +12,7 @@ import {
   SYSTEM_SPRITE_TEMPLATES, type SystemSpriteTemplate,
 } from './game-presets/shared';
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
+import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
 import { billboardGroups, canShiftGroup, shiftBillboardGroup, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
@@ -31,7 +32,7 @@ function SpriteThumb({ t }: { t: Tex25D }) {
 interface Yume25DEditorPanelProps {
   layout: Layout25D;
   onLayoutChange: (updater: (l: Layout25D) => Layout25D) => void;
-  onPickImage?: (target: { t: 'yumeTex'; id: number } | { t: 'yumeSky' } | { t: 'yumeTexSound'; id: number }) => void;
+  onPickImage?: (target: { t: 'yumeTex'; id: number } | { t: 'yumeSky' } | { t: 'yumeTexSound'; id: number } | { t: 'yumeMcSkin' }) => void;
   view: '2d' | '3d';
   onViewChange: (v: '2d' | '3d') => void;
   tool: Yume25DTool;
@@ -128,6 +129,21 @@ export default function Yume25DEditorPanel({
     onSelSpriteChange(id);
     setModelSearchOpen(false);
   };
+
+  /** マイクラスキン（Slim型）のスプライトテクスチャを追加し、スプライトツール＋パレット選択まで済ませる。 */
+  const addMinecraftSkinTex = (name: string, url: string) => {
+    const id = Math.max(0, ...Object.keys(layout.textures).map(Number)) + 1;
+    onLayoutChange(l => ({
+      ...l,
+      textures: {
+        ...l.textures,
+        [id]: { id, name, kind: 'sprite' as const, color: '#7ec9a2', emoji: '🧍', minecraftSkin: url },
+      },
+    }));
+    onToolChange('sprite');
+    onSelSpriteChange(id);
+  };
+  const [mcSkinUrl, setMcSkinUrl] = useState('');
 
   /** システムスプライト（ボール・スピーカー）を special 付きスプライトテクスチャとして追加し、
    *  スプライトツール＋パレット選択まで済ませる。 */
@@ -548,6 +564,27 @@ export default function Yume25DEditorPanel({
           <button onClick={() => { setModelQuery(''); setModelSearchOpen(true); }}
             className="col-span-2 flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
             <Plus size={11} />🗿 3Dモデル（キーワード検索）
+          </button>
+        </div>
+        {/* マイクラスキン：Slim型スキン画像からブロック人形の3Dキャラを組み立てる。
+            プリセット／画像URL／アップロード画像（参照）のどれでも追加できる */}
+        <p className="text-[10px] text-gray-500 pt-1.5 mt-1 border-t border-gray-700/50">マイクラスキン：Minecraft のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作ってスプライトとして配置できます。歩くと手足を振ります。</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {MINECRAFT_SKIN_PRESETS.map(p => (
+            <button key={p.minecraftName} onClick={() => addMinecraftSkinTex(p.minecraftName, p.skinUrl)}
+              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
+              <Plus size={11} />🧍 {p.minecraftName}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <input value={mcSkinUrl} onChange={e => setMcSkinUrl(e.target.value)} placeholder="スキン画像URL（64×64）"
+            className="flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-[10px] text-white outline-none" />
+          <button onClick={() => { const u = mcSkinUrl.trim(); if (u) { addMinecraftSkinTex('マイクラスキン', u); setMcSkinUrl(''); } }}
+            className="px-2 py-1 rounded bg-blue-600 text-white text-[10px] font-bold">追加</button>
+          <button onClick={() => onPickImage?.({ t: 'yumeMcSkin' })}
+            className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300 text-[10px]">
+            <ImageIcon size={12} /> 参照
           </button>
         </div>
       </div>

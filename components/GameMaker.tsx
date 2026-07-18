@@ -897,7 +897,8 @@ type PickTarget =
   | { t: 'sceneBgm'; idx: number }
   | { t: 'yumeTex'; id: number }
   | { t: 'yumeSky' }
-  | { t: 'yumeTexSound'; id: number };
+  | { t: 'yumeTexSound'; id: number }
+  | { t: 'yumeMcSkin' };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -10067,6 +10068,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     else if (target.t === 'yumeSky') {
       setGameData(p => p.layout25d ? { ...p, layout25d: { ...p.layout25d, skyRef: res.ref, skyUrl: res.url } } : p);
+    }
+    else if (target.t === 'yumeMcSkin') {
+      // マイクラスキン：選んだ画像（アップロード画像や素材URL）からブロック人形スプライトを新規追加する
+      const lay = gameData.layout25d;
+      if (lay) {
+        const id = Math.max(0, ...Object.keys(lay.textures).map(Number)) + 1;
+        setGameData(p => p.layout25d ? {
+          ...p,
+          layout25d: {
+            ...p.layout25d,
+            textures: {
+              ...p.layout25d.textures,
+              [id]: { id, name: 'マイクラスキン', kind: 'sprite' as const, color: '#7ec9a2', emoji: '🧍', minecraftSkin: res.url },
+            },
+          },
+        } : p);
+        setYume25dTool('sprite');
+        setYume25dSelSprite(id);
+      }
     }
     else if (target.t === 'yumeTexSound') {
       const s = bgmLike();

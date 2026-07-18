@@ -504,6 +504,10 @@ export interface Tex25D {
   /** サンプル3Dモデル（glb）のURL（kind==='sprite'）。指定時はビルボードの代わりに
    *  GLTFモデルを配置する（当たり判定なし・すり抜け）。model-catalog.ts の検索モーダルから設定する。 */
   modelUrl?: string;
+  /** Minecraftスキン画像（Slim型・64x64）のURL（kind==='sprite'）。指定時はビルボードの代わりに
+   *  ブロック人形の3Dモデル（lib/minecraft-model.ts）を組み立てて配置する。
+   *  プリセットURL・任意の画像URL・アップロード画像のどれでも参照できる。 */
+  minecraftSkin?: string;
   /** モデルの大きさ（最大辺のマス数）。未指定は1。 */
   modelScale?: number;
   /** special==='ball'（kind==='sprite'）：球の半径（マス単位）。未指定は0.22。
