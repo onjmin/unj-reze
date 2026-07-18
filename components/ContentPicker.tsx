@@ -6,7 +6,8 @@ import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
-import { youtubeRefFromUrl, toYoutubeWatchUrl } from '@/lib/asset-ref';
+import { youtubeRefFromUrl, toYoutubeWatchUrl, parseWalkRef } from '@/lib/asset-ref';
+import { loadImage, animatedCellInRect, detectStandard, standardById } from '@/lib/walk-sprite';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
@@ -46,6 +47,91 @@ const SFX_TABS: BgmTab[] = ['rpgenSe', 'builtinGame', 'direct'];
 let lastImageTab: ImageTab = 'posts';
 const lastBgmTabByKind: Record<'bgm' | 'sfx', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe' };
 const scrollPositions = new Map<string, number>();
+
+/** 履歴タブのサムネ。walk: 参照は正面1コマ目を切り出し、url:#fragment はクロップ矩形を表示。 */
+function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?: string; size?: number }) {
+  const cvRef = useRef<HTMLCanvasElement>(null);
+  const walkRef = useRef(parseWalkRef(refStr));
+  // ref が変わったときだけ再解析
+  const prevRefStr = useRef(refStr);
+  if (prevRefStr.current !== refStr) { prevRefStr.current = refStr; walkRef.current = parseWalkRef(refStr); }
+  const walk = walkRef.current;
+  // walk: のとき url は source 内に格納されている場合がある
+  const imgUrl = url ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+
+  useEffect(() => {
+    const cv = cvRef.current;
+    if (!cv || !imgUrl) return;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+
+    // walk: 参照 → 正面フレームをクロップ
+    if (walk && walk.source.kind === 'url') {
+      let cancelled = false;
+      loadImage(imgUrl).then(img => {
+        if (cancelled || !ctx) return;
+        const imgW = img.naturalWidth, imgH = img.naturalHeight;
+        let sx = 0, sy = 0, sw = imgW, sh = imgH;
+        if (walk.crop) {
+          let std = walk.stdId === 'auto' ? detectStandard(walk.crop[2], walk.crop[3]) : standardById(walk.stdId);
+          if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
+          const rect = animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0 });
+          sx = rect.sx; sy = rect.sy; sw = rect.sw; sh = rect.sh;
+        } else {
+          const std = walk.stdId === 'auto' ? detectStandard(imgW, imgH) : standardById(walk.stdId);
+          const cols = std.frames;
+          const rows = std.ways.length;
+          sw = imgW / cols; sh = imgH / rows;
+          const idleCol = std.frames === 3 ? 1 : 0;
+          sx = idleCol * sw; sy = 0;
+        }
+        ctx.clearRect(0, 0, size, size);
+        const zoom = Math.min(size / sw, size / sh);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, sx, sy, sw, sh, (size - sw * zoom) / 2, (size - sh * zoom) / 2, sw * zoom, sh * zoom);
+      });
+      return () => { cancelled = true; };
+    }
+
+    // url:...#sx,sy,sw,sh → フラグメントでクロップ
+    if (!walk) {
+      const hashIdx = imgUrl.indexOf('#');
+      if (hashIdx !== -1) {
+        const parts = imgUrl.slice(hashIdx + 1).split(',').map(Number);
+        if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
+          const [fsx, fsy, fsw, fsh] = parts;
+          const baseUrl = imgUrl.slice(0, hashIdx);
+          let cancelled = false;
+          loadImage(baseUrl).then(img => {
+            if (cancelled || !ctx) return;
+            ctx.clearRect(0, 0, size, size);
+            const zoom = Math.min(size / fsw, size / fsh);
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(img, fsx, fsy, fsw, fsh, (size - fsw * zoom) / 2, (size - fsh * zoom) / 2, fsw * zoom, fsh * zoom);
+          });
+          return () => { cancelled = true; };
+        }
+      }
+    }
+  }, [imgUrl, walk?.crop?.[0], walk?.crop?.[1], walk?.crop?.[2], walk?.crop?.[3], walk?.stdId, walk?.frames, size]);
+
+  // walk: 参照でも url:#fragment でもない場合、または画像未読込の場合は <img> フォールバック
+  if (!walk && !(url && url.includes('#'))) {
+    return url
+      ? <img src={url} alt="" className="w-full h-full object-cover" />
+      : <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">?</div>;
+  }
+
+  return (
+    <canvas
+      ref={cvRef}
+      width={size}
+      height={size}
+      className="w-full h-full"
+      style={{ imageRendering: 'pixelated' }}
+    />
+  );
+}
 
 export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], currentRef, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -310,12 +396,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                     onClick={() => onPick(a)}
                     className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative"
                   >
-                    {a.url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={a.url} alt="" className="w-full h-full object-cover" style={{ imageRendering: a.ref.startsWith('walk:') ? 'pixelated' : 'auto' }} />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">?</div>
-                    )}
+                    <HistoryAssetThumb ref={a.ref} url={a.url} />
                     {a.url && (
                       <span
                         role="button"
