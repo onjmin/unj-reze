@@ -21,7 +21,7 @@ export default function CollabSelector({ imageUrl, onSelectDrawing, onSelectDotD
         </div>
 
         <div className="p-4">
-          <div className="relative rounded-xl overflow-hidden border border-gray-700 mb-4 bg-[#1a1b26]">
+          <div className="gimp-checkered-background-white relative rounded-xl overflow-hidden border border-gray-700 mb-4 bg-[#1a1b26]">
             <img
               src={imageUrl}
               alt="コラボ元画像"
