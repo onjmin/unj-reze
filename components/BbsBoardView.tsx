@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Loader2 } from 'lucide-react';
+import { Search, Plus, Loader2, PlaySquare } from 'lucide-react';
 import { Post } from '@/lib/types';
 import { extractFirstEmbed, getEmbedThumbnail } from '@/lib/embed';
 
@@ -150,6 +150,13 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                   return (
                     <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
                       <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  );
+                }
+                if (post.hasGame) {
+                  return (
+                    <div className="shrink-0 w-11 h-11 rounded bg-red-600/20 border border-red-600/40 flex items-center justify-center">
+                      <PlaySquare size={18} className="text-red-400" />
                     </div>
                   );
                 }

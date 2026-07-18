@@ -68,6 +68,15 @@ export default function App() {
         const newUrl = window.location.pathname;
         window.history.replaceState({}, '', newUrl);
       }
+
+      try {
+        const pending = sessionStorage.getItem('unj_pending_game');
+        if (pending) {
+          sessionStorage.removeItem('unj_pending_game');
+          const { gameId, postId } = JSON.parse(pending);
+          if (gameId) handleOpenPostGame(gameId, postId);
+        }
+      } catch {}
     }
   }, []);
   const [notifCount, setNotifCount] = useState(0);
