@@ -562,9 +562,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           }
           layerCounterRef.current = 2;
         } else {
-          const bgLayer = new oekaki.LayeredCanvas('白背景');
-          bgLayer.fill('#FFF');
-          bgLayer.trace();
           new oekaki.LayeredCanvas('レイヤー #1');
           layerCounterRef.current = 2;
 
@@ -573,7 +570,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
             img.crossOrigin = 'anonymous';
             img.src = collabRef.current;
             img.onload = () => {
-              bgLayer.delete();
               const layers = oekaki.getLayers();
               const target = layers[0];
               if (target) {

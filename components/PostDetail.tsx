@@ -569,7 +569,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           })()}
 
           {post.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background">
               <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}

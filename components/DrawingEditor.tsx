@@ -259,10 +259,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         }
         setRestoredState(null);
       } else {
-        // g_layers is empty after init — create initial user layers
-        const bgLayer = new oekaki.LayeredCanvas('白背景');
-        bgLayer.fill('#FFF');
-        bgLayer.trace();
         new oekaki.LayeredCanvas('レイヤー #1');
         layerCounterRef.current = 2;
 
@@ -272,8 +268,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           img.crossOrigin = 'anonymous';
           img.src = collabRef.current;
           img.onload = () => {
-            // remove white background layer, paste image on first layer
-            bgLayer.delete();
             const layers = oekaki.getLayers();
             const target = layers[0];
             if (target) {

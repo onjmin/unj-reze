@@ -339,7 +339,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                     <button
                       key={p.id}
                       onClick={() => pickImagePost(p, imageTab === 'posts' ? 'post' : 'walk')}
-                      className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative"
+                      className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={p.imageSrc} alt="" className="w-full h-full object-cover" style={{ imageRendering: imageTab === 'walk' ? 'pixelated' : 'auto' }} />

@@ -150,7 +150,7 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
       {/* Image */}
       <div
         ref={containerRef}
-        className="w-full h-full flex items-center justify-center touch-none overflow-hidden"
+        className="w-full h-full flex items-center justify-center touch-none overflow-hidden gimp-checkered-background"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

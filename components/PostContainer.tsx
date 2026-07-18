@@ -401,7 +401,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                 e.stopPropagation();
                 if (post.imageSrc) setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
               }}
-              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer"
+              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background"
             >
               <img
                 src={post.imageSrc}
