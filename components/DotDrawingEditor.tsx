@@ -3,8 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Eraser, PaintBucket, Pipette,
-  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload, History, FlipHorizontal,
-  Sun, Moon
+  Trash2, Undo, Redo, Save, Maximize2, Layers, Film, Upload, History, FlipHorizontal
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -19,7 +18,7 @@ import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, s
 
 interface DotDrawingEditorProps {
   onClose: () => void;
-  onSave: (data: string, checkeredDark: boolean) => void;
+  onSave: (data: string) => void;
   collabImageUrl?: string;
 }
 
@@ -61,10 +60,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [color, setColor] = useState('#000000');
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
-  const [checkeredDark, setCheckeredDark] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem('unj-dotdrawing-checkered-dark') !== 'false';
-  });
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number | null>(null);
@@ -687,14 +682,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   }, [gridW, gridH]);
 
   useEffect(() => {
-    const cv = oekaki.lowerLayer.value?.canvas;
-    if (!cv) return;
-    cv.classList.remove('gimp-checkered-background', 'gimp-checkered-background-white');
-    cv.classList.add(checkeredDark ? 'gimp-checkered-background' : 'gimp-checkered-background-white');
-    localStorage.setItem('unj-dotdrawing-checkered-dark', String(checkeredDark));
-  }, [checkeredDark]);
-
-  useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
     const correctCoords = (e: PointerEvent) => {
@@ -1099,7 +1086,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const handleSave = () => {
     clearAutosave(storageKey);
     const canvas = oekaki.render();
-    onSave(canvas.toDataURL('image/png'), checkeredDark);
+    onSave(canvas.toDataURL('image/png'));
   };
 
   const zoomIn = () => setZoom(v => Math.min(4, Math.round((v + 0.25) * 100) / 100));
@@ -1377,9 +1364,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
             <button onClick={handleRedo} className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] disabled:opacity-40">
               <Redo size={10} />
               <span>進む</span>
-            </button>
-            <button onClick={() => setCheckeredDark(v => !v)} className="px-2 h-6 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[9px] hover:bg-gray-100/20" title={checkeredDark ? 'ライト背景' : 'ダーク背景'}>
-              {checkeredDark ? <Sun size={10} /> : <Moon size={10} />}
             </button>
           </div>
           <button onClick={handleSave} className="h-6 rounded bg-[#1db854] hover:bg-[#1ed760] text-gray-900 font-bold flex items-center space-x-1 px-3 text-[9px] transition-colors">

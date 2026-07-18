@@ -58,7 +58,7 @@ export default function App() {
     try {
       const cached = localStorage.getItem('unj_current_user');
       if (cached) setCurrentUser(JSON.parse(cached));
-    } catch { }
+    } catch {}
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -77,7 +77,7 @@ export default function App() {
           if (returnTo) setPendingReturnTo(returnTo);
           if (gameId) handleOpenPostGame(gameId, postId);
         }
-      } catch { }
+      } catch {}
     }
   }, []);
   const [notifCount, setNotifCount] = useState(0);
@@ -86,7 +86,6 @@ export default function App() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [attachedMml, setAttachedMml] = useState<string | null>(null);
   const [originType, setOriginType] = useState<OriginType | undefined>(undefined);
-  const [attachedCheckeredDark, setAttachedCheckeredDark] = useState<boolean | undefined>(undefined);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
@@ -134,10 +133,10 @@ export default function App() {
       localStorage.setItem('unj_current_user', JSON.stringify(user));
       api.notifications.unreadCount(user.displayName).then(({ count }) => {
         setNotifCount(count);
-      }).catch(() => { });
+      }).catch(() => {});
       api.messages.list(user.displayName).then(msgs => {
         setMessageCount(msgs.length);
-      }).catch(() => { });
+      }).catch(() => {});
     }).catch(() => {
       setUserId('名無しvFZ');
     });
@@ -182,7 +181,7 @@ export default function App() {
           postGameLastIdRef.current = Math.max(...newOnes.map(r => decodeId(r.id) || 0));
           setPostGameDanmaku(prev => [...prev, ...newOnes.map(r => `${r.displayName}: ${r.content}`)]);
         }
-      } catch { }
+      } catch {}
     };
     poll();
     const id = setInterval(poll, 3000);
@@ -248,11 +247,11 @@ export default function App() {
       try {
         const data = await api.posts.list(userId);
         const existingIds = new Set(postsRef.current.map(p => String(p.id)));
-
+        
         setNewPosts(currentNewPosts => {
           const newIds = new Set(currentNewPosts.map(p => String(p.id)));
           const incomingNewPosts = data.filter(p => !existingIds.has(String(p.id)) && !newIds.has(String(p.id)));
-
+          
           if (incomingNewPosts.length > 0) {
             return [...incomingNewPosts, ...currentNewPosts];
           }
@@ -262,7 +261,7 @@ export default function App() {
         // ignore errors
       }
     }, 15000);
-
+    
     return () => clearInterval(intervalId);
   }, [userId]);
 
@@ -401,7 +400,6 @@ export default function App() {
       hasImage: !!attachedImage,
       imageSrc: attachedImage ?? undefined,
       originType,
-      checkeredDark: attachedCheckeredDark,
     };
     setPosts(prev => {
       const next = prev.map(p => p.id === postId
@@ -416,7 +414,6 @@ export default function App() {
     setAttachedMml(null);
     setGameDraft(null);
     setOriginType(undefined);
-    setAttachedCheckeredDark(undefined);
 
     let imageSrc: string | undefined;
     if (attachedImage) {
@@ -444,7 +441,6 @@ export default function App() {
       imageSrc,
       gameId,
       originType,
-      checkeredDark: attachedCheckeredDark,
     });
 
     setPosts(prev => {
@@ -483,7 +479,6 @@ export default function App() {
       hasImage: !!attachedImage,
       imageSrc: attachedImage ?? undefined,
       originType,
-      checkeredDark: attachedCheckeredDark,
     };
     setPosts(prev => { const next = [optimisticPost, ...prev]; postsRef.current = next; return next; });
     setInputText('');
@@ -491,7 +486,6 @@ export default function App() {
     setAttachedMml(null);
     setGameDraft(null);
     setOriginType(undefined);
-    setAttachedCheckeredDark(undefined);
 
     let imageSrc: string | undefined;
     if (attachedImage) {
@@ -518,7 +512,6 @@ export default function App() {
       avatarColor: "from-blue-500 to-indigo-600",
       gameId,
       originType,
-      checkeredDark: attachedCheckeredDark,
     });
     setPosts(prev => {
       const next = prev.map(p => p.id === tempId ? { ...post, avatarUrl: post.avatarUrl ?? currentUser?.avatarUrl } : p);
@@ -569,7 +562,7 @@ export default function App() {
     setActiveScreen('mml');
   };
 
-  const handleSaveDrawing = async (canvasData: string, checkeredDark: boolean) => {
+  const handleSaveDrawing = async (canvasData: string) => {
     if (editingPost) {
       setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
       setActiveScreen(null);
@@ -578,13 +571,12 @@ export default function App() {
       return;
     }
     setAttachedImage(canvasData);
-    setAttachedCheckeredDark(checkeredDark);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
     setInputText("#お絵描き 自作イラスト完成！");
   };
 
-  const handleSaveDotDrawing = async (canvasData: string, checkeredDark: boolean) => {
+  const handleSaveDotDrawing = async (canvasData: string) => {
     if (editingPost) {
       setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
       setActiveScreen(null);
@@ -593,7 +585,6 @@ export default function App() {
       return;
     }
     setAttachedImage(canvasData);
-    setAttachedCheckeredDark(checkeredDark);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
     setInputText("#ドット絵 自作ドット絵完成！");
@@ -622,7 +613,7 @@ export default function App() {
       postGameLastIdRef.current = 0;
       setPlayingGame({ manifest: game.manifest, title: game.title, postId, gameId, creatorSlug: game.creatorSlug });
       setActiveScreen('postgame');
-    } catch { }
+    } catch {}
   };
 
   const [pendingReturnTo, setPendingReturnTo] = useState<string | null>(null);
@@ -635,7 +626,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: meta.title, manifest, userSlug: currentUser?.slug }),
       });
-    } catch { }
+    } catch {}
     setActiveScreen(null);
     setPlayingGame(null);
     setPostGameDanmaku([]);
@@ -833,7 +824,7 @@ export default function App() {
                       setGameDraft={setGameDraft}
                       originType={originType}
                       setOriginType={setOriginType}
-                      onClose={() => { }}
+                      onClose={() => {}}
                       onSubmit={handleCreatePost}
                       onOpenDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('drawing'); }}
                       onOpenDotDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('dotdrawing'); }}
@@ -991,7 +982,7 @@ export default function App() {
               try {
                 await api.posts.edit(editingPost.id, userId, newContent, editingPost.originType, nextImageSrc === null ? '' : nextImageSrc);
                 fetchPosts();
-              } catch { }
+              } catch {}
               setShowGlobalEditModal(false);
               setEditingPost(null);
             }}

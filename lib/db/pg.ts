@@ -100,7 +100,6 @@ async function rowToPost(row: any): Promise<Post> {
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: row.is_false_declaration ?? false,
     isEdited: row.is_edited ?? false,
-    checkeredDark: row.checkered_dark != null ? !!row.checkered_dark : undefined,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -300,12 +299,12 @@ export const pgStore: DataStore = {
     try {
       const slug = data.slug || deriveSlugPg(data.displayName);
       const insertResult = await client.query(
-        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type, checkered_dark)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10, $11)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10)
          RETURNING *`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-         !!data.gameId, data.gameId || null, data.originType ?? null, data.checkeredDark ?? null]
+         !!data.gameId, data.gameId || null, data.originType ?? null]
       );
       return { ...(await rowToPost(insertResult.rows[0])), replies: [] };
     } finally {
@@ -511,7 +510,7 @@ export const pgStore: DataStore = {
     }
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
     const client = await getPool().connect();
     try {
       const [postResult, viewerSlug] = await Promise.all([
@@ -535,10 +534,6 @@ export const pgStore: DataStore = {
       if (imageSrc !== undefined) {
         sets.push(`image_src = $${values.length + 1}`);
         values.push(imageSrc);
-      }
-      if (checkeredDark !== undefined) {
-        sets.push(`checkered_dark = $${values.length + 1}`);
-        values.push(checkeredDark);
       }
       if (shouldMarkEdited) sets.push('is_edited = TRUE');
       values.push(id);

@@ -51,8 +51,6 @@ export interface Post {
   /** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
   isFalseDeclaration?: boolean;
   isEdited?: boolean;
-  /** お絵描き背景 true=ダーク(既定) false=ライト */
-  checkeredDark?: boolean;
   threadId: string;
   parentPostId?: string;
   replies: Post[];

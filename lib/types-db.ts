@@ -29,7 +29,6 @@ export interface DbPost {
   originType?: OriginType;
   isFalseDeclaration?: boolean;
   isEdited?: boolean;
-  checkeredDark?: boolean;
   threadId: number;
   parentPostId?: number;
   replies: DbPost[];

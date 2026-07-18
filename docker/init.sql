@@ -188,8 +188,6 @@ CREATE TABLE IF NOT EXISTS oshi_items (
 );
 CREATE INDEX IF NOT EXISTS idx_oshi_items_user_slug ON oshi_items(user_slug);
 
-ALTER TABLE posts ADD COLUMN checkered_dark INTEGER;
-
 -- === 通知データ ===
 INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, created_at) VALUES
   (1, '名無しXz9', 'がいいねしました', '青空の写真', 'like', 7, NULL, NOW() - INTERVAL '3 minutes'),

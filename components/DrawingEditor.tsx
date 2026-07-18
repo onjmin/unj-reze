@@ -3,8 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
-  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History, FlipHorizontal,
-  Sun, Moon
+  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History, FlipHorizontal
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -17,7 +16,7 @@ import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, s
 
 interface DrawingEditorProps {
   onClose: () => void;
-  onSave: (data: string, checkeredDark: boolean) => void;
+  onSave: (data: string) => void;
   collabImageUrl?: string;
 }
 
@@ -41,10 +40,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [brushSize, setBrushSize] = useState(12);
   const [eraserSize, setEraserSize] = useState(20);
   const [showGrid, setShowGrid] = useState(false);
-  const [checkeredDark, setCheckeredDark] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem('unj-drawing-checkered-dark') !== 'false';
-  });
   const [recentColors, setRecentColors] = useState<string[]>([]);
   const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
   const [activeLayerIndex, setActiveLayerIndex] = useState(0);
@@ -391,14 +386,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   }, [showGrid]);
 
   useEffect(() => {
-    const cv = oekaki.lowerLayer.value?.canvas;
-    if (!cv) return;
-    cv.classList.remove('gimp-checkered-background', 'gimp-checkered-background-white');
-    cv.classList.add(checkeredDark ? 'gimp-checkered-background' : 'gimp-checkered-background-white');
-    localStorage.setItem('unj-drawing-checkered-dark', String(checkeredDark));
-  }, [checkeredDark]);
-
-  useEffect(() => {
     oekaki.penSize.value = penSize;
     oekaki.brushSize.value = brushSize;
     oekaki.eraserSize.value = eraserSize;
@@ -733,7 +720,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   const handleSave = () => {
     clearAutosave(storageKey);
-    onSave(oekaki.render().toDataURL(), checkeredDark);
+    onSave(oekaki.render().toDataURL());
   };
 
   // 二本指ピンチでキャンバスをズーム。1本指の描画はoekaki側のpointer captureが処理するため干渉しない。
@@ -959,9 +946,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
             <button onClick={handleRedo} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40">
               <Redo size={11} />
               <span>進む</span>
-            </button>
-            <button onClick={() => setCheckeredDark(v => !v)} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20" title={checkeredDark ? 'ライト背景' : 'ダーク背景'}>
-              {checkeredDark ? <Sun size={11} /> : <Moon size={11} />}
             </button>
           </div>
           <button onClick={() => setShowImport(true)} className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] hover:bg-gray-100/20">

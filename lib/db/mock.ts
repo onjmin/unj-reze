@@ -44,8 +44,8 @@ export const mockStore: DataStore = {
     return mockDb.addReply(postId, data);
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean) {
-    return mockDb.editPost(id, userId, content, originType, imageSrc, checkeredDark);
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
+    return mockDb.editPost(id, userId, content, originType, imageSrc);
   },
 
   async deletePost(id: number, userId: string) {

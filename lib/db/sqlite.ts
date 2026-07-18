@@ -134,9 +134,6 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!postColNames.includes('is_edited')) {
     d.run("ALTER TABLE posts ADD COLUMN is_edited INTEGER NOT NULL DEFAULT 0");
   }
-  if (!postColNames.includes('checkered_dark')) {
-    d.run("ALTER TABLE posts ADD COLUMN checkered_dark INTEGER");
-  }
   d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_slug TEXT NOT NULL,
     blocked_slug TEXT NOT NULL,
@@ -277,7 +274,6 @@ function rowToPost(row: any): Post {
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: !!row.is_false_declaration,
     isEdited: !!row.is_edited,
-    checkeredDark: row.checkered_dark != null ? !!row.checkered_dark : undefined,
     threadId: row.thread_id,
     parentPostId: row.parent_post_id ?? undefined,
     replies: [],
@@ -447,11 +443,11 @@ export const sqliteStore: DataStore = {
     const now = new Date().toISOString();
     const originTypeVal = data.originType ?? null;
     d.run(
-      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type, checkered_dark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
       [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null,
-       data.gameId ? 1 : 0, data.gameId || null, originTypeVal, data.checkeredDark != null ? (data.checkeredDark ? 1 : 0) : null]
+       data.gameId ? 1 : 0, data.gameId || null, originTypeVal]
     );
     saveDb();
     return {
@@ -465,7 +461,6 @@ export const sqliteStore: DataStore = {
         avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
         has_collab_button: 1, hearts_total: 0, has_game: data.gameId ? 1 : 0,
         game_id: data.gameId || null, origin_type: originTypeVal,
-        checkered_dark: data.checkeredDark != null ? (data.checkeredDark ? 1 : 0) : null,
       }),
       replies: []
     };
@@ -577,11 +572,10 @@ export const sqliteStore: DataStore = {
     const now = new Date().toISOString();
     const parentPostId = data.parentPostId ?? postId;
     d.run(
-      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type, checkered_dark)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, postId, parentPostId, data.displayName, slug, data.content, now, data.avatarColor || 'from-blue-500 to-indigo-600',
-       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null, data.originType || null,
-       data.checkeredDark != null ? (data.checkeredDark ? 1 : 0) : null]
+       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null, data.originType || null]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
     const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
@@ -614,13 +608,12 @@ export const sqliteStore: DataStore = {
         avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
         has_collab_button: 0, hearts_total: 0, has_game: data.gameId ? 1 : 0,
         game_id: data.gameId || null, origin_type: data.originType || null,
-        checkered_dark: data.checkeredDark != null ? (data.checkeredDark ? 1 : 0) : null,
       }),
       replies: [],
     };
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
     const d = await getDb();
     const rows = rowsToObjects(d, 'SELECT slug, display_name, content, origin_type FROM posts WHERE id = ?', [id]);
     if (rows.length === 0) return null;
@@ -640,10 +633,6 @@ export const sqliteStore: DataStore = {
     if (imageSrc !== undefined) {
       sets.push('image_src = ?');
       values.push(imageSrc);
-    }
-    if (checkeredDark !== undefined) {
-      sets.push('checkered_dark = ?');
-      values.push(checkeredDark ? 1 : 0);
     }
     if (shouldMarkEdited) sets.push('is_edited = 1');
     values.push(id);

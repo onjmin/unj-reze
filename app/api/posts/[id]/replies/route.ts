@@ -30,7 +30,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { displayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType, checkeredDark } = body;
+  const { displayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType } = body;
 
   if (!displayName) {
     return NextResponse.json(
@@ -61,7 +61,6 @@ export async function POST(
     avatarColor,
     gameId: gameId ? Number(gameId) : undefined,
     originType,
-    checkeredDark,
   });
   if (!reply) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });

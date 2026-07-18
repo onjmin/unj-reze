@@ -33,7 +33,6 @@ export interface CreatePostParams {
   gameId?: number;
   /** 自己申告の権利表記。未設定なら undefined */
   originType?: OriginType;
-  checkeredDark?: boolean;
 }
 
 export interface ReplyParams {
@@ -46,7 +45,6 @@ export interface ReplyParams {
   avatarColor?: string;
   gameId?: number;
   originType?: OriginType;
-  checkeredDark?: boolean;
 }
 
 export interface MessageParams {
@@ -72,7 +70,7 @@ export interface DataStore {
   repostPost(id: number): Promise<DbPost | null>;
   getReplies(postId: number, userId?: string): Promise<DbPost[]>;
   addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
-  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean): Promise<DbPost | null>;
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string): Promise<DbPost | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
   getUserPostsBySlug(slug: string, userId?: string): Promise<DbPost[]>;
