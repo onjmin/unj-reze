@@ -384,6 +384,8 @@ export interface BillboardInstance {
   /** マイクラモデル専用：腕脚のピボット（歩行スイング用）と位相。 */
   mcLimbs?: MinecraftLimbs;
   mcPhase?: number;
+  /** マイクラ/3Dモデル停止時の最後の向き。移動中に記録し、停止中にこの値を維持する。 */
+  lastYaw?: number;
 }
 
 export class Yume25DEngine {
@@ -654,6 +656,7 @@ export class Yume25DEngine {
         ab.faceZ = -Math.cos(fy);
         ab.dirLastKey = undefined;
       }
+      ab.lastYaw = undefined;
 
       const s = ab.data.scale ?? 1;
       const is3DModel = this.isModel3D(ab.data.tex);
@@ -2244,10 +2247,9 @@ export class Yume25DEngine {
 
       if (is3DModel) {
         if (ab.vx !== 0 || ab.vz !== 0) {
-          ab.object.rotation.y = Math.atan2(ab.vx, ab.vz);
-        } else {
-          ab.object.rotation.y = b.dir !== undefined ? YAW_FOR_DIR[b.dir] : 0;
+          ab.lastYaw = Math.atan2(ab.vx, ab.vz);
         }
+        ab.object.rotation.y = ab.lastYaw ?? (b.dir !== undefined ? YAW_FOR_DIR[b.dir] : Math.atan2(ab.vx || 0, ab.vz || 0));
       }
     }
   }
