@@ -23,7 +23,11 @@ const setFaceUV = (geo: THREE.BoxGeometry, faceIdx: number, x0: number, y0: numb
   const u0 = x0 / TEX_W, u1 = (x0 + w) / TEX_W;
   const vT = 1 - y0 / TEX_H, vB = 1 - (y0 + h) / TEX_H;
   const o = faceIdx * 4;
-  uv.setXY(o, u0, vT); uv.setXY(o + 1, u1, vT); uv.setXY(o + 2, u0, vB); uv.setXY(o + 3, u1, vB);
+  // Bottom face (-y): Minecraft skin bottom rect has front at bottom (high y), back at top (low y),
+  // but BoxGeometry -y face maps +z (front) to vT. Swap vT/vB to correct.
+  const bv = faceIdx === 3;
+  uv.setXY(o, u0, bv ? vB : vT); uv.setXY(o + 1, u1, bv ? vB : vT);
+  uv.setXY(o + 2, u0, bv ? vT : vB); uv.setXY(o + 3, u1, bv ? vT : vB);
   uv.needsUpdate = true;
 };
 
