@@ -12311,7 +12311,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           )}
 
           {(isPlaying || playOnly || editModeType === 'move_place') ? (
-            <div className="flex-1 flex flex-col p-4 select-none bg-[#0e0f14] min-h-[220px]">
+            <div className={`flex-1 flex flex-col p-4 select-none bg-[#0e0f14] min-h-[220px] ${(isPlaying || playOnly) ? 'md:hidden' : ''}`}>
               <div className="flex justify-between items-center px-1 mb-2 text-[9px] text-gray-500 font-pixel font-bold leading-none">
                 <span>SYSTEM: {gameData.engine.toUpperCase()} ENGINE</span>
                 <span>{playOnly || isPlaying ? "MODE: PLAY" : `MODE: EDIT (${editSpeedMult}x)`}</span>

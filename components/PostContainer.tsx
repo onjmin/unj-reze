@@ -19,6 +19,8 @@ import EditPostModal from './EditPostModal';
 import DeletePostModal from './DeletePostModal';
 import OriginTypeModal from './OriginTypeModal';
 import UserActionMenu from './UserActionMenu';
+import ImagePreview from './ImagePreview';
+import GamePreview from './GamePreview';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
@@ -43,9 +45,10 @@ interface PostContainerProps {
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
+  userId?: string;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditPost }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditPost, userId }: PostContainerProps) {
   const router = useRouter();
   const avatarInfo = getAvatarInfo(post.displayName);
   const [showReplyInput, setShowReplyInput] = useState(false);
@@ -61,6 +64,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
+  const [previewGame, setPreviewGame] = useState<{ gameId: string; postId?: string } | null>(null);
 
   const targetSlug = post.slug || post.displayName;
   const isSelf = !!currentUserSlug && currentUserSlug === targetSlug;
@@ -394,7 +399,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {post.hasImage && (
             <div
-              onClick={handlePostClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
+              }}
               className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer"
             >
               <img
@@ -420,7 +428,10 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {post.hasGame && (
             <div
-              onClick={() => openGame(post.gameId, post.id)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewGame({ gameId: post.gameId || '', postId: post.id });
+              }}
               className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
             >
               {post.gameThumbnail && (
@@ -586,6 +597,21 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
         }}
         position={avatarMenuPos}
       />
+      {previewImage && (
+        <ImagePreview
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
+        />
+      )}
+      {previewGame && userId && (
+        <GamePreview
+          gameId={previewGame.gameId}
+          postId={previewGame.postId}
+          userId={userId}
+          onClose={() => setPreviewGame(null)}
+        />
+      )}
     </div>
   );
 }

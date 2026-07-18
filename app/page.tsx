@@ -879,6 +879,7 @@ export default function App() {
                     onEditImage={handleEditPostImage}
                     onEditMml={handleEditPostMml}
                     onEditPost={handleEditPost}
+                    userId={userId}
                   />
                 </>
               )}
