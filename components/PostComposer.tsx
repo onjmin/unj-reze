@@ -100,7 +100,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${image ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
         <div className="overflow-hidden min-h-0">
           {image && (
-            <div className={`relative mt-2 rounded-lg overflow-hidden border border-gray-800 ${md ? 'max-w-[180px] md:max-w-[260px]' : 'max-w-[180px]'}`}>
+            <div className={`gimp-checkered-background-white relative mt-2 rounded-lg overflow-hidden border border-gray-800 ${md ? 'max-w-[180px] md:max-w-[260px]' : 'max-w-[180px]'}`}>
               <img src={image} alt="添付画像" className="w-full h-auto" />
               <div className="absolute top-1 right-1 flex items-center gap-1.5">
                 <button

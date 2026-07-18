@@ -120,7 +120,7 @@ export default function EditPostModal({
 
         {/* 添付画像 */}
         {currentImageSrc && (
-          <div className="relative rounded-lg overflow-hidden border border-gray-800 max-w-[180px] md:max-w-[260px] self-start group">
+          <div className="gimp-checkered-background-white relative rounded-lg overflow-hidden border border-gray-800 max-w-[180px] md:max-w-[260px] self-start group">
             <img src={currentImageSrc} alt="添付画像" className="w-full h-auto" />
             <div className="absolute top-1.5 right-1.5 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
               {onEditImage && (
