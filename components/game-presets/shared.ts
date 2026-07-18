@@ -538,6 +538,8 @@ export interface Billboard25D {
   behavior?: NpcBehavior;
   collidable?: boolean;
   dir?: Dir4;
+  /** イベントページ。持つ場合は「はなす」でコマンドが実行される（ObjectDef.pages と同じ仕組み）。 */
+  pages?: EventPage[];
 }
 
 /** 2.5Dエンジンのレイアウト全体。プレーンJSONとしてそのまま保存できる。 */

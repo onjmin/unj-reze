@@ -79,6 +79,8 @@ interface Yume25DMakerProps {
   hoverMode: boolean;
   onHoverModeChange: (v: boolean) => void;
   onDeath?: () => void;
+  /** 「はなす」でビルボードのイベントページを実行する。true を返すと表示型の会話はスキップする。 */
+  onInteractBillboard?: (billboardId: string) => boolean;
 }
 
 export interface Yume25DMakerHandle {
@@ -99,7 +101,7 @@ export const yume25dResizeFloor = (floor: number[][], cols: number, rows: number
 const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function Yume25DMaker({
   layout, onLayoutChange, isPlaying, demo, playerAppearance, onPickImage, virtualKeys,
   view, tool, level, selFloor, selWall, selSprite, talkTargetId, onTalkTargetChange,
-  hoverMode, onHoverModeChange, onDeath,
+  hoverMode, onHoverModeChange, onDeath, onInteractBillboard,
 }, ref) {
   const glCanvasRef = useRef<HTMLCanvasElement>(null);
   const edCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -619,7 +621,10 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
   // ── 「はなす」：近くの interactive なビルボードがあれば会話ウィンドウを開く ──
   const handleTalk = () => {
     const b = engineRef.current?.getInteractable();
-    if (b) setDialogue({ message: b.message || '……', choices: b.choices });
+    if (!b) return;
+    // イベントページがあれば親コンポーネントで実行を試みる（成功したら表示型会話はスキップ）
+    if (b.pages && b.pages.length > 0 && onInteractBillboard?.(b.id)) return;
+    setDialogue({ message: b.message || '……', choices: b.choices });
   };
 
   // ── 2Dエディタ描画：VIEW_COLS×VIEW_ROWS マス分の窓だけを scroll 位置基準で描画する ──────

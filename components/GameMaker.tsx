@@ -244,7 +244,7 @@ function buildWorldLayout(scenes: SceneDef[]): {
 const emptyGridLike = (map: number[][]): number[][] =>
   map.map(row => new Array(row.length).fill(0));
 
-const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', randomDash: 'ランダムダッシュ', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
+const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 'ランダム', randomDash: 'ランダムダッシュ', randomHop: 'ランダムジャンプ', chase: '追尾', flee: '逃走', patrolH: '左右往復', patrolV: '上下往復', walker: '歩行（崖で反転）' };
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
@@ -4286,7 +4286,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, [gameData, playSfx, showGameMsg]);
 
   // ── イベントインタプリタ ──
-  const findActivePage = useCallback((obj: ObjectDef): EventPage | null => {
+  const findActivePage = useCallback((obj: { id: string; pages?: EventPage[] }): EventPage | null => {
     if (!obj.pages || obj.pages.length === 0) return null;
     for (const page of obj.pages) {
       const c = page.conditions;
@@ -10727,6 +10727,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     setShowDeathScreen(true);
                   }
                 }}
+                onInteractBillboard={(billboardId) => {
+                  const b = gameDataRef.current.layout25d?.billboards.find(bb => bb.id === billboardId);
+                  if (!b || !b.pages || b.pages.length === 0) return false;
+                  const page = findActivePage(b);
+                  if (page && page.commands.length > 0) {
+                    runEventCommands(b.id, page.commands);
+                    return true;
+                  }
+                  return false;
+                }}
               />
             ) : (
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
@@ -13222,8 +13232,71 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── OBJECT ── */}
                 {editorTab === 'object' && (
                   <div className="space-y-3">
+                    {/* ── yume25d ビルボード選択中 ── */}
+                    {gameData.engine === 'yume25d' && yume25dTalkTargetId && (() => {
+                      const bb = gameData.layout25d?.billboards.find(b => b.id === yume25dTalkTargetId);
+                      if (!bb) return null;
+                      const updBb = (patch: Partial<typeof bb>) => setGameData(p => ({
+                        ...p, layout25d: p.layout25d ? {
+                          ...p.layout25d, billboards: p.layout25d.billboards.map(b => b.id === bb.id ? { ...b, ...patch } : b)
+                        } : p.layout25d
+                      }));
+                      return (
+                        <div className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-yellow-400 font-bold flex items-center gap-1">
+                              <Smartphone size={11} /> 選択中: {bb.message || `ビルボード#${bb.tex}`}
+                            </span>
+                            <button onClick={() => setYume25dTalkTargetId(null)}
+                              className="grid place-items-center min-w-[2.25rem] h-6 px-2 bg-gray-700 hover:bg-gray-600 rounded text-[10px] text-gray-300">解除</button>
+                          </div>
+                          <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                            <input type="checkbox" checked={!!bb.interactive}
+                              onChange={e => updBb({ interactive: e.target.checked || undefined })} />
+                            はなせる
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                            <input type="checkbox" checked={!!bb.collidable}
+                              onChange={e => updBb({ collidable: e.target.checked || undefined })} />
+                            当たり判定
+                          </label>
+                          <label className="text-[10px] text-gray-400 block">AI行動
+                            <select value={bb.behavior ?? 'still'}
+                              onChange={e => updBb({ behavior: e.target.value as NpcBehavior })}
+                              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
+                              <option value="still">静止</option>
+                              <option value="random">ランダム移動</option>
+                              <option value="randomDash">ランダムダッシュ</option>
+                              <option value="randomHop">ランダムジャンプ</option>
+                              <option value="chase">追いかける</option>
+                              <option value="flee">逃げる</option>
+                              <option value="patrolH">左右巡回</option>
+                              <option value="patrolV">前後巡回</option>
+                            </select>
+                          </label>
+                          <label className="text-[10px] text-gray-400 block">メッセージ
+                            <input type="text" value={bb.message ?? ''} placeholder="……"
+                              onChange={e => updBb({ message: e.target.value || undefined })}
+                              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                          </label>
+                          <label className="text-[10px] text-gray-400 block">選択肢（,区切り）
+                            <input type="text" value={(bb.choices ?? []).join(',')}
+                              onChange={e => { const v = e.target.value; updBb({ choices: v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined }); }}
+                              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
+                          </label>
+                          {/* イベントページ */}
+                          <EventPageEditor
+                            pages={bb.pages ?? []}
+                            setPages={pages => updBb({ pages: pages.length > 0 ? pages : undefined })}
+                            switches={gameData.switches ?? []}
+                            items={gameData.items ?? []}
+                            setPreviewCommand={setPreviewCommand}
+                          />
+                        </div>
+                      );
+                    })()}
                     {/* ── 選択中オブジェクト or 新規テンプレート ── */}
-                    {selObj ? (<>
+                    {!(gameData.engine === 'yume25d' && yume25dTalkTargetId) && (selObj ? (<>
                       <div key={selObj.id} className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-yellow-400 font-bold flex items-center gap-1">
@@ -13698,19 +13771,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <Plus size={13} />プレイヤー位置に新規配置
                         </button>
                       </div>
-                    )}
+                    ))}
                     {/* ── 全オブジェクト一覧 ── */}
                     <div>
-                      <div className="text-[10px] text-gray-500 mb-1.5">全{gameData.objects.length}個</div>
+                      <div className="text-[10px] text-gray-500 mb-1.5">全{gameData.engine === 'yume25d' ? (gameData.layout25d?.billboards.length ?? 0) : gameData.objects.length}個</div>
                       <div className="max-h-28 overflow-y-auto space-y-0.5">
-                        {gameData.objects.map(o => (
-                          <button key={o.id} onClick={() => setSelectedObjId(o.id)}
-                            className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${selectedObjId === o.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
-                            <span>{o.emoji}</span>
-                            <span className="truncate flex-1">{o.name || o.objType || '敵'}</span>
-                            <span className="text-gray-600">({o.col},{o.row})</span>
-                          </button>
-                        ))}
+                        {gameData.engine === 'yume25d'
+                          ? (gameData.layout25d?.billboards ?? []).map(b => (
+                            <button key={b.id} onClick={() => { setSelectedObjId(null); setYume25dTalkTargetId(b.id); }}
+                              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${yume25dTalkTargetId === b.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
+                              <span>{b.interactive ? '💬' : '🪧'}</span>
+                              <span className="truncate flex-1">{b.message || `ビルボード#${b.tex}`}</span>
+                              <span className="text-gray-600">({b.col},{b.row})</span>
+                            </button>
+                          ))
+                          : gameData.objects.map(o => (
+                            <button key={o.id} onClick={() => setSelectedObjId(o.id)}
+                              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${selectedObjId === o.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
+                              <span>{o.emoji}</span>
+                              <span className="truncate flex-1">{o.name || o.objType || '敵'}</span>
+                              <span className="text-gray-600">({o.col},{o.row})</span>
+                            </button>
+                          ))}
                       </div>
                     </div>
                   </div>
