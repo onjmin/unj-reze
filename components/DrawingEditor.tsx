@@ -42,8 +42,9 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [eraserSize, setEraserSize] = useState(20);
   const [showGrid, setShowGrid] = useState(false);
   const [checkeredDark, setCheckeredDark] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem('unj-drawing-checkered-dark') !== 'false';
+    if (typeof window === 'undefined') return false;
+    const saved = localStorage.getItem('unj-drawing-checkered-dark');
+    return saved === null ? false : saved !== 'false';
   });
   const [recentColors, setRecentColors] = useState<string[]>([]);
   const [layerEntries, setLayerEntries] = useState<LayerEntry[]>([]);
