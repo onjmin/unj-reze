@@ -60,8 +60,29 @@ const WATER_SINK_V = -0.7;    // 沈降速度（マス/秒）
 const WATER_DRAG = 3.0;       // 水の抵抗（1/秒。落下の勢いがこの速さで沈降速度へ収束）
 const SWIM_UP_V = 1.7;        // ひとかき（ジャンプ入力）の上昇速度
 const WATER_MOVE_MULT = 0.55; // 水中の移動速度倍率
-const RIPPLE_PERIOD = 0.9;    // 入水中の波紋アニメ1周期（秒）
 const WATER_DEFAULT_COLOR = '#2f7fa8';
+const LAVA_DEFAULT_COLOR = '#d35400';  // waterKind==='lava' の既定色（マグマ色）
+// 水没ダメージ（layout.waterDamage で対象別に有効化）：浸かっている間、1秒おきに削る。溶岩は倍。
+const SUBMERGE_DMG_INTERVAL = 1.0;
+const SUBMERGE_DMG_WATER = 2;      // 1ハート/秒
+const SUBMERGE_DMG_LAVA = 4;       // 2ハート/秒
+const NPC_SUBMERGE_SEC = 3;        // 住人（NPC/敵）が水没から倒れるまでの秒数（溶岩は半分）
+// 酸素（layout.oxygen で有効化）：Minecraft風。頭まで潜ると減り、尽きたら1秒おきに窒息ダメージ。
+// 水面に出れば倍速で回復する。
+const OXYGEN_MAX_SEC = 10;         // 息が続く秒数（＝ゲージ10目盛り）
+const OXYGEN_RECOVER_MULT = 4;     // 回復は消費の4倍速
+const DROWN_DMG = 2;               // 窒息ダメージ（1ハート/秒）
+// 空腹ゲージ（layout.hunger で有効化）：Minecraft準拠の簡略版。20ポイント＝🍗10個（1個=2ポイント）。
+const HUNGER_MAX = 20;
+const HUNGER_DASH_DRAIN = 0.35;    // ダッシュ移動中の消費（ポイント/秒）。ごくゆっくり減る
+const HUNGER_SPRINT_MIN = 6;       // 🍗3個以下ではダッシュできない（Minecraftと同じ閾値）
+const HUNGER_REGEN_MIN = 18;       // 🍗9個以上でHPが自然回復する
+const HUNGER_REGEN_INTERVAL = 2.0; // 自然回復の間隔（秒）。1回で 1HP 回復し空腹を少し消費
+const HUNGER_REGEN_COST = 0.6;
+const STARVE_INTERVAL = 2.0;       // 空腹0の飢餓ダメージ間隔（秒）
+const STARVE_MIN_HP = 2;           // 飢餓では1ハートまでしか減らない（Minecraftノーマル相当＝飢えでは死なない）
+const FOOD_DEFAULT_VALUE = 6;      // 食べ物1個の回復量（🍗3個ぶん）
+const SYS_FOOD_SFX = 'https://rpgen-search.pages.dev/audio/sound/lFPiWw.mp3';
 // 波：水面はプレーンな板ではなく分割メッシュで、動き（プレイヤー・NPC・ボールの移動）があるとき
 // だけ頂点変位のさざ波を立てる。静止すると凪に戻る。波の陰影は水面専用のライトレイヤーで付ける
 // （ワールドは環境光のみなので、専用ライトが無いと頂点変位が見えない）。
@@ -347,6 +368,18 @@ export interface BillboardInstance {
    *  （idle なし＝歩きを先頭コマで固定、run なし＝歩きの早回しで代用）。 */
   anims?: { idle?: THREE.AnimationAction; walk: THREE.AnimationAction; run?: THREE.AnimationAction };
   currentAction?: THREE.AnimationAction | null;
+  /** 水没ダメージ（layout.waterDamage.npc/enemy）用の残り体力（秒換算）。未定義＝満タン。 */
+  submergeHp?: number;
+  /** 水没で倒れた（非表示・AI/当たり判定/会話から除外）。リスポーンで復活する。 */
+  dead?: boolean;
+  /** 歩行グラNPC専用：向き別（正面/横/背面）表示のための個別キャンバス。
+   *  共有テクスチャ（texEntries）は正面固定なので、向きを持つNPCは自分専用の板絵を持つ。 */
+  dirCanvas?: HTMLCanvasElement;
+  dirTexture?: THREE.CanvasTexture;
+  dirLastKey?: string;
+  /** NPC自身の向き（単位ベクトル）。移動で更新され、停止中は最後の向きを保つ。歩行グラNPCのみ使用。 */
+  faceX?: number;
+  faceZ?: number;
 }
 
 export class Yume25DEngine {
@@ -378,9 +411,6 @@ export class Yume25DEngine {
   private povDistance = 1.6;
   private hEdges = new Set<string>();  // セル(c,r)の北辺（z=r, x∈[c,c+1]）
   private vEdges = new Set<string>();  // セル(c,r)の西辺（x=c, z∈[r,r+1]）
-  /** 薄壁の上端高さ（全段）。key=セル。プレイヤーが壁の面から半径以内にいる間の「壁の上に立つ」足場判定に使う。 */
-  private wallTopsH = new Map<string, number[]>();
-  private wallTopsV = new Map<string, number[]>();
   private billboardMeshes: THREE.Mesh[] = [];
   private worldObjects: THREE.Object3D[] = [];
   private ownedGeometries: THREE.BufferGeometry[] = [];
@@ -444,11 +474,19 @@ export class Yume25DEngine {
   /** 泡パーティクルのプール。y<0 は非アクティブ。 */
   private bubbles: { x: number; y: number; z: number; vy: number; phase: number }[] = [];
   private bubbleSpawnT = 0;
-  private rippleMesh: THREE.Mesh | null = null;
-  private rippleMat: THREE.MeshBasicMaterial | null = null;
-  private rippleGeo: THREE.RingGeometry | null = null;
-  private rippleT = 0;
   private peakHop = 0;
+  // ── 水没ダメージ・酸素 ──
+  private submergeDmgT = 0;   // プレイヤー水没ダメージの次ティックまでの残り秒
+  private oxygen = OXYGEN_MAX_SEC;
+  private oxygenShown = OXYGEN_MAX_SEC;  // onOxygenChange 通知済みの目盛り（Math.ceil）
+  private drownT = 0;         // 窒息ダメージの次ティックまでの残り秒
+  /** 水没で倒れた住人・食べられた食べ物のビルボードid。セリフ・会話対象からも除外する。 */
+  private deadIds = new Set<string>();
+  // ── 空腹ゲージ ──
+  private hunger = HUNGER_MAX;
+  private hungerShown = HUNGER_MAX;  // onHungerChange 通知済みの値（Math.ceil）
+  private regenT = 0;   // 自然回復の経過秒
+  private starveT = 0;  // 飢餓ダメージの経過秒
   /** スピーカー（special==='speaker'）。同じ音源のスプライト群を1本の Audio にまとめ、最寄り距離で音量を決める。 */
   private speakers: { src: string; positions: [number, number][]; radius: number; volume: number }[] = [];
   private speakerAudio = new Map<string, HTMLAudioElement>();
@@ -483,6 +521,12 @@ export class Yume25DEngine {
   private invuln = 0;
   /** HP変化通知（HUD用）。被弾・リセットでの全回復の両方で呼ばれる。 */
   onHpChange: ((hp: number, max: number) => void) | null = null;
+  /** 酸素の残り通知（HUD用）。表示目盛り（Math.ceil）が変わったときだけ呼ばれる。 */
+  onOxygenChange: ((sec: number, max: number) => void) | null = null;
+  get oxygenState() { return { sec: this.oxygen, max: OXYGEN_MAX_SEC }; }
+  /** 空腹の残り通知（HUD用）。表示値（Math.ceil）が変わったときだけ呼ばれる。 */
+  onHungerChange: ((pts: number, max: number) => void) | null = null;
+  get hungerState() { return { pts: this.hunger, max: HUNGER_MAX }; }
   /** HP が 0 になったとき（フェードアウト開始直前）に呼ばれる。死亡画面表示用。 */
   onDeath: (() => void) | null = null;
 
@@ -565,6 +609,18 @@ export class Yume25DEngine {
     this.hp = this.maxHp;
     this.invuln = 0;
     this.onHpChange?.(this.hp, this.maxHp);
+    // 酸素・水没ダメージ・空腹の状態もリセット（リスポーンで満タンから）
+    this.oxygen = OXYGEN_MAX_SEC;
+    this.oxygenShown = OXYGEN_MAX_SEC;
+    this.submergeDmgT = 0;
+    this.drownT = 0;
+    this.onOxygenChange?.(this.oxygen, OXYGEN_MAX_SEC);
+    this.hunger = HUNGER_MAX;
+    this.hungerShown = HUNGER_MAX;
+    this.regenT = 0;
+    this.starveT = 0;
+    this.onHungerChange?.(this.hunger, HUNGER_MAX);
+    this.deadIds.clear();
     // ボールを定位置へ戻す（プレイ開始・ゆめから さめたとき）
     for (const b of this.balls) {
       b.x = b.homeX; b.z = b.homeZ; b.y = b.homeY;
@@ -581,7 +637,18 @@ export class Yume25DEngine {
       ab.aiTimer = 0;
       ab.startX = ab.x;
       ab.startZ = ab.z;
-      
+      // 水没で倒れた住人も復活させる
+      ab.dead = false;
+      ab.submergeHp = undefined;
+      ab.object.visible = true;
+      // 歩行グラNPCの向きも初期（配置の dir、未指定は南向き）へ戻す
+      if (ab.dirTexture) {
+        const fy = YAW_FOR_DIR[ab.data.dir ?? 2];
+        ab.faceX = -Math.sin(fy);
+        ab.faceZ = -Math.cos(fy);
+        ab.dirLastKey = undefined;
+      }
+
       const s = ab.data.scale ?? 1;
       const is3DModel = !!this.layout.textures[ab.data.tex]?.modelUrl;
       const objectY = is3DModel ? ab.y : ab.y + (s * 0.9) / 2;
@@ -651,9 +718,18 @@ export class Yume25DEngine {
     this.playerMesh.visible = this.pov === 'third';
   }
 
-  /** その場でポンと短く跳ねる。地面にいるときのみ発動（多重ジャンプ防止）。 */
+  /** その場でポンと短く跳ねる。地面にいるときのみ発動（多重ジャンプ防止）。
+   *  水中では接地していなくても「ひとかき」として使え、連打で上昇できる。 */
   jump() {
-    if (this.grounded) this.jumpQueued = true;
+    const waterLv = this.layout.waterLevel ?? 0;
+    const inWater = waterLv > 0 && this.hop < waterLv - 1e-3;
+    if (this.grounded || inWater) this.jumpQueued = true;
+  }
+
+  /** マウスホイール等で三人称カメラの距離を調整する（一人称では何もしない）。 */
+  adjustPovDistance(delta: number) {
+    if (this.pov !== 'third') return;
+    this.povDistance = Math.max(POV_MIN_DIST, Math.min(POV_MAX_DIST, this.povDistance + delta));
   }
 
   /** ドラッグ操作によるカメラ回転（ラジアン加算）。turnL/turnR とは独立に毎フレーム呼べる。
@@ -753,7 +829,7 @@ export class Yume25DEngine {
     let best: Billboard25D | null = null;
     let bestDist = INTERACT_RANGE;
     for (const b of this.layout.billboards) {
-      if (!b.interactive) continue;
+      if (!b.interactive || this.deadIds.has(b.id)) continue;
       const dist = Math.hypot(b.col + 0.5 - this.x, b.row + 0.5 - this.z);
       if (dist < bestDist) { best = b; bestDist = dist; }
     }
@@ -770,7 +846,7 @@ export class Yume25DEngine {
     }
     const active = new Set<string>();
     for (const b of this.layout.billboards) {
-      if (!b.interactive || !b.message) continue;
+      if (!b.interactive || !b.message || this.deadIds.has(b.id)) continue;
       const dist = Math.hypot(b.col + 0.5 - this.x, b.row + 0.5 - this.z);
       if (dist > SPEECH_RANGE) continue;
       active.add(b.id);
@@ -885,6 +961,7 @@ export class Yume25DEngine {
       if (this.editMode) this.onEditFrame?.();  // 移動・浮遊でカメラが動いてもプレビューを追従させる
       this.updateSpeeches(t);
       this.updateTexAnimations(t / 1000);
+      this.updateBillboardDirSprites(t / 1000);
       this.updatePlayerAnim(t / 1000);
       this.renderer.render(this.scene, this.camera);
       this.raf = requestAnimationFrame(loop);
@@ -920,8 +997,6 @@ export class Yume25DEngine {
     this.ballShadeTex?.dispose();
     this.waterGeo?.dispose();
     this.waterMat?.dispose();
-    this.rippleGeo?.dispose();
-    this.rippleMat?.dispose();
     this.bubbleGeo?.dispose();
     this.bubbleMat?.dispose();
     // 3Dモデルキャッシュ：原本のジオメトリ/マテリアル/テクスチャを解放（クローンは共有なので原本だけでよい）
@@ -952,7 +1027,9 @@ export class Yume25DEngine {
     this.worldObjects = [];
     this.billboardMeshes = [];
     this.mixers = [];
+    for (const ab of this.activeBillboards) ab.dirTexture?.dispose();  // 歩行グラNPC個別テクスチャ
     this.activeBillboards = [];
+    this.deadIds.clear();  // レイアウト差し替えで住人が作り直されるので、水没死の記録もリセット
     for (const g of this.ownedGeometries) g.dispose();
     this.ownedGeometries = [];
     for (const m of this.ownedMaterials) m.dispose();
@@ -1038,6 +1115,30 @@ export class Yume25DEngine {
     }
   }
 
+  /** 歩行グラNPCの向き別表示：NPC自身の向きとカメラの向きから、見えるべき行（正面/横/背面）を選んで
+   *  そのNPC専用のキャンバスへ描く。板自体は従来どおりカメラへ正対し、絵柄だけで向きを表現する（Doom風）。 */
+  private updateBillboardDirSprites(timeSec: number) {
+    const camFx = -Math.sin(this.yaw), camFz = -Math.cos(this.yaw);
+    const camRx = Math.cos(this.yaw), camRz = -Math.sin(this.yaw);
+    for (const ab of this.activeBillboards) {
+      if (!ab.dirTexture || !ab.dirCanvas || ab.dead) continue;
+      const a = this.texEntries.get(ab.data.tex)?.anim;
+      if (!a) continue;  // シート未ロード（作成時にコピーした仮絵のまま待つ）
+      const fx = ab.faceX ?? 0, fz = ab.faceZ ?? 1;
+      // カメラ前方・右方向への射影で行を決める：カメラと同じ向き＝背面(w)、逆向き＝正面(s)、横は横顔(a/d)
+      const dotF = fx * camFx + fz * camFz;
+      const dotR = fx * camRx + fz * camRz;
+      const way: WayKey = Math.abs(dotF) >= Math.abs(dotR) ? (dotF > 0 ? 'w' : 's') : (dotR > 0 ? 'd' : 'a');
+      const frame = walkFrameIndex(a.std, Math.floor(timeSec * BILLBOARD_ANIM_FPS));
+      const key = `${way}:${frame}`;
+      if (key === ab.dirLastKey) continue;
+      ab.dirLastKey = key;
+      const rect = cellRect(a.std, a.img.naturalWidth, a.img.naturalHeight, way, frame);
+      drawCellContain(ab.dirCanvas, a.img, rect.sx, rect.sy, rect.sw, rect.sh);
+      ab.dirTexture.needsUpdate = true;
+    }
+  }
+
   /** 歩行グラプレイヤーを向き・足踏みに応じて描き替える。
    *  静止中もその場で足踏みを続ける（NPCと同じゆっくりテンポ。移動中は速める）。 */
   private updatePlayerAnim(timeSec: number) {
@@ -1076,17 +1177,8 @@ export class Yume25DEngine {
     this.updateWater(L);
 
     // 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
-    // 壁の上端高さ（全段）も記録し、「壁の上に立つ」足場判定（groundAt）に使う。
     this.hEdges.clear(); this.vEdges.clear();
-    this.wallTopsH.clear(); this.wallTopsV.clear();
     for (const w of L.walls) {
-      const key = `${w.col},${w.row}`;
-      const top = ((w.level ?? 0) + 1) * H;
-      if (w.dir === 0) {
-        const a = this.wallTopsH.get(key) ?? []; a.push(top); this.wallTopsH.set(key, a);
-      } else if (w.dir === 3) {
-        const a = this.wallTopsV.get(key) ?? []; a.push(top); this.wallTopsV.set(key, a);
-      }
       if ((w.level ?? 0) !== 0) continue;
       if (w.dir === 0) this.hEdges.add(`${w.col},${w.row}`);
       else if (w.dir === 3) this.vEdges.add(`${w.col},${w.row}`);
@@ -1300,8 +1392,26 @@ export class Yume25DEngine {
 
       const s = b.scale ?? 1;
       const geo = new THREE.PlaneGeometry(s * 0.9, s * 0.9);
+      const sharedTex = this.getTex(b.tex);  // 共有テクスチャ（ロードのトリガも兼ねる）
+      // 歩行グラ（walk:シート）のNPCは向き（正面/横/背面）を持つので、共有テクスチャではなく
+      // 自分専用のキャンバスを持ち、見る角度に応じた行を描き分ける。単体画像は従来どおり常に正面。
+      const walkRef = def?.imageRef ? parseWalkRef(def.imageRef) : null;
+      const hasDir = !!def?.imageUrl && isAnimatableWalk(walkRef);
+      let dirCanvas: HTMLCanvasElement | undefined;
+      let dirTexture: THREE.CanvasTexture | undefined;
+      if (hasDir) {
+        dirCanvas = document.createElement('canvas');
+        dirCanvas.width = 64; dirCanvas.height = 64;
+        const shared = this.texEntries.get(b.tex);
+        if (shared) dirCanvas.getContext('2d')!.drawImage(shared.canvas, 0, 0);  // ロード完了までの仮絵
+        dirTexture = new THREE.CanvasTexture(dirCanvas);
+        dirTexture.magFilter = THREE.NearestFilter;
+        dirTexture.minFilter = THREE.NearestFilter;
+        dirTexture.generateMipmaps = false;
+        dirTexture.colorSpace = THREE.SRGBColorSpace;
+      }
       const mat = new THREE.MeshLambertMaterial({
-        map: this.getTex(b.tex),
+        map: dirTexture ?? sharedTex,
         alphaTest: 0.5,       // transparent:false のまま切り抜き → 深度ソート不要で描画順バグが出ない
         side: THREE.DoubleSide,
       });
@@ -1315,6 +1425,8 @@ export class Yume25DEngine {
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);
+      // 初期の向き：配置の dir（未指定は南向き＝カメラ既定位置から正面が見える）
+      const faceYaw = YAW_FOR_DIR[b.dir ?? 2];
       this.activeBillboards.push({
         data: b,
         object: mesh,
@@ -1326,6 +1438,10 @@ export class Yume25DEngine {
         aiTimer: 0,
         startX: b.col + 0.5,
         startZ: b.row + 0.5,
+        dirCanvas,
+        dirTexture,
+        faceX: hasDir ? -Math.sin(faceYaw) : undefined,
+        faceZ: hasDir ? -Math.cos(faceYaw) : undefined,
       });
 
       // スピーカー：テクスチャの special で判定（システム床と同じパターン）
@@ -1397,34 +1513,12 @@ export class Yume25DEngine {
     }
   }
 
-  /** (x,z) のセルで below 以下にある最も高い足場（地面0＋ブロック上面）。 */
-  /** 足場の高さ。地面0＋ブロック上面に加え、wallMaxTop（プレイヤーの現在の足元）を渡すと
-   *  薄壁の上端も足場になる：壁の面から半径以内にいる間は壁の上に立てる（綱渡り）。
-   *  wallMaxTop 以下の上端だけを拾うので、壁の横を歩いていて勝手に壁の上へ登ることはなく、
-   *  上から着地したときだけ乗れる。半径から外れると支えを失い、体が壁面から抜けた位置で
-   *  落下が始まる（壁に体が刺さったまま落ちる「真っ二つ」見た目の防止）。 */
-  private groundAt(x: number, z: number, below: number, wallMaxTop?: number): number {
+  /** (x,z) のセルで below 以下にある最も高い足場（地面0＋ブロック上面）。
+   *  薄壁の上端は足場にしない（壁のそばの空中に見えない床ができてしまうため）。 */
+  private groundAt(x: number, z: number, below: number): number {
     const tops = this.blockTops.get(`${Math.floor(x)},${Math.floor(z)}`);
     let g = 0;
     if (tops) for (const t of tops) if (t <= below + 1e-3 && t > g) g = t;
-    if (wallMaxTop !== undefined) {
-      const R = PLAYER_RADIUS;
-      const lim = Math.min(below, wallMaxTop);
-      const cx = Math.round(x);
-      if (Math.abs(x - cx) <= R) {
-        for (const r of [Math.floor(z - R * 0.9), Math.floor(z + R * 0.9)]) {
-          const ts = this.wallTopsV.get(`${cx},${r}`);
-          if (ts) for (const t of ts) if (t <= lim + 1e-3 && t > g) g = t;
-        }
-      }
-      const cz = Math.round(z);
-      if (Math.abs(z - cz) <= R) {
-        for (const c of [Math.floor(x - R * 0.9), Math.floor(x + R * 0.9)]) {
-          const ts = this.wallTopsH.get(`${c},${cz}`);
-          if (ts) for (const t of ts) if (t <= lim + 1e-3 && t > g) g = t;
-        }
-      }
-    }
     return g;
   }
 
@@ -1441,7 +1535,6 @@ export class Yume25DEngine {
     const lv = L.waterLevel ?? 0;
     if (lv <= 0) {
       if (this.waterMesh) this.waterMesh.visible = false;
-      if (this.rippleMesh) this.rippleMesh.visible = false;
       if (this.bubblePts) this.bubblePts.visible = false;
       this.setUnderwater(false);
       return;
@@ -1460,15 +1553,6 @@ export class Yume25DEngine {
       this.waterSun.position.set(0.45, 1, 0.3);
       this.waterSun.layers.set(WATER_LIGHT_LAYER);
       this.scene.add(this.waterSun);
-
-      this.rippleGeo = new THREE.RingGeometry(0.55, 0.7, 20);
-      this.rippleMat = new THREE.MeshBasicMaterial({
-        color: '#dff4ff', transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
-      });
-      this.rippleMesh = new THREE.Mesh(this.rippleGeo, this.rippleMat);
-      this.rippleMesh.rotation.x = -Math.PI / 2;
-      this.rippleMesh.visible = false;
-      this.scene.add(this.rippleMesh);
 
       // 泡パーティクル（水中でプレイヤーから立ちのぼる）。プール方式で使い回す
       this.bubbles = Array.from({ length: BUBBLE_MAX }, () => ({ x: 0, y: -1, z: 0, vy: 0, phase: 0 }));
@@ -1493,8 +1577,18 @@ export class Yume25DEngine {
     this.waterMesh.visible = true;
     this.waterMesh.scale.set(1, 1, 1);
     this.waterMesh.position.set(L.cols / 2, lv, L.rows / 2);
-    this.waterMat!.color.set(L.waterColor ?? WATER_DEFAULT_COLOR);
+    // 色は自由に変えられる。溶岩は不透明寄り＋自己発光（暗いワールドでもマグマらしく光って見える）
+    const lava = (L.waterKind ?? 'water') === 'lava';
+    this.waterMat!.color.set(this.waterBaseColor());
+    this.waterMat!.opacity = lava ? 0.85 : 0.55;
+    this.waterMat!.emissive.set(lava ? new THREE.Color(this.waterBaseColor()).multiplyScalar(0.55) : new THREE.Color('#000000'));
+    if (this.bubbleMat) this.bubbleMat.color.set(lava ? '#ffd27a' : '#dff4ff');
     if (this.bubblePts) this.bubblePts.visible = true;
+  }
+
+  /** 水面の基準色。未指定なら種類（水/溶岩）ごとの既定色。 */
+  private waterBaseColor(): string {
+    return this.layout.waterColor ?? ((this.layout.waterKind ?? 'water') === 'lava' ? LAVA_DEFAULT_COLOR : WATER_DEFAULT_COLOR);
   }
 
   /** カメラが水面下に入った/出たときの視界切り替え：海の色に合わせた濃いフォグと背景。 */
@@ -1503,7 +1597,7 @@ export class Yume25DEngine {
     this.underwater = on;
     const L = this.layout;
     if (on) {
-      const wc = new THREE.Color(L.waterColor ?? WATER_DEFAULT_COLOR).multiplyScalar(0.55);
+      const wc = new THREE.Color(this.waterBaseColor()).multiplyScalar(0.55);
       this.scene.fog = new THREE.Fog(wc, UNDERWATER_FOG_NEAR, UNDERWATER_FOG_FAR);
       this.scene.background = wc;
       if (this.skyMesh) this.skyMesh.visible = false;
@@ -1753,6 +1847,21 @@ export class Yume25DEngine {
     }
   }
 
+  /** 空腹値の変更（クランプ＋表示値が変わったときだけHUDへ通知）。 */
+  private setHunger(v: number) {
+    this.hunger = Math.max(0, Math.min(HUNGER_MAX, v));
+    const shown = Math.ceil(this.hunger);
+    if (shown !== this.hungerShown) {
+      this.hungerShown = shown;
+      this.onHungerChange?.(this.hunger, HUNGER_MAX);
+    }
+  }
+
+  /** ダッシュ可能か：空腹ゲージ有効時は🍗3個（6ポイント）以下で走れない（Minecraft準拠）。 */
+  private canDash(): boolean {
+    return !this.layout.hunger || this.hunger > HUNGER_SPRINT_MIN;
+  }
+
   private takeDamage(amount: number) {
     if (this.hp <= 0) return;
     this.hp = Math.max(0, this.hp - amount);
@@ -1814,7 +1923,7 @@ export class Yume25DEngine {
     const playerLevel = Math.round(this.hop / H);
     
     for (const ab of this.activeBillboards) {
-      if (!ab.data.collidable) continue;
+      if (!ab.data.collidable || ab.dead) continue;
       const abLevel = ab.data.level ?? 0;
       if (abLevel !== playerLevel) continue;
 
@@ -1838,7 +1947,7 @@ export class Yume25DEngine {
   private resolveBillboardCollisionsForNpc(ab: BillboardInstance) {
     const pr = 0.22;
     for (const other of this.activeBillboards) {
-      if (other === ab || !other.data.collidable) continue;
+      if (other === ab || other.dead || !other.data.collidable) continue;
       
       const abLevel = ab.data.level ?? 0;
       const otherLevel = other.data.level ?? 0;
@@ -1897,9 +2006,31 @@ export class Yume25DEngine {
   private updateBillboardAI(dt: number) {
     if (this.editMode) return;
     const speed = 1.0;
+    const waterLv = this.layout.waterLevel ?? 0;
+    const wd = this.layout.waterDamage;
+    const lavaSea = (this.layout.waterKind ?? 'water') === 'lava';
     for (const ab of this.activeBillboards) {
+      if (ab.dead) continue;
       const b = ab.data;
       const behavior = b.behavior || 'still';
+
+      // ── 水没ダメージ（住人）：浸かっている間じわじわ弱り、尽きると倒れて消える（リスポーンで復活）。
+      //    「追尾」の住人は敵扱いで waterDamage.enemy、それ以外は waterDamage.npc に従う。溶岩は倍速。 ──
+      if (waterLv > 0 && !this.demo && wd && (behavior === 'chase' ? wd.enemy : wd.npc) && ab.y < waterLv - 1e-3) {
+        ab.submergeHp = (ab.submergeHp ?? NPC_SUBMERGE_SEC) - dt * (lavaSea ? 2 : 1);
+        if (ab.submergeHp <= 0) {
+          ab.dead = true;
+          this.deadIds.add(b.id);
+          ab.object.visible = false;
+          ab.vx = 0; ab.vz = 0;
+          continue;
+        }
+        // 残りわずかで点滅させて「溺れている」ことを見せる
+        ab.object.visible = ab.submergeHp > 1.0 || Math.floor(ab.submergeHp * 8) % 2 === 0;
+      } else if (ab.submergeHp !== undefined && ab.submergeHp < NPC_SUBMERGE_SEC) {
+        ab.submergeHp = Math.min(NPC_SUBMERGE_SEC, ab.submergeHp + dt);  // 陸に上がれば回復
+        ab.object.visible = true;
+      }
       if (behavior === 'still') {
         ab.vx = 0;
         ab.vz = 0;
@@ -2000,6 +2131,11 @@ export class Yume25DEngine {
 
       // 移動速度に応じたアニメ：ダッシュ級なら走り、通常は歩き（速度でテンポも変える）、停止中は直立
       const sp = Math.hypot(ab.vx, ab.vz);
+      // 歩行グラNPCの向き：動いている間は進行方向を向き、止まったら最後の向きを保つ
+      if (ab.dirTexture && sp > 1e-4) {
+        ab.faceX = ab.vx / sp;
+        ab.faceZ = ab.vz / sp;
+      }
       if (sp > 1e-4) {
         if (sp > speed * 1.5) this.applyModelAnim(ab, 'run');
         else this.applyModelAnim(ab, 'walk', Math.min(1.6, Math.max(0.75, sp / speed)));
@@ -2028,14 +2164,21 @@ export class Yume25DEngine {
     this.z = Math.max(PLAYER_RADIUS + EPS, Math.min(this.layout.rows - PLAYER_RADIUS - EPS, this.z));
   }
 
+  /** 壁（地上段）は y ∈ [0, wallHeight] の範囲だけ実体がある。足元がその上端以上にあるときは
+   *  遮らない（壁の上の空間に見えない当たり判定が伸びないように）。 */
+  private aboveWalls(): boolean {
+    return this.hop >= this.layout.wallHeight - 1e-3;
+  }
   /** x=c の縦辺が、プレイヤーの z 範囲のどこかで壁になっているか。 */
   private blockedV(c: number, z: number): boolean {
+    if (this.aboveWalls()) return false;
     const r0 = Math.floor(z - PLAYER_RADIUS * 0.9), r1 = Math.floor(z + PLAYER_RADIUS * 0.9);
     for (let r = r0; r <= r1; r++) if (this.vEdges.has(`${c},${r}`)) return true;
     return false;
   }
   /** z=r の横辺が、プレイヤーの x 範囲のどこかで壁になっているか。 */
   private blockedH(r: number, x: number): boolean {
+    if (this.aboveWalls()) return false;
     const c0 = Math.floor(x - PLAYER_RADIUS * 0.9), c1 = Math.floor(x + PLAYER_RADIUS * 0.9);
     for (let c = c0; c <= c1; c++) if (this.hEdges.has(`${c},${r}`)) return true;
     return false;
@@ -2118,21 +2261,39 @@ export class Yume25DEngine {
     this.z = nz;
   }
 
-  /** 三人称カメラが壁にめり込まないよう、プレイヤーから backX/backZ 方向へ壁に当たるまでの距離を測る
-   *  （粗いレイマーチ。壁の薄板1枚ぶんの精度があれば十分なので細かい解析式は使わない）。 */
+  /** 三人称カメラが壁にめり込まないよう、プレイヤーから backX/backZ 方向へ壁に当たるまでの距離を測る。
+   *  マーチはセル辺の検出にだけ使い、返す距離は「辺と交差する正確な距離」を解析的に出す
+   *  （ステップ幅へ量子化すると、壁際・マップ端でカメラ距離が段階的に飛んでカクつくため）。
+   *  マップ境界の外へもカメラを出さない（境界面までの距離は連続値なので滑らかに縮む）。 */
   private raycastClamp(backX: number, backZ: number, maxDist: number): number {
+    const MARGIN = 0.05;
+    // マップ境界面まででレイの長さを先に制限する（連続値）
+    let limit = maxDist;
+    if (backX > 1e-6) limit = Math.min(limit, (this.layout.cols - MARGIN - this.x) / backX);
+    else if (backX < -1e-6) limit = Math.min(limit, (MARGIN - this.x) / backX);
+    if (backZ > 1e-6) limit = Math.min(limit, (this.layout.rows - MARGIN - this.z) / backZ);
+    else if (backZ < -1e-6) limit = Math.min(limit, (MARGIN - this.z) / backZ);
+    limit = Math.max(POV_MIN_DIST, Math.min(maxDist, limit));
+
     const STEPS = 24;
     let px = this.x, pz = this.z;
     for (let i = 1; i <= STEPS; i++) {
-      const t = (maxDist * i) / STEPS;
+      const t = (limit * i) / STEPS;
       const nx = this.x + backX * t, nz = this.z + backZ * t;
       const bx0 = Math.floor(px), bx1 = Math.floor(nx);
-      if (bx1 !== bx0 && this.vEdges.has(`${Math.max(bx0, bx1)},${Math.floor(nz)}`)) return Math.max(POV_MIN_DIST, (maxDist * (i - 1)) / STEPS);
+      if (bx1 !== bx0 && this.vEdges.has(`${Math.max(bx0, bx1)},${Math.floor(nz)}`)) {
+        // 交差した縦辺（x=整数）までの正確な距離
+        const tHit = Math.abs(backX) > 1e-6 ? (Math.max(bx0, bx1) - this.x) / backX : (limit * (i - 1)) / STEPS;
+        return Math.max(POV_MIN_DIST, Math.min(limit, tHit - MARGIN));
+      }
       const bz0 = Math.floor(pz), bz1 = Math.floor(nz);
-      if (bz1 !== bz0 && this.hEdges.has(`${Math.floor(nx)},${Math.max(bz0, bz1)}`)) return Math.max(POV_MIN_DIST, (maxDist * (i - 1)) / STEPS);
+      if (bz1 !== bz0 && this.hEdges.has(`${Math.floor(nx)},${Math.max(bz0, bz1)}`)) {
+        const tHit = Math.abs(backZ) > 1e-6 ? (Math.max(bz0, bz1) - this.z) / backZ : (limit * (i - 1)) / STEPS;
+        return Math.max(POV_MIN_DIST, Math.min(limit, tHit - MARGIN));
+      }
       px = nx; pz = nz;
     }
-    return maxDist;
+    return limit;
   }
 
   // ── システム床（ワープ/ダメージ/つるつる） ────────────────────────────────
@@ -2189,6 +2350,12 @@ export class Yume25DEngine {
     let move = (inp.forward ? 1 : 0) - (inp.back ? 1 : 0);
     let strafe = (inp.strafeR ? 1 : 0) - (inp.strafeL ? 1 : 0);
 
+    // 死亡中（死亡画面の表示中）：リスポーン（resetToStart で HP 全回復）まで操作を受け付けない
+    if (this.hp <= 0 && !this.editMode) {
+      turn = 0; move = 0; strafe = 0;
+      this.jumpQueued = false;
+    }
+
     if (this.demo) {
       move = 1; strafe = 0;
       if (this.demoTurnFrames > 0) { this.demoTurnFrames--; turn = -1; }
@@ -2201,7 +2368,7 @@ export class Yume25DEngine {
     const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
     const H = this.layout.wallHeight;
     const hovering = this.editMode && this.hover;
-    // 海：waterLevel より足元が下なら入水中（泳ぎ・波紋・沈降のすべてに使う）
+    // 海：waterLevel より足元が下なら入水中（泳ぎ・沈降・水没ダメージのすべてに使う）
     const waterLv = this.layout.waterLevel ?? 0;
     const inWater = waterLv > 0 && this.hop < waterLv - 1e-3 && !hovering;
 
@@ -2228,7 +2395,9 @@ export class Yume25DEngine {
     }
 
     if (!slideVec && (move !== 0 || strafe !== 0)) {
-      const dashMult = (inp.dash && !this.demo) ? DASH_MULT : 1;
+      const dashMult = (inp.dash && !this.demo && this.canDash()) ? DASH_MULT : 1;
+      // ダッシュ移動中は空腹がごくゆっくり減る
+      if (dashMult > 1 && this.layout.hunger && !this.editMode) this.setHunger(this.hunger - HUNGER_DASH_DRAIN * dt);
       const swimMult = inWater ? WATER_MOVE_MULT : 1;  // 水中は泳ぎでゆっくり進む
       const ms = move * MOVE_SPEED * dashMult * swimMult * dt, ss = strafe * STRAFE_SPEED * dashMult * swimMult * dt;
       if (hovering && this.hop >= H) {
@@ -2305,7 +2474,7 @@ export class Yume25DEngine {
         if (this.hop < H) this.resolveWalls();  // 壁の高さより下へ降りたら壁の中に居座らないよう押し出す
       }
       this.vy = 0;
-      this.grounded = this.hop <= this.groundAt(this.x, this.z, this.hop, this.hop) + 1e-3;
+      this.grounded = this.hop <= this.groundAt(this.x, this.z, this.hop) + 1e-3;
       this.jumpQueued = false;
     } else {
       // ジャンプ（地上）／ひとかき上昇（水中はいつでも）
@@ -2314,10 +2483,10 @@ export class Yume25DEngine {
         this.grounded = false;
         this.jumpQueued = false;
       }
-      // 足場＝地面0＋ブロック上面＋薄壁の上端（壁面から半径以内にいる間）。
+      // 足場＝地面0＋ブロック上面。
       // 接地中はブロック2段まで自動でよじ登る（moveX/Z が通した段差）。持ち上げは瞬間ではなく
       // CLIMB_SPEED で時間をかけて上る（よじ登りモーション）。
-      const ground = this.groundAt(this.x, this.z, this.hop + (this.grounded ? BLOCK_CLIMB_MAX : 0), this.hop);
+      const ground = this.groundAt(this.x, this.z, this.hop + (this.grounded ? BLOCK_CLIMB_MAX : 0));
       if (this.grounded && this.hop < ground) this.hop = Math.min(ground, this.hop + CLIMB_SPEED * dt);  // 段差をよいしょと上がる
       else if (this.grounded && this.hop > ground + 1e-3) this.grounded = false;  // 足場から出た → 落下開始
       if (!this.grounded || this.hop > ground) {
@@ -2384,15 +2553,83 @@ export class Yume25DEngine {
     // 海面の波（動きがあるときだけ立つ）・水中の視界・泡
     this.updateWaterFX(dt, inWater, waterLv);
 
-    // 入水中の波紋：水面上のプレイヤー位置で「拡大しながら薄くなる」リングをループ再生する
-    if (this.rippleMesh && this.rippleMat) {
-      this.rippleMesh.visible = inWater;
-      if (inWater) {
-        this.rippleT = (this.rippleT + dt) % RIPPLE_PERIOD;
-        const k = this.rippleT / RIPPLE_PERIOD;
-        this.rippleMesh.position.set(this.x, waterLv + 0.02, this.z);
-        this.rippleMesh.scale.setScalar(0.5 + k * 1.6);
-        this.rippleMat.opacity = 0.55 * (1 - k);
+    // ── 水没ダメージ（プレイヤー）と酸素。プレイ中のみ（編集・デモ・浮遊は対象外） ──
+    const playActive = !this.editMode && !this.demo && !hovering;
+    const lavaSea = (this.layout.waterKind ?? 'water') === 'lava';
+    if (playActive && !this.fadeState && this.layout.waterDamage?.player && inWater) {
+      // 入水した瞬間に1発目、以降は1秒おき（溶岩は倍のダメージ）
+      this.submergeDmgT -= dt;
+      if (this.submergeDmgT <= 0) {
+        this.submergeDmgT = SUBMERGE_DMG_INTERVAL;
+        this.takeDamage(lavaSea ? SUBMERGE_DMG_LAVA : SUBMERGE_DMG_WATER);
+      }
+    } else if (!inWater) {
+      this.submergeDmgT = 0;
+    }
+    // 酸素：頭まで潜っている間だけ減る。尽きたら1秒おきに窒息ダメージ。水面に出れば倍速回復
+    if (this.layout.oxygen) {
+      const headUnder = inWater && this.hop + 0.55 < waterLv;
+      if (playActive && headUnder) {
+        this.oxygen = Math.max(0, this.oxygen - dt);
+        if (this.oxygen <= 0 && !this.fadeState) {
+          this.drownT -= dt;
+          if (this.drownT <= 0) {
+            this.drownT = SUBMERGE_DMG_INTERVAL;
+            this.takeDamage(DROWN_DMG);
+          }
+        }
+      } else {
+        this.oxygen = Math.min(OXYGEN_MAX_SEC, this.oxygen + dt * OXYGEN_RECOVER_MULT);
+        this.drownT = 0;
+      }
+    } else if (this.oxygen < OXYGEN_MAX_SEC) {
+      this.oxygen = OXYGEN_MAX_SEC;  // 設定で無効化されたらゲージを満タンに戻す
+    }
+    const oxyShown = Math.ceil(this.oxygen);
+    if (oxyShown !== this.oxygenShown) {
+      this.oxygenShown = oxyShown;
+      this.onOxygenChange?.(this.oxygen, OXYGEN_MAX_SEC);
+    }
+
+    // ── 空腹ゲージ（Minecraft準拠の簡略版）。減少はダッシュ移動時（移動ブロック内）に行う ──
+    if (this.layout.hunger && playActive) {
+      // 🍗9個以上あるとHPが自然回復し、そのぶん空腹を少し消費する
+      if (this.hunger >= HUNGER_REGEN_MIN && this.hp > 0 && this.hp < this.maxHp && !this.fadeState) {
+        this.regenT += dt;
+        if (this.regenT >= HUNGER_REGEN_INTERVAL) {
+          this.regenT = 0;
+          this.hp = Math.min(this.maxHp, this.hp + 1);
+          this.onHpChange?.(this.hp, this.maxHp);
+          this.setHunger(this.hunger - HUNGER_REGEN_COST);
+        }
+      } else {
+        this.regenT = 0;
+      }
+      // 空腹0：飢餓ダメージ。1ハート（2HP）までで止まる＝飢えでは死なない（Minecraftノーマル相当）
+      if (this.hunger <= 0 && this.hp > STARVE_MIN_HP && !this.fadeState) {
+        this.starveT += dt;
+        if (this.starveT >= STARVE_INTERVAL) {
+          this.starveT = 0;
+          this.takeDamage(1);
+        }
+      } else {
+        this.starveT = 0;
+      }
+      // 食べ物（special==='food'）：触れると食べる。満腹のときは食べない（Minecraft準拠）
+      if (this.hunger < HUNGER_MAX - 1e-3) {
+        for (const ab of this.activeBillboards) {
+          if (ab.dead) continue;
+          const t = this.layout.textures[ab.data.tex];
+          if (t?.special !== 'food') continue;
+          if (Math.abs(ab.y - this.hop) > 1.0 || Math.hypot(ab.x - this.x, ab.z - this.z) > 0.55) continue;
+          ab.dead = true;
+          this.deadIds.add(ab.data.id);
+          ab.object.visible = false;
+          this.setHunger(this.hunger + (t.foodValue ?? FOOD_DEFAULT_VALUE));
+          // もぐもぐ音を数回鳴らす（Minecraftの食事音風）
+          for (let i = 0; i < 3; i++) setTimeout(() => playSysSfx(SYS_FOOD_SFX), i * 260);
+          break;  // 1フレームに食べるのは1個
+        }
       }
     }
 

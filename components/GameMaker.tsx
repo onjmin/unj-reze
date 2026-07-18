@@ -10477,7 +10477,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     showGameMsg(`${it?.emoji ?? '?'} ${it?.name ?? itemId}を すてた。`, 'instant', () => { });
   };
   return (
-    <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}>
+    <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}
+      onContextMenu={(e) => { const t = e.target as HTMLElement; if (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA' && t.tagName !== 'SELECT' && !t.isContentEditable) e.preventDefault(); }}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">

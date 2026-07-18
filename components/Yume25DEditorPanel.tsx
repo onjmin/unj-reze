@@ -537,7 +537,7 @@ export default function Yume25DEditorPanel({
             </button>
           ))}
         </div>
-        <p className="text-[10px] text-gray-500 pt-1.5 mt-1 border-t border-gray-700/50">遊べるオブジェクト：スプライトパレットに追加され、スプライトツールで配置します。ボールは蹴って転がせて、スピーカーは設定した音源が近づくと聞こえます。</p>
+        <p className="text-[10px] text-gray-500 pt-1.5 mt-1 border-t border-gray-700/50">遊べるオブジェクト：スプライトパレットに追加され、スプライトツールで配置します。ボールは蹴って転がせて、スピーカーは設定した音源が近づくと聞こえます。食べ物は触れると食べて空腹ゲージを回復します（設定の「空腹ゲージ」ON時）。</p>
         <div className="grid grid-cols-2 gap-1.5">
           {SYSTEM_SPRITE_TEMPLATES.map(tpl => (
             <button key={tpl.key} onClick={() => addSystemSpriteTex(tpl)}
@@ -652,19 +652,67 @@ export default function Yume25DEditorPanel({
             </div>
           </div>
 
-          {/* 海：この高さから下がすべて水になる（0=なし）。プレイヤーは泳げる */}
+          {/* 海：この高さから下がすべて水（溶岩）になる（0=なし）。プレイヤーは泳げる */}
           <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">海</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <label className="flex items-center justify-between gap-1">水面の高さ
               <input type="range" min={0} max={3} step={0.05} value={layout.waterLevel ?? 0}
                 onChange={e => onLayoutChange(l => ({ ...l, waterLevel: Number(e.target.value) || undefined }))} className="w-20" />
             </label>
-            <label className="flex items-center justify-between gap-1">水の色
-              <input type="color" value={layout.waterColor ?? '#2f7fa8'}
+            <label className="flex items-center justify-between gap-1">種類
+              <select value={layout.waterKind ?? 'water'}
+                onChange={e => onLayoutChange(l => ({ ...l, waterKind: e.target.value === 'lava' ? 'lava' : undefined }))}
+                className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
+                <option value="water">水</option>
+                <option value="lava">溶岩</option>
+              </select>
+            </label>
+            <label className="flex items-center justify-between gap-1">{layout.waterKind === 'lava' ? '溶岩の色' : '水の色'}
+              <input type="color" value={layout.waterColor ?? (layout.waterKind === 'lava' ? '#d35400' : '#2f7fa8')}
                 onChange={e => onLayoutChange(l => ({ ...l, waterColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
             </label>
             {(layout.waterLevel ?? 0) > 0 && (
-              <p className="col-span-2 text-[9px] text-gray-500">水面の高さ {(layout.waterLevel ?? 0).toFixed(2)} マスから下が海になります。水中はゆっくり沈み、ジャンプ入力のひとかきで上昇して泳げます。ブロックを積めば水面から顔を出す足場が作れます</p>
+              <>
+                {/* 水没ダメージ：浸かっている間の継続ダメージを対象別にON/OFF（溶岩はダメージ倍） */}
+                <p className="col-span-2 text-gray-400">水没ダメージ（浸かっている間）</p>
+                <label className="flex items-center justify-between gap-1">プレイヤー
+                  <input type="checkbox" checked={!!layout.waterDamage?.player}
+                    onChange={e => onLayoutChange(l => ({ ...l, waterDamage: { ...l.waterDamage, player: e.target.checked } }))} />
+                </label>
+                <label className="flex items-center justify-between gap-1">NPC（敵以外）
+                  <input type="checkbox" checked={!!layout.waterDamage?.npc}
+                    onChange={e => onLayoutChange(l => ({ ...l, waterDamage: { ...l.waterDamage, npc: e.target.checked } }))} />
+                </label>
+                <label className="flex items-center justify-between gap-1">敵（追尾の住人）
+                  <input type="checkbox" checked={!!layout.waterDamage?.enemy}
+                    onChange={e => onLayoutChange(l => ({ ...l, waterDamage: { ...l.waterDamage, enemy: e.target.checked } }))} />
+                </label>
+                <label className="flex items-center justify-between gap-1">酸素ゲージ
+                  <input type="checkbox" checked={!!layout.oxygen}
+                    onChange={e => onLayoutChange(l => ({ ...l, oxygen: e.target.checked || undefined }))} />
+                </label>
+                <p className="col-span-2 text-[9px] text-gray-500">
+                  水面の高さ {(layout.waterLevel ?? 0).toFixed(2)} マスから下が{layout.waterKind === 'lava' ? '溶岩' : '海'}になります。水中はゆっくり沈み、ジャンプ入力のひとかきで上昇して泳げます。
+                  水没ダメージをONにすると浸かっている間じわじわダメージ（溶岩は倍）。住人はしばらく浸かると倒れて消えます（リスポーンで復活）。
+                  酸素ゲージをONにすると頭まで潜って約10秒で息が尽き、窒息ダメージが始まります。水面に出れば回復します
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* サバイバル：空腹ゲージ（Minecraft風）。「食べ物」スプライト（オブジェタブ）で回復する */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">サバイバル</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1 col-span-2">空腹ゲージ（Minecraft風）
+              <input type="checkbox" checked={!!layout.hunger}
+                onChange={e => onLayoutChange(l => ({ ...l, hunger: e.target.checked || undefined }))} />
+            </label>
+            {layout.hunger && (
+              <p className="col-span-2 text-[9px] text-gray-500">
+                方向キー2回押し（またはShift/DASHボタン）でダッシュでき、ダッシュ中は🍗ゲージがすこしずつ減ります。
+                🍗3個以下になると走れず、0になると1ハートまで飢餓ダメージ。🍗9個以上あるとHPが自然回復します。
+                オブジェタブの「🍖 食べ物」スプライトに触れると回復します
+              </p>
             )}
           </div>
 

@@ -63,9 +63,15 @@ const billboards: Billboard25D[] = [
   // 上空に浮かぶ め（level=1,2 の縦積みショーケース）
   { id: 'bb-eyefloat1', col: 8, row: 11, tex: 22, scale: 0.9, level: 1 },
   { id: 'bb-eyefloat2', col: 7, row: 4, tex: 22, scale: 0.9, level: 2 },
-  // 住人（歩行グラNPC。ビルボードなので常にこちらを向き、その場で足踏みする）
+  // 住人（歩行グラNPC。向きに応じて正面/横/背面が描き分けられ、その場で足踏みする）
   { id: 'bb-shiroiko', col: 4, row: 4, tex: 26, scale: 0.9, interactive: true, message: 'ゆめのなかで あったこと、\nおきたら わすれてしまうのかな。', choices: ['わすれないよ', '……'] },
   { id: 'bb-onryo', col: 12, row: 12, tex: 27, scale: 0.95, interactive: true, message: 'カエレ……　カエレ……\nココハ　オマエノ　バショデハナイ……' },
+  // 食べ物（空腹ゲージ用）：触れると食べて🍗が回復する。リスポーンで復活
+  { id: 'bb-food1', col: 5, row: 13, tex: 28, scale: 0.6 },
+  { id: 'bb-food2', col: 3, row: 4, tex: 28, scale: 0.6 },
+  { id: 'bb-food3', col: 12, row: 9, tex: 28, scale: 0.6 },
+  { id: 'bb-food4', col: 8, row: 5, tex: 28, scale: 0.6 },
+  { id: 'bb-food5', col: 14, row: 6, tex: 28, scale: 0.6 },
 ];
 
 const layout25d: Layout25D = {
@@ -91,6 +97,7 @@ const layout25d: Layout25D = {
     25: { id: 25, name: 'ドア', kind: 'sprite', color: '#7a5230', emoji: '🚪' },
     26: { id: 26, name: 'しろいこ', kind: 'sprite', color: '#e8e8f4', emoji: '👧', imageRef: `walk:auto:u:${SHIROIKO_URL}`, imageUrl: SHIROIKO_URL },
     27: { id: 27, name: 'おんりょう', kind: 'sprite', color: '#4f6fd8', emoji: '👻', imageRef: `walk:auto:u:${ONRYO_URL}`, imageUrl: ONRYO_URL },
+    28: { id: 28, name: '食べ物', kind: 'sprite', color: '#e0995a', emoji: '🍖', special: 'food' },
   },
   wallHeight: 1,
   skyColor: '#0b0714',
@@ -100,6 +107,8 @@ const layout25d: Layout25D = {
   start: { col: 8, row: 13, dir: 0 },
   pov: 'third',
   povDistance: 1.6,
+  // 空腹ゲージ（Minecraft風）：ダッシュで減り、🍖に触れると回復する
+  hunger: true,
 };
 
 export const yume: PresetData = {

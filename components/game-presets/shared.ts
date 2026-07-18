@@ -499,6 +499,8 @@ export interface Tex25D {
   warpDest?: { col: number; row: number; dir?: Dir4 };
   /** special==='damage'：被ダメージ量。未指定時は3（2Dの TileDef.damageAmount と同じ既定値）。 */
   damageAmount?: number;
+  /** special==='food'（kind==='sprite'）：食べたときの空腹回復量（ポイント。2で🍗1個）。未指定は6。 */
+  foodValue?: number;
   /** サンプル3Dモデル（glb）のURL（kind==='sprite'）。指定時はビルボードの代わりに
    *  GLTFモデルを配置する（当たり判定なし・すり抜け）。model-catalog.ts の検索モーダルから設定する。 */
   modelUrl?: string;
@@ -555,8 +557,18 @@ export interface Layout25D {
   /** 海（水面）の高さ。0/未指定=水なし。この高さから下（底まで）がすべて水になり、
    *  プレイヤーは泳げる（水中はゆっくり沈む・ジャンプ入力でひとかき上昇・移動は減速）。 */
   waterLevel?: number;
-  /** 水の色。未指定は青緑。 */
+  /** 水の色。未指定は青緑（waterKind==='lava' のときはマグマ色）。 */
   waterColor?: string;
+  /** 海の種類。'lava' で溶岩になる（既定色がマグマ色になり、面が発光して見える・水没ダメージも強め）。未指定は 'water'。 */
+  waterKind?: 'water' | 'lava';
+  /** 水没ダメージ：水（溶岩）に浸かっている間、時間経過でダメージを受けるかを対象別に指定する。
+   *  enemy は「追尾」行動の住人、npc はそれ以外の住人。住人はしばらく浸かると倒れて消える（リスポーンで復活）。 */
+  waterDamage?: { player?: boolean; npc?: boolean; enemy?: boolean };
+  /** 酸素ゲージ（Minecraft風）。頭まで潜ると酸素が減り、尽きると窒息ダメージ。水面に出ると回復する。未指定は無効。 */
+  oxygen?: boolean;
+  /** 空腹ゲージ（Minecraft風）。ダッシュ中にすこしずつ減り、🍗3個以下でダッシュ不可・0で飢餓ダメージ・
+   *  9個以上でHP自然回復。「食べ物」スプライト（special==='food'）に触れると回復する。未指定は無効。 */
+  hunger?: boolean;
   /** ワールド全体の明るさ（環境光）。1=従来のフルブライト。0.1〜2。未指定は1。 */
   ambientLight?: number;
   /** 環境光の色。未指定は白（テクスチャそのままの色）。 */
@@ -725,6 +737,7 @@ export const SYSTEM_SPRITE_TEMPLATES: SystemSpriteTemplate[] = [
   { key: 'ball', label: 'サッカーボール', special: 'ball', emoji: '⚽', color: '#e8e8e8' },
   { key: 'speaker', label: 'スピーカー', special: 'speaker', emoji: '🔊', color: '#8ab4ff' },
   { key: 'block', label: 'ブロック', special: 'block', emoji: '🧱', color: '#a97a50' },
+  { key: 'food', label: '食べ物', special: 'food', emoji: '🍖', color: '#e0995a' },
 ];
 
 /** システムタイル共通の効果音（2Dエンジンと yume25d の両方で使う直リンクmp3）。 */

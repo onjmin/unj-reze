@@ -27,6 +27,9 @@ const PAD_DEADZONE = 10;
 const TAP_MAX_MOVE = 8;
 /** Minecraft風の浮遊トグル：Space 2回押しがこのms以内なら浮遊モードをON/OFFする。 */
 const SPACE_DOUBLE_TAP_MS = 300;
+/** Minecraft風のダッシュ：同じ方向キーの2回押しがこのms以内ならキーを離すまでダッシュする。 */
+const DASH_DOUBLE_TAP_MS = 300;
+const MOVE_KEYS = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'W', 'a', 'A', 's', 'S', 'd', 'D'];
 /** システム床（special 付き床テクスチャ）の2D見下ろしエディタ用マーカー。 */
 const SPECIAL_FLOOR_GLYPHS: Record<string, string> = {
   warp: '◉', damage: '☠', 'ice-up': '↑', 'ice-right': '→', 'ice-down': '↓', 'ice-left': '←',
@@ -109,6 +112,12 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
   const [dialogue, setDialogue] = useState<DialogueState | null>(null);
   /** ダメージ床のHP制（ハート表示）。エンジンの onHpChange 通知で同期する。 */
   const [hpState, setHpState] = useState<{ hp: number; max: number } | null>(null);
+  /** 酸素ゲージ（layout.oxygen 有効時）。エンジンの onOxygenChange 通知で同期する。 */
+  const [oxyState, setOxyState] = useState<{ sec: number; max: number } | null>(null);
+  /** 空腹ゲージ（layout.hunger 有効時）。エンジンの onHungerChange 通知で同期する。 */
+  const [hungerState, setHungerState] = useState<{ pts: number; max: number } | null>(null);
+  /** Minecraft風の方向キー2回押しダッシュ。active はダッシュを発動させたキー（離すと解除）。 */
+  const dashTapRef = useRef<{ key: string; t: number; active: string | null }>({ key: '', t: 0, active: null });
   const [showControlGuide, setShowControlGuide] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogueRef = useRef<DialogueState | null>(null);
@@ -210,8 +219,15 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
     const eng = new Yume25DEngine(cv, layoutRef.current, playerAppearance);
     eng.onHpChange = (hp, max) => setHpState({ hp, max });
     setHpState({ hp: eng.hp, max: eng.maxHp });
+    eng.onOxygenChange = (sec, max) => setOxyState({ sec, max });
+    setOxyState(eng.oxygenState);
+    eng.onHungerChange = (pts, max) => setHungerState({ pts, max });
+    setHungerState(eng.hungerState);
     engineRef.current = eng;
-    return () => { eng.dispose(); engineRef.current = null; };
+    // ホイールで三人称カメラの距離を調整（React の onWheel は passive なので native で preventDefault する）
+    const onWheel = (ev: WheelEvent) => { ev.preventDefault(); eng.adjustPovDistance(ev.deltaY * 0.0035); };
+    cv.addEventListener('wheel', onWheel, { passive: false });
+    return () => { cv.removeEventListener('wheel', onWheel); eng.dispose(); engineRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -350,9 +366,28 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
         if (b) setDialogue({ message: b.message || '……', choices: b.choices });
         return;
       }
+      // Minecraft風：同じ方向キーの2回押しでダッシュ（そのキーを離すまで継続）
+      if (playing && !e.repeat && MOVE_KEYS.includes(e.key)) {
+        const now = performance.now();
+        if (dashTapRef.current.key === e.key && now - dashTapRef.current.t < DASH_DOUBLE_TAP_MS) {
+          const inp = engineRef.current?.input;
+          if (inp) inp.dash = true;
+          dashTapRef.current.active = e.key;
+        }
+        dashTapRef.current.key = e.key;
+        dashTapRef.current.t = now;
+      }
       if (setKey(e.key, true) && (e.key.startsWith('Arrow') || 'wasdWASD'.includes(e.key))) e.preventDefault();
     };
-    const up = (e: KeyboardEvent) => { setKey(e.key, false); };
+    const up = (e: KeyboardEvent) => {
+      // 2回押しダッシュを発動させたキーを離したら解除（Shiftダッシュとは独立）
+      if (dashTapRef.current.active === e.key) {
+        dashTapRef.current.active = null;
+        const inp = engineRef.current?.input;
+        if (inp) inp.dash = false;
+      }
+      setKey(e.key, false);
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
@@ -955,16 +990,41 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
 
       {/* HPハート（ダメージ床のHP制）。2Dエンジン同様 1ハート=2HP。プレイ中のみ表示（デモ・編集では非表示）。 */}
       {playing && !demo && hpState && (
-        <div className="absolute top-2 right-2 z-20 flex gap-0.5 text-[15px] leading-none pointer-events-none select-none"
+        <div className="absolute top-2 right-2 z-20 flex flex-col items-end gap-0.5 pointer-events-none select-none"
           style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}>
-          {Array.from({ length: Math.ceil(hpState.max / 2) }, (_, i) => {
-            const v = hpState.hp - i * 2;
-            return (
-              <span key={i} className={v >= 2 ? 'text-red-500' : v === 1 ? 'text-red-500 opacity-50' : 'text-gray-600'}>
-                {v >= 1 ? '♥' : '♡'}
-              </span>
-            );
-          })}
+          <div className="flex gap-0.5 text-[15px] leading-none">
+            {Array.from({ length: Math.ceil(hpState.max / 2) }, (_, i) => {
+              const v = hpState.hp - i * 2;
+              return (
+                <span key={i} className={v >= 2 ? 'text-red-500' : v === 1 ? 'text-red-500 opacity-50' : 'text-gray-600'}>
+                  {v >= 1 ? '♥' : '♡'}
+                </span>
+              );
+            })}
+          </div>
+          {/* 空腹ゲージ（Minecraft風）：🍗10個＝20ポイント。半分減は薄く、空はグレー */}
+          {layout.hunger && hungerState && (
+            <div className="flex gap-0.5 text-[13px] leading-none">
+              {Array.from({ length: Math.ceil(hungerState.max / 2) }, (_, i) => {
+                const v = hungerState.pts - i * 2;
+                return (
+                  <span key={i} style={v >= 2 ? undefined : v >= 1 ? { opacity: 0.55 } : { filter: 'grayscale(1)', opacity: 0.3 }}>
+                    🍗
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {/* 酸素ゲージ（Minecraft風）：潜って減っている間だけハートの下に出る。1目盛り=息1秒 */}
+          {layout.oxygen && oxyState && oxyState.sec < oxyState.max && (
+            <div className="flex gap-0.5 text-[11px] leading-none">
+              {Array.from({ length: oxyState.max }, (_, i) => (
+                <span key={i} className={i < Math.ceil(oxyState.sec) ? 'text-sky-300' : 'text-gray-600'}>
+                  {i < Math.ceil(oxyState.sec) ? '●' : '○'}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
