@@ -6,10 +6,7 @@ import * as THREE from 'three';
 export interface MinecraftSkinPreset { minecraftName: string; skinUrl: string; }
 /** プリセットスキン（Slim型）。エディタの「マイクラスキン」からワンタップで追加できる。 */
 export const MINECRAFT_SKIN_PRESETS: MinecraftSkinPreset[] = [
-  { minecraftName: 'Momoi', skinUrl: 'https://s.namemc.com/i/8e561d74e6a87cf0.png' },
-  { minecraftName: 'Midori', skinUrl: 'https://s.namemc.com/i/06e63aad7ea65219.png' },
-  { minecraftName: 'Yuzu', skinUrl: 'https://s.namemc.com/i/bdecfd1ad2534e5c.png' },
-  { minecraftName: 'Aris', skinUrl: 'https://s.namemc.com/i/e806697057c3f02b.png' },
+  { minecraftName: '正実モブ', skinUrl: 'https://i.imgur.com/0BWVpea.png' },
 ];
 
 export interface MinecraftLimbs {
