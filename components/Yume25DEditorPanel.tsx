@@ -137,7 +137,7 @@ export default function Yume25DEditorPanel({
       ...l,
       textures: {
         ...l.textures,
-        [id]: { id, name, kind: 'sprite' as const, color: '#7ec9a2', emoji: '🧍', minecraftSkin: url },
+        [id]: { id, name, kind: 'sprite' as const, color: '#7ec9a2', emoji: '👗', minecraftSkin: url },
       },
     }));
     onToolChange('sprite');
@@ -573,7 +573,7 @@ export default function Yume25DEditorPanel({
           {MINECRAFT_SKIN_PRESETS.map(p => (
             <button key={p.name} onClick={() => addMinecraftSkinTex(p.name, p.url)}
               className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
-              <Plus size={11} />🧍 {p.name}
+              <Plus size={11} />👗 {p.name}
             </button>
           ))}
         </div>

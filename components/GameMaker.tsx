@@ -10080,7 +10080,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             ...p.layout25d,
             textures: {
               ...p.layout25d.textures,
-              [id]: { id, name: 'マイクラスキン', kind: 'sprite' as const, color: '#7ec9a2', emoji: '🧍', minecraftSkin: res.url },
+              [id]: { id, name: 'マイクラスキン', kind: 'sprite' as const, color: '#7ec9a2', emoji: '👗', minecraftSkin: res.url },
             },
           },
         } : p);
