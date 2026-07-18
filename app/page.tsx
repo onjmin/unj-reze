@@ -73,7 +73,8 @@ export default function App() {
         const pending = sessionStorage.getItem('unj_pending_game');
         if (pending) {
           sessionStorage.removeItem('unj_pending_game');
-          const { gameId, postId } = JSON.parse(pending);
+          const { gameId, postId, returnTo } = JSON.parse(pending);
+          if (returnTo) setPendingReturnTo(returnTo);
           if (gameId) handleOpenPostGame(gameId, postId);
         }
       } catch {}
@@ -615,6 +616,8 @@ export default function App() {
     } catch {}
   };
 
+  const [pendingReturnTo, setPendingReturnTo] = useState<string | null>(null);
+
   const handleSaveEditedGame = async (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
     if (!playingGame?.gameId) return;
     try {
@@ -725,6 +728,11 @@ export default function App() {
             setPostGameDanmaku([]);
             if (editingPost) {
               setShowGlobalEditModal(true);
+            } else if (pendingReturnTo) {
+              const url = pendingReturnTo;
+              setPendingReturnTo(null);
+              window.location.href = url;
+              return;
             }
           }}
           userId={userId}

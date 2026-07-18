@@ -239,7 +239,10 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
               {p.hasGame && (
                 <div
                   onClick={() => {
-                    try { sessionStorage.setItem('unj_pending_game', JSON.stringify({ gameId: p.gameId, postId: p.id })); } catch {}
+                    try {
+                      const threadId = post.id;
+                      sessionStorage.setItem('unj_pending_game', JSON.stringify({ gameId: p.gameId, postId: p.id, returnTo: `/post/${threadId}` }));
+                    } catch {}
                     router.push('/');
                   }}
                   className="pl-6 mt-2 cursor-pointer"
