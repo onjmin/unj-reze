@@ -17,7 +17,7 @@
     "@aws-sdk/client-s3": "3.1067.0",
     "@neondatabase/serverless": "1.1.0",
     "@onjmin/chord-parser": "1.0.3",
-    "@onjmin/dtm": "0.1.58",
+    "@onjmin/dtm": "0.1.59",
     "@onjmin/oekaki": "1.0.59",
     "@rpgja/rpgen-map": "1.0.5",
     "lucide-react": "1.17.0",
