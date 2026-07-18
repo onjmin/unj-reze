@@ -24,7 +24,7 @@ function SpriteThumb({ t }: { t: Tex25D }) {
     const cv = cvRef.current;
     if (!cv) return;
     cv.width = 64; cv.height = 64;
-    drawPlayerIconCanvas(cv, { emoji: t.emoji, color: t.color, spriteUrl: t.imageUrl, spriteRef: t.imageRef }, () => {});
+    drawPlayerIconCanvas(cv, { emoji: t.emoji, color: t.color, spriteUrl: t.imageUrl, spriteRef: t.imageRef }, () => { });
   }, [t.imageUrl, t.imageRef, t.emoji, t.color]);
   return <canvas ref={cvRef} className="w-full h-full" style={{ imageRendering: 'pixelated' }} />;
 }
@@ -571,9 +571,9 @@ export default function Yume25DEditorPanel({
         <p className="text-[10px] text-gray-500 pt-1.5 mt-1 border-t border-gray-700/50">マイクラスキン：Minecraft のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作ってスプライトとして配置できます。歩くと手足を振ります。</p>
         <div className="grid grid-cols-2 gap-1.5">
           {MINECRAFT_SKIN_PRESETS.map(p => (
-            <button key={p.minecraftName} onClick={() => addMinecraftSkinTex(p.minecraftName, p.skinUrl)}
+            <button key={p.name} onClick={() => addMinecraftSkinTex(p.name, p.url)}
               className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
-              <Plus size={11} />🧍 {p.minecraftName}
+              <Plus size={11} />🧍 {p.name}
             </button>
           ))}
         </div>

@@ -3,10 +3,10 @@
 // 「ホルダーGroupの原点＝足元」で挿入される。腕脚は肩/腰ピボットのGroupで包み、歩行スイングに使う。
 import * as THREE from 'three';
 
-export interface MinecraftSkinPreset { minecraftName: string; skinUrl: string; }
+export interface MinecraftSkinPreset { name: string; url: string; }
 /** プリセットスキン（Slim型）。エディタの「マイクラスキン」からワンタップで追加できる。 */
 export const MINECRAFT_SKIN_PRESETS: MinecraftSkinPreset[] = [
-  { minecraftName: '正実モブ', skinUrl: 'https://i.imgur.com/0BWVpea.png' },
+  { name: '正実モブ', url: 'https://i.imgur.com/0BWVpea.png' },
 ];
 
 export interface MinecraftLimbs {
