@@ -924,7 +924,7 @@ export default function App() {
               )}
             </div>
 
-            <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} />
+            <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} userAvatarUrl={currentUser?.avatarUrl} />
 
             <FAB openText={() => handleQuickPost()} />
           </>

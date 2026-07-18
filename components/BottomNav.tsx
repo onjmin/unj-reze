@@ -7,6 +7,7 @@ interface BottomNavProps {
   set: (id: string) => void;
   notifCount?: number;
   messageCount?: number;
+  userAvatarUrl?: string;
 }
 
 const items = [
@@ -17,7 +18,7 @@ const items = [
   { id: 'profile', icon: User, label: 'マイ' },
 ];
 
-export default function BottomNav({ current, set, notifCount = 0, messageCount = 0 }: BottomNavProps) {
+export default function BottomNav({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl }: BottomNavProps) {
   const badgeMap: Record<string, number> = {
     notifications: notifCount,
     messages: messageCount,
@@ -35,7 +36,11 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
             onClick={() => set(item.id)}
             title={item.label}
           >
-            <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+            {item.id === 'profile' && userAvatarUrl ? (
+              <img src={userAvatarUrl} alt="" className="w-[22px] h-[22px] rounded-full object-cover border border-gray-700/50" />
+            ) : (
+              <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+            )}
             {badge > 0 && (
               <span className="absolute -top-0.5 right-1 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 leading-none shadow-lg animate-pop">
                 {badge > 99 ? '99+' : badge}
