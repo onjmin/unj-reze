@@ -62,9 +62,8 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
   const [checkeredDark, setCheckeredDark] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    const saved = localStorage.getItem('unj-dotdrawing-checkered-dark');
-    return saved === null ? false : saved !== 'false';
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem('unj-dotdrawing-checkered-dark') !== 'false';
   });
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
