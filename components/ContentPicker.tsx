@@ -81,6 +81,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const [editingHistoryAsset, setEditingHistoryAsset] = useState<{ ref: string; url: string; label: string } | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
+  const bgmRef = useRef<{ setVolume: (v: number) => void } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentTab = mode === 'image' ? imageTab : bgmTab;
 
@@ -103,6 +104,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const previewMml = async (key: string, mml: string) => {
     stopRef.current?.();
     stopRef.current = null;
+    bgmRef.current = null;
     if (previewKey === key) { setPreviewKey(null); return; }
     if (!mml.trim()) return;
     try {
@@ -113,8 +115,10 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         onStop: () => {
           setPreviewKey(null);
           stopRef.current = null;
+          bgmRef.current = null;
         }
       });
+      bgmRef.current = bgm;
       stopRef.current = () => {
         bgm.stop();
         bgm.destroy();
@@ -126,6 +130,8 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   };
 
   useEffect(() => () => { stopRef.current?.(); }, []);
+
+  useEffect(() => subscribeMasterVolume(() => bgmRef.current?.setVolume(applyMasterVolume(100))), []);
 
   useEffect(() => {
     let alive = true;

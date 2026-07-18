@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useId, useState } from 'react';
+import { useEffect, useRef, useId } from 'react';
 import { useAudioFocus } from '@/lib/audio-focus-context';
 import { getStudio } from '@/lib/dtm';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
@@ -16,12 +16,12 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
   const { requestFocus, releaseFocus } = useAudioFocus();
   const containerRef = useRef<HTMLDivElement>(null);
   const claimedRef = useRef(false);
+  const instRef = useRef<{ setVolume: (v: number) => void } | null>(null);
   const focusRef = useRef({ requestFocus, releaseFocus });
   const focusRef_current = { requestFocus, releaseFocus };
   focusRef.current = focusRef_current;
-  const [volumeTick, setVolumeTick] = useState(0);
 
-  useEffect(() => subscribeMasterVolume(() => setVolumeTick((n) => n + 1)), []);
+  useEffect(() => subscribeMasterVolume(() => instRef.current?.setVolume(applyMasterVolume(50))), []);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -41,6 +41,7 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
           focusRef.current.releaseFocus(id);
         },
       });
+      instRef.current = inst;
 
       const onClick = () => {
         requestAnimationFrame(() => {
@@ -58,11 +59,12 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
       disposed = true;
       cleanup?.();
       inst?.destroy();
+      instRef.current = null;
       focusRef.current.releaseFocus(id);
       claimedRef.current = false;
       inst = null;
     };
-  }, [chords, id, volumeTick]);
+  }, [chords, id]);
 
   return <div ref={containerRef} className="mb-2.5" />;
 }

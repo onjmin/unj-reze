@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Music, Loader2, History } from 'lucide-react';
 import { getStudio } from '@/lib/dtm';
+import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import HistoryModal from '@/components/HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory } from '@/lib/history';
 
@@ -38,7 +39,10 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
           editorTarget: mountRef.current,
           mode: 'simple',
           position: 'prepend',
-          editorOptions: initialMml ? { initialMML: initialMml } : undefined,
+          editorOptions: {
+            ...(initialMml ? { initialMML: initialMml } : undefined),
+            masterVolume: applyMasterVolume(100),
+          },
         });
       }
       setLoading(false);
@@ -56,6 +60,10 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
       modeSwitchRef.current = null;
     };
   }, []);
+
+  useEffect(() => subscribeMasterVolume(() => {
+    modeSwitchRef.current?.getDaw()?.setMasterVolume(applyMasterVolume(100));
+  }), []);
 
   // Check autosave on mount
   useEffect(() => {
