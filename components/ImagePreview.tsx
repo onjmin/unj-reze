@@ -12,6 +12,7 @@ interface ImagePreviewProps {
 export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [closing, setClosing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef({ dragging: false, startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
@@ -89,18 +90,33 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
     pinchRef.current.pinching = false;
   }, []);
 
+  const handleClose = useCallback(() => {
+    setClosing(true);
+  }, []);
+
+  const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
+    if (e.propertyName === 'opacity' && closing) {
+      onClose();
+    }
+  }, [closing, onClose]);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [handleClose]);
 
   const resetZoom = () => { setZoom(1); setOffset({ x: 0, y: 0 }); };
 
   return (
     <div
-      className="fixed inset-0 z-60 bg-black/95 flex items-center justify-center"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      className="fixed inset-0 z-60 flex items-center justify-center"
+      style={{
+        backgroundColor: closing ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.95)',
+        transition: 'background-color 250ms ease-out',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+      onTransitionEnd={handleTransitionEnd}
     >
       {/* Controls */}
       <div className="absolute top-3 right-3 flex items-center gap-1 z-10">
@@ -118,7 +134,7 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
           className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors">
           <ZoomOut size={18} />
         </button>
-        <button onClick={onClose}
+        <button onClick={handleClose}
           className="p-2 bg-gray-800/80 hover:bg-gray-700 rounded-full text-white transition-colors">
           <X size={18} />
         </button>
@@ -147,7 +163,11 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
           src={src}
           alt={alt || ''}
           className="max-w-full max-h-full object-contain select-none"
-          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transition: dragRef.current.dragging ? 'none' : 'transform 0.15s ease-out' }}
+          style={{
+            transform: `translate(${offset.x}px, ${offset.y}px) scale(${closing ? 0.92 : zoom})`,
+            opacity: closing ? 0 : 1,
+            transition: dragRef.current.dragging ? 'opacity 250ms ease-out' : 'transform 0.15s ease-out, opacity 250ms ease-out',
+          }}
           draggable={false}
           onClick={(e) => e.stopPropagation()}
         />

@@ -97,32 +97,36 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
 
   const attachmentPreviews = (
     <>
-      {image && (
-        <div className={`relative mt-2 rounded-lg overflow-hidden border border-gray-800 ${md ? 'max-w-[180px] md:max-w-[260px]' : 'max-w-[180px]'}`}>
-          <img src={image} alt="添付画像" className="w-full h-auto" />
-          <div className="absolute top-1 right-1 flex items-center gap-1.5">
-            <button
-              onClick={() => {
-                if (text.includes('#ドット絵')) {
-                  onOpenDotDrawing();
-                } else {
-                  onOpenDrawing();
-                }
-              }}
-              className="bg-black/85 px-2 py-0.5 rounded-full text-blue-400 hover:bg-blue-600 hover:text-white text-[10px] font-bold active:scale-95 transition-all"
-              title="編集"
-            >
-              編集
-            </button>
-            <button
-              onClick={() => setImage(null)}
-              className="bg-black/85 p-1 rounded-full text-white hover:bg-red-500 active:scale-95 transition-all"
-            >
-              <X size={14} />
-            </button>
-          </div>
+      <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${image ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="overflow-hidden min-h-0">
+          {image && (
+            <div className={`relative mt-2 rounded-lg overflow-hidden border border-gray-800 ${md ? 'max-w-[180px] md:max-w-[260px]' : 'max-w-[180px]'}`}>
+              <img src={image} alt="添付画像" className="w-full h-auto" />
+              <div className="absolute top-1 right-1 flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    if (text.includes('#ドット絵')) {
+                      onOpenDotDrawing();
+                    } else {
+                      onOpenDrawing();
+                    }
+                  }}
+                  className="bg-black/85 px-2 py-0.5 rounded-full text-blue-400 hover:bg-blue-600 hover:text-white text-[10px] font-bold active:scale-95 transition-all"
+                  title="編集"
+                >
+                  編集
+                </button>
+                <button
+                  onClick={() => setImage(null)}
+                  className="bg-black/85 p-1 rounded-full text-white hover:bg-red-500 active:scale-95 transition-all"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
       {mml && (
         <div className={`relative mt-2 rounded-lg border border-pink-700/50 bg-pink-500/10 px-3 py-2 max-w-[280px] ${md ? 'md:px-4 md:py-3 md:max-w-[420px]' : ''}`}>
           <div className="flex items-center justify-between mb-1">
