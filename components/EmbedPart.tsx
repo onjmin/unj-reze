@@ -27,7 +27,6 @@ const sendYtVolume = (iframe: HTMLIFrameElement, volume: number) => {
 
 export default function EmbedPart({ embed }: EmbedPartProps) {
   const { requestFocus, releaseFocus } = useAudioFocus();
-  const [closed, setClosed] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -89,7 +88,20 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
     return () => observer.disconnect();
   }, [playing, embed?.type, releaseFocus]);
 
-  if (!embed || closed) return null;
+  if (!embed) return null;
+
+  const handleClose = () => {
+    if (embed.type === 'video_file') {
+      const v = videoRef.current;
+      if (v) { v.pause(); v.src = ''; v.load(); }
+    } else if (iframeRef.current) {
+      iframeRef.current.remove();
+      iframeRef.current = null;
+    }
+    setPlaying(false);
+    setReady(false);
+    releaseFocus(idRef.current);
+  };
 
   const thumbUrl = getYtThumb(embed.embedUrl);
 
@@ -150,7 +162,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
           <a href={embed.rawUrl} target="_blank" rel="noopener noreferrer" className="p-1 rounded hover:bg-gray-100/10 transition-colors">
             <ExternalLink size={12} className="text-gray-500" />
           </a>
-          <button onClick={() => setClosed(true)} className="p-1 rounded hover:bg-gray-100/10 transition-colors">
+          <button onClick={handleClose} className="p-1 rounded hover:bg-gray-100/10 transition-colors">
             <X size={12} className="text-gray-500" />
           </button>
         </div>
