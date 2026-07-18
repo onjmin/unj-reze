@@ -39,11 +39,10 @@ function getCookie(name: string): string | undefined {
 
 export default function PostDetail({ post: initial }: PostDetailProps) {
   const router = useRouter();
-  const [bbsMode, setBbsMode] = useState('');
-  useEffect(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
-    setBbsMode(saved ?? 'SNSモード');
-  }, []);
+  const [bbsMode, setBbsMode] = useState(() => {
+    if (typeof localStorage === 'undefined') return 'SNSモード';
+    return localStorage.getItem('unj_bbs_mode') ?? 'SNSモード';
+  });
 
   const [post, setPost] = useState<Post>(initial);
   const [replyText, setReplyText] = useState('');

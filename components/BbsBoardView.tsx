@@ -115,7 +115,10 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
           pagePosts.map(post => (
             <div
               key={post.id}
-              onClick={() => router.push(`/post/${post.id}`)}
+              onClick={() => {
+                try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch {}
+                router.push(`/post/${post.id}`);
+              }}
               className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
             >
               {/* Reply count badge */}

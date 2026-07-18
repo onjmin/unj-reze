@@ -199,8 +199,9 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const handlePostClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]') || t.closest('video')) return;
+    try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch {}
     router.push(`/post/${post.id}`);
-  }, [router, post.id]);
+  }, [router, post.id, post]);
 
   const getRankScoreDisplay = () => {
     if (rankCategory === 'イイ') return `${post.likes} いいね`;
