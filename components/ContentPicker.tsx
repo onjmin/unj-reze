@@ -5,6 +5,7 @@ import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Squa
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
+import { applyMasterVolume } from '@/lib/master-volume';
 import { youtubeRefFromUrl, toYoutubeWatchUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
@@ -108,6 +109,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
       const { playMML } = await import('@onjmin/dtm');
       const bgm = playMML(mml, {
         loop: false,
+        volume: applyMasterVolume(100),
         onStop: () => {
           setPreviewKey(null);
           stopRef.current = null;

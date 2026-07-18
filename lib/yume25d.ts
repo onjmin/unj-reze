@@ -7,6 +7,7 @@ import { clone as cloneWithSkeleton } from 'three/examples/jsm/utils/SkeletonUti
 import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D } from '@/components/game-presets/shared';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
+import { applyMasterVolume } from '@/lib/master-volume';
 
 /** 内部レンダリング解像度。CSS 側で pixelated 拡大してドット感を出す。 */
 export const RENDER_W = 320;
@@ -105,7 +106,7 @@ const playSysSfx = (src: string) => {
   if (typeof Audio === 'undefined') return;
   try {
     const a = new Audio(src);
-    a.volume = 0.35;
+    a.volume = applyMasterVolume(35) / 100;
     a.play().catch(() => {});
   } catch { /* noop */ }
 };
@@ -1734,7 +1735,7 @@ export class Yume25DEngine {
         if (dd < d2) d2 = dd;
       }
       const t = Math.max(0, 1 - Math.sqrt(d2) / s.radius);
-      const vol = audible ? Math.min(1, s.volume * t * t) : 0;
+      const vol = audible ? Math.min(1, s.volume * t * t) * (applyMasterVolume(100) / 100) : 0;
       let audio = this.speakerAudio.get(s.src);
       if (vol > SPEAKER_PAUSE_EPS) {
         if (!audio) {
