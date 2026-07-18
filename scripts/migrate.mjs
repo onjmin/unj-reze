@@ -138,12 +138,6 @@ const migrations = [
       ALTER TABLE game_players ALTER COLUMN game_id TYPE BIGINT;
       ALTER TABLE posts ALTER COLUMN game_id TYPE BIGINT;
     `
-  },
-  {
-    name: '10_add_checkered_dark_to_posts',
-    sql: `
-      ALTER TABLE posts ADD COLUMN IF NOT EXISTS checkered_dark INTEGER;
-    `
   }
 ];
 

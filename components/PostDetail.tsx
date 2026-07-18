@@ -114,7 +114,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   useEffect(() => {
     setCurrentCheckeredDark(post.checkeredDark ?? true);
-  }, [post.id]);
+  }, [post.checkeredDark]);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -405,17 +405,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const handleToggleBackground = async () => {
     if (!userId || !post.hasImage || !post.imageSrc) return;
-    const previousValue = currentCheckeredDark;
     const nextValue = !currentCheckeredDark;
     setMenuOpen(false);
     setCurrentCheckeredDark(nextValue);
-    setPost(prev => ({ ...prev, checkeredDark: nextValue }));
     try {
       const updated = await api.posts.edit(post.id, userId, post.content, post.originType, post.imageSrc, nextValue);
-      setPost(prev => ({ ...prev, ...updated, checkeredDark: updated.checkeredDark ?? nextValue }));
+      setPost(updated);
+      router.refresh();
     } catch {
-      setCurrentCheckeredDark(previousValue);
-      setPost(prev => ({ ...prev, checkeredDark: previousValue }));
+      setCurrentCheckeredDark(currentCheckeredDark);
     }
   };
 

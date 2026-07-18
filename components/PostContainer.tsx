@@ -72,7 +72,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
   useEffect(() => {
     setCurrentCheckeredDark(post.checkeredDark ?? true);
-  }, [post.id]);
+  }, [post.checkeredDark]);
 
   const toggleMenu = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -152,16 +152,16 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
   const handleToggleBackground = useCallback(async () => {
     if (!currentUserDisplayName || !post.hasImage || !post.imageSrc) return;
-    const previousValue = currentCheckeredDark;
     const nextValue = !currentCheckeredDark;
     setMenuOpen(false);
     setCurrentCheckeredDark(nextValue);
     try {
       await api.posts.edit(post.id, currentUserDisplayName, post.content, post.originType, post.imageSrc, nextValue);
+      onModerationChange?.();
     } catch {
-      setCurrentCheckeredDark(previousValue);
+      setCurrentCheckeredDark(currentCheckeredDark);
     }
-  }, [currentCheckeredDark, currentUserDisplayName, post.content, post.hasImage, post.id, post.imageSrc, post.originType]);
+  }, [currentCheckeredDark, currentUserDisplayName, onModerationChange, post.content, post.hasImage, post.id, post.imageSrc, post.originType]);
 
   const handleSaveEdit = useCallback(async (next: string, nextImageSrc?: string | null) => {
     setShowEditModal(false);
