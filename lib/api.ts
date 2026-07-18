@@ -51,7 +51,7 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return encodePost(post);
     },
-    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType }) => {
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType; checkeredDark?: boolean }) => {
       const decodedGameId = data.gameId ? decodeIdOrThrow(data.gameId) : undefined;
       const post = await mockDbInstance.createPost({ ...data, gameId: decodedGameId });
       return encodePost(post);
@@ -76,8 +76,8 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return encodePost(post);
     },
-    edit: async (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => {
-      const post = mockDbInstance.editPost(decodeIdOrThrow(id), userId, content, originType, imageSrc);
+    edit: async (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean) => {
+      const post = mockDbInstance.editPost(decodeIdOrThrow(id), userId, content, originType, imageSrc, checkeredDark);
       if (!post) throw new Error('Post not found or not owned');
       return encodePost(post);
     },
@@ -101,6 +101,7 @@ const staticApi = {
         avatarColor?: string;
         gameId?: string | number;
         originType?: OriginType;
+        checkeredDark?: boolean;
       }) => {
         const decodedParentPostId = data.parentPostId ? decodeIdOrThrow(data.parentPostId) : undefined;
         const gameIdNum = data.gameId ? Number(data.gameId) : undefined;
@@ -237,13 +238,13 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
-    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType }) =>
+    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType; checkeredDark?: boolean }) =>
       fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
     like: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
     dislike: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
     heart: (id: string, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
     repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
-    edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc }) }),
+    edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc, checkeredDark }) }),
     remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
     replies: {
       list: (postId: string, userId?: string) => {
@@ -260,6 +261,7 @@ const liveApi = {
         avatarColor?: string;
         gameId?: string | number;
         originType?: OriginType;
+        checkeredDark?: boolean;
       }) =>
         fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
     },

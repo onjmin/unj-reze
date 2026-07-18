@@ -349,6 +349,7 @@ class MockDB {
     slug?: string;
     gameId?: number;
     originType?: OriginType;
+    checkeredDark?: boolean;
   }): Post {
     const createdAt = this.now();
     const post: Post = {
@@ -374,6 +375,7 @@ class MockDB {
       hasGame: !!data.gameId,
       gameId: data.gameId,
       originType: data.originType,
+      checkeredDark: data.checkeredDark,
       isFalseDeclaration: false,
       threadId: this.genId(),
       replies: [],
@@ -455,6 +457,7 @@ class MockDB {
     avatarColor?: string;
     gameId?: number;
     originType?: OriginType;
+    checkeredDark?: boolean;
   }): Post | null {
     const post = this.posts.find(p => p.id === postId);
     if (!post) return null;
@@ -472,6 +475,7 @@ class MockDB {
       gameId: data.gameId,
       hasGame: !!data.gameId,
       originType: data.originType,
+      checkeredDark: data.checkeredDark,
     };
     this.posts.push(reply);
     post.repliesCount += 1;
@@ -723,7 +727,7 @@ class MockDB {
     return post.displayName === userId || post.slug === this.slugForUser(userId);
   }
 
-  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string): Post | null {
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, checkeredDark?: boolean): Post | null {
     const post = this.posts.find(p => p.id === id);
     if (!post || !this.ownsPost(post, userId)) return null;
     const hasContentChanged = post.content !== content;
@@ -734,6 +738,7 @@ class MockDB {
     post.content = content;
     if (originType !== undefined) post.originType = originType == null ? undefined : originType;
     if (imageSrc !== undefined) post.imageSrc = imageSrc;
+    if (checkeredDark !== undefined) post.checkeredDark = checkeredDark;
     // 親スレッドの replies 配列内の同一投稿も更新
     for (const thread of this.posts) {
       const child = thread.replies?.find(r => r.id === id);
@@ -741,6 +746,7 @@ class MockDB {
         child.content = content;
         if (originType !== undefined) child.originType = originType == null ? undefined : originType;
         if (imageSrc !== undefined) child.imageSrc = imageSrc;
+        if (checkeredDark !== undefined) child.checkeredDark = checkeredDark;
         if (hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined) {
           child.isEdited = true;
         }

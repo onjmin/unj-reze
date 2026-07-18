@@ -65,8 +65,14 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
+  const [currentCheckeredDark, setCurrentCheckeredDark] = useState(post.checkeredDark ?? true);
   const targetSlug = post.slug || post.displayName;
   const isSelf = !!currentUserSlug && currentUserSlug === targetSlug;
+  const drawingBackgroundClass = currentCheckeredDark ? 'gimp-checkered-background' : 'gimp-checkered-background-white';
+
+  useEffect(() => {
+    setCurrentCheckeredDark(post.checkeredDark ?? true);
+  }, [post.checkeredDark]);
 
   const toggleMenu = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -144,6 +150,19 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     }
   }, [currentUserSlug, onEditPost, post]);
 
+  const handleToggleBackground = useCallback(async () => {
+    if (!currentUserDisplayName || !post.hasImage || !post.imageSrc) return;
+    const nextValue = !currentCheckeredDark;
+    setMenuOpen(false);
+    setCurrentCheckeredDark(nextValue);
+    try {
+      await api.posts.edit(post.id, currentUserDisplayName, post.content, post.originType, post.imageSrc, nextValue);
+      onModerationChange?.();
+    } catch {
+      setCurrentCheckeredDark(currentCheckeredDark);
+    }
+  }, [currentCheckeredDark, currentUserDisplayName, onModerationChange, post.content, post.hasImage, post.id, post.imageSrc, post.originType]);
+
   const handleSaveEdit = useCallback(async (next: string, nextImageSrc?: string | null) => {
     setShowEditModal(false);
     if (!currentUserDisplayName) return;
@@ -202,7 +221,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const handlePostClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]') || t.closest('video')) return;
-    try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch {}
+    try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch { }
     router.push(`/post/${post.id}`);
   }, [router, post.id, post]);
 
@@ -312,6 +331,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                       <span>権利表記を設定</span>
                     </button>
                   )}
+                  {isSelf && post.hasImage && post.imageSrc && (
+                    <button role="menuitem" onClick={handleToggleBackground} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <Pencil size={12} className="shrink-0" />
+                      <span>{currentCheckeredDark ? '白背景に切り替え' : '黒背景に切り替え'}</span>
+                    </button>
+                  )}
                   {isSelf && (
                     <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
                       <Trash2 size={12} className="shrink-0" />
@@ -401,7 +426,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                 e.stopPropagation();
                 if (post.imageSrc) setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
               }}
-              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background"
+              className={`relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer ${drawingBackgroundClass}`}
             >
               <img
                 src={post.imageSrc}

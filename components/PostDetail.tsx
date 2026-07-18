@@ -58,6 +58,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyImage, setReplyImage] = useState<string | null>(null);
+  const [replyCheckeredDark, setReplyCheckeredDark] = useState<boolean | undefined>(undefined);
   const [replyMml, setReplyMml] = useState<string | null>(null);
   const [replyGameDraft, setReplyGameDraft] = useState<any>(null);
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
@@ -73,6 +74,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [avatarColor, setAvatarColor] = useState('from-blue-500 to-indigo-600');
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [currentCheckeredDark, setCurrentCheckeredDark] = useState(post.checkeredDark ?? true);
 
   const handleAvatarClick = useCallback((user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => {
     setSelectedUser(user);
@@ -87,7 +89,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         setUserSlug(user.slug);
         setAvatarUrl(user.avatarUrl);
         if (user.avatarColor) setAvatarColor(user.avatarColor);
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, []);
 
@@ -108,6 +110,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const dislikeParity = useRef(0);
   const dislikeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bodyExpanded, setBodyExpanded] = useState(false);
+  const drawingBackgroundClass = currentCheckeredDark ? 'gimp-checkered-background' : 'gimp-checkered-background-white';
+
+  useEffect(() => {
+    setCurrentCheckeredDark(post.checkeredDark ?? true);
+  }, [post.checkeredDark]);
 
   const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -258,6 +265,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         imageSrc,
         gameId,
         originType: replyOriginType,
+        checkeredDark: replyCheckeredDark,
       });
 
       setPost(p => ({
@@ -311,15 +319,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setCollabImageUrl(undefined);
   }, []);
 
-  const handleSaveDrawing = (canvasData: string) => {
+  const handleSaveDrawing = (canvasData: string, checkeredDark: boolean) => {
     setReplyImage(canvasData);
+    setReplyCheckeredDark(checkeredDark);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
     setReplyText("#お絵描き 自作イラスト完成！");
   };
 
-  const handleSaveDotDrawing = (canvasData: string) => {
+  const handleSaveDotDrawing = (canvasData: string, checkeredDark: boolean) => {
     setReplyImage(canvasData);
+    setReplyCheckeredDark(checkeredDark);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
     setReplyText("#ドット絵 自作ドット絵完成！");
@@ -353,8 +363,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
   };
 
-  const handleSaveEditedArt = async (canvasData: string) => {
-    const updated = await api.posts.edit(post.id, userId, post.content, post.originType, canvasData);
+  const handleSaveEditedArt = async (canvasData: string, checkeredDark: boolean) => {
+    const updated = await api.posts.edit(post.id, userId, post.content, post.originType, canvasData, checkeredDark);
     setPost(updated);
     setActiveScreen(null);
     setCollabImageUrl(undefined);
@@ -391,6 +401,20 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const handleMenuEdit = () => {
     setShowEditModal(true);
     setMenuOpen(false);
+  };
+
+  const handleToggleBackground = async () => {
+    if (!userId || !post.hasImage || !post.imageSrc) return;
+    const nextValue = !currentCheckeredDark;
+    setMenuOpen(false);
+    setCurrentCheckeredDark(nextValue);
+    try {
+      const updated = await api.posts.edit(post.id, userId, post.content, post.originType, post.imageSrc, nextValue);
+      setPost(updated);
+      router.refresh();
+    } catch {
+      setCurrentCheckeredDark(currentCheckeredDark);
+    }
   };
 
   const handleMenuOriginType = () => {
@@ -450,6 +474,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   <button role="menuitem" onClick={handleEditArt} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Pencil size={12} className="shrink-0" />
                     <span>作品を編集</span>
+                  </button>
+                )}
+                {isSelf && post.hasImage && post.imageSrc && (
+                  <button role="menuitem" onClick={handleToggleBackground} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>{currentCheckeredDark ? '白背景に切り替え' : '黒背景に切り替え'}</span>
                   </button>
                 )}
                 {isSelf && mmlCode && (
@@ -569,7 +599,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           })()}
 
           {post.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background">
+            <div className={`rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] ${drawingBackgroundClass}`}>
               <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}
@@ -979,7 +1009,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           </p>
 
           {localPost.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background">
+            <div className={`rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] ${localPost.checkeredDark ?? true ? 'gimp-checkered-background' : 'gimp-checkered-background-white'}`}>
               <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}

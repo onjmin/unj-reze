@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType } = body;
+    const { displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType, checkeredDark } = body;
 
     if (!displayName || (!content && !hasImage)) {
       return NextResponse.json(
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid gameId' }, { status: 400 });
     }
 
-    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId: decodedGameId === null ? undefined : decodedGameId, originType });
+    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId: decodedGameId === null ? undefined : decodedGameId, originType, checkeredDark });
     await attachGameInfo(post);
     return NextResponse.json(encodePost(post), { status: 201 });
   } catch (e) {
