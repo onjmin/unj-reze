@@ -112,7 +112,7 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
     <div
       className="fixed inset-0 z-60 flex items-center justify-center"
       style={{
-        backgroundColor: closing ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.95)',
+        backgroundColor: closing ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.5)',
         transition: 'background-color 250ms ease-out',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
@@ -150,7 +150,7 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
       {/* Image */}
       <div
         ref={containerRef}
-        className="w-full h-full flex items-center justify-center touch-none overflow-hidden gimp-checkered-background"
+        className="w-full h-full flex items-center justify-center touch-none overflow-hidden"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

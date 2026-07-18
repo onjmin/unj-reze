@@ -152,7 +152,7 @@ export default function HistoryModal({
               >
                 {/* Thumbnail Preview for Drawings */}
                 {item.previewUrl && (
-                  <div className="w-10 h-10 bg-[#1a1b26] border border-gray-700 rounded overflow-hidden shrink-0 flex items-center justify-center">
+                  <div className="w-10 h-10 bg-[#1a1b26] border border-gray-700 rounded overflow-hidden shrink-0 flex items-center justify-center gimp-checkered-background">
                     <img
                       src={item.previewUrl}
                       alt="preview"

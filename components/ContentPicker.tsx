@@ -377,7 +377,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                   <button
                     key={`${a.ref}-${i}`}
                     onClick={() => onPick(a)}
-                    className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative"
+                    className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
                   >
                     <HistoryAssetThumb ref={a.ref} url={a.url} />
                     {a.url && (
@@ -411,7 +411,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
               />
               {urlInput.trim() && (
-                <div className="rounded-lg border border-gray-700 overflow-hidden max-h-40 flex items-center justify-center bg-black/40">
+                <div className="rounded-lg border border-gray-700 overflow-hidden max-h-40 flex items-center justify-center bg-black/40 gimp-checkered-background">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={urlInput} alt="" className="max-w-full max-h-40 object-contain" />
                 </div>

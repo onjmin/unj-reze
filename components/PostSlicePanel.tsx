@@ -78,7 +78,7 @@ export default function PostSlicePanel({ userId, onPick, initialAsset }: PostSli
             <button
               key={p.id}
               onClick={() => setSelected({ id: p.id, url: p.imageSrc! })}
-              className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative"
+              className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={p.imageSrc} alt="" className="w-full h-full object-cover" />

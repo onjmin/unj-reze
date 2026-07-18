@@ -979,7 +979,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           </p>
 
           {localPost.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26]">
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background">
               <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}
