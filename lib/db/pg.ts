@@ -305,7 +305,7 @@ export const pgStore: DataStore = {
          RETURNING *`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-         !!data.gameId, data.gameId || null, data.originType ?? null, data.checkeredDark ?? null]
+         !!data.gameId, data.gameId || null, data.originType ?? null, data.checkeredDark != null ? (data.checkeredDark ? 1 : 0) : null]
       );
       return { ...(await rowToPost(insertResult.rows[0])), replies: [] };
     } finally {
@@ -464,14 +464,14 @@ export const pgStore: DataStore = {
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
-        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12)
+        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type, checkered_dark)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [
           postId, parentPostId, data.displayName, slug, data.content,
           data.avatarColor || 'from-blue-500 to-indigo-600',
           data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-          !!data.gameId, data.gameId || null, data.originType ?? null
+          !!data.gameId, data.gameId || null, data.originType ?? null, data.checkeredDark != null ? (data.checkeredDark ? 1 : 0) : null
         ]
       );
       await client.query(
@@ -538,7 +538,7 @@ export const pgStore: DataStore = {
       }
       if (checkeredDark !== undefined) {
         sets.push(`checkered_dark = $${values.length + 1}`);
-        values.push(checkeredDark);
+        values.push(checkeredDark ? 1 : 0);
       }
       if (shouldMarkEdited) sets.push('is_edited = TRUE');
       values.push(id);
