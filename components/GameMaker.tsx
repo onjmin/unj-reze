@@ -39,7 +39,7 @@ import {
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig, type DeathScreenConfig, type DeathScreenStyle,
   defaultTitleScreen, defaultEndingScreen, defaultDeathScreen,
-  type Layout25D,
+  type Layout25D, type Billboard25D,
   chest, SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
   SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
   convertMapToLayout25D, convertLayout25DToMap,
@@ -1257,6 +1257,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
   selectedObjIdRef.current = selectedObjId;
+  // ── バッチ選択（複数オブジェクトをまとめて編集） ──
+  const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
+  const batchIdsRef = useRef<Set<string>>(new Set());
+  batchIdsRef.current = batchIds;
+  const lastClickedIdRef = useRef<string | null>(null);
   // ── イベントランタイム ──
   const [switchVals, setSwitchVals] = useState<Record<number, boolean>>({});
   const switchValsRef = useRef<Record<number, boolean>>({});
@@ -10422,6 +10427,48 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
   const placeObj = () => { const p = engineRef.current.player; setGameData(prev => ({ ...prev, objects: [...prev.objects, { ...objTemplate, id: uid(), col: Math.floor((p.x + 12) / TILE_SIZE), row: Math.floor((p.y + 12) / TILE_SIZE) }] })); };
 
+  // ── バッチ選択: Ctrl/Meta+クリックでトグル、Shift+クリックで範囲選択 ──
+  const isYume25d = gameData.engine === 'yume25d';
+  const orderedIds = isYume25d
+    ? (gameData.layout25d?.billboards ?? []).map(b => b.id)
+    : gameData.objects.map(o => o.id);
+  const handleBatchClick = (id: string, e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => {
+    if (e.ctrlKey || e.metaKey) {
+      setBatchIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+      lastClickedIdRef.current = id;
+    } else if (e.shiftKey && lastClickedIdRef.current) {
+      const from = orderedIds.indexOf(lastClickedIdRef.current);
+      const to = orderedIds.indexOf(id);
+      if (from >= 0 && to >= 0) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        setBatchIds(prev => { const n = new Set(prev); for (let i = lo; i <= hi; i++) n.add(orderedIds[i]); return n; });
+      }
+    } else {
+      // 通常クリック: バッチ選択をクリアして単一選択
+      setBatchIds(new Set());
+      lastClickedIdRef.current = null;
+      if (isYume25d) { setSelectedObjId(null); setYume25dTalkTargetId(id); }
+      else { setSelectedObjId(id); }
+    }
+  };
+  const batchCount = batchIds.size;
+  const clearBatch = () => setBatchIds(new Set());
+
+  /** バッチ一括適用: ObjectDef 用 */
+  const batchApplyObjects = (patch: Partial<ObjectDef>) => {
+    if (batchCount === 0) return;
+    setGameData(p => ({ ...p, objects: p.objects.map(o => batchIds.has(o.id) ? { ...o, ...patch } : o) }));
+  };
+  /** バッチ一括適用: Billboard25D 用 */
+  const batchApplyBillboards = (patch: Partial<Billboard25D>) => {
+    if (batchCount === 0) return;
+    setGameData(p => ({
+      ...p, layout25d: p.layout25d ? {
+        ...p.layout25d, billboards: p.layout25d.billboards.map(b => batchIds.has(b.id) ? { ...b, ...patch } : b)
+      } : p.layout25d
+    }));
+  };
+
   // ── タイトル／エンディング画面の更新ヘルパ ──
   const updTitle = (patch: Partial<TitleScreenConfig>) => setGameData(p => p.titleScreen ? ({ ...p, titleScreen: { ...p.titleScreen, ...patch } }) : p);
   const updEnding = (patch: Partial<EndingScreenConfig>) => setGameData(p => p.ending ? ({ ...p, ending: { ...p.ending, ...patch } }) : p);
@@ -13774,20 +13821,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     ))}
                     {/* ── 全オブジェクト一覧 ── */}
                     <div>
-                      <div className="text-[10px] text-gray-500 mb-1.5">全{gameData.engine === 'yume25d' ? (gameData.layout25d?.billboards.length ?? 0) : gameData.objects.length}個</div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[10px] text-gray-500">全{isYume25d ? (gameData.layout25d?.billboards.length ?? 0) : gameData.objects.length}個 {batchCount > 0 && <span className="text-yellow-400">({batchCount}選択中)</span>}</span>
+                        {batchCount > 0 && <button onClick={clearBatch} className="text-[10px] text-gray-500 hover:text-gray-300">選択解除</button>}
+                      </div>
                       <div className="max-h-28 overflow-y-auto space-y-0.5">
-                        {gameData.engine === 'yume25d'
+                        {isYume25d
                           ? (gameData.layout25d?.billboards ?? []).map(b => (
-                            <button key={b.id} onClick={() => { setSelectedObjId(null); setYume25dTalkTargetId(b.id); }}
-                              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${yume25dTalkTargetId === b.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
+                            <button key={b.id} onClick={(e) => handleBatchClick(b.id, e)}
+                              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${batchIds.has(b.id) ? 'bg-blue-800/40 text-blue-200' : yume25dTalkTargetId === b.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
+                              <input type="checkbox" checked={batchIds.has(b.id)} readOnly className="accent-blue-500 shrink-0"
+                                onClick={e => { e.stopPropagation(); setBatchIds(prev => { const n = new Set(prev); n.has(b.id) ? n.delete(b.id) : n.add(b.id); return n; }); lastClickedIdRef.current = b.id; }} />
                               <span>{b.interactive ? '💬' : '🪧'}</span>
                               <span className="truncate flex-1">{b.message || `ビルボード#${b.tex}`}</span>
                               <span className="text-gray-600">({b.col},{b.row})</span>
                             </button>
                           ))
                           : gameData.objects.map(o => (
-                            <button key={o.id} onClick={() => setSelectedObjId(o.id)}
-                              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${selectedObjId === o.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
+                            <button key={o.id} onClick={(e) => handleBatchClick(o.id, e)}
+                              className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${batchIds.has(o.id) ? 'bg-blue-800/40 text-blue-200' : selectedObjId === o.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
+                              <input type="checkbox" checked={batchIds.has(o.id)} readOnly className="accent-blue-500 shrink-0"
+                                onClick={e => { e.stopPropagation(); setBatchIds(prev => { const n = new Set(prev); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; }); lastClickedIdRef.current = o.id; }} />
                               <span>{o.emoji}</span>
                               <span className="truncate flex-1">{o.name || o.objType || '敵'}</span>
                               <span className="text-gray-600">({o.col},{o.row})</span>
@@ -13795,6 +13849,88 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           ))}
                       </div>
                     </div>
+
+                    {/* ── バッチ編集パネル（複数選択時のみ表示） ── */}
+                    {batchCount >= 2 && (
+                      <div className="rounded-lg border border-blue-600/50 bg-gray-900 p-2.5 space-y-2">
+                        <p className="text-[11px] text-blue-400 font-bold">一括編集 ({batchCount}個)</p>
+                        {isYume25d ? (
+                          <>
+                            <label className="text-[10px] text-gray-400 block">AI行動
+                              <select value="" onChange={e => { if (e.target.value) batchApplyBillboards({ behavior: e.target.value as NpcBehavior }); }}
+                                className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
+                                <option value="">— 選択して適用 —</option>
+                                <option value="still">静止</option>
+                                <option value="random">ランダム移動</option>
+                                <option value="randomDash">ランダムダッシュ</option>
+                                <option value="randomHop">ランダムジャンプ</option>
+                                <option value="chase">追いかける</option>
+                                <option value="flee">逃げる</option>
+                                <option value="patrolH">左右巡回</option>
+                                <option value="patrolV">前後巡回</option>
+                              </select>
+                            </label>
+                            <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <input type="checkbox" onChange={e => batchApplyBillboards({ interactive: e.target.checked || undefined })} className="accent-blue-500" />
+                              はなせるをON
+                            </label>
+                            <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <input type="checkbox" onChange={e => batchApplyBillboards({ collidable: e.target.checked || undefined })} className="accent-blue-500" />
+                              当たり判定をON
+                            </label>
+                          </>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="text-[10px] text-gray-400">種別
+                                <select value="" onChange={e => { if (e.target.value) batchApplyObjects({ objType: e.target.value as ObjType }); }}
+                                  className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
+                                  <option value="">— 適用しない —</option>
+                                  <option value="enemy">敵</option>
+                                  <option value="npc">NPC</option>
+                                  <option value="item">アイテム</option>
+                                  <option value="warp">ワープ</option>
+                                  <option value="event">イベント</option>
+                                  <option value="platform">プラットフォーム</option>
+                                </select>
+                              </label>
+                              <label className="text-[10px] text-gray-400">AI行動
+                                <select value="" onChange={e => { if (e.target.value) batchApplyObjects({ behavior: e.target.value as NpcBehavior }); }}
+                                  className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
+                                  <option value="">— 適用しない —</option>
+                                  <option value="still">静止</option>
+                                  <option value="random">ランダム</option>
+                                  <option value="randomDash">ランダムダッシュ</option>
+                                  <option value="randomHop">ランダムジャンプ</option>
+                                  <option value="chase">追尾</option>
+                                  <option value="flee">逃走</option>
+                                  <option value="patrolH">左右往復</option>
+                                  <option value="patrolV">上下往復</option>
+                                  <option value="walker">歩行</option>
+                                </select>
+                              </label>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="text-[10px] text-gray-400">弾
+                                <select value="" onChange={e => { if (e.target.value) batchApplyObjects({ bullet: e.target.value as BulletType }); }}
+                                  className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
+                                  <option value="">— 適用しない —</option>
+                                  <option value="none">なし</option>
+                                  <option value="aimed">狙い弾</option>
+                                  <option value="spread">拡散</option>
+                                  <option value="spiral">回転</option>
+                                </select>
+                              </label>
+                              <label className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-4">
+                                <input type="checkbox" onChange={e => batchApplyObjects({ hazard: e.target.checked })} className="accent-blue-500" />
+                                接触でミスをON
+                              </label>
+                            </div>
+                          </>
+                        )}
+                        <button onClick={clearBatch} className="w-full py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-[10px] text-gray-300">選択解除</button>
+                      </div>
+                    )}
                   </div>
                 )}
 
