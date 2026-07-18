@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Volume2, VolumeX } from 'lucide-react';
+import { Volume2, Volume1, Volume, VolumeX, VolumeOff } from 'lucide-react';
 import { getMasterVolume, setMasterVolume, subscribeMasterVolume, getMuted, setMuted, subscribeMuted } from '@/lib/master-volume';
 
 /** ヘッダー用マスター音量コントロール。スピーカーアイコン→クリックでスライダーをポップアップ表示する。
@@ -37,7 +37,7 @@ export default function VolumeControl() {
         aria-label="音量"
         title={muted ? '音量 ミュート中' : `音量 ${volume}`}
       >
-        {muted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+        {muted ? <VolumeOff size={20} /> : volume === 0 ? <VolumeX size={20} /> : volume <= 30 ? <Volume size={20} /> : volume <= 60 ? <Volume1 size={20} /> : <Volume2 size={20} />}
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-[#1a1a2e] border border-gray-700 rounded-lg shadow-2xl p-3">
@@ -52,7 +52,7 @@ export default function VolumeControl() {
               aria-label={muted ? 'ミュート解除' : 'ミュート'}
               title={muted ? 'ミュート解除' : 'ミュート'}
             >
-              {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {muted ? <VolumeOff size={14} /> : <VolumeX size={14} />}
             </button>
             <input
               type="range"
