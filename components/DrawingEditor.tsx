@@ -228,7 +228,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     setFlipped(false);
     canvasSizeRef.current = { w, h };
 
-    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
+    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background-white');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
     oekaki.color.value = colorRef.current;
     oekaki.penSize.value = penSize;

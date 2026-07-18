@@ -110,9 +110,9 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 
   return (
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center"
+      className="fixed inset-0 z-60 flex items-center justify-center gimp-checkered-background-white"
       style={{
-        backgroundColor: closing ? 'rgba(0,0,0,0)' : 'rgba(0,0,0,0.5)',
+        opacity: closing ? 0 : 0.5,
         transition: 'background-color 250ms ease-out',
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}

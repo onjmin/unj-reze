@@ -97,7 +97,7 @@ export default function HistoryModal({
     <div className="fixed inset-0 z-[110] flex flex-col items-center overflow-y-auto px-3 pt-12 md:pt-24" onClick={(e) => e.stopPropagation()}>
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-lg bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-5 flex flex-col space-y-4 animate-fade-in-up">
-        
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-bold text-gray-300 flex items-center gap-1.5">
@@ -152,7 +152,7 @@ export default function HistoryModal({
               >
                 {/* Thumbnail Preview for Drawings */}
                 {item.previewUrl && (
-                  <div className="w-10 h-10 bg-[#1a1b26] border border-gray-700 rounded overflow-hidden shrink-0 flex items-center justify-center gimp-checkered-background">
+                  <div className="w-10 h-10 bg-[#1a1b26] border border-gray-700 rounded overflow-hidden shrink-0 flex items-center justify-center gimp-checkered-background-white">
                     <img
                       src={item.previewUrl}
                       alt="preview"

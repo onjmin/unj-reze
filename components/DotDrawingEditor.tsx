@@ -479,7 +479,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       oekaki.setDotSize(1, restoredState ? restoredState.gridH : gridH);
     }
 
-    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background');
+    oekaki.lowerLayer.value?.canvas.classList.add('gimp-checkered-background-white');
     oekaki.upperLayer.value?.canvas.classList.add('upper-canvas');
     oekaki.color.value = colorRef.current;
 

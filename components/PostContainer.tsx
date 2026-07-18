@@ -202,7 +202,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const handlePostClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]') || t.closest('video')) return;
-    try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch {}
+    try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch { }
     router.push(`/post/${post.id}`);
   }, [router, post.id, post]);
 
@@ -401,7 +401,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                 e.stopPropagation();
                 if (post.imageSrc) setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
               }}
-              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background"
+              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
             >
               <img
                 src={post.imageSrc}

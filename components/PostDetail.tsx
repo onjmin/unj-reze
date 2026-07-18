@@ -87,7 +87,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         setUserSlug(user.slug);
         setAvatarUrl(user.avatarUrl);
         if (user.avatarColor) setAvatarColor(user.avatarColor);
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, []);
 
@@ -569,7 +569,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           })()}
 
           {post.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background">
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background-white">
               <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}
@@ -979,7 +979,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           </p>
 
           {localPost.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background">
+            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background-white">
               <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
             </div>
           )}
