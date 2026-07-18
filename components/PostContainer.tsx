@@ -414,7 +414,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               />
               {post.hasCollabButton && (
                 <button
-                  onClick={() => openCollab(post)}
+                  onClick={(e) => { e.stopPropagation(); openCollab(post); }}
                   className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
                 >
                   <Edit3 size={11} />
