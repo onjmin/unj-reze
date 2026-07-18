@@ -14,12 +14,17 @@ import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
+import { PLAY_W, PLAY_H } from './game-presets/shared';
+
+/** ゲームcanvas（PLAY_W×PLAY_H比率）+ ヘッダー分の高さを、投稿幅いっぱいに収まるよう自動計算する */
+const GAME_BOX_PADDING_TOP = `calc(${PLAY_H} / ${PLAY_W} * 100% + 40px)`;
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('./DotDrawingEditor'), { ssr: false });
 const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
+const GamePreview = dynamic(() => import('./GamePreview'), { ssr: false });
 const PostComposer = dynamic(() => import('./PostComposer'), { ssr: false });
 const EditPostModal = dynamic(() => import('./EditPostModal'), { ssr: false });
 const DeletePostModal = dynamic(() => import('./DeletePostModal'), { ssr: false });
@@ -61,6 +66,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [replyGameDraft, setReplyGameDraft] = useState<any>(null);
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
+  const [previewGame, setPreviewGame] = useState<{ gameId: string; postId?: string } | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
 
@@ -574,34 +580,43 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           )}
 
           {post.hasGame && (
-            <div
-              onClick={() => {
-                try {
-                  sessionStorage.setItem('unj_pending_game', JSON.stringify({ gameId: post.gameId, postId: post.id, returnTo: `/post/${post.id}` }));
-                } catch {}
-                router.push('/');
-              }}
-              className="mb-2.5 cursor-pointer"
-            >
-              <div className="w-full aspect-[16/9] bg-gray-900 rounded-xl flex items-center justify-center overflow-hidden border border-gray-800 relative group transition-all shadow-inner">
-                {post.gameThumbnail && (
-                  <div
-                    className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"
-                    style={{ backgroundImage: `url('${post.gameThumbnail}')` }}
+            previewGame && previewGame.postId === post.id ? (
+              <div className="mb-2.5 w-full relative" style={{ paddingTop: GAME_BOX_PADDING_TOP }}>
+                <div className="absolute inset-0">
+                  <GamePreview
+                    gameId={previewGame.gameId}
+                    postId={previewGame.postId}
+                    userId={userId}
+                    onClose={() => setPreviewGame(null)}
+                    inline
                   />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
-                <div className="z-10 flex flex-col items-center space-y-1">
-                  <div className="bg-red-600 p-3 rounded-full shadow-[0_0_15px_rgba(220,38,38,0.5)] group-hover:scale-110 transition-transform">
-                    <PlaySquare size={28} className="text-white ml-0.5" />
-                  </div>
-                  <span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">TAP TO PLAY GAME</span>
-                </div>
-                <div className="absolute bottom-2 left-2.5 z-10">
-                  <span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">{post.gameTitle || 'ゲーム'}</span>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div
+                onClick={() => setPreviewGame({ gameId: post.gameId || '', postId: post.id })}
+                className="mb-2.5 cursor-pointer"
+              >
+                <div className="w-full relative flex items-center justify-center bg-gray-900 rounded-xl overflow-hidden border border-gray-800 group transition-all shadow-inner" style={{ paddingTop: GAME_BOX_PADDING_TOP }}>
+                  {post.gameThumbnail && (
+                    <div
+                      className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"
+                      style={{ backgroundImage: `url('${post.gameThumbnail}')` }}
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
+                  <div className="z-10 flex flex-col items-center space-y-1">
+                    <div className="bg-red-600 p-3 rounded-full shadow-[0_0_15px_rgba(220,38,38,0.5)] group-hover:scale-110 transition-transform">
+                      <PlaySquare size={28} className="text-white ml-0.5" />
+                    </div>
+                    <span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">TAP TO PLAY GAME</span>
+                  </div>
+                  <div className="absolute bottom-2 left-2.5 z-10">
+                    <span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">{post.gameTitle || 'ゲーム'}</span>
+                  </div>
+                </div>
+              </div>
+            )
           )}
 
           {(() => {

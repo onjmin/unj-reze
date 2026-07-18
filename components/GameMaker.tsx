@@ -878,6 +878,8 @@ interface GameMakerProps {
   playOnly?: boolean;
   /** 親コンテナに収める（absolute overlay ではなく h-full flex-col） */
   embedded?: boolean;
+  /** モバイルの仮想コントローラーを画面全体に固定表示する（フィード等の小さい埋め込み領域用） */
+  fixedControls?: boolean;
   ghostPlayers?: { sessionId: string; x: number; y: number; emoji: string; color?: string }[];
   onPositionChange?: (x: number, y: number, emoji: string) => void;
   /** ゲームポストのID（コメント返信先） */
@@ -1166,7 +1168,7 @@ function getDodgeImg(url: string): HTMLImageElement {
   return img;
 }
 
-export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
+export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, fixedControls, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // canvas エリア（親フレックス）の実測サイズを ResizeObserver で追いかけ、PLAY_W:PLAY_H を保った
   // まま contain フィットさせる。CSS の aspect-ratio + width:auto;height:auto だけに頼ると、親の高さが
@@ -12311,7 +12313,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           )}
 
           {(isPlaying || playOnly || editModeType === 'move_place') ? (
-            <div className={`flex-1 flex flex-col p-4 select-none bg-[#0e0f14] min-h-[220px] ${(isPlaying || playOnly) ? 'md:hidden' : ''}`}>
+            <div className={
+              fixedControls && (isPlaying || playOnly)
+                ? "fixed inset-x-0 bottom-0 z-[70] flex flex-col p-4 select-none bg-[#0e0f14]/95 backdrop-blur border-t border-gray-800 md:hidden pointer-events-auto"
+                : `flex-1 flex flex-col p-4 select-none bg-[#0e0f14] min-h-[220px] ${(isPlaying || playOnly) ? 'md:hidden' : ''}`
+            }>
               <div className="flex justify-between items-center px-1 mb-2 text-[9px] text-gray-500 font-pixel font-bold leading-none">
                 <span>SYSTEM: {gameData.engine.toUpperCase()} ENGINE</span>
                 <span>{playOnly || isPlaying ? "MODE: PLAY" : `MODE: EDIT (${editSpeedMult}x)`}</span>
