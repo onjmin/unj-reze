@@ -12,7 +12,7 @@ import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, H
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
 import { tldrSfxUrl, TLDR_UNDERTALE_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
 import {
-  detectStandard, standardById, animatedCell, animatedCellInRect, dirFromDelta,
+  detectStandard, standardById, animatedCell, animatedCellInRect, dirFromDelta, resolveSpriteRect,
   type WayKey, type WalkStandard,
 } from '@/lib/walk-sprite';
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
@@ -980,41 +980,9 @@ const SpriteThumbnail = ({
       sh = csh;
       sx = csx;
       sy = csy;
-    } else if (walk?.crop) {
-      // 連結シートから規格（RPGEN/ツクール等）でキャラ1体分を切り出した参照。
-      // crop矩形の中でその規格の格子計算を行い、待機ポーズ（中央フレーム正面）を出す。
-      let std = walk.stdId === 'auto' ? detectStandard(walk.crop[2], walk.crop[3]) : standardById(walk.stdId);
-      if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
-      const rect = animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0 });
-      sx = rect.sx; sy = rect.sy; sw = rect.sw; sh = rect.sh;
     } else {
-      const hashIdx = resolvedUrl!.indexOf('#');
-      if (hashIdx !== -1) {
-        const frag = resolvedUrl!.slice(hashIdx + 1);
-        const parts = frag.split(',').map(n => parseInt(n, 10));
-        if (parts.length >= 4 && parts.every(n => !isNaN(n))) {
-          sx = parts[0];
-          sy = parts[1];
-          sw = parts[2];
-          sh = parts[3];
-          if (parts.length >= 5 && parts[4] > 1) {
-            sw = sw / parts[4];
-          }
-        }
-      } else {
-        const std = walk?.stdId === 'auto'
-          ? detectStandard(imgW, imgH)
-          : standardById(walk?.stdId ?? 'auto');
-        const cols = std.frames;
-        const rows = std.ways.length;
-        sw = imgW / cols;
-        sh = imgH / rows;
-        // VX/MV standard first frame might be down-facing, column 1
-        const idleCol = std.frames === 3 ? 1 : 0;
-        sx = idleCol * sw;
-        const frontIdx = std.ways.findIndex(w => w.key === 's');
-        sy = (frontIdx >= 0 ? frontIdx : 0) * sh;
-      }
+      const rect = resolveSpriteRect(walk, imgW, imgH, resolvedUrl);
+      sx = rect.sx; sy = rect.sy; sw = rect.sw; sh = rect.sh;
     }
 
     ctx.clearRect(0, 0, size, size);

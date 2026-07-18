@@ -7,7 +7,7 @@ import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import { youtubeRefFromUrl, toYoutubeWatchUrl, parseWalkRef } from '@/lib/asset-ref';
-import { loadImage, animatedCellInRect, detectStandard, standardById } from '@/lib/walk-sprite';
+import { loadImage, resolveSpriteRect } from '@/lib/walk-sprite';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
@@ -52,11 +52,9 @@ const scrollPositions = new Map<string, number>();
 function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?: string; size?: number }) {
   const cvRef = useRef<HTMLCanvasElement>(null);
   const walkRef = useRef(parseWalkRef(refStr));
-  // ref が変わったときだけ再解析
   const prevRefStr = useRef(refStr);
   if (prevRefStr.current !== refStr) { prevRefStr.current = refStr; walkRef.current = parseWalkRef(refStr); }
   const walk = walkRef.current;
-  // walk: のとき url は source 内に格納されている場合がある
   const imgUrl = url ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
 
   useEffect(() => {
@@ -65,28 +63,11 @@ function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?:
     const ctx = cv.getContext('2d');
     if (!ctx) return;
 
-    // walk: 参照 → 正面フレームをクロップ
     if (walk && walk.source.kind === 'url') {
       let cancelled = false;
       loadImage(imgUrl).then(img => {
         if (cancelled || !ctx) return;
-        const imgW = img.naturalWidth, imgH = img.naturalHeight;
-        let sx = 0, sy = 0, sw = imgW, sh = imgH;
-        if (walk.crop) {
-          let std = walk.stdId === 'auto' ? detectStandard(walk.crop[2], walk.crop[3]) : standardById(walk.stdId);
-          if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
-          const rect = animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0 });
-          sx = rect.sx; sy = rect.sy; sw = rect.sw; sh = rect.sh;
-        } else {
-          const std = walk.stdId === 'auto' ? detectStandard(imgW, imgH) : standardById(walk.stdId);
-          const cols = std.frames;
-          const rows = std.ways.length;
-          sw = imgW / cols; sh = imgH / rows;
-          const idleCol = std.frames === 3 ? 1 : 0;
-          sx = idleCol * sw;
-          const frontIdx = std.ways.findIndex(w => w.key === 's');
-          sy = (frontIdx >= 0 ? frontIdx : 0) * sh;
-        }
+        const { sx, sy, sw, sh } = resolveSpriteRect(walk, img.naturalWidth, img.naturalHeight, imgUrl);
         ctx.clearRect(0, 0, size, size);
         const zoom = Math.min(size / sw, size / sh);
         ctx.imageSmoothingEnabled = false;
@@ -95,7 +76,7 @@ function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?:
       return () => { cancelled = true; };
     }
 
-    // url:...#sx,sy,sw,sh → フラグメントでクロップ
+    // url:#fragment → フラグメントでクロップ（walk なし）
     if (!walk) {
       const hashIdx = imgUrl.indexOf('#');
       if (hashIdx !== -1) {
@@ -106,10 +87,11 @@ function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?:
           let cancelled = false;
           loadImage(baseUrl).then(img => {
             if (cancelled || !ctx) return;
+            const rect = resolveSpriteRect(null, img.naturalWidth, img.naturalHeight, imgUrl);
             ctx.clearRect(0, 0, size, size);
             const zoom = Math.min(size / fsw, size / fsh);
             ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(img, fsx, fsy, fsw, fsh, (size - fsw * zoom) / 2, (size - fsh * zoom) / 2, fsw * zoom, fsh * zoom);
+            ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, (size - rect.sw * zoom) / 2, (size - rect.sh * zoom) / 2, rect.sw * zoom, rect.sh * zoom);
           });
           return () => { cancelled = true; };
         }
@@ -117,7 +99,6 @@ function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?:
     }
   }, [imgUrl, walk?.crop?.[0], walk?.crop?.[1], walk?.crop?.[2], walk?.crop?.[3], walk?.stdId, walk?.frames, size]);
 
-  // walk: 参照でも url:#fragment でもない場合、または画像未読込の場合は <img> フォールバック
   if (!walk && !(url && url.includes('#'))) {
     return url
       ? <img src={url} alt="" className="w-full h-full object-cover" />

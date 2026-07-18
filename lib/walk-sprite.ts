@@ -240,3 +240,44 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
 export function peekImage(url: string): HTMLImageElement | undefined {
   return imgCache.get(url);
 }
+
+/**
+ * spriteRef / spriteUrl / walk:/url#fragment から、サムネイル描画に使うソース矩形を求める。
+ * 画像の実寸(imgW,imgH)と resolvedUrl（URL フラグメント込み）を受け取り、{ sx, sy, sw, sh } を返す。
+ * walk: 参照がある場合は正面(idle)フレーム、url:#fragment は指定矩形、それ以外は画像全体。
+ */
+export function resolveSpriteRect(
+  walk: { stdId: string; crop?: [number, number, number, number]; frames?: number; source: { kind: string } } | null,
+  imgW: number, imgH: number,
+  resolvedUrl: string | undefined,
+): SpriteRect {
+  // walk: + crop → 連結シートから規格でキャラ1体分を切り出した参照
+  if (walk?.crop && walk.source.kind !== 'smc_json') {
+    let std = walk.stdId === 'auto' ? detectStandard(walk.crop[2], walk.crop[3]) : standardById(walk.stdId);
+    if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
+    return animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0 });
+  }
+  // walk: + no crop → 1枚のシートを規格グリッドで分割
+  if (walk) {
+    const std = walk.stdId === 'auto' ? detectStandard(imgW, imgH) : standardById(walk.stdId);
+    const sw = imgW / std.frames;
+    const sh = imgH / std.ways.length;
+    const idleCol = std.frames === 3 ? 1 : 0;
+    const frontIdx = std.ways.findIndex(w => w.key === 's');
+    return { sx: idleCol * sw, sy: (frontIdx >= 0 ? frontIdx : 0) * sh, sw, sh };
+  }
+  // url:#sx,sy,sw,sh → フラグメントでクロップ
+  if (resolvedUrl) {
+    const hashIdx = resolvedUrl.indexOf('#');
+    if (hashIdx !== -1) {
+      const parts = resolvedUrl.slice(hashIdx + 1).split(',').map(Number);
+      if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
+        let sw = parts[2], sh = parts[3];
+        if (parts.length >= 5 && parts[4] > 1) sw = sw / parts[4];
+        return { sx: parts[0], sy: parts[1], sw, sh };
+      }
+    }
+  }
+  // フォールバック: 画像全体
+  return { sx: 0, sy: 0, sw: imgW, sh: imgH };
+}
