@@ -386,6 +386,10 @@ export interface BillboardInstance {
   mcPhase?: number;
   /** マイクラ/3Dモデル停止時の最後の向き。移動中に記録し、停止中にこの値を維持する。 */
   lastYaw?: number;
+  /** ランダムジャンプ等の垂直速度。0＝地上。 */
+  vy?: number;
+  /** ランダムジャンプの次のジャンプ待機タイマ（秒）。 */
+  hopTimer?: number;
 }
 
 export class Yume25DEngine {
@@ -657,6 +661,8 @@ export class Yume25DEngine {
         ab.dirLastKey = undefined;
       }
       ab.lastYaw = undefined;
+      ab.vy = 0;
+      ab.hopTimer = 0;
 
       const s = ab.data.scale ?? 1;
       const is3DModel = this.isModel3D(ab.data.tex);
@@ -2157,6 +2163,27 @@ export class Yume25DEngine {
             ab.aiTimer = 0.6 + Math.random() * 1.6;
           }
         }
+      } else if (behavior === 'randomHop') {
+        // ランダムジャンプ：少し歩いてから方向転換し、頻繁にジャンプする
+        ab.aiTimer -= dt;
+        if (ab.aiTimer <= 0) {
+          if (ab.vx === 0 && ab.vz === 0) {
+            const theta = Math.random() * Math.PI * 2;
+            ab.vx = Math.cos(theta) * speed * AI_DASH_MULT;
+            ab.vz = Math.sin(theta) * speed * AI_DASH_MULT;
+            ab.aiTimer = 3.0 + Math.random() * 3.0;
+          } else {
+            ab.vx = 0;
+            ab.vz = 0;
+            ab.aiTimer = 0.5 + Math.random() * 0.5;
+          }
+        }
+        // ジャンプ周期：歩いている間もジャンプし続ける
+        ab.hopTimer = (ab.hopTimer ?? 0) - dt;
+        if (ab.hopTimer <= 0 && (ab.vy ?? 0) === 0) {
+          ab.vy = 3.4;
+          ab.hopTimer = 0.35 + Math.random() * 0.4;
+        }
       } else if (behavior === 'chase') {
         const dx = this.x - ab.x;
         const dz = this.z - ab.z;
@@ -2200,7 +2227,7 @@ export class Yume25DEngine {
         ab.vx = -ab.vx;
       } else if (behavior === 'patrolV' && Math.abs(ab.z - prevZ) < 1e-4) {
         ab.vz = -ab.vz;
-      } else if (behavior === 'walker' && Math.hypot(ab.x - prevX, ab.z - prevZ) < 1e-4 * speed) {
+      } else if ((behavior === 'walker' || behavior === 'randomHop') && Math.hypot(ab.x - prevX, ab.z - prevZ) < 1e-4 * speed) {
         const theta = Math.random() * Math.PI * 2;
         ab.vx = Math.cos(theta) * speed;
         ab.vz = Math.sin(theta) * speed;
@@ -2210,6 +2237,19 @@ export class Yume25DEngine {
         ab.vx = 0;
         ab.vz = 0;
         ab.aiTimer = 0.4 + Math.random() * 0.8;
+      }
+
+      // ランダムジャンプの垂直物理：重力で落下、地上に戻ったら停止
+      const vy = ab.vy ?? 0;
+      if (vy !== 0) {
+        const nv = vy - GRAVITY * dt;
+        ab.vy = nv;
+        ab.y += nv * dt;
+        const groundY = (ab.data.level ?? 0) * this.layout.wallHeight;
+        if (ab.y <= groundY) {
+          ab.y = groundY;
+          ab.vy = 0;
+        }
       }
 
       // 移動速度に応じたアニメ：ダッシュ級なら走り、通常は歩き（速度でテンポも変える）、停止中は直立

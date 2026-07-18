@@ -13,7 +13,7 @@ export const VIEW_H = VIEW_ROWS * TILE_SIZE;  // 352 px
 
 export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'undertale' | 'deltarune' | 'yume';
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze' | 'yume25d';
-export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker' | 'randomDash';
+export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker' | 'randomDash' | 'randomHop';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
 export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn' | 'coin' | 'save';
 export type ObjectKind = 'npc' | 'tile' | 'bullet';

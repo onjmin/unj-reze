@@ -373,6 +373,7 @@ export default function Yume25DEditorPanel({
                 <option value="still">静止 (Still)</option>
                 <option value="random">ランダム移動 (Random)</option>
                 <option value="randomDash">ランダムダッシュ (Random Dash)</option>
+                <option value="randomHop">ランダムジャンプ (Random Hop)</option>
                 <option value="chase">追いかける (Chase Player)</option>
                 <option value="flee">逃げる (Flee Player)</option>
                 <option value="patrolH">左右巡回 (Patrol H)</option>
