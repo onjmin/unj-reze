@@ -1122,6 +1122,9 @@ export class Yume25DEngine {
     this.blockTops.clear();
     this.buildGen++;
     const speakerCells = new Map<number, [number, number][]>();  // texId -> スピーカー位置
+    // 地形マクロ等でブロックは数千個になり得るため、ジオメトリ1個＋テクスチャ毎のマテリアルを共有する
+    let blockGeoShared: THREE.BoxGeometry | null = null;
+    const blockMatShared = new Map<number, THREE.MeshLambertMaterial>();
     for (const b of L.billboards) {
       const def = L.textures[b.tex];
 
@@ -1208,11 +1211,17 @@ export class Yume25DEngine {
       // 立方体ブロック：一辺1マスの箱。上に乗れる足場になる（段=BLOCK_SIZE単位で積める）
       if (def?.special === 'block') {
         const base = (b.level ?? 0) * BLOCK_SIZE;
-        const geo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-        const mat = new THREE.MeshLambertMaterial({ map: this.getTex(b.tex) });
-        this.ownedGeometries.push(geo);
-        this.ownedMaterials.push(mat);
-        const mesh = new THREE.Mesh(geo, mat);
+        if (!blockGeoShared) {
+          blockGeoShared = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+          this.ownedGeometries.push(blockGeoShared);
+        }
+        let mat = blockMatShared.get(b.tex);
+        if (!mat) {
+          mat = new THREE.MeshLambertMaterial({ map: this.getTex(b.tex) });
+          blockMatShared.set(b.tex, mat);
+          this.ownedMaterials.push(mat);
+        }
+        const mesh = new THREE.Mesh(blockGeoShared, mat);
         mesh.position.set(b.col + 0.5, base + BLOCK_SIZE / 2, b.row + 0.5);
         mesh.userData.bbLevel = b.level ?? 0;
         this.scene.add(mesh);

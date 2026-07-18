@@ -53,7 +53,7 @@ const createPerlin2D = (seed: number) => {
 };
 
 /** fBm：周波数を倍々・振幅を半々にしたノイズを重ねる（マイクラのオクターブ合成）。0〜1 に正規化して返す。 */
-const createFbm01 = (seed: number, octaves = 4) => {
+export const createFbm01 = (seed: number, octaves = 4) => {
   const noise = createPerlin2D(seed);
   return (x: number, y: number): number => {
     let sum = 0, amp = 1, freq = 1, norm = 0;
@@ -73,6 +73,107 @@ export const createTerrainSampler = (seed: number) => ({
   moist01: createFbm01((seed ^ 0x9e3779b9) >>> 0),
 });
 
+// ── 3Dパーリンノイズ（洞窟くり抜き用） ─────────────────────────────────
+/** 格子点ハッシュから12方向（立方体の辺の中点）の勾配との内積（Ken Perlin の grad3）。 */
+const grad3 = (h: number, x: number, y: number, z: number) => {
+  switch (h & 15) {
+    case 0: return x + y; case 1: return -x + y; case 2: return x - y; case 3: return -x - y;
+    case 4: return x + z; case 5: return -x + z; case 6: return x - z; case 7: return -x - z;
+    case 8: return y + z; case 9: return -y + z; case 10: return y - z; case 11: return -y - z;
+    case 12: return x + y; case 13: return -y + z; case 14: return -x + y; default: return -y - z;
+  }
+};
+
+/** 古典パーリンノイズ（3D）。戻り値はおよそ [-1, 1]（実効レンジは±0.7程度）。 */
+export const createPerlin3D = (seed: number) => {
+  const rand = seededRandom(seed);
+  const base = Array.from({ length: 256 }, (_, i) => i);
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [base[i], base[j]] = [base[j], base[i]];
+  }
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = base[i & 255];
+  return (x: number, y: number, z: number): number => {
+    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
+    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+    const u = fade(x), v = fade(y), w = fade(z);
+    const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
+    return lerp(
+      lerp(
+        lerp(grad3(p[AA], x, y, z), grad3(p[BA], x - 1, y, z), u),
+        lerp(grad3(p[AB], x, y - 1, z), grad3(p[BB], x - 1, y - 1, z), u), v),
+      lerp(
+        lerp(grad3(p[AA + 1], x, y, z - 1), grad3(p[BA + 1], x - 1, y, z - 1), u),
+        lerp(grad3(p[AB + 1], x, y - 1, z - 1), grad3(p[BB + 1], x - 1, y - 1, z - 1), u), v),
+      w);
+  };
+};
+
+/** マイクラ式スパゲッティ洞窟：2本の3Dノイズがどちらも0付近になる場所＝チューブ状のトンネル。
+ *  戻り値 true のマスをくり抜く。座標は呼び出し側で周波数を掛けて渡す。 */
+export const createCaveSampler = (seed: number) => {
+  const n1 = createPerlin3D((seed ^ 0x51ab3c7d) >>> 0);
+  const n2 = createPerlin3D((seed ^ 0x9e3779b9) >>> 0);
+  return (x: number, y: number, z: number): boolean =>
+    Math.abs(n1(x, y, z)) < 0.12 && Math.abs(n2(x, y, z)) < 0.12;
+};
+
+// ── 標高の生成手法（yume25d の地形タイプ） ─────────────────────────────
+/** 地形タイプ。hills=fBm丘陵（標準）/ island=島（放射フォールオフ）/ ridged=山岳（尾根が尖る
+ *  リッジドマルチフラクタル）/ terrace=段々台地（テラス量子化）/ warp=ゆがみ（ドメインワープ）。 */
+export type TerrainStyle = 'hills' | 'island' | 'ridged' | 'terrace' | 'warp';
+export const TERRAIN_STYLE_LABELS: Record<TerrainStyle, string> = {
+  hills: '丘陵（標準）', island: '島', ridged: '山岳（尾根）', terrace: '段々台地', warp: 'ゆがみ（夢風）',
+};
+
+/** リッジドマルチフラクタル：1-|noise| で谷を尾根に折り返すと山脈らしい鋭い稜線になる。0〜1。 */
+export const createRidged01 = (seed: number, octaves = 4) => {
+  const noise = createPerlin2D(seed);
+  return (x: number, y: number): number => {
+    let sum = 0, amp = 1, freq = 1, norm = 0;
+    for (let o = 0; o < octaves; o++) {
+      const n = Math.max(0, 1 - Math.abs(noise(x * freq, y * freq)) / 0.7);
+      sum += amp * n * n;
+      norm += amp; amp *= 0.5; freq *= 2;
+    }
+    return Math.min(1, sum / norm);
+  };
+};
+
+/** テラス化：標高を steps 段に量子化しつつ、段差の肩だけ smoothstep で斜面にする（棚田/メサ地形）。 */
+const terrace = (e: number, steps: number): number => {
+  const t = e * steps, i = Math.floor(t), f = t - i;
+  const s = f < 0.6 ? 0 : (f - 0.6) / 0.4;
+  return (i + s * s * (3 - 2 * s)) / steps;
+};
+
+/** 地形タイプ別の標高サンプラー。(x, y)=ノイズ座標、(u, v)=マップ内の正規化位置（0〜1、島の
+ *  フォールオフ用）。戻り値 0〜1。 */
+export const createStyledElevation = (seed: number, style: TerrainStyle) => {
+  const base = createFbm01(seed, style === 'terrace' ? 2 : 4);
+  const ridged = style === 'ridged' ? createRidged01(seed) : null;
+  const warpX = style === 'warp' ? createFbm01((seed ^ 0x00abcdef) >>> 0, 3) : null;
+  const warpY = style === 'warp' ? createFbm01((seed ^ 0x00123457) >>> 0, 3) : null;
+  return (x: number, y: number, u: number, v: number): number => {
+    if (ridged) return ridged(x, y) ** 1.4;
+    if (warpX && warpY) {
+      // ドメインワープ：座標自体を別ノイズで歪ませてから標高を引く（うねる夢地形）
+      const dx = (warpX(x, y) * 2 - 1) * 1.6, dy = (warpY(x, y) * 2 - 1) * 1.6;
+      return base(x + dx, y + dy);
+    }
+    let e = base(x, y);
+    if (style === 'terrace') e = terrace(e, 5);
+    else if (style === 'island') {
+      // 中心からの距離で標高を減衰させ、周囲が必ず海になる島を作る
+      const d = Math.hypot(u - 0.5, v - 0.5) * 2;
+      e = Math.min(1, (e * 0.85 + 0.3) * Math.max(0, 1 - d * d * 1.4));
+    }
+    return e;
+  };
+};
+
 /** ノイズの1単位＝何マスか（地形の起伏の大きさ）。 */
 export const TERRAIN_SCALE = 8;
 
@@ -89,6 +190,7 @@ export const TERRAIN_CHIPS = {
   grass: chip('草原', '#8fd14f', 7, 0, true),
   forest: chip('森', '#3e9b3e', 15, 2, true),
   mountain: chip('山', '#8d8d8d', 6, 8, false),
+  snow: chip('雪', '#eef4f0', 13, 9, true),
   // 横視点（action）用の地中ブロック。ぜんぶ足場（通行不可＝壁）として使う
   grassBlock: chip('草ブロック', '#8fd14f', 7, 0, false),
   dirt: chip('土', '#b5652d', 5, 12, false),

@@ -13,8 +13,8 @@ import {
 } from './game-presets/shared';
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
-import { billboardGroups, canShiftGroup, shiftBillboardGroup, generateYumeTerrain } from '@/lib/yume25d-macros';
-import type { TerrainWater } from '@/lib/terrain-gen';
+import { billboardGroups, canShiftGroup, shiftBillboardGroup, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
+import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
 
 /** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
 function SpriteThumb({ t }: { t: Tex25D }) {
@@ -98,10 +98,20 @@ export default function Yume25DEditorPanel({
   const macroSel = macroGroups.some(g => g.tex === macroTex) ? macroTex : (macroGroups[0]?.tex ?? 0);
   const runShiftMacro = (dc: number, dr: number, dlv = 0) =>
     onLayoutChange(l => shiftBillboardGroup(l, macroSel, dc, dr, dlv));
-  // 地形自動生成マクロ：押すたびにランダムシードで生成し直す
-  const [terrainWater, setTerrainWater] = useState<TerrainWater>('mid');
+  // 地形自動生成マクロ：XYZ（列・行・最大高さ）の数値指定＋地形タイプ・水の量・洞窟。
+  // 押すたびにランダムシードで生成し直す。XY が現在のマップサイズと違えば自動で拡張/縮小される。
+  const [terrainCols, setTerrainCols] = useState(layout.cols);
+  const [terrainRows, setTerrainRows] = useState(layout.rows);
+  const [terrainHeight, setTerrainHeight] = useState(4);
+  const [terrainWater, setTerrainWater] = useState<YumeTerrainOptions['water']>('mid');
+  const [terrainStyle, setTerrainStyle] = useState<TerrainStyle>('hills');
+  const [terrainCaves, setTerrainCaves] = useState(true);
   const runTerrainMacro = () =>
-    onLayoutChange(l => generateYumeTerrain(l, (Math.random() * 0xffffffff) >>> 0, terrainWater));
+    onLayoutChange(l => generateYumeTerrain(l, {
+      seed: (Math.random() * 0xffffffff) >>> 0,
+      cols: terrainCols, rows: terrainRows, maxHeight: terrainHeight,
+      water: terrainWater, style: terrainStyle, caves: terrainCaves,
+    }));
 
   /** 検索モーダルで選んだ3Dモデルをスプライトテクスチャとして追加し、
    *  スプライトツール＋パレット選択まで済ませる。 */
@@ -175,23 +185,53 @@ export default function Yume25DEditorPanel({
         <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
           <p className="text-[12px] font-bold text-gray-200">🔁 マクロ（一括編集）</p>
 
-          {/* 地形自動生成：パーリンノイズで床＋草ブロックの丘＋木を丸ごと作る */}
+          {/* 地形自動生成：パーリンノイズの高さマップでブロック地形（海底〜山・洞窟）を丸ごと作る */}
           <p className="font-bold text-gray-400">🌍 地形の自動生成</p>
           <div className="flex items-center gap-2 flex-wrap">
-            <label className="flex items-center gap-1.5">水の量
-              <select value={terrainWater} onChange={e => setTerrainWater(e.target.value as TerrainWater)}
+            <label className="flex items-center gap-1" title="マップの列数（自動でリサイズ）">X(列)
+              <input type="number" min={4} max={48} value={terrainCols}
+                onChange={e => setTerrainCols(Math.max(4, Math.min(48, Number(e.target.value) || 4)))}
+                className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+            </label>
+            <label className="flex items-center gap-1" title="マップの行数（自動でリサイズ）">Y(行)
+              <input type="number" min={4} max={48} value={terrainRows}
+                onChange={e => setTerrainRows(Math.max(4, Math.min(48, Number(e.target.value) || 4)))}
+                className="w-14 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+            </label>
+            <label className="flex items-center gap-1" title="地形の最大の高さ（ブロック段数）">Z(高さ)
+              <input type="number" min={1} max={8} value={terrainHeight}
+                onChange={e => setTerrainHeight(Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
+                className="w-12 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-white" />
+            </label>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="flex items-center gap-1.5">地形タイプ
+              <select value={terrainStyle} onChange={e => setTerrainStyle(e.target.value as TerrainStyle)}
                 className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                {(Object.keys(TERRAIN_STYLE_LABELS) as TerrainStyle[]).map(s => (
+                  <option key={s} value={s}>{TERRAIN_STYLE_LABELS[s]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5">水の量
+              <select value={terrainWater} onChange={e => setTerrainWater(e.target.value as YumeTerrainOptions['water'])}
+                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                <option value="none">なし</option>
                 <option value="low">少なめ</option>
                 <option value="mid">ふつう</option>
                 <option value="high">多め</option>
               </select>
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={terrainCaves} onChange={e => setTerrainCaves(e.target.checked)} />
+              洞窟
             </label>
             <button onClick={runTerrainMacro}
               className="px-2.5 py-1 rounded border-2 border-gray-600 bg-blue-600 text-white text-[11px] font-bold">
               🎲 地形を生成
             </button>
           </div>
-          <p className="text-[9px] text-gray-500">マイクラと同じパーリンノイズで、床を 海・砂浜・草原 に塗り分け、丘は草ブロックを積み、森に🌲を立てます（内蔵素材を使用）。押すたびに別の地形になります。床と草ブロック/木は描き替えますが、ほかのスプライトは残ります。スタート周辺は平地になります</p>
+          <p className="text-[9px] text-gray-500">マイクラと同じパーリンノイズの高さマップで、内蔵素材のブロックを積んだ地形（海底の起伏〜砂浜〜草原〜山、雪山）を作ります。水の量を入れると海面より低い場所は泳いで潜れる海になり、洞窟ONで山の中にトンネルがくり抜かれます。押すたびに別の地形になります。床とブロック/木は描き替えますが、ほかのスプライトや壁は残ります。スタート周辺は平地になります。XYZが大きいほど生成後の動作が重くなります</p>
 
           <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">↔️ グループ平行移動</p>
           {macroGroups.length === 0 ? (
