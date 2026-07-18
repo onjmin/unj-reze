@@ -216,7 +216,7 @@ export interface Input25D {
   flyUp: boolean; flyDown: boolean;
 }
 
-export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; spriteRef?: string; }
+export interface PlayerAppearance { emoji?: string; color: string; spriteUrl?: string; spriteRef?: string; minecraftSkin?: string; }
 export type PovMode = 'first' | 'third';
 
 /** 3Dビュー編集時の配置プレビュー（ゴースト）。カーソル位置のツール適用先を半透明で示す。
@@ -443,6 +443,10 @@ export class Yume25DEngine {
   private playerMesh: THREE.Mesh;
   private playerGeo: THREE.PlaneGeometry;
   private playerMat: THREE.MeshLambertMaterial;
+  private playerMcGroup: THREE.Group | null = null;
+  private playerMcLimbs: MinecraftLimbs | null = null;
+  private playerMcPhase = 0;
+  private playerMcYaw = 0;
 
   // ── 遊べるオブジェクト ──
   /** 蹴れるボール（special==='ball' のスプライト）。home はレイアウト上の定位置で、リセットで戻る。
@@ -695,7 +699,8 @@ export class Yume25DEngine {
   setPlayerAppearance(appearance: PlayerAppearance) {
     const p = this.playerAppearance;
     if (p.emoji === appearance.emoji && p.color === appearance.color
-      && p.spriteUrl === appearance.spriteUrl && p.spriteRef === appearance.spriteRef) return;
+      && p.spriteUrl === appearance.spriteUrl && p.spriteRef === appearance.spriteRef
+      && p.minecraftSkin === appearance.minecraftSkin) return;
     this.playerAppearance = appearance;
     this.applyPlayerAppearance();
   }
@@ -705,6 +710,42 @@ export class Yume25DEngine {
   private applyPlayerAppearance() {
     const a = this.playerAppearance;
     this.playerAnim = null;
+
+    // マイクラスキン：3Dモデルをプレイヤーとして使う
+    if (a.minecraftSkin) {
+      this.playerMesh.visible = false;
+      // 既存モデルを除去
+      if (this.playerMcGroup) {
+        this.scene.remove(this.playerMcGroup);
+        this.playerMcGroup = null;
+        this.playerMcLimbs = null;
+      }
+      const gen = this.buildGen;
+      this.loadMcSkin(a.minecraftSkin).then(tex => {
+        if (this.disposed || gen !== this.buildGen || this.playerAppearance !== a || !tex) return;
+        const { group, limbs } = buildMinecraftModel(tex, 0.95);
+        group.traverse(o => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh) {
+            this.ownedGeometries.push(m.geometry);
+            this.ownedMaterials.push(m.material as THREE.Material);
+          }
+        });
+        this.scene.add(group);
+        this.playerMcGroup = group;
+        this.playerMcLimbs = limbs;
+      });
+      return;
+    }
+
+    // マイクラモデルを解除
+    if (this.playerMcGroup) {
+      this.scene.remove(this.playerMcGroup);
+      this.playerMcGroup = null;
+      this.playerMcLimbs = null;
+    }
+    if (this.playerMesh) this.playerMesh.visible = this.pov === 'third';
+
     const walk = a.spriteRef ? parseWalkRef(a.spriteRef) : null;
     const sheetUrl = isAnimatableWalk(walk)
       ? (a.spriteUrl ?? (walk.source.kind === 'url' ? walk.source.url : undefined))
@@ -996,6 +1037,7 @@ export class Yume25DEngine {
     this.disposed = true;
     this.stop();
     this.clearWorld();
+    if (this.playerMcGroup) { this.scene.remove(this.playerMcGroup); this.playerMcGroup = null; this.playerMcLimbs = null; }
     this.playerGeo.dispose();
     this.playerMat.dispose();
     this.playerTexture.dispose();
@@ -2667,8 +2709,37 @@ export class Yume25DEngine {
 
     const eyeY = this.layout.wallHeight * 0.52 + this.hop;
     // プレイヤー本体（三人称のときだけ見える）は常に最新の位置・向き・高さへ追従
-    this.playerMesh.position.set(this.x, this.hop + 0.42, this.z);
-    this.playerMesh.rotation.y = this.yaw;
+    if (this.playerMcGroup) {
+      this.playerMcGroup.position.set(this.x, this.hop, this.z);
+      this.playerMcGroup.visible = this.pov === 'third';
+      // 移動方向にモデルを向ける（カメラyawではなく入力ベクトルから算出）
+      const inp = this.input;
+      const fwd = (inp.forward ? 1 : 0) - (inp.back ? 1 : 0);
+      const str = (inp.strafeR ? 1 : 0) - (inp.strafeL ? 1 : 0);
+      if (fwd !== 0 || str !== 0) {
+        const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+        const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
+        this.playerMcYaw = Math.atan2(fx * fwd + rx * str, fz * fwd + rz * str);
+      }
+      this.playerMcGroup.rotation.y = this.playerMcYaw;
+      // 手足スイング
+      const isMoving = (fwd !== 0 || str !== 0) && this.grounded;
+      if (isMoving && this.grounded) {
+        this.playerMcPhase += (this.input.dash ? 12 : 7) * dt;
+        const a = Math.sin(this.playerMcPhase) * (this.input.dash ? 0.7 : 0.4);
+        const L = this.playerMcLimbs;
+        if (L) {
+          L.rArm.rotation.x = a; L.lArm.rotation.x = -a;
+          L.rLeg.rotation.x = -a; L.lLeg.rotation.x = a;
+        }
+      } else if (this.playerMcLimbs) {
+        const k = Math.max(0, 1 - dt * 8);
+        for (const limb of [this.playerMcLimbs.rArm, this.playerMcLimbs.lArm, this.playerMcLimbs.rLeg, this.playerMcLimbs.lLeg]) limb.rotation.x *= k;
+      }
+    } else {
+      this.playerMesh.position.set(this.x, this.hop + 0.42, this.z);
+      this.playerMesh.rotation.y = this.yaw;
+    }
 
     if (this.pov === 'third') {
       const backX = Math.sin(this.yaw), backZ = Math.cos(this.yaw);

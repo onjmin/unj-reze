@@ -21,6 +21,7 @@ import WalkSpritePreview from './WalkSpritePreview';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
 import { parseRpgen } from '@/lib/rpgen-parser';
+import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
@@ -144,7 +145,7 @@ export interface GameManifestDraft {
   /** つるつる床の強制スライド速度（px/frame）。未指定時は既定値。 */
   iceSlideSpeed?: number;
   player: {
-    emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string;
+    emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string; minecraftSkin?: string;
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number;
   };
   tiles: Record<number, {
@@ -898,7 +899,8 @@ type PickTarget =
   | { t: 'yumeTex'; id: number }
   | { t: 'yumeSky' }
   | { t: 'yumeTexSound'; id: number }
-  | { t: 'yumeMcSkin' };
+  | { t: 'yumeMcSkin' }
+  | { t: 'playerMcSkin' };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -4881,7 +4883,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       data.objects = JSON.parse(JSON.stringify(data.scenes[0].objects));
     }
     // ゲームの同一性に関わるタイトルと、エンジン非依存のプレイヤーの見た目・BGMは常に引き継ぐ
-    data.player = { ...data.player, emoji: prev.player.emoji, color: prev.player.color, spriteRef: prev.player.spriteRef, spriteUrl: prev.player.spriteUrl };
+    data.player = { ...data.player, emoji: prev.player.emoji, color: prev.player.color, spriteRef: prev.player.spriteRef, spriteUrl: prev.player.spriteUrl, minecraftSkin: prev.player.minecraftSkin };
     if (prev.bgm) data.bgm = prev.bgm;
 
     const prevIs3d = prev.engine === 'yume25d', nextIs3d = data.engine === 'yume25d';
@@ -10088,6 +10090,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         setYume25dSelSprite(id);
       }
     }
+    else if (target.t === 'playerMcSkin') {
+      setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: res.url, spriteRef: undefined, spriteUrl: undefined } }));
+    }
     else if (target.t === 'yumeTexSound') {
       const s = bgmLike();
       setGameData(p => {
@@ -10700,7 +10705,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 onLayoutChange={updater => setGameData(prev => prev.layout25d ? { ...prev, layout25d: updater(prev.layout25d) } : prev)}
                 isPlaying={isPlaying}
                 demo={introOpen}
-                playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color, spriteUrl: gameData.player.spriteUrl, spriteRef: gameData.player.spriteRef }}
+                playerAppearance={{ emoji: gameData.player.emoji, color: gameData.player.color, spriteUrl: gameData.player.spriteUrl, spriteRef: gameData.player.spriteRef, minecraftSkin: gameData.player.minecraftSkin }}
                 onPickImage={(target) => setPicker({ mode: 'image', target })}
                 virtualKeys={touchRef.current}
                 view={yume25dView}
@@ -13741,6 +13746,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       )}
                     </div>
+                    {gameData.engine === 'yume25d' && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2 space-y-1.5">
+                        <p className="text-[10px] text-gray-500">マイクラスキン：Minecraft のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作って主人公にできます。歩くと手足を振ります。</p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {MINECRAFT_SKIN_PRESETS.map(p => (
+                            <button key={p.url} onClick={() => setGameData(prev => ({ ...prev, player: { ...prev.player, minecraftSkin: p.url, spriteRef: undefined, spriteUrl: undefined } }))}
+                              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
+                              🧍 {p.name}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input value={gameData.player.minecraftSkin ?? ''} onChange={e => setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: e.target.value || undefined } }))} placeholder="スキン画像URL（64×64）"
+                            className="flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-[10px] text-white outline-none" />
+                          <button onClick={() => setPicker({ mode: 'image', target: { t: 'playerMcSkin' } })}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300 text-[10px]">
+                            <ImageIcon size={12} /> 参照
+                          </button>
+                        </div>
+                        {gameData.player.minecraftSkin && (
+                          <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: undefined } }))}
+                            className="text-[10px] text-gray-400 hover:text-red-400">マイクラスキンを解除</button>
+                        )}
+                      </div>
+                    )}
                     <label className="flex items-center justify-between text-[11px] text-gray-400">
                       <span>移動速度</span>
                       <input type="text" inputMode="decimal" key={`spd-${presetId}`} defaultValue={gameData.player.speed}

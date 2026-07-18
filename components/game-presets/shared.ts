@@ -137,7 +137,7 @@ export interface TileDef {
 }
 export interface PlayerDef {
   emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number;
-  start: { x: number; y: number }; spriteRef?: string; spriteUrl?: string;
+  start: { x: number; y: number }; spriteRef?: string; spriteUrl?: string; minecraftSkin?: string;
   /** onjReze: 初期ハート数（1ハート=2HP）。デフォルト 3 */
   hearts?: number;
   /** touhou: 初期ボム数（デフォルト 3） */
