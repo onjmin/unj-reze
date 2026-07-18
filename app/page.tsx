@@ -42,15 +42,7 @@ export default function App() {
   const [replyTargetPost, setReplyTargetPost] = useState<Post | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [userId, setUserId] = useState('');
-  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(() => {
-    if (typeof localStorage === 'undefined') return null;
-    try {
-      const cached = localStorage.getItem('unj_current_user');
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [server, setServer] = useState('/main');
   const [bbsMode, setBbsModeRaw] = useState('SNSモード');
 
@@ -62,6 +54,11 @@ export default function App() {
   useEffect(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
     if (saved) setBbsModeRaw(saved);
+
+    try {
+      const cached = localStorage.getItem('unj_current_user');
+      if (cached) setCurrentUser(JSON.parse(cached));
+    } catch {}
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -799,6 +796,7 @@ export default function App() {
                       inline
                       userId={userId}
                       avatarUrl={currentUser?.avatarUrl}
+                      bbsMode={bbsMode}
                       text={inputText}
                       setText={setInputText}
                       image={attachedImage}
@@ -918,6 +916,7 @@ export default function App() {
           <PostComposer
             userId={userId}
             avatarUrl={currentUser?.avatarUrl}
+            bbsMode={bbsMode}
             text={inputText}
             setText={setInputText}
             image={attachedImage}

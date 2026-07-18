@@ -30,6 +30,7 @@ interface PostComposerProps {
   onOpenGameMaker: () => void;
   replyToDisplayName?: string;
   inline?: boolean;
+  bbsMode?: string;
 }
 
 function ToolbarButton({ onClick, title, hoverColor, children }: {
@@ -49,7 +50,7 @@ function ToolbarButton({ onClick, title, hoverColor, children }: {
   );
 }
 
-export default function PostComposer({ userId, avatarUrl, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, replyToDisplayName, inline }: PostComposerProps) {
+export default function PostComposer({ userId, avatarUrl, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, replyToDisplayName, inline, bbsMode }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showOriginModal, setShowOriginModal] = useState(false);
@@ -231,7 +232,8 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
     </button>
   );
 
-  const avatar = (
+  const isBbs = bbsMode === '掲示板モード';
+  const avatar = isBbs ? null : (
     <div
       className={`rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center font-bold text-white relative overflow-hidden ${md ? 'w-9 h-9 md:w-12 md:h-12 text-xs md:text-sm' : 'w-9 h-9 text-xs'}`}
       style={avatarUrl ? undefined : avatarInfo.style}
@@ -270,7 +272,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
 
   const composerBody = (
     <>
-      <div className={`flex items-start ${md ? 'space-x-3 md:space-x-4' : 'space-x-3'}`}>
+      <div className={`flex items-start ${avatar ? (md ? 'space-x-3 md:space-x-4' : 'space-x-3') : ''}`}>
         {avatar}
         <div className="flex-1">
           {textarea}
@@ -281,7 +283,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
         </div>
       </div>
       {originRow}
-      <div className={`flex justify-between items-center ${md ? 'pl-12 md:pl-16' : 'pl-12'}`}>
+      <div className={`flex justify-between items-center ${avatar ? (md ? 'pl-12 md:pl-16' : 'pl-12') : ''}`}>
         {toolbar}
         {submitButton}
       </div>

@@ -268,6 +268,7 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
         <PostComposer
           inline
           userId={userId}
+          bbsMode="掲示板モード"
           text={replyText}
           setText={setReplyText}
           image={replyImage}
