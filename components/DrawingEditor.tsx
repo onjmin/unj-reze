@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
-  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History, FlipHorizontal
+  Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History, FlipHorizontal,
+  BoxSelect, Copy
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -20,7 +21,7 @@ interface DrawingEditorProps {
   collabImageUrl?: string;
 }
 
-type Tool = 'pen' | 'brush' | 'eraser' | 'dropper' | 'fill';
+type Tool = 'pen' | 'brush' | 'eraser' | 'dropper' | 'fill' | 'select';
 
 const PRESET_COLORS = [
   '#000000', '#ffffff', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6',
@@ -64,6 +65,10 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [zoom, setZoom] = useState(1);
   const [flipped, setFlipped] = useState(false);
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  const internalClipboardRef = useRef<HTMLCanvasElement | null>(null);
+  const selectDragModeRef = useRef<'new' | 'move' | 'resize' | null>(null);
+  const selectStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const selectAnchorRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // History & Autosave States
   const [showHistory, setShowHistory] = useState(false);
@@ -130,6 +135,33 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     ctx.drawImage(temp, 0, 0);
     ctx.globalAlpha = 1;
   };
+
+  const SELECTION_HANDLE_SIZE = 8;
+  const SELECTION_HANDLE_HIT = 10;
+  const drawSelectionHandle = () => {
+    const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+    const sel = active?.selection;
+    const ctx = oekaki.upperLayer.value?.ctx;
+    if (!sel || !ctx) return;
+    const hx = sel.x + sel.w;
+    const hy = sel.y + sel.h;
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+    ctx.fillRect(hx - SELECTION_HANDLE_SIZE / 2, hy - SELECTION_HANDLE_SIZE / 2, SELECTION_HANDLE_SIZE, SELECTION_HANDLE_SIZE);
+    ctx.strokeRect(hx - SELECTION_HANDLE_SIZE / 2, hy - SELECTION_HANDLE_SIZE / 2, SELECTION_HANDLE_SIZE, SELECTION_HANDLE_SIZE);
+    ctx.restore();
+  };
+
+  const isNearSelectionHandle = (sel: { x: number; y: number; w: number; h: number }, x: number, y: number) => {
+    const hx = sel.x + sel.w;
+    const hy = sel.y + sel.h;
+    return Math.abs(x - hx) <= SELECTION_HANDLE_HIT && Math.abs(y - hy) <= SELECTION_HANDLE_HIT;
+  };
+
+  const isInsideSelection = (sel: { x: number; y: number; w: number; h: number }, x: number, y: number) =>
+    x >= sel.x && x <= sel.x + sel.w && y >= sel.y && y <= sel.y + sel.h;
 
   // Check autosave on mount
   useEffect(() => {
@@ -321,6 +353,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
     let px: number | null = null;
     let py: number | null = null;
+    let selectDragMode: 'new' | 'move' | 'resize' | null = null;
+    let selectStartX = 0;
+    let selectStartY = 0;
+    let selectAnchorX = 0;
+    let selectAnchorY = 0;
 
     oekaki.onDraw((x, y, buttons) => {
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
@@ -336,6 +373,33 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           }
         }
         px = null; py = null;
+        return;
+      }
+
+      if (toolRef.current === 'select') {
+        const sel = active.selection;
+        if (selectDragMode === null) {
+          if (sel && isNearSelectionHandle(sel, x, y)) {
+            selectDragMode = 'resize';
+            selectAnchorX = sel.x;
+            selectAnchorY = sel.y;
+          } else if (sel && isInsideSelection(sel, x, y)) {
+            selectDragMode = 'move';
+          } else {
+            selectDragMode = 'new';
+            selectStartX = x;
+            selectStartY = y;
+          }
+        }
+        if (selectDragMode === 'move') {
+          active.moveSelection(x - px!, y - py!);
+        } else if (selectDragMode === 'resize') {
+          active.resizeSelection(x - selectAnchorX, y - selectAnchorY);
+        } else {
+          active.select(selectStartX, selectStartY, x - selectStartX, y - selectStartY);
+        }
+        drawSelectionHandle();
+        px = x; py = y;
         return;
       }
 
@@ -359,6 +423,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       px = null; py = null;
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (active?.modified()) active.trace();
+
+      if (toolRef.current === 'select' && selectDragMode !== null) {
+        selectDragMode = null;
+        forceRender(n => n + 1);
+      }
 
       if (toolRef.current === 'fill') {
         const rgb = colorRef.current.slice(1).match(/.{2}/g)?.map(v => parseInt(v, 16));
@@ -433,6 +502,31 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       el.removeEventListener('auxclick', onClick, { capture: true });
     };
   }, [zoom]);
+
+  useEffect(() => {
+    const upperCanvas = oekaki.upperLayer.value?.canvas;
+    if (!upperCanvas) return;
+    const onPointerMove = (e: PointerEvent) => {
+      if (toolRef.current !== 'select' || selectDragModeRef.current !== null || e.buttons !== 0) return;
+      const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+      const sel = active?.selection;
+      if (!sel) {
+        upperCanvas.style.cursor = 'crosshair';
+        return;
+      }
+      const [x, y] = oekaki.getXY(e);
+      if (isNearSelectionHandle(sel, x, y)) {
+        upperCanvas.style.cursor = 'nwse-resize';
+      } else if (isInsideSelection(sel, x, y)) {
+        upperCanvas.style.cursor = 'move';
+      } else {
+        upperCanvas.style.cursor = 'crosshair';
+      }
+      drawSelectionHandle();
+    };
+    upperCanvas.addEventListener('pointermove', onPointerMove);
+    return () => upperCanvas.removeEventListener('pointermove', onPointerMove);
+  }, []);
 
   useEffect(() => {
     const el = canvasAreaRef.current;
@@ -688,13 +782,53 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (e.ctrlKey) {
-        switch (e.key) {
-          case 'z': e.preventDefault(); handleUndo(); break;
-          case 'Z': e.preventDefault(); handleRedo(); break;
+        switch (e.key.toLowerCase()) {
+          case 'z': if (e.shiftKey) { e.preventDefault(); handleRedo(); } else { e.preventDefault(); handleUndo(); } break;
           case 's': e.preventDefault(); handleSave(); break;
+          case 'c':
+            if (active?.selection) {
+              e.preventDefault();
+              const copy = active.copySelection();
+              if (copy) internalClipboardRef.current = copy;
+            }
+            break;
+          case 'x':
+            if (active?.selection) {
+              e.preventDefault();
+              const copy = active.copySelection();
+              if (copy) internalClipboardRef.current = copy;
+              active.deleteSelection();
+              if (active.modified()) active.trace();
+              forceRender(n => n + 1);
+            }
+            break;
         }
         return;
+      }
+      if (active?.selection) {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          active.deleteSelection();
+          if (active.modified()) active.trace();
+          forceRender(n => n + 1);
+          return;
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          active.deselect();
+          forceRender(n => n + 1);
+          return;
+        } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          const step = 1;
+          const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+          const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+          active.moveSelection(dx, dy);
+          if (active.modified()) active.trace();
+          drawSelectionHandle();
+          return;
+        }
       }
       switch (e.key) {
         case '1': setTool('pen'); toolRef.current = 'pen'; break;
@@ -702,12 +836,38 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         case '3': setTool('eraser'); toolRef.current = 'eraser'; break;
         case '4': setTool('dropper'); toolRef.current = 'dropper'; break;
         case '5': setTool('fill'); toolRef.current = 'fill'; break;
+        case '6': setTool('select'); toolRef.current = 'select'; break;
         case 'g': setShowGrid(v => !v); break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   });
+
+  useEffect(() => {
+    const onPaste = async (e: ClipboardEvent) => {
+      const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+      if (!active?.editable) return;
+      const imageItem = Array.from(e.clipboardData?.items || []).find(v => v.kind === 'file' && v.type.startsWith('image/'));
+      let bitmap: ImageBitmap | HTMLCanvasElement | null = null;
+      if (imageItem) {
+        const blob = imageItem.getAsFile();
+        if (!blob) return;
+        bitmap = await createImageBitmap(blob);
+      } else if (internalClipboardRef.current) {
+        bitmap = internalClipboardRef.current;
+      } else {
+        return;
+      }
+      e.preventDefault();
+      active.paste(bitmap);
+      if (active.modified()) active.trace();
+      drawSelectionHandle();
+      forceRender(n => n + 1);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
 
   const handleImport = async (image: HTMLImageElement, _opts: { opacity: number; simple: boolean }) => {
     const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
@@ -840,6 +1000,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           {toolBtn('eraser', <Eraser size={15} />, '消しゴム (3)')}
           {toolBtn('dropper', <Pipette size={15} />, 'スポイト (4)')}
           {toolBtn('fill', <PaintBucket size={15} />, '塗りつぶし (5)')}
+          {toolBtn('select', <BoxSelect size={15} />, '範囲選択 (6)')}
           <div className="w-px h-6 bg-gray-800 mx-1" />
           <button
             onClick={() => setShowGrid(v => !v)}
@@ -896,6 +1057,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           {(tool === 'dropper' || tool === 'fill') && (
             <span className="text-[10px] text-gray-500">キャンバスをクリック</span>
           )}
+          {tool === 'select' && (
+            <div className="flex-1 flex items-center space-x-1">
+              <span className="text-[10px] text-gray-500">クリック&ドラッグで範囲選択</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center space-x-2">
@@ -930,6 +1096,38 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
                 />
               ))}
             </div>
+          </div>
+        )}
+
+        {tool === 'select' && (
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={() => {
+                const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+                if (!active?.selection) return;
+                const copy = active.copySelection();
+                if (copy) internalClipboardRef.current = copy;
+              }}
+              className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+              title="選択範囲をコピー"
+            >
+              <Copy size={11} />
+              <span>コピー</span>
+            </button>
+            <button
+              onClick={() => {
+                const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+                if (!active?.selection) return;
+                active.deleteSelection();
+                if (active.modified()) active.trace();
+                forceRender(n => n + 1);
+              }}
+              className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+              title="選択範囲を削除"
+            >
+              <Trash2 size={11} />
+              <span>削除</span>
+            </button>
           </div>
         )}
 
