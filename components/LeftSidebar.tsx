@@ -14,7 +14,7 @@ interface LeftSidebarProps {
 
 const items = [
   { id: 'home', icon: Home, label: 'ホーム' },
-  { id: 'search', icon: Search, label: 'トレンド' },
+  { id: 'search', icon: Search, label: '話題を検索' },
   { id: 'notifications', icon: Bell, label: '通知' },
   { id: 'messages', icon: Mail, label: 'メッセージ' },
   { id: 'profile', icon: User, label: 'マイページ' },
