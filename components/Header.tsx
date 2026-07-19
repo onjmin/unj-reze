@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { Menu, Hourglass } from 'lucide-react';
 import VolumeControl from './VolumeControl';
 
@@ -9,11 +8,12 @@ interface HeaderProps {
   userId: string;
   server: string;
   bbsMode: string;
+  onOpenSettings: () => void;
   onToggleBbsMode: () => void;
 }
 
 export default function Header({
-  userId, server, bbsMode, onToggleBbsMode,
+  userId, server, bbsMode, onOpenSettings, onToggleBbsMode,
 }: HeaderProps) {
   const [currentTime, setCurrentTime] = useState('00:00:00');
 
@@ -55,13 +55,13 @@ export default function Header({
             {bbsMode}
           </button>
           <VolumeControl />
-          <Link
-            href="/settings"
+          <button
+            onClick={onOpenSettings}
             className="p-1.5 hover:bg-gray-100/10 rounded-full transition-colors text-gray-500 hover:text-gray-300"
             aria-label="メニューを開く"
           >
             <Menu size={20} />
-          </Link>
+          </button>
         </div>
       </div>
       <div className="flex justify-between items-center text-[10px] mt-1.5 px-0.5">

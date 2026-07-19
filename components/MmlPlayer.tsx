@@ -36,7 +36,12 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
     getStudio().then((studio) => {
       if (disposed || !el) return;
       inst = studio.mountPlayer(el, mml, {
-        volume: applyMasterVolume(50),
+        // volume(trackVolume) はマウント時に固定される値なので常に100(無加工)を渡し、
+        // マスター音量はライブ更新可能な masterVolume 経路に一本化する。
+        // これを volume 側にだけ焼き込むと、その後 setVolume() で masterVolume を
+        // 変更しても trackVolume が古いまま残り、二重スケーリング/音量ズレが起きる。
+        volume: 100,
+        masterVolume: applyMasterVolume(50),
         onStop: () => {
           claimedRef.current = false;
           focusRef.current.releaseFocus(id);

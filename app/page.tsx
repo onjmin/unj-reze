@@ -24,6 +24,8 @@ import SearchView from '@/components/SearchView';
 import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
 import ProfileView from '@/components/ProfileView';
+import LinksView from '@/components/LinksView';
+import SettingsView from '@/components/SettingsView';
 import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
 import ToastContainer from '@/components/ToastContainer';
 import HeartBurst from '@/components/HeartBurst';
@@ -881,6 +883,7 @@ export default function App() {
               userId={userId}
               server={server}
               bbsMode={bbsMode}
+              onOpenSettings={() => handleNavigate('settings')}
               onToggleBbsMode={() => setBbsMode(bbsMode === '掲示板モード' ? 'SNSモード' : '掲示板モード')}
             />
 
@@ -1032,6 +1035,15 @@ export default function App() {
                   onProfileUpdate={handleProfileUpdate}
                   onEditImage={handleEditPostImage}
                   onEditMml={handleEditPostMml}
+                />
+              )}
+              {currentNav === 'links' && <LinksView />}
+              {currentNav === 'settings' && (
+                <SettingsView
+                  userId={userId}
+                  bbsMode={bbsMode}
+                  setBbsMode={setBbsMode}
+                  currentUser={currentUser}
                 />
               )}
             </div>

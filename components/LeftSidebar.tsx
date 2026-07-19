@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { Home, Search, Bell, Mail, User, PenSquare, Link2, Settings } from 'lucide-react';
 
 interface LeftSidebarProps {
@@ -19,6 +18,8 @@ const items = [
   { id: 'notifications', icon: Bell, label: '通知' },
   { id: 'messages', icon: Mail, label: 'メッセージ' },
   { id: 'profile', icon: User, label: 'マイページ' },
+  { id: 'links', icon: Link2, label: 'リンク' },
+  { id: 'settings', icon: Settings, label: '設定とプライバシー' },
 ];
 
 export default function LeftSidebar({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl, onPost }: LeftSidebarProps) {
@@ -63,24 +64,6 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
             </button>
           );
         })}
-
-        <Link
-          href="/links"
-          className="flex items-center gap-4 px-3 py-3 rounded-full transition-all w-fit xl:w-full text-gray-300 hover:text-white hover:bg-white/10"
-          title="リンク"
-        >
-          <Link2 size={26} strokeWidth={2} className="shrink-0" />
-          <span className="hidden xl:inline text-lg truncate">リンク</span>
-        </Link>
-
-        <Link
-          href="/settings"
-          className="flex items-center gap-4 px-3 py-3 rounded-full transition-all w-fit xl:w-full text-gray-300 hover:text-white hover:bg-white/10"
-          title="設定とプライバシー"
-        >
-          <Settings size={26} strokeWidth={2} className="shrink-0" />
-          <span className="hidden xl:inline text-lg truncate">設定とプライバシー</span>
-        </Link>
       </div>
 
       <button
