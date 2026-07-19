@@ -390,6 +390,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
             selectStartX = x;
             selectStartY = y;
           }
+          px = x; py = y;
         }
         if (selectDragMode === 'move') {
           if (showGrid) {
