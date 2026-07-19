@@ -313,14 +313,25 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const handleFollow = async () => {
     if (!currentUserId) return;
-    if (isFollow) {
-      await api.follow.unfollow(currentUserId, userId);
+    const wasFollowing = isFollow;
+    if (wasFollowing) {
       setIsFollow(false);
       setFollowers(f => Math.max(0, f - 1));
+      try {
+        await api.follow.unfollow(currentUserId, userId);
+      } catch {
+        setIsFollow(true);
+        setFollowers(f => f + 1);
+      }
     } else {
-      await api.follow.follow(currentUserId, userId);
       setIsFollow(true);
       setFollowers(f => f + 1);
+      try {
+        await api.follow.follow(currentUserId, userId);
+      } catch {
+        setIsFollow(false);
+        setFollowers(f => Math.max(0, f - 1));
+      }
     }
   };
 

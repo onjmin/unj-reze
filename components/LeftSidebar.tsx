@@ -29,8 +29,16 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
   };
   const [avatarBroken, setAvatarBroken] = useState(false);
 
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const scrollable = document.getElementById('scrollable-content');
+    if (scrollable) scrollable.scrollTop += e.deltaY;
+  };
+
   return (
-    <div className="hidden md:flex flex-col justify-between w-[68px] xl:w-64 h-dvh shrink-0 px-2 xl:px-3 py-4 border-r border-gray-800">
+    <div
+      className="hidden md:flex flex-col justify-between w-[68px] xl:w-64 h-dvh shrink-0 px-2 xl:px-3 py-4 border-r border-gray-800"
+      onWheel={handleWheel}
+    >
       <div className="flex flex-col gap-1">
         {items.map(item => {
           const isActive = current === item.id;

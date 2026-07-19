@@ -74,21 +74,20 @@ export default function UserActionMenu({
 
   const handleFollowToggle = async () => {
     if (!currentUserId || isSelf) return;
+    const wasFollowing = isFollowingTarget;
+    setIsFollowingTarget(!wasFollowing);
     try {
-      if (isFollowingTarget) {
+      if (wasFollowing) {
         await api.follow.unfollow(currentUserId, targetUserDisplayName);
-        setIsFollowingTarget(false);
-        api.follow.getCounts(targetUserDisplayName).then(c => {
-          updateCache({ followers: c.followers, following: c.following });
-        }).catch(() => {});
       } else {
         await api.follow.follow(currentUserId, targetUserDisplayName);
-        setIsFollowingTarget(true);
-        api.follow.getCounts(targetUserDisplayName).then(c => {
-          updateCache({ followers: c.followers, following: c.following });
-        }).catch(() => {});
       }
-    } catch {}
+      api.follow.getCounts(targetUserDisplayName).then(c => {
+        updateCache({ followers: c.followers, following: c.following });
+      }).catch(() => {});
+    } catch {
+      setIsFollowingTarget(wasFollowing);
+    }
   };
 
   const handleSendDm = async () => {
