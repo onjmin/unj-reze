@@ -50,19 +50,19 @@ export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedS
           onClick={() => setFeedSubMode('threads')}
           className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'threads' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
         >
-          最新スレ <span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'threads' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestThreadCount)}</span>
+          最新スレ {latestThreadCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'threads' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestThreadCount)}</span>)}
         </button>
         <button
           onClick={() => setFeedSubMode('replies')}
           className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'replies' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
         >
-          最新レス <span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'replies' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestReplyCount)}</span>
+          最新レス {latestReplyCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'replies' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestReplyCount)}</span>)}
         </button>
         <button
           onClick={() => setFeedSubMode('media')}
           className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'media' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
         >
-          メディア <span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'media' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(mediaCount)}</span>
+          メディア {mediaCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'media' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(mediaCount)}</span>)}
         </button>
       </div>
     </div>
