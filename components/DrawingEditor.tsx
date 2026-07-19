@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   X, Pen, Brush, Eraser, PaintBucket, Pipette,
   Grid3x3, Trash2, Undo, Redo, Save, Layers, Film, Upload, History, FlipHorizontal,
-  BoxSelect, Copy
+  BoxSelect, Copy, RotateCcw, RotateCw, LassoSelect
 } from 'lucide-react';
 import * as oekaki from '@onjmin/oekaki';
 import LayerPanel from './LayerPanel';
@@ -21,7 +21,7 @@ interface DrawingEditorProps {
   collabImageUrl?: string;
 }
 
-type Tool = 'pen' | 'brush' | 'eraser' | 'dropper' | 'fill' | 'select';
+type Tool = 'pen' | 'brush' | 'eraser' | 'dropper' | 'fill' | 'select' | 'lasso';
 
 const PRESET_COLORS = [
   '#000000', '#ffffff', '#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6',
@@ -66,9 +66,9 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [flipped, setFlipped] = useState(false);
   const canvasSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const internalClipboardRef = useRef<HTMLCanvasElement | null>(null);
-  const selectDragModeRef = useRef<'new' | 'move' | 'resize' | null>(null);
-  const selectStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const selectAnchorRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const selectDragModeRef = useRef<'new' | 'resize' | 'move' | 'rotate' | null>(null);
+  const lassoPointsRef = useRef<[number, number][]>([]);
+  const selectRotateAngleRef = useRef(0);
 
   // History & Autosave States
   const [showHistory, setShowHistory] = useState(false);
@@ -138,6 +138,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   const SELECTION_HANDLE_SIZE = 8;
   const SELECTION_HANDLE_HIT = 10;
+  const ROTATE_HANDLE_OFFSET = 24;
+  const ROTATE_HANDLE_RADIUS = 5;
+  const ROTATE_HANDLE_HIT = 10;
+  const getRotateHandlePos = (sel: { x: number; y: number; w: number; h: number }) => ({ x: sel.x + sel.w / 2, y: sel.y - ROTATE_HANDLE_OFFSET });
+
   const drawSelectionHandle = () => {
     const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
     const sel = active?.selection;
@@ -151,6 +156,16 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     ctx.lineWidth = 1;
     ctx.fillRect(hx - SELECTION_HANDLE_SIZE / 2, hy - SELECTION_HANDLE_SIZE / 2, SELECTION_HANDLE_SIZE, SELECTION_HANDLE_SIZE);
     ctx.strokeRect(hx - SELECTION_HANDLE_SIZE / 2, hy - SELECTION_HANDLE_SIZE / 2, SELECTION_HANDLE_SIZE, SELECTION_HANDLE_SIZE);
+    const cx = sel.x + sel.w / 2;
+    const rot = getRotateHandlePos(sel);
+    ctx.beginPath();
+    ctx.moveTo(cx, sel.y);
+    ctx.lineTo(rot.x, rot.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(rot.x, rot.y, ROTATE_HANDLE_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
   };
 
@@ -160,8 +175,31 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     return Math.abs(x - hx) <= SELECTION_HANDLE_HIT && Math.abs(y - hy) <= SELECTION_HANDLE_HIT;
   };
 
+  const isNearRotateHandle = (sel: { x: number; y: number; w: number; h: number }, x: number, y: number) => {
+    const rot = getRotateHandlePos(sel);
+    return Math.hypot(x - rot.x, y - rot.y) <= ROTATE_HANDLE_HIT;
+  };
+
   const isInsideSelection = (sel: { x: number; y: number; w: number; h: number }, x: number, y: number) =>
     x >= sel.x && x <= sel.x + sel.w && y >= sel.y && y <= sel.y + sel.h;
+
+  const drawLassoPreview = () => {
+    const ctx = oekaki.upperLayer.value?.ctx;
+    const pts = lassoPointsRef.current;
+    if (!ctx || pts.length < 2) return;
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py));
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    ctx.strokeStyle = '#000000';
+    ctx.lineDashOffset = 4;
+    ctx.stroke();
+    ctx.restore();
+  };
 
   // Check autosave on mount
   useEffect(() => {
@@ -353,11 +391,12 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
     let px: number | null = null;
     let py: number | null = null;
-    let selectDragMode: 'new' | 'move' | 'resize' | null = null;
+    let selectDragMode: 'new' | 'move' | 'resize' | 'rotate' | null = null;
     let selectStartX = 0;
     let selectStartY = 0;
     let selectAnchorX = 0;
     let selectAnchorY = 0;
+    let selectRotateLastAngle = 0;
 
     oekaki.onDraw((x, y, buttons) => {
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
@@ -379,7 +418,12 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       if (toolRef.current === 'select') {
         const sel = active.selection;
         if (selectDragMode === null) {
-          if (sel && isNearSelectionHandle(sel, x, y)) {
+          if (sel && isNearRotateHandle(sel, x, y)) {
+            selectDragMode = 'rotate';
+            const cx = sel.x + sel.w / 2;
+            const cy = sel.y + sel.h / 2;
+            selectRotateLastAngle = Math.atan2(y - cy, x - cx) * 180 / Math.PI;
+          } else if (sel && isNearSelectionHandle(sel, x, y)) {
             selectDragMode = 'resize';
             selectAnchorX = sel.x;
             selectAnchorY = sel.y;
@@ -392,7 +436,20 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           }
           px = x; py = y;
         }
-        if (selectDragMode === 'move') {
+        if (selectDragMode === 'rotate') {
+          const cx = sel.x + sel.w / 2;
+          const cy = sel.y + sel.h / 2;
+          const angle = Math.atan2(y - cy, x - cx) * 180 / Math.PI;
+          let deltaAngle = angle - selectRotateLastAngle;
+          if (deltaAngle > 180) deltaAngle -= 360;
+          if (deltaAngle < -180) deltaAngle += 360;
+          if (showGrid) {
+            active.rotateSelectionByDot(deltaAngle);
+          } else {
+            active.rotateSelection(deltaAngle);
+          }
+          selectRotateLastAngle = angle;
+        } else if (selectDragMode === 'move') {
           if (showGrid) {
             active.moveSelectionByDot(x - px!, y - py!);
           } else {
@@ -410,6 +467,13 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           active.select(selectStartX, selectStartY, x - selectStartX, y - selectStartY);
         }
         drawSelectionHandle();
+        px = x; py = y;
+        return;
+      }
+
+      if (toolRef.current === 'lasso') {
+        lassoPointsRef.current.push([x, y]);
+        drawLassoPreview();
         px = x; py = y;
         return;
       }
@@ -438,6 +502,22 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       if (toolRef.current === 'select' && selectDragMode !== null) {
         selectDragMode = null;
         forceRender(n => n + 1);
+      }
+
+      if (toolRef.current === 'lasso' && active) {
+        if (lassoPointsRef.current.length >= 3) {
+          if (showGrid) {
+            active.selectFreehandByDot(lassoPointsRef.current);
+          } else {
+            active.selectFreehand(lassoPointsRef.current);
+          }
+          toolRef.current = 'select';
+          setTool('select');
+          drawSelectionHandle();
+        }
+        const upperCtx = oekaki.upperLayer.value?.ctx;
+        if (upperCtx) upperCtx.clearRect(0, 0, upperCtx.canvas.width, upperCtx.canvas.height);
+        lassoPointsRef.current = [];
       }
 
       if (toolRef.current === 'fill') {
@@ -526,7 +606,9 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         return;
       }
       const [x, y] = oekaki.getXY(e);
-      if (isNearSelectionHandle(sel, x, y)) {
+      if (isNearRotateHandle(sel, x, y)) {
+        upperCanvas.style.cursor = 'crosshair';
+      } else if (isNearSelectionHandle(sel, x, y)) {
         upperCanvas.style.cursor = 'nwse-resize';
       } else if (isInsideSelection(sel, x, y)) {
         upperCanvas.style.cursor = 'move';
@@ -839,6 +921,18 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           if (active.modified()) active.trace();
           drawSelectionHandle();
           return;
+        } else if (e.key === '[' || e.key === ']') {
+          e.preventDefault();
+          const rotateStep = showGrid ? 90 : 15;
+          const deltaAngle = e.key === '[' ? -rotateStep : rotateStep;
+          if (showGrid) {
+            active.rotateSelectionByDot(deltaAngle);
+          } else {
+            active.rotateSelection(deltaAngle);
+          }
+          if (active.modified()) active.trace();
+          drawSelectionHandle();
+          return;
         }
       }
       switch (e.key) {
@@ -848,6 +942,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
         case '4': setTool('dropper'); toolRef.current = 'dropper'; break;
         case '5': setTool('fill'); toolRef.current = 'fill'; break;
         case '6': setTool('select'); toolRef.current = 'select'; break;
+        case '7': setTool('lasso'); toolRef.current = 'lasso'; break;
         case 'g': setShowGrid(v => !v); break;
       }
     };
@@ -1012,6 +1107,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           {toolBtn('dropper', <Pipette size={15} />, 'スポイト (4)')}
           {toolBtn('fill', <PaintBucket size={15} />, '塗りつぶし (5)')}
           {toolBtn('select', <BoxSelect size={15} />, '範囲選択 (6)')}
+          {toolBtn('lasso', <LassoSelect size={15} />, '自由選択 (7)')}
           <div className="w-px h-6 bg-gray-800 mx-1" />
           <button
             onClick={() => setShowGrid(v => !v)}
@@ -1068,7 +1164,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           {(tool === 'dropper' || tool === 'fill') && (
             <span className="text-[10px] text-gray-500">キャンバスをクリック</span>
           )}
-          {tool === 'select' && (
+          {(tool === 'select' || tool === 'lasso') && (
             <div className="flex-1 flex items-center space-x-1">
               <span className="text-[10px] text-gray-500">クリック&ドラッグで範囲選択</span>
             </div>
@@ -1110,7 +1206,7 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           </div>
         )}
 
-        {tool === 'select' && (
+        {(tool === 'select' || tool === 'lasso') && (
           <div className="flex items-center space-x-1">
             <button
               onClick={() => {
@@ -1138,6 +1234,47 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
             >
               <Trash2 size={11} />
               <span>削除</span>
+            </button>
+            <div className="w-px h-5 bg-gray-800 mx-1" />
+            <button
+              onClick={() => {
+                const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+                if (!active?.selection) return;
+                const step = showGrid ? 90 : 15;
+                if (showGrid) {
+                  active.rotateSelectionByDot(-step);
+                } else {
+                  active.rotateSelection(-step);
+                }
+                if (active.modified()) active.trace();
+                drawSelectionHandle();
+                forceRender(n => n + 1);
+              }}
+              className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+              title="反時計回りに回転"
+            >
+              <RotateCcw size={11} />
+              <span>回転</span>
+            </button>
+            <button
+              onClick={() => {
+                const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+                if (!active?.selection) return;
+                const step = showGrid ? 90 : 15;
+                if (showGrid) {
+                  active.rotateSelectionByDot(step);
+                } else {
+                  active.rotateSelection(step);
+                }
+                if (active.modified()) active.trace();
+                drawSelectionHandle();
+                forceRender(n => n + 1);
+              }}
+              className="px-2 h-7 rounded bg-gray-100/10 text-gray-300 flex items-center space-x-1 text-[10px] disabled:opacity-40"
+              title="時計回りに回転"
+            >
+              <RotateCw size={11} />
+              <span>回転</span>
             </button>
           </div>
         )}
