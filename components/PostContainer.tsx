@@ -8,6 +8,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
 import { api } from '@/lib/api';
+import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -65,6 +66,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
+  const [optimisticallyDeleted, setOptimisticallyDeleted] = useState(false);
   const targetSlug = post.slug || post.displayName;
   const isSelf = !!currentUserSlug && currentUserSlug === targetSlug;
 
@@ -153,7 +155,9 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
       // /post/[id] はサーバーコンポーネントでDBから直接取得するため、
       // 編集直後に開いても本文が古いまま残らないようRouterキャッシュを破棄する
       router.refresh();
-    } catch { /* noop */ }
+    } catch {
+      showToast('error', '投稿の編集に失敗しました');
+    }
   }, [currentUserDisplayName, post.id, post.originType, onModerationChange, router]);
 
   const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
@@ -169,7 +173,9 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     try {
       await api.posts.edit(post.id, currentUserDisplayName, post.content, value ?? null);
       onModerationChange?.();
-    } catch { /* noop */ }
+    } catch {
+      showToast('error', '権利表記の更新に失敗しました');
+    }
   }, [currentUserDisplayName, post.id, post.content, onModerationChange]);
 
   const handleMenuDelete = useCallback((e: React.MouseEvent) => {
@@ -182,10 +188,14 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const handleConfirmDelete = useCallback(async () => {
     setShowDeleteModal(false);
     if (!currentUserSlug) return;
+    setOptimisticallyDeleted(true);
     try {
       await api.posts.remove(post.id, currentUserSlug);
       onModerationChange?.();
-    } catch { /* noop */ }
+    } catch {
+      setOptimisticallyDeleted(false);
+      showToast('error', '投稿の削除に失敗しました');
+    }
   }, [currentUserSlug, post.id, onModerationChange]);
 
   useEffect(() => {
@@ -212,6 +222,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     if (rankCategory === 'ダメ') return `${post.dislikes} ダメ`;
     return `${post.repliesCount} レス`;
   };
+
+  if (optimisticallyDeleted) return null;
 
   return (
     <div className={`flex relative transition-all ${isRankingMode ? 'bg-gradient-to-r from-gray-900/10 via-transparent to-transparent' : ''}`}>

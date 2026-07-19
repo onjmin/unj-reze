@@ -193,6 +193,28 @@ body {
   animation: pop 0.35s ease-out forwards;
 }
 
+@keyframes heart-float {
+  0% {
+    transform: translate(0, 0) scale(0.6);
+    opacity: 0;
+  }
+
+  15% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(var(--heart-drift, 0px), -90vh) scale(1.1);
+    opacity: 0;
+  }
+}
+
+@utility animate-heart-float {
+  animation-name: heart-float;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+}
+
 .unj-canvas-grid .upper-canvas {
   opacity: 0.4;
   background-image: linear-gradient(to right, gray 1px, transparent 1px),

@@ -26,6 +26,9 @@ import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
 import ProfileView from '@/components/ProfileView';
 import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
+import ToastContainer from '@/components/ToastContainer';
+import HeartBurst from '@/components/HeartBurst';
+import { showToast, triggerHeartBurst } from '@/lib/toast';
 
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
@@ -267,6 +270,51 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [userId]);
 
+  // Socket.io を使わないため、通知一覧のポーリング差分で「フォローされた」「いいね／ハートされた」を検知し、
+  // Snackbar通知とハート受信時の演出を出す。初回ポーリングは既存通知をseenに登録するだけでトーストは出さない
+  // （履歴を新着として誤検知しないため）。以降は未見のIDだけをトースト＆ハート数はSetサイズを上限で刈り込んで抑える。
+  const seenNotifIds = useRef<Set<string> | null>(null);
+  const currentNavRef = useRef(currentNav);
+  useEffect(() => { currentNavRef.current = currentNav; }, [currentNav]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const notifs = await api.notifications.list(userId);
+        if (cancelled) return;
+        if (seenNotifIds.current === null) {
+          seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
+        } else {
+          const freshOnes = notifs.filter(n => !seenNotifIds.current!.has(String(n.id)));
+          for (const n of freshOnes) {
+            seenNotifIds.current!.add(String(n.id));
+            if (n.type === 'follow') {
+              showToast('info', `${n.user}さんにフォローされました`);
+            } else if (n.type === 'like') {
+              showToast('info', `${n.user}さんがあなたの投稿にいいねしました`);
+            } else if (n.type === 'heart') {
+              showToast('info', `${n.user}さんがあなたの投稿にハートを送りました`);
+              triggerHeartBurst();
+            }
+          }
+          if (seenNotifIds.current!.size > 500) {
+            seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
+          }
+        }
+        if (currentNavRef.current !== 'notifications') {
+          setNotifCount(notifs.filter(n => !n.read).length);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+    poll();
+    const id = setInterval(poll, 20000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [userId]);
+
   const handleShowNewPosts = () => {
     setPosts(prev => [...newPosts, ...prev]);
     setNewPosts([]);
@@ -281,11 +329,16 @@ export default function App() {
   };
 
   const handleLike = (postId: string) => {
-    setPosts(prev => prev.map(p => p.id !== postId ? p : {
-      ...p, liked: !p.liked,
-      likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
-      disliked: p.liked ? p.disliked : false,
-      dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
+    let prevPost: Post | undefined;
+    setPosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      prevPost = p;
+      return {
+        ...p, liked: !p.liked,
+        likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
+        disliked: p.liked ? p.disliked : false,
+        dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
+      };
     }));
     const parity = (likeParity.current.get(postId) || 0) + 1;
     likeParity.current.set(postId, parity);
@@ -295,17 +348,27 @@ export default function App() {
       likeParity.current.delete(postId);
       likeTimers.current.delete(postId);
       if (p % 2 === 0) return;
-      const updated = await api.posts.like(postId, userId);
-      setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+      try {
+        const updated = await api.posts.like(postId, userId);
+        setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+      } catch {
+        if (prevPost) setPosts(prev => prev.map(p2 => p2.id === postId ? prevPost! : p2));
+        showToast('error', 'いいねの送信に失敗しました');
+      }
     }, 2000));
   };
 
   const handleDislike = (postId: string) => {
-    setPosts(prev => prev.map(p => p.id !== postId ? p : {
-      ...p, disliked: !p.disliked,
-      dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
-      liked: p.disliked ? p.liked : false,
-      likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
+    let prevPost: Post | undefined;
+    setPosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      prevPost = p;
+      return {
+        ...p, disliked: !p.disliked,
+        dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
+        liked: p.disliked ? p.liked : false,
+        likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
+      };
     }));
     const parity = (dislikeParity.current.get(postId) || 0) + 1;
     dislikeParity.current.set(postId, parity);
@@ -315,18 +378,33 @@ export default function App() {
       dislikeParity.current.delete(postId);
       dislikeTimers.current.delete(postId);
       if (p % 2 === 0) return;
-      const updated = await api.posts.dislike(postId, userId);
-      setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+      try {
+        const updated = await api.posts.dislike(postId, userId);
+        setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+      } catch {
+        if (prevPost) setPosts(prev => prev.map(p2 => p2.id === postId ? prevPost! : p2));
+        showToast('error', '低評価の送信に失敗しました');
+      }
     }, 2000));
   };
 
   const handleRepost = async (postId: string) => {
-    setPosts(prev => prev.map(p => p.id !== postId ? p : {
-      ...p, reposted: !p.reposted,
-      reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
+    let prevPost: Post | undefined;
+    setPosts(prev => prev.map(p => {
+      if (p.id !== postId) return p;
+      prevPost = p;
+      return {
+        ...p, reposted: !p.reposted,
+        reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
+      };
     }));
-    const updated = await api.posts.repost(postId);
-    setPosts(prev => prev.map(p => p.id === postId ? updated : p));
+    try {
+      const updated = await api.posts.repost(postId);
+      setPosts(prev => prev.map(p => p.id === postId ? updated : p));
+    } catch {
+      if (prevPost) setPosts(prev => prev.map(p => p.id === postId ? prevPost! : p));
+      showToast('error', 'リポストに失敗しました');
+    }
   };
 
   const handleHeart = (postId: string) => {
@@ -338,8 +416,13 @@ export default function App() {
       const count = heartQueue.current.get(postId) || 0;
       heartQueue.current.delete(postId);
       heartTimers.current.delete(postId);
-      const updated = await api.posts.heart(postId, userId, count);
-      setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+      try {
+        const updated = await api.posts.heart(postId, userId, count);
+        setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
+      } catch {
+        setPosts(prev => prev.map(p2 => p2.id === postId ? { ...p2, heartsTotal: Math.max(0, (Number(p2.heartsTotal) || 0) - count) } : p2));
+        showToast('error', 'ハートの送信に失敗しました');
+      }
     }, 2000));
   };
 
@@ -382,6 +465,7 @@ export default function App() {
         postsRef.current = next;
         return next;
       });
+      showToast('error', '返信の送信に失敗しました');
     }
   };
 
@@ -417,41 +501,52 @@ export default function App() {
     setGameDraft(null);
     setOriginType(undefined);
 
-    let imageSrc: string | undefined;
-    if (attachedImage) {
-      const result = await api.upload.image({ image: attachedImage });
-      imageSrc = result.url;
-    }
-    let gameId: number | undefined;
-    if (gameDraft) {
-      const res = await fetch('/api/games', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest, creatorSlug: currentUser?.slug }),
-      });
-      if (res.ok) {
-        const savedGame = await res.json();
-        gameId = savedGame.id;
+    try {
+      let imageSrc: string | undefined;
+      if (attachedImage) {
+        const result = await api.upload.image({ image: attachedImage });
+        imageSrc = result.url;
       }
+      let gameId: number | undefined;
+      if (gameDraft) {
+        const res = await fetch('/api/games', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest, creatorSlug: currentUser?.slug }),
+        });
+        if (res.ok) {
+          const savedGame = await res.json();
+          gameId = savedGame.id;
+        }
+      }
+
+      const reply = await api.posts.replies.create(postId, {
+        displayName: userId,
+        content,
+        parentPostId: postId,
+        hasImage: !!attachedImage,
+        imageSrc,
+        gameId,
+        originType,
+      });
+
+      setPosts(prev => {
+        const next = prev.map(p => p.id === postId
+          ? { ...p, replies: p.replies.map(r => r.id === tempId ? { ...reply, avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl } : r) }
+          : p);
+        postsRef.current = next;
+        return next;
+      });
+    } catch {
+      setPosts(prev => {
+        const next = prev.map(p => p.id === postId
+          ? { ...p, repliesCount: Math.max(0, p.repliesCount - 1), replies: p.replies.filter(r => r.id !== tempId) }
+          : p);
+        postsRef.current = next;
+        return next;
+      });
+      showToast('error', '返信の送信に失敗しました');
     }
-
-    const reply = await api.posts.replies.create(postId, {
-      displayName: userId,
-      content,
-      parentPostId: postId,
-      hasImage: !!attachedImage,
-      imageSrc,
-      gameId,
-      originType,
-    });
-
-    setPosts(prev => {
-      const next = prev.map(p => p.id === postId
-        ? { ...p, replies: p.replies.map(r => r.id === tempId ? { ...reply, avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl } : r) }
-        : p);
-      postsRef.current = next;
-      return next;
-    });
   };
 
   const handleNavigate = (id: string) => {
@@ -489,37 +584,46 @@ export default function App() {
     setGameDraft(null);
     setOriginType(undefined);
 
-    let imageSrc: string | undefined;
-    if (attachedImage) {
-      const result = await api.upload.image({ image: attachedImage });
-      imageSrc = result.url;
-    }
-    let gameId: string | undefined;
-    if (gameDraft) {
-      const res = await fetch('/api/games', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest, creatorSlug: currentUser?.slug }),
-      });
-      if (res.ok) {
-        const savedGame = await res.json();
-        gameId = savedGame.id;
+    try {
+      let imageSrc: string | undefined;
+      if (attachedImage) {
+        const result = await api.upload.image({ image: attachedImage });
+        imageSrc = result.url;
       }
+      let gameId: string | undefined;
+      if (gameDraft) {
+        const res = await fetch('/api/games', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: gameDraft.preset, title: gameDraft.title, manifest: gameDraft.manifest, creatorSlug: currentUser?.slug }),
+        });
+        if (res.ok) {
+          const savedGame = await res.json();
+          gameId = savedGame.id;
+        }
+      }
+      const post = await api.posts.create({
+        displayName: userId,
+        content,
+        hasImage: !!attachedImage,
+        imageSrc,
+        avatarColor: "from-blue-500 to-indigo-600",
+        gameId,
+        originType,
+      });
+      setPosts(prev => {
+        const next = prev.map(p => p.id === tempId ? { ...post, avatarUrl: post.avatarUrl ?? currentUser?.avatarUrl } : p);
+        postsRef.current = next;
+        return next;
+      });
+    } catch {
+      setPosts(prev => {
+        const next = prev.filter(p => p.id !== tempId);
+        postsRef.current = next;
+        return next;
+      });
+      showToast('error', '投稿に失敗しました');
     }
-    const post = await api.posts.create({
-      displayName: userId,
-      content,
-      hasImage: !!attachedImage,
-      imageSrc,
-      avatarColor: "from-blue-500 to-indigo-600",
-      gameId,
-      originType,
-    });
-    setPosts(prev => {
-      const next = prev.map(p => p.id === tempId ? { ...post, avatarUrl: post.avatarUrl ?? currentUser?.avatarUrl } : p);
-      postsRef.current = next;
-      return next;
-    });
   };
 
   const handleOpenCollab = useCallback((post: Post) => {
@@ -696,6 +800,8 @@ export default function App() {
 
   return (
     <div className="bg-[#0b0e14] text-gray-100 h-dvh w-full flex flex-col overflow-hidden select-none font-sans relative">
+      <ToastContainer />
+      <HeartBurst />
       <RightDrawer
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -990,12 +1096,25 @@ export default function App() {
               setEditingPost(null);
             }}
             onSave={async (newContent, nextImageSrc) => {
-              try {
-                await api.posts.edit(editingPost.id, userId, newContent, editingPost.originType, nextImageSrc === null ? '' : nextImageSrc);
-                fetchPosts();
-              } catch {}
+              const targetId = editingPost.id;
+              const prevContent = editingPost.content;
+              const prevImageSrc = editingPost.imageSrc;
               setShowGlobalEditModal(false);
               setEditingPost(null);
+              setPosts(prev => prev.map(p => p.id !== targetId ? p : {
+                ...p,
+                content: newContent,
+                imageSrc: nextImageSrc === null ? undefined : (nextImageSrc ?? p.imageSrc),
+                hasImage: nextImageSrc === null ? false : (nextImageSrc ? true : p.hasImage),
+                isEdited: true,
+              }));
+              try {
+                await api.posts.edit(targetId, userId, newContent, editingPost.originType, nextImageSrc === null ? '' : nextImageSrc);
+                fetchPosts();
+              } catch {
+                setPosts(prev => prev.map(p => p.id !== targetId ? p : { ...p, content: prevContent, imageSrc: prevImageSrc }));
+                showToast('error', '編集の保存に失敗しました');
+              }
             }}
             imageSrc={editingPost.imageSrc}
             onEditImage={() => handleEditPostImage(editingPost)}

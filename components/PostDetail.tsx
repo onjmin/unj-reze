@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
+import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -275,20 +276,41 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleEditReply = async (replyId: string, content: string, originType?: OriginType) => {
-    const updated = await api.posts.edit(replyId, userId, content, originType);
+    const prevReply = post.replies.find(r => r.id === replyId);
     setPost(p => ({
       ...p,
-      replies: p.replies.map(r => r.id === replyId ? { ...r, content: updated.content, originType: updated.originType, isEdited: true } : r)
+      replies: p.replies.map(r => r.id === replyId ? { ...r, content, originType, isEdited: true } : r)
     }));
+    try {
+      const updated = await api.posts.edit(replyId, userId, content, originType);
+      setPost(p => ({
+        ...p,
+        replies: p.replies.map(r => r.id === replyId ? { ...r, content: updated.content, originType: updated.originType, isEdited: true } : r)
+      }));
+    } catch {
+      if (prevReply) {
+        setPost(p => ({
+          ...p,
+          replies: p.replies.map(r => r.id === replyId ? prevReply : r)
+        }));
+      }
+      showToast('error', '返信の編集に失敗しました');
+    }
   };
 
   const handleDeleteReply = async (replyId: string) => {
-    await api.posts.remove(replyId, userId);
+    const prevReplies = post.replies;
     setPost(p => ({
       ...p,
       replies: p.replies.filter(r => r.id !== replyId),
       repliesCount: Math.max(0, p.repliesCount - 1)
     }));
+    try {
+      await api.posts.remove(replyId, userId);
+    } catch {
+      setPost(p => ({ ...p, replies: prevReplies, repliesCount: prevReplies.length }));
+      showToast('error', '返信の削除に失敗しました');
+    }
   };
 
   const handleOpenCollab = useCallback((p: Post) => {
@@ -337,10 +359,23 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleSaveEdit = async (newContent: string, nextImageSrc?: string | null) => {
-    const updated = await api.posts.edit(post.id, userId, newContent, post.originType, nextImageSrc === null ? '' : nextImageSrc);
-    setPost(updated);
+    const prevPost = post;
     setShowEditModal(false);
-    router.refresh();
+    setPost(p => ({
+      ...p,
+      content: newContent,
+      imageSrc: nextImageSrc === null ? undefined : (nextImageSrc ?? p.imageSrc),
+      hasImage: nextImageSrc === null ? false : (nextImageSrc ? true : p.hasImage),
+      isEdited: true,
+    }));
+    try {
+      const updated = await api.posts.edit(post.id, userId, newContent, post.originType, nextImageSrc === null ? '' : nextImageSrc);
+      setPost(updated);
+      router.refresh();
+    } catch {
+      setPost(prevPost);
+      showToast('error', '投稿の編集に失敗しました');
+    }
   };
 
   const handleEditArt = () => {
@@ -354,11 +389,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleSaveEditedArt = async (canvasData: string) => {
-    const updated = await api.posts.edit(post.id, userId, post.content, post.originType, canvasData);
-    setPost(updated);
+    const prevPost = post;
     setActiveScreen(null);
     setCollabImageUrl(undefined);
-    router.refresh();
+    setPost(p => ({ ...p, imageSrc: canvasData, hasImage: true, isEdited: true }));
+    try {
+      const updated = await api.posts.edit(post.id, userId, post.content, post.originType, canvasData);
+      setPost(updated);
+      router.refresh();
+    } catch {
+      setPost(prevPost);
+      showToast('error', '画像の編集に失敗しました');
+    }
   };
 
   const handleEditMusic = () => {
@@ -367,25 +409,43 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleSaveEditedMusic = async (mml: string) => {
+    const prevPost = post;
     const newContent = `${stripMmlLine(post.content)}\n#mml ${mml}`.trim();
-    const updated = await api.posts.edit(post.id, userId, newContent, post.originType);
-    setPost(updated);
     setActiveScreen(null);
-    router.refresh();
+    setPost(p => ({ ...p, content: newContent, isEdited: true }));
+    try {
+      const updated = await api.posts.edit(post.id, userId, newContent, post.originType);
+      setPost(updated);
+      router.refresh();
+    } catch {
+      setPost(prevPost);
+      showToast('error', '楽曲の編集に失敗しました');
+    }
   };
 
   const handleSelectOriginType = async (ot: OriginType | undefined) => {
-    const updated = await api.posts.edit(post.id, userId, post.content, ot);
-    setPost(updated);
+    const prevPost = post;
     setShowOriginModal(false);
-    router.refresh();
+    setPost(p => ({ ...p, originType: ot }));
+    try {
+      const updated = await api.posts.edit(post.id, userId, post.content, ot);
+      setPost(updated);
+      router.refresh();
+    } catch {
+      setPost(prevPost);
+      showToast('error', '権利表記の更新に失敗しました');
+    }
   };
 
   const handleConfirmDelete = async () => {
-    await api.posts.remove(post.id, userId);
     setShowDeleteModal(false);
-    router.push('/');
-    router.refresh();
+    try {
+      await api.posts.remove(post.id, userId);
+      router.push('/');
+      router.refresh();
+    } catch {
+      showToast('error', '投稿の削除に失敗しました');
+    }
   };
 
   const handleMenuEdit = () => {
