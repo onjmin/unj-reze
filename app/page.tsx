@@ -14,6 +14,8 @@ import RankingSubTabs from '@/components/RankingSubTabs';
 import RightDrawer from '@/components/RightDrawer';
 import FeedList from '@/components/FeedList';
 import BottomNav from '@/components/BottomNav';
+import LeftSidebar from '@/components/LeftSidebar';
+import RightSidebar from '@/components/RightSidebar';
 import FAB from '@/components/FAB';
 import CollabSelector from '@/components/CollabSelector';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
@@ -765,7 +767,16 @@ export default function App() {
         />
       )}
 
-      <div className="relative w-full max-w-2xl mx-auto border-x border-gray-800 h-dvh flex flex-col shrink-0">
+      <div className="w-full h-dvh flex justify-center overflow-hidden">
+        <LeftSidebar
+          current={currentNav}
+          set={handleNavigate}
+          notifCount={notifCount}
+          messageCount={messageCount}
+          userAvatarUrl={currentUser?.avatarUrl}
+          onPost={() => handleQuickPost()}
+        />
+        <div className="relative w-full max-w-2xl border-x border-gray-800 h-dvh flex flex-col shrink-0">
         {!activeScreen && (
           <>
             <Header
@@ -994,6 +1005,8 @@ export default function App() {
             onEditGame={() => handleOpenPostGame(editingPost.gameId || '', editingPost.id)}
           />
         )}
+        </div>
+        <RightSidebar />
       </div>
     </div>
   );
