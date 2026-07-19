@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
+import { ensureSessionId } from '@/lib/session';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
@@ -31,12 +32,6 @@ import UserActionMenu from './UserActionMenu';
 
 interface PostDetailProps {
   post: Post;
-}
-
-function getCookie(name: string): string | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
-  return match ? decodeURIComponent(match[1]) : undefined;
 }
 
 export default function PostDetail({ post: initial }: PostDetailProps) {
@@ -81,15 +76,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   }, []);
 
   useEffect(() => {
-    const sessionId = getCookie('unj_reze_session');
-    if (sessionId) {
-      api.auth.anonymous(sessionId).then(user => {
-        setUserId(user.displayName);
-        setUserSlug(user.slug);
-        setAvatarUrl(user.avatarUrl);
-        if (user.avatarColor) setAvatarColor(user.avatarColor);
-      }).catch(() => { });
-    }
+    const sessionId = ensureSessionId();
+    api.auth.anonymous(sessionId).then(user => {
+      setUserId(user.displayName);
+      setUserSlug(user.slug);
+      setAvatarUrl(user.avatarUrl);
+      if (user.avatarColor) setAvatarColor(user.avatarColor);
+    }).catch(() => { });
   }, []);
 
   useEffect(() => {

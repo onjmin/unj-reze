@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import { usePostActions } from '@/lib/hooks/usePostActions';
+import { ensureSessionId } from '@/lib/session';
 import { decodeId } from '@/lib/sqids';
 import { stripMmlLine, extractMmlFromContent } from '@/lib/mml';
 import Header from '@/components/Header';
@@ -104,26 +105,10 @@ export default function App() {
 
   const sessionInitialized = useRef(false);
 
-  function getCookie(name: string): string | undefined {
-    if (typeof document === 'undefined') return undefined;
-    const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
-    return match ? decodeURIComponent(match[1]) : undefined;
-  }
-
-  function setCookie(name: string, value: string, days: number) {
-    if (typeof document === 'undefined') return;
-    const expires = new Date(Date.now() + days * 864e5).toUTCString();
-    document.cookie = `${name}=${encodeURIComponent(value)};expires=${expires};path=/;SameSite=Lax`;
-  }
-
   useEffect(() => {
     if (sessionInitialized.current) return;
     sessionInitialized.current = true;
-    let sessionId = getCookie('unj_reze_session');
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      setCookie('unj_reze_session', sessionId, 365);
-    }
+    const sessionId = ensureSessionId();
     api.auth.anonymous(sessionId).then(user => {
       setUserId(user.displayName);
       setCurrentUser(user);
@@ -739,7 +724,7 @@ export default function App() {
               {currentNav === 'home' && topTab === 'game' && (
                 <LiveGameView
                   userId={userId}
-                  sessionId={getCookie('unj_reze_session') || userId}
+                  sessionId={ensureSessionId()}
                 />
               )}
               {currentNav === 'home' && topTab !== 'game' && (

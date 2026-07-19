@@ -89,7 +89,6 @@ class MockDB {
   private heartEntries: { postId: number; userId: string }[] = [];
   private anonUserData: Map<string, { id: string; ipAddress: string; sessionId: string; displayName: string; slug: string; avatarColor: string; avatarUrl?: string; bio?: string; createdAt: string; lastSeenAt: string }> = new Map();
   private oshiItems: DbOshiItem[] = [];
-  private ipToUser: Map<string, string> = new Map();
   private sessionToUser: Map<string, string> = new Map();
   private follows: { followerId: string; followedId: string }[] = [];
   private blocks: { blockerSlug: string; blockedSlug: string }[] = [];
@@ -190,13 +189,10 @@ class MockDB {
       return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, bio: stored.bio, createdAt: stored.createdAt };
     }
 
-    const existingByIp = this.ipToUser.get(ipAddress);
-    if (existingByIp) {
-      const stored = this.anonUserData.get(existingByIp)!;
-      this.sessionToUser.set(sessionId, stored.id);
-      stored.lastSeenAt = this.now();
-      return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, bio: stored.bio, createdAt: stored.createdAt };
-    }
+    // 注意: 以前は ipAddress が一致する既存ユーザーに割り当てる同一IPフォールバックがあったが、
+    // Netlify環境ではロードバランサーのアドレスしか取得できず（context.ip 含む）、
+    // 全訪問者が同一IPとして扱われ他人のアカウントに merge される実害があったため削除。
+    // ipAddress 自体は分析/レート制限用に引き続き保持するが、本人確認には使わない。
 
     const id = this.generateId();
     const displayName = generateDisplayName();
@@ -205,7 +201,6 @@ class MockDB {
     const createdAt = this.now();
     const stored = { id, ipAddress, sessionId, displayName, slug, avatarColor, avatarUrl: undefined, createdAt, lastSeenAt: createdAt };
     this.anonUserData.set(id, stored);
-    this.ipToUser.set(ipAddress, id);
     this.sessionToUser.set(sessionId, id);
     return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt };
   }

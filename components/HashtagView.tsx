@@ -4,15 +4,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Hash } from 'lucide-react';
 import { Post, AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
+import { ensureSessionId } from '@/lib/session';
 import PostContainer from './PostContainer';
 import VirtualizedItem from './VirtualizedItem';
 import PageHeader from './PageHeader';
-
-function getCookie(name: string): string | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
-  return match ? decodeURIComponent(match[1]) : undefined;
-}
 
 interface HashtagViewProps {
   tag: string;
@@ -36,13 +31,11 @@ export default function HashtagView({ tag }: HashtagViewProps) {
   useEffect(() => {
     if (inited.current) return;
     inited.current = true;
-    const sessionId = getCookie('unj_reze_session');
-    if (sessionId) {
-      api.auth.anonymous(sessionId).then(u => {
-        setUserId(u.displayName);
-        setCurrentUser(u);
-      }).catch(() => {});
-    }
+    const sessionId = ensureSessionId();
+    api.auth.anonymous(sessionId).then(u => {
+      setUserId(u.displayName);
+      setCurrentUser(u);
+    }).catch(() => {});
   }, []);
 
   const fetchPosts = useCallback(() => {

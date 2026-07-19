@@ -4,12 +4,7 @@ import { useState, useEffect } from 'react';
 import { ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy } from 'lucide-react';
 import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
-
-function getCookieValue(name: string): string | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
-  return match ? decodeURIComponent(match[1]) : undefined;
-}
+import { ensureSessionId } from '@/lib/session';
 
 interface SettingsPanelProps {
   userId: string;
@@ -58,11 +53,7 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
   const handleRedeem = async () => {
     const token = redeemInput.trim();
     if (!token) return;
-    let sessionId = getCookieValue('unj_reze_session');
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      document.cookie = `unj_reze_session=${sessionId};path=/;max-age=${60 * 60 * 24 * 365};SameSite=Lax`;
-    }
+    const sessionId = ensureSessionId();
     try {
       const user = await api.auth.redeemMigrationToken(token, sessionId);
       setRedeemMsg(`「${user.displayName}」として復元しました。再読み込みします…`);

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
+import { ensureSessionId } from '@/lib/session';
 import EmbedPart from './EmbedPart';
 import MmlPlayer from './MmlPlayer';
 import ChordPlayer from './ChordPlayer';
@@ -54,12 +55,6 @@ function parseContent(text: string, replyMap: Map<string, number>) {
   });
 }
 
-function getCookie(name: string): string | undefined {
-  if (typeof document === 'undefined') return undefined;
-  const match = document.cookie.match(`(?:^|;\\s*)${name}=([^;]*)`);
-  return match ? decodeURIComponent(match[1]) : undefined;
-}
-
 export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const router = useRouter();
   const [post, setPost] = useState<Post>(initial);
@@ -75,12 +70,10 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    const sessionId = getCookie('unj_reze_session');
-    if (sessionId) {
-      api.auth.anonymous(sessionId).then(user => {
-        setUserId(user.displayName);
-      }).catch(() => {});
-    }
+    const sessionId = ensureSessionId();
+    api.auth.anonymous(sessionId).then(user => {
+      setUserId(user.displayName);
+    }).catch(() => {});
   }, []);
 
   // Build ordered list: OP as #1, then replies in order

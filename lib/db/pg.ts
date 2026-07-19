@@ -988,27 +988,10 @@ export const pgStore: DataStore = {
         } as AnonymousUser;
       }
 
-      const ipResult = await client.query(
-        'SELECT * FROM anonymous_users WHERE ip_address = $1 ORDER BY last_seen_at DESC LIMIT 1',
-        [ipAddress]
-      );
-      if (ipResult.rows.length > 0) {
-        const row = ipResult.rows[0];
-        await client.query(
-          'UPDATE anonymous_users SET session_id = $1, last_seen_at = NOW() WHERE id = $2',
-          [sessionId, row.id]
-        );
-        return {
-          id: row.id,
-          displayName: row.display_name,
-          slug: row.slug,
-          avatarColor: row.avatar_color,
-          avatarUrl: row.avatar_url ?? undefined,
-          bio: row.bio ?? undefined,
-          createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
-            ? row.created_at.toISOString() : String(row.created_at),
-        } as AnonymousUser;
-      }
+      // 注意: 以前は ip_address が一致する既存ユーザーに割り当てる同一IPフォールバックがあったが、
+      // Netlify環境ではロードバランサーのアドレスしか取得できず（context.ip 含む）、
+      // 全訪問者が同一IPとして扱われ他人のアカウントに merge される実害があったため削除。
+      // ip_address 自体は分析/レート制限用に引き続き保存するが、本人確認には使わない。
 
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const displayName = generateDisplayNamePg();

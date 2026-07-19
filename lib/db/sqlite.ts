@@ -932,28 +932,10 @@ export const sqliteStore: DataStore = {
       } as AnonymousUser;
     }
 
-    const ipRows = rowsToObjects(
-      d,
-      'SELECT * FROM anonymous_users WHERE ip_address = ? ORDER BY last_seen_at DESC LIMIT 1',
-      [ipAddress]
-    );
-    if (ipRows.length > 0) {
-      const row = ipRows[0];
-      d.run(
-        'UPDATE anonymous_users SET session_id = ?, last_seen_at = ? WHERE id = ?',
-        [sessionId, new Date().toISOString(), row.id]
-      );
-      saveDb();
-      return {
-        id: row.id,
-        displayName: row.display_name,
-        slug: row.slug,
-        avatarColor: row.avatar_color,
-        avatarUrl: row.avatar_url ?? undefined,
-        bio: row.bio ?? undefined,
-        createdAt: row.created_at,
-      } as AnonymousUser;
-    }
+    // 注意: 以前は ip_address が一致する既存ユーザーに割り当てる同一IPフォールバックがあったが、
+    // Netlify環境ではロードバランサーのアドレスしか取得できず（context.ip 含む）、
+    // 全訪問者が同一IPとして扱われ他人のアカウントに merge される実害があったため削除。
+    // ip_address 自体は分析/レート制限用に引き続き保存するが、本人確認には使わない。
 
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const displayName = generateDisplayNameSqlite();

@@ -5,6 +5,7 @@ import { Post, OshiItem, AnonymousUser } from '@/lib/types';
 import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil, Play, Pause } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { ensureSessionId } from '@/lib/session';
 import { getAvatarInfo } from '@/lib/avatar';
 import { applyMasterVolume, subscribeMasterVolume, subscribeMuted } from '@/lib/master-volume';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
@@ -76,16 +77,8 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    const getCookie = (name: string): string | undefined => {
-      if (typeof document === 'undefined') return undefined;
-      const value = `; ${document.cookie}`;
-      const parts = value.split(`; ${name}=`);
-      if (parts.length === 2) return parts.pop()?.split(';').shift();
-    };
-    const sessionId = getCookie('unj_reze_session');
-    if (sessionId) {
-      api.auth.anonymous(sessionId).then(setCurrentUser).catch(() => {});
-    }
+    const sessionId = ensureSessionId();
+    api.auth.anonymous(sessionId).then(setCurrentUser).catch(() => {});
   }, []);
 
   const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
