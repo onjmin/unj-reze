@@ -392,9 +392,19 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
           }
         }
         if (selectDragMode === 'move') {
-          active.moveSelection(x - px!, y - py!);
+          if (showGrid) {
+            active.moveSelectionByDot(x - px!, y - py!);
+          } else {
+            active.moveSelection(x - px!, y - py!);
+          }
         } else if (selectDragMode === 'resize') {
-          active.resizeSelection(x - selectAnchorX, y - selectAnchorY);
+          if (showGrid) {
+            active.resizeSelectionByDot(x - selectAnchorX, y - selectAnchorY);
+          } else {
+            active.resizeSelection(x - selectAnchorX, y - selectAnchorY);
+          }
+        } else if (showGrid) {
+          active.selectByDot(selectStartX, selectStartY, x - selectStartX, y - selectStartY);
         } else {
           active.select(selectStartX, selectStartY, x - selectStartX, y - selectStartY);
         }

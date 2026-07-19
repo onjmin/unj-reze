@@ -21,8 +21,8 @@ importers:
         specifier: 0.1.63
         version: 0.1.63
       '@onjmin/oekaki':
-        specifier: 1.0.60
-        version: 1.0.60
+        specifier: 1.0.61
+        version: 1.0.61
       '@rpgja/rpgen-map':
         specifier: 1.0.5
         version: 1.0.5
@@ -594,8 +594,8 @@ packages:
     resolution: {integrity: sha512-wMqD7iOz1VN76cc9ChKlDZD7vkhq2Aq+gQc81YU/7NjN+CoowxkRhyTVstUzSLuuDuPrRLDCklKY8JCcTqfdAg==}
     hasBin: true
 
-  '@onjmin/oekaki@1.0.60':
-    resolution: {integrity: sha512-H5d4XwqMWf8DPo6dhY6u5KEsiA5ch45v3NwV8OzrevTLbCv1dhKZvQHnz0VdnSoeJphDXmKUTJMRSx5FVWS61Q==}
+  '@onjmin/oekaki@1.0.61':
+    resolution: {integrity: sha512-Yawolk7431ES6RNUiH1aXEfeyFz87xkge/61FlzQW57ufsh/oy/ACFYqdd26xEZzbVAVkjcWceuds7i8ohH5SA==}
 
   '@rpgja/rpgen-map@1.0.5':
     resolution: {integrity: sha512-13xeUQ2WgDfxMp9VjjWMPYSxAX9rSvr9tgecGleNvWA7XLcY7H37empZXAEZauIyLtXmCVpg7ZLe9JpVAfLhiw==}
@@ -2916,7 +2916,7 @@ snapshots:
 
   '@onjmin/koe@1.0.4': {}
 
-  '@onjmin/oekaki@1.0.60': {}
+  '@onjmin/oekaki@1.0.61': {}
 
   '@rpgja/rpgen-map@1.0.5': {}
 

@@ -696,11 +696,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           }
         }
         if (selectDragMode === 'move') {
-          active.moveSelection(x - px!, y - py!);
+          active.moveSelectionByDot(x - px!, y - py!);
         } else if (selectDragMode === 'resize') {
-          active.resizeSelection(x - selectAnchorX, y - selectAnchorY);
+          active.resizeSelectionByDot(x - selectAnchorX, y - selectAnchorY);
         } else {
-          active.select(selectStartX, selectStartY, x - selectStartX, y - selectStartY);
+          active.selectByDot(selectStartX, selectStartY, x - selectStartX, y - selectStartY);
         }
         drawSelectionHandle();
         px = x; py = y;
