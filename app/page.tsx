@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import { decodeId } from '@/lib/sqids';
-import { stripMmlLine } from '@/lib/mml';
+import { stripMmlLine, extractMmlFromContent } from '@/lib/mml';
 import Header from '@/components/Header';
 import EditPostModal from '@/components/EditPostModal';
 import TopTabs from '@/components/TopTabs';
@@ -752,7 +752,7 @@ export default function App() {
         <MmlEditor
           onClose={() => setActiveScreen(null)}
           onSave={handleSaveMml}
-          initialMml={attachedMml || undefined}
+          initialMml={(editingPost ? extractMmlFromContent(editingPost.content) : attachedMml) || undefined}
         />
       )}
 
