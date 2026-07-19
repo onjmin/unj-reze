@@ -5,9 +5,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 
-export default function RightSidebar() {
+interface RightSidebarProps {
+  onSearch: (query: string) => void;
+}
+
+export default function RightSidebar({ onSearch }: RightSidebarProps) {
   const router = useRouter();
   const [trends, setTrends] = useState<{ keyword: string; count: number }[]>([]);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     api.search.trends().then(setTrends);
@@ -16,21 +21,29 @@ export default function RightSidebar() {
   const handleTrendClick = (keyword: string) => {
     if (keyword.startsWith('#')) {
       router.push(`/hashtag/${encodeURIComponent(keyword.slice(1))}`);
+      return;
     }
+    setQuery(keyword);
+    onSearch(keyword);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (query.trim()) onSearch(query);
   };
 
   return (
     <div className="hidden lg:flex flex-col w-80 shrink-0 h-dvh overflow-y-auto scrollbar-none px-4 py-4 gap-4 border-l border-gray-800">
-      <div className="relative">
+      <form onSubmit={handleSubmit} className="relative">
         <Search className="absolute left-3.5 top-2.5 text-gray-500" size={16} />
         <input
           type="text"
-          readOnly
-          onClick={() => router.push('/')}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
           placeholder="掲示板内スレッド・素材を検索"
           className="w-full bg-[#161b22] border border-gray-800 rounded-full pl-10 pr-4 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none"
         />
-      </div>
+      </form>
 
       {trends.length > 0 && (
         <div className="bg-[#0f1420] border border-gray-800 rounded-2xl overflow-hidden">

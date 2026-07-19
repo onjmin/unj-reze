@@ -23,12 +23,13 @@ interface SearchViewProps {
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
+  initialQuery?: string;
 }
 
 export default function SearchView(props: SearchViewProps) {
   const router = useRouter();
   const [trends, setTrends] = useState<{ keyword: string; count: number }[]>([]);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(props.initialQuery || '');
   const [results, setResults] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -53,6 +54,14 @@ export default function SearchView(props: SearchViewProps) {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (props.initialQuery && props.initialQuery.trim()) {
+      setQuery(props.initialQuery);
+      handleSearch(props.initialQuery);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.initialQuery]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

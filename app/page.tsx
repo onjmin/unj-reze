@@ -42,6 +42,7 @@ export default function App() {
   const [currentNav, setCurrentNav] = useState('home');
   const [topTab, setTopTab] = useState('everyone');
   const [feedSubMode, setFeedSubMode] = useState<FeedSubMode>('threads');
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
   const [rankCategory, setRankCategory] = useState('イイ');
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -1023,6 +1024,7 @@ export default function App() {
                   onEditImage={handleEditPostImage}
                   onEditMml={handleEditPostMml}
                   onEditPost={handleEditPost}
+                  initialQuery={sidebarSearchQuery}
                 />
               )}
               {currentNav === 'notifications' && <NotificationView userId={userId} />}
@@ -1129,7 +1131,12 @@ export default function App() {
           />
         )}
         </div>
-        <RightSidebar />
+        <RightSidebar
+          onSearch={(query) => {
+            setSidebarSearchQuery(query);
+            handleNavigate('search');
+          }}
+        />
       </div>
     </div>
   );
