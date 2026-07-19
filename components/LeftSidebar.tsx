@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Home, Search, Bell, Mail, User, PenSquare, Link2, Settings } from 'lucide-react';
 
 interface LeftSidebarProps {
@@ -9,6 +10,7 @@ interface LeftSidebarProps {
   notifCount?: number;
   messageCount?: number;
   userAvatarUrl?: string;
+  userSlug?: string;
   onPost: () => void;
 }
 
@@ -22,7 +24,8 @@ const items = [
   { id: 'settings', icon: Settings, label: '設定とプライバシー' },
 ];
 
-export default function LeftSidebar({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl, onPost }: LeftSidebarProps) {
+export default function LeftSidebar({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl, userSlug, onPost }: LeftSidebarProps) {
+  const router = useRouter();
   const badgeMap: Record<string, number> = {
     notifications: notifCount,
     messages: messageCount,
@@ -32,6 +35,34 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const scrollable = document.getElementById('scrollable-content');
     if (scrollable) scrollable.scrollTop += e.deltaY;
+  };
+
+  const handleItemClick = (id: string) => {
+    if (id === 'search') {
+      router.push('/search');
+      return;
+    }
+    if (id === 'profile' && userSlug) {
+      router.push(`/user/${userSlug}`);
+      return;
+    }
+    if (id === 'settings') {
+      router.push('/settings');
+      return;
+    }
+    if (id === 'notifications') {
+      router.push('/notifications');
+      return;
+    }
+    if (id === 'messages') {
+      router.push('/messages');
+      return;
+    }
+    if (id === 'links') {
+      router.push('/links');
+      return;
+    }
+    set(id);
   };
 
   return (
@@ -48,7 +79,7 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
             <button
               key={item.id}
               className={`flex items-center gap-4 px-3 py-3 rounded-full transition-all w-fit xl:w-full ${isActive ? 'text-[#a3e635]' : 'text-gray-300 hover:text-white'} hover:bg-white/10`}
-              onClick={() => set(item.id)}
+              onClick={() => handleItemClick(item.id)}
               title={item.label}
             >
               <span className="relative inline-flex shrink-0">

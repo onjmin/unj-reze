@@ -5,15 +5,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { Post } from '@/lib/types';
+import { usePostActions } from '@/lib/hooks/usePostActions';
 import PostContainer from './PostContainer';
 import VirtualizedItem from './VirtualizedItem';
 
 interface SearchViewProps {
-  onLike: (id: string) => void;
-  onDislike: (id: string) => void;
-  onRepost: (id: string) => void;
-  onHeart: (id: string) => void;
-  onAddReply: (id: string, text: string) => void;
+  userId?: string;
+  onLike?: (id: string) => void;
+  onDislike?: (id: string) => void;
+  onRepost?: (id: string) => void;
+  onHeart?: (id: string) => void;
+  onAddReply?: (id: string, text: string) => void;
   onQuickPost: (text?: string) => void;
   openGame: (gameId?: string, postId?: string) => void;
   openCollab: (post: Post) => void;
@@ -33,6 +35,19 @@ export default function SearchView(props: SearchViewProps) {
   const [results, setResults] = useState<Post[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+
+  const updateResultPost = useCallback((postId: string, updater: (p: Post) => Post) => {
+    setResults(prev => prev.map(p => p.id === postId ? updater(p) : p));
+  }, []);
+  const ownActions = usePostActions(
+    props.userId || props.currentUserDisplayName || '',
+    updateResultPost
+  );
+  const onLike = props.onLike ?? ownActions.handleLike;
+  const onDislike = props.onDislike ?? ownActions.handleDislike;
+  const onRepost = props.onRepost ?? ownActions.handleRepost;
+  const onHeart = props.onHeart ?? ownActions.handleHeart;
+  const onAddReply = props.onAddReply ?? ownActions.handleAddReply;
 
   useEffect(() => {
     api.search.trends().then(setTrends);
@@ -113,11 +128,11 @@ export default function SearchView(props: SearchViewProps) {
                 isRankingMode={false}
                 rankIndex={0}
                 rankCategory=""
-                onLike={props.onLike}
-                onDislike={props.onDislike}
-                onRepost={props.onRepost}
-                onHeart={props.onHeart}
-                onAddReply={props.onAddReply}
+                onLike={onLike}
+                onDislike={onDislike}
+                onRepost={onRepost}
+                onHeart={onHeart}
+                onAddReply={onAddReply}
                 onQuickPost={props.onQuickPost}
                 openGame={props.openGame}
                 openCollab={props.openCollab}

@@ -28,7 +28,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
   const userPosts = await db.getUserPostsBySlug(id);
   const displayName = await db.getUserDisplayName(id);
 
-  if (userPosts.length === 0) {
+  if (!displayName) {
     return (
       <div className="bg-[#0b0e14] text-gray-100 min-h-dvh flex flex-col items-center justify-center space-y-3">
         <p className="text-gray-500 text-sm">ユーザーが見つかりません</p>

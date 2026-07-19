@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Home, Search, Bell, Mail, User } from 'lucide-react';
 
 interface BottomNavProps {
@@ -9,6 +10,7 @@ interface BottomNavProps {
   notifCount?: number;
   messageCount?: number;
   userAvatarUrl?: string;
+  userSlug?: string;
 }
 
 const items = [
@@ -19,12 +21,33 @@ const items = [
   { id: 'profile', icon: User, label: 'マイページ' },
 ];
 
-export default function BottomNav({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl }: BottomNavProps) {
+export default function BottomNav({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl, userSlug }: BottomNavProps) {
+  const router = useRouter();
   const badgeMap: Record<string, number> = {
     notifications: notifCount,
     messages: messageCount,
   };
   const [avatarBroken, setAvatarBroken] = useState(false);
+
+  const handleItemClick = (id: string) => {
+    if (id === 'search') {
+      router.push('/search');
+      return;
+    }
+    if (id === 'profile' && userSlug) {
+      router.push(`/user/${userSlug}`);
+      return;
+    }
+    if (id === 'notifications') {
+      router.push('/notifications');
+      return;
+    }
+    if (id === 'messages') {
+      router.push('/messages');
+      return;
+    }
+    set(id);
+  };
 
   return (
     <div className="md:hidden flex justify-around items-center h-14 border-t border-gray-800 bg-[#0b0e14]/95 backdrop-blur pb-safe absolute bottom-0 w-full z-25">
@@ -36,7 +59,7 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
           <button
             key={item.id}
             className={`flex-1 min-w-0 px-1 py-2 rounded-full flex flex-col items-center justify-center gap-0.5 transition-all ${isActive ? 'text-[#a3e635]' : 'text-gray-500 hover:text-gray-300'}`}
-            onClick={() => set(item.id)}
+            onClick={() => handleItemClick(item.id)}
             title={item.label}
           >
             <span className="relative inline-flex">

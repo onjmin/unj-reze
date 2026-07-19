@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
+import { usePostActions } from '@/lib/hooks/usePostActions';
 import { decodeId } from '@/lib/sqids';
 import { stripMmlLine, extractMmlFromContent } from '@/lib/mml';
 import Header from '@/components/Header';
@@ -20,12 +22,6 @@ import CollabSelector from '@/components/CollabSelector';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
 import LiveGameView from '@/components/LiveGameView';
 import PostComposer from '@/components/PostComposer';
-import SearchView from '@/components/SearchView';
-import NotificationView from '@/components/NotificationView';
-import MessageView from '@/components/MessageView';
-import ProfileView from '@/components/ProfileView';
-import LinksView from '@/components/LinksView';
-import SettingsView from '@/components/SettingsView';
 import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
 import ToastContainer from '@/components/ToastContainer';
 import HeartBurst from '@/components/HeartBurst';
@@ -36,6 +32,7 @@ const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), 
 const MmlEditor = dynamic(() => import('@/components/MmlEditor'), { ssr: false });
 
 export default function App() {
+  const router = useRouter();
   const [posts, setPosts] = useState<Post[]>([]);
   const [newPosts, setNewPosts] = useState<Post[]>([]);
   const postsRef = useRef<Post[]>([]);
@@ -43,7 +40,6 @@ export default function App() {
   const [currentNav, setCurrentNav] = useState('home');
   const [topTab, setTopTab] = useState('everyone');
   const [feedSubMode, setFeedSubMode] = useState<FeedSubMode>('threads');
-  const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
   const [rankCategory, setRankCategory] = useState('イイ');
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -106,12 +102,6 @@ export default function App() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [showGlobalEditModal, setShowGlobalEditModal] = useState(false);
 
-  const heartQueue = useRef<Map<string, number>>(new Map());
-  const heartTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const likeParity = useRef<Map<string, number>>(new Map());
-  const likeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const dislikeParity = useRef<Map<string, number>>(new Map());
-  const dislikeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const sessionInitialized = useRef(false);
 
   function getCookie(name: string): string | undefined {
@@ -205,41 +195,6 @@ export default function App() {
     }
   }, [userId]);
 
-  const handleProfileUpdate = useCallback((newDisplayName: string, newAvatarUrl?: string) => {
-    setUserId(newDisplayName);
-    if (currentUser) {
-      const oldSlug = currentUser.slug;
-      const oldDisplayName = currentUser.displayName;
-      const updatedUser = {
-        ...currentUser,
-        displayName: newDisplayName,
-        avatarUrl: newAvatarUrl,
-      };
-      setCurrentUser(updatedUser);
-      localStorage.setItem('unj_current_user', JSON.stringify(updatedUser));
-
-      const updatePost = (p: Post): Post => {
-        const isUserPost = p.slug === oldSlug || p.displayName === oldDisplayName || p.displayName === newDisplayName;
-        return {
-          ...p,
-          displayName: isUserPost ? newDisplayName : p.displayName,
-          avatarUrl: isUserPost ? newAvatarUrl : p.avatarUrl,
-          replies: p.replies?.map(r => {
-            const isUserReply = r.slug === oldSlug || r.displayName === oldDisplayName || r.displayName === newDisplayName;
-            return {
-              ...r,
-              displayName: isUserReply ? newDisplayName : r.displayName,
-              avatarUrl: isUserReply ? newAvatarUrl : r.avatarUrl,
-            };
-          }) || [],
-        };
-      };
-
-      setPosts(prev => prev.map(updatePost));
-      setNewPosts(prev => prev.map(updatePost));
-    }
-  }, [currentUser]);
-
   useEffect(() => {
     postsRef.current = posts;
   }, [posts]);
@@ -276,8 +231,6 @@ export default function App() {
   // Snackbar通知とハート受信時の演出を出す。初回ポーリングは既存通知をseenに登録するだけでトーストは出さない
   // （履歴を新着として誤検知しないため）。以降は未見のIDだけをトースト＆ハート数はSetサイズを上限で刈り込んで抑える。
   const seenNotifIds = useRef<Set<string> | null>(null);
-  const currentNavRef = useRef(currentNav);
-  useEffect(() => { currentNavRef.current = currentNav; }, [currentNav]);
 
   useEffect(() => {
     if (!userId) return;
@@ -305,9 +258,7 @@ export default function App() {
             seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
           }
         }
-        if (currentNavRef.current !== 'notifications') {
-          setNotifCount(notifs.filter(n => !n.read).length);
-        }
+        setNotifCount(notifs.filter(n => !n.read).length);
       } catch {
         // ignore polling errors
       }
@@ -330,146 +281,19 @@ export default function App() {
     }
   };
 
-  const handleLike = (postId: string) => {
-    let prevPost: Post | undefined;
-    setPosts(prev => prev.map(p => {
-      if (p.id !== postId) return p;
-      prevPost = p;
-      return {
-        ...p, liked: !p.liked,
-        likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
-        disliked: p.liked ? p.disliked : false,
-        dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
-      };
-    }));
-    const parity = (likeParity.current.get(postId) || 0) + 1;
-    likeParity.current.set(postId, parity);
-    if (likeTimers.current.has(postId)) clearTimeout(likeTimers.current.get(postId)!);
-    likeTimers.current.set(postId, setTimeout(async () => {
-      const p = likeParity.current.get(postId) || 0;
-      likeParity.current.delete(postId);
-      likeTimers.current.delete(postId);
-      if (p % 2 === 0) return;
-      try {
-        const updated = await api.posts.like(postId, userId);
-        setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
-      } catch {
-        if (prevPost) setPosts(prev => prev.map(p2 => p2.id === postId ? prevPost! : p2));
-        showToast('error', 'いいねの送信に失敗しました');
-      }
-    }, 2000));
-  };
-
-  const handleDislike = (postId: string) => {
-    let prevPost: Post | undefined;
-    setPosts(prev => prev.map(p => {
-      if (p.id !== postId) return p;
-      prevPost = p;
-      return {
-        ...p, disliked: !p.disliked,
-        dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1),
-        liked: p.disliked ? p.liked : false,
-        likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
-      };
-    }));
-    const parity = (dislikeParity.current.get(postId) || 0) + 1;
-    dislikeParity.current.set(postId, parity);
-    if (dislikeTimers.current.has(postId)) clearTimeout(dislikeTimers.current.get(postId)!);
-    dislikeTimers.current.set(postId, setTimeout(async () => {
-      const p = dislikeParity.current.get(postId) || 0;
-      dislikeParity.current.delete(postId);
-      dislikeTimers.current.delete(postId);
-      if (p % 2 === 0) return;
-      try {
-        const updated = await api.posts.dislike(postId, userId);
-        setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
-      } catch {
-        if (prevPost) setPosts(prev => prev.map(p2 => p2.id === postId ? prevPost! : p2));
-        showToast('error', '低評価の送信に失敗しました');
-      }
-    }, 2000));
-  };
-
-  const handleRepost = async (postId: string) => {
-    let prevPost: Post | undefined;
-    setPosts(prev => prev.map(p => {
-      if (p.id !== postId) return p;
-      prevPost = p;
-      return {
-        ...p, reposted: !p.reposted,
-        reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
-      };
-    }));
-    try {
-      const updated = await api.posts.repost(postId);
-      setPosts(prev => prev.map(p => p.id === postId ? updated : p));
-    } catch {
-      if (prevPost) setPosts(prev => prev.map(p => p.id === postId ? prevPost! : p));
-      showToast('error', 'リポストに失敗しました');
-    }
-  };
-
-  const handleHeart = (postId: string) => {
-    setPosts(prev => prev.map(p => p.id !== postId ? p : { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
-    const current = heartQueue.current.get(postId) || 0;
-    heartQueue.current.set(postId, current + 1);
-    if (heartTimers.current.has(postId)) clearTimeout(heartTimers.current.get(postId)!);
-    heartTimers.current.set(postId, setTimeout(async () => {
-      const count = heartQueue.current.get(postId) || 0;
-      heartQueue.current.delete(postId);
-      heartTimers.current.delete(postId);
-      try {
-        const updated = await api.posts.heart(postId, userId, count);
-        setPosts(prev => prev.map(p2 => p2.id === postId ? updated : p2));
-      } catch {
-        setPosts(prev => prev.map(p2 => p2.id === postId ? { ...p2, heartsTotal: Math.max(0, (Number(p2.heartsTotal) || 0) - count) } : p2));
-        showToast('error', 'ハートの送信に失敗しました');
-      }
-    }, 2000));
-  };
-
-  const handleAddReply = async (postId: string, replyText: string) => {
-    if (!replyText.trim()) return;
-    const tempId = `temp-${Date.now()}`;
-    const optimisticReply: Post = {
-      id: tempId, displayName: userId, createdAt: new Date().toISOString(), time: "たった今", content: replyText,
-      likes: 0, dislikes: 0, liked: false, disliked: false,
-      repliesCount: 0, reposts: 0, reposted: false,
-      avatarColor: "from-blue-500 to-indigo-600",
-      heartsTotal: 0, replies: [],
-      threadId: postId, parentPostId: postId,
-    };
+  const updatePost = useCallback((postId: string, updater: (p: Post) => Post) => {
     setPosts(prev => {
-      const next = prev.map(p => p.id === postId
-        ? { ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, optimisticReply] }
-        : p);
+      const next = prev.map(p => p.id === postId ? updater(p) : p);
       postsRef.current = next;
       return next;
     });
-    try {
-      const reply = await api.posts.replies.create(postId, {
-        displayName: userId,
-        content: replyText,
-        parentPostId: postId,
-      });
-      setPosts(prev => {
-        const next = prev.map(p => p.id === postId
-          ? { ...p, replies: p.replies.map(r => r.id === tempId ? { ...reply, avatarUrl: reply.avatarUrl ?? currentUser?.avatarUrl } : r) }
-          : p);
-        postsRef.current = next;
-        return next;
-      });
-    } catch {
-      setPosts(prev => {
-        const next = prev.map(p => p.id === postId
-          ? { ...p, repliesCount: Math.max(0, p.repliesCount - 1), replies: p.replies.filter(r => r.id !== tempId) }
-          : p);
-        postsRef.current = next;
-        return next;
-      });
-      showToast('error', '返信の送信に失敗しました');
-    }
-  };
+  }, []);
+
+  const { handleLike, handleDislike, handleRepost, handleHeart, handleAddReply } = usePostActions(
+    userId,
+    updatePost,
+    { avatarUrl: currentUser?.avatarUrl }
+  );
 
   const handleCreateReplyFromComposer = async (postId: string) => {
     const parts: string[] = [];
@@ -553,8 +377,6 @@ export default function App() {
 
   const handleNavigate = (id: string) => {
     setCurrentNav(id);
-    if (id === 'notifications') setNotifCount(0);
-    if (id === 'messages') setMessageCount(0);
   };
 
   const handleCreatePost = async () => {
@@ -874,6 +696,7 @@ export default function App() {
           notifCount={notifCount}
           messageCount={messageCount}
           userAvatarUrl={currentUser?.avatarUrl}
+          userSlug={currentUser?.slug}
           onPost={() => handleQuickPost()}
         />
         <div className="relative w-full max-w-2xl border-x border-gray-800 h-dvh flex flex-col shrink-0">
@@ -883,7 +706,7 @@ export default function App() {
               userId={userId}
               server={server}
               bbsMode={bbsMode}
-              onOpenSettings={() => handleNavigate('settings')}
+              onOpenSettings={() => router.push('/settings')}
               onToggleBbsMode={() => setBbsMode(bbsMode === '掲示板モード' ? 'SNSモード' : '掲示板モード')}
             />
 
@@ -998,57 +821,9 @@ export default function App() {
                 </>
               )}
 
-              {currentNav === 'search' && (
-                <SearchView
-                  onLike={handleLike}
-                  onDislike={handleDislike}
-                  onRepost={handleRepost}
-                  onHeart={handleHeart}
-                  onAddReply={handleAddReply}
-                  onQuickPost={handleQuickPost}
-                  openGame={(gameId?: string, postId?: string) => {
-                    if (gameId) handleOpenPostGame(gameId, postId);
-                  }}
-                  openCollab={handleOpenCollab}
-                  openMml={() => setActiveScreen('mml')}
-                  currentUserSlug={currentUser?.slug}
-                  currentUserDisplayName={currentUser?.displayName}
-                  onEditImage={handleEditPostImage}
-                  onEditMml={handleEditPostMml}
-                  onEditPost={handleEditPost}
-                  initialQuery={sidebarSearchQuery}
-                />
-              )}
-              {currentNav === 'notifications' && <NotificationView userId={userId} />}
-              {currentNav === 'messages' && <MessageView userId={userId} />}
-              {currentNav === 'profile' && (
-                <ProfileView
-                  userId={userId}
-                  displayName={currentUser?.displayName || userId}
-                  currentUserId={userId}
-                  currentUserSlug={currentUser?.slug}
-                  onLike={handleLike}
-                  onDislike={handleDislike}
-                  onHeart={handleHeart}
-                  onRepost={handleRepost}
-                  openCollab={handleOpenCollab}
-                  onProfileUpdate={handleProfileUpdate}
-                  onEditImage={handleEditPostImage}
-                  onEditMml={handleEditPostMml}
-                />
-              )}
-              {currentNav === 'links' && <LinksView />}
-              {currentNav === 'settings' && (
-                <SettingsView
-                  userId={userId}
-                  bbsMode={bbsMode}
-                  setBbsMode={setBbsMode}
-                  currentUser={currentUser}
-                />
-              )}
             </div>
 
-            <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} userAvatarUrl={currentUser?.avatarUrl} />
+            <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} userAvatarUrl={currentUser?.avatarUrl} userSlug={currentUser?.slug} />
 
             <FAB openText={() => handleQuickPost()} />
           </>
@@ -1134,8 +909,7 @@ export default function App() {
         </div>
         <RightSidebar
           onSearch={(query) => {
-            setSidebarSearchQuery(query);
-            handleNavigate('search');
+            router.push(`/search?q=${encodeURIComponent(query)}`);
           }}
         />
       </div>
