@@ -1,0 +1,68 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getClientIp } from '@/lib/ip';
+import { verifyTurnstileToken } from '@/lib/security/turnstile';
+import { scoreRequest } from '@/lib/security/scoring';
+import type { VerifyRequestBody } from '@/lib/security/types';
+
+export const runtime = 'edge';
+
+function getSessionIdFromCookie(request: NextRequest): string | null {
+  return request.cookies.get('unj_reze_session')?.value || null;
+}
+
+/**
+ * 投稿など不正利用の対象になりうるアクションの直前に呼び出す共通検証エンドポイント。
+ * Turnstile検証 → 多信号スコアリング → レート制限判定 の順で評価し、
+ * 呼び出し元ルートはこの結果を見て処理を継続するか拒否するかを決める。
+ */
+export async function POST(request: NextRequest) {
+  let body: VerifyRequestBody;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
+  }
+
+  if (!body.fingerprint) {
+    return NextResponse.json({ error: 'fingerprint is required' }, { status: 400 });
+  }
+
+  const ip = getClientIp(request.headers);
+  const sessionId = getSessionIdFromCookie(request);
+  const userAgent = request.headers.get('user-agent') || '';
+  // JA4/JA3 は Next.js/Netlify では取得できないため、TLSを終端する上流
+  // (Cloudflare Worker等)が注入する前提のヘッダを読む。無ければ null（判定不能）扱い。
+  const ja4 = request.headers.get('x-ja4-fingerprint') || request.headers.get('x-ja3-fingerprint') || null;
+
+  const turnstileResult = await verifyTurnstileToken(body.turnstileToken, ip);
+
+  const result = await scoreRequest({
+    fingerprint: body.fingerprint,
+    ip,
+    sessionId,
+    userAgent,
+    ja4,
+    turnstileOk: turnstileResult.success,
+    turnstileUnreachable: turnstileResult.unreachable,
+  });
+
+  if (result.blocked) {
+    return NextResponse.json(
+      { allowed: false, score: result.score, reasons: result.reasons },
+      { status: 403 }
+    );
+  }
+
+  if (result.rateLimited) {
+    return NextResponse.json(
+      { allowed: false, score: result.score, reasons: result.reasons },
+      { status: 429, headers: { 'Retry-After': '10' } }
+    );
+  }
+
+  return NextResponse.json({
+    allowed: true,
+    score: result.score,
+    reasons: result.reasons,
+  });
+}
