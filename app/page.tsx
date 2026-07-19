@@ -11,7 +11,6 @@ import EditPostModal from '@/components/EditPostModal';
 import TopTabs, { type FeedSubMode } from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
 import RankingSubTabs from '@/components/RankingSubTabs';
-import RightDrawer from '@/components/RightDrawer';
 import FeedList from '@/components/FeedList';
 import BottomNav from '@/components/BottomNav';
 import LeftSidebar from '@/components/LeftSidebar';
@@ -26,7 +25,6 @@ import NotificationView from '@/components/NotificationView';
 import MessageView from '@/components/MessageView';
 import ProfileView from '@/components/ProfileView';
 import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
-import LinksModal from '@/components/LinksModal';
 import ToastContainer from '@/components/ToastContainer';
 import HeartBurst from '@/components/HeartBurst';
 import { showToast, triggerHeartBurst } from '@/lib/toast';
@@ -44,12 +42,10 @@ export default function App() {
   const [topTab, setTopTab] = useState('everyone');
   const [feedSubMode, setFeedSubMode] = useState<FeedSubMode>('threads');
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
-  const [showLinksModal, setShowLinksModal] = useState(false);
   const [rankCategory, setRankCategory] = useState('イイ');
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyTargetPost, setReplyTargetPost] = useState<Post | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [userId, setUserId] = useState('');
   const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [server, setServer] = useState('/main');
@@ -806,15 +802,6 @@ export default function App() {
     <div className="bg-[#0b0e14] text-gray-100 h-dvh w-full flex flex-col overflow-hidden select-none font-sans relative">
       <ToastContainer />
       <HeartBurst />
-      {showLinksModal && <LinksModal onClose={() => setShowLinksModal(false)} />}
-      <RightDrawer
-        isOpen={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        userId={userId}
-        bbsMode={bbsMode}
-        setBbsMode={setBbsMode}
-        currentUser={currentUser}
-      />
 
       {activeScreen === 'drawing' && (
         <DrawingEditor
@@ -886,8 +873,6 @@ export default function App() {
           messageCount={messageCount}
           userAvatarUrl={currentUser?.avatarUrl}
           onPost={() => handleQuickPost()}
-          onOpenLinks={() => setShowLinksModal(true)}
-          onOpenSettings={() => setDrawerOpen(true)}
         />
         <div className="relative w-full max-w-2xl border-x border-gray-800 h-dvh flex flex-col shrink-0">
         {!activeScreen && (
@@ -896,7 +881,6 @@ export default function App() {
               userId={userId}
               server={server}
               bbsMode={bbsMode}
-              onOpenDrawer={() => setDrawerOpen(true)}
               onToggleBbsMode={() => setBbsMode(bbsMode === '掲示板モード' ? 'SNSモード' : '掲示板モード')}
             />
 

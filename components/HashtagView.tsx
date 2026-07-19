@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
-import { ArrowLeft, Hash } from 'lucide-react';
+import { Hash } from 'lucide-react';
 import { Post, AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import PostContainer from './PostContainer';
 import VirtualizedItem from './VirtualizedItem';
+import PageHeader from './PageHeader';
 
 function getCookie(name: string): string | undefined {
   if (typeof document === 'undefined') return undefined;
@@ -81,17 +81,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
   return (
     <div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
       <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
-        <div className="sticky top-0 z-10 bg-[#0b0e14]/95 backdrop-blur border-b border-gray-800">
-          <div className="flex items-center px-3 h-11">
-            <Link href="/" className="p-1.5 -ml-1.5 hover:bg-gray-100/10 rounded-full transition-colors">
-              <ArrowLeft size={18} className="text-gray-300" />
-            </Link>
-            <span className="ml-3 font-bold text-sm text-gray-200 flex items-center gap-1">
-              <Hash size={15} className="text-blue-400" />
-              {normalized.slice(1)}
-            </span>
-          </div>
-        </div>
+        <PageHeader title={normalized.slice(1)} icon={<Hash size={15} className="text-blue-400" />} />
 
         <div className="flex-1 overflow-y-auto divide-y divide-gray-800/80">
           {loading ? (

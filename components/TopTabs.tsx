@@ -45,7 +45,7 @@ export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedS
           ゲーム
         </button>
       </div>
-      <div className="flex space-x-4 px-4 py-1.5 text-xs bg-gray-100/5 text-gray-400 border-t border-gray-800/40">
+      <div className="flex justify-center space-x-4 px-4 py-1.5 text-xs bg-gray-100/5 text-gray-400 border-t border-gray-800/40">
         <button
           onClick={() => setFeedSubMode('threads')}
           className={`flex items-center transition-colors ${feedSubMode === 'threads' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}

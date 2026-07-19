@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { Home, Search, Bell, Mail, User, PenSquare, Link2, Settings } from 'lucide-react';
 
 interface LeftSidebarProps {
@@ -10,8 +11,6 @@ interface LeftSidebarProps {
   messageCount?: number;
   userAvatarUrl?: string;
   onPost: () => void;
-  onOpenLinks: () => void;
-  onOpenSettings: () => void;
 }
 
 const items = [
@@ -22,7 +21,7 @@ const items = [
   { id: 'profile', icon: User, label: 'マイページ' },
 ];
 
-export default function LeftSidebar({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl, onPost, onOpenLinks, onOpenSettings }: LeftSidebarProps) {
+export default function LeftSidebar({ current, set, notifCount = 0, messageCount = 0, userAvatarUrl, onPost }: LeftSidebarProps) {
   const badgeMap: Record<string, number> = {
     notifications: notifCount,
     messages: messageCount,
@@ -65,23 +64,23 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
           );
         })}
 
-        <button
-          onClick={onOpenLinks}
+        <Link
+          href="/links"
           className="flex items-center gap-4 px-3 py-3 rounded-full transition-all w-fit xl:w-full text-gray-300 hover:text-white hover:bg-white/10"
           title="リンク"
         >
           <Link2 size={26} strokeWidth={2} className="shrink-0" />
           <span className="hidden xl:inline text-lg truncate">リンク</span>
-        </button>
+        </Link>
 
-        <button
-          onClick={onOpenSettings}
+        <Link
+          href="/settings"
           className="flex items-center gap-4 px-3 py-3 rounded-full transition-all w-fit xl:w-full text-gray-300 hover:text-white hover:bg-white/10"
           title="設定とプライバシー"
         >
           <Settings size={26} strokeWidth={2} className="shrink-0" />
           <span className="hidden xl:inline text-lg truncate">設定とプライバシー</span>
-        </button>
+        </Link>
       </div>
 
       <button
