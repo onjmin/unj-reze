@@ -47,9 +47,11 @@ interface PostContainerProps {
   onEditMml?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
   userId?: string;
+  /** 「最新レス」タブ用: 返信元の元スレ投稿を引用カードとして本文の下に表示する */
+  quotedPost?: Post;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditPost, userId }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditPost, userId, quotedPost }: PostContainerProps) {
   const router = useRouter();
   const avatarInfo = getAvatarInfo(post.displayName);
   const [showReplyInput, setShowReplyInput] = useState(false);
@@ -296,6 +298,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               <span className="text-gray-500 text-[10px] font-medium">
                 {post.time}
                 {post.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
+                {quotedPost && <span className="ml-1 text-[9px] text-gray-500/70">↩返信</span>}
               </span>
             </div>
             <div ref={menuRef} className="relative">
@@ -455,6 +458,47 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             if (post.hasImage || post.hasGame) return null;
             const embed = extractFirstEmbed(post.content);
             return embed ? <div onClick={e => e.stopPropagation()}><EmbedPart embed={embed} /></div> : null;
+          })()}
+
+          {quotedPost && (() => {
+            const quotedAvatarInfo = getAvatarInfo(quotedPost.displayName);
+            return (
+              <div
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(`/post/${quotedPost.id}`);
+                }}
+                className="mb-2.5 rounded-xl border border-gray-800 bg-gray-100/[0.03] p-2.5 cursor-pointer hover:bg-gray-100/[0.06] transition-colors"
+              >
+                <div className="flex items-center gap-1.5 mb-1">
+                  <div
+                    className="w-4 h-4 rounded-full shrink-0 flex items-center justify-center text-[8px] font-bold text-white overflow-hidden"
+                    style={quotedPost.avatarUrl ? undefined : quotedAvatarInfo.style}
+                  >
+                    {quotedPost.avatarUrl ? (
+                      <img src={quotedPost.avatarUrl} alt={quotedAvatarInfo.username} className="w-full h-full object-cover rounded-full" />
+                    ) : (
+                      (() => {
+                        const QuotedAvatarIcon = quotedAvatarInfo.Icon;
+                        return <QuotedAvatarIcon className="w-2.5 h-2.5 text-white/40 leading-none" />;
+                      })()
+                    )}
+                  </div>
+                  <span className="font-bold text-[11px] text-gray-300">{quotedAvatarInfo.username}</span>
+                  <span className="text-gray-600 text-[10px]">{quotedPost.time}</span>
+                </div>
+                <p className="text-[11px] text-gray-400 line-clamp-2 whitespace-pre-wrap">
+                  {getDisplayContent(quotedPost.content)}
+                </p>
+                {quotedPost.hasImage && quotedPost.imageSrc && (
+                  <img
+                    src={quotedPost.imageSrc}
+                    alt={quotedPost.imageAlt || 'ユーザーアート'}
+                    className="mt-1.5 max-h-[120px] rounded-lg object-cover"
+                  />
+                )}
+              </div>
+            );
           })()}
 
           <div className="flex justify-between items-center text-gray-500 mt-1 max-w-[280px]">

@@ -8,7 +8,7 @@ import { decodeId } from '@/lib/sqids';
 import { stripMmlLine, extractMmlFromContent } from '@/lib/mml';
 import Header from '@/components/Header';
 import EditPostModal from '@/components/EditPostModal';
-import TopTabs from '@/components/TopTabs';
+import TopTabs, { type FeedSubMode } from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
 import RankingSubTabs from '@/components/RankingSubTabs';
 import RightDrawer from '@/components/RightDrawer';
@@ -41,6 +41,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [currentNav, setCurrentNav] = useState('home');
   const [topTab, setTopTab] = useState('everyone');
+  const [feedSubMode, setFeedSubMode] = useState<FeedSubMode>('threads');
   const [rankCategory, setRankCategory] = useState('イイ');
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -909,6 +910,8 @@ export default function App() {
                       setRankCategory('イイ');
                     }
                   }}
+                  feedSubMode={feedSubMode}
+                  setFeedSubMode={setFeedSubMode}
                   latestThreadCount={latestThreadCount}
                   latestReplyCount={latestReplyCount}
                   mediaCount={mediaCount}
@@ -972,6 +975,7 @@ export default function App() {
                   <FeedList
                     posts={posts}
                     activeTab={topTab}
+                    feedSubMode={feedSubMode}
                     rankCategory={rankCategory}
                     bbsMode={bbsMode}
                     onLike={handleLike}

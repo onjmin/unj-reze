@@ -5,11 +5,14 @@ import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
 import BbsBoardView from './BbsBoardView';
 import VirtualizedItem from './VirtualizedItem';
+import MediaGrid from './MediaGrid';
 import { Loader2 } from 'lucide-react';
+import type { FeedSubMode } from './TopTabs';
 
 interface FeedListProps {
   posts: Post[];
   activeTab: string;
+  feedSubMode?: FeedSubMode;
   rankCategory: string;
   bbsMode: string;
   onLike: (id: string) => void;
@@ -32,7 +35,7 @@ interface FeedListProps {
   userId?: string;
 }
 
-export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditPost, userId }: FeedListProps) {
+export default function FeedList({ posts, activeTab, feedSubMode = 'threads', rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditPost, userId }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -71,6 +74,64 @@ export default function FeedList({ posts, activeTab, rankCategory, bbsMode, onLi
     return (
       <div className="flex justify-center py-12">
         <Loader2 className="text-gray-500 animate-spin" size={20} />
+      </div>
+    );
+  }
+
+  if (activeTab === 'everyone' && feedSubMode === 'media') {
+    const mediaItems = posts.flatMap(p => [p, ...p.replies]).filter(p => p.hasImage && p.imageSrc);
+    return <MediaGrid items={mediaItems} />;
+  }
+
+  if (activeTab === 'everyone' && feedSubMode === 'replies') {
+    const repliesFlat = posts
+      .flatMap(p => p.replies.map(r => ({ reply: r, parent: p })))
+      .sort((a, b) => new Date(b.reply.createdAt).getTime() - new Date(a.reply.createdAt).getTime());
+
+    if (repliesFlat.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center p-12 text-center py-20 bg-gray-900/5">
+          <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 flex items-center justify-center mb-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
+            <span className="text-2xl">💬</span>
+          </div>
+          <p className="text-sm font-bold text-gray-200">まだ返信がありません。</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="divide-y divide-gray-800/80">
+        {repliesFlat.map(({ reply, parent }, index) => (
+          <VirtualizedItem key={reply.id} initialVisible={index < 8}>
+            <PostContainer
+              post={reply}
+              quotedPost={parent}
+              isRankingMode={false}
+              rankIndex={index + 1}
+              rankCategory={rankCategory}
+              onLike={onLike}
+              onDislike={onDislike}
+              onRepost={onRepost}
+              onHeart={onHeart}
+              onAddReply={onAddReply}
+              onQuickPost={onQuickPost}
+              openGame={openGame}
+              openCollab={openCollab}
+              openMml={openMml}
+              currentUserSlug={currentUserSlug}
+              currentUserDisplayName={currentUserDisplayName}
+              onModerationChange={onModerationChange}
+              onReplyClick={onReplyClick}
+              onEditImage={onEditImage}
+              onEditMml={onEditMml}
+              onEditPost={onEditPost}
+              userId={userId}
+            />
+          </VirtualizedItem>
+        ))}
+        <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
+          すべて表示されました 🌱
+        </div>
       </div>
     );
   }
