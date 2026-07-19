@@ -35,26 +35,28 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
         return (
           <button
             key={item.id}
-            className={`relative flex-1 min-w-0 px-1 py-2 rounded-full flex flex-col items-center justify-center gap-0.5 transition-all ${isActive ? 'text-[#a3e635]' : 'text-gray-500 hover:text-gray-300'}`}
+            className={`flex-1 min-w-0 px-1 py-2 rounded-full flex flex-col items-center justify-center gap-0.5 transition-all ${isActive ? 'text-[#a3e635]' : 'text-gray-500 hover:text-gray-300'}`}
             onClick={() => set(item.id)}
             title={item.label}
           >
-            {showAvatar ? (
-              <img
-                src={userAvatarUrl}
-                alt=""
-                className="w-[22px] h-[22px] rounded-full object-cover border border-gray-700/50"
-                onError={() => setAvatarBroken(true)}
-              />
-            ) : (
-              <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
-            )}
+            <span className="relative inline-flex">
+              {showAvatar ? (
+                <img
+                  src={userAvatarUrl}
+                  alt=""
+                  className="w-[22px] h-[22px] rounded-full object-cover border border-gray-700/50"
+                  onError={() => setAvatarBroken(true)}
+                />
+              ) : (
+                <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
+              )}
+              {badge > 0 && (
+                <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 leading-none shadow-lg animate-pop">
+                  {badge > 99 ? '99+' : badge}
+                </span>
+              )}
+            </span>
             <span className="text-[9px] leading-none truncate max-w-full">{item.label}</span>
-            {badge > 0 && (
-              <span className="absolute -top-0.5 right-1 bg-red-500 text-white text-[9px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1 leading-none shadow-lg animate-pop">
-                {badge > 99 ? '99+' : badge}
-              </span>
-            )}
           </button>
         );
       })}
