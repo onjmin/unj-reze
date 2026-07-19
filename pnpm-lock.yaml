@@ -18,8 +18,8 @@ importers:
         specifier: 1.0.3
         version: 1.0.3
       '@onjmin/dtm':
-        specifier: 0.1.61
-        version: 0.1.61
+        specifier: 0.1.62
+        version: 0.1.62
       '@onjmin/oekaki':
         specifier: 1.0.59
         version: 1.0.59
@@ -583,8 +583,8 @@ packages:
   '@onjmin/dtm@0.1.14':
     resolution: {integrity: sha512-4sgVlv2X0uc4kd0qT+CxdZnRkV/RrK8nIqg6yvD/qYobKPj2I1OvGbzlG+73Nheiw64VSekP3MCKptvMq7+VZg==}
 
-  '@onjmin/dtm@0.1.61':
-    resolution: {integrity: sha512-eMnvIyeXhN7pTDIaROvLrqIpf5H/pLOWvuCJuu3rxoPsHCjH5RJNSRa4xDBfn7mByV/ijym08kZeoASYkkE+Xg==}
+  '@onjmin/dtm@0.1.62':
+    resolution: {integrity: sha512-LXbd6dTVXIaH6qmYISHMJ6fW1ZqUk64dIPfxLYo5KgGI8Znm0Yh8NAOUErGKWkNjW2/FpOmfAHZ+BKWSi1U9sg==}
 
   '@onjmin/koe@1.0.3':
     resolution: {integrity: sha512-qxBtIKPcbtWJPo0jhi/pzfneOkE1s+Ok5DvCXpjI/NR8bbXEHM77XCn18buENe5eIZMdfUHEprIDuIp5eARONA==}
@@ -2905,7 +2905,7 @@ snapshots:
       '@onjmin/chord-parser': 1.0.2
       '@onjmin/koe': 1.0.3
 
-  '@onjmin/dtm@0.1.61':
+  '@onjmin/dtm@0.1.62':
     dependencies:
       '@onjmin/chord-parser': 1.0.2
       '@onjmin/dtm': 0.1.14
