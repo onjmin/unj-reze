@@ -743,6 +743,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
           px = x; py = y;
         }
         if (selectDragMode === 'rotate') {
+          if (!sel) return;
           const cx = sel.x + sel.w / 2;
           const cy = sel.y + sel.h / 2;
           const angle = Math.atan2(y - cy, x - cx) * 180 / Math.PI;
