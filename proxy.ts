@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCountryFromHeaders, isBlockedCountry } from '@/lib/geo';
 import { kvGet, kvSetEx } from '@/lib/kv';
+import { getClientIp } from '@/lib/ip';
 
 // Next.js 16: middleware は proxy に改称。
 // 注意: next.config.ts が output:"export"(GitHub Pages)の場合 proxy は動作しない。
@@ -10,15 +11,6 @@ import { kvGet, kvSetEx } from '@/lib/kv';
 const RATE_LIMIT_WINDOW_SEC = 10;
 const RATE_LIMIT_MAX = 30; // 1ウィンドウ(10s)あたりの書き込み上限 / IP
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get('x-nf-client-connection-ip') ||
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    '127.0.0.1'
-  );
-}
 
 async function isRateLimited(ip: string): Promise<{ limited: boolean; retryAfter: number }> {
   const windowIndex = Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000));
@@ -69,7 +61,7 @@ export async function proxy(request: NextRequest) {
 
   // API の書き込みメソッドにレートリミット
   if (pathname.startsWith('/api/') && WRITE_METHODS.has(request.method)) {
-    const ip = getClientIp(request);
+    const ip = getClientIp(request.headers);
     const { limited, retryAfter } = await isRateLimited(ip);
     if (limited) {
       return NextResponse.json(

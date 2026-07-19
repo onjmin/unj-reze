@@ -1,20 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { encodeId } from '@/lib/sqids';
+import { getClientIp } from '@/lib/ip';
 
 export const runtime = 'edge';
 
-function getIp(request: NextRequest): string {
-  return (
-    request.headers.get('x-nf-client-connection-ip') ||
-    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
-    request.headers.get('x-real-ip') ||
-    '127.0.0.1'
-  );
-}
-
 export async function GET(request: NextRequest) {
-  const ip = getIp(request);
+  const ip = getClientIp(request.headers);
   const info = await db.getLiveGameInfo(ip);
   const manifest = info.gameId ? (await db.getGame(info.gameId))?.manifest ?? null : null;
 

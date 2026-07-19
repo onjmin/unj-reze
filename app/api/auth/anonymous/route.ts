@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-
-export const runtime = 'edge';
+import { getClientIp } from '@/lib/ip';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -11,11 +10,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
   }
 
-  const ipAddress =
-    request.headers.get('x-nf-client-connection-ip') ||
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
-    '127.0.0.1';
+  const ipAddress = getClientIp(request.headers);
 
   const user = await db.getOrCreateAnonymousUser(sessionId, ipAddress);
 
