@@ -7880,8 +7880,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (!eventRunningRef.current && !e.talked && !frozen) {
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
-                  e.talked = true;
-                  runEventCommands(d.id, page.commands);
+                  const trig = page.trigger ?? 'action';
+                  if (trig === 'playerTouch' || trig === 'eventTouch') {
+                    e.talked = true;
+                    runEventCommands(d.id, page.commands);
+                  }
                 }
               }
               break;
@@ -8328,6 +8331,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       }
 
+      // ── 自動実行（autorun）イベントのチェック ──
+      if (!eventRunningRef.current && !battleRef.current.active && !frozen && !activeDialogueRef.current && !sceneFadeRef.current && !sceneTransRef.current) {
+        const autorunTarget = (isPlaying ? eng.entities : gameData.objects).find(o => {
+          const def = isPlaying ? (o as Entity).def : (o as ObjectDef);
+          const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
+          return page && page.trigger === 'autorun' && page.commands.length > 0;
+        });
+        if (autorunTarget) {
+          const def = isPlaying ? (autorunTarget as Entity).def : (autorunTarget as ObjectDef);
+          const page = findActivePage(def)!;
+          runEventCommands(def.id, page.commands);
+        }
+      }
+
       // ── action key: trigger event/message on overlapping object ──
       if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current && !frozen) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
@@ -8366,7 +8383,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // 怯えているモブはメッセージウィンドウを出さない（頭上のセリフのみ）
           } else {
             const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
-            if (page && page.commands.length > 0) {
+            if (page && (page.trigger ?? 'action') === 'action' && page.commands.length > 0) {
               runEventCommands(def.id, page.commands);
             } else if (def.message && !(isPlaying && !def.hazard)) {
               // 頭上に1文字ずつセリフが出るキャラ（非hazardの接触モブ）は、そちらで既に表示されるため
@@ -11111,7 +11128,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   const b = gameDataRef.current.layout25d?.billboards.find(bb => bb.id === billboardId);
                   if (!b || !b.pages || b.pages.length === 0) return false;
                   const page = findActivePage(b);
-                  if (page && page.commands.length > 0) {
+                  if (page && (page.trigger ?? 'action') === 'action' && page.commands.length > 0) {
                     runEventCommands(b.id, page.commands);
                     return true;
                   }
@@ -16240,6 +16257,15 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
                   </select>
                 )}
               </div>
+              {/* トリガー (起動条件) */}
+              <div className="text-[9px] text-gray-400 font-bold mt-1">トリガー（起動条件）</div>
+              <select value={page.trigger ?? 'action'} onChange={e => setPage(pi, { trigger: e.target.value as any })}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[9px] outline-none text-gray-200">
+                <option value="action">決定ボタン</option>
+                <option value="playerTouch">プレイヤーから接触</option>
+                <option value="eventTouch">イベントから接触</option>
+                <option value="autorun">自動実行</option>
+              </select>
               {/* コマンド一覧 */}
               <div className="text-[9px] text-gray-400 font-bold mt-1">コマンド</div>
               {page.commands.length === 0 && <p className="text-[9px] text-gray-500">（なし）</p>}

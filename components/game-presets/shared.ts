@@ -141,6 +141,7 @@ export type EventCommand =
 
 export interface EventPage {
   name?: string;
+  trigger?: 'action' | 'playerTouch' | 'eventTouch' | 'autorun';
   conditions: EventCondition;
   commands: EventCommand[];
 }
