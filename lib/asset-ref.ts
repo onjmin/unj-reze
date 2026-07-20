@@ -26,7 +26,7 @@ export function parseRef(raw: string): ParsedRef | null {
   if (idx === -1) return { scheme: 'url', value: raw, raw };
   const scheme = raw.slice(0, idx);
   const value = raw.slice(idx + 1);
-  const known = ['post', 'walk', 'url', 'tile', 'emoji', 'youtube', 'mml', 'none', 'direct'];
+  const known = ['post', 'walk', 'url', 'tile', 'emoji', 'youtube', 'nicovideo', 'soundcloud', 'mml', 'none', 'direct'];
   if (!known.includes(scheme)) return { scheme: 'url', value: raw, raw };
   return { scheme, value, raw };
 }
@@ -158,7 +158,7 @@ export function getBgmVolume(ref?: string): number {
 export function bgmRefToAsset(
   raw: string,
   rawMml?: string,
-): { type: 'youtube' | 'mml'; src: string; loop?: any; volume?: number } | null {
+): { type: 'youtube' | 'nicovideo' | 'soundcloud' | 'mml' | 'direct'; src: string; loop?: any; volume?: number } | null {
   const ref = parseRef(raw);
   if (!ref || ref.scheme === 'none' || !ref.value) return null;
 
@@ -171,11 +171,16 @@ export function bgmRefToAsset(
     valStr = valStr.slice(0, hashIdx);
   }
 
-  // BgmManager.extractVideoId は "v=" / "youtu.be/" / "/embed/" を含む URL を前提にしているため、
-  // youtube: scheme の値が素の動画ID（"youtube:VIDEO_ID" が本来の規約）のときはそのまま渡すと
-  // マッチせず再生されない。常にフルURLへ復元してから渡す。
   if (ref.scheme === 'youtube') return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
-  if (ref.scheme === 'url') return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
+  if (ref.scheme === 'nicovideo') return { type: 'nicovideo', src: valStr, volume };
+  if (ref.scheme === 'soundcloud') return { type: 'soundcloud', src: valStr, volume };
+  if (ref.scheme === 'direct') return { type: 'direct', src: valStr, volume };
+  if (ref.scheme === 'url') {
+    if (valStr.includes('nicovideo.jp')) return { type: 'nicovideo', src: valStr, volume };
+    if (valStr.includes('soundcloud.com')) return { type: 'soundcloud', src: valStr, volume };
+    if (valStr.includes('youtube.com') || valStr.includes('youtu.be')) return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
+    return { type: 'direct', src: valStr, volume };
+  }
   if (ref.scheme === 'mml') {
     if (valStr.startsWith('post:')) {
       return rawMml ? { type: 'mml', src: rawMml, loop: loopOption, volume } : null;
@@ -200,6 +205,8 @@ export function refLabel(raw: string): string {
     case 'tile': return `色 ${ref.value}`;
     case 'emoji': return ref.value;
     case 'youtube': return 'YouTube BGM';
+    case 'nicovideo': return 'ニコニコ BGM';
+    case 'soundcloud': return 'SoundCloud BGM';
     case 'mml': return ref.value.startsWith('post:') ? `MML投稿 #${ref.value.slice(5)}` : 'MML';
     case 'direct': return ref.value.length > 28 ? ref.value.slice(0, 26) + '…' : ref.value;
     default: return ref.raw;
@@ -209,6 +216,15 @@ export function refLabel(raw: string): string {
 export function youtubeRefFromUrl(url: string): string {
   const m = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
   return m ? `youtube:${m[1]}` : `youtube:${url}`;
+}
+
+export function nicovideoRefFromUrl(url: string): string {
+  const m = url.match(/(sm\d+|so\d+|nm\d+|\d+)/i);
+  return m ? `nicovideo:${m[1]}` : `nicovideo:${url}`;
+}
+
+export function soundcloudRefFromUrl(url: string): string {
+  return `soundcloud:${url}`;
 }
 
 /** youtube: scheme の値（素の動画ID、または生のYouTube URLも許容）を、BgmManager.extractVideoId

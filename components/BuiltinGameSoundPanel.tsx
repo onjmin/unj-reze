@@ -12,6 +12,7 @@ interface BuiltinGameSoundPanelProps {
   /** 'bgm'=BGM欄（ループ再生曲）、'sfx'=効果音欄（短い単発音） */
   kind: 'bgm' | 'sfx';
   onPick: (res: PickResult) => void;
+  onPlayPreview?: (stopFn: () => void) => void;
 }
 
 type Source = 'undertale' | 'deltarune' | 'mario' | 'megaman';
@@ -51,14 +52,24 @@ function buildEntries(source: Source, kind: 'bgm' | 'sfx'): Entry[] {
   return (Object.keys(MEGAMAN_SFX) as MegamanSfxKey[]).map(k => ({ key: k, label: k, url: megamanSfxUrl(k) }));
 }
 
+
+function formatTime(sec: number) {
+  if (!sec || isNaN(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
 const SOURCES: Source[] = ['undertale', 'deltarune', 'mario', 'megaman'];
 
 /** 内蔵の他プロジェクト音源タブ（アンダーテール／デルタルーン／マリオ127／ロックマンJS）。
  *  いずれもGitHub raw CDNで直接配信されている音声を直リンク（type: 'direct'）として選択する。 */
-export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSoundPanelProps) {
+export default function BuiltinGameSoundPanel({ kind, onPick, onPlayPreview }: BuiltinGameSoundPanelProps) {
   const sourcesAvailable = SOURCES.filter(s => buildEntries(s, kind).length > 0);
   const [source, setSource] = useState<Source>(sourcesAvailable[0] ?? 'mario');
   const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const entries = buildEntries(source, kind);
@@ -67,6 +78,8 @@ export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSound
     audioRef.current?.pause();
     audioRef.current = null;
     setPreviewKey(null);
+    setCurrentTime(0);
+    setDuration(0);
   };
 
   // 試聴中に他タブへ切り替え・ピッカーを閉じるなどでこのコンポーネントがアンマウントされても、
@@ -76,13 +89,27 @@ export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSound
 
   const preview = (entry: Entry) => {
     if (previewKey === entry.key) { stopPreview(); return; }
+    
+    onPlayPreview?.(() => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setPreviewKey(null);
+    });
+
     stopPreview();
     const a = new Audio(entry.url);
     a.volume = 0.6;
+    a.ontimeupdate = () => setCurrentTime(a.currentTime);
+    a.onloadedmetadata = () => setDuration(a.duration);
+    a.onended = () => {
+      setPreviewKey(k => (k === entry.key ? null : k));
+      setCurrentTime(0);
+    };
     a.play().catch(() => {});
-    a.onended = () => setPreviewKey(k => (k === entry.key ? null : k));
     audioRef.current = a;
     setPreviewKey(entry.key);
+    setCurrentTime(0);
+    setDuration(0);
   };
 
   const pick = (entry: Entry) => {
@@ -115,7 +142,34 @@ export default function BuiltinGameSoundPanel({ kind, onPick }: BuiltinGameSound
               >
                 {isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
               </button>
-              <span className="flex-1 min-w-0 text-[11px] text-gray-300 font-bold truncate">{entry.label}</span>
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-[11px] text-gray-300 font-bold truncate">{entry.label}</span>
+                  {isPrev && duration > 0 && (
+                    <span className="text-[9px] text-gray-400 font-mono shrink-0">
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </span>
+                  )}
+                </div>
+                {isPrev && (
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 100}
+                    step={0.1}
+                    value={currentTime}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (audioRef.current) {
+                        audioRef.current.currentTime = val;
+                        setCurrentTime(val);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  />
+                )}
+              </div>
               <button
                 onClick={() => pick(entry)}
                 className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-bold bg-[#a3e635]/20 text-[#a3e635] hover:bg-[#a3e635]/30 active:bg-[#a3e635]/40"

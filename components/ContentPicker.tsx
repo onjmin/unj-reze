@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
-import { youtubeRefFromUrl, toYoutubeWatchUrl, parseWalkRef } from '@/lib/asset-ref';
+import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, parseWalkRef } from '@/lib/asset-ref';
 import { loadImage, resolveSpriteRect } from '@/lib/walk-sprite';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
@@ -36,10 +36,10 @@ interface ContentPickerProps {
 }
 
 type ImageTab = 'posts' | 'slice' | 'history' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local';
-type BgmTab = 'youtube' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe' | 'builtinGame';
+type BgmTab = 'youtube' | 'nicovideo' | 'soundcloud' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe' | 'builtinGame';
 
 // BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
-const BGM_TABS: BgmTab[] = ['youtube', 'mmlPost', 'builtinGame', 'mmlRaw', 'direct'];
+const BGM_TABS: BgmTab[] = ['youtube', 'nicovideo', 'soundcloud', 'mmlPost', 'builtinGame', 'mmlRaw', 'direct'];
 const SFX_TABS: BgmTab[] = ['rpgenSe', 'builtinGame', 'direct'];
 
 // モーダルは閉じるたびにアンマウントされるため、タブ選択とスクロール位置をモジュール変数で覚えておき、
@@ -116,6 +116,14 @@ function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?:
   );
 }
 
+
+function formatTime(sec: number) {
+  if (!sec || isNaN(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
 export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], currentRef, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -128,6 +136,8 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const [bgmTab, setBgmTab] = useState<BgmTab>(() => {
     if (mode === 'bgm' && currentRefBase) {
       if (currentRefBase.startsWith('youtube:') && allowedBgmTabs.includes('youtube')) return 'youtube';
+      if (currentRefBase.startsWith('nicovideo:') && allowedBgmTabs.includes('nicovideo')) return 'nicovideo';
+      if (currentRefBase.startsWith('soundcloud:') && allowedBgmTabs.includes('soundcloud')) return 'soundcloud';
       if (currentRefBase.startsWith('direct:') && allowedBgmTabs.includes('direct')) return 'direct';
       if (currentRefBase.startsWith('mml:post:') && allowedBgmTabs.includes('mmlPost')) return 'mmlPost';
       if (currentRefBase.startsWith('mml:') && allowedBgmTabs.includes('mmlRaw')) return 'mmlRaw';
@@ -149,13 +159,34 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   });
   const [editingHistoryAsset, setEditingHistoryAsset] = useState<{ ref: string; url: string; label: string } | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
-  const stopRef = useRef<(() => void) | null>(null);
+  const [mmlStepInfo, setMmlStepInfo] = useState<{ currentStep: number; totalSteps: number } | null>(null);
+  const [directCurrentTime, setDirectCurrentTime] = useState(0);
+  const [directDuration, setDirectDuration] = useState(0);
+  const directAudioRef = useRef<HTMLAudioElement | null>(null);
+  const stopAllPreviewsRef = useRef<(() => void) | null>(null);
   const bgmRef = useRef<{ setVolume: (v: number) => void } | null>(null);
+  const activeMmlCacheRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentTab = mode === 'image' ? imageTab : bgmTab;
 
-  const changeImageTab = (tab: ImageTab) => { lastImageTab = tab; setImageTab(tab); };
-  const changeBgmTab = (tab: BgmTab) => { lastBgmTabByKind[bgmKind] = tab; setBgmTab(tab); };
+  const stopAllPreviews = () => {
+    stopAllPreviewsRef.current?.();
+    stopAllPreviewsRef.current = null;
+    if (directAudioRef.current) { directAudioRef.current.pause(); directAudioRef.current = null; }
+    bgmRef.current = null;
+    setPreviewKey(null);
+    setMmlStepInfo(null);
+    setDirectCurrentTime(0);
+    setDirectDuration(0);
+  };
+
+  const handleSubpanelPlayPreview = (stopFn: () => void) => {
+    stopAllPreviews();
+    stopAllPreviewsRef.current = stopFn;
+  };
+
+  const changeImageTab = (tab: ImageTab) => { stopAllPreviews(); lastImageTab = tab; setImageTab(tab); };
+  const changeBgmTab = (tab: BgmTab) => { stopAllPreviews(); lastBgmTabByKind[bgmKind] = tab; setBgmTab(tab); };
 
   // タブ切り替え時: 直前のタブのスクロール位置を保存し、切り替え先タブの位置を復元する
   useEffect(() => {
@@ -170,35 +201,101 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     scrollPositions.set(`${mode}:${currentTab}`, el.scrollTop);
   };
 
-  const previewMml = async (key: string, mml: string) => {
-    stopRef.current?.();
-    stopRef.current = null;
-    bgmRef.current = null;
-    if (previewKey === key) { setPreviewKey(null); return; }
+  const previewMml = async (key: string, mml: string, seekStep?: number) => {
+    const isSameKey = previewKey === key && seekStep === undefined;
+    stopAllPreviews();
+    if (isSameKey) return;
     if (!mml.trim()) return;
     try {
-      const { playMML } = await import('@onjmin/dtm');
-      const bgm = playMML(mml, {
-        loop: false,
-        volume: applyMasterVolume(100),
-        onStop: () => {
-          setPreviewKey(null);
-          stopRef.current = null;
-          bgmRef.current = null;
-        }
-      });
+      const dtm = await import('@onjmin/dtm');
+      const parsed = dtm.parseMML(mml);
+      const totalSteps = parsed.placements?.length > 0
+        ? Math.max(...parsed.placements.map((p: any) => p.startStep + p.durationSteps), 192)
+        : 192;
+      const bpm = parsed.bpm || 120;
+      activeMmlCacheRef.current = { mml, parsed, totalSteps, bpm };
+
+      const startAt = seekStep ?? 0;
+      let bgm: any;
+
+      if (startAt > 0 && dtm.playPlacements && parsed.placements) {
+        const remaining = parsed.placements.filter((p: any) => p.startStep + p.durationSteps > startAt);
+        const shifted = remaining.map((p: any) => ({ ...p, startStep: Math.max(0, p.startStep - startAt) }));
+        bgm = dtm.playPlacements(shifted, {
+          bpm,
+          volume: applyMasterVolume(100),
+          onTick: (relStep: number) => {
+            setMmlStepInfo({ currentStep: Math.min(startAt + relStep, totalSteps), totalSteps });
+          },
+          onStop: () => {
+            setPreviewKey(null);
+            setMmlStepInfo(null);
+            bgmRef.current = null;
+          }
+        });
+      } else {
+        bgm = dtm.playMML(mml, {
+          loop: false,
+          volume: applyMasterVolume(100),
+          onTick: (step: number) => {
+            setMmlStepInfo({ currentStep: Math.min(step, totalSteps), totalSteps });
+          },
+          onStop: () => {
+            setPreviewKey(null);
+            setMmlStepInfo(null);
+            bgmRef.current = null;
+          }
+        });
+      }
+
       bgmRef.current = bgm;
-      stopRef.current = () => {
-        bgm.stop();
-        bgm.destroy();
+      stopAllPreviewsRef.current = () => {
+        try { bgm.stop(); } catch (e) {}
+        try { bgm.destroy(); } catch (e) {}
+        setPreviewKey(null);
+        setMmlStepInfo(null);
+        bgmRef.current = null;
       };
       setPreviewKey(key);
+      setMmlStepInfo({ currentStep: startAt, totalSteps });
     } catch (e) {
       console.error(e);
     }
   };
 
-  useEffect(() => () => { stopRef.current?.(); }, []);
+  const seekMml = (key: string, mml: string, targetStep: number) => {
+    previewMml(key, mml, targetStep);
+  };
+
+  const toggleDirectAudioPreview = (url: string) => {
+    if (previewKey === 'directUrl') {
+      stopAllPreviews();
+      return;
+    }
+    stopAllPreviews();
+    const a = new Audio(url);
+    a.volume = (applyMasterVolume(100) / 100) * 0.7;
+    a.ontimeupdate = () => setDirectCurrentTime(a.currentTime);
+    a.onloadedmetadata = () => setDirectDuration(a.duration);
+    a.onended = () => {
+      setPreviewKey(null);
+      setDirectCurrentTime(0);
+    };
+    a.play().catch(() => {});
+    directAudioRef.current = a;
+    stopAllPreviewsRef.current = () => {
+      a.pause();
+      directAudioRef.current = null;
+      setPreviewKey(null);
+      setDirectCurrentTime(0);
+      setDirectDuration(0);
+    };
+    setPreviewKey('directUrl');
+    setDirectCurrentTime(0);
+    setDirectDuration(0);
+  };
+
+  useEffect(() => () => { stopAllPreviews(); }, []);
 
   useEffect(() => subscribeMasterVolume(() => bgmRef.current?.setVolume(applyMasterVolume(100))), []);
 
@@ -243,18 +340,33 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     onPick({ ref: youtubeRefFromUrl(v), url: v, label: 'YouTube BGM' });
   };
 
+  const pickNicovideo = () => {
+    const v = urlInput.trim();
+    if (!v) return;
+    onPick({ ref: nicovideoRefFromUrl(v), url: v, label: 'ニコニコ BGM' });
+  };
+
+  const pickSoundCloud = () => {
+    const v = urlInput.trim();
+    if (!v) return;
+    onPick({ ref: soundcloudRefFromUrl(v), url: v, label: 'SoundCloud BGM' });
+  };
+
   const pickMmlPost = (p: Post) => {
+    stopAllPreviews();
     const mml = extractMmlFromContent(p.content) || '';
     onPick({ ref: `mml:post:${p.id}`, rawMml: mml, label: `MML投稿 #${p.id}` });
   };
 
   const pickMmlRaw = () => {
+    stopAllPreviews();
     const v = mmlInput.trim();
     if (!v) return;
     onPick({ ref: `mml:${v}`, rawMml: v, label: 'MML' });
   };
 
   const pickDirect = () => {
+    stopAllPreviews();
     const v = urlInput.trim();
     if (!v) return;
     onPick({ ref: `direct:${v}`, url: v, label: v.length > 28 ? v.slice(0, 26) + '…' : v });
@@ -264,7 +376,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     `shrink-0 whitespace-nowrap px-2.5 py-2 text-[11px] font-bold rounded-md transition flex items-center justify-center gap-1 ${active ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-100/10'}`;
 
   return (
-    <div className="absolute inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60" onClick={onClose}>
+    <div className="absolute inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/60" onClick={() => { stopAllPreviews(); onClose(); }}>
       <div
         className="bg-[#0b0e14] w-full sm:w-[420px] sm:rounded-2xl rounded-t-2xl border border-gray-800 shadow-2xl flex flex-col max-h-[85vh] animate-fade-in-up"
         onClick={e => e.stopPropagation()}
@@ -273,7 +385,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
           <span className="text-xs font-bold text-gray-200">
             {mode === 'image' ? '画像を参照' : bgmKind === 'sfx' ? '効果音を参照' : 'BGMを参照'}
           </span>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 p-1 rounded-full hover:bg-gray-100/10">
+          <button onClick={() => { stopAllPreviews(); onClose(); }} className="text-gray-400 hover:text-gray-200 p-1 rounded-full hover:bg-gray-100/10">
             <X size={16} />
           </button>
         </div>
@@ -298,6 +410,12 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
             <>
               {allowedBgmTabs.includes('youtube') && (
                 <button className={tabBtn(bgmTab === 'youtube')} onClick={() => changeBgmTab('youtube')}><Video size={12} />YouTube</button>
+              )}
+              {allowedBgmTabs.includes('nicovideo') && (
+                <button className={tabBtn(bgmTab === 'nicovideo')} onClick={() => changeBgmTab('nicovideo')}>📺 ニコニコ</button>
+              )}
+              {allowedBgmTabs.includes('soundcloud') && (
+                <button className={tabBtn(bgmTab === 'soundcloud')} onClick={() => changeBgmTab('soundcloud')}>☁️ SoundCloud</button>
               )}
               {allowedBgmTabs.includes('mmlPost') && (
                 <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => changeBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
@@ -449,6 +567,36 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
             </div>
           )}
 
+          {/* BGM: nicovideo */}
+          {mode === 'bgm' && bgmTab === 'nicovideo' && (
+            <div className="space-y-2">
+              <label className="block text-[10px] text-gray-500">ニコニコ動画 URL / 動画ID</label>
+              <input
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                placeholder="https://www.nicovideo.jp/watch/sm... または sm12345678"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
+              />
+              <p className="text-[10px] text-gray-600">ニコニコ動画をBGMとしてループ再生します。</p>
+              <button onClick={pickNicovideo} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このBGMを使う</button>
+            </div>
+          )}
+
+          {/* BGM: soundcloud */}
+          {mode === 'bgm' && bgmTab === 'soundcloud' && (
+            <div className="space-y-2">
+              <label className="block text-[10px] text-gray-500">SoundCloud Track URL</label>
+              <input
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                placeholder="https://soundcloud.com/artist/track"
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
+              />
+              <p className="text-[10px] text-gray-600">SoundCloud 楽曲をBGMとしてループ再生します。</p>
+              <button onClick={pickSoundCloud} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このBGMを使う</button>
+            </div>
+          )}
+
           {/* BGM: mml post */}
           {mode === 'bgm' && bgmTab === 'mmlPost' && (
             <>
@@ -470,22 +618,41 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                     const mml = extractMmlFromContent(p.content) || '';
                     const key = `post-${p.id}`;
                     const isPrev = previewKey === key;
+                    const currentStep = isPrev ? (mmlStepInfo?.currentStep ?? 0) : 0;
+                    const totalSteps = isPrev ? (mmlStepInfo?.totalSteps ?? 1) : 1;
                     return (
-                      <div key={p.id} className="flex items-center gap-1.5 p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900">
-                        <button
-                          onClick={() => previewMml(key, mml)}
-                          className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
-                          title={isPrev ? '停止' : '試聴'}
-                        >
-                          {isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
-                        </button>
-                        <button onClick={() => pickMmlPost(p)} className="flex-1 min-w-0 text-left">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <Music size={11} className="text-pink-400 shrink-0" />
-                            <span className="text-[11px] text-gray-300 font-bold truncate">{p.displayName} #{p.id}</span>
+                      <div key={p.id} className="flex flex-col gap-1.5 p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => previewMml(key, mml)}
+                            className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
+                            title={isPrev ? '停止' : '試聴'}
+                          >
+                            {isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
+                          </button>
+                          <button onClick={() => pickMmlPost(p)} className="flex-1 min-w-0 text-left">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <Music size={11} className="text-pink-400 shrink-0" />
+                              <span className="text-[11px] text-gray-300 font-bold truncate">{p.displayName} #{p.id}</span>
+                            </div>
+                            <p className="text-[10px] text-gray-500 font-mono truncate">{mml}</p>
+                          </button>
+                        </div>
+                        {isPrev && (
+                          <div className="flex items-center gap-2 px-1 pt-1 border-t border-gray-800">
+                            <input
+                              type="range"
+                              min={0}
+                              max={totalSteps}
+                              value={Math.min(currentStep, totalSteps)}
+                              onChange={(e) => seekMml(key, mml, Number(e.target.value))}
+                              className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#a3e635]"
+                            />
+                            <span className="text-[9px] text-gray-400 font-mono shrink-0">
+                              {Math.floor((currentStep / totalSteps) * 100)}%
+                            </span>
                           </div>
-                          <p className="text-[10px] text-gray-500 font-mono truncate">{mml}</p>
-                        </button>
+                        )}
                       </div>
                     );
                   })}
@@ -512,6 +679,21 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 </button>
                 <button onClick={pickMmlRaw} disabled={!mmlInput.trim()} className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このMMLを使う</button>
               </div>
+              {previewKey === 'raw' && mmlStepInfo && (
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="range"
+                    min={0}
+                    max={mmlStepInfo.totalSteps}
+                    value={Math.min(mmlStepInfo.currentStep, mmlStepInfo.totalSteps)}
+                    onChange={(e) => seekMml('raw', mmlInput, Number(e.target.value))}
+                    className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#a3e635]"
+                  />
+                  <span className="text-[9px] text-gray-400 font-mono">
+                    {Math.floor((mmlStepInfo.currentStep / mmlStepInfo.totalSteps) * 100)}%
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
@@ -526,18 +708,51 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
               />
               <p className="text-[10px] text-gray-600">MP3/WAV の直リンクURLを入力。効果音に向いています。</p>
+              {urlInput.trim() && (
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-gray-900 border border-gray-700">
+                  <button
+                    onClick={() => toggleDirectAudioPreview(urlInput.trim())}
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${previewKey === 'directUrl' ? 'bg-red-600/20 text-red-400' : 'bg-blue-600/20 text-blue-400'}`}
+                  >
+                    {previewKey === 'directUrl' ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
+                  </button>
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <div className="flex justify-between items-center text-[10px] text-gray-400">
+                      <span>音声を試聴</span>
+                      {directDuration > 0 && <span>{formatTime(directCurrentTime)} / {formatTime(directDuration)}</span>}
+                    </div>
+                    {previewKey === 'directUrl' && (
+                      <input
+                        type="range"
+                        min={0}
+                        max={directDuration || 100}
+                        step={0.1}
+                        value={directCurrentTime}
+                        onChange={e => {
+                          const val = Number(e.target.value);
+                          if (directAudioRef.current) {
+                            directAudioRef.current.currentTime = val;
+                            setDirectCurrentTime(val);
+                          }
+                        }}
+                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
               <button onClick={pickDirect} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">このURLを使う</button>
             </div>
           )}
 
           {/* SE: RPGen sound library */}
           {mode === 'bgm' && bgmTab === 'rpgenSe' && (
-            <RpgenAssetPanel kind="sound" onPick={onPick} />
+            <RpgenAssetPanel kind="sound" onPick={res => { stopAllPreviews(); onPick(res); }} onPlayPreview={handleSubpanelPlayPreview} />
           )}
 
           {/* BGM/SE: other game project sound library (Undertale/Mario127/MegamanJS) */}
           {mode === 'bgm' && bgmTab === 'builtinGame' && (
-            <BuiltinGameSoundPanel kind={bgmKind === 'sfx' ? 'sfx' : 'bgm'} onPick={onPick} />
+            <BuiltinGameSoundPanel kind={bgmKind === 'sfx' ? 'sfx' : 'bgm'} onPick={res => { stopAllPreviews(); onPick(res); }} onPlayPreview={handleSubpanelPlayPreview} />
           )}
         </div>
       </div>

@@ -19,6 +19,7 @@ type Kind = 'walk' | 'sound';
 interface RpgenAssetPanelProps {
   kind: Kind;
   onPick: (res: PickResult) => void;
+  onPlayPreview?: (stopFn: () => void) => void;
 }
 
 const PER_PAGE = 48;
@@ -43,7 +44,15 @@ const caches: Record<Kind, AssetCache> = { walk: emptyCache(), sound: emptyCache
 const walkNameCache = new Map<string, string>();
 const soundNameCache = new Map<string, string>();
 
-export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) {
+
+function formatTime(sec: number) {
+  if (!sec || isNaN(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+export default function RpgenAssetPanel({ kind, onPick, onPlayPreview }: RpgenAssetPanelProps) {
   const cache = caches[kind];
   const [query, setQuery] = useState(cache.query);
   const [submitted, setSubmitted] = useState(cache.submitted);
@@ -57,6 +66,8 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
 
   const [open, setOpen] = useState<SAnimSheetItem | SoundSheetItem | null>(cache.open);
   const [previewNo, setPreviewNo] = useState<string | null>(null);
+  const [soundCurrentTime, setSoundCurrentTime] = useState(0);
+  const [soundDuration, setSoundDuration] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // 復元直後の1回だけは、キャッシュ済みのデータをそのまま使い、二重取得・重複追加を避ける
   const skipInitialFetch = useRef(cache.sheets.length > 0 || cache.items.length > 0);
@@ -119,12 +130,25 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
   const toggleSoundPreview = (id: string) => {
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     if (previewNo === id) { setPreviewNo(null); return; }
+    
+    onPlayPreview?.(() => {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+      setPreviewNo(null);
+    });
+
     const a = new Audio(soundUrl(id));
     a.volume = 0.7;
-    a.onended = () => setPreviewNo((cur) => (cur === id ? null : cur));
+    a.ontimeupdate = () => setSoundCurrentTime(a.currentTime);
+    a.onloadedmetadata = () => setSoundDuration(a.duration);
+    a.onended = () => {
+      setPreviewNo((cur) => (cur === id ? null : cur));
+      setSoundCurrentTime(0);
+    };
     a.play().catch(() => {});
     audioRef.current = a;
     setPreviewNo(id);
+    setSoundCurrentTime(0);
+    setSoundDuration(0);
   };
 
   const pickWalk = (m: SAnimSheetMember, sheetName: string) => {
@@ -288,9 +312,35 @@ export default function RpgenAssetPanel({ kind, onPick }: RpgenAssetPanelProps) 
                   >
                     {previewNo === item.id ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
                   </button>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[11px] text-gray-200 font-bold truncate">{item.title || `#${item.no}`}</p>
-                    <p className="text-[9px] text-gray-600 font-mono truncate">{item.id}</p>
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className="text-[11px] text-gray-200 font-bold truncate">{item.title || `#${item.no}`}</p>
+                      {previewNo === item.id && soundDuration > 0 && (
+                        <span className="text-[9px] text-gray-400 font-mono shrink-0">
+                          {formatTime(soundCurrentTime)} / {formatTime(soundDuration)}
+                        </span>
+                      )}
+                    </div>
+                    {previewNo === item.id ? (
+                      <input
+                        type="range"
+                        min={0}
+                        max={soundDuration || 100}
+                        step={0.1}
+                        value={soundCurrentTime}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (audioRef.current) {
+                            audioRef.current.currentTime = val;
+                            setSoundCurrentTime(val);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#a3e635]"
+                      />
+                    ) : (
+                      <p className="text-[9px] text-gray-600 font-mono truncate">{item.id}</p>
+                    )}
                   </div>
                   <button onClick={() => pickSoundItem(item)} className="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold shrink-0 flex items-center gap-1">
                     <Check size={11} />使う

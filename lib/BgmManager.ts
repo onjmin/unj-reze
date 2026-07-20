@@ -26,6 +26,10 @@ class BgmManager {
       await this.playMidi(manifest.bgm.src, volume);
     } else if (manifest.bgm.type === 'youtube') {
       this.playYoutube(manifest.bgm.src, volume);
+    } else if (manifest.bgm.type === 'nicovideo') {
+      this.playNicovideo(manifest.bgm.src, volume);
+    } else if (manifest.bgm.type === 'soundcloud') {
+      this.playSoundCloud(manifest.bgm.src, volume);
     } else if (manifest.bgm.type === 'mml') {
       this.playMml(manifest.bgm.src, manifest.bgm.loop, volume);
     } else if (manifest.bgm.type === 'direct') {
@@ -35,7 +39,7 @@ class BgmManager {
 
   stop() {
     if (this.current) { try { this.current.stop(); } catch (e) { } this.current = null; }
-    document.querySelectorAll('.bgm-youtube-container').forEach(el => el.remove());
+    document.querySelectorAll('.bgm-youtube-container, .bgm-nicovideo-container, .bgm-soundcloud-container').forEach(el => el.remove());
   }
 
   // ── 直リンク音声（MP3/WAV）をループ再生 ──
@@ -210,6 +214,142 @@ class BgmManager {
         container.remove();
       },
       setBaseVolume: (v) => { try { player?.setVolume(applyMasterVolume(v)); } catch (e) {} },
+    };
+  }
+
+  // ── ニコニコ動画 ──
+
+  private extractNicovideoId(url: string): string | null {
+    const m = url.match(/(sm\d+|so\d+|nm\d+|\d+)/i);
+    return m ? m[1] : null;
+  }
+
+  private playNicovideo(url: string, volume: number = 50) {
+    const videoId = this.extractNicovideoId(url);
+    if (!videoId) return;
+
+    const existing = document.querySelector('.bgm-nicovideo-container');
+    if (existing) existing.remove();
+
+    const container = document.createElement('div');
+    container.className = 'bgm-nicovideo-container';
+    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(container);
+
+    const iframe = document.createElement('iframe');
+    iframe.src = `https://embed.nicovideo.jp/watch/${videoId}?jsapiversion=1&autoplay=1`;
+    iframe.style.cssText = 'width:1px;height:1px;border:none';
+    iframe.allow = 'autoplay';
+    container.appendChild(iframe);
+
+    const origin = 'https://embed.nicovideo.jp';
+    const postMsg = (data: object) => {
+      iframe.contentWindow?.postMessage(
+        Object.assign({ sourceConnectorType: 1 }, data),
+        origin
+      );
+    };
+
+    const handleMsg = (e: MessageEvent) => {
+      if (e.origin !== origin) return;
+      const data = e.data?.data;
+      switch (e.data?.eventName) {
+        case 'playerStatusChange': {
+          if (data?.playerStatus === 4) { // ended -> replay
+            postMsg({ eventName: 'play' });
+          }
+          break;
+        }
+        case 'loadComplete': {
+          postMsg({ eventName: 'volumeChange', data: { volume: (applyMasterVolume(volume) / 100) * 0.96 } });
+          postMsg({ eventName: 'play' });
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMsg);
+
+    const initTimer = setTimeout(() => {
+      postMsg({ eventName: 'volumeChange', data: { volume: (applyMasterVolume(volume) / 100) * 0.96 } });
+      postMsg({ eventName: 'play' });
+    }, 1200);
+
+    this.current = {
+      stop: () => {
+        window.removeEventListener('message', handleMsg);
+        clearTimeout(initTimer);
+        try { postMsg({ eventName: 'pause' }); } catch (e) {}
+        container.remove();
+      },
+      setBaseVolume: (v) => {
+        postMsg({ eventName: 'volumeChange', data: { volume: (applyMasterVolume(v) / 100) * 0.96 } });
+      },
+    };
+  }
+
+  // ── SoundCloud ──
+
+  private playSoundCloud(url: string, volume: number = 50) {
+    const existing = document.querySelector('.bgm-soundcloud-container');
+    if (existing) existing.remove();
+
+    const container = document.createElement('div');
+    container.className = 'bgm-soundcloud-container';
+    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(container);
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'bgm-soundcloud-iframe';
+    const soundcloudSrc = url.startsWith('http')
+      ? `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=true&hide_related=true&show_comments=false&show_user=false&show_reposts=false&visual=false`
+      : url;
+    iframe.src = soundcloudSrc;
+    iframe.style.cssText = 'width:1px;height:1px;border:none';
+    iframe.allow = 'autoplay';
+    container.appendChild(iframe);
+
+    const loadScSdk = () => {
+      if ((window as any).SC && (window as any).SC.Widget) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        if (!document.getElementById('soundcloud-widget-api-script')) {
+          const tag = document.createElement('script');
+          tag.id = 'soundcloud-widget-api-script';
+          tag.src = 'https://w.soundcloud.com/player/api.js';
+          const first = document.getElementsByTagName('script')[0];
+          first?.parentNode?.insertBefore(tag, first);
+        }
+        const check = setInterval(() => {
+          if ((window as any).SC && (window as any).SC.Widget) {
+            clearInterval(check);
+            resolve();
+          }
+        }, 100);
+      });
+    };
+
+    let widget: any = null;
+    loadScSdk().then(() => {
+      widget = (window as any).SC.Widget(iframe);
+      widget.bind((window as any).SC.Widget.Events.READY, () => {
+        widget.setVolume(applyMasterVolume(volume));
+        widget.play();
+      });
+      widget.bind((window as any).SC.Widget.Events.FINISH, () => {
+        widget.play(); // loop
+      });
+    });
+
+    this.current = {
+      stop: () => {
+        try { if (widget) widget.pause(); } catch (e) {}
+        container.remove();
+      },
+      setBaseVolume: (v) => {
+        try { if (widget) widget.setVolume(applyMasterVolume(v)); } catch (e) {}
+      },
     };
   }
 }
