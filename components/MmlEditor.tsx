@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Music, Loader2, History } from 'lucide-react';
+import { parseMML, parseMmlMeta, TRACKS_SIMPLE, type DawMode } from '@onjmin/dtm';
 import { getStudio } from '@/lib/dtm';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import HistoryModal from '@/components/HistoryModal';
@@ -11,6 +12,20 @@ interface MmlEditorProps {
   onClose: () => void;
   onSave: (mml: string) => void;
   initialMml?: string;
+}
+
+// 再編集時: アドバンスモードで作られたMMLを開いたら自動的にアドバンスモードへ切り替える。
+// 判定基準は @onjmin/dtm 側の「シンプルモードで読み込むと上級者モードへの切替を提案する」
+// 条件（mergedTrackCount > 0 || meta.mode === 'advanced'）に合わせる。
+function detectMode(mml?: string): DawMode {
+  if (!mml) return 'simple';
+  try {
+    if (parseMmlMeta(mml).mode === 'advanced') return 'advanced';
+    const { mergedTrackCount } = parseMML(mml, { clampTrackCount: TRACKS_SIMPLE.length });
+    return mergedTrackCount > 0 ? 'advanced' : 'simple';
+  } catch (e) {
+    return 'simple';
+  }
 }
 
 // 編集UIは @onjmin/dtm の createDtmStudio().mountModeSwitch() に差し替え。
@@ -37,7 +52,7 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
       if (mountRef.current) {
         modeSwitchRef.current = studio.mountModeSwitch(mountRef.current, {
           editorTarget: mountRef.current,
-          mode: 'simple',
+          mode: detectMode(initialMml),
           position: 'prepend',
           editorOptions: {
             ...(initialMml ? { initialMML: initialMml } : undefined),
