@@ -326,7 +326,7 @@ const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId
     armors: manifest.armors ?? base.armors,
     effects: (manifest.effects ?? base.effects)?.map(ef => ({
       ...ef,
-      imageUrl: ef.imageRef.startsWith('url:') ? (imageRefToUrl(ef.imageRef) ?? undefined) : (hydrateUrlFromRef(ef.imageRef) ?? ef.imageUrl),
+      imageUrl: ef.imageRef?.startsWith('url:') ? (imageRefToUrl(ef.imageRef) ?? undefined) : (hydrateUrlFromRef(ef.imageRef) ?? ef.imageUrl),
     })),
     phases: manifest.phases ?? base.phases,
     titleScreen: manifest.titleScreen ?? base.titleScreen,
@@ -2081,7 +2081,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!effectId) return;
     const effect = (gameDataRef.current.effects ?? []).find(e => e.id === effectId);
     if (!effect) return;
-    const url = imageRefToUrl(effect.imageRef) ?? effect.imageUrl;
+    const url = imageRefToUrl(effect.imageRef) ?? hydrateUrlFromRef(effect.imageRef) ?? effect.imageUrl;
     if (!url) return;
     const key = `${effectId}-${Date.now()}-${Math.random()}`;
     setBattleEffects(list => [...list, { key, effect, url, foeIdx }]);
@@ -5025,15 +5025,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, [ensureImage]);
 
   // ── エフェクトアニメーション（フィールド）: 再生中インスタンスの一覧 ──
-  const activeFieldEffectsRef = useRef<{ key: string; effect: EffectPreset; imgUrl: string; worldX: number; worldY: number; startTime: number }[]>([]);
+  const activeFieldEffectsRef = useRef<{ key: string; effect: EffectPreset; imgUrl: string; worldX: number; worldY: number; startTime: number; started: boolean }[]>([]);
   /** 指定ワールド座標にエフェクトを1回再生する。画像を warm-up し、SFX があれば1回だけ再生する。 */
   const spawnFieldEffect = useCallback((effect: EffectPreset, worldX: number, worldY: number) => {
-    const url = imageRefToUrl(effect.imageRef) ?? effect.imageUrl;
+    const url = imageRefToUrl(effect.imageRef) ?? hydrateUrlFromRef(effect.imageRef) ?? effect.imageUrl;
     if (!url) return;
     ensureImage(url);
     activeFieldEffectsRef.current.push({
       key: `${effect.id}-${Date.now()}-${Math.random()}`,
-      effect, imgUrl: url, worldX, worldY, startTime: performance.now(),
+      effect, imgUrl: url, worldX, worldY, startTime: 0, started: false,
     });
     if (effect.sfx) playSfx(effect.sfx);
   }, [ensureImage]);
@@ -5053,9 +5053,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           cmd.choices.forEach(ch => preloadEvents(ch.commands));
         } else if (cmd.type === 'changeSprite') {
           ensureImageFromRef(cmd.spriteRef, cmd.spriteUrl);
+        } else if (cmd.type === 'playEffect') {
+          if (cmd.effectId) {
+            const ef = (gameData.effects ?? []).find(e => e.id === cmd.effectId);
+            if (ef) {
+              const url = imageRefToUrl(ef.imageRef) ?? hydrateUrlFromRef(ef.imageRef) ?? ef.imageUrl;
+              if (url) ensureImage(url);
+            }
+          }
         }
       });
     };
+
+    (gameData.effects ?? []).forEach(ef => {
+      const url = imageRefToUrl(ef.imageRef) ?? hydrateUrlFromRef(ef.imageRef) ?? ef.imageUrl;
+      if (url) ensureImage(url);
+    });
 
     Object.values(gameData.tiles).forEach(t => ensureImage(t.imageUrl));
     gameData.objects.forEach(o => {
@@ -9633,20 +9646,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const nowPerf = performance.now();
         const stillActive: typeof activeFieldEffectsRef.current = [];
         for (const fx of activeFieldEffectsRef.current) {
+          const domImg = imgCache.current.get(fx.imgUrl);
+          if (!domImg || !domImg.complete || domImg.naturalWidth <= 0) {
+            stillActive.push(fx);
+            continue;
+          }
+          if (!fx.started) {
+            fx.startTime = nowPerf;
+            fx.started = true;
+          }
           const elapsed = (nowPerf - fx.startTime) / 1000;
           const fps = fx.effect.fps ?? 12;
           const frame = Math.floor(elapsed * fps);
           if (frame >= fx.effect.frameCount) continue; // 再生終了：リストから除外（stillActive に積まない）
           stillActive.push(fx);
-          const domImg = imgCache.current.get(fx.imgUrl);
-          if (domImg && domImg.complete && domImg.naturalWidth > 0) {
-            const frameW = domImg.naturalWidth / fx.effect.frameCount;
-            const destH = TILE_SIZE * 1.5;
-            const destW = destH * (frameW / domImg.naturalHeight);
-            const screenX = fx.worldX - camXRef.current;
-            const screenY = fx.worldY - camYRef.current;
-            ctx.drawImage(domImg, frame * frameW, 0, frameW, domImg.naturalHeight, screenX - destW / 2, screenY - destH / 2, destW, destH);
-          }
+
+          const frameW = domImg.naturalWidth / fx.effect.frameCount;
+          const destH = TILE_SIZE * 1.5;
+          const destW = destH * (frameW / domImg.naturalHeight);
+          const screenX = fx.worldX - camXRef.current;
+          const screenY = fx.worldY - camYRef.current;
+          ctx.drawImage(domImg, frame * frameW, 0, frameW, domImg.naturalHeight, screenX - destW / 2, screenY - destH / 2, destW, destH);
         }
         activeFieldEffectsRef.current = stillActive;
       }
