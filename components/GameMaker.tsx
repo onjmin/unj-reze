@@ -1123,11 +1123,11 @@ function EffectSpriteAnim({
 
 /** 組み込みのエフェクトアニメーションプリセット（id は追加時に uid() で採番）。RPGEN のスペルシートを流用。 */
 const BUILT_IN_EFFECT_PRESETS: Omit<EffectPreset, 'id'>[] = [
-  { name: 'ファイアボール', imageRef: 'url:https://rpgen.org/dq/spells/7/spell.png', imageUrl: 'https://rpgen.org/dq/spells/7/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', type: 'direct' } },
-  { name: '炎', imageRef: 'url:https://rpgen.org/dq/spells/18/spell.png', imageUrl: 'https://rpgen.org/dq/spells/18/spell.png', frameCount: 8, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', type: 'direct' } },
-  { name: '爆発', imageRef: 'url:https://rpgen.org/dq/spells/6/spell.png', imageUrl: 'https://rpgen.org/dq/spells/6/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/hR4B8I.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/hR4B8I.mp3', type: 'direct' } },
-  { name: 'かぜ', imageRef: 'url:https://rpgen.org/dq/spells/3/spell.png', imageUrl: 'https://rpgen.org/dq/spells/3/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/XoGbTD.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/XoGbTD.mp3', type: 'direct' } },
-  { name: 'こおり', imageRef: 'url:https://rpgen.org/dq/spells/15/spell.png', imageUrl: 'https://rpgen.org/dq/spells/15/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/QSRAPG.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/QSRAPG.mp3', type: 'direct' } },
+  { name: '火の玉', imageRef: 'url:https://rpgen.org/dq/spells/7/spell.png', imageUrl: 'https://rpgen.org/dq/spells/7/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/usF2l8.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/usF2l8.mp3', type: 'direct' } },
+  { name: '炎', imageRef: 'url:https://rpgen.org/dq/spells/18/spell.png', imageUrl: 'https://rpgen.org/dq/spells/18/spell.png', frameCount: 8, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HyTVhK.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HyTVhK.mp3', type: 'direct' } },
+  { name: '爆発', imageRef: 'url:https://rpgen.org/dq/spells/6/spell.png', imageUrl: 'https://rpgen.org/dq/spells/6/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HydVaH.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HydVaH.mp3', type: 'direct' } },
+  { name: '風', imageRef: 'url:https://rpgen.org/dq/spells/3/spell.png', imageUrl: 'https://rpgen.org/dq/spells/3/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/1Pv71N.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/1Pv71N.mp3', type: 'direct' } },
+  { name: '氷', imageRef: 'url:https://rpgen.org/dq/spells/15/spell.png', imageUrl: 'https://rpgen.org/dq/spells/15/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/XCdbnX.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/XCdbnX.mp3', type: 'direct' } },
 ];
 
 let globalSmcMetadata: any = null;
@@ -11683,19 +11683,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {undertaleMenu === 'act' && (() => {
                             const acMoves = availableMoves(bd.moves, pr.level);
                             return (
-                            <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                              {acMoves.map((m, i) => (
-                                <button key={`m${i}`} disabled={!canMenu || pr.mp < m.cost}
-                                  onClick={() => { setUndertaleSubCursor(i); if (m.heal) { setUndertaleMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
-                                  className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
-                                  {undertaleSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                                {acMoves.map((m, i) => (
+                                  <button key={`m${i}`} disabled={!canMenu || pr.mp < m.cost}
+                                    onClick={() => { setUndertaleSubCursor(i); if (m.heal) { setUndertaleMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
+                                    className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
+                                    {undertaleSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
+                                  </button>
+                                ))}
+                                <button onClick={() => { setUndertaleSubCursor(acMoves.length); setUndertaleMenu('root'); }}
+                                  className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === acMoves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                  {undertaleSubCursor === acMoves.length ? '❤ ' : '  '}もどる
                                 </button>
-                              ))}
-                              <button onClick={() => { setUndertaleSubCursor(acMoves.length); setUndertaleMenu('root'); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === acMoves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                                {undertaleSubCursor === acMoves.length ? '❤ ' : '  '}もどる
-                              </button>
-                            </div>
+                              </div>
                             );
                           })()}
                           {undertaleMenu === 'target' && (
