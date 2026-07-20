@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy } from 'lucide-react';
+import Link from 'next/link';
+import { ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy, FileText, Shield, Cookie, Eye, ChevronRight } from 'lucide-react';
 import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
@@ -185,6 +186,46 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
             </button>
           </div>
           {redeemMsg && <p className="text-[9px] text-gray-400">{redeemMsg}</p>}
+        </div>
+
+        <div className="h-px bg-gray-800" />
+
+        <div className="space-y-2">
+          <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">規約・ポリシー・アクセシビリティ</label>
+          <div className="space-y-1">
+            <Link
+              href="/terms"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-xs text-gray-300"
+            >
+              <FileText size={14} className="text-blue-400 shrink-0" />
+              <span className="flex-1">利用規約</span>
+              <ChevronRight size={14} className="text-gray-600 shrink-0" />
+            </Link>
+            <Link
+              href="/privacy"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-xs text-gray-300"
+            >
+              <Shield size={14} className="text-emerald-400 shrink-0" />
+              <span className="flex-1">プライバシーポリシー</span>
+              <ChevronRight size={14} className="text-gray-600 shrink-0" />
+            </Link>
+            <Link
+              href="/cookies"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-xs text-gray-300"
+            >
+              <Cookie size={14} className="text-amber-400 shrink-0" />
+              <span className="flex-1">Cookie・ストレージポリシー</span>
+              <ChevronRight size={14} className="text-gray-600 shrink-0" />
+            </Link>
+            <Link
+              href="/accessibility"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-xs text-gray-300"
+            >
+              <Eye size={14} className="text-purple-400 shrink-0" />
+              <span className="flex-1">アクセシビリティ方針</span>
+              <ChevronRight size={14} className="text-gray-600 shrink-0" />
+            </Link>
+          </div>
         </div>
       </div>
 

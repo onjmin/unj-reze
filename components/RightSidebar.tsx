@@ -2,6 +2,7 @@
 
 import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 
@@ -62,13 +63,13 @@ export default function RightSidebar({ onSearch }: RightSidebarProps) {
         </div>
       )}
 
-      <div className="text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1 px-2 pb-4">
-        <span>利用規約</span>
-        <span>プライバシー</span>
-        <span>Cookie</span>
-        <span>アクセシビリティ</span>
-        <span>もっと見る</span>
-        <span>© {new Date().getFullYear()} unj-reze</span>
+      <div className="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-1.5 px-2 pb-4">
+        <Link href="/terms" className="hover:text-gray-300 hover:underline transition-colors">利用規約</Link>
+        <Link href="/privacy" className="hover:text-gray-300 hover:underline transition-colors">プライバシーポリシー</Link>
+        <Link href="/cookies" className="hover:text-gray-300 hover:underline transition-colors">Cookie</Link>
+        <Link href="/accessibility" className="hover:text-gray-300 hover:underline transition-colors">アクセシビリティ</Link>
+        <Link href="/settings" className="hover:text-gray-300 hover:underline transition-colors">設定とプライバシー</Link>
+        <span className="text-gray-600">© {new Date().getFullYear()} unj-reze</span>
       </div>
     </div>
   );
