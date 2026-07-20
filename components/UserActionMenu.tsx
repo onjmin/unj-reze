@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { User, UserPlus, UserMinus, AtSign, Mail } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -28,6 +29,7 @@ export default function UserActionMenu({
   position,
 }: UserActionMenuProps) {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [isFollowingTarget, setIsFollowingTarget] = useState(false);
 
   // DM states
@@ -39,6 +41,10 @@ export default function UserActionMenu({
   const targetIdOrSlug = targetUserSlug || targetUserDisplayName;
   const isSelf = currentUserId === targetUserDisplayName || currentUserSlug === targetUserSlug;
   const avatarInfo = getAvatarInfo(targetUserDisplayName);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Cache update helper that merges updates with existing cache data
   const updateCache = (updates: Partial<{ followers: number; following: number }>) => {
@@ -70,7 +76,7 @@ export default function UserActionMenu({
     }
   }, [isOpen, targetUserDisplayName, currentUserId, isSelf]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   const handleFollowToggle = async () => {
     if (!currentUserId || isSelf) return;
@@ -110,21 +116,38 @@ export default function UserActionMenu({
     }
   };
 
-  return (
+  let menuX = position ? position.x : 0;
+  let menuY = position ? position.y + 4 : 0;
+
+  if (position && typeof window !== 'undefined') {
+    const menuWidth = 176;
+    const menuHeight = 220;
+
+    if (menuX + menuWidth > window.innerWidth - 12) {
+      menuX = Math.max(12, window.innerWidth - menuWidth - 12);
+    }
+    if (menuX < 12) {
+      menuX = 12;
+    }
+
+    if (menuY + menuHeight > window.innerHeight - 12) {
+      menuY = Math.max(12, position.y - menuHeight - 8);
+    }
+  }
+
+  return createPortal(
     <>
       {/* Transparent overlay backdrop to close dropdown on outside clicks */}
       <div className="fixed inset-0 z-50 cursor-default" onClick={onClose} />
 
       <div
         style={{
-          position: 'absolute',
-          left: position ? `${position.x}px` : '50%',
-          top: position ? `${position.y}px` : '50%',
+          position: 'fixed',
+          left: position ? `${menuX}px` : '50%',
+          top: position ? `${menuY}px` : '50%',
           transform: position ? 'none' : 'translate(-50%, -50%)',
         }}
-        className={`z-50 w-44 rounded-lg border border-gray-800 bg-[#161922] shadow-2xl py-1 text-xs text-gray-300 animate-fade-in-up ${
-          position ? 'mt-1' : ''
-        }`}
+        className="z-50 w-44 rounded-lg border border-gray-800 bg-[#161922] shadow-2xl py-1 text-xs text-gray-300 animate-fade-in-up"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -216,6 +239,7 @@ export default function UserActionMenu({
           <span>@メンションする</span>
         </button>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

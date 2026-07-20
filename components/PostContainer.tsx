@@ -256,7 +256,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               router.push(`/user/${post.slug || post.displayName}`);
             } else {
               const rect = e.currentTarget.getBoundingClientRect();
-              setAvatarMenuPos({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
+              setAvatarMenuPos({ x: rect.left, y: rect.bottom });
               setUserMenuOpen(true);
             }
           }}

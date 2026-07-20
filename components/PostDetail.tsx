@@ -558,7 +558,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               const rect = e.currentTarget.getBoundingClientRect();
               handleAvatarClick(
                 { displayName: post.displayName, slug: post.slug || undefined },
-                { x: rect.left + window.scrollX, y: rect.bottom + window.scrollY }
+                { x: rect.left, y: rect.bottom }
               );
             }
           }}
@@ -963,7 +963,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
               const rect = e.currentTarget.getBoundingClientRect();
               onAvatarClick(
                 { displayName: localPost.displayName, slug: localPost.slug || undefined },
-                { x: rect.left + window.scrollX, y: rect.bottom + window.scrollY }
+                { x: rect.left, y: rect.bottom }
               );
             }
           }}

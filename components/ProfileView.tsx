@@ -561,7 +561,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                         router.push(`/user/${p.slug || p.displayName}`);
                       } else {
                         const rect = e.currentTarget.getBoundingClientRect();
-                        setAvatarMenuPos({ x: rect.left + window.scrollX, y: rect.bottom + window.scrollY });
+                        setAvatarMenuPos({ x: rect.left, y: rect.bottom });
                         setSelectedUser({ displayName: p.displayName, slug: p.slug || undefined });
                       }
                     }}
