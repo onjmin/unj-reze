@@ -68,7 +68,7 @@ export default function Header({
         <div className="flex items-center space-x-1.5">
           <span className="text-gray-600">ID:</span>
           <span className="bg-blue-600/20 text-blue-400 border border-blue-500/35 px-2 py-0.5 rounded-full font-bold leading-none">
-            {userId}
+            {userId ? userId.slice(0, 3) : ''}
           </span>
           <span className="text-gray-600 ml-0.5">サーバ:</span>
           <span className="text-[#a3e635] font-bold">{server}</span>

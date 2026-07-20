@@ -191,7 +191,7 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
                 <span className="text-gray-600">：{formatDateTime(p.createdAt)}</span>
                 <span className="text-gray-600">({p.time}){p.isEdited && ' (編集済み)'}</span>
                 <span className="text-gray-500">
-                  ID: <span className="text-green-400 font-bold">{p.displayName.slice(-3)}</span>
+                  ID: <span className="text-green-400 font-bold">{p.displayName.slice(0, 3)}</span>
                 </span>
                 <button
                   onClick={() => setReplyTo(num)}
