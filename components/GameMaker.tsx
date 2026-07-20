@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
@@ -148,7 +148,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect';
+type EditorTab = 'map' | 'event' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -10165,6 +10165,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // 編集モードでのリアルタイム座標表示更新（右上のDOMを直接書き換え）
       if (!isPlaying && editorCoordRef.current) {
+        if (editorTab === 'event') {
+          // イベントパネルアクティブ時、イベントを持つNPCの上に半透明アイコンを表示
+          eng.entities.forEach(e => {
+            if (e.def.pages && e.def.pages.length > 0) {
+              const drawX = e.x - camXRef.current;
+              const drawY = e.y - camYRef.current;
+              ctx.fillStyle = 'rgba(255, 255, 0, 0.4)';
+              ctx.beginPath();
+              ctx.arc(drawX + (e.def.w ?? TILE_SIZE)/2, drawY - 10, 8, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = 'white';
+              ctx.font = '10px Arial';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('E', drawX + (e.def.w ?? TILE_SIZE)/2, drawY - 10);
+            }
+          });
+        }
         const curX = p.x;
         const curY = p.y;
         const curW = pData.w;
@@ -10280,7 +10298,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           return { ...prev, map: newMap };
         });
       }
-    } else if (editorTab === 'object') {
+    } else if (editorTab === 'object' || editorTab === 'event') {
       const found = gameData.objects.find(o => o.col === col && o.row === row);
       setSelectedObjId(found?.id ?? null);
     }
@@ -13000,7 +13018,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* 基本タブ（常時表示） */}
                 {([
                   ['map', 'マップ'],
-                  ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ']] : []),
+                  ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ'], ['event', 'イベント']] : []),
                   ['char', 'キャラ'],
                   ...(gameData.battle ? [['battle', '戦闘']] : []),
                   ...(gameData.battle ? [['character', 'キャラクター']] : []),
@@ -13658,6 +13676,57 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           )}
                         </>)}
                       </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── EVENT ── */}
+                {editorTab === 'event' && (
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <button onClick={() => {
+                        if (!engineRef.current) return;
+                        const px = engineRef.current.player.x + (gameData.player.w ?? TILE_SIZE) / 2;
+                        const py = engineRef.current.player.y + (gameData.player.h ?? TILE_SIZE) / 2;
+                        const pCol = Math.floor(px / TILE_SIZE);
+                        const pRow = Math.floor(py / TILE_SIZE);
+                        const obj = gameData.objects?.find(o => o.col === pCol && o.row === pRow);
+                        if (obj) setSelectedObjId(obj.id);
+                        else alert('プレイヤーの位置にイベントが見つかりません');
+                      }} className="bg-blue-800 hover:bg-blue-700 text-[10px] text-white px-2 py-1 rounded">
+                        この位置のイベントを読み込む
+                      </button>
+                      {selObj && (
+                        <button onClick={() => {
+                          const newObj = JSON.parse(JSON.stringify(selObj));
+                          newObj.id = crypto.randomUUID();
+                          newObj.col = (newObj.col || 0) + 1;
+                          setGameData(p => ({ ...p, objects: [...(p.objects || []), newObj] }));
+                          setSelectedObjId(newObj.id);
+                        }} className="bg-gray-700 hover:bg-gray-600 text-[10px] text-gray-200 px-2 py-1 rounded">
+                          イベントを複製
+                        </button>
+                      )}
+                    </div>
+                    {selObj ? (
+                      <div key={selObj.id} className="rounded-lg border border-yellow-600/50 bg-gray-900 p-2.5 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] text-yellow-400 font-bold flex items-center gap-1">
+                            <MessageSquare size={11} /> 選択中: {selObj.name || selObj.emoji}
+                          </span>
+                          <button onClick={() => setSelectedObjId(null)} className="text-[10px] text-gray-400 hover:text-gray-200">解除</button>
+                        </div>
+                        <EventPageEditor
+                          pages={selObj.pages ?? []}
+                          setPages={pages => updObj({ pages: pages.length > 0 ? pages : undefined })}
+                          switches={gameData.switches ?? []}
+                          items={gameData.items ?? []}
+                          effects={gameData.effects ?? []}
+                          setPreviewCommand={setPreviewCommand}
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-gray-500 text-center py-4">マップ上でイベントを選択してください</div>
                     )}
                   </div>
                 )}
@@ -16215,7 +16284,8 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
       {detailsCmdIndex && (
-        <ImageCommandDetailsModal
+        <EventCommandDetailsModal
+          switches={switches} items={items} effects={effects}
           cmd={pages[detailsCmdIndex.pi].commands[detailsCmdIndex.ci]}
           onChange={(patch) => {
             const newCmd = { ...pages[detailsCmdIndex.pi].commands[detailsCmdIndex.ci], ...patch } as EventCommand;
@@ -16344,8 +16414,6 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
               {page.commands.length === 0 && <p className="text-[9px] text-gray-500">（なし）</p>}
               {page.commands.map((cmd, ci) => (
                 <CommandEditor key={ci} cmd={cmd} index={ci} count={page.commands.length}
-                  switches={switches} items={items} effects={effects}
-                  onChange={patch => updCmd(pi, ci, patch)}
                   onDelete={() => delCmd(pi, ci)}
                   onMove={dir => moveCmd(pi, ci, dir)}
                   onShowDetails={() => {
@@ -16368,120 +16436,12 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
 
 // ── 単一イベントコマンドエディタ ──
 
-function ImageCommandDetailsModal({ cmd, onChange, onClose }: { cmd: EventCommand; onChange: (patch: Partial<EventCommand>) => void; onClose: () => void }) {
-  if (cmd.type !== 'showImage' && cmd.type !== 'changeSprite') return null;
-  const isImg = cmd.type === 'showImage';
-  const c = cmd as any;
-
-  const numInput = (label: string, key: string, max?: number, min?: number) => (
-    <label className="flex flex-col text-[9px] text-gray-400 gap-0.5">
-      {label}
-      <input type="number" value={c[key] ?? 0} onChange={e => onChange({ [key]: Number(e.target.value) })}
-        max={max} min={min}
-        className="bg-gray-800 border border-gray-700 rounded px-1 py-1 text-gray-200 outline-none w-full" />
-    </label>
-  );
-
-  const checkInput = (label: string, key: string) => (
-    <label className="flex items-center gap-1 text-[9px] text-gray-300">
-      <input type="checkbox" checked={!!c[key]} onChange={e => onChange({ [key]: e.target.checked })} />
-      {label}
-    </label>
-  );
-
-  return (
-    <div className="fixed inset-0 z-[100] flex flex-col justify-end md:flex-row md:justify-end md:items-center p-2 md:p-4 pointer-events-none">
-      <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-full max-w-sm flex flex-col max-h-[50vh] md:max-h-[90vh] pointer-events-auto mt-auto md:mt-0">
-        <div className="px-3 py-2 border-b border-gray-800 flex justify-between items-center bg-gray-800/50 rounded-t-lg">
-          <span className="text-[11px] font-bold text-gray-300">画像コマンド詳細 ({isImg ? 'DW_IMA' : 'DW_FL'})</span>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={14} /></button>
-        </div>
-        <div className="p-3 overflow-y-auto space-y-4">
-          {/* 基本 */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">基本設定</div>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="flex flex-col text-[9px] text-gray-400 gap-0.5">
-                {isImg ? '画像ID (i)' : '対象ID (target)'}
-                <input value={isImg ? (c.imgId ?? '') : (c.objId ?? '')} onChange={e => onChange(isImg ? { imgId: e.target.value } : { objId: e.target.value })}
-                  className="bg-gray-800 border border-gray-700 rounded px-1 py-1 text-gray-200 outline-none" />
-              </label>
-              <label className="flex flex-col text-[9px] text-gray-400 gap-0.5">
-                画像URL (u)
-                <input value={isImg ? (c.url ?? '') : (c.spriteRef ?? '')} onChange={e => onChange(isImg ? { url: e.target.value } : { spriteRef: e.target.value })}
-                  className="bg-gray-800 border border-gray-700 rounded px-1 py-1 text-gray-200 outline-none" />
-              </label>
-            </div>
-          </div>
-
-          {/* 描画先 */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">描画先 (Destination)</div>
-            <div className="grid grid-cols-4 gap-2">
-              {numInput('X', 'x')}
-              {numInput('Y', 'y')}
-              {numInput('W', 'w')}
-              {numInput('H', 'h')}
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              {checkInput('X,Yは%指定 (xp)', 'xp')}
-              {checkInput('W,Hは%指定 (wp)', 'wp')}
-              {isImg && checkInput('マップ座標追従 (m)', 'm')}
-              {checkInput('中央基準 (c)', 'c')}
-            </div>
-          </div>
-
-          {/* クロップ */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">クロップ元 (Source)</div>
-            <div className="grid grid-cols-4 gap-2">
-              {numInput('Crop X (sx)', 'sx')}
-              {numInput('Crop Y (sy)', 'sy')}
-              {numInput('Crop W (sw)', 'sw')}
-              {numInput('Crop H (sh)', 'sh')}
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              {checkInput('sx,syは%指定 (sxp)', 'sxp')}
-              {checkInput('sw,shは%指定 (swp)', 'swp')}
-            </div>
-          </div>
-
-          {/* アニメーション・その他 */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">変形・アニメーション</div>
-            <div className="grid grid-cols-4 gap-2">
-              {numInput('原点 X (ox)', 'ox')}
-              {numInput('原点 Y (oy)', 'oy')}
-              {numInput('回転 (r)', 'r')}
-              {numInput('不透明度 (a)', 'opacity', 100, 0)}
-            </div>
-            {isImg && (
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                {numInput('コマ間隔ms (ms)', 'ms')}
-                <div className="flex items-center mt-3">
-                  {checkInput('ループ再生 (lp)', 'lp')}
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="text-[9px] text-gray-500 pt-2 border-t border-gray-800">
-            ※プレビューはキャンバス上にリアルタイムで表示されます。
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CommandEditor({ cmd, index, count, switches, items, effects, onChange, onDelete, onMove, onShowDetails }:
-  {
-    cmd: EventCommand; index: number; count: number; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[];
-    onChange: (patch: Partial<EventCommand>) => void; onDelete: () => void; onMove: (dir: -1 | 1) => void;
-    onShowDetails: () => void;
-  }) {
+function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onClose }: {
+  cmd: EventCommand; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[];
+  onChange: (patch: Partial<EventCommand>) => void; onClose: () => void;
+}) {
   const type = cmd.type;
   const setType = (t: EventCommand['type']) => {
-    // reset fields when switching type
     const base: EventCommand = (() => {
       switch (t) {
         case 'message': return { type: 'message', text: '' };
@@ -16501,10 +16461,6 @@ function CommandEditor({ cmd, index, count, switches, items, effects, onChange, 
         case 'comment': return { type: 'comment', text: '' };
         case 'label': return { type: 'label', name: '' };
         case 'jump': return { type: 'jump', label: '' };
-        case 'ifGold': return { type: 'ifGold', amount: 0, then: [], else: undefined };
-        case 'changeGold': return { type: 'changeGold', amount: 0 };
-        case 'restoreHp': return { type: 'restoreHp' };
-        case 'restoreMp': return { type: 'restoreMp' };
         case 'overheadMessage': return { type: 'overheadMessage', text: '' };
         case 'playSound': return { type: 'playSound', src: '' };
         case 'changeSprite': return { type: 'changeSprite', spriteRef: '', objId: '' };
@@ -16523,237 +16479,282 @@ function CommandEditor({ cmd, index, count, switches, items, effects, onChange, 
     })();
     onChange(base as Partial<EventCommand>);
   };
-  const inputCls = 'bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none w-full';
+  const inputCls = 'bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none w-full';
+
   return (
-    <div className="flex items-start gap-1 bg-gray-900/50 rounded p-1">
-      <div className="flex flex-col gap-0.5 shrink-0">
-        <button onClick={() => onMove(-1)} disabled={index === 0}
-          className="text-[9px] text-gray-500 hover:text-white disabled:opacity-20 leading-none">▲</button>
-        <button onClick={() => onMove(1)} disabled={index === count - 1}
-          className="text-[9px] text-gray-500 hover:text-white disabled:opacity-20 leading-none">▼</button>
-        <button onClick={onDelete} className="text-[9px] text-red-400 hover:text-red-300 leading-none">×</button>
-      </div>
-      <div className="flex-1 min-w-0 space-y-0.5">
-        <select value={type} onChange={e => setType(e.target.value as EventCommand['type'])}
-          className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200 w-full">
-          {(Object.keys(COMMAND_LABELS) as EventCommand['type'][]).map(t =>
-            <option key={t} value={t}>{COMMAND_LABELS[t]}</option>)}
-        </select>
-        {/* type-specific controls */}
-        {type === 'message' && (
-          <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
-            rows={2} className={inputCls} placeholder="メッセージ" />
-        )}
-        {type === 'choice' && (
-          <div className="space-y-0.5">
-            <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
-              rows={1} className={inputCls} placeholder="質問文" />
-            <div className="text-[8px] text-gray-500">選択肢はコード編集が必要です（準備中）</div>
-          </div>
-        )}
-        {type === 'ifSwitch' && (
-          <div className="flex items-center gap-1">
-            {switches.length > 0 ? (
-              <select value={(cmd as any).switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
-                className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200 flex-1">
-                {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            ) : <span className="text-[8px] text-gray-500">スイッチ未定義</span>}
-            <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
-              className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-              <option value="ON">ON</option><option value="OFF">OFF</option>
+    <div className="fixed inset-0 z-[100] flex flex-col justify-end md:flex-row md:justify-end md:items-center p-2 md:p-4 pointer-events-none">
+      <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh] md:max-h-[90vh] pointer-events-auto mt-auto md:mt-0">
+        <div className="px-3 py-2 border-b border-gray-800 flex justify-between items-center bg-gray-800/50 rounded-t-lg">
+          <span className="text-[12px] font-bold text-gray-300">コマンド詳細設定</span>
+          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={14} /></button>
+        </div>
+        <div className="p-3 overflow-y-auto space-y-4">
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">コマンドの種類</div>
+            <select value={type} onChange={e => setType(e.target.value as EventCommand['type'])}
+              className="bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] outline-none text-gray-200 w-full">
+              {(Object.keys(COMMAND_LABELS) as EventCommand['type'][]).map(t =>
+                <option key={t} value={t}>{COMMAND_LABELS[t]}</option>)}
             </select>
           </div>
-        )}
-        {type === 'ifItem' && (
-          <div className="flex items-center gap-1">
-            {items.length > 0 ? (
-              <select value={(cmd as any).itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
-                className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200 flex-1">
-                {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            ) : <span className="text-[8px] text-gray-500">アイテム未定義</span>}
-            <select value={(cmd as any).has ? 'あり' : 'なし'} onChange={e => onChange({ has: e.target.value === 'あり' })}
-              className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-              <option value="あり">持っている</option><option value="なし">持っていない</option>
-            </select>
-          </div>
-        )}
-        {type === 'setSwitch' && (
-          <div className="flex items-center gap-1">
-            {switches.length > 0 ? (
-              <select value={(cmd as any).switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
-                className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200 flex-1">
-                {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            ) : <span className="text-[8px] text-gray-500">スイッチ未定義</span>}
-            <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
-              className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-              <option value="ON">ON</option><option value="OFF">OFF</option>
-            </select>
-          </div>
-        )}
-        {type === 'setSelfSwitch' && (
-          <div className="flex items-center gap-1">
-            <select value={(cmd as any).id ?? 'A'} onChange={e => onChange({ id: e.target.value })}
-              className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-              {['A', 'B', 'C', 'D'].map(s => <option key={s} value={s}>セルフ{s}</option>)}
-            </select>
-            <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
-              className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-              <option value="ON">ON</option><option value="OFF">OFF</option>
-            </select>
-          </div>
-        )}
-        {(type === 'giveItem' || type === 'removeItem') && (
-          <div className="flex items-center gap-1">
-            {items.length > 0 ? (
-              <select value={(cmd as any).itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
-                className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200 flex-1">
-                {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            ) : <span className="text-[8px] text-gray-500">アイテム未定義</span>}
-            <input type="number" min={1} value={(cmd as any).count ?? 1} onChange={e => onChange({ count: Math.max(1, Number(e.target.value)) })}
-              className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
-          </div>
-        )}
-        {type === 'warp' && (
-          <div className="flex items-center gap-1">
-            <input type="number" value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) })}
-              className="w-12 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="X" />
-            <input type="number" value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) })}
-              className="w-12 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="Y" />
-          </div>
-        )}
-        {type === 'wait' && (
-          <input type="number" min={1} max={600} value={(cmd as any).frames ?? 30}
-            onChange={e => onChange({ frames: Number(e.target.value) })}
-            className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" />
-        )}
-        {(type === 'comment' || type === 'label' || type === 'jump') && (
-          <input value={(cmd as any).text ?? (cmd as any).name ?? ''}
-            onChange={e => onChange(type === 'comment' ? { text: e.target.value } : { name: e.target.value, ...(type === 'jump' ? { label: e.target.value } : {}) })}
-            className={inputCls} placeholder={type === 'comment' ? 'コメント' : type === 'label' ? 'ラベル名' : 'ジャンプ先ラベル'} />
-        )}
-        {type === 'overheadMessage' && (
-          <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
-            rows={2} className={inputCls} placeholder="頭上メッセージ" />
-        )}
-        {type === 'playSound' && (
-          <input value={(cmd as any).src ?? ''} onChange={e => onChange({ src: e.target.value })}
-            className={inputCls} placeholder="効果音URL（mp3）" />
-        )}
-        {type === 'changeSprite' && (
-          <div className="space-y-1">
-            <div className="flex items-center gap-1">
-              <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                className={inputCls} placeholder="対象ID (player 等)" />
-              <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
-                className={inputCls} placeholder="画像URL (sprite: 等)" />
-            </div>
-            {(cmd as any).spriteRef && (
-              <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1">
-                <img src={(cmd as any).spriteRef.replace('sprite:', '')} className="max-h-16 object-contain" alt="preview" />
+          
+          <div className="space-y-1.5">
+            <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">設定項目</div>
+            
+            {type === 'message' && (
+              <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+                rows={3} className={inputCls} placeholder="メッセージ" />
+            )}
+            {type === 'choice' && (
+              <div className="space-y-0.5">
+                <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+                  rows={2} className={inputCls} placeholder="質問文" />
+                <div className="text-[10px] text-gray-500">選択肢はコード編集が必要です（準備中）</div>
               </div>
             )}
-          </div>
-        )}
-        {type === 'changeBackground' && (
-          <div className="space-y-1">
-            <input value={(cmd as any).bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
-              className={inputCls} placeholder="背景画像URL (bg: 等)" />
-            {(cmd as any).bgRef && (
-              <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1">
-                <img src={(cmd as any).bgRef.replace('bg:', '')} className="max-h-16 object-contain" alt="preview" />
+            {type === 'ifSwitch' && (
+              <div className="flex flex-col gap-2">
+                {switches.length > 0 ? (
+                  <select value={(cmd as any).switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
+                    className={inputCls}>
+                    {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                ) : <span className="text-[10px] text-gray-500">スイッチ未定義</span>}
+                <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
+                  className={inputCls}>
+                  <option value="ON">ON</option><option value="OFF">OFF</option>
+                </select>
               </div>
             )}
-          </div>
-        )}
-        {type === 'showImage' && (
-          <div className="space-y-1">
-            <div className="flex items-center gap-1">
+            {type === 'ifItem' && (
+              <div className="flex flex-col gap-2">
+                {items.length > 0 ? (
+                  <select value={(cmd as any).itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
+                    className={inputCls}>
+                    {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                ) : <span className="text-[10px] text-gray-500">アイテム未定義</span>}
+                <select value={(cmd as any).has ? 'あり' : 'なし'} onChange={e => onChange({ has: e.target.value === 'あり' })}
+                  className={inputCls}>
+                  <option value="あり">持っている</option><option value="なし">持っていない</option>
+                </select>
+              </div>
+            )}
+            {type === 'setSwitch' && (
+              <div className="flex flex-col gap-2">
+                {switches.length > 0 ? (
+                  <select value={(cmd as any).switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
+                    className={inputCls}>
+                    {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                ) : <span className="text-[10px] text-gray-500">スイッチ未定義</span>}
+                <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
+                  className={inputCls}>
+                  <option value="ON">ON</option><option value="OFF">OFF</option>
+                </select>
+              </div>
+            )}
+            {type === 'setSelfSwitch' && (
+              <div className="flex flex-col gap-2">
+                <select value={(cmd as any).id ?? 'A'} onChange={e => onChange({ id: e.target.value })}
+                  className={inputCls}>
+                  {['A', 'B', 'C', 'D'].map(s => <option key={s} value={s}>セルフ{s}</option>)}
+                </select>
+                <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
+                  className={inputCls}>
+                  <option value="ON">ON</option><option value="OFF">OFF</option>
+                </select>
+              </div>
+            )}
+            {(type === 'giveItem' || type === 'removeItem') && (
+              <div className="flex flex-col gap-2">
+                {items.length > 0 ? (
+                  <select value={(cmd as any).itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
+                    className={inputCls}>
+                    {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                ) : <span className="text-[10px] text-gray-500">アイテム未定義</span>}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-400">個数:</span>
+                  <input type="number" min={1} value={(cmd as any).count ?? 1} onChange={e => onChange({ count: Math.max(1, Number(e.target.value)) })}
+                    className={inputCls} />
+                </div>
+              </div>
+            )}
+            {type === 'warp' && (
+              <div className="grid grid-cols-2 gap-2">
+                <input type="number" value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) })}
+                  className={inputCls} placeholder="X" />
+                <input type="number" value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) })}
+                  className={inputCls} placeholder="Y" />
+              </div>
+            )}
+            {type === 'wait' && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-400">待機フレーム数:</span>
+                <input type="number" min={1} max={600} value={(cmd as any).frames ?? 30}
+                  onChange={e => onChange({ frames: Number(e.target.value) })}
+                  className={inputCls} />
+              </div>
+            )}
+            {(type === 'comment' || type === 'label' || type === 'jump') && (
+              <input value={(cmd as any).text ?? (cmd as any).name ?? (cmd as any).label ?? ''}
+                onChange={e => onChange(type === 'comment' ? { text: e.target.value } : { name: e.target.value, ...(type === 'jump' ? { label: e.target.value } : {}) })}
+                className={inputCls} placeholder={type === 'comment' ? 'コメント' : type === 'label' ? 'ラベル名' : 'ジャンプ先ラベル'} />
+            )}
+            {type === 'overheadMessage' && (
+              <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+                rows={2} className={inputCls} placeholder="頭上メッセージ" />
+            )}
+            {type === 'playSound' && (
+              <input value={(cmd as any).src ?? ''} onChange={e => onChange({ src: e.target.value })}
+                className={inputCls} placeholder="効果音URL（mp3）" />
+            )}
+            {type === 'changeSprite' && (
+              <div className="space-y-2">
+                <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                  className={inputCls} placeholder="対象ID (player 等)" />
+                <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
+                  className={inputCls} placeholder="画像URL (sprite: 等)" />
+                {(cmd as any).spriteRef && (
+                  <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
+                    <img src={(cmd as any).spriteRef.replace('sprite:', '')} className="max-h-24 object-contain" alt="preview" />
+                  </div>
+                )}
+              </div>
+            )}
+            {type === 'changeBackground' && (
+              <div className="space-y-2">
+                <input value={(cmd as any).bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
+                  className={inputCls} placeholder="背景画像URL (bg: 等)" />
+                {(cmd as any).bgRef && (
+                  <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
+                    <img src={(cmd as any).bgRef.replace('bg:', '')} className="max-h-24 object-contain" alt="preview" />
+                  </div>
+                )}
+              </div>
+            )}
+            {type === 'showImage' && (
+              <div className="space-y-2">
+                <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                  className={inputCls} placeholder="画像ID" />
+                <input value={(cmd as any).url ?? ''} onChange={e => onChange({ url: e.target.value })}
+                  className={inputCls} placeholder="画像URL" />
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="number" value={(cmd as any).x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
+                    className={inputCls} placeholder="X" />
+                  <input type="number" value={(cmd as any).y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
+                    className={inputCls} placeholder="Y" />
+                </div>
+                {(cmd as any).url && (
+                  <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
+                    <img src={(cmd as any).url} className="max-h-24 object-contain" alt="preview" />
+                  </div>
+                )}
+              </div>
+            )}
+            {type === 'hideImage' && (
               <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
-                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="画像ID" />
-              <input value={(cmd as any).url ?? ''} onChange={e => onChange({ url: e.target.value })}
-                className={inputCls} placeholder="画像URL" />
-              <button onClick={onShowDetails} className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white rounded px-2 py-0.5 text-[9px]">詳細</button>
-            </div>
-            <div className="flex items-center gap-1">
-              <input type="number" value={(cmd as any).x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
-                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="X" />
-              <input type="number" value={(cmd as any).y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
-                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="Y" />
-            </div>
-            {(cmd as any).url && (
-              <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1">
-                <img src={(cmd as any).url} className="max-h-16 object-contain" alt="preview" />
+                className={inputCls} placeholder="消去する画像ID" />
+            )}
+            {type === 'moveCamera' && (
+              <div className="grid grid-cols-2 gap-2">
+                <input type="number" value={(cmd as any).tx ?? 0} onChange={e => onChange({ tx: Number(e.target.value) })}
+                  className={inputCls} placeholder="目標X" />
+                <input type="number" value={(cmd as any).ty ?? 0} onChange={e => onChange({ ty: Number(e.target.value) })}
+                  className={inputCls} placeholder="目標Y" />
+                <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
+                  className={inputCls} placeholder="フレーム数" />
+              </div>
+            )}
+            {type === 'moveNpc' && (
+              <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                className={inputCls} placeholder="対象NPCのID" />
+            )}
+            {type === 'screenEffect' && (
+              <input
+                value={(cmd as any).effects?.[0]?.color ?? ''}
+                onChange={e => {
+                  onChange({
+                    effects: [{ type: 'solid', color: e.target.value, c1: '', c2: '', pos: '', stops: '' }],
+                  });
+                }}
+                className={inputCls} placeholder="エフェクト色 (例: 255-0-0-50)"
+              />
+            )}
+            {type === 'changePhase' && (
+              <input type="number" value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
+                className={inputCls} placeholder="移行先フェーズ番号" />
+            )}
+            {type === 'playEffect' && (
+              <div className="flex flex-col gap-2">
+                <select value={(cmd as any).effectId ?? ''} onChange={e => onChange({ effectId: e.target.value })}
+                  className={inputCls}>
+                  <option value="">（エフェクトを選択）</option>
+                  {effects.map(ef => <option key={ef.id} value={ef.id}>{ef.name}</option>)}
+                </select>
+                <select value={(cmd as any).target ?? 'self'} onChange={e => onChange({ target: e.target.value as 'self' | 'player' })}
+                  className={inputCls}>
+                  <option value="self">自分の位置</option>
+                  <option value="player">プレイヤーの位置</option>
+                </select>
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                  <input type="checkbox" checked={!!(cmd as any).wait} onChange={e => onChange({ wait: e.target.checked || undefined })} className="accent-blue-500 w-3.5 h-3.5" />
+                  完了まで待つ
+                </label>
               </div>
             )}
           </div>
-        )}
-        {type === 'hideImage' && (
-          <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
-            className={inputCls} placeholder="消去する画像ID" />
-        )}
-        {type === 'moveCamera' && (
-          <div className="flex items-center gap-1">
-            <input type="number" value={(cmd as any).tx ?? 0} onChange={e => onChange({ tx: Number(e.target.value) })}
-              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="目標X" />
-            <input type="number" value={(cmd as any).ty ?? 0} onChange={e => onChange({ ty: Number(e.target.value) })}
-              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="目標Y" />
-            <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
-              className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none" placeholder="フレーム数" />
-          </div>
-        )}
-        {type === 'moveNpc' && (
-          <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-            className={inputCls} placeholder="対象NPCのID" />
-        )}
-        {type === 'screenEffect' && (
-          <input
-            value={(cmd as any).effects?.[0]?.color ?? ''}
-            onChange={e => {
-              const color = e.target.value;
-              onChange({
-                effects: [
-                  {
-                    type: 'solid',
-                    color,
-                    c1: '',
-                    c2: '',
-                    pos: '',
-                    stops: '',
-                  },
-                ],
-              });
-            }}
-            className={inputCls}
-            placeholder="エフェクト色 (例: 255-0-0-50)"
-          />
-        )}
-        {type === 'changePhase' && (
-          <input type="number" value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
-            className={inputCls} placeholder="移行先フェーズ番号" />
-        )}
-        {type === 'playEffect' && (
-          <div className="flex items-center gap-1 flex-wrap">
-            <select value={(cmd as any).effectId ?? ''} onChange={e => onChange({ effectId: e.target.value })}
-              className={inputCls} style={{ width: 'auto', flex: '1 1 auto' }}>
-              <option value="">（エフェクトを選択）</option>
-              {effects.map(ef => <option key={ef.id} value={ef.id}>{ef.name}</option>)}
-            </select>
-            <select value={(cmd as any).target ?? 'self'} onChange={e => onChange({ target: e.target.value as 'self' | 'player' })}
-              className={inputCls} style={{ width: 'auto' }}>
-              <option value="self">自分の位置</option>
-              <option value="player">プレイヤーの位置</option>
-            </select>
-            <label className="flex items-center gap-0.5 text-[9px] text-gray-400 cursor-pointer shrink-0">
-              <input type="checkbox" checked={!!(cmd as any).wait} onChange={e => onChange({ wait: e.target.checked || undefined })} className="accent-blue-500" />
-              完了まで待つ
-            </label>
-          </div>
-        )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
+  cmd: EventCommand; index: number; count: number;
+  onShowDetails: () => void; onDelete: () => void; onMove: (dir: -1 | 1) => void;
+}) {
+  const getPreviewText = () => {
+    const c = cmd as any;
+    switch (cmd.type) {
+      case 'message': return c.text ? c.text.split('\n')[0] : 'なし';
+      case 'ifSwitch': return `#${c.switchId || 0} が ${c.value ? 'ON' : 'OFF'}`;
+      case 'ifItem': return `${c.itemId || '?'} を ${c.has ? '持っている' : '持っていない'}`;
+      case 'setSwitch': return `#${c.switchId || 0} = ${c.value ? 'ON' : 'OFF'}`;
+      case 'setSelfSwitch': return `セルフ${c.id || 'A'} = ${c.value ? 'ON' : 'OFF'}`;
+      case 'giveItem': return `${c.itemId || '?'} を ${c.count || 1}個 増やす`;
+      case 'removeItem': return `${c.itemId || '?'} を ${c.count || 1}個 減らす`;
+      case 'changeGold': return `${c.amount > 0 ? '+' : ''}${c.amount || 0} G`;
+      case 'warp': return `[${c.col || 0}, ${c.row || 0}]へ`;
+      case 'wait': return `${c.frames || 30}フレーム`;
+      case 'comment': return c.text || '';
+      case 'playSound': return c.src || '';
+      case 'label': return c.name || '';
+      case 'jump': return c.label || '';
+      default: return '';
+    }
+  };
+
+  const isCondition = cmd.type.startsWith('if');
+  const isSwitch = cmd.type.startsWith('setSwitch') || cmd.type.startsWith('setSelf');
+  const isComment = cmd.type === 'comment';
+
+  let color = 'text-gray-300';
+  if (isCondition) color = 'text-blue-400';
+  else if (isSwitch) color = 'text-red-400';
+  else if (isComment) color = 'text-green-500';
+
+  const prefix = isComment ? '注釈' : COMMAND_LABELS[cmd.type] || cmd.type;
+  const preview = getPreviewText();
+
+  return (
+    <div className="flex items-center gap-1 hover:bg-blue-900/30 cursor-pointer text-[10px] py-1 px-1 border-b border-gray-800/50 group" onClick={onShowDetails}>
+      <span className="text-gray-600 w-3 text-center shrink-0 hover:text-white" onClick={e => { e.stopPropagation(); onMove(-1); }}>▲</span>
+      <span className="text-gray-600 w-3 text-center shrink-0 hover:text-white" onClick={e => { e.stopPropagation(); onMove(1); }}>▼</span>
+      <span className={`${color} shrink-0 pr-0.5`}>◆</span>
+      <span className={`flex-1 ${color} truncate`}>{prefix}{preview ? `: ${preview}` : ''}</span>
+      <span className="text-red-900/0 group-hover:text-red-400 shrink-0 px-2 font-bold" onClick={e => { e.stopPropagation(); onDelete(); }}>×</span>
     </div>
   );
 }

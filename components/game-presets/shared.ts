@@ -141,8 +141,12 @@ export type EventCommand =
   | { type: 'playEffect'; effectId: string; target: 'self' | 'player'; wait?: boolean };
 
 export interface EventPage {
+  /** ページ名（管理用） */
   name?: string;
+  /** イベントの起動条件（トリガー）: デフォルトは 'action' */
   trigger?: 'action' | 'playerTouch' | 'eventTouch' | 'autorun';
+  /** イベントの実行優先度（自動実行や同時トリガー時の優先順位。数値が大きいほど優先） */
+  executionPriority?: number;
   conditions: EventCondition;
   commands: EventCommand[];
 }
@@ -264,6 +268,7 @@ export interface ObjectDef {
   behavior: NpcBehavior; bullet: BulletType; bulletSpeed: number; bulletColor: string; fireRate: number;
   hazard: boolean; message: string;
   w?: number; h?: number;
+  unplaced?: boolean; // If true, the event/object is treated as not physically on the map.
   /** エディタ時のみ表示するスプライト（システム用ポイントの半透明表示など） */
   editorSprite?: string;
   /** オブジェクト種別（エディタで表示項目を切り替え）。未指定=enemy。 */
