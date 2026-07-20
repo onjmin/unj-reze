@@ -54,7 +54,7 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
   const activeId = pendingActiveId ?? current;
 
   return (
-    <div className="md:hidden flex justify-around items-center h-14 border-t border-gray-800 bg-[#0b0e14]/95 backdrop-blur pb-safe absolute bottom-0 w-full z-25">
+    <div className="md:hidden flex justify-around items-center h-14 border-t border-gray-800 bg-[#0b0e14]/95 backdrop-blur pb-safe fixed bottom-0 w-full max-w-2xl z-25">
       {items.map(item => {
         const isActive = activeId === item.id;
         const badge = badgeMap[item.id] || 0;

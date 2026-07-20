@@ -34,8 +34,8 @@ export default function MessageView({ userId }: MessageViewProps) {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-12rem)]">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="flex flex-col flex-1 pb-20">
+      <div className="flex-1 p-4 space-y-4">
         {messages.map(m => (
           <div key={m.id} className={`flex flex-col group ${m.sender === currentSender ? 'items-end' : 'items-start'}`}>
             <span className="text-[10px] text-gray-500 mb-0.5">{m.sender} ・ {m.time}</span>

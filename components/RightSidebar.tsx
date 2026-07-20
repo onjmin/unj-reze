@@ -34,7 +34,7 @@ export default function RightSidebar({ onSearch }: RightSidebarProps) {
   };
 
   return (
-    <div className="hidden lg:flex flex-col w-80 shrink-0 h-dvh overflow-y-auto scrollbar-none px-4 py-4 gap-4 border-l border-gray-800">
+    <div className="hidden lg:flex flex-col w-80 shrink-0 h-dvh sticky top-0 overflow-y-auto scrollbar-none px-4 py-4 gap-4 border-l border-gray-800">
       <form onSubmit={handleSubmit} className="relative">
         <Search className="absolute left-3.5 top-2.5 text-gray-500" size={16} />
         <input

@@ -26,7 +26,13 @@ export async function generateMetadata({ params }: { params: Promise<{ tag: stri
   };
 }
 
+import AppShell from '@/components/AppShell';
+
 export default async function HashtagPage({ params }: { params: Promise<{ tag: string }> }) {
   const { tag } = await params;
-  return <HashtagView tag={decodeURIComponent(tag)} />;
+  return (
+    <AppShell current="search">
+      <HashtagView tag={decodeURIComponent(tag)} />
+    </AppShell>
+  );
 }

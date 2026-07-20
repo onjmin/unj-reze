@@ -544,7 +544,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
         })}
       </div>
 
-      <div className="flex-1 overflow-y-auto divide-y divide-gray-800/80">
+      <div className="flex-1 divide-y divide-gray-800/80 pb-20">
         {loading ? (
           <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
         ) : filteredPosts.length > 0 ? (

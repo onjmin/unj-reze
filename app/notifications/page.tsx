@@ -20,7 +20,7 @@ export default function NotificationsPage() {
           <span className="font-bold text-sm text-gray-200">通知</span>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1">
         <NotificationView userId={currentUser?.displayName} />
       </div>
     </AppShell>

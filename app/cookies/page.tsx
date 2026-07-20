@@ -16,7 +16,7 @@ export default function CookiesPage() {
           <span className="font-bold text-sm text-gray-200 ml-2">Cookie・ストレージポリシー</span>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1">
         <CookiesView />
       </div>
     </AppShell>

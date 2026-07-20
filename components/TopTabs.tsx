@@ -18,7 +18,7 @@ function formatCount(n: number) {
 
 export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedSubMode, latestThreadCount = 0, latestReplyCount = 0, mediaCount = 0 }: TopTabsProps) {
   return (
-    <div className="flex flex-col border-b border-gray-800 shrink-0 bg-[#0b0e14] z-10">
+    <div className="flex flex-col border-b border-gray-800 shrink-0 bg-[#0b0e14]/95 backdrop-blur z-10 sticky top-[60px]">
       <div className="flex px-2 py-2.5 font-bold text-sm text-gray-500">
         <button
           onClick={() => setActiveTab('everyone')}

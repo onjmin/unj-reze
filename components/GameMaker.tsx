@@ -1955,6 +1955,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [enemyDmgPopup, setEnemyDmgPopup] = useState<Record<number, { text: string; id: number; miss?: boolean } | undefined>>({});
   /** アンダーテール風戦闘：敵HPゲージ（敵ごと）。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<Record<number, { pct: number; id: number } | undefined>>({});
+  const [enemyShakeFx, setEnemyShakeFx] = useState<Record<number, { id: number } | undefined>>({});
   /** アンダーテール/デルタルーン風戦闘：撃破演出中（発光→分解して消える）の敵。foes 配列のインデックスをキーに
    *  独立管理し、演出が終わるまでは f.gone=true でも描画を続ける（消える瞬間まで枠を占有させ、演出後に
    *  ビュートランジションで残りの敵をなめらかに詰める）。 */
@@ -1989,12 +1990,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const afterPct = Math.max(0, Math.min(100, (afterHp / maxHp) * 100));
     setEnemyDmgPopup(p => ({ ...p, [foeIdx]: { text: String(dmg), id } }));
     setEnemyGaugeAnim(p => ({ ...p, [foeIdx]: { pct: beforePct, id } }));
+    setEnemyShakeFx(p => ({ ...p, [foeIdx]: { id } }));
     // 次のフレームで実際のHP%へ更新し、CSSトランジションで減少アニメーションを見せる
     requestAnimationFrame(() => requestAnimationFrame(() => {
       setEnemyGaugeAnim(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: { pct: afterPct, id } } : p));
     }));
     setTimeout(() => setEnemyDmgPopup(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), ENEMY_DMG_POPUP_MS);
     setTimeout(() => setEnemyGaugeAnim(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), 1200);
+    setTimeout(() => setEnemyShakeFx(p => (p[foeIdx]?.id === id ? { ...p, [foeIdx]: undefined } : p)), 400);
   };
   /** こうげきをハズしたとき：ダメージ数値の代わりに対象の敵の頭上へ「MISS」を出す（HPゲージは出さない）。 */
   const triggerEnemyMissFx = (foeIdx: number) => {
@@ -11257,6 +11260,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           if (f.gone && !dying) return null;
                           const pop = enemyDmgPopup[i];
                           const gauge = enemyGaugeAnim[i];
+                          const shake = enemyShakeFx[i];
                           const fReady = foeSpareReady(f);
                           const targeting = undertaleMenu === 'target' && undertaleTargetCursor === i;
                           return (
@@ -11281,11 +11285,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {pop.text}
                                   </div>
                                 )}
-                                {f.sprite ? (() => {
-                                  const es = f.sprite;
-                                  const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
-                                  return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
-                                })() : <span className="text-5xl sm:text-6xl">{f.emoji}</span>}
+                                <div key={shake?.id ?? 'noshake'} style={shake ? { animation: 'enemyHitShake 0.4s ease-in-out' } : undefined}>
+                                  {f.sprite ? (() => {
+                                    const es = f.sprite;
+                                    const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
+                                    return <BattleAnimSprite anim={anim} h={anim.h ? Math.min(80, anim.h * 1.25) : 64} />;
+                                  })() : <span className="text-5xl sm:text-6xl">{f.emoji}</span>}
+                                </div>
                                 {gauge && (
                                   <div className="absolute left-1/2 top-1/3 -translate-x-1/2 w-16 h-1.5 overflow-hidden bg-gray-700/80 z-10">
                                     <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />
@@ -11519,6 +11525,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           if (f.gone && !dying) return null;
                           const pop = enemyDmgPopup[i];
                           const gauge = enemyGaugeAnim[i];
+                          const shake = enemyShakeFx[i];
                           const fReady = foeSpareReady(f);
                           const targeting = undertaleMenu === 'target' && undertaleTargetCursor === i;
                           return (
@@ -11543,12 +11550,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {pop.text}
                                   </div>
                                 )}
-                                {f.sprite ? (() => {
-                                  const es = f.sprite;
-                                  const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
-                                  const cap = Math.min(sizeCap, anim.h ? anim.h * sizeMul : 120);
-                                  return <BattleAnimSprite anim={anim} h={`clamp(36px, ${aliveCount > 1 ? 12 : 20}vw, ${cap}px)`} />;
-                                })() : <span className={`${aliveCount > 1 ? 'text-5xl sm:text-6xl' : 'text-7xl sm:text-8xl'} leading-none drop-shadow`}>{f.emoji}</span>}
+                                <div key={shake?.id ?? 'noshake'} style={shake ? { animation: 'enemyHitShake 0.4s ease-in-out' } : undefined}>
+                                  {f.sprite ? (() => {
+                                    const es = f.sprite;
+                                    const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
+                                    const cap = Math.min(sizeCap, anim.h ? anim.h * sizeMul : 120);
+                                    return <BattleAnimSprite anim={anim} h={`clamp(36px, ${aliveCount > 1 ? 12 : 20}vw, ${cap}px)`} />;
+                                  })() : <span className={`${aliveCount > 1 ? 'text-5xl sm:text-6xl' : 'text-7xl sm:text-8xl'} leading-none drop-shadow`}>{f.emoji}</span>}
+                                </div>
                                 {gauge && (
                                   <div className="absolute left-1/2 top-1/3 -translate-x-1/2 w-20 h-1.5 overflow-hidden z-10" style={{ background: '#5b1010' }}>
                                     <div className="h-full bg-lime-400 transition-all duration-500 ease-out" style={{ width: `${gauge.pct}%` }} />

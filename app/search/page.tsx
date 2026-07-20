@@ -37,7 +37,7 @@ export default function SearchPage() {
           </Link>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1">
         <Suspense fallback={null}>
           <SearchPageContent />
         </Suspense>

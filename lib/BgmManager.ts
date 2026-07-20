@@ -9,6 +9,7 @@ interface BgmHandle {
 
 class BgmManager {
   private current: BgmHandle | null = null;
+  private currentKey: { type: string; src: string } | null = null;
   private baseVolume = 50;
 
   constructor() {
@@ -16,28 +17,43 @@ class BgmManager {
   }
 
   async play(manifest: AssetManifest) {
-    this.stop();
-    if (!manifest.bgm || !manifest.bgm.src) return;
+    if (!manifest.bgm || !manifest.bgm.src) {
+      this.stop();
+      return;
+    }
 
+    const type = manifest.bgm.type ?? 'youtube';
+    const src = manifest.bgm.src;
     const volume = (manifest.bgm as any).volume !== undefined ? (manifest.bgm as any).volume : 50;
+
+    // シーン切替等で同じBGM（type, srcが同一）が指定された場合は巻き戻さず継続再生する
+    if (this.currentKey && this.currentKey.type === type && this.currentKey.src === src && this.current) {
+      this.baseVolume = volume;
+      this.current.setBaseVolume?.(volume);
+      return;
+    }
+
+    this.stop();
+    this.currentKey = { type, src };
     this.baseVolume = volume;
 
-    if (manifest.bgm.type === 'midi') {
-      await this.playMidi(manifest.bgm.src, volume);
-    } else if (manifest.bgm.type === 'youtube') {
-      this.playYoutube(manifest.bgm.src, volume);
-    } else if (manifest.bgm.type === 'nicovideo') {
-      this.playNicovideo(manifest.bgm.src, volume);
-    } else if (manifest.bgm.type === 'soundcloud') {
-      this.playSoundCloud(manifest.bgm.src, volume);
-    } else if (manifest.bgm.type === 'mml') {
-      this.playMml(manifest.bgm.src, manifest.bgm.loop, volume);
-    } else if (manifest.bgm.type === 'direct') {
-      this.playDirect(manifest.bgm.src, volume);
+    if (type === 'midi') {
+      await this.playMidi(src, volume);
+    } else if (type === 'youtube') {
+      this.playYoutube(src, volume);
+    } else if (type === 'nicovideo') {
+      this.playNicovideo(src, volume);
+    } else if (type === 'soundcloud') {
+      this.playSoundCloud(src, volume);
+    } else if (type === 'mml') {
+      this.playMml(src, manifest.bgm.loop, volume);
+    } else if (type === 'direct') {
+      this.playDirect(src, volume);
     }
   }
 
   stop() {
+    this.currentKey = null;
     if (this.current) { try { this.current.stop(); } catch (e) { } this.current = null; }
     document.querySelectorAll('.bgm-youtube-container, .bgm-nicovideo-container, .bgm-soundcloud-container').forEach(el => el.remove());
   }

@@ -72,43 +72,41 @@ export default function HashtagView({ tag }: HashtagViewProps) {
   };
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 min-h-dvh w-full flex flex-col">
-      <div className="w-full max-w-2xl mx-auto border-x border-gray-800 flex-1 flex flex-col">
-        <PageHeader title={normalized.slice(1)} icon={<Hash size={15} className="text-blue-400" />} />
+    <div className="flex-1 flex flex-col">
+      <PageHeader title={normalized.slice(1)} icon={<Hash size={15} className="text-blue-400" />} />
 
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-800/80">
-          {loading ? (
-            <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
-          ) : posts.length > 0 ? (
-            posts.map((post, index) => (
-              <VirtualizedItem key={post.id} initialVisible={index < 8}>
-                <PostContainer
-                  post={post}
-                  isRankingMode={false}
-                  rankIndex={index + 1}
-                  rankCategory=""
-                  onLike={handleLike}
-                  onDislike={handleDislike}
-                  onRepost={handleRepost}
-                  onHeart={handleHeart}
-                  onAddReply={handleAddReply}
-                  onQuickPost={() => {}}
-                  openGame={() => {}}
-                  openCollab={() => {}}
-                  openMml={() => {}}
-                  currentUserSlug={currentUser?.slug}
-                  currentUserDisplayName={currentUser?.displayName}
-                  onModerationChange={fetchPosts}
-                />
-              </VirtualizedItem>
-            ))
-          ) : (
-            <div className="p-12 text-center text-xs text-gray-600 flex flex-col items-center gap-2">
-              <Hash size={24} className="text-gray-700" />
-              <span>「{normalized}」の投稿はまだありません</span>
-            </div>
-          )}
-        </div>
+      <div className="flex-1 divide-y divide-gray-800/80 pb-20">
+        {loading ? (
+          <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
+        ) : posts.length > 0 ? (
+          posts.map((post, index) => (
+            <VirtualizedItem key={post.id} initialVisible={index < 8}>
+              <PostContainer
+                post={post}
+                isRankingMode={false}
+                rankIndex={index + 1}
+                rankCategory=""
+                onLike={handleLike}
+                onDislike={handleDislike}
+                onRepost={handleRepost}
+                onHeart={handleHeart}
+                onAddReply={handleAddReply}
+                onQuickPost={() => {}}
+                openGame={() => {}}
+                openCollab={() => {}}
+                openMml={() => {}}
+                currentUserSlug={currentUser?.slug}
+                currentUserDisplayName={currentUser?.displayName}
+                onModerationChange={fetchPosts}
+              />
+            </VirtualizedItem>
+          ))
+        ) : (
+          <div className="p-12 text-center text-xs text-gray-600 flex flex-col items-center gap-2">
+            <Hash size={24} className="text-gray-700" />
+            <span>「{normalized}」の投稿はまだありません</span>
+          </div>
+        )}
       </div>
     </div>
   );

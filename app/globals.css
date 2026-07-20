@@ -84,6 +84,33 @@
   }
 }
 
+/* 被弾演出：アンダーテール風に左右へ小刻みに揺れる */
+@keyframes enemyHitShake {
+  0% {
+    transform: translateX(0);
+  }
+
+  20% {
+    transform: translateX(-6px);
+  }
+
+  40% {
+    transform: translateX(6px);
+  }
+
+  60% {
+    transform: translateX(-4px);
+  }
+
+  80% {
+    transform: translateX(4px);
+  }
+
+  100% {
+    transform: translateX(0);
+  }
+}
+
 @keyframes danmaku-slide {
   from {
     left: 105%;

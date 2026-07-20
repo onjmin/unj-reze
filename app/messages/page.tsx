@@ -20,7 +20,7 @@ export default function MessagesPage() {
           <span className="font-bold text-sm text-gray-200">メッセージ</span>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1">
         <MessageView userId={currentUser?.displayName} />
       </div>
     </AppShell>

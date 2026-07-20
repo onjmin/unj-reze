@@ -48,11 +48,6 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
     if (userSlug) router.prefetch(`/user/${userSlug}`);
   }, [router, userSlug]);
 
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    const scrollable = document.getElementById('scrollable-content');
-    if (scrollable) scrollable.scrollTop += e.deltaY;
-  };
-
   const getItemHref = (id: string) => {
     if (id === 'search') return '/search';
     if (id === 'profile') return userSlug ? `/user/${userSlug}` : '/';
@@ -67,8 +62,7 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
 
   return (
     <div
-      className="hidden md:flex flex-col justify-between w-[68px] xl:w-64 h-dvh shrink-0 px-2 xl:px-3 py-4 border-r border-gray-800"
-      onWheel={handleWheel}
+      className="hidden md:flex flex-col justify-between w-[68px] xl:w-64 h-dvh sticky top-0 shrink-0 px-2 xl:px-3 py-4 border-r border-gray-800"
     >
       <div className="flex flex-col gap-1">
         {items.map(item => {
