@@ -35,6 +35,7 @@ import {
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
   type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type UndertaleMode, type EnemyDialogueLine,
+  type GrowthType, type StatGrowth, expToNextLevel,
   type PartySpell, type PartyMember, type BattleSpriteAnim, type PartyBattleSprites, type EnemyBattleSprite,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig, type DeathScreenConfig, type DeathScreenStyle,
@@ -69,6 +70,16 @@ function pickRandomEncounter(groups: EncounterGroup[] | undefined, table: Encoun
   }
   if (table?.length) return table[Math.floor(Math.random() * table.length)];
   return undefined;
+}
+
+/** 主人公のレベルに応じて、まだ覚えていない（learnLevel未到達）戦闘コマンドを除いた一覧を返す。 */
+function availableMoves(moves: BattleMove[], level: number): BattleMove[] {
+  return moves.filter(m => (m.learnLevel ?? 1) <= level);
+}
+
+/** party[0]（レベル管理される主人公）の呪文だけ learnLevel でフィルタする。同行者は個別レベルを持たないため常に全て使える。 */
+function availableSpells(spells: PartySpell[], memberIdx: number, level: number): PartySpell[] {
+  return memberIdx === 0 ? spells.filter(s => (s.learnLevel ?? 1) <= level) : spells;
 }
 
 let cachedPixelFontFamily: string | null = null;
@@ -2523,7 +2534,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       pr.exp += expGain;
       let lvUp = '';
       {
-        const levelTable = gameDataRef.current.battle?.levelTable ?? [];
+        const bd0 = gameDataRef.current.battle;
+        const levelTable = bd0?.levelTable ?? [];
+        const growthType: GrowthType = bd0?.growthType ?? 'standard';
+        const growth: StatGrowth = bd0?.growth ?? { hp: 6, mp: 3, atk: 2, def: 1 };
+        const learned: string[] = [];
         while (true) {
           const nextEntry = levelTable.find(e => e.level === pr.level + 1);
           const nextExpNeeded = nextEntry?.exp ?? pr.expNext;
@@ -2537,13 +2552,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (nextEntry.def != null) pr.baseDef = nextEntry.def;
             pr.hp = pr.maxHp; pr.mp = pr.maxMp;
           } else {
-            pr.maxHp += 6; pr.maxMp += 3; pr.baseAtk += 2; pr.baseDef += 1; pr.hp = pr.maxHp; pr.mp = pr.maxMp;
+            pr.maxHp += growth.hp; pr.maxMp += growth.mp; pr.baseAtk += growth.atk; pr.baseDef += growth.def;
+            pr.hp = pr.maxHp; pr.mp = pr.maxMp;
           }
           const nextNext = levelTable.find(e => e.level === pr.level + 1);
-          pr.expNext = nextNext?.exp ?? pr.level * 10;
+          pr.expNext = nextNext?.exp ?? expToNextLevel(pr.level, growthType);
+          // このレベルで新しく使えるようになった戦闘コマンド／呪文（主人公＝party[0]）を集めてログに出す
+          (bd0?.moves ?? []).forEach(m => { if (m.learnLevel === pr.level) learned.push(m.name); });
+          (bd0?.party?.[0]?.spells ?? []).forEach(s => { if (s.learnLevel === pr.level) learned.push(s.name); });
           lvUp = `レベルが ${pr.level} に あがった！`;
           playSfx(sfxRef.current.levelup);
         }
+        if (learned.length) lvUp += ` ${learned.join('・')}を おぼえた！`;
         if (lvUp) applyEquipment(equipmentRef.current); // 基礎値の上に装備ボーナスを再計算
       }
       pr.gold = (pr.gold ?? 0) + goldGain;
@@ -3472,7 +3492,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const style = bd.style;
     const roster = ptParty();
     const cur = roster[Math.min(p.turnIdx, Math.max(0, roster.length - 1))];
-    const skillMoves = bd.moves.filter(m => m.mercy == null);
+    const skillMoves = availableMoves(bd.moves, progressRef.current.level).filter(m => m.mercy == null);
     const items = usableItems();
     if (p.menu === 'target') {
       const list = battleRef.current.foes
@@ -3555,7 +3575,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const bd = gameDataRef.current.battle!;
     const roster = ptParty();
     const cur = roster[Math.min(ptRef.current.turnIdx, Math.max(0, roster.length - 1))];
-    const skillMoves = bd.moves.filter(m => m.mercy == null);
+    const skillMoves = availableMoves(bd.moves, progressRef.current.level).filter(m => m.mercy == null);
     const atkCost = milkyBaseAttackCost(cur?.atk ?? 10);
     const list: { name: string; sub: string; disabled?: boolean; onClick: () => void }[] = [
       { name: 'ふつうのこうげき', sub: `WT${atkCost}`, onClick: () => ptWithTarget({ kind: 'attack' }) },
@@ -5134,7 +5154,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
-      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.[0]?.exp ?? 10, gold: b.gold ?? 0 };
+      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 };
       setEquipment({}); equipmentRef.current = {};
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
       encounterGaugeRef.current = 0; encounterNextRef.current = 0;
@@ -8239,8 +8259,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // ACT / ITEM / MERCY サブメニュー。デルタルーンの2番目のコマンドはメンバーで中身が変わる：
           // 呪文持ち（スージー/ラルセイ）＝「まほう」で自分の呪文のみ、呪文なし（クリス）＝「こうどう」でACT技のみ
           const bd2 = gameDataRef.current.battle;
-          const curSpells = isDt ? (dtParty()[dtTurnIdxRef.current] ? (bd2?.party?.[dtTurnIdxRef.current]?.spells ?? []) : []) : [];
-          const curMoveCount = isDt && curSpells.length ? 0 : (bd2?.moves.length ?? 0);
+          const rawSpells2 = isDt ? (dtParty()[dtTurnIdxRef.current] ? (bd2?.party?.[dtTurnIdxRef.current]?.spells ?? []) : []) : [];
+          const curSpells = availableSpells(rawSpells2, dtTurnIdxRef.current, progressRef.current.level);
+          const curMoveCount = isDt && rawSpells2.length ? 0 : availableMoves(bd2?.moves ?? [], progressRef.current.level).length;
           let count = 1; let cols = 1;
           if (undertaleMenuRef.current === 'act') { count = curMoveCount + curSpells.length + 1; cols = 2; }
           else if (undertaleMenuRef.current === 'item') { count = usableItems().length + 1; cols = 2; }
@@ -8296,7 +8317,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
         } else {
           const bd3 = gameDataRef.current.battle;
-          const n = 2 + (bd3?.moves.length ?? 0) + (bd3?.labels.mercy ? 1 : 0) + (usableItems().length > 0 ? 1 : 0);
+          const n = 2 + availableMoves(bd3?.moves ?? [], progressRef.current.level).length + (bd3?.labels.mercy ? 1 : 0) + (usableItems().length > 0 ? 1 : 0);
           if (n > 0 && (menuUpEdge || menuDownEdge || menuLeftEdge || menuRightEdge)) {
             let c = classicBattleCursorRef.current;
             if (menuLeftEdge) c -= 1;
@@ -8389,9 +8410,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
           } else if (undertaleMenuRef.current === 'act') {
             const curMember = isDt ? gameDataRef.current.battle?.party?.[dtTurnIdxRef.current] : undefined;
-            const spells = curMember?.spells ?? [];
+            const rawSpells3 = curMember?.spells ?? [];
+            const spells = availableSpells(rawSpells3, dtTurnIdxRef.current, progressRef.current.level);
             // 呪文持ちメンバーのメニューは「まほう」＝呪文のみ（ACT技は呪文なしのクリス専用）
-            const moves = isDt && spells.length ? [] : (gameDataRef.current.battle?.moves ?? []);
+            const moves = isDt && rawSpells3.length ? [] : availableMoves(gameDataRef.current.battle?.moves ?? [], progressRef.current.level);
             const idx = undertaleSubCursorRef.current;
             if (idx < moves.length) {
               // 自分回復のこうどうは対象不要。それ以外（敵意/ダメージ）は対象の敵を選んでから実行
@@ -11394,21 +11416,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             && (enemyBubbles.size === 0 || [...enemyBubbles.values()].every(b => b.reveal >= b.text.length)) && (
                               <div className="absolute bottom-1 right-2 text-white animate-pulse">▼</div>
                             )}
-                          {undertaleMenu === 'act' && (
+                          {undertaleMenu === 'act' && (() => {
+                            const acMoves = availableMoves(bd.moves, pr.level);
+                            return (
                             <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                              {bd.moves.map((m, i) => (
+                              {acMoves.map((m, i) => (
                                 <button key={`m${i}`} disabled={!canMenu || pr.mp < m.cost}
                                   onClick={() => { setUndertaleSubCursor(i); if (m.heal) { setUndertaleMenu('root'); doMove(m); } else beginTargetSelect({ kind: 'act', move: m }); }}
                                   className={`text-left disabled:opacity-40 text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === i ? 'text-yellow-300' : 'text-white hover:text-yellow-300'}`}>
                                   {undertaleSubCursor === i ? '❤ ' : '  '}{m.name}{m.cost > 0 && <span className="text-cyan-300 ml-1">{m.cost}</span>}
                                 </button>
                               ))}
-                              <button onClick={() => { setUndertaleSubCursor(bd.moves.length); setUndertaleMenu('root'); }}
-                                className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === bd.moves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
-                                {undertaleSubCursor === bd.moves.length ? '❤ ' : '  '}もどる
+                              <button onClick={() => { setUndertaleSubCursor(acMoves.length); setUndertaleMenu('root'); }}
+                                className={`text-left text-[11px] sm:text-xs py-0.5 ${undertaleSubCursor === acMoves.length ? 'text-yellow-300' : 'text-gray-400 hover:text-white'}`}>
+                                {undertaleSubCursor === acMoves.length ? '❤ ' : '  '}もどる
                               </button>
                             </div>
-                          )}
+                            );
+                          })()}
                           {undertaleMenu === 'target' && (
                             <div className="flex flex-col gap-1">
                               <p className="text-gray-400 text-[10px] sm:text-xs">＊ だれに？</p>
@@ -11501,17 +11526,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const ready = battle.foes.some(f => !f.gone && foeSpareReady(f));
               const roster = dtParty();
               const curMember = bd.party?.[dtTurnIdx];
-              const curSpells = curMember?.spells ?? [];
+              const isSpellUser = (curMember?.spells ?? []).length > 0;
+              const curSpells = availableSpells(curMember?.spells ?? [], dtTurnIdx, progressRef.current.level);
               // 呪文持ちメンバー（スージー/ラルセイ）の2番目のコマンドは「まほう」＝自分の呪文だけが並ぶ。
               // 呪文を持たないメンバー（クリス）だけが「こうどう」＝共通のACT技を使える（原作準拠：
               // tlDR Engine でも ACT は item_s_act としてクリスの spells 枠に入っている構造）。
-              const curMoves = curSpells.length ? [] : bd.moves;
+              const curMoves = isSpellUser ? [] : availableMoves(bd.moves, progressRef.current.level);
               const memberColor = (i: number) => bd.party?.[i]?.color ?? '#ffffff';
               // コマンド5種（tlDR Engine のボタンスプライト。frame0=通常/frame1=選択中）。
               // 2番目は呪文持ちなら POWER（まほう）、それ以外は ACT（こうどう）の絵柄になる。
               const cmds = [
                 { anim: TLDR_UI_SPRITES.btFight, label: bd.labels.attack, sel: undertaleMenu === 'target', onClick: () => canMenu && beginTargetSelect({ kind: 'fight' }) },
-                { anim: curSpells.length ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: curSpells.length ? 'まほう' : bd.labels.move, sel: undertaleMenu === 'act', onClick: () => canMenu && setUndertaleMenu(m => m === 'act' ? 'root' : 'act') },
+                { anim: isSpellUser ? TLDR_UI_SPRITES.btPower : TLDR_UI_SPRITES.btAct, label: isSpellUser ? 'まほう' : bd.labels.move, sel: undertaleMenu === 'act', onClick: () => canMenu && setUndertaleMenu(m => m === 'act' ? 'root' : 'act') },
                 { anim: TLDR_UI_SPRITES.btItem, label: bd.labels.item ?? 'アイテム', sel: undertaleMenu === 'item', onClick: () => canMenu && setUndertaleMenu(m => m === 'item' ? 'root' : 'item') },
                 { anim: TLDR_UI_SPRITES.btSpare, label: bd.labels.mercy ?? 'みのがす', sel: undertaleMenu === 'mercy', mercy: true, onClick: () => canMenu && setUndertaleMenu(m => m === 'mercy' ? 'root' : 'mercy') },
                 { anim: TLDR_UI_SPRITES.btDefend, label: 'まもる', onClick: () => canMenu && doDefend() },
@@ -14180,6 +14206,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   ))}
                                 </div>
                               )}
+                              {/* このメンバーの呪文（PartySpell）。learnLevel は主人公(i===0)のみレベル連動、同行者は常に使用可能。 */}
+                              <div className="space-y-1 pt-1 border-t border-gray-700/50">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[9px] text-gray-400">呪文{i !== 0 && <span className="text-gray-600">（同行者は習得Lv欄を無視して常に使用可）</span>}</span>
+                                  <button onClick={() => setGameData(p => {
+                                    const b = p.battle!; const next = [...(b.party ?? [])];
+                                    next[i] = { ...next[i], spells: [...(next[i].spells ?? []), { name: '新しい呪文', tpCost: 20, power: 10 }] };
+                                    return { ...p, battle: { ...b, party: next } };
+                                  })} className="text-[9px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5">+ 呪文追加</button>
+                                </div>
+                                {(m.spells ?? []).map((sp, si) => (
+                                  <div key={si} className="bg-gray-900/60 rounded border border-gray-700/70 p-1.5 space-y-1">
+                                    <div className="flex gap-1.5 items-center">
+                                      <input value={sp.name} placeholder="呪文名" onChange={e => setGameData(p => {
+                                        const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                        sps[si] = { ...sps[si], name: e.target.value };
+                                        next[i] = { ...next[i], spells: sps };
+                                        return { ...p, battle: { ...b, party: next } };
+                                      })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" />
+                                      <button onClick={() => setGameData(p => {
+                                        const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                        sps.splice(si, 1);
+                                        next[i] = { ...next[i], spells: sps };
+                                        return { ...p, battle: { ...b, party: next } };
+                                      })} className="shrink-0 grid place-items-center w-7 h-7 -my-1 rounded text-gray-500 hover:text-red-400 text-xs">✕</button>
+                                    </div>
+                                    <div className="grid grid-cols-4 gap-1">
+                                      {([['tpCost', '消費TP'], ['power', '威力/回復'], ['learnLevel', '習得Lv']] as ['tpCost' | 'power' | 'learnLevel', string][]).map(([key, label]) => (
+                                        <label key={key} className="text-[9px] text-gray-500">{label}
+                                          <input type="text" inputMode="numeric" value={key === 'learnLevel' ? (sp[key] ?? '') : sp[key]}
+                                            placeholder={key === 'learnLevel' ? '1' : undefined}
+                                            onChange={e => setGameData(p => {
+                                              const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                              const v = parseInt(e.target.value);
+                                              sps[si] = { ...sps[si], [key]: key === 'learnLevel' ? (!isNaN(v) && v > 1 ? v : undefined) : (!isNaN(v) ? v : 0) };
+                                              next[i] = { ...next[i], spells: sps };
+                                              return { ...p, battle: { ...b, party: next } };
+                                            })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1 text-[10px] text-white text-right outline-none" />
+                                        </label>
+                                      ))}
+                                      <label className="text-[9px] text-gray-500 block">種別
+                                        <select value={sp.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
+                                          const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                          sps[si] = { ...sps[si], heal: e.target.value === 'heal' || undefined };
+                                          next[i] = { ...next[i], spells: sps };
+                                          return { ...p, battle: { ...b, party: next } };
+                                        })} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-1 text-[10px] text-white outline-none">
+                                          <option value="attack">ダメージ</option>
+                                          <option value="heal">HP回復</option>
+                                        </select>
+                                      </label>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -14254,7 +14335,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 return { ...p, battle: { ...b, moves: next } };
                               })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
                             </div>
-                            <div className="grid grid-cols-3 gap-1.5">
+                            <div className="grid grid-cols-4 gap-1.5">
                               <label className="text-[10px] text-gray-400">消費MP
                                 <input type="text" inputMode="numeric" value={m.cost} onChange={e => setGameData(p => {
                                   const b = p.battle!; const next = [...b.moves];
@@ -14293,16 +14374,59 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   {gameData.battle?.labels.mercy && <option value="mercy">こうどう(敵意)</option>}
                                 </select>
                               </label>
+                              <label className="text-[10px] text-gray-400">習得Lv
+                                <input type="text" inputMode="numeric" value={m.learnLevel ?? ''} placeholder="1" onChange={e => setGameData(p => {
+                                  const b = p.battle!; const next = [...b.moves];
+                                  const v = parseInt(e.target.value);
+                                  next[i] = { ...next[i], learnLevel: !isNaN(v) && v > 1 ? v : undefined };
+                                  return { ...p, battle: { ...b, moves: next } };
+                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                              </label>
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
 
-                    {/* 4. レベルアップ成長テーブル */}
+                    {/* 4. レベルアップ成長率・経験値カーブ */}
+                    <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                      <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長率・経験値カーブ</p>
+                      <p className="text-[9px] text-gray-500 leading-relaxed">主人公のレベルが上がるたびに、下の増分がステータスへ自動加算されます（下の「成長表」で特定レベルだけ手動指定した場合はそちらが優先）。</p>
+                      <label className="block text-[10px] text-gray-400">経験値カーブ（成長タイプ）
+                        <select value={gameData.battle.growthType ?? 'standard'} onChange={e => {
+                          const v = e.target.value as GrowthType;
+                          setGameData(p => ({ ...p, battle: { ...p.battle!, growthType: v } }));
+                        }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
+                          <option value="early">早熟（序盤は少ない経験値でどんどんレベルが上がる）</option>
+                          <option value="standard">標準</option>
+                          <option value="late">晩成（レベルが上がるほど必要経験値が急激に増える）</option>
+                        </select>
+                      </label>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {([
+                          ['hp', '最大HP+'], ['mp', '最大MP+'], ['atk', '攻撃+'], ['def', '防御+'],
+                        ] as ['hp' | 'mp' | 'atk' | 'def', string][]).map(([key, label]) => (
+                          <label key={key} className="text-[10px] text-gray-400">{label}
+                            <input type="text" inputMode="numeric" value={gameData.battle!.growth?.[key] ?? { hp: 6, mp: 3, atk: 2, def: 1 }[key]} onChange={e => {
+                              const v = parseInt(e.target.value);
+                              setGameData(p => {
+                                const b = p.battle!;
+                                const cur = b.growth ?? { hp: 6, mp: 3, atk: 2, def: 1 };
+                                return { ...p, battle: { ...b, growth: { ...cur, [key]: !isNaN(v) ? v : cur[key] } } };
+                              });
+                            }} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 4.5 レベルアップ成長表（手動指定・任意） */}
                     <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
                       <div className="flex justify-between items-center">
-                        <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長表</p>
+                        <div>
+                          <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長表（手動指定・任意）</p>
+                          <p className="text-[9px] text-gray-500">特定のレベルだけ、上の自動成長ではなく指定した値に置き換えたいときに追加。</p>
+                        </div>
                         <button onClick={() => setGameData(p => {
                           const b = p.battle!;
                           const table = b.levelTable ?? [];

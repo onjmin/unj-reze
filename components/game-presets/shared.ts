@@ -360,8 +360,27 @@ export interface DeathScreenConfig {
   textColor?: string;     // 文字色（Minecraft風スタイル時の見出し）
 }
 
-/** レベルアップ時のステータス成長テーブル。exp 以上になったとき適用。 */
+/** レベルアップ時のステータス成長テーブル。exp 以上になったとき適用。
+ *  levelTable に該当レベルの行が無いとき、growthType/growth（下記）による自動計算にフォールバックする。 */
 export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?: number; atk?: number; def?: number; }
+
+/** 経験値カーブの成長タイプ。早熟＝序盤ほど少ない経験値でレベルが上がる、晩成＝逆に必要経験値が急激に増えていく。 */
+export type GrowthType = 'early' | 'standard' | 'late';
+
+/** レベルアップ1回ごとのステータス増分（levelTable に該当レベルの行が無いときに使う自動成長）。 */
+export interface StatGrowth { hp: number; mp: number; atk: number; def: number; }
+
+const GROWTH_EXP_PARAMS: Record<GrowthType, { base: number; pow: number }> = {
+  early: { base: 8, pow: 1.8 },
+  standard: { base: 10, pow: 2 },
+  late: { base: 13, pow: 2.3 },
+};
+
+/** growthType に応じた「現在のレベルから次のレベルに上がるまでに必要な経験値」を返す。 */
+export function expToNextLevel(level: number, growthType: GrowthType = 'standard'): number {
+  const { base, pow } = GROWTH_EXP_PARAMS[growthType];
+  return Math.max(1, Math.round(base * Math.pow(Math.max(1, level), pow)));
+}
 
 /** ショップ販売アイテム定義。 */
 export interface ShopItem { itemId: string; price: number; }
@@ -369,7 +388,8 @@ export interface ShopItem { itemId: string; price: number; }
 /** ターン制戦闘の技/呪文。heal=true のとき power 分だけ自分のHPを回復。
  *  mercy を指定すると「こうどう」技になる：ダメージを与えず敵の敵意ゲージ（0〜100）を mercy 分下げる。
  *  ゲージが満タン（または敵HPが2割以下）になると「みのがす」で戦闘を終了できる（labels.mercy 参照）。 */
-export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; }
+/** learnLevel を指定すると、主人公（レベル管理される操作キャラ）のレベルがそれ以上になるまで戦闘コマンドに出現しない。省略時は最初から使える。 */
+export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; learnLevel?: number; }
 
 /** UNDERTALEの移動モード（battle.style==='undertale' の弾幕よけ中）。
  *  red=自由移動 / blue=重力+ジャンプ / green=シールド（移動不可・方向キーでその方向の矢弾を防ぐ）
@@ -413,6 +433,9 @@ export interface PartySpell {
   name: string; tpCost: number; power: number; heal?: boolean;
   /** 詠唱時・命中時の専用SE（省略時は共通の spellCast／enemyDamage）。ルードバスター等の固有演出用 */
   castSfxUrl?: string; hitSfxUrl?: string;
+  /** 主人公（party先頭・レベル管理される操作キャラ）のレベルがそれ以上になるまで出現しない。
+   *  同行者（party[1]以降）は個別のレベルを持たないため、この欄を指定しても常に使用可能のまま。 */
+  learnLevel?: number;
 }
 
 /** バトル演出用のアニメ1本（フレーム順の画像URL列）。fps 省略時は 8。
@@ -466,8 +489,13 @@ export interface BattleConfig {
   party?: PartyMember[];
   /** 初期所持金。 */
   gold?: number;
-  /** レベルアップテーブル。exp 到達時に対応ステータスへ上書き。 */
+  /** レベルアップテーブル（任意・特定レベルだけ手動で上書きしたいとき用）。exp 到達時に対応ステータスへ上書き。
+   *  該当レベルの行が無いときは growthType/growth による自動成長が使われる。 */
   levelTable?: LevelEntry[];
+  /** 経験値カーブの成長タイプ（早熟/標準/晩成）。省略時 'standard'。 */
+  growthType?: GrowthType;
+  /** レベルアップ1回ごとの自動ステータス増分。省略時は控えめな既定値（HP+6/MP+3/攻+2/防+1）。 */
+  growth?: StatGrowth;
   /** ゴール（城/ジム）到達時に戦うボス。倒すとクリア。 */
   boss?: EncounterEnemy;
   /** ゴールボス撃破後に流すセリフ。 */
