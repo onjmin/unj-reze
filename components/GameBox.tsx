@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { PlaySquare } from 'lucide-react';
 import GamePreview from './GamePreview';
 import { PLAY_W, PLAY_H } from './game-presets/shared';
+import { useAudioFocus } from '@/lib/audio-focus-context';
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
@@ -21,6 +22,8 @@ export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, user
   const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed');
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { requestFocus, releaseFocus } = useAudioFocus();
+  const instanceIdRef = useRef(`gb_${postId}_${Math.random().toString(36).slice(2, 9)}`);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -35,13 +38,31 @@ export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, user
   const isOpen = phase === 'opening' || phase === 'open';
   const currentHeight = isOpen ? fullHeight : THUMBNAIL_HEIGHT;
 
-  const handleOpen = useCallback(() => {
-    setPhase(prev => (prev === 'closed' || prev === 'closing') ? 'opening' : prev);
-  }, []);
-
   const handleClose = useCallback(() => {
     setPhase(prev => (prev === 'open' || prev === 'opening') ? 'closing' : prev);
   }, []);
+
+  const handleOpen = useCallback(() => {
+    requestFocus(instanceIdRef.current, () => {
+      handleClose();
+    });
+    window.dispatchEvent(new CustomEvent('unj-game-box-open', { detail: { id: instanceIdRef.current } }));
+    setPhase(prev => (prev === 'closed' || prev === 'closing') ? 'opening' : prev);
+  }, [requestFocus, handleClose]);
+
+  useEffect(() => {
+    const handleOtherOpen = (e: Event) => {
+      const customEvent = e as CustomEvent<{ id: string }>;
+      if (customEvent.detail?.id !== instanceIdRef.current) {
+        handleClose();
+      }
+    };
+    window.addEventListener('unj-game-box-open', handleOtherOpen);
+    return () => {
+      window.removeEventListener('unj-game-box-open', handleOtherOpen);
+      releaseFocus(instanceIdRef.current);
+    };
+  }, [handleClose, releaseFocus]);
 
   const handleTransitionEnd = useCallback((e: React.TransitionEvent) => {
     if (e.propertyName !== 'height') return;
