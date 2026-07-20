@@ -34,9 +34,10 @@ import {
   type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
-  type BattleMove, type SwitchDef, type ItemDef, type BattleConfig, type UndertaleMode, type EnemyDialogueLine,
+  type BattleMove, type SwitchDef, type ItemDef, type EquipmentDef, type BattleConfig, type UndertaleMode, type EnemyDialogueLine,
   type GrowthType, type StatGrowth, expToNextLevel,
   type PartySpell, type PartyMember, type BattleSpriteAnim, type PartyBattleSprites, type EnemyBattleSprite,
+  type EffectPreset,
   type EventCommand, type EventPage, type EventCondition,
   type TitleScreenConfig, type EndingScreenConfig, type DeathScreenConfig, type DeathScreenStyle,
   defaultTitleScreen, defaultEndingScreen, defaultDeathScreen,
@@ -147,7 +148,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'object' | 'char' | 'battle' | 'switch' | 'item' | 'spell' | 'sound' | 'screen' | 'scene';
+type EditorTab = 'map' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -190,6 +191,10 @@ export interface GameManifestDraft {
   scroll?: { worldCols: number; worldRows?: number };
   switches?: SwitchDef[];
   items?: ItemDef[];
+  weapons?: EquipmentDef[];
+  armors?: EquipmentDef[];
+  /** 汎用エフェクトアニメーション一覧。imageUrl は post: 参照の解決済みキャッシュのため保存しない。 */
+  effects?: Array<Omit<EffectPreset, 'imageUrl'> & { imageUrl?: string }>;
   phases?: StagePhase[];
   titleScreen?: Omit<TitleScreenConfig, 'bgUrl'>;
   ending?: Omit<EndingScreenConfig, 'bgUrl'>;
@@ -317,6 +322,12 @@ const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId
     scroll: manifest.scroll ?? base.scroll,
     switches: manifest.switches ?? base.switches,
     items: manifest.items ?? base.items,
+    weapons: manifest.weapons ?? base.weapons,
+    armors: manifest.armors ?? base.armors,
+    effects: (manifest.effects ?? base.effects)?.map(ef => ({
+      ...ef,
+      imageUrl: ef.imageRef.startsWith('url:') ? (imageRefToUrl(ef.imageRef) ?? undefined) : (hydrateUrlFromRef(ef.imageRef) ?? ef.imageUrl),
+    })),
     phases: manifest.phases ?? base.phases,
     titleScreen: manifest.titleScreen ?? base.titleScreen,
     ending: manifest.ending ?? base.ending,
@@ -926,7 +937,9 @@ type PickTarget =
   | { t: 'yumeSky' }
   | { t: 'yumeTexSound'; id: number }
   | { t: 'yumeMcSkin' }
-  | { t: 'playerMcSkin' };
+  | { t: 'playerMcSkin' }
+  | { t: 'effectImage'; id: string }
+  | { t: 'effectSfx'; id: string };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -1048,6 +1061,74 @@ const SpriteThumbnail = ({
     <div className={`shrink-0 bg-gray-800 rounded ${className}`} style={{ width: `${size}px`, height: `${size}px` }} />
   );
 };
+
+/** 汎用エフェクトアニメーション（横一列スプライトシート）を再生する小さな DOM コンポーネント。
+ *  バトル演出（1回だけ再生→onDone）と、エディタのプレビュー（loop=true で繰り返し再生）の両方から使う。
+ *  クラシックな「スプライトストリップ」手法: 外側 div を1コマ分の幅で overflow:hidden にし、
+ *  内側の img を frameCount 倍の幅で敷いて translateX でずらす。 */
+function EffectSpriteAnim({
+  effect, url, sizePx = 64, loop = false, onDone,
+}: { effect: EffectPreset; url: string; sizePx?: number; loop?: boolean; onDone?: () => void }) {
+  const [frame, setFrame] = useState(0);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const frameCount = Math.max(1, effect.frameCount || 1);
+  const fps = effect.fps ?? 12;
+
+  useEffect(() => {
+    setFrame(0);
+    setNatural(null);
+    let alive = true;
+    const img = new Image();
+    img.onload = () => { if (alive) setNatural({ w: img.naturalWidth, h: img.naturalHeight }); };
+    img.src = url;
+    return () => { alive = false; };
+  }, [url]);
+
+  useEffect(() => {
+    if (!natural) return;
+    let raf = 0;
+    let start = performance.now();
+    let done = false;
+    const tick = (now: number) => {
+      const elapsed = (now - start) / 1000;
+      let f = Math.floor(elapsed * fps);
+      if (f >= frameCount) {
+        if (loop) { start = now; f = 0; }
+        else { f = frameCount - 1; if (!done) { done = true; onDone?.(); } setFrame(f); return; }
+      }
+      setFrame(f);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [natural, frameCount, fps, loop]);
+
+  if (!natural) return <div style={{ width: sizePx, height: sizePx }} className="bg-gray-800/50 rounded" />;
+  const frameDisplayW = sizePx * (natural.w / frameCount / natural.h);
+  return (
+    <div style={{ width: frameDisplayW, height: sizePx, overflow: 'hidden', position: 'relative' }}>
+      <img
+        src={url}
+        style={{
+          position: 'absolute', left: 0, top: 0,
+          width: frameDisplayW * frameCount, height: sizePx,
+          transform: `translateX(${-frame * frameDisplayW}px)`,
+          imageRendering: 'pixelated',
+        }}
+      />
+    </div>
+  );
+}
+
+/** 組み込みのエフェクトアニメーションプリセット（id は追加時に uid() で採番）。RPGEN のスペルシートを流用。 */
+const BUILT_IN_EFFECT_PRESETS: Omit<EffectPreset, 'id'>[] = [
+  { name: 'ファイアボール', imageRef: 'url:https://rpgen.org/dq/spells/7/spell.png', imageUrl: 'https://rpgen.org/dq/spells/7/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', type: 'direct' } },
+  { name: '炎', imageRef: 'url:https://rpgen.org/dq/spells/18/spell.png', imageUrl: 'https://rpgen.org/dq/spells/18/spell.png', frameCount: 8, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/HDbV5i.mp3', type: 'direct' } },
+  { name: '爆発', imageRef: 'url:https://rpgen.org/dq/spells/6/spell.png', imageUrl: 'https://rpgen.org/dq/spells/6/spell.png', frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/hR4B8I.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/hR4B8I.mp3', type: 'direct' } },
+  { name: 'かぜ', imageRef: 'url:https://rpgen.org/dq/spells/3/spell.png', imageUrl: 'https://rpgen.org/dq/spells/3/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/XoGbTD.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/XoGbTD.mp3', type: 'direct' } },
+  { name: 'こおり', imageRef: 'url:https://rpgen.org/dq/spells/15/spell.png', imageUrl: 'https://rpgen.org/dq/spells/15/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/QSRAPG.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/QSRAPG.mp3', type: 'direct' } },
+];
 
 let globalSmcMetadata: any = null;
 
@@ -1209,6 +1290,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 新規作成時の入口ヒーロー（デモ再生＋あそぶ/改造の選択）。playOnly/編集再開/埋め込み時は出さない。 */
   const [introOpen, setIntroOpen] = useState(!playOnly && !initialManifest && !embedded);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
+  /** エディタの「エフェクト」タブで、プレビュー再生中の EffectPreset.id（1件のみ）。 */
+  const [playingEffectPreview, setPlayingEffectPreview] = useState<string | null>(null);
   /** 詳細タブ（設定・サウンド・画面・フェーズ）の表示フラグ。初回は非表示で圧迫感を減らす。 */
   const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
@@ -1295,6 +1378,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   shopModalRef.current = shopModal;
   const [equipment, setEquipment] = useState<{ weapon?: string; armor?: string }>({});
   const equipmentRef = useRef<{ weapon?: string; armor?: string }>({});
+  /** 同行者(party[1..])ごとの装備。PartyMember.id をキーにする。主人公の equipment/equipmentRef は別管理のまま。 */
+  const [partyEquipment, setPartyEquipment] = useState<Record<string, { weapon?: string; armor?: string }>>({});
+  const partyEquipmentRef = useRef<Record<string, { weapon?: string; armor?: string }>>({});
   const selfSwitchesRef = useRef<Record<string, Record<string, boolean>>>({});
   const eventRunningRef = useRef(false);
   const eventIdRef = useRef(0);
@@ -1504,6 +1590,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     inventory: typeof inventoryRef.current;
     invSlots: string[];
     equipment: { weapon?: string; armor?: string };
+    partyEquipment?: Record<string, { weapon?: string; armor?: string }>;
     switchVals: Record<number, boolean>;
     selfSwitches: Record<string, Record<string, boolean>>;
     tp: number;
@@ -1604,6 +1691,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       inventory: inventoryRef.current,
       invSlots: invSlotsRef.current,
       equipment: equipmentRef.current,
+      partyEquipment: partyEquipmentRef.current,
       switchVals: switchValsRef.current,
       selfSwitches: selfSwitchesRef.current,
       tp: tpRef.current,
@@ -1627,6 +1715,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setInvSlots(state.invSlots);
     equipmentRef.current = state.equipment;
     setEquipment(state.equipment);
+    partyEquipmentRef.current = state.partyEquipment ?? {};
+    setPartyEquipment(state.partyEquipment ?? {});
     setSwitchVals(state.switchVals);
     selfSwitchesRef.current = state.selfSwitches;
     setTp(state.tp);
@@ -1982,6 +2072,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** アンダーテール風戦闘：敵HPゲージ（敵ごと）。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<Record<number, { pct: number; id: number } | undefined>>({});
   const [enemyShakeFx, setEnemyShakeFx] = useState<Record<number, { id: number } | undefined>>({});
+  /** バトル演出用エフェクトアニメーション（EffectPreset）の再生中インスタンス一覧。
+   *  foeIdx 指定時は該当する敵スロット内に重ねて表示し、未指定（パーティ側）は現状 castSpell/doMove の
+   *  攻撃系（敵へ命中）のみ配線済み。「見方が受ける」側の演出（EnemyMove 由来）は今回未配線。 */
+  const [battleEffects, setBattleEffects] = useState<{ key: string; effect: EffectPreset; url: string; foeIdx?: number }[]>([]);
+  const spawnBattleEffect = (effectId: string | undefined, foeIdx?: number) => {
+    if (!effectId) return;
+    const effect = (gameDataRef.current.effects ?? []).find(e => e.id === effectId);
+    if (!effect) return;
+    const url = imageRefToUrl(effect.imageRef) ?? effect.imageUrl;
+    if (!url) return;
+    const key = `${effectId}-${Date.now()}-${Math.random()}`;
+    setBattleEffects(list => [...list, { key, effect, url, foeIdx }]);
+  };
+  const removeBattleEffect = (key: string) => setBattleEffects(list => list.filter(e => e.key !== key));
   /** アンダーテール/デルタルーン風戦闘：撃破演出中（発光→分解して消える）の敵。foes 配列のインデックスをキーに
    *  独立管理し、演出が終わるまでは f.gone=true でも描画を続ける（消える瞬間まで枠を占有させ、演出後に
    *  ビュートランジションで残りの敵をなめらかに詰める）。 */
@@ -3097,6 +3201,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     } else {
       const dmg = Math.max(1, Math.round(m.power * (0.85 + Math.random() * 0.3)));
       if (dodge && foe) {
+        spawnBattleEffect(m.effectId, tIdx);
         const { killed, over } = damageFoe(tIdx, dmg);
         playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
         appendLog(`${m.name}！ ${b.foes.length > 1 ? `${foe.name}に ` : ''}${dmg}のダメージ${killed ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
@@ -3142,6 +3247,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const dmg = Math.max(1, Math.round(spell.power * (0.85 + Math.random() * 0.3)));
       const tIdx = retargetFoe(targetIdx ?? aliveFoeIdxs()[0] ?? 0);
       const foe = b.foes[tIdx];
+      spawnBattleEffect(spell.effectId, tIdx);
       const { killed, over } = damageFoe(tIdx, dmg);
       // 呪文固有の命中SE（ルードバスターの snd_rudebuster_hit 等）があれば共通音の代わりに鳴らす
       playSfx(spell.hitSfxUrl
@@ -3267,18 +3373,45 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   /** 戦闘中のどうぐ使用：対象メンバーへ healHp/healMp を適用し、所持品から1つ減らす。 */
-  const ptUseItemOn = (it: ItemDef, targetMemberId: string, userName?: string) => {
+  const ptUseItemOn = (it: ItemDef, targetMemberId: string, userName?: string, targetFoeIdx?: number) => {
     if ((inventoryRef.current[it.id] ?? 0) <= 0) return;
+    const tt = it.targetType;
+    // 対象メンバーごとの override（healHp/healMp）を解決する。
+    const healMember = (target: { id: string; hp: number; maxHp: number; mp: number; maxMp: number }): string[] => {
+      const ov = it.overrides?.find(o => o.memberId === target.id);
+      const healHp = ov?.healHp ?? it.healHp;
+      const healMp = ov?.healMp ?? it.healMp;
+      const parts: string[] = [];
+      if (healHp) { const after = Math.min(target.maxHp, target.hp + healHp); parts.push(`HPが ${after - target.hp} かいふく`); dtSetHp(target.id, after); }
+      if (healMp) { const after = Math.min(target.maxMp, target.mp + healMp); parts.push(`MPが ${after - target.mp} かいふく`); ptSetMp(target.id, after); }
+      return parts;
+    };
+    const consume = () => {
+      const slotIdx = invSlotsRef.current.indexOf(it.id);
+      if (slotIdx >= 0) { const copy = [...invSlotsRef.current]; copy.splice(slotIdx, 1); setInvSlots(copy); invSlotsRef.current = copy; }
+      setInventory(p => { const n = { ...p }; n[it.id] = (n[it.id] ?? 0) - 1; if (n[it.id] <= 0) delete n[it.id]; return n; });
+      playSfx(sfxRef.current.inn);
+      forceHud(n => n + 1);
+    };
+    if (tt === 'enemy' || tt === 'allEnemies') {
+      const dmg = it.damage ?? 0;
+      const idxs = tt === 'allEnemies' ? aliveFoeIdxs() : [targetFoeIdx ?? aliveFoeIdxs()[0] ?? 0];
+      consume();
+      appendLog(`${userName ?? ''}は ${it.name}を つかった！`, { canAct: false });
+      idxs.forEach(fi => { const foe = battleRef.current.foes[fi]; if (foe && !foe.gone && dmg > 0) { damageFoe(fi, dmg); appendLog(`${foe.name}に ${dmg}のダメージ！`, { canAct: false }); } });
+      return;
+    }
+    if (tt === 'allAllies') {
+      const members = ptParty().filter(mm => !ptIsDown(mm));
+      consume();
+      members.forEach(m => healMember(m));
+      appendLog(`${userName ?? ''}は ${it.name}を つかった！ パーティ全員を かいふく`, { canAct: false });
+      return;
+    }
     const target = ptParty().find(mm => mm.id === targetMemberId);
     if (!target) return;
-    const parts: string[] = [];
-    if (it.healHp) { const after = Math.min(target.maxHp, target.hp + it.healHp); parts.push(`HPが ${after - target.hp} かいふく`); dtSetHp(target.id, after); }
-    if (it.healMp) { const after = Math.min(target.maxMp, target.mp + it.healMp); parts.push(`MPが ${after - target.mp} かいふく`); ptSetMp(target.id, after); }
-    const slotIdx = invSlotsRef.current.indexOf(it.id);
-    if (slotIdx >= 0) { const copy = [...invSlotsRef.current]; copy.splice(slotIdx, 1); setInvSlots(copy); invSlotsRef.current = copy; }
-    setInventory(p => { const n = { ...p }; n[it.id] = (n[it.id] ?? 0) - 1; if (n[it.id] <= 0) delete n[it.id]; return n; });
-    playSfx(sfxRef.current.inn);
-    forceHud(n => n + 1);
+    const parts = healMember(target);
+    consume();
     appendLog(`${userName ?? target.name}は ${it.name}を つかった！ ${target.name}の ${parts.join('、')}`, { canAct: false });
   };
 
@@ -3339,7 +3472,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     if (action.kind === 'item' && action.item) {
-      ptUseItemOn(action.item, action.targetMemberId ?? actor.id, actor.name);
+      ptUseItemOn(action.item, action.targetMemberId ?? actor.id, actor.name, action.target);
       ptDelay(ptRunQueue, 850);
       return;
     }
@@ -3361,7 +3494,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     // 通常攻撃
-    const dmg = calcDmg(actor.atk, battleRef.current.enemyDef);
+    const dmg = calcDmg(effectiveMemberAtk(actor), battleRef.current.enemyDef);
     const over = ptHitFoe(`${actor.name}の こうげき！`, dmg, action.target);
     if (!over) ptDelay(ptRunQueue, 850);
   };
@@ -3387,7 +3520,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const targets = ptAliveMembers();
         const target = targets[Math.floor(Math.random() * targets.length)];
         if (!target) return;
-        const raw = move ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3))) : calcDmg(b.enemyAtk, target.def);
+        const raw = move ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3))) : calcDmg(b.enemyAtk, effectiveMemberDef(target));
         const dealt = ptDamageMember(target, raw);
         playSfx(sfxRef.current.damage);
         shakeRef.current = 6;
@@ -3448,7 +3581,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (pend.kind === 'attack') {
         ptPatch({ pending: null, menu: 'root' });
         milkyQueueAction(key, milkyBaseAttackCost(actor.atk), 'ふつうのこうげき', () => {
-          const dmg = calcDmg(actor.atk, battleRef.current.enemyDef);
+          const dmg = calcDmg(effectiveMemberAtk(actor), battleRef.current.enemyDef);
           return ptHitFoe(`${actor.name}の こうげき！`, dmg, foeIdx);
         });
       } else if (pend.kind === 'skill' && pend.move) {
@@ -3467,6 +3600,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!actor) return;
     if (pend.kind === 'attack') ptChoose({ memberId: actor.id, kind: 'attack', target: foeIdx });
     else if (pend.kind === 'skill' && pend.move) ptChoose({ memberId: actor.id, kind: 'skill', move: pend.move, target: foeIdx });
+    else if (pend.kind === 'item' && pend.item) ptChoose({ memberId: actor.id, kind: 'item', item: pend.item, target: foeIdx });
   };
 
   /** 味方対象が必要な行動（回復技・どうぐ）の対象確定。 */
@@ -3529,7 +3663,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (p.menu === 'item') {
       const list: { label: string; sub?: string; disabled?: boolean; onClick: () => void }[] = items.map(it => ({
         label: it.name, sub: `×${inventory[it.id] ?? 0}`,
-        onClick: () => { if (style === 'milky') milkyItem(it); else ptPatch({ pending: { kind: 'item', item: it }, menu: 'member' }); },
+        onClick: () => {
+          if (style === 'milky') { milkyItem(it); return; }
+          const tt = it.targetType;
+          if (tt === 'allAllies' || tt === 'allEnemies') { if (cur) ptChoose({ memberId: cur.id, kind: 'item', item: it }); }
+          else if (tt === 'enemy') ptWithTarget({ kind: 'item', item: it });
+          else ptPatch({ pending: { kind: 'item', item: it }, menu: 'member' });
+        },
       }));
       list.push({ label: 'もどる', onClick: () => ptPatch({ menu: 'root' }) });
       return list;
@@ -3656,7 +3796,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const targets = ptAliveMembers();
       const target = targets[Math.floor(Math.random() * targets.length)];
       if (!target) { ptDelay(milkyStartTicking, 60); return; }
-      const raw = move ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3))) : calcDmg(b.enemyAtk, target.def);
+      const raw = move ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3))) : calcDmg(b.enemyAtk, effectiveMemberDef(target));
       const dealt = ptDamageMember(target, raw);
       playSfx(sfxRef.current.damage);
       shakeRef.current = 6;
@@ -4177,8 +4317,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const pr = progressRef.current;
     if ((inventoryRef.current[it.id] ?? 0) <= 0) return;
     const parts: string[] = [];
-    if (it.healHp) { const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + it.healHp); parts.push(`HPが ${pr.hp - before} かいふく`); }
-    if (it.healMp) { const before = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + it.healMp); parts.push(`MPが ${pr.mp - before} かいふく`); }
+    // 主人公（先頭メンバー）向けの override があれば回復量を差し替える。
+    const leadId = gameDataRef.current.battle?.party?.[0]?.id ?? '__self';
+    const ov = it.overrides?.find(o => o.memberId === leadId);
+    const healHp = ov?.healHp ?? it.healHp;
+    const healMp = ov?.healMp ?? it.healMp;
+    if (healHp) { const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + healHp); parts.push(`HPが ${pr.hp - before} かいふく`); }
+    if (healMp) { const before = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + healMp); parts.push(`MPが ${pr.mp - before} かいふく`); }
+    // 敵対象アイテム：所持する foes 配列にダメージを与える（classic の単体 enemyHp にもフォールバック）。
+    if ((it.targetType === 'enemy' || it.targetType === 'allEnemies') && (ov?.damage ?? it.damage)) {
+      const dmg = ov?.damage ?? it.damage ?? 0;
+      if (battleRef.current.foes?.length) {
+        const idxs = it.targetType === 'allEnemies' ? aliveFoeIdxs() : [retargetFoe(attackTargetRef.current)];
+        idxs.forEach(fi => { const foe = battleRef.current.foes[fi]; if (foe && !foe.gone) { damageFoe(fi, dmg); parts.push(`${foe.name}に ${dmg}のダメージ`); } });
+      } else {
+        battleRef.current.enemyHp = Math.max(0, battleRef.current.enemyHp - dmg);
+        parts.push(`てきに ${dmg}のダメージ`);
+      }
+    }
     // スロットからも除去
     const idx = invSlotsRef.current.indexOf(it.id);
     if (idx >= 0) {
@@ -4204,7 +4360,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   /** 「どうぐ」で使えるアイテム（healHp/healMp 持ちで所持数 1 以上）。 */
   const usableItems = () =>
-    (gameDataRef.current.items ?? []).filter(it => (it.healHp || it.healMp) && (inventoryRef.current[it.id] ?? 0) > 0);
+    (gameDataRef.current.items ?? []).filter(it => (it.healHp || it.healMp || it.damage || it.targetType) && (inventoryRef.current[it.id] ?? 0) > 0);
 
   const showGameMsg = useCallback((text: string, mode: 'instant' | 'timed', onDismiss: () => void) => {
     // timed メッセージ（ミス/ゲームオーバー/クリア）は必ずラウンド終了 → 即座に操作・進行を凍結。
@@ -4322,15 +4478,34 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const b = gameDataRef.current.battle;
     if (!b) return;
     const pr = progressRef.current;
-    const items = gameDataRef.current.items ?? [];
+    const weapons = gameDataRef.current.weapons ?? [];
+    const armors = gameDataRef.current.armors ?? [];
     let atkBonus = 0, defBonus = 0;
-    if (eq.weapon) { const it = items.find(i => i.id === eq.weapon); atkBonus += it?.atkBonus ?? 0; }
-    if (eq.armor) { const it = items.find(i => i.id === eq.armor); defBonus += it?.defBonus ?? 0; }
+    if (eq.weapon) { const it = weapons.find(i => i.id === eq.weapon); atkBonus += it?.atkBonus ?? 0; }
+    if (eq.armor) { const it = armors.find(i => i.id === eq.armor); defBonus += it?.defBonus ?? 0; }
     // レベル基礎値（baseAtk/baseDef）に装備ボーナスを重ねる。旧データ互換で未設定なら初期値を使う。
     pr.atk = (pr.baseAtk || b.atk) + atkBonus;
     pr.def = (pr.baseDef || b.def) + defBonus;
     forceHud(n => n + 1);
   }, []);
+
+  /** 同行者の装備ボーナス合計（atk/def）。 */
+  const getMemberEquipBonus = useCallback((memberId: string): { atk: number; def: number } => {
+    const eq = partyEquipmentRef.current[memberId];
+    if (!eq) return { atk: 0, def: 0 };
+    const weapons = gameDataRef.current.weapons ?? [];
+    const armors = gameDataRef.current.armors ?? [];
+    let atk = 0, def = 0;
+    if (eq.weapon) { const it = weapons.find(i => i.id === eq.weapon); atk += it?.atkBonus ?? 0; }
+    if (eq.armor) { const it = armors.find(i => i.id === eq.armor); def += it?.defBonus ?? 0; }
+    return { atk, def };
+  }, []);
+  const effectiveMemberAtk = useCallback((member: { id: string; atk?: number }): number => {
+    return (member.atk ?? 0) + getMemberEquipBonus(member.id).atk;
+  }, [getMemberEquipBonus]);
+  const effectiveMemberDef = useCallback((member: { id: string; def?: number }): number => {
+    return (member.def ?? 0) + getMemberEquipBonus(member.id).def;
+  }, [getMemberEquipBonus]);
 
   const runEventCommands = useCallback((objId: string, commands: EventCommand[], onDone?: () => void) => {
     if (eventRunningRef.current && !onDone) return;
@@ -4623,6 +4798,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, cmd.duration ?? 0);
           break;
         }
+        case 'playEffect': {
+          const effect = (gameDataRef.current.effects ?? []).find(e => e.id === cmd.effectId);
+          if (effect) {
+            let worldX: number, worldY: number;
+            if (cmd.target === 'player') {
+              worldX = engineRef.current.player.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
+              worldY = engineRef.current.player.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
+            } else {
+              const obj = engineRef.current.entities?.find(o => o.def.id === objId);
+              if (obj) {
+                worldX = obj.x + TILE_SIZE / 2;
+                worldY = obj.y + TILE_SIZE / 2;
+              } else {
+                worldX = engineRef.current.player.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
+                worldY = engineRef.current.player.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
+              }
+            }
+            spawnFieldEffect(effect, worldX, worldY);
+            const durationMs = Math.round(((effect.frameCount) / (effect.fps ?? 12)) * 1000);
+            setTimeout(advance, cmd.wait ? durationMs : 0);
+          } else {
+            setTimeout(advance, 0);
+          }
+          break;
+        }
         case 'clearScreenEffect':
           setScreenEffect(null);
           setTimeout(advance, 0);
@@ -4821,6 +5021,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         ensureImage(walk.source.url);
       }
     }
+  }, [ensureImage]);
+
+  // ── エフェクトアニメーション（フィールド）: 再生中インスタンスの一覧 ──
+  const activeFieldEffectsRef = useRef<{ key: string; effect: EffectPreset; imgUrl: string; worldX: number; worldY: number; startTime: number }[]>([]);
+  /** 指定ワールド座標にエフェクトを1回再生する。画像を warm-up し、SFX があれば1回だけ再生する。 */
+  const spawnFieldEffect = useCallback((effect: EffectPreset, worldX: number, worldY: number) => {
+    const url = imageRefToUrl(effect.imageRef) ?? effect.imageUrl;
+    if (!url) return;
+    ensureImage(url);
+    activeFieldEffectsRef.current.push({
+      key: `${effect.id}-${Date.now()}-${Math.random()}`,
+      effect, imgUrl: url, worldX, worldY, startTime: performance.now(),
+    });
+    if (effect.sfx) playSfx(effect.sfx);
   }, [ensureImage]);
 
   useEffect(() => {
@@ -5156,6 +5370,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const b = gameData.battle;
       if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 };
       setEquipment({}); equipmentRef.current = {};
+      setPartyEquipment({}); partyEquipmentRef.current = {};
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
       encounterGaugeRef.current = 0; encounterNextRef.current = 0;
       invulnRef.current = 0; isPlayerDeadRef.current = false; roundOverRef.current = false; livesRef.current = 3; scoreRef.current = 0;
@@ -8201,7 +8416,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // アイテムアクションメニュー（つかう/せつめい/すてる/もどる：縦一列）
         const itemId = invSlotsRef.current[invMenuRef.current.slotIdx];
         const it = (gameDataRef.current.items ?? []).find(x => x.id === itemId);
-        const usable = !!(it?.healHp || it?.healMp);
+        const usable = !!(it?.healHp || it?.healMp || it?.damage || it?.targetType);
         const discardable = it?.discardable !== false;
         const count = (usable ? 1 : 0) + 1 /* せつめい */ + (discardable ? 1 : 0) + 1 /* もどる */;
         if (count > 0 && (menuUpEdge || menuDownEdge)) {
@@ -8373,7 +8588,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const itemId = invSlotsRef.current[invMenuRef.current.slotIdx];
           const it = (gameDataRef.current.items ?? []).find(x => x.id === itemId);
           if (it) {
-            const usable = !!(it.healHp || it.healMp);
+            const usable = !!(it.healHp || it.healMp || it.damage || it.targetType);
             const discardable = it.discardable !== false;
             const actions: (() => void)[] = [];
             if (usable) actions.push(() => useInventoryItem(itemId));
@@ -9412,6 +9627,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       });
 
+      // ── エフェクトアニメーション（フィールド）描画：エンティティより手前、一度きり再生 ──
+      {
+        const nowPerf = performance.now();
+        const stillActive: typeof activeFieldEffectsRef.current = [];
+        for (const fx of activeFieldEffectsRef.current) {
+          const elapsed = (nowPerf - fx.startTime) / 1000;
+          const fps = fx.effect.fps ?? 12;
+          const frame = Math.floor(elapsed * fps);
+          if (frame >= fx.effect.frameCount) continue; // 再生終了：リストから除外（stillActive に積まない）
+          stillActive.push(fx);
+          const domImg = imgCache.current.get(fx.imgUrl);
+          if (domImg && domImg.complete && domImg.naturalWidth > 0) {
+            const frameW = domImg.naturalWidth / fx.effect.frameCount;
+            const destH = TILE_SIZE * 1.5;
+            const destW = destH * (frameW / domImg.naturalHeight);
+            const screenX = fx.worldX - camXRef.current;
+            const screenY = fx.worldY - camYRef.current;
+            ctx.drawImage(domImg, frame * frameW, 0, frameW, domImg.naturalHeight, screenX - destW / 2, screenY - destH / 2, destW, destH);
+          }
+        }
+        activeFieldEffectsRef.current = stillActive;
+      }
+
       // ── プレビュー用画像描画 (DW_IMA プレビュー) ─────────────────────────
       if (previewCommandRef.current && previewCommandRef.current.type === 'showImage') {
         const img = previewCommandRef.current as any;
@@ -10115,6 +10353,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     else if (target.t === 'playerMcSkin') {
       setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: res.url, spriteRef: undefined, spriteUrl: undefined } }));
     }
+    else if (target.t === 'effectImage') {
+      ensureImage(res.url);
+      setGameData(p => ({ ...p, effects: (p.effects ?? []).map(ef => ef.id === target.id ? { ...ef, imageRef: res.ref, imageUrl: res.url } : ef) }));
+    }
+    else if (target.t === 'effectSfx') {
+      const s = bgmLike();
+      setGameData(p => ({ ...p, effects: (p.effects ?? []).map(ef => ef.id === target.id ? { ...ef, sfx: { ref: s.ref, src: s.src, type: s.type } } : ef) }));
+    }
     else if (target.t === 'yumeTexSound') {
       const s = bgmLike();
       setGameData(p => {
@@ -10222,6 +10468,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     sfx: Object.fromEntries(Object.entries(gameData.sfx).map(([k, v]) => [k, v?.ref])) as Partial<Record<SfxTrigger, string>>,
     switches: gameData.switches,
     items: gameData.items,
+    weapons: gameData.weapons,
+    armors: gameData.armors,
+    effects: gameData.effects?.map(ef => ({
+      id: ef.id, name: ef.name, imageRef: ef.imageRef,
+      // url: 参照は自己解決可能なので imageUrl は保存しない（post: の場合のみキャッシュとして保存）。
+      imageUrl: ef.imageRef.startsWith('url:') ? undefined : ef.imageUrl,
+      frameCount: ef.frameCount, fps: ef.fps, sfx: ef.sfx,
+    })),
     phases: gameData.phases,
     titleScreen: gameData.titleScreen ? (({ bgUrl: _u, ...t }) => t)(gameData.titleScreen) : undefined,
     ending: gameData.ending ? (({ bgUrl: _u, ...e }) => e)(gameData.ending) : undefined,
@@ -10569,8 +10823,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 効果適用
     let parts: string[] = [];
     const pr = progressRef.current;
-    if (it.healHp) { const b = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + it.healHp); parts.push(`HPが ${pr.hp - b} かいふく`); }
-    if (it.healMp) { const b = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + it.healMp); parts.push(`MPが ${pr.mp - b} かいふく`); }
+    // フィールドでは常に主人公(self)対象。override があれば回復量を差し替える。敵対象アイテムはフィールドでは自己使用にフォールバック。
+    const leadId = gameDataRef.current.battle?.party?.[0]?.id ?? '__self';
+    const ov = it.overrides?.find(o => o.memberId === leadId);
+    const healHp = ov?.healHp ?? it.healHp;
+    const healMp = ov?.healMp ?? it.healMp;
+    if (healHp) { const b = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + healHp); parts.push(`HPが ${pr.hp - b} かいふく`); }
+    if (healMp) { const b = pr.mp; pr.mp = Math.min(pr.maxMp, pr.mp + healMp); parts.push(`MPが ${pr.mp - b} かいふく`); }
     // 消費
     if (consumable) {
       const idx = invSlotsRef.current.indexOf(itemId);
@@ -11375,6 +11634,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   </div>
                                 )}
                                 {targeting && <span className="absolute -left-4 top-1/2 -translate-y-1/2 text-red-500 animate-pulse z-10">❤</span>}
+                                {battleEffects.filter(be => be.foeIdx === i).map(be => (
+                                  <div key={be.key} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
+                                    <EffectSpriteAnim effect={be.effect} url={be.url} sizePx={72} onDone={() => removeBattleEffect(be.key)} />
+                                  </div>
+                                ))}
                                 {renderEnemyBubble(i)}
                               </div>
                             </div>
@@ -11649,6 +11913,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     className="absolute -top-1 -right-1 h-4 w-auto z-10" style={{ imageRendering: 'pixelated' }} />
                                 )}
                                 {targeting && <span className="absolute -left-4 top-1/2 -translate-y-1/2 text-red-500 animate-pulse z-10">❤</span>}
+                                {battleEffects.filter(be => be.foeIdx === i).map(be => (
+                                  <div key={be.key} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
+                                    <EffectSpriteAnim effect={be.effect} url={be.url} sizePx={72} onDone={() => removeBattleEffect(be.key)} />
+                                  </div>
+                                ))}
                                 {/* 攻撃予告セリフのフキダシ（敵の形状・位置に応じて自動配置） */}
                                 {renderEnemyBubble(i)}
                               </div>
@@ -12344,7 +12613,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     const itemId = invSlots[invMenu.slotIdx];
                     const it = (gameData.items ?? []).find(x => x.id === itemId);
                     if (!it) return <p className="text-gray-500 text-xs">? ふめい</p>;
-                    const usable = !!(it.healHp || it.healMp);
+                    const usable = !!(it.healHp || it.healMp || it.damage || it.targetType);
                     const discardable = it.discardable !== false;
                     const actions: { key: string; label: string; onClick: () => void }[] = [];
                     if (usable) actions.push({ key: 'use', label: 'つかう', onClick: () => useInventoryItem(itemId) });
@@ -12689,7 +12958,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ']] : []),
                   ['char', 'キャラ'],
                   ...(gameData.battle ? [['battle', '戦闘']] : []),
+                  ...(gameData.battle ? [['character', 'キャラクター']] : []),
                   ['item', 'アイテム'],
+                  ['weapon', '武器'],
+                  ['armor', '防具'],
                 ] as [EditorTab, string][]).map(([id, label]) => (
                   <button key={id} onClick={() => setEditorTab(id)}
                     className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
@@ -12699,7 +12971,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
                 {/* 詳細タブ（showAdvancedTabs=trueのとき表示） */}
                 {showAdvancedTabs && ([
-                  ['switch', 'スイッチ'], ['sound', 'サウンド'],
+                  ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'],
                   ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
                   ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
                 ] as [EditorTab, string][]).map(([id, label]) => (
@@ -12721,7 +12993,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 <button
                   onClick={() => {
                     setShowAdvancedTabs(v => {
-                      if (v && !['map', 'object', 'char', 'battle', 'item'].includes(editorTab)) setEditorTab('map');
+                      if (v && !['map', 'object', 'char', 'battle', 'character', 'item'].includes(editorTab)) setEditorTab('map');
                       return !v;
                     });
                   }}
@@ -13406,6 +13678,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             setPages={pages => updBb({ pages: pages.length > 0 ? pages : undefined })}
                             switches={gameData.switches ?? []}
                             items={gameData.items ?? []}
+                            effects={gameData.effects ?? []}
                             setPreviewCommand={setPreviewCommand}
                           />
                         </div>
@@ -13826,6 +14099,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           setPages={pages => updObj({ pages: pages.length > 0 ? pages : undefined })}
                           switches={gameData.switches ?? []}
                           items={gameData.items ?? []}
+                          effects={gameData.effects ?? []}
                           setPreviewCommand={setPreviewCommand}
                         />
                       )}
@@ -14076,6 +14350,232 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )}
 
+                {/* ── CHARACTER（キャラクター：編成・装備・アイテム効果） ── */}
+                {editorTab === 'character' && gameData.battle && (() => {
+                  const isParty = gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style);
+                  const equipDefs: ['weapon' | 'armor', string, EquipmentDef[]][] = [['weapon', '武器', gameData.weapons ?? []], ['armor', '防具', gameData.armors ?? []]];
+                  const leadId = gameData.battle.party?.[0]?.id ?? '__self';
+                  return (
+                    <div className="space-y-4">
+                      <p className="text-[12px] font-bold text-yellow-400 flex items-center gap-1">🧑 キャラクター</p>
+
+                      {isParty ? (
+                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                          <div className="flex justify-between items-center">
+                            <p className="text-[10px] text-gray-300 font-bold">パーティ編成</p>
+                            <button onClick={() => setGameData(p => {
+                              const b = p.battle!;
+                              const party = b.party ?? [];
+                              const seeded = party.length === 0
+                                ? [{ id: `pm-${Date.now().toString(36)}`, name: b.playerName || '主人公', emoji: p.player.emoji || '🧝', maxHp: b.maxHp } as PartyMember]
+                                : party;
+                              const nm: PartyMember = {
+                                id: `pm-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`,
+                                name: `なかま${seeded.length}`, emoji: '🧑',
+                                maxHp: Math.max(1, Math.round(b.maxHp * 0.9)), maxMp: b.maxMp, atk: b.atk, def: b.def,
+                              };
+                              return { ...p, battle: { ...b, party: [...seeded, nm] } };
+                            })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                          </div>
+                          <p className="text-[9px] text-gray-500 leading-relaxed">先頭のメンバーが主人公（フィールドのHP/MP・レベルアップに追従）。未設定なら主人公ひとりで戦います。</p>
+                          <div className="space-y-2 max-h-[28rem] overflow-y-auto">
+                            {(gameData.battle.party ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - 主人公ひとりで戦う）</p>}
+                            {(gameData.battle.party ?? []).map((m, i) => (
+                              <div key={m.id} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
+                                <div className="flex gap-1.5 items-center">
+                                  <input value={m.emoji} onChange={e => setGameData(p => {
+                                    const b = p.battle!; const next = [...(b.party ?? [])];
+                                    next[i] = { ...next[i], emoji: e.target.value.slice(0, 2) };
+                                    return { ...p, battle: { ...b, party: next } };
+                                  })} className="w-10 shrink-0 bg-gray-700 rounded px-1 py-1.5 text-center text-base outline-none" />
+                                  <input value={m.name} placeholder="名前" onChange={e => setGameData(p => {
+                                    const b = p.battle!; const next = [...(b.party ?? [])];
+                                    next[i] = { ...next[i], name: e.target.value };
+                                    return { ...p, battle: { ...b, party: next } };
+                                  })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" />
+                                  <input type="color" value={m.color ?? '#ffffff'} title="メンバーカラー" onChange={e => setGameData(p => {
+                                    const b = p.battle!; const next = [...(b.party ?? [])];
+                                    next[i] = { ...next[i], color: e.target.value };
+                                    return { ...p, battle: { ...b, party: next } };
+                                  })} className="w-9 h-9 -my-0.5 shrink-0 bg-transparent border border-gray-700 rounded cursor-pointer" />
+                                  <button onClick={() => setGameData(p => {
+                                    const b = p.battle!; const next = [...(b.party ?? [])]; next.splice(i, 1);
+                                    return { ...p, battle: { ...b, party: next } };
+                                  })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
+                                </div>
+                                {i === 0 ? (
+                                  <p className="text-[9px] text-violet-300/80">主人公：HP/MP・攻/防は基本ステータスとレベルに追従します</p>
+                                ) : (
+                                  <div className="grid grid-cols-4 gap-1.5">
+                                    {([
+                                      ['maxHp', '最大HP'], ['maxMp', '最大MP'], ['atk', '攻撃'], ['def', '防御'],
+                                    ] as ['maxHp' | 'maxMp' | 'atk' | 'def', string][]).map(([key, label]) => (
+                                      <label key={key} className="text-[10px] text-gray-400">{label}
+                                        <input type="text" inputMode="numeric" value={m[key] ?? ''} placeholder="主人公" onChange={e => setGameData(p => {
+                                          const b = p.battle!; const next = [...(b.party ?? [])];
+                                          const v = parseInt(e.target.value);
+                                          next[i] = { ...next[i], [key]: key === 'maxHp' ? (!isNaN(v) ? v : next[i].maxHp) : (!isNaN(v) ? v : undefined) };
+                                          return { ...p, battle: { ...b, party: next } };
+                                        })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                                <div className="space-y-1 pt-1 border-t border-gray-700/50">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-[9px] text-gray-400">呪文{i !== 0 && <span className="text-gray-600">（同行者は習得Lv欄を無視して常に使用可）</span>}</span>
+                                    <button onClick={() => setGameData(p => {
+                                      const b = p.battle!; const next = [...(b.party ?? [])];
+                                      next[i] = { ...next[i], spells: [...(next[i].spells ?? []), { name: '新しい呪文', tpCost: 20, power: 10 }] };
+                                      return { ...p, battle: { ...b, party: next } };
+                                    })} className="text-[9px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5">+ 呪文追加</button>
+                                  </div>
+                                  {(m.spells ?? []).map((sp, si) => (
+                                    <div key={si} className="bg-gray-900/60 rounded border border-gray-700/70 p-1.5 space-y-1">
+                                      <div className="flex gap-1.5 items-center">
+                                        <input value={sp.name} placeholder="呪文名" onChange={e => setGameData(p => {
+                                          const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                          sps[si] = { ...sps[si], name: e.target.value };
+                                          next[i] = { ...next[i], spells: sps };
+                                          return { ...p, battle: { ...b, party: next } };
+                                        })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" />
+                                        <button onClick={() => setGameData(p => {
+                                          const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                          sps.splice(si, 1);
+                                          next[i] = { ...next[i], spells: sps };
+                                          return { ...p, battle: { ...b, party: next } };
+                                        })} className="shrink-0 grid place-items-center w-7 h-7 -my-1 rounded text-gray-500 hover:text-red-400 text-xs">✕</button>
+                                      </div>
+                                      <div className="grid grid-cols-4 gap-1">
+                                        {([['tpCost', '消費TP'], ['power', '威力/回復'], ['learnLevel', '習得Lv']] as ['tpCost' | 'power' | 'learnLevel', string][]).map(([key, label]) => (
+                                          <label key={key} className="text-[9px] text-gray-500">{label}
+                                            <input type="text" inputMode="numeric" value={key === 'learnLevel' ? (sp[key] ?? '') : sp[key]}
+                                              placeholder={key === 'learnLevel' ? '1' : undefined}
+                                              onChange={e => setGameData(p => {
+                                                const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                                const v = parseInt(e.target.value);
+                                                sps[si] = { ...sps[si], [key]: key === 'learnLevel' ? (!isNaN(v) && v > 1 ? v : undefined) : (!isNaN(v) ? v : 0) };
+                                                next[i] = { ...next[i], spells: sps };
+                                                return { ...p, battle: { ...b, party: next } };
+                                              })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1 text-[10px] text-white text-right outline-none" />
+                                          </label>
+                                        ))}
+                                        <label className="text-[9px] text-gray-500 block">種別
+                                          <select value={sp.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
+                                            const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                            sps[si] = { ...sps[si], heal: e.target.value === 'heal' || undefined };
+                                            next[i] = { ...next[i], spells: sps };
+                                            return { ...p, battle: { ...b, party: next } };
+                                          })} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-1 text-[10px] text-white outline-none">
+                                            <option value="attack">ダメージ</option>
+                                            <option value="heal">HP回復</option>
+                                          </select>
+                                        </label>
+                                      </div>
+                                      <label className="text-[9px] text-gray-500 block">エフェクト
+                                        <select value={sp.effectId ?? ''} onChange={e => setGameData(p => {
+                                          const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
+                                          sps[si] = { ...sps[si], effectId: e.target.value || undefined };
+                                          next[i] = { ...next[i], spells: sps };
+                                          return { ...p, battle: { ...b, party: next } };
+                                        })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1 text-[10px] text-white outline-none">
+                                          <option value="">（なし）</option>
+                                          {(gameData.effects ?? []).map(ef => <option key={ef.id} value={ef.id}>{ef.name}</option>)}
+                                        </select>
+                                      </label>
+                                    </div>
+                                  ))}
+                                </div>
+                                {(equipDefs[0][2].length > 0 || equipDefs[1][2].length > 0) && (
+                                  <div className="space-y-1 pt-1 border-t border-gray-700/50">
+                                    <span className="text-[9px] text-gray-400">装備</span>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      {equipDefs.map(([slot, slotLabel, defs]) => (
+                                        <label key={slot} className="text-[9px] text-gray-500 block">{slotLabel}
+                                          <select
+                                            value={(i === 0 ? equipment[slot] : partyEquipment[m.id]?.[slot]) ?? ''}
+                                            onChange={e => {
+                                              const val = e.target.value || undefined;
+                                              if (i === 0) {
+                                                const eq = { ...equipmentRef.current, [slot]: val };
+                                                setEquipment(eq); applyEquipment(eq);
+                                              } else {
+                                                setPartyEquipment(pp => { const n = { ...pp, [m.id]: { ...pp[m.id], [slot]: val } }; partyEquipmentRef.current = n; return n; });
+                                              }
+                                            }}
+                                            className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1 text-[10px] text-white outline-none">
+                                            <option value="">（なし）</option>
+                                            {defs.filter(d => !d.restrictTo?.length || d.restrictTo.includes(m.id)).map(d => (
+                                              <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {(gameData.items ?? []).some(it => it.overrides?.some(o => o.memberId === m.id)) && (
+                                  <div className="space-y-1 pt-1 border-t border-gray-700/50">
+                                    <span className="text-[9px] text-gray-400">アイテム効果</span>
+                                    <ul className="space-y-0.5">
+                                      {(gameData.items ?? []).filter(it => it.overrides?.some(o => o.memberId === m.id)).map(it => {
+                                        const o = it.overrides!.find(oo => oo.memberId === m.id)!;
+                                        const effs = [o.healHp ? `HP+${o.healHp}` : '', o.healMp ? `MP+${o.healMp}` : '', o.damage ? `ダメージ${o.damage}` : ''].filter(Boolean).join(' / ');
+                                        return <li key={it.id} className="text-[9px] text-gray-400">{it.emoji} {it.name}：{effs || '（効果なし）'}</li>;
+                                      })}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
+                          <p className="text-[10px] text-gray-300 font-bold">主人公</p>
+                          <p className="text-[9px] text-gray-500 leading-relaxed">HP/MP・攻/防は基本ステータスとレベルに追従します。名前・ステータスは「戦闘」タブで編集できます。</p>
+                          {(equipDefs[0][2].length > 0 || equipDefs[1][2].length > 0) && (
+                            <div className="space-y-1 pt-1 border-t border-gray-700/50">
+                              <span className="text-[9px] text-gray-400">装備</span>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {equipDefs.map(([slot, slotLabel, defs]) => (
+                                  <label key={slot} className="text-[9px] text-gray-500 block">{slotLabel}
+                                    <select
+                                      value={equipment[slot] ?? ''}
+                                      onChange={e => {
+                                        const val = e.target.value || undefined;
+                                        const eq = { ...equipmentRef.current, [slot]: val };
+                                        setEquipment(eq); applyEquipment(eq);
+                                      }}
+                                      className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1 text-[10px] text-white outline-none">
+                                      <option value="">（なし）</option>
+                                      {defs.filter(d => !d.restrictTo?.length || d.restrictTo.includes(leadId)).map(d => (
+                                        <option key={d.id} value={d.id}>{d.emoji} {d.name}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {(gameData.items ?? []).some(it => it.overrides?.some(o => o.memberId === leadId)) && (
+                            <div className="space-y-1 pt-1 border-t border-gray-700/50">
+                              <span className="text-[9px] text-gray-400">アイテム効果</span>
+                              <ul className="space-y-0.5">
+                                {(gameData.items ?? []).filter(it => it.overrides?.some(o => o.memberId === leadId)).map(it => {
+                                  const o = it.overrides!.find(oo => oo.memberId === leadId)!;
+                                  const effs = [o.healHp ? `HP+${o.healHp}` : '', o.healMp ? `MP+${o.healMp}` : '', o.damage ? `ダメージ${o.damage}` : ''].filter(Boolean).join(' / ');
+                                  return <li key={it.id} className="text-[9px] text-gray-400">{it.emoji} {it.name}：{effs || '（効果なし）'}</li>;
+                                })}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* ── BATTLE（RPG戦闘設定） ── */}
                 {editorTab === 'battle' && gameData.battle && (
                   <div className="space-y-4">
@@ -14142,130 +14642,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       )}
                     </div>
 
-                    {/* 1.2 パーティ編成（パーティ制スタイルのみ） */}
-                    {(gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style)) && (
-                      <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                        <div className="flex justify-between items-center">
-                          <p className="text-[10px] text-gray-300 font-bold">パーティ編成</p>
-                          <button onClick={() => setGameData(p => {
-                            const b = p.battle!;
-                            const party = b.party ?? [];
-                            // 空のときは先頭に主人公を自動で置いてから、同行者を1人足す
-                            const seeded = party.length === 0
-                              ? [{ id: `pm-${Date.now().toString(36)}`, name: b.playerName || '主人公', emoji: p.player.emoji || '🧝', maxHp: b.maxHp } as PartyMember]
-                              : party;
-                            const nm: PartyMember = {
-                              id: `pm-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`,
-                              name: `なかま${seeded.length}`, emoji: '🧑',
-                              maxHp: Math.max(1, Math.round(b.maxHp * 0.9)), maxMp: b.maxMp, atk: b.atk, def: b.def,
-                            };
-                            return { ...p, battle: { ...b, party: [...seeded, nm] } };
-                          })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
-                        </div>
-                        <p className="text-[9px] text-gray-500 leading-relaxed">先頭のメンバーが主人公（フィールドのHP/MP・レベルアップに追従）。未設定なら主人公ひとりで戦います。</p>
-                        <div className="space-y-2 max-h-72 overflow-y-auto">
-                          {(gameData.battle.party ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - 主人公ひとりで戦う）</p>}
-                          {(gameData.battle.party ?? []).map((m, i) => (
-                            <div key={m.id} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1.5">
-                              <div className="flex gap-1.5 items-center">
-                                <input value={m.emoji} onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.party ?? [])];
-                                  next[i] = { ...next[i], emoji: e.target.value.slice(0, 2) };
-                                  return { ...p, battle: { ...b, party: next } };
-                                })} className="w-10 shrink-0 bg-gray-700 rounded px-1 py-1.5 text-center text-base outline-none" />
-                                <input value={m.name} placeholder="名前" onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.party ?? [])];
-                                  next[i] = { ...next[i], name: e.target.value };
-                                  return { ...p, battle: { ...b, party: next } };
-                                })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none" />
-                                <input type="color" value={m.color ?? '#ffffff'} title="メンバーカラー" onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.party ?? [])];
-                                  next[i] = { ...next[i], color: e.target.value };
-                                  return { ...p, battle: { ...b, party: next } };
-                                })} className="w-9 h-9 -my-0.5 shrink-0 bg-transparent border border-gray-700 rounded cursor-pointer" />
-                                <button onClick={() => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.party ?? [])]; next.splice(i, 1);
-                                  return { ...p, battle: { ...b, party: next } };
-                                })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
-                              </div>
-                              {i === 0 ? (
-                                <p className="text-[9px] text-violet-300/80">主人公：HP/MP・攻/防は基本ステータスとレベルに追従します</p>
-                              ) : (
-                                <div className="grid grid-cols-4 gap-1.5">
-                                  {([
-                                    ['maxHp', '最大HP'], ['maxMp', '最大MP'], ['atk', '攻撃'], ['def', '防御'],
-                                  ] as ['maxHp' | 'maxMp' | 'atk' | 'def', string][]).map(([key, label]) => (
-                                    <label key={key} className="text-[10px] text-gray-400">{label}
-                                      <input type="text" inputMode="numeric" value={m[key] ?? ''} placeholder="主人公" onChange={e => setGameData(p => {
-                                        const b = p.battle!; const next = [...(b.party ?? [])];
-                                        const v = parseInt(e.target.value);
-                                        next[i] = { ...next[i], [key]: key === 'maxHp' ? (!isNaN(v) ? v : next[i].maxHp) : (!isNaN(v) ? v : undefined) };
-                                        return { ...p, battle: { ...b, party: next } };
-                                      })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
-                              {/* このメンバーの呪文（PartySpell）。learnLevel は主人公(i===0)のみレベル連動、同行者は常に使用可能。 */}
-                              <div className="space-y-1 pt-1 border-t border-gray-700/50">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-[9px] text-gray-400">呪文{i !== 0 && <span className="text-gray-600">（同行者は習得Lv欄を無視して常に使用可）</span>}</span>
-                                  <button onClick={() => setGameData(p => {
-                                    const b = p.battle!; const next = [...(b.party ?? [])];
-                                    next[i] = { ...next[i], spells: [...(next[i].spells ?? []), { name: '新しい呪文', tpCost: 20, power: 10 }] };
-                                    return { ...p, battle: { ...b, party: next } };
-                                  })} className="text-[9px] text-emerald-400 hover:text-emerald-300 px-1.5 py-0.5">+ 呪文追加</button>
-                                </div>
-                                {(m.spells ?? []).map((sp, si) => (
-                                  <div key={si} className="bg-gray-900/60 rounded border border-gray-700/70 p-1.5 space-y-1">
-                                    <div className="flex gap-1.5 items-center">
-                                      <input value={sp.name} placeholder="呪文名" onChange={e => setGameData(p => {
-                                        const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
-                                        sps[si] = { ...sps[si], name: e.target.value };
-                                        next[i] = { ...next[i], spells: sps };
-                                        return { ...p, battle: { ...b, party: next } };
-                                      })} className="flex-1 min-w-0 bg-gray-700 rounded px-1.5 py-1 text-[10px] text-white outline-none" />
-                                      <button onClick={() => setGameData(p => {
-                                        const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
-                                        sps.splice(si, 1);
-                                        next[i] = { ...next[i], spells: sps };
-                                        return { ...p, battle: { ...b, party: next } };
-                                      })} className="shrink-0 grid place-items-center w-7 h-7 -my-1 rounded text-gray-500 hover:text-red-400 text-xs">✕</button>
-                                    </div>
-                                    <div className="grid grid-cols-4 gap-1">
-                                      {([['tpCost', '消費TP'], ['power', '威力/回復'], ['learnLevel', '習得Lv']] as ['tpCost' | 'power' | 'learnLevel', string][]).map(([key, label]) => (
-                                        <label key={key} className="text-[9px] text-gray-500">{label}
-                                          <input type="text" inputMode="numeric" value={key === 'learnLevel' ? (sp[key] ?? '') : sp[key]}
-                                            placeholder={key === 'learnLevel' ? '1' : undefined}
-                                            onChange={e => setGameData(p => {
-                                              const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
-                                              const v = parseInt(e.target.value);
-                                              sps[si] = { ...sps[si], [key]: key === 'learnLevel' ? (!isNaN(v) && v > 1 ? v : undefined) : (!isNaN(v) ? v : 0) };
-                                              next[i] = { ...next[i], spells: sps };
-                                              return { ...p, battle: { ...b, party: next } };
-                                            })} className="w-full mt-0.5 bg-gray-700 rounded px-1 py-1 text-[10px] text-white text-right outline-none" />
-                                        </label>
-                                      ))}
-                                      <label className="text-[9px] text-gray-500 block">種別
-                                        <select value={sp.heal ? 'heal' : 'attack'} onChange={e => setGameData(p => {
-                                          const b = p.battle!; const next = [...(b.party ?? [])]; const sps = [...(next[i].spells ?? [])];
-                                          sps[si] = { ...sps[si], heal: e.target.value === 'heal' || undefined };
-                                          next[i] = { ...next[i], spells: sps };
-                                          return { ...p, battle: { ...b, party: next } };
-                                        })} className="w-full mt-0.5 bg-gray-700 rounded px-0.5 py-1 text-[10px] text-white outline-none">
-                                          <option value="attack">ダメージ</option>
-                                          <option value="heal">HP回復</option>
-                                        </select>
-                                      </label>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    {/* 編成は「キャラクター」タブに移動しました */}
+                    <p className="text-[10px] text-gray-400">キャラクター編成は「キャラクター」タブに移動しました</p>
 
                     {/* 1.5 コマンド表示名 */}
                     <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
@@ -14383,6 +14761,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                               </label>
                             </div>
+                            <label className="text-[10px] text-gray-400 block">エフェクト
+                              <select value={m.effectId ?? ''} onChange={e => setGameData(p => {
+                                const b = p.battle!; const next = [...b.moves];
+                                next[i] = { ...next[i], effectId: e.target.value || undefined };
+                                return { ...p, battle: { ...b, moves: next } };
+                              })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white outline-none">
+                                <option value="">（なし）</option>
+                                {(gameData.effects ?? []).map(ef => <option key={ef.id} value={ef.id}>{ef.name}</option>)}
+                              </select>
+                            </label>
                           </div>
                         ))}
                       </div>
@@ -14955,6 +15343,72 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 すてられる
                               </label>
                             </div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <label className="text-[9px] text-gray-400">
+                                対象
+                                <select value={it.targetType ?? ''} onChange={e => setGameData(p => {
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], targetType: (e.target.value || undefined) as ItemDef['targetType'] }; return { ...p, items: copy };
+                                })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none">
+                                  <option value="">未指定（自分/選択）</option>
+                                  <option value="self">自分のみ</option>
+                                  <option value="chooseAlly">仲間1人を選択</option>
+                                  <option value="allAllies">仲間全員</option>
+                                  <option value="enemy">敵1体を選択</option>
+                                  <option value="allEnemies">敵全体</option>
+                                </select>
+                              </label>
+                              {(it.targetType === 'enemy' || it.targetType === 'allEnemies') && (
+                                <label className="text-[9px] text-gray-400">
+                                  ダメージ
+                                  <input type="text" inputMode="numeric" value={it.damage ?? ''} onChange={e => setGameData(p => {
+                                    const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                    const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], damage: v && !isNaN(v) ? v : undefined }; return { ...p, items: copy };
+                                  })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                </label>
+                              )}
+                            </div>
+                            <div>
+                              <label className="flex text-[9px] text-gray-400 mb-1 items-center gap-1">キャラ別の効果上書き（省略可）</label>
+                              <div className="space-y-1">
+                                {(it.overrides ?? []).map((ov, oi) => (
+                                  <div key={oi} className="flex items-center gap-1">
+                                    <select value={ov.memberId} onChange={e => setGameData(p => {
+                                      const copy = [...(p.items ?? [])]; const ovs = [...(copy[i].overrides ?? [])];
+                                      ovs[oi] = { ...ovs[oi], memberId: e.target.value }; copy[i] = { ...copy[i], overrides: ovs }; return { ...p, items: copy };
+                                    })} className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none">
+                                      <option value="">キャラを選択</option>
+                                      {(gameData.battle?.party?.length ? gameData.battle.party : [{ id: 'self', name: '主人公' }]).map(m => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                      ))}
+                                    </select>
+                                    <input type="text" inputMode="numeric" placeholder="HP" value={ov.healHp ?? ''} onChange={e => setGameData(p => {
+                                      const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                      const copy = [...(p.items ?? [])]; const ovs = [...(copy[i].overrides ?? [])];
+                                      ovs[oi] = { ...ovs[oi], healHp: v && !isNaN(v) ? v : undefined }; copy[i] = { ...copy[i], overrides: ovs }; return { ...p, items: copy };
+                                    })} className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                    <input type="text" inputMode="numeric" placeholder="MP" value={ov.healMp ?? ''} onChange={e => setGameData(p => {
+                                      const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                      const copy = [...(p.items ?? [])]; const ovs = [...(copy[i].overrides ?? [])];
+                                      ovs[oi] = { ...ovs[oi], healMp: v && !isNaN(v) ? v : undefined }; copy[i] = { ...copy[i], overrides: ovs }; return { ...p, items: copy };
+                                    })} className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                    <input type="text" inputMode="numeric" placeholder="Dmg" value={ov.damage ?? ''} onChange={e => setGameData(p => {
+                                      const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                      const copy = [...(p.items ?? [])]; const ovs = [...(copy[i].overrides ?? [])];
+                                      ovs[oi] = { ...ovs[oi], damage: v && !isNaN(v) ? v : undefined }; copy[i] = { ...copy[i], overrides: ovs }; return { ...p, items: copy };
+                                    })} className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                    <button onClick={() => setGameData(p => {
+                                      const copy = [...(p.items ?? [])]; const ovs = [...(copy[i].overrides ?? [])]; ovs.splice(oi, 1);
+                                      copy[i] = { ...copy[i], overrides: ovs.length > 0 ? ovs : undefined }; return { ...p, items: copy };
+                                    })} className="shrink-0 px-1 py-0.5 rounded text-[9px] text-red-400 hover:text-red-300">✕</button>
+                                  </div>
+                                ))}
+                              </div>
+                              <button onClick={() => setGameData(p => {
+                                const copy = [...(p.items ?? [])]; const ovs = [...(copy[i].overrides ?? []), { memberId: '' }];
+                                copy[i] = { ...copy[i], overrides: ovs }; return { ...p, items: copy };
+                              })} className="w-full flex items-center justify-center gap-1 py-1 rounded border border-dashed border-gray-700 text-[9px] text-gray-500 hover:bg-gray-100/5 mt-1">
+                                <Plus size={10} />上書き追加</button>
+                            </div>
                             <div>
                               <input value={it.useMessage ?? ''} onChange={e => setGameData(p => {
                                 const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], useMessage: e.target.value || undefined }; return { ...p, items: copy };
@@ -14968,6 +15422,190 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         return { ...p, items: [...arr, { id, name: `アイテム${arr.length + 1}`, emoji: '💊' }] };
                       })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
                         <Plus size={11} />アイテム追加</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── WEAPON / ARMOR（装備品） ── */}
+                {(editorTab === 'weapon' || editorTab === 'armor') && (() => {
+                  const key = editorTab === 'weapon' ? 'weapons' : 'armors';
+                  const label = editorTab === 'weapon' ? '⚔️ 武器定義' : '🛡️ 防具定義';
+                  const list = (gameData[key] ?? []) as EquipmentDef[];
+                  const party = gameData.battle?.party ?? [];
+                  const restrictOptions = party.length ? party : [{ id: 'self', name: '主人公' }];
+                  return (
+                    <div className="space-y-4">
+                      <div>
+                        <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">{label}</label>
+                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                          {list.length === 0 && <p className="text-[9px] text-gray-500 px-1">まだありません。「追加」ボタンで作成してください。</p>}
+                          {list.map((it, i) => (
+                            <div key={it.id} className="bg-gray-900 rounded-lg border border-gray-800 p-2.5 space-y-2">
+                              <div className="flex items-center gap-1.5">
+                                <input value={it.emoji} onChange={e => setGameData(p => {
+                                  const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], emoji: e.target.value.slice(0, 2) }; return { ...p, [key]: copy };
+                                })} className="w-8 bg-gray-800 border border-gray-700 rounded text-center text-sm outline-none" />
+                                <input value={it.name} onChange={e => setGameData(p => {
+                                  const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], name: e.target.value }; return { ...p, [key]: copy };
+                                })} placeholder="名前" className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                                <button onClick={() => setGameData(p => {
+                                  const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy.splice(i, 1); return { ...p, [key]: copy.length > 0 ? copy : undefined };
+                                })} className="shrink-0 px-2 py-1 rounded text-[11px] text-red-400 hover:text-red-300 active:bg-red-500/15">削除</button>
+                              </div>
+                              <div>
+                                <textarea value={it.description ?? ''} onChange={e => setGameData(p => {
+                                  const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], description: e.target.value || undefined }; return { ...p, [key]: copy };
+                                })} placeholder="せつめい（省略可）" rows={2} className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-300 outline-none resize-none" />
+                              </div>
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <label className="text-[9px] text-gray-400">
+                                  攻撃力
+                                  <input type="text" inputMode="numeric" value={it.atkBonus ?? ''} onChange={e => setGameData(p => {
+                                    const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                    const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], atkBonus: v && !isNaN(v) ? v : undefined }; return { ...p, [key]: copy };
+                                  })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                </label>
+                                <label className="text-[9px] text-gray-400">
+                                  防御力
+                                  <input type="text" inputMode="numeric" value={it.defBonus ?? ''} onChange={e => setGameData(p => {
+                                    const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                    const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], defBonus: v && !isNaN(v) ? v : undefined }; return { ...p, [key]: copy };
+                                  })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                </label>
+                                <label className="text-[9px] text-gray-400">
+                                  価格
+                                  <input type="text" inputMode="numeric" value={it.price ?? ''} onChange={e => setGameData(p => {
+                                    const v = e.target.value ? parseInt(e.target.value) : undefined;
+                                    const copy = [...((p[key] ?? []) as EquipmentDef[])]; copy[i] = { ...copy[i], price: v && !isNaN(v) ? v : undefined }; return { ...p, [key]: copy };
+                                  })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                </label>
+                              </div>
+                              <div>
+                                <label className="flex text-[9px] text-gray-400 mb-1 items-center gap-1">
+                                  装備可能キャラ（{(!it.restrictTo || it.restrictTo.length === 0) ? '誰でも装備可能' : `${it.restrictTo.length}人に限定`}）
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                  {restrictOptions.map((m, mi) => {
+                                    const checked = (it.restrictTo ?? []).includes(m.id);
+                                    return (
+                                      <label key={m.id} className="flex items-center gap-1 text-[9px] text-gray-400 cursor-pointer">
+                                        <input type="checkbox" checked={checked} onChange={e => setGameData(p => {
+                                          const copy = [...((p[key] ?? []) as EquipmentDef[])];
+                                          const cur = copy[i].restrictTo ?? [];
+                                          const next = e.target.checked ? [...cur, m.id] : cur.filter(x => x !== m.id);
+                                          copy[i] = { ...copy[i], restrictTo: next.length > 0 ? next : undefined };
+                                          return { ...p, [key]: copy };
+                                        })} className="accent-blue-500" />
+                                        {mi === 0 && party.length === 0 ? '主人公' : m.name}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <button onClick={() => setGameData(p => {
+                          const arr = (p[key] ?? []) as EquipmentDef[]; const id = `${editorTab}${Date.now()}`;
+                          const created: EquipmentDef = { id, name: `${editorTab === 'weapon' ? '武器' : '防具'}${arr.length + 1}`, emoji: editorTab === 'weapon' ? '⚔️' : '🛡️' };
+                          return { ...p, [key]: [...arr, created] };
+                        })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
+                          <Plus size={11} />{editorTab === 'weapon' ? '武器追加' : '防具追加'}</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── EFFECT（エフェクトアニメーション） ── */}
+                {editorTab === 'effect' && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">✨ エフェクトアニメーション</label>
+                      <p className="text-[9px] text-gray-500 mb-2 leading-relaxed">
+                        横一列に並んだ画像（例: 魔法エフェクトのスプライトシート）を等分割してアニメ再生します。
+                        フィールドイベントの「エフェクト再生」コマンドや、呪文/技の「エフェクト」欄から使用できます。
+                      </p>
+                      <div className="space-y-2 max-h-[65vh] overflow-y-auto pr-1">
+                        {(gameData.effects ?? []).length === 0 && <p className="text-[9px] text-gray-500 px-1">エフェクトがありません。下のボタンで作成してください。</p>}
+                        {(gameData.effects ?? []).map((ef, i) => {
+                          const url = imageRefToUrl(ef.imageRef) ?? ef.imageUrl;
+                          return (
+                            <div key={ef.id} className="bg-gray-900 rounded-lg border border-gray-800 p-2.5 space-y-2">
+                              <div className="flex items-center gap-1.5">
+                                <input value={ef.name} onChange={e => setGameData(p => {
+                                  const copy = [...(p.effects ?? [])]; copy[i] = { ...copy[i], name: e.target.value }; return { ...p, effects: copy };
+                                })} placeholder="エフェクト名" className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none" />
+                                <button onClick={() => setGameData(p => {
+                                  const copy = [...(p.effects ?? [])]; copy.splice(i, 1); return { ...p, effects: copy.length > 0 ? copy : undefined };
+                                })} className="shrink-0 px-2 py-1 rounded text-[11px] text-red-400 hover:text-red-300 active:bg-red-500/15">削除</button>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => setPicker({ mode: 'image', target: { t: 'effectImage', id: ef.id } })}
+                                  className="flex-1 flex items-center justify-between py-1.5 px-2 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300">
+                                  <span className="truncate">{ef.imageRef ? refLabel(ef.imageRef) : '未設定（画像を選択）'}</span>
+                                  <ImageIcon size={12} className="shrink-0 ml-1" />
+                                </button>
+                                {url && (
+                                  <div className="shrink-0 bg-gray-950 rounded border border-gray-700 overflow-hidden" style={{ width: 32, height: 32 }}>
+                                    <img src={url} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'left' }} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                <label className="text-[9px] text-gray-400">コマ数
+                                  <input type="text" inputMode="numeric" value={ef.frameCount} onChange={e => setGameData(p => {
+                                    const v = parseInt(e.target.value);
+                                    const copy = [...(p.effects ?? [])]; copy[i] = { ...copy[i], frameCount: !isNaN(v) && v > 0 ? v : 1 }; return { ...p, effects: copy };
+                                  })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                </label>
+                                <label className="text-[9px] text-gray-400">FPS
+                                  <input type="text" inputMode="numeric" value={ef.fps ?? ''} placeholder="12" onChange={e => setGameData(p => {
+                                    const v = parseInt(e.target.value);
+                                    const copy = [...(p.effects ?? [])]; copy[i] = { ...copy[i], fps: !isNaN(v) && v > 0 ? v : undefined }; return { ...p, effects: copy };
+                                  })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none text-center" />
+                                </label>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => setPicker({ mode: 'bgm', target: { t: 'effectSfx', id: ef.id } })}
+                                  className="flex-1 min-w-0 text-left text-[10px] text-gray-300 truncate bg-gray-800 border border-gray-700 rounded px-2 py-1.5">
+                                  {ef.sfx ? refLabel(ef.sfx.ref) : 'SE未設定'}
+                                </button>
+                                {ef.sfx && <button onClick={() => previewMmlAsset(`effect-${ef.id}`, ef.sfx)} className="shrink-0 px-2 py-1.5 rounded-md text-[11px] text-emerald-300 hover:text-emerald-200 active:bg-emerald-500/15">試聴</button>}
+                                {ef.sfx && <button onClick={() => setGameData(p => {
+                                  const copy = [...(p.effects ?? [])]; copy[i] = { ...copy[i], sfx: undefined }; return { ...p, effects: copy };
+                                })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={14} /></button>}
+                              </div>
+                              <div className="flex items-center gap-2 pt-1 border-t border-gray-800">
+                                <button onClick={() => setPlayingEffectPreview(id => id === ef.id ? null : ef.id)}
+                                  className="px-2.5 py-1 rounded-md text-[10px] text-blue-300 hover:text-blue-200 active:bg-blue-500/15 border border-blue-800">
+                                  {playingEffectPreview === ef.id ? '■ 停止' : '▶ プレビュー'}
+                                </button>
+                                {playingEffectPreview === ef.id && url && (
+                                  <EffectSpriteAnim effect={ef} url={url} sizePx={40} loop />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <button onClick={() => setGameData(p => {
+                        const arr = p.effects ?? [];
+                        return { ...p, effects: [...arr, { id: uid(), name: `エフェクト${arr.length + 1}`, imageRef: '', frameCount: 1, fps: 12 }] };
+                      })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5 mt-1">
+                        <Plus size={11} />新規作成</button>
+                    </div>
+
+                    <div>
+                      <label className="flex text-[11px] text-gray-400 mb-1.5 items-center gap-1">📦 プリセットから追加</label>
+                      <div className="space-y-1.5">
+                        {BUILT_IN_EFFECT_PRESETS.map(bp => (
+                          <div key={bp.name} className="flex items-center justify-between bg-gray-900 rounded-lg border border-gray-800 px-2.5 py-1.5">
+                            <span className="text-[11px] text-gray-300">{bp.name}</span>
+                            <button onClick={() => setGameData(p => ({ ...p, effects: [...(p.effects ?? []), { ...bp, id: uid() }] }))}
+                              className="px-2.5 py-1 rounded text-[10px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -15489,12 +16127,13 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   changeSprite: '画像変更', changeBackground: '背景変更', showImage: '画像表示', hideImage: '画像消去',
   followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
   moveCamera: 'カメラ移動', resetCamera: 'カメラリセット', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', clearScreenEffect: '画面エフェクト消去', changePhase: 'フェーズ変更',
+  playEffect: 'エフェクト再生',
 };
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
 
-function EventPageEditor({ pages, setPages, switches, items, setPreviewCommand }:
-  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; setPreviewCommand: (cmd: EventCommand | null) => void; }) {
+function EventPageEditor({ pages, setPages, switches, items, effects, setPreviewCommand }:
+  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[]; setPreviewCommand: (cmd: EventCommand | null) => void; }) {
   const [expanded, setExpanded] = useState<number>(0);
   const [detailsCmdIndex, setDetailsCmdIndex] = useState<{ pi: number; ci: number } | null>(null);
   const addPage = () => {
@@ -15585,7 +16224,7 @@ function EventPageEditor({ pages, setPages, switches, items, setPreviewCommand }
               {page.commands.length === 0 && <p className="text-[9px] text-gray-500">（なし）</p>}
               {page.commands.map((cmd, ci) => (
                 <CommandEditor key={ci} cmd={cmd} index={ci} count={page.commands.length}
-                  switches={switches} items={items}
+                  switches={switches} items={items} effects={effects}
                   onChange={patch => updCmd(pi, ci, patch)}
                   onDelete={() => delCmd(pi, ci)}
                   onMove={dir => moveCmd(pi, ci, dir)}
@@ -15714,9 +16353,9 @@ function ImageCommandDetailsModal({ cmd, onChange, onClose }: { cmd: EventComman
   );
 }
 
-function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete, onMove, onShowDetails }:
+function CommandEditor({ cmd, index, count, switches, items, effects, onChange, onDelete, onMove, onShowDetails }:
   {
-    cmd: EventCommand; index: number; count: number; switches: SwitchDef[]; items: ItemDef[];
+    cmd: EventCommand; index: number; count: number; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[];
     onChange: (patch: Partial<EventCommand>) => void; onDelete: () => void; onMove: (dir: -1 | 1) => void;
     onShowDetails: () => void;
   }) {
@@ -15758,6 +16397,7 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         case 'clearScreenEffect': return { type: 'clearScreenEffect' };
         case 'screenEffect': return { type: 'screenEffect', effects: [] };
         case 'changePhase': return { type: 'changePhase', phaseIndex: 0 };
+        case 'playEffect': return { type: 'playEffect', effectId: '', target: 'self' };
         default: return { type: 'message', text: '' };
       }
     })();
@@ -15974,6 +16614,24 @@ function CommandEditor({ cmd, index, count, switches, items, onChange, onDelete,
         {type === 'changePhase' && (
           <input type="number" value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
             className={inputCls} placeholder="移行先フェーズ番号" />
+        )}
+        {type === 'playEffect' && (
+          <div className="flex items-center gap-1 flex-wrap">
+            <select value={(cmd as any).effectId ?? ''} onChange={e => onChange({ effectId: e.target.value })}
+              className={inputCls} style={{ width: 'auto', flex: '1 1 auto' }}>
+              <option value="">（エフェクトを選択）</option>
+              {effects.map(ef => <option key={ef.id} value={ef.id}>{ef.name}</option>)}
+            </select>
+            <select value={(cmd as any).target ?? 'self'} onChange={e => onChange({ target: e.target.value as 'self' | 'player' })}
+              className={inputCls} style={{ width: 'auto' }}>
+              <option value="self">自分の位置</option>
+              <option value="player">プレイヤーの位置</option>
+            </select>
+            <label className="flex items-center gap-0.5 text-[9px] text-gray-400 cursor-pointer shrink-0">
+              <input type="checkbox" checked={!!(cmd as any).wait} onChange={e => onChange({ wait: e.target.checked || undefined })} className="accent-blue-500" />
+              完了まで待つ
+            </label>
+          </div>
         )}
       </div>
     </div>

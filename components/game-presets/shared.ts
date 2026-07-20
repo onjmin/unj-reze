@@ -27,7 +27,28 @@ export interface SwitchDef { id: number; name: string; }
  *  consumable: 使用時に消費される（デフォルト: healHp/healMp がある場合は true、それ以外は false）。
  *  discardable: すてることができる（デフォルト: true）。
  *  useMessage: 使用時に表示するメッセージ（未指定時は自動生成）。 */
-export interface ItemDef { id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; healHp?: number; healMp?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; consumable?: boolean; discardable?: boolean; useMessage?: string; }
+export interface ItemDef {
+  id: string; name: string; emoji: string; description?: string; atkBonus?: number; defBonus?: number; healHp?: number; healMp?: number; category?: 'consumable' | 'weapon' | 'armor' | 'key'; consumable?: boolean; discardable?: boolean; useMessage?: string;
+  /** アイテム使用時の対象。省略時は 'self'（フィールド使用時の既定）／パーティ制バトルでは
+   *  従来どおり使用時に1人選択（'chooseAlly' 相当）。'allAllies'=味方全員、'enemy'=戦闘中の敵1体選択、
+   *  'allEnemies'=敵全体。enemy 系は damage フィールドと組み合わせて攻撃アイテム（爆弾等）に使う。 */
+  targetType?: 'self' | 'chooseAlly' | 'allAllies' | 'enemy' | 'allEnemies';
+  /** 敵に対して使うと power 分のダメージを与える（爆弾などの攻撃アイテム用）。 */
+  damage?: number;
+  /** 特定キャラに使ったときだけ効果を上書きする（例: 特定の同行者にだけ通常と違うHP回復量にする）。
+   *  memberId は PartyMember.id、主人公は party[0] の id または 'self'。 */
+  overrides?: { memberId: string; healHp?: number; healMp?: number; damage?: number }[];
+}
+
+/** 装備品（武器/防具）に共通のフィールド。restrictTo で装備可能キャラを制限できる。 */
+export interface EquipmentDef {
+  id: string; name: string; emoji: string; description?: string;
+  atkBonus?: number; defBonus?: number;
+  /** 装備可能なキャラのID一覧（PartyMember.id、主人公は party[0] の id、または party未使用時は 'self'）。
+   *  省略/空配列＝誰でも装備可能。 */
+  restrictTo?: string[];
+  price?: number;
+}
 
 /** イベントページの発生条件。すべて AND。 */
 export interface EventCondition {
@@ -113,7 +134,10 @@ export type EventCommand =
   | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number }
   | { type: 'clearScreenEffect' }
   | { type: 'screenEffect'; effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] }
-  | { type: 'changePhase'; phaseIndex: number };
+  | { type: 'changePhase'; phaseIndex: number }
+  /** エフェクトアニメーション（EffectPreset）を再生する。target='self' はこのイベント自身の位置、'player' はプレイヤーの現在位置。
+   *  wait=true のとき、アニメーション1周分の時間だけコマンド進行をブロックする。 */
+  | { type: 'playEffect'; effectId: string; target: 'self' | 'player'; wait?: boolean };
 
 export interface EventPage {
   name?: string;
@@ -389,7 +413,7 @@ export interface ShopItem { itemId: string; price: number; }
  *  mercy を指定すると「こうどう」技になる：ダメージを与えず敵の敵意ゲージ（0〜100）を mercy 分下げる。
  *  ゲージが満タン（または敵HPが2割以下）になると「みのがす」で戦闘を終了できる（labels.mercy 参照）。 */
 /** learnLevel を指定すると、主人公（レベル管理される操作キャラ）のレベルがそれ以上になるまで戦闘コマンドに出現しない。省略時は最初から使える。 */
-export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; learnLevel?: number; }
+export interface BattleMove { name: string; cost: number; power: number; heal?: boolean; mercy?: number; learnLevel?: number; effectId?: string; }
 
 /** UNDERTALEの移動モード（battle.style==='undertale' の弾幕よけ中）。
  *  red=自由移動 / blue=重力+ジャンプ / green=シールド（移動不可・方向キーでその方向の矢弾を防ぐ）
@@ -415,7 +439,7 @@ export interface EnemyDialogueLine {
 /** 敵の特技/呪文（攻撃パターン）。heal=true なら自分のHPを power 回復、それ以外は power ダメージ。
  *  undertaleMode を指定すると、この技の弾幕よけ中だけ UNDERTALE の移動モードを上書きする（未指定は敵本体/デフォルトの 'red'）。
  *  dialogue を指定すると、この技を予告するとき敵本体の dialogue より優先して使われる。 */
-export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; }
+export interface EnemyMove { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; effectId?: string; }
 
 /** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。
  *  dialogue＝通常攻撃（moves 抽選に外れたとき）の予告セリフ候補。
@@ -436,6 +460,22 @@ export interface PartySpell {
   /** 主人公（party先頭・レベル管理される操作キャラ）のレベルがそれ以上になるまで出現しない。
    *  同行者（party[1]以降）は個別のレベルを持たないため、この欄を指定しても常に使用可能のまま。 */
   learnLevel?: number;
+  /** 再生するエフェクトアニメーション（EffectPreset.id）。省略時は演出なし。 */
+  effectId?: string;
+}
+
+/** 汎用エフェクトアニメーション。1枚の画像を横に frameCount 等分してスライド再生する
+ *  （例: 横一列に並んだ魔法/爆発エフェクトのスプライトシート）。フィールドイベントの
+ *  playEffect コマンドと、バトルの呪文/技の effectId の両方から再生できる。 */
+export interface EffectPreset {
+  id: string; name: string;
+  /** 画像の asset ref（post:/url: など）。imageUrl は post: のときの解決済みURLキャッシュ。 */
+  imageRef: string; imageUrl?: string;
+  frameCount: number;
+  /** 再生速度（フレーム/秒）。省略時 12。 */
+  fps?: number;
+  /** 効果音（任意）。 */
+  sfx?: SfxRef;
 }
 
 /** バトル演出用のアニメ1本（フレーム順の画像URL列）。fps 省略時は 8。
@@ -685,6 +725,12 @@ export interface PresetData {
   battle?: BattleConfig;
   switches?: SwitchDef[];
   items?: ItemDef[];
+  /** 武器一覧。装備は EquipmentDef.restrictTo で装備可能キャラを制限できる。 */
+  weapons?: EquipmentDef[];
+  /** 防具一覧。装備は EquipmentDef.restrictTo で装備可能キャラを制限できる。 */
+  armors?: EquipmentDef[];
+  /** 汎用エフェクトアニメーション一覧。フィールドイベント/バトル演出から effectId で参照する。 */
+  effects?: EffectPreset[];
   /** フェーズ定義（touhou エンジン）。定義するとフェーズ順に進行する。 */
   phases?: StagePhase[];
   /** 2.5Dエンジン（yume25d）のレイアウト。engine==='yume25d' のとき必須。 */
