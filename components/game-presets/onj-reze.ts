@@ -76,7 +76,6 @@ const townMap = Array.from({ length: ROWS }, (_, y) =>
 const scene1: SceneDef = {
   id: 'town', name: 'レゼの街',
   map: townMap,
-  bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },
   objects: [
     // ── 宿屋 ──
     newObject({
@@ -322,7 +321,6 @@ const scene2: SceneDef = {
   id: 'field', name: 'フィールド',
   map: fieldMap,
   overlayMap: fieldOverlayMap,
-  bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },
   objects: [
     // ── 街帰還ワープ（元データのプレイヤー座標=col26,row21 付近を街入口とする） ──
     newObject({ emoji: '🏠', col: 26, row: 21, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
