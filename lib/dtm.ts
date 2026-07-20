@@ -20,15 +20,8 @@ let studioPromise: Promise<any> | null = null;
 export const getStudio = (): Promise<any> => {
   if (!studioPromise) {
     studioPromise = (async () => {
-      const [SoundFont, SoundFont_drum, SoundFont_list] = await Promise.all([
-        loadEngine(SOUNDFONT_CDN.soundFont, 'SoundFont'),
-        loadEngine(SOUNDFONT_CDN.soundFontDrum, 'SoundFont_drum'),
-        loadEngine(SOUNDFONT_CDN.soundFontList, 'SoundFont_list'),
-      ]);
       const { createDtmStudio } = await import('@onjmin/dtm');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return createDtmStudio({
-        engines: { SoundFont, SoundFont_drum, SoundFont_list } as any,
         midiSearch: { apiKey: process.env.RPGEN_SEARCH_TOKEN },
       });
     })();

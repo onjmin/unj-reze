@@ -1,6 +1,24 @@
 import type { NextConfig } from "next";
+import os from "os";
 
 const isGhPages = process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" || process.env.GITHUB_ACTIONS === "true";
+
+// ローカルIPアドレスを自動取得する関数
+const getLocalIp = (): string => {
+  const interfaces = os.networkInterfaces();
+  for (const interfaceName in interfaces) {
+    const networkInterface = interfaces[interfaceName];
+    if (networkInterface) {
+      for (const net of networkInterface) {
+        // IPv4 かつ ループバック（127.0.0.1）でないものを探す
+        if (net.family === "IPv4" && !net.internal) {
+          return net.address;
+        }
+      }
+    }
+  }
+  return "localhost"; // 見つからなかった場合のフォールバック
+};
 
 const nextConfig: NextConfig = {
   ...(isGhPages && {
@@ -11,6 +29,7 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  allowedDevOrigins: [getLocalIp(), `localhost:${process.env.PORT || 3000}`],
 };
 
 export default nextConfig;

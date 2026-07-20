@@ -29,7 +29,15 @@ export function ensureSessionId(): string {
     fromStorage = localStorage.getItem(STORAGE_KEY) ?? undefined;
   } catch {}
 
-  const sessionId = fromCookie || fromStorage || crypto.randomUUID();
+  const sessionId = fromCookie || fromStorage || (
+    typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        })
+  );
 
   writeCookie(COOKIE_NAME, sessionId, 365);
   try {
