@@ -5,6 +5,7 @@ import { X, Music, Loader2, History } from 'lucide-react';
 import { parseMML, parseMmlMeta, TRACKS_SIMPLE, type DawMode } from '@onjmin/dtm';
 import { getStudio } from '@/lib/dtm';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
+import VolumeControl from '@/components/VolumeControl';
 import HistoryModal from '@/components/HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory } from '@/lib/history';
 
@@ -186,6 +187,10 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
         <span className="text-gray-400 text-xs">MML作曲エディタ</span>
         <div className="flex-1" />
         
+        <div className="mr-2">
+          <VolumeControl />
+        </div>
+
         <button
           onClick={() => setShowHistory(true)}
           disabled={loading || !!error}
