@@ -9,6 +9,7 @@ const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
 interface EditPostModalProps {
   initialContent: string;
+  originalContent?: string;
   onClose: () => void;
   onSave: (content: string, imageSrc?: string | null) => void;
   imageSrc?: string | null;
@@ -35,6 +36,7 @@ function splitMml(content: string): { mmlLine: string | null; textOnly: string }
 
 export default function EditPostModal({
   initialContent,
+  originalContent,
   onClose,
   onSave,
   imageSrc,
@@ -91,7 +93,8 @@ export default function EditPostModal({
     const parts: string[] = [];
     if (text.trim()) parts.push(text.trim());
     if (mmlLine) parts.push(mmlLine);
-    const textOrMmlChanged = parts.join('\n') !== initialContent;
+    const compareBase = originalContent ?? initialContent;
+    const textOrMmlChanged = parts.join('\n') !== compareBase;
     const imageChanged = currentImageSrc !== imageSrc;
     const gameChanged = currentHasGame !== hasGame;
     return textOrMmlChanged || imageChanged || gameChanged;

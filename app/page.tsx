@@ -101,6 +101,7 @@ export default function App() {
     targetScreen: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker';
   } | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
+  const [originalPostContent, setOriginalPostContent] = useState<string>('');
   const [showGlobalEditModal, setShowGlobalEditModal] = useState(false);
 
   const sessionInitialized = useRef(false);
@@ -463,11 +464,13 @@ export default function App() {
 
   const handleEditPost = (post: Post) => {
     setEditingPost(post);
+    setOriginalPostContent(post.content);
     setShowGlobalEditModal(true);
   };
 
   const handleEditPostImage = (post: Post) => {
     setEditingPost(post);
+    setOriginalPostContent(prev => prev || post.content);
     setCollabImageUrl(post.imageSrc);
     setShowGlobalEditModal(false);
     if (post.content.includes('#ドット絵')) {
@@ -479,6 +482,7 @@ export default function App() {
 
   const handleEditPostMml = (post: Post) => {
     setEditingPost(post);
+    setOriginalPostContent(prev => prev || post.content);
     setShowGlobalEditModal(false);
     setActiveScreen('mml');
   };
@@ -665,9 +669,13 @@ export default function App() {
       )}
       {activeScreen === 'mml' && (
         <MmlEditor
-          onClose={() => setActiveScreen(null)}
+          onClose={() => {
+            setActiveScreen(null);
+            if (editingPost) setShowGlobalEditModal(true);
+          }}
           onSave={handleSaveMml}
           initialMml={(editingPost ? extractMmlFromContent(editingPost.content) : attachedMml) || undefined}
+          isEditing={!!editingPost}
         />
       )}
 
@@ -864,9 +872,11 @@ export default function App() {
         {showGlobalEditModal && editingPost && (
           <EditPostModal
             initialContent={editingPost.content}
+            originalContent={originalPostContent || editingPost.content}
             onClose={() => {
               setShowGlobalEditModal(false);
               setEditingPost(null);
+              setOriginalPostContent('');
             }}
             onSave={async (newContent, nextImageSrc) => {
               const targetId = editingPost.id;
@@ -874,6 +884,7 @@ export default function App() {
               const prevImageSrc = editingPost.imageSrc;
               setShowGlobalEditModal(false);
               setEditingPost(null);
+              setOriginalPostContent('');
               setPosts(prev => prev.map(p => p.id !== targetId ? p : {
                 ...p,
                 content: newContent,

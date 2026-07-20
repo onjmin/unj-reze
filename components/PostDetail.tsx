@@ -779,6 +779,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           onClose={() => setActiveScreen(null)}
           onSave={handleSaveEditedMusic}
           initialMml={mmlCode ?? undefined}
+          isEditing
         />
       )}
 

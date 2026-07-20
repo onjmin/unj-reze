@@ -13,6 +13,7 @@ interface MmlEditorProps {
   onClose: () => void;
   onSave: (mml: string) => void;
   initialMml?: string;
+  isEditing?: boolean;
 }
 
 // 再編集時: アドバンスモードで作られたMMLを開いたら自動的にアドバンスモードへ切り替える。
@@ -33,7 +34,7 @@ function detectMode(mml?: string): DawMode {
 // mountModeSwitch はシンプル/アドバンスのモード切替UIを差し込み、編集UI（mountEditor）の
 // マウント・再マウント（MML引き継ぎ）まで面倒を見る。ピアノロール・楽器プリセット・ドラム・
 // MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
-export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProps) {
+export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: MmlEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const modeSwitchRef = useRef<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -204,7 +205,7 @@ export default function MmlEditor({ onClose, onSave, initialMml }: MmlEditorProp
           disabled={loading || !!error}
           className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1.5 px-3.5 rounded-lg text-[11px] disabled:opacity-50 flex items-center space-x-1.5 transition-colors"
         >
-          <Music size={13} /> <span>投稿</span>
+          <Music size={13} /> <span>{isEditing ? '再編集' : '投稿'}</span>
         </button>
       </div>
 
