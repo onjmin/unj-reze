@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Home, Search, Bell, Mail, User } from 'lucide-react';
 
@@ -28,38 +29,48 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
     messages: messageCount,
   };
   const [avatarBroken, setAvatarBroken] = useState(false);
+  const [pendingActiveId, setPendingActiveId] = useState<string | null>(null);
 
-  const handleItemClick = (id: string) => {
-    if (id === 'search') {
-      router.push('/search');
-      return;
-    }
-    if (id === 'profile' && userSlug) {
-      router.push(`/user/${userSlug}`);
-      return;
-    }
-    if (id === 'notifications') {
-      router.push('/notifications');
-      return;
-    }
-    if (id === 'messages') {
-      router.push('/messages');
-      return;
-    }
-    set(id);
+  useEffect(() => {
+    setPendingActiveId(null);
+  }, [current]);
+
+  useEffect(() => {
+    router.prefetch('/');
+    router.prefetch('/search');
+    router.prefetch('/notifications');
+    router.prefetch('/messages');
+    if (userSlug) router.prefetch(`/user/${userSlug}`);
+  }, [router, userSlug]);
+
+  const getItemHref = (id: string) => {
+    if (id === 'search') return '/search';
+    if (id === 'profile') return userSlug ? `/user/${userSlug}` : '/';
+    if (id === 'notifications') return '/notifications';
+    if (id === 'messages') return '/messages';
+    return '/';
   };
+
+  const activeId = pendingActiveId ?? current;
 
   return (
     <div className="md:hidden flex justify-around items-center h-14 border-t border-gray-800 bg-[#0b0e14]/95 backdrop-blur pb-safe absolute bottom-0 w-full z-25">
       {items.map(item => {
-        const isActive = current === item.id;
+        const isActive = activeId === item.id;
         const badge = badgeMap[item.id] || 0;
         const showAvatar = item.id === 'profile' && !!userAvatarUrl && !avatarBroken;
+        const href = getItemHref(item.id);
+
         return (
-          <button
+          <Link
             key={item.id}
+            href={href}
+            prefetch={true}
+            onClick={() => {
+              setPendingActiveId(item.id);
+              if (item.id === 'home') set('home');
+            }}
             className={`flex-1 min-w-0 px-1 py-2 rounded-full flex flex-col items-center justify-center gap-0.5 transition-all ${isActive ? 'text-[#a3e635]' : 'text-gray-500 hover:text-gray-300'}`}
-            onClick={() => handleItemClick(item.id)}
             title={item.label}
           >
             <span className="relative inline-flex">
@@ -80,7 +91,7 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
               )}
             </span>
             <span className="text-[9px] leading-none truncate max-w-full">{item.label}</span>
-          </button>
+          </Link>
         );
       })}
     </div>

@@ -26,7 +26,6 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const userPosts = await db.getUserPostsBySlug(id);
   const displayName = await db.getUserDisplayName(id);
 
   if (!displayName) {

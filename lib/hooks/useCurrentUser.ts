@@ -6,14 +6,17 @@ import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
 
 export function useCurrentUser() {
-  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
-
-  useEffect(() => {
+  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(() => {
+    if (typeof window === 'undefined') return null;
     try {
       const cached = localStorage.getItem('unj_current_user');
-      if (cached) setCurrentUser(JSON.parse(cached));
-    } catch {}
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
+  useEffect(() => {
     const sessionId = ensureSessionId();
     api.auth.anonymous(sessionId).then(user => {
       setCurrentUser(user);

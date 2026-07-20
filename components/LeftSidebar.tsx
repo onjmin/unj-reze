@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Home, Search, Bell, Mail, User, PenSquare, Link2, Settings } from 'lucide-react';
 
@@ -31,39 +32,38 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
     messages: messageCount,
   };
   const [avatarBroken, setAvatarBroken] = useState(false);
+  const [pendingActiveId, setPendingActiveId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPendingActiveId(null);
+  }, [current]);
+
+  useEffect(() => {
+    router.prefetch('/');
+    router.prefetch('/search');
+    router.prefetch('/notifications');
+    router.prefetch('/messages');
+    router.prefetch('/links');
+    router.prefetch('/settings');
+    if (userSlug) router.prefetch(`/user/${userSlug}`);
+  }, [router, userSlug]);
 
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const scrollable = document.getElementById('scrollable-content');
     if (scrollable) scrollable.scrollTop += e.deltaY;
   };
 
-  const handleItemClick = (id: string) => {
-    if (id === 'search') {
-      router.push('/search');
-      return;
-    }
-    if (id === 'profile' && userSlug) {
-      router.push(`/user/${userSlug}`);
-      return;
-    }
-    if (id === 'settings') {
-      router.push('/settings');
-      return;
-    }
-    if (id === 'notifications') {
-      router.push('/notifications');
-      return;
-    }
-    if (id === 'messages') {
-      router.push('/messages');
-      return;
-    }
-    if (id === 'links') {
-      router.push('/links');
-      return;
-    }
-    set(id);
+  const getItemHref = (id: string) => {
+    if (id === 'search') return '/search';
+    if (id === 'profile') return userSlug ? `/user/${userSlug}` : '/';
+    if (id === 'settings') return '/settings';
+    if (id === 'notifications') return '/notifications';
+    if (id === 'messages') return '/messages';
+    if (id === 'links') return '/links';
+    return '/';
   };
+
+  const activeId = pendingActiveId ?? current;
 
   return (
     <div
@@ -72,14 +72,21 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
     >
       <div className="flex flex-col gap-1">
         {items.map(item => {
-          const isActive = current === item.id;
+          const isActive = activeId === item.id;
           const badge = badgeMap[item.id] || 0;
           const showAvatar = item.id === 'profile' && !!userAvatarUrl && !avatarBroken;
+          const href = getItemHref(item.id);
+
           return (
-            <button
+            <Link
               key={item.id}
+              href={href}
+              prefetch={true}
+              onClick={() => {
+                setPendingActiveId(item.id);
+                if (item.id === 'home') set('home');
+              }}
               className={`flex items-center gap-4 px-3 py-3 rounded-full transition-all w-fit xl:w-full ${isActive ? 'text-[#a3e635]' : 'text-gray-300 hover:text-white'} hover:bg-white/10`}
-              onClick={() => handleItemClick(item.id)}
               title={item.label}
             >
               <span className="relative inline-flex shrink-0">
@@ -100,7 +107,7 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
                 )}
               </span>
               <span className="hidden xl:inline text-lg truncate">{item.label}</span>
-            </button>
+            </Link>
           );
         })}
       </div>
