@@ -103,7 +103,7 @@ const sceneRuins: SceneDef = {
   id: 'ruins', name: 'いせき',
   map: ruinsMap,
   randomEncounters: [
-    { name: 'カエルさん',     emoji: '🐸', hp: 26, atk: 8, def: 2, exp: 3, gold: 5, dialogue: [
+    { name: 'カエルさん',     emoji: '🐸', hp: 17, atk: 5, def: 1, exp: 3, gold: 5, dialogue: [
       { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
@@ -111,28 +111,28 @@ const sceneRuins: SceneDef = {
       { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] },
-    { name: 'ひらひらむし',   emoji: '🦋', hp: 20,  atk: 7, def: 1, exp: 2, gold: 4, dialogue: [
+    { name: 'ひらひらむし',   emoji: '🦋', hp: 13,  atk: 4, def: 1, exp: 2, gold: 4, dialogue: [
       { text: 'ひらひら…… そっちに いくのも いいかな', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'ひらひら…… にげなくていいよ', actUsed: 'はなす' },
       { text: 'きもちいい…… ありがとう', actUsed: 'ほめる' },
       { text: 'ひらひら…… おちちゃいそう……', hpBelowPct: 30 },
       'ひらひら とんでるだけだよ',
     ] },
-    { name: 'ないてるおばけ', emoji: '👻', hp: 32, atk: 6, def: 3, exp: 4, gold: 6, dialogue: [
+    { name: 'ないてるおばけ', emoji: '👻', hp: 20, atk: 4, def: 2, exp: 4, gold: 6, dialogue: [
       { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '……はなしかけて くれるの？ うれしい……', actUsed: 'はなす' },
       { text: '……ほめられても なきょうみ ないのに……', actUsed: 'ほめる' },
       { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
       { text: '……まだ ここに いたいな……', hpAbovePct: 80 },
       'なきながら たたかうの…… ごめん……',
-    ], moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+    ], moves: [{ name: 'なみだの あめ', power: 4, miniScript: `
 while true
   shotRain(randF(1.2, 2.0), 3, 4)
   wait(9)
 end while
 `.trim() }] },
   ],
-  encounterRate: 16,
+  encounterRate: 12,
   bgm: { ref: 'https://www.youtube.com/watch?v=oHZDWwW6iXs', src: 'https://www.youtube.com/watch?v=oHZDWwW6iXs', type: 'youtube' },
   objects: [
     // ヤギのママ（いえ・回復とパイ）
@@ -170,7 +170,7 @@ end while
       { type: 'changeGold', amount: 30 },
     ]),
     // 遺跡のモンスター
-    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
+    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 17, atk: 5, def: 1, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
       { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
@@ -178,7 +178,7 @@ end while
       { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] }),
-    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 26, atk: 8, def: 2, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
+    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 17, atk: 5, def: 1, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
       { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
@@ -186,14 +186,14 @@ end while
       { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] }),
-    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 32, atk: 6, def: 3, exp: 4, gold: 6, dialogue: [
+    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 20, atk: 4, def: 2, exp: 4, gold: 6, dialogue: [
       { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '……はなしかけて くれるの？ うれしい……', actUsed: 'はなす' },
       { text: '……ほめられても なきょうみ ないのに……', actUsed: 'ほめる' },
       { text: 'もう…… きえちゃいそう……', hpBelowPct: 30 },
       { text: '……まだ ここに いたいな……', hpAbovePct: 80 },
       'なきながら たたかうの…… ごめん……',
-    ], moves: [{ name: 'なみだの あめ', power: 7, miniScript: `
+    ], moves: [{ name: 'なみだの あめ', power: 4, miniScript: `
 while true
   shotRain(randF(1.2, 2.0), 3, 4)
   wait(9)
@@ -286,15 +286,15 @@ const sceneSnowdin: SceneDef = {
   id: 'snowdin', name: 'ゆきのまち',
   map: snowdinMap,
   randomEncounters: [
-    { name: 'ゆきのとり',   emoji: '🐦', hp: 40, atk: 12, def: 5, exp: 8, gold: 12, dialogue: [
+    { name: 'ゆきのとり',   emoji: '🐦', hp: 26, atk: 8, def: 3, exp: 8, gold: 12, dialogue: [
       { text: '……そっちの せかいも さむいの？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'きー！ にげたげじゃないか！', actUsed: 'はなす' },
       { text: 'きー？ なに おろしくないこと いってやがる', actUsed: 'ほめる' },
       { text: 'きー…… さむすぎる……', hpBelowPct: 30 },
       { text: 'きーきー！ だいじょうぶだぞ！', hpAbovePct: 80 },
       'くささず うたうぞ！',
-    ], moves: [{ name: 'さむいダジャレ', power: 8 }] },
-    { name: 'アイスぼうや', emoji: '🧊', hp: 35, atk: 11, def: 6, exp: 7, gold: 10, dialogue: [
+    ], moves: [{ name: 'さむいダジャレ', power: 5 }] },
+    { name: 'アイスぼうや', emoji: '🧊', hp: 23, atk: 7, def: 4, exp: 7, gold: 10, dialogue: [
       { text: '……ぼくの アイスぼうしを みにいく？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'ちょっと！ もうちょっと きいてよ！', actUsed: 'はなす' },
       { text: 'えへへ…… もちろん そうだろう！', actUsed: 'ほめる' },
@@ -302,7 +302,7 @@ const sceneSnowdin: SceneDef = {
       { text: 'ぼくのぼうしは うでまえが いいんだぜ！', hpAbovePct: 80 },
       'ぼくの アイスぼうしは ものすごいぞ！',
     ] },
-    { name: 'わんわん',     emoji: '🐕', hp: 44, atk: 13, def: 6, exp: 9, gold: 14, dialogue: [
+    { name: 'わんわん',     emoji: '🐕', hp: 28, atk: 8, def: 4, exp: 9, gold: 14, dialogue: [
       { text: 'わん！ なかまに なるわん！', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'わん？ なに いいわん？', actUsed: 'はなす' },
       { text: 'わんわん！ こてこて するわん！', actUsed: 'ほめる' },
@@ -311,7 +311,7 @@ const sceneSnowdin: SceneDef = {
       'わん！ おえらびかたをもとめるわん！',
     ] },
   ],
-  encounterRate: 14,
+  encounterRate: 10,
   bgm: { ref: 'https://www.youtube.com/watch?v=vYyLL9QstbI', src: 'https://www.youtube.com/watch?v=vYyLL9QstbI', type: 'youtube' },
   objects: [
     // ホネの兄弟
@@ -370,7 +370,7 @@ end while
       ]}],
     }),
     // 番犬・スノーマン
-    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 44, atk: 13, def: 6, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH', dialogue: [
+    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 28, atk: 8, def: 4, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH', dialogue: [
       { text: '……おまえの なかまに なるのはちょっと……', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'うるさい！ こっちを むかするな！', actUsed: 'はなす' },
       { text: '……？ なぜ おだまきを お投げする？', actUsed: 'ほめる' },
@@ -464,7 +464,7 @@ const sceneWaterfall: SceneDef = {
   id: 'waterfall', name: 'みずのどうくつ',
   map: waterfallMap,
   randomEncounters: [
-    { name: 'キラキラくらげ', emoji: '🪼', hp: 52, atk: 16, def: 8, exp: 13, gold: 18, dialogue: [
+    { name: 'キラキラくらげ', emoji: '🪼', hp: 34, atk: 11, def: 5, exp: 13, gold: 18, dialogue: [
       { text: 'キラキラ…… そっちも きらきらしてる？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'キラキラ…… にげなくていいんだよ', actUsed: 'はなす' },
       { text: 'キラキラ！ きもちいいよ！', actUsed: 'ほめる' },
@@ -472,14 +472,14 @@ const sceneWaterfall: SceneDef = {
       { text: 'キラキラ！ うみは すごいよ！', hpAbovePct: 80 },
       'キラキラ すいてあげるよ！',
     ] },
-    { name: 'うたうさかな',   emoji: '🐟', hp: 60, atk: 18, def: 9, exp: 15, gold: 22, dialogue: [
+    { name: 'うたうさかな',   emoji: '🐟', hp: 38, atk: 11, def: 6, exp: 15, gold: 22, dialogue: [
       { text: '♪…… いっしょに うたわない？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '♪…… きいてくれるの？', actUsed: 'はなす' },
       { text: '♪♪！ もっと うたってあげる！', actUsed: 'ほめる' },
       { text: '♪…… もう うたえない……', hpBelowPct: 30 },
       { text: '♪♪♪！ うみの おかしは おいしい！', hpAbovePct: 80 },
       '♪ うたって しかえし するよ！',
-    ], moves: [{ name: 'ソウルフルなうた', power: 12 }] },
+    ], moves: [{ name: 'ソウルフルなうた', power: 7 }] },
     { name: 'テミー',         emoji: '🐱', hp: 15,  atk: 4,  def: 2, exp: 1,  gold: 50, dialogue: [
       { text: 'え！？ テミーの なかまになりてぇの？ やばっ！', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'ちょっと！ もうちょっと みてよ！', actUsed: 'はなす' },
@@ -489,7 +489,7 @@ const sceneWaterfall: SceneDef = {
       'テミーのみせ！！ かって！！！',
     ] },
   ],
-  encounterRate: 12,
+  encounterRate: 8,
   bgm: { ref: 'https://www.youtube.com/watch?v=DVUh7caufKU', src: 'https://www.youtube.com/watch?v=DVUh7caufKU', type: 'youtube' },
   objects: [
     // ゆううつなゴースト
@@ -518,13 +518,13 @@ const sceneWaterfall: SceneDef = {
       { type: 'giveItem', itemId: 'tutu', count: 1 },
     ]),
     // どうくつのモンスター
-    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 60, atk: 18, def: 9, exp: 15, gold: 22, dialogue: [
+    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 38, atk: 11, def: 6, exp: 15, gold: 22, dialogue: [
       { text: '♪…… いっしょに うたわない？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '♪…… きいてくれるの？', actUsed: 'はなす' },
       { text: '♪♪！ もっと うたってあげる！', actUsed: 'ほめる' },
       { text: '♪…… もう うたえない……', hpBelowPct: 30 },
       '♪ うたって しかえし するよ！',
-    ], moves: [{ name: 'ソウルフルなうた', power: 12 }], behavior: 'random' }),
+    ], moves: [{ name: 'ソウルフルなうた', power: 7 }], behavior: 'random' }),
     // 出口の通路をまもる さかなのヒーロー
     npc('🪧', 6, 16, '看板「この先 せまい通路。\n【えいゆう】が にんげんを まちかまえている とのこと」'),
     foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 220, atk: 20, def: 16, exp: 80, gold: 80,
