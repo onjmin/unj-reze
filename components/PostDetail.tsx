@@ -59,6 +59,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
+  const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
 
   const [showEditModal, setShowEditModal] = useState(false);
@@ -307,6 +308,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleOpenCollab = useCallback((p: Post) => {
+    const pMml = extractMmlFromContent(p.content);
+    if (!p.hasImage && pMml) {
+      setCollabMml(pMml);
+      setActiveScreen('mml');
+      return;
+    }
     setCollabImageUrl(p.imageSrc);
     setShowCollabSelector(true);
   }, []);
@@ -342,6 +349,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const handleSaveMml = (mml: string) => {
     setActiveScreen(null);
+    setCollabMml(undefined);
     setReplyMml(mml);
   };
 
@@ -639,7 +647,22 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           )}
 
           {(() => {
-            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            if (mmlCode) {
+              return (
+                <div className="relative">
+                  <MmlPlayer mml={mmlCode} />
+                  {post.hasCollabButton && (
+                    <button
+                      onClick={() => handleOpenCollab(post)}
+                      className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-pink-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all z-10"
+                    >
+                      <Pencil size={11} />
+                      <span>コラボ</span>
+                    </button>
+                  )}
+                </div>
+              );
+            }
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
             if (post.hasImage || post.hasGame) return null;
             const embed = extractFirstEmbed(post.content);
@@ -732,8 +755,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       )}
       {activeScreen === 'mml' && (
         <MmlEditor
-          onClose={() => setActiveScreen(null)}
+          onClose={() => { setActiveScreen(null); setCollabMml(undefined); }}
           onSave={handleSaveMml}
+          initialMml={collabMml}
         />
       )}
       {activeScreen === 'edit-drawing' && (

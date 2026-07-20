@@ -452,7 +452,22 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           {(() => {
             const mmlCode = extractMmlFromContent(post.content);
-            if (mmlCode) return <div onClick={e => e.stopPropagation()}><MmlPlayer mml={mmlCode} /></div>;
+            if (mmlCode) {
+              return (
+                <div onClick={e => e.stopPropagation()} className="relative">
+                  <MmlPlayer mml={mmlCode} />
+                  {post.hasCollabButton && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openCollab(post); }}
+                      className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-pink-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all z-10"
+                    >
+                      <Edit3 size={11} />
+                      <span>コラボ</span>
+                    </button>
+                  )}
+                </div>
+              );
+            }
             const chordRes = extractChordsFromContent(post.content);
             if (chordRes) return <div onClick={e => e.stopPropagation()}><ChordPlayer chords={chordRes.chords} /></div>;
             if (post.hasImage || post.hasGame) return null;

@@ -436,6 +436,12 @@ export default function App() {
   };
 
   const handleOpenCollab = useCallback((post: Post) => {
+    const postMml = extractMmlFromContent(post.content);
+    if (!post.hasImage && postMml) {
+      setAttachedMml(postMml);
+      setActiveScreen('mml');
+      return;
+    }
     setCollabImageUrl(post.imageSrc);
     setShowCollabSelector(true);
   }, []);
