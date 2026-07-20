@@ -13668,7 +13668,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               onChange={e => updBb({ message: e.target.value || undefined })}
                               className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />
                           </label>
-                          <label className="text-[10px] text-gray-400 block">選択肢（,区切り）
+                          <label className="text-[10px] text-gray-400 block">選択肢（カンマ区切り）
                             <input type="text" value={(bb.choices ?? []).join(',')}
                               onChange={e => { const v = e.target.value; updBb({ choices: v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined }); }}
                               className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none" />

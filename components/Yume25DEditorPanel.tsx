@@ -385,7 +385,7 @@ export default function Yume25DEditorPanel({
                 onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, message: e.target.value } : b) }))}
                 className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
             </label>
-            <label className="flex items-center gap-1.5">選択肢（,区切り）
+            <label className="flex items-center gap-1.5">選択肢（カンマ区切り）
               <input type="text" value={(target.choices ?? []).join(',')}
                 onChange={e => { const v = e.target.value; const choices = v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : undefined; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, choices } : b) })); }}
                 className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white" />
