@@ -38,7 +38,7 @@ export default function Header({
   }, []);
 
   return (
-    <header className="flex flex-col border-b border-gray-800 px-3 py-2 shrink-0 bg-[#0b0e14]/95 backdrop-blur z-20 sticky top-0">
+    <header className="flex flex-col border-b border-gray-800 px-3 py-2 shrink-0 bg-[#0b0e14]/90 backdrop-blur z-20">
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-2">
           <span className="text-[#a3e635] font-bold text-xl tracking-tight">うんｊレゼ</span>

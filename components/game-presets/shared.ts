@@ -402,6 +402,10 @@ export interface EnemyMove { name: string; power: number; heal?: boolean; miniSc
  *  battleSprite＝戦闘オーバーレイで絵文字の代わりに描くスプライト。 */
 export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; }
 
+/** ランダムエンカウントのグループ（例：「森」「洞窟」）。weight（省略時1）で抽選比重をつける。
+ *  scene.encounterGroups が1件以上あるときはこちらが優先され、scene.randomEncounters は無視される。 */
+export interface EncounterGroup { id: string; name?: string; weight: number; enemies: EncounterEnemy[]; }
+
 /** battle.style==='deltarune' の呪文。TPを消費する（MPとは別のバトル専用リソース。戦闘開始時0にリセットされ、
  *  グレイズ／まもる で溜まる）。heal=true なら power の値だけパーティを回復、それ以外は power ダメージ
  *  （タイミングバー無しの確定ダメージ）。 */
@@ -623,8 +627,11 @@ export interface SceneDef {
   exits?: SceneExit;
   /** このシーン専用 BGM。省略時はゲーム共通 BGM を継続。 */
   bgm?: BgmState;
-  /** ランダムエンカウント敵テーブル（rpg エンジン）。フィールド歩行中に抽選して戦闘に入る。 */
+  /** ランダムエンカウント敵テーブル（rpg エンジン）。フィールド歩行中に抽選して戦闘に入る。
+   *  encounterGroups が1件以上あるときは無視される（フラットな旧形式・後方互換用）。 */
   randomEncounters?: EncounterEnemy[];
+  /** ランダムエンカウントのグループ分け。設定されている場合は randomEncounters より優先。 */
+  encounterGroups?: EncounterGroup[];
   /** ランダムエンカウント発生ステップ数（デフォルト 16）。 */
   encounterRate?: number;
 }

@@ -44,7 +44,7 @@ import {
   SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, SYS_TILE_DOOR_SFX,
   convertMapToLayout25D, convertLayout25DToMap,
 } from './game-presets/shared';
-import type { SceneDef, SceneExit } from './game-presets/shared';
+import type { SceneDef, SceneExit, EncounterGroup, EncounterEnemy } from './game-presets/shared';
 import { PRESETS, PRESET_ORDER, PRESET_EMOJI, PRESET_TAGLINE } from './game-presets';
 import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
@@ -55,6 +55,21 @@ import Yume25DEditorPanel from './Yume25DEditorPanel';
 import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
 
 export type { PresetId };
+
+/** ランダムエンカウントの抽選。encounterGroups があれば weight で重み付き抽選→グループ内は均等抽選、
+ *  無ければ旧形式の randomEncounters から均等抽選する。 */
+function pickRandomEncounter(groups: EncounterGroup[] | undefined, table: EncounterEnemy[] | undefined): EncounterEnemy | undefined {
+  if (groups?.length) {
+    const totalWeight = groups.reduce((sum, g) => sum + Math.max(0, g.weight ?? 1), 0);
+    if (totalWeight > 0) {
+      let r = Math.random() * totalWeight;
+      const group = groups.find(g => (r -= Math.max(0, g.weight ?? 1)) < 0) ?? groups[groups.length - 1];
+      return group.enemies[Math.floor(Math.random() * group.enemies.length)];
+    }
+  }
+  if (table?.length) return table[Math.floor(Math.random() * table.length)];
+  return undefined;
+}
 
 let cachedPixelFontFamily: string | null = null;
 /** HUD/ダイアログのcanvas描画に使うピクセルアートフォント名を取得（next/fontのCSS変数から解決） */
@@ -6844,20 +6859,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (isPlaying && gameData.engine === 'rpg' && gameData.battle && !dead &&
             !eventRunningRef.current && !sceneFadeRef.current && invulnRef.current <= 0 && !debugInvincibleRef.current) {
             const scene = scenesRef.current[activeSceneIdxRef.current];
+            const groups = scene?.encounterGroups?.filter(g => g.enemies.length);
             const table = scene?.randomEncounters;
-            if (table?.length) {
+            const hasEncounters = (groups?.length ?? 0) > 0 || (table?.length ?? 0) > 0;
+            if (hasEncounters) {
               const moved = Math.abs(p.x - prevPx) + Math.abs(p.y - prevPy);
               if (moved > 0) {
                 if (encounterNextRef.current <= 0) {
-                  const rate = scene.encounterRate ?? 16;
+                  const rate = scene!.encounterRate ?? 16;
                   encounterNextRef.current = rate * TILE_SIZE * (0.6 + Math.random() * 0.8);
                 }
                 encounterGaugeRef.current += moved;
                 if (encounterGaugeRef.current >= encounterNextRef.current) {
                   encounterGaugeRef.current = 0; encounterNextRef.current = 0;
-                  const enemy = table[Math.floor(Math.random() * table.length)];
-                  triggerEncounter(() => beginBattle({ ...enemy, entity: null }));
-                  dead = true;
+                  const enemy = pickRandomEncounter(groups, table);
+                  if (enemy) {
+                    triggerEncounter(() => beginBattle({ ...enemy, entity: null }));
+                    dead = true;
+                  }
                 }
               }
             }
@@ -10195,6 +10214,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       objects: s.objects.map(({ spriteUrl, ...o }) => o),
       bgm: s.bgm?.ref,
       randomEncounters: s.randomEncounters,
+      encounterGroups: s.encounterGroups,
       encounterRate: s.encounterRate,
     })),
   });
@@ -10394,6 +10414,41 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return { ...prev, scenes };
     });
   }, [flushSceneEdits]);
+
+  /** 指定シーンを部分更新するユーティリティ（エンカウント設定編集で共用）。 */
+  const updateSceneAt = useCallback((idx: number, patch: (s: SceneDef) => SceneDef) => {
+    setGameData(prev => {
+      if (!prev.scenes) return prev;
+      return { ...prev, scenes: prev.scenes.map((s, i) => i === idx ? patch(s) : s) };
+    });
+  }, []);
+  const addEncounterGroup = useCallback((idx: number) => {
+    updateSceneAt(idx, s => ({ ...s, encounterGroups: [...(s.encounterGroups ?? []), { id: uid(), name: '', weight: 1, enemies: [] }] }));
+  }, [updateSceneAt]);
+  const updateEncounterGroup = useCallback((idx: number, groupId: string, patch: Partial<EncounterGroup>) => {
+    updateSceneAt(idx, s => ({ ...s, encounterGroups: (s.encounterGroups ?? []).map(g => g.id === groupId ? { ...g, ...patch } : g) }));
+  }, [updateSceneAt]);
+  const removeEncounterGroup = useCallback((idx: number, groupId: string) => {
+    updateSceneAt(idx, s => ({ ...s, encounterGroups: (s.encounterGroups ?? []).filter(g => g.id !== groupId) }));
+  }, [updateSceneAt]);
+  const addEncounterEnemy = useCallback((idx: number, groupId: string) => {
+    updateSceneAt(idx, s => ({
+      ...s, encounterGroups: (s.encounterGroups ?? []).map(g => g.id === groupId
+        ? { ...g, enemies: [...g.enemies, { name: '', emoji: '👾', hp: 10, atk: 3, def: 0, exp: 1 }] } : g),
+    }));
+  }, [updateSceneAt]);
+  const updateEncounterEnemy = useCallback((idx: number, groupId: string, enemyIdx: number, patch: Partial<EncounterEnemy>) => {
+    updateSceneAt(idx, s => ({
+      ...s, encounterGroups: (s.encounterGroups ?? []).map(g => g.id === groupId
+        ? { ...g, enemies: g.enemies.map((en, i) => i === enemyIdx ? { ...en, ...patch } : en) } : g),
+    }));
+  }, [updateSceneAt]);
+  const removeEncounterEnemy = useCallback((idx: number, groupId: string, enemyIdx: number) => {
+    updateSceneAt(idx, s => ({
+      ...s, encounterGroups: (s.encounterGroups ?? []).map(g => g.id === groupId
+        ? { ...g, enemies: g.enemies.filter((_, i) => i !== enemyIdx) } : g),
+    }));
+  }, [updateSceneAt]);
 
   const tpl = objTemplate;
   const setTpl = (patch: Partial<ObjectDef>) => setObjTemplate(o => ({ ...o, ...patch }));
@@ -15052,6 +15107,66 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               </>
                             )}
                           </div>
+
+                          {/* ランダムエンカウント設定 */}
+                          {gameData.engine === 'rpg' && (
+                            <div className="space-y-1.5 pt-1.5 border-t border-gray-850">
+                              <span className="text-[9px] text-gray-400">👾 ランダムエンカウント</span>
+                              <label className="flex items-center gap-2 text-[10px] text-gray-400">
+                                発生ステップ数
+                                <input type="number" min={1} max={999} placeholder="16"
+                                  value={sc.encounterRate ?? ''}
+                                  onChange={e => updateSceneAt(idx, s => ({ ...s, encounterRate: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value) || 16) }))}
+                                  className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                <span className="text-gray-500">歩（未設定=16）</span>
+                              </label>
+
+                              {(sc.encounterGroups ?? []).map((g, gi) => (
+                                <div key={g.id} className="rounded-lg border border-gray-800 bg-gray-900/60 p-2 space-y-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <input value={g.name ?? ''} placeholder={`グループ${gi + 1}`}
+                                      onChange={e => updateEncounterGroup(idx, g.id, { name: e.target.value })}
+                                      className="flex-1 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-200 outline-none min-w-0" />
+                                    <label className="flex items-center gap-1 text-[9px] text-gray-500 shrink-0">
+                                      比重
+                                      <input type="number" min={0} step={0.1} value={g.weight}
+                                        onChange={e => updateEncounterGroup(idx, g.id, { weight: Math.max(0, Number(e.target.value) || 0) })}
+                                        className="w-12 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                    </label>
+                                    <button onClick={() => removeEncounterGroup(idx, g.id)} className="text-gray-600 hover:text-red-400 shrink-0"><X size={12} /></button>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {g.enemies.map((en, ei) => (
+                                      <div key={ei} className="flex items-center gap-1 flex-wrap bg-gray-950/60 rounded px-1.5 py-1">
+                                        <input value={en.emoji} onChange={e => updateEncounterEnemy(idx, g.id, ei, { emoji: e.target.value })}
+                                          className="w-8 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none text-center" />
+                                        <input value={en.name} onChange={e => updateEncounterEnemy(idx, g.id, ei, { name: e.target.value })} placeholder="名前"
+                                          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                        {(['hp', 'atk', 'def', 'exp'] as const).map(k => (
+                                          <label key={k} className="flex items-center gap-0.5 text-[9px] text-gray-500 shrink-0">
+                                            {k.toUpperCase()}
+                                            <input type="number" min={0} value={en[k]}
+                                              onChange={e => updateEncounterEnemy(idx, g.id, ei, { [k]: Math.max(0, Number(e.target.value) || 0) })}
+                                              className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                          </label>
+                                        ))}
+                                        <button onClick={() => removeEncounterEnemy(idx, g.id, ei)} className="text-gray-600 hover:text-red-400 shrink-0"><X size={11} /></button>
+                                      </div>
+                                    ))}
+                                    <button onClick={() => addEncounterEnemy(idx, g.id)}
+                                      className="w-full flex items-center justify-center gap-1 py-1 rounded border border-dashed border-gray-700 text-[9px] text-gray-500 hover:bg-gray-100/5">
+                                      <Plus size={10} />敵を追加
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                              <button onClick={() => addEncounterGroup(idx)}
+                                className="w-full flex items-center justify-center gap-1 py-1.5 rounded border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
+                                <Plus size={11} />エンカウントグループを追加
+                              </button>
+                              <p className="text-[9px] text-gray-600 leading-relaxed">歩行中、比重に応じてグループを抽選→グループ内の敵から均等に1体選んで戦闘開始。グループが無い場合エンカウントなし。</p>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

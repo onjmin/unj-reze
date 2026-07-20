@@ -257,11 +257,18 @@ export default function App() {
   const handleShowNewPosts = () => {
     setPosts(prev => [...newPosts, ...prev]);
     setNewPosts([]);
-    const target = document.getElementById('main-scroll-container') || document.getElementById('scrollable-content');
-    if (target) {
-      target.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.getElementById('scrollable-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOuterWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const scrollable = document.getElementById('scrollable-content');
+    if (!scrollable) return;
+    const rightSidebar = document.getElementById('right-sidebar');
+    if (rightSidebar && rightSidebar.contains(e.target as Node)) {
+      return;
+    }
+    if (!scrollable.contains(e.target as Node)) {
+      scrollable.scrollTop += e.deltaY;
     }
   };
 
@@ -693,7 +700,7 @@ export default function App() {
         />
       )}
 
-      <div id="main-scroll-container" className={`w-full flex justify-center bg-[#0b0e14] ${topTab === 'game' || activeScreen ? 'h-dvh overflow-hidden' : 'min-h-dvh overflow-y-auto scrollbar-none'}`}>
+      <div className="w-full h-dvh flex justify-center overflow-hidden bg-[#0b0e14]" onWheel={handleOuterWheel}>
         <LeftSidebar
           current={currentNav}
           set={handleNavigate}
@@ -703,7 +710,7 @@ export default function App() {
           userSlug={currentUser?.slug}
           onPost={() => handleQuickPost()}
         />
-        <div className={`relative w-full max-w-2xl border-x border-gray-800 flex flex-col shrink-0 ${topTab === 'game' || activeScreen ? 'h-dvh overflow-hidden' : 'min-h-dvh'}`}>
+        <div className="relative w-full max-w-2xl border-x border-gray-800 h-dvh flex flex-col shrink-0 overflow-hidden">
         {!activeScreen && (
           <>
             <Header
@@ -739,7 +746,7 @@ export default function App() {
               );
             })()}
 
-            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col pb-14' : 'pb-20'}`}>
+            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col pb-14' : 'overflow-y-auto pb-20'}`}>
               {currentNav === 'home' && topTab === 'game' && (
                 <LiveGameView
                   userId={userId}

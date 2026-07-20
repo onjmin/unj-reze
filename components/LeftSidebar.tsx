@@ -62,7 +62,7 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
 
   return (
     <div
-      className="hidden md:flex flex-col justify-between w-[68px] xl:w-64 h-dvh sticky top-0 shrink-0 px-2 xl:px-3 py-4 border-r border-gray-800"
+      className="hidden md:flex flex-col justify-between w-[68px] xl:w-64 h-dvh shrink-0 px-2 xl:px-3 py-4 border-r border-gray-800 select-none"
     >
       <div className="flex flex-col gap-1">
         {items.map(item => {
