@@ -53,6 +53,7 @@ export interface EquipmentDef {
 /** イベントページの発生条件。すべて AND。 */
 export interface EventCondition {
   switchId?: number; switchValue?: boolean;
+  switch2Id?: number; switch2Value?: boolean;
   itemId?: string; hasItem?: boolean;
   selfSwitchId?: string; selfSwitchValue?: boolean;
 }

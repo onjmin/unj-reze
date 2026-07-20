@@ -4461,9 +4461,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // ── イベントインタプリタ ──
   const findActivePage = useCallback((obj: { id: string; pages?: EventPage[] }): EventPage | null => {
     if (!obj.pages || obj.pages.length === 0) return null;
-    for (const page of obj.pages) {
+    for (let i = obj.pages.length - 1; i >= 0; i--) {
+      const page = obj.pages[i];
       const c = page.conditions;
       if (c.switchId != null && (switchValsRef.current[c.switchId] ?? false) !== !!c.switchValue) continue;
+      if (c.switch2Id != null && (switchValsRef.current[c.switch2Id] ?? false) !== !!c.switch2Value) continue;
       if (c.itemId != null && (!!inventoryRef.current[c.itemId]) !== !!c.hasItem) continue;
       if (c.selfSwitchId != null) {
         const ss = selfSwitchesRef.current[obj.id]?.[c.selfSwitchId] ?? false;
@@ -9057,12 +9059,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               ctx.drawImage(srcImg, cell.sx, cell.sy + cell.sh / 2, cell.sw, cell.sh / 2, e.x, e.y + eh / 2, ew, eh / 2);
             }
           } else {
-            const eOpened = e.def.altSpriteRef && (selfSwitchesRef.current[e.def.id]?.['A'] ?? false);
-            drawSprite({
-              emoji: e.def.emoji,
-              spriteUrl: eOpened ? e.def.altSpriteUrl : e.def.spriteUrl,
-              spriteRef: eOpened ? e.def.altSpriteRef : e.def.spriteRef,
-            }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
+            const page = e.def.pages && e.def.pages.length > 0 ? findActivePage(e.def) : null;
+            if (e.def.pages && e.def.pages.length > 0 && !page) {
+              // hide event completely if it has pages but none are active
+            } else {
+              const eOpened = e.def.altSpriteRef && (selfSwitchesRef.current[e.def.id]?.['A'] ?? false);
+              drawSprite({
+                emoji: e.def.emoji,
+                spriteUrl: eOpened ? e.def.altSpriteUrl : e.def.spriteUrl,
+                spriteRef: eOpened ? e.def.altSpriteRef : e.def.spriteRef,
+              }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
+            }
           }
           // レゼが近接戦闘AIに移行している時（プレイヤーが近くにいる時）は赤いオーラを描画
           if (gameData.engine === 'onjReze' && e.def.name === 'レゼ' && !dead) {
@@ -16175,6 +16182,7 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
   const [expanded, setExpanded] = useState<number>(0);
   const [detailsCmdIndex, setDetailsCmdIndex] = useState<{ pi: number; ci: number } | null>(null);
   const addPage = () => {
+    if (pages.length >= 20) return;
     setPages([...pages, { name: `ページ${pages.length + 1}`, conditions: {}, commands: [] }]);
     setExpanded(pages.length);
   };
@@ -16219,44 +16227,109 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
       )}
       <div className="flex items-center justify-between">
         <span className="text-[10px] text-gray-400 font-bold">イベントページ</span>
-        <button onClick={addPage}
-          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-800 hover:bg-blue-700 text-[9px] text-white">
+        <button onClick={addPage} disabled={pages.length >= 20}
+          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-800 hover:bg-blue-700 disabled:opacity-50 text-[9px] text-white">
           <Plus size={10} />ページ追加
         </button>
       </div>
       {pages.length === 0 && <p className="text-[9px] text-gray-500">ページがありません。追加してイベントを定義してください。</p>}
-      {pages.map((page, pi) => (
-        <div key={pi} className="border border-gray-700/60 rounded bg-gray-800/30 overflow-hidden">
-          <div onClick={() => setExpanded(expanded === pi ? -1 : pi)}
-            className="w-full flex items-center gap-1 px-2 py-1.5 text-[10px] text-left font-bold text-gray-300 hover:bg-gray-700/30 cursor-pointer">
-            <span className="text-gray-500">{expanded === pi ? '▼' : '▶'}</span>
-            <span className="flex-1 truncate">{page.name}</span>
-            <span className="text-[9px] text-gray-500">{page.commands.length}コマンド</span>
-            {pages.length > 1 && <button onClick={e => { e.stopPropagation(); delPage(pi); }}
-              className="text-red-400 hover:text-red-300 text-[9px] px-1">削除</button>}
-          </div>
-          {expanded === pi && (
-            <div className="px-2 pb-2 space-y-1.5">
+      
+      {pages.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {pages.map((_, pi) => (
+            <button
+              key={pi}
+              onClick={() => setExpanded(pi)}
+              className={`px-2 py-1 text-[10px] rounded ${expanded === pi ? 'bg-blue-600 text-white font-bold' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+            >
+              {pi + 1}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {expanded >= 0 && expanded < pages.length && (() => {
+        const pi = expanded;
+        const page = pages[pi];
+        return (
+          <div className="border border-gray-700/60 rounded bg-gray-800/30 overflow-hidden">
+            <div className="w-full flex items-center justify-between px-2 py-1.5 text-[10px] bg-gray-700/50 font-bold text-gray-300">
+              <span className="flex-1 truncate">{page.name}</span>
+              <span className="text-[9px] text-gray-500 mr-2">{page.commands.length}コマンド</span>
+              {pages.length > 1 && (
+                <button onClick={() => delPage(pi)} className="text-red-400 hover:text-red-300 text-[9px] px-1">
+                  削除
+                </button>
+              )}
+            </div>
+            <div className="px-2 pb-2 mt-2 space-y-1.5">
               {/* ページ名 */}
               <input value={page.name ?? ''} onChange={e => setPage(pi, { name: e.target.value })}
                 placeholder="ページ名" className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none" />
               {/* 条件 */}
               <div className="text-[9px] text-gray-400 font-bold">発生条件（すべてAND / 空=常時）</div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {switches.length > 0 ? (
-                  <select value={page.conditions.switchId ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, switchId: e.target.value ? Number(e.target.value) : undefined } })}
+              
+              <div className="flex flex-col gap-1.5 bg-gray-900/50 p-1.5 rounded">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {switches.length > 0 ? (
+                    <select value={page.conditions.switchId ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, switchId: e.target.value ? Number(e.target.value) : undefined } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="">スイッチ1 なし</option>
+                      {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  ) : <span className="text-[9px] text-gray-500">スイッチ未定義</span>}
+                  {page.conditions.switchId != null && (
+                    <select value={page.conditions.switchValue ? 'ON' : 'OFF'} onChange={e => setPage(pi, { conditions: { ...page.conditions, switchValue: e.target.value === 'ON' } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="ON">ON</option><option value="OFF">OFF</option>
+                    </select>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {switches.length > 0 ? (
+                    <select value={page.conditions.switch2Id ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, switch2Id: e.target.value ? Number(e.target.value) : undefined } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="">スイッチ2 なし</option>
+                      {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  ) : null}
+                  {page.conditions.switch2Id != null && (
+                    <select value={page.conditions.switch2Value ? 'ON' : 'OFF'} onChange={e => setPage(pi, { conditions: { ...page.conditions, switch2Value: e.target.value === 'ON' } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="ON">ON</option><option value="OFF">OFF</option>
+                    </select>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {items.length > 0 ? (
+                    <select value={page.conditions.itemId ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, itemId: e.target.value ? e.target.value : undefined } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="">アイテム なし</option>
+                      {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  ) : <span className="text-[9px] text-gray-500">アイテム未定義</span>}
+                  {page.conditions.itemId != null && (
+                    <select value={page.conditions.hasItem ? '持っている' : '持っていない'} onChange={e => setPage(pi, { conditions: { ...page.conditions, hasItem: e.target.value === '持っている' } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="持っている">持っている</option><option value="持っていない">持っていない</option>
+                    </select>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <select value={page.conditions.selfSwitchId ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, selfSwitchId: e.target.value ? e.target.value : undefined } })}
                     className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-                    <option value="">スイッチなし</option>
-                    {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    <option value="">セルフスイッチ なし</option>
+                    <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
                   </select>
-                ) : <span className="text-[9px] text-gray-500">スイッチ未定義</span>}
-                {page.conditions.switchId != null && (
-                  <select value={page.conditions.switchValue ? 'ON' : 'OFF'} onChange={e => setPage(pi, { conditions: { ...page.conditions, switchValue: e.target.value === 'ON' } })}
-                    className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
-                    <option value="ON">ON</option><option value="OFF">OFF</option>
-                  </select>
-                )}
+                  {page.conditions.selfSwitchId != null && (
+                    <select value={page.conditions.selfSwitchValue ? 'ON' : 'OFF'} onChange={e => setPage(pi, { conditions: { ...page.conditions, selfSwitchValue: e.target.value === 'ON' } })}
+                      className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
+                      <option value="ON">ON</option><option value="OFF">OFF</option>
+                    </select>
+                  )}
+                </div>
               </div>
+
               {/* トリガー (起動条件) */}
               <div className="text-[9px] text-gray-400 font-bold mt-1">トリガー（起動条件）</div>
               <select value={page.trigger ?? 'action'} onChange={e => setPage(pi, { trigger: e.target.value as any })}
@@ -16286,9 +16359,9 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
                 <Plus size={10} />コマンド追加
               </button>
             </div>
-          )}
-        </div>
-      ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
