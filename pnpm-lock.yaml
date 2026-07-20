@@ -18,8 +18,8 @@ importers:
         specifier: 1.0.3
         version: 1.0.3
       '@onjmin/dtm':
-        specifier: 0.1.64
-        version: 0.1.64
+        specifier: 0.1.65
+        version: 0.1.65
       '@onjmin/oekaki':
         specifier: 1.0.62
         version: 1.0.62
@@ -580,15 +580,8 @@ packages:
   '@onjmin/chord-parser@1.0.3':
     resolution: {integrity: sha512-HGJt7Xe1qfYST8FHb/gDMh4EmpHSFeVg35NLrqAb3hU0mcz9EI8wBZHhi2l2TlM3qdb5ETYKrB2loE5ih57tPQ==}
 
-  '@onjmin/dtm@0.1.14':
-    resolution: {integrity: sha512-4sgVlv2X0uc4kd0qT+CxdZnRkV/RrK8nIqg6yvD/qYobKPj2I1OvGbzlG+73Nheiw64VSekP3MCKptvMq7+VZg==}
-
-  '@onjmin/dtm@0.1.64':
-    resolution: {integrity: sha512-cXkjkMwb7JISC6lL1d2uAoC0Lek42VDJhkAN/k4F/7lM8V/5XZkO7VwlpnxSgXkhX7obR8hpMSsA/2Zb0ZHJHg==}
-
-  '@onjmin/koe@1.0.3':
-    resolution: {integrity: sha512-qxBtIKPcbtWJPo0jhi/pzfneOkE1s+Ok5DvCXpjI/NR8bbXEHM77XCn18buENe5eIZMdfUHEprIDuIp5eARONA==}
-    hasBin: true
+  '@onjmin/dtm@0.1.65':
+    resolution: {integrity: sha512-Mgfa9H9Q73Z2b9s5THq/3OwuVfiMfvlo3/oR1tVtE0s5fRuGcaPlOS8sn11QySPcTPbpDIz49uEPLw5VtAOa/g==}
 
   '@onjmin/koe@1.0.4':
     resolution: {integrity: sha512-wMqD7iOz1VN76cc9ChKlDZD7vkhq2Aq+gQc81YU/7NjN+CoowxkRhyTVstUzSLuuDuPrRLDCklKY8JCcTqfdAg==}
@@ -2900,19 +2893,11 @@ snapshots:
 
   '@onjmin/chord-parser@1.0.3': {}
 
-  '@onjmin/dtm@0.1.14':
+  '@onjmin/dtm@0.1.65':
     dependencies:
       '@onjmin/chord-parser': 1.0.2
-      '@onjmin/koe': 1.0.3
-
-  '@onjmin/dtm@0.1.64':
-    dependencies:
-      '@onjmin/chord-parser': 1.0.2
-      '@onjmin/dtm': 0.1.14
       '@onjmin/koe': 1.0.4
       midi-json-parser: 8.1.74
-
-  '@onjmin/koe@1.0.3': {}
 
   '@onjmin/koe@1.0.4': {}
 
