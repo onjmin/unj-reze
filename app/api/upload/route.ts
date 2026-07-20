@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { uploadImage } from '@/lib/storage';
 
-export const runtime = 'edge';
-
 export async function POST(request: NextRequest) {
   try {
     const { image, filename } = await request.json();

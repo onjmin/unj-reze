@@ -4,8 +4,6 @@ import { verifyTurnstileToken } from '@/lib/security/turnstile';
 import { scoreRequest } from '@/lib/security/scoring';
 import type { VerifyRequestBody } from '@/lib/security/types';
 
-export const runtime = 'edge';
-
 function getSessionIdFromCookie(request: NextRequest): string | null {
   return request.cookies.get('unj_reze_session')?.value || null;
 }

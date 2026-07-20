@@ -3,8 +3,6 @@ import { db } from '@/lib/db';
 import { encodeId } from '@/lib/sqids';
 import { getClientIp } from '@/lib/ip';
 
-export const runtime = 'edge';
-
 export async function GET(request: NextRequest) {
   const ip = getClientIp(request.headers);
   const info = await db.getLiveGameInfo(ip);

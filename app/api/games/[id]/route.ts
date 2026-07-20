@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodeGame } from '@/lib/sqids';
 
-export const runtime = 'edge';
-
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const decodedId = decodeId(id);

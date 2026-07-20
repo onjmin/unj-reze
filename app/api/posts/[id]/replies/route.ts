@@ -3,8 +3,6 @@ import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachGameInfo } from '@/lib/game-embed';
 
-export const runtime = 'edge';
-
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

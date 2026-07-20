@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
-export const runtime = 'edge';
-
 export async function POST(request: NextRequest) {
   const { reporterSlug, targetType, targetId, reason } = await request.json();
   if (!reporterSlug || !targetType || !targetId) {

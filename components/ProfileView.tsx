@@ -20,6 +20,8 @@ const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false });
 const MusicShareModal = dynamic(() => import('./MusicShareModal'), { ssr: false });
 
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+
 interface ProfileViewProps {
   userId: string;
   displayName?: string;
@@ -47,6 +49,10 @@ const tabs = [
 
 export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, onProfileUpdate, onEditImage, onEditMml }: ProfileViewProps) {
   const router = useRouter();
+  const currentUser = useCurrentUser();
+  const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
+
+  const [profileDisplayName, setProfileDisplayName] = useState<string | undefined>(displayName);
   const [activeTab, setActiveTab] = useState('threads');
   const [myPosts, setMyPosts] = useState<Post[]>([]);
   const [likedPosts, setLikedPosts] = useState<Post[]>([]);
@@ -72,16 +78,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
   const avatarFileInputRef = useRef<HTMLInputElement>(null);
   const oshiAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    const sessionId = ensureSessionId();
-    api.auth.anonymous(sessionId).then(setCurrentUser).catch(() => {});
-  }, []);
-
-  const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
   const isSelf = useMemo(() => {
     if (!userId) return false;
     if (currentUser) {
@@ -90,7 +89,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     return currentUserId === userId;
   }, [currentUserId, userId, currentUser]);
 
-  const resolvedName = displayName || myPosts[0]?.displayName || userId;
+  const resolvedName = profileDisplayName || displayName || myPosts[0]?.displayName || userId;
   const avatarInfo = getAvatarInfo(resolvedName);
 
   useEffect(() => {
@@ -175,81 +174,71 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     }
   };
 
-  // Load cached profile data from localStorage immediately on mount/slug change
+  // Load cached profile data from localStorage immediately when slug changes
   useEffect(() => {
-    if (!slug) return;
-    
-    // Reset state first to avoid showing previous user's data
-    setMyPosts([]);
-    setAvatarUrl(undefined);
-    setBio('');
-    setFollowers(0);
-    setFollowing(0);
-    setOshiItems([]);
-    setLoading(true);
-
-    if (typeof localStorage !== 'undefined') {
-      const cached = localStorage.getItem(`unj_cached_profile_${slug}`);
-      if (cached) {
-        try {
-          const data = JSON.parse(cached);
-          if (data) {
-            if (Array.isArray(data.posts)) setMyPosts(data.posts);
-            if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
-            if (data.bio) setBio(data.bio || '');
-            if (typeof data.followers === 'number') setFollowers(data.followers);
-            if (typeof data.following === 'number') setFollowing(data.following);
-            if (Array.isArray(data.oshiItems)) setOshiItems(data.oshiItems);
-            setLoading(false); // Stop loading since we have cached content
-          }
-        } catch (e) {
-          console.error('Failed to parse cached profile', e);
+    if (!slug || typeof localStorage === 'undefined') return;
+    const cached = localStorage.getItem(`unj_cached_profile_${slug}`);
+    if (cached) {
+      try {
+        const data = JSON.parse(cached);
+        if (data) {
+          if (Array.isArray(data.posts)) setMyPosts(data.posts);
+          if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
+          if (data.bio) setBio(data.bio || '');
+          if (data.displayName) setProfileDisplayName(data.displayName);
+          if (typeof data.followers === 'number') setFollowers(data.followers);
+          if (typeof data.following === 'number') setFollowing(data.following);
+          if (Array.isArray(data.oshiItems)) setOshiItems(data.oshiItems);
+          setLoading(false);
         }
-      }
+      } catch {}
+    } else {
+      setMyPosts([]);
+      setAvatarUrl(undefined);
+      setBio('');
+      setProfileDisplayName(displayName);
+      setFollowers(0);
+      setFollowing(0);
+      setOshiItems([]);
+      setLoading(true);
     }
-  }, [slug]);
+  }, [slug, displayName]);
 
   // Update localStorage cache whenever profile data is updated
   useEffect(() => {
     if (!slug || typeof localStorage === 'undefined') return;
-    if (myPosts.length > 0 || bio || avatarUrl || followers > 0 || following > 0 || oshiItems.length > 0) {
+    if (myPosts.length > 0 || bio || avatarUrl || profileDisplayName || followers > 0 || following > 0 || oshiItems.length > 0) {
       const dataToCache = {
         posts: myPosts,
         avatarUrl,
         bio,
+        displayName: profileDisplayName,
         followers,
         following,
         oshiItems,
       };
       localStorage.setItem(`unj_cached_profile_${slug}`, JSON.stringify(dataToCache));
     }
-  }, [slug, myPosts, avatarUrl, bio, followers, following, oshiItems]);
+  }, [slug, myPosts, avatarUrl, bio, profileDisplayName, followers, following, oshiItems]);
 
-  // Posts are the primary content — the spinner waits only for these (if not already cached).
-  // Follow counts and the oshi list are secondary; they fire at the same time
-  // but populate silently so each section appears the moment its data arrives.
   useEffect(() => {
-    // Only show loading spinner if we don't already have posts from cache/previous fetch
-    if (myPosts.length === 0) {
-      setLoading(true);
-    }
     api.users.profile(slug, userId)
       .then(data => {
         setMyPosts(data.posts);
         setAvatarUrl(data.avatarUrl || undefined);
         setBio(data.bio || '');
+        if (data.displayName) setProfileDisplayName(data.displayName);
       })
-      .catch(() => setMyPosts([]))
+      .catch(() => {})
       .finally(() => setLoading(false));
 
-    // Fire concurrently — no spinner, just silent population.
     api.follow.getCounts(userId)
       .then(c => { setFollowers(c.followers); setFollowing(c.following); })
       .catch(() => {});
     api.oshi.list(slug)
       .then(setOshiItems)
       .catch(() => setOshiItems([]));
-  }, [userId, slug, currentUserId]);
+  }, [userId, slug]);
 
   // Separate effect: only checks follow status, and only when we know isSelf.
   // Runs independently so it never triggers a reload of the main data.
@@ -309,21 +298,21 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     const wasFollowing = isFollow;
     if (wasFollowing) {
       setIsFollow(false);
-      setFollowers(f => Math.max(0, f - 1));
+      setFollowers((f: number) => Math.max(0, f - 1));
       try {
         await api.follow.unfollow(currentUserId, userId);
       } catch {
         setIsFollow(true);
-        setFollowers(f => f + 1);
+        setFollowers((f: number) => f + 1);
       }
     } else {
       setIsFollow(true);
-      setFollowers(f => f + 1);
+      setFollowers((f: number) => f + 1);
       try {
         await api.follow.follow(currentUserId, userId);
       } catch {
         setIsFollow(false);
-        setFollowers(f => Math.max(0, f - 1));
+        setFollowers((f: number) => Math.max(0, f - 1));
       }
     }
   };

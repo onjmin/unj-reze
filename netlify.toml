@@ -5,5 +5,9 @@
 [build.environment]
   NODE_VERSION = "20"
 
+[functions]
+  node_bundler = "esbuild"
+  region = "ap-northeast-1"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

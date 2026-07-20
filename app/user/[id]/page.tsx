@@ -15,27 +15,15 @@ export function generateStaticParams() {
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const displayName = await db.getUserDisplayName(id);
-  const title = displayName ? `${displayName}のプロフィール` : 'プロフィール';
   return {
-    title,
+    title: 'プロフィール',
     alternates: { canonical: `${SITE_URL}/user/${id}` },
-    openGraph: { title, url: `${SITE_URL}/user/${id}` },
+    openGraph: { title: 'プロフィール', url: `${SITE_URL}/user/${id}` },
   };
 }
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const displayName = await db.getUserDisplayName(id);
-
-  if (!displayName) {
-    return (
-      <div className="bg-[#0b0e14] text-gray-100 min-h-dvh flex flex-col items-center justify-center space-y-3">
-        <p className="text-gray-500 text-sm">ユーザーが見つかりません</p>
-        <Link href="/" className="text-blue-400 text-xs hover:underline">戻る</Link>
-      </div>
-    );
-  }
 
   return (
     <AppShell current="profile">
@@ -48,7 +36,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
-        <ProfileView userId={id} displayName={displayName} />
+        <ProfileView userId={id} />
       </div>
     </AppShell>
   );

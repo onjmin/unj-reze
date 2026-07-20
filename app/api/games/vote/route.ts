@@ -3,8 +3,6 @@ import { db } from '@/lib/db';
 import { decodeId } from '@/lib/sqids';
 import { getClientIp } from '@/lib/ip';
 
-export const runtime = 'edge';
-
 export async function POST(request: NextRequest) {
   const { gameId: gameIdRaw } = await request.json();
   const gameId = decodeId(gameIdRaw);

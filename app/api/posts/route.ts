@@ -8,8 +8,6 @@ import { verifyTurnstileToken } from '@/lib/security/turnstile';
 import { scoreRequest } from '@/lib/security/scoring';
 import type { FingerprintSignals } from '@/lib/security/types';
 
-export const runtime = 'edge';
-
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);

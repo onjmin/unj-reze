@@ -3,8 +3,6 @@ import { db } from '@/lib/db';
 import { encodeOshiItem } from '@/lib/sqids';
 import { OshiItemKind } from '@/lib/types';
 
-export const runtime = 'edge';
-
 const VALID_KINDS: OshiItemKind[] = ['song', 'album', 'artist'];
 
 export async function GET(request: NextRequest) {

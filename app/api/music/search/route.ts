@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const runtime = 'edge';
-
 const VALID_ENTITIES = ['song', 'album', 'musicArtist'];
 
 export async function GET(request: NextRequest) {
