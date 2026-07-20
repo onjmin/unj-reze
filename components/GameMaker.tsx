@@ -1113,6 +1113,7 @@ function EffectSpriteAnim({
         style={{
           position: 'absolute', left: 0, top: 0,
           width: frameDisplayW * frameCount, height: sizePx,
+          maxWidth: 'none', maxHeight: 'none',
           transform: `translateX(${-frame * frameDisplayW}px)`,
           imageRendering: 'pixelated',
         }}
