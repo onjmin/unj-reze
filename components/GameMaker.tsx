@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2 } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
@@ -1293,8 +1293,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
   /** エディタの「エフェクト」タブで、プレビュー再生中の EffectPreset.id（1件のみ）。 */
   const [playingEffectPreview, setPlayingEffectPreview] = useState<string | null>(null);
-  /** 詳細タブ（設定・サウンド・画面・フェーズ）の表示フラグ。初回は非表示で圧迫感を減らす。 */
-  const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
+  /** パネルを全画面表示するフラグ。スマホで細かい編集をするとき用。 */
+  const [panelFullscreen, setPanelFullscreen] = useState(false);
+  useEffect(() => {
+    if (!panelFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panelFullscreen]);
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
   const isDraggingStartRef = useRef(false);
@@ -13006,66 +13012,58 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               return isFixedController && mounted ? createPortal(controllerEl, document.body) : controllerEl;
             })()
           ) : (
-            <>
+            /* 全画面時のみ実体のあるラッパーになる（通常は display:contents で従来のレイアウトのまま）。 */
+            <div className={panelFullscreen ? 'fixed inset-0 z-[70] flex flex-col bg-[#0f0f11] overscroll-contain' : 'contents'}>
               {/* ── タイトル：どのタブからでも常に見えるよう固定表示 ── */}
               <div className="px-3 pt-3 pb-1 shrink-0">
                 <label className="block text-[11px] text-gray-400 mb-1">タイトル</label>
                 <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200" />
               </div>
 
-              {/* ── タブバー：基本3つ＋詳細▼ で圧迫感を抑える ── */}
-              <div className="flex flex-wrap border-b border-gray-800 shrink-0">
-                {/* 基本タブ（常時表示） */}
-                {([
-                  ['map', 'マップ'],
-                  ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ'], ['event', 'イベント']] : []),
-                  ['char', 'キャラ'],
-                  ...(gameData.battle ? [['battle', '戦闘']] : []),
-                  ...(gameData.battle ? [['character', 'キャラクター']] : []),
-                  ['item', 'アイテム'],
-                  ['weapon', '武器'],
-                  ['armor', '防具'],
-                ] as [EditorTab, string][]).map(([id, label]) => (
-                  <button key={id} onClick={() => setEditorTab(id)}
-                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
-                    {label}
-                  </button>
-                ))}
-
-                {/* 詳細タブ（showAdvancedTabs=trueのとき表示） */}
-                {showAdvancedTabs && ([
-                  ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'],
-                  ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
-                  ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
-                ] as [EditorTab, string][]).map(([id, label]) => (
-                  <button key={id} onClick={() => setEditorTab(id)}
-                    className={`flex-none py-3 px-3 text-[11px] font-bold transition ${editorTab === id ? 'text-blue-400 border-b-2 border-blue-500 bg-[#0f0f11]' : 'text-gray-600 hover:text-gray-400'}`}>
-                    {label}
-                  </button>
-                ))}
-
-                {/* シーンタブ（scenes 定義済み preset のみ） */}
-                {gameData.scenes && (
-                  <button onClick={() => setEditorTab('scene')}
-                    className={`flex-none py-3 px-3.5 text-[11px] font-bold transition ${editorTab === 'scene' ? 'text-violet-400 border-b-2 border-violet-500 bg-[#0f0f11]' : 'text-gray-500 hover:text-gray-300'}`}>
-                    シーン
-                  </button>
-                )}
-
-                {/* 詳細トグル */}
+              {/* ── パネル選択：タブを並べると縦を食うのでドロップダウン1行にまとめる ── */}
+              <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-800 shrink-0">
+                <select
+                  value={editorTab}
+                  onChange={e => setEditorTab(e.target.value as EditorTab)}
+                  aria-label="編集パネル"
+                  className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-2 text-[12px] font-bold text-blue-300 outline-none">
+                  <optgroup label="基本">
+                    {([
+                      ['map', 'マップ'],
+                      ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ'], ['event', 'イベント']] : []),
+                      ['char', 'キャラ'],
+                      ...(gameData.battle ? [['battle', '戦闘'], ['character', 'キャラクター']] : []),
+                      ['item', 'アイテム'],
+                      ['weapon', '武器'],
+                      ['armor', '防具'],
+                    ] as [EditorTab, string][]).map(([id, label]) => (
+                      <option key={id} value={id}>{label}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="詳細">
+                    {([
+                      ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'],
+                      ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
+                      ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
+                    ] as [EditorTab, string][]).map(([id, label]) => (
+                      <option key={id} value={id}>{label}</option>
+                    ))}
+                  </optgroup>
+                  {/* シーン（scenes 定義済み preset のみ） */}
+                  {gameData.scenes && (
+                    <optgroup label="シーン">
+                      <option value="scene">シーン</option>
+                    </optgroup>
+                  )}
+                </select>
                 <button
-                  onClick={() => {
-                    setShowAdvancedTabs(v => {
-                      if (v && !['map', 'object', 'char', 'battle', 'character', 'item'].includes(editorTab)) setEditorTab('map');
-                      return !v;
-                    });
-                  }}
-                  className="ml-auto flex-none py-3 px-3 text-[10px] font-bold text-gray-600 hover:text-gray-400 transition whitespace-nowrap">
-                  {showAdvancedTabs ? '詳細 ▲' : '詳細 ▼'}
+                  onClick={() => setPanelFullscreen(v => !v)}
+                  aria-label={panelFullscreen ? 'パネルの全画面を解除' : 'パネルを全画面表示'}
+                  title={panelFullscreen ? '全画面を解除' : '全画面で編集'}
+                  className="shrink-0 h-10 px-3 rounded border border-gray-700 bg-gray-900 text-[11px] font-bold text-gray-300 active:bg-gray-800 flex items-center gap-1">
+                  {panelFullscreen ? <><Minimize2 size={13} />閉じる</> : <><Maximize2 size={13} />全画面</>}
                 </button>
               </div>
-
-
 
 
 
@@ -16111,7 +16109,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )}
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>

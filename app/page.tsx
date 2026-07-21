@@ -45,6 +45,9 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyTargetPost, setReplyTargetPost] = useState<Post | null>(null);
+  /** 返信送信の排他制御。送信中の再送信を弾き、遅れて完了した送信が
+   *  その後に開いたコンポーザ/エディタの状態を壊さないようにする。 */
+  const replySubmittingRef = useRef(false);
   const [userId, setUserId] = useState('');
   const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
   const [server, setServer] = useState('/main');
@@ -294,6 +297,8 @@ export default function App() {
   );
 
   const handleCreateReplyFromComposer = async (postId: string) => {
+    if (replySubmittingRef.current) return;
+    replySubmittingRef.current = true;
     const parts: string[] = [];
     if (inputText.trim()) parts.push(inputText.trim());
     if (attachedMml) parts.push(`#mml ${attachedMml}`);
@@ -370,6 +375,8 @@ export default function App() {
         return next;
       });
       showToast('error', '返信の送信に失敗しました');
+    } finally {
+      replySubmittingRef.current = false;
     }
   };
 
@@ -857,6 +864,7 @@ export default function App() {
             setOriginType={setOriginType}
             onClose={() => { setComposerOpen(false); setReplyTargetPost(null); }}
             onSubmit={() => {
+              if (replySubmittingRef.current) return;
               if (replyTargetPost) {
                 handleCreateReplyFromComposer(replyTargetPost.id);
               } else {

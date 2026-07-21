@@ -92,7 +92,31 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
   }, [replyTo]);
 
+  /** 返信送信とコンポーザ/エディタ起動の排他制御用。
+   *  コンポーザやエディタを開くたびに世代番号を進め、送信完了後の後片付け
+   *  （返信先クリア等）は「送信時と同じ世代のときだけ」実行する。
+   *  こうしないと 返信→エディタ起動 の順で操作したとき、遅れて返ってきた
+   *  返信処理がエディタ側の状態を巻き戻してしまう。 */
+  const uiSessionRef = useRef(0);
+  const replySubmittingRef = useRef(false);
+  const beginUiSession = useCallback(() => {
+    uiSessionRef.current += 1;
+    return uiSessionRef.current;
+  }, []);
+  /** 返信コンポーザを開く（target=null で通常のスレ返信）。 */
+  const openComposer = useCallback((target: Post | null) => {
+    beginUiSession();
+    setReplyTo(target);
+    setComposerOpen(true);
+  }, [beginUiSession]);
+  /** 全画面エディタ（お絵描き/MML/ゲーム）を開く。 */
+  const openScreen = useCallback((screen: string) => {
+    beginUiSession();
+    setActiveScreen(screen);
+  }, [beginUiSession]);
+
   const handleComposerClose = () => {
+    beginUiSession();
     setComposerOpen(false);
     setReplyTo(null);
   };
@@ -198,6 +222,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   }, [post.id, userId]);
 
   const handleCreateReplyFromComposer = async () => {
+    // 二重送信防止（送信ボタン連打・Enter連打）
+    if (replySubmittingRef.current) return;
+    replySubmittingRef.current = true;
+    const session = beginUiSession();
     const targetParent = replyTo ?? post;
     const parts: string[] = [];
     if (replyText.trim()) parts.push(replyText.trim());
@@ -226,25 +254,25 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setReplyOriginType(undefined);
     setComposerOpen(false);
 
-    let imageSrc: string | undefined;
-    if (replyImage) {
-      const result = await api.upload.image({ image: replyImage });
-      imageSrc = result.url;
-    }
-    let gameId: number | undefined;
-    if (replyGameDraft) {
-      const res = await fetch('/api/games', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset: replyGameDraft.preset, title: replyGameDraft.title, manifest: replyGameDraft.manifest, creatorSlug: userSlug }),
-      });
-      if (res.ok) {
-        const savedGame = await res.json();
-        gameId = savedGame.id;
-      }
-    }
-
     try {
+      let imageSrc: string | undefined;
+      if (replyImage) {
+        const result = await api.upload.image({ image: replyImage });
+        imageSrc = result.url;
+      }
+      let gameId: number | undefined;
+      if (replyGameDraft) {
+        const res = await fetch('/api/games', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: replyGameDraft.preset, title: replyGameDraft.title, manifest: replyGameDraft.manifest, creatorSlug: userSlug }),
+        });
+        if (res.ok) {
+          const savedGame = await res.json();
+          gameId = savedGame.id;
+        }
+      }
+
       const reply = await api.posts.replies.create(post.id, {
         displayName: userId,
         content,
@@ -265,8 +293,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         replies: p.replies.filter(r => r.id !== tempId),
         repliesCount: Math.max(0, p.repliesCount - 1),
       }));
+      showToast('error', '返信の送信に失敗しました');
+    } finally {
+      replySubmittingRef.current = false;
     }
-    setReplyTo(null);
+    // 送信中にコンポーザ/エディタを開き直していたら、その状態を壊さない
+    if (uiSessionRef.current === session) setReplyTo(null);
   };
 
   const handleEditReply = async (replyId: string, content: string, originType?: OriginType) => {
@@ -676,7 +708,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             <button onClick={handleDislike} className={`flex items-center space-x-1 hover:text-red-500 transition-colors ${post.disliked ? 'text-red-500 font-bold' : ''}`}>
               <ThumbsDown size={14} /><span className="text-[11px]">{post.dislikes || ''}</span>
             </button>
-            <button onClick={() => { setReplyTo(null); setComposerOpen(true); }} className="flex items-center space-x-1 hover:text-green-400 transition-colors">
+            <button onClick={() => openComposer(null)} className="flex items-center space-x-1 hover:text-green-400 transition-colors">
               <MessageCircle size={14} /><span className="text-[11px]">{post.repliesCount || ''}</span>
             </button>
             <button onClick={handleRepost} className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? 'text-purple-400' : ''}`}>
@@ -693,18 +725,27 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         </div>
       </div>
 
-      {post.replies.length > 0 && (
-        <div className="border-t border-gray-800 px-3 py-3 space-y-2">
-          <span className="text-[11px] text-gray-500 font-bold">返信</span>
-          {post.replies.filter(r => r.parentPostId === post.id).map(reply => (
-            <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={setReplyTo} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} />
-          ))}
-        </div>
-      )}
+      {post.replies.length > 0 && (() => {
+        // 親返信が削除済み／別スレッド由来などで親を辿れない返信は、
+        // 単純な parentPostId 一致だけだとツリーのどこにも現れず消えてしまう。
+        // 親が見つからないものはルート扱いにして必ず描画する。
+        const ids = new Set(post.replies.map(r => r.id));
+        const roots = post.replies.filter(r =>
+          !r.parentPostId || r.parentPostId === post.id || !ids.has(r.parentPostId)
+        );
+        return (
+          <div className="border-t border-gray-800 px-3 py-3 space-y-2">
+            <span className="text-[11px] text-gray-500 font-bold">返信</span>
+            {roots.map(reply => (
+              <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={openComposer} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} />
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="border-t border-gray-800 px-3 pt-1 pb-3 space-y-1 mx-3 mb-4 mt-2">
         <div
-          onClick={() => { setReplyTo(null); setComposerOpen(true); }}
+          onClick={() => openComposer(null)}
           className="flex items-center space-x-2 bg-gray-100/5 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-100/10 transition-colors"
         >
           <span className="text-xs text-gray-500 flex-1">返信を書き込む...</span>
@@ -730,8 +771,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           onSubmit={handleCreateReplyFromComposer}
           onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenCollab(post); }}
           onOpenDotDrawing={() => { setCollabImageUrl(undefined); handleCollabSelectDotDrawing(); }}
-          onOpenMml={() => setActiveScreen('mml')}
-          onOpenGameMaker={() => setActiveScreen('gamemaker')}
+          onOpenMml={() => openScreen('mml')}
+          onOpenGameMaker={() => openScreen('gamemaker')}
           replyToDisplayName={replyTo ? replyTo.displayName : post.displayName}
         />
       )}
@@ -882,16 +923,17 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
     setMenuOpen(false);
   };
 
+  // 編集結果は親（post prop）を単一の情報源とする。
+  // ここで localPost を直に書き換えると、API失敗でロールバックされたときに
+  // ローカルだけ新しい内容のまま残り、編集内容が反映されない／戻らない状態になる。
   const handleSaveEdit = async (newContent: string, nextImageSrc?: string | null) => {
-    await onEdit(localPost.id, newContent, localPost.originType);
-    setLocalPost(p => ({ ...p, content: newContent, isEdited: true }));
     setShowEditModal(false);
+    await onEdit(localPost.id, newContent, localPost.originType);
   };
 
   const handleSelectOriginType = async (ot: OriginType | undefined) => {
-    await onEdit(localPost.id, localPost.content, ot);
-    setLocalPost(p => ({ ...p, originType: ot }));
     setShowOriginModal(false);
+    await onEdit(localPost.id, localPost.content, ot);
   };
 
   const handleConfirmDelete = async () => {
