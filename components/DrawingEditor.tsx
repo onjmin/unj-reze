@@ -78,6 +78,10 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const [initKey, setInitKey] = useState(0);
   const storageKey = getStorageKey('drawing');
   const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  /** 2本指ピンチ中フラグ。立っている間は描画コールバックを無視する。 */
+  const pinchingRef = useRef(false);
+  /** 1本目の指が触れた時点のレイヤー内容。2本目が触れたらここまで巻き戻す。 */
+  const strokeSnapshotRef = useRef<{ layer: { data: Uint8ClampedArray }; data: Uint8ClampedArray } | null>(null);
   const pinchStartDistRef = useRef<number | null>(null);
   const pinchStartZoomRef = useRef(1);
 
@@ -399,6 +403,8 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     let selectRotateLastAngle = 0;
 
     oekaki.onDraw((x, y, buttons) => {
+      // ピンチ（2本指ズーム）中はペンを動かさない
+      if (pinchingRef.current) return;
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (!active?.editable) return;
 
@@ -497,6 +503,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
     oekaki.onDrawn((x, y) => {
       px = null; py = null;
+      // ピンチ中に指が離れた場合は、描いていないので履歴も残さない
+      if (pinchingRef.current) {
+        lassoPointsRef.current = [];
+        return;
+      }
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (active?.modified()) active.trace();
 
@@ -993,6 +1004,20 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   // 二本指ピンチでキャンバスをズーム。1本指の描画はoekaki側のpointer captureが処理するため干渉しない。
   const handlePinchPointerDown = (e: React.PointerEvent) => {
     pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // 1本目の指はそのまま描画が始まってしまうため、内容を控えておき、
+    // 2本目が触れた時点（＝ピンチ確定）で巻き戻して描き込みを無かったことにする。
+    if (pinchPointsRef.current.size === 1 && e.pointerType === 'touch') {
+      const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
+      strokeSnapshotRef.current = active?.editable ? { layer: active, data: active.data } : null;
+    }
+    if (pinchPointsRef.current.size >= 2) {
+      pinchingRef.current = true;
+      const snapshot = strokeSnapshotRef.current;
+      if (snapshot) {
+        snapshot.layer.data = snapshot.data;
+        strokeSnapshotRef.current = null;
+      }
+    }
     if (pinchPointsRef.current.size === 2) {
       const [p1, p2] = Array.from(pinchPointsRef.current.values());
       pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -1012,9 +1037,33 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     }
   };
 
+  // キャンバス外（ツールバー上など）で指が離れると要素側の pointerup を取りこぼし、
+  // ピンチ中フラグが立ちっぱなしで描けなくなるため、window側でも後始末する。
+  useEffect(() => {
+    const release = (e: PointerEvent) => {
+      if (!pinchPointsRef.current.delete(e.pointerId)) return;
+      pinchStartDistRef.current = null;
+      if (pinchPointsRef.current.size === 0) {
+        pinchingRef.current = false;
+        strokeSnapshotRef.current = null;
+      }
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+    };
+  }, []);
+
   const handlePinchPointerUp = (e: React.PointerEvent) => {
     pinchPointsRef.current.delete(e.pointerId);
     pinchStartDistRef.current = null;
+    // 指が全部離れるまでは描画を再開しない（1本残った指で線が出るのを防ぐ）
+    if (pinchPointsRef.current.size === 0) {
+      pinchingRef.current = false;
+      strokeSnapshotRef.current = null;
+    }
     if (pinchPointsRef.current.size === 2) {
       const [p1, p2] = Array.from(pinchPointsRef.current.values());
       pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
