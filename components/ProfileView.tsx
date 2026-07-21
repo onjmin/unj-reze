@@ -21,6 +21,7 @@ const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false 
 const MusicShareModal = dynamic(() => import('./MusicShareModal'), { ssr: false });
 
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { cachePost } from '@/lib/post-cache';
 
 interface ProfileViewProps {
   userId: string;
@@ -368,8 +369,10 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     }
   }, [activeTab, threads, replies, heartedPosts, likedPosts, dislikedPosts, mediaPosts]);
 
-  const handlePostClick = (postId: string) => {
-    router.push(`/post/${postId}`);
+  const handlePostClick = (post: Post) => {
+    // 一覧で取得済みのデータを詳細ページへ渡し、API応答を待たずに描画させる
+    cachePost(post);
+    router.push(`/post/${post.id}`);
   };
 
   if (loading && myPosts.length === 0 && likedPosts.length === 0 && dislikedPosts.length === 0 && heartedPosts.length === 0) {
@@ -587,7 +590,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
                   <p
                     className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
-                    onClick={() => handlePostClick(p.id)}
+                    onClick={() => handlePostClick(p)}
                   >
                     {(() => {
                       const displayText = getDisplayContent(p.content);
@@ -610,7 +613,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
                   {p.hasImage && (
                     <div
-                      onClick={() => handlePostClick(p.id)}
+                      onClick={() => handlePostClick(p)}
                       className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer"
                     >
                       <img
@@ -636,7 +639,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
                   {p.hasGame && (
                     <div
-                      onClick={() => handlePostClick(p.id)}
+                      onClick={() => handlePostClick(p)}
                       className="w-full aspect-[16/9] bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
                     >
                       <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>

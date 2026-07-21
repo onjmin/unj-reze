@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import PostDetail from '@/components/PostDetail';
 import { Post } from '@/lib/types';
+import { readCachedPost } from '@/lib/post-cache';
 
 const BG = '#0b0e14';
 const BORDER = '#1f2937';
@@ -14,13 +15,9 @@ export default function PostLoading() {
   const [post, setPost] = useState<Post | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(`unj_post_${id}`);
-      if (raw) {
-        setPost(JSON.parse(raw));
-        sessionStorage.removeItem(`unj_post_${id}`);
-      }
-    } catch {}
+    // 一覧側でキャッシュ済みなら、サーバーの応答を待たずにそのまま描画する。
+    // 消さずに残すので「戻る→また開く」でも即描画になる。
+    setPost(readCachedPost(id));
   }, [id]);
 
   const wrapperStyle: React.CSSProperties = { background: BG, color: '#e5e7eb', minHeight: '100dvh', width: '100%', display: 'flex', flexDirection: 'column' };

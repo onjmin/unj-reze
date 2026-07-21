@@ -270,7 +270,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       onChange={(e) => setText(e.target.value)}
       onKeyDown={handleKeyDown}
       className={`w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none text-gray-100 ${md ? 'md:px-5 md:py-4 md:text-lg h-24 md:h-48' : 'h-20'}`}
-      placeholder={replyAvatarInfo ? '返信を書き込む...' : 'いまどうしてる？ #お絵描き #ゲーム'}
+      placeholder={replyAvatarInfo ? '返信を書き込む...' : isBbs ? 'スレタイ + 本文を入力' : 'いまどうしてる？ #お絵描き #ゲーム'}
     />
   );
 
@@ -317,7 +317,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       <div className="relative w-full md:max-w-2xl lg:max-w-3xl bg-[#0b0e14] rounded-xl border border-gray-800 shadow-2xl p-3 md:p-6 flex flex-col space-y-2 md:space-y-4 animate-fade-in-up">
         <div className="flex items-center justify-between mb-1">
           <span className="text-xs md:text-base font-bold text-gray-400">
-            {replyAvatarInfo ? `@${replyAvatarInfo.username} への返信` : '新規ポスト'}
+            {replyAvatarInfo ? `@${replyAvatarInfo.username} への返信` : isBbs ? '新規スレ作成' : '新規ポスト'}
           </span>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 p-1 rounded hover:bg-gray-100/10 transition-colors">
             <X size={16} className="md:hidden" />

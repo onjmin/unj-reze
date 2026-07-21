@@ -10,6 +10,7 @@ import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from 
 import { api } from '@/lib/api';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
+import { cachePost } from '@/lib/post-cache';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -214,7 +215,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const handlePostClick = useCallback((e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
     if (t.closest('button') || t.closest('input') || t.closest('textarea') || t.closest('a') || t.closest('[role="button"]') || t.closest('video')) return;
-    try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch { }
+    cachePost(post);
     router.push(`/post/${post.id}`);
   }, [router, post.id, post]);
 
@@ -481,6 +482,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               <div
                 onClick={(e) => {
                   e.stopPropagation();
+                  cachePost(quotedPost);
                   router.push(`/post/${quotedPost.id}`);
                 }}
                 className="mb-2.5 rounded-xl border border-gray-800 bg-gray-100/[0.03] p-2.5 cursor-pointer hover:bg-gray-100/[0.06] transition-colors"
@@ -569,7 +571,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           </div>
 
           {post.replies.length > 0 && (
-            <ReplyPreview replies={post.replies} postId={post.id} />
+            <ReplyPreview replies={post.replies} post={post} />
           )}
 
           {showReplyInput && (
@@ -661,7 +663,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   );
 }
 
-function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) {
+function ReplyPreview({ replies, post: parentPost }: { replies: Post[]; post: Post }) {
+  const postId = parentPost.id;
   const router = useRouter();
   const [index, setIndex] = useState(0);
   const [pop, setPop] = useState(false);
@@ -695,7 +698,7 @@ function ReplyPreview({ replies, postId }: { replies: Post[]; postId: string }) 
 
   return (
     <div
-      onClick={() => router.push(`/post/${postId}`)}
+      onClick={() => { cachePost(parentPost); router.push(`/post/${postId}`); }}
       className="mt-2 pl-2.5 cursor-pointer hover:opacity-80 transition-opacity"
     >
       <div className="flex items-center gap-1.5 py-1">

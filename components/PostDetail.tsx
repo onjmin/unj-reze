@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
+import { cachePost } from '@/lib/post-cache';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -75,6 +76,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setSelectedUser(user);
     setAvatarMenuPos(pos);
   }, []);
+
+  // サーバーから届いた正規データでキャッシュを更新しておく。
+  // 一覧へ戻ってから開き直したときも、最新のスナップショットで即描画できる。
+  useEffect(() => {
+    cachePost(initial);
+  }, [initial]);
 
   useEffect(() => {
     const sessionId = ensureSessionId();

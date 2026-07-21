@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Home, Search, Bell, Mail, User } from 'lucide-react';
+import { useScrollNav } from '@/lib/hooks/useScrollNav';
 
 interface BottomNavProps {
   current: string;
@@ -29,6 +30,8 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
     messages: messageCount,
   };
   const [avatarBroken, setAvatarBroken] = useState(false);
+  // 下スクロール中はフッターを畳んで本文の可視領域を広げる（上スクロール／上下端で復帰）
+  const { footerHidden } = useScrollNav();
   const [pendingActiveId, setPendingActiveId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,7 +57,10 @@ export default function BottomNav({ current, set, notifCount = 0, messageCount =
   const activeId = pendingActiveId ?? current;
 
   return (
-    <div className="md:hidden flex justify-around items-center h-14 border-t border-gray-800 bg-[#0b0e14]/95 backdrop-blur pb-safe fixed bottom-0 w-full max-w-2xl z-25">
+    <div
+      className={`md:hidden flex justify-around items-center h-14 border-t border-gray-800 bg-[#0b0e14]/95 backdrop-blur pb-safe fixed bottom-0 w-full max-w-2xl z-25 transition-transform duration-200 ease-out ${footerHidden ? 'translate-y-full' : 'translate-y-0'}`}
+      aria-hidden={footerHidden}
+    >
       {items.map(item => {
         const isActive = activeId === item.id;
         const badge = badgeMap[item.id] || 0;

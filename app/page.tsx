@@ -19,6 +19,7 @@ import BottomNav from '@/components/BottomNav';
 import LeftSidebar from '@/components/LeftSidebar';
 import RightSidebar from '@/components/RightSidebar';
 import FAB from '@/components/FAB';
+import ScrollJumpControls from '@/components/ScrollJumpControls';
 import CollabSelector from '@/components/CollabSelector';
 import GameMaker, { type GameManifestDraft } from '@/components/GameMaker';
 import LiveGameView from '@/components/LiveGameView';
@@ -762,7 +763,8 @@ export default function App() {
               )}
               {currentNav === 'home' && topTab !== 'game' && (
                 <>
-                  {topTab !== 'ranking' && topTab !== 'game' && (
+                  {/* 掲示板モードでは板＝スレ一覧を最初に見せる（投稿は「スレ作成」からモーダルで） */}
+                  {topTab !== 'ranking' && topTab !== 'game' && bbsMode !== '掲示板モード' && (
                     <PostComposer
                       inline
                       userId={userId}
@@ -844,6 +846,8 @@ export default function App() {
             <BottomNav current={currentNav} set={handleNavigate} notifCount={notifCount} messageCount={messageCount} userAvatarUrl={currentUser?.avatarUrl} userSlug={currentUser?.slug} />
 
             <FAB openText={() => handleQuickPost()} />
+
+            <ScrollJumpControls />
           </>
         )}
 

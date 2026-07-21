@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 import LeftSidebar from './LeftSidebar';
 import RightSidebar from './RightSidebar';
 import BottomNav from './BottomNav';
+import ScrollJumpControls from './ScrollJumpControls';
 
 interface AppShellProps {
   /** LeftSidebar / BottomNav のどの項目をハイライトするか（例: 'settings'） */
@@ -56,6 +57,7 @@ export default function AppShell({ current, children }: AppShellProps) {
         <div id="scrollable-content" className="flex-1 overflow-y-auto scrollbar-none flex flex-col min-h-0 pb-14 md:pb-0">
           {children}
         </div>
+        <ScrollJumpControls />
         <BottomNav
           current={current}
           set={(id) => { if (id === 'home') router.push('/'); }}

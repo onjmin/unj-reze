@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ThumbsUp, ThumbsDown, MessageCircle } from 'lucide-react';
 import { Post } from '@/lib/types';
+import { cachePost } from '@/lib/post-cache';
 
 type MediaSort = 'new' | 'likes' | 'dislikes';
 
@@ -57,7 +58,7 @@ export default function MediaGrid({ items }: MediaGridProps) {
         {sorted.map(post => (
           <button
             key={post.id}
-            onClick={() => router.push(`/post/${post.id}`)}
+            onClick={() => { cachePost(post); router.push(`/post/${post.id}`); }}
             className="relative aspect-square bg-[#1a1b26] overflow-hidden group"
           >
             <img

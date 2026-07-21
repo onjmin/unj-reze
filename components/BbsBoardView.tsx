@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus, Loader2, PlaySquare } from 'lucide-react';
 import { Post } from '@/lib/types';
 import { extractFirstEmbed, getEmbedThumbnail } from '@/lib/embed';
+import { cachePost } from '@/lib/post-cache';
 
 interface BbsBoardViewProps {
   posts: Post[];
@@ -16,17 +17,62 @@ interface BbsBoardViewProps {
 
 const PAGE_SIZE = 15;
 
+type SortKey = 'updated' | 'newThread' | 'momentum' | 'newReply' | 'replyCount' | 'oldest';
+
+const SORT_OPTIONS: { key: SortKey; label: string; icon?: string }[] = [
+  { key: 'updated', label: '更新順' },
+  { key: 'newThread', label: '新スレ順' },
+  { key: 'momentum', label: '勢い', icon: '🔥' },
+  { key: 'newReply', label: '新レス順' },
+  { key: 'replyCount', label: '投稿数' },
+  { key: 'oldest', label: '古い順' },
+];
+
+const createdMs = (p: Post) => new Date(p.createdAt).getTime();
+/** 最終レス時刻（レス無しはスレ立て時刻）。 */
+const lastReplyMs = (p: Post) =>
+  p.replies.reduce((latest, r) => Math.max(latest, new Date(r.createdAt).getTime()), 0);
+const lastActivityMs = (p: Post) => Math.max(createdMs(p), lastReplyMs(p));
+/** 勢い＝レス数 ÷ 経過時間（時間）。立ったばかりのスレが有利になりすぎないよう下限を1hに。 */
+const momentum = (p: Post) => {
+  const hours = Math.max(1, (Date.now() - createdMs(p)) / 3600_000);
+  return p.repliesCount / hours;
+};
+
 export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPost, loading }: BbsBoardViewProps) {
   const router = useRouter();
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<SortKey>('updated');
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!sortOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (sortRef.current && !sortRef.current.contains(e.target as Node)) setSortOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [sortOpen]);
 
   let displayPosts = [...posts];
   if (activeTab === 'ranking') {
     if (rankCategory === 'イイ') displayPosts.sort((a, b) => b.likes - a.likes);
     else if (rankCategory === 'コメ') displayPosts.sort((a, b) => b.repliesCount - a.repliesCount);
     else if (rankCategory === 'ダメ') displayPosts.sort((a, b) => b.dislikes - a.dislikes);
+  } else {
+    switch (sortKey) {
+      case 'newThread': displayPosts.sort((a, b) => createdMs(b) - createdMs(a)); break;
+      case 'momentum': displayPosts.sort((a, b) => momentum(b) - momentum(a)); break;
+      case 'newReply': displayPosts.sort((a, b) => lastReplyMs(b) - lastReplyMs(a)); break;
+      case 'replyCount': displayPosts.sort((a, b) => b.repliesCount - a.repliesCount); break;
+      case 'oldest': displayPosts.sort((a, b) => createdMs(a) - createdMs(b)); break;
+      default: displayPosts.sort((a, b) => lastActivityMs(b) - lastActivityMs(a)); break;
+    }
   }
+
+  const currentSort = SORT_OPTIONS.find(o => o.key === sortKey) ?? SORT_OPTIONS[0];
 
   const totalPages = Math.max(1, Math.ceil(displayPosts.length / PAGE_SIZE));
   const pagePosts = displayPosts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -53,9 +99,33 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 flex-wrap shrink-0">
         <span className="text-gray-500 text-[10px]">並び:</span>
-        <span className="bg-gray-800 text-gray-200 px-2 py-0.5 rounded text-[10px]">
-          更新順 <span className="text-gray-500">▼</span>
-        </span>
+        <div className="relative" ref={sortRef}>
+          <button
+            onClick={() => setSortOpen(v => !v)}
+            aria-haspopup="menu"
+            aria-expanded={sortOpen}
+            className={`bg-gray-800 hover:bg-gray-700 px-2 py-0.5 rounded text-[10px] transition-colors ${sortOpen ? 'text-[#a3e635] ring-1 ring-[#a3e635]/40' : 'text-gray-200'}`}
+          >
+            {currentSort.icon && <span className="mr-0.5">{currentSort.icon}</span>}
+            {currentSort.label} <span className="text-gray-500">▼</span>
+          </button>
+          {sortOpen && (
+            <div role="menu" className="absolute left-0 top-6 z-30 w-32 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1">
+              {SORT_OPTIONS.map(opt => (
+                <button
+                  key={opt.key}
+                  role="menuitemradio"
+                  aria-checked={opt.key === sortKey}
+                  onClick={() => { setSortKey(opt.key); setPage(1); setSortOpen(false); }}
+                  className={`w-full text-left px-3 py-2 text-[11px] transition-colors hover:bg-gray-100/10 ${opt.key === sortKey ? 'text-[#a3e635] font-bold' : 'text-gray-300'}`}
+                >
+                  {opt.icon && <span className="mr-1">{opt.icon}</span>}
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button
           onClick={() => setAutoUpdate(v => !v)}
           className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
@@ -116,7 +186,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
             <div
               key={post.id}
               onClick={() => {
-                try { sessionStorage.setItem(`unj_post_${post.id}`, JSON.stringify(post)); } catch {}
+                cachePost(post);
                 router.push(`/post/${post.id}`);
               }}
               className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
