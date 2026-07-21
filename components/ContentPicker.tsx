@@ -12,6 +12,7 @@ import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
 import LocalAssetPanel from './LocalAssetPanel';
+import UserSheetPanel from './UserSheetPanel';
 import BuiltinGameSoundPanel from './BuiltinGameSoundPanel';
 import PostSlicePanel from './PostSlicePanel';
 
@@ -35,7 +36,7 @@ interface ContentPickerProps {
   onClose: () => void;
 }
 
-type ImageTab = 'posts' | 'slice' | 'history' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local';
+type ImageTab = 'posts' | 'slice' | 'history' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local' | 'mySheet';
 type BgmTab = 'youtube' | 'nicovideo' | 'soundcloud' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe' | 'builtinGame';
 
 // BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
@@ -400,6 +401,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 <button className={tabBtn(imageTab === 'history')} onClick={() => changeImageTab('history')}>🕘 使用履歴</button>
               )}
               <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
+              <button className={tabBtn(imageTab === 'mySheet')} onClick={() => changeImageTab('mySheet')}>🗂️ マイシート</button>
               <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 素材</button>
               <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 歩行グラ</button>
               <button className={tabBtn(imageTab === 'walk')} onClick={() => changeImageTab('walk')}>📥 投稿グラ</button>
@@ -550,6 +552,9 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
           )}
           {mode === 'image' && imageTab === 'local' && (
             <LocalAssetPanel onPick={onPick} />
+          )}
+          {mode === 'image' && imageTab === 'mySheet' && (
+            <UserSheetPanel onPick={onPick} />
           )}
 
           {/* BGM: youtube */}

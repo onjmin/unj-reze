@@ -54,6 +54,7 @@ import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
 import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList, YUME25D_TOOL_LABELS } from './Yume25DMaker';
 import Yume25DEditorPanel from './Yume25DEditorPanel';
+import UserSheetPanel from './UserSheetPanel';
 import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
 
 export type { PresetId };
@@ -148,7 +149,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'event' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect';
+type EditorTab = 'map' | 'event' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect' | 'sheets';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -13404,7 +13405,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       ['item', 'アイテム定義'],
                       ['weapon', '武器'],
                       ['armor', '防具'],
-                      ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'],
+                      ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'], ['sheets', '素材シート'],
                       ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
                       ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
                     ] as [EditorTab, string][]).map(([id, label]) => (
@@ -16511,6 +16512,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 )}
 
                 {/* ── SWITCH（イベント制御用変数）── */}
+                {/* ── 素材シート（マイシート）：直リンク/アップロード画像をマス目で切り出して使う ── */}
+                {editorTab === 'sheets' && (
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-bold text-gray-200">🗂️ 素材シート</p>
+                    <p className="text-[10px] text-gray-500 leading-relaxed">
+                      スプライトシートを登録すると、タイルやキャラの「画像参照」→「マイシート」タブから
+                      1マスずつ選べるようになります。登録はこのブラウザに保存され、どのゲームからでも使えます。
+                    </p>
+                    <UserSheetPanel />
+                  </div>
+                )}
+
                 {editorTab === 'switch' && (
                   <div className="space-y-4">
                     {/* ── スイッチ一覧エディタ ── */}
