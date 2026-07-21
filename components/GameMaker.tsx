@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2 } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2 } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
@@ -8815,6 +8815,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         } else if (isPlaying && shopModalRef.current) {
           setShopModal(null);
         } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current && selectedObjIdRef.current) {
+          pushUndoRef.current?.();
           setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) }));
           setSelectedObjId(null);
         }
@@ -10810,10 +10811,87 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const tpl = objTemplate;
   const setTpl = (patch: Partial<ObjectDef>) => setObjTemplate(o => ({ ...o, ...patch }));
   const selObj = selectedObjId ? gameData.objects.find(o => o.id === selectedObjId) ?? null : null;
+  // ── 配置のやり直し（Undo / Redo）───────────────────────────────────
+  //  タイル塗り・オブジェクトの追加/削除/移動の直前に gameData のスナップショットを積む。
+  //  1操作＝1スナップショット（キャンバスのドラッグ塗りは指を置いた時点で1回だけ）。
+  const UNDO_LIMIT = 30;
+  const undoStackRef = useRef<PresetData[]>([]);
+  const redoStackRef = useRef<PresetData[]>([]);
+  const [undoDepth, setUndoDepth] = useState(0);
+  const [redoDepth, setRedoDepth] = useState(0);
+
+  /** ゲームループ（別effect）から参照するための橋渡し。 */
+  const pushUndoRef = useRef<(() => void) | null>(null);
+  const pushUndo = useCallback(() => {
+    const stack = undoStackRef.current;
+    stack.push(clone(gameDataRef.current));
+    if (stack.length > UNDO_LIMIT) stack.shift();
+    redoStackRef.current = [];
+    setUndoDepth(stack.length);
+    setRedoDepth(0);
+  }, []);
+
+  pushUndoRef.current = pushUndo;
+
+  /** スナップショットを編集ステートと実行中エンジンへ戻す。 */
+  const applyEditSnapshot = useCallback((snap: PresetData) => {
+    setGameData(snap);
+    gameDataRef.current = snap;
+    engineRef.current.map = JSON.parse(JSON.stringify(snap.map));
+    setSelectedObjId(prev => (prev && snap.objects.some(o => o.id === prev) ? prev : null));
+    setBatchIds(new Set());
+  }, []);
+
+  const undoEdit = useCallback(() => {
+    const stack = undoStackRef.current;
+    const snap = stack.pop();
+    if (!snap) return;
+    redoStackRef.current.push(clone(gameDataRef.current));
+    applyEditSnapshot(snap);
+    setUndoDepth(stack.length);
+    setRedoDepth(redoStackRef.current.length);
+  }, [applyEditSnapshot]);
+
+  const redoEdit = useCallback(() => {
+    const stack = redoStackRef.current;
+    const snap = stack.pop();
+    if (!snap) return;
+    undoStackRef.current.push(clone(gameDataRef.current));
+    applyEditSnapshot(snap);
+    setUndoDepth(undoStackRef.current.length);
+    setRedoDepth(stack.length);
+  }, [applyEditSnapshot]);
+
+  /** キャンバスのドラッグ塗り開始時に1回だけ積む（1ストローク＝1操作）。 */
+  const editGestureRef = useRef(false);
+  const beginEditGesture = useCallback(() => {
+    if (isPlaying || playOnly || editGestureRef.current) return;
+    if (editorTab !== 'map') return;   // オブジェ/イベントタブのクリックは選択のみで変更しない
+    editGestureRef.current = true;
+    pushUndo();
+  }, [isPlaying, playOnly, editorTab, pushUndo]);
+  const endEditGesture = useCallback(() => { editGestureRef.current = false; }, []);
+
+  // デスクトップ: Ctrl+Z / Ctrl+Y（Ctrl+Shift+Z）でやり直し
+  useEffect(() => {
+    if (isPlaying || playOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const t = e.target as HTMLElement | null;
+      const tag = t?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoEdit(); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoEdit(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isPlaying, playOnly, undoEdit, redoEdit]);
+
   const updObj = (patch: Partial<ObjectDef>) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, ...patch } : o) })); };
-  const delObj = () => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjId) })); setSelectedObjId(null); };
-  const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
-  const placeObj = () => { const p = engineRef.current.player; setGameData(prev => ({ ...prev, objects: [...prev.objects, { ...objTemplate, id: uid(), col: Math.floor((p.x + 12) / TILE_SIZE), row: Math.floor((p.y + 12) / TILE_SIZE) }] })); };
+  const delObj = () => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjId) })); setSelectedObjId(null); };
+  const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
+  const placeObj = () => { pushUndo(); const p = engineRef.current.player; setGameData(prev => ({ ...prev, objects: [...prev.objects, { ...objTemplate, id: uid(), col: Math.floor((p.x + 12) / TILE_SIZE), row: Math.floor((p.y + 12) / TILE_SIZE) }] })); };
 
   // ── バッチ選択: Ctrl/Meta+クリックでトグル、Shift+クリックで範囲選択 ──
   const isYume25d = gameData.engine === 'yume25d';
@@ -10866,7 +10944,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // SELECT ボタンが押されたとき
   const handleSelectPress = () => {
     if (introOpen) return;
-    // 編集・プレイ共通：速度切り替え (1x => 2x => 4x)
+    // 編集中は配置のやり直し（Undo）。プレイ中は従来どおり速度切り替え。
+    if (!isPlaying && !playOnly) { undoEdit(); return; }
+    // 速度切り替え (1x => 2x => 4x)
     setEditSpeedMult(prev => {
       const speeds = [1, 2, 4];
       return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
@@ -10883,6 +10963,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // STARTボタンでもちものを開閉
       setTouch('inv', true);
       setTimeout(() => setTouch('inv', false), 80);
+    } else if (!playOnly) {
+      // 編集中は配置のやり直し（Redo）。テストプレイはヘッダーの「プレイ」ボタンから。
+      redoEdit();
     } else {
       // テストプレイ開始
       setActivePreviewKey(null);
@@ -10999,7 +11082,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 shrink-0"><X size={16} /></button>}
-          <span className="text-xs font-bold text-white shrink-0">{embedded ? '▶ プレイ中' : 'ゲーム作成'}</span>
+          {embedded && <span className="text-xs font-bold text-white shrink-0">▶ プレイ中</span>}
           {!isPlaying && !playOnly && (
             <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
               className="bg-gray-800 border border-gray-700 px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
@@ -11125,6 +11208,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             <History size={14} />
           </button>
           <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
+          {/* 配置のやり直し（編集中のみ）。モバイルはSELECT/STARTボタンからも操作できる。 */}
+          {!isPlaying && !playOnly && (
+            <>
+              <button onClick={undoEdit} disabled={undoDepth === 0}
+                className="p-2 text-gray-400 hover:text-white bg-gray-700/50 disabled:opacity-30 disabled:hover:text-gray-400"
+                title={`元に戻す（Ctrl+Z / SELECT）${undoDepth ? ` ${undoDepth}` : ''}`}><Undo2 size={14} /></button>
+              <button onClick={redoEdit} disabled={redoDepth === 0}
+                className="p-2 text-gray-400 hover:text-white bg-gray-700/50 disabled:opacity-30 disabled:hover:text-gray-400"
+                title={`やり直す（Ctrl+Y / START）${redoDepth ? ` ${redoDepth}` : ''}`}><Redo2 size={14} /></button>
+            </>
+          )}
           {!playOnly && (
             <button onClick={() => {
               if (introOpen) {
@@ -11244,12 +11338,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               <canvas ref={canvasRef} width={PLAY_W} height={PLAY_H}
                 className={`block w-full h-full ${!isPlaying ? 'cursor-crosshair' : ''}`}
                 style={{ imageRendering: 'pixelated' }}
-                onMouseDown={handleCanvasAction}
+                onMouseDown={e => { beginEditGesture(); handleCanvasAction(e); }}
                 onMouseMove={e => editorTab !== 'object' && (e.buttons & 1) === 1 && handleCanvasAction(e)}
-                onMouseUp={() => { isDraggingStartRef.current = false; }}
-                onTouchStart={handleCanvasAction}
+                onMouseUp={() => { isDraggingStartRef.current = false; endEditGesture(); }}
+                onTouchStart={e => { beginEditGesture(); handleCanvasAction(e); }}
                 onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
-                onTouchEnd={() => { isDraggingStartRef.current = false; }}
+                onTouchEnd={() => { isDraggingStartRef.current = false; endEditGesture(); }}
                 onContextMenu={e => e.preventDefault()} />
             )}
 
@@ -12864,6 +12958,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           {(isPlaying || playOnly || editModeType === 'move_place') ? (
             (() => {
               const isFixedController = fixedControls && (isPlaying || playOnly);
+              /** 編集中（テストプレイでも閲覧専用でもない）＝SELECT/STARTはUndo/Redo。 */
+              const isEditing = !isPlaying && !playOnly;
               const controllerEl = (
                 <div className={
                   isFixedController
@@ -12924,8 +13020,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           // ゆめにっき3D：十字キーでカーソルを動かし、Aボタンで現在のツール（床/壁/スプライト/開始等）を配置する。
                           btnAActive = true; btnALabel = yume25dTool === 'erase' ? '消す' : '配置';
                         } else if (!isPlaying) {
-                          btnAActive = true; btnALabel = "PUT";
-                          btnBActive = selectedObjId !== null || selectedObjIdRef.current !== null; btnBLabel = "DEL";
+                          btnAActive = true; btnALabel = "配置";
+                          btnBActive = selectedObjId !== null || selectedObjIdRef.current !== null; btnBLabel = "削除";
                         } else if (gameData.engine === 'action') {
                           btnAActive = true; btnALabel = "JUMP";
                           btnBActive = true; btnBLabel = "SHOT";
@@ -12987,20 +13083,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   {/* 中央下部：SELECT / START / INV ボタン */}
                   {!introOpen && (
                     <div className="flex gap-6 justify-center items-center mt-3 pt-1 border-t border-gray-800/40 w-full shrink-0 select-none">
-                      {/* SELECT */}
+                      {/* SELECT（編集中はUNDO） */}
                       <div className="flex flex-col items-center gap-0.5">
                         <button onClick={handleSelectPress}
-                          className="w-11 h-3.5 bg-gray-700 active:bg-gray-600 rounded-full border border-gray-900 shadow-md transform rotate-12 active:translate-y-0.5 transition touch-none cursor-pointer"
-                          title="SELECT" />
-                        <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">SELECT</span>
+                          disabled={isEditing && undoDepth === 0}
+                          className={`w-11 h-3.5 rounded-full border border-gray-900 shadow-md transform rotate-12 active:translate-y-0.5 transition touch-none cursor-pointer ${isEditing && undoDepth === 0 ? 'bg-gray-800 opacity-40' : 'bg-gray-700 active:bg-gray-600'}`}
+                          title={isEditing ? `元に戻す（${undoDepth}）` : 'SELECT'} />
+                        <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">{isEditing ? 'UNDO' : 'SELECT'}</span>
                       </div>
 
-                      {/* START */}
+                      {/* START（編集中はREDO） */}
                       <div className="flex flex-col items-center gap-0.5">
                         <button onClick={handleStartPress}
-                          className="w-11 h-3.5 bg-gray-700 active:bg-gray-600 rounded-full border border-gray-900 shadow-md transform rotate-12 active:translate-y-0.5 transition touch-none cursor-pointer"
-                          title="START" />
-                        <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">START</span>
+                          disabled={isEditing && redoDepth === 0}
+                          className={`w-11 h-3.5 rounded-full border border-gray-900 shadow-md transform rotate-12 active:translate-y-0.5 transition touch-none cursor-pointer ${isEditing && redoDepth === 0 ? 'bg-gray-800 opacity-40' : 'bg-gray-700 active:bg-gray-600'}`}
+                          title={isEditing ? `やり直す（${redoDepth}）` : 'START'} />
+                        <span className="text-[7px] font-pixel font-bold text-gray-600 tracking-wider">{isEditing ? 'REDO' : 'START'}</span>
                       </div>
                     </div>
                   )}
