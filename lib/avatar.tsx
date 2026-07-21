@@ -10,6 +10,15 @@ const AVATAR_ICONS = [
   Music, Coins, Hammer, Wrench, Gift, Map, Flag, Bomb, Lightbulb, User
 ];
 
+/** 掲示板モードで出す「ID」表記。
+ *  表示名（例: 名無しvFZ）の末尾英数字＝slug が本来のIDなので、
+ *  先頭3文字を切り出すと全員 "名無し" になってしまう。slug があればそれを使う。 */
+export function getUserIdLabel(displayName: string | null | undefined, slug?: string | null): string {
+  if (slug) return slug;
+  const match = displayName?.match(/[a-zA-Z0-9]+$/);
+  return match ? match[0] : (displayName || '???');
+}
+
 export function getAvatarInfo(userId: string | null | undefined) {
   if (!userId) {
     return {

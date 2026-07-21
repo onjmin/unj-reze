@@ -45,6 +45,8 @@ export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedS
           ゲーム
         </button>
       </div>
+      {/* 最新スレ/最新レス/メディア はタイムライン（みんな）でのみ意味を持つので他タブでは出さない */}
+      {activeTab === 'everyone' && (
       <div className="flex px-2 py-1.5 text-xs bg-gray-100/5 text-gray-400 border-t border-gray-800/40">
         <button
           onClick={() => setFeedSubMode('threads')}
@@ -65,6 +67,7 @@ export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedS
           メディア {mediaCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'media' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(mediaCount)}</span>)}
         </button>
       </div>
+      )}
     </div>
   );
 }

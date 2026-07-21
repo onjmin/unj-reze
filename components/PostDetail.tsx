@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import BbsThreadView from './BbsThreadView';
-import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag, Pencil, Trash2, VolumeX, User as UserIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
@@ -49,6 +49,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [following, setFollowing] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [muted, setMuted] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const [userId, setUserId] = useState('名無しvFZ');
   const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
@@ -76,6 +77,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setSelectedUser(user);
     setAvatarMenuPos(pos);
   }, []);
+
+  // スレ主に対する現在のミュート/ブロック状態をメニュー表記へ反映する。
+  useEffect(() => {
+    const targetSlug = post.slug || post.displayName;
+    if (!userSlug || userSlug === targetSlug) return;
+    api.mute.list(userSlug).then(r => setMuted(r.muted.includes(targetSlug))).catch(() => {});
+    api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => {});
+  }, [userSlug, post.slug, post.displayName]);
 
   // サーバーから届いた正規データでキャッシュを更新しておく。
   // 一覧へ戻ってから開き直したときも、最新のスナップショットで即描画できる。
@@ -150,9 +159,38 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setMenuOpen(false);
   };
 
-  const handleMenuBlock = () => {
-    setBlocked(v => !v);
+  /** スレ主（＝この投稿の投稿者）をブロックする。以後この人の投稿は一覧から消える。 */
+  const handleMenuBlock = async () => {
     setMenuOpen(false);
+    const targetSlug = post.slug || post.displayName;
+    if (!userSlug || userSlug === targetSlug) return;
+    const was = blocked;
+    setBlocked(!was);
+    try {
+      if (was) await api.block.unblock(userSlug, targetSlug);
+      else await api.block.block(userSlug, targetSlug);
+      showToast('info', was ? 'ブロックを解除しました' : 'ブロックしました');
+    } catch {
+      setBlocked(was);
+      showToast('error', 'ブロックに失敗しました');
+    }
+  };
+
+  /** スレ主をミュートする（ブロックと違い相手には分からない）。 */
+  const handleMenuMute = async () => {
+    setMenuOpen(false);
+    const targetSlug = post.slug || post.displayName;
+    if (!userSlug || userSlug === targetSlug) return;
+    const was = muted;
+    setMuted(!was);
+    try {
+      if (was) await api.mute.unmute(userSlug, targetSlug);
+      else await api.mute.mute(userSlug, targetSlug);
+      showToast('info', was ? 'ミュートを解除しました' : 'ミュートしました');
+    } catch {
+      setMuted(was);
+      showToast('error', 'ミュートに失敗しました');
+    }
   };
 
   const handleMenuReport = () => {
@@ -503,6 +541,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setMenuOpen(false);
   };
 
+
   const isSelf = !!userSlug && (post.slug || post.displayName) === userSlug;
 
   const mmlCode = extractMmlFromContent(post.content);
@@ -571,9 +610,21 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   </button>
                 )}
                 {!isSelf && (
+                  <button role="menuitem" onClick={() => { setMenuOpen(false); router.push(`/user/${post.slug || post.displayName}`); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <UserIcon size={12} className="shrink-0" />
+                    <span>プロフページ</span>
+                  </button>
+                )}
+                {!isSelf && (
+                  <button role="menuitem" onClick={handleMenuMute} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <VolumeX size={12} className="shrink-0" />
+                    <span>{muted ? 'ミュート解除' : `${getAvatarInfo(post.displayName).username}さんをミュート`}</span>
+                  </button>
+                )}
+                {!isSelf && (
                   <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Ban size={12} className="shrink-0" />
-                    <span>{blocked ? 'ブロック中' : `${getAvatarInfo(post.displayName).username}さんをブロック`}</span>
+                    <span>{blocked ? 'ブロック解除' : `${getAvatarInfo(post.displayName).username}さんをブロック`}</span>
                   </button>
                 )}
                 <div className="border-t border-gray-800 my-1" />
@@ -900,6 +951,8 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
   }, [post]);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showOriginModal, setShowOriginModal] = useState(false);
@@ -928,6 +981,46 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
   const handleMenuDelete = () => {
     setShowDeleteModal(true);
     setMenuOpen(false);
+  };
+
+  /** 返信者のプロフィールへ移動する。 */
+  const handleMenuProfile = () => {
+    setMenuOpen(false);
+    router.push(`/user/${localPost.slug || localPost.displayName}`);
+  };
+
+  // メニューを開いたときに現在のミュート/ブロック状態を取り出し、解除表記にできるようにする
+  useEffect(() => {
+    if (!menuOpen || !userSlug) return;
+    const targetSlug = localPost.slug || localPost.displayName;
+    if (userSlug === targetSlug) return;
+    api.mute.list(userSlug).then(r => setMuted(r.muted.includes(targetSlug))).catch(() => {});
+    api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => {});
+  }, [menuOpen, userSlug, localPost.slug, localPost.displayName]);
+
+  /** 返信者をミュート／ブロックする。SNSモードの返信からも導線を出す。 */
+  const toggleModeration = async (kind: 'mute' | 'block') => {
+    setMenuOpen(false);
+    const targetSlug = localPost.slug || localPost.displayName;
+    if (!userSlug || userSlug === targetSlug) return;
+    const was = kind === 'mute' ? muted : blocked;
+    const setLocal = kind === 'mute' ? setMuted : setBlocked;
+    setLocal(!was);
+    try {
+      if (kind === 'mute') {
+        if (was) await api.mute.unmute(userSlug, targetSlug);
+        else await api.mute.mute(userSlug, targetSlug);
+      } else {
+        if (was) await api.block.unblock(userSlug, targetSlug);
+        else await api.block.block(userSlug, targetSlug);
+      }
+      showToast('info', kind === 'mute'
+        ? (was ? 'ミュートを解除しました' : 'ミュートしました')
+        : (was ? 'ブロックを解除しました' : 'ブロックしました'));
+    } catch {
+      setLocal(was);
+      showToast('error', '設定の変更に失敗しました');
+    }
   };
 
   // 編集結果は親（post prop）を単一の情報源とする。
@@ -1080,6 +1173,24 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
                     <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
                       <Trash2 size={11} className="shrink-0" />
                       <span>削除</span>
+                    </button>
+                  )}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={handleMenuProfile} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <UserIcon size={11} className="shrink-0" />
+                      <span>プロフページ</span>
+                    </button>
+                  )}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={() => toggleModeration('mute')} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                      <VolumeX size={11} className="shrink-0" />
+                      <span>{muted ? 'ミュート解除' : 'この人をミュート'}</span>
+                    </button>
+                  )}
+                  {!isSelf && (
+                    <button role="menuitem" onClick={() => toggleModeration('block')} className="flex items-center gap-2 w-full px-2.5 py-1.5 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                      <Ban size={11} className="shrink-0" />
+                      <span>{blocked ? 'ブロック解除' : 'この人をブロック'}</span>
                     </button>
                   )}
                 </div>

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { User, UserPlus, UserMinus, AtSign, Mail } from 'lucide-react';
+import { User, UserPlus, UserMinus, AtSign, Mail, VolumeX, Volume2, Ban, CircleSlash } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
 
@@ -16,6 +16,8 @@ interface UserActionMenuProps {
   currentUserSlug?: string;
   onMention: (username: string) => void;
   position?: { x: number; y: number } | null;
+  /** ミュート/ブロックの変更後に一覧を作り直したいとき用。 */
+  onModerationChange?: () => void;
 }
 
 export default function UserActionMenu({
@@ -27,10 +29,14 @@ export default function UserActionMenu({
   currentUserSlug,
   onMention,
   position,
+  onModerationChange,
 }: UserActionMenuProps) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [isFollowingTarget, setIsFollowingTarget] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [moderating, setModerating] = useState(false);
 
   // DM states
   const [showDmInput, setShowDmInput] = useState(false);
@@ -69,12 +75,20 @@ export default function UserActionMenu({
     setDmText('');
     setDmSuccess(false);
 
+    setMuted(false);
+    setBlocked(false);
+
     if (currentUserId && !isSelf) {
       api.follow.isFollowing(currentUserId, targetUserDisplayName)
         .then(r => setIsFollowingTarget(r.isFollowing))
         .catch(() => {});
     }
-  }, [isOpen, targetUserDisplayName, currentUserId, isSelf]);
+    // 現在のミュート/ブロック状態を取り出して「解除」表示にできるようにする
+    if (currentUserSlug && !isSelf) {
+      api.mute.list(currentUserSlug).then(r => setMuted(r.muted.includes(targetIdOrSlug))).catch(() => {});
+      api.block.list(currentUserSlug).then(r => setBlocked(r.blocked.includes(targetIdOrSlug))).catch(() => {});
+    }
+  }, [isOpen, targetUserDisplayName, currentUserId, currentUserSlug, targetIdOrSlug, isSelf]);
 
   if (!isOpen || !mounted) return null;
 
@@ -93,6 +107,38 @@ export default function UserActionMenu({
       }).catch(() => {});
     } catch {
       setIsFollowingTarget(wasFollowing);
+    }
+  };
+
+  const handleMuteToggle = async () => {
+    if (!currentUserSlug || isSelf || moderating) return;
+    const was = muted;
+    setModerating(true);
+    setMuted(!was);
+    try {
+      if (was) await api.mute.unmute(currentUserSlug, targetIdOrSlug);
+      else await api.mute.mute(currentUserSlug, targetIdOrSlug);
+      onModerationChange?.();
+    } catch {
+      setMuted(was);
+    } finally {
+      setModerating(false);
+    }
+  };
+
+  const handleBlockToggle = async () => {
+    if (!currentUserSlug || isSelf || moderating) return;
+    const was = blocked;
+    setModerating(true);
+    setBlocked(!was);
+    try {
+      if (was) await api.block.unblock(currentUserSlug, targetIdOrSlug);
+      else await api.block.block(currentUserSlug, targetIdOrSlug);
+      onModerationChange?.();
+    } catch {
+      setBlocked(was);
+    } finally {
+      setModerating(false);
     }
   };
 
@@ -121,7 +167,7 @@ export default function UserActionMenu({
 
   if (position && typeof window !== 'undefined') {
     const menuWidth = 176;
-    const menuHeight = 220;
+    const menuHeight = 320;
 
     if (menuX + menuWidth > window.innerWidth - 12) {
       menuX = Math.max(12, window.innerWidth - menuWidth - 12);
@@ -238,6 +284,28 @@ export default function UserActionMenu({
           <AtSign size={14} className="shrink-0 text-gray-400" />
           <span>@メンションする</span>
         </button>
+
+        {!isSelf && currentUserSlug && (
+          <>
+            <div className="border-t border-gray-800 my-1" />
+            <button
+              onClick={handleMuteToggle}
+              disabled={moderating}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold disabled:opacity-50"
+            >
+              {muted ? <Volume2 size={14} className="shrink-0 text-gray-400" /> : <VolumeX size={14} className="shrink-0 text-gray-400" />}
+              <span>{muted ? 'ミュート解除' : 'ミュートする'}</span>
+            </button>
+            <button
+              onClick={handleBlockToggle}
+              disabled={moderating}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors font-semibold disabled:opacity-50"
+            >
+              {blocked ? <CircleSlash size={14} className="shrink-0 text-red-400" /> : <Ban size={14} className="shrink-0 text-red-400" />}
+              <span>{blocked ? 'ブロック解除' : 'ブロックする'}</span>
+            </button>
+          </>
+        )}
       </div>
     </>,
     document.body

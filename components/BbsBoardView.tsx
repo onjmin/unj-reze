@@ -6,6 +6,7 @@ import { Search, Plus, Loader2, PlaySquare } from 'lucide-react';
 import { Post } from '@/lib/types';
 import { extractFirstEmbed, getEmbedThumbnail } from '@/lib/embed';
 import { cachePost } from '@/lib/post-cache';
+import { getUserIdLabel } from '@/lib/avatar';
 
 interface BbsBoardViewProps {
   posts: Post[];
@@ -202,7 +203,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                   {post.content.split('\n')[0]}
                 </p>
                 <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
-                  <span>ID:{post.displayName.slice(0, 3)}</span>
+                  <span>ID:{getUserIdLabel(post.displayName, post.slug)}</span>
                   <span>{formatDate(post.createdAt)}</span>
                   <span className="text-gray-600">({post.time}){post.isEdited && ' (編集済み)'}</span>
                   {post.likes > 0 && (

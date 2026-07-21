@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
+import { getUserIdLabel } from '@/lib/avatar';
+import UserActionMenu from './UserActionMenu';
 import EmbedPart from './EmbedPart';
 import MmlPlayer from './MmlPlayer';
 import ChordPlayer from './ChordPlayer';
@@ -66,6 +68,10 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const [replyTo, setReplyTo] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
+  const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
+  /** IDタップで開くユーザーメニュー（プロフ/ミュート/ブロック/DM/メンション）。 */
+  const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
+  const [userMenuPos, setUserMenuPos] = useState<{ x: number; y: number } | null>(null);
   const heartQueue = useRef(0);
   const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -73,6 +79,7 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
     const sessionId = ensureSessionId();
     api.auth.anonymous(sessionId).then(user => {
       setUserId(user.displayName);
+      setUserSlug(user.slug);
     }).catch(() => {});
   }, []);
 
@@ -190,9 +197,17 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
                 <span className="text-gray-200 font-bold">名無し</span>
                 <span className="text-gray-600">：{formatDateTime(p.createdAt)}</span>
                 <span className="text-gray-600">({p.time}){p.isEdited && ' (編集済み)'}</span>
-                <span className="text-gray-500">
-                  ID: <span className="text-green-400 font-bold">{p.displayName.slice(0, 3)}</span>
-                </span>
+                <button
+                  onClick={e => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setSelectedUser({ displayName: p.displayName, slug: p.slug || undefined });
+                    setUserMenuPos({ x: rect.left, y: rect.bottom });
+                  }}
+                  className="text-gray-500 hover:text-gray-300 transition-colors"
+                  title="このIDの操作"
+                >
+                  ID: <span className="text-green-400 font-bold underline decoration-dotted underline-offset-2">{getUserIdLabel(p.displayName, p.slug)}</span>
+                </button>
                 <button
                   onClick={() => setReplyTo(num)}
                   className="ml-auto text-gray-600 hover:text-blue-400 transition-colors tabular-nums"
@@ -296,6 +311,19 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
           onOpenGameMaker={() => {}}
         />
       </div>
+
+      {selectedUser && (
+        <UserActionMenu
+          isOpen={true}
+          onClose={() => setSelectedUser(null)}
+          targetUserDisplayName={selectedUser.displayName}
+          targetUserSlug={selectedUser.slug}
+          currentUserId={userId}
+          currentUserSlug={userSlug}
+          onMention={(username) => setReplyText(prev => prev ? `${prev} @${username} ` : `@${username} `)}
+          position={userMenuPos}
+        />
+      )}
     </>
   );
 }
