@@ -1295,6 +1295,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 新規作成時の入口ヒーロー（デモ再生＋あそぶ/改造の選択）。playOnly/編集再開/埋め込み時は出さない。 */
   const [introOpen, setIntroOpen] = useState(!playOnly && !initialManifest && !embedded);
   const [editorTab, setEditorTab] = useState<EditorTab>('map');
+  const editorTabRef = useRef<EditorTab>('map');
+  editorTabRef.current = editorTab;
   /** エディタの「エフェクト」タブで、プレビュー再生中の EffectPreset.id（1件のみ）。 */
   const [playingEffectPreview, setPlayingEffectPreview] = useState<string | null>(null);
   /** パネルを全画面表示するフラグ。スマホで細かい編集をするとき用。 */
@@ -1327,8 +1329,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const deathScreenRef = useRef<DeathScreenConfig | undefined>(undefined);
   deathScreenRef.current = gameData.deathScreen;
   const [selectedTileId, setSelectedTileId] = useState(1);
+  const selectedTileIdRef = useRef(1);
+  selectedTileIdRef.current = selectedTileId;
   /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=置物(当たり判定あり・プレイヤーの後ろ) / 'overhead'=天蓋(当たり判定なし・手前・半透明化)。 */
   const [editMapLayer, setEditMapLayer] = useState<'base' | 'overlay' | 'overhead'>('base');
+  const editMapLayerRef = useRef<'base' | 'overlay' | 'overhead'>('base');
+  editMapLayerRef.current = editMapLayer;
   /** 地形自動生成マクロの「水の量」（見下ろし型のみ。actionは横視点の起伏地形なので使わない）。 */
   const [terrainWater, setTerrainWater] = useState<TerrainWater>('mid');
   const [objTemplate, setObjTemplate] = useState<ObjectDef>(() => newObject());
@@ -8772,7 +8778,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           playMenuConfirmSfx();
           startFromTitle();
         } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current) {
-          placeObj();
+          placeAtCursorRef.current?.();
         }
       }
 
@@ -8814,10 +8820,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setBattleItemsOpen(false);
         } else if (isPlaying && shopModalRef.current) {
           setShopModal(null);
-        } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current && selectedObjIdRef.current) {
-          pushUndoRef.current?.();
-          setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjIdRef.current) }));
-          setSelectedObjId(null);
+        } else if (!isPlaying && !battleRef.current.active && !eventRunningRef.current) {
+          deleteAtCursorRef.current?.();
         }
       }
       prevZRef.current = isZ;
@@ -10832,6 +10836,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, []);
 
   pushUndoRef.current = pushUndo;
+  /** ゲームループから最新の実装を呼ぶための橋渡し（依存配列を増やさないため）。 */
+  const placeAtCursorRef = useRef<(() => void) | null>(null);
+  const deleteAtCursorRef = useRef<(() => void) | null>(null);
 
   /** スナップショットを編集ステートと実行中エンジンへ戻す。 */
   const applyEditSnapshot = useCallback((snap: PresetData) => {
@@ -10891,7 +10898,110 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const updObj = (patch: Partial<ObjectDef>) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, ...patch } : o) })); };
   const delObj = () => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjId) })); setSelectedObjId(null); };
   const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
+  // ── パネル選択＝「いま置くもの」──────────────────────────────────
+  //  ドロップダウンの1項目＝1つの配置物になるよう、
+  //  （編集パネル・描画レイヤー・オブジェ種別）の組を1つの値として扱う。
+  type PlaceKind = 'ground' | 'wall' | 'overlay' | 'overhead' | ObjType;
+  const PLACE_LABELS: Record<PlaceKind, string> = {
+    ground: '地面（歩ける）',
+    wall: '地面（歩けない）',
+    overlay: '置物（中層）',
+    overhead: '天蓋（手前）',
+    npc: '人（NPC）',
+    enemy: '敵',
+    item: 'アイテム・宝箱',
+    warp: '扉・マップ移動',
+    event: 'イベントポイント',
+    platform: '動くリフト',
+  };
+  const MAP_PLACE_KINDS: PlaceKind[] = ['ground', 'wall', 'overlay', 'overhead'];
+
+  /** いまの状態から「選択中の配置物」を導出する（パレットで直接タイルを選んでも追従する）。 */
+  const currentPlaceKind = (): PlaceKind | null => {
+    if (editorTab === 'map') {
+      if (editMapLayer === 'overlay') return 'overlay';
+      if (editMapLayer === 'overhead') return 'overhead';
+      return gameData.tiles[selectedTileId]?.passable === false ? 'wall' : 'ground';
+    }
+    if (editorTab === 'object') return (objTemplate.objType ?? 'enemy') as PlaceKind;
+    return null;
+  };
+
+  /** ドロップダウンで配置物を選んだときに、対応するパネル・レイヤー・種別を揃える。 */
+  const applyPlaceKind = (kind: PlaceKind) => {
+    if (MAP_PLACE_KINDS.includes(kind)) {
+      setEditorTab('map');
+      setEditMapLayer(kind === 'overlay' ? 'overlay' : kind === 'overhead' ? 'overhead' : 'base');
+      if (kind === 'ground' || kind === 'wall') {
+        const wantPassable = kind === 'ground';
+        const cur = gameData.tiles[selectedTileId];
+        if (!cur || (cur.passable !== false) !== wantPassable) {
+          const hit = Object.entries(gameData.tiles).find(([, t]) => (t.passable !== false) === wantPassable);
+          if (hit) setSelectedTileId(Number(hit[0]));
+        }
+      }
+      return;
+    }
+    setEditorTab('object');
+    setTpl({ objType: kind as ObjType });
+  };
+
+  /** カーソル（＝編集中のプレイヤーマーカー）が乗っているタイル座標。 */
+  const cursorTile = () => {
+    const p = engineRef.current.player;
+    return { col: Math.floor((p.x + 12) / TILE_SIZE), row: Math.floor((p.y + 12) / TILE_SIZE) };
+  };
+
+  /** マップパネル：カーソル位置のタイルを塗る（tileId=0 で消す）。編集中のレイヤーに従う。 */
+  const paintTileAtCursor = (tileId: number) => {
+    const { col, row } = cursorTile();
+    const cur = gameDataRef.current;
+    const rows = cur.map.length, cols = cur.map[0]?.length ?? 0;
+    if (col < 0 || row < 0 || col >= cols || row >= rows) return;
+    const layer = editMapLayerRef.current;
+    if (layer === 'base' && (cur.map[row]?.[col] ?? 0) === tileId) return;
+    pushUndo();
+    setGameData(prev => {
+      if (layer === 'overlay') {
+        const next = (prev.overlayMap ?? emptyGridLike(prev.map)).map(r => [...r]);
+        next[row][col] = tileId;
+        return { ...prev, overlayMap: next };
+      }
+      if (layer === 'overhead') {
+        const next = (prev.overheadMap ?? emptyGridLike(prev.map)).map(r => [...r]);
+        next[row][col] = tileId;
+        return { ...prev, overheadMap: next };
+      }
+      const next = prev.map.map(r => [...r]);
+      next[row][col] = tileId;
+      engineRef.current.map = next;
+      return { ...prev, map: next };
+    });
+  };
+
+  /** 「配置」＝いま開いているパネルの概念を置く。
+   *  マップ＝選択中のタイル（地形）を塗る／オブジェ・イベント＝オブジェクトを置く。 */
+  const placeAtCursor = () => {
+    if (isPlaying || playOnly) return;
+    if (editorTabRef.current === 'map') { paintTileAtCursor(selectedTileIdRef.current); return; }
+    placeObj();
+  };
+
+  /** 「削除」＝マップなら足元のタイルを消し、それ以外は選択中オブジェクトを消す。 */
+  const deleteAtCursor = () => {
+    if (isPlaying || playOnly) return;
+    if (editorTabRef.current === 'map') { paintTileAtCursor(0); return; }
+    if (!selectedObjIdRef.current) return;
+    pushUndo();
+    const target = selectedObjIdRef.current;
+    setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== target) }));
+    setSelectedObjId(null);
+  };
+
   const placeObj = () => { pushUndo(); const p = engineRef.current.player; setGameData(prev => ({ ...prev, objects: [...prev.objects, { ...objTemplate, id: uid(), col: Math.floor((p.x + 12) / TILE_SIZE), row: Math.floor((p.y + 12) / TILE_SIZE) }] })); };
+
+  placeAtCursorRef.current = placeAtCursor;
+  deleteAtCursorRef.current = deleteAtCursor;
 
   // ── バッチ選択: Ctrl/Meta+クリックでトグル、Shift+クリックで範囲選択 ──
   const isYume25d = gameData.engine === 'yume25d';
@@ -13020,8 +13130,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           // ゆめにっき3D：十字キーでカーソルを動かし、Aボタンで現在のツール（床/壁/スプライト/開始等）を配置する。
                           btnAActive = true; btnALabel = yume25dTool === 'erase' ? '消す' : '配置';
                         } else if (!isPlaying) {
-                          btnAActive = true; btnALabel = "配置";
-                          btnBActive = selectedObjId !== null || selectedObjIdRef.current !== null; btnBLabel = "削除";
+                          const isMapTab = editorTab === 'map';
+                          btnAActive = true; btnALabel = isMapTab ? "塗る" : "配置";
+                          btnBActive = isMapTab || selectedObjId !== null || selectedObjIdRef.current !== null;
+                          btnBLabel = isMapTab ? "消す" : "削除";
                         } else if (gameData.engine === 'action') {
                           btnAActive = true; btnALabel = "JUMP";
                           btnBActive = true; btnBLabel = "SHOT";
@@ -13181,36 +13293,46 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-800 shrink-0">
                 {!panelFullscreen && modeToggle}
                 <select
-                  value={editorTab}
-                  onChange={e => setEditorTab(e.target.value as EditorTab)}
+                  value={currentPlaceKind() ? `place:${currentPlaceKind()}` : `tab:${editorTab}`}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (v.startsWith('place:')) applyPlaceKind(v.slice(6) as PlaceKind);
+                    else setEditorTab(v.slice(4) as EditorTab);
+                  }}
                   aria-label="編集パネル"
                   className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-2 text-[12px] font-bold text-blue-300 outline-none">
-                  <optgroup label="基本">
-                    {([
-                      ['map', 'マップ'],
-                      ...(gameData.engine !== 'touhou' ? [['object', 'オブジェ'], ['event', 'イベント']] : []),
-                      ['char', 'キャラ'],
-                      ...(gameData.battle ? [['battle', '戦闘'], ['character', 'キャラクター']] : []),
-                      ['item', 'アイテム'],
-                      ['weapon', '武器'],
-                      ['armor', '防具'],
-                    ] as [EditorTab, string][]).map(([id, label]) => (
-                      <option key={id} value={id}>{label}</option>
+                  {/* 置くもの：1項目＝1つの配置物。選んだものが「配置」ボタンで置かれる */}
+                  <optgroup label="置くもの">
+                    {(gameData.engine === 'yume25d'
+                      ? (['ground'] as PlaceKind[])
+                      : gameData.engine === 'touhou'
+                        ? MAP_PLACE_KINDS
+                        : ([...MAP_PLACE_KINDS, 'npc', 'enemy', 'item', 'warp', 'event', 'platform'] as PlaceKind[])
+                    ).map(kind => (
+                      <option key={kind} value={`place:${kind}`}>
+                        {gameData.engine === 'yume25d' && kind === 'ground' ? 'マップ（3D編集）' : PLACE_LABELS[kind]}
+                      </option>
                     ))}
                   </optgroup>
-                  <optgroup label="詳細">
+                  <optgroup label="設定">
                     {([
+                      ...(gameData.engine !== 'touhou' ? [['event', 'イベント編集']] : []),
+                      ['char', 'キャラ'],
+                      ...(gameData.battle ? [['battle', '戦闘'], ['character', 'キャラクター']] : []),
+                      ['item', 'アイテム定義'],
+                      ['weapon', '武器'],
+                      ['armor', '防具'],
                       ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'],
                       ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
                       ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
                     ] as [EditorTab, string][]).map(([id, label]) => (
-                      <option key={id} value={id}>{label}</option>
+                      <option key={id} value={`tab:${id}`}>{label}</option>
                     ))}
                   </optgroup>
                   {/* シーン（scenes 定義済み preset のみ） */}
                   {gameData.scenes && (
                     <optgroup label="シーン">
-                      <option value="scene">シーン</option>
+                      <option value="tab:scene">シーン</option>
                     </optgroup>
                   )}
                 </select>
@@ -13493,54 +13615,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 )}
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && (
                   <div className="space-y-3">
-                    {/* ── マップサイズ（自由拡張・東方以外）── */}
-                    {gameData.engine !== 'touhou' && (
-                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
-                        <p className="text-[11px] font-bold text-gray-300">マップサイズ</p>
-                        <label className="flex items-center justify-between text-[10px] text-gray-400">
-                          <span>横幅（タイル数・{COLS}以上）</span>
-                          <input type="text" inputMode="numeric" key={`mw-${presetId}-${curWorldCols(gameData)}`} defaultValue={curWorldCols(gameData)}
-                            onBlur={e => { const v = Math.max(COLS, Math.round(Number(e.target.value) || COLS)); e.target.value = String(v); setGameData(p => applyWorldSize(p, v, curWorldRows(p))); }}
-                            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
-                        </label>
-                        <label className="flex items-center justify-between text-[10px] text-gray-400">
-                          <span>高さ（タイル数・{ROWS}以上）</span>
-                          <input type="text" inputMode="numeric" key={`mh-${presetId}-${curWorldRows(gameData)}`} defaultValue={curWorldRows(gameData)}
-                            onBlur={e => { const v = Math.max(ROWS, Math.round(Number(e.target.value) || ROWS)); e.target.value = String(v); setGameData(p => applyWorldSize(p, curWorldCols(p), v)); }}
-                            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
-                        </label>
-                        <p className="text-[10px] text-gray-500">{COLS}×{ROWS} で1画面固定。広げるとカメラが追従します。</p>
-                      </div>
-                    )}
-
-                    {/* ── 地形の自動生成（マクロ）：パーリンノイズで下層(地面)を丸ごと描き替える ── */}
-                    {gameData.engine !== 'touhou' && (
-                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
-                        <p className="text-[11px] font-bold text-gray-300">🌍 地形の自動生成（マクロ）</p>
-                        <div className="flex items-center gap-2 flex-wrap text-[10px] text-gray-300">
-                          {gameData.engine !== 'action' && (
-                            <label className="flex items-center gap-1.5">水の量
-                              <select value={terrainWater} onChange={e => setTerrainWater(e.target.value as TerrainWater)}
-                                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
-                                <option value="low">少なめ</option>
-                                <option value="mid">ふつう</option>
-                                <option value="high">多め</option>
-                              </select>
-                            </label>
-                          )}
-                          <button onClick={runTerrainMacro}
-                            className="px-2.5 py-1 rounded border-2 border-gray-600 bg-blue-600 text-white text-[11px] font-bold">
-                            🎲 地形を生成
-                          </button>
-                        </div>
-                        <p className="text-[10px] text-gray-500">
-                          {gameData.engine === 'action'
-                            ? 'マイクラと同じパーリンノイズで、地表の起伏（草ブロック・土・岩盤）を作ります（内蔵素材を使用）。押すたびに別の地形になり、編集中シーンの下層(地面)レイヤーを丸ごと描き替えます。スタート地点の足元は地表に均されます。'
-                            : 'マイクラと同じパーリンノイズで、深い海・海・砂浜・草原・森・山を塗り分けます（内蔵素材を使用）。押すたびに別の地形になり、編集中シーンの下層(地面)レイヤーを丸ごと描き替えます（中層・天蓋・オブジェクトは残ります）。スタート周辺は草原になります。'}
-                        </p>
-                      </div>
-                    )}
-
                     {/* ── 描画レイヤー切り替え ── */}
                     <div className="flex rounded-lg border border-gray-700 overflow-hidden text-[10px] sm:text-[11px]">
                       <button onClick={() => setEditMapLayer('base')}
@@ -13682,6 +13756,57 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {gameData.mapBgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.mapBgUrl} alt="" className="w-8 h-8 object-cover rounded shrink-0" />}
                           <span className="truncate flex-1">{refLabel(gameData.mapBgRef)}</span>
                           <button onClick={() => setGameData(p => ({ ...p, mapBgRef: undefined, mapBgUrl: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+
+                    {/* ── ここから下は使用頻度の低い設定（マップサイズ・地形マクロ）。
+                        よく使うタイルパレットを上に出すため、パネル最下部へ置く。 ── */}
+                    {/* ── マップサイズ（自由拡張・東方以外）── */}
+                    {gameData.engine !== 'touhou' && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[11px] font-bold text-gray-300">マップサイズ</p>
+                        <label className="flex items-center justify-between text-[10px] text-gray-400">
+                          <span>横幅（タイル数・{COLS}以上）</span>
+                          <input type="text" inputMode="numeric" key={`mw-${presetId}-${curWorldCols(gameData)}`} defaultValue={curWorldCols(gameData)}
+                            onBlur={e => { const v = Math.max(COLS, Math.round(Number(e.target.value) || COLS)); e.target.value = String(v); setGameData(p => applyWorldSize(p, v, curWorldRows(p))); }}
+                            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                        </label>
+                        <label className="flex items-center justify-between text-[10px] text-gray-400">
+                          <span>高さ（タイル数・{ROWS}以上）</span>
+                          <input type="text" inputMode="numeric" key={`mh-${presetId}-${curWorldRows(gameData)}`} defaultValue={curWorldRows(gameData)}
+                            onBlur={e => { const v = Math.max(ROWS, Math.round(Number(e.target.value) || ROWS)); e.target.value = String(v); setGameData(p => applyWorldSize(p, curWorldCols(p), v)); }}
+                            className="w-20 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none text-right" />
+                        </label>
+                        <p className="text-[10px] text-gray-500">{COLS}×{ROWS} で1画面固定。広げるとカメラが追従します。</p>
+                      </div>
+                    )}
+
+                    {/* ── 地形の自動生成（マクロ）：パーリンノイズで下層(地面)を丸ごと描き替える ── */}
+                    {gameData.engine !== 'touhou' && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[11px] font-bold text-gray-300">🌍 地形の自動生成（マクロ）</p>
+                        <div className="flex items-center gap-2 flex-wrap text-[10px] text-gray-300">
+                          {gameData.engine !== 'action' && (
+                            <label className="flex items-center gap-1.5">水の量
+                              <select value={terrainWater} onChange={e => setTerrainWater(e.target.value as TerrainWater)}
+                                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                                <option value="low">少なめ</option>
+                                <option value="mid">ふつう</option>
+                                <option value="high">多め</option>
+                              </select>
+                            </label>
+                          )}
+                          <button onClick={runTerrainMacro}
+                            className="px-2.5 py-1 rounded border-2 border-gray-600 bg-blue-600 text-white text-[11px] font-bold">
+                            🎲 地形を生成
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-gray-500">
+                          {gameData.engine === 'action'
+                            ? 'マイクラと同じパーリンノイズで、地表の起伏（草ブロック・土・岩盤）を作ります（内蔵素材を使用）。押すたびに別の地形になり、編集中シーンの下層(地面)レイヤーを丸ごと描き替えます。スタート地点の足元は地表に均されます。'
+                            : 'マイクラと同じパーリンノイズで、深い海・海・砂浜・草原・森・山を塗り分けます（内蔵素材を使用）。押すたびに別の地形になり、編集中シーンの下層(地面)レイヤーを丸ごと描き替えます（中層・天蓋・オブジェクトは残ります）。スタート周辺は草原になります。'}
+                        </p>
+                      </div>
+                    )}
+
                         </div>
                       )}
                     </div>
@@ -16267,6 +16392,35 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 )}
               </div>
+
+              {/* ── 配置／削除バー：いま開いているパネルの概念をカーソル位置へ置く。
+                  パネル下部の余白を使い、スマホでも常に手の届く位置に置く。 ── */}
+              {(editorTab === 'map' || editorTab === 'object' || editorTab === 'event') && (() => {
+                const isMapTab = editorTab === 'map';
+                const target = isMapTab
+                  ? (gameData.tiles[selectedTileId]?.name || 'タイル')
+                  : (objTemplate.name || OBJTYPE_LABELS[objTemplate.objType ?? 'enemy']);
+                const canDelete = isMapTab || !!selectedObjId;
+                return (
+                  <div className="shrink-0 border-t border-gray-800 bg-gray-900/90 px-2 py-2 flex items-center gap-2">
+                    <span className="text-[10px] text-gray-400 truncate max-w-[6rem]" title={target}>{target}</span>
+                    <span className="text-[10px] text-gray-500 shrink-0">を</span>
+                    <button
+                      onClick={placeAtCursor}
+                      className="flex-1 min-w-0 py-2 rounded bg-blue-700 hover:bg-blue-600 active:bg-blue-500 text-white text-[11px] font-bold"
+                    >
+                      {isMapTab ? '塗る' : '配置'}（Z）
+                    </button>
+                    <button
+                      onClick={deleteAtCursor}
+                      disabled={!canDelete}
+                      className="flex-1 min-w-0 py-2 rounded bg-red-800 hover:bg-red-700 active:bg-red-600 disabled:opacity-40 text-white text-[11px] font-bold"
+                    >
+                      {isMapTab ? '消す' : '削除'}（X）
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
