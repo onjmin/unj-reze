@@ -292,6 +292,10 @@ export interface ObjectDef {
   bombDrop?: number;
   /** ワープ先（同一シーン内）。objType=warp のとき使用。 */
   warpTarget?: WarpTarget;
+  /** 発動する入力方向。指定すると「この向きを押しながら重なったとき」だけワープする。
+   *  出口側に逆向きを設定しておくと、転送直後に押している向き（＝出る向き）では再発動せず、
+   *  往復ループを防げる。未指定なら従来どおり触れた時点で発動。 */
+  warpEnterDir?: 'up' | 'down' | 'left' | 'right';
   /** シーン間ワープ。触れるとフェード遷移で別シーンへ移動。土管・扉などに使用。 */
   warpSceneId?: string;
   /** シーン間ワープの入場位置（省略時はシーン開始位置）。 */

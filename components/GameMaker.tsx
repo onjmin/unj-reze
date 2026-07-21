@@ -273,7 +273,14 @@ function buildWorldLayout(scenes: SceneDef[]): {
 
 /** map と同サイズの空グリッド（overlayMap の既定値）を作る。 */
 /** エディタで「置くもの」。ドロップダウンの1項目＝1つの配置物。 */
-type PlaceKind = 'ground' | 'wall' | 'overlay' | 'overhead' | 'start' | 'npc' | 'item' | 'chest' | 'warp' | 'event';
+type PlaceKind = 'ground' | 'wall' | 'overlay' | 'overhead' | 'npc' | 'item' | 'chest' | 'warp' | 'look' | 'event';
+
+/** エディタ専用マーカー画像（RPGENのmap.pngから16pxで切り出し。半透明で重ねて描く）。 */
+const EDITOR_MARKER = {
+  event: '/assets/rpgen/map.png#112,128,16,16',   // (7, 8)
+  warp: '/assets/rpgen/map.png#208,128,16,16',    // (13, 8)
+  look: '/assets/rpgen/map.png#352,128,16,16',    // (22, 8) しらべるポイント
+} as const;
 
 const emptyGridLike = (map: number[][]): number[][] =>
   map.map(row => new Array(row.length).fill(0));
@@ -1313,6 +1320,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
   const isDraggingStartRef = useRef(false);
+  /** 編集中、選択中のレイヤーだけを描画する（Lキーで切替）。重なって見えないときの確認用。 */
+  const [soloLayer, setSoloLayer] = useState(false);
+  const soloLayerRef = useRef(false);
+  soloLayerRef.current = soloLayer;
+  /** キャンバスのタップ／ドラッグで直接描くか。既定オフ（誤操作防止）。設定メニューから切り替える。 */
+  const [canvasDraw, setCanvasDraw] = useState(false);
+  const canvasDrawRef = useRef(false);
+  canvasDrawRef.current = canvasDraw;
   const justStartedRef = useRef(false);
   const editorCoordRef = useRef<HTMLDivElement>(null);
 
@@ -7813,7 +7828,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (overlap) {
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
-              if (exactOverlap && !eventRunningRef.current && !warpCooldownRef.current) {
+              // 発動方向が指定されていれば、その向きを押しているときだけ通す。
+              // 転送直後は「出る向き」＝逆向きを押しているので、そのままでは再発動しない。
+              const dirOk = !d.warpEnterDir
+                || (d.warpEnterDir === 'up' && isUp) || (d.warpEnterDir === 'down' && isDown)
+                || (d.warpEnterDir === 'left' && isLeft) || (d.warpEnterDir === 'right' && isRight);
+              if (exactOverlap && dirOk && !eventRunningRef.current && (d.warpEnterDir ? true : !warpCooldownRef.current)) {
                 const tx = d.warpTarget.col * TILE_SIZE, ty = d.warpTarget.row * TILE_SIZE;
                 engineRef.current.player.x = tx;
                 engineRef.current.player.y = ty;
@@ -7824,7 +7844,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               break;
             }
             // シーン間ワープ（土管・扉など）：フェード遷移を開始
-            if (exactOverlap && d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current && !warpCooldownRef.current) {
+            const sceneDirOk = !d.warpEnterDir
+              || (d.warpEnterDir === 'up' && isUp) || (d.warpEnterDir === 'down' && isDown)
+              || (d.warpEnterDir === 'left' && isLeft) || (d.warpEnterDir === 'right' && isRight);
+            if (exactOverlap && sceneDirOk && d.warpSceneId && scenesRef.current.length > 0 && !sceneFadeRef.current && !sceneTransRef.current && !eventRunningRef.current && (d.warpEnterDir ? true : !warpCooldownRef.current)) {
               const tgtScene = scenesRef.current.find(s => s.id === d.warpSceneId);
               if (tgtScene) {
                 const ex = (d.warpEntryCol ?? 1) * TILE_SIZE;
@@ -9012,8 +9035,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
         }
       };
+      /** 単独表示モード中は、選択中レイヤー以外を描かない（編集中のみ）。 */
+      const layerVisible = (layer: 'base' | 'overlay' | 'overhead') =>
+        isPlaying || !soloLayerRef.current || editMapLayerRef.current === layer;
       // 地面レイヤー：プレイヤーより先に描画
-      for (let y = startRow; y < endRow; y++) {
+      if (layerVisible('base')) for (let y = startRow; y < endRow; y++) {
         for (let x = startCol; x < endCol; x++) {
           const tileId = map[y]?.[x] ?? 0;
           const info = gameData.tiles[tileId];
@@ -9022,7 +9048,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       // 置物レイヤー（オブジェクトレイヤー）：プレイヤーより先に描画
       const overlayMap = engineRef.current.overlayMap ?? worldLayoutRef.current?.overlayMap ?? gameData.overlayMap;
-      if (overlayMap) {
+      if (overlayMap && layerVisible('overlay')) {
         for (let y = startRow; y < endRow; y++) {
           for (let x = startCol; x < endCol; x++) {
             const tileId = overlayMap[y]?.[x] ?? 0;
@@ -9374,7 +9400,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 天蓋レイヤー：木の上部や屋根などプレイヤーより手前に重ねて描画。
       // プレイヤーがその真下付近にいる間は半透明化し、奥のプレイヤーが見えるようにする（gomi.html の drawMapUpper 相当）。
       const overheadMap = engineRef.current.overheadMap ?? worldLayoutRef.current?.overheadMap ?? gameData.overheadMap;
-      if (overheadMap) {
+      if (overheadMap && layerVisible('overhead')) {
         const ptx = Math.floor((p.x + pData.w / 2) / TILE_SIZE);
         const pty = Math.floor((p.y + pData.h) / TILE_SIZE);
         let underOverhead = false;
@@ -10296,31 +10322,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (col < 0 || col >= worldCols || row < 0 || row >= worldRows) return;
 
     if (editorTab === 'map') {
-      // 🏁マーカー付近クリック → 初期位置ドラッグ開始
-      const startCol = Math.floor(gameData.player.start.x / TILE_SIZE);
-      const startRow = Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE);
-      const isPointerDown = ('buttons' in e ? (e as React.MouseEvent).buttons === 1 : true);
-      if (isPointerDown && !isDraggingStartRef.current && Math.abs(col - startCol) <= 1 && Math.abs(row - startRow) <= 1) {
-        isDraggingStartRef.current = true;
-      }
-      if (isDraggingStartRef.current) {
-        const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameData.player.h;
-        setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
-        engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
-        setEditScroll(Math.max(0, Math.min(worldCols * TILE_SIZE - VIEW_W, sx + gameData.player.w / 2 - VIEW_W / 2)));
-        setEditScrollY(Math.max(0, Math.min(worldRows * TILE_SIZE - VIEW_H, sy + gameData.player.h / 2 - VIEW_H / 2)));
-        return;
-      }
+      // キャンバスへの直接描画は既定でオフ（設定から有効化できる）。
+      // 配置はカーソル移動＋Zキー／Aボタンを基本操作とする。
+      if (!canvasDrawRef.current) return;
       if (editMapLayer === 'overlay') {
         setGameData(prev => {
           const newOverlay = (prev.overlayMap ?? emptyGridLike(prev.map)).map(r => [...r]);
           newOverlay[row][col] = selectedTileId;
+          if (engineRef.current.overlayMap) engineRef.current.overlayMap = newOverlay;
           return { ...prev, overlayMap: newOverlay };
         });
       } else if (editMapLayer === 'overhead') {
         setGameData(prev => {
           const newOverhead = (prev.overheadMap ?? emptyGridLike(prev.map)).map(r => [...r]);
           newOverhead[row][col] = selectedTileId;
+          if (engineRef.current.overheadMap) engineRef.current.overheadMap = newOverhead;
           return { ...prev, overheadMap: newOverhead };
         });
       } else {
@@ -10896,10 +10912,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   useEffect(() => {
     if (isPlaying || playOnly) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+      // L：選択中レイヤーだけ表示 / 全レイヤー表示 の切り替え
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'l' || e.key === 'L')) {
+        e.preventDefault();
+        setSoloLayer(v => !v);
+        return;
+      }
+      if (!(e.ctrlKey || e.metaKey)) return;
       const k = e.key.toLowerCase();
       if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoEdit(); }
       else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoEdit(); }
@@ -10919,11 +10941,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     wall: '地面（歩けない）',
     overlay: '置物（中層）',
     overhead: '天蓋（手前）',
-    start: 'スタート地点',
     npc: '人（NPC・敵）',
     item: 'アイテム',
     chest: '宝箱',
     warp: '移動ポイント（扉/階段）',
+    look: 'しらべるポイント',
     event: 'イベントポイント',
   };
   const MAP_PLACE_KINDS: PlaceKind[] = ['ground', 'wall', 'overlay', 'overhead'];
@@ -10934,15 +10956,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
   /** 配置物ごとの、そのとき開くパネル。 */
   const PLACE_TAB: Record<PlaceKind, EditorTab> = {
-    ground: 'map', wall: 'map', overlay: 'map', overhead: 'map', start: 'map',
-    npc: 'object', item: 'object', chest: 'object', warp: 'object', event: 'object',
+    ground: 'map', wall: 'map', overlay: 'map', overhead: 'map',
+    npc: 'object', item: 'object', chest: 'object', warp: 'object', look: 'object', event: 'object',
   };
 
   /** ドロップダウンで配置物を選んだときに、パネル・描画レイヤー・オブジェ種別を揃える。 */
   const applyPlaceKind = (kind: PlaceKind) => {
     setPlaceKind(kind);
     setEditorTab(PLACE_TAB[kind]);
-    if (MAP_PLACE_KINDS.includes(kind) || kind === 'start') {
+    if (MAP_PLACE_KINDS.includes(kind)) {
       setEditMapLayer(kind === 'overlay' ? 'overlay' : kind === 'overhead' ? 'overhead' : 'base');
       if (kind === 'ground' || kind === 'wall') {
         // そのパネルに関係するタイルだけを選べるよう、選択中タイルも合わせておく
@@ -10956,7 +10978,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     // 宝箱は専用オブジェクトなのでテンプレの種別は触らない
-    if (kind !== 'chest') setTpl({ objType: kind === 'npc' ? 'npc' : kind as ObjType });
+    if (kind === 'chest') return;
+    // 移動ポイント／イベント／しらべるポイントは絵文字ではなく専用グラフィック（半透明マーカー）で置く
+    const marker = kind === 'warp' ? EDITOR_MARKER.warp
+      : kind === 'event' ? EDITOR_MARKER.event
+        : kind === 'look' ? EDITOR_MARKER.look : undefined;
+    setTpl({
+      objType: kind === 'look' ? 'npc' : kind === 'npc' ? 'npc' : kind as ObjType,
+      editorSprite: marker,
+      // マーカーを使う配置物は絵文字を消す。使わない側へ戻ったときは既定の絵文字を戻す
+      // （空のままだと画面に何も出ないオブジェクトになってしまう）。
+      ...(marker
+        ? { emoji: '', spriteRef: undefined, spriteUrl: undefined }
+        : { emoji: objTemplate.emoji || (kind === 'item' ? '🎁' : '👾') }),
+    });
   };
 
   /** いまタイルパレットに出すタイル（＝いま選んでいる配置物に関係するものだけ）。 */
@@ -10986,11 +11021,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (layer === 'overlay') {
         const next = (prev.overlayMap ?? emptyGridLike(prev.map)).map(r => [...r]);
         next[row][col] = tileId;
+        // 描画は engineRef 側のコピーを優先して読むため、そちらも更新しないと画面に出ない
+        if (engineRef.current.overlayMap) engineRef.current.overlayMap = next;
         return { ...prev, overlayMap: next };
       }
       if (layer === 'overhead') {
         const next = (prev.overheadMap ?? emptyGridLike(prev.map)).map(r => [...r]);
         next[row][col] = tileId;
+        if (engineRef.current.overheadMap) engineRef.current.overheadMap = next;
         return { ...prev, overheadMap: next };
       }
       const next = prev.map.map(r => [...r]);
@@ -11005,14 +11043,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const placeAtCursor = () => {
     if (isPlaying || playOnly) return;
     const kind = placeKindRef.current;
-    if (kind === 'start') {
-      // スタート地点も「置くもの」として扱う（🏁のドラッグは補助手段として残す）
-      const { col, row } = cursorTile();
-      pushUndo();
-      const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameDataRef.current.player.h;
-      setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
-      return;
-    }
     if (kind === 'chest') { pushUndo(); addChestObject(); return; }
     if (editorTabRef.current === 'map') { paintTileAtCursor(selectedTileIdRef.current); return; }
     placeObj();
@@ -11021,7 +11051,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 「削除」＝マップなら足元のタイルを消し、それ以外は選択中オブジェクトを消す。 */
   const deleteAtCursor = () => {
     if (isPlaying || playOnly) return;
-    if (placeKindRef.current === 'start') return;   // スタート地点は消せない（必ず1つ必要）
     if (editorTabRef.current === 'map') { paintTileAtCursor(0); return; }
     // カーソルが乗っているオブジェクトを優先して消す（選択していなくても消せる）
     if (!selectedObjIdRef.current) {
@@ -11266,6 +11295,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   {debugInvincible ? <Shield size={13} /> : <ShieldOff size={13} />}
                   無敵モード {debugInvincible ? 'ON' : 'OFF'}
                 </button>
+                {!playOnly && (
+                  <button
+                    onClick={() => setCanvasDraw(v => !v)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${canvasDraw ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                  >
+                    🖌️ キャンバスに直接描く {canvasDraw ? 'ON' : 'OFF'}
+                  </button>
+                )}
                 <button
                   onClick={() => { setOnlineTestMode(v => !v); setSettingsOpen(false); }}
                   className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
@@ -13354,7 +13391,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       ))
                       : (gameData.engine === 'touhou'
                         ? MAP_PLACE_KINDS
-                        : ([...MAP_PLACE_KINDS, 'start', 'npc', 'item', 'chest', 'warp', 'event'] as PlaceKind[])
+                        : ([...MAP_PLACE_KINDS, 'npc', 'item', 'chest', 'warp', 'look', 'event'] as PlaceKind[])
                       ).map(kind => (
                         <option key={kind} value={`place:${kind}`}>{PLACE_LABELS[kind]}</option>
                       ))}
@@ -13381,6 +13418,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </optgroup>
                   )}
                 </select>
+                {editorTab === 'map' && gameData.engine !== 'yume25d' && (
+                  <button
+                    onClick={() => setSoloLayer(v => !v)}
+                    aria-pressed={soloLayer}
+                    title={soloLayer ? '全レイヤーを表示（L）' : '選択中のレイヤーだけ表示（L）'}
+                    className={`shrink-0 w-10 h-10 rounded border flex items-center justify-center text-[15px] ${soloLayer ? 'border-yellow-500 bg-yellow-500/15 text-yellow-300' : 'border-gray-700 bg-gray-900 text-gray-300'}`}
+                  >
+                    {soloLayer ? '◉' : '◎'}
+                  </button>
+                )}
                 <button
                   onClick={() => setPanelFullscreen(v => !v)}
                   aria-label={panelFullscreen ? 'パネルの全画面を解除' : 'パネルを全画面表示'}
@@ -13661,15 +13708,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && (
                   <div className="space-y-3">
                     {/* スタート地点を置くときはタイル関連UIを出さない（そのパネルに関係する概念だけ見せる） */}
-                    {placeKind === 'start' ? (
-                      <div className="rounded-lg border border-green-800/60 bg-green-900/10 p-2.5 space-y-1">
-                        <p className="text-[11px] font-bold text-green-300">🏁 スタート地点</p>
-                        <p className="text-[10px] text-gray-400">十字キーでカーソル（主人公）を動かし、Zキー／Aボタンでその位置をゲーム開始位置にします。</p>
-                      </div>
-                    ) : (<>
+                    {(<>
                     {/* ── タイル塗りヒント ── */}
-                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> タイルを選択して画面をタップ／ドラッグ</p>
-                    <p className="text-[10px] text-green-400 flex items-center gap-1">🏁 マーカーをドラッグしてプレイヤーの初期位置を変更</p>
+                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> 十字キーでカーソルを動かし、Zキー／Aボタンで塗る（Xで消す）</p>
+                    <p className="text-[10px] text-gray-500">キャンバスを直接タップして描きたいときは、設定（⚙）の「キャンバスに直接描く」をONにしてください。</p>
                     {/* ── タイルパレット：yume25d と同じ横並びスウォッチ。選ぶと下に詳細設定が開く ── */}
                     <div className="flex items-center gap-1 flex-wrap">
                       {paletteTiles().map(([id, tile]) => {
@@ -14050,6 +14092,67 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── OBJECT ── */}
                 {editorTab === 'object' && (
                   <div className="space-y-3">
+                      {/* ── 移動ポイント一覧：スタート地点＋登録済みワープを1か所で管理する ── */}
+                      {placeKind === 'warp' && (() => {
+                        const warps = gameData.objects.filter(o => (o.objType ?? 'enemy') === 'warp');
+                        const startCol = Math.floor(gameData.player.start.x / TILE_SIZE);
+                        const startRow = Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE);
+                        const destLabel = (o: ObjectDef) => {
+                          if (o.warpSceneId) {
+                            const sc = gameData.scenes?.find(sn => sn.id === o.warpSceneId);
+                            return `${sc?.name ?? o.warpSceneId} (${o.warpEntryCol ?? 1},${o.warpEntryRow ?? 1})`;
+                          }
+                          if (o.warpTarget) return `同マップ (${o.warpTarget.col},${o.warpTarget.row})`;
+                          return '未設定';
+                        };
+                        const DIR_MARK: Record<string, string> = { up: '↑', down: '↓', left: '←', right: '→' };
+                        return (
+                          <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2 space-y-1.5">
+                            <p className="text-[11px] font-bold text-gray-200">🚪 移動ポイント一覧（{warps.length}）</p>
+                            {/* スタート地点（消せないので座標の確認と移動のみ） */}
+                            <div className="flex items-center gap-1.5 rounded bg-gray-800/60 px-1.5 py-1">
+                              <span className="text-[11px]">🏁</span>
+                              <span className="text-[10px] text-gray-300 flex-1 truncate">スタート地点 ({startCol},{startRow})</span>
+                              <button
+                                onClick={() => {
+                                  const sx = startCol * TILE_SIZE, sy = gameData.player.start.y;
+                                  engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
+                                }}
+                                className="px-2 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
+                                <button
+                                  onClick={() => {
+                                    // カーソル（主人公マーカー）の位置をゲーム開始位置にする
+                                    const cp = engineRef.current.player;
+                                    const col = Math.floor((cp.x + 12) / TILE_SIZE), row = Math.floor((cp.y + 12) / TILE_SIZE);
+                                    pushUndo();
+                                    const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameData.player.h;
+                                    setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
+                                  }}
+                                  className="px-2 py-1 rounded text-[10px] text-green-300 hover:bg-green-500/10">現在地に設定</button>
+                            </div>
+                            {warps.length === 0 && <p className="text-[10px] text-gray-500 px-1">まだ登録されていません。カーソルを置いてZキー／Aボタンで追加します。</p>}
+                            {warps.map(o => (
+                              <div key={o.id} className={`flex items-center gap-1.5 rounded px-1.5 py-1 ${selectedObjId === o.id ? 'bg-blue-600/20 ring-1 ring-blue-500/40' : 'bg-gray-800/40'}`}>
+                                <span className="text-[11px]">{o.emoji || '🚪'}</span>
+                                <button onClick={() => setSelectedObjId(o.id)} className="flex-1 min-w-0 text-left">
+                                  <span className="block text-[10px] text-gray-300 truncate">
+                                    ({o.col},{o.row}){o.warpEnterDir ? ` ${DIR_MARK[o.warpEnterDir]}` : ''} → {destLabel(o)}
+                                  </span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    engineRef.current.player = { x: o.col * TILE_SIZE, y: o.row * TILE_SIZE, vx: 0, vy: 0, isGrounded: false };
+                                    setSelectedObjId(o.id);
+                                  }}
+                                  className="px-1.5 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
+                                <button
+                                  onClick={() => { pushUndo(); setGameData(p2 => ({ ...p2, objects: p2.objects.filter(x => x.id !== o.id) })); if (selectedObjId === o.id) setSelectedObjId(null); }}
+                                  className="px-1.5 py-1 rounded text-[10px] text-red-400 hover:bg-red-500/10">削除</button>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     {/* ── yume25d ビルボード選択中 ── */}
                     {gameData.engine === 'yume25d' && yume25dTalkTargetId && (() => {
                       const bb = gameData.layout25d?.billboards.find(b => b.id === yume25dTalkTargetId);
@@ -14509,6 +14612,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </label>
                         )}
                         {/* Warp 設定 */}
+                        {(selObj.objType ?? 'enemy') === 'warp' && (
+                          <label className="text-[10px] text-gray-400 block">発動する向き
+                            <select value={selObj.warpEnterDir ?? ''} onChange={e => updObj({ warpEnterDir: (e.target.value || undefined) as ObjectDef['warpEnterDir'] })}
+                              className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none text-[10px]">
+                              <option value="">触れたら即（向き指定なし）</option>
+                              <option value="up">↑ を押したとき</option>
+                              <option value="down">↓ を押したとき</option>
+                              <option value="left">← を押したとき</option>
+                              <option value="right">→ を押したとき</option>
+                            </select>
+                            <span className="block mt-0.5 text-[9px] text-gray-500">
+                              出口側に「入ってきた向きの逆」を設定すると、転送直後に押している向きでは再発動せず往復ループを防げます。
+                            </span>
+                          </label>
+                        )}
                         {(selObj.objType ?? 'enemy') === 'warp' && (
                           <WarpDestinationEditor
                             scenes={gameData.scenes}

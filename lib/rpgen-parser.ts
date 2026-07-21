@@ -556,7 +556,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     draft.objects.push(newObject({
       col: tp.position.x, row: tp.position.y, emoji: '', objType: 'event',
       behavior: 'still', hazard: false,
-      editorSprite: '/assets/rpgen/map.png#368,112,16,16',
+      editorSprite: '/assets/rpgen/map.png#208,128,16,16',
       pages: [{
         name: 'Warp',
         conditions: {},
