@@ -52,7 +52,7 @@ import SpellEditor, { defaultBlock } from './SpellEditor';
 import DialogueCutscene, { type DialogueCutsceneHandle } from './DialogueCutscene';
 import SpellCutscene from './SpellCutscene';
 import { parseMiniScript, runMiniScript, type MiniEnv } from './MiniScriptVM';
-import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList } from './Yume25DMaker';
+import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList, YUME25D_TOOL_LABELS } from './Yume25DMaker';
 import Yume25DEditorPanel from './Yume25DEditorPanel';
 import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
 
@@ -272,6 +272,9 @@ function buildWorldLayout(scenes: SceneDef[]): {
 }
 
 /** map と同サイズの空グリッド（overlayMap の既定値）を作る。 */
+/** エディタで「置くもの」。ドロップダウンの1項目＝1つの配置物。 */
+type PlaceKind = 'ground' | 'wall' | 'overlay' | 'overhead' | 'start' | 'npc' | 'item' | 'chest' | 'warp' | 'event';
+
 const emptyGridLike = (map: number[][]): number[][] =>
   map.map(row => new Array(row.length).fill(0));
 
@@ -1329,6 +1332,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const deathScreenRef = useRef<DeathScreenConfig | undefined>(undefined);
   deathScreenRef.current = gameData.deathScreen;
   const [selectedTileId, setSelectedTileId] = useState(1);
+  /** いま「配置」ボタンで置かれるもの。ドロップダウンの1項目＝1つの配置物。 */
+  const [placeKind, setPlaceKind] = useState<PlaceKind>('ground');
   const selectedTileIdRef = useRef(1);
   selectedTileIdRef.current = selectedTileId;
   /** マップ編集タブでどちらのレイヤーに描画するか。'base'=地面(当たり判定あり) / 'overlay'=置物(当たり判定あり・プレイヤーの後ろ) / 'overhead'=天蓋(当たり判定なし・手前・半透明化)。 */
@@ -7809,8 +7814,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
               if (exactOverlap && !eventRunningRef.current && !warpCooldownRef.current) {
-                engineRef.current.player.x = d.warpTarget.col * TILE_SIZE;
-                engineRef.current.player.y = d.warpTarget.row * TILE_SIZE;
+                const tx = d.warpTarget.col * TILE_SIZE, ty = d.warpTarget.row * TILE_SIZE;
+                engineRef.current.player.x = tx;
+                engineRef.current.player.y = ty;
+                // 移動先がワープ地点に重なっていると即座に再発動して往復するため、
+                // その場所から離れるまでは次のワープを発動させない。
+                warpCooldownRef.current = { x: tx + pData.w / 2, y: ty + pData.h / 2 };
               }
               break;
             }
@@ -8372,7 +8381,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       // ── action key: trigger event/message on overlapping object ──
-      if (isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current && !frozen) {
+      // 編集中は「配置」にZを使うため、話しかけ／扉あけの判定はプレイ中のみ行う
+      if (isPlaying && isAction && !prevActionRef.current && !battleRef.current.active && !eventRunningRef.current && !activeDialogueRef.current && !frozen) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
         const pCol = Math.floor(pcx / TILE_SIZE), pRow = Math.floor(pcy / TILE_SIZE);
         const ADJ_DIRS: [number, number][] = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -10504,7 +10514,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const addChestObject = () => {
     const p = engineRef.current.player;
     const col = Math.floor((p.x + 12) / TILE_SIZE), row = Math.floor((p.y + 12) / TILE_SIZE);
-    const obj = chest(col, row, []);
+    // 一覧で「敵」と表示されないよう名前を付ける（当たり判定はモブ扱いのままで、通り抜けできない箱になる）
+    const obj = { ...chest(col, row, []), name: '宝箱' };
     setGameData(prev => ({ ...prev, objects: [...prev.objects, obj] }));
     setEditorTab('object');
     setSelectedObjId(obj.id);
@@ -10836,6 +10847,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, []);
 
   pushUndoRef.current = pushUndo;
+  const placeKindRef = useRef<PlaceKind>('ground');
+  placeKindRef.current = placeKind;
   /** ゲームループから最新の実装を呼ぶための橋渡し（依存配列を増やさないため）。 */
   const placeAtCursorRef = useRef<(() => void) | null>(null);
   const deleteAtCursorRef = useRef<(() => void) | null>(null);
@@ -10901,38 +10914,38 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // ── パネル選択＝「いま置くもの」──────────────────────────────────
   //  ドロップダウンの1項目＝1つの配置物になるよう、
   //  （編集パネル・描画レイヤー・オブジェ種別）の組を1つの値として扱う。
-  type PlaceKind = 'ground' | 'wall' | 'overlay' | 'overhead' | ObjType;
   const PLACE_LABELS: Record<PlaceKind, string> = {
     ground: '地面（歩ける）',
     wall: '地面（歩けない）',
     overlay: '置物（中層）',
     overhead: '天蓋（手前）',
-    npc: '人（NPC）',
-    enemy: '敵',
-    item: 'アイテム・宝箱',
-    warp: '扉・マップ移動',
+    start: 'スタート地点',
+    npc: '人（NPC・敵）',
+    item: 'アイテム',
+    chest: '宝箱',
+    warp: '移動ポイント（扉/階段）',
     event: 'イベントポイント',
-    platform: '動くリフト',
   };
   const MAP_PLACE_KINDS: PlaceKind[] = ['ground', 'wall', 'overlay', 'overhead'];
-
-  /** いまの状態から「選択中の配置物」を導出する（パレットで直接タイルを選んでも追従する）。 */
-  const currentPlaceKind = (): PlaceKind | null => {
-    if (editorTab === 'map') {
-      if (editMapLayer === 'overlay') return 'overlay';
-      if (editMapLayer === 'overhead') return 'overhead';
-      return gameData.tiles[selectedTileId]?.passable === false ? 'wall' : 'ground';
-    }
-    if (editorTab === 'object') return (objTemplate.objType ?? 'enemy') as PlaceKind;
-    return null;
+  /** ゆめにっき3Dのツールも同じドロップダウンに並べる（入れ子の選択UIを作らないため）。 */
+  const YUME25D_PLACE_LABELS: Record<Yume25DTool, string> = {
+    floor: '床（地面）', wall: '壁', sprite: 'スプライト（物）',
+    start: 'スタート地点', talk: '会話設定', erase: '消す',
+  };
+  /** 配置物ごとの、そのとき開くパネル。 */
+  const PLACE_TAB: Record<PlaceKind, EditorTab> = {
+    ground: 'map', wall: 'map', overlay: 'map', overhead: 'map', start: 'map',
+    npc: 'object', item: 'object', chest: 'object', warp: 'object', event: 'object',
   };
 
-  /** ドロップダウンで配置物を選んだときに、対応するパネル・レイヤー・種別を揃える。 */
+  /** ドロップダウンで配置物を選んだときに、パネル・描画レイヤー・オブジェ種別を揃える。 */
   const applyPlaceKind = (kind: PlaceKind) => {
-    if (MAP_PLACE_KINDS.includes(kind)) {
-      setEditorTab('map');
+    setPlaceKind(kind);
+    setEditorTab(PLACE_TAB[kind]);
+    if (MAP_PLACE_KINDS.includes(kind) || kind === 'start') {
       setEditMapLayer(kind === 'overlay' ? 'overlay' : kind === 'overhead' ? 'overhead' : 'base');
       if (kind === 'ground' || kind === 'wall') {
+        // そのパネルに関係するタイルだけを選べるよう、選択中タイルも合わせておく
         const wantPassable = kind === 'ground';
         const cur = gameData.tiles[selectedTileId];
         if (!cur || (cur.passable !== false) !== wantPassable) {
@@ -10942,8 +10955,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       return;
     }
-    setEditorTab('object');
-    setTpl({ objType: kind as ObjType });
+    // 宝箱は専用オブジェクトなのでテンプレの種別は触らない
+    if (kind !== 'chest') setTpl({ objType: kind === 'npc' ? 'npc' : kind as ObjType });
+  };
+
+  /** いまタイルパレットに出すタイル（＝いま選んでいる配置物に関係するものだけ）。 */
+  const paletteTiles = (): [number, TileDef][] => {
+    const all = Object.entries(gameData.tiles).map(([k, v]) => [Number(k), v] as [number, TileDef]);
+    if (placeKind === 'ground') return all.filter(([, t]) => t.passable !== false);
+    if (placeKind === 'wall') return all.filter(([, t]) => t.passable === false);
+    return all;   // 中層・天蓋は通行判定を持たないため制限しない
   };
 
   /** カーソル（＝編集中のプレイヤーマーカー）が乗っているタイル座標。 */
@@ -10983,6 +11004,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  マップ＝選択中のタイル（地形）を塗る／オブジェ・イベント＝オブジェクトを置く。 */
   const placeAtCursor = () => {
     if (isPlaying || playOnly) return;
+    const kind = placeKindRef.current;
+    if (kind === 'start') {
+      // スタート地点も「置くもの」として扱う（🏁のドラッグは補助手段として残す）
+      const { col, row } = cursorTile();
+      pushUndo();
+      const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameDataRef.current.player.h;
+      setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
+      return;
+    }
+    if (kind === 'chest') { pushUndo(); addChestObject(); return; }
     if (editorTabRef.current === 'map') { paintTileAtCursor(selectedTileIdRef.current); return; }
     placeObj();
   };
@@ -10990,7 +11021,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 「削除」＝マップなら足元のタイルを消し、それ以外は選択中オブジェクトを消す。 */
   const deleteAtCursor = () => {
     if (isPlaying || playOnly) return;
+    if (placeKindRef.current === 'start') return;   // スタート地点は消せない（必ず1つ必要）
     if (editorTabRef.current === 'map') { paintTileAtCursor(0); return; }
+    // カーソルが乗っているオブジェクトを優先して消す（選択していなくても消せる）
+    if (!selectedObjIdRef.current) {
+      const { col, row } = cursorTile();
+      const hit = gameDataRef.current.objects.find(o => o.col === col && o.row === row);
+      if (hit) {
+        pushUndo();
+        setGameData(prev => ({ ...prev, objects: prev.objects.filter(o => o.id !== hit.id) }));
+        return;
+      }
+    }
     if (!selectedObjIdRef.current) return;
     pushUndo();
     const target = selectedObjIdRef.current;
@@ -13056,7 +13098,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         </div>
 
         {/* Sidebar */}
-        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly || editModeType === 'move_place') ? 'w-full md:w-auto' : 'portrait:flex-1 flex-none max-h-[40vh] md:max-h-none overflow-y-auto md:w-80 md:flex-none'}`}>
+        <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly || editModeType === 'move_place') ? 'w-full md:w-auto' : 'portrait:flex-1 flex-none min-h-0 overflow-y-auto md:w-80 md:flex-none'}`}>
           {/* パネル編集モードでは、この切替はパネル選択と同じ行に出す（縦の節約） */}
           {!isPlaying && !playOnly && editModeType === 'move_place' && (
             <div className="flex items-center gap-2 px-2 py-1.5 bg-gray-900 border-b border-gray-800 shrink-0">
@@ -13293,26 +13335,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-800 shrink-0">
                 {!panelFullscreen && modeToggle}
                 <select
-                  value={currentPlaceKind() ? `place:${currentPlaceKind()}` : `tab:${editorTab}`}
+                  value={gameData.engine === 'yume25d' && editorTab === 'map'
+                    ? `y25:${yume25dTool}`
+                    : PLACE_TAB[placeKind] === editorTab ? `place:${placeKind}` : `tab:${editorTab}`}
                   onChange={e => {
                     const v = e.target.value;
-                    if (v.startsWith('place:')) applyPlaceKind(v.slice(6) as PlaceKind);
+                    if (v.startsWith('y25:')) { setEditorTab('map'); setYume25dTool(v.slice(4) as Yume25DTool); }
+                    else if (v.startsWith('place:')) applyPlaceKind(v.slice(6) as PlaceKind);
                     else setEditorTab(v.slice(4) as EditorTab);
                   }}
                   aria-label="編集パネル"
                   className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded px-2 py-2 text-[12px] font-bold text-blue-300 outline-none">
                   {/* 置くもの：1項目＝1つの配置物。選んだものが「配置」ボタンで置かれる */}
                   <optgroup label="置くもの">
-                    {(gameData.engine === 'yume25d'
-                      ? (['ground'] as PlaceKind[])
-                      : gameData.engine === 'touhou'
+                    {gameData.engine === 'yume25d'
+                      ? (Object.keys(YUME25D_TOOL_LABELS) as Yume25DTool[]).map(t => (
+                        <option key={t} value={`y25:${t}`}>{YUME25D_PLACE_LABELS[t]}</option>
+                      ))
+                      : (gameData.engine === 'touhou'
                         ? MAP_PLACE_KINDS
-                        : ([...MAP_PLACE_KINDS, 'npc', 'enemy', 'item', 'warp', 'event', 'platform'] as PlaceKind[])
-                    ).map(kind => (
-                      <option key={kind} value={`place:${kind}`}>
-                        {gameData.engine === 'yume25d' && kind === 'ground' ? 'マップ（3D編集）' : PLACE_LABELS[kind]}
-                      </option>
-                    ))}
+                        : ([...MAP_PLACE_KINDS, 'start', 'npc', 'item', 'chest', 'warp', 'event'] as PlaceKind[])
+                      ).map(kind => (
+                        <option key={kind} value={`place:${kind}`}>{PLACE_LABELS[kind]}</option>
+                      ))}
                   </optgroup>
                   <optgroup label="設定">
                     {([
@@ -13615,31 +13660,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 )}
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && (
                   <div className="space-y-3">
-                    {/* ── 描画レイヤー切り替え ── */}
-                    <div className="flex rounded-lg border border-gray-700 overflow-hidden text-[10px] sm:text-[11px]">
-                      <button onClick={() => setEditMapLayer('base')}
-                        className={`flex-1 py-1.5 px-1 border-r border-gray-700 ${editMapLayer === 'base' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>下層(地面)</button>
-                      <button onClick={() => setEditMapLayer('overlay')}
-                        className={`flex-1 py-1.5 px-1 border-r border-gray-700 ${editMapLayer === 'overlay' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>中層(置物)</button>
-                      <button onClick={() => setEditMapLayer('overhead')}
-                        className={`flex-1 py-1.5 px-1 ${editMapLayer === 'overhead' ? 'bg-blue-600 text-white' : 'bg-gray-900 text-gray-400'}`}>天蓋(手前)</button>
-                    </div>
-                    {editMapLayer === 'base' && (
-                      <p className="text-[10px] text-gray-500">下層は最も奥に描画され、タイルの通行可/不可などの当たり判定が適用されます。</p>
-                    )}
-                    {editMapLayer === 'overlay' && (
-                      <p className="text-[10px] text-gray-500">中層は下層の上、かつプレイヤーの後ろに描画されます。装飾や草などの配置に適しています。</p>
-                    )}
-                    {editMapLayer === 'overhead' && (
-                      <p className="text-[10px] text-gray-500">天蓋は最も手前（プレイヤーの前面）に描画されます。プレイヤーが真下に入ると自動で半透明になります。</p>
-                    )}
+                    {/* スタート地点を置くときはタイル関連UIを出さない（そのパネルに関係する概念だけ見せる） */}
+                    {placeKind === 'start' ? (
+                      <div className="rounded-lg border border-green-800/60 bg-green-900/10 p-2.5 space-y-1">
+                        <p className="text-[11px] font-bold text-green-300">🏁 スタート地点</p>
+                        <p className="text-[10px] text-gray-400">十字キーでカーソル（主人公）を動かし、Zキー／Aボタンでその位置をゲーム開始位置にします。</p>
+                      </div>
+                    ) : (<>
                     {/* ── タイル塗りヒント ── */}
                     <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> タイルを選択して画面をタップ／ドラッグ</p>
                     <p className="text-[10px] text-green-400 flex items-center gap-1">🏁 マーカーをドラッグしてプレイヤーの初期位置を変更</p>
                     {/* ── タイルパレット：yume25d と同じ横並びスウォッチ。選ぶと下に詳細設定が開く ── */}
                     <div className="flex items-center gap-1 flex-wrap">
-                      {Object.entries(gameData.tiles).map(([idStr, tile]) => {
-                        const id = Number(idStr);
+                      {paletteTiles().map(([id, tile]) => {
                         return (
                           <button key={id} onClick={() => setSelectedTileId(id)} title={tile.name}
                             className={`w-7 h-7 shrink-0 rounded border-2 overflow-hidden ${selectedTileId === id ? 'border-yellow-400' : 'border-gray-700'}`}
@@ -13715,9 +13748,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                       );
                     })()}
+                    </>)}
 
-                    {/* ── システムタイル（ワープ床・どく沼/ダメージ床・つるつる床）── */}
-                    {(gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
+                    {/* ── システムタイル（ワープ床・どく沼/ダメージ床・つるつる床）。
+                        いずれも「歩ける床」なので、その配置物を選んでいるときだけ出す ── */}
+                    {placeKind === 'ground' && (gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
                       <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
                         <p className="text-[12px] font-bold text-gray-200">⚙️ システムタイル</p>
                         <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきの床タイルがタイル一覧に追加されるので、マップに塗ってください。
@@ -14508,11 +14543,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {tpl.spriteUrl && <button onClick={() => setTpl({ spriteRef: undefined, spriteUrl: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
                         </div>
                         <div className="grid grid-cols-2 gap-2">
-                          <label className="text-[10px] text-gray-400">種別
-                            <select value={tpl.objType ?? 'enemy'} onChange={e => setTpl({ objType: e.target.value as ObjType })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
-                              {Object.entries(OBJTYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                            </select>
-                          </label>
                           <label className="text-[10px] text-gray-400">挙動
                             <select value={tpl.behavior} onChange={e => setTpl({ behavior: e.target.value as NpcBehavior })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
                               {Object.entries(BEHAVIOR_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -14552,8 +14582,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <input value={tpl.message} onChange={e => setTpl({ message: e.target.value })} placeholder="会話メッセージ(NPC)"
                             className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none" />
                         )}
-                        <button onClick={placeObj} className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-[11px] text-white font-bold">
-                          <Plus size={13} />プレイヤー位置に新規配置
+                        <button onClick={() => (placeKind === 'chest' ? addChestObject() : placeObj())}
+                          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-[11px] text-white font-bold">
+                          <Plus size={13} />{placeKind === 'chest' ? '宝箱をプレイヤー位置に置く' : 'プレイヤー位置に新規配置'}
                         </button>
                       </div>
                     ))}
@@ -16393,34 +16424,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 )}
               </div>
 
-              {/* ── 配置／削除バー：いま開いているパネルの概念をカーソル位置へ置く。
-                  パネル下部の余白を使い、スマホでも常に手の届く位置に置く。 ── */}
-              {(editorTab === 'map' || editorTab === 'object' || editorTab === 'event') && (() => {
-                const isMapTab = editorTab === 'map';
-                const target = isMapTab
-                  ? (gameData.tiles[selectedTileId]?.name || 'タイル')
-                  : (objTemplate.name || OBJTYPE_LABELS[objTemplate.objType ?? 'enemy']);
-                const canDelete = isMapTab || !!selectedObjId;
-                return (
-                  <div className="shrink-0 border-t border-gray-800 bg-gray-900/90 px-2 py-2 flex items-center gap-2">
-                    <span className="text-[10px] text-gray-400 truncate max-w-[6rem]" title={target}>{target}</span>
-                    <span className="text-[10px] text-gray-500 shrink-0">を</span>
-                    <button
-                      onClick={placeAtCursor}
-                      className="flex-1 min-w-0 py-2 rounded bg-blue-700 hover:bg-blue-600 active:bg-blue-500 text-white text-[11px] font-bold"
-                    >
-                      {isMapTab ? '塗る' : '配置'}（Z）
-                    </button>
-                    <button
-                      onClick={deleteAtCursor}
-                      disabled={!canDelete}
-                      className="flex-1 min-w-0 py-2 rounded bg-red-800 hover:bg-red-700 active:bg-red-600 disabled:opacity-40 text-white text-[11px] font-bold"
-                    >
-                      {isMapTab ? '消す' : '削除'}（X）
-                    </button>
-                  </div>
-                );
-              })()}
             </div>
           )}
         </div>

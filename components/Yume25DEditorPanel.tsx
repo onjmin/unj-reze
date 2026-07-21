@@ -5,7 +5,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Image as ImageIcon, Music } from 'lucide-react';
-import { type Yume25DTool, YUME25D_TOOL_LABELS, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
+import { type Yume25DTool, yume25dTexList, yume25dResizeFloor } from './Yume25DMaker';
 import {
   type Layout25D, type Tex25D, type Dir4, type NpcBehavior,
   SYSTEM_TILE_TEMPLATES, type SystemTileTemplate,
@@ -294,15 +294,7 @@ export default function Yume25DEditorPanel({
         </div>
       )}
 
-      {/* ツール：2D/3D どちらのビューでも使える（3Dはタップした視線の先のマスへ配置）。 */}
-      <div className="flex items-center gap-1 flex-wrap">
-        {(Object.keys(YUME25D_TOOL_LABELS) as Yume25DTool[]).map(t => (
-          <button key={t} onClick={() => onToolChange(t)}
-            className={`px-2 py-1 text-[11px] font-bold rounded ${tool === t ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-            {YUME25D_TOOL_LABELS[t]}
-          </button>
-        ))}
-      </div>
+      {/* ツール選択は上の「置くもの」ドロップダウンへ統合済み（入れ子の選択UIを作らない）。 */}
       {view === '3d' && (
         <span className="text-[10px] text-gray-400 px-1">タップ/クリックで配置（高さは指した先に自動追従）・WASDで移動・Space2回押しで浮遊ON/OFF（浮遊中：Spaceで上昇/Shiftで下降）・通常時：Spaceでジャンプ/Shiftでダッシュ・ドラッグで視点回転(上下も可)</span>
       )}
