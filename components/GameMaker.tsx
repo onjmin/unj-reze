@@ -1273,7 +1273,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }, []);
   const [presetId, setPresetId] = useState<PresetId>('onjReze');
   const [gameData, setGameData] = useState<PresetData>(() => clone(PRESETS.onjReze));
-  const [title, setTitle] = useState(PRESETS.onjReze.name);
+  /** ゲーム名はタイトル画面の見出し（画面タブで編集）を正とする。
+   *  未入力なら「無題」。タイトル画面を持たないプリセットはプリセット名を使う。 */
+  const title = (gameData.titleScreen?.heading ?? '').trim()
+    || (gameData.titleScreen ? '' : (gameData.name ?? '').trim())
+    || '無題';
   const [isPlaying, setIsPlaying] = useState(false);
   const [smcMetadata, setSmcMetadata] = useState<any>(null);
   useEffect(() => {
@@ -5095,8 +5099,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** プリセットデータを編集ステートへ丸ごと適用する（resetGame / エンジン変更の共通処理）。 */
   const applyPresetData = useCallback((id: PresetId, data: PresetData, titleStr: string) => {
     setPresetId(id);
-    setGameData(data);
-    setTitle(titleStr);
+    // ゲーム名はタイトル画面の見出しが正。見出しが空なら渡された名前を引き継ぐ
+    // （旧データやDBのタイトルを読み込んだときに名前が失われないようにする）。
+    setGameData(
+      data.titleScreen && !data.titleScreen.heading?.trim() && titleStr?.trim()
+        ? { ...data, titleScreen: { ...data.titleScreen, heading: titleStr.trim() } }
+        : data
+    );
     setEditorTab('map');
     setEditSceneIdx(0);
     const eng = engineRef.current;
@@ -5188,8 +5197,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 既存ゲームを読み込む
       const { presetId: preset, data } = manifestToPresetData(initialManifest);
       setPresetId(preset);
-      setGameData(data);
-      setTitle(data.name);
+      setGameData(
+        data.titleScreen && !data.titleScreen.heading?.trim() && data.name?.trim()
+          ? { ...data, titleScreen: { ...data.titleScreen, heading: data.name.trim() } }
+          : data
+      );
       const eng = engineRef.current;
       eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
       eng.map = JSON.parse(JSON.stringify(data.map));
@@ -10929,10 +10941,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setInvMenu(null); setInvDetail(null);
     showGameMsg(`${it?.emoji ?? '?'} ${it?.name ?? itemId}を すてた。`, 'instant', () => { });
   };
+  /** スマホ用：ヘッダーを畳んで描画エリアを広く取る。上端の帯を下スワイプかタップで開く。
+   *  md以上では常時表示（CSS側で translate を打ち消す）。 */
+  const [headerOpen, setHeaderOpen] = useState(false);
+  const headerSwipeRef = useRef<{ y: number; moved: boolean } | null>(null);
+  const onHeaderTouchStart = useCallback((e: React.TouchEvent) => {
+    headerSwipeRef.current = { y: e.touches[0].clientY, moved: false };
+  }, []);
+  const onHeaderTouchMove = useCallback((e: React.TouchEvent) => {
+    const start = headerSwipeRef.current;
+    if (!start) return;
+    const dy = e.touches[0].clientY - start.y;
+    if (Math.abs(dy) < 24) return;
+    headerSwipeRef.current = { ...start, moved: true };
+    setHeaderOpen(dy > 0);
+  }, []);
+  /** スワイプにならなかった（＝タップ）ときはトグルする。 */
+  const onHeaderHandleClick = useCallback(() => {
+    if (headerSwipeRef.current?.moved) {
+      headerSwipeRef.current = null;
+      return;
+    }
+    setHeaderOpen(v => !v);
+  }, []);
+
+  /** 移動・設置 / パネル編集 の切替（アイコンのみのセグメント）。
+   *  パネル選択のドロップダウンと同じ行に並べて縦を節約する。 */
+  const modeToggle = (!isPlaying && !playOnly) ? (
+    <div className="flex shrink-0 rounded overflow-hidden border border-gray-700">
+      <button
+        onClick={() => setEditModeType('move_place')}
+        aria-label="移動・設置モード"
+        aria-pressed={editModeType === 'move_place'}
+        title="移動・設置モード"
+        className={`px-2.5 py-2 text-xs transition ${editModeType === 'move_place' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+      >🕹️</button>
+      <button
+        onClick={() => setEditModeType('panel_input')}
+        aria-label="パネル編集モード"
+        aria-pressed={editModeType === 'panel_input'}
+        title="パネル編集モード"
+        className={`px-2.5 py-2 text-xs transition ${editModeType === 'panel_input' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+      >📝</button>
+    </div>
+  ) : null;
+
   return (
-    <div className={embedded ? "flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}
+    <div className={embedded ? "relative flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}
       onContextMenu={(e) => { const t = e.target as HTMLElement; if (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA' && t.tagName !== 'SELECT' && !t.isContentEditable) e.preventDefault(); }}>
-      {/* Header */}
+      {/* Header：スマホでは通常隠しておき（描画エリアを圧迫しない）、
+          上端のハンドルを下スワイプ／タップで引き出す。md以上は従来どおり常時表示。 */}
+      <div
+        className={`absolute md:static top-0 left-0 right-0 z-40 shrink-0 transition-transform duration-200 md:translate-y-0 ${headerOpen ? 'translate-y-0' : '-translate-y-[calc(100%-20px)]'}`}
+        onTouchStart={onHeaderTouchStart}
+        onTouchMove={onHeaderTouchMove}
+      >
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 shrink-0"><X size={16} /></button>}
@@ -11114,9 +11177,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           )}
         </div>
       </div>
+        {/* 引き出しハンドル（スマホのみ）。閉じているときはこの20pxだけが画面に残る。 */}
+        <button
+          type="button"
+          onClick={onHeaderHandleClick}
+          aria-label={headerOpen ? 'ヘッダーを隠す' : 'ヘッダーを表示'}
+          aria-expanded={headerOpen}
+          className="md:hidden w-full h-5 flex items-center justify-center bg-[#0f0f11]/95 border-b border-gray-800 touch-none"
+        >
+          <span className="w-10 h-1 rounded-full bg-gray-600" />
+        </button>
+      </div>
 
-      {/* Main */}
-      <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+      {/* Main（スマホはヘッダーが絶対配置なので、ハンドルぶんだけ上に余白を取る） */}
+      <div className="flex flex-1 overflow-hidden flex-col md:flex-row pt-5 md:pt-0">
         {/* Canvas */}
         <div ref={canvasAreaRef} className={`flex flex-col items-center justify-center bg-black overflow-hidden ${isPlaying ? 'flex-1 max-h-[55vh] md:max-h-full' : 'flex-1 portrait:flex-none'}`}>
           <div className="relative mx-auto overflow-hidden ring-2 ring-gray-700 touch-none shrink-0"
@@ -12779,20 +12853,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
         {/* Sidebar */}
         <div className={`bg-[#0a0a0d] flex flex-col border-t md:border-t-0 md:border-l border-gray-800 ${(isPlaying || playOnly || editModeType === 'move_place') ? 'w-full md:w-auto' : 'portrait:flex-1 flex-none max-h-[40vh] md:max-h-none overflow-y-auto md:w-80 md:flex-none'}`}>
-          {!isPlaying && !playOnly && (
-            <div className="flex p-2 bg-gray-900 border-b border-gray-800 gap-2 shrink-0">
-              <button
-                onClick={() => setEditModeType('move_place')}
-                className={`flex-1 py-1.5 rounded text-xs font-bold font-pixel flex items-center justify-center gap-1.5 transition ${editModeType === 'move_place' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-gray-800 text-gray-400 hover:text-gray-300'}`}
-              >
-                🕹️ 移動・設置モード
-              </button>
-              <button
-                onClick={() => setEditModeType('panel_input')}
-                className={`flex-1 py-1.5 rounded text-xs font-bold font-pixel flex items-center justify-center gap-1.5 transition ${editModeType === 'panel_input' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-gray-800 text-gray-400 hover:text-gray-300'}`}
-              >
-                📝 パネル編集モード
-              </button>
+          {/* パネル編集モードでは、この切替はパネル選択と同じ行に出す（縦の節約） */}
+          {!isPlaying && !playOnly && editModeType === 'move_place' && (
+            <div className="flex items-center gap-2 px-2 py-1.5 bg-gray-900 border-b border-gray-800 shrink-0">
+              {modeToggle}
+              <span className="text-[11px] font-bold text-gray-300 font-pixel">移動・設置モード</span>
             </div>
           )}
 
@@ -13014,14 +13079,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ) : (
             /* 全画面時のみ実体のあるラッパーになる（通常は display:contents で従来のレイアウトのまま）。 */
             <div className={panelFullscreen ? 'fixed inset-0 z-[70] flex flex-col bg-[#0f0f11] overscroll-contain' : 'contents'}>
-              {/* ── タイトル：どのタブからでも常に見えるよう固定表示 ── */}
-              <div className="px-3 pt-3 pb-1 shrink-0">
-                <label className="block text-[11px] text-gray-400 mb-1">タイトル</label>
-                <input type="text" value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-200" />
-              </div>
-
               {/* ── パネル選択：タブを並べると縦を食うのでドロップダウン1行にまとめる ── */}
-              <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-800 shrink-0">
+              <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-800 shrink-0">
+                {!panelFullscreen && modeToggle}
                 <select
                   value={editorTab}
                   onChange={e => setEditorTab(e.target.value as EditorTab)}
@@ -13060,8 +13120,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   onClick={() => setPanelFullscreen(v => !v)}
                   aria-label={panelFullscreen ? 'パネルの全画面を解除' : 'パネルを全画面表示'}
                   title={panelFullscreen ? '全画面を解除' : '全画面で編集'}
-                  className="shrink-0 h-10 px-3 rounded border border-gray-700 bg-gray-900 text-[11px] font-bold text-gray-300 active:bg-gray-800 flex items-center gap-1">
-                  {panelFullscreen ? <><Minimize2 size={13} />閉じる</> : <><Maximize2 size={13} />全画面</>}
+                  className="shrink-0 w-10 h-10 rounded border border-gray-700 bg-gray-900 text-gray-300 active:bg-gray-800 flex items-center justify-center">
+                  {panelFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
                 </button>
               </div>
 
