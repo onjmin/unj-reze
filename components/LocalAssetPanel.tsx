@@ -42,7 +42,7 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
       {section === 'chars' ? (
         <>
           <p className="text-[10px] text-gray-600 px-0.5">DQ風キャラ（RPGEN 16px・2フレーム×4方向）</p>
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-6 gap-1.5">
             {DQ_CHARACTERS.map((c) => (
               <button
                 key={c.surface}

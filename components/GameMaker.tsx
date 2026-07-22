@@ -149,7 +149,7 @@ function wrapWithKinsoku(ctx: CanvasRenderingContext2D, text: string, maxWidth: 
   return lines;
 }
 
-type EditorTab = 'map' | 'event' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect' | 'sheets';
+type EditorTab = 'map' | 'mapSettings' | 'event' | 'object' | 'char' | 'battle' | 'character' | 'switch' | 'item' | 'weapon' | 'armor' | 'spell' | 'sound' | 'screen' | 'scene' | 'effect' | 'sheets';
 
 /** 保存マニフェストは表示URLを持たないため、URL由来の参照(url:/walk:...:u:)だけロード時に復元する。
  *  post: 等の投稿参照は解決不能なので undefined のまま（従来挙動）。 */
@@ -13421,6 +13421,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </optgroup>
                   <optgroup label="設定">
                     {([
+                      ...(gameData.engine !== 'yume25d' ? [['mapSettings', 'マップ設定（背景・サイズ・地形）']] : []),
                       ...(gameData.engine !== 'touhou' ? [['event', 'イベント編集']] : []),
                       ['char', 'キャラ'],
                       ...(gameData.battle ? [['battle', '戦闘'], ['character', 'キャラクター']] : []),
@@ -13844,6 +13845,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </div>
                     )}
 
+
+                  </div>
+                )}
+
+                {/* ── MAP SETTINGS（マップ背景・サイズ・地形マクロ）：各レイヤーのパネルから分離した専用パネル ── */}
+                {editorTab === 'mapSettings' && gameData.engine !== 'yume25d' && (
+                  <div className="space-y-3">
                     {/* ── マップ背景画像 ── */}
                     <div>
                       <label className="block text-[11px] text-gray-400 mb-1">マップ背景（画像/GIF）</label>
@@ -13856,9 +13864,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {gameData.mapBgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.mapBgUrl} alt="" className="w-8 h-8 object-cover rounded shrink-0" />}
                           <span className="truncate flex-1">{refLabel(gameData.mapBgRef)}</span>
                           <button onClick={() => setGameData(p => ({ ...p, mapBgRef: undefined, mapBgUrl: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
+                        </div>
+                      )}
+                    </div>
 
-                    {/* ── ここから下は使用頻度の低い設定（マップサイズ・地形マクロ）。
-                        よく使うタイルパレットを上に出すため、パネル最下部へ置く。 ── */}
                     {/* ── マップサイズ（自由拡張・東方以外）── */}
                     {gameData.engine !== 'touhou' && (
                       <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
@@ -13906,10 +13915,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </p>
                       </div>
                     )}
-
-                        </div>
-                      )}
-                    </div>
                   </div>
                 )}
 
