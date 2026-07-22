@@ -15,6 +15,7 @@ import LocalAssetPanel from './LocalAssetPanel';
 import UserSheetPanel from './UserSheetPanel';
 import BuiltinGameSoundPanel from './BuiltinGameSoundPanel';
 import PostSlicePanel from './PostSlicePanel';
+import { getAvatarInfo } from '@/lib/avatar';
 
 export interface PickResult {
   ref: string;
@@ -614,7 +615,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                           <button onClick={() => pickMmlPost(p)} className="flex-1 min-w-0 text-left">
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <Music size={11} className="text-pink-400 shrink-0" />
-                              <span className="text-[11px] text-gray-300 font-bold truncate">{p.displayName} #{p.id}</span>
+                              <span className="text-[11px] text-gray-300 font-bold truncate">{getAvatarInfo(p.displayName).username} #{p.id}</span>
                             </div>
                             <p className="text-[10px] text-gray-500 font-mono truncate">{mml}</p>
                           </button>

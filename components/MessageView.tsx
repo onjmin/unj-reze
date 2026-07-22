@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { getAvatarInfo } from '@/lib/avatar';
 
 interface MessageViewProps {
   userId?: string;
@@ -38,7 +39,7 @@ export default function MessageView({ userId }: MessageViewProps) {
       <div className="flex-1 p-4 space-y-4">
         {messages.map(m => (
           <div key={m.id} className={`flex flex-col group ${m.sender === currentSender ? 'items-end' : 'items-start'}`}>
-            <span className="text-[10px] text-gray-500 mb-0.5">{m.sender} ・ {m.time}</span>
+            <span className="text-[10px] text-gray-500 mb-0.5">{getAvatarInfo(m.sender).username} ・ {m.time}</span>
             <div className="flex items-center gap-1.5">
               {m.sender === currentSender && (
                 <button

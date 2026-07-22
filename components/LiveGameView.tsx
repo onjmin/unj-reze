@@ -5,6 +5,7 @@ import { Clock, Trophy, Users } from 'lucide-react';
 import GameMaker, { type GameManifestDraft } from './GameMaker';
 import type { GhostPlayer, GameVoteCandidate } from '@/lib/types';
 import { decodeId } from '@/lib/sqids';
+import { getAvatarInfo } from '@/lib/avatar';
 
 interface LiveInfo {
   gameId: string | null;
@@ -101,7 +102,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
             const newOnes = replies.filter(r => (decodeId(r.id) || 0) > commentLastIdRef.current);
             if (newOnes.length > 0) {
               commentLastIdRef.current = Math.max(...newOnes.map(r => decodeId(r.id) || 0));
-              setDanmakuComments(prev => [...prev, ...newOnes.map(r => `${r.displayName}: ${r.content}`)]);
+              setDanmakuComments(prev => [...prev, ...newOnes.map(r => `${getAvatarInfo(r.displayName).username}: ${r.content}`)]);
             }
           }
         } catch {}
@@ -177,7 +178,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
             danmakuComments={danmakuComments}
             onComment={async (text, displayName) => {
               if (!info.postId) return;
-              setDanmakuComments(prev => [...prev, `${displayName}: ${text}`]);
+              setDanmakuComments(prev => [...prev, `${getAvatarInfo(displayName).username}: ${text}`]);
               try {
                 const res = await fetch(`/api/posts/${info.postId}/replies`, {
                   method: 'POST',

@@ -337,19 +337,19 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                   {!isSelf && (
                     <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                       <UserPlus size={12} className="shrink-0" />
-                      <span>{following ? 'フォロー中' : `${post.displayName}さんをフォロー`}</span>
+                      <span>{following ? 'フォロー中' : `${avatarInfo.username}さんをフォロー`}</span>
                     </button>
                   )}
                   {!isSelf && (
                     <button role="menuitem" onClick={handleMenuMute} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                       <VolumeX size={12} className="shrink-0" />
-                      <span>{muted ? 'ミュート中' : `${post.displayName}さんをミュート`}</span>
+                      <span>{muted ? 'ミュート中' : `${avatarInfo.username}さんをミュート`}</span>
                     </button>
                   )}
                   {!isSelf && (
                     <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                       <Ban size={12} className="shrink-0" />
-                      <span>{blocked ? 'ブロック中' : `${post.displayName}さんをブロック`}</span>
+                      <span>{blocked ? 'ブロック中' : `${avatarInfo.username}さんをブロック`}</span>
                     </button>
                   )}
                   {!isSelf && <div className="border-t border-gray-800 my-1" />}
