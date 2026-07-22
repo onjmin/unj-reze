@@ -8858,6 +8858,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           deleteAtCursorRef.current?.();
         }
       }
+
+      // ── 連続配置：配置キー（Z/Aボタン）を押しっぱなしのままカーソルを動かすと、通った新しいマスへ次々に置く ──
+      //    押し始めの1回は上のZブロックで配置済み。同じストローク中は同じマスへ二重に置かない
+      //    （オブジェクトの重ね置きや、同一マスの無駄な再描画を防ぐ）。
+      if (!isPlaying && !playOnly && !battleRef.current.active && !eventRunningRef.current && !showTitleRef.current) {
+        if (isZ) {
+          const key = `${Math.floor((p.x + 12) / TILE_SIZE)},${Math.floor((p.y + 12) / TILE_SIZE)}`;
+          if (!prevZRef.current) {
+            placeStrokeRef.current.clear();
+            placeStrokeRef.current.add(key);
+          } else if (!placeStrokeRef.current.has(key)) {
+            placeAtCursorRef.current?.();
+            placeStrokeRef.current.add(key);
+          }
+        } else if (placeStrokeRef.current.size) {
+          placeStrokeRef.current.clear();
+        }
+      }
+
       prevZRef.current = isZ;
       prevXRef.current = isX;
 
@@ -10851,6 +10870,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const redoStackRef = useRef<PresetData[]>([]);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
+
+  /** 連続配置（Zキー押しっぱなし）の1ストローク中に、すでに置いたマス（"col,row"）。同じマスへ二重に置かないため。 */
+  const placeStrokeRef = useRef<Set<string>>(new Set());
 
   /** ゲームループ（別effect）から参照するための橋渡し。 */
   const pushUndoRef = useRef<(() => void) | null>(null);
