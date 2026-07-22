@@ -21,7 +21,6 @@
 - 対象：touhouプリセットのボス/雑魚の弾幕パターン（`ObjectDef.miniScript` / `SpellCardDef.miniScript`）のみ。他プリセットは未使用。
 - 構文：`if/end if`、`while/end while`、`for/end for`、`wait(frames)`、`shot(angle,speed,delay)`、`moveTo(x,y,frames)` 等の手続き的命令＋式評価。
 - 編集UI：GameMaker.tsx内の`<textarea>`で生テキストとして直接編集（[GameMaker.tsx:5249](../components/GameMaker.tsx:5249) 等）。
-- 実装：行ベースの自作パーサ（`parseMiniScript`）＋式は`new Function`での動的評価（キャッシュなし）。
 
 ---
 
