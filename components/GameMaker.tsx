@@ -1378,6 +1378,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
   selectedObjIdRef.current = selectedObjId;
+  const [nearObjId, setNearObjId] = useState<string | null>(null);
+  const nearObjIdRef = useRef<string | null>(null);
+  nearObjIdRef.current = nearObjId;
   // ── バッチ選択（複数オブジェクトをまとめて編集） ──
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const batchIdsRef = useRef<Set<string>>(new Set());
@@ -8900,7 +8903,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       prevZRef.current = isZ;
       prevXRef.current = isX;
 
-      // ── edit mode: detect near objects ──
+      // ── edit mode: detect near objects (do NOT auto-select on touch) ──
       let nearObj: ObjectDef | null = null;
       if (!isPlaying && !battleRef.current.active) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
@@ -8911,7 +8914,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             break;
           }
         }
-        if (nearObj && nearObj.id !== selectedObjIdRef.current) setSelectedObjId(nearObj.id);
+        if (nearObj?.id !== nearObjIdRef.current) {
+          setNearObjId(nearObj?.id ?? null);
+        }
       }
 
       // ── draw ──
@@ -14719,6 +14724,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           />
                         )}
                       </div>
+                      {/* ── 宝箱・イベントの起動・条件設定（トリガー / 必要アイテム） ── */}
+                      {selObj && (selObj.pages?.length ?? 0) > 0 && (() => {
+                        const mainPageIndex = (selObj.pages?.length ?? 0) > 1 ? 1 : 0;
+                        const activePage = selObj.pages![mainPageIndex];
+                        const triggerVal = activePage?.trigger ?? 'action';
+                        const itemIdVal = activePage?.conditions?.itemId ?? '';
+                        return (
+                          <div className="rounded-lg border border-amber-600/50 bg-gray-900 p-2.5 space-y-2 text-[10px]">
+                            <p className="text-amber-400 font-bold flex items-center gap-1">
+                              <Box size={12} /> 宝箱・イベントの起動・開放設定
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="text-gray-300 block">開くタイミング
+                                <select
+                                  value={triggerVal}
+                                  onChange={e => {
+                                    const trig = e.target.value as 'action' | 'playerTouch';
+                                    const copy = (selObj.pages ?? []).map((p, idx) =>
+                                      idx === mainPageIndex ? { ...p, trigger: trig } : p
+                                    );
+                                    updObj({ pages: copy });
+                                  }}
+                                  className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none"
+                                >
+                                  <option value="action">決定ボタンで開く (調べる)</option>
+                                  <option value="playerTouch">接触で開く (触れる)</option>
+                                </select>
+                              </label>
+                              <label className="text-gray-300 block">必要なアイテム
+                                <select
+                                  value={itemIdVal}
+                                  onChange={e => {
+                                    const itemId = e.target.value || undefined;
+                                    const copy = (selObj.pages ?? []).map((p, idx) =>
+                                      idx === mainPageIndex
+                                        ? { ...p, conditions: { ...p.conditions, itemId, hasItem: itemId ? true : undefined } }
+                                        : p
+                                    );
+                                    updObj({ pages: copy });
+                                  }}
+                                  className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-gray-200 outline-none"
+                                >
+                                  <option value="">なし（誰でも開ける）</option>
+                                  {(gameData.items ?? []).map(it => (
+                                    <option key={it.id} value={it.id}>{it.emoji} {it.name}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+                            <p className="text-[9px] text-gray-500">
+                              宝箱やイベントの「接触で開く/決定ボタンで開く」「鍵や特定アイテムの所持条件」を設定できます。
+                            </p>
+                          </div>
+                        );
+                      })()}
                       {/* ── イベントページエディタ（全objType共通） ── */}
                       {selObj && (
                         <EventPageEditor
@@ -14732,7 +14792,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       )}
                     </>) : (
                       <div className="rounded-lg border border-gray-700 bg-gray-900 p-2.5 space-y-2.5">
-                        <p className="text-[10px] text-gray-400 flex items-center gap-1"><Smartphone size={11} /> プレイヤーで重なるかキャンバスをタップで選択</p>
+                        {/* ── 足元・選択位置のオブジェクト読み込みボタン（レイアウト切り替えを行わず常時表示） ── */}
+                        <button
+                          onClick={() => {
+                            const near = gameData.objects.find(o => o.id === nearObjId);
+                            if (near) setSelectedObjId(near.id);
+                          }}
+                          disabled={!nearObjId || !gameData.objects.some(o => o.id === nearObjId)}
+                          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:hover:bg-gray-800 disabled:cursor-not-allowed border border-gray-700 text-[11px] text-gray-300 transition-colors"
+                        >
+                          <Box size={12} />
+                          この位置のイベントを読み込む
+                          {(() => {
+                            const near = gameData.objects.find(o => o.id === nearObjId);
+                            return near ? <span className="text-[10px] text-gray-400">({near.name || near.emoji || '検出'})</span> : null;
+                          })()}
+                        </button>
+                        <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={11} /> オブジェクトの位置でボタンを押して再編集</p>
                         <div className="flex items-center gap-2">
                           {tpl.spriteUrl || tpl.spriteRef ? (
                             <div className="relative shrink-0 w-10 h-10 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
