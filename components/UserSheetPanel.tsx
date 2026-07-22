@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2, Scissors, Pencil } from 'lucide-react';
+import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2, Scissors, Pencil, Upload } from 'lucide-react';
 import { api } from '@/lib/api';
 import { loadImage, WALK_STANDARDS } from '@/lib/walk-sprite';
 import { buildWalkRef } from '@/lib/asset-ref';
@@ -93,7 +93,7 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
           onClick={() => { setAdding(v => !v); setCropping(false); }}
           className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${adding ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}
         >
-          <Plus size={11} className="inline -mt-0.5 mr-0.5" />シートを追加
+          <Plus size={11} className="inline -mt-0.5 mr-0.5" />アセットシートを追加
         </button>
         {canDefine && (
           <button
@@ -106,10 +106,10 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
         <input ref={importRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportFile} />
         <button
           onClick={() => { setImportError(null); importRef.current?.click(); }}
-          title="書き出したシート定義（.json）を取り込む"
+          title="書き出したアセットシート定義（.json）を取り込む"
           className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800 transition"
         >
-          <FileUp size={11} className="inline -mt-0.5 mr-0.5" />取り込み
+          <FileUp size={11} className="inline -mt-0.5 mr-0.5" />アセットシートを取り込む
         </button>
       </div>
 
@@ -155,6 +155,7 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
           : <SheetGrid
               key={open.id}
               sheet={open}
+              userId={userId}
               onPick={onPick}
               onExport={() => handleExport(open)}
               onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
@@ -212,17 +213,17 @@ function PickRefSheetView({ sheet, userId, onPick, onExport, onDelete }: { sheet
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 px-0.5">
         <p className="text-[10px] text-gray-500 flex-1 truncate">{sheet.name} ・ {isWalk ? '歩行グラ（切り出し）' : '切り出しスプライト'}</p>
-        <button onClick={() => { setEditName(sheet.name); setEditing(true); }} title="クロップ位置・パラメータを再編集"
-          className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
-          <Pencil size={14} />
+        <button onClick={() => { setEditName(sheet.name); setEditing(true); }}
+          className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 transition">
+          <Pencil size={11} />編集
         </button>
-        <button onClick={onExport} title="このシート定義を書き出す（.json）"
-          className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
-          <Download size={14} />
+        <button onClick={onExport}
+          className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 transition">
+          <Download size={11} />アセットシートを書き出す
         </button>
-        <button onClick={onDelete} title="このシートを削除"
-          className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10">
-          <Trash2 size={14} />
+        <button onClick={onDelete}
+          className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition">
+          <Trash2 size={11} />削除
         </button>
       </div>
       <div className="flex items-center gap-3">
@@ -247,17 +248,42 @@ function PickRefSheetView({ sheet, userId, onPick, onExport, onDelete }: { sheet
   );
 }
 
-/** 投稿画像から取り込む／直リンクURLで、1枚絵として使う・シートとして登録する共通フォーム。
- *  画像アップロードは廃止し、取り込み口は「SNS投稿の画像」か「直リンクURL」に限定する。 */
+/** 画像ファイル、投稿画像、直リンクURLのいずれかから、1枚絵として使う・シートとして登録する共通フォーム。 */
 function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id: string) => void; onPick?: (res: PickResult) => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [cellW, setCellW] = useState(16);
   const [cellH, setCellH] = useState(16);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** 画像の取り込み元。'post'=SNS投稿画像 / 'url'=直リンクURL。 */
-  const [source, setSource] = useState<'post' | 'url'>(userId ? 'post' : 'url');
+  /** 画像の取り込み元。'upload'=ファイル選択 / 'post'=SNS投稿画像 / 'url'=直リンクURL。 */
+  const [source, setSource] = useState<'upload' | 'post' | 'url'>('upload');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError(null);
+    if (!file.type.startsWith('image/')) { setError('画像ファイルを選択してください'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setUploading(true);
+      try {
+        const res = await api.upload.image({ image: reader.result as string });
+        setUrl(res.url);
+        if (!name.trim() && file.name) {
+          setName(file.name.replace(/\.[^/.]+$/, ''));
+        }
+      } catch {
+        setError('画像のアップロードに失敗しました');
+      } finally {
+        setUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   /** 切り出さず、画像1枚をそのままスプライトとして使う（旧「URL」タブ相当）。 */
   const useWhole = async () => {
@@ -296,19 +322,23 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
     }
   };
 
-  const numInput = 'w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none';
+  const numInput = 'w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-500';
   const srcBtn = (active: boolean) =>
-    `flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold border transition ${active ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`;
+    `flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${active ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-750'}`;
 
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+    <div className="rounded-lg border border-gray-800 bg-gray-900/80 p-2.5 space-y-2">
       <input
         value={name} onChange={e => setName(e.target.value)} placeholder="シート名（任意）"
-        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none"
+        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
       />
 
-      {/* 取り込み元の切り替え（アップロードは廃止） */}
-      <div className="flex items-center gap-1.5">
+      {/* 取り込み元の切り替え（ファイル選択 / SNS投稿 / 直リンクURL） */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
+        <button type="button" onClick={() => setSource('upload')} className={srcBtn(source === 'upload')}>
+          <Upload size={12} />ファイル選択
+        </button>
         {userId && (
           <button type="button" onClick={() => setSource('post')} className={srcBtn(source === 'post')}>
             <ImageIcon size={12} />投稿から選ぶ
@@ -319,6 +349,19 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
         </button>
       </div>
 
+      {source === 'upload' && (
+        <div className="space-y-1.5">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-200 font-bold disabled:opacity-50 transition"
+          >
+            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+            {url ? '別の画像ファイルを選択' : '画像ファイルを選択'}
+          </button>
+        </div>
+      )}
       {source === 'post' && (
         userId
           ? <PostImageGrid userId={userId} selectedUrl={url.trim()} onSelect={(u, id) => { setUrl(u); if (!name.trim()) setName(`投稿#${id}`); }} />
@@ -327,15 +370,15 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
       {source === 'url' && (
         <input
           value={url} onChange={e => setUrl(e.target.value)} placeholder="画像の直リンクURL"
-          className="w-full min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none"
+          className="w-full min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
         />
       )}
 
       {/* 1枚絵ならそのまま使える。素材選びの場でだけ出す（管理タブでは登録のみ）。 */}
       {onPick && (
         <button
-          onClick={useWhole} disabled={busy || !url.trim()}
-          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-[11px] text-white font-bold"
+          onClick={useWhole} disabled={busy || uploading || !url.trim()}
+          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-[11px] text-white font-bold transition"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : null}この画像を1枚絵として使う
         </button>
@@ -352,8 +395,8 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
           <span>px</span>
           <div className="flex gap-1 ml-auto">
             {[16, 32, 48, 64].map(n => (
-              <button key={n} onClick={() => { setCellW(n); setCellH(n); }}
-                className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700">{n}</button>
+              <button key={n} type="button" onClick={() => { setCellW(n); setCellH(n); }}
+                className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700 transition">{n}</button>
             ))}
           </div>
         </div>
@@ -363,8 +406,8 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
 
         {error && <p className="text-[10px] text-red-400">{error}</p>}
         <button
-          onClick={submit} disabled={busy || !url.trim()}
-          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-50 text-[11px] text-gray-200 font-bold"
+          onClick={submit} disabled={busy || uploading || !url.trim()}
+          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-50 text-[11px] text-gray-200 font-bold transition"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}シートに登録
         </button>
@@ -510,7 +553,7 @@ function SheetPreview({ url, cellW, cellH }: { url: string; cellW: number; cellH
 interface Cell { col: number; row: number; opaque: boolean }
 
 /** 登録シートをマス目で走査し、中身のあるマスだけ選べるグリッドにする。 */
-function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; onPick?: (res: PickResult) => void; onExport: () => void; onDelete: () => void }) {
+function SheetGrid({ sheet, userId, onPick, onExport, onDelete }: { sheet: UserSheet; userId?: string; onPick?: (res: PickResult) => void; onExport: () => void; onDelete: () => void }) {
   const [cells, setCells] = useState<Cell[] | null>(null);
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   const [shown, setShown] = useState(CELLS_PER_CHUNK);
@@ -527,6 +570,31 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
   const [editCellH, setEditCellH] = useState(sheet.cellH);
   const [editError, setEditError] = useState<string | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+
+  const [editSource, setEditSource] = useState<'upload' | 'post' | 'url'>('url');
+  const [editUploading, setEditUploading] = useState(false);
+  const editFileRef = useRef<HTMLInputElement>(null);
+
+  const handleEditFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setEditError(null);
+    if (!file.type.startsWith('image/')) { setEditError('画像ファイルを選択してください'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setEditUploading(true);
+      try {
+        const res = await api.upload.image({ image: reader.result as string });
+        setEditUrl(res.url);
+      } catch {
+        setEditError('画像のアップロードに失敗しました');
+      } finally {
+        setEditUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -581,17 +649,17 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
         setEditCellH(sheet.cellH);
         setEditError(null);
         setEditing(true);
-      }} title="マス目サイズ・パラメータを再編集"
-        className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
-        <Pencil size={14} />
+      }}
+        className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 transition">
+        <Pencil size={11} />編集
       </button>
-      <button onClick={onExport} title="このシート定義を書き出す（.json）"
-        className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
-        <Download size={14} />
+      <button onClick={onExport}
+        className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 transition">
+        <Download size={11} />アセットシートを書き出す
       </button>
-      <button onClick={onDelete} title="このシートを削除"
-        className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10">
-        <Trash2 size={14} />
+      <button onClick={onDelete}
+        className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition">
+        <Trash2 size={11} />削除
       </button>
     </div>
   );
@@ -635,14 +703,16 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
     };
 
     const numInput = 'w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-500';
+    const srcBtn = (active: boolean) =>
+      `flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${active ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-750'}`;
 
     return (
-      <div className="rounded-lg border border-blue-500 bg-gray-900/80 p-2.5 space-y-2">
+      <div className="rounded-lg border border-blue-500/60 bg-gray-900/90 p-2.5 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-blue-400 font-bold">シート定義を再編集</p>
+          <p className="text-[11px] text-blue-400 font-bold">アセットシート定義を再編集</p>
           <button
             onClick={() => setEditing(false)}
-            className="text-[10px] text-gray-400 hover:text-white px-2 py-0.5 rounded bg-gray-800 border border-gray-700"
+            className="text-[10px] text-gray-400 hover:text-white px-2 py-0.5 rounded bg-gray-800 border border-gray-700 transition"
           >
             キャンセル
           </button>
@@ -656,12 +726,45 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="text-[10px] text-gray-400">画像URL</label>
-          <input
-            value={editUrl} onChange={e => setEditUrl(e.target.value)} placeholder="画像の直リンクURL"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
-          />
+        <div className="space-y-1.5">
+          <label className="text-[10px] text-gray-400">取り込み元</label>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <input ref={editFileRef} type="file" accept="image/*" className="hidden" onChange={handleEditFileUpload} />
+            <button type="button" onClick={() => setEditSource('upload')} className={srcBtn(editSource === 'upload')}>
+              <Upload size={12} />ファイル選択
+            </button>
+            {userId && (
+              <button type="button" onClick={() => setEditSource('post')} className={srcBtn(editSource === 'post')}>
+                <ImageIcon size={12} />投稿から選ぶ
+              </button>
+            )}
+            <button type="button" onClick={() => setEditSource('url')} className={srcBtn(editSource === 'url')}>
+              <Link2 size={12} />直リンクURL
+            </button>
+          </div>
+
+          {editSource === 'upload' && (
+            <button
+              type="button"
+              onClick={() => editFileRef.current?.click()}
+              disabled={editUploading}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-200 font-bold disabled:opacity-50 transition"
+            >
+              {editUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+              {editUrl ? '別の画像ファイルを選択' : '画像ファイルを選択'}
+            </button>
+          )}
+          {editSource === 'post' && (
+            userId
+              ? <PostImageGrid userId={userId} selectedUrl={editUrl.trim()} onSelect={(u) => setEditUrl(u)} />
+              : <p className="text-[10px] text-gray-500 px-0.5">投稿から取り込むにはログインが必要です。</p>
+          )}
+          {editSource === 'url' && (
+            <input
+              value={editUrl} onChange={e => setEditUrl(e.target.value)} placeholder="画像の直リンクURL"
+              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
+            />
+          )}
         </div>
 
         <div className="border-t border-gray-800 pt-2 space-y-2">
