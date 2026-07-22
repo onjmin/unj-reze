@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Search, ArrowLeft } from 'lucide-react';
+import { Loader2, Search, ArrowLeft, Upload } from 'lucide-react';
 import {
   loadImage, WALK_STANDARDS, standardById, detectStandard, animatedCellInRect, WAY,
   type WayKey, type WalkStandard,
@@ -16,23 +16,33 @@ interface PostSlicePanelProps {
   onPick: (res: PickResult) => void;
   /** 使用履歴からの再編集用。指定時はこの画像・切り出し設定から直接エディタを開く。 */
   initialAsset?: { ref: string; url: string; label?: string };
+  /** アップロードした画像も切り出し元にできるようにする（素材定義パネル用）。 */
+  allowUpload?: boolean;
+  /** 切り出し確定ボタンの文言（既定「この範囲を使う」）。素材定義では「マイシートに保存」等に差し替える。 */
+  confirmLabel?: string;
+  /** 選択画面の説明文（省略時は既定の切り出し説明）。 */
+  hint?: string;
 }
 
 interface Rect { x: number; y: number; w: number; h: number; }
 interface SliceImage { id: string | number; url: string; }
 
 const DISPLAY_MAX = 320;
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 // 投稿画像から矩形を切り出してスプライト素材化するパネル。
 // 1枚の画像に複数キャラが入ったシート（RPGEN/RPGツクール風）でも、
 // 自由な矩形選択 or グリッド分割で好きな位置から切り出せる。
-export default function PostSlicePanel({ userId, onPick, initialAsset }: PostSlicePanelProps) {
+export default function PostSlicePanel({ userId, onPick, initialAsset, allowUpload, confirmLabel, hint }: PostSlicePanelProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<SliceImage | null>(
     initialAsset ? { id: 'history', url: initialAsset.url } : null,
   );
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -42,6 +52,29 @@ export default function PostSlicePanel({ userId, onPick, initialAsset }: PostSli
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [userId]);
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadError(null);
+    if (!file.type.startsWith('image/')) { setUploadError('画像ファイルを選択してください'); return; }
+    if (file.size > MAX_UPLOAD_BYTES) { setUploadError('5MB以下の画像を選択してください'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setUploading(true);
+      try {
+        // アップロードしてURL化する。参照は絶対URLになるので、他の人の画面でも表示される。
+        const res = await api.upload.image({ image: reader.result as string });
+        setSelected({ id: 'upload', url: res.url });
+      } catch {
+        setUploadError('アップロードに失敗しました');
+      } finally {
+        setUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const q = query.trim().toLowerCase();
   const imagePosts = posts.filter(p => p.hasImage && p.imageSrc &&
@@ -54,13 +87,28 @@ export default function PostSlicePanel({ userId, onPick, initialAsset }: PostSli
         initialRef={selected.id === 'history' ? initialAsset?.ref : undefined}
         onBack={() => setSelected(null)}
         onPick={onPick}
+        confirmLabel={confirmLabel}
       />
     );
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-[10px] text-gray-600 px-0.5">投稿画像から矩形を切り出してスプライトにします。複数キャラが入ったシートでも好きな位置を選べます。</p>
+      <p className="text-[10px] text-gray-600 px-0.5">{hint ?? '投稿画像から矩形を切り出してスプライトにします。複数キャラが入ったシートでも好きな位置を選べます。'}</p>
+      {allowUpload && (
+        <>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
+          <button
+            onClick={() => { setUploadError(null); fileRef.current?.click(); }}
+            disabled={uploading}
+            className="flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300 disabled:opacity-50"
+          >
+            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}画像をアップロードして切り出す
+          </button>
+          {uploadError && <p className="text-[10px] text-red-400 px-0.5">{uploadError}</p>}
+          <p className="text-[10px] text-gray-600 px-0.5">または投稿から選ぶ:</p>
+        </>
+      )}
       <div className="relative">
         <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
         <input
@@ -157,8 +205,8 @@ function parseInitialCrop(ref: string): InitialCrop | null {
   return null;
 }
 
-function SliceEditor({ image, initialRef, onBack, onPick }: {
-  image: SliceImage; initialRef?: string; onBack: () => void; onPick: (res: PickResult) => void;
+function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
+  image: SliceImage; initialRef?: string; onBack: () => void; onPick: (res: PickResult) => void; confirmLabel?: string;
 }) {
   const initialCrop = useMemo(() => (initialRef ? parseInitialCrop(initialRef) : null), [initialRef]);
 
@@ -576,7 +624,7 @@ function SliceEditor({ image, initialRef, onBack, onPick }: {
           </div>
 
           <button onClick={confirm} disabled={!canConfirm} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">
-            この範囲を使う
+            {confirmLabel ?? 'この範囲を使う'}
           </button>
         </>
       )}

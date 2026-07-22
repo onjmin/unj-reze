@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2 } from 'lucide-react';
+import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2, Scissors } from 'lucide-react';
 import { api } from '@/lib/api';
 import { loadImage, WALK_STANDARDS } from '@/lib/walk-sprite';
 import { buildWalkRef } from '@/lib/asset-ref';
@@ -12,6 +12,8 @@ import {
   userSheetCellRef, userSheetCellUrl, type UserSheet,
 } from '@/lib/user-sheets';
 import WalkSpritePreview from './WalkSpritePreview';
+import AssetThumb from './AssetThumb';
+import PostSlicePanel from './PostSlicePanel';
 import type { PickResult } from './ContentPicker';
 import type { Post } from '@/lib/types';
 
@@ -31,8 +33,12 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
   const sheets = useSyncExternalStore(subscribeUserSheets, userSheetsSnapshot, userSheetsServerSnapshot);
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [cropping, setCropping] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  // 「歩行グラを切り出す」は素材定義（管理モード＝onPick なし）でのみ出す。
+  // 投稿画像やアップロード画像から1体ぶんを切り出し、pickRef 付きマイシートとして保存する。
+  const canDefine = !onPick && !!userId;
 
   const open = sheets.find(s => s.id === openId) ?? null;
 
@@ -74,22 +80,29 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
             title={`${s.name} ・ ${s.cellW}×${s.cellH}px`}
             className={`shrink-0 whitespace-nowrap flex items-center gap-1 pl-1 pr-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${openId === s.id ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={s.url} alt=""
-              onError={e => { e.currentTarget.style.visibility = 'hidden'; }}
-              className="w-5 h-5 rounded object-cover bg-[#11131a] gimp-checkered-background"
-              style={{ imageRendering: 'pixelated' }}
-            />
+            <span className="w-5 h-5 rounded overflow-hidden bg-[#11131a] gimp-checkered-background shrink-0">
+              {s.pickRef
+                ? <AssetThumb refStr={s.pickRef} url={s.url} size={20} />
+                /* eslint-disable-next-line @next/next/no-img-element */
+                : <img src={s.url} alt="" onError={e => { e.currentTarget.style.visibility = 'hidden'; }} className="w-full h-full object-cover" style={{ imageRendering: 'pixelated' }} />}
+            </span>
             {s.name}
           </button>
         ))}
         <button
-          onClick={() => setAdding(v => !v)}
+          onClick={() => { setAdding(v => !v); setCropping(false); }}
           className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${adding ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}
         >
           <Plus size={11} className="inline -mt-0.5 mr-0.5" />シートを追加
         </button>
+        {canDefine && (
+          <button
+            onClick={() => { setCropping(v => !v); setAdding(false); }}
+            className={`shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${cropping ? 'bg-gray-700 text-white border-gray-600' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}
+          >
+            <Scissors size={11} className="inline -mt-0.5 mr-0.5" />歩行グラを切り出す
+          </button>
+        )}
         <input ref={importRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportFile} />
         <button
           onClick={() => { setImportError(null); importRef.current?.click(); }}
@@ -104,21 +117,85 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
 
       {adding && <AddSheetForm userId={userId} onDone={id => { setAdding(false); setOpenId(id); }} onPick={onPick} />}
 
-      {sheets.length === 0 && !adding && (
+      {cropping && canDefine && (
+        <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5">
+          <PostSlicePanel
+            userId={userId!}
+            allowUpload
+            confirmLabel="この歩行グラをマイシートに保存"
+            hint="投稿画像やアップロード画像から、1体ぶんの歩行グラ（または1コマ）を切り出してマイシートに保存します。保存した素材は「画像を参照」→「マイシート」からいつでも使えます。"
+            onPick={(res) => {
+              if (!res.url) return;
+              const created = addUserSheet({ name: res.label || '切り出し素材', url: res.url, cellW: 16, cellH: 16, pickRef: res.ref });
+              setCropping(false);
+              setOpenId(created.id);
+            }}
+          />
+        </div>
+      )}
+
+      {sheets.length === 0 && !adding && !cropping && (
         <p className="text-[10px] text-gray-500 px-0.5 leading-relaxed">
           投稿画像や画像URLを登録して、素材として使えます。
           1枚絵はそのまま、スプライトシートはマス目で切り出して使えます。
+          {canDefine && '「歩行グラを切り出す」でスプライトシートから1体ぶんを切り出して保存もできます。'}
         </p>
       )}
 
       {open && (
-        <SheetGrid
-          key={open.id}
-          sheet={open}
-          onPick={onPick}
-          onExport={() => handleExport(open)}
-          onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
-        />
+        open.pickRef
+          ? <PickRefSheetView
+              key={open.id}
+              sheet={open}
+              onPick={onPick}
+              onExport={() => handleExport(open)}
+              onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
+            />
+          : <SheetGrid
+              key={open.id}
+              sheet={open}
+              onPick={onPick}
+              onExport={() => handleExport(open)}
+              onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
+            />
+      )}
+    </div>
+  );
+}
+
+/** pickRef 付きマイシート（切り出し済みの1体素材）の詳細ビュー。マス目選択ではなく、そのまま使う。 */
+function PickRefSheetView({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; onPick?: (res: PickResult) => void; onExport: () => void; onDelete: () => void }) {
+  const isWalk = sheet.pickRef?.startsWith('walk:');
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 px-0.5">
+        <p className="text-[10px] text-gray-500 flex-1 truncate">{sheet.name} ・ {isWalk ? '歩行グラ（切り出し）' : '切り出しスプライト'}</p>
+        <button onClick={onExport} title="このシート定義を書き出す（.json）"
+          className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
+          <Download size={14} />
+        </button>
+        <button onClick={onDelete} title="このシートを削除"
+          className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10">
+          <Trash2 size={14} />
+        </button>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="shrink-0 grid place-items-center w-16 h-16 rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background overflow-hidden">
+          <AssetThumb refStr={sheet.pickRef!} url={sheet.url} size={56} />
+        </div>
+        <p className="text-[10px] text-gray-500 leading-relaxed flex-1">
+          {onPick
+            ? '切り出し済みの素材です。そのままタイル・キャラ・オブジェクトに使えます。'
+            : 'この素材は「画像を参照」→「マイシート」から使えます。'}
+        </p>
+      </div>
+      {onPick && (
+        <button
+          onClick={() => onPick({ ref: sheet.pickRef!, url: sheet.url, label: sheet.name })}
+          className="w-full py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-[11px] text-white font-bold"
+        >
+          この素材を使う
+        </button>
       )}
     </div>
   );

@@ -17,6 +17,11 @@ export interface UserSheet {
   cellH: number;
   /** 登録日時（新しい順に並べるため）。 */
   createdAt: number;
+  /** 単体素材（切り出した歩行グラ／スプライト）の確定参照。
+   *  存在すればマス目で切り出すシートではなく「1体ぶんの完成素材」として扱い、
+   *  選ぶときはこの参照（walk:...#x,y,w,h,frames,offsetY,scale や url:...#x,y,w,h）をそのまま使う。
+   *  切り出し矩形・歩行規格・表示倍率はこの参照文字列にすべて内包される。 */
+  pickRef?: string;
 }
 
 const KEY = 'unj_user_sheets';
@@ -31,7 +36,8 @@ function read(): UserSheet[] {
   try {
     const raw = localStorage.getItem(KEY);
     const arr = raw ? JSON.parse(raw) : [];
-    cache = Array.isArray(arr) ? arr.filter(s => s && s.url && s.cellW > 0 && s.cellH > 0) : [];
+    // 単体素材（pickRef あり）はマス目サイズを問わない。マス目シートは cellW/cellH が必須。
+    cache = Array.isArray(arr) ? arr.filter(s => s && s.url && (s.pickRef || (s.cellW > 0 && s.cellH > 0))) : [];
   } catch {
     cache = [];
   }
@@ -90,7 +96,7 @@ const EXPORT_VERSION = 1;
 interface SheetExport {
   kind: typeof EXPORT_KIND;
   version: number;
-  sheet: Pick<UserSheet, 'name' | 'url' | 'cellW' | 'cellH'>;
+  sheet: Pick<UserSheet, 'name' | 'url' | 'cellW' | 'cellH' | 'pickRef'>;
 }
 
 /** 1シートを配布用JSON文字列にする。 */
@@ -98,7 +104,7 @@ export function exportUserSheet(sheet: UserSheet): string {
   const payload: SheetExport = {
     kind: EXPORT_KIND,
     version: EXPORT_VERSION,
-    sheet: { name: sheet.name, url: sheet.url, cellW: sheet.cellW, cellH: sheet.cellH },
+    sheet: { name: sheet.name, url: sheet.url, cellW: sheet.cellW, cellH: sheet.cellH, ...(sheet.pickRef ? { pickRef: sheet.pickRef } : {}) },
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -115,13 +121,16 @@ export function importUserSheet(json: string): UserSheet | null {
   if (!obj || obj.kind !== EXPORT_KIND) return null;
   const s = obj.sheet;
   if (!s || typeof s.url !== 'string' || !s.url.trim()) return null;
+  const pickRef = typeof s.pickRef === 'string' && s.pickRef.trim() ? s.pickRef.trim() : undefined;
   const cellW = Number(s.cellW), cellH = Number(s.cellH);
-  if (!(cellW > 0) || !(cellH > 0)) return null;
+  // 単体素材（pickRef）はマス目サイズを問わない。マス目シートは正の cellW/cellH が必須。
+  if (!pickRef && (!(cellW > 0) || !(cellH > 0))) return null;
   return addUserSheet({
     name: typeof s.name === 'string' && s.name.trim() ? s.name.trim() : 'マイシート',
     url: s.url.trim(),
-    cellW,
-    cellH,
+    cellW: cellW > 0 ? cellW : 16,
+    cellH: cellH > 0 ? cellH : 16,
+    ...(pickRef ? { pickRef } : {}),
   });
 }
 

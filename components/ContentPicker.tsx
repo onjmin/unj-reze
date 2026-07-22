@@ -1,13 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Image as ImageIcon, Music, Video, Search, Loader2, Play, Square, Pencil, ArrowLeft } from 'lucide-react';
+import { X, Music, Video, Search, Loader2, Play, Square, Pencil, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
-import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, parseWalkRef } from '@/lib/asset-ref';
-import { loadImage, resolveSpriteRect } from '@/lib/walk-sprite';
+import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
@@ -15,6 +14,7 @@ import LocalAssetPanel from './LocalAssetPanel';
 import UserSheetPanel from './UserSheetPanel';
 import BuiltinGameSoundPanel from './BuiltinGameSoundPanel';
 import PostSlicePanel from './PostSlicePanel';
+import AssetThumb from './AssetThumb';
 import { getAvatarInfo } from '@/lib/avatar';
 
 export interface PickResult {
@@ -46,77 +46,12 @@ const SFX_TABS: BgmTab[] = ['rpgenSe', 'builtinGame', 'direct'];
 
 // モーダルは閉じるたびにアンマウントされるため、タブ選択とスクロール位置をモジュール変数で覚えておき、
 // 再度開いたときに前回見ていた場所へ復元する。BGM欄/効果音欄は選べるタブが違うので別々に覚える。
-let lastImageTab: ImageTab = 'posts';
+// 画像タブから「投稿」「切り出し」「投稿グラ」は廃止（素材定義はマイシート＝素材定義パネルへ集約）。
+// 廃止タブが最後の選択として復元されると空白になるため、既定のマイシートへ振り替える。
+const REMOVED_IMAGE_TABS = new Set<string>(['posts', 'slice', 'walk', 'url']);
+let lastImageTab: ImageTab = 'mySheet';
 const lastBgmTabByKind: Record<'bgm' | 'sfx', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe' };
 const scrollPositions = new Map<string, number>();
-
-/** 履歴タブのサムネ。walk: 参照は正面1コマ目を切り出し、url:#fragment はクロップ矩形を表示。 */
-function HistoryAssetThumb({ ref: refStr, url, size = 48 }: { ref: string; url?: string; size?: number }) {
-  const cvRef = useRef<HTMLCanvasElement>(null);
-  const walkRef = useRef(parseWalkRef(refStr));
-  const prevRefStr = useRef(refStr);
-  if (prevRefStr.current !== refStr) { prevRefStr.current = refStr; walkRef.current = parseWalkRef(refStr); }
-  const walk = walkRef.current;
-  const imgUrl = url ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
-
-  useEffect(() => {
-    const cv = cvRef.current;
-    if (!cv || !imgUrl) return;
-    const ctx = cv.getContext('2d');
-    if (!ctx) return;
-
-    if (walk && walk.source.kind === 'url') {
-      let cancelled = false;
-      loadImage(imgUrl).then(img => {
-        if (cancelled || !ctx) return;
-        const { sx, sy, sw, sh } = resolveSpriteRect(walk, img.naturalWidth, img.naturalHeight, imgUrl);
-        ctx.clearRect(0, 0, size, size);
-        const zoom = Math.min(size / sw, size / sh);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(img, sx, sy, sw, sh, (size - sw * zoom) / 2, (size - sh * zoom) / 2, sw * zoom, sh * zoom);
-      });
-      return () => { cancelled = true; };
-    }
-
-    // url:#fragment → フラグメントでクロップ（walk なし）
-    if (!walk) {
-      const hashIdx = imgUrl.indexOf('#');
-      if (hashIdx !== -1) {
-        const parts = imgUrl.slice(hashIdx + 1).split(',').map(Number);
-        if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
-          const [fsx, fsy, fsw, fsh] = parts;
-          const baseUrl = imgUrl.slice(0, hashIdx);
-          let cancelled = false;
-          loadImage(baseUrl).then(img => {
-            if (cancelled || !ctx) return;
-            const rect = resolveSpriteRect(null, img.naturalWidth, img.naturalHeight, imgUrl);
-            ctx.clearRect(0, 0, size, size);
-            const zoom = Math.min(size / fsw, size / fsh);
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, (size - rect.sw * zoom) / 2, (size - rect.sh * zoom) / 2, rect.sw * zoom, rect.sh * zoom);
-          });
-          return () => { cancelled = true; };
-        }
-      }
-    }
-  }, [imgUrl, walk?.crop?.[0], walk?.crop?.[1], walk?.crop?.[2], walk?.crop?.[3], walk?.stdId, walk?.frames, size]);
-
-  if (!walk && !(url && url.includes('#'))) {
-    return url
-      ? <img src={url} alt="" className="w-full h-full object-cover" />
-      : <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">?</div>;
-  }
-
-  return (
-    <canvas
-      ref={cvRef}
-      width={size}
-      height={size}
-      className="w-full h-full"
-      style={{ imageRendering: 'pixelated' }}
-    />
-  );
-}
 
 
 function formatTime(sec: number) {
@@ -132,7 +67,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const [query, setQuery] = useState('');
   // 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
   // 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
-  const [imageTab, setImageTab] = useState<ImageTab>(lastImageTab === 'url' ? 'mySheet' : lastImageTab);
+  const [imageTab, setImageTab] = useState<ImageTab>(REMOVED_IMAGE_TABS.has(lastImageTab) ? 'mySheet' : lastImageTab);
   const allowedBgmTabs = bgmKind === 'sfx' ? SFX_TABS : BGM_TABS;
   // 現在選択中のBGM/効果音がある場合は、それが属するタブとURL/MML欄をあらかじめ復元する
   // （従来は毎回タブ・入力欄が空になり、既存の設定を再編集できなかった）。
@@ -313,25 +248,11 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   }, [userId]);
 
   const q = query.trim().toLowerCase();
-  const imagePosts = posts.filter(p => p.hasImage && p.imageSrc &&
-    (!q || p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q)));
-  // 歩行グラ: #歩行グラ タグ付きの画像投稿を優先候補に
-  const walkPosts = posts.filter(p => p.hasImage && p.imageSrc &&
-    /歩行|walk|スプライト|sprite/i.test(p.content) &&
-    (!q || p.content.toLowerCase().includes(q)));
+  // BGM欄の「MML投稿」タブ用。画像投稿の直接ピックは廃止（マイシート＝素材定義パネルへ集約）。
   const mmlPosts = posts.filter(p => {
     const mml = extractMmlFromContent(p.content);
     return !!mml && (!q || p.content.toLowerCase().includes(q));
   });
-
-  const pickImagePost = (p: Post, scheme: 'post' | 'walk') => {
-    onPick({
-      ref: scheme === 'post' ? `post:${p.id}` : `walk:${p.id}`,
-      url: p.imageSrc,
-      label: `${scheme === 'post' ? '画像' : '歩行グラ'} #${p.id}`,
-    });
-  };
-
 
   const pickYoutube = () => {
     const v = urlInput.trim();
@@ -393,16 +314,15 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         <div className="flex flex-wrap gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
           {mode === 'image' ? (
             <>
-              <button className={tabBtn(imageTab === 'posts')} onClick={() => changeImageTab('posts')}><ImageIcon size={12} />画像投稿</button>
-              <button className={tabBtn(imageTab === 'slice')} onClick={() => changeImageTab('slice')}>✂️ 投稿から切り出し</button>
+              {/* メタ（自分の素材）タブ: 使用履歴・マイシート。画像アップロード/投稿からの切り出しは「素材定義」パネルへ移動した。 */}
               {usedAssets.length > 0 && (
                 <button className={tabBtn(imageTab === 'history')} onClick={() => changeImageTab('history')}>🕘 使用履歴</button>
               )}
-              <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
               <button className={tabBtn(imageTab === 'mySheet')} onClick={() => changeImageTab('mySheet')}>🗂️ マイシート</button>
-              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 素材</button>
-              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 歩行グラ</button>
-              <button className={tabBtn(imageTab === 'walk')} onClick={() => changeImageTab('walk')}>📥 投稿グラ</button>
+              {/* 内蔵素材（リポジトリ同梱）と、rpgen-search 由来の外部素材を分けて示す。 */}
+              <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
+              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 外部素材</button>
+              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 外部歩行グラ</button>
               <button className={tabBtn(imageTab === 'smc')} onClick={() => changeImageTab('smc')}>🎮 SMC素材</button>
             </>
           ) : (
@@ -436,46 +356,6 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         </div>
 
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 scrollbar-none">
-          {/* Image: posts / walk */}
-          {mode === 'image' && (imageTab === 'posts' || imageTab === 'walk') && (
-            <>
-              <div className="relative mb-2">
-                <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
-                <input
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="投稿を検索"
-                  className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
-                />
-              </div>
-              {loading ? (
-                <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-500" /></div>
-              ) : (
-                <div className="grid grid-cols-3 gap-2">
-                  {(imageTab === 'posts' ? imagePosts : walkPosts).map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => pickImagePost(p, imageTab === 'posts' ? 'post' : 'walk')}
-                      className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.imageSrc} alt="" className="w-full h-full object-cover" style={{ imageRendering: imageTab === 'walk' ? 'pixelated' : 'auto' }} />
-                      <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">#{p.id}</span>
-                    </button>
-                  ))}
-                  {(imageTab === 'posts' ? imagePosts : walkPosts).length === 0 && (
-                    <p className="col-span-3 text-center text-[11px] text-gray-600 py-8">該当する投稿がありません</p>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Image: slice (post image → sprite sheet crop) */}
-          {mode === 'image' && imageTab === 'slice' && (
-            <PostSlicePanel userId={userId} onPick={onPick} />
-          )}
-
           {/* Image: history（このゲーム内で既に使われている画像を再選択・再編集） */}
           {mode === 'image' && imageTab === 'history' && (
             editingHistoryAsset ? (
@@ -496,7 +376,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                     onClick={() => onPick(a)}
                     className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
                   >
-                    <HistoryAssetThumb ref={a.ref} url={a.url} />
+                    <AssetThumb refStr={a.ref} url={a.url} />
                     {a.url && (
                       <span
                         role="button"
