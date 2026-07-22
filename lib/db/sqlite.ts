@@ -375,19 +375,20 @@ async function getThreadRepliesSqlite(d: SqlJsDatabase, threadIds: number[]): Pr
 }
 
 export const sqliteStore: DataStore = {
-  async getPosts(userId?: string) {
+  async getPosts(userId?: string, limit?: number) {
     const d = await getDb();
+    const limitClause = limit ? ` LIMIT ${Math.max(1, Math.min(limit, 100))}` : '';
     let rows;
     if (userId) {
       rows = rowsToObjects(
         d,
-        `${VOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC`,
+        `${VOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC${limitClause}`,
         [userId]
       );
     } else {
       rows = rowsToObjects(
         d,
-        `${UNVOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC`
+        `${UNVOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC${limitClause}`
       );
     }
     if (rows.length === 0) return [];
@@ -1141,6 +1142,14 @@ export const sqliteStore: DataStore = {
     if (rows.length === 0) return null;
     const r = rows[0];
     return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined };
+  },
+
+  async getGamesByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    const d = await getDb();
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = rowsToObjects(d, `SELECT * FROM games WHERE id IN (${placeholders})`, ids);
+    return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined }));
   },
 
   async updateGame(id, data) {

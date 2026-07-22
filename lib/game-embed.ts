@@ -21,12 +21,13 @@ export async function attachGameInfo<T extends DbPost | null | (DbPost | null)[]
   if (ids.size === 0) return posts;
 
   const gameMap = new Map<number, DbGameRecord>();
-  await Promise.all(
-    [...ids].map(async (id) => {
-      const game = await db.getGame(id);
-      if (game) gameMap.set(id, game);
-    })
-  );
+  const idArray = [...ids];
+  const games = typeof db.getGamesByIds === 'function'
+    ? await db.getGamesByIds(idArray)
+    : (await Promise.all(idArray.map(id => db.getGame(id)))).filter((g): g is DbGameRecord => !!g);
+  games.forEach(game => {
+    if (game) gameMap.set(game.id, game);
+  });
 
   const apply = (p: DbPost) => {
     if (p.gameId && gameMap.has(p.gameId)) {

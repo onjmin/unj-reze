@@ -61,7 +61,7 @@ export interface ReportParams {
 }
 
 export interface DataStore {
-  getPosts(userId?: string): Promise<DbPost[]>;
+  getPosts(userId?: string, limit?: number): Promise<DbPost[]>;
   getPost(id: number, userId?: string): Promise<DbPost | null>;
   createPost(data: CreatePostParams): Promise<DbPost>;
   likePost(id: number, userId: string): Promise<DbPost | null>;
@@ -113,6 +113,7 @@ export interface DataStore {
   reportContent(data: ReportParams): Promise<void>;
   createGame(data: CreateGameParams): Promise<DbGameRecord>;
   getGame(id: number): Promise<DbGameRecord | null>;
+  getGamesByIds(ids: number[]): Promise<DbGameRecord[]>;
   updateGame(id: number, data: { title: string; manifest: GameManifestDraft }): Promise<DbGameRecord | null>;
   listAllGames(): Promise<DbGameRecord[]>;
   getLiveGameInfo(ipAddress: string): Promise<{ gameId: number | null; gameTitle: string; gamePreset: string; hourSlot: string; postId: number | null; nextCandidates: GameVoteCandidate[]; myVote: number | null }>;

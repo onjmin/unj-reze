@@ -110,8 +110,9 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
   return map;
 }
 
-async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> {
+async function getPostsWithVotes(client: any, userId?: string, limit?: number): Promise<Post[]> {
   let result;
+  const limitClause = limit ? ` LIMIT ${Math.max(1, Math.min(limit, 100))}` : '';
   if (userId) {
     result = await client.query(`
       SELECT p.*,
@@ -124,7 +125,7 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
       WHERE p.thread_id = p.id
-      ORDER BY p.id DESC
+      ORDER BY p.id DESC${limitClause}
     `, [userId]);
   } else {
     result = await client.query(`
@@ -137,7 +138,7 @@ async function getPostsWithVotes(client: any, userId?: string): Promise<Post[]> 
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.thread_id = p.id
-      ORDER BY p.id DESC
+      ORDER BY p.id DESC${limitClause}
     `);
   }
 
@@ -1253,6 +1254,20 @@ export const pgStore: DataStore = {
       const r = result.rows[0];
       const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
       return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
+    } finally {
+      client.release();
+    }
+  },
+
+  async getGamesByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    const client = await getPool().connect();
+    try {
+      const result = await client.query('SELECT * FROM games WHERE id = ANY($1::int[])', [ids]);
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+        return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
+      });
     } finally {
       client.release();
     }

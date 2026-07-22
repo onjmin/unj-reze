@@ -8,8 +8,8 @@ import type { DbGameRecord } from '../types-db';
 const gameStore = new Map<number, DbGameRecord>();
 
 export const mockStore: DataStore = {
-  async getPosts(userId?: string) {
-    return mockDb.getPosts(userId);
+  async getPosts(userId?: string, limit?: number) {
+    return mockDb.getPosts(userId, limit);
   },
 
   async getPost(id: number, userId?: string) {
@@ -213,6 +213,12 @@ export const mockStore: DataStore = {
 
   async getGame(id: number): Promise<DbGameRecord | null> {
     return gameStore.get(id) ?? null;
+  },
+
+  async getGamesByIds(ids: number[]): Promise<DbGameRecord[]> {
+    if (!ids || ids.length === 0) return [];
+    const set = new Set(ids);
+    return Array.from(gameStore.values()).filter(g => set.has(g.id));
   },
 
   async updateGame(id: number, data: { title: string; manifest: CreateGameParams['manifest'] }): Promise<DbGameRecord | null> {

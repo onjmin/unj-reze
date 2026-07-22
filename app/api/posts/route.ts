@@ -12,7 +12,9 @@ export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
     const userId = url.searchParams.get('userId') || undefined;
-    const posts = await db.getPosts(userId);
+    const limitParam = url.searchParams.get('limit');
+    const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 100) : 50;
+    const posts = await db.getPosts(userId, limit);
     await attachGameInfo(posts);
     return NextResponse.json(posts.map(encodePost));
   } catch (e) {

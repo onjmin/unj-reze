@@ -276,13 +276,17 @@ class MockDB {
     return post;
   }
 
-  getPosts(userId?: string): Post[] {
+  getPosts(userId?: string, limit?: number): Post[] {
     const hidden = this.getHiddenSlugs(userId);
-    return this.posts
+    const result = this.posts
       .filter(p => p.id === p.threadId)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => this.canViewAuthor(p.slug ?? '', p.displayName, userId))
       .map(p => this.applyUserState({ ...p, replies: [...p.replies].filter(r => !hidden.has(r.slug ?? '')).map(r => this.applyUserState(r, userId)) }, userId));
+    if (limit && limit > 0) {
+      return result.slice(0, limit);
+    }
+    return result;
   }
 
   getUserPostsBySlug(slug: string, userId?: string): Post[] {
