@@ -264,9 +264,15 @@ export interface WalkRef {
   offsetY?: number;
   /** 表示倍率（小数可）。指定時はセルへの自動フィットをせず、コマ実寸×この倍率で描く。#…,offsetY,scale の7番目。 */
   renderScale?: number;
+  /** 簡易アニメ用: 対象行インデックス (既定 0)。#…,scale,row の8番目。 */
+  row?: number;
+  /** 簡易アニメ用: 再生モード ('loop' | 'pingpong' | 'once')。#…,row,playMode の9番目。 */
+  playMode?: 'loop' | 'pingpong' | 'once';
+  /** 簡易アニメ用: フレームレート FPS (既定 6)。#…,playMode,fps の10番目。 */
+  fps?: number;
 }
 
-const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc', 'smc_json']);
+const WALK_STD_IDS = new Set(['auto', 'rpgen', 'rm2k', 'rmxp', 'rmvx', 'rmmv', 'smc', 'smc_json', 'row_anim']);
 
 export function buildWalkRef(stdId: string, source: WalkRef['source']): string {
   const src = source.kind === 'url' ? `u:${source.url}` : `p:${source.postId}`;
@@ -307,17 +313,24 @@ export function parseWalkRef(raw: string): WalkRef | null {
         let frames: number | undefined;
         let offsetY: number | undefined;
         let renderScale: number | undefined;
+        let row: number | undefined;
+        let playMode: 'loop' | 'pingpong' | 'once' | undefined;
+        let fps: number | undefined;
         if (hashIdx !== -1) {
           url = rawUrl.slice(0, hashIdx);
-          const parts = rawUrl.slice(hashIdx + 1).split(',').map(Number);
+          const rawParts = rawUrl.slice(hashIdx + 1).split(',');
+          const parts = rawParts.map(Number);
           if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
             crop = parts.slice(0, 4) as [number, number, number, number];
             if (parts.length >= 5 && !isNaN(parts[4]) && parts[4] > 0) frames = parts[4];
             if (parts.length >= 6 && !isNaN(parts[5])) offsetY = parts[5];
             if (parts.length >= 7 && !isNaN(parts[6]) && parts[6] > 0) renderScale = parts[6];
+            if (parts.length >= 8 && !isNaN(parts[7]) && parts[7] >= 0) row = parts[7];
+            if (parts.length >= 9 && ['loop', 'pingpong', 'once'].includes(rawParts[8])) playMode = rawParts[8] as any;
+            if (parts.length >= 10 && !isNaN(parts[9]) && parts[9] > 0) fps = parts[9];
           }
         }
-        return { stdId: maybeStd, source: { kind: 'url', url }, crop, frames, offsetY, renderScale };
+        return { stdId: maybeStd, source: { kind: 'url', url }, crop, frames, offsetY, renderScale, row, playMode, fps };
       }
       if (srcStr.startsWith('p:')) {
         const id = parseInt(srcStr.slice(2), 10);

@@ -12,7 +12,7 @@ import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, H
 import { undertaleSfxUrl } from '@/lib/undertale-engine-sfx';
 import { tldrSfxUrl, TLDR_UNDERTALE_SPRITE, TLDR_UI_SPRITES } from '@/lib/deltarune-tldr-assets';
 import {
-  detectStandard, standardById, animatedCell, animatedCellInRect, dirFromDelta, resolveSpriteRect,
+  detectStandard, standardById, animatedCell, animatedCellInRect, rowAnimCellInRect, dirFromDelta, resolveSpriteRect,
   type WayKey, type WalkStandard,
 } from '@/lib/walk-sprite';
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
@@ -5845,10 +5845,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const offsetY = walk.offsetY ?? 0;
         const renderScale = walk.renderScale;
 
+        if (walk.stdId === 'row_anim') {
+          // 簡易アニメーション（行指定・方向固定）:
+          // キャラの向きに関わらず全く同じアニメーションを表示する。
+          const cropRect: [number, number, number, number] = walk.crop ?? [0, 0, imgW, imgH];
+          const cell = rowAnimCellInRect(cropRect, {
+            frames: walk.frames ?? 4,
+            row: walk.row ?? 0,
+            playMode: walk.playMode ?? 'loop',
+            fps: walk.fps ?? 6,
+            timeSec: performance.now() / 1000,
+          });
+          const destW = renderScale ? cell.sw * renderScale : w;
+          const destH = renderScale ? cell.sh * renderScale : h;
+          const destX = x + (w - destW) / 2;
+          const destY = y + (h - destH) - offsetY;
+          ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh, destX, destY, destW, destH);
+          return;
+        }
+
         if (walk.crop && walk.stdId === 'smc') {
           // SMC専用ロジック（lib/smc-sprite.ts）: ストリップを分割。
           // 右向き素材なので、左移動時は水平反転して描く。
-          const rect = smcFrameRect(walk.crop, { moving: animMoving, timeSec: performance.now() / 1000, fps: 7, frames: walk.frames });
+          const rect = smcFrameRect(walk.crop, { moving: animMoving, timeSec: performance.now() / 1000, fps: 7, frames: walk.frames, row: walk.row });
 
           // 倍率指定時はそれをそのまま使い、未指定ならアスペクト比を保って縦幅をhに合わせる。
           const zoom = renderScale ?? h / rect.sh;
@@ -5874,7 +5893,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // crop矩形内でその規格の 方向×フレーム 格子計算を行う（stdは上のキャッシュ済みのもの）。
           const cell = animatedCellInRect(std, walk.crop, {
             dir: std.flipH ? 'd' : dir,
-            moving: animMoving, timeSec: performance.now() / 1000, fps: 7,
+            moving: animMoving, timeSec: performance.now() / 1000, fps: 7, row: walk.row,
           });
           // 倍率未指定時はセルにぴったり合わせる（従来どおり）。指定時はコマ実寸×倍率（小数可）で描く。
           const destW = renderScale ? cell.sw * renderScale : w;
@@ -5896,7 +5915,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
         const cell = animatedCell(std, imgW, imgH, {
           dir: std.flipH ? 'd' : dir,
-          moving: animMoving, timeSec: performance.now() / 1000, fps: 7,
+          moving: animMoving, timeSec: performance.now() / 1000, fps: 7, row: walk.row,
         });
         const flipLeft = std.flipH && dir === 'a';
         if (flipLeft) {

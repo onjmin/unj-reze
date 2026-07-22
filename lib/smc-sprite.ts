@@ -42,7 +42,7 @@ export function smcFrameCount(crop: SmcCrop, explicit?: number): number {
  */
 export function smcFrameRect(
   crop: SmcCrop,
-  opts: { moving: boolean; timeSec: number; fps?: number; frames?: number },
+  opts: { moving: boolean; timeSec: number; fps?: number; frames?: number; row?: number },
 ): SmcFrameRect {
   const [sx, sy, sw, sh] = crop;
   const frames = smcFrameCount(crop, opts.frames);
@@ -51,5 +51,6 @@ export function smcFrameRect(
   const idx = frames <= 1 || !opts.moving
     ? 0
     : ((Math.floor(opts.timeSec * fps) % frames) + frames) % frames;
-  return { sx: sx + idx * frameW, sy, sw: frameW, sh };
+  const rowOffsetY = (opts.row ?? 0) * sh;
+  return { sx: sx + idx * frameW, sy: sy + rowOffsetY, sw: frameW, sh };
 }

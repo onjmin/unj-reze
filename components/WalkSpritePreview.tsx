@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   type WayKey, type WalkStandard,
-  standardById, detectStandard, animatedCell, loadImage,
+  standardById, detectStandard, animatedCell, rowAnimCellInRect, loadImage,
 } from '@/lib/walk-sprite';
 
 interface WalkSpritePreviewProps {
@@ -20,6 +20,12 @@ interface WalkSpritePreviewProps {
   /** 足踏みfps。既定 6 */
   fps?: number;
   className?: string;
+  /** 簡易アニメ用 コマ数 */
+  frames?: number;
+  /** 簡易アニメ用 再生モード */
+  playMode?: 'loop' | 'pingpong' | 'once';
+  /** 簡易アニメ用 対象行 */
+  row?: number;
 }
 
 const SHOWCASE_DIRS: WayKey[] = ['s', 'a', 'd', 'w'];
@@ -27,7 +33,7 @@ const SHOWCASE_DIRS: WayKey[] = ['s', 'a', 'd', 'w'];
 // 1枚のシート歩行グラを canvas でアニメーション表示する。
 // AssetBrowser やエディタのプレビューで使う（モバイル・ドット絵想定で pixelated 描画）。
 export default function WalkSpritePreview({
-  url, stdId = 'auto', size = 64, dir, walking = true, fps = 6, className,
+  url, stdId = 'auto', size = 64, dir, walking = true, fps = 6, className, frames, playMode, row,
 }: WalkSpritePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState(false);
@@ -54,10 +60,21 @@ export default function WalkSpritePreview({
       if (!ctx) return;
 
       const timeSec = t / 1000;
-      const curDir = dir ?? SHOWCASE_DIRS[Math.floor(timeSec / 0.9) % SHOWCASE_DIRS.length];
-      const cell = animatedCell(std, img.naturalWidth, img.naturalHeight, {
-        dir: curDir, moving: walking, timeSec, fps,
-      });
+      let cell;
+      if (std.id === 'row_anim') {
+        cell = rowAnimCellInRect([0, 0, img.naturalWidth, img.naturalHeight], {
+          frames: frames ?? std.frames ?? 4,
+          row: row ?? 0,
+          playMode: playMode ?? 'loop',
+          fps,
+          timeSec,
+        });
+      } else {
+        const curDir = dir ?? SHOWCASE_DIRS[Math.floor(timeSec / 0.9) % SHOWCASE_DIRS.length];
+        cell = animatedCell(std, img.naturalWidth, img.naturalHeight, {
+          dir: curDir, moving: walking, timeSec, fps, row,
+        });
+      }
 
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       if (canvas.width !== size * dpr) { canvas.width = size * dpr; canvas.height = size * dpr; }

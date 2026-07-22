@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Search, ArrowLeft, Upload } from 'lucide-react';
 import {
-  loadImage, WALK_STANDARDS, standardById, detectStandard, animatedCellInRect, WAY,
+  loadImage, WALK_STANDARDS, standardById, detectStandard, animatedCellInRect, rowAnimCellInRect, WAY,
   type WayKey, type WalkStandard,
 } from '@/lib/walk-sprite';
 import { parseWalkRef } from '@/lib/asset-ref';
@@ -174,6 +174,9 @@ interface InitialCrop {
   fieldWays: string;
   fieldOffsetY: number;
   fieldScale: string;
+  fieldRow: number;
+  fieldPlayMode: 'loop' | 'pingpong' | 'once';
+  fieldFps: number;
 }
 
 /** 既存の ref（url:...#x,y,w,h や walk:...:u:...#x,y,w,h,...）から編集用の初期状態を復元する。 */
@@ -195,10 +198,13 @@ function parseInitialCrop(ref: string): InitialCrop | null {
       templateId: wr.stdId,
       fieldW: Math.round(w / std.frames),
       fieldH: Math.round(h / std.ways.length),
-      fieldFrames: std.frames,
+      fieldFrames: wr.frames ?? std.frames,
       fieldWays: std.ways.map(k => k.key).join(''),
       fieldOffsetY: wr.offsetY ?? 0,
       fieldScale: wr.renderScale ? String(wr.renderScale) : '',
+      fieldRow: wr.row ?? 0,
+      fieldPlayMode: wr.playMode ?? 'loop',
+      fieldFps: wr.fps ?? 6,
     };
   }
   if (ref.startsWith('url:')) {
@@ -218,6 +224,9 @@ function parseInitialCrop(ref: string): InitialCrop | null {
       fieldWays: std.ways.map(k => k.key).join(''),
       fieldOffsetY: 0,
       fieldScale: '',
+      fieldRow: 0,
+      fieldPlayMode: 'loop',
+      fieldFps: 6,
     };
   }
   return null;
@@ -250,6 +259,9 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
   const [fieldH, setFieldH] = useState<number>(initialCrop?.fieldH ?? WALK_STANDARDS[0].h);
   const [fieldFrames, setFieldFrames] = useState<number>(initialCrop?.fieldFrames ?? WALK_STANDARDS[0].frames);
   const [fieldWays, setFieldWays] = useState<string>(initialCrop?.fieldWays ?? WALK_STANDARDS[0].ways.map(w => w.key).join(''));
+  const [fieldRow, setFieldRow] = useState<number>(initialCrop?.fieldRow ?? 0);
+  const [fieldPlayMode, setFieldPlayMode] = useState<'loop' | 'pingpong' | 'once'>(initialCrop?.fieldPlayMode ?? 'loop');
+  const [fieldFps, setFieldFps] = useState<number>(initialCrop?.fieldFps ?? 6);
 
   const applyTemplate = (id: string) => {
     setTemplateId(id);
@@ -351,8 +363,19 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
     const render = (t: DOMHighResTimeStamp) => {
       raf = requestAnimationFrame(render);
       const timeSec = t / 1000;
-      const curDir = showDirs[Math.floor(timeSec / 1) % showDirs.length];
-      const cell = animatedCellInRect(std, [rect.x, rect.y, rect.w, rect.h], { dir: curDir, moving: true, timeSec, fps: 6 });
+      let cell;
+      if (templateId === 'row_anim') {
+        cell = rowAnimCellInRect([rect.x, rect.y, rect.w, rect.h], {
+          frames: fieldFrames,
+          row: fieldRow,
+          playMode: fieldPlayMode,
+          fps: fieldFps,
+          timeSec,
+        });
+      } else {
+        const curDir = showDirs[Math.floor(timeSec / 1) % showDirs.length];
+        cell = animatedCellInRect(std, [rect.x, rect.y, rect.w, rect.h], { dir: curDir, moving: true, timeSec, fps: 6, row: fieldRow });
+      }
 
       const CW = canvas.width, CH = canvas.height;
       const CELL = 64;           // 「セル」の想定サイズ(px)。仮想タイル1マス分。
@@ -398,7 +421,7 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
     };
     raf = requestAnimationFrame(render);
     return () => cancelAnimationFrame(raf);
-  }, [img, outKind, rect, fieldFrames, wayKeys, fieldOffsetY, fieldScale]);
+  }, [img, outKind, rect, fieldFrames, wayKeys, fieldOffsetY, fieldScale, templateId, fieldRow, fieldPlayMode, fieldFps]);
 
   const toImagePoint = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -425,6 +448,11 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
       const w = Math.min(blockW, img.naturalWidth - x);
       const h = Math.min(blockH, img.naturalHeight - y);
       setRect({ x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) });
+
+      if (blockH > 0) {
+        const clickedRow = Math.floor(snapY / blockH);
+        if (clickedRow >= 0) setFieldRow(clickedRow);
+      }
       return;
     }
 
@@ -491,13 +519,21 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
       const scaleN = parseFloat(fieldScale);
       const hasScale = !isNaN(scaleN) && scaleN > 0;
       const hasOffset = fieldOffsetY !== 0;
-      const parts = [rect.x, rect.y, rect.w, rect.h];
-      if (!matched || hasOffset || hasScale) parts.push(fieldFrames);
-      if (hasOffset || hasScale) parts.push(fieldOffsetY);
-      if (hasScale) parts.push(scaleN);
+      const isRowAnim = stdId === 'row_anim';
+      const hasRow = isRowAnim || fieldRow !== 0;
+      const hasPlayMode = isRowAnim || fieldPlayMode !== 'loop';
+      const hasFps = isRowAnim || fieldFps !== 6;
+
+      const parts: (number | string)[] = [rect.x, rect.y, rect.w, rect.h];
+      if (!matched || hasOffset || hasScale || hasRow || hasPlayMode || hasFps) parts.push(fieldFrames);
+      if (hasOffset || hasScale || hasRow || hasPlayMode || hasFps) parts.push(fieldOffsetY);
+      if (hasScale || hasRow || hasPlayMode || hasFps) parts.push(hasScale ? scaleN : 1);
+      if (hasRow || hasPlayMode || hasFps) parts.push(fieldRow);
+      if (hasPlayMode || hasFps) parts.push(fieldPlayMode);
+      if (hasFps) parts.push(fieldFps);
       const crop = parts.join(',');
 
-      const label = matched ? `画像 #${image.id} 歩行グラ切り出し（${matched.label}）` : `画像 #${image.id} 歩行グラ切り出し`;
+      const label = matched ? `画像 #${image.id} アニメ切り出し（${matched.label}）` : `画像 #${image.id} アニメ切り出し`;
       onPick({ ref: `walk:${stdId}:u:${url}#${crop}`, url, label });
     }
   };
@@ -535,7 +571,7 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
 
           <div className="flex flex-wrap gap-1.5">
             <button className={btn(outKind === 'sprite')} onClick={() => setOutKind('sprite')}>🖼️ スプライト（静止画）</button>
-            <button className={btn(outKind === 'walk')} onClick={() => setOutKind('walk')}>🚶 歩行グラ（アニメ）</button>
+            <button className={btn(outKind === 'walk')} onClick={() => setOutKind('walk')}>🚶 歩行グラ / 簡易アニメ</button>
           </div>
 
           {outKind === 'sprite' && (
@@ -563,7 +599,7 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
             <div className="flex flex-col gap-2 p-2.5 rounded-lg border border-gray-800 bg-[#11131a]">
               <div>
                 <div className="text-xs font-bold text-gray-200">コマ数 / サイズ変更</div>
-                <p className="text-[10px] text-gray-600">ツクールの規格に対応できます</p>
+                <p className="text-[10px] text-gray-600">歩行グラ規格・簡易アニメ（1行ストリップ）に対応できます</p>
               </div>
 
               <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">
@@ -578,6 +614,48 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
                   ))}
                 </select>
               </label>
+
+              {templateId === 'row_anim' && (
+                <div className="p-2 rounded bg-blue-950/40 border border-blue-900/60 space-y-2 text-[10px]">
+                  <p className="text-blue-300 font-bold">簡易アニメ（行指定・方向固定）設定</p>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <label className="flex flex-col gap-0.5 text-gray-400">
+                      再生モード
+                      <select
+                        value={fieldPlayMode}
+                        onChange={e => setFieldPlayMode(e.target.value as any)}
+                        className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+                      >
+                        <option value="loop">ループ (標準)</option>
+                        <option value="pingpong">往復 (ピンポン)</option>
+                        <option value="once">単発 (1回のみ / 技・攻撃)</option>
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-0.5 text-gray-400">
+                      速度 (FPS)
+                      <input
+                        type="number" min={1} max={30} value={fieldFps}
+                        onChange={e => setFieldFps(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">
+                対象行インデックス (0始まり)
+                <input
+                  type="number" min={0} value={fieldRow}
+                  onChange={e => setFieldRow(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
+                />
+              </label>
+              <p className="text-[10px] text-gray-600">
+                複数キャラ・素材が縦に並んだシートから対象の行（0, 1, 2…）を選択できます。画像上のキャラをクリックしても移動できます。
+              </p>
 
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">
@@ -598,12 +676,16 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
                   className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200" />
               </label>
 
-              <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">
-                方向転換
-                <input value={fieldWays} onChange={e => setFieldWays(e.target.value)}
-                  className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200 font-mono" />
-              </label>
-              <p className="text-[10px] text-gray-600">wasd(前後左右)+qezc(ナナメ)</p>
+              {templateId !== 'row_anim' && (
+                <>
+                  <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">
+                    方向転換
+                    <input value={fieldWays} onChange={e => setFieldWays(e.target.value)}
+                      className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200 font-mono" />
+                  </label>
+                  <p className="text-[10px] text-gray-600">wasd(前後左右)+qezc(ナナメ)</p>
+                </>
+              )}
 
               <div className="grid grid-cols-2 gap-1.5">
                 <label className="flex flex-col gap-0.5 text-[10px] text-gray-500">

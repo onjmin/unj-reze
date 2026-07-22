@@ -74,8 +74,17 @@ export const SMC_STRIP: WalkStandard = {
   flipH: true,
 };
 
+/**
+ * 簡易アニメーション規格（行指定・方向固定）。
+ * 指定した1行のコマ群を ループ / 往復(ピンポン) / 単発 で再生する。向きによらず同一の表示となる。
+ */
+export const ROW_ANIM: WalkStandard = {
+  id: 'row_anim', label: '簡易アニメ（方向固定）', w: 16, h: 16, frames: 4,
+  ways: [WAY.s],
+};
+
 export const WALK_STANDARDS: WalkStandard[] = [
-  RPGEN, RPGMAKER_2000, RPGMAKER_XP, RPGMAKER_VX, RPGMAKER_MV, SMC_STRIP,
+  RPGEN, RPGMAKER_2000, RPGMAKER_XP, RPGMAKER_VX, RPGMAKER_MV, SMC_STRIP, ROW_ANIM,
 ];
 
 export function standardById(id: string): WalkStandard {
@@ -133,13 +142,15 @@ export function cellRect(
   imgH: number,
   key: WayKey,
   frame: number,
+  rowOffset: number = 0,
 ): SpriteRect {
   const cols = std.frames;
   const rows = std.ways.length;
   const cw = imgW / cols;
   const ch = imgH / rows;
   const way = resolveWay(std, key);
-  const rowIdx = std.ways.indexOf(way);
+  const baseRowIdx = std.ways.indexOf(way);
+  const rowIdx = baseRowIdx + rowOffset * rows;
   const colIdx = ((frame % cols) + cols) % cols;
   return { 
     sx: colIdx * cw + SAFE_OFFSET_XY, 
@@ -157,13 +168,13 @@ export function animatedCell(
   std: WalkStandard,
   imgW: number,
   imgH: number,
-  opts: { dir: WayKey; moving: boolean; timeSec: number; fps?: number },
+  opts: { dir: WayKey; moving: boolean; timeSec: number; fps?: number; row?: number },
 ): SpriteRect {
   const fps = opts.fps ?? 6;
   const step = opts.moving ? Math.floor(opts.timeSec * fps) : (std.frames === 3 ? 0 : 0);
   const idleFrame = std.frames === 3 ? 1 : 0; // 3フレーム規格は中央が待機
   const frame = opts.moving ? walkFrameIndex(std, step) : idleFrame;
-  return cellRect(std, imgW, imgH, opts.dir, frame);
+  return cellRect(std, imgW, imgH, opts.dir, frame, opts.row ?? 0);
 }
 
 /**
@@ -175,11 +186,72 @@ export function animatedCell(
 export function animatedCellInRect(
   std: WalkStandard,
   crop: [number, number, number, number],
-  opts: { dir: WayKey; moving: boolean; timeSec: number; fps?: number },
+  opts: { dir: WayKey; moving: boolean; timeSec: number; fps?: number; row?: number },
 ): SpriteRect {
   const [csx, csy, csw, csh] = crop;
   const cell = animatedCell(std, csw, csh, opts);
-  return { sx: csx + cell.sx, sy: csy + cell.sy, sw: cell.sw, sh: cell.sh };
+  const rowOffsetY = (opts.row ?? 0) * (cell.sh * std.ways.length);
+  return { sx: csx + cell.sx, sy: csy + cell.sy + rowOffsetY, sw: cell.sw, sh: cell.sh };
+}
+
+// ───────────────── 簡易アニメーション (Row Animation) ─────────────────
+
+export type AnimPlayMode = 'loop' | 'pingpong' | 'once';
+
+/**
+ * 簡易アニメーション（行指定）のフレームインデックス(0..frames-1)を求める。
+ * - loop: 0, 1, 2, ..., N-1, 0, 1, 2, ...
+ * - pingpong: 0, 1, 2, ..., N-1, N-2, ..., 1, 0, 1, ...
+ * - once: 0, 1, 2, ..., N-1（最終コマで停止）
+ */
+export function rowAnimFrameIndex(
+  frames: number,
+  playMode: AnimPlayMode = 'loop',
+  timeSec: number,
+  fps: number = 6,
+): number {
+  if (frames <= 1) return 0;
+  const step = Math.floor(timeSec * fps);
+  if (playMode === 'once') {
+    return Math.min(step, frames - 1);
+  }
+  if (playMode === 'pingpong') {
+    const period = 2 * (frames - 1);
+    const cycle = ((step % period) + period) % period;
+    return cycle < frames ? cycle : period - cycle;
+  }
+  // 'loop'
+  return ((step % frames) + frames) % frames;
+}
+
+/**
+ * 簡易アニメーション（行指定・方向固定）のセル矩形を求める。
+ * - crop: 行/アトラスの切り出し領域 [csx, csy, csw, csh]
+ * - opts: コマ数(frames), 行番号(row), 再生モード(playMode: loop/pingpong/once), 速度(fps), 経過時間(timeSec)
+ */
+export function rowAnimCellInRect(
+  crop: [number, number, number, number],
+  opts: {
+    frames?: number;
+    row?: number;
+    playMode?: AnimPlayMode;
+    fps?: number;
+    timeSec: number;
+  },
+): SpriteRect {
+  const [csx, csy, csw, csh] = crop;
+  const numFrames = opts.frames && opts.frames > 0 ? opts.frames : 1;
+  const rowIndex = opts.row ?? 0;
+  const frameIdx = rowAnimFrameIndex(numFrames, opts.playMode ?? 'loop', opts.timeSec, opts.fps ?? 6);
+
+  const cw = csw / numFrames;
+  const ch = csh;
+  return {
+    sx: csx + frameIdx * cw + SAFE_OFFSET_XY,
+    sy: csy + rowIndex * ch + SAFE_OFFSET_XY,
+    sw: cw - SAFE_OFFSET_WH,
+    sh: ch - SAFE_OFFSET_WH,
+  };
 }
 
 // ───────────────── 規格の自動推定 ─────────────────
@@ -247,15 +319,18 @@ export function peekImage(url: string): HTMLImageElement | undefined {
  * walk: 参照がある場合は正面(idle)フレーム、url:#fragment は指定矩形、それ以外は画像全体。
  */
 export function resolveSpriteRect(
-  walk: { stdId: string; crop?: [number, number, number, number]; frames?: number; source: { kind: string } } | null,
+  walk: { stdId: string; crop?: [number, number, number, number]; frames?: number; row?: number; source: { kind: string } } | null,
   imgW: number, imgH: number,
   resolvedUrl: string | undefined,
 ): SpriteRect {
+  if (walk?.crop && walk.stdId === 'row_anim') {
+    return rowAnimCellInRect(walk.crop, { frames: walk.frames ?? 4, timeSec: 0, row: walk.row });
+  }
   // walk: + crop → 連結シートから規格でキャラ1体分を切り出した参照
   if (walk?.crop && walk.source.kind !== 'smc_json') {
     let std = walk.stdId === 'auto' ? detectStandard(walk.crop[2], walk.crop[3]) : standardById(walk.stdId);
     if (walk.stdId === 'auto' && walk.frames && walk.frames > 0) std = { ...std, frames: walk.frames };
-    return animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0 });
+    return animatedCellInRect(std, walk.crop, { dir: 's', moving: false, timeSec: 0, row: walk.row });
   }
   // walk: + no crop → 1枚のシートを規格グリッドで分割
   if (walk) {
