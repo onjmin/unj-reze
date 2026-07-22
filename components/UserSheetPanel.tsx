@@ -145,21 +145,21 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
       {open && (
         open.pickRef
           ? <PickRefSheetView
-              key={open.id}
-              sheet={open}
-              userId={userId}
-              onPick={onPick}
-              onExport={() => handleExport(open)}
-              onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
-            />
+            key={open.id}
+            sheet={open}
+            userId={userId}
+            onPick={onPick}
+            onExport={() => handleExport(open)}
+            onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
+          />
           : <SheetGrid
-              key={open.id}
-              sheet={open}
-              userId={userId}
-              onPick={onPick}
-              onExport={() => handleExport(open)}
-              onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
-            />
+            key={open.id}
+            sheet={open}
+            userId={userId}
+            onPick={onPick}
+            onExport={() => handleExport(open)}
+            onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
+          />
       )}
     </div>
   );
@@ -387,7 +387,7 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
       <div className="border-t border-gray-800 pt-2 space-y-2">
         <p className="text-[10px] text-gray-500">スプライトシートとして登録（マス目で切り出す）</p>
         <div className="flex items-center gap-2 text-[10px] text-gray-400">
-          <label className="flex items-center gap-1">マス目
+          <label className="flex flex-wrap items-center gap-1">マス目
             <input type="number" min={1} value={cellW} onChange={e => setCellW(Number(e.target.value))} className={numInput} />
           </label>
           <span>×</span>
