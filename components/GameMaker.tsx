@@ -13781,7 +13781,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       return (
                         <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
                           <div className="flex items-center justify-between">
-                            <span className="text-[12px] font-bold text-gray-200">🎨 {tile.name || 'タイル'} の設定</span>
+                            <span className="text-[12px] font-bold text-gray-200 flex items-center gap-1.5">
+                              {tile.imageUrl || tile.imageRef ? (
+                                <span className="w-5 h-5 shrink-0 rounded overflow-hidden inline-flex items-center justify-center bg-black/40 border border-gray-700">
+                                  <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={20} />
+                                </span>
+                              ) : (
+                                <span className="w-3.5 h-3.5 rounded shrink-0 border border-gray-600 inline-block" style={{ backgroundColor: tile.color }} />
+                              )}
+                              🎨 {tile.name || 'タイル'} の設定
+                            </span>
                             {id !== 0 && (
                               <button onClick={() => deleteTile(id)} className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">削除</button>
                             )}
@@ -13823,11 +13832,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           )}
                           <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
                             <span className="text-[10px] text-gray-400">画像（任意）</span>
-                            <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded">
+                            {tile.imageUrl || tile.imageRef ? (
+                              <div className="relative shrink-0 w-8 h-8 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
+                                <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={32} />
+                              </div>
+                            ) : null}
+                            <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded font-bold">
                               <ImageIcon size={12} /> {tile.imageRef ? '画像を変更' : '画像を参照'}
                             </button>
                             {tile.imageRef && (
-                              <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1"><Trash2 size={14} /></button>
+                              <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1" title="画像解除"><Trash2 size={14} /></button>
                             )}
                           </div>
                           <p className="text-[9px] text-gray-500">画像は既存の投稿・歩行グラ・URLを参照します。</p>

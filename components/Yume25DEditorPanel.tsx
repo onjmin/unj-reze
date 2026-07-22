@@ -16,6 +16,7 @@ import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
 import { billboardGroups, canShiftGroup, shiftBillboardGroup, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
+import AssetThumb from './AssetThumb';
 
 /** スプライトパレットのサムネ。歩行グラ（walk:参照）なら正面(下向き)1コマ目だけを切り出して表示する。 */
 function SpriteThumb({ t }: { t: Tex25D }) {
@@ -393,7 +394,16 @@ export default function Yume25DEditorPanel({
         return (
           <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-bold text-gray-200">🎨 {t.name} の設定</span>
+              <span className="text-[12px] font-bold text-gray-200 flex items-center gap-1.5">
+                {t.imageUrl || t.imageRef ? (
+                  <span className="w-5 h-5 shrink-0 rounded overflow-hidden inline-flex items-center justify-center bg-black/40 border border-gray-700">
+                    <AssetThumb refStr={t.imageRef || t.imageUrl || ''} url={t.imageUrl} size={20} />
+                  </span>
+                ) : (
+                  <span className="w-3.5 h-3.5 rounded shrink-0 border border-gray-600 inline-block" style={{ backgroundColor: t.color }} />
+                )}
+                🎨 {t.name} の設定
+              </span>
               {t.special && (
                 <button onClick={() => deleteFloorTex(t.id)}
                   className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">
@@ -515,7 +525,12 @@ export default function Yume25DEditorPanel({
                   className="w-6 h-4 bg-transparent cursor-pointer" />
               </label>
 
-              <div className="flex items-center gap-1 ml-auto">
+              <div className="flex items-center gap-1.5 ml-auto">
+                {t.imageUrl || t.imageRef ? (
+                  <div className="relative shrink-0 w-8 h-8 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
+                    <AssetThumb refStr={t.imageRef || t.imageUrl || ''} url={t.imageUrl} size={32} />
+                  </div>
+                ) : null}
                 {t.imageUrl && (
                   <button onClick={() => onLayoutChange(l => ({ ...l, textures: { ...l.textures, [t.id]: { ...l.textures[t.id], imageRef: undefined, imageUrl: undefined } } }))}
                     className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">
@@ -523,8 +538,8 @@ export default function Yume25DEditorPanel({
                   </button>
                 )}
                 <button onClick={() => onPickImage?.({ t: 'yumeTex', id: t.id })}
-                  className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300">
-                  <ImageIcon size={12} /> 画像を参照
+                  className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300 font-bold">
+                  <ImageIcon size={12} /> {t.imageRef ? '画像を変更' : '画像を参照'}
                 </button>
               </div>
             </div>
