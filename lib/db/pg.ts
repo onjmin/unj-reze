@@ -1,49 +1,30 @@
-import { Pool as NeonPool, neonConfig } from '@neondatabase/serverless';
+import { neon } from '@neondatabase/serverless';
 import { AnonymousUser, OriginType } from '../types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
-// kvIncr / kvDecr / kvGet: no longer used for read-path; KV writes removed as DB is source of truth
 
-// Node.js環境（マイグレーション実行時など）での WebSocket ポリフィル
-if (typeof window === 'undefined' && !process.env.NEXT_RUNTIME) {
-  const getRequire = () => {
-    try {
-      return new Function('name', 'return require(name)');
-    } catch {
-      return null;
-    }
-  };
-  const req = getRequire();
-  if (req) {
-    try {
-      neonConfig.webSocketConstructor = req('ws');
-    } catch {}
-  }
+export function getDb() {
+  const connectionString = process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze';
+  return neon(connectionString, { fullResults: true });
 }
 
-let pool: any = null;
+function getClient() {
+  const sql = getDb();
+  return {
+    async query(text: string, params: any[] = []) {
+      const res = await sql.query(text, params, { fullResults: true });
+      return res as { rows: any[]; rowCount?: number; fields?: any[]; command?: string };
+    },
+    release() {}
+  };
+}
 
-
-function getPool(): any {
-  if (!pool) {
-    const connectionString = process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze';
-    const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
-    if (isLocal) {
-      // ローカルの wsproxy (8080ポート) への WebSocket トンネリング接続を有効化。
-      // wsproxy は Docker ネットワーク内で動くため、接続先アドレスは
-      // ホスト側の DATABASE_URL の host(localhost)ではなく、
-      // wsproxy から解決できる db-neon:5432 を明示的に指定する。
-      neonConfig.wsProxy = () => 'localhost:8080/v1?address=db-neon:5432';
-      neonConfig.useSecureWebSocket = false;
-      // postgres:16-alpine はデフォルトで scram-sha-256(SASL)認証のため、
-      // クリアテキストパスワード専用の pipelineConnect は使えない。
-      neonConfig.pipelineConnect = false;
-    }
-    pool = new NeonPool({ connectionString });
-  }
-  return pool;
+function getPool(): { connect: () => Promise<ReturnType<typeof getClient>> } {
+  return {
+    connect: async () => getClient(),
+  };
 }
 
 function rowToOshiItemPg(row: any): DbOshiItem {
