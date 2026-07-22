@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Image as ImageIcon, Link2, Music, Video, Search, Loader2, Play, Square, Pencil, ArrowLeft } from 'lucide-react';
+import { X, Image as ImageIcon, Music, Video, Search, Loader2, Play, Square, Pencil, ArrowLeft } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
@@ -129,7 +129,9 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
-  const [imageTab, setImageTab] = useState<ImageTab>(lastImageTab);
+  // 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
+  // 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
+  const [imageTab, setImageTab] = useState<ImageTab>(lastImageTab === 'url' ? 'mySheet' : lastImageTab);
   const allowedBgmTabs = bgmKind === 'sfx' ? SFX_TABS : BGM_TABS;
   // 現在選択中のBGM/効果音がある場合は、それが属するタブとURL/MML欄をあらかじめ復元する
   // （従来は毎回タブ・入力欄が空になり、既存の設定を再編集できなかった）。
@@ -329,11 +331,6 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     });
   };
 
-  const pickUrl = () => {
-    const v = urlInput.trim();
-    if (!v) return;
-    onPick({ ref: `url:${v}`, url: v, label: v.slice(0, 26) });
-  };
 
   const pickYoutube = () => {
     const v = urlInput.trim();
@@ -406,7 +403,6 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
               <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 歩行グラ</button>
               <button className={tabBtn(imageTab === 'walk')} onClick={() => changeImageTab('walk')}>📥 投稿グラ</button>
               <button className={tabBtn(imageTab === 'smc')} onClick={() => changeImageTab('smc')}>🎮 SMC素材</button>
-              <button className={tabBtn(imageTab === 'url')} onClick={() => changeImageTab('url')}><Link2 size={12} />URL</button>
             </>
           ) : (
             <>
@@ -518,26 +514,6 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 )}
               </div>
             )
-          )}
-
-          {/* Image: url */}
-          {mode === 'image' && imageTab === 'url' && (
-            <div className="space-y-2">
-              <label className="block text-[10px] text-gray-500">画像URL（直リンク / imgur 等）</label>
-              <input
-                value={urlInput}
-                onChange={e => setUrlInput(e.target.value)}
-                placeholder="https://i.imgur.com/xxxx.png"
-                className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
-              />
-              {urlInput.trim() && (
-                <div className="rounded-lg border border-gray-700 overflow-hidden max-h-40 flex items-center justify-center bg-black/40 gimp-checkered-background">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={urlInput} alt="" className="max-w-full max-h-40 object-contain" />
-                </div>
-              )}
-              <button onClick={pickUrl} disabled={!urlInput.trim()} className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold">この画像を使う</button>
-            </div>
           )}
 
           {/* Image: RPGen sprites（人がまとめた素材集） / walk graphics */}

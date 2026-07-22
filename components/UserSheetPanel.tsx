@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Loader2, Plus, Trash2, Upload, Download, FileUp } from 'lucide-react';
 import { api } from '@/lib/api';
-import { loadImage } from '@/lib/walk-sprite';
+import { loadImage, WALK_STANDARDS } from '@/lib/walk-sprite';
+import { buildWalkRef } from '@/lib/asset-ref';
 import {
   addUserSheet, removeUserSheet, subscribeUserSheets,
   userSheetsSnapshot, userSheetsServerSnapshot,
   exportUserSheet, importUserSheet,
   userSheetCellRef, userSheetCellUrl, type UserSheet,
 } from '@/lib/user-sheets';
+import WalkSpritePreview from './WalkSpritePreview';
 import type { PickResult } from './ContentPicker';
 
 interface UserSheetPanelProps {
@@ -89,12 +91,12 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
 
       {importError && <p className="text-[10px] text-red-400 px-0.5">{importError}</p>}
 
-      {adding && <AddSheetForm onDone={id => { setAdding(false); setOpenId(id); }} />}
+      {adding && <AddSheetForm onDone={id => { setAdding(false); setOpenId(id); }} onPick={onPick} />}
 
       {sheets.length === 0 && !adding && (
         <p className="text-[10px] text-gray-500 px-0.5 leading-relaxed">
-          スプライトシートの画像URL（または手持ちの画像）とマス目サイズを登録すると、
-          1マスずつ切り出してタイルやキャラの素材として使えます。
+          画像URL・手持ちの画像を登録して、素材として使えます。
+          1枚絵はそのまま、スプライトシートはマス目で切り出して使えます。
         </p>
       )}
 
@@ -111,8 +113,9 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
   );
 }
 
-/** URL直リンク or 画像アップロードでシートを登録するフォーム。 */
-function AddSheetForm({ onDone }: { onDone: (id: string) => void }) {
+/** URL直リンク or 画像アップロードで、1枚絵として使う／シートとして登録する共通フォーム。
+ *  画像の取り込み口（URL・アップロード）をここに集約し、素材選びを1か所にまとめる。 */
+function AddSheetForm({ onDone, onPick }: { onDone: (id: string) => void; onPick?: (res: PickResult) => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [cellW, setCellW] = useState(16);
@@ -120,6 +123,22 @@ function AddSheetForm({ onDone }: { onDone: (id: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  /** 切り出さず、画像1枚をそのままスプライトとして使う（旧「URL」タブ相当）。 */
+  const useWhole = async () => {
+    setError(null);
+    if (!url.trim()) { setError('画像URLを入力するか、画像を選んでください'); return; }
+    if (!onPick) return;
+    setBusy(true);
+    try {
+      await loadImage(url.trim());   // 読めない画像はここで弾く
+      onPick({ ref: `url:${url.trim()}`, url: url.trim(), label: name.trim() || url.trim().slice(0, 26) });
+    } catch {
+      setError('画像を読み込めませんでした（URLとCORSを確認してください）');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -188,27 +207,40 @@ function AddSheetForm({ onDone }: { onDone: (id: string) => void }) {
           <Upload size={12} />画像から
         </button>
       </div>
-      <div className="flex items-center gap-2 text-[10px] text-gray-400">
-        <label className="flex items-center gap-1">マス目
-          <input type="number" min={1} value={cellW} onChange={e => setCellW(Number(e.target.value))} className={numInput} />
-        </label>
-        <span>×</span>
-        <input type="number" min={1} value={cellH} onChange={e => setCellH(Number(e.target.value))} className={numInput} />
-        <span>px</span>
-        <div className="flex gap-1 ml-auto">
-          {[16, 32, 48].map(n => (
-            <button key={n} onClick={() => { setCellW(n); setCellH(n); }}
-              className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700">{n}</button>
-          ))}
+      {/* 1枚絵ならそのまま使える。素材選びの場でだけ出す（管理タブでは登録のみ）。 */}
+      {onPick && (
+        <button
+          onClick={useWhole} disabled={busy || !url.trim()}
+          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-[11px] text-white font-bold"
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : null}この画像を1枚絵として使う
+        </button>
+      )}
+
+      <div className="border-t border-gray-800 pt-2 space-y-2">
+        <p className="text-[10px] text-gray-500">スプライトシートとして登録（マス目で切り出す）</p>
+        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+          <label className="flex items-center gap-1">マス目
+            <input type="number" min={1} value={cellW} onChange={e => setCellW(Number(e.target.value))} className={numInput} />
+          </label>
+          <span>×</span>
+          <input type="number" min={1} value={cellH} onChange={e => setCellH(Number(e.target.value))} className={numInput} />
+          <span>px</span>
+          <div className="flex gap-1 ml-auto">
+            {[16, 32, 48].map(n => (
+              <button key={n} onClick={() => { setCellW(n); setCellH(n); }}
+                className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700">{n}</button>
+            ))}
+          </div>
         </div>
+        {error && <p className="text-[10px] text-red-400">{error}</p>}
+        <button
+          onClick={submit} disabled={busy}
+          className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-50 text-[11px] text-gray-200 font-bold"
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}シートに登録
+        </button>
       </div>
-      {error && <p className="text-[10px] text-red-400">{error}</p>}
-      <button
-        onClick={submit} disabled={busy}
-        className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-[11px] text-white font-bold"
-      >
-        {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}登録する
-      </button>
     </div>
   );
 }
@@ -221,6 +253,10 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   const [shown, setShown] = useState(CELLS_PER_CHUNK);
   const [error, setError] = useState(false);
+  /** マス（1コマの静止画）を選ぶか、画像全体を歩行グラ（アニメ）として使うか。 */
+  const [mode, setMode] = useState<'cell' | 'walk'>('cell');
+  /** 歩行グラの規格（auto=実寸から自動推定）。 */
+  const [walkStd, setWalkStd] = useState('auto');
 
   useEffect(() => {
     let cancelled = false;
@@ -279,8 +315,59 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
     </div>
   );
 
+  // マス選択 / 歩行グラ の切り替えタブ（onPick がある＝素材を選ぶ用途のときだけ出す）
+  const modeTabs = onPick ? (
+    <div className="flex gap-1 px-0.5">
+      {([['cell', '🔲 マス（1コマ）'], ['walk', '🚶 歩行グラ（アニメ）']] as const).map(([m, label]) => (
+        <button key={m} onClick={() => setMode(m)}
+          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${mode === m ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   if (error) return <>{header}<p className="text-center text-[11px] text-red-400 py-6">画像を読み込めませんでした</p></>;
   if (!cells || !size) return <>{header}<div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-500" /></div></>;
+
+  // ── 歩行グラモード：画像全体を歩行グラシートとして扱い walk: 参照を作る ──
+  if (onPick && mode === 'walk') {
+    return (
+      <>
+        {header}
+        {modeTabs}
+        <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 shrink-0">規格</span>
+            <select value={walkStd} onChange={e => setWalkStd(e.target.value)}
+              className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none">
+              <option value="auto">自動（実寸から推定）</option>
+              {WALK_STANDARDS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="shrink-0 grid place-items-center w-16 h-16 rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background">
+              <WalkSpritePreview url={sheet.url} stdId={walkStd} size={56} />
+            </div>
+            <p className="text-[10px] text-gray-500 leading-relaxed flex-1">
+              画像全体を1体分の歩行グラとして、方向×コマに分けてアニメーションします。
+              向きやコマ割りが合わないときは規格を変えてください。
+            </p>
+          </div>
+          <button
+            onClick={() => onPick({
+              ref: buildWalkRef(walkStd, { kind: 'url', url: sheet.url }),
+              url: sheet.url,
+              label: `${sheet.name}（歩行グラ）`,
+            })}
+            className="w-full py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-[11px] text-white font-bold"
+          >
+            この歩行グラを使う
+          </button>
+        </div>
+      </>
+    );
+  }
 
   const usable = cells.filter(c => c.opaque);
   const visible = usable.slice(0, shown);
@@ -289,6 +376,7 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
   return (
     <>
       {header}
+      {modeTabs}
       <div className="grid gap-0.5" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {visible.map(c => (
           <button
