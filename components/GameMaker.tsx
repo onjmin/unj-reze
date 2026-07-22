@@ -16520,7 +16520,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       スプライトシートを登録すると、タイルやキャラの「画像参照」→「マイシート」タブから
                       1マスずつ選べるようになります。登録はこのブラウザに保存され、どのゲームからでも使えます。
                     </p>
-                    <UserSheetPanel />
+                    <UserSheetPanel userId={userId} />
                   </div>
                 )}
 

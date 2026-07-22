@@ -95,7 +95,7 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
        au.avatar_url as avatar_url
      FROM posts p
      LEFT JOIN anonymous_users au ON p.slug = au.slug
-     WHERE p.thread_id = ANY($1::int[]) AND p.id != p.thread_id ORDER BY p.id`,
+     WHERE p.thread_id = ANY($1::bigint[]) AND p.id != p.thread_id ORDER BY p.id`,
     [threadIds]
   );
   const map = new Map<number, Post[]>();
@@ -1263,7 +1263,7 @@ export const pgStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM games WHERE id = ANY($1::int[])', [ids]);
+      const result = await client.query('SELECT * FROM games WHERE id = ANY($1::bigint[])', [ids]);
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
         return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };

@@ -531,7 +531,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
             <LocalAssetPanel onPick={onPick} />
           )}
           {mode === 'image' && imageTab === 'mySheet' && (
-            <UserSheetPanel onPick={onPick} />
+            <UserSheetPanel onPick={onPick} userId={userId} />
           )}
 
           {/* BGM: youtube */}

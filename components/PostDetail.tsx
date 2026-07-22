@@ -685,7 +685,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             </span>
           </div>
 
-          <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
+          <p className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
             {(() => {
               const displayText = getDisplayContent(post.content);
               const allLines = displayText ? displayText.split('\n') : [];
@@ -1198,7 +1198,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
             </div>
           </div>
 
-          <p className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5">
+          <p className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
             {(() => {
               const displayText = getDisplayContent(localPost.content);
               const lines = displayText ? displayText.split('\n') : [];

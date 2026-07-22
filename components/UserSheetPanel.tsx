@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Plus, Trash2, Upload, Download, FileUp } from 'lucide-react';
+import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { loadImage, WALK_STANDARDS } from '@/lib/walk-sprite';
 import { buildWalkRef } from '@/lib/asset-ref';
@@ -13,19 +13,21 @@ import {
 } from '@/lib/user-sheets';
 import WalkSpritePreview from './WalkSpritePreview';
 import type { PickResult } from './ContentPicker';
+import type { Post } from '@/lib/types';
 
 interface UserSheetPanelProps {
   /** マスを選んだときの通知。管理だけしたい場合は省略できる（選択不可になる）。 */
   onPick?: (res: PickResult) => void;
+  /** 投稿画像から取り込むためのユーザーID。省略時は投稿タブが使えず直リンクURLのみになる。 */
+  userId?: string;
 }
 
 const CELLS_PER_CHUNK = 240;
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
-/** マイシート：直リンクやアップロード画像を「マス目サイズ」で切り出して素材として使う。
+/** マイシート：投稿画像や直リンクを「マス目サイズ」で切り出して素材として使う。
  *  内蔵素材タブ（LocalAssetPanel）と同じ url:#crop 参照を作るので、
  *  タイル・オブジェクト・歩行グラなど既存の参照先すべてにそのまま使える。 */
-export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
+export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) {
   const sheets = useSyncExternalStore(subscribeUserSheets, userSheetsSnapshot, userSheetsServerSnapshot);
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -63,13 +65,22 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
 
   return (
     <div className="flex flex-col gap-2">
+      {/* 登録済みシートの一覧：小さなプレビュー付きで、どのシートかひと目で分かるようにする。 */}
       <div className="flex items-center gap-1.5 flex-wrap">
         {sheets.map(s => (
           <button
             key={s.id}
             onClick={() => setOpenId(openId === s.id ? null : s.id)}
-            className={`shrink-0 whitespace-nowrap px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${openId === s.id ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}
+            title={`${s.name} ・ ${s.cellW}×${s.cellH}px`}
+            className={`shrink-0 whitespace-nowrap flex items-center gap-1 pl-1 pr-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${openId === s.id ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={s.url} alt=""
+              onError={e => { e.currentTarget.style.visibility = 'hidden'; }}
+              className="w-5 h-5 rounded object-cover bg-[#11131a] gimp-checkered-background"
+              style={{ imageRendering: 'pixelated' }}
+            />
             {s.name}
           </button>
         ))}
@@ -91,11 +102,11 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
 
       {importError && <p className="text-[10px] text-red-400 px-0.5">{importError}</p>}
 
-      {adding && <AddSheetForm onDone={id => { setAdding(false); setOpenId(id); }} onPick={onPick} />}
+      {adding && <AddSheetForm userId={userId} onDone={id => { setAdding(false); setOpenId(id); }} onPick={onPick} />}
 
       {sheets.length === 0 && !adding && (
         <p className="text-[10px] text-gray-500 px-0.5 leading-relaxed">
-          画像URL・手持ちの画像を登録して、素材として使えます。
+          投稿画像や画像URLを登録して、素材として使えます。
           1枚絵はそのまま、スプライトシートはマス目で切り出して使えます。
         </p>
       )}
@@ -113,21 +124,22 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
   );
 }
 
-/** URL直リンク or 画像アップロードで、1枚絵として使う／シートとして登録する共通フォーム。
- *  画像の取り込み口（URL・アップロード）をここに集約し、素材選びを1か所にまとめる。 */
-function AddSheetForm({ onDone, onPick }: { onDone: (id: string) => void; onPick?: (res: PickResult) => void }) {
+/** 投稿画像から取り込む／直リンクURLで、1枚絵として使う・シートとして登録する共通フォーム。
+ *  画像アップロードは廃止し、取り込み口は「SNS投稿の画像」か「直リンクURL」に限定する。 */
+function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id: string) => void; onPick?: (res: PickResult) => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [cellW, setCellW] = useState(16);
   const [cellH, setCellH] = useState(16);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  /** 画像の取り込み元。'post'=SNS投稿画像 / 'url'=直リンクURL。 */
+  const [source, setSource] = useState<'post' | 'url'>(userId ? 'post' : 'url');
 
   /** 切り出さず、画像1枚をそのままスプライトとして使う（旧「URL」タブ相当）。 */
   const useWhole = async () => {
     setError(null);
-    if (!url.trim()) { setError('画像URLを入力するか、画像を選んでください'); return; }
+    if (!url.trim()) { setError('画像を選ぶか、URLを入力してください'); return; }
     if (!onPick) return;
     setBusy(true);
     try {
@@ -140,33 +152,9 @@ function AddSheetForm({ onDone, onPick }: { onDone: (id: string) => void; onPick
     }
   };
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setError(null);
-    if (!file.type.startsWith('image/')) { setError('画像ファイルを選択してください'); return; }
-    if (file.size > MAX_UPLOAD_BYTES) { setError('5MB以下の画像を選択してください'); return; }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setBusy(true);
-      try {
-        // アップロードしてURL化する。参照は絶対URLになるので、他の人の画面でも表示される。
-        const res = await api.upload.image({ image: reader.result as string });
-        setUrl(res.url);
-        if (!name) setName(file.name.replace(/\.[^.]+$/, ''));
-      } catch {
-        setError('アップロードに失敗しました');
-      } finally {
-        setBusy(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   const submit = async () => {
     setError(null);
-    if (!url.trim()) { setError('画像URLを入力するか、画像を選んでください'); return; }
+    if (!url.trim()) { setError('画像を選ぶか、URLを入力してください'); return; }
     if (cellW <= 0 || cellH <= 0) { setError('マス目サイズは1以上にしてください'); return; }
     setBusy(true);
     try {
@@ -186,6 +174,8 @@ function AddSheetForm({ onDone, onPick }: { onDone: (id: string) => void; onPick
   };
 
   const numInput = 'w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none';
+  const srcBtn = (active: boolean) =>
+    `flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold border transition ${active ? 'bg-blue-600 text-white border-blue-500' : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800'}`;
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
@@ -193,20 +183,31 @@ function AddSheetForm({ onDone, onPick }: { onDone: (id: string) => void; onPick
         value={name} onChange={e => setName(e.target.value)} placeholder="シート名（任意）"
         className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none"
       />
+
+      {/* 取り込み元の切り替え（アップロードは廃止） */}
       <div className="flex items-center gap-1.5">
-        <input
-          value={url} onChange={e => setUrl(e.target.value)} placeholder="画像の直リンクURL"
-          className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none"
-        />
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-        <button
-          onClick={() => fileRef.current?.click()}
-          disabled={busy}
-          className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[11px] text-gray-300 disabled:opacity-50"
-        >
-          <Upload size={12} />画像から
+        {userId && (
+          <button type="button" onClick={() => setSource('post')} className={srcBtn(source === 'post')}>
+            <ImageIcon size={12} />投稿から選ぶ
+          </button>
+        )}
+        <button type="button" onClick={() => setSource('url')} className={srcBtn(source === 'url')}>
+          <Link2 size={12} />直リンクURL
         </button>
       </div>
+
+      {source === 'post' && (
+        userId
+          ? <PostImageGrid userId={userId} selectedUrl={url.trim()} onSelect={(u, id) => { setUrl(u); if (!name.trim()) setName(`投稿#${id}`); }} />
+          : <p className="text-[10px] text-gray-500 px-0.5">投稿から取り込むにはログインが必要です。</p>
+      )}
+      {source === 'url' && (
+        <input
+          value={url} onChange={e => setUrl(e.target.value)} placeholder="画像の直リンクURL"
+          className="w-full min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none"
+        />
+      )}
+
       {/* 1枚絵ならそのまま使える。素材選びの場でだけ出す（管理タブでは登録のみ）。 */}
       {onPick && (
         <button
@@ -233,14 +234,138 @@ function AddSheetForm({ onDone, onPick }: { onDone: (id: string) => void; onPick
             ))}
           </div>
         </div>
+
+        {/* プレビュー：登録前に、実寸の画像へマス目（青い格子）を重ねて切り出し結果を確認できる。 */}
+        {url.trim() && <SheetPreview url={url.trim()} cellW={cellW} cellH={cellH} />}
+
         {error && <p className="text-[10px] text-red-400">{error}</p>}
         <button
-          onClick={submit} disabled={busy}
+          onClick={submit} disabled={busy || !url.trim()}
           className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 disabled:opacity-50 text-[11px] text-gray-200 font-bold"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}シートに登録
         </button>
       </div>
+    </div>
+  );
+}
+
+/** SNS投稿の画像から1枚を選ぶグリッド。選ぶとその画像URLを取り込み元にする。 */
+function PostImageGrid({ userId, selectedUrl, onSelect }: { userId: string; selectedUrl: string; onSelect: (url: string, id: string) => void }) {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    api.posts.list(userId)
+      .then(data => { if (alive) setPosts(data); })
+      .catch(() => {})
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [userId]);
+
+  const q = query.trim().toLowerCase();
+  const imagePosts = posts.filter(p => p.hasImage && p.imageSrc &&
+    (!q || p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q)));
+
+  return (
+    <div className="space-y-1.5">
+      <div className="relative">
+        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
+        <input
+          value={query} onChange={e => setQuery(e.target.value)} placeholder="投稿を検索"
+          className="w-full bg-gray-800 border border-gray-700 rounded pl-7 pr-2 py-1.5 text-[11px] text-gray-200 outline-none"
+        />
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-500" /></div>
+      ) : (
+        <div className="grid grid-cols-4 gap-1.5 max-h-52 overflow-y-auto scrollbar-none">
+          {imagePosts.map(p => {
+            const active = selectedUrl === p.imageSrc;
+            return (
+              <button
+                key={p.id} type="button"
+                onClick={() => onSelect(p.imageSrc!, p.id)}
+                title={`#${p.id}`}
+                className={`aspect-square rounded-lg overflow-hidden border bg-gray-900 relative gimp-checkered-background ${active ? 'border-blue-500 ring-1 ring-blue-500' : 'border-gray-700 hover:border-blue-500'}`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={p.imageSrc} alt="" className="w-full h-full object-cover" style={{ imageRendering: 'pixelated' }} />
+              </button>
+            );
+          })}
+          {imagePosts.length === 0 && (
+            <p className="col-span-4 text-center text-[11px] text-gray-600 py-6">画像投稿がありません</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 登録前プレビュー：画像にマス目（格子）を重ねて、何マスに割れるかを可視化する。 */
+function SheetPreview({ url, cellW, cellH }: { url: string; cellW: number; cellH: number }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dim, setDim] = useState<{ cols: number; rows: number } | null>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setError(false);
+    setDim(null);
+    loadImage(url).then(img => {
+      if (cancelled) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const MAX = 280;
+      const scale = Math.min(1, MAX / img.naturalWidth);
+      const dw = Math.max(1, Math.round(img.naturalWidth * scale));
+      const dh = Math.max(1, Math.round(img.naturalHeight * scale));
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = dw * dpr;
+      canvas.height = dh * dpr;
+      canvas.style.width = `${dw}px`;
+      canvas.style.height = `${dh}px`;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, dw, dh);
+      ctx.drawImage(img, 0, 0, dw, dh);
+
+      const cols = cellW > 0 ? Math.floor(img.naturalWidth / cellW) : 0;
+      const rows = cellH > 0 ? Math.floor(img.naturalHeight / cellH) : 0;
+      if (cellW > 0 && cellH > 0) {
+        ctx.strokeStyle = 'rgba(59,130,246,0.55)';
+        ctx.lineWidth = 1;
+        for (let x = cellW; x < img.naturalWidth; x += cellW) {
+          const px = Math.round(x * scale) + 0.5;
+          ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, dh); ctx.stroke();
+        }
+        for (let y = cellH; y < img.naturalHeight; y += cellH) {
+          const py = Math.round(y * scale) + 0.5;
+          ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(dw, py); ctx.stroke();
+        }
+      }
+      setDim({ cols, rows });
+    }).catch(() => { if (!cancelled) setError(true); });
+    return () => { cancelled = true; };
+  }, [url, cellW, cellH]);
+
+  if (error) {
+    return <p className="text-[10px] text-red-400 px-0.5">画像を読み込めませんでした（URLとCORSを確認してください）</p>;
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="max-w-full overflow-auto rounded-lg border border-gray-800 bg-[#11131a] p-1 gimp-checkered-background">
+        <canvas ref={canvasRef} className="block" style={{ imageRendering: 'pixelated' }} />
+      </div>
+      <p className="text-[10px] text-gray-500 self-start px-0.5">
+        プレビュー{dim ? ` ・ ${dim.cols}×${dim.rows}マス（${dim.cols * dim.rows}コマ）` : ''}
+      </p>
     </div>
   );
 }

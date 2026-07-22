@@ -366,7 +366,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
           <p
             onClick={handlePostClick}
-            className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
+            className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
           >
             {(() => {
               const displayText = getDisplayContent(post.content);
