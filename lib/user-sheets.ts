@@ -80,6 +80,51 @@ export const userSheetsSnapshot = (): UserSheet[] => read();
 const SERVER_SHEETS: UserSheet[] = [];
 export const userSheetsServerSnapshot = (): UserSheet[] => SERVER_SHEETS;
 
+// ── 個別シートの書き出し / 取り込み ──────────────────────────────────
+// 別のゲームや別端末でも使い回せるよう、1シートを小さなJSONにして受け渡しする。
+// 画像は絶対URLなので、この定義（名前・URL・マス目）さえあればどこでも復元できる。
+
+const EXPORT_KIND = 'unj-user-sheet';
+const EXPORT_VERSION = 1;
+
+interface SheetExport {
+  kind: typeof EXPORT_KIND;
+  version: number;
+  sheet: Pick<UserSheet, 'name' | 'url' | 'cellW' | 'cellH'>;
+}
+
+/** 1シートを配布用JSON文字列にする。 */
+export function exportUserSheet(sheet: UserSheet): string {
+  const payload: SheetExport = {
+    kind: EXPORT_KIND,
+    version: EXPORT_VERSION,
+    sheet: { name: sheet.name, url: sheet.url, cellW: sheet.cellW, cellH: sheet.cellH },
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/** exportUserSheet が作ったJSONを取り込む。妥当なら登録して返す。不正なら null。 */
+export function importUserSheet(json: string): UserSheet | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  const obj = data as Partial<SheetExport>;
+  if (!obj || obj.kind !== EXPORT_KIND) return null;
+  const s = obj.sheet;
+  if (!s || typeof s.url !== 'string' || !s.url.trim()) return null;
+  const cellW = Number(s.cellW), cellH = Number(s.cellH);
+  if (!(cellW > 0) || !(cellH > 0)) return null;
+  return addUserSheet({
+    name: typeof s.name === 'string' && s.name.trim() ? s.name.trim() : 'マイシート',
+    url: s.url.trim(),
+    cellW,
+    cellH,
+  });
+}
+
 /** マス座標 → クロップ参照（内蔵シートの localTileUrl と同じ形式）。 */
 export function userSheetCellRef(sheet: UserSheet, col: number, row: number): string {
   return `url:${sheet.url}#${col * sheet.cellW},${row * sheet.cellH},${sheet.cellW},${sheet.cellH}`;

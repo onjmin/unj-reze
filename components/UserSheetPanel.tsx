@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Plus, Trash2, Upload } from 'lucide-react';
+import { Loader2, Plus, Trash2, Upload, Download, FileUp } from 'lucide-react';
 import { api } from '@/lib/api';
 import { loadImage } from '@/lib/walk-sprite';
 import {
   addUserSheet, removeUserSheet, subscribeUserSheets,
   userSheetsSnapshot, userSheetsServerSnapshot,
+  exportUserSheet, importUserSheet,
   userSheetCellRef, userSheetCellUrl, type UserSheet,
 } from '@/lib/user-sheets';
 import type { PickResult } from './ContentPicker';
@@ -26,8 +27,37 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
   const sheets = useSyncExternalStore(subscribeUserSheets, userSheetsSnapshot, userSheetsServerSnapshot);
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const open = sheets.find(s => s.id === openId) ?? null;
+
+  /** 1シートを .json として書き出す。 */
+  const handleExport = (sheet: UserSheet) => {
+    const blob = new Blob([exportUserSheet(sheet)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(sheet.name || 'sheet').replace(/[\\/:*?"<>|\s]+/g, '_')}.sheet.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** 書き出した .json を取り込んで登録する。 */
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const created = importUserSheet(String(reader.result ?? ''));
+      if (created) setOpenId(created.id);
+      else setImportError('このファイルはマイシートの定義ではありません');
+    };
+    reader.onerror = () => setImportError('ファイルを読み込めませんでした');
+    reader.readAsText(file);
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -47,7 +77,17 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
         >
           <Plus size={11} className="inline -mt-0.5 mr-0.5" />シートを追加
         </button>
+        <input ref={importRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportFile} />
+        <button
+          onClick={() => { setImportError(null); importRef.current?.click(); }}
+          title="書き出したシート定義（.json）を取り込む"
+          className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800 transition"
+        >
+          <FileUp size={11} className="inline -mt-0.5 mr-0.5" />取り込み
+        </button>
       </div>
+
+      {importError && <p className="text-[10px] text-red-400 px-0.5">{importError}</p>}
 
       {adding && <AddSheetForm onDone={id => { setAdding(false); setOpenId(id); }} />}
 
@@ -63,6 +103,7 @@ export default function UserSheetPanel({ onPick }: UserSheetPanelProps) {
           key={open.id}
           sheet={open}
           onPick={onPick}
+          onExport={() => handleExport(open)}
           onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
         />
       )}
@@ -175,7 +216,7 @@ function AddSheetForm({ onDone }: { onDone: (id: string) => void }) {
 interface Cell { col: number; row: number; opaque: boolean }
 
 /** 登録シートをマス目で走査し、中身のあるマスだけ選べるグリッドにする。 */
-function SheetGrid({ sheet, onPick, onDelete }: { sheet: UserSheet; onPick?: (res: PickResult) => void; onDelete: () => void }) {
+function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; onPick?: (res: PickResult) => void; onExport: () => void; onDelete: () => void }) {
   const [cells, setCells] = useState<Cell[] | null>(null);
   const [size, setSize] = useState<{ cols: number; rows: number } | null>(null);
   const [shown, setShown] = useState(CELLS_PER_CHUNK);
@@ -227,6 +268,10 @@ function SheetGrid({ sheet, onPick, onDelete }: { sheet: UserSheet; onPick?: (re
         {sheet.name} ・ {sheet.cellW}×{sheet.cellH}px
         {size ? ` ・ ${size.cols}×${size.rows}マス` : ''}
       </p>
+      <button onClick={onExport} title="このシート定義を書き出す（.json）"
+        className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
+        <Download size={14} />
+      </button>
       <button onClick={onDelete} title="このシートを削除"
         className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10">
         <Trash2 size={14} />
