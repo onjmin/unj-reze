@@ -1154,8 +1154,17 @@ export const sqliteStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const d = await getDb();
     const placeholders = ids.map(() => '?').join(',');
-    const rows = rowsToObjects(d, `SELECT * FROM games WHERE id IN (${placeholders})`, ids);
-    return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined }));
+    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest, created_at, creator_slug FROM games WHERE id IN (${placeholders})`, ids);
+    return rows.map(r => {
+      let manifest: any = {};
+      if (typeof r.manifest === 'string') {
+        const match = r.manifest.match(/"bgRef"\s*:\s*"(https?:\/\/[^"]+)"/);
+        manifest = match ? { titleScreen: { bgRef: match[1] } } : {};
+      } else if (r.manifest && typeof r.manifest === 'object') {
+        manifest = r.manifest;
+      }
+      return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined };
+    });
   },
 
   async updateGame(id, data) {

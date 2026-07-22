@@ -229,12 +229,18 @@ async function resolveViewerSlug(client: any, userId: string): Promise<string> {
   return u.rows[0]?.slug ?? deriveSlugPg(userId);
 }
 
+const hiddenSlugsCache = new Map<string, { hidden: Set<string>; expiresAt: number }>();
+
 /** 閲覧者に対して非表示にすべき slug 集合(自分がブロック/ミュート ＋ 自分をブロックした相手)。 */
 async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>> {
-  const hidden = new Set<string>();
-  if (!userId) return hidden;
+  if (!userId) return new Set();
+  const now = Date.now();
+  const cached = hiddenSlugsCache.get(userId);
+  if (cached && cached.expiresAt > now) {
+    return cached.hidden;
+  }
   const viewerSlug = await resolveViewerSlug(client, userId);
-  if (!viewerSlug) return hidden;
+  if (!viewerSlug) return new Set();
   const [blocks, mutes] = await Promise.all([
     client.query(
       'SELECT blocker_slug, blocked_slug FROM user_blocks WHERE blocker_slug = $1 OR blocked_slug = $1',
@@ -242,11 +248,13 @@ async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>
     ),
     client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [viewerSlug])
   ]);
+  const hidden = new Set<string>();
   for (const r of blocks.rows) {
     if (r.blocker_slug === viewerSlug) hidden.add(r.blocked_slug);
     if (r.blocked_slug === viewerSlug) hidden.add(r.blocker_slug);
   }
   for (const r of mutes.rows) hidden.add(r.muted_slug);
+  hiddenSlugsCache.set(userId, { hidden, expiresAt: now + 10000 });
   return hidden;
 }
 
@@ -1277,10 +1285,17 @@ export const pgStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM games WHERE id = ANY($1::bigint[])', [ids]);
+      const result = await client.query('SELECT id, preset, title, manifest, created_at, creator_slug FROM games WHERE id = ANY($1::bigint[])', [ids]);
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
+        let manifest: any = {};
+        if (typeof r.manifest === 'string') {
+          const match = r.manifest.match(/"bgRef"\s*:\s*"(https?:\/\/[^"]+)"/);
+          manifest = match ? { titleScreen: { bgRef: match[1] } } : {};
+        } else if (r.manifest && typeof r.manifest === 'object') {
+          manifest = r.manifest;
+        }
+        return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt, creatorSlug: r.creator_slug ?? undefined };
       });
     } finally {
       client.release();
