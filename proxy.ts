@@ -47,6 +47,8 @@ const BLOCKED_HTML = `<!doctype html>
   <p>Access from the EU / EEA is restricted for legal reasons.</p>
 </div></body></html>`;
 
+export const runtime = "experimental-edge";
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
