@@ -313,12 +313,16 @@ function SheetPreview({ url, cellW, cellH }: { url: string; cellW: number; cellH
 
   useEffect(() => {
     let cancelled = false;
-    setError(false);
-    setDim(null);
     loadImage(url).then(img => {
       if (cancelled) return;
+      const ctx = canvasRef.current?.getContext('2d');
+      const cols = cellW > 0 ? Math.floor(img.naturalWidth / cellW) : 0;
+      const rows = cellH > 0 ? Math.floor(img.naturalHeight / cellH) : 0;
+      setError(false);
+      setDim({ cols, rows });
       const canvas = canvasRef.current;
-      if (!canvas) return;
+      if (!ctx || !canvas) return;
+
       const MAX = 280;
       const scale = Math.min(1, MAX / img.naturalWidth);
       const dw = Math.max(1, Math.round(img.naturalWidth * scale));
@@ -328,15 +332,11 @@ function SheetPreview({ url, cellW, cellH }: { url: string; cellW: number; cellH
       canvas.height = dh * dpr;
       canvas.style.width = `${dw}px`;
       canvas.style.height = `${dh}px`;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.imageSmoothingEnabled = false;
       ctx.clearRect(0, 0, dw, dh);
       ctx.drawImage(img, 0, 0, dw, dh);
 
-      const cols = cellW > 0 ? Math.floor(img.naturalWidth / cellW) : 0;
-      const rows = cellH > 0 ? Math.floor(img.naturalHeight / cellH) : 0;
       if (cellW > 0 && cellH > 0) {
         ctx.strokeStyle = 'rgba(59,130,246,0.55)';
         ctx.lineWidth = 1;
@@ -349,23 +349,23 @@ function SheetPreview({ url, cellW, cellH }: { url: string; cellW: number; cellH
           ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(dw, py); ctx.stroke();
         }
       }
-      setDim({ cols, rows });
-    }).catch(() => { if (!cancelled) setError(true); });
+    }).catch(() => { if (!cancelled) { setError(true); setDim(null); } });
     return () => { cancelled = true; };
   }, [url, cellW, cellH]);
 
-  if (error) {
-    return <p className="text-[10px] text-red-400 px-0.5">画像を読み込めませんでした（URLとCORSを確認してください）</p>;
-  }
-
+  // canvas は常にマウントしておく（エラー時に外すと、URL修正後も参照が取れず再描画できなくなるため）。
   return (
     <div className="flex flex-col items-center gap-1">
-      <div className="max-w-full overflow-auto rounded-lg border border-gray-800 bg-[#11131a] p-1 gimp-checkered-background">
+      <div className={`max-w-full overflow-auto rounded-lg border border-gray-800 bg-[#11131a] p-1 gimp-checkered-background ${error ? 'hidden' : ''}`}>
         <canvas ref={canvasRef} className="block" style={{ imageRendering: 'pixelated' }} />
       </div>
-      <p className="text-[10px] text-gray-500 self-start px-0.5">
-        プレビュー{dim ? ` ・ ${dim.cols}×${dim.rows}マス（${dim.cols * dim.rows}コマ）` : ''}
-      </p>
+      {error ? (
+        <p className="text-[10px] text-red-400 self-start px-0.5">画像を読み込めませんでした（URLとCORSを確認してください）</p>
+      ) : (
+        <p className="text-[10px] text-gray-500 self-start px-0.5">
+          プレビュー{dim ? ` ・ ${dim.cols}×${dim.rows}マス（${dim.cols * dim.rows}コマ）` : ''}
+        </p>
+      )}
     </div>
   );
 }
