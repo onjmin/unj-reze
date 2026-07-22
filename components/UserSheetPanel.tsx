@@ -228,7 +228,7 @@ function AddSheetForm({ userId, onDone, onPick }: { userId?: string; onDone: (id
           <input type="number" min={1} value={cellH} onChange={e => setCellH(Number(e.target.value))} className={numInput} />
           <span>px</span>
           <div className="flex gap-1 ml-auto">
-            {[16, 32, 48].map(n => (
+            {[16, 32, 48, 64].map(n => (
               <button key={n} onClick={() => { setCellW(n); setCellH(n); }}
                 className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700">{n}</button>
             ))}
@@ -260,7 +260,7 @@ function PostImageGrid({ userId, selectedUrl, onSelect }: { userId: string; sele
     let alive = true;
     api.posts.list(userId)
       .then(data => { if (alive) setPosts(data); })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [userId]);
