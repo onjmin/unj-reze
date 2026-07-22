@@ -733,6 +733,14 @@ function ReplyPreview({ replies, post: parentPost }: { replies: Post[]; post: Po
           )}
         </div>
         <span key={index} className="flex items-center min-w-0 animate-fade-in-up">
+          {reply?.hasImage && reply.imageSrc && (
+            <img
+              src={reply.imageSrc}
+              alt={reply.imageAlt || 'ユーザーアート'}
+              className="shrink-0 w-5 h-5 rounded object-cover border border-gray-800 mr-1.5"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+          )}
           <span className="truncate text-[11px] text-gray-400">
             <span className="text-gray-300 font-bold">{activeAvatarInfo.username}</span>
             <span className="text-gray-500 ml-1">{reply?.content}</span>
