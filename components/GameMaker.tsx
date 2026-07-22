@@ -1378,9 +1378,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [selectedObjId, setSelectedObjId] = useState<string | null>(null);
   const selectedObjIdRef = useRef<string | null>(null);
   selectedObjIdRef.current = selectedObjId;
-  const [nearObjId, setNearObjId] = useState<string | null>(null);
-  const nearObjIdRef = useRef<string | null>(null);
-  nearObjIdRef.current = nearObjId;
   // ── バッチ選択（複数オブジェクトをまとめて編集） ──
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const batchIdsRef = useRef<Set<string>>(new Set());
@@ -8903,22 +8900,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       prevZRef.current = isZ;
       prevXRef.current = isX;
 
-      // ── edit mode: detect near objects (do NOT auto-select on touch) ──
-      let nearObj: ObjectDef | null = null;
-      if (!isPlaying && !battleRef.current.active) {
-        const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
-        for (const o of gameData.objects) {
-          const ox = o.col * TILE_SIZE, oy = o.row * TILE_SIZE;
-          if (pcx > ox && pcx < ox + TILE_SIZE && pcy > oy && pcy < oy + TILE_SIZE) {
-            nearObj = o;
-            break;
-          }
-        }
-        if (nearObj?.id !== nearObjIdRef.current) {
-          setNearObjId(nearObj?.id ?? null);
-        }
-      }
-
       // ── draw ──
       ctx.fillStyle = gameData.tiles[0]?.color || '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -10981,6 +10962,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const updObj = (patch: Partial<ObjectDef>) => { if (!selectedObjId) return; setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, ...patch } : o) })); };
   const delObj = () => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.filter(o => o.id !== selectedObjId) })); setSelectedObjId(null); };
   const moveObj = (dc: number, dr: number) => { if (!selectedObjId) return; pushUndo(); setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, col: o.col + dc, row: o.row + dr } : o) })); };
+  const loadNearEvent = () => {
+    const p = engineRef.current.player;
+    const pCol = Math.floor((p.x + 12) / TILE_SIZE);
+    const pRow = Math.floor((p.y + 12) / TILE_SIZE);
+    const target = gameData.objects.find(o => o.col === pCol && o.row === pRow)
+      ?? gameData.objects.find(o => Math.abs(o.col - pCol) <= 1 && Math.abs(o.row - pRow) <= 1);
+    if (target) {
+      setSelectedObjId(target.id);
+    }
+  };
   // ── パネル選択＝「いま置くもの」──────────────────────────────────
   //  ドロップダウンの1項目＝1つの配置物になるよう、
   //  （編集パネル・描画レイヤー・オブジェ種別）の組を1つの値として扱う。
@@ -14792,21 +14783,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       )}
                     </>) : (
                       <div className="rounded-lg border border-gray-700 bg-gray-900 p-2.5 space-y-2.5">
-                        {/* ── 足元・選択位置のオブジェクト読み込みボタン（レイアウト切り替えを行わず常時表示） ── */}
+                        {/* ── 足元・選択位置のオブジェクト読み込みボタン（オンデマンド判定・重くならない） ── */}
                         <button
-                          onClick={() => {
-                            const near = gameData.objects.find(o => o.id === nearObjId);
-                            if (near) setSelectedObjId(near.id);
-                          }}
-                          disabled={!nearObjId || !gameData.objects.some(o => o.id === nearObjId)}
-                          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:hover:bg-gray-800 disabled:cursor-not-allowed border border-gray-700 text-[11px] text-gray-300 transition-colors"
+                          onClick={loadNearEvent}
+                          className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-gray-600 border border-gray-700 text-[11px] text-gray-300 transition-colors"
                         >
                           <Box size={12} />
                           この位置のイベントを読み込む
-                          {(() => {
-                            const near = gameData.objects.find(o => o.id === nearObjId);
-                            return near ? <span className="text-[10px] text-gray-400">({near.name || near.emoji || '検出'})</span> : null;
-                          })()}
                         </button>
                         <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={11} /> オブジェクトの位置でボタンを押して再編集</p>
                         <div className="flex items-center gap-2">
