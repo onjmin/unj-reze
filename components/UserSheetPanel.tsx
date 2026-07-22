@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2, Scissors, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { loadImage, WALK_STANDARDS } from '@/lib/walk-sprite';
@@ -389,7 +389,21 @@ function PostImageGrid({ userId, selectedUrl, onSelect }: { userId: string; sele
   }, [userId]);
 
   const q = query.trim().toLowerCase();
-  const imagePosts = posts.filter(p => p.hasImage && p.imageSrc &&
+  const allPostsAndReplies = useMemo(() => {
+    const list: Post[] = [];
+    const seen = new Set<string>();
+    for (const p of posts) {
+      if (!seen.has(p.id)) { seen.add(p.id); list.push(p); }
+      if (p.replies) {
+        for (const r of p.replies) {
+          if (!seen.has(r.id)) { seen.add(r.id); list.push(r); }
+        }
+      }
+    }
+    return list;
+  }, [posts]);
+
+  const imagePosts = allPostsAndReplies.filter(p => p.hasImage && p.imageSrc &&
     (!q || p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q)));
 
   return (
