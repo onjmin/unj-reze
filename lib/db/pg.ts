@@ -112,7 +112,8 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
 
 async function getPostsWithVotes(client: any, userId?: string, limit?: number): Promise<Post[]> {
   let result;
-  const limitClause = limit ? ` LIMIT ${Math.max(1, Math.min(limit, 100))}` : '';
+  const safeLimit = Math.max(1, Math.min(limit || 20, 50));
+  const limitClause = ` LIMIT ${safeLimit}`;
   if (userId) {
     result = await client.query(`
       SELECT p.*,
