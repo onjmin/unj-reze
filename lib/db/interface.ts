@@ -73,11 +73,11 @@ export interface DataStore {
   editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string): Promise<DbPost | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
-  getUserPostsBySlug(slug: string, userId?: string): Promise<DbPost[]>;
+  getUserPostsBySlug(slug: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getUserDisplayName(slug: string): Promise<string | undefined>;
-  getLikedPosts(userId: string): Promise<DbPost[]>;
-  getDislikedPosts(userId: string): Promise<DbPost[]>;
-  getHeartedPosts(userId: string): Promise<DbPost[]>;
+  getLikedPosts(userId: string, limit?: number): Promise<DbPost[]>;
+  getDislikedPosts(userId: string, limit?: number): Promise<DbPost[]>;
+  getHeartedPosts(userId: string, limit?: number): Promise<DbPost[]>;
   getNotifications(userId?: string): Promise<DbNotification[]>;
   markNotificationRead(id: number, userId: string): Promise<void>;
   markAllNotificationsRead(userId: string): Promise<void>;
@@ -86,8 +86,8 @@ export interface DataStore {
   getMessages(userId?: string): Promise<Message[]>;
   addMessage(data: MessageParams): Promise<Message>;
   getTrends(): Promise<Trend[]>;
-  searchPosts(query: string, userId?: string): Promise<DbPost[]>;
-  getPostsByHashtag(tag: string, userId?: string): Promise<DbPost[]>;
+  searchPosts(query: string, userId?: string, limit?: number): Promise<DbPost[]>;
+  getPostsByHashtag(tag: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
   updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string): Promise<void>;
   getUserAvatarUrl(slug: string): Promise<string | undefined>;
@@ -115,7 +115,7 @@ export interface DataStore {
   getGame(id: number): Promise<DbGameRecord | null>;
   getGamesByIds(ids: number[]): Promise<DbGameRecord[]>;
   updateGame(id: number, data: { title: string; manifest: GameManifestDraft }): Promise<DbGameRecord | null>;
-  listAllGames(): Promise<DbGameRecord[]>;
+  listAllGames(limit?: number): Promise<DbGameRecord[]>;
   getLiveGameInfo(ipAddress: string): Promise<{ gameId: number | null; gameTitle: string; gamePreset: string; hourSlot: string; postId: number | null; nextCandidates: GameVoteCandidate[]; myVote: number | null }>;
   voteGame(gameId: number, ipAddress: string): Promise<void>;
   updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string): Promise<void>;

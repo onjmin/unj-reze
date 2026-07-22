@@ -56,20 +56,20 @@ export const mockStore: DataStore = {
     return mockDb.deleteMessage(id, userId);
   },
 
-  async getUserPostsBySlug(slug: string, userId?: string) {
-    return mockDb.getUserPostsBySlug(slug, userId);
+  async getUserPostsBySlug(slug: string, userId?: string, limit?: number) {
+    return mockDb.getUserPostsBySlug(slug, userId, limit);
   },
 
-  async getLikedPosts(userId: string) {
-    return mockDb.getLikedPosts(userId);
+  async getLikedPosts(userId: string, limit?: number) {
+    return mockDb.getLikedPosts(userId, limit);
   },
 
-  async getDislikedPosts(userId: string) {
-    return mockDb.getDislikedPosts(userId);
+  async getDislikedPosts(userId: string, limit?: number) {
+    return mockDb.getDislikedPosts(userId, limit);
   },
 
-  async getHeartedPosts(userId: string) {
-    return mockDb.getHeartedPosts(userId);
+  async getHeartedPosts(userId: string, limit?: number) {
+    return mockDb.getHeartedPosts(userId, limit);
   },
 
   async getUserDisplayName(slug: string) {
@@ -108,12 +108,12 @@ export const mockStore: DataStore = {
     return mockDb.getTrends();
   },
 
-  async searchPosts(query: string, userId?: string) {
-    return mockDb.searchPosts(query, userId);
+  async searchPosts(query: string, userId?: string, limit?: number) {
+    return mockDb.searchPosts(query, userId, limit);
   },
 
-  async getPostsByHashtag(tag: string, userId?: string) {
-    return mockDb.getPostsByHashtag(tag, userId);
+  async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
+    return mockDb.getPostsByHashtag(tag, userId, limit);
   },
 
   async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
@@ -229,8 +229,9 @@ export const mockStore: DataStore = {
     return updated;
   },
 
-  async listAllGames() {
-    return Array.from(gameStore.values());
+  async listAllGames(limit?: number) {
+    const list = Array.from(gameStore.values());
+    return limit && limit > 0 ? list.slice(0, limit) : list;
   },
 
   async getLiveGameInfo(_ipAddress: string) {

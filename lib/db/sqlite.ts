@@ -679,30 +679,33 @@ export const sqliteStore: DataStore = {
     return true;
   },
 
-  async getLikedPosts(userId: string) {
+  async getLikedPosts(userId: string, limit?: number) {
     const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 20, 50));
     const rows = rowsToObjects(
       d,
-      `${VOTED_SELECT} JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = ? AND pv.vote_type = 'like' ORDER BY p.id DESC`,
+      `${VOTED_SELECT} JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = ? AND pv.vote_type = 'like' ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [userId]
     );
     rows.forEach(r => applyVoteRow(r, userId));
     return rows.map(rowToPost);
   },
 
-  async getDislikedPosts(userId: string) {
+  async getDislikedPosts(userId: string, limit?: number) {
     const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 20, 50));
     const rows = rowsToObjects(
       d,
-      `${VOTED_SELECT} JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = ? AND pv.vote_type = 'dislike' ORDER BY p.id DESC`,
+      `${VOTED_SELECT} JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = ? AND pv.vote_type = 'dislike' ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [userId]
     );
     rows.forEach(r => applyVoteRow(r, userId));
     return rows.map(rowToPost);
   },
 
-  async getHeartedPosts(userId: string) {
+  async getHeartedPosts(userId: string, limit?: number) {
     const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 20, 50));
     const rows = rowsToObjects(
       d,
       `SELECT p.*,
@@ -713,25 +716,26 @@ export const sqliteStore: DataStore = {
        FROM posts p
        LEFT JOIN anonymous_users au ON p.slug = au.slug
        JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = ?
-       ORDER BY p.id DESC`,
+       ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [userId]
     );
     return rows.map(rowToPost);
   },
 
-  async getUserPostsBySlug(slug: string, userId?: string) {
+  async getUserPostsBySlug(slug: string, userId?: string, limit?: number) {
     const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 20, 50));
     let rows;
     if (userId) {
       rows = rowsToObjects(
         d,
-        `${VOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC`,
+        `${VOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC LIMIT ${safeLimit}`,
         [userId, slug]
       );
     } else {
       rows = rowsToObjects(
         d,
-        `${UNVOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC`,
+        `${UNVOTED_SELECT} WHERE p.slug = ? ORDER BY p.id DESC LIMIT ${safeLimit}`,
         [slug]
       );
     }
@@ -872,32 +876,34 @@ export const sqliteStore: DataStore = {
       .slice(0, 10);
   },
 
-  async searchPosts(query: string, userId?: string) {
+  async searchPosts(query: string, userId?: string, limit?: number) {
     if (!query.trim()) return [];
     const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 20, 50));
     const rows = rowsToObjects(
       d,
       `${UNVOTED_SELECT}
       WHERE p.thread_id = p.id
         AND (p.content LIKE ? OR p.display_name LIKE ? OR (au.display_name IS NOT NULL AND au.display_name LIKE ?))
         AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), 0) = 0
-      ORDER BY p.id DESC`,
+      ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [`%${query}%`, `%${query}%`, `%${query}%`]
     );
     const hidden = getHiddenSlugsSqlite(d, userId);
     return rows.map(rowToPost).filter(p => !hidden.has(p.slug ?? ''));
   },
 
-  async getPostsByHashtag(tag: string, userId?: string) {
+  async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 20, 50));
     const rows = rowsToObjects(
       d,
       `${UNVOTED_SELECT}
       WHERE p.thread_id = p.id
         AND p.content LIKE ?
         AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), 0) = 0
-      ORDER BY p.id DESC`,
+      ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [`%${normalized}%`]
     );
     const hidden = getHiddenSlugsSqlite(d, userId);
@@ -1159,9 +1165,10 @@ export const sqliteStore: DataStore = {
     return this.getGame(id);
   },
 
-  async listAllGames() {
+  async listAllGames(limit?: number) {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT * FROM games ORDER BY id DESC', []);
+    const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+    const rows = rowsToObjects(d, `SELECT * FROM games ORDER BY id DESC LIMIT ${safeLimit}`, []);
     return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at }));
   },
 
@@ -1191,7 +1198,7 @@ export const sqliteStore: DataStore = {
       const gr = rowsToObjects(d, 'SELECT preset, title FROM games WHERE id = ?', [gameId]);
       if (gr.length > 0) { gameTitle = gr[0].title; gamePreset = gr[0].preset; }
     }
-    const allGames = rowsToObjects(d, 'SELECT id, preset, title, created_at FROM games ORDER BY id DESC', []);
+    const allGames = rowsToObjects(d, 'SELECT id, preset, title, created_at FROM games ORDER BY id DESC LIMIT 30', []);
     const vcRows = rowsToObjects(d, 'SELECT game_id, COUNT(*) as cnt FROM game_votes WHERE hour_slot = ? GROUP BY game_id', [slot]);
     const voteCounts = new Map(vcRows.map((r: any) => [r.game_id, Number(r.cnt)]));
     const myVoteRows = rowsToObjects(d, 'SELECT game_id FROM game_votes WHERE ip_address = ? AND hour_slot = ?', [ipAddress, slot]);

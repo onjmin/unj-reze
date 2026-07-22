@@ -289,42 +289,48 @@ class MockDB {
     return result;
   }
 
-  getUserPostsBySlug(slug: string, userId?: string): Post[] {
+  getUserPostsBySlug(slug: string, userId?: string, limit?: number): Post[] {
     const hidden = this.getHiddenSlugs(userId);
     if (hidden.has(slug)) return [];
     const posts = this.posts.filter(p => p.slug === slug);
     const author = posts[0];
     if (author && !this.canViewAuthor(slug, author.displayName, userId)) return [];
-    return posts.map(p => this.applyUserState({ ...p, replies: [...p.replies].map(r => this.applyUserState(r, userId)) }, userId));
+    const res = posts.map(p => this.applyUserState({ ...p, replies: [...p.replies].map(r => this.applyUserState(r, userId)) }, userId));
+    return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
-  getLikedPosts(userId: string): Post[] {
+  getLikedPosts(userId: string, limit?: number): Post[] {
     const likedIds = new Set<number>();
     for (const [key, val] of this.votes) {
       if (key.endsWith(`:${userId}:like`) && val === 'like') {
         likedIds.add(parseInt(key.split(':')[0], 10));
       }
     }
-    return this.posts.filter(p => likedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    const res = this.posts.filter(p => likedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
-  getDislikedPosts(userId: string): Post[] {
+  getDislikedPosts(userId: string, limit?: number): Post[] {
     const dislikedIds = new Set<number>();
     for (const [key, val] of this.votes) {
       if (key.endsWith(`:${userId}:dislike`) && val === 'dislike') {
         dislikedIds.add(parseInt(key.split(':')[0], 10));
       }
     }
-    return this.posts.filter(p => dislikedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    const res = this.posts.filter(p => dislikedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
-  getHeartedPosts(userId: string): Post[] {
+  getHeartedPosts(userId: string, limit?: number): Post[] {
     const heartedIds = new Set<number>();
     for (const e of this.heartEntries) {
       if (e.userId === userId) heartedIds.add(e.postId);
     }
-    return this.posts.filter(p => heartedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    const res = this.posts.filter(p => heartedIds.has(p.id)).map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return limit && limit > 0 ? res.slice(0, limit) : res;
   }
+
+
 
   getUserDisplayName(slug: string): string | undefined {
     const post = this.posts.find(p => p.slug === slug);
@@ -575,22 +581,23 @@ class MockDB {
     return msg;
   }
 
-  searchPosts(query: string, userId?: string): Post[] {
+  searchPosts(query: string, userId?: string, limit?: number): Post[] {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
     const hidden = this.getHiddenSlugs(userId);
-    return this.posts
+    const res = this.posts
       .filter(p => p.id === p.threadId)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
       .filter(p => p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))
       .map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
-  getPostsByHashtag(tag: string, userId?: string): Post[] {
+  getPostsByHashtag(tag: string, userId?: string, limit?: number): Post[] {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const hidden = this.getHiddenSlugs(userId);
-    return this.posts
+    const res = this.posts
       .filter(p => p.id === p.threadId)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
@@ -599,6 +606,7 @@ class MockDB {
         return tags?.some(t => t === normalized) ?? false;
       })
       .map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
+    return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
   getTrends(): Trend[] {

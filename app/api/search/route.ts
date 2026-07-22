@@ -10,7 +10,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'query parameter q is required' }, { status: 400 });
   }
   const userId = url.searchParams.get('userId') || undefined;
-  const posts = await db.searchPosts(q, userId);
+  const limitParam = url.searchParams.get('limit');
+  const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : 20;
+  const posts = await db.searchPosts(q, userId, limit);
   await attachGameInfo(posts);
   return NextResponse.json(posts.map(encodePost));
 }

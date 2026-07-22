@@ -13,14 +13,17 @@ export async function GET(
   const userId = url.searchParams.get('userId') || undefined;
   const tab = url.searchParams.get('tab');
 
+  const limitParam = url.searchParams.get('limit');
+  const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : 20;
+
   const [posts, displayNameResult, avatarUrl, bio] = await Promise.all([
     tab === 'likes' && userId
-      ? db.getLikedPosts(userId)
+      ? db.getLikedPosts(userId, limit)
       : tab === 'dislikes' && userId
-      ? db.getDislikedPosts(userId)
+      ? db.getDislikedPosts(userId, limit)
       : tab === 'hearts' && userId
-      ? db.getHeartedPosts(userId)
-      : db.getUserPostsBySlug(id, userId),
+      ? db.getHeartedPosts(userId, limit)
+      : db.getUserPostsBySlug(id, userId, limit),
     db.getUserDisplayName(id),
     db.getUserAvatarUrl(id),
     db.getUserBio(id),

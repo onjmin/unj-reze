@@ -573,9 +573,10 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getLikedPosts(userId: string) {
+  async getLikedPosts(userId: string, limit?: number) {
     const client = await getPool().connect();
     try {
+      const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
         SELECT p.*,
           COALESCE(au.display_name, p.display_name) as display_name,
@@ -587,6 +588,7 @@ export const pgStore: DataStore = {
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'like'
         ORDER BY p.id DESC
+        LIMIT ${safeLimit}
       `, [userId]);
       return Promise.all(result.rows.map(rowToPost));
     } finally {
@@ -594,9 +596,10 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getDislikedPosts(userId: string) {
+  async getDislikedPosts(userId: string, limit?: number) {
     const client = await getPool().connect();
     try {
+      const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
         SELECT p.*,
           COALESCE(au.display_name, p.display_name) as display_name,
@@ -608,6 +611,7 @@ export const pgStore: DataStore = {
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'dislike'
         ORDER BY p.id DESC
+        LIMIT ${safeLimit}
       `, [userId]);
       return Promise.all(result.rows.map(rowToPost));
     } finally {
@@ -615,9 +619,10 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getHeartedPosts(userId: string) {
+  async getHeartedPosts(userId: string, limit?: number) {
     const client = await getPool().connect();
     try {
+      const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
         SELECT p.*,
           COALESCE(au.display_name, p.display_name) as display_name,
@@ -629,6 +634,7 @@ export const pgStore: DataStore = {
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = $1
         ORDER BY p.id DESC
+        LIMIT ${safeLimit}
       `, [userId]);
       return Promise.all(result.rows.map(rowToPost));
     } finally {
@@ -636,9 +642,10 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getUserPostsBySlug(slug: string, userId?: string) {
+  async getUserPostsBySlug(slug: string, userId?: string, limit?: number) {
     const client = await getPool().connect();
     try {
+      const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       let result;
       if (userId) {
         result = await client.query(`
@@ -653,6 +660,7 @@ export const pgStore: DataStore = {
           LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
           WHERE p.slug = $2
           ORDER BY p.id DESC
+          LIMIT ${safeLimit}
         `, [userId, slug]);
       } else {
         result = await client.query(`
@@ -666,6 +674,7 @@ export const pgStore: DataStore = {
           LEFT JOIN anonymous_users au ON p.slug = au.slug
           WHERE p.slug = $1
           ORDER BY p.id DESC
+          LIMIT ${safeLimit}
         `, [slug]);
       }
       return Promise.all(result.rows.map(rowToPost));
@@ -889,10 +898,11 @@ export const pgStore: DataStore = {
     }
   },
 
-  async searchPosts(query: string, userId?: string) {
+  async searchPosts(query: string, userId?: string, limit?: number) {
     if (!query.trim()) return [];
     const client = await getPool().connect();
     try {
+      const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
         SELECT p.*,
           COALESCE(au.display_name, p.display_name) as display_name,
@@ -906,6 +916,7 @@ export const pgStore: DataStore = {
           AND (p.content ILIKE $1 OR p.display_name ILIKE $1 OR au.display_name ILIKE $1)
           AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
+        LIMIT ${safeLimit}
       `, [`%${query}%`]);
       const [posts, hidden] = await Promise.all([
         Promise.all(result.rows.map(rowToPost)),
@@ -917,10 +928,11 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getPostsByHashtag(tag: string, userId?: string) {
+  async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const client = await getPool().connect();
     try {
+      const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
         SELECT p.*,
           COALESCE(au.display_name, p.display_name) as display_name,
@@ -934,6 +946,7 @@ export const pgStore: DataStore = {
           AND p.content ~ ('(^|[[:space:]])' || $1 || '([[:space:]]|$)')
           AND COALESCE((SELECT au.hide_from_search FROM anonymous_users au WHERE au.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
+        LIMIT ${safeLimit}
       `, [normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')]);
       const [posts, hidden] = await Promise.all([
         Promise.all(result.rows.map(rowToPost)),
@@ -1290,10 +1303,11 @@ export const pgStore: DataStore = {
     }
   },
 
-  async listAllGames() {
+  async listAllGames(limit?: number) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT * FROM games ORDER BY id DESC');
+      const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+      const result = await client.query(`SELECT * FROM games ORDER BY id DESC LIMIT ${safeLimit}`);
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
         return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt };
@@ -1329,7 +1343,7 @@ export const pgStore: DataStore = {
         const gr = await client.query('SELECT preset, title FROM games WHERE id = $1', [gameId]);
         if (gr.rows.length > 0) { gameTitle = gr.rows[0].title; gamePreset = gr.rows[0].preset; }
       }
-      const allGames = await client.query('SELECT id, preset, title, created_at FROM games ORDER BY id DESC');
+      const allGames = await client.query('SELECT id, preset, title, created_at FROM games ORDER BY id DESC LIMIT 30');
       const vcResult = await client.query('SELECT game_id, COUNT(*) as cnt FROM game_votes WHERE hour_slot = $1 GROUP BY game_id', [slot]);
       const voteCounts = new Map(vcResult.rows.map((r: any) => [String(r.game_id), Number(r.cnt)]));
       const myVoteResult = await client.query('SELECT game_id FROM game_votes WHERE ip_address = $1 AND hour_slot = $2', [ipAddress, slot]);
