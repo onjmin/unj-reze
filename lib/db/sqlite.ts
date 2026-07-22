@@ -1039,6 +1039,8 @@ export const sqliteStore: DataStore = {
 
   async followUser(followerId: string, followedId: string) {
     const d = await getDb();
+    // 同一ユーザーを id / display_name / slug の別表記で指した自己フォローを防ぐ。
+    if (resolveViewerSlugSqlite(d, followerId) === resolveViewerSlugSqlite(d, followedId)) return;
     const before = rowsToObjects(d, 'SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ? LIMIT 1', [followerId, followedId]);
     d.run(
       'INSERT OR IGNORE INTO user_follows (follower_id, followed_id) VALUES (?, ?)',

@@ -4,6 +4,7 @@ import { Heart, AtSign, Repeat2, UserPlus, MessageCircle, X, CheckCheck } from '
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { getAvatarInfo } from '@/lib/avatar';
 
 const tabs = ['すべて', 'メンション'];
 
@@ -101,7 +102,7 @@ export default function NotificationView({ userId }: NotificationViewProps) {
               <Icon size={16} className={`${color} shrink-0 mt-0.5 ${n.type === 'like' || n.type === 'heart' ? 'fill-current' : ''}`} />
               <div className="flex-1 min-w-0">
                 <p className={n.read ? 'text-gray-400' : 'text-gray-200'}>
-                  <span className="font-bold text-white mr-1">{n.user}</span>
+                  <span className="font-bold text-white mr-1">{getAvatarInfo(n.user).username}</span>
                   {n.action}
                   {n.target && <span className="text-gray-400">「{n.target}」</span>}
                 </p>

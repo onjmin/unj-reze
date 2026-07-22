@@ -1108,6 +1108,12 @@ export const pgStore: DataStore = {
   async followUser(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
+      // 同一ユーザーを id / display_name / slug の別表記で指した自己フォローを防ぐ。
+      const [followerSlug, followedSlug] = await Promise.all([
+        resolveViewerSlug(client, followerId),
+        resolveViewerSlug(client, followedId),
+      ]);
+      if (followerSlug === followedSlug) return;
       const ins = await client.query(
         'INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [followerId, followedId]

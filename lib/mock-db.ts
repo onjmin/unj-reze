@@ -620,7 +620,8 @@ class MockDB {
   }
 
   followUser(followerId: string, followedId: string): void {
-    if (followerId === followedId) return;
+    // 同一ユーザーを別表記(id/displayName/slug)で指した自己フォローも弾く。
+    if (followerId === followedId || this.slugForUser(followerId) === this.slugForUser(followedId)) return;
     const exists = this.follows.some(f => f.followerId === followerId && f.followedId === followedId);
     if (!exists) {
       this.follows.push({ followerId, followedId });
