@@ -18,6 +18,7 @@ import {
 import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
 import ContentPicker, { type PickResult } from './ContentPicker';
 import WalkSpritePreview from './WalkSpritePreview';
+import AssetThumb from './AssetThumb';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
 import { parseRpgen } from '@/lib/rpgen-parser';
@@ -14280,12 +14281,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <button onClick={delObj} className="grid place-items-center min-w-[2.25rem] h-9 px-2 bg-red-800 hover:bg-red-700 active:bg-red-600 rounded-lg text-[11px] text-white">削除</button>
                           </div>
                         </div>
-                        {/* 共通: emoji + name */}
+                        {/* 共通: emoji / sprite + name */}
                         <div className="flex items-center gap-2">
-                          <input value={selObj.emoji} onChange={e => updObj({ emoji: e.target.value.slice(0, 2) })}
-                            className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-center text-lg" />
+                          {selObj.spriteUrl || selObj.spriteRef ? (
+                            <div className="relative shrink-0 w-10 h-10 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
+                              <AssetThumb refStr={selObj.spriteRef || selObj.spriteUrl || ''} url={selObj.spriteUrl} size={40} />
+                              <button onClick={() => updObj({ spriteRef: undefined, spriteUrl: undefined })}
+                                className="absolute -top-1 -right-1 bg-red-600 hover:bg-red-500 text-white rounded-full p-0.5" title="画像解除">
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <input value={selObj.emoji} onChange={e => updObj({ emoji: e.target.value.slice(0, 2) })}
+                              className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-center text-lg shrink-0" title="絵文字" />
+                          )}
+                          <button
+                            onClick={() => setPicker({ mode: 'image', target: { t: 'selObjSprite' } })}
+                            className="flex items-center justify-center gap-1 px-2 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300 font-bold shrink-0"
+                          >
+                            <ImageIcon size={12} />
+                            {selObj.spriteUrl || selObj.spriteRef ? '画像変更' : '画像参照'}
+                          </button>
                           <input value={selObj.name ?? ''} onChange={e => updObj({ name: e.target.value || undefined })} placeholder="名前(任意)"
-                            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none" />
+                            className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none" />
                         </div>
                         {/* 種別 */}
                         <label className="text-[10px] text-gray-400 block">種別
@@ -14702,10 +14720,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       <div className="rounded-lg border border-gray-700 bg-gray-900 p-2.5 space-y-2.5">
                         <p className="text-[10px] text-gray-400 flex items-center gap-1"><Smartphone size={11} /> プレイヤーで重なるかキャンバスをタップで選択</p>
                         <div className="flex items-center gap-2">
-                          <input value={tpl.emoji} onChange={e => setTpl({ emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined })}
-                            className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-1.5 text-center text-lg" />
-                          <button onClick={() => setPicker({ mode: 'image', target: { t: 'objsprite' } })} className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />画像参照</button>
-                          {tpl.spriteUrl && <button onClick={() => setTpl({ spriteRef: undefined, spriteUrl: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>}
+                          {tpl.spriteUrl || tpl.spriteRef ? (
+                            <div className="relative shrink-0 w-10 h-10 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
+                              <AssetThumb refStr={tpl.spriteRef || tpl.spriteUrl || ''} url={tpl.spriteUrl} size={40} />
+                              <button onClick={() => setTpl({ spriteRef: undefined, spriteUrl: undefined })}
+                                className="absolute -top-1 -right-1 bg-red-600 hover:bg-red-500 text-white rounded-full p-0.5" title="画像解除">
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <input value={tpl.emoji} onChange={e => setTpl({ emoji: e.target.value.slice(0, 2), spriteRef: undefined, spriteUrl: undefined })}
+                              className="w-10 bg-gray-800 border border-gray-700 rounded px-1 py-1.5 text-center text-lg shrink-0" title="絵文字" />
+                          )}
+                          <button onClick={() => setPicker({ mode: 'image', target: { t: 'objsprite' } })}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300 font-bold">
+                            <ImageIcon size={12} />
+                            {tpl.spriteUrl || tpl.spriteRef ? '画像変更' : '画像参照'}
+                          </button>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <label className="text-[10px] text-gray-400">挙動
@@ -14776,7 +14807,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               className={`w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-left ${batchIds.has(o.id) ? 'bg-blue-800/40 text-blue-200' : selectedObjId === o.id ? 'bg-yellow-800/40 text-yellow-200' : 'bg-gray-800/40 text-gray-400 hover:bg-gray-700/40'}`}>
                               <input type="checkbox" checked={batchIds.has(o.id)} readOnly className="accent-blue-500 shrink-0"
                                 onClick={e => { e.stopPropagation(); setBatchIds(prev => { const n = new Set(prev); n.has(o.id) ? n.delete(o.id) : n.add(o.id); return n; }); lastClickedIdRef.current = o.id; }} />
-                              <span>{o.emoji}</span>
+                              {o.spriteUrl || o.spriteRef ? (
+                                <span className="w-5 h-5 shrink-0 rounded overflow-hidden flex items-center justify-center bg-black/40 border border-gray-700">
+                                  <AssetThumb refStr={o.spriteRef || o.spriteUrl || ''} url={o.spriteUrl} size={20} />
+                                </span>
+                              ) : (
+                                <span>{o.emoji}</span>
+                              )}
                               <span className="truncate flex-1">{o.name || o.objType || '敵'}</span>
                               <span className="text-gray-600">({o.col},{o.row})</span>
                             </button>
