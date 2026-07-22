@@ -49,7 +49,7 @@ const BLOCKED_HTML = `<!doctype html>
 
 export const runtime = "experimental-edge";
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // EU/EEA からのアクセスを 451 で遮断
