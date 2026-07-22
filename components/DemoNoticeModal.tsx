@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-const PROD_URL = 'https://unj-reze.netlify.app/';
+const PROD_URL = 'https://unj-reze.onjmin.workers.dev/';
 
 export default function DemoNoticeModal() {
   const [visible, setVisible] = useState(false);
