@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2, Scissors } from 'lucide-react';
+import { Loader2, Plus, Trash2, Download, FileUp, Search, Image as ImageIcon, Link2, Scissors, Pencil } from 'lucide-react';
 import { api } from '@/lib/api';
 import { loadImage, WALK_STANDARDS } from '@/lib/walk-sprite';
 import { buildWalkRef } from '@/lib/asset-ref';
 import {
-  addUserSheet, removeUserSheet, subscribeUserSheets,
+  addUserSheet, updateUserSheet, removeUserSheet, subscribeUserSheets,
   userSheetsSnapshot, userSheetsServerSnapshot,
   exportUserSheet, importUserSheet,
   userSheetCellRef, userSheetCellUrl, type UserSheet,
@@ -147,6 +147,7 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
           ? <PickRefSheetView
               key={open.id}
               sheet={open}
+              userId={userId}
               onPick={onPick}
               onExport={() => handleExport(open)}
               onDelete={() => { removeUserSheet(open.id); setOpenId(null); }}
@@ -164,12 +165,57 @@ export default function UserSheetPanel({ onPick, userId }: UserSheetPanelProps) 
 }
 
 /** pickRef 付きマイシート（切り出し済みの1体素材）の詳細ビュー。マス目選択ではなく、そのまま使う。 */
-function PickRefSheetView({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; onPick?: (res: PickResult) => void; onExport: () => void; onDelete: () => void }) {
+function PickRefSheetView({ sheet, userId, onPick, onExport, onDelete }: { sheet: UserSheet; userId?: string; onPick?: (res: PickResult) => void; onExport: () => void; onDelete: () => void }) {
   const isWalk = sheet.pickRef?.startsWith('walk:');
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(sheet.name);
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-blue-500 bg-gray-900/80 p-2.5 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-blue-400 font-bold">切り出し設定を再編集</p>
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[10px] text-gray-400 hover:text-white px-2 py-0.5 rounded bg-gray-800 border border-gray-700"
+          >
+            キャンセル
+          </button>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] text-gray-400">素材名</label>
+          <input
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            placeholder="素材名"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-500"
+          />
+        </div>
+        <PostSlicePanel
+          userId={userId}
+          allowUpload
+          initialAsset={{ ref: sheet.pickRef!, url: sheet.url, label: editName }}
+          confirmLabel="定義を更新"
+          hint="クロップ位置や歩行グラ規格・コマ数・表示倍率などのパラメータを再編集できます。"
+          onPick={(res) => {
+            if (!res.ref) return;
+            const finalName = editName.trim() || res.label || sheet.name;
+            updateUserSheet(sheet.id, { name: finalName, pickRef: res.ref });
+            setEditing(false);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 px-0.5">
         <p className="text-[10px] text-gray-500 flex-1 truncate">{sheet.name} ・ {isWalk ? '歩行グラ（切り出し）' : '切り出しスプライト'}</p>
+        <button onClick={() => { setEditName(sheet.name); setEditing(true); }} title="クロップ位置・パラメータを再編集"
+          className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
+          <Pencil size={14} />
+        </button>
         <button onClick={onExport} title="このシート定義を書き出す（.json）"
           className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
           <Download size={14} />
@@ -460,6 +506,14 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
   /** 歩行グラの規格（auto=実寸から自動推定）。 */
   const [walkStd, setWalkStd] = useState('auto');
 
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(sheet.name);
+  const [editUrl, setEditUrl] = useState(sheet.url);
+  const [editCellW, setEditCellW] = useState(sheet.cellW);
+  const [editCellH, setEditCellH] = useState(sheet.cellH);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     loadImage(sheet.url).then(img => {
@@ -506,6 +560,17 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
         {sheet.name} ・ {sheet.cellW}×{sheet.cellH}px
         {size ? ` ・ ${size.cols}×${size.rows}マス` : ''}
       </p>
+      <button onClick={() => {
+        setEditName(sheet.name);
+        setEditUrl(sheet.url);
+        setEditCellW(sheet.cellW);
+        setEditCellH(sheet.cellH);
+        setEditError(null);
+        setEditing(true);
+      }} title="マス目サイズ・パラメータを再編集"
+        className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
+        <Pencil size={14} />
+      </button>
       <button onClick={onExport} title="このシート定義を書き出す（.json）"
         className="shrink-0 grid place-items-center w-8 h-8 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-blue-500/10">
         <Download size={14} />
@@ -528,6 +593,93 @@ function SheetGrid({ sheet, onPick, onExport, onDelete }: { sheet: UserSheet; on
       ))}
     </div>
   ) : null;
+
+  if (editing) {
+    const handleSave = async () => {
+      setEditError(null);
+      if (!editUrl.trim()) { setEditError('URLを入力してください'); return; }
+      if (editCellW <= 0 || editCellH <= 0) { setEditError('マス目サイズは1以上にしてください'); return; }
+      setEditBusy(true);
+      try {
+        const img = await loadImage(editUrl.trim());
+        if (img.naturalWidth < editCellW || img.naturalHeight < editCellH) {
+          setEditError('画像がマス目サイズより小さいです');
+          return;
+        }
+        updateUserSheet(sheet.id, {
+          name: editName.trim() || 'マイシート',
+          url: editUrl.trim(),
+          cellW: editCellW,
+          cellH: editCellH,
+        });
+        setEditing(false);
+      } catch {
+        setEditError('画像を読み込めませんでした（URLとCORSを確認してください）');
+      } finally {
+        setEditBusy(false);
+      }
+    };
+
+    const numInput = 'w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-500';
+
+    return (
+      <div className="rounded-lg border border-blue-500 bg-gray-900/80 p-2.5 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-blue-400 font-bold">シート定義を再編集</p>
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[10px] text-gray-400 hover:text-white px-2 py-0.5 rounded bg-gray-800 border border-gray-700"
+          >
+            キャンセル
+          </button>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[10px] text-gray-400">シート名</label>
+          <input
+            value={editName} onChange={e => setEditName(e.target.value)} placeholder="シート名"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[10px] text-gray-400">画像URL</label>
+          <input
+            value={editUrl} onChange={e => setEditUrl(e.target.value)} placeholder="画像の直リンクURL"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="border-t border-gray-800 pt-2 space-y-2">
+          <div className="flex items-center gap-2 text-[10px] text-gray-400">
+            <label className="flex items-center gap-1">マス目
+              <input type="number" min={1} value={editCellW} onChange={e => setEditCellW(Number(e.target.value))} className={numInput} />
+            </label>
+            <span>×</span>
+            <input type="number" min={1} value={editCellH} onChange={e => setEditCellH(Number(e.target.value))} className={numInput} />
+            <span>px</span>
+            <div className="flex gap-1 ml-auto">
+              {[16, 32, 48, 64].map(n => (
+                <button key={n} type="button" onClick={() => { setEditCellW(n); setEditCellH(n); }}
+                  className="px-1.5 py-1 rounded bg-gray-800 border border-gray-700 text-[10px] text-gray-300 hover:bg-gray-700">{n}</button>
+              ))}
+            </div>
+          </div>
+
+          {editUrl.trim() && <SheetPreview url={editUrl.trim()} cellW={editCellW} cellH={editCellH} />}
+
+          {editError && <p className="text-[10px] text-red-400">{editError}</p>}
+
+          <button
+            onClick={handleSave} disabled={editBusy || !editUrl.trim()}
+            className="w-full flex items-center justify-center gap-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-[11px] text-white font-bold"
+          >
+            {editBusy ? <Loader2 size={13} className="animate-spin" /> : null}定義を更新
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (error) return <>{header}<p className="text-center text-[11px] text-red-400 py-6">画像を読み込めませんでした</p></>;
   if (!cells || !size) return <>{header}<div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-500" /></div></>;

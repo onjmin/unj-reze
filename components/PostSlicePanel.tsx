@@ -12,7 +12,7 @@ import type { Post } from '@/lib/types';
 import type { PickResult } from './ContentPicker';
 
 interface PostSlicePanelProps {
-  userId: string;
+  userId?: string;
   onPick: (res: PickResult) => void;
   /** 使用履歴からの再編集用。指定時はこの画像・切り出し設定から直接エディタを開く。 */
   initialAsset?: { ref: string; url: string; label?: string };
@@ -46,6 +46,10 @@ export default function PostSlicePanel({ userId, onPick, initialAsset, allowUplo
 
   useEffect(() => {
     let alive = true;
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
     api.posts.list(userId)
       .then(data => { if (alive) setPosts(data); })
       .catch(() => {})

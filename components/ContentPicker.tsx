@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { X, Music, Video, Search, Loader2, Play, Square, Pencil, ArrowLeft } from 'lucide-react';
+import { X, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
@@ -13,7 +13,6 @@ import SMCAssetPanel from './SMCAssetPanel';
 import LocalAssetPanel from './LocalAssetPanel';
 import UserSheetPanel from './UserSheetPanel';
 import BuiltinGameSoundPanel from './BuiltinGameSoundPanel';
-import PostSlicePanel from './PostSlicePanel';
 import AssetThumb from './AssetThumb';
 import { getAvatarInfo } from '@/lib/avatar';
 
@@ -96,7 +95,6 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     }
     return 'T120 o4 c d e f g a b';
   });
-  const [editingHistoryAsset, setEditingHistoryAsset] = useState<{ ref: string; url: string; label: string } | null>(null);
   const [previewKey, setPreviewKey] = useState<string | null>(null);
   const [mmlStepInfo, setMmlStepInfo] = useState<{ currentStep: number; totalSteps: number } | null>(null);
   const [directCurrentTime, setDirectCurrentTime] = useState(0);
@@ -356,45 +354,23 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         </div>
 
         <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-3 scrollbar-none">
-          {/* Image: history（このゲーム内で既に使われている画像を再選択・再編集） */}
+          {/* Image: history（このゲーム内で既に使われている画像を再選択） */}
           {mode === 'image' && imageTab === 'history' && (
-            editingHistoryAsset ? (
-              <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-6 gap-2">
+              {usedAssets.map((a, i) => (
                 <button
-                  onClick={() => setEditingHistoryAsset(null)}
-                  className="flex items-center gap-1 text-[10px] text-blue-500 hover:underline font-bold w-fit"
+                  key={`${a.ref}-${i}`}
+                  onClick={() => onPick(a)}
+                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
                 >
-                  <ArrowLeft size={11} />履歴に戻る
+                  <AssetThumb refStr={a.ref} url={a.url} />
+                  <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">{a.label}</span>
                 </button>
-                <PostSlicePanel userId={userId} onPick={onPick} initialAsset={editingHistoryAsset} />
-              </div>
-            ) : (
-              <div className="grid grid-cols-6 gap-2">
-                {usedAssets.map((a, i) => (
-                  <button
-                    key={`${a.ref}-${i}`}
-                    onClick={() => onPick(a)}
-                    className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
-                  >
-                    <AssetThumb refStr={a.ref} url={a.url} />
-                    {a.url && (
-                      <span
-                        role="button"
-                        onClick={(e) => { e.stopPropagation(); setEditingHistoryAsset({ ref: a.ref, url: a.url!, label: a.label }); }}
-                        className="absolute top-1 right-1 grid place-items-center w-5 h-5 rounded-full bg-black/70 text-gray-300 hover:text-blue-400 hover:bg-black/90"
-                        title="切り出し設定を編集"
-                      >
-                        <Pencil size={11} />
-                      </span>
-                    )}
-                    <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">{a.label}</span>
-                  </button>
-                ))}
-                {usedAssets.length === 0 && (
-                  <p className="col-span-6 text-center text-[11px] text-gray-600 py-8">このゲームではまだ画像が使われていません</p>
-                )}
-              </div>
-            )
+              ))}
+              {usedAssets.length === 0 && (
+                <p className="col-span-6 text-center text-[11px] text-gray-600 py-8">このゲームではまだ画像が使われていません</p>
+              )}
+            </div>
           )}
 
           {/* Image: RPGen sprites（人がまとめた素材集） / walk graphics */}
