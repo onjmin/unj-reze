@@ -9004,8 +9004,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         camY = trans.startCamY + (trans.endCamY - trans.startCamY) * ratio;
       }
 
-      const finalCamX = camX + cameraPanRef.current.x;
-      const finalCamY = camY + cameraPanRef.current.y;
+      const finalCamX = Math.round(camX + cameraPanRef.current.x);
+      const finalCamY = Math.round(camY + cameraPanRef.current.y);
       camXRef.current = finalCamX; camYRef.current = finalCamY;
 
       // 画面シェイク（ヒット・爆発・ゲームオーバー）
@@ -9084,11 +9084,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const dH = sw > 0 ? Math.round(sh * (TILE_SIZE / sw)) : TILE_SIZE;
             ctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE, y * TILE_SIZE + TILE_SIZE - dH, TILE_SIZE, dH);
           } else {
-            // cell-fill（既定）: マスいっぱいに敷き詰める。
-            ctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            // cell-fill（既定）: マスいっぱいに敷き詰める。SCALE_X/Y が非整数（4/3・15/11）のため
+            // タイル境界がデバイスピクセル上で小数位置に落ち、縁のアンチエイリアスで継ぎ目（グリッド線）が出る。
+            // 上下左右へ 0.5px ずつはみ出させ（計 1px オーバーラップ）、隣接タイルでアンチエイリアス縁を確実に覆う。
+            ctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE - 0.5, y * TILE_SIZE - 0.5, TILE_SIZE + 1, TILE_SIZE + 1);
           }
         }
-        else { ctx.fillStyle = info.color; ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+        else { ctx.fillStyle = info.color; ctx.fillRect(x * TILE_SIZE - 0.5, y * TILE_SIZE - 0.5, TILE_SIZE + 1, TILE_SIZE + 1); }
         if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
         if (showCollisionBoundariesRef.current && !isPlaying && !info.passable) {
           const px = x * TILE_SIZE + 5, py = y * TILE_SIZE + 5;
