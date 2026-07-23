@@ -7939,17 +7939,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const pRow = Math.floor(pcy / TILE_SIZE);
           const eCol = Math.floor((e.x + TILE_SIZE / 2) / TILE_SIZE);
           const eRow = Math.floor((e.y + TILE_SIZE / 2) / TILE_SIZE);
-          const isAdjacentTile = Math.abs(pCol - eCol) + Math.abs(pRow - eRow) <= 1;
-          const isFacingEventTile = (isUp && eRow === pRow - 1 && eCol === pCol) ||
-                                    (isDown && eRow === pRow + 1 && eCol === pCol) ||
-                                    (isLeft && eCol === pCol - 1 && eRow === pRow) ||
-                                    (isRight && eCol === pCol + 1 && eRow === pRow);
-          // 半径は「斜め隣接マス（中心間 √2×TILE ≒ 45px）」まで届く 1.5×TILE に取る。
-          // 通行不可タイルに乗ったイベント（壁に埋め込まれた看板・NPC等）は、プレイヤーが
-          // そのマスへ入れないため直交隣接しか成立せず、さらに角では斜め隣接しか取れないことがある。
-          // 1.35（≒43px）だと斜め隣接（≒45px）に僅かに届かず「触れても発動しない」状態になっていた。
-          const overlap = Math.hypot(pcx - (e.x + TILE_SIZE / 2), pcy - (e.y + TILE_SIZE / 2)) < TILE_SIZE * 1.5 || (isFacingEventTile && isAdjacentTile);
-          const exactOverlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
+          const eW = d.w ?? TILE_SIZE, eH = d.h ?? TILE_SIZE;
+
+          // プレイヤー本体の当たり判定領域と、イベントオブジェクト（および設置先の障害物地形）の接触判定
+          const pBoxTouch = p.x - 4 < e.x + eW && p.x + pData.w + 4 > e.x &&
+                            p.y - 4 < e.y + eH && p.y + pData.h + 4 > e.y;
+          const isAdjacentTile = Math.abs(pCol - eCol) <= 1 && Math.abs(pRow - eRow) <= 1;
+          const isFacingEventTile = (isUp && eRow <= pRow && eCol === pCol) ||
+                                    (isDown && eRow >= pRow && eCol === pCol) ||
+                                    (isLeft && eCol <= pCol && eRow === pRow) ||
+                                    (isRight && eCol >= pCol && eRow === pRow);
+          const overlap = pBoxTouch || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5 || (isFacingEventTile && isAdjacentTile);
+          const exactOverlap = pcx > e.x && pcx < e.x + eW && pcy > e.y && pcy < e.y + eH;
           if (overlap) {
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
@@ -8564,15 +8565,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const frontCol = pCol + (pFacing === 'r' ? 1 : pFacing === 'l' ? -1 : 0);
         const frontRow = pRow + (pFacing === 'd' ? 1 : pFacing === 'u' ? -1 : 0);
 
+        // プレイヤーの前面当たり判定領域（移動・押下方向の前方12px）
+        const fBox = {
+          x: pFacing === 'l' ? p.x - 12 : pFacing === 'r' ? p.x + pData.w : p.x,
+          y: pFacing === 'u' ? p.y - 12 : pFacing === 'd' ? p.y + pData.h : p.y,
+          w: (pFacing === 'l' || pFacing === 'r') ? 12 : pData.w,
+          h: (pFacing === 'u' || pFacing === 'd') ? 12 : pData.h,
+        };
+
         const target = acrossTable ?? (isPlaying ? eng.entities : gameData.objects).find(o => {
           const oc = isPlaying ? Math.floor(((o as Entity).x + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).col;
           const or_ = isPlaying ? Math.floor(((o as Entity).y + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).row;
           if ((oc === frontCol && or_ === frontRow) || (oc === pCol && or_ === pRow)) return true;
-          // 8近傍（斜め含む）まで拾えるよう半径は 1.5×TILE。壁に埋まったイベントは角で
-          // 斜め隣接しか取れないことがあり、1.35 だと斜め隣接（≒45px）に届かなかった。
+
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
           const oy = isPlaying ? (o as Entity).y : (o as ObjectDef).row * TILE_SIZE;
-          return Math.hypot(pcx - (ox + TILE_SIZE / 2), pcy - (oy + TILE_SIZE / 2)) < TILE_SIZE * 1.5;
+          const oW = (isPlaying ? (o as Entity).def.w : (o as ObjectDef).w) ?? TILE_SIZE;
+          const oH = (isPlaying ? (o as Entity).def.h : (o as ObjectDef).h) ?? TILE_SIZE;
+
+          // 前面領域が障害物地形上のイベントと接触しているか
+          const isFrontTouch = fBox.x < ox + oW && fBox.x + fBox.w > ox &&
+                               fBox.y < oy + oH && fBox.y + fBox.h > oy;
+          if (isFrontTouch) return true;
+
+          return Math.hypot(pcx - (ox + oW / 2), pcy - (oy + oH / 2)) < TILE_SIZE * 1.5;
         });
         if (target) {
           const def = isPlaying ? (target as Entity).def : target as ObjectDef;
