@@ -10760,6 +10760,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }));
         const eng = engineRef.current;
         eng.map = JSON.parse(JSON.stringify(remappedMap));
+        eng.overlayMap = remappedOverlayMap ? JSON.parse(JSON.stringify(remappedOverlayMap)) : undefined;
+        eng.overheadMap = remappedOverheadMap ? JSON.parse(JSON.stringify(remappedOverheadMap)) : undefined;
         eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
         if (manifest.player?.start) {
           eng.player.x = manifest.player.start.x;

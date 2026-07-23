@@ -11,9 +11,10 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 
   const idsToTranslate = new Set<number>();
 
-  const mapSize = rpgMap.floor.getSize();
-  const cols = mapSize.width;
-  const rows = mapSize.height;
+  const floorSize = rpgMap.floor.getSize();
+  const objSize = rpgMap.objects.getSize();
+  const cols = Math.max(floorSize.width, objSize.width);
+  const rows = Math.max(floorSize.height, objSize.height);
 
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
@@ -149,7 +150,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       } else {
         const id = Number(tk.replace('C', ''));
         const hash = idToHash.get(id);
-        if (hash) imageUrl = `https://rpgen-search.pages.dev/images/sprites/${hash}.png`;
+        if (hash) imageUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
       }
       tileIndexMap.set(tk, nextTileIdx);
       draft.tiles[nextTileIdx] = { name: tk, color: '#333333', passable, imageUrl, special };
@@ -199,7 +200,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
             if (u.startsWith('http')) return u;
             if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
             const hash = idToHash.get(parseInt(u));
-            return hash ? `https://rpgen-search.pages.dev/images/sprites/${hash}.png` : '';
+            return hash ? `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png` : '';
           };
 
           const frames: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[] = [];
@@ -294,9 +295,9 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
           const hash = idToHash.get(idNum);
           if (hash) {
             if (nStr.includes('A')) {
-              spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/images/sAnims/${hash}.png`;
+              spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/${hash}.png`;
             } else {
-              spriteUrl = `https://rpgen-search.pages.dev/images/sprites/${hash}.png`;
+              spriteUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
             }
           }
         }
@@ -313,7 +314,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
           if (u.startsWith('http')) return u;
           if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
           const hash = idToHash.get(parseInt(u));
-          return hash ? `https://rpgen-search.pages.dev/images/sprites/${hash}.png` : '';
+          return hash ? `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png` : '';
         };
 
         const frames: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[] = [];
@@ -368,7 +369,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
           if (u.startsWith('http')) return u;
           if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
           const hash = idToHash.get(parseInt(u));
-          return hash ? `https://rpgen-search.pages.dev/images/sprites/${hash}.png` : '';
+          return hash ? `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png` : '';
         };
 
         const dirs: Record<'U' | 'D' | 'L' | 'R', any> = { U: undefined, D: undefined, L: undefined, R: undefined };
@@ -480,10 +481,10 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       if (match) spriteRef = `walk:auto:u:${match.url}`;
     } else if (human.sprite.type === 2) {
       const hash = idToHash.get(Number((human.sprite as any).id));
-      if (hash) spriteUrl = `https://rpgen-search.pages.dev/images/sprites/${hash}.png`;
+      if (hash) spriteUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
     } else if (human.sprite.type === 3) {
       const hash = idToHash.get(Number((human.sprite as any).id));
-      if (hash) spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/images/sAnims/${hash}.png`;
+      if (hash) spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/${hash}.png`;
     }
 
     let behavior: 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' = 'still';
