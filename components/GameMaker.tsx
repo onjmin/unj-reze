@@ -5,7 +5,7 @@ import { flushSync, createPortal } from 'react-dom';
 import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2 } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
-import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
+import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
 import { applyMasterVolume } from '@/lib/master-volume';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
@@ -10762,7 +10762,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : undefined;
         const remappedOverheadMap = manifest.overheadMap ? remapGrid(manifest.overheadMap) : undefined;
         const importedBgm = hydrateBgmFromRef(manifest.bgm);
-        const importedBgUrl = manifest.mapBgRef ? (imageRefToUrl(manifest.mapBgRef) ?? undefined) : undefined;
+        const blackBgRef = 'tile:#000000';
+        const blackBgUrl = colorToDataUrl('#000000');
 
         const idx = editSceneIdx;
         setGameData(prev => ({
@@ -10772,8 +10773,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           overlayMap: remappedOverlayMap,
           overheadMap: remappedOverheadMap,
           objects: manifest.objects,
-          mapBgRef: manifest.mapBgRef,
-          mapBgUrl: importedBgUrl,
+          mapBgRef: blackBgRef,
+          mapBgUrl: blackBgUrl,
           bgm: importedBgm,
           player: manifest.player ? { ...prev.player, start: manifest.player.start } : prev.player,
           scenes: prev.scenes!.map((s, i) => i === idx ? {
@@ -10782,8 +10783,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             overlayMap: remappedOverlayMap,
             overheadMap: remappedOverheadMap,
             objects: manifest.objects,
-            mapBgRef: manifest.mapBgRef,
-            mapBgUrl: importedBgUrl,
+            mapBgRef: blackBgRef,
+            mapBgUrl: blackBgUrl,
             bgm: importedBgm,
             start: manifest.player?.start,
           } : s),
@@ -10807,7 +10808,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       const preset = manifest.preset as PresetId;
       const base = clone(PRESETS[preset]);
-      const importedBgUrl = manifest.mapBgRef ? (imageRefToUrl(manifest.mapBgRef) ?? undefined) : undefined;
+      const blackBgRef = 'tile:#000000';
+      const blackBgUrl = colorToDataUrl('#000000');
       const data: PresetData = {
         ...base,
         engine: manifest.engine,
@@ -10820,8 +10822,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         overlayMap: manifest.overlayMap,
         overheadMap: manifest.overheadMap,
         objects: manifest.objects,
-        mapBgRef: manifest.mapBgRef,
-        mapBgUrl: importedBgUrl,
+        mapBgRef: blackBgRef,
+        mapBgUrl: blackBgUrl,
         bgm: hydrateBgmFromRef(manifest.bgm),
       };
       applyPresetData(preset as PresetId, data, manifest.name);

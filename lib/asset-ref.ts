@@ -31,6 +31,11 @@ export function parseRef(raw: string): ParsedRef | null {
   return { scheme, value, raw };
 }
 
+export function colorToDataUrl(color: string): string {
+  const safeColor = color || '#000000';
+  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="100%" height="100%" fill="${encodeURIComponent(safeColor)}"/></svg>`;
+}
+
 /** 画像参照を「いま表示に使えるURL」へ。post:/walk: は投稿の image_src 解決が要るため null を返す
  *  (エディタは ContentPicker が選択時に得た URL を別途キャッシュして使う)。 */
 export function imageRefToUrl(raw: string): string | null {
@@ -38,7 +43,7 @@ export function imageRefToUrl(raw: string): string | null {
   if (!ref) return null;
   switch (ref.scheme) {
     case 'url': return ref.value;
-    case 'tile': return null;   // 単色: 描画側で色塗り
+    case 'tile': return colorToDataUrl(ref.value);
     case 'emoji': return null;  // 絵文字: 描画側でfillText
     case 'walk': {
       // URL由来の歩行グラはそのまま表示URLになる（投稿由来は解決が必要）。
@@ -52,7 +57,7 @@ export function imageRefToUrl(raw: string): string | null {
 
 export function isImageRef(raw: string): boolean {
   const ref = parseRef(raw);
-  return !!ref && ['post', 'walk', 'url'].includes(ref.scheme);
+  return !!ref && ['post', 'walk', 'url', 'tile'].includes(ref.scheme);
 }
 
 export interface LoopConfig {

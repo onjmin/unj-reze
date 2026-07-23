@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
-import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl } from '@/lib/asset-ref';
+import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, colorToDataUrl } from '@/lib/asset-ref';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
@@ -36,7 +36,7 @@ interface ContentPickerProps {
   onClose: () => void;
 }
 
-type ImageTab = 'posts' | 'slice' | 'history' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local' | 'mySheet';
+type ImageTab = 'posts' | 'slice' | 'history' | 'walk' | 'url' | 'rpgenSprite' | 'rpgenWalk' | 'smc' | 'local' | 'mySheet' | 'color';
 type BgmTab = 'youtube' | 'nicovideo' | 'soundcloud' | 'mmlPost' | 'mmlRaw' | 'direct' | 'rpgenSe' | 'builtinGame';
 
 // BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
@@ -64,6 +64,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [selectedColor, setSelectedColor] = useState('#000000');
   // 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
   // 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
   const [imageTab, setImageTab] = useState<ImageTab>(REMOVED_IMAGE_TABS.has(lastImageTab) ? 'mySheet' : lastImageTab);
@@ -317,6 +318,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 <button className={tabBtn(imageTab === 'history')} onClick={() => changeImageTab('history')}>🕘 使用履歴</button>
               )}
               <button className={tabBtn(imageTab === 'mySheet')} onClick={() => changeImageTab('mySheet')}>🗂️ マイシート</button>
+              <button className={tabBtn(imageTab === 'color')} onClick={() => changeImageTab('color')}>🎨 単色カラー</button>
               {/* 内蔵素材（リポジトリ同梱）と、rpgen-search 由来の外部素材を分けて示す。 */}
               <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
               <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 外部素材</button>
@@ -388,6 +390,71 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
           )}
           {mode === 'image' && imageTab === 'mySheet' && (
             <UserSheetPanel onPick={onPick} userId={userId} />
+          )}
+          {mode === 'image' && imageTab === 'color' && (
+            <div className="space-y-4 p-1">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 mb-2">パレットから選択</label>
+                <div className="grid grid-cols-6 gap-2">
+                  {[
+                    { name: 'ブラック', hex: '#000000' },
+                    { name: 'ダークグレー', hex: '#1f2937' },
+                    { name: 'ホワイト', hex: '#ffffff' },
+                    { name: 'レッド', hex: '#ef4444' },
+                    { name: 'オレンジ', hex: '#f97316' },
+                    { name: 'イエロー', hex: '#eab308' },
+                    { name: 'グリーン', hex: '#10b981' },
+                    { name: 'シアン', hex: '#06b6d4' },
+                    { name: 'ブルー', hex: '#3b82f6' },
+                    { name: 'パープル', hex: '#8b5cf6' },
+                    { name: 'ピンク', hex: '#ec4899' },
+                    { name: 'ブラウン', hex: '#78350f' },
+                  ].map((c) => (
+                    <button
+                      key={c.hex}
+                      onClick={() => setSelectedColor(c.hex)}
+                      style={{ backgroundColor: c.hex }}
+                      className={`h-9 rounded-lg border-2 transition relative flex items-center justify-center ${selectedColor === c.hex ? 'border-blue-400 scale-105 shadow-lg' : 'border-gray-700 hover:border-gray-500'}`}
+                      title={c.name}
+                    >
+                      {selectedColor === c.hex && (
+                        <span className={c.hex === '#ffffff' ? 'text-black text-xs font-bold' : 'text-white text-xs font-bold'}>✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-300 mb-2">カスタムカラー指定</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={selectedColor}
+                    onChange={(e) => setSelectedColor(e.target.value)}
+                    className="w-10 h-10 rounded-lg cursor-pointer bg-transparent border-0"
+                  />
+                  <input
+                    type="text"
+                    value={selectedColor}
+                    onChange={(e) => setSelectedColor(e.target.value)}
+                    placeholder="#000000"
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  const color = selectedColor || '#000000';
+                  const url = colorToDataUrl(color);
+                  onPick({ ref: `tile:${color}`, url, label: `単色 (${color})` });
+                }}
+                className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition shadow"
+              >
+                この単色カラーを設定
+              </button>
+            </div>
           )}
 
           {/* BGM: youtube */}

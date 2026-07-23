@@ -119,11 +119,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     bgm: rpgMap.bgmUrl
       ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : rpgMap.bgmUrl.startsWith('http') || rpgMap.bgmUrl.startsWith('/') ? `direct:${rpgMap.bgmUrl}` : `direct:https://rpgen-search.pages.dev/data/audio/bgm/${rpgMap.bgmUrl}`)
       : '',
-    mapBgRef: rpgMap.backgroundImageUrl
-      ? (rpgMap.backgroundImageUrl.startsWith('http') || rpgMap.backgroundImageUrl.startsWith('/')
-          ? `url:${rpgMap.backgroundImageUrl}`
-          : `url:https://i.imgur.com/${rpgMap.backgroundImageUrl}`)
-      : undefined,
+    mapBgRef: 'tile:#000000',
     sfx: {},
     switches: [],
   };
