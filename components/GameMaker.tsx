@@ -7958,6 +7958,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const eRow = Math.floor((e.y + TILE_SIZE / 2) / TILE_SIZE);
           const eW = d.w ?? TILE_SIZE, eH = d.h ?? TILE_SIZE;
 
+          // 設置先タイルの障害物判定
+          const overlayInfo = getOverlayTileAt(eCol, eRow)?.info;
+          const floorInfo = getTile(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2)?.info;
+          const isSolidTile = (overlayInfo ? !overlayInfo.passable : (floorInfo ? !floorInfo.passable : false)) || d.hazard;
+
           // プレイヤー本体の当たり判定領域と、イベントオブジェクト（および設置先の障害物地形）の接触判定
           const pBoxTouch = p.x - 4 < e.x + eW && p.x + pData.w + 4 > e.x &&
                             p.y - 4 < e.y + eH && p.y + pData.h + 4 > e.y;
@@ -7966,8 +7971,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     (isDown && eRow >= pRow && eCol === pCol) ||
                                     (isLeft && eCol <= pCol && eRow === pRow) ||
                                     (isRight && eCol >= pCol && eRow === pRow);
-          const overlap = pBoxTouch || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5 || (isFacingEventTile && isAdjacentTile);
           const exactOverlap = pcx > e.x && pcx < e.x + eW && pcy > e.y && pcy < e.y + eH;
+
+          // 当たり判定が無い場所（床マス）：その座標に入った瞬間（pCol === eCol && pRow === eRow または exactOverlap）に発動
+          // 当たり判定が有る場所（壁・看板）：進入不可能なため境界接触（pBoxTouch）または直前で向いたときに発動
+          const touchTriggerOk = isSolidTile
+            ? (pBoxTouch || (isFacingEventTile && isAdjacentTile))
+            : (exactOverlap || (pCol === eCol && pRow === eRow));
+
+          const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
+
           if (overlap) {
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
@@ -8082,7 +8095,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
                   const trig = page.trigger ?? 'action';
-                  if ((trig === 'playerTouch' || trig === 'eventTouch') && !warpCooldownRef.current) {
+                  if ((trig === 'playerTouch' || trig === 'eventTouch') && !warpCooldownRef.current && touchTriggerOk) {
                     e.talked = true;
                     runEventCommands(d.id, page.commands);
                   }
