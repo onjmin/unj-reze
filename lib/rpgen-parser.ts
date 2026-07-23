@@ -1,7 +1,7 @@
 import { RPGMap, RawCommand, checkWalkableTile, checkDamageTile, checkTreasureBoxTile, checkTableTile, checkDoorTile } from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
 import type { EventCommand, EventPage } from '@/components/game-presets/shared';
-import { newObject } from '@/components/game-presets/shared';
+import { newObject, TILE_SIZE, chest } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 
@@ -102,8 +102,8 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     gravity: 0,
     friction: 0,
     player: {
-      emoji: '', color: '#ffffff', speed: 2, jumpPower: 0, w: 32, h: 32,
-      start: { x: (rpgMap.initialHeroPosition?.x ?? 0) * 32, y: (rpgMap.initialHeroPosition?.y ?? 0) * 32 },
+      emoji: '', color: '#ffffff', speed: 2, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
+      start: { x: (rpgMap.initialHeroPosition?.x ?? 0) * TILE_SIZE, y: (rpgMap.initialHeroPosition?.y ?? 0) * TILE_SIZE },
       spriteRef: 'walk:auto:u:/assets/rpgen/char/00-hero.png',
     },
     tiles: {
@@ -114,9 +114,11 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     overheadMap: [],
     objects: [],
     bgm: rpgMap.bgmUrl
-      ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : `direct:${rpgMap.bgmUrl}`)
+      ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : rpgMap.bgmUrl.startsWith('http') || rpgMap.bgmUrl.startsWith('/') ? `direct:${rpgMap.bgmUrl}` : `direct:https://rpgen-search.pages.dev/data/audio/bgm/${rpgMap.bgmUrl}`)
       : '',
-    mapBgRef: rpgMap.backgroundImageUrl ? `url:${rpgMap.backgroundImageUrl}` : undefined,
+    mapBgRef: rpgMap.backgroundImageUrl
+      ? (rpgMap.backgroundImageUrl.startsWith('http') || rpgMap.backgroundImageUrl.startsWith('/') ? `url:${rpgMap.backgroundImageUrl}` : `url:https://i.imgur.com/${rpgMap.backgroundImageUrl}`)
+      : undefined,
     sfx: {},
     switches: [],
   };
@@ -508,12 +510,8 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
 
   for (const tbox of rpgMap.treasureBoxPoints) {
     const pages = messageToPages(tbox.message || '');
-    draft.objects.push(newObject({
-      col: tbox.position.x, row: tbox.position.y, emoji: '📦',
-      behavior: 'still', hazard: false,
-      message: pages ? '' : (tbox.message || ''), objType: 'npc',
-      pages
-    }));
+    const openCmds = pages?.[0]?.commands ?? (tbox.message ? [{ type: 'overheadMessage', text: tbox.message }] : []);
+    draft.objects.push(chest(tbox.position.x, tbox.position.y, openCmds as EventCommand[]));
   }
 
   for (const spoint of rpgMap.lookPoints) {
@@ -523,18 +521,24 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       behavior: 'still', hazard: false,
       editorSprite: '/assets/rpgen/map.png#352,128,16,16',
       message: pages ? '' : (spoint.message || ''), objType: 'npc',
-      pages
+      pages: pages ?? [{
+        name: 'Examine',
+        conditions: {},
+        trigger: 'action',
+        commands: [{ type: 'overheadMessage', text: spoint.message || '何も発見できなかった。' }]
+      }]
     }));
   }
 
   for (const ep of rpgMap.eventPoints) {
     const pages: EventPage[] = [];
     ep.phases.forEach((ph: any, idx: number) => {
-      const parsedCommands = ph.sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[];
-
+      const parsedCommands = ph.sequence ? ph.sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[] : [];
+      const trig = ph.trigger === 'touch' ? 'playerTouch' : ph.trigger === 'autorun' ? 'autorun' : 'action';
       pages.push({
         name: `Phase ${idx}`,
         conditions: {},
+        trigger: trig,
         commands: parsedCommands
       });
     });
@@ -554,13 +558,16 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
 
   for (const tp of rpgMap.teleportPoints) {
     draft.objects.push(newObject({
-      col: tp.position.x, row: tp.position.y, emoji: '', objType: 'event',
+      col: tp.position.x, row: tp.position.y, emoji: '', objType: 'warp',
       behavior: 'still', hazard: false,
       editorSprite: '/assets/rpgen/map.png#208,128,16,16',
       pages: [{
         name: 'Warp',
         conditions: {},
-        commands: [{ type: 'comment', text: `Warp to map ${tp.destination.mapId} (${tp.destination.position.x}, ${tp.destination.position.y})` }]
+        trigger: 'playerTouch',
+        commands: [
+          { type: 'warp', col: tp.destination.position.x, row: tp.destination.position.y, mapId: String(tp.destination.mapId) }
+        ]
       }]
     }));
   }

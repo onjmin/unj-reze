@@ -5025,6 +5025,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (hashIdx !== -1) keyedCache.current.set(baseUrl, keyed);
       }
     };
+    img.onerror = () => {
+      const currentBg = gameDataRef.current.mapBgUrl;
+      const fallbackUrl = 'https://i.imgur.com/xqZTM17.jpg';
+      if ((url === currentBg || baseUrl === currentBg) && currentBg !== fallbackUrl) {
+        ensureImage(fallbackUrl);
+        setGameData(p => (p.mapBgUrl === currentBg || p.mapBgUrl === url) ? { ...p, mapBgRef: `url:${fallbackUrl}`, mapBgUrl: fallbackUrl } : p);
+      }
+    };
     img.src = baseUrl;
     imgCache.current.set(url, img);
     if (hashIdx !== -1) imgCache.current.set(baseUrl, img); // ベースURLでも登録
@@ -8904,7 +8912,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       ctx.fillStyle = gameData.tiles[0]?.color || '#000';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (gameData.mapBgUrl) {
-        const bgImg = imgCache.current.get(gameData.mapBgUrl);
+        let bgImg = imgCache.current.get(gameData.mapBgUrl);
+        if (bgImg && bgImg.complete && bgImg.naturalWidth === 0 && gameData.mapBgUrl !== 'https://i.imgur.com/xqZTM17.jpg') {
+          const fallbackUrl = 'https://i.imgur.com/xqZTM17.jpg';
+          ensureImage(fallbackUrl);
+          bgImg = imgCache.current.get(fallbackUrl);
+        }
         if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
           ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
         }
@@ -10704,6 +10717,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : undefined;
         const remappedOverheadMap = manifest.overheadMap ? remapGrid(manifest.overheadMap) : undefined;
         const importedBgm = hydrateBgmFromRef(manifest.bgm);
+        const importedBgUrl = manifest.mapBgRef ? (imageRefToUrl(manifest.mapBgRef) ?? undefined) : undefined;
 
         const idx = editSceneIdx;
         setGameData(prev => ({
@@ -10713,18 +10727,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           overlayMap: remappedOverlayMap,
           overheadMap: remappedOverheadMap,
           objects: manifest.objects,
+          mapBgRef: manifest.mapBgRef,
+          mapBgUrl: importedBgUrl,
+          bgm: importedBgm,
+          player: manifest.player ? { ...prev.player, start: manifest.player.start } : prev.player,
           scenes: prev.scenes!.map((s, i) => i === idx ? {
             ...s,
             map: remappedMap,
             overlayMap: remappedOverlayMap,
             overheadMap: remappedOverheadMap,
             objects: manifest.objects,
+            mapBgRef: manifest.mapBgRef,
+            mapBgUrl: importedBgUrl,
             bgm: importedBgm,
+            start: manifest.player?.start,
           } : s),
         }));
         const eng = engineRef.current;
         eng.map = JSON.parse(JSON.stringify(remappedMap));
         eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
+        if (manifest.player?.start) {
+          eng.player.x = manifest.player.start.x;
+          eng.player.y = manifest.player.start.y;
+          setEditScroll(Math.max(0, Math.min(remappedMap[0].length * TILE_SIZE - VIEW_W, manifest.player.start.x + (manifest.player.w || TILE_SIZE) / 2 - VIEW_W / 2)));
+          setEditScrollY(Math.max(0, Math.min(remappedMap.length * TILE_SIZE - VIEW_H, manifest.player.start.y + (manifest.player.h || TILE_SIZE) / 2 - VIEW_H / 2)));
+        }
         setIsPlaying(false); setSelectedObjId(null);
         setShowRpgenModal(false);
         setRpgenInputText('');
@@ -10733,6 +10760,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       const preset = manifest.preset as PresetId;
       const base = clone(PRESETS[preset]);
+      const importedBgUrl = manifest.mapBgRef ? (imageRefToUrl(manifest.mapBgRef) ?? undefined) : undefined;
       const data: PresetData = {
         ...base,
         engine: manifest.engine,
@@ -10746,9 +10774,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         overheadMap: manifest.overheadMap,
         objects: manifest.objects,
         mapBgRef: manifest.mapBgRef,
+        mapBgUrl: importedBgUrl,
         bgm: hydrateBgmFromRef(manifest.bgm),
       };
       applyPresetData(preset as PresetId, data, manifest.name);
+      if (manifest.player?.start) {
+        const eng = engineRef.current;
+        eng.player.x = manifest.player.start.x;
+        eng.player.y = manifest.player.start.y;
+        setEditScroll(Math.max(0, Math.min(manifest.map[0].length * TILE_SIZE - VIEW_W, manifest.player.start.x + (manifest.player.w || TILE_SIZE) / 2 - VIEW_W / 2)));
+        setEditScrollY(Math.max(0, Math.min(manifest.map.length * TILE_SIZE - VIEW_H, manifest.player.start.y + (manifest.player.h || TILE_SIZE) / 2 - VIEW_H / 2)));
+      }
       setShowRpgenModal(false);
       setRpgenInputText('');
     } catch (err) { alert('RPGENの読み込みに失敗しました。'); console.error(err); }
