@@ -7537,7 +7537,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (e.x < TILE_SIZE || e.x > worldW - TILE_SIZE * 2) e.vx *= -1;
             } else if (d.behavior === 'patrolV') {
               if (e.vy === 0) e.vy = sp; e.y += e.vy;
-              if (e.x < e.homeY - TILE_SIZE * 3 || e.x > e.homeY + TILE_SIZE * 3) e.vy *= -1;
+              if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
               if (e.y < TILE_SIZE || e.y > worldH - TILE_SIZE * 2) e.vy *= -1;
             }
             e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));

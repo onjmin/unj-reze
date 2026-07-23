@@ -117,7 +117,11 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     bgm: rpgMap.bgmUrl
       ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : rpgMap.bgmUrl.startsWith('http') || rpgMap.bgmUrl.startsWith('/') ? `direct:${rpgMap.bgmUrl}` : `direct:https://rpgen-search.pages.dev/data/audio/bgm/${rpgMap.bgmUrl}`)
       : '',
-    mapBgRef: undefined,
+    mapBgRef: rpgMap.backgroundImageUrl
+      ? (rpgMap.backgroundImageUrl.startsWith('http') || rpgMap.backgroundImageUrl.startsWith('/')
+          ? `url:${rpgMap.backgroundImageUrl}`
+          : `url:https://i.imgur.com/${rpgMap.backgroundImageUrl}`)
+      : undefined,
     sfx: {},
     switches: [],
   };
@@ -488,7 +492,8 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     }
 
     let behavior: 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' = 'still';
-    if (human.behavior === 1 || human.behavior === 2) behavior = 'random';
+    if (human.behavior === 1) behavior = 'random';
+    if (human.behavior === 2) behavior = 'still';
     if (human.behavior === 3) behavior = 'patrolH';
     if (human.behavior === 4) behavior = 'patrolV';
     if (human.behavior === 5) behavior = 'chase';
