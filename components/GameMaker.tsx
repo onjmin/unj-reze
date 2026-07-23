@@ -8651,8 +8651,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
             if (page && (page.trigger ?? 'action') === 'action' && page.commands.length > 0) {
               runEventCommands(def.id, page.commands);
-            } else if (def.message) {
-              showGameMsg(def.message, 'instant', () => { });
             }
           }
         }
@@ -9709,7 +9707,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const lineHeight = 14;
           const tw = Math.max(...wrappedDisplay.map(l => ctx.measureText(l).width));
           let px = e.x + (e.def.w ?? TILE_SIZE) / 2;
-          px = Math.max(tw / 2 + 4, Math.min(PLAY_W - tw / 2 - 4, px));
+          // カメラオフセットを考慮してスクリーン座標でクランプし、ワールド座標に戻す
+          const pxScreen = px - finalCamX;
+          const pxClamped = Math.max(tw / 2 + 4, Math.min(PLAY_W - tw / 2 - 4, pxScreen));
+          px = pxClamped + finalCamX;
           const boxBottom = e.y - 8;
           const boxHeight = wrappedDisplay.length * lineHeight + 6;
           const boxTop = boxBottom - boxHeight;

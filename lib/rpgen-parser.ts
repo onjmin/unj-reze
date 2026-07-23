@@ -553,12 +553,10 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
   // スクリプトらしき内容は translateRpgenCommand でコマンド列化して pages に変換する。
   const messageToPages = (message: string): EventPage[] | undefined => {
     if (!message || !message.trim()) return undefined;
-    if (/^\s*#[A-Z_]+/.test(message)) {
-      const commands = RawCommand.parseSequence(message).map(translateRpgenCommand).filter(Boolean) as EventCommand[];
-      if (commands.length === 0) return undefined;
-      return [{ name: 'Phase 0', conditions: {}, trigger: 'action', commands }];
-    }
-    return [{ name: 'Phase 0', conditions: {}, trigger: 'action', commands: [{ type: 'message', text: message }] }];
+    if (!/^\s*#[A-Z_]+/.test(message)) return undefined;
+    const commands = RawCommand.parseSequence(message).map(translateRpgenCommand).filter(Boolean) as EventCommand[];
+    if (commands.length === 0) return undefined;
+    return [{ name: 'Phase 0', conditions: {}, trigger: 'action', commands }];
   };
 
   for (const human of rpgMap.humans) {
