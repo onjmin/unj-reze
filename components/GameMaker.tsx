@@ -236,27 +236,58 @@ function buildWorldLayout(scenes: SceneDef[]): {
   };
   const layouts: Array<{ sceneIdx: number; originX: number; originY: number; sceneW: number; sceneH: number }> = [];
   const placed = new Set<number>();
-  const q: Array<{ idx: number; ox: number; oy: number }> = [{ idx: 0, ox: 0, oy: 0 }];
   let maxC = 0, maxR = 0;
-  while (q.length) {
-    const { idx, ox, oy } = q.shift()!;
-    if (placed.has(idx)) continue;
-    placed.add(idx);
-    const sm = scenes[idx].map;
-    const sceneW = sm[0]?.length ?? COLS;
-    const sceneH = sm.length ?? ROWS;
-    layouts.push({ sceneIdx: idx, originX: ox, originY: oy, sceneW, sceneH });
-    maxC = Math.max(maxC, ox + sceneW); maxR = Math.max(maxR, oy + sceneH);
-    const exits = scenes[idx].exits;
-    if (!exits) continue;
-    const add = (id: string | undefined, dox: number, doy: number) => {
-      if (!id) return;
-      const ni = scenes.findIndex(s => s.id === id);
-      if (ni >= 0 && !placed.has(ni)) q.push({ idx: ni, ox: ox + dox, oy: oy + doy });
-    };
-    add(exits.right, sceneW, 0); add(exits.left, -sceneW, 0);
-    add(exits.down, 0, sceneH); add(exits.up, 0, -sceneH);
+
+  // 全シーンを漏れなくワールド上に配置（exits 連結成分ごと＋未連結シーンも順次拡張配置）
+  for (let startIdx = 0; startIdx < scenes.length; startIdx++) {
+    if (placed.has(startIdx)) continue;
+
+    const startOx = maxC > 0 ? maxC + 2 : 0;
+    const startOy = 0;
+    const q: Array<{ idx: number; ox: number; oy: number }> = [{ idx: startIdx, ox: startOx, oy: startOy }];
+
+    while (q.length) {
+      const { idx, ox, oy } = q.shift()!;
+      if (placed.has(idx)) continue;
+      placed.add(idx);
+      const sm = scenes[idx].map;
+      const sceneW = sm[0]?.length ?? COLS;
+      const sceneH = sm.length ?? ROWS;
+      layouts.push({ sceneIdx: idx, originX: ox, originY: oy, sceneW, sceneH });
+      maxC = Math.max(maxC, ox + sceneW);
+      maxR = Math.max(maxR, oy + sceneH);
+      const exits = scenes[idx].exits;
+      if (!exits) continue;
+      const add = (id: string | undefined, dox: number, doy: number) => {
+        if (!id) return;
+        const ni = scenes.findIndex(s => s.id === id);
+        if (ni >= 0 && !placed.has(ni)) q.push({ idx: ni, ox: ox + dox, oy: oy + doy });
+      };
+      add(exits.right, sceneW, 0);
+      add(exits.left, -sceneW, 0);
+      add(exits.down, 0, sceneH);
+      add(exits.up, 0, -sceneH);
+    }
   }
+
+  // 負の座標が存在する場合は全体を原点（0,0）以上にオフセット補正
+  let minOx = 0, minOy = 0;
+  for (const l of layouts) {
+    minOx = Math.min(minOx, l.originX);
+    minOy = Math.min(minOy, l.originY);
+  }
+  if (minOx < 0 || minOy < 0) {
+    const shiftX = minOx < 0 ? -minOx : 0;
+    const shiftY = minOy < 0 ? -minOy : 0;
+    maxC = 0; maxR = 0;
+    for (const l of layouts) {
+      l.originX += shiftX;
+      l.originY += shiftY;
+      maxC = Math.max(maxC, l.originX + l.sceneW);
+      maxR = Math.max(maxR, l.originY + l.sceneH);
+    }
+  }
+
   const map: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
   const overlayMap: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
   const overheadMap: number[][] = Array.from({ length: maxR }, () => Array(maxC).fill(0));
@@ -1343,6 +1374,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   previewCommandRef.current = previewCommand;
 
   // ── タイトル／エンディング画面ランタイム ──
+  const [confirmModal, setConfirmModal] = useState<{
+    title?: string;
+    message: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const [noticeModal, setNoticeModal] = useState<{
+    title?: string;
+    message: string;
+  } | null>(null);
+
+  const customAlert = useCallback((message: string, title?: string) => {
+    setNoticeModal({ message, title });
+  }, []);
+
+  const customConfirm = useCallback((message: string, onConfirm: () => void, title?: string) => {
+    setConfirmModal({ message, onConfirm, title });
+  }, []);
+
   const [showTitle, setShowTitle] = useState(false);
   const showTitleRef = useRef(false);
   showTitleRef.current = showTitle;
@@ -4689,7 +4741,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'warp':
           if (cmd.mapId) {
-            const targetSceneId = `rpgen_map_${cmd.mapId}`;
+            const targetSceneId = scenesRef.current?.find(s => s.id === cmd.mapId || s.id === `rpgen_map_${cmd.mapId}`)?.id ?? `rpgen_map_${cmd.mapId}`;
             const ex = cmd.col * TILE_SIZE;
             const ey = cmd.row * TILE_SIZE;
             sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: targetSceneId, entryX: ex, entryY: ey };
@@ -6197,7 +6249,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // 他のエンジン（rpg, touhou 等）は従来の即時切り替えを維持
       if (!layout.layouts.some(l => l.sceneIdx === activeSceneIdxRef.current)) return;
-      const px = ep.x / TILE_SIZE, py = ep.y / TILE_SIZE;
+      const px = (ep.x + pw / 2) / TILE_SIZE;
+      const py = (ep.y + ph / 2) / TILE_SIZE;
       for (const lay of layout.layouts) {
         if (lay.sceneIdx === activeSceneIdxRef.current) continue;
         if (px >= lay.originX && px < lay.originX + lay.sceneW &&
@@ -6215,7 +6268,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           engineRef.current.bullets = []; engineRef.current.enemyBullets = [];
           encounterGaugeRef.current = 0; encounterNextRef.current = 0;
           resetSceneState();
-          setEditSceneIdx(lay.sceneIdx);
+          switchBgm(getCurrentFieldBgm());
           break;
         }
       }
@@ -9007,7 +9060,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       // ── シーン切り替えモードでのカメラ境界クランプ ──
-      if (isPlaying && gameData.engine === 'action' && scenesRef.current.length > 0 && worldLayoutRef.current) {
+      if (isPlaying && scenesRef.current.length > 0 && worldLayoutRef.current) {
         const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
         if (lay && !sceneTransRef.current) {
           const minX = lay.originX * TILE_SIZE;
@@ -10048,37 +10101,74 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (nextIdx >= 0) {
             const next = scenesRef.current[nextIdx];
             activeSceneIdxRef.current = nextIdx;
-            eng.map = JSON.parse(JSON.stringify(next.map));
-            eng.overlayMap = JSON.parse(JSON.stringify(next.overlayMap ?? emptyGridLike(next.map)));
-            eng.overheadMap = JSON.parse(JSON.stringify(next.overheadMap ?? emptyGridLike(next.map)));
-            eng.entities = next.objects.map(o => ({
-              x: o.col * TILE_SIZE, y: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
-              homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
-              vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
-              def: o,
-            })) as unknown as Entity[];
-            eng.bullets = []; eng.enemyBullets = [];
-            encounterGaugeRef.current = 0; encounterNextRef.current = 0;
-            eng.player.x = fade.entryX; eng.player.y = fade.entryY;
-            eng.player.vx = 0; eng.player.vy = 0;
-            // 入場地点付近に別のワープがあっても即座に巻き戻らないよう、離れるまで発動を抑制する
-            warpCooldownRef.current = { x: fade.entryX + pData.w / 2, y: fade.entryY + pData.h / 2 };
-            if (gameData.id === 'mario') {
-              marioPipeRef.current = {
-                phase: 'exiting',
-                x: fade.entryX,
-                startY: fade.entryY + 32,
-                targetY: fade.entryY,
-                progress: 0,
-                maxProgress: 30
-              };
-              eng.player.y = fade.entryY + 32;
+            const layout = worldLayoutRef.current;
+            const nextLayout = layout?.layouts.find(l => l.sceneIdx === nextIdx);
+
+            if (layout && nextLayout) {
+              const ox = nextLayout.originX * TILE_SIZE;
+              const oy = nextLayout.originY * TILE_SIZE;
+              const targetWx = ox + fade.entryX;
+              const targetWy = oy + fade.entryY;
+
+              eng.player.x = targetWx;
+              eng.player.y = targetWy;
+              eng.player.vx = 0; eng.player.vy = 0;
+
+              eng.entities = next.objects.map(o => ({
+                x: (nextLayout.originX + o.col) * TILE_SIZE,
+                y: (nextLayout.originY + o.row) * TILE_SIZE,
+                homeX: (nextLayout.originX + o.col) * TILE_SIZE,
+                homeY: (nextLayout.originY + o.row) * TILE_SIZE,
+                vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
+                def: o,
+              })) as unknown as Entity[];
+              eng.bullets = []; eng.enemyBullets = [];
+              encounterGaugeRef.current = 0; encounterNextRef.current = 0;
+              warpCooldownRef.current = { x: targetWx + pData.w / 2, y: targetWy + pData.h / 2 };
+              if (gameData.id === 'mario') {
+                marioPipeRef.current = {
+                  phase: 'exiting',
+                  x: targetWx,
+                  startY: targetWy + 32,
+                  targetY: targetWy,
+                  progress: 0,
+                  maxProgress: 30
+                };
+                eng.player.y = targetWy + 32;
+              }
+              justStartedRef.current = true;
+              resetSceneState();
+              switchBgm(getCurrentFieldBgm());
+            } else {
+              eng.map = JSON.parse(JSON.stringify(next.map));
+              eng.overlayMap = JSON.parse(JSON.stringify(next.overlayMap ?? emptyGridLike(next.map)));
+              eng.overheadMap = JSON.parse(JSON.stringify(next.overheadMap ?? emptyGridLike(next.map)));
+              eng.entities = next.objects.map(o => ({
+                x: o.col * TILE_SIZE, y: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
+                homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
+                vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
+                def: o,
+              })) as unknown as Entity[];
+              eng.bullets = []; eng.enemyBullets = [];
+              encounterGaugeRef.current = 0; encounterNextRef.current = 0;
+              eng.player.x = fade.entryX; eng.player.y = fade.entryY;
+              eng.player.vx = 0; eng.player.vy = 0;
+              warpCooldownRef.current = { x: fade.entryX + pData.w / 2, y: fade.entryY + pData.h / 2 };
+              if (gameData.id === 'mario') {
+                marioPipeRef.current = {
+                  phase: 'exiting',
+                  x: fade.entryX,
+                  startY: fade.entryY + 32,
+                  targetY: fade.entryY,
+                  progress: 0,
+                  maxProgress: 30
+                };
+                eng.player.y = fade.entryY + 32;
+              }
+              justStartedRef.current = true;
+              resetSceneState();
+              switchBgm(getCurrentFieldBgm());
             }
-            justStartedRef.current = true; // 2マスキャラ等のワープ先埋まり防止イジェクトを再実行
-            resetSceneState();
-            setEditSceneIdx(nextIdx);
-            // シーン別BGM切り替え
-            switchBgm(getCurrentFieldBgm());
           }
           sceneFadeRef.current = { ...fade, phase: 'in', frame: 0 };
         }
@@ -10736,13 +10826,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const manifest = (raw && typeof raw === 'object' && raw.manifest && typeof raw.manifest === 'object'
           ? raw.manifest : raw) as GameManifestDraft;
         if (!manifest || typeof manifest !== 'object' || (!manifest.map && !manifest.layout25d && !manifest.scenes)) {
-          alert('ゲームのJSONではないようです（map / layout25d / scenes が見つかりません）');
+          customAlert('ゲームのJSONではないようです（map / layout25d / scenes が見つかりません）', 'インポートエラー');
           return;
         }
         loadManifest(manifest, typeof raw.title === 'string' && raw.title ? raw.title : undefined);
       } catch (err) {
         console.error('game JSON import failed', err);
-        alert(`JSONの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+        customAlert(`JSONの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`, 'インポートエラー');
       }
     };
     reader.readAsText(file);
@@ -10856,7 +10946,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setRpgenInputText('');
     } catch (err: any) {
       const msg = typeof err === 'string' ? err : err?.message || 'RPGENの読み込みに失敗しました。';
-      alert(msg);
+      customAlert(msg, 'RPGENインポートエラー');
       console.error(err);
     }
   };
@@ -11524,9 +11614,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         onChange={e => {
                           const id = e.target.value as PresetId;
                           if (id === presetId) return;
-                          if (!window.confirm(`「${PRESETS[id].name}」エンジンへ切り替えますか？\nマップはできるだけ変換して引き継ぎますが、完全には再現されません（元に戻すには再度切り替えても戻りません）`)) return;
-                          switchEngine(id);
-                          setSettingsOpen(false);
+                          customConfirm(
+                            `「${PRESETS[id].name}」エンジンへ切り替えますか？\nマップはできるだけ変換して引き継ぎますが、完全には再現されません（元に戻すには再度切り替えても戻りません）`,
+                            () => {
+                              switchEngine(id);
+                              setSettingsOpen(false);
+                            },
+                            'エンジン変更の確認'
+                          );
                         }}
                         className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
                       >
@@ -12129,6 +12224,64 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 imageScale={spellCutin.imageScale}
                 onComplete={() => setSpellCutin(null)}
               />
+            )}
+
+            {/* ── カスタム確認モーダル ── */}
+            {confirmModal && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn select-none font-sans">
+                <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-2xl space-y-4 text-gray-200">
+                  {confirmModal.title && (
+                    <h4 className="text-sm font-bold text-gray-100 flex items-center gap-2">
+                      <span>⚠️</span> {confirmModal.title}
+                    </h4>
+                  )}
+                  <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
+                    {confirmModal.message}
+                  </p>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      onClick={() => setConfirmModal(null)}
+                      className="px-3.5 py-1.5 rounded-lg text-xs text-gray-300 bg-gray-800 hover:bg-gray-700 transition"
+                    >
+                      {confirmModal.cancelText ?? 'キャンセル'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const cb = confirmModal.onConfirm;
+                        setConfirmModal(null);
+                        cb();
+                      }}
+                      className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition shadow"
+                    >
+                      {confirmModal.confirmText ?? '実行する'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── カスタムお知らせモーダル ── */}
+            {noticeModal && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn select-none font-sans">
+                <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-xl p-5 shadow-2xl space-y-4 text-gray-200">
+                  {noticeModal.title && (
+                    <h4 className="text-sm font-bold text-gray-100 flex items-center gap-2">
+                      <span>ℹ️</span> {noticeModal.title}
+                    </h4>
+                  )}
+                  <p className="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
+                    {noticeModal.message}
+                  </p>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => setNoticeModal(null)}
+                      className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition shadow"
+                    >
+                      OK
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* ── セリフプレビュー（最後に操作した行を常に表示） ── */}
@@ -14264,7 +14417,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         const pRow = Math.floor(py / TILE_SIZE);
                         const obj = gameData.objects?.find(o => o.col === pCol && o.row === pRow);
                         if (obj) setSelectedObjId(obj.id);
-                        else alert('プレイヤーの位置にイベントが見つかりません');
+                        else showGameMsg('プレイヤーの位置にイベントが見つかりません', 'instant', () => {});
                       }} className="bg-blue-800 hover:bg-blue-700 text-[10px] text-white px-2 py-1 rounded">
                         この位置のイベントを読み込む
                       </button>

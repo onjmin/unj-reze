@@ -17,6 +17,8 @@ export default function MessageView({ userId }: MessageViewProps) {
     api.messages.list(userId).then(setMessages);
   }, [userId]);
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
   const sendMsg = async () => {
     if (!msgInput.trim()) return;
     const msg = await api.messages.send({ sender: userId || '名無し', text: msgInput });
@@ -27,10 +29,10 @@ export default function MessageView({ userId }: MessageViewProps) {
   const currentSender = userId || '名無し';
 
   const handleDelete = async (id: number) => {
-    if (typeof window !== 'undefined' && !window.confirm('このメッセージを削除しますか？')) return;
     try {
       await api.messages.remove(id, currentSender);
       setMessages(prev => prev.filter(m => m.id !== id));
+      setConfirmDeleteId(null);
     } catch { /* noop */ }
   };
 
@@ -42,13 +44,21 @@ export default function MessageView({ userId }: MessageViewProps) {
             <span className="text-[10px] text-gray-500 mb-0.5">{getAvatarInfo(m.sender).username} ・ {m.time}</span>
             <div className="flex items-center gap-1.5">
               {m.sender === currentSender && (
-                <button
-                  onClick={() => handleDelete(m.id)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-1"
-                  title="削除"
-                >
-                  <Trash2 size={12} />
-                </button>
+                confirmDeleteId === m.id ? (
+                  <div className="flex items-center gap-1 text-[10px]">
+                    <span className="text-red-400 font-bold">削除？</span>
+                    <button onClick={() => handleDelete(m.id)} className="px-1.5 py-0.5 bg-red-600 hover:bg-red-500 text-white rounded font-bold">はい</button>
+                    <button onClick={() => setConfirmDeleteId(null)} className="px-1.5 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded">いいえ</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(m.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-1"
+                    title="削除"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )
               )}
               <div className={`p-2.5 rounded-2xl max-w-[80%] text-xs ${m.sender === currentSender ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-gray-100/10 text-gray-200 rounded-tl-none'}`}>
                 {m.text}

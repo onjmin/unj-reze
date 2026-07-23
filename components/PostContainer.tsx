@@ -64,6 +64,9 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showOriginModal, setShowOriginModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportToast, setReportToast] = useState(false);
   const [bodyExpanded, setBodyExpanded] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -123,20 +126,26 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     } catch { /* noop */ }
   }, [currentUserSlug, targetSlug, muted, onModerationChange]);
 
-  const handleMenuReport = useCallback(async (e: React.MouseEvent) => {
+  const handleMenuReport = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setMenuOpen(false);
-    const reason = typeof window !== 'undefined' ? (window.prompt('通報理由を入力してください（任意）') ?? '') : '';
+    setShowReportModal(true);
+  }, []);
+
+  const submitReport = useCallback(async () => {
     try {
       await api.report.create({
         reporterSlug: currentUserSlug || '名無し',
         targetType: 'post',
         targetId: String(post.id),
-        reason,
+        reason: reportReason,
       });
-      if (typeof window !== 'undefined') window.alert('通報を受け付けました。');
+      setShowReportModal(false);
+      setReportReason('');
+      setReportToast(true);
+      setTimeout(() => setReportToast(false), 3000);
     } catch { /* noop */ }
-  }, [currentUserSlug, post.id]);
+  }, [currentUserSlug, post.id, reportReason]);
 
   const handleMenuEdit = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -658,6 +667,44 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           alt={previewImage.alt}
           onClose={() => setPreviewImage(null)}
         />
+      )}
+      {/* ── 通報入力モーダル ── */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3 font-sans text-gray-200 shadow-2xl">
+            <h4 className="text-sm font-bold text-gray-100 flex items-center gap-1.5">
+              <span>🚨</span> 投稿の通報
+            </h4>
+            <p className="text-xs text-gray-400">通報理由を入力してください（任意）</p>
+            <textarea
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              placeholder="理由の詳細…"
+              rows={3}
+              className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-red-500 resize-none"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => { setShowReportModal(false); setReportReason(''); }}
+                className="px-3.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-lg transition"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={submitReport}
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-lg transition"
+              >
+                送信
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── 通報完了トースト ── */}
+      {reportToast && (
+        <div className="fixed bottom-6 right-6 z-[130] bg-gray-900 border border-emerald-500/50 text-emerald-400 text-xs font-bold px-4 py-2.5 rounded-lg shadow-xl animate-bounce">
+          ✓ 通報を受け付けました。
+        </div>
       )}
     </div>
   );

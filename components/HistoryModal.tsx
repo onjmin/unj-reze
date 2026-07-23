@@ -29,6 +29,8 @@ export default function HistoryModal({
     setHistoryItems(getHistory(storageKey));
   };
 
+  const [confirmingClear, setConfirmingClear] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
       loadHistory();
@@ -53,11 +55,10 @@ export default function HistoryModal({
   };
 
   const handleClearAll = () => {
-    if (confirm('すべての履歴を消去しますか？')) {
-      localStorage.removeItem(storageKey);
-      loadHistory();
-      setMessage({ text: '履歴をすべて消去しました。', color: 'text-yellow-400' });
-    }
+    localStorage.removeItem(storageKey);
+    loadHistory();
+    setMessage({ text: '履歴をすべて消去しました。', color: 'text-yellow-400' });
+    setConfirmingClear(false);
   };
 
   const handleManualSave = () => {
@@ -128,13 +129,31 @@ export default function HistoryModal({
             </button>
           ) : <div />}
           {historyItems.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-red-400 hover:bg-red-950/20 hover:border-red-900/30 rounded-lg transition-colors border border-transparent"
-            >
-              <Trash2 size={13} />
-              <span>すべてクリア</span>
-            </button>
+            confirmingClear ? (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-red-400 font-bold">全削除しますか？</span>
+                <button
+                  onClick={handleClearAll}
+                  className="px-2.5 py-1 text-[10px] font-bold text-white bg-red-600 hover:bg-red-500 rounded transition"
+                >
+                  消去
+                </button>
+                <button
+                  onClick={() => setConfirmingClear(false)}
+                  className="px-2.5 py-1 text-[10px] text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded transition"
+                >
+                  キャンセル
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingClear(true)}
+                className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-red-400 hover:bg-red-950/20 hover:border-red-900/30 rounded-lg transition-colors border border-transparent"
+              >
+                <Trash2 size={13} />
+                <span>すべてクリア</span>
+              </button>
+            )
           )}
         </div>
 
