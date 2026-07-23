@@ -7943,7 +7943,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     (isDown && eRow === pRow + 1 && eCol === pCol) ||
                                     (isLeft && eCol === pCol - 1 && eRow === pRow) ||
                                     (isRight && eCol === pCol + 1 && eRow === pRow);
-          const overlap = Math.hypot(pcx - (e.x + TILE_SIZE / 2), pcy - (e.y + TILE_SIZE / 2)) < TILE_SIZE * 1.35 || (isFacingEventTile && isAdjacentTile);
+          // 半径は「斜め隣接マス（中心間 √2×TILE ≒ 45px）」まで届く 1.5×TILE に取る。
+          // 通行不可タイルに乗ったイベント（壁に埋め込まれた看板・NPC等）は、プレイヤーが
+          // そのマスへ入れないため直交隣接しか成立せず、さらに角では斜め隣接しか取れないことがある。
+          // 1.35（≒43px）だと斜め隣接（≒45px）に僅かに届かず「触れても発動しない」状態になっていた。
+          const overlap = Math.hypot(pcx - (e.x + TILE_SIZE / 2), pcy - (e.y + TILE_SIZE / 2)) < TILE_SIZE * 1.5 || (isFacingEventTile && isAdjacentTile);
           const exactOverlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
           if (overlap) {
             const ot = d.objType ?? 'enemy';
@@ -8550,7 +8554,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           });
         }).find(Boolean);
 
-        const pFacing = walkInst.get('player')?.dir || (isUp ? 'u' : isDown ? 'd' : isLeft ? 'l' : isRight ? 'r' : 'd');
+        // 現在押している入力方向を最優先する。walkInst の向きは移動量から導出されるため、
+        // 通行不可タイルのイベント（壁に埋め込まれた看板・NPC）に向かって押しても、実際には
+        // 動けず向きが更新されないので frontCol/frontRow がイベントを指さない。押下方向を使えば
+        // 「壁に埋まったイベントへ向いて決定」で正しく前方マスを判定できる。
+        const pressedFacing = isUp ? 'u' : isDown ? 'd' : isLeft ? 'l' : isRight ? 'r' : null;
+        const pFacing = pressedFacing ?? walkInst.get('player')?.dir ?? 'd';
         const frontCol = pCol + (pFacing === 'r' ? 1 : pFacing === 'l' ? -1 : 0);
         const frontRow = pRow + (pFacing === 'd' ? 1 : pFacing === 'u' ? -1 : 0);
 
@@ -8558,9 +8567,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const oc = isPlaying ? Math.floor(((o as Entity).x + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).col;
           const or_ = isPlaying ? Math.floor(((o as Entity).y + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).row;
           if ((oc === frontCol && or_ === frontRow) || (oc === pCol && or_ === pRow)) return true;
+          // 8近傍（斜め含む）まで拾えるよう半径は 1.5×TILE。壁に埋まったイベントは角で
+          // 斜め隣接しか取れないことがあり、1.35 だと斜め隣接（≒45px）に届かなかった。
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
           const oy = isPlaying ? (o as Entity).y : (o as ObjectDef).row * TILE_SIZE;
-          return Math.hypot(pcx - (ox + TILE_SIZE / 2), pcy - (oy + TILE_SIZE / 2)) < TILE_SIZE * 1.35;
+          return Math.hypot(pcx - (ox + TILE_SIZE / 2), pcy - (oy + TILE_SIZE / 2)) < TILE_SIZE * 1.5;
         });
         if (target) {
           const def = isPlaying ? (target as Entity).def : target as ObjectDef;
