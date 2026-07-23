@@ -5,6 +5,8 @@ import { newObject, TILE_SIZE, chest } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 
+export const MAX_TILE_CONVERSIONS = 500;
+
 export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   const rpgMap = RPGMap.parse(text);
   console.log(rpgMap)
@@ -133,6 +135,9 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     if (!rawVal) return 0;
     const tk = String(rawVal);
     if (!tileIndexMap.has(tk)) {
+      if (tileIndexMap.size >= MAX_TILE_CONVERSIONS) {
+        throw new Error(`タイル変換数が上限（${MAX_TILE_CONVERSIONS}種類）を超えています。インポートを中断します。`);
+      }
       let imageUrl: string | undefined = undefined;
       let passable = !tk.includes('C');
       let special: string | undefined = undefined;

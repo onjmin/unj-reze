@@ -10814,7 +10814,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       setShowRpgenModal(false);
       setRpgenInputText('');
-    } catch (err) { alert('RPGENの読み込みに失敗しました。'); console.error(err); }
+    } catch (err: any) {
+      const msg = typeof err === 'string' ? err : err?.message || 'RPGENの読み込みに失敗しました。';
+      alert(msg);
+      console.error(err);
+    }
   };
 
   // ── シーン管理ヘルパー ────────────────────────────────────────────────────
