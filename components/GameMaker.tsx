@@ -9155,6 +9155,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       let camX: number;
       let camY: number;
 
+      // カメラの実効可動範囲へ丸める。シーン分割中はアクティブなシーンの矩形、
+      // それ以外はワールド全体（0..camMax）に制限する。moveCamera が範囲外のタイルを
+      // 指していても、ここで実際に描画できる位置へ補正して端でのすり抜け・破綻を防ぐ。
+      const clampCamToBounds = (cx: number, cy: number): [number, number] => {
+        let minX = 0, minY = 0, maxX = camMax, maxY = camMaxY;
+        if (isPlaying && scenesRef.current.length > 0 && worldLayoutRef.current && !sceneTransRef.current) {
+          const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
+          if (lay) {
+            minX = lay.originX * TILE_SIZE;
+            maxX = Math.max(minX, (lay.originX + lay.sceneW) * TILE_SIZE - VIEW_W);
+            minY = lay.originY * TILE_SIZE;
+            maxY = Math.max(minY, (lay.originY + lay.sceneH) * TILE_SIZE - VIEW_H);
+          }
+        }
+        return [Math.max(minX, Math.min(maxX, cx)), Math.max(minY, Math.min(maxY, cy))];
+      };
+
       if (camOverrideRef.current && camOverrideRef.current.endX !== -1) {
         // ── カメラ移動コマンド（moveCamera）実行中 ──
         // プレイヤー中心追従を完全に無効化し、指定されたカメラ座標のみに従って動作する
@@ -9168,6 +9185,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           camX = ovr.startX + (ovr.endX - ovr.startX) * r;
           camY = ovr.startY + (ovr.endY - ovr.startY) * r;
         }
+        // 追従時と同じくシーン/ワールド境界へ補正（moveCamera 発行時はワールド全体でしか
+        // クランプされておらず、シーン外や範囲外を指したままになりうるため実行時に丸める）。
+        [camX, camY] = clampCamToBounds(camX, camY);
       } else {
         // ── 通常時：プレイヤー中心追従 ──
         const playerAtStart = p.x === gameData.player.start.x && p.y === gameData.player.start.y;
@@ -9194,17 +9214,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
 
         // シーン切り替えモードでのカメラ境界クランプ（通常追従時のみ適用）
-        if (isPlaying && scenesRef.current.length > 0 && worldLayoutRef.current) {
-          const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
-          if (lay && !sceneTransRef.current) {
-            const minX = lay.originX * TILE_SIZE;
-            const maxX = Math.max(minX, (lay.originX + lay.sceneW) * TILE_SIZE - VIEW_W);
-            const minY = lay.originY * TILE_SIZE;
-            const maxY = Math.max(minY, (lay.originY + lay.sceneH) * TILE_SIZE - VIEW_H);
-            camX = Math.max(minX, Math.min(maxX, camX));
-            camY = Math.max(minY, Math.min(maxY, camY));
-          }
-        }
+        [camX, camY] = clampCamToBounds(camX, camY);
       }
 
       // ── スライド遷移中のカメラ位置線形補間 ──

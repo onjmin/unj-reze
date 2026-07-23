@@ -2014,14 +2014,18 @@ export class Yume25DEngine {
 
   private resolveBillboardWalls(ab: BillboardInstance) {
     const r = 0.22;
+    // 住人の体が占める高さ範囲。薄壁（vEdges/hEdges）に加えて、立方体ブロックの側面も
+    // すり抜けないよう、プレイヤーと同じ blockSolidAt でこの範囲と重なるセルを塞ぐ。
+    const by0 = ab.y + EPS, by1 = ab.y + PLAYER_BODY_H;
     for (let pass = 0; pass < 2; pass++) {
       let moved = false;
       const c0 = Math.ceil(ab.x - r), c1 = Math.floor(ab.x + r);
       for (let c = c0; c <= c1; c++) {
         const r0 = Math.floor(ab.z - r * 0.9), r1 = Math.floor(ab.z + r * 0.9);
+        const pc = ab.x < c ? c : c - 1;  // x=c の辺を越えて入り込むセルの列
         let blocked = false;
         for (let row = r0; row <= r1; row++) {
-          if (this.vEdges.has(`${c},${row}`)) { blocked = true; break; }
+          if (this.vEdges.has(`${c},${row}`) || this.blockSolidAt(pc, row, by0, by1)) { blocked = true; break; }
         }
         if (blocked) {
           ab.x = ab.x < c ? c - r - EPS : c + r + EPS;
@@ -2031,9 +2035,10 @@ export class Yume25DEngine {
       const r0 = Math.ceil(ab.z - r), r1 = Math.floor(ab.z + r);
       for (let rr = r0; rr <= r1; rr++) {
         const c0_v = Math.floor(ab.x - r * 0.9), c1_v = Math.floor(ab.x + r * 0.9);
+        const pr = ab.z < rr ? rr : rr - 1;  // z=rr の辺を越えて入り込むセルの行
         let blocked = false;
         for (let col = c0_v; col <= c1_v; col++) {
-          if (this.hEdges.has(`${col},${rr}`)) { blocked = true; break; }
+          if (this.hEdges.has(`${col},${rr}`) || this.blockSolidAt(col, pr, by0, by1)) { blocked = true; break; }
         }
         if (blocked) {
           ab.z = ab.z < rr ? rr - r - EPS : rr + r + EPS;
