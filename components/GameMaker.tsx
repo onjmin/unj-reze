@@ -7162,7 +7162,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             for (let k = eng.entities.length - 1; k >= 0; k--) {
               const ent = eng.entities[k];
-              if (ent.def.objType === 'warp') continue; // 扉などのワープオブジェクトは攻撃で破壊されない
+              // イベント・ワープ・アイテム・NPC等は爆風でダメージを受けない（敵のみダメージ）
+              if ((ent.def.objType ?? 'enemy') !== 'enemy') continue;
               const ex = ent.x + TILE_SIZE / 2, ey = ent.y + TILE_SIZE / 2;
               if (Math.hypot(ex - bm.x, ey - bm.y) <= bm.r) {
                 if (bm.owner && bm.owner === ent) continue; // 自分が投げた爆弾の爆風ダメージは無効
@@ -7720,7 +7721,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // ── 剣（近接）の当たり判定（onjReze） ──
           // 直線状の矩形判定だと、追尾してくる敵が斜め位置にいるだけで当たらず「ダメージを与えられない」原因になるため、
           // プレイヤーの向いている方向に少しずらした円形の判定に変更（斜め位置の敵にも当たるように緩和）。
-          if (gameData.engine === 'onjReze' && (d.hazard || d.objType === 'npc') && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
+          if (gameData.engine === 'onjReze' && ((d.hazard && (d.objType ?? 'enemy') === 'enemy') || d.objType === 'npc') && swordRef.current.active > 0 && !swordRef.current.hit.has(d.id)) {
             const sw = swordRef.current; const reach = 26;
             const swingCx = p.x + pData.w / 2 + sw.dir.x * (pData.w / 2 + reach / 2);
             const swingCy = p.y + pData.h / 2 + sw.dir.y * (pData.h / 2 + reach / 2);
@@ -7728,8 +7729,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const hitR = reach + Math.max(pData.w, pData.h, ew0, eh0) / 2 * 0.6;
             if (Math.hypot(ecx - swingCx, ecy - swingCy) < hitR) {
               sw.hit.add(d.id);
-              if (!d.hazard) {
-                // 味方モブ：怯えて逃げるAIに切り替えつつ、ダメージも与える
+              if (d.objType === 'npc') {
+                // 味方モブ：怯えて逃げるAIに切り替え
                 e.fleeing = true;
                 e.talked = false;
                 if (npcTalkRef.current?.entity === e) npcTalkRef.current = null;
@@ -7748,7 +7749,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
 
           // ── onjReze: hazard 敵に触れたら確実にダメージを受ける（仕様変更） ──
-          if (gameData.engine === 'onjReze' && d.hazard && isPlaying && !dead
+          if (gameData.engine === 'onjReze' && d.hazard && (d.objType ?? 'enemy') === 'enemy' && isPlaying && !dead
             && !debugInvincibleRef.current && invulnRef.current <= 0) {
             const ew1 = e.def.w ?? TILE_SIZE, eh1 = e.def.h ?? TILE_SIZE;
             const touchR = (Math.max(pData.w, pData.h) + Math.max(ew1, eh1)) / 2 * 0.85;
@@ -7849,7 +7850,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               break;
             }
             // スター無敵による即死処理
-            if (starTimerRef.current > 0 && d.hazard && (e.shellGrace ?? 0) <= 0) {
+            if (starTimerRef.current > 0 && d.hazard && (d.objType ?? 'enemy') === 'enemy' && (e.shellGrace ?? 0) <= 0) {
               eng.entities.splice(ei, 1);
               scoreRef.current += 100;
               playSfx(sfxRef.current.damage);
@@ -7857,7 +7858,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               break;
             }
             // 滑走甲羅 or 通常の敵に横から触れた → ダメージ（蹴り出し直後の猶予中はスキップ）
-            if (d.hazard && (e.shellGrace ?? 0) <= 0 && !debugInvincibleRef.current && invulnRef.current <= 0) {
+            if (d.hazard && (d.objType ?? 'enemy') === 'enemy' && (e.shellGrace ?? 0) <= 0 && !debugInvincibleRef.current && invulnRef.current <= 0) {
               const dmg = Math.max(1, d.atk ?? 2);
               if (gameData.id === 'mario') {
                 if (marioPowerRef.current === 'fire') {
@@ -8071,7 +8072,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
               break;
             }
-            if (d.hazard) {
+            if (d.hazard && (d.objType ?? 'enemy') === 'enemy') {
               if (starTimerRef.current > 0) {
                 eng.entities.splice(ei, 1);
                 scoreRef.current += 100;
@@ -11232,8 +11233,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const marker = kind === 'warp' ? EDITOR_MARKER.warp
       : kind === 'event' ? EDITOR_MARKER.event
         : kind === 'look' ? EDITOR_MARKER.look : undefined;
+    const targetObjType = kind === 'look' ? 'npc' : kind === 'npc' ? 'npc' : kind as ObjType;
     setTpl({
-      objType: kind === 'look' ? 'npc' : kind === 'npc' ? 'npc' : kind as ObjType,
+      objType: targetObjType,
+      hazard: targetObjType === 'enemy',
+      behavior: (targetObjType === 'event' || targetObjType === 'warp' || targetObjType === 'item') ? 'still' : (objTemplate.behavior ?? 'random'),
       editorSprite: marker,
       // マーカーを使う配置物は絵文字を消す。使わない側へ戻ったときは既定の絵文字を戻す
       // （空のままだと画面に何も出ないオブジェクトになってしまう）。
@@ -14637,7 +14641,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         </div>
                         {/* 種別 */}
                         <label className="text-[10px] text-gray-400 block">種別
-                          <select value={selObj.objType ?? 'enemy'} onChange={e => updObj({ objType: e.target.value as ObjType })}
+                          <select value={selObj.objType ?? 'enemy'} onChange={e => {
+                            const newType = e.target.value as ObjType;
+                            updObj({
+                              objType: newType,
+                              hazard: newType === 'enemy' ? (selObj.hazard ?? true) : false,
+                            });
+                          }}
                             className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
                             {Object.entries(OBJTYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                           </select>
