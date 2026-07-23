@@ -2055,7 +2055,7 @@ export class Yume25DEngine {
     const playerLevel = Math.round(this.hop / H);
     
     for (const ab of this.activeBillboards) {
-      if (!ab.data.collidable || ab.dead) continue;
+      if (!ab.data.collidable || ab.dead || ab.data.through) continue;
       const abLevel = ab.data.level ?? 0;
       if (abLevel !== playerLevel) continue;
 
@@ -2077,9 +2077,10 @@ export class Yume25DEngine {
   }
 
   private resolveBillboardCollisionsForNpc(ab: BillboardInstance) {
+    if (ab.data.through) return; // through: NPC同士の衝突判定をスキップ
     const pr = 0.22;
     for (const other of this.activeBillboards) {
-      if (other === ab || other.dead || !other.data.collidable) continue;
+      if (other === ab || other.dead || !other.data.collidable || other.data.through) continue;
       
       const abLevel = ab.data.level ?? 0;
       const otherLevel = other.data.level ?? 0;
@@ -2263,7 +2264,14 @@ export class Yume25DEngine {
       ab.x += ab.vx * dt;
       ab.z += ab.vz * dt;
 
-      this.resolveBillboardWalls(ab);
+      if (!b.through) {
+        this.resolveBillboardWalls(ab);
+      } else {
+        // through: 壁の衝突判定をスキップし、マップ端だけクランプ
+        const r_bound = 0.22;
+        ab.x = Math.max(r_bound + EPS, Math.min(this.layout.cols - r_bound - EPS, ab.x));
+        ab.z = Math.max(r_bound + EPS, Math.min(this.layout.rows - r_bound - EPS, ab.z));
+      }
 
       if (behavior === 'patrolH' && Math.abs(ab.x - prevX) < 1e-4) {
         ab.vx = -ab.vx;

@@ -7536,29 +7536,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 水平移動（壁・画面端で反転。walker は接地中、進行方向の足元が無ければ反転）
               if (e.vx !== 0) {
                 const nx = e.x + e.vx;
-                const leadX = e.vx > 0 ? nx + ew - 1 : nx;
-                const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + eh - 2);
-                const wall = (wt && !wt.info.passable) || (wb && !wb.info.passable);
-                let edge = false;
-                if (d.behavior === 'walker' && e.isGrounded) {
-                  const f = getTile(leadX, e.y + eh + 2);
-                  edge = !f || f.info.passable;
+                if (d.through) {
+                  e.x = nx;
+                } else {
+                  const leadX = e.vx > 0 ? nx + ew - 1 : nx;
+                  const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + eh - 2);
+                  const wall = (wt && !wt.info.passable) || (wb && !wb.info.passable);
+                  let edge = false;
+                  if (d.behavior === 'walker' && e.isGrounded) {
+                    const f = getTile(leadX, e.y + eh + 2);
+                    edge = !f || f.info.passable;
+                  }
+                  if (wall || edge || nx < 0 || nx > worldW - ew) e.vx = -e.vx;
+                  else e.x = nx;
                 }
-                if (wall || edge || nx < 0 || nx > worldW - ew) e.vx = -e.vx;
-                else e.x = nx;
               }
               // 重力 → 垂直移動 → 地面/天井判定（接地していなければ自由落下）
               e.vy += gameData.gravity; if (e.vy > ACTION_MAX_FALL) e.vy = ACTION_MAX_FALL;
               e.y += e.vy;
-              e.isGrounded = false;
-              if (e.vy > 0) {
-                const fl = getTile(e.x + 2, e.y + eh), fr = getTile(e.x + ew - 2, e.y + eh);
-                const g = (fl && !fl.info.passable) ? fl : (fr && !fr.info.passable) ? fr : null;
-                if (g) { e.y = g.rect.y - eh; e.vy = 0; e.isGrounded = true; }
-              } else if (e.vy < 0) {
-                const hl = getTile(e.x + 2, e.y), hr = getTile(e.x + ew - 2, e.y);
-                const c = (hl && !hl.info.passable) ? hl : (hr && !hr.info.passable) ? hr : null;
-                if (c) { e.y = c.rect.y + TILE_SIZE; e.vy = 0; }
+              if (d.through) {
+                // through: 重力は適用するが壁の衝突判定は無視
+              } else {
+                e.isGrounded = false;
+                if (e.vy > 0) {
+                  const fl = getTile(e.x + 2, e.y + eh), fr = getTile(e.x + ew - 2, e.y + eh);
+                  const g = (fl && !fl.info.passable) ? fl : (fr && !fr.info.passable) ? fr : null;
+                  if (g) { e.y = g.rect.y - eh; e.vy = 0; e.isGrounded = true; }
+                } else if (e.vy < 0) {
+                  const hl = getTile(e.x + 2, e.y), hr = getTile(e.x + ew - 2, e.y);
+                  const c = (hl && !hl.info.passable) ? hl : (hr && !hr.info.passable) ? hr : null;
+                  if (c) { e.y = c.rect.y + TILE_SIZE; e.vy = 0; }
+                }
               }
               e.x = Math.max(0, Math.min(worldW - ew, e.x));
               // 穴に落ちたら除去
@@ -7612,22 +7620,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             } else if (d.behavior === 'random') {
               if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
-              const nrx = e.x + e.vx, nry = e.y + e.vy;
-              const rt1 = getTile(nrx, e.y), rt2 = getTile(nrx + ew - 1, e.y + eh - 1);
-              if (rt1?.info.passable && rt2?.info.passable && nrx >= 0 && nrx <= worldW - ew) e.x = nrx; else e.vx = -e.vx;
-              const rt3 = getTile(e.x, nry), rt4 = getTile(e.x + ew - 1, nry + eh - 1);
-              if (rt3?.info.passable && rt4?.info.passable && nry >= 0 && nry <= worldH - eh) e.y = nry; else e.vy = -e.vy;
+              if (d.through) {
+                e.x += e.vx; e.y += e.vy;
+              } else {
+                const nrx = e.x + e.vx, nry = e.y + e.vy;
+                const rt1 = getTile(nrx, e.y), rt2 = getTile(nrx + ew - 1, e.y + eh - 1);
+                if (rt1?.info.passable && rt2?.info.passable && nrx >= 0 && nrx <= worldW - ew) e.x = nrx; else e.vx = -e.vx;
+                const rt3 = getTile(e.x, nry), rt4 = getTile(e.x + ew - 1, nry + eh - 1);
+                if (rt3?.info.passable && rt4?.info.passable && nry >= 0 && nry <= worldH - eh) e.y = nry; else e.vy = -e.vy;
+              }
             } else if (d.behavior === 'randomDash') {
               // ランダムダッシュ：短い駆け足（30F）と立ち止まり（60F）を繰り返す
               if (e.timer % 90 === 0) {
                 const th = Math.random() * Math.PI * 2;
                 e.vx = Math.cos(th) * sp * 2.5; e.vy = Math.sin(th) * sp * 2.5;
               } else if (e.timer % 90 === 30) { e.vx = 0; e.vy = 0; }
-              const ndx = e.x + e.vx, ndy = e.y + e.vy;
-              const dt1 = getTile(ndx, e.y), dt2 = getTile(ndx + ew - 1, e.y + eh - 1);
-              if (dt1?.info.passable && dt2?.info.passable && ndx >= 0 && ndx <= worldW - ew) e.x = ndx; else e.vx = -e.vx;
-              const dt3 = getTile(e.x, ndy), dt4 = getTile(e.x + ew - 1, ndy + eh - 1);
-              if (dt3?.info.passable && dt4?.info.passable && ndy >= 0 && ndy <= worldH - eh) e.y = ndy; else e.vy = -e.vy;
+              if (d.through) {
+                e.x += e.vx; e.y += e.vy;
+              } else {
+                const ndx = e.x + e.vx, ndy = e.y + e.vy;
+                const dt1 = getTile(ndx, e.y), dt2 = getTile(ndx + ew - 1, e.y + eh - 1);
+                if (dt1?.info.passable && dt2?.info.passable && ndx >= 0 && ndx <= worldW - ew) e.x = ndx; else e.vx = -e.vx;
+                const dt3 = getTile(e.x, ndy), dt4 = getTile(e.x + ew - 1, ndy + eh - 1);
+                if (dt3?.info.passable && dt4?.info.passable && ndy >= 0 && ndy <= worldH - eh) e.y = ndy; else e.vy = -e.vy;
+              }
             } else if (d.behavior === 'chase' || d.behavior === 'flee') {
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
               let s = (d.behavior === 'chase' ? 1 : -1) * sp;
@@ -7654,6 +7670,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   e.rezeState = undefined;
                   e.x += (dx / dist) * s; e.y += (dy / dist) * s;
                 }
+              } else if (d.through) {
+                e.x += (dx / dist) * s; e.y += (dy / dist) * s;
               } else {
                 // 通常の追尾処理（NPC はタイル衝突チェック付き）
                 const ncx = e.x + (dx / dist) * s, ncy = e.y + (dy / dist) * s;
@@ -7668,15 +7686,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             } else if (d.behavior === 'patrolH') {
               if (e.vx === 0) e.vx = sp;
-              const nhx = e.x + e.vx;
-              const ht1 = getTile(nhx, e.y), ht2 = getTile(nhx + ew - 1, e.y + eh - 1);
-              if (ht1?.info.passable && ht2?.info.passable && nhx >= 0 && nhx <= worldW - ew) e.x = nhx; else e.vx *= -1;
+              if (d.through) {
+                e.x += e.vx;
+              } else {
+                const nhx = e.x + e.vx;
+                const ht1 = getTile(nhx, e.y), ht2 = getTile(nhx + ew - 1, e.y + eh - 1);
+                if (ht1?.info.passable && ht2?.info.passable && nhx >= 0 && nhx <= worldW - ew) e.x = nhx; else e.vx *= -1;
+              }
               if (e.x < e.homeX - TILE_SIZE * 3 || e.x > e.homeX + TILE_SIZE * 3) e.vx *= -1;
             } else if (d.behavior === 'patrolV') {
               if (e.vy === 0) e.vy = sp;
-              const nvy = e.y + e.vy;
-              const vt1 = getTile(e.x, nvy), vt2 = getTile(e.x + ew - 1, nvy + eh - 1);
-              if (vt1?.info.passable && vt2?.info.passable && nvy >= 0 && nvy <= worldH - eh) e.y = nvy; else e.vy *= -1;
+              if (d.through) {
+                e.y += e.vy;
+              } else {
+                const nvy = e.y + e.vy;
+                const vt1 = getTile(e.x, nvy), vt2 = getTile(e.x + ew - 1, nvy + eh - 1);
+                if (vt1?.info.passable && vt2?.info.passable && nvy >= 0 && nvy <= worldH - eh) e.y = nvy; else e.vy *= -1;
+              }
               if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
             }
             e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
@@ -14663,6 +14689,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               onChange={e => updBb({ collidable: e.target.checked || undefined })} />
                             当たり判定
                           </label>
+                          <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                            <input type="checkbox" checked={!!bb.through}
+                              onChange={e => updBb({ through: e.target.checked || undefined })} />
+                            すり抜け
+                          </label>
                           <label className="text-[10px] text-gray-400 block">AI行動
                             <select value={bb.behavior ?? 'still'}
                               onChange={e => updBb({ behavior: e.target.value as NpcBehavior })}
@@ -14775,6 +14806,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <input type="text" inputMode="decimal" defaultValue={selObj.speed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ speed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" />
                               </label>
                             </div>
+                            <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <input type="checkbox" checked={!!selObj.through}
+                                onChange={e => updObj({ through: e.target.checked || undefined })} />
+                              壁をすり抜ける（through）
+                            </label>
                             {gameData.battle && (
                               <>
                                 <div className="grid grid-cols-3 gap-2">
@@ -15102,6 +15138,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 {Object.entries(BEHAVIOR_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                               </select>
                             </label>
+                            <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <input type="checkbox" checked={!!selObj.through}
+                                onChange={e => updObj({ through: e.target.checked || undefined })} />
+                              壁をすり抜ける（through）
+                            </label>
                             <textarea value={selObj.message} onChange={e => updObj({ message: e.target.value })} placeholder="会話メッセージ"
                               rows={2} className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none resize-none" />
                           </>
@@ -15351,6 +15392,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
                               <input type="checkbox" onChange={e => batchApplyBillboards({ collidable: e.target.checked || undefined })} className="accent-blue-500" />
                               当たり判定をON
+                            </label>
+                            <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                              <input type="checkbox" onChange={e => batchApplyBillboards({ through: e.target.checked || undefined })} className="accent-blue-500" />
+                              すり抜けをON
                             </label>
                           </>
                         ) : (

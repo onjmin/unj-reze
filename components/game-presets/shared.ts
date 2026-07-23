@@ -327,6 +327,9 @@ export interface ObjectDef {
   /** action（マリオ系）: 踏むと甲羅化する敵（ノコノコ型）。shell=true は stompable を含意。
    *  甲羅は静止→蹴ると滑走して他の敵を巻き込み、横から触れるとプレイヤーがダメージを受ける。 */
   shell?: boolean;
+  /** true のとき、この NPC/敵は壁・オブジェクトの衝突判定を無視してすり抜ける。
+   *  未指定/false は従来どおり壁に接触して反転・停止する。 */
+  through?: boolean;
 }
 
 /** スペルカード定義（touhou ボス用）。HP が triggerHp 以下になったとき発動する。 */
@@ -620,6 +623,8 @@ export interface Billboard25D {
   choices?: string[];
   behavior?: NpcBehavior;
   collidable?: boolean;
+  /** true のとき、このビルボードの AI 移動は壁の衝突判定を無視してすり抜ける。 */
+  through?: boolean;
   dir?: Dir4;
   /** イベントページ。持つ場合は「はなす」でコマンドが実行される（ObjectDef.pages と同じ仕組み）。 */
   pages?: EventPage[];

@@ -359,6 +359,11 @@ export default function Yume25DEditorPanel({
                 onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, collidable: e.target.checked } : b) }))} />
               当たり判定あり（すり抜け不可）
             </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={!!target.through}
+                onChange={e => onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, through: e.target.checked || undefined } : b) }))} />
+              壁をすり抜ける（through）
+            </label>
             <label className="flex items-center gap-1.5">AI行動
               <select value={target.behavior ?? 'still'}
                 onChange={e => { const behavior = e.target.value as NpcBehavior; onLayoutChange(l => ({ ...l, billboards: l.billboards.map(b => b.id === target.id ? { ...b, behavior } : b) })); }}
