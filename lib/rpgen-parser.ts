@@ -116,9 +116,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     bgm: rpgMap.bgmUrl
       ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : rpgMap.bgmUrl.startsWith('http') || rpgMap.bgmUrl.startsWith('/') ? `direct:${rpgMap.bgmUrl}` : `direct:https://rpgen-search.pages.dev/data/audio/bgm/${rpgMap.bgmUrl}`)
       : '',
-    mapBgRef: rpgMap.backgroundImageUrl
-      ? (rpgMap.backgroundImageUrl.startsWith('http') || rpgMap.backgroundImageUrl.startsWith('/') ? `url:${rpgMap.backgroundImageUrl}` : `url:https://i.imgur.com/${rpgMap.backgroundImageUrl}`)
-      : undefined,
+    mapBgRef: undefined,
     sfx: {},
     switches: [],
   };
@@ -534,7 +532,11 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     const pages: EventPage[] = [];
     ep.phases.forEach((ph: any, idx: number) => {
       const parsedCommands = ph.sequence ? ph.sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[] : [];
-      const trig = ph.trigger === 'touch' ? 'playerTouch' : ph.trigger === 'autorun' ? 'autorun' : 'action';
+      const trig = (ph.timing === 1 || ph.timing === 'touch' || ph.trigger === 'touch')
+        ? 'playerTouch'
+        : (ph.timing === 2 || ph.timing === 'autorun' || ph.trigger === 'autorun')
+        ? 'autorun'
+        : 'action';
       pages.push({
         name: `Phase ${idx}`,
         conditions: {},

@@ -7852,7 +7852,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // モブ衝突が円形になり隣接タイルへ入れなくなったため、NPCとの接触扱いの判定は円形かつ広めに取る。
           // ただしワープ/アイテムはモブ衝突の対象外（isBlockedByMob参照）で従来通りタイルに乗れるため、
           // 判定を広げると隣接するワープ同士が入った瞬間に誤発動するので、こちらは元の狭い矩形判定を使う。
-          const overlap = Math.hypot(pcx - (e.x + TILE_SIZE / 2), pcy - (e.y + TILE_SIZE / 2)) < TILE_SIZE * 1.1;
+          const pCol = Math.floor(pcx / TILE_SIZE);
+          const pRow = Math.floor(pcy / TILE_SIZE);
+          const eCol = Math.floor((e.x + TILE_SIZE / 2) / TILE_SIZE);
+          const eRow = Math.floor((e.y + TILE_SIZE / 2) / TILE_SIZE);
+          const isAdjacentTile = Math.abs(pCol - eCol) + Math.abs(pRow - eRow) <= 1;
+          const isFacingEventTile = (isUp && eRow === pRow - 1 && eCol === pCol) ||
+                                    (isDown && eRow === pRow + 1 && eCol === pCol) ||
+                                    (isLeft && eCol === pCol - 1 && eRow === pRow) ||
+                                    (isRight && eCol === pCol + 1 && eRow === pRow);
+          const overlap = Math.hypot(pcx - (e.x + TILE_SIZE / 2), pcy - (e.y + TILE_SIZE / 2)) < TILE_SIZE * 1.35 || (isFacingEventTile && isAdjacentTile);
           const exactOverlap = pcx > e.x && pcx < e.x + TILE_SIZE && pcy > e.y && pcy < e.y + TILE_SIZE;
           if (overlap) {
             const ot = d.objType ?? 'enemy';
@@ -8459,11 +8468,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           });
         }).find(Boolean);
 
+        const pFacing = walkInst.get('player')?.dir || (isUp ? 'u' : isDown ? 'd' : isLeft ? 'l' : isRight ? 'r' : 'd');
+        const frontCol = pCol + (pFacing === 'r' ? 1 : pFacing === 'l' ? -1 : 0);
+        const frontRow = pRow + (pFacing === 'd' ? 1 : pFacing === 'u' ? -1 : 0);
+
         const target = acrossTable ?? (isPlaying ? eng.entities : gameData.objects).find(o => {
+          const oc = isPlaying ? Math.floor(((o as Entity).x + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).col;
+          const or_ = isPlaying ? Math.floor(((o as Entity).y + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).row;
+          if ((oc === frontCol && or_ === frontRow) || (oc === pCol && or_ === pRow)) return true;
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
           const oy = isPlaying ? (o as Entity).y : (o as ObjectDef).row * TILE_SIZE;
-          // モブ衝突が円形になり隣接タイルへ入れなくなったため、話しかけ判定も円形かつ広めに取る
-          return Math.hypot(pcx - (ox + TILE_SIZE / 2), pcy - (oy + TILE_SIZE / 2)) < TILE_SIZE * 1.1;
+          return Math.hypot(pcx - (ox + TILE_SIZE / 2), pcy - (oy + TILE_SIZE / 2)) < TILE_SIZE * 1.35;
         });
         if (target) {
           const def = isPlaying ? (target as Entity).def : target as ObjectDef;
