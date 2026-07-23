@@ -1488,6 +1488,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** 現在のカメラのワールド座標オフセット。エンカウント演出でスクリーン固定位置へ変換するために毎フレーム更新する。 */
   const camXRef = useRef(0);
   const camYRef = useRef(0);
+  /** 地面／置物タイルを等倍(1マス=TILE_SIZE px)で合成する専用バッファ。
+   *  非整数スケール(SCALE_X/Y)を直接タイルに掛けると境界が小数ピクセルへ落ちて継ぎ目が出る／
+   *  オーバーラップで塞ぐと半透明タイルの縁が二重合成で濃くなる。そこで一旦このバッファへ
+   *  等倍・オーバーラップ無しで敷き詰め（各ピクセルは必ず1回だけ合成される）、最後に一括拡大ブリットする。 */
+  const tileBufferRef = useRef<HTMLCanvasElement | null>(null);
   const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 });
   const cameraPanRef = useRef({ x: 0, y: 0 });
   type OverlayImageType = {
@@ -9014,32 +9019,39 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const shakeOx = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
       const shakeOy = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
 
-      ctx.save();
-      ctx.scale(SCALE_X, SCALE_Y);
-      ctx.translate(shakeOx - finalCamX, shakeOy - finalCamY);
-
+      // ── 地面／置物タイル：等倍(1マス=TILE_SIZE px)バッファへオーバーラップ無しで敷き詰める ──
+      // 各タイルは整数座標で密着（境界が小数ピクセルに落ちない＝継ぎ目が出ない）、各ピクセルは1回だけ
+      // 合成される（半透明タイルの縁が二重合成で濃くならない）。仕上げにこのバッファを一括拡大ブリットする。
       const map = engineRef.current.map;
       const startCol = Math.max(0, Math.floor(finalCamX / TILE_SIZE));
       const endCol = Math.min(worldCols, startCol + VIEW_COLS + 2);
       const startRow = Math.max(0, Math.floor(finalCamY / TILE_SIZE));
       const endRow = Math.min(worldRows, startRow + VIEW_ROWS + 2);
+      let tileBuf = tileBufferRef.current;
+      if (!tileBuf) { tileBuf = document.createElement('canvas'); tileBuf.width = VIEW_W; tileBuf.height = VIEW_H; tileBufferRef.current = tileBuf; }
+      const tctx = tileBuf.getContext('2d')!;
+      tctx.setTransform(1, 0, 0, 1, 0, 0);
+      tctx.clearRect(0, 0, VIEW_W, VIEW_H);
+      tctx.imageSmoothingEnabled = false;
+      // カメラ分だけ整数で平行移動。スケールは掛けない＝タイル境界は常に整数ピクセルに乗る。
+      tctx.translate(-finalCamX, -finalCamY);
       const drawTileCell = (x: number, y: number, tileId: number, info: TileDef) => {
         // コインタイル：回転コイン（横幅が正弦波で伸縮）を描く。画像不要。
         if (info.special === 'coin') {
           const ccx = x * TILE_SIZE + TILE_SIZE / 2, ccy = y * TILE_SIZE + TILE_SIZE / 2;
           const spinW = Math.max(2, Math.abs(Math.sin(Date.now() / 180 + x * 0.9)) * 9);
-          ctx.fillStyle = '#ffd700';
-          ctx.beginPath(); ctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); ctx.fill();
-          ctx.strokeStyle = '#b8860b'; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); ctx.stroke();
-          if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+          tctx.fillStyle = '#ffd700';
+          tctx.beginPath(); tctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); tctx.fill();
+          tctx.strokeStyle = '#b8860b'; tctx.lineWidth = 2;
+          tctx.beginPath(); tctx.ellipse(ccx, ccy, spinW, 11, 0, 0, Math.PI * 2); tctx.stroke();
+          if (!isPlaying) { tctx.strokeStyle = 'rgba(255,255,255,0.1)'; tctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
           if (showCollisionBoundariesRef.current && !isPlaying && !info.passable) {
             const px = x * TILE_SIZE + 5, py = y * TILE_SIZE + 5;
             const ex = x * TILE_SIZE + TILE_SIZE - 5, ey = y * TILE_SIZE + TILE_SIZE - 5;
-            ctx.lineWidth = 3; ctx.strokeStyle = '#000';
-            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
-            ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff';
-            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
+            tctx.lineWidth = 3; tctx.strokeStyle = '#000';
+            tctx.beginPath(); tctx.moveTo(px, py); tctx.lineTo(ex, ey); tctx.moveTo(ex, py); tctx.lineTo(px, ey); tctx.stroke();
+            tctx.lineWidth = 1.5; tctx.strokeStyle = '#fff';
+            tctx.beginPath(); tctx.moveTo(px, py); tctx.lineTo(ex, ey); tctx.moveTo(ex, py); tctx.lineTo(px, ey); tctx.stroke();
           }
           return;
         }
@@ -9075,30 +9087,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const destX = x * TILE_SIZE + (TILE_SIZE - destW) / 2;
             if (info.imageOverflowTop) {
               const destY = y * TILE_SIZE + TILE_SIZE - destH;
-              ctx.drawImage(drawSrc, sx, sy, sw, sh, destX, destY, destW, destH);
+              tctx.drawImage(drawSrc, sx, sy, sw, sh, destX, destY, destW, destH);
             } else {
-              ctx.drawImage(drawSrc, sx, sy, sw, sh, destX, y * TILE_SIZE, destW, TILE_SIZE);
+              tctx.drawImage(drawSrc, sx, sy, sw, sh, destX, y * TILE_SIZE, destW, TILE_SIZE);
             }
           } else if (info.imageOverflowTop) {
             // セル幅に合わせ高さをアスペクト比から算出。下端固定で縦長は上へはみ出す。
             const dH = sw > 0 ? Math.round(sh * (TILE_SIZE / sw)) : TILE_SIZE;
-            ctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE, y * TILE_SIZE + TILE_SIZE - dH, TILE_SIZE, dH);
+            tctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE, y * TILE_SIZE + TILE_SIZE - dH, TILE_SIZE, dH);
           } else {
-            // cell-fill（既定）: マスいっぱいに敷き詰める。SCALE_X/Y が非整数（4/3・15/11）のため
-            // タイル境界がデバイスピクセル上で小数位置に落ち、縁のアンチエイリアスで継ぎ目（グリッド線）が出る。
-            // 上下左右へ 0.5px ずつはみ出させ（計 1px オーバーラップ）、隣接タイルでアンチエイリアス縁を確実に覆う。
-            ctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE - 0.5, y * TILE_SIZE - 0.5, TILE_SIZE + 1, TILE_SIZE + 1);
+            // cell-fill（既定）: 等倍バッファ上なので境界は整数ピクセル。オーバーラップ無しでも隣と密着する。
+            tctx.drawImage(drawSrc, sx, sy, sw, sh, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
           }
         }
-        else { ctx.fillStyle = info.color; ctx.fillRect(x * TILE_SIZE - 0.5, y * TILE_SIZE - 0.5, TILE_SIZE + 1, TILE_SIZE + 1); }
-        if (!isPlaying) { ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+        else { tctx.fillStyle = info.color; tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
+        if (!isPlaying) { tctx.strokeStyle = 'rgba(255,255,255,0.1)'; tctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE); }
         if (showCollisionBoundariesRef.current && !isPlaying && !info.passable) {
           const px = x * TILE_SIZE + 5, py = y * TILE_SIZE + 5;
           const ex = x * TILE_SIZE + TILE_SIZE - 5, ey = y * TILE_SIZE + TILE_SIZE - 5;
-          ctx.lineWidth = 3; ctx.strokeStyle = '#000';
-          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
-          ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff';
-          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.moveTo(ex, py); ctx.lineTo(px, ey); ctx.stroke();
+          tctx.lineWidth = 3; tctx.strokeStyle = '#000';
+          tctx.beginPath(); tctx.moveTo(px, py); tctx.lineTo(ex, ey); tctx.moveTo(ex, py); tctx.lineTo(px, ey); tctx.stroke();
+          tctx.lineWidth = 1.5; tctx.strokeStyle = '#fff';
+          tctx.beginPath(); tctx.moveTo(px, py); tctx.lineTo(ex, ey); tctx.moveTo(ex, py); tctx.lineTo(px, ey); tctx.stroke();
         }
       };
       /** 単独表示モード中は、選択中レイヤー以外を描かない（編集中のみ）。 */
@@ -9123,6 +9133,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
         }
       }
+
+      // ── メインキャンバスへ：スケールを掛け、完成したタイルバッファを1回だけ拡大ブリット ──
+      // 1枚の画像として貼るのでタイル間に継ぎ目は原理的に生じない。カメラ分は既にバッファへ焼き込み済み。
+      ctx.save();
+      ctx.scale(SCALE_X, SCALE_Y);
+      ctx.drawImage(tileBuf, shakeOx, shakeOy);
+      // 以降のプレイヤー／オブジェクト等はワールド座標で描くのでカメラ平行移動を適用する。
+      ctx.translate(shakeOx - finalCamX, shakeOy - finalCamY);
 
       // ── アニメーション中ブロックの描画 ──
       if (isPlaying) {
