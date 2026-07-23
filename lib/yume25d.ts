@@ -2287,6 +2287,14 @@ export class Yume25DEngine {
         ab.vx = 0;
         ab.vz = 0;
         ab.aiTimer = 0.4 + Math.random() * 0.8;
+      } else if (behavior === 'random' && (ab.vx !== 0 || ab.vz !== 0)
+        && Math.hypot(ab.x - prevX, ab.z - prevZ) < 1e-4) {
+        // 壁やオブジェクトにぶつかったら、その方向へ押し続けず別方向へ歩き直す
+        // （vx/vz が 0 の「休憩中」は対象外なので stop/go のリズムは崩さない）
+        const theta = Math.random() * Math.PI * 2;
+        ab.vx = Math.cos(theta) * speed;
+        ab.vz = Math.sin(theta) * speed;
+        ab.aiTimer = 1.0 + Math.random() * 2.0;
       }
 
       // ランダムジャンプの垂直物理：重力で落下、地上に戻ったら停止
