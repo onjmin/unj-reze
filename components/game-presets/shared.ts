@@ -848,7 +848,6 @@ export const chest = (col: number, row: number, openCmds: EventCommand[]): Objec
   spriteRef: CHEST_SPRITE_CLOSED, spriteUrl: CHEST_CHIP_URL,
   altSpriteRef: CHEST_SPRITE_OPEN, altSpriteUrl: CHEST_CHIP_URL,
   pages: [
-    { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [] },
     {
       conditions: {},
       commands: [
@@ -857,6 +856,8 @@ export const chest = (col: number, row: number, openCmds: EventCommand[]): Objec
         { type: 'setSelfSwitch', id: 'A', value: true },
       ],
     },
+    // 開封済み（selfSwitch A=true）のときは最高優先度でマッチし、空コマンドで再発動を防ぐ
+    { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [] },
   ],
 });
 
