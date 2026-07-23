@@ -306,10 +306,81 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
             }
           }
         }
-        return { type: 'changeSprite', spriteRef, spriteUrl, objId: '' };
+        const targetObjId = (cmd.params?.tx !== undefined && cmd.params?.ty !== undefined) ? `obj-human-${cmd.params.tx}-${cmd.params.ty}` : '';
+        return { type: 'changeSprite', spriteRef, spriteUrl, objId: targetObjId };
       }
-      case 'MV_NA': return { type: 'moveNpc', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
-      case 'MV_PA': return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
+      case 'CH_HM': {
+        const nStr = String(cmd.params?.n || '');
+        let spriteUrl = '';
+        let spriteRef = '';
+        if (nStr) {
+          const idNum = Number(nStr.replace('A', ''));
+          const hash = idToHash.get(idNum);
+          if (hash) {
+            if (nStr.includes('A')) {
+              spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/${hash}.png`;
+            } else {
+              spriteUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
+            }
+          }
+        }
+        const isPlayer = cmd.params?.i === '0';
+        const targetObjId = isPlayer ? 'player' : (cmd.params?.tx !== undefined && cmd.params?.ty !== undefined ? `obj-human-${cmd.params.tx}-${cmd.params.ty}` : 'player');
+        return { type: 'changeSprite', spriteRef, spriteUrl, objId: targetObjId };
+      }
+      case 'MV_PD': {
+        const dVal = cmd.params?.d;
+        const d = parseInt(dVal || '0');
+        const v = parseInt(cmd.params?.v || '1');
+        let dx = 0, dy = 0;
+        if (d === 0 || dVal === 'up') { dx = 0; dy = -v; }
+        else if (d === 1 || dVal === 'right') { dx = v; dy = 0; }
+        else if (d === 2 || dVal === 'down') { dx = 0; dy = v; }
+        else if (d === 3 || dVal === 'left') { dx = -v; dy = 0; }
+        else if (d === 4) { dx = v; dy = -v; }
+        else if (d === 5) { dx = v; dy = v; }
+        else if (d === 6) { dx = -v; dy = v; }
+        else if (d === 7) { dx = -v; dy = -v; }
+        return { type: 'moveNpc', objId: 'player', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      }
+      case 'MV_PA': return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      case 'MV_PR': {
+        const dx = parseInt(cmd.params?.tx || '0');
+        const dy = parseInt(cmd.params?.ty || '0');
+        return { type: 'moveNpc', objId: 'player', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      }
+      case 'MV_ND': {
+        const nx = parseInt(cmd.params?.nx || '0');
+        const ny = parseInt(cmd.params?.ny || '0');
+        const dVal = cmd.params?.d;
+        const d = parseInt(dVal || '0');
+        const v = parseInt(cmd.params?.v || '1');
+        let dx = 0, dy = 0;
+        if (d === 0 || dVal === 'up') { dx = 0; dy = -v; }
+        else if (d === 1 || dVal === 'right') { dx = v; dy = 0; }
+        else if (d === 2 || dVal === 'down') { dx = 0; dy = v; }
+        else if (d === 3 || dVal === 'left') { dx = -v; dy = 0; }
+        else if (d === 4) { dx = v; dy = -v; }
+        else if (d === 5) { dx = v; dy = v; }
+        else if (d === 6) { dx = -v; dy = v; }
+        else if (d === 7) { dx = -v; dy = -v; }
+        return { type: 'moveNpc', objId: `obj-human-${nx}-${ny}`, dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      }
+      case 'MV_NA': {
+        const nx = parseInt(cmd.params?.nx || '0');
+        const ny = parseInt(cmd.params?.ny || '0');
+        return { type: 'moveNpc', objId: `obj-human-${nx}-${ny}`, tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      }
+      case 'MV_NR': {
+        const nx = parseInt(cmd.params?.nx || '0');
+        const ny = parseInt(cmd.params?.ny || '0');
+        const dx = parseInt(cmd.params?.tx || '0');
+        const dy = parseInt(cmd.params?.ty || '0');
+        return { type: 'moveNpc', objId: `obj-human-${nx}-${ny}`, dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      }
+      case 'PL_GLD': return { type: 'changeGold', amount: parseInt(cmd.params?.v || '0') };
+      case 'MI_GLD': return { type: 'changeGold', amount: -parseInt(cmd.params?.v || '0') };
+      case 'SET_GLD': return { type: 'changeGold', amount: parseInt(cmd.params?.v || '0') };
       case 'DW_IMA':
       case 'DW_IMG': {
         const params = cmd.params || {};
