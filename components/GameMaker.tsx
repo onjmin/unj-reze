@@ -4557,9 +4557,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     phaseIndexRef.current = pending;
   }, [gameData, playSfx, showGameMsg]);
 
-  // ── イベントインタプリタ ──
   const findActivePage = useCallback((obj: { id: string; pages?: EventPage[] }): EventPage | null => {
     if (!obj.pages || obj.pages.length === 0) return null;
+    const hasConditions = (c?: EventCondition) => {
+      if (!c) return false;
+      return c.switchId != null || c.switch2Id != null || c.itemId != null || c.selfSwitchId != null;
+    };
     for (let i = obj.pages.length - 1; i >= 0; i--) {
       const page = obj.pages[i];
       const c = page.conditions;
@@ -4570,6 +4573,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const ss = selfSwitchesRef.current[obj.id]?.[c.selfSwitchId] ?? false;
         if (ss !== !!c.selfSwitchValue) continue;
       }
+      // 条件が未設定でかつ実行コマンドも無い空のページ（i > 0）は未構成タブのためスキップし、
+      // 実際にコマンドや条件が設定されている下位ページを評価する。
+      if (i > 0 && !hasConditions(c) && (!page.commands || page.commands.length === 0)) continue;
+
       return page;
     }
     return null;
