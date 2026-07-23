@@ -11384,7 +11384,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       {/* Header：スマホでは通常隠しておき（描画エリアを圧迫しない）、
           上端のハンドルを下スワイプ／タップで引き出す。md以上は従来どおり常時表示。 */}
       <div
-        className={`absolute md:static top-0 left-0 right-0 z-40 shrink-0 transition-transform duration-200 md:translate-y-0 ${headerOpen ? 'translate-y-0' : '-translate-y-[calc(100%-20px)]'}`}
+        className={`absolute md:static top-0 left-0 right-0 z-[60] shrink-0 transition-transform duration-200 md:translate-y-0 ${headerOpen ? 'translate-y-0' : '-translate-y-[calc(100%-20px)]'}`}
         onTouchStart={onHeaderTouchStart}
         onTouchMove={onHeaderTouchMove}
       >
@@ -11414,7 +11414,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             </button>
             <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
             {settingsOpen && (
-              <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
+              <div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
                 {/* 無敵モード */}
                 <button
                   onClick={() => setDebugInvincible(v => !v)}
