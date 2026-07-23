@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2 } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2, FlaskConical } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
@@ -1334,6 +1334,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const canvasDrawRef = useRef(false);
   canvasDrawRef.current = canvasDraw;
   const justStartedRef = useRef(false);
+  const isTestPlayRef = useRef(false);
   const editorCoordRef = useRef<HTMLDivElement>(null);
 
   // ── プレビュー用 ──
@@ -5159,6 +5160,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const sw = data.scroll?.worldCols ?? COLS; const sh = data.scroll?.worldRows ?? ROWS;
     setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - VIEW_W, data.player.start.x + data.player.w / 2 - VIEW_W / 2)));
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
+    isTestPlayRef.current = true;
     setIsPlaying(false); setSelectedObjId(null);
     setShowTitle(false); setShowEnding(false);
   }, []);
@@ -5218,6 +5220,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   const restart = useCallback(() => {
+    isTestPlayRef.current = true;
     const eng = engineRef.current;
     eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
     justStartedRef.current = true;
@@ -5248,6 +5251,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       eng.player = { ...data.player.start, vx: 0, vy: 0, isGrounded: false };
       eng.map = JSON.parse(JSON.stringify(data.map));
       if (playOnly) {
+        isTestPlayRef.current = true;
         if (data.titleScreen?.enabled) setShowTitle(true);
         else setIsPlaying(true);
       }
@@ -5277,6 +5281,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   /** ヒーローから「あそぶ」。タイトル画面があればそれを、なければ即プレイ。 */
   const enterPlayFromIntro = useCallback(() => {
+    isTestPlayRef.current = true;
     setIntroOpen(false);
     setActivePreviewKey(null);
     if (gameData.titleScreen?.enabled) { restart(); setShowTitle(true); return; }
@@ -5354,12 +5359,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     engineRef.current.map = JSON.parse(JSON.stringify(layout.map));
     engineRef.current.overlayMap = JSON.parse(JSON.stringify(layout.overlayMap));
     engineRef.current.overheadMap = JSON.parse(JSON.stringify(layout.overheadMap));
-    // シーン0の原点でプレイヤー位置を補正
-    const s0 = layout.layouts.find(l => l.sceneIdx === 0);
-    if (s0) {
-      const ep = engineRef.current.player;
-      ep.x = s0.originX * TILE_SIZE + gameData.player.start.x;
-      ep.y = s0.originY * TILE_SIZE + gameData.player.start.y;
+    // シーン0の原点でプレイヤー位置を補正（テストプレイ時のみ）
+    if (isTestPlayRef.current) {
+      const s0 = layout.layouts.find(l => l.sceneIdx === 0);
+      if (s0) {
+        const ep = engineRef.current.player;
+        ep.x = s0.originX * TILE_SIZE + gameData.player.start.x;
+        ep.y = s0.originY * TILE_SIZE + gameData.player.start.y;
+      }
     }
     // シーン0のエンティティをワールド座標で配置
     const s0l = layout.layouts.find(l => l.sceneIdx === 0)!;
@@ -5441,7 +5448,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         phaseIndexRef.current = 0;
       }
       eng.map = JSON.parse(JSON.stringify(gameData.map));
-      eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
+      if (isTestPlayRef.current) {
+        eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
+      } else {
+        eng.player = { x: eng.player.x, y: eng.player.y, vx: 0, vy: 0, isGrounded: false };
+      }
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
       if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 };
@@ -11245,6 +11256,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const updDeath = (patch: Partial<DeathScreenConfig>) => setGameData(p => p.deathScreen ? ({ ...p, deathScreen: { ...p.deathScreen, ...patch } }) : p);
   const startFromTitle = () => { setShowTitle(false); setIsPlaying(true); };
 
+  /** テストプレイ実行：タイトル画面および初期開始位置（gameData.player.start）からゲームを開始する */
+  const handleTestPlay = useCallback(() => {
+    isTestPlayRef.current = true;
+    if (isPlaying) {
+      setShowEnding(false);
+      setIsPlaying(false);
+    }
+    setActivePreviewKey(null);
+    flushSceneEdits();
+    restart();
+    if (gameData.titleScreen?.enabled) {
+      setShowTitle(true);
+    } else {
+      setIsPlaying(true);
+      justStartedRef.current = true;
+    }
+  }, [isPlaying, flushSceneEdits, restart, gameData.titleScreen?.enabled]);
+
   // SELECT ボタンが押されたとき
   const handleSelectPress = () => {
     if (introOpen) return;
@@ -11439,6 +11468,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   🧱 衝突バウンダリ {showCollisionBoundaries ? 'ON' : 'OFF'}
                 </button>
 
+                {!playOnly && (
+                  <button
+                    onClick={() => { handleTestPlay(); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-green-400 hover:bg-gray-700 hover:text-green-300 transition"
+                  >
+                    <FlaskConical size={13} /> 🧪 テストプレイ
+                  </button>
+                )}
+
                 <div className="border-t border-gray-700 my-1" />
                 {/* エクスポート */}
                 <button
@@ -11566,9 +11604,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 }
               }
               if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
+              isTestPlayRef.current = false;
               setActivePreviewKey(null);
               flushSceneEdits();
-              if (gameData.titleScreen?.enabled) { setShowTitle(true); return; }
+              setShowTitle(false);
               setIsPlaying(true);
               justStartedRef.current = true;
             }}
