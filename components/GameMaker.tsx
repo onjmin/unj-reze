@@ -1493,7 +1493,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  オーバーラップで塞ぐと半透明タイルの縁が二重合成で濃くなる。そこで一旦このバッファへ
    *  等倍・オーバーラップ無しで敷き詰め（各ピクセルは必ず1回だけ合成される）、最後に一括拡大ブリットする。 */
   const tileBufferRef = useRef<HTMLCanvasElement | null>(null);
-  const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 });
+  // カメラの追加パン量（moveCamera は camOverrideRef で処理し、ここは常に 0）。
   const cameraPanRef = useRef({ x: 0, y: 0 });
   type OverlayImageType = {
     url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean;
@@ -4822,11 +4822,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             });
           }
           setTimeout(advance, 0);
-          break;
-        case 'moveCamera':
-          setCameraPan({ x: cmd.tx, y: cmd.ty });
-          cameraPanRef.current = { x: cmd.tx, y: cmd.ty };
-          setTimeout(advance, cmd.duration > 0 ? cmd.duration : 0);
           break;
         case 'moveNpc': {
           const target = !cmd.objId ? 'player' : cmd.objId;
@@ -17158,10 +17153,13 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
         case 'hideImage': return { type: 'hideImage', imgId: '' };
         case 'moveCamera': return { type: 'moveCamera', tx: 0, ty: 0, duration: 0 };
         case 'resetCamera': return { type: 'resetCamera', duration: 0 };
-        case 'moveNpc': return { type: 'moveNpc', objId: 'player' };
+        case 'moveNpc': return { type: 'moveNpc', objId: 'player', tx: 0, ty: 0, duration: 0 };
+        case 'followImage': return { type: 'followImage', imgId: '1', targetObjId: 'player', directions: { U: undefined, D: undefined, L: undefined, R: undefined } };
+        case 'pauseImage': return { type: 'pauseImage', imgId: '1' };
+        case 'resumeImage': return { type: 'resumeImage', imgId: '1' };
         case 'clearScreenEffect': return { type: 'clearScreenEffect' };
-        case 'screenEffect': return { type: 'screenEffect', effects: [] };
-        case 'changePhase': return { type: 'changePhase', phaseIndex: 0 };
+        case 'screenEffect': return { type: 'screenEffect', effects: [{ type: 'solid', color: '0-0-0-50', c1: '', c2: '', pos: '', stops: '' }] };
+        case 'changePhase': return { type: 'changePhase', phaseIndex: 1 };
         case 'playEffect': return { type: 'playEffect', effectId: '', target: 'self' };
         default: return { type: 'message', text: '' };
       }
@@ -17194,13 +17192,46 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
               <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
                 rows={3} className={inputCls} placeholder="メッセージ" />
             )}
-            {type === 'choice' && (
-              <div className="space-y-0.5">
-                <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
-                  rows={2} className={inputCls} placeholder="質問文" />
-                <div className="text-[10px] text-gray-500">選択肢はコード編集が必要です（準備中）</div>
-              </div>
-            )}
+            {type === 'choice' && (() => {
+              const choices: { label: string; commands: EventCommand[] }[] = (cmd as any).choices ?? [];
+              const setChoices = (next: { label: string; commands: EventCommand[] }[]) => onChange({ choices: next } as Partial<EventCommand>);
+              return (
+                <div className="space-y-2">
+                  <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+                    rows={2} className={inputCls} placeholder="質問文（省略可）" />
+                  <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={!!(cmd as any).random}
+                      onChange={e => onChange({ random: e.target.checked || undefined } as Partial<EventCommand>)}
+                      className="accent-blue-500 w-3.5 h-3.5" />
+                    ランダム選択（選択肢を出さず1つを自動実行 / RPGEN x,y省略時）
+                  </label>
+                  <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                    <input type="checkbox" checked={!!(cmd as any).keepMessage}
+                      onChange={e => onChange({ keepMessage: e.target.checked || undefined } as Partial<EventCommand>)}
+                      className="accent-blue-500 w-3.5 h-3.5" />
+                    直前のメッセージを消さない（RPGEN c:1）
+                  </label>
+                  <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">選択肢</div>
+                  {choices.length === 0 && <p className="text-[10px] text-gray-500">（なし）</p>}
+                  {choices.map((ch, ci) => (
+                    <div key={ci} className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-gray-500 w-4 text-center shrink-0">{ci + 1}</span>
+                      <input value={ch.label}
+                        onChange={e => setChoices(choices.map((c, j) => j === ci ? { ...c, label: e.target.value } : c))}
+                        className={inputCls} placeholder={`選択肢${ci + 1}`} />
+                      <span className="text-[9px] text-gray-500 shrink-0 whitespace-nowrap">{ch.commands.length}命令</span>
+                      <button onClick={() => setChoices(choices.filter((_, j) => j !== ci))}
+                        className="text-red-400 hover:text-red-300 text-[12px] px-1 shrink-0">×</button>
+                    </div>
+                  ))}
+                  <button onClick={() => setChoices([...choices, { label: `選択肢${choices.length + 1}`, commands: [] }])}
+                    className="w-full flex items-center justify-center gap-0.5 py-1 rounded border border-dashed border-gray-600 text-[9px] text-gray-400 hover:bg-gray-100/5">
+                    <Plus size={10} />選択肢を追加
+                  </button>
+                  <p className="text-[9px] text-gray-500">各選択肢の中で実行する命令はインポート結果を保持します（分岐内の命令編集は今後対応）。</p>
+                </div>
+              );
+            })()}
             {type === 'ifSwitch' && (
               <div className="flex flex-col gap-2">
                 {switches.length > 0 ? (
@@ -17270,12 +17301,46 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                 </div>
               </div>
             )}
+            {type === 'changeGold' && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-400 whitespace-nowrap">増減額（負で減少）:</span>
+                <input type="number" value={(cmd as any).amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
+                  className={inputCls} placeholder="例: 100 / -50" />
+              </div>
+            )}
+            {(type === 'restoreHp' || type === 'restoreMp') && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-400 whitespace-nowrap">回復量（空=全回復）:</span>
+                <input type="number" value={(cmd as any).amount ?? ''} onChange={e => onChange({ amount: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  className={inputCls} placeholder="全回復" />
+              </div>
+            )}
+            {type === 'ifGold' && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-400 whitespace-nowrap">所持金がこの値以上なら:</span>
+                  <input type="number" value={(cmd as any).amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
+                    className={inputCls} placeholder="金額" />
+                </div>
+                <p className="text-[9px] text-gray-500">条件を満たしたとき/満たさないときの命令はインポート結果を保持します。</p>
+              </div>
+            )}
             {type === 'warp' && (
-              <div className="grid grid-cols-2 gap-2">
-                <input type="number" value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) })}
-                  className={inputCls} placeholder="X" />
-                <input type="number" value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) })}
-                  className={inputCls} placeholder="Y" />
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[10px] text-gray-400">移動先X(列)
+                    <input type="number" value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="X" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">移動先Y(行)
+                    <input type="number" value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="Y" />
+                  </label>
+                </div>
+                <label className="text-[10px] text-gray-400 block">移動先マップID（空=同一マップ内で座標移動）
+                  <input value={(cmd as any).mapId ?? ''} onChange={e => onChange({ mapId: e.target.value || undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="RPGEN マップ番号など" />
+                </label>
               </div>
             )}
             {type === 'wait' && (
@@ -17301,40 +17366,99 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'changeSprite' && (
               <div className="space-y-2">
-                <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                  className={inputCls} placeholder="対象ID (player 等)" />
-                <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
-                  className={inputCls} placeholder="画像URL (sprite: 等)" />
-                {(cmd as any).spriteRef && (
+                <label className="text-[10px] text-gray-400 block">対象ID（空=プレイヤー）
+                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="player / オブジェクトID" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">歩行アニメ参照（walk:… 形式）
+                  <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="walk:auto:u:https://…" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">静止画像URL（単一スプライト）
+                  <input value={(cmd as any).spriteUrl ?? ''} onChange={e => onChange({ spriteUrl: e.target.value || undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="https://…/sprites/xxxx.png" />
+                </label>
+                {((cmd as any).spriteUrl || (cmd as any).spriteRef) && (
                   <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
-                    <img src={(cmd as any).spriteRef.replace('sprite:', '')} className="max-h-24 object-contain" alt="preview" />
+                    <img src={(cmd as any).spriteUrl || (cmd as any).spriteRef.replace(/^walk:[^:]*:[^:]*:/, '')} className="max-h-24 object-contain" alt="preview" />
                   </div>
                 )}
               </div>
             )}
             {type === 'changeBackground' && (
               <div className="space-y-2">
-                <input value={(cmd as any).bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
-                  className={inputCls} placeholder="背景画像URL (bg: 等)" />
-                {(cmd as any).bgRef && (
+                <label className="text-[10px] text-gray-400 block">背景参照（asset ref）
+                  <input value={(cmd as any).bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="tile:#000000 / url:… 等" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">背景画像URL / BGM ID
+                  <input value={(cmd as any).bgUrl ?? ''} onChange={e => onChange({ bgUrl: e.target.value || undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="https://… または YouTube ID" />
+                </label>
+                {(cmd as any).bgUrl && /^https?:\/\//.test((cmd as any).bgUrl) && (
                   <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
-                    <img src={(cmd as any).bgRef.replace('bg:', '')} className="max-h-24 object-contain" alt="preview" />
+                    <img src={(cmd as any).bgUrl} className="max-h-24 object-contain" alt="preview" />
                   </div>
                 )}
               </div>
             )}
             {type === 'showImage' && (
               <div className="space-y-2">
-                <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
-                  className={inputCls} placeholder="画像ID" />
-                <input value={(cmd as any).url ?? ''} onChange={e => onChange({ url: e.target.value })}
-                  className={inputCls} placeholder="画像URL" />
                 <div className="grid grid-cols-2 gap-2">
-                  <input type="number" value={(cmd as any).x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
-                    className={inputCls} placeholder="X" />
-                  <input type="number" value={(cmd as any).y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
-                    className={inputCls} placeholder="Y" />
+                  <label className="text-[10px] text-gray-400">管理番号(ID)
+                    <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                      className={`${inputCls} mt-0.5`} placeholder="1〜50" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">表示ミリ秒(ms)
+                    <input type="number" value={(cmd as any).ms ?? 100} onChange={e => onChange({ ms: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="100" />
+                  </label>
                 </div>
+                <label className="text-[10px] text-gray-400 block">画像URL
+                  <input value={(cmd as any).url ?? ''} onChange={e => onChange({ url: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="https://…" />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[10px] text-gray-400">表示位置X
+                    <input type="number" value={(cmd as any).x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="X" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">表示位置Y
+                    <input type="number" value={(cmd as any).y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="Y" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">表示幅W(0=元幅)
+                    <input type="number" value={(cmd as any).w ?? 0} onChange={e => onChange({ w: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="W" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">表示高H(0=元高)
+                    <input type="number" value={(cmd as any).h ?? 0} onChange={e => onChange({ h: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="H" />
+                  </label>
+                </div>
+                <label className="text-[10px] text-gray-400 block">透明度%（0〜100）
+                  <input type="number" min={0} max={100} value={(cmd as any).opacity ?? 100} onChange={e => onChange({ opacity: Number(e.target.value) })}
+                    className={`${inputCls} mt-0.5`} placeholder="100" />
+                </label>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-gray-900/50 p-1.5 rounded">
+                  {([
+                    ['m', 'マップ座標で置く'],
+                    ['c', '中心点を基準'],
+                    ['xp', 'X/Yをピクセル単位'],
+                    ['wp', 'W/Hをピクセル単位'],
+                    ['lp', 'ループ再生'],
+                  ] as const).map(([k, label]) => (
+                    <label key={k} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
+                      <input type="checkbox" checked={!!(cmd as any)[k]}
+                        onChange={e => onChange({ [k]: e.target.checked || undefined } as any)}
+                        className="accent-blue-500 w-3 h-3" />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                {(cmd as any).frames?.length > 1 && (
+                  <p className="text-[9px] text-gray-500">アニメーション {(cmd as any).frames.length} フレーム（切り取り等の詳細はインポート結果を保持）。</p>
+                )}
                 {(cmd as any).url && (
                   <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
                     <img src={(cmd as any).url} className="max-h-24 object-contain" alt="preview" />
@@ -17343,37 +17467,150 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
               </div>
             )}
             {type === 'hideImage' && (
-              <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
-                className={inputCls} placeholder="消去する画像ID" />
+              <label className="text-[10px] text-gray-400 block">消去する画像の管理番号（ID）
+                <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                  className={`${inputCls} mt-0.5`} placeholder="1〜50" />
+              </label>
             )}
-            {type === 'moveCamera' && (
-              <div className="grid grid-cols-2 gap-2">
-                <input type="number" value={(cmd as any).tx ?? 0} onChange={e => onChange({ tx: Number(e.target.value) })}
-                  className={inputCls} placeholder="目標X" />
-                <input type="number" value={(cmd as any).ty ?? 0} onChange={e => onChange({ ty: Number(e.target.value) })}
-                  className={inputCls} placeholder="目標Y" />
-                <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
-                  className={inputCls} placeholder="フレーム数" />
+            {(type === 'pauseImage' || type === 'resumeImage') && (
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">画像の管理番号（ID）
+                  <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value || undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="1〜50" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">レイヤータイプ（ID未指定時に使用）
+                  <input type="number" value={(cmd as any).layer ?? ''} onChange={e => onChange({ layer: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="1 / 5 / 7 / 9 / 11" />
+                </label>
               </div>
             )}
+            {type === 'followImage' && (() => {
+              const dirs = (cmd as any).directions ?? {};
+              const DIR_LABELS: Record<'U' | 'D' | 'L' | 'R', string> = { U: '上', D: '下', L: '左', R: '右' };
+              const setDir = (d: 'U' | 'D' | 'L' | 'R', patch: any) => {
+                const base = dirs[d] ?? { url: '', x: 0, y: 0 };
+                onChange({ directions: { ...dirs, [d]: { ...base, ...patch } } } as Partial<EventCommand>);
+              };
+              const clearDir = (d: 'U' | 'D' | 'L' | 'R') => onChange({ directions: { ...dirs, [d]: undefined } } as Partial<EventCommand>);
+              return (
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-400 block">管理番号（ID）
+                    <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                      className={`${inputCls} mt-0.5`} placeholder="1〜50" />
+                  </label>
+                  <label className="text-[10px] text-gray-400 block">追随対象ID
+                    <input value={(cmd as any).targetObjId ?? 'player'} onChange={e => onChange({ targetObjId: e.target.value })}
+                      className={`${inputCls} mt-0.5`} placeholder="player / obj-human-X-Y" />
+                  </label>
+                  {(['U', 'D', 'L', 'R'] as const).map(d => (
+                    <div key={d} className="bg-gray-900/50 p-1.5 rounded space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-gray-300 font-bold">{DIR_LABELS[d]}向き</span>
+                        {dirs[d] && (
+                          <button onClick={() => clearDir(d)} className="text-red-400 hover:text-red-300 text-[9px]">削除</button>
+                        )}
+                      </div>
+                      <input value={dirs[d]?.url ?? ''} onChange={e => setDir(d, { url: e.target.value })}
+                        className={inputCls} placeholder={`${DIR_LABELS[d]}向きの画像URL`} />
+                      {dirs[d] && (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <input type="number" value={dirs[d]?.x ?? 0} onChange={e => setDir(d, { x: Number(e.target.value) })}
+                            className={inputCls} placeholder="X" />
+                          <input type="number" value={dirs[d]?.y ?? 0} onChange={e => setDir(d, { y: Number(e.target.value) })}
+                            className={inputCls} placeholder="Y" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+            {type === 'moveCamera' && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[10px] text-gray-400">目標X(列)
+                    <input type="number" value={(cmd as any).tx ?? 0} onChange={e => onChange({ tx: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="列" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">目標Y(行)
+                    <input type="number" value={(cmd as any).ty ?? 0} onChange={e => onChange({ ty: Number(e.target.value) })}
+                      className={`${inputCls} mt-0.5`} placeholder="行" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">相対移動X(任意)
+                    <input type="number" value={(cmd as any).dx ?? ''} onChange={e => onChange({ dx: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="±列" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">相対移動Y(任意)
+                    <input type="number" value={(cmd as any).dy ?? ''} onChange={e => onChange({ dy: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="±行" />
+                  </label>
+                </div>
+                <label className="text-[10px] text-gray-400 block">移動時間（ミリ秒）
+                  <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
+                    className={`${inputCls} mt-0.5`} placeholder="300" />
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                  <input type="checkbox" checked={!!(cmd as any).blocking}
+                    onChange={e => onChange({ blocking: e.target.checked || undefined } as Partial<EventCommand>)}
+                    className="accent-blue-500 w-3.5 h-3.5" />
+                  移動完了まで待つ（ブロッキング）
+                </label>
+              </div>
+            )}
+            {type === 'resetCamera' && (
+              <label className="text-[10px] text-gray-400 block">プレイヤーへ戻す時間（ミリ秒）
+                <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
+                  className={`${inputCls} mt-0.5`} placeholder="300" />
+              </label>
+            )}
             {type === 'moveNpc' && (
-              <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                className={inputCls} placeholder="対象NPCのID" />
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">対象ID（空=プレイヤー）
+                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="player / オブジェクトID" />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[10px] text-gray-400">目標X(列/任意)
+                    <input type="number" value={(cmd as any).tx ?? ''} onChange={e => onChange({ tx: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="列" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">目標Y(行/任意)
+                    <input type="number" value={(cmd as any).ty ?? ''} onChange={e => onChange({ ty: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="行" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">相対移動X(任意)
+                    <input type="number" value={(cmd as any).dx ?? ''} onChange={e => onChange({ dx: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="±列" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">相対移動Y(任意)
+                    <input type="number" value={(cmd as any).dy ?? ''} onChange={e => onChange({ dy: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="±行" />
+                  </label>
+                </div>
+                <label className="text-[10px] text-gray-400 block">移動時間（ミリ秒）
+                  <input type="number" value={(cmd as any).duration ?? 0} onChange={e => onChange({ duration: Number(e.target.value) })}
+                    className={`${inputCls} mt-0.5`} placeholder="0" />
+                </label>
+              </div>
             )}
             {type === 'screenEffect' && (
-              <input
-                value={(cmd as any).effects?.[0]?.color ?? ''}
-                onChange={e => {
-                  onChange({
-                    effects: [{ type: 'solid', color: e.target.value, c1: '', c2: '', pos: '', stops: '' }],
-                  });
-                }}
-                className={inputCls} placeholder="エフェクト色 (例: 255-0-0-50)"
-              />
+              <label className="text-[10px] text-gray-400 block">画面を覆う色（R-G-B-A / Aは0〜100）
+                <input
+                  value={(cmd as any).effects?.[0]?.color ?? ''}
+                  onChange={e => {
+                    onChange({
+                      effects: [{ type: 'solid', color: e.target.value, c1: '', c2: '', pos: '', stops: '' }],
+                    });
+                  }}
+                  className={`${inputCls} mt-0.5`} placeholder="例: 255-0-0-50（赤・不透明度50%）"
+                />
+              </label>
             )}
             {type === 'changePhase' && (
-              <input type="number" value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
-                className={inputCls} placeholder="移行先フェーズ番号" />
+              <label className="text-[10px] text-gray-400 block">移行先フェーズ番号（1〜4）
+                <input type="number" min={1} max={4} value={(cmd as any).phaseIndex ?? 1} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
+                  className={`${inputCls} mt-0.5`} placeholder="1" />
+              </label>
             )}
             {type === 'playEffect' && (
               <div className="flex flex-col gap-2">
@@ -17415,12 +17652,30 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'giveItem': return `${c.itemId || '?'} を ${c.count || 1}個 増やす`;
       case 'removeItem': return `${c.itemId || '?'} を ${c.count || 1}個 減らす`;
       case 'changeGold': return `${c.amount > 0 ? '+' : ''}${c.amount || 0} G`;
-      case 'warp': return `[${c.col || 0}, ${c.row || 0}]へ`;
+      case 'restoreHp': return c.amount != null ? `+${c.amount}` : '全回復';
+      case 'restoreMp': return c.amount != null ? `+${c.amount}` : '全回復';
+      case 'ifGold': return `所持金 ≥ ${c.amount || 0}`;
+      case 'warp': return c.mapId ? `マップ${c.mapId} [${c.col || 0}, ${c.row || 0}]へ` : `[${c.col || 0}, ${c.row || 0}]へ`;
       case 'wait': return `${c.frames || 30}フレーム`;
       case 'comment': return c.text || '';
+      case 'overheadMessage': return c.text ? c.text.split('\n')[0] : '';
       case 'playSound': return c.src || '';
       case 'label': return c.name || '';
       case 'jump': return c.label || '';
+      case 'choice': return c.choices?.length ? `${c.choices.length}択${c.random ? '(ランダム)' : ''}` : 'なし';
+      case 'changeSprite': return `${c.objId || 'player'}`;
+      case 'changeBackground': return c.bgUrl || c.bgRef || '';
+      case 'showImage': return `ID:${c.imgId || '?'} ${c.url ? '📷' : ''}`;
+      case 'hideImage': return `ID:${c.imgId || '?'}`;
+      case 'followImage': return `ID:${c.imgId || '?'} → ${c.targetObjId || 'player'}`;
+      case 'pauseImage': return c.imgId ? `ID:${c.imgId}` : `レイヤー${c.layer ?? '?'}`;
+      case 'resumeImage': return c.imgId ? `ID:${c.imgId}` : `レイヤー${c.layer ?? '?'}`;
+      case 'moveCamera': return (c.dx != null || c.dy != null) ? `相対[${c.dx || 0}, ${c.dy || 0}]` : `[${c.tx || 0}, ${c.ty || 0}]へ`;
+      case 'resetCamera': return `${c.duration || 0}ms`;
+      case 'moveNpc': return `${c.objId || 'player'} → [${c.tx ?? '-'}, ${c.ty ?? '-'}]`;
+      case 'screenEffect': return c.effects?.[0]?.color || '';
+      case 'changePhase': return `フェーズ${c.phaseIndex || 1}`;
+      case 'playEffect': return `${c.effectId || '?'} @ ${c.target || 'self'}`;
       default: return '';
     }
   };

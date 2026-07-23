@@ -308,7 +308,6 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
         }
         return { type: 'changeSprite', spriteRef, spriteUrl, objId: '' };
       }
-      case 'MV_CA': return { type: 'moveCamera', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
       case 'MV_NA': return { type: 'moveNpc', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
       case 'MV_PA': return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || '0') };
       case 'DW_IMA':
@@ -450,17 +449,17 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       case 'MV_CD': {
         const tx = parseInt(cmd.params?.tx || '0');
         const ty = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.w === '1' };
+        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.nb !== '1' };
       }
       case 'MV_CA': {
         const tx = parseInt(cmd.params?.tx || '0');
         const ty = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.w === '1' };
+        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.nb !== '1' };
       }
       case 'MV_CR': {
         const dx = parseInt(cmd.params?.tx || '0');
         const dy = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx: 0, ty: 0, dx, dy, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.w === '1' };
+        return { type: 'moveCamera', tx: 0, ty: 0, dx, dy, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.nb !== '1' };
       }
       case 'WT_RN':
       case 'WT_SN': return { type: 'screenEffect', effects: [{ type: 'solid', color: cmd.params?.c || cmd.params?.c1 || '', c1: '', c2: '', pos: '', stops: '' }] };
