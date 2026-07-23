@@ -4754,8 +4754,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             sceneFadeRef.current = { phase: 'out', frame: 0, totalFrames: 16, nextSceneId: targetSceneId, entryX: ex, entryY: ey };
             setTimeout(advance, 0);
           } else {
-            engineRef.current.player.x = cmd.col * TILE_SIZE;
-            engineRef.current.player.y = cmd.row * TILE_SIZE;
+            const tx = cmd.col * TILE_SIZE;
+            const ty = cmd.row * TILE_SIZE;
+            engineRef.current.player.x = tx;
+            engineRef.current.player.y = ty;
+            const pw = gameDataRef.current.player.w ?? TILE_SIZE;
+            const ph = gameDataRef.current.player.h ?? TILE_SIZE;
+            warpCooldownRef.current = { x: tx + pw / 2, y: ty + ph / 2 };
             setTimeout(advance, 50);
           }
           break;
@@ -4890,6 +4895,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (cmd.ty != null) engineRef.current.player.y = cmd.ty * TILE_SIZE;
             if (cmd.dx != null) engineRef.current.player.x += cmd.dx * TILE_SIZE;
             if (cmd.dy != null) engineRef.current.player.y += cmd.dy * TILE_SIZE;
+            const px = engineRef.current.player.x;
+            const py = engineRef.current.player.y;
+            const pw = gameDataRef.current.player.w ?? TILE_SIZE;
+            const ph = gameDataRef.current.player.h ?? TILE_SIZE;
+            warpCooldownRef.current = { x: px + pw / 2, y: py + ph / 2 };
           } else {
             const obj = engineRef.current.entities?.find(o => o.def.id === target);
             if (obj) {
@@ -8072,7 +8082,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
                   const trig = page.trigger ?? 'action';
-                  if (trig === 'playerTouch' || trig === 'eventTouch') {
+                  if ((trig === 'playerTouch' || trig === 'eventTouch') && !warpCooldownRef.current) {
                     e.talked = true;
                     runEventCommands(d.id, page.commands);
                   }
@@ -8523,7 +8533,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       // ── 自動実行（autorun）イベントのチェック ──
-      if (!eventRunningRef.current && !battleRef.current.active && !frozen && !activeDialogueRef.current && !sceneFadeRef.current && !sceneTransRef.current) {
+      if (!eventRunningRef.current && !battleRef.current.active && !frozen && !activeDialogueRef.current && !sceneFadeRef.current && !sceneTransRef.current && !warpCooldownRef.current) {
         const autorunTarget = (isPlaying ? eng.entities : gameData.objects).find(o => {
           const def = isPlaying ? (o as Entity).def : (o as ObjectDef);
           const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
