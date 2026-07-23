@@ -5350,7 +5350,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       objects: s.objects.map(o => ({ ...o })),
       exits: s.exits ? { ...s.exits } : s.exits,
     })) as SceneDef[];
-    activeSceneIdxRef.current = 0;
     sceneTransRef.current = null;
     sceneFadeRef.current = null;
     // 全シーンを1枚のワールドマップに合成（事前ロードでシームレス遷移）
@@ -5359,18 +5358,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     engineRef.current.map = JSON.parse(JSON.stringify(layout.map));
     engineRef.current.overlayMap = JSON.parse(JSON.stringify(layout.overlayMap));
     engineRef.current.overheadMap = JSON.parse(JSON.stringify(layout.overheadMap));
-    // シーン0の原点でプレイヤー位置を補正（テストプレイ時のみ）
+
     if (isTestPlayRef.current) {
+      activeSceneIdxRef.current = 0;
+      // シーン0の原点でプレイヤー位置を補正
       const s0 = layout.layouts.find(l => l.sceneIdx === 0);
       if (s0) {
         const ep = engineRef.current.player;
         ep.x = s0.originX * TILE_SIZE + gameData.player.start.x;
         ep.y = s0.originY * TILE_SIZE + gameData.player.start.y;
       }
+    } else {
+      const targetIdx = Math.min(Math.max(0, editSceneIdx), gameData.scenes.length - 1);
+      activeSceneIdxRef.current = targetIdx;
+      const targetLayout = layout.layouts.find(l => l.sceneIdx === targetIdx);
+      if (targetLayout) {
+        const ep = engineRef.current.player;
+        ep.x = targetLayout.originX * TILE_SIZE + ep.x;
+        ep.y = targetLayout.originY * TILE_SIZE + ep.y;
+      }
     }
-    // シーン0のエンティティをワールド座標で配置
-    const s0l = layout.layouts.find(l => l.sceneIdx === 0)!;
-    engineRef.current.entities = (scenesRef.current[0]?.objects ?? []).map(o => ({
+    // アクティブシーンのエンティティをワールド座標で配置
+    const s0l = layout.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current) ?? layout.layouts[0];
+    engineRef.current.entities = (scenesRef.current[activeSceneIdxRef.current]?.objects ?? []).map(o => ({
       x: (s0l.originX + o.col) * TILE_SIZE,
       y: (s0l.originY + o.row) * TILE_SIZE,
       homeX: (s0l.originX + o.col) * TILE_SIZE,
@@ -5380,7 +5390,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     })) as unknown as Entity[];
     // 全シーンのスプライト画像を事前ロード（spriteUrl は Entity.def から除外されるため spriteRef も参照）
     gameData.scenes?.forEach(s => s.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl)));
-  }, [isPlaying, gameData.scenes, gameData.player.start, ensureImage, ensureImageFromRef]);
+  }, [isPlaying, gameData.scenes, gameData.player.start, editSceneIdx, ensureImage, ensureImageFromRef]);
 
   // プレイ開始時に sfx を音量極小で一瞬再生してブラウザにデコード・バッファさせる
   useEffect(() => {
@@ -5447,11 +5457,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         eng.entities = spawnEntities(stageObjs.map(makeEntity));
         phaseIndexRef.current = 0;
       }
-      eng.map = JSON.parse(JSON.stringify(gameData.map));
-      if (isTestPlayRef.current) {
-        eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
-      } else {
-        eng.player = { x: eng.player.x, y: eng.player.y, vx: 0, vy: 0, isGrounded: false };
+      if (!gameData.scenes?.length) {
+        eng.map = JSON.parse(JSON.stringify(gameData.map));
+        if (isTestPlayRef.current) {
+          eng.player = { ...gameData.player.start, vx: 0, vy: 0, isGrounded: false };
+        } else {
+          eng.player = { x: eng.player.x, y: eng.player.y, vx: 0, vy: 0, isGrounded: false };
+        }
       }
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
@@ -10866,6 +10878,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const next = gameData.scenes?.[newIdx];
     if (next) {
       engineRef.current.map = JSON.parse(JSON.stringify(next.map));
+      engineRef.current.overlayMap = next.overlayMap ? JSON.parse(JSON.stringify(next.overlayMap)) : undefined;
+      engineRef.current.overheadMap = next.overheadMap ? JSON.parse(JSON.stringify(next.overheadMap)) : undefined;
       const startPos = gameData.player.start;
       engineRef.current.player = { ...startPos, vx: 0, vy: 0, isGrounded: false };
     }
@@ -11585,22 +11599,41 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
                 setBattle(null);
                 battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
-                const pp = engineRef.current.player;
-                const pw = gameData.player.w, ph = gameData.player.h;
-                setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
-                setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
-                // プレイ中にシーンを切り替えていた場合、editSceneIdx はその都度 activeSceneIdxRef に追従するが、
-                // エディタの作業バッファ（gameData.map/objects）は switchEditScene 経由でしか同期されないため、
-                // ここで同期しないまま次回プレイの flushSceneEdits() が走ると「今 editSceneIdx が指しているシーン」に
-                // 「実際には別シーン（最後に編集タブで開いていたシーン）の古い map/objects」を上書きしてしまい、
-                // 次回プレイでそのシーンのオブジェクト座標が丸ごと入れ替わってしまう。編集に戻る瞬間に必ず同期する。
                 if (gameData.scenes?.length) {
                   const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
                   const activeScene = gameData.scenes[activeIdx];
-                  if (activeScene && (activeIdx !== editSceneIdx || activeScene.objects !== gameData.objects)) {
-                    setGameData(prev => ({ ...prev, map: activeScene.map, overlayMap: activeScene.overlayMap ?? prev.overlayMap, overheadMap: activeScene.overheadMap ?? prev.overheadMap, objects: activeScene.objects }));
+                  const activeLayout = worldLayoutRef.current?.layouts?.find(l => l.sceneIdx === activeIdx);
+                  const pp = engineRef.current.player;
+                  const originX = (activeLayout?.originX ?? 0) * TILE_SIZE;
+                  const originY = (activeLayout?.originY ?? 0) * TILE_SIZE;
+                  const localX = pp.x - originX;
+                  const localY = pp.y - originY;
+                  pp.x = localX;
+                  pp.y = localY;
+
+                  if (activeScene) {
+                    setGameData(prev => ({
+                      ...prev,
+                      map: activeScene.map,
+                      overlayMap: activeScene.overlayMap ?? prev.overlayMap,
+                      overheadMap: activeScene.overheadMap ?? prev.overheadMap,
+                      objects: activeScene.objects,
+                    }));
+                    engineRef.current.map = JSON.parse(JSON.stringify(activeScene.map));
+                    engineRef.current.overlayMap = activeScene.overlayMap ? JSON.parse(JSON.stringify(activeScene.overlayMap)) : undefined;
+                    engineRef.current.overheadMap = activeScene.overheadMap ? JSON.parse(JSON.stringify(activeScene.overheadMap)) : undefined;
                     setEditSceneIdx(activeIdx);
                   }
+                  const pw = gameData.player.w, ph = gameData.player.h;
+                  const sceneCols = activeScene?.map[0]?.length ?? COLS;
+                  const sceneRows = activeScene?.map?.length ?? ROWS;
+                  setEditScroll(Math.max(0, Math.min(((sceneCols * TILE_SIZE) - VIEW_W), localX + pw / 2 - VIEW_W / 2)));
+                  setEditScrollY(Math.max(0, Math.min(((sceneRows * TILE_SIZE) - VIEW_H), localY + ph / 2 - VIEW_H / 2)));
+                } else {
+                  const pp = engineRef.current.player;
+                  const pw = gameData.player.w, ph = gameData.player.h;
+                  setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
+                  setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
                 }
               }
               if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
