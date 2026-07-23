@@ -8651,9 +8651,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const page = def.pages && def.pages.length > 0 ? findActivePage(def) : null;
             if (page && (page.trigger ?? 'action') === 'action' && page.commands.length > 0) {
               runEventCommands(def.id, page.commands);
-            } else if (def.message && !(isPlaying && !def.hazard)) {
-              // 頭上に1文字ずつセリフが出るキャラ（非hazardの接触モブ）は、そちらで既に表示されるため
-              // 話しかけ時の個別フキダシは重複させない
+            } else if (def.message) {
               showGameMsg(def.message, 'instant', () => { });
             }
           }
