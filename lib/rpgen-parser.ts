@@ -597,7 +597,13 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
   for (const tbox of rpgMap.treasureBoxPoints) {
     const pages = messageToPages(tbox.message || '');
     const openCmds = pages?.[0]?.commands ?? (tbox.message ? [{ type: 'overheadMessage', text: tbox.message }] : []);
-    draft.objects.push(chest(tbox.position.x, tbox.position.y, openCmds as EventCommand[]));
+    const chestObj = chest(tbox.position.x, tbox.position.y, openCmds as EventCommand[]);
+    // RPGENの宝箱は近づくだけで自動開封（RPGエンジンと同じ playerTouch 動作）
+    if (chestObj.pages) {
+      const opener = chestObj.pages.find(p => !p.conditions?.selfSwitchId);
+      if (opener) opener.trigger = 'playerTouch';
+    }
+    draft.objects.push(chestObj);
   }
 
   for (const spoint of rpgMap.lookPoints) {
