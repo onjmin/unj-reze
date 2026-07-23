@@ -4945,25 +4945,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setScreenEffect({ effects: cmd.effects });
           setTimeout(advance, 0);
           break;
-        case 'resetCamera':
+        case 'resetCamera': {
+          const now = Date.now();
+          let startX = camXRef.current;
+          let startY = camYRef.current;
           if (camOverrideRef.current) {
-            const now = Date.now();
             const elapsed = now - camOverrideRef.current.startTime;
-            let currentX = camOverrideRef.current.endX;
-            let currentY = camOverrideRef.current.endY;
             if (elapsed < camOverrideRef.current.duration && camOverrideRef.current.duration > 0) {
               const r = elapsed / camOverrideRef.current.duration;
-              currentX = camOverrideRef.current.startX + (camOverrideRef.current.endX - camOverrideRef.current.startX) * r;
-              currentY = camOverrideRef.current.startY + (camOverrideRef.current.endY - camOverrideRef.current.startY) * r;
+              startX = camOverrideRef.current.startX + (camOverrideRef.current.endX - camOverrideRef.current.startX) * r;
+              startY = camOverrideRef.current.startY + (camOverrideRef.current.endY - camOverrideRef.current.startY) * r;
+            } else if (camOverrideRef.current.endX !== -1) {
+              startX = camOverrideRef.current.endX;
+              startY = camOverrideRef.current.endY;
             }
+          }
+          if (cmd.duration && cmd.duration > 0) {
             camOverrideRef.current = {
-              startX: currentX, startY: currentY,
-              endX: -1, endY: -1, // Use -1 as a flag to return to player
+              startX, startY,
+              endX: -1, endY: -1,
               startTime: now, duration: cmd.duration, easing: cmd.easing
             };
+          } else {
+            camOverrideRef.current = null;
           }
-          setTimeout(advance, cmd.duration);
+          setTimeout(advance, cmd.duration ?? 0);
           break;
+        }
         case 'moveCamera': {
           const now = Date.now();
           let startX = camXRef.current;
@@ -4974,22 +4982,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const r = elapsed / camOverrideRef.current.duration;
               startX = camOverrideRef.current.startX + (camOverrideRef.current.endX - camOverrideRef.current.startX) * r;
               startY = camOverrideRef.current.startY + (camOverrideRef.current.endY - camOverrideRef.current.startY) * r;
-            } else {
+            } else if (camOverrideRef.current.endX !== -1) {
               startX = camOverrideRef.current.endX;
               startY = camOverrideRef.current.endY;
             }
           }
-          let endX = cmd.tx * TILE_SIZE;
-          let endY = cmd.ty * TILE_SIZE;
+          const layout = worldLayoutRef.current;
+          const wCols = layout ? layout.worldCols : curWorldCols(gameDataRef.current);
+          const wRows = layout ? layout.worldRows : curWorldRows(gameDataRef.current);
+          let maxCamX = Math.max(0, wCols * TILE_SIZE - VIEW_W);
+          let maxCamY = Math.max(0, wRows * TILE_SIZE - VIEW_H);
+          let targetTileX = cmd.tx ?? 0;
+          let targetTileY = cmd.ty ?? 0;
+          if (layout && activeSceneIdxRef.current >= 0) {
+            const lay = layout.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
+            if (lay) {
+              if (cmd.tx != null && cmd.tx < lay.sceneW) targetTileX = lay.originX + cmd.tx;
+              if (cmd.ty != null && cmd.ty < lay.sceneH) targetTileY = lay.originY + cmd.ty;
+            }
+          }
+          let endX = Math.max(0, Math.min(maxCamX, targetTileX * TILE_SIZE + TILE_SIZE / 2 - VIEW_W / 2));
+          let endY = Math.max(0, Math.min(maxCamY, targetTileY * TILE_SIZE + TILE_SIZE / 2 - VIEW_H / 2));
           if (cmd.dx !== undefined || cmd.dy !== undefined) {
-            endX = startX + (cmd.dx || 0) * TILE_SIZE;
-            endY = startY + (cmd.dy || 0) * TILE_SIZE;
+            endX = Math.max(0, Math.min(maxCamX, startX + (cmd.dx || 0) * TILE_SIZE));
+            endY = Math.max(0, Math.min(maxCamY, startY + (cmd.dy || 0) * TILE_SIZE));
           }
           camOverrideRef.current = {
-            startX, startY, endX, endY, startTime: now, duration: cmd.duration, easing: cmd.easing
+            startX, startY, endX, endY, startTime: now, duration: cmd.duration ?? 0, easing: cmd.easing
           };
           if (cmd.blocking) {
-            setTimeout(advance, cmd.duration);
+            setTimeout(advance, cmd.duration ?? 0);
           } else {
             setTimeout(advance, 0);
           }
@@ -5010,6 +5032,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const resetSceneState = useCallback(() => {
     eventIdRef.current++;
     eventRunningRef.current = false;
+    camOverrideRef.current = null;
     setActiveDialogue(null);
     activeDialogueRef.current = null;
     afterDialogueRef.current = null;
@@ -9083,19 +9106,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // この判定は必ず X/Y 両軸セットで行うこと：軸ごとに個別判定すると、歩行中に片方の座標が
       // たまたま初期値と一致した瞬間（整数速度・タイルスナップで頻発）だけカメラがスクロール座標へ
       // 1フレーム飛んで戻る「瞬間テレポート」が起きる。
-      const playerAtStart = p.x === gameData.player.start.x && p.y === gameData.player.start.y;
-      let camX = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMax,
-        isPlaying || !playerAtStart
-          ? p.x + pData.w / 2 - VIEW_W / 2
-          : editScrollRef.current));
-      let camY = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMaxY,
-        isPlaying || !playerAtStart
-          ? p.y + pData.h / 2 - VIEW_H / 2
-          : editScrollYRef.current));
+      let camX: number;
+      let camY: number;
 
-      if (camOverrideRef.current) {
+      if (camOverrideRef.current && camOverrideRef.current.endX !== -1) {
+        // ── カメラ移動コマンド（moveCamera）実行中 ──
+        // プレイヤー中心追従を完全に無効化し、指定されたカメラ座標のみに従って動作する
         const ovr = camOverrideRef.current;
-        if (ovr.endX === -1) {
+        const elapsed = Date.now() - ovr.startTime;
+        if (elapsed >= ovr.duration || ovr.duration <= 0) {
+          camX = ovr.endX;
+          camY = ovr.endY;
+        } else {
+          const r = Math.min(1, elapsed / ovr.duration);
+          camX = ovr.startX + (ovr.endX - ovr.startX) * r;
+          camY = ovr.startY + (ovr.endY - ovr.startY) * r;
+        }
+      } else {
+        // ── 通常時：プレイヤー中心追従 ──
+        const playerAtStart = p.x === gameData.player.start.x && p.y === gameData.player.start.y;
+        camX = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMax,
+          isPlaying || !playerAtStart
+            ? p.x + pData.w / 2 - VIEW_W / 2
+            : editScrollRef.current));
+        camY = gameData.engine === 'touhou' ? 0 : Math.max(0, Math.min(camMaxY,
+          isPlaying || !playerAtStart
+            ? p.y + pData.h / 2 - VIEW_H / 2
+            : editScrollYRef.current));
+
+        if (camOverrideRef.current && camOverrideRef.current.endX === -1) {
+          // resetCamera 実行中：指定位置からプレイヤー中心座標へ復帰
+          const ovr = camOverrideRef.current;
           const elapsed = Date.now() - ovr.startTime;
           if (elapsed >= ovr.duration || ovr.duration <= 0) {
             camOverrideRef.current = null;
@@ -9104,29 +9145,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             camX = ovr.startX + (camX - ovr.startX) * r;
             camY = ovr.startY + (camY - ovr.startY) * r;
           }
-        } else {
-          const elapsed = Date.now() - ovr.startTime;
-          if (elapsed >= ovr.duration || ovr.duration <= 0) {
-            camX = ovr.endX;
-            camY = ovr.endY;
-          } else {
-            const r = Math.min(1, elapsed / ovr.duration);
-            camX = ovr.startX + (ovr.endX - ovr.startX) * r;
-            camY = ovr.startY + (ovr.endY - ovr.startY) * r;
-          }
         }
-      }
 
-      // ── シーン切り替えモードでのカメラ境界クランプ ──
-      if (isPlaying && scenesRef.current.length > 0 && worldLayoutRef.current) {
-        const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
-        if (lay && !sceneTransRef.current) {
-          const minX = lay.originX * TILE_SIZE;
-          const maxX = Math.max(minX, (lay.originX + lay.sceneW) * TILE_SIZE - VIEW_W);
-          const minY = lay.originY * TILE_SIZE;
-          const maxY = Math.max(minY, (lay.originY + lay.sceneH) * TILE_SIZE - VIEW_H);
-          camX = Math.max(minX, Math.min(maxX, camX));
-          camY = Math.max(minY, Math.min(maxY, camY));
+        // シーン切り替えモードでのカメラ境界クランプ（通常追従時のみ適用）
+        if (isPlaying && scenesRef.current.length > 0 && worldLayoutRef.current) {
+          const lay = worldLayoutRef.current.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current);
+          if (lay && !sceneTransRef.current) {
+            const minX = lay.originX * TILE_SIZE;
+            const maxX = Math.max(minX, (lay.originX + lay.sceneW) * TILE_SIZE - VIEW_W);
+            const minY = lay.originY * TILE_SIZE;
+            const maxY = Math.max(minY, (lay.originY + lay.sceneH) * TILE_SIZE - VIEW_H);
+            camX = Math.max(minX, Math.min(maxX, camX));
+            camY = Math.max(minY, Math.min(maxY, camY));
+          }
         }
       }
 

@@ -131,7 +131,7 @@ export type EventCommand =
   | { type: 'pauseImage'; imgId?: string; layer?: number }
   | { type: 'resumeImage'; imgId?: string; layer?: number }
   | { type: 'resetCamera'; duration: number; easing?: number }
-  | { type: 'moveCamera'; tx: number; ty: number; duration: number; dx?: number; dy?: number; easing?: number; blocking?: boolean }
+  | { type: 'moveCamera'; tx?: number; ty?: number; duration: number; dx?: number; dy?: number; easing?: number; blocking?: boolean }
   | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number }
   | { type: 'clearScreenEffect' }
   | { type: 'screenEffect'; effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] }

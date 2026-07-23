@@ -445,21 +445,31 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
         }
         return { type: 'screenEffect', effects: effects as any };
       }
-      case 'MV_CF': return { type: 'resetCamera', duration: parseInt(cmd.params?.t || '300') };
+      case 'MV_CF': return { type: 'resetCamera', duration: parseInt(cmd.params?.t || cmd.params?.p || '300') };
       case 'MV_CD': {
-        const tx = parseInt(cmd.params?.tx || '0');
-        const ty = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.nb !== '1' };
+        const dVal = cmd.params?.d;
+        const d = parseInt(dVal || '0');
+        const v = parseInt(cmd.params?.v || '1');
+        let dx = 0, dy = 0;
+        if (d === 0 || dVal === 'up') { dx = 0; dy = -v; }
+        else if (d === 1 || dVal === 'right') { dx = v; dy = 0; }
+        else if (d === 2 || dVal === 'down') { dx = 0; dy = v; }
+        else if (d === 3 || dVal === 'left') { dx = -v; dy = 0; }
+        else if (d === 4) { dx = v; dy = -v; }
+        else if (d === 5) { dx = v; dy = v; }
+        else if (d === 6) { dx = -v; dy = v; }
+        else if (d === 7) { dx = -v; dy = -v; }
+        return { type: 'moveCamera', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '300'), blocking: cmd.params?.nb !== '1' };
       }
       case 'MV_CA': {
         const tx = parseInt(cmd.params?.tx || '0');
         const ty = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.nb !== '1' };
+        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || cmd.params?.p || '300'), blocking: cmd.params?.nb !== '1' };
       }
       case 'MV_CR': {
         const dx = parseInt(cmd.params?.tx || '0');
         const dy = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx: 0, ty: 0, dx, dy, duration: parseInt(cmd.params?.t || '300'), blocking: cmd.params?.nb !== '1' };
+        return { type: 'moveCamera', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '300'), blocking: cmd.params?.nb !== '1' };
       }
       case 'WT_RN':
       case 'WT_SN': return { type: 'screenEffect', effects: [{ type: 'solid', color: cmd.params?.c || cmd.params?.c1 || '', c1: '', c2: '', pos: '', stops: '' }] };
