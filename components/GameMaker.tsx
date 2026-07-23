@@ -879,6 +879,7 @@ function buildPhaseEntities(
 //  CORS で getImageData が tainted の場合は null を返し、呼び出し側は元画像にフォールバック。
 const CHROMA_TOL = 18;
 const CHROMA_MIN_COVERAGE = 0.18;
+const CHROMA_MAX_COVERAGE = 0.75; // 消去範囲が広すぎる(75%超)場合は、背景ではなく画像全体の地色/単色イラストとみなしてキーイングを行わない
 const CHROMA_MAX_EXISTING_ALPHA = 0.02; // これ以上 alpha<250 を含む画像は「透明素材」とみなしスキップ
 function makeChromaKeyed(img: HTMLImageElement): HTMLCanvasElement | null {
   const w = img.naturalWidth, h = img.naturalHeight;
@@ -916,6 +917,8 @@ function makeChromaKeyed(img: HTMLImageElement): HTMLCanvasElement | null {
     }
   }
   if (keyed === 0) return null;
+  const opaqueTotal = total - translucent;
+  if (opaqueTotal > 0 && keyed / opaqueTotal > CHROMA_MAX_COVERAGE) return null; // 消去範囲が広すぎる(75%超)場合はキーイングをキャンセル
   c.putImageData(data, 0, 0);
   return cnv;
 }
@@ -5118,7 +5121,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (url) ensureImage(url);
     });
 
-    Object.values(gameData.tiles).forEach(t => ensureImage(t.imageUrl));
+    Object.values(gameData.tiles).forEach(t => {
+      const url = t.imageUrl ?? (t.imageRef ? (imageRefToUrl(t.imageRef) ?? hydrateUrlFromRef(t.imageRef)) : undefined);
+      if (url) ensureImage(url);
+    });
     gameData.objects.forEach(o => {
       ensureImageFromRef(o.spriteRef, o.spriteUrl);
       if (o.editorSprite) ensureImage(o.editorSprite);
@@ -9041,7 +9047,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // 既定は cell-fill（マスいっぱいに描画）＝欠片を縦に積んでも継ぎ目が出ない（土管トップ＋ボディ等）。
         // imageOverflowTop=true のタイルのみ、アスペクト比を保ち「セル幅基準・下端固定」で上方向へはみ出す
         // （1マスに置く単独の縦長素材＝ゴール旗など）。
-        const rawImgUrl = info.imageUrl ?? '';
+        const rawImgUrl = info.imageUrl ?? (info.imageRef ? (imageRefToUrl(info.imageRef) ?? hydrateUrlFromRef(info.imageRef)) : null) ?? '';
         const hashIdx = rawImgUrl.indexOf('#');
         const baseImgUrl = hashIdx !== -1 ? rawImgUrl.slice(0, hashIdx) : rawImgUrl;
         const rawCrop = hashIdx !== -1
@@ -9050,7 +9056,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const imgCrop = rawCrop && rawCrop.length === 4 && rawCrop.every(n => !Number.isNaN(n))
           ? rawCrop as [number, number, number, number]
           : null;
-        const img = baseImgUrl ? (imgCache.current.get(rawImgUrl) ?? imgCache.current.get(baseImgUrl)) : undefined;
+        let img = baseImgUrl ? (imgCache.current.get(rawImgUrl) ?? imgCache.current.get(baseImgUrl)) : undefined;
+        if (!img && baseImgUrl) {
+          ensureImage(rawImgUrl);
+          img = imgCache.current.get(rawImgUrl) ?? imgCache.current.get(baseImgUrl);
+        }
         if (img && img.complete && img.naturalWidth > 0) {
           const sx = imgCrop ? imgCrop[0] : 0;
           const sy = imgCrop ? imgCrop[1] : 0;
