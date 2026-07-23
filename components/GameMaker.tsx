@@ -7597,6 +7597,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             }
           } else {
+            const ew = d.w ?? TILE_SIZE; // 敵の当たり判定幅
+            const eh = d.h ?? TILE_SIZE; // 敵の当たり判定高さ
             const eStandingTile = getTile(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2);
             const eStandingSpecial = eStandingTile?.info?.special;
             if (eStandingSpecial && ICE_DIRS[eStandingSpecial]) {
@@ -7610,14 +7612,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             } else if (d.behavior === 'random') {
               if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
-              e.x += e.vx; e.y += e.vy;
+              const nrx = e.x + e.vx, nry = e.y + e.vy;
+              const rt1 = getTile(nrx, e.y), rt2 = getTile(nrx + ew - 1, e.y + eh - 1);
+              if (rt1?.info.passable && rt2?.info.passable && nrx >= 0 && nrx <= worldW - ew) e.x = nrx; else e.vx = -e.vx;
+              const rt3 = getTile(e.x, nry), rt4 = getTile(e.x + ew - 1, nry + eh - 1);
+              if (rt3?.info.passable && rt4?.info.passable && nry >= 0 && nry <= worldH - eh) e.y = nry; else e.vy = -e.vy;
             } else if (d.behavior === 'randomDash') {
               // ランダムダッシュ：短い駆け足（30F）と立ち止まり（60F）を繰り返す
               if (e.timer % 90 === 0) {
                 const th = Math.random() * Math.PI * 2;
                 e.vx = Math.cos(th) * sp * 2.5; e.vy = Math.sin(th) * sp * 2.5;
               } else if (e.timer % 90 === 30) { e.vx = 0; e.vy = 0; }
-              e.x += e.vx; e.y += e.vy;
+              const ndx = e.x + e.vx, ndy = e.y + e.vy;
+              const dt1 = getTile(ndx, e.y), dt2 = getTile(ndx + ew - 1, e.y + eh - 1);
+              if (dt1?.info.passable && dt2?.info.passable && ndx >= 0 && ndx <= worldW - ew) e.x = ndx; else e.vx = -e.vx;
+              const dt3 = getTile(e.x, ndy), dt4 = getTile(e.x + ew - 1, ndy + eh - 1);
+              if (dt3?.info.passable && dt4?.info.passable && ndy >= 0 && ndy <= worldH - eh) e.y = ndy; else e.vy = -e.vy;
             } else if (d.behavior === 'chase' || d.behavior === 'flee') {
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
               let s = (d.behavior === 'chase' ? 1 : -1) * sp;
@@ -7645,17 +7655,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   e.x += (dx / dist) * s; e.y += (dy / dist) * s;
                 }
               } else {
-                // 通常の追尾処理
-                e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+                // 通常の追尾処理（NPC はタイル衝突チェック付き）
+                const ncx = e.x + (dx / dist) * s, ncy = e.y + (dy / dist) * s;
+                if (d.objType === 'npc') {
+                  const ct1 = getTile(ncx, e.y), ct2 = getTile(ncx + ew - 1, e.y + eh - 1);
+                  if (ct1?.info.passable && ct2?.info.passable && ncx >= 0 && ncx <= worldW - ew) e.x = ncx;
+                  const ct3 = getTile(e.x, ncy), ct4 = getTile(e.x + ew - 1, ncy + eh - 1);
+                  if (ct3?.info.passable && ct4?.info.passable && ncy >= 0 && ncy <= worldH - eh) e.y = ncy;
+                } else {
+                  e.x += (dx / dist) * s; e.y += (dy / dist) * s;
+                }
               }
             } else if (d.behavior === 'patrolH') {
-              if (e.vx === 0) e.vx = sp; e.x += e.vx;
+              if (e.vx === 0) e.vx = sp;
+              const nhx = e.x + e.vx;
+              const ht1 = getTile(nhx, e.y), ht2 = getTile(nhx + ew - 1, e.y + eh - 1);
+              if (ht1?.info.passable && ht2?.info.passable && nhx >= 0 && nhx <= worldW - ew) e.x = nhx; else e.vx *= -1;
               if (e.x < e.homeX - TILE_SIZE * 3 || e.x > e.homeX + TILE_SIZE * 3) e.vx *= -1;
-              if (e.x < TILE_SIZE || e.x > worldW - TILE_SIZE * 2) e.vx *= -1;
             } else if (d.behavior === 'patrolV') {
-              if (e.vy === 0) e.vy = sp; e.y += e.vy;
+              if (e.vy === 0) e.vy = sp;
+              const nvy = e.y + e.vy;
+              const vt1 = getTile(e.x, nvy), vt2 = getTile(e.x + ew - 1, nvy + eh - 1);
+              if (vt1?.info.passable && vt2?.info.passable && nvy >= 0 && nvy <= worldH - eh) e.y = nvy; else e.vy *= -1;
               if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
-              if (e.y < TILE_SIZE || e.y > worldH - TILE_SIZE * 2) e.vy *= -1;
             }
             e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
             e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
@@ -7988,12 +8010,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           // プレイヤー本体の当たり判定領域と、イベントオブジェクト（および設置先の障害物地形）の接触判定
           const pBoxTouch = p.x - 4 < e.x + eW && p.x + pData.w + 4 > e.x &&
-                            p.y - 4 < e.y + eH && p.y + pData.h + 4 > e.y;
+            p.y - 4 < e.y + eH && p.y + pData.h + 4 > e.y;
           const isAdjacentTile = Math.abs(pCol - eCol) <= 1 && Math.abs(pRow - eRow) <= 1;
           const isFacingEventTile = (isUp && eRow <= pRow && eCol === pCol) ||
-                                    (isDown && eRow >= pRow && eCol === pCol) ||
-                                    (isLeft && eCol <= pCol && eRow === pRow) ||
-                                    (isRight && eCol >= pCol && eRow === pRow);
+            (isDown && eRow >= pRow && eCol === pCol) ||
+            (isLeft && eCol <= pCol && eRow === pRow) ||
+            (isRight && eCol >= pCol && eRow === pRow);
           const exactOverlap = pcx > e.x && pcx < e.x + eW && pcy > e.y && pcy < e.y + eH;
 
           // 当たり判定が無い場所（床マス）：その座標に入った瞬間（pCol === eCol && pRow === eRow または exactOverlap）に発動
@@ -8640,7 +8662,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           // 前面領域が障害物地形上のイベントと接触しているか
           const isFrontTouch = fBox.x < ox + oW && fBox.x + fBox.w > ox &&
-                               fBox.y < oy + oH && fBox.y + fBox.h > oy;
+            fBox.y < oy + oH && fBox.y + fBox.h > oy;
           if (isFrontTouch) return true;
 
           return Math.hypot(pcx - (ox + oW / 2), pcy - (oy + oH / 2)) < TILE_SIZE * 1.5;
@@ -10514,13 +10536,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const drawY = e.y - camYRef.current;
               ctx.fillStyle = 'rgba(255, 255, 0, 0.4)';
               ctx.beginPath();
-              ctx.arc(drawX + (e.def.w ?? TILE_SIZE)/2, drawY - 10, 8, 0, Math.PI * 2);
+              ctx.arc(drawX + (e.def.w ?? TILE_SIZE) / 2, drawY - 10, 8, 0, Math.PI * 2);
               ctx.fill();
               ctx.fillStyle = 'white';
               ctx.font = '10px Arial';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
-              ctx.fillText('E', drawX + (e.def.w ?? TILE_SIZE)/2, drawY - 10);
+              ctx.fillText('E', drawX + (e.def.w ?? TILE_SIZE) / 2, drawY - 10);
             }
           });
         }
@@ -11609,240 +11631,240 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         onTouchStart={onHeaderTouchStart}
         onTouchMove={onHeaderTouchMove}
       >
-      <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 shrink-0"><X size={16} /></button>}
-          {embedded && <span className="text-xs font-bold text-white shrink-0">▶ プレイ中</span>}
-          {!isPlaying && !playOnly && (
-            <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
-              className="bg-gray-800 border border-gray-700 px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
-              {PRESET_ORDER.map(id => (
-                <option key={id} value={id}>{PRESETS[id].name}</option>
-              ))}
-            </select>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <VolumeControl />
-          {/* 設定ボタン */}
-          <div className="relative" ref={settingsRef}>
-            <button
-              onClick={() => setSettingsOpen(v => !v)}
-              className={`p-2 ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-700/50 text-gray-400 hover:text-white'} ${debugInvincible ? 'ring-1 ring-yellow-400' : ''}`}
-              title="設定"
-            >
-              <Settings size={14} />
-            </button>
-            <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
-            {settingsOpen && (
-              <div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
-                {/* 無敵モード */}
-                <button
-                  onClick={() => setDebugInvincible(v => !v)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${debugInvincible ? 'bg-yellow-500/20 text-yellow-300' : 'text-gray-400 hover:bg-gray-700'}`}
-                >
-                  {debugInvincible ? <Shield size={13} /> : <ShieldOff size={13} />}
-                  無敵モード {debugInvincible ? 'ON' : 'OFF'}
-                </button>
-                {!playOnly && (
-                  <button
-                    onClick={() => setCanvasDraw(v => !v)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${canvasDraw ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
-                  >
-                    🖌️ キャンバスに直接描く {canvasDraw ? 'ON' : 'OFF'}
-                  </button>
-                )}
-                <button
-                  onClick={() => { setOnlineTestMode(v => !v); setSettingsOpen(false); }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
-                >
-                  🌐 オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
-                </button>
-                <button
-                  onClick={() => setShowCollisionBoundaries(v => !v)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${showCollisionBoundaries ? 'bg-purple-500/20 text-purple-300' : 'text-gray-400 hover:bg-gray-700'}`}
-                >
-                  🧱 衝突バウンダリ {showCollisionBoundaries ? 'ON' : 'OFF'}
-                </button>
-
-                {!playOnly && (
-                  <button
-                    onClick={() => { handleTestPlay(); setSettingsOpen(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-green-400 hover:bg-gray-700 hover:text-green-300 transition"
-                  >
-                    <FlaskConical size={13} /> 🧪 テストプレイ
-                  </button>
-                )}
-
-                <div className="border-t border-gray-700 my-1" />
-                {/* エクスポート */}
-                <button
-                  onClick={() => { handleExport(); setSettingsOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
-                >
-                  <Download size={13} />データをエクスポート (.json)
-                </button>
-                {/* インポート */}
-                <button
-                  onClick={() => { importFileRef.current?.click(); setSettingsOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
-                >
-                  <Upload size={13} />データをインポート (.json)
-                </button>
-                <button
-                  onClick={() => { setShowRpgenModal(true); setSettingsOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
-                >
-                  <Upload size={13} />RPGENをインポート (テキスト)
-                </button>
-                {/* エンジン変更：編集中のゲームを別プリセット（別エンジン）へ切り替える。
-                    タイトル・プレイヤーの見た目・BGMを引き継ぎ、マップは可能な範囲で変換する（ロッシー）。 */}
-                {!playOnly && !isPlaying && (
-                  <>
-                    <div className="border-t border-gray-700 my-1" />
-                    <div className="px-3 py-2">
-                      <div className="text-[10px] font-bold text-gray-400 mb-1">🔧 エンジン変更</div>
-                      <select
-                        value={presetId}
-                        onChange={e => {
-                          const id = e.target.value as PresetId;
-                          if (id === presetId) return;
-                          customConfirm(
-                            `「${PRESETS[id].name}」エンジンへ切り替えますか？\nマップはできるだけ変換して引き継ぎますが、完全には再現されません（元に戻すには再度切り替えても戻りません）`,
-                            () => {
-                              switchEngine(id);
-                              setSettingsOpen(false);
-                            },
-                            'エンジン変更の確認'
-                          );
-                        }}
-                        className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
-                      >
-                        {PRESET_ORDER.map(pid => (
-                          <option key={pid} value={pid}>{PRESETS[pid].name}{pid === presetId ? '（現在）' : ''}</option>
-                        ))}
-                      </select>
-                      <p className="mt-1 text-[9px] text-gray-500 leading-relaxed">タイトル・見た目・BGMに加え、マップも近似変換で引き継ぎます（2D⇄3Dは一部が失われます）</p>
-                    </div>
-                  </>
-                )}
-                {/* SMC素材クレジット（マリオプリセット使用時） */}
-                {gameData.id === 'mario' && (
-                  <>
-                    <div className="border-t border-gray-700 my-1" />
-                    <div className="px-3 py-2 text-[10px] text-gray-500 leading-relaxed">
-                      <div className="font-bold text-gray-400 mb-1">🎨 素材クレジット</div>
-                      <div>キャラクタースプライト:</div>
-                      <div>© Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph</div>
-                      <div className="mt-1">
-                        <a
-                          href="https://github.com/Level-Share-Square/SMC-released-sprites"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-400 underline"
-                          onClick={e => e.stopPropagation()}
-                        >
-                          SMC-released-sprites
-                        </a>
-                        {' '}(非商用)
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
+        <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 shrink-0"><X size={16} /></button>}
+            {embedded && <span className="text-xs font-bold text-white shrink-0">▶ プレイ中</span>}
+            {!isPlaying && !playOnly && (
+              <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
+                className="bg-gray-800 border border-gray-700 px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
+                {PRESET_ORDER.map(id => (
+                  <option key={id} value={id}>{PRESETS[id].name}</option>
+                ))}
+              </select>
             )}
           </div>
-          <button
-            onClick={() => setShowHistory(true)}
-            className="p-2 text-gray-400 hover:text-white bg-gray-700/50"
-            title="履歴・スナップショット"
-          >
-            <History size={14} />
-          </button>
-          <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
-          {/* 配置のやり直し（編集中のみ）。モバイルはSELECT/STARTボタンからも操作できる。 */}
-          {!isPlaying && !playOnly && (
-            <>
-              <button onClick={undoEdit} disabled={undoDepth === 0}
-                className="p-2 text-gray-400 hover:text-white bg-gray-700/50 disabled:opacity-30 disabled:hover:text-gray-400"
-                title={`元に戻す（Ctrl+Z / SELECT）${undoDepth ? ` ${undoDepth}` : ''}`}><Undo2 size={14} /></button>
-              <button onClick={redoEdit} disabled={redoDepth === 0}
-                className="p-2 text-gray-400 hover:text-white bg-gray-700/50 disabled:opacity-30 disabled:hover:text-gray-400"
-                title={`やり直す（Ctrl+Y / START）${redoDepth ? ` ${redoDepth}` : ''}`}><Redo2 size={14} /></button>
-            </>
-          )}
-          {!playOnly && (
-            <button onClick={() => {
-              if (introOpen) {
-                enterEditFromIntro();
-                return;
-              }
-              if (isPlaying) {
-                resetSceneState();
-                invulnRef.current = 0;
-                bombInvulnRef.current = 0;
-                isPlayerDeadRef.current = false;
-                roundOverRef.current = false;
-                sceneTransRef.current = null;
-                sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
-                setBattle(null);
-                battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
-                if (gameData.scenes?.length) {
-                  const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
-                  const activeScene = gameData.scenes[activeIdx];
-                  const activeLayout = worldLayoutRef.current?.layouts?.find(l => l.sceneIdx === activeIdx);
-                  const pp = engineRef.current.player;
-                  const originX = (activeLayout?.originX ?? 0) * TILE_SIZE;
-                  const originY = (activeLayout?.originY ?? 0) * TILE_SIZE;
-                  const localX = pp.x - originX;
-                  const localY = pp.y - originY;
-                  pp.x = localX;
-                  pp.y = localY;
+          <div className="flex items-center gap-1.5 shrink-0">
+            <VolumeControl />
+            {/* 設定ボタン */}
+            <div className="relative" ref={settingsRef}>
+              <button
+                onClick={() => setSettingsOpen(v => !v)}
+                className={`p-2 ${settingsOpen ? 'bg-gray-600 text-white' : 'bg-gray-700/50 text-gray-400 hover:text-white'} ${debugInvincible ? 'ring-1 ring-yellow-400' : ''}`}
+                title="設定"
+              >
+                <Settings size={14} />
+              </button>
+              <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImport} />
+              {settingsOpen && (
+                <div className="absolute right-0 top-full mt-1 z-[100] w-52 bg-[#1a1a2e] border border-gray-700 shadow-2xl p-2 space-y-1">
+                  {/* 無敵モード */}
+                  <button
+                    onClick={() => setDebugInvincible(v => !v)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${debugInvincible ? 'bg-yellow-500/20 text-yellow-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                  >
+                    {debugInvincible ? <Shield size={13} /> : <ShieldOff size={13} />}
+                    無敵モード {debugInvincible ? 'ON' : 'OFF'}
+                  </button>
+                  {!playOnly && (
+                    <button
+                      onClick={() => setCanvasDraw(v => !v)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${canvasDraw ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                    >
+                      🖌️ キャンバスに直接描く {canvasDraw ? 'ON' : 'OFF'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setOnlineTestMode(v => !v); setSettingsOpen(false); }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                  >
+                    🌐 オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
+                  </button>
+                  <button
+                    onClick={() => setShowCollisionBoundaries(v => !v)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${showCollisionBoundaries ? 'bg-purple-500/20 text-purple-300' : 'text-gray-400 hover:bg-gray-700'}`}
+                  >
+                    🧱 衝突バウンダリ {showCollisionBoundaries ? 'ON' : 'OFF'}
+                  </button>
 
-                  if (activeScene) {
-                    setGameData(prev => ({
-                      ...prev,
-                      map: activeScene.map,
-                      overlayMap: activeScene.overlayMap ?? prev.overlayMap,
-                      overheadMap: activeScene.overheadMap ?? prev.overheadMap,
-                      objects: activeScene.objects,
-                    }));
-                    engineRef.current.map = JSON.parse(JSON.stringify(activeScene.map));
-                    engineRef.current.overlayMap = activeScene.overlayMap ? JSON.parse(JSON.stringify(activeScene.overlayMap)) : undefined;
-                    engineRef.current.overheadMap = activeScene.overheadMap ? JSON.parse(JSON.stringify(activeScene.overheadMap)) : undefined;
-                    setEditSceneIdx(activeIdx);
-                  }
-                  const pw = gameData.player.w, ph = gameData.player.h;
-                  const sceneCols = activeScene?.map[0]?.length ?? COLS;
-                  const sceneRows = activeScene?.map?.length ?? ROWS;
-                  setEditScroll(Math.max(0, Math.min(((sceneCols * TILE_SIZE) - VIEW_W), localX + pw / 2 - VIEW_W / 2)));
-                  setEditScrollY(Math.max(0, Math.min(((sceneRows * TILE_SIZE) - VIEW_H), localY + ph / 2 - VIEW_H / 2)));
-                } else {
-                  const pp = engineRef.current.player;
-                  const pw = gameData.player.w, ph = gameData.player.h;
-                  setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
-                  setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+                  {!playOnly && (
+                    <button
+                      onClick={() => { handleTestPlay(); setSettingsOpen(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-green-400 hover:bg-gray-700 hover:text-green-300 transition"
+                    >
+                      <FlaskConical size={13} /> 🧪 テストプレイ
+                    </button>
+                  )}
+
+                  <div className="border-t border-gray-700 my-1" />
+                  {/* エクスポート */}
+                  <button
+                    onClick={() => { handleExport(); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  >
+                    <Download size={13} />データをエクスポート (.json)
+                  </button>
+                  {/* インポート */}
+                  <button
+                    onClick={() => { importFileRef.current?.click(); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  >
+                    <Upload size={13} />データをインポート (.json)
+                  </button>
+                  <button
+                    onClick={() => { setShowRpgenModal(true); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  >
+                    <Upload size={13} />RPGENをインポート (テキスト)
+                  </button>
+                  {/* エンジン変更：編集中のゲームを別プリセット（別エンジン）へ切り替える。
+                    タイトル・プレイヤーの見た目・BGMを引き継ぎ、マップは可能な範囲で変換する（ロッシー）。 */}
+                  {!playOnly && !isPlaying && (
+                    <>
+                      <div className="border-t border-gray-700 my-1" />
+                      <div className="px-3 py-2">
+                        <div className="text-[10px] font-bold text-gray-400 mb-1">🔧 エンジン変更</div>
+                        <select
+                          value={presetId}
+                          onChange={e => {
+                            const id = e.target.value as PresetId;
+                            if (id === presetId) return;
+                            customConfirm(
+                              `「${PRESETS[id].name}」エンジンへ切り替えますか？\nマップはできるだけ変換して引き継ぎますが、完全には再現されません（元に戻すには再度切り替えても戻りません）`,
+                              () => {
+                                switchEngine(id);
+                                setSettingsOpen(false);
+                              },
+                              'エンジン変更の確認'
+                            );
+                          }}
+                          className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
+                        >
+                          {PRESET_ORDER.map(pid => (
+                            <option key={pid} value={pid}>{PRESETS[pid].name}{pid === presetId ? '（現在）' : ''}</option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-[9px] text-gray-500 leading-relaxed">タイトル・見た目・BGMに加え、マップも近似変換で引き継ぎます（2D⇄3Dは一部が失われます）</p>
+                      </div>
+                    </>
+                  )}
+                  {/* SMC素材クレジット（マリオプリセット使用時） */}
+                  {gameData.id === 'mario' && (
+                    <>
+                      <div className="border-t border-gray-700 my-1" />
+                      <div className="px-3 py-2 text-[10px] text-gray-500 leading-relaxed">
+                        <div className="font-bold text-gray-400 mb-1">🎨 素材クレジット</div>
+                        <div>キャラクタースプライト:</div>
+                        <div>© Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph</div>
+                        <div className="mt-1">
+                          <a
+                            href="https://github.com/Level-Share-Square/SMC-released-sprites"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-400 underline"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            SMC-released-sprites
+                          </a>
+                          {' '}(非商用)
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setShowHistory(true)}
+              className="p-2 text-gray-400 hover:text-white bg-gray-700/50"
+              title="履歴・スナップショット"
+            >
+              <History size={14} />
+            </button>
+            <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
+            {/* 配置のやり直し（編集中のみ）。モバイルはSELECT/STARTボタンからも操作できる。 */}
+            {!isPlaying && !playOnly && (
+              <>
+                <button onClick={undoEdit} disabled={undoDepth === 0}
+                  className="p-2 text-gray-400 hover:text-white bg-gray-700/50 disabled:opacity-30 disabled:hover:text-gray-400"
+                  title={`元に戻す（Ctrl+Z / SELECT）${undoDepth ? ` ${undoDepth}` : ''}`}><Undo2 size={14} /></button>
+                <button onClick={redoEdit} disabled={redoDepth === 0}
+                  className="p-2 text-gray-400 hover:text-white bg-gray-700/50 disabled:opacity-30 disabled:hover:text-gray-400"
+                  title={`やり直す（Ctrl+Y / START）${redoDepth ? ` ${redoDepth}` : ''}`}><Redo2 size={14} /></button>
+              </>
+            )}
+            {!playOnly && (
+              <button onClick={() => {
+                if (introOpen) {
+                  enterEditFromIntro();
+                  return;
                 }
-              }
-              if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
-              isTestPlayRef.current = false;
-              setActivePreviewKey(null);
-              flushSceneEdits();
-              setShowTitle(false);
-              setIsPlaying(true);
-              justStartedRef.current = true;
-            }}
-              className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
-              {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
-            </button>
-          )}
-          {onSave && (
-            <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
-              <Save size={14} /><span className="hidden sm:inline">投稿に添付</span>
-            </button>
-          )}
+                if (isPlaying) {
+                  resetSceneState();
+                  invulnRef.current = 0;
+                  bombInvulnRef.current = 0;
+                  isPlayerDeadRef.current = false;
+                  roundOverRef.current = false;
+                  sceneTransRef.current = null;
+                  sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
+                  setBattle(null);
+                  battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
+                  if (gameData.scenes?.length) {
+                    const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
+                    const activeScene = gameData.scenes[activeIdx];
+                    const activeLayout = worldLayoutRef.current?.layouts?.find(l => l.sceneIdx === activeIdx);
+                    const pp = engineRef.current.player;
+                    const originX = (activeLayout?.originX ?? 0) * TILE_SIZE;
+                    const originY = (activeLayout?.originY ?? 0) * TILE_SIZE;
+                    const localX = pp.x - originX;
+                    const localY = pp.y - originY;
+                    pp.x = localX;
+                    pp.y = localY;
+
+                    if (activeScene) {
+                      setGameData(prev => ({
+                        ...prev,
+                        map: activeScene.map,
+                        overlayMap: activeScene.overlayMap ?? prev.overlayMap,
+                        overheadMap: activeScene.overheadMap ?? prev.overheadMap,
+                        objects: activeScene.objects,
+                      }));
+                      engineRef.current.map = JSON.parse(JSON.stringify(activeScene.map));
+                      engineRef.current.overlayMap = activeScene.overlayMap ? JSON.parse(JSON.stringify(activeScene.overlayMap)) : undefined;
+                      engineRef.current.overheadMap = activeScene.overheadMap ? JSON.parse(JSON.stringify(activeScene.overheadMap)) : undefined;
+                      setEditSceneIdx(activeIdx);
+                    }
+                    const pw = gameData.player.w, ph = gameData.player.h;
+                    const sceneCols = activeScene?.map[0]?.length ?? COLS;
+                    const sceneRows = activeScene?.map?.length ?? ROWS;
+                    setEditScroll(Math.max(0, Math.min(((sceneCols * TILE_SIZE) - VIEW_W), localX + pw / 2 - VIEW_W / 2)));
+                    setEditScrollY(Math.max(0, Math.min(((sceneRows * TILE_SIZE) - VIEW_H), localY + ph / 2 - VIEW_H / 2)));
+                  } else {
+                    const pp = engineRef.current.player;
+                    const pw = gameData.player.w, ph = gameData.player.h;
+                    setEditScroll(Math.max(0, Math.min(((gameData.scroll?.worldCols ?? COLS) * TILE_SIZE - VIEW_W), pp.x + pw / 2 - VIEW_W / 2)));
+                    setEditScrollY(Math.max(0, Math.min(((gameData.scroll?.worldRows ?? ROWS) * TILE_SIZE - VIEW_H), pp.y + ph / 2 - VIEW_H / 2)));
+                  }
+                }
+                if (isPlaying) { setShowEnding(false); setIsPlaying(false); return; }
+                isTestPlayRef.current = false;
+                setActivePreviewKey(null);
+                flushSceneEdits();
+                setShowTitle(false);
+                setIsPlaying(true);
+                justStartedRef.current = true;
+              }}
+                className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
+                {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
+              </button>
+            )}
+            {onSave && (
+              <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
+                <Save size={14} /><span className="hidden sm:inline">投稿に添付</span>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
         {/* 引き出しハンドル（スマホのみ）。閉じているときはこの20pxだけが画面に残る。 */}
         <button
           type="button"
@@ -14151,101 +14173,101 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   <div className="space-y-3">
                     {/* スタート地点を置くときはタイル関連UIを出さない（そのパネルに関係する概念だけ見せる） */}
                     {(<>
-                    {/* ── タイル塗りヒント ── */}
-                    <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> 十字キーでカーソルを動かし、Zキー／Aボタンで塗る（Xで消す）</p>
-                    <p className="text-[10px] text-gray-500">キャンバスを直接タップして描きたいときは、設定（⚙）の「キャンバスに直接描く」をONにしてください。</p>
-                    {/* ── タイルパレット：yume25d と同じ横並びスウォッチ。選ぶと下に詳細設定が開く ── */}
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {paletteTiles().map(([id, tile]) => {
-                        return (
-                          <button key={id} onClick={() => setSelectedTileId(id)} title={tile.name}
-                            className={`w-7 h-7 shrink-0 rounded border-2 overflow-hidden ${selectedTileId === id ? 'border-yellow-400' : 'border-gray-700'}`}
-                            style={{ backgroundColor: tile.color }}>
-                            {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
-                          </button>
-                        );
-                      })}
-                      <button onClick={addTile} title="タイルを追加"
-                        className="w-7 h-7 shrink-0 rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5 grid place-items-center">
-                        <Plus size={13} />
-                      </button>
-                    </div>
-
-                    {/* 選択中タイルの詳細設定（yume25d のテクスチャ個別設定と同じ構成） */}
-                    {(() => {
-                      const tile = gameData.tiles[selectedTileId];
-                      if (!tile) return null;
-                      const id = selectedTileId;
-                      return (
-                        <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[12px] font-bold text-gray-200 flex items-center gap-1.5">
-                              {tile.imageUrl || tile.imageRef ? (
-                                <span className="w-5 h-5 shrink-0 rounded overflow-hidden inline-flex items-center justify-center bg-black/40 border border-gray-700">
-                                  <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={20} />
-                                </span>
-                              ) : (
-                                <span className="w-3.5 h-3.5 rounded shrink-0 border border-gray-600 inline-block" style={{ backgroundColor: tile.color }} />
-                              )}
-                              🎨 {tile.name || 'タイル'} の設定
-                            </span>
-                            {id !== 0 && (
-                              <button onClick={() => deleteTile(id)} className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">削除</button>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <label className="flex items-center gap-1">名前:
-                              <input value={tile.name} onChange={e => updateTile(id, { name: e.target.value })}
-                                className="w-24 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white outline-none" />
-                            </label>
-                            <label className="flex items-center gap-1">色:
-                              <input type="color" value={tile.color} onChange={e => updateTile(id, { color: e.target.value })}
-                                className="w-6 h-4 bg-transparent cursor-pointer" title="色" />
-                            </label>
-                            <label className="flex items-center gap-1 text-gray-400"><input type="checkbox" checked={tile.passable} onChange={e => updateTile(id, { passable: e.target.checked })} className="accent-blue-500" />通行可</label>
-                          </div>
-                          <div className="flex items-center gap-3 text-[10px] text-gray-400">
-                            <select value={tile.special || ''} onChange={e => updateTile(id, { special: e.target.value || undefined })} className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
-                              <option value="">特殊なし</option>
-                              <option value="goal">ゴール</option>
-                              <option value="trap">トラップ</option>
-                              <option value="item">アイテム</option>
-                              <option value="grass">草むら</option>
-                              <option value="warp">システム: シーン切替床</option>
-                              <option value="damage">システム: どく沼/ダメージ床</option>
-                              <option value="ice-up">システム: つるつる床（↑）</option>
-                              <option value="ice-right">システム: つるつる床（→）</option>
-                              <option value="ice-down">システム: つるつる床（↓）</option>
-                              <option value="ice-left">システム: つるつる床（←）</option>
-                            </select>
-                          </div>
-                          {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
-                            <p className="text-[10px] text-gray-500">🚪 ワープ先の設定は「シーン」タブで行えます。</p>
-                          )}
-                          {tile.special === 'damage' && (
-                            <label className="text-[10px] text-gray-400 flex items-center gap-1">被ダメージ量
-                              <input type="number" value={tile.damageAmount ?? 3} onChange={e => updateTile(id, { damageAmount: Number(e.target.value) })}
-                                className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
-                            </label>
-                          )}
-                          <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
-                            <span className="text-[10px] text-gray-400">画像（任意）</span>
-                            {tile.imageUrl || tile.imageRef ? (
-                              <div className="relative shrink-0 w-8 h-8 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
-                                <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={32} />
-                              </div>
-                            ) : null}
-                            <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded font-bold">
-                              <ImageIcon size={12} /> {tile.imageRef ? '画像を変更' : '画像を参照'}
+                      {/* ── タイル塗りヒント ── */}
+                      <p className="text-[10px] text-gray-500 flex items-center gap-1"><Smartphone size={12} /> 十字キーでカーソルを動かし、Zキー／Aボタンで塗る（Xで消す）</p>
+                      <p className="text-[10px] text-gray-500">キャンバスを直接タップして描きたいときは、設定（⚙）の「キャンバスに直接描く」をONにしてください。</p>
+                      {/* ── タイルパレット：yume25d と同じ横並びスウォッチ。選ぶと下に詳細設定が開く ── */}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {paletteTiles().map(([id, tile]) => {
+                          return (
+                            <button key={id} onClick={() => setSelectedTileId(id)} title={tile.name}
+                              className={`w-7 h-7 shrink-0 rounded border-2 overflow-hidden ${selectedTileId === id ? 'border-yellow-400' : 'border-gray-700'}`}
+                              style={{ backgroundColor: tile.color }}>
+                              {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
                             </button>
-                            {tile.imageRef && (
-                              <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1" title="画像解除"><Trash2 size={14} /></button>
+                          );
+                        })}
+                        <button onClick={addTile} title="タイルを追加"
+                          className="w-7 h-7 shrink-0 rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5 grid place-items-center">
+                          <Plus size={13} />
+                        </button>
+                      </div>
+
+                      {/* 選択中タイルの詳細設定（yume25d のテクスチャ個別設定と同じ構成） */}
+                      {(() => {
+                        const tile = gameData.tiles[selectedTileId];
+                        if (!tile) return null;
+                        const id = selectedTileId;
+                        return (
+                          <div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[12px] font-bold text-gray-200 flex items-center gap-1.5">
+                                {tile.imageUrl || tile.imageRef ? (
+                                  <span className="w-5 h-5 shrink-0 rounded overflow-hidden inline-flex items-center justify-center bg-black/40 border border-gray-700">
+                                    <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={20} />
+                                  </span>
+                                ) : (
+                                  <span className="w-3.5 h-3.5 rounded shrink-0 border border-gray-600 inline-block" style={{ backgroundColor: tile.color }} />
+                                )}
+                                🎨 {tile.name || 'タイル'} の設定
+                              </span>
+                              {id !== 0 && (
+                                <button onClick={() => deleteTile(id)} className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">削除</button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <label className="flex items-center gap-1">名前:
+                                <input value={tile.name} onChange={e => updateTile(id, { name: e.target.value })}
+                                  className="w-24 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white outline-none" />
+                              </label>
+                              <label className="flex items-center gap-1">色:
+                                <input type="color" value={tile.color} onChange={e => updateTile(id, { color: e.target.value })}
+                                  className="w-6 h-4 bg-transparent cursor-pointer" title="色" />
+                              </label>
+                              <label className="flex items-center gap-1 text-gray-400"><input type="checkbox" checked={tile.passable} onChange={e => updateTile(id, { passable: e.target.checked })} className="accent-blue-500" />通行可</label>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] text-gray-400">
+                              <select value={tile.special || ''} onChange={e => updateTile(id, { special: e.target.value || undefined })} className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 outline-none">
+                                <option value="">特殊なし</option>
+                                <option value="goal">ゴール</option>
+                                <option value="trap">トラップ</option>
+                                <option value="item">アイテム</option>
+                                <option value="grass">草むら</option>
+                                <option value="warp">システム: シーン切替床</option>
+                                <option value="damage">システム: どく沼/ダメージ床</option>
+                                <option value="ice-up">システム: つるつる床（↑）</option>
+                                <option value="ice-right">システム: つるつる床（→）</option>
+                                <option value="ice-down">システム: つるつる床（↓）</option>
+                                <option value="ice-left">システム: つるつる床（←）</option>
+                              </select>
+                            </div>
+                            {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
+                              <p className="text-[10px] text-gray-500">🚪 ワープ先の設定は「シーン」タブで行えます。</p>
                             )}
+                            {tile.special === 'damage' && (
+                              <label className="text-[10px] text-gray-400 flex items-center gap-1">被ダメージ量
+                                <input type="number" value={tile.damageAmount ?? 3} onChange={e => updateTile(id, { damageAmount: Number(e.target.value) })}
+                                  className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                              </label>
+                            )}
+                            <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
+                              <span className="text-[10px] text-gray-400">画像（任意）</span>
+                              {tile.imageUrl || tile.imageRef ? (
+                                <div className="relative shrink-0 w-8 h-8 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
+                                  <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={32} />
+                                </div>
+                              ) : null}
+                              <button onClick={() => setPicker({ mode: 'image', target: { t: 'tile', id } })} className="text-[10px] text-blue-400 hover:text-blue-300 ml-auto flex items-center gap-1 bg-blue-500/10 px-2 py-1 rounded font-bold">
+                                <ImageIcon size={12} /> {tile.imageRef ? '画像を変更' : '画像を参照'}
+                              </button>
+                              {tile.imageRef && (
+                                <button onClick={() => updateTile(id, { imageRef: undefined, imageUrl: undefined })} className="text-gray-400 hover:text-red-400 p-1" title="画像解除"><Trash2 size={14} /></button>
+                              )}
+                            </div>
+                            <p className="text-[9px] text-gray-500">画像は既存の投稿・歩行グラ・URLを参照します。</p>
                           </div>
-                          <p className="text-[9px] text-gray-500">画像は既存の投稿・歩行グラ・URLを参照します。</p>
-                        </div>
-                      );
-                    })()}
+                        );
+                      })()}
                     </>)}
 
                     {/* ── システムタイル（ワープ床・どく沼/ダメージ床・つるつる床）。
@@ -14510,7 +14532,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         const pRow = Math.floor(py / TILE_SIZE);
                         const obj = gameData.objects?.find(o => o.col === pCol && o.row === pRow);
                         if (obj) setSelectedObjId(obj.id);
-                        else showGameMsg('プレイヤーの位置にイベントが見つかりません', 'instant', () => {});
+                        else showGameMsg('プレイヤーの位置にイベントが見つかりません', 'instant', () => { });
                       }} className="bg-blue-800 hover:bg-blue-700 text-[10px] text-white px-2 py-1 rounded">
                         この位置のイベントを読み込む
                       </button>
@@ -14552,67 +14574,67 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {/* ── OBJECT ── */}
                 {editorTab === 'object' && (
                   <div className="space-y-3">
-                      {/* ── 移動ポイント一覧：スタート地点＋登録済みワープを1か所で管理する ── */}
-                      {placeKind === 'warp' && (() => {
-                        const warps = gameData.objects.filter(o => (o.objType ?? 'enemy') === 'warp');
-                        const startCol = Math.floor(gameData.player.start.x / TILE_SIZE);
-                        const startRow = Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE);
-                        const destLabel = (o: ObjectDef) => {
-                          if (o.warpSceneId) {
-                            const sc = gameData.scenes?.find(sn => sn.id === o.warpSceneId);
-                            return `${sc?.name ?? o.warpSceneId} (${o.warpEntryCol ?? 1},${o.warpEntryRow ?? 1})`;
-                          }
-                          if (o.warpTarget) return `同マップ (${o.warpTarget.col},${o.warpTarget.row})`;
-                          return '未設定';
-                        };
-                        const DIR_MARK: Record<string, string> = { up: '↑', down: '↓', left: '←', right: '→' };
-                        return (
-                          <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2 space-y-1.5">
-                            <p className="text-[11px] font-bold text-gray-200">🚪 移動ポイント一覧（{warps.length}）</p>
-                            {/* スタート地点（消せないので座標の確認と移動のみ） */}
-                            <div className="flex items-center gap-1.5 rounded bg-gray-800/60 px-1.5 py-1">
-                              <span className="text-[11px]">🏁</span>
-                              <span className="text-[10px] text-gray-300 flex-1 truncate">スタート地点 ({startCol},{startRow})</span>
+                    {/* ── 移動ポイント一覧：スタート地点＋登録済みワープを1か所で管理する ── */}
+                    {placeKind === 'warp' && (() => {
+                      const warps = gameData.objects.filter(o => (o.objType ?? 'enemy') === 'warp');
+                      const startCol = Math.floor(gameData.player.start.x / TILE_SIZE);
+                      const startRow = Math.floor((gameData.player.start.y + gameData.player.h - TILE_SIZE) / TILE_SIZE);
+                      const destLabel = (o: ObjectDef) => {
+                        if (o.warpSceneId) {
+                          const sc = gameData.scenes?.find(sn => sn.id === o.warpSceneId);
+                          return `${sc?.name ?? o.warpSceneId} (${o.warpEntryCol ?? 1},${o.warpEntryRow ?? 1})`;
+                        }
+                        if (o.warpTarget) return `同マップ (${o.warpTarget.col},${o.warpTarget.row})`;
+                        return '未設定';
+                      };
+                      const DIR_MARK: Record<string, string> = { up: '↑', down: '↓', left: '←', right: '→' };
+                      return (
+                        <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2 space-y-1.5">
+                          <p className="text-[11px] font-bold text-gray-200">🚪 移動ポイント一覧（{warps.length}）</p>
+                          {/* スタート地点（消せないので座標の確認と移動のみ） */}
+                          <div className="flex items-center gap-1.5 rounded bg-gray-800/60 px-1.5 py-1">
+                            <span className="text-[11px]">🏁</span>
+                            <span className="text-[10px] text-gray-300 flex-1 truncate">スタート地点 ({startCol},{startRow})</span>
+                            <button
+                              onClick={() => {
+                                const sx = startCol * TILE_SIZE, sy = gameData.player.start.y;
+                                engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
+                              }}
+                              className="px-2 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
+                            <button
+                              onClick={() => {
+                                // カーソル（主人公マーカー）の位置をゲーム開始位置にする
+                                const cp = engineRef.current.player;
+                                const col = Math.floor((cp.x + 12) / TILE_SIZE), row = Math.floor((cp.y + 12) / TILE_SIZE);
+                                pushUndo();
+                                const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameData.player.h;
+                                setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
+                              }}
+                              className="px-2 py-1 rounded text-[10px] text-green-300 hover:bg-green-500/10">現在地に設定</button>
+                          </div>
+                          {warps.length === 0 && <p className="text-[10px] text-gray-500 px-1">まだ登録されていません。カーソルを置いてZキー／Aボタンで追加します。</p>}
+                          {warps.map(o => (
+                            <div key={o.id} className={`flex items-center gap-1.5 rounded px-1.5 py-1 ${selectedObjId === o.id ? 'bg-blue-600/20 ring-1 ring-blue-500/40' : 'bg-gray-800/40'}`}>
+                              <span className="text-[11px]">{o.emoji || '🚪'}</span>
+                              <button onClick={() => setSelectedObjId(o.id)} className="flex-1 min-w-0 text-left">
+                                <span className="block text-[10px] text-gray-300 truncate">
+                                  ({o.col},{o.row}){o.warpEnterDir ? ` ${DIR_MARK[o.warpEnterDir]}` : ''} → {destLabel(o)}
+                                </span>
+                              </button>
                               <button
                                 onClick={() => {
-                                  const sx = startCol * TILE_SIZE, sy = gameData.player.start.y;
-                                  engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
+                                  engineRef.current.player = { x: o.col * TILE_SIZE, y: o.row * TILE_SIZE, vx: 0, vy: 0, isGrounded: false };
+                                  setSelectedObjId(o.id);
                                 }}
-                                className="px-2 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
-                                <button
-                                  onClick={() => {
-                                    // カーソル（主人公マーカー）の位置をゲーム開始位置にする
-                                    const cp = engineRef.current.player;
-                                    const col = Math.floor((cp.x + 12) / TILE_SIZE), row = Math.floor((cp.y + 12) / TILE_SIZE);
-                                    pushUndo();
-                                    const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameData.player.h;
-                                    setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
-                                  }}
-                                  className="px-2 py-1 rounded text-[10px] text-green-300 hover:bg-green-500/10">現在地に設定</button>
+                                className="px-1.5 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
+                              <button
+                                onClick={() => { pushUndo(); setGameData(p2 => ({ ...p2, objects: p2.objects.filter(x => x.id !== o.id) })); if (selectedObjId === o.id) setSelectedObjId(null); }}
+                                className="px-1.5 py-1 rounded text-[10px] text-red-400 hover:bg-red-500/10">削除</button>
                             </div>
-                            {warps.length === 0 && <p className="text-[10px] text-gray-500 px-1">まだ登録されていません。カーソルを置いてZキー／Aボタンで追加します。</p>}
-                            {warps.map(o => (
-                              <div key={o.id} className={`flex items-center gap-1.5 rounded px-1.5 py-1 ${selectedObjId === o.id ? 'bg-blue-600/20 ring-1 ring-blue-500/40' : 'bg-gray-800/40'}`}>
-                                <span className="text-[11px]">{o.emoji || '🚪'}</span>
-                                <button onClick={() => setSelectedObjId(o.id)} className="flex-1 min-w-0 text-left">
-                                  <span className="block text-[10px] text-gray-300 truncate">
-                                    ({o.col},{o.row}){o.warpEnterDir ? ` ${DIR_MARK[o.warpEnterDir]}` : ''} → {destLabel(o)}
-                                  </span>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    engineRef.current.player = { x: o.col * TILE_SIZE, y: o.row * TILE_SIZE, vx: 0, vy: 0, isGrounded: false };
-                                    setSelectedObjId(o.id);
-                                  }}
-                                  className="px-1.5 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
-                                <button
-                                  onClick={() => { pushUndo(); setGameData(p2 => ({ ...p2, objects: p2.objects.filter(x => x.id !== o.id) })); if (selectedObjId === o.id) setSelectedObjId(null); }}
-                                  className="px-1.5 py-1 rounded text-[10px] text-red-400 hover:bg-red-500/10">削除</button>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })()}
+                          ))}
+                        </div>
+                      );
+                    })()}
                     {/* ── yume25d ビルボード選択中 ── */}
                     {gameData.engine === 'yume25d' && yume25dTalkTargetId && (() => {
                       const bb = gameData.layout25d?.billboards.find(b => b.id === yume25dTalkTargetId);
@@ -17311,7 +17333,7 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
         </button>
       </div>
       {pages.length === 0 && <p className="text-[9px] text-gray-500">ページがありません。追加してイベントを定義してください。</p>}
-      
+
       {pages.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {pages.map((_, pi) => (
@@ -17346,7 +17368,7 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
                 placeholder="ページ名" className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none" />
               {/* 条件 */}
               <div className="text-[9px] text-gray-400 font-bold">発生条件（すべてAND / 空=常時）</div>
-              
+
               <div className="flex flex-col gap-1.5 bg-gray-900/50 p-1.5 rounded">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {switches.length > 0 ? (
@@ -17508,10 +17530,10 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                 <option key={t} value={t}>{COMMAND_LABELS[t]}</option>)}
             </select>
           </div>
-          
+
           <div className="space-y-1.5">
             <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">設定項目</div>
-            
+
             {type === 'message' && (
               <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
                 rows={3} className={inputCls} placeholder="メッセージ" />
