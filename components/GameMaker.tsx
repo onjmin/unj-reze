@@ -12209,7 +12209,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {pop.text}
                                   </div>
                                 )}
-                                <div key={shake?.id ?? 'noshake'} style={shake ? { animation: 'enemyHitShake 0.4s ease-in-out' } : undefined}>
+                                <div key={shake ? `shake-${i}-${shake.id}` : `noshake-${i}`} style={shake ? { animation: 'enemyHitShake 0.4s ease-in-out' } : undefined}>
                                   {f.sprite ? (() => {
                                     const es = f.sprite;
                                     const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
@@ -12483,7 +12483,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {pop.text}
                                   </div>
                                 )}
-                                <div key={shake?.id ?? 'noshake'} style={shake ? { animation: 'enemyHitShake 0.4s ease-in-out' } : undefined}>
+                                <div key={shake ? `shake-${i}-${shake.id}` : `noshake-${i}`} style={shake ? { animation: 'enemyHitShake 0.4s ease-in-out' } : undefined}>
                                   {f.sprite ? (() => {
                                     const es = f.sprite;
                                     const anim = pop && !pop.miss && es.hurt ? es.hurt : fReady && es.spare ? es.spare : es.idle;
