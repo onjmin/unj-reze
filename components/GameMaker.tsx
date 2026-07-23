@@ -7998,7 +7998,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           // 当たり判定が無い場所（床マス）：その座標に入った瞬間（pCol === eCol && pRow === eRow または exactOverlap）に発動
           // 当たり判定が有る場所（壁・看板）：進入不可能なため境界接触（pBoxTouch）または直前で向いたときに発動
-          const touchTriggerOk = isSolidTile
+          // NPC（モブコリジョンあり）：プレイヤーが侵入できないためソリッドタイルと同様の判定を使う
+          const isNpcBlocker = (d.objType === 'npc') && !d.hazard;
+          const touchTriggerOk = (isSolidTile || isNpcBlocker)
             ? (pBoxTouch || (isFacingEventTile && isAdjacentTile))
             : (exactOverlap || (pCol === eCol && pRow === eRow));
 
