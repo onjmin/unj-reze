@@ -5728,6 +5728,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       const floor = getTile(px, py);
       return !!floor?.info.passable;
     };
+    // NPC/敵の自律移動用：矩形の対角2隅がともに通行可か。プレイヤーと同じ isCellPassable を
+    // 使い、床（map）だけでなくオーバーレイ層（壁・扉・橋など）も含めた最終判定で移動可否を
+    // 決める。getTile(...).info.passable だと床しか見ず overlay をすり抜けてしまう。
+    const npcCornersPassable = (ax: number, ay: number, bx: number, by: number) =>
+      isCellPassable(ax, ay) && isCellPassable(bx, by);
     const isAllPassable = (x: number, y: number, w: number, h: number) => {
       // 当たり判定は見た目より少し内側に絞る。プレイヤーは連続移動でタイル境界に
       // ぴったり揃わないため、余白なしだと「壁-通路-壁」の通路に対して横から
@@ -7580,10 +7585,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
             const fleeSp = sp > 0 ? sp : 1.5;
             const nex = e.x - (dx / dist) * fleeSp, ney = e.y - (dy / dist) * fleeSp;
-            const et1 = getTile(nex, e.y), et2 = getTile(nex + TILE_SIZE - 1, e.y + TILE_SIZE - 1);
-            if (et1?.info.passable && et2?.info.passable && nex >= 0 && nex <= worldW - TILE_SIZE) e.x = nex;
-            const et3 = getTile(e.x, ney), et4 = getTile(e.x + TILE_SIZE - 1, ney + TILE_SIZE - 1);
-            if (et3?.info.passable && et4?.info.passable && ney >= 0 && ney <= worldH - TILE_SIZE) e.y = ney;
+            if (npcCornersPassable(nex, e.y, nex + TILE_SIZE - 1, e.y + TILE_SIZE - 1) && nex >= 0 && nex <= worldW - TILE_SIZE) e.x = nex;
+            if (npcCornersPassable(e.x, ney, e.x + TILE_SIZE - 1, ney + TILE_SIZE - 1) && ney >= 0 && ney <= worldH - TILE_SIZE) e.y = ney;
           } else if (e.iceSlide) {
             // つるつる床：強制スライド中は behavior による移動を無視し、目標タイルへ直進する（プレイヤーと同様）。
             const slide = e.iceSlide;
@@ -7598,8 +7601,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
               if (nextDir) {
                 const tx = e.x + nextDir[0] * TILE_SIZE, ty = e.y + nextDir[1] * TILE_SIZE;
-                const ta = getTile(tx, ty), tb = getTile(tx + TILE_SIZE - 1, ty + TILE_SIZE - 1);
-                if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+                if (npcCornersPassable(tx, ty, tx + TILE_SIZE - 1, ty + TILE_SIZE - 1) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
                   e.iceSlide = { targetX: tx, targetY: ty };
                 }
               }
@@ -7614,8 +7616,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 塞がっていて開始できない場合も自由に振る舞わせず、次フレーム以降に再試行させる。
               const [idx, idy] = ICE_DIRS[eStandingSpecial];
               const tx = eStandingTile!.rect.x + idx * TILE_SIZE, ty = eStandingTile!.rect.y + idy * TILE_SIZE;
-              const ta = getTile(tx, ty), tb = getTile(tx + TILE_SIZE - 1, ty + TILE_SIZE - 1);
-              if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+              if (npcCornersPassable(tx, ty, tx + TILE_SIZE - 1, ty + TILE_SIZE - 1) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
                 e.iceSlide = { targetX: tx, targetY: ty };
               }
             } else if (d.behavior === 'random') {
@@ -7624,10 +7625,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 e.x += e.vx; e.y += e.vy;
               } else {
                 const nrx = e.x + e.vx, nry = e.y + e.vy;
-                const rt1 = getTile(nrx, e.y), rt2 = getTile(nrx + ew - 1, e.y + eh - 1);
-                if (rt1?.info.passable && rt2?.info.passable && nrx >= 0 && nrx <= worldW - ew) e.x = nrx; else e.vx = -e.vx;
-                const rt3 = getTile(e.x, nry), rt4 = getTile(e.x + ew - 1, nry + eh - 1);
-                if (rt3?.info.passable && rt4?.info.passable && nry >= 0 && nry <= worldH - eh) e.y = nry; else e.vy = -e.vy;
+                if (npcCornersPassable(nrx, e.y, nrx + ew - 1, e.y + eh - 1) && nrx >= 0 && nrx <= worldW - ew) e.x = nrx; else e.vx = -e.vx;
+                if (npcCornersPassable(e.x, nry, e.x + ew - 1, nry + eh - 1) && nry >= 0 && nry <= worldH - eh) e.y = nry; else e.vy = -e.vy;
               }
             } else if (d.behavior === 'randomDash') {
               // ランダムダッシュ：短い駆け足（30F）と立ち止まり（60F）を繰り返す
@@ -7639,10 +7638,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 e.x += e.vx; e.y += e.vy;
               } else {
                 const ndx = e.x + e.vx, ndy = e.y + e.vy;
-                const dt1 = getTile(ndx, e.y), dt2 = getTile(ndx + ew - 1, e.y + eh - 1);
-                if (dt1?.info.passable && dt2?.info.passable && ndx >= 0 && ndx <= worldW - ew) e.x = ndx; else e.vx = -e.vx;
-                const dt3 = getTile(e.x, ndy), dt4 = getTile(e.x + ew - 1, ndy + eh - 1);
-                if (dt3?.info.passable && dt4?.info.passable && ndy >= 0 && ndy <= worldH - eh) e.y = ndy; else e.vy = -e.vy;
+                if (npcCornersPassable(ndx, e.y, ndx + ew - 1, e.y + eh - 1) && ndx >= 0 && ndx <= worldW - ew) e.x = ndx; else e.vx = -e.vx;
+                if (npcCornersPassable(e.x, ndy, e.x + ew - 1, ndy + eh - 1) && ndy >= 0 && ndy <= worldH - eh) e.y = ndy; else e.vy = -e.vy;
               }
             } else if (d.behavior === 'chase' || d.behavior === 'flee') {
               const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
@@ -7676,10 +7673,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 // 通常の追尾処理（NPC はタイル衝突チェック付き）
                 const ncx = e.x + (dx / dist) * s, ncy = e.y + (dy / dist) * s;
                 if (d.objType === 'npc') {
-                  const ct1 = getTile(ncx, e.y), ct2 = getTile(ncx + ew - 1, e.y + eh - 1);
-                  if (ct1?.info.passable && ct2?.info.passable && ncx >= 0 && ncx <= worldW - ew) e.x = ncx;
-                  const ct3 = getTile(e.x, ncy), ct4 = getTile(e.x + ew - 1, ncy + eh - 1);
-                  if (ct3?.info.passable && ct4?.info.passable && ncy >= 0 && ncy <= worldH - eh) e.y = ncy;
+                  if (npcCornersPassable(ncx, e.y, ncx + ew - 1, e.y + eh - 1) && ncx >= 0 && ncx <= worldW - ew) e.x = ncx;
+                  if (npcCornersPassable(e.x, ncy, e.x + ew - 1, ncy + eh - 1) && ncy >= 0 && ncy <= worldH - eh) e.y = ncy;
                 } else {
                   e.x += (dx / dist) * s; e.y += (dy / dist) * s;
                 }
@@ -7690,8 +7685,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 e.x += e.vx;
               } else {
                 const nhx = e.x + e.vx;
-                const ht1 = getTile(nhx, e.y), ht2 = getTile(nhx + ew - 1, e.y + eh - 1);
-                if (ht1?.info.passable && ht2?.info.passable && nhx >= 0 && nhx <= worldW - ew) e.x = nhx; else e.vx *= -1;
+                if (npcCornersPassable(nhx, e.y, nhx + ew - 1, e.y + eh - 1) && nhx >= 0 && nhx <= worldW - ew) e.x = nhx; else e.vx *= -1;
               }
               if (e.x < e.homeX - TILE_SIZE * 3 || e.x > e.homeX + TILE_SIZE * 3) e.vx *= -1;
             } else if (d.behavior === 'patrolV') {
@@ -7700,8 +7694,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 e.y += e.vy;
               } else {
                 const nvy = e.y + e.vy;
-                const vt1 = getTile(e.x, nvy), vt2 = getTile(e.x + ew - 1, nvy + eh - 1);
-                if (vt1?.info.passable && vt2?.info.passable && nvy >= 0 && nvy <= worldH - eh) e.y = nvy; else e.vy *= -1;
+                if (npcCornersPassable(e.x, nvy, e.x + ew - 1, nvy + eh - 1) && nvy >= 0 && nvy <= worldH - eh) e.y = nvy; else e.vy *= -1;
               }
               if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
             }
