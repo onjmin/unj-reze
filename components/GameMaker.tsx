@@ -10983,16 +10983,48 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const [showRpgenModal, setShowRpgenModal] = useState(false);
   const [rpgenInputText, setRpgenInputText] = useState('');
+  const rpgenFileInputRef = useRef<HTMLInputElement>(null);
+
+  // For file input: only strip the 'L1' prefix and decompress if present.
+  // We do NOT blindly try decompression on arbitrary text because
+  // LZString.decompressFromEncodedURIComponent can return non-null garbage
+  // for plain RPGEN data.
+  const decodeRpgenFileContent = (raw: string): string => {
+    if (raw.startsWith('L1')) {
+      return LZString.decompressFromEncodedURIComponent(raw.slice(2)) ?? raw;
+    }
+    return raw;
+  };
+
+  const handleRpgenFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const raw = (ev.target?.result as string ?? '').trim();
+      setRpgenInputText(decodeRpgenFileContent(raw));
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const submitRpgenImport = async () => {
     try {
       const raw = rpgenInputText.trim();
       if (!raw) return;
-      // Support both plain text and LZString-compressed strings (prefixed with 'L1').
-      const text = raw.startsWith('L1')
-        ? LZString.decompressFromEncodedURIComponent(raw.replace(/^L1/, '')) ?? raw
-        : raw;
-      const manifest = await parseRpgen(text);
+
+      // Resolve the text to parse, handling three possible formats:
+      //   1. L1-prefixed LZString → strip prefix and decompress.
+      //   2. Plain RPGEN text     → use as-is (fast path).
+      //   3. LZString without L1  → decompression attempted as fallback
+      //                             only when the raw string fails to parse.
+      let textToParse: string;
+      if (raw.startsWith('L1')) {
+        textToParse = LZString.decompressFromEncodedURIComponent(raw.slice(2)) ?? raw;
+      } else {
+        textToParse = raw; // will fall back to decompression inside parseRpgen call below
+      }
+      const manifest = await parseRpgen(textToParse);
 
       // シーンモードで編集中なら、ゲーム全体を作り直すのではなく「今開いているシーン」だけを
       // 上書きする。BGM・イベント（オブジェクト）・マップは丸ごと差し替え、それ以外
@@ -12060,6 +12092,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
                 <div className="bg-gray-900 border border-gray-700 rounded p-4 w-full max-w-lg flex flex-col shadow-2xl">
                   <h3 className="text-sm font-bold text-gray-200 mb-2">RPGEN テキストをインポート</h3>
+                  <input
+                    ref={rpgenFileInputRef}
+                    type="file"
+                    accept=".txt,.rpgen,text/plain"
+                    className="hidden"
+                    onChange={handleRpgenFileInput}
+                  />
+                  <button
+                    onClick={() => rpgenFileInputRef.current?.click()}
+                    className="w-full mb-2 px-3 py-1.5 text-xs text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded transition text-left"
+                  >
+                    📂 ファイルから読み込む (.txt / .rpgen)
+                  </button>
                   <textarea
                     value={rpgenInputText}
                     onChange={(e) => setRpgenInputText(e.target.value)}

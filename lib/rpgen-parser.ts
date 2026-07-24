@@ -4,11 +4,26 @@ import type { EventCommand, EventPage } from '@/components/game-presets/shared';
 import { newObject, TILE_SIZE, chest } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
+import LZString from 'lz-string';
 
 export const MAX_TILE_CONVERSIONS = 500;
 
 export async function parseRpgen(text: string): Promise<GameManifestDraft> {
-  const rpgMap = RPGMap.parse(text);
+  // Try to parse as-is. If that fails and the text looks like it could be
+  // LZString-compressed (no 'L1' prefix — that case is handled by the caller),
+  // attempt decompression and retry once before giving up.
+  let rpgMap: ReturnType<typeof RPGMap.parse>;
+  try {
+    rpgMap = RPGMap.parse(text);
+  } catch (firstErr) {
+    const decompressed = LZString.decompressFromEncodedURIComponent(text);
+    if (decompressed) {
+      rpgMap = RPGMap.parse(decompressed); // throws with a meaningful error if still invalid
+    } else {
+      throw firstErr;
+    }
+  }
+
   console.log(rpgMap)
 
   const idsToTranslate = new Set<number>();
