@@ -56,6 +56,8 @@ export interface EventCondition {
   switch2Id?: number; switch2Value?: boolean;
   itemId?: string; hasItem?: boolean;
   selfSwitchId?: string; selfSwitchValue?: boolean;
+  /** このページを有効にする最低所持金（gold >= minGold）。RPGEN の gold 条件の変換先。 */
+  minGold?: number;
 }
 
 /** イベントコマンド（順次実行）。 */

@@ -4562,7 +4562,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!obj.pages || obj.pages.length === 0) return null;
     const hasConditions = (c?: EventCondition) => {
       if (!c) return false;
-      return c.switchId != null || c.switch2Id != null || c.itemId != null || c.selfSwitchId != null;
+      return c.switchId != null || c.switch2Id != null || c.itemId != null || c.selfSwitchId != null || c.minGold != null;
     };
     for (let i = obj.pages.length - 1; i >= 0; i--) {
       const page = obj.pages[i];
@@ -4570,6 +4570,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (c.switchId != null && (switchValsRef.current[c.switchId] ?? false) !== !!c.switchValue) continue;
       if (c.switch2Id != null && (switchValsRef.current[c.switch2Id] ?? false) !== !!c.switch2Value) continue;
       if (c.itemId != null && (!!inventoryRef.current[c.itemId]) !== !!c.hasItem) continue;
+      if (c.minGold != null && (progressRef.current.gold ?? 0) < c.minGold) continue;
       if (c.selfSwitchId != null) {
         const ss = selfSwitchesRef.current[obj.id]?.[c.selfSwitchId] ?? false;
         if (ss !== !!c.selfSwitchValue) continue;

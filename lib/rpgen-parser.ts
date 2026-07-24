@@ -1,6 +1,6 @@
 import { RPGMap, RawCommand, checkWalkableTile, checkDamageTile, checkTreasureBoxTile, checkTableTile, checkDoorTile } from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
-import type { EventCommand, EventPage } from '@/components/game-presets/shared';
+import type { EventCommand, EventCondition, EventPage } from '@/components/game-presets/shared';
 import { newObject, TILE_SIZE, chest } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
@@ -646,9 +646,14 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
         : (ph.timing === 2 || ph.timing === 'autorun' || ph.trigger === 'autorun')
         ? 'autorun'
         : 'action';
+      // RPGEN のフェーズ発生条件を EventCondition へ変換する。gold（所持金 >= N）は
+      // エンジンの minGold 条件へマッピングする（それ以外の条件は未対応のため無視）。
+      const conditions: EventCondition = {};
+      const goldCond = Number(ph.condition?.gold);
+      if (Number.isFinite(goldCond) && goldCond > 0) conditions.minGold = goldCond;
       pages.push({
         name: `Phase ${idx}`,
-        conditions: {},
+        conditions,
         trigger: trig,
         commands: parsedCommands
       });
