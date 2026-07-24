@@ -22,6 +22,7 @@ import AssetThumb from './AssetThumb';
 import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
 import { parseRpgen } from '@/lib/rpgen-parser';
+import LZString from 'lz-string';
 import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 
 import {
@@ -10985,8 +10986,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const submitRpgenImport = async () => {
     try {
-      const text = rpgenInputText;
-      if (!text.trim()) return;
+      const raw = rpgenInputText.trim();
+      if (!raw) return;
+      // Support both plain text and LZString-compressed strings (prefixed with 'L1').
+      const text = raw.startsWith('L1')
+        ? LZString.decompressFromEncodedURIComponent(raw.replace(/^L1/, '')) ?? raw
+        : raw;
       const manifest = await parseRpgen(text);
 
       // シーンモードで編集中なら、ゲーム全体を作り直すのではなく「今開いているシーン」だけを
