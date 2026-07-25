@@ -24,8 +24,8 @@ importers:
         specifier: 1.0.62
         version: 1.0.62
       '@rpgja/rpgen-map':
-        specifier: 1.0.5
-        version: 1.0.5
+        specifier: 1.1.6
+        version: 1.1.6
       lucide-react:
         specifier: 1.17.0
         version: 1.17.0(react@19.2.4)
@@ -1191,8 +1191,8 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
-  '@rpgja/rpgen-map@1.0.5':
-    resolution: {integrity: sha512-13xeUQ2WgDfxMp9VjjWMPYSxAX9rSvr9tgecGleNvWA7XLcY7H37empZXAEZauIyLtXmCVpg7ZLe9JpVAfLhiw==}
+  '@rpgja/rpgen-map@1.1.6':
+    resolution: {integrity: sha512-KIQSG319zelE4DcFX004LMltkkUDRRLlso0WRMaApFxYF6aUnVnfv2PI/8u/YcWpIuTEJGrDk9Z3uBgKvmPmJA==}
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
@@ -4944,7 +4944,7 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
-  '@rpgja/rpgen-map@1.0.5': {}
+  '@rpgja/rpgen-map@1.1.6': {}
 
   '@rtsao/scc@1.1.0': {}
 

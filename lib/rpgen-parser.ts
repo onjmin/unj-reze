@@ -1,18 +1,191 @@
-import { RPGMap, RawCommand, checkWalkableTile, checkDamageTile, checkTreasureBoxTile, checkTableTile, checkDoorTile } from "@rpgja/rpgen-map";
+import {
+  CommandType,
+  EventTiming,
+  HumanBehavior,
+  RAW_DQ_STILL_SPRITE_SEPARATOR,
+  RAW_TILE_COLLISION_SUFFIX,
+  RPGMap,
+  RawCommand,
+  RawSpritePrefix,
+  SpriteType,
+  checkDamageTile,
+  checkDoorTile,
+  checkTableTile,
+  checkTreasureBoxTile,
+  checkWalkableTile,
+  tileOfEvent,
+  tileOfLook,
+  tileOfTeleport,
+  tilesLogicalName,
+  type Command,
+  type RawTile,
+} from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
-import type { EventCommand, EventCondition, EventPage } from '@/components/game-presets/shared';
-import { newObject, TILE_SIZE, chest } from '@/components/game-presets/shared';
+import type { EventCommand, EventCondition, EventPage, NpcBehavior } from '@/components/game-presets/shared';
+import { newObject, TILE_SIZE, chest, localSysTileUrl } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 import LZString from 'lz-string';
 
 export const MAX_TILE_CONVERSIONS = 500;
 
+const ORIGIN = 'https://rpgen-search.pages.dev';
+const SPRITE_BASE = `${ORIGIN}/data/images/sprites`;
+const SANIM_BASE = `${ORIGIN}/data/images/sAnims`;
+const SOUND_BASE = `${ORIGIN}/data/audio/sound`;
+const BGM_BASE = `${ORIGIN}/data/audio/bgm`;
+/** リポジトリ同梱の RPGEN 標準マップチップ（16pxグリッド） */
+const RPGEN_CHIP_URL = '/assets/rpgen/map.png';
+const RPGEN_CHIP_SIZE = 16;
+
+/** RPGEN の人物の動き方 → エンジンの NPC ビヘイビア。 */
+const NPC_BEHAVIOR_BY_HUMAN_BEHAVIOR: Record<HumanBehavior, NpcBehavior> = {
+  [HumanBehavior.Still]: 'still',
+  [HumanBehavior.RandomMove]: 'random',
+  // 方向転換するだけでマスは移動しないため静止扱い
+  [HumanBehavior.RandomDirection]: 'still',
+  [HumanBehavior.RandomMoveHorizontal]: 'patrolH',
+  [HumanBehavior.RandomMoveVertical]: 'patrolV',
+  [HumanBehavior.GoNear]: 'chase',
+  [HumanBehavior.RunAway]: 'flee',
+};
+
+/** 標準素材の「動く床」→ エンジンの強制スライド床。 */
+const ICE_SPECIAL_BY_TILE: Record<string, string> = {
+  '16_13': 'ice-up',
+  '17_13': 'ice-right',
+  '16_14': 'ice-left',
+  '17_14': 'ice-down',
+};
+
+const ANIMATION_SPRITE_PREFIX = RawSpritePrefix[SpriteType.CustomAnimationSprite];
+
+type ImageFrame = { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number };
+/** 素材ID・ファイル名・URL のいずれかを実URLへ解決する。 */
+type ResolveUrl = (raw: string) => string;
+
+/** 独自素材タイル（"123" / "123C"）の素材ID。標準素材（"12_3"）なら undefined。 */
+const customTileId = (rawTile: string): number | undefined => {
+  if (rawTile.includes(RAW_DQ_STILL_SPRITE_SEPARATOR)) return undefined;
+  const id = Number(rawTile.replaceAll(RAW_TILE_COLLISION_SUFFIX, ''));
+  return Number.isFinite(id) ? id : undefined;
+};
+
+/** コマンドの n パラメータ（"A123"=歩行グラ / "123"=静止スプライト）。 */
+const parseSpriteParam = (raw: string | undefined): { id: number; animated: boolean } | undefined => {
+  if (!raw) return undefined;
+  const animated = raw.startsWith(ANIMATION_SPRITE_PREFIX);
+  const id = Number(animated ? raw.slice(ANIMATION_SPRITE_PREFIX.length) : raw);
+  return Number.isFinite(id) ? { id, animated } : undefined;
+};
+
+/** #DW_IMG/#DW_IMA/#DW_FL の u 系パラメータのうち、素材IDで指定されたもの。 */
+const spriteIdsInImageParams = (params: Record<string, string>): number[] => {
+  const ids: number[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    if (key[0] !== 'u') continue;
+    if (!/^\d+$/.test(value)) continue;
+    ids.push(Number(value));
+  }
+  return ids;
+};
+
+const parseParamsBody = (body: string): Record<string, string> => {
+  const params: Record<string, string> = {};
+  for (const pair of body.trim().split(',')) {
+    const idx = pair.indexOf(':');
+    if (idx >= 0) params[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
+  }
+  return params;
+};
+
+/** #MSG 本文に "#DW_IMA\nu:…,x:…," のようなコマンドが直接書かれている場合に分解する。 */
+const parseEmbeddedCommand = (text: string): { name: string; params: Record<string, string> } | null => {
+  const matched = text.match(/^#([A-Z_]+)[ \t]*(?:\r?\n([\s\S]*))?$/);
+  if (!matched) return null;
+  return { name: matched[1], params: parseParamsBody(matched[2] ?? '') };
+};
+
+/** 選択肢の分岐の中まで再帰的に全コマンドを走査する。 */
+const forEachCommand = (commands: Command[], visit: (cmd: Command) => void): void => {
+  for (const cmd of commands) {
+    visit(cmd);
+    if (cmd.type === CommandType.Select) {
+      for (const choice of cmd.choices) forEachCommand(choice.sequence, visit);
+    }
+  }
+};
+
+/** d（方角）と v（マス数）から移動量を求める。0-3=上右下左、4-7=斜め。 */
+const directionDelta = (dRaw: string | undefined, vRaw: string | undefined): { dx: number; dy: number } => {
+  const v = parseInt(vRaw || '1');
+  const named: Record<string, number> = { up: 0, right: 1, down: 2, left: 3 };
+  const d = named[dRaw ?? ''] ?? parseInt(dRaw || '0');
+  switch (d) {
+    case 0: return { dx: 0, dy: -v };
+    case 1: return { dx: v, dy: 0 };
+    case 2: return { dx: 0, dy: v };
+    case 3: return { dx: -v, dy: 0 };
+    case 4: return { dx: v, dy: -v };
+    case 5: return { dx: v, dy: v };
+    case 6: return { dx: -v, dy: v };
+    case 7: return { dx: -v, dy: -v };
+    default: return { dx: 0, dy: 0 };
+  }
+};
+
+const buildFrames = (params: Record<string, string>, resolveUrl: ResolveUrl): ImageFrame[] => {
+  const frames: ImageFrame[] = [];
+  for (let i = 1; i <= 30; i++) {
+    const sfx = i === 1 ? '' : String(i);
+    const hasAnyParam = ['u', 'sx', 'sy', 'sw', 'sh', 'ox', 'oy', 'r', 'a'].some(k => params[`${k}${sfx}`] !== undefined);
+    if (!hasAnyParam) break;
+    const prevFrame = i > 1 ? frames[frames.length - 1] : null;
+    const u = params[`u${sfx}`];
+    frames.push({
+      url: u ? resolveUrl(u) : (prevFrame ? prevFrame.url : ''),
+      sx: parseInt(params[`sx${sfx}`] || '0'),
+      sy: parseInt(params[`sy${sfx}`] || '0'),
+      sw: parseInt(params[`sw${sfx}`] || '100'),
+      sh: parseInt(params[`sh${sfx}`] || '100'),
+      ox: parseInt(params[`ox${sfx}`] || '0'),
+      oy: parseInt(params[`oy${sfx}`] || '0'),
+      r: parseInt(params[`r${sfx}`] || '0'),
+      a: parseInt(params[`a${sfx}`] || (i === 1 ? '100' : (prevFrame ? String(prevFrame.a) : '100'))),
+    });
+  }
+  return frames;
+};
+
+const showImageCommand = (params: Record<string, string>, resolveUrl: ResolveUrl): EventCommand => {
+  const frames = buildFrames(params, resolveUrl);
+  return {
+    type: 'showImage',
+    imgId: params.i || '1',
+    url: frames.length > 0 ? frames[0].url : '',
+    x: parseInt(params.x || '0'),
+    y: parseInt(params.y || '0'),
+    w: parseInt(params.w || '0'),
+    h: parseInt(params.h || '0'),
+    opacity: parseInt(params.a || '100'),
+    isPercent: params.xp !== '1',
+    m: params.m === '1',
+    c: params.c === '1',
+    sxp: params.sxp === '1',
+    swp: params.swp === '1',
+    xp: params.xp === '1',
+    wp: params.wp === '1',
+    lp: params.lp === '1',
+    ms: parseInt(params.ms || '100'),
+    frames,
+  };
+};
+
 export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   // Try to parse as-is. If that fails and the text looks like it could be
   // LZString-compressed (no 'L1' prefix — that case is handled by the caller),
   // attempt decompression and retry once before giving up.
-  let rpgMap: ReturnType<typeof RPGMap.parse>;
+  let rpgMap: RPGMap;
   try {
     rpgMap = RPGMap.parse(text);
   } catch (firstErr) {
@@ -24,9 +197,47 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     }
   }
 
-  console.log(rpgMap)
+  // ── 解析結果のキャッシュ ────────────────────────────────────────────────
+  // 素材IDの収集とコマンド変換で同じ解析結果を使い回す。
+  const scriptCache = new Map<string, Command[]>();
+  /** RPGENのメッセージ本文をコマンド列として解釈する（コマンドで始まらなければ空配列）。 */
+  const parseScript = (message: string): Command[] => {
+    const cached = scriptCache.get(message);
+    if (cached) return cached;
+    let parsed: Command[] = [];
+    if (/^\s*#[A-Z_]+/.test(message)) {
+      try {
+        parsed = RawCommand.parseSequence(message).map((c) => c.parse());
+      } catch {
+        parsed = [];
+      }
+    }
+    scriptCache.set(message, parsed);
+    return parsed;
+  };
 
+  const phaseCache = new Map<RawCommand[], Command[]>();
+  /** #PH<N> のコマンド列を parse する（壊れたコマンドは読み飛ばす）。 */
+  const parsePhase = (sequence: RawCommand[]): Command[] => {
+    const cached = phaseCache.get(sequence);
+    if (cached) return cached;
+    const parsed: Command[] = [];
+    for (const raw of sequence) {
+      try {
+        parsed.push(raw.parse());
+      } catch {
+        // 壊れたコマンドは読み飛ばす
+      }
+    }
+    phaseCache.set(sequence, parsed);
+    return parsed;
+  };
+
+  // ── 素材ID・スイッチIDの収集 ────────────────────────────────────────────
+  // RPGEN の素材は連番IDで参照されるが、画像の実URLはハッシュ化されたIDになる。
+  // 変換に必要なIDをマップ全体から先に集め、まとめて encode API に問い合わせる。
   const idsToTranslate = new Set<number>();
+  const switchIds = new Set<number>();
 
   const floorSize = rpgMap.floor.getSize();
   const objSize = rpgMap.objects.getSize();
@@ -35,58 +246,67 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      const ft = rpgMap.floor.getRaw(x, y);
-      if (ft) {
-        const tk = String(ft);
-        if (!tk.includes('_')) {
-          const idNum = Number(tk.replace('C', ''));
-          if (!isNaN(idNum)) idsToTranslate.add(idNum);
-        }
-      }
-      const ot = rpgMap.objects.getRaw(x, y);
-      if (ot) {
-        const tk = String(ot);
-        if (!tk.includes('_')) {
-          const idNum = Number(tk.replace('C', ''));
-          if (!isNaN(idNum)) idsToTranslate.add(idNum);
-        }
+      for (const raw of [rpgMap.floor.getRaw(x, y), rpgMap.objects.getRaw(x, y)]) {
+        if (!raw) continue;
+        const id = customTileId(raw);
+        if (id !== undefined) idsToTranslate.add(id);
       }
     }
   }
 
   for (const human of rpgMap.humans) {
-    if (human.sprite.type === 2 || human.sprite.type === 3) {
-      const idNum = Number((human.sprite as any).id);
-      if (!isNaN(idNum)) idsToTranslate.add(idNum);
+    if (human.sprite.type === SpriteType.CustomStillSprite || human.sprite.type === SpriteType.CustomAnimationSprite) {
+      if (Number.isFinite(human.sprite.id)) idsToTranslate.add(human.sprite.id);
     }
   }
 
-  for (const ep of rpgMap.eventPoints) {
-    ep.phases.forEach((ph: any) => {
-      if (ph && ph.sequence) {
-        const scanCommand = (cmd: any) => {
-          if (cmd.type === 'CH_SP' && cmd.params?.n) {
-            const nStr = String(cmd.params.n);
-            const idNum = Number(nStr.replace('A', ''));
-            if (!isNaN(idNum)) idsToTranslate.add(idNum);
-          }
-          if (cmd.choices) {
-            for (const seq of cmd.choices.values()) {
-              seq.forEach(scanCommand);
-            }
-          }
-        };
-        ph.sequence.forEach((c: any) => {
-          let cmd;
-          try { cmd = c.parse(); } catch { return; }
-          scanCommand(cmd);
-        });
+  const collectFromCommand = (cmd: Command): void => {
+    switch (cmd.type) {
+      case CommandType.ChangeObjectSprite:
+      case CommandType.ChangeHumanSprite: {
+        const spec = parseSpriteParam(cmd.params.n);
+        if (spec) idsToTranslate.add(spec.id);
+        break;
       }
-    });
+      case CommandType.DrawImage:
+      case CommandType.DrawAnimation:
+      case CommandType.DrawFollowImage: {
+        for (const id of spriteIdsInImageParams(cmd.params)) idsToTranslate.add(id);
+        break;
+      }
+      case CommandType.PlaySound: {
+        const id = Number(cmd.params.i);
+        if (cmd.params.i !== undefined && Number.isFinite(id)) idsToTranslate.add(id);
+        break;
+      }
+      case CommandType.OnSwitch:
+      case CommandType.OffSwitch: {
+        const id = Number(cmd.params.n);
+        if (Number.isFinite(id)) switchIds.add(id);
+        break;
+      }
+      case CommandType.Message: {
+        // #MSG の本文にコマンドが直書きされている場合（#DW_IMA 等）も対象にする
+        const embedded = parseEmbeddedCommand(cmd.content);
+        if (embedded) for (const id of spriteIdsInImageParams(embedded.params)) idsToTranslate.add(id);
+        break;
+      }
+    }
+  };
+  const collectFrom = (commands: Command[]) => forEachCommand(commands, collectFromCommand);
+
+  for (const human of rpgMap.humans) collectFrom(parseScript(human.message ?? ''));
+  for (const tbox of rpgMap.treasureBoxPoints) collectFrom(parseScript(tbox.message ?? ''));
+  for (const spoint of rpgMap.lookPoints) collectFrom(parseScript(spoint.message ?? ''));
+  for (const ep of rpgMap.eventPoints) {
+    for (const phase of ep.phases) {
+      collectFrom(parsePhase(phase.sequence));
+      const sw = 'condition' in phase ? phase.condition.switch : undefined;
+      if (sw !== undefined && Number.isFinite(sw)) switchIds.add(sw);
+    }
   }
 
-const ORIGIN = 'https://rpgen-search.pages.dev';
-const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
+  const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
 
   const uniqueIds = Array.from(idsToTranslate);
   const idToHash = new Map<number, string>();
@@ -113,6 +333,29 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     }
   }
 
+  const spriteUrlOf = (id: number): string => {
+    const hash = idToHash.get(id);
+    return hash ? `${SPRITE_BASE}/${hash}.png` : '';
+  };
+  const sAnimUrlOf = (id: number): string => {
+    const hash = idToHash.get(id);
+    return hash ? `${SANIM_BASE}/${hash}.png` : '';
+  };
+  /** 素材ID / imgur のファイル名 / 直リンクURL のいずれかを実URLへ解決する。 */
+  const resolveUrl: ResolveUrl = (raw) => {
+    if (!raw) return '';
+    if (raw.startsWith('http')) return raw;
+    if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(raw)) return `https://i.imgur.com/${raw}`;
+    return spriteUrlOf(parseInt(raw));
+  };
+  /** 素材IDで指定された効果音を直リンクmp3へ解決する。 */
+  const resolveSoundUrl = (raw: string | undefined): string => {
+    if (!raw) return '';
+    if (raw.startsWith('http')) return raw;
+    const hash = /^\d+$/.test(raw) ? idToHash.get(Number(raw)) : raw;
+    return hash ? `${SOUND_BASE}/${hash}.mp3` : '';
+  };
+
   const draft: GameManifestDraft = {
     engine: 'rpg',
     preset: 'onjReze',
@@ -132,17 +375,18 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     overheadMap: [],
     objects: [],
     bgm: rpgMap.bgmUrl
-      ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : rpgMap.bgmUrl.startsWith('http') || rpgMap.bgmUrl.startsWith('/') ? `direct:${rpgMap.bgmUrl}` : `direct:https://rpgen-search.pages.dev/data/audio/bgm/${rpgMap.bgmUrl}`)
+      ? (/(?:youtube\.com|youtu\.be)/i.test(rpgMap.bgmUrl) ? youtubeRefFromUrl(rpgMap.bgmUrl) : rpgMap.bgmUrl.startsWith('http') || rpgMap.bgmUrl.startsWith('/') ? `direct:${rpgMap.bgmUrl}` : `direct:${BGM_BASE}/${rpgMap.bgmUrl}`)
       : '',
     mapBgRef: 'tile:#000000',
     sfx: {},
-    switches: [],
+    // RPGEN のスイッチは番号のみで名前を持たないため、使われている番号だけを登録する
+    switches: Array.from(switchIds).sort((a, b) => a - b).map(id => ({ id, name: `スイッチ${id}` })),
   };
 
   const tileIndexMap = new Map<string, number>();
   let nextTileIdx = 1;
 
-  const parseTile = (rawVal: any): number => {
+  const parseTile = (rawVal: RawTile | undefined): number => {
     if (!rawVal) return 0;
     const tk = String(rawVal);
     if (!tileIndexMap.has(tk)) {
@@ -150,30 +394,30 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
         throw new Error(`タイル変換数が上限（${MAX_TILE_CONVERSIONS}種類）を超えています。インポートを中断します。`);
       }
       let imageUrl: string | undefined = undefined;
-      let passable = !tk.includes('C');
-      let special: string | undefined = undefined;
-      const tkBase = tk.replace('C', '');
-      if (tkBase === '16_13') special = 'ice-up';
-      else if (tkBase === '17_13') special = 'ice-right';
-      else if (tkBase === '16_14') special = 'ice-left';
-      else if (tkBase === '17_14') special = 'ice-down';
-      else if (checkDoorTile(tkBase)) special = 'door';
-      else if (checkTableTile(tkBase)) special = 'table';
-      else if (checkTreasureBoxTile(tkBase)) special = 'treasure';
-      else if (checkDamageTile(tkBase)) special = 'damage';
+      let passable = !tk.includes(RAW_TILE_COLLISION_SUFFIX);
+      let name = tk;
+      const tkBase = tk.replaceAll(RAW_TILE_COLLISION_SUFFIX, '');
+      let special: string | undefined = ICE_SPECIAL_BY_TILE[tkBase];
+      if (special === undefined) {
+        if (checkDoorTile(tkBase)) special = 'door';
+        else if (checkTableTile(tkBase)) special = 'table';
+        else if (checkTreasureBoxTile(tkBase)) special = 'treasure';
+        else if (checkDamageTile(tkBase)) special = 'damage';
+      }
 
-      if (tk.includes('_')) {
-        const [cStr, rStr] = tk.split('_');
-        imageUrl = `/assets/rpgen/map.png#${parseInt(cStr, 10) * 16},${parseInt(rStr, 10) * 16},16,16`;
-        // map.png タイルは checkWalkableTile の判定を C フラグより優先する
+      if (tk.includes(RAW_DQ_STILL_SPRITE_SEPARATOR)) {
+        const [cStr, rStr] = tk.split(RAW_DQ_STILL_SPRITE_SEPARATOR);
+        imageUrl = `${RPGEN_CHIP_URL}#${parseInt(cStr, 10) * RPGEN_CHIP_SIZE},${parseInt(rStr, 10) * RPGEN_CHIP_SIZE},${RPGEN_CHIP_SIZE},${RPGEN_CHIP_SIZE}`;
+        // 標準素材は checkWalkableTile の判定を C フラグより優先する
         passable = checkWalkableTile(tkBase);
+        // エディタのタイル一覧で識別できるよう、生の値ではなく論理名を使う
+        name = (tilesLogicalName as Record<string, string | undefined>)[tkBase] ?? tk;
       } else {
-        const id = Number(tk.replace('C', ''));
-        const hash = idToHash.get(id);
-        if (hash) imageUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
+        const id = customTileId(tk);
+        if (id !== undefined) imageUrl = spriteUrlOf(id) || undefined;
       }
       tileIndexMap.set(tk, nextTileIdx);
-      draft.tiles[nextTileIdx] = { name: tk, color: '#333333', passable, imageUrl, special };
+      draft.tiles[nextTileIdx] = { name, color: '#333333', passable, imageUrl, special };
       nextTileIdx++;
     }
     return tileIndexMap.get(tk)!;
@@ -193,280 +437,98 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     draft.overheadMap!.push(rowOverhead);
   }
 
-  const translateRpgenCommand = (rawCmd: any): EventCommand | null => {
-    let cmd = rawCmd;
-    if (typeof rawCmd.parse === 'function') {
-      try {
-        cmd = rawCmd.parse();
-      } catch {
-        return null;
-      }
+  /** #CH_SP / #CH_HM の n パラメータから見た目の差し替え内容を作る。 */
+  const spriteChangeOf = (n: string | undefined): { spriteRef: string; spriteUrl: string } => {
+    const spec = parseSpriteParam(n);
+    if (!spec) return { spriteRef: '', spriteUrl: '' };
+    if (spec.animated) {
+      const url = sAnimUrlOf(spec.id);
+      return { spriteRef: url ? `walk:auto:u:${url}` : '', spriteUrl: '' };
     }
-    
+    return { spriteRef: '', spriteUrl: spriteUrlOf(spec.id) };
+  };
+
+  const npcObjId = (x: string | undefined, y: string | undefined): string =>
+    (x !== undefined && y !== undefined) ? `obj-human-${x}-${y}` : '';
+
+  const translateRpgenCommand = (cmd: Command): EventCommand | null => {
     switch (cmd.type) {
-      case 'MSG': {
+      case CommandType.Message: {
         const text = cmd.content || '';
-        if (text.startsWith('#DW_IMA') || text.startsWith('#DW_IMG')) {
-          const lines = text.split('\n');
-          const paramsStr = lines.slice(1).join('\n').trim();
-          const params: Record<string, string> = {};
-          paramsStr.split(',').forEach((pair: string) => {
-            const idx = pair.indexOf(':');
-            if (idx >= 0) params[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
-          });
-          
-          const resolveUrl = (u: string) => {
-            if (!u) return '';
-            if (u.startsWith('http')) return u;
-            if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
-            const hash = idToHash.get(parseInt(u));
-            return hash ? `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png` : '';
-          };
-
-          const frames: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[] = [];
-          for (let i = 1; i <= 30; i++) {
-            const sfx = i === 1 ? '' : String(i);
-            const hasAnyParam = ['u', 'sx', 'sy', 'sw', 'sh', 'ox', 'oy', 'r', 'a'].some(k => params[`${k}${sfx}`] !== undefined);
-            if (!hasAnyParam) break;
-            const prevFrame = i > 1 ? frames[frames.length - 1] : null;
-            const u = params[`u${sfx}`];
-            frames.push({
-              url: u ? resolveUrl(u) : (prevFrame ? prevFrame.url : ''),
-              sx: parseInt(params[`sx${sfx}`] || '0'),
-              sy: parseInt(params[`sy${sfx}`] || '0'),
-              sw: parseInt(params[`sw${sfx}`] || '100'),
-              sh: parseInt(params[`sh${sfx}`] || '100'),
-              ox: parseInt(params[`ox${sfx}`] || '0'),
-              oy: parseInt(params[`oy${sfx}`] || '0'),
-              r: parseInt(params[`r${sfx}`] || '0'),
-              a: parseInt(params[`a${sfx}`] || (i === 1 ? '100' : (prevFrame ? String(prevFrame.a) : '100')))
-            });
-          }
-
-          return {
-            type: 'showImage',
-            imgId: params.i || '1',
-            url: frames.length > 0 ? frames[0].url : '',
-            x: parseInt(params.x || '0'),
-            y: parseInt(params.y || '0'),
-            w: parseInt(params.w || '0'),
-            h: parseInt(params.h || '0'),
-            opacity: parseInt(params.a || '100'),
-            isPercent: params.xp !== '1',
-            m: params.m === '1',
-            c: params.c === '1',
-            sxp: params.sxp === '1',
-            swp: params.swp === '1',
-            xp: params.xp === '1',
-            wp: params.wp === '1',
-            lp: params.lp === '1',
-            ms: parseInt(params.ms || '100'),
-            frames
-          };
-        }
-        if (text.startsWith('#ST_IMA') || text.startsWith('#ST_IMG')) {
-          const lines = text.split('\n');
-          const paramsStr = lines.slice(1).join('\n').trim();
-          const params: Record<string, string> = {};
-          paramsStr.split(',').forEach((pair: string) => {
-            const idx = pair.indexOf(':');
-            if (idx >= 0) params[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
-          });
-          return { type: 'hideImage', imgId: params.i || '1' };
-        }
-        if (text.startsWith('#ED')) {
-          // Backward compatibility if some #ED are still left as MSG
-          return null;
+        const embedded = parseEmbeddedCommand(text);
+        switch (embedded?.name) {
+          case CommandType.DrawAnimation:
+          case CommandType.DrawImage:
+            return showImageCommand(embedded.params, resolveUrl);
+          case CommandType.StopAnimation:
+          case CommandType.StopImage:
+            return { type: 'hideImage', imgId: embedded.params.i || '1' };
+          case 'ED':
+            // 一部の #ED が MSG として残っている場合の後方互換
+            return null;
         }
         return { type: 'message', text };
       }
-      case 'SEL': {
-        // RawCommand.parse() は choices/clearMessage しか返さず、元の x/y パラメータの有無は
-        // 捨てられてしまう。x/y省略時のランダム判定に必要なので、toString() で元テキストへ
-        // 戻し、先頭行（パラメータ行）に x:/y: が含まれるかを直接見る。
-        const rawText = typeof rawCmd.toString === 'function' ? String(rawCmd.toString()) : '';
-        const paramsLine = rawText.match(/^#SEL\d*[ \t]*(.*?)\r?\n/)?.[1] ?? '';
-        const hasXY = /(?:^|,)\s*x:/.test(paramsLine) && /(?:^|,)\s*y:/.test(paramsLine);
-
+      case CommandType.Select: {
         const choiceNode: EventCommand = {
           type: 'choice', text: '', choices: [],
-          random: !hasXY,
-          // ライブラリの clearMessage は params.c === '1' そのもの。RPGENの実際の挙動は
+          // x/y の指定がない #SEL はランダムな位置に出るため、選択肢UIを出さずランダムに1つ実行する
+          random: cmd.displayPosition === undefined,
+          // ライブラリの clearMessage は c フラグそのもの。RPGENの実際の挙動は
           // c:1で直前のメッセージウィンドウを表示したままにする、というものなのでそのまま使う。
           keepMessage: cmd.clearMessage === true,
         };
-        if (cmd.choices) {
-          for (const [label, sequence] of cmd.choices.entries()) {
-            choiceNode.choices.push({
-              label,
-              commands: sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[]
-            });
-          }
+        for (const choice of cmd.choices) {
+          choiceNode.choices.push({
+            label: choice.label,
+            commands: choice.sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[],
+          });
         }
         return choiceNode;
       }
-      case 'WAIT': return { type: 'wait', frames: Math.floor((cmd.delay || 1000) / 16) };
-      case 'CH_SP': {
-        const nStr = String(cmd.params?.n || '');
-        let spriteUrl = '';
-        let spriteRef = '';
-        if (nStr) {
-          const idNum = Number(nStr.replace('A', ''));
-          const hash = idToHash.get(idNum);
-          if (hash) {
-            if (nStr.includes('A')) {
-              spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/${hash}.png`;
-            } else {
-              spriteUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
-            }
-          }
-        }
-        const targetObjId = (cmd.params?.tx !== undefined && cmd.params?.ty !== undefined) ? `obj-human-${cmd.params.tx}-${cmd.params.ty}` : '';
-        return { type: 'changeSprite', spriteRef, spriteUrl, objId: targetObjId };
+      case CommandType.Wait: return { type: 'wait', frames: Math.floor((cmd.delay || 1000) / 16) };
+      case CommandType.ChangeObjectSprite: {
+        const { spriteRef, spriteUrl } = spriteChangeOf(cmd.params.n);
+        return { type: 'changeSprite', spriteRef, spriteUrl, objId: npcObjId(cmd.params.tx, cmd.params.ty) };
       }
-      case 'CH_HM': {
-        const nStr = String(cmd.params?.n || '');
-        let spriteUrl = '';
-        let spriteRef = '';
-        if (nStr) {
-          const idNum = Number(nStr.replace('A', ''));
-          const hash = idToHash.get(idNum);
-          if (hash) {
-            if (nStr.includes('A')) {
-              spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/${hash}.png`;
-            } else {
-              spriteUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
-            }
-          }
-        }
-        const isPlayer = cmd.params?.i === '0';
-        const targetObjId = isPlayer ? 'player' : (cmd.params?.tx !== undefined && cmd.params?.ty !== undefined ? `obj-human-${cmd.params.tx}-${cmd.params.ty}` : 'player');
-        return { type: 'changeSprite', spriteRef, spriteUrl, objId: targetObjId };
+      case CommandType.ChangeHumanSprite: {
+        const { spriteRef, spriteUrl } = spriteChangeOf(cmd.params.n);
+        // i:0 は主人公、それ以外は tx/ty の位置にいるNPC
+        const objId = cmd.params.i === '0' ? 'player' : (npcObjId(cmd.params.tx, cmd.params.ty) || 'player');
+        return { type: 'changeSprite', spriteRef, spriteUrl, objId };
       }
-      case 'MV_PD': {
-        const dVal = cmd.params?.d;
-        const d = parseInt(dVal || '0');
-        const v = parseInt(cmd.params?.v || '1');
-        let dx = 0, dy = 0;
-        if (d === 0 || dVal === 'up') { dx = 0; dy = -v; }
-        else if (d === 1 || dVal === 'right') { dx = v; dy = 0; }
-        else if (d === 2 || dVal === 'down') { dx = 0; dy = v; }
-        else if (d === 3 || dVal === 'left') { dx = -v; dy = 0; }
-        else if (d === 4) { dx = v; dy = -v; }
-        else if (d === 5) { dx = v; dy = v; }
-        else if (d === 6) { dx = -v; dy = v; }
-        else if (d === 7) { dx = -v; dy = -v; }
-        return { type: 'moveNpc', objId: 'player', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      case CommandType.MovePartyDirection: {
+        const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
+        return { type: 'moveNpc', objId: 'player', dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '0') };
       }
-      case 'MV_PA': return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
-      case 'MV_PR': {
-        const dx = parseInt(cmd.params?.tx || '0');
-        const dy = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveNpc', objId: 'player', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
+      case CommandType.MovePartyAbsolute:
+        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+      case CommandType.MovePartyRelative:
+        return { type: 'moveNpc', objId: 'player', dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+      case CommandType.MoveNpcDirection: {
+        const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
+        return { type: 'moveNpc', objId: `obj-human-${parseInt(cmd.params.nx || '0')}-${parseInt(cmd.params.ny || '0')}`, dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '0') };
       }
-      case 'MV_ND': {
-        const nx = parseInt(cmd.params?.nx || '0');
-        const ny = parseInt(cmd.params?.ny || '0');
-        const dVal = cmd.params?.d;
-        const d = parseInt(dVal || '0');
-        const v = parseInt(cmd.params?.v || '1');
-        let dx = 0, dy = 0;
-        if (d === 0 || dVal === 'up') { dx = 0; dy = -v; }
-        else if (d === 1 || dVal === 'right') { dx = v; dy = 0; }
-        else if (d === 2 || dVal === 'down') { dx = 0; dy = v; }
-        else if (d === 3 || dVal === 'left') { dx = -v; dy = 0; }
-        else if (d === 4) { dx = v; dy = -v; }
-        else if (d === 5) { dx = v; dy = v; }
-        else if (d === 6) { dx = -v; dy = v; }
-        else if (d === 7) { dx = -v; dy = -v; }
-        return { type: 'moveNpc', objId: `obj-human-${nx}-${ny}`, dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
-      }
-      case 'MV_NA': {
-        const nx = parseInt(cmd.params?.nx || '0');
-        const ny = parseInt(cmd.params?.ny || '0');
-        return { type: 'moveNpc', objId: `obj-human-${nx}-${ny}`, tx: parseInt(cmd.params?.tx || '0'), ty: parseInt(cmd.params?.ty || '0'), duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
-      }
-      case 'MV_NR': {
-        const nx = parseInt(cmd.params?.nx || '0');
-        const ny = parseInt(cmd.params?.ny || '0');
-        const dx = parseInt(cmd.params?.tx || '0');
-        const dy = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveNpc', objId: `obj-human-${nx}-${ny}`, dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '0') };
-      }
-      case 'PL_GLD': return { type: 'changeGold', amount: parseInt(cmd.params?.v || '0') };
-      case 'MI_GLD': return { type: 'changeGold', amount: -parseInt(cmd.params?.v || '0') };
-      case 'SET_GLD': return { type: 'changeGold', amount: parseInt(cmd.params?.v || '0') };
-      case 'DW_IMA':
-      case 'DW_IMG': {
-        const params = cmd.params || {};
-        const resolveUrl = (u: string) => {
-          if (!u) return '';
-          if (u.startsWith('http')) return u;
-          if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
-          const hash = idToHash.get(parseInt(u));
-          return hash ? `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png` : '';
-        };
-
-        const frames: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[] = [];
-        for (let i = 1; i <= 30; i++) {
-          const sfx = i === 1 ? '' : String(i);
-          const hasAnyParam = ['u', 'sx', 'sy', 'sw', 'sh', 'ox', 'oy', 'r', 'a'].some(k => params[`${k}${sfx}`] !== undefined);
-          if (!hasAnyParam) break;
-          const prevFrame = i > 1 ? frames[frames.length - 1] : null;
-          const u = params[`u${sfx}`];
-          frames.push({
-            url: u ? resolveUrl(u) : (prevFrame ? prevFrame.url : ''),
-            sx: parseInt(params[`sx${sfx}`] || '0'),
-            sy: parseInt(params[`sy${sfx}`] || '0'),
-            sw: parseInt(params[`sw${sfx}`] || '100'),
-            sh: parseInt(params[`sh${sfx}`] || '100'),
-            ox: parseInt(params[`ox${sfx}`] || '0'),
-            oy: parseInt(params[`oy${sfx}`] || '0'),
-            r: parseInt(params[`r${sfx}`] || '0'),
-            a: parseInt(params[`a${sfx}`] || (i === 1 ? '100' : (prevFrame ? String(prevFrame.a) : '100')))
-          });
-        }
-
-        return { 
-          type: 'showImage', 
-          imgId: params.i || '1', 
-          url: frames.length > 0 ? frames[0].url : '', 
-          x: parseInt(params.x || '0'), 
-          y: parseInt(params.y || '0'), 
-          w: parseInt(params.w || '0'), 
-          h: parseInt(params.h || '0'), 
-          opacity: parseInt(params.a || '100'), 
-          isPercent: params.xp !== '1',
-          m: params.m === '1',
-          c: params.c === '1',
-          sxp: params.sxp === '1',
-          swp: params.swp === '1',
-          xp: params.xp === '1',
-          wp: params.wp === '1',
-          lp: params.lp === '1',
-          ms: parseInt(params.ms || '100'),
-          frames
-        };
-      }
-      case 'ST_IMA':
-      case 'ST_IMG': return { type: 'hideImage', imgId: cmd.params?.i || '1' };
-      case 'DW_FL': {
-        const params = cmd.params || {};
-        const targetObjId = (params.nx !== undefined && params.ny !== undefined) ? `obj-human-${params.nx}-${params.ny}` : 'player';
-        
-        const resolveUrl = (u: string) => {
-          if (!u) return '';
-          if (u.startsWith('http')) return u;
-          if (/^[A-Za-z0-9]+\.(png|jpg|jpeg|gif)$/i.test(u)) return `https://i.imgur.com/${u}`;
-          const hash = idToHash.get(parseInt(u));
-          return hash ? `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png` : '';
-        };
-
-        const dirs: Record<'U' | 'D' | 'L' | 'R', any> = { U: undefined, D: undefined, L: undefined, R: undefined };
-        ['U', 'D', 'L', 'R'].forEach(dir => {
+      case CommandType.MoveNpcAbsolute:
+        return { type: 'moveNpc', objId: `obj-human-${parseInt(cmd.params.nx || '0')}-${parseInt(cmd.params.ny || '0')}`, tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+      case CommandType.MoveNpcRelative:
+        return { type: 'moveNpc', objId: `obj-human-${parseInt(cmd.params.nx || '0')}-${parseInt(cmd.params.ny || '0')}`, dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+      case CommandType.PlusGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
+      case CommandType.MinusGold: return { type: 'changeGold', amount: -parseInt(cmd.params.v || '0') };
+      case CommandType.SetGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
+      case CommandType.DrawAnimation:
+      case CommandType.DrawImage:
+        return showImageCommand(cmd.params, resolveUrl);
+      case CommandType.StopAnimation:
+      case CommandType.StopImage: return { type: 'hideImage', imgId: cmd.params.i || '1' };
+      case CommandType.DrawFollowImage: {
+        const params = cmd.params;
+        const dirs: Record<'U' | 'D' | 'L' | 'R', NonNullable<Extract<EventCommand, { type: 'followImage' }>['directions']['U']> | undefined> =
+          { U: undefined, D: undefined, L: undefined, R: undefined };
+        for (const dir of ['U', 'D', 'L', 'R'] as const) {
           const u = params[`u${dir}`];
           if (u || params[`x${dir}`] !== undefined) {
-            dirs[dir as 'U'|'D'|'L'|'R'] = {
+            dirs[dir] = {
               url: resolveUrl(u || ''),
               x: parseInt(params[`x${dir}`] || '0'),
               y: parseInt(params[`y${dir}`] || '0'),
@@ -485,37 +547,39 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
               sh: parseInt(params[`sh${dir}`] || '100'),
               ox: parseInt(params[`ox${dir}`] || '0'),
               oy: parseInt(params[`oy${dir}`] || '0'),
-              r: parseInt(params[`r${dir}`] || '0')
+              r: parseInt(params[`r${dir}`] || '0'),
             };
           }
-        });
-
+        }
         return {
           type: 'followImage',
           imgId: params.i || '1',
-          targetObjId,
-          directions: dirs
+          targetObjId: npcObjId(params.nx, params.ny) || 'player',
+          directions: dirs,
         };
       }
-      case 'PS_IMG': return { type: 'pauseImage', imgId: cmd.params?.i || '1' };
-      case 'RS_IMG': return { type: 'resumeImage', imgId: cmd.params?.i || '1' };
-      case 'PS_LAY': return { type: 'pauseImage', layer: parseInt(cmd.params?.l || '0') };
-      case 'RS_LAY': return { type: 'resumeImage', layer: parseInt(cmd.params?.l || '0') };
-      case 'PL_SD': return { type: 'playSound', src: cmd.params?.i || '' };
-      case 'CH_YB': return { type: 'changeBackground', bgRef: '', bgUrl: cmd.params?.v };
-      case 'SET_GLD': return { type: 'changeGold', amount: parseInt(cmd.params?.v || '0') };
-      case 'CH_PH': return { type: 'changePhase', phaseIndex: parseInt(cmd.params?.p || '1') };
-      case 'ON_SW': return { type: 'setSwitch', switchId: parseInt(cmd.params?.n || '0'), value: true };
-      case 'OFF_SW': return { type: 'setSwitch', switchId: parseInt(cmd.params?.n || '0'), value: false };
-      case 'MV_MP': return { type: 'warp', col: parseInt(cmd.params?.tx || '0'), row: parseInt(cmd.params?.ty || '0'), mapId: cmd.params?.n };
-      case 'CM_EV': return { type: 'comment', text: cmd.params?.m || '' };
-      case 'EF_RGR': return { type: 'clearScreenEffect' };
-      case 'EF_GR': {
+      case CommandType.PauseImage:
+      case CommandType.PauseAnimation: return { type: 'pauseImage', imgId: cmd.params.i || '1' };
+      case CommandType.ResumeImage:
+      case CommandType.ResumeAnimation: return { type: 'resumeImage', imgId: cmd.params.i || '1' };
+      case CommandType.PauseLayer:
+      case CommandType.PauseLayerAnimation: return { type: 'pauseImage', layer: parseInt(cmd.params.l || '0') };
+      case CommandType.ResumeLayer:
+      case CommandType.ResumeLayerAnimation: return { type: 'resumeImage', layer: parseInt(cmd.params.l || '0') };
+      case CommandType.PlaySound: return { type: 'playSound', src: resolveSoundUrl(cmd.params.i) };
+      case CommandType.ChangeBGM: return { type: 'changeBackground', bgRef: '', bgUrl: cmd.params.v };
+      case CommandType.ChangePhase: return { type: 'changePhase', phaseIndex: parseInt(cmd.params.p || '1') };
+      case CommandType.OnSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: true };
+      case CommandType.OffSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: false };
+      case CommandType.MoveMap: return { type: 'warp', col: parseInt(cmd.params.tx || '0'), row: parseInt(cmd.params.ty || '0'), mapId: cmd.params.n };
+      case CommandType.Comment: return { type: 'comment', text: cmd.params.m || '' };
+      case CommandType.StopScreenEffect: return { type: 'clearScreenEffect' };
+      case CommandType.StartScreenEffect: {
         const effects = [];
         for (let idx = 0; idx < 10; idx++) {
-          const iStr = cmd.params?.[`i${idx}`];
+          const iStr = cmd.params[`i${idx}`];
           if (!iStr) continue;
-          const kvs = iStr.split('+').reduce((acc: any, kv: string) => {
+          const kvs = iStr.split('+').reduce((acc: Record<string, string>, kv: string) => {
             const [k, v] = kv.split('=');
             if (k) acc[k] = v;
             return acc;
@@ -529,47 +593,33 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
             stops: kvs.s || ''
           });
         }
-        return { type: 'screenEffect', effects: effects as any };
+        return { type: 'screenEffect', effects: effects as Extract<EventCommand, { type: 'screenEffect' }>['effects'] };
       }
-      case 'MV_CF': return { type: 'resetCamera', duration: parseInt(cmd.params?.t || cmd.params?.p || '300') };
-      case 'MV_CD': {
-        const dVal = cmd.params?.d;
-        const d = parseInt(dVal || '0');
-        const v = parseInt(cmd.params?.v || '1');
-        let dx = 0, dy = 0;
-        if (d === 0 || dVal === 'up') { dx = 0; dy = -v; }
-        else if (d === 1 || dVal === 'right') { dx = v; dy = 0; }
-        else if (d === 2 || dVal === 'down') { dx = 0; dy = v; }
-        else if (d === 3 || dVal === 'left') { dx = -v; dy = 0; }
-        else if (d === 4) { dx = v; dy = -v; }
-        else if (d === 5) { dx = v; dy = v; }
-        else if (d === 6) { dx = -v; dy = v; }
-        else if (d === 7) { dx = -v; dy = -v; }
-        return { type: 'moveCamera', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '300'), blocking: cmd.params?.nb !== '1' };
+      case CommandType.MoveCameraReset: return { type: 'resetCamera', duration: parseInt(cmd.params.t || cmd.params.p || '300') };
+      case CommandType.MoveCameraDirection: {
+        const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
+        return { type: 'moveCamera', dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '300'), blocking: cmd.params.nb !== '1' };
       }
-      case 'MV_CA': {
-        const tx = parseInt(cmd.params?.tx || '0');
-        const ty = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', tx, ty, duration: parseInt(cmd.params?.t || cmd.params?.p || '300'), blocking: cmd.params?.nb !== '1' };
-      }
-      case 'MV_CR': {
-        const dx = parseInt(cmd.params?.tx || '0');
-        const dy = parseInt(cmd.params?.ty || '0');
-        return { type: 'moveCamera', dx, dy, duration: parseInt(cmd.params?.t || cmd.params?.p || '300'), blocking: cmd.params?.nb !== '1' };
-      }
-      case 'WT_RN':
-      case 'WT_SN': return { type: 'screenEffect', effects: [{ type: 'solid', color: cmd.params?.c || cmd.params?.c1 || '', c1: '', c2: '', pos: '', stops: '' }] };
+      case CommandType.MoveCameraAbsolute:
+        return { type: 'moveCamera', tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '300'), blocking: cmd.params.nb !== '1' };
+      case CommandType.MoveCameraRelative:
+        return { type: 'moveCamera', dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '300'), blocking: cmd.params.nb !== '1' };
+      case CommandType.ChangeWeatherRain:
+      case CommandType.ChangeWeatherClear:
+        return { type: 'screenEffect', effects: [{ type: 'solid', color: cmd.params.c || cmd.params.c1 || '', c1: '', c2: '', pos: '', stops: '' }] };
       default: return { type: 'comment', text: `Unimplemented: ${cmd.type}` };
     }
   };
+
+  const translateSequence = (commands: Command[]): EventCommand[] =>
+    commands.map(translateRpgenCommand).filter(Boolean) as EventCommand[];
 
   // RPGENの message は本来「#DW_IMA/#MSG/#SEL...」等のコマンド列を含むスクリプトになりうる。
   // 単なる表示テキストとして扱うと fade-in/message/fade-out のような演出が逐次実行されないため、
   // スクリプトらしき内容は translateRpgenCommand でコマンド列化して pages に変換する。
   const messageToPages = (message: string): EventPage[] | undefined => {
     if (!message || !message.trim()) return undefined;
-    if (!/^\s*#[A-Z_]+/.test(message)) return undefined;
-    const commands = RawCommand.parseSequence(message).map(translateRpgenCommand).filter(Boolean) as EventCommand[];
+    const commands = translateSequence(parseScript(message));
     if (commands.length === 0) return undefined;
     return [{ name: 'Phase 0', conditions: {}, trigger: 'action', commands }];
   };
@@ -577,24 +627,16 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
   for (const human of rpgMap.humans) {
     let spriteUrl: string | undefined = undefined;
     let spriteRef: string | undefined = undefined;
-    if (human.sprite.type === 1) {
-      const match = DQ_CHARACTERS.find(c => c.surface === (human.sprite as any).surface);
+    if (human.sprite.type === SpriteType.DQAnimationSprite) {
+      const surface = human.sprite.surface;
+      const match = DQ_CHARACTERS.find(c => c.surface === surface);
       if (match) spriteRef = `walk:auto:u:${match.url}`;
-    } else if (human.sprite.type === 2) {
-      const hash = idToHash.get(Number((human.sprite as any).id));
-      if (hash) spriteUrl = `https://rpgen-search.pages.dev/data/images/sprites/${hash}.png`;
-    } else if (human.sprite.type === 3) {
-      const hash = idToHash.get(Number((human.sprite as any).id));
-      if (hash) spriteRef = `walk:auto:u:https://rpgen-search.pages.dev/data/images/sAnims/${hash}.png`;
+    } else if (human.sprite.type === SpriteType.CustomStillSprite) {
+      spriteUrl = spriteUrlOf(human.sprite.id) || undefined;
+    } else if (human.sprite.type === SpriteType.CustomAnimationSprite) {
+      const url = sAnimUrlOf(human.sprite.id);
+      if (url) spriteRef = `walk:auto:u:${url}`;
     }
-
-    let behavior: 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' = 'still';
-    if (human.behavior === 1) behavior = 'random';
-    if (human.behavior === 2) behavior = 'still';
-    if (human.behavior === 3) behavior = 'patrolH';
-    if (human.behavior === 4) behavior = 'patrolV';
-    if (human.behavior === 5) behavior = 'chase';
-    if (human.behavior === 6) behavior = 'flee';
 
     const pages = messageToPages(human.message || '');
     draft.objects.push(newObject({
@@ -602,7 +644,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       emoji: (spriteUrl || spriteRef) ? undefined : '🧍',
       spriteUrl,
       spriteRef,
-      behavior,
+      behavior: NPC_BEHAVIOR_BY_HUMAN_BEHAVIOR[human.behavior] ?? 'still',
       hazard: false,
       message: pages ? '' : (human.message || ''), objType: 'npc',
       pages
@@ -623,42 +665,46 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
 
   for (const spoint of rpgMap.lookPoints) {
     const pages = messageToPages(spoint.message || '');
+    const commands = pages?.[0]?.commands
+      ?? [{ type: 'overheadMessage', text: spoint.message || '何も発見できなかった。' } as EventCommand];
+    // once（1回だけ）のしらべるポイントは、実行後にセルフスイッチAを立てて再発動を防ぐ
+    const lookPages: EventPage[] = spoint.once
+      ? [
+          { name: 'Examine', conditions: {}, trigger: 'action', commands: [...commands, { type: 'setSelfSwitch', id: 'A', value: true }] },
+          { name: 'Examined', conditions: { selfSwitchId: 'A', selfSwitchValue: true }, trigger: 'action', commands: [] },
+        ]
+      : [{ name: 'Examine', conditions: {}, trigger: 'action', commands }];
+
     draft.objects.push(newObject({
       col: spoint.position.x, row: spoint.position.y, emoji: '',
       behavior: 'still', hazard: false,
-      editorSprite: '/assets/rpgen/map.png#352,128,16,16',
+      editorSprite: localSysTileUrl(tileOfLook.x, tileOfLook.y),
       message: pages ? '' : (spoint.message || ''), objType: 'npc',
-      pages: pages ?? [{
-        name: 'Examine',
-        conditions: {},
-        trigger: 'action',
-        commands: [{ type: 'overheadMessage', text: spoint.message || '何も発見できなかった。' }]
-      }]
+      pages: lookPages
     }));
   }
 
   for (const ep of rpgMap.eventPoints) {
-    const pages: EventPage[] = [];
-    ep.phases.forEach((ph: any, idx: number) => {
-      const parsedCommands = ph.sequence ? ph.sequence.map(translateRpgenCommand).filter(Boolean) as EventCommand[] : [];
-      const trig = (ph.timing === 1 || ph.timing === 'touch' || ph.trigger === 'touch')
-        ? 'playerTouch'
-        : (ph.timing === 2 || ph.timing === 'autorun' || ph.trigger === 'autorun')
-        ? 'autorun'
-        : 'action';
-      // RPGEN のフェーズ発生条件を EventCondition へ変換する。gold（所持金 >= N）は
-      // エンジンの minGold 条件へマッピングする（それ以外の条件は未対応のため無視）。
+    const pages: EventPage[] = ep.phases.map((phase, idx) => {
+      // RPGEN のフェーズ発生条件を EventCondition へ変換する。
       const conditions: EventCondition = {};
-      const goldCond = Number(ph.condition?.gold);
-      if (Number.isFinite(goldCond) && goldCond > 0) conditions.minGold = goldCond;
-      pages.push({
+      if ('condition' in phase) {
+        const goldCond = Number(phase.condition.gold);
+        if (Number.isFinite(goldCond) && goldCond > 0) conditions.minGold = goldCond;
+        const switchCond = Number(phase.condition.switch);
+        if (Number.isFinite(switchCond)) {
+          conditions.switchId = switchCond;
+          conditions.switchValue = true;
+        }
+      }
+      return {
         name: `Phase ${idx}`,
         conditions,
-        trigger: trig,
-        commands: parsedCommands
-      });
+        trigger: phase.timing === EventTiming.Touch ? 'playerTouch' as const : 'action' as const,
+        commands: translateSequence(parsePhase(phase.sequence)),
+      };
     });
-    
+
     const humanObj = draft.objects.find(o => o.col === ep.position.x && o.row === ep.position.y && o.objType === 'npc');
     if (humanObj) {
       humanObj.pages = pages;
@@ -666,7 +712,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
       draft.objects.push(newObject({
         col: ep.position.x, row: ep.position.y, emoji: '', objType: 'event',
         behavior: 'still', hazard: false,
-        editorSprite: '/assets/rpgen/map.png#112,128,16,16',
+        editorSprite: localSysTileUrl(tileOfEvent.x, tileOfEvent.y),
         pages
       }));
     }
@@ -676,7 +722,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
     draft.objects.push(newObject({
       col: tp.position.x, row: tp.position.y, emoji: '', objType: 'warp',
       behavior: 'still', hazard: false,
-      editorSprite: '/assets/rpgen/map.png#208,128,16,16',
+      editorSprite: localSysTileUrl(tileOfTeleport.x, tileOfTeleport.y),
       pages: [{
         name: 'Warp',
         conditions: {},
