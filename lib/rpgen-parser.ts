@@ -337,7 +337,15 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 
   const collectFromCommand = (cmd: Command): void => {
     switch (cmd.type) {
-      case CommandType.ChangeObjectSprite:
+      case CommandType.ChangeObjectSprite: {
+        // #CH_SP の n は「マップのタイル値」と同じ規約（"11853" / "11853C" / "2_12"）で、
+        // #CH_HM の人物スプライト指定とは別物。parseSpriteParam で読むと接頭辞なしの素材IDが
+        // 標準素材のサーフェス番号として扱われ、encode API への問い合わせから漏れてしまう。
+        const raw = (cmd.params.n ?? '').trim();
+        const id = raw ? customTileId(raw) : undefined;
+        if (id !== undefined) idsToTranslate.add(id);
+        break;
+      }
       case CommandType.ChangeHumanSprite: {
         // 標準素材（接頭辞なし）はサーフェス番号でリポジトリ同梱のシートを引くだけなので、
         // encode API に問い合わせるのはユーザ投稿素材（"A1" / "-1"）のIDだけにする。
@@ -383,7 +391,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     }
   }
 
-  const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN;
+  const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || 'n4CrMK7W';
 
   const uniqueIds = Array.from(idsToTranslate);
   const idToHash = new Map<number, string>();
@@ -522,18 +530,32 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     const raw = (n ?? '').trim();
     if (!raw) return undefined;
     const isPassable = l % 2 === 0;
-    const rawWithCollision = isPassable ? raw.replaceAll(RAW_TILE_COLLISION_SUFFIX, '') : (raw.includes(RAW_TILE_COLLISION_SUFFIX) ? raw : raw + RAW_TILE_COLLISION_SUFFIX);
-    const rawWithoutCollision = raw.replaceAll(RAW_TILE_COLLISION_SUFFIX, '');
-
-    // マップ解析時に登録された既存タイル定義（11853, 11853C 等）を優先参照
-    const existing = tileIndexMap.get(rawWithCollision) ?? tileIndexMap.get(rawWithoutCollision) ?? tileIndexMap.get(raw);
-    if (existing !== undefined) return existing;
-
+    // l の偶数＝ぶつからない／奇数＝ぶつかる。マップのタイル値は末尾 "C" が当たり判定ありなので、
+    // l に合わせて末尾を付け外しした値＝「マップに置かれていたのと同じタイル」として登録する。
+    // こうすると画像URL・論理名・つるつる床などの特殊効果の判定がマップ本体と完全に一致し、
+    // 同じ見た目のタイルが二重登録されることもない。
+    const base = raw.replaceAll(RAW_TILE_COLLISION_SUFFIX, '');
+    const key = isPassable ? base : base + RAW_TILE_COLLISION_SUFFIX;
+    let id: number;
     try {
-      return parseTile(rawWithCollision);
+      id = parseTile(key);
     } catch {
       return undefined;
     }
+    const tile = draft.tiles[id];
+    if (!tile || tile.passable === isPassable) return id;
+
+    // 標準素材は parseTile が checkWalkableTile の判定を "C" より優先するため、l の指定と
+    // 食い違うことがある。#CH_SP は l で当たり判定を明示しているので、そのときだけ
+    // 当たり判定だけを差し替えた別タイルを登録する。
+    const variantKey = `${key}@l${isPassable ? 0 : 1}`;
+    const cached = tileIndexMap.get(variantKey);
+    if (cached !== undefined) return cached;
+    if (tileIndexMap.size >= MAX_TILE_CONVERSIONS) return undefined;
+    const variantId = nextTileIdx++;
+    tileIndexMap.set(variantKey, variantId);
+    draft.tiles[variantId] = { ...tile, name: `${tile.name}${isPassable ? '' : RAW_TILE_COLLISION_SUFFIX}`, passable: isPassable };
+    return variantId;
   };
 
   /** #CH_SP / #CH_HM の n パラメータから見た目の差し替え内容を作る。 */

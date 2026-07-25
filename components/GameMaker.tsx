@@ -459,7 +459,12 @@ interface Entity {
   touchEventRunning?: boolean;
   _touchStartCol?: number;
   _touchStartRow?: number;
+  /** 接触イベントを「発動した」時刻。 */
   _lastTouchTime?: number;
+  /** 接触イベントが「終わった」時刻。クールタイムはこちらを基点に測る
+   *  （開始時刻基点だと、実行に時間のかかるイベントは終了時点でクールタイムを
+   *   消化済みになり、終わった瞬間に再発動して連続発動になる）。 */
+  _touchEndTime?: number;
   spriteRef?: string; spriteUrl?: string; activePageIdx?: number;
   isGrounded?: boolean; // 横スク（action）敵の接地状態
   spellState?: SpellExecState;
@@ -5114,6 +5119,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const pw = gameDataRef.current.player.w ?? TILE_SIZE;
               const ph = gameDataRef.current.player.h ?? TILE_SIZE;
               warpCooldownRef.current = { x: targetX + pw / 2, y: targetY + ph / 2 };
+              const tCol = Math.floor((targetX + pw / 2) / TILE_SIZE);
+              const tRow = Math.floor((targetY + ph / 2) / TILE_SIZE);
+              lastTouchTimeMapRef.current.set(`${tCol},${tRow}`, performance.now());
               if (isInstant) {
                 playerJustMovedRef.current = true;
               }
@@ -5713,6 +5721,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         _touchStartCol: old ? (old as any)._touchStartCol : undefined,
         _touchStartRow: old ? (old as any)._touchStartRow : undefined,
         _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
+        _touchEndTime: old ? (old as any)._touchEndTime : undefined,
         def: o,
       };
     }) as unknown as Entity[];
@@ -5760,6 +5769,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           _touchStartCol: old ? (old as any)._touchStartCol : undefined,
           _touchStartRow: old ? (old as any)._touchStartRow : undefined,
           _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
+        _touchEndTime: old ? (old as any)._touchEndTime : undefined,
           spellState: o.spellScript?.length
             ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number },], frame: 0, waitLeft: 0 }
             : undefined,
@@ -7713,6 +7723,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const justMoved = playerJustMovedRef.current;
         playerJustMovedRef.current = false;
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
+        // 接触イベントのクールタイムの基点。発動時刻と終了時刻の新しい方を使うので、
+        // 実行に時間のかかるイベントでも「終わってからクールタイム分の間」は再発動しない。
+        // マップ側（id / マス座標）の記録も見るのは、エンティティが作り直されても
+        // 記録が消えないようにするため。
+        const touchCooldownBase = (e: Entity, d: ObjectDef) => Math.max(
+          e._lastTouchTime ?? 0,
+          e._touchEndTime ?? 0,
+          lastTouchTimeMapRef.current.get(d.id) ?? 0,
+          lastTouchTimeMapRef.current.get(`${d.col},${d.row}`) ?? 0,
+        );
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
           if (e.spawnGrace && e.spawnGrace > 0) {
@@ -8430,8 +8450,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 2マス歩かされることになるため、再武装には使わない。
               if (!touchTriggerOk) {
                 const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
-                const lastTouch = (e as any)._lastTouchTime ?? 0;
-                if (performance.now() - lastTouch >= cooldownMs) {
+                // 発動範囲から出た時点でイベントは終わったものとして扱う（実行中に
+                // 移動させられた場合など、終了時刻が付かないまま離れることがある）。
+                if (e.touchEventRunning && !eventRunningRef.current) {
+                  e.touchEventRunning = false;
+                  if (e._touchEndTime == null) e._touchEndTime = performance.now();
+                }
+                if (performance.now() - touchCooldownBase(e, d) >= cooldownMs) {
                   e.talked = false;
                 }
               }
@@ -8441,10 +8466,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               else if (e.touchEventRunning && !eventRunningRef.current && !frozen) {
                 const sc = (e as any)._touchStartCol, sr = (e as any)._touchStartRow;
                 const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
-                const lastTouch = (e as any)._lastTouchTime ?? 0;
                 const now = performance.now();
+                // イベントが終わった最初のフレームで終了時刻を記録し、ここからクールタイムを数える。
+                if (e._touchEndTime == null) {
+                  e._touchEndTime = now;
+                  lastTouchTimeMapRef.current.set(d.id, now);
+                  lastTouchTimeMapRef.current.set(`${d.col},${d.row}`, now);
+                }
                 if (sc == null || sr == null || (pCol === sc && pRow === sr) || sameCell) {
-                  if (now - lastTouch >= cooldownMs) {
+                  if (now - touchCooldownBase(e, d) >= cooldownMs) {
                     e.touchEventRunning = false;
                     e.talked = false;
                   }
@@ -8473,6 +8503,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 // 移動先がワープ地点に重なっていると即座に再発動して往復するため、
                 // その場所から離れるまでは次のワープを発動させない。
                 warpCooldownRef.current = { x: tx + pData.w / 2, y: ty + pData.h / 2 };
+                lastTouchTimeMapRef.current.set(`${d.warpTarget.col},${d.warpTarget.row}`, performance.now());
                 playerJustMovedRef.current = true;
               }
               break;
@@ -8578,15 +8609,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   // ここでは距離ベースの warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
                   if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
                     const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
-                    const lastTouch = Math.max((e as any)._lastTouchTime ?? 0, lastTouchTimeMapRef.current.get(d.id) ?? 0);
+                    const cellKey = `${d.col},${d.row}`;
                     const now = performance.now();
-                    if (now - lastTouch >= cooldownMs) {
+                    if (now - touchCooldownBase(e, d) >= cooldownMs) {
                       e.talked = true;
                       e.touchEventRunning = true;
                       (e as any)._touchStartCol = pCol;
                       (e as any)._touchStartRow = pRow;
-                      (e as any)._lastTouchTime = now;
+                      e._lastTouchTime = now;
+                      // 発動したら終了時刻は次の終了まで無効。以降は発動時刻でクールタイムを測る。
+                      e._touchEndTime = undefined;
                       lastTouchTimeMapRef.current.set(d.id, now);
+                      lastTouchTimeMapRef.current.set(cellKey, now);
                       runEventCommands(d.id, page.commands);
                       ran = true;
                     }
@@ -8679,8 +8713,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
           } else {
             const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
-            const lastTouch = (e as any)._lastTouchTime ?? 0;
-            if (performance.now() - lastTouch >= cooldownMs) {
+            if (e.touchEventRunning && !eventRunningRef.current) {
+              e.touchEventRunning = false;
+              if (e._touchEndTime == null) e._touchEndTime = performance.now();
+            }
+            if (performance.now() - touchCooldownBase(e, d) >= cooldownMs) {
               e.talked = false;
             }
             if (npcTalkRef.current?.entity === e) npcTalkRef.current = null;
@@ -9853,10 +9890,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // hide event completely if it has pages but none are active
             } else {
               const eOpened = e.def.altSpriteRef && (selfSwitchesRef.current[e.def.id]?.['A'] ?? false);
+              // #CH_HM（changeSprite）でイベント中に差し替えられた見た目は def ではなく Entity 側に載る。
+              // spriteRef（歩行グラのシート）と spriteUrl（静止画像）はセットで意味を持つので、
+              // 片方だけ差し替えられていても、2つまとめて上書き扱いにする（古い方が勝つと差し替えが効かない）。
+              const eSwapped = !eOpened && !!(e.spriteRef || e.spriteUrl);
               drawSprite({
                 emoji: e.def.emoji,
-                spriteUrl: eOpened ? e.def.altSpriteUrl : e.def.spriteUrl,
-                spriteRef: eOpened ? e.def.altSpriteRef : e.def.spriteRef,
+                spriteUrl: eOpened ? e.def.altSpriteUrl : eSwapped ? e.spriteUrl : e.def.spriteUrl,
+                spriteRef: eOpened ? e.def.altSpriteRef : eSwapped ? e.spriteRef : e.def.spriteRef,
               }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`, e.facing ?? initialFacing(e.def));
             }
           }
@@ -11490,6 +11531,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const remappedMap = remapGrid(manifest.map);
         const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : undefined;
         const remappedOverheadMap = manifest.overheadMap ? remapGrid(manifest.overheadMap) : undefined;
+        // イベントコマンドの changeTile（#CH_SP）もタイルIDを参照しているため、マップと同じ表に沿って
+        // 振り直す。選択肢や条件分岐の中に入れ子になっているコマンドも辿らないと、
+        // インポート後に「差し替え先が全く別のタイルになる」ことになる。
+        const remapCommandTileIds = (commands: EventCommand[]): EventCommand[] =>
+          commands.map(cmd => {
+            if (cmd.type === 'changeTile') return { ...cmd, tileId: tileIdRemap.get(cmd.tileId) ?? cmd.tileId };
+            if (cmd.type === 'choice') {
+              return { ...cmd, choices: cmd.choices.map(c => ({ ...c, commands: remapCommandTileIds(c.commands) })) };
+            }
+            if (cmd.type === 'ifSwitch' || cmd.type === 'ifItem' || cmd.type === 'ifGold') {
+              return {
+                ...cmd,
+                then: remapCommandTileIds(cmd.then),
+                ...(cmd.else ? { else: remapCommandTileIds(cmd.else) } : {}),
+              };
+            }
+            return cmd;
+          });
+        const remappedObjects = manifest.objects.map(obj => ({
+          ...obj,
+          pages: obj.pages?.map(page => ({ ...page, commands: remapCommandTileIds(page.commands) })),
+        }));
         const importedBgm = hydrateBgmFromRef(manifest.bgm);
         const blackBgRef = 'tile:#000000';
         const blackBgUrl = colorToDataUrl('#000000');
@@ -11501,7 +11564,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           map: remappedMap,
           overlayMap: remappedOverlayMap,
           overheadMap: remappedOverheadMap,
-          objects: manifest.objects,
+          objects: remappedObjects,
           mapBgRef: blackBgRef,
           mapBgUrl: blackBgUrl,
           bgm: importedBgm,
@@ -11511,7 +11574,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             map: remappedMap,
             overlayMap: remappedOverlayMap,
             overheadMap: remappedOverheadMap,
-            objects: manifest.objects,
+            objects: remappedObjects,
             mapBgRef: blackBgRef,
             mapBgUrl: blackBgUrl,
             bgm: importedBgm,
