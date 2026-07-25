@@ -224,15 +224,23 @@ const buildFrames = (params: Record<string, string>, resolveUrl: ResolveUrl): Im
 
 const showImageCommand = (params: Record<string, string>, resolveUrl: ResolveUrl, kind: 'image' | 'anim' = 'image'): EventCommand => {
   const frames = buildFrames(params, resolveUrl);
+  const xp = params.xp === '1';
+  const wp = params.wp === '1';
+  const scaleX = 640 / 600;
+  const scaleY = 480 / 450;
+  const rawX = parseInt(params.x || '0');
+  const rawY = parseInt(params.y || '0');
+  const rawW = parseInt(params.w || '0');
+  const rawH = parseInt(params.h || '0');
   return {
     type: 'showImage',
     kind,
     imgId: params.i || '1',
     url: frames.length > 0 ? frames[0].url : '',
-    x: parseInt(params.x || '0'),
-    y: parseInt(params.y || '0'),
-    w: parseInt(params.w || '0'),
-    h: parseInt(params.h || '0'),
+    x: xp ? Math.round(rawX * scaleX) : rawX,
+    y: xp ? Math.round(rawY * scaleY) : rawY,
+    w: wp ? Math.round(rawW * scaleX) : (rawW > 0 ? Math.round(rawW * scaleX) : rawW),
+    h: wp ? Math.round(rawH * scaleY) : (rawH > 0 ? Math.round(rawH * scaleY) : rawH),
     opacity: parseInt(params.a || '100'),
     isPercent: params.xp !== '1',
     m: params.m === '1',
@@ -593,9 +601,9 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
           case CommandType.DrawImage:
             return showImageCommand(embedded.params, resolveUrl, 'image');
           case CommandType.StopAnimation:
-            return { type: 'hideImage', kind: 'anim' };
+            return { type: 'hideImage', kind: 'anim', imgId: embedded.params.i || undefined };
           case CommandType.StopImage:
-            return { type: 'hideImage', kind: 'image', followImages: embedded.params.bf === '1' };
+            return { type: 'hideImage', kind: 'image', imgId: embedded.params.i || undefined, followImages: embedded.params.bf === '1' };
           case 'ED':
             // 一部の #ED が MSG として残っている場合の後方互換
             return null;
@@ -688,8 +696,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         return showImageCommand(cmd.params, resolveUrl, 'image');
       // #ST_IMA / #ST_IMG は管理番号を取らない「表示中のものをすべて終了」コマンド。
       // i:… を読んで1枚だけ消していたため、i を付けずに出した画像／アニメが消えなかった。
-      case CommandType.StopAnimation: return { type: 'hideImage', kind: 'anim' };
-      case CommandType.StopImage: return { type: 'hideImage', kind: 'image', followImages: cmd.params.bf === '1' };
+      case CommandType.StopAnimation: return { type: 'hideImage', kind: 'anim', imgId: cmd.params.i || undefined };
+      case CommandType.StopImage: return { type: 'hideImage', kind: 'image', imgId: cmd.params.i || undefined, followImages: cmd.params.bf === '1' };
       case CommandType.DrawFollowImage: {
         const params = cmd.params;
         const dirs: Record<'U' | 'D' | 'L' | 'R', NonNullable<Extract<EventCommand, { type: 'followImage' }>['directions']['U']> | undefined> =

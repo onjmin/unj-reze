@@ -4968,17 +4968,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
           break;
         case 'hideImage': {
-          // RPGEN の #ST_IMG / #ST_IMA は管理番号を取らず「表示中のものをすべて終了」する。
-          // imgId 指定時のみ1件を消し、未指定なら kind（画像/アニメ）に一致するものを全部消す。
           const targetId = cmd.imgId;
           if (targetId) {
-            setOverlayImages(prev => { const next = { ...prev }; delete next[targetId]; return next; });
-            setFollowImages(prev => { const next = { ...prev }; delete next[targetId]; return next; });
+            setOverlayImages(prev => {
+              const next = { ...prev };
+              delete next[targetId];
+              delete next[String(targetId)];
+              return next;
+            });
+            setFollowImages(prev => {
+              const next = { ...prev };
+              delete next[targetId];
+              delete next[String(targetId)];
+              return next;
+            });
           } else {
             setOverlayImages(prev => {
               const next: typeof prev = {};
               for (const [id, img] of Object.entries(prev)) {
-                // kind 未記録の旧データは画像扱い（#ST_IMG で消える）にしておく
                 if (cmd.kind && (img.kind ?? 'image') !== cmd.kind) next[id] = img;
               }
               return next;
@@ -4995,17 +5002,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }));
           setTimeout(advance, 0);
           break;
-        case 'pauseImage':
-          if (cmd.imgId) {
-            const id = cmd.imgId;
+        case 'pauseImage': {
+          const targetId = cmd.imgId;
+          if (targetId) {
             setOverlayImages(prev => {
-              const img = prev[id];
-              if (!img || img.pausedAt) return prev;
-              return { ...prev, [id]: { ...img, pausedAt: Date.now() } };
+              const next = { ...prev };
+              delete next[targetId];
+              delete next[String(targetId)];
+              return next;
             });
+            setFollowImages(prev => {
+              const next = { ...prev };
+              delete next[targetId];
+              delete next[String(targetId)];
+              return next;
+            });
+          } else {
+            setOverlayImages({});
+            setFollowImages({});
           }
           setTimeout(advance, 0);
           break;
+        }
         case 'resumeImage':
           if (cmd.imgId) {
             const id = cmd.imgId;
