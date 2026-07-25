@@ -17911,7 +17911,7 @@ function NestedCommandList({
           onShowDetails={() => setEditingIndex(idx)}
         />
       ))}
-      {editingIndex !== null && commands[editingIndex] && (
+      {editingIndex !== null && commands[editingIndex] && createPortal(
         <EventCommandDetailsModal
           cmd={commands[editingIndex]}
           switches={switches}
@@ -17926,7 +17926,8 @@ function NestedCommandList({
             updated[editingIndex] = { ...updated[editingIndex], ...patch } as EventCommand;
             onChangeCommands(updated);
           }}
-        />
+        />,
+        document.body,
       )}
     </div>
   );

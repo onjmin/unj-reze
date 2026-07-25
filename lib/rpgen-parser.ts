@@ -4,6 +4,7 @@ import {
   EventTiming,
   HumanBehavior,
   RawDirection,
+  SelectMode,
   parseHumanBehavior,
   RAW_DQ_STILL_SPRITE_SEPARATOR,
   RAW_TILE_COLLISION_SUFFIX,
@@ -562,7 +563,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.Select: {
         const choiceNode: EventCommand = {
           type: 'choice', text: '', choices: [],
-          random: false,
+          // mode === SelectMode.Random のとき選択肢UIを出さず1つをランダムに実行する
+          random: cmd.mode === SelectMode.Random,
           // c:1 で直前のメッセージウィンドウを表示したままにする
           keepMessage: cmd.clearMessage === true,
         };
