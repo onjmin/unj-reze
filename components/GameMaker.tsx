@@ -5068,7 +5068,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const pw = gameDataRef.current.player.w ?? TILE_SIZE;
               const ph = gameDataRef.current.player.h ?? TILE_SIZE;
               warpCooldownRef.current = { x: targetX + pw / 2, y: targetY + ph / 2 };
-              playerJustMovedRef.current = true;
+              if (isInstant) {
+                playerJustMovedRef.current = true;
+              }
             }
             setTimeout(advance, duration);
           } else {
@@ -7308,6 +7310,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               p.x = mt.tx;
               p.y = mt.ty;
               (p as any).moveTarget = undefined;
+              playerJustMovedRef.current = true;
             }
           } else {
             let nx = p.x, ny = p.y;
@@ -8346,9 +8349,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // （pBoxTouch）と、隣接マスからそちらを向いた状態も「接触」として扱う。押し込み入力は要求しない
           // ——接触は座標の話であって操作の話ではない。接触が続く限り再発動する仕組みは、
           // イベント完了時に talked を戻す方式（下の再武装処理）で担保する。
-          const touchTriggerOk = sameCell; // blocksPlayer
-            // ? (sameCell || pBoxTouch || (isFacingEventTile && isAdjacentTile))
-            // : sameCell;
+          const playerOverlay = getOverlayTileAt(pCol, pRow)?.info;
+          const playerFloor = getTile(pcx, pcy)?.info;
+          const isPlayerOnSolidTile = (playerOverlay ? !playerOverlay.passable : (playerFloor ? !playerFloor.passable : false));
+          const isCollisionEvent = blocksPlayer || isPlayerOnSolidTile;
+          const touchTriggerOk = isCollisionEvent
+            ? (sameCell || ((pBoxTouch || isAdjacentTile) && isFacingEventTile))
+            : sameCell;
 
           const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
 
@@ -8373,7 +8380,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // なり、転送直後に誤発動する）。発動済みにしておけば、離れて入り直したときに発動する。
               // ただし、当たり判定のあるオブジェクト（壁タイル・NPC）はプレイヤーが侵入できないため、
               // 連続発動の問題が生じない。justMoved による抑制の対象外とする（b）。
-              else if (justMoved && !blocksPlayer) e.talked = true;
+
             }
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
