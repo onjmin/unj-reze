@@ -470,6 +470,9 @@ interface Entity {
   rezeStateTimer?: number;
   /** 味方モブが攻撃されて怯え、プレイヤーから逃げるようになった状態。 */
   fleeing?: boolean;
+  /** 接触トリガー（playerTouch / eventTouch）のイベントを実際に起動した直後で、まだ完了していない状態。
+   *  完了を検知して talked を戻す（＝接触が続く限り再発動させる）ためのフラグ。 */
+  touchEventRunning?: boolean;
   /** つるつる床の強制スライド中の目標タイル（プレイヤーの iceSlideRef と同等の仕組みを敵/NPCにも適用）。 */
   iceSlide?: { targetX: number; targetY: number };
   /** 見下ろし型での現在の向き。初期値は def.dir、移動すると実際の移動方向で更新される。 */
@@ -4674,6 +4677,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             },
           };
           setEventChoice(eventChoiceRef.current);
+          // 選択肢を開いたキー入力で、そのまま先頭の選択肢が確定されてしまうのを防ぐ。
+          // 「話しかけ」判定と「メニュー確定」判定は同じフレーム内で順に走り、#SEL がイベントの
+          // 先頭コマンドだとこの case が両者の間で同期実行される。押下エッジを消費済みにしておくと
+          // 確定側が反応せず、選択肢ウィンドウが一瞬で閉じる（＝出ないように見える）のを防げる。
+          prevZRef.current = true;
           break;
         }
         case 'ifSwitch': {
@@ -4758,7 +4766,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
           break;
         case 'wait':
-          setTimeout(advance, cmd.frames * 16);
+          // ウェイトの単位はミリ秒。frames しか持たない旧データだけ 1フレーム=16.67ms で換算する。
+          setTimeout(advance, cmd.ms ?? Math.round((cmd.frames ?? 0) * 1000 / 60));
           break;
         case 'comment':
           setTimeout(advance, 0);
@@ -5159,26 +5168,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         case 'changePhase': {
           // phaseIndex は GUI の「ページ1」と揃えた 1 始まり。配列添字へは -1 して変換する。
           const targetPageIdx = Math.max(0, (cmd.phaseIndex ?? 1) - 1);
-          // tx/ty 指定時は、そのマスにいる別イベントのフェーズを切り替えるだけで、実行は継続する。
+          const entities = engineRef.current.entities ?? [];
+          // 対象イベントの解決。x/y は「別イベントの座標」だが、RPGEN のデータは自分自身の座標を
+          // そのまま書き出していることが多い（例: (13,17) のイベントに #CH_PH p:1,x:13,y:17）。
+          // 座標が自分を指しているときは自己切り替えとして扱わないと、フェーズを記録するだけで
+          // 実行が切り替わらず「効かない」ように見える。
+          let targetObj = entities.find(o => o.def.id === objId);
           if (cmd.tx != null && cmd.ty != null) {
-            const other = engineRef.current.entities?.find(o => o.def.col === cmd.tx && o.def.row === cmd.ty);
-            if (other && other.def.pages && other.def.pages[targetPageIdx]) {
-              other.activePageIdx = targetPageIdx;
-              forcedPagesRef.current[other.def.id] = targetPageIdx;
-            }
-            setTimeout(advance, 0);
-            break;
+            const atCell = entities.find(o =>
+              o.def.col === cmd.tx && o.def.row === cmd.ty && (o.def.pages?.length ?? 0) > 0);
+            if (atCell) targetObj = atCell;
           }
-          index = cmds.length; // 自分自身の切り替えでは現在のイベント実行を直ちに中断する
-          const targetObj = engineRef.current.entities?.find(o => o.def.id === objId);
-          if (targetObj && targetObj.def.pages && targetObj.def.pages[targetPageIdx]) {
+          const isSelf = !!targetObj && targetObj.def.id === objId;
+          const targetPage = targetObj?.def.pages?.[targetPageIdx];
+          if (targetObj && targetPage) {
             targetObj.activePageIdx = targetPageIdx;
             forcedPagesRef.current[targetObj.def.id] = targetPageIdx;
-            const targetPage = targetObj.def.pages[targetPageIdx];
-            cmds = targetPage.commands;
-            index = 0;
-            setTimeout(runNext, 0);
-            break;
+            if (isSelf) {
+              // 自分自身の切り替えは、現在のコマンド列を破棄して新しいフェーズを続けて実行する。
+              cmds = targetPage.commands;
+              index = 0;
+              setTimeout(runNext, 0);
+              break;
+            }
+            // 別イベントのフェーズ切り替えは、そのイベントの次回発動に効くだけで実行は継続する。
           }
           setTimeout(advance, 0);
           break;
@@ -8312,9 +8325,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const isNpcBlocker = (d.objType === 'npc') && !d.hazard;
           // プレイヤーが侵入できない場所（壁・看板・モブ）に置かれたイベントかどうか
           const blocksPlayer = isSolidTile || isNpcBlocker;
+          // 同じ座標に入っていれば、入力の有無に関わらず「接触」。当たり判定の有無で変わらない大原則。
+          // （転送・イベント移動で乗せられた場合や、モブ側が寄ってきた場合はこちらで拾う）
+          const sameCell = exactOverlap || (pCol === eCol && pRow === eRow);
+          // 侵入できない場所（壁・看板・モブ）に置かれたイベントは同座標になれないので、境界での接触
+          // （pBoxTouch）と、隣接マスからそちらを向いた状態も「接触」として扱う。押し込み入力は要求しない
+          // ——接触は座標の話であって操作の話ではない。接触が続く限り再発動する仕組みは、
+          // イベント完了時に talked を戻す方式（下の再武装処理）で担保する。
           const touchTriggerOk = blocksPlayer
-            ? (pBoxTouch || (isFacingEventTile && isAdjacentTile))
-            : (exactOverlap || (pCol === eCol && pRow === eRow));
+            ? (sameCell || pBoxTouch || (isFacingEventTile && isAdjacentTile))
+            : sameCell;
 
           const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
 
@@ -8324,6 +8344,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 会話など他の判定用に 1.5 マスと広く取ってあり、これを再発動の条件にすると接触に戻るまで
               // 2マス歩かされることになるため、再武装には使わない。
               if (!touchTriggerOk) e.talked = false;
+              // 接触トリガーは「接触している間ずっと発動し続ける」。自分が起動したイベントが完了したら
+              // その場で再武装し、まだ接触が続いていれば次のフレームで再発動させる。壁・看板のように
+              // 乗り越えられない場所のイベントは離れないと再武装できず、1回しか発動しなかった。
+              // なお justMoved による抑制（下）は touchEventRunning を立てないので、ここでは戻らない。
+              else if (e.touchEventRunning && !eventRunningRef.current && !frozen) {
+                e.touchEventRunning = false;
+                e.talked = false;
+              }
               // 移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
               // わけではないので発動させない（隣が当たり判定持ちだと pBoxTouch の 4px 余裕で接触扱いに
               // なり、転送直後に誤発動する）。発動済みにしておけば、離れて入り直したときに発動する。
@@ -8450,6 +8478,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   // ここでは距離ベースの warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
                   if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
                     e.talked = true;
+                    // 完了を検知して再武装するための印。接触が続く限り繰り返し発動させる。
+                    e.touchEventRunning = true;
                     runEventCommands(d.id, page.commands);
                     ran = true;
                   }
@@ -12836,22 +12866,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const justifyContent = anchor(eventChoice.posX, RPGEN_SCREEN_W) ?? 'center';
               const alignItems = anchor(eventChoice.posY, RPGEN_SCREEN_H) ?? 'end';
               return (
-                <div className="absolute inset-0 flex px-4 pt-4 font-pixel"
+                <div className="absolute inset-0 flex px-4 pt-4 font-pixel pointer-events-none"
                   style={{ justifyContent, alignItems, paddingBottom: alignItems === 'end' ? 64 : 16 }}>
-                  <div className="bg-[#1a1a2e] border-2 border-gray-400 p-3 shadow-2xl w-full max-w-xs overflow-y-auto"
+                  {/* RPGEN 本家に合わせた白黒だけのウィンドウ。幅は固定せず中身（最長の選択肢）に合わせて伸縮させる
+                      （flex 縦並びの stretch で、行はウィンドウ幅いっぱいのクリック領域を保ったまま幅計算には効かない）。 */}
+                  <div className="pointer-events-auto bg-black border-2 border-white px-3 py-2 text-white w-auto max-w-full overflow-y-auto"
                     style={{ maxHeight: '100%' }}>
-                    <p
-                      className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap break-words"
-                      style={{ overflowWrap: 'anywhere' }}
-                    >
-                      {eventChoice.text}
-                    </p>
-                    <div className="space-y-1.5">
+                    {eventChoice.text && (
+                      <p
+                        className="text-sm leading-relaxed mb-1.5 whitespace-pre-wrap break-words"
+                        style={{ overflowWrap: 'anywhere' }}
+                      >
+                        {eventChoice.text}
+                      </p>
+                    )}
+                    <div className="flex flex-col">
                       {eventChoice.choices.map((ch, i) => (
                         <button key={i} onClick={() => { setEventChoiceCursor(i); eventChoice.onPick(i); }}
-                          className={`w-full py-1.5 text-xs font-bold text-left px-3 whitespace-pre-wrap break-words ${eventChoiceCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white'}`}
+                          className="text-left text-sm leading-relaxed whitespace-pre-wrap break-words"
                           style={{ overflowWrap: 'anywhere' }}>
-                          {eventChoiceCursor === i ? '❤ ' : '  '}{ch.label}
+                          {/* カーソルは記号のみ。色を変えずに選択位置を示す（白黒縛り） */}
+                          <span className="inline-block w-[1.2em] shrink-0">{eventChoiceCursor === i ? '▶' : ''}</span>
+                          {ch.label}
                         </button>
                       ))}
                     </div>
@@ -17833,13 +17869,20 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
 
               <div className="flex flex-col gap-1.5 bg-gray-900/50 p-1.5 rounded">
                 <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* スイッチ未定義でも「番号を直接入力」で条件を確認・編集できるようにする。
+                      RPGEN から取り込んだページ条件は、スイッチ定義が無い／一覧に無い番号を指すことがあり、
+                      select だけだと設定済みの条件が画面から消えてしまう。 */}
                   {switches.length > 0 ? (
-                    <select value={page.conditions.switchId ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, switchId: e.target.value ? Number(e.target.value) : undefined } })}
+                    <select value={switches.some(s => s.id === page.conditions.switchId) ? String(page.conditions.switchId) : ''}
+                      onChange={e => setPage(pi, { conditions: { ...page.conditions, switchId: e.target.value ? Number(e.target.value) : undefined } })}
                       className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
                       <option value="">スイッチ1 なし</option>
                       {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   ) : <span className="text-[9px] text-gray-500">スイッチ未定義</span>}
+                  <input type="number" min={0} value={page.conditions.switchId ?? ''} placeholder="番号"
+                    onChange={e => setPage(pi, { conditions: { ...page.conditions, switchId: e.target.value === '' ? undefined : Number(e.target.value) } })}
+                    className="w-14 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200" />
                   {page.conditions.switchId != null && (
                     <select value={page.conditions.switchValue ? 'ON' : 'OFF'} onChange={e => setPage(pi, { conditions: { ...page.conditions, switchValue: e.target.value === 'ON' } })}
                       className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
@@ -17849,12 +17892,16 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {switches.length > 0 ? (
-                    <select value={page.conditions.switch2Id ?? ''} onChange={e => setPage(pi, { conditions: { ...page.conditions, switch2Id: e.target.value ? Number(e.target.value) : undefined } })}
+                    <select value={switches.some(s => s.id === page.conditions.switch2Id) ? String(page.conditions.switch2Id) : ''}
+                      onChange={e => setPage(pi, { conditions: { ...page.conditions, switch2Id: e.target.value ? Number(e.target.value) : undefined } })}
                       className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
                       <option value="">スイッチ2 なし</option>
                       {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
-                  ) : null}
+                  ) : <span className="text-[9px] text-gray-500">スイッチ2</span>}
+                  <input type="number" min={0} value={page.conditions.switch2Id ?? ''} placeholder="番号"
+                    onChange={e => setPage(pi, { conditions: { ...page.conditions, switch2Id: e.target.value === '' ? undefined : Number(e.target.value) } })}
+                    className="w-14 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200" />
                   {page.conditions.switch2Id != null && (
                     <select value={page.conditions.switch2Value ? 'ON' : 'OFF'} onChange={e => setPage(pi, { conditions: { ...page.conditions, switch2Value: e.target.value === 'ON' } })}
                       className="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200">
@@ -17889,6 +17936,14 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
                       <option value="ON">ON</option><option value="OFF">OFF</option>
                     </select>
                   )}
+                </div>
+                {/* 所持金条件（RPGEN のフェーズ条件 g）。UIが無いと取り込んだ条件を確認も編集もできなかった。 */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[9px] text-gray-400">所持金が</span>
+                  <input type="number" min={0} value={page.conditions.minGold ?? ''} placeholder="なし"
+                    onChange={e => setPage(pi, { conditions: { ...page.conditions, minGold: e.target.value === '' ? undefined : Number(e.target.value) } })}
+                    className="w-20 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] outline-none text-gray-200" />
+                  <span className="text-[9px] text-gray-400">G 以上</span>
                 </div>
               </div>
 
@@ -18042,7 +18097,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
         case 'restoreMp': return { type: 'restoreMp', amount: undefined };
         case 'ifGold': return { type: 'ifGold', amount: 0, then: [], else: undefined };
         case 'warp': return { type: 'warp', col: 0, row: 0 };
-        case 'wait': return { type: 'wait', frames: 30 };
+        case 'wait': return { type: 'wait', ms: 500 };
         case 'comment': return { type: 'comment', text: '' };
         case 'label': return { type: 'label', name: '' };
         case 'jump': return { type: 'jump', label: '' };
@@ -18383,9 +18438,10 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'wait' && (
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-gray-400">待機フレーム数:</span>
-                <input type="number" min={1} max={600} value={(cmd as any).frames ?? 30}
-                  onChange={e => onChange({ frames: Number(e.target.value) })}
+                <span className="text-[10px] text-gray-400">待機時間（ミリ秒）:</span>
+                <input type="number" min={0} max={10000} step={100}
+                  value={(cmd as any).ms ?? Math.round(((cmd as any).frames ?? 30) * 1000 / 60)}
+                  onChange={e => onChange({ ms: Number(e.target.value), frames: undefined } as Partial<EventCommand>)}
                   className={inputCls} />
               </div>
             )}
@@ -18753,7 +18809,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'restoreMp': return c.amount != null ? `+${c.amount}` : '全回復';
       case 'ifGold': return `所持金 ≥ ${c.amount || 0}`;
       case 'warp': return c.mapId ? `マップ${c.mapId} [${c.col || 0}, ${c.row || 0}]へ` : `[${c.col || 0}, ${c.row || 0}]へ`;
-      case 'wait': return `${c.frames || 30}フレーム`;
+      case 'wait': return `${c.ms ?? Math.round((c.frames ?? 30) * 1000 / 60)}ミリ秒`;
       case 'comment': return c.text || '';
       case 'overheadMessage': return c.text ? c.text.split('\n')[0] : '';
       case 'playSound': return c.src || '';

@@ -85,7 +85,9 @@ export type EventCommand =
   | { type: 'restoreHp'; amount?: number }
   | { type: 'restoreMp'; amount?: number }
   | { type: 'warp'; col: number; row: number; mapId?: string }
-  | { type: 'wait'; frames: number }
+  /** 指定時間だけ次のコマンドを待つ（RPGEN の #WAT）。単位はミリ秒。
+   *  frames は旧データ互換のためだけに残してあり、ms が未指定のときのみ 1フレーム=16.67ms として使う。 */
+  | { type: 'wait'; ms?: number; frames?: number }
   | { type: 'comment'; text: string }
   | { type: 'label'; name: string }
   | { type: 'jump'; label: string }

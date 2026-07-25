@@ -583,7 +583,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         }
         return choiceNode;
       }
-      case CommandType.Wait: return { type: 'wait', frames: Math.floor((cmd.delay || 1000) / 16) };
+      // #WAT の t はミリ秒。フレーム換算せずそのまま渡す。
+      case CommandType.Wait: return { type: 'wait', ms: cmd.delay || 1000 };
       case CommandType.ChangeObjectSprite: {
         const { spriteRef, spriteUrl } = spriteChangeOf(cmd.params.n);
         return { type: 'changeSprite', spriteRef, spriteUrl, objId: npcObjId(cmd.params.tx, cmd.params.ty) };
