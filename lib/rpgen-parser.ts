@@ -589,13 +589,15 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         return { type: 'moveNpc', objId: 'player', dx, dy, duration: calcMoveDuration(cmd.params, steps) };
       }
       case CommandType.MovePartyAbsolute: {
-        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0', 10), ty: parseInt(cmd.params.ty || '0', 10), duration: calcMoveDuration(cmd.params, 1) };
+        const allowDiagonal = cmd.params.s === '1';
+        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0', 10), ty: parseInt(cmd.params.ty || '0', 10), duration: calcMoveDuration(cmd.params, 1), allowDiagonal };
       }
       case CommandType.MovePartyRelative: {
         const dx = parseInt(cmd.params.tx || '0', 10);
         const dy = parseInt(cmd.params.ty || '0', 10);
-        const steps = cmd.params.s === '1' ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
-        return { type: 'moveNpc', objId: 'player', dx, dy, duration: calcMoveDuration(cmd.params, steps) };
+        const allowDiagonal = cmd.params.s === '1';
+        const steps = allowDiagonal ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
+        return { type: 'moveNpc', objId: 'player', dx, dy, duration: calcMoveDuration(cmd.params, steps), allowDiagonal };
       }
       case CommandType.MoveNpcDirection: {
         const steps = parseInt(cmd.params.v || '1', 10);
@@ -609,14 +611,16 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         const ty = parseInt(cmd.params.ty ?? '0', 10);
         const delX = Math.abs(tx - nx);
         const delY = Math.abs(ty - ny);
-        const steps = cmd.params.s === '1' ? Math.max(delX, delY) : (delX + delY);
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx, ty, duration: calcMoveDuration(cmd.params, steps) };
+        const allowDiagonal = cmd.params.s === '1';
+        const steps = allowDiagonal ? Math.max(delX, delY) : (delX + delY);
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx, ty, duration: calcMoveDuration(cmd.params, steps), allowDiagonal };
       }
       case CommandType.MoveNpcRelative: {
         const dx = parseInt(cmd.params.tx || '0', 10);
         const dy = parseInt(cmd.params.ty || '0', 10);
-        const steps = cmd.params.s === '1' ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, duration: calcMoveDuration(cmd.params, steps) };
+        const allowDiagonal = cmd.params.s === '1';
+        const steps = allowDiagonal ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, duration: calcMoveDuration(cmd.params, steps), allowDiagonal };
       }
       case CommandType.PlusGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
       case CommandType.MinusGold: return { type: 'changeGold', amount: -parseInt(cmd.params.v || '0') };

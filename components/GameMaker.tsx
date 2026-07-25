@@ -444,11 +444,11 @@ async function playSfx(s?: SfxRef) {
 interface SpellFrame { script: SpellBlock[]; ip: number; timesLeft: number; }
 interface SpellExecState { stack: SpellFrame[]; frame: number; waitLeft: number; }
 
-interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; sx: number; sy: number; }
+interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; sx: number; sy: number; allowDiagonal?: boolean; }
 interface Entity {
   def: ObjectDef; x: number; y: number; homeX: number; homeY: number;
   hp: number; timer: number; vx: number; vy: number; talked: boolean;
-  spriteRef?: string; spriteUrl?: string;
+  spriteRef?: string; spriteUrl?: string; activePageIdx?: number;
   isGrounded?: boolean; // 横スク（action）敵の接地状態
   spellState?: SpellExecState;
   moveTarget?: MoveTarget;
@@ -4787,6 +4787,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'changeSprite': {
           const target = !cmd.objId ? 'player' : cmd.objId;
+          ensureImageFromRef(cmd.spriteRef, cmd.spriteUrl);
           if (target === 'player') {
             engineRef.current.player.spriteRef = cmd.spriteRef;
             engineRef.current.player.spriteUrl = cmd.spriteUrl;
@@ -4983,6 +4984,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   ty: targetY,
                   frames: totalFrames,
                   elapsed: 0,
+                  allowDiagonal: cmd.allowDiagonal,
                 };
               } else {
                 obj.x = targetX;
@@ -5099,10 +5101,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
           break;
         }
-        case 'changePhase':
-          // TODO: Implement phase transition if supported by engine
+        case 'changePhase': {
+          index = cmds.length; // 現在のイベント実行を直ちに中断する
+          const targetPhaseIdx = Math.max(0, (cmd.phaseIndex ?? 1) - 1);
+          const targetObj = engineRef.current.entities?.find(o => o.def.id === objId);
+          if (targetObj && targetObj.def.pages && targetObj.def.pages[targetPhaseIdx]) {
+            targetObj.activePageIdx = targetPhaseIdx;
+            const targetPage = targetObj.def.pages[targetPhaseIdx];
+            cmds = targetPage.commands;
+            index = 0;
+            setTimeout(runNext, 0);
+            break;
+          }
           setTimeout(advance, 0);
           break;
+        }
         default:
           setTimeout(advance, 0);
       }
@@ -7659,12 +7672,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // レゼ：上半身を投げてから爆発するまでは立ち止まる（原作再現のため棒立ち）
             e.vx = 0; e.vy = 0;
           } else if (e.moveTarget) {
-            // イベントコマンドによるスムーズな目標地点への移動（lerp）
+            // イベントコマンドによるスムーズな目標地点への移動（直角／斜め対応）
             const mt = e.moveTarget;
             mt.elapsed = (mt.elapsed ?? 0) + 1;
             const progress = Math.min(1, mt.elapsed / mt.frames);
-            e.x = mt.sx + (mt.tx - mt.sx) * progress;
-            e.y = mt.sy + (mt.ty - mt.sy) * progress;
+            if (mt.allowDiagonal || mt.sx === mt.tx || mt.sy === mt.ty) {
+              e.x = mt.sx + (mt.tx - mt.sx) * progress;
+              e.y = mt.sy + (mt.ty - mt.sy) * progress;
+            } else {
+              // 直角移動（斜め移動非許可: s != 1）
+              const dxAbs = Math.abs(mt.tx - mt.sx);
+              const dyAbs = Math.abs(mt.ty - mt.sy);
+              const totalDist = dxAbs + dyAbs;
+              const ratioX = totalDist > 0 ? dxAbs / totalDist : 0.5;
+              if (progress <= ratioX) {
+                const pX = ratioX > 0 ? progress / ratioX : 1;
+                e.x = mt.sx + (mt.tx - mt.sx) * pX;
+                e.y = mt.sy;
+              } else {
+                const pY = (1 - ratioX) > 0 ? (progress - ratioX) / (1 - ratioX) : 1;
+                e.x = mt.tx;
+                e.y = mt.sy + (mt.ty - mt.sy) * pY;
+              }
+            }
             if (mt.elapsed >= mt.frames) {
               e.x = mt.tx;
               e.y = mt.ty;
@@ -7707,6 +7737,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const banished = e.x < -TILE_SIZE || e.x > worldW || e.y < -TILE_SIZE || e.y > worldH;
             if (banished) {
               // 場外に置いたまま何もしない
+            } else if (eventRunningRef.current) {
+              // イベント実行中（メッセージ表示・演出中）はNPCの自律移動（ランダム移動等）を一時停止
             } else if (eStandingSpecial && ICE_DIRS[eStandingSpecial]) {
               // つるつる床に乗った瞬間：behavior による移動を無視し、強制スライドを開始する。
               // 塞がっていて開始できない場合も自由に振る舞わせず、次フレーム以降に再試行させる。
