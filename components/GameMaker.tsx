@@ -4972,8 +4972,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const steps = cmd.allowDiagonal ? Math.max(tileDx, tileDy) : (tileDx + tileDy);
 
             let duration = cmd.duration ?? 0;
-            if (duration <= 0 && steps > 0) {
-              duration = Math.round(steps * 250); // デフォルト 250ms / マス
+            if (cmd.stepMs && cmd.stepMs > 0 && steps > 0) {
+              duration = Math.round(steps * cmd.stepMs);
+            } else if (duration <= 0 && steps > 0) {
+              duration = Math.round(steps * 120); // デフォルト 120ms / マス
             }
 
             if (duration > 0) {
@@ -5112,7 +5114,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'changePhase': {
           index = cmds.length; // 現在のイベント実行を直ちに中断する
-          const targetPhaseIdx = Math.max(0, (cmd.phaseIndex ?? 1) - 1);
+          const targetPhaseIdx = Math.max(0, cmd.phaseIndex ?? 0);
           const targetObj = engineRef.current.entities?.find(o => o.def.id === objId);
           if (targetObj && targetObj.def.pages && targetObj.def.pages[targetPhaseIdx]) {
             targetObj.activePageIdx = targetPhaseIdx;
@@ -18423,9 +18425,9 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
               </label>
             )}
             {type === 'changePhase' && (
-              <label className="text-[10px] text-gray-400 block">移行先フェーズ番号（1〜4）
-                <input type="number" min={1} max={4} value={(cmd as any).phaseIndex ?? 1} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
-                  className={`${inputCls} mt-0.5`} placeholder="1" />
+              <label className="text-[10px] text-gray-400 block">移行先フェーズ番号（0〜）
+                <input type="number" min={0} max={10} value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
+                  className={`${inputCls} mt-0.5`} placeholder="0" />
               </label>
             )}
             {type === 'playEffect' && (
@@ -18493,7 +18495,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'resetCamera': return `${c.duration || 0}ms`;
       case 'moveNpc': return `${c.objId || 'player'} → [${c.tx ?? '-'}, ${c.ty ?? '-'}]`;
       case 'screenEffect': return c.effects?.[0]?.color || '';
-      case 'changePhase': return `フェーズ${c.phaseIndex || 1}`;
+      case 'changePhase': return `フェーズ${c.phaseIndex ?? 0}`;
       case 'playEffect': return `${c.effectId || '?'} @ ${c.target || 'self'}`;
       default: return '';
     }
