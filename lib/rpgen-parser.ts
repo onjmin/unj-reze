@@ -3,6 +3,8 @@ import {
   Direction,
   EventTiming,
   HumanBehavior,
+  RawDirection,
+  parseHumanBehavior,
   RAW_DQ_STILL_SPRITE_SEPARATOR,
   RAW_TILE_COLLISION_SUFFIX,
   RPGMap,
@@ -63,6 +65,19 @@ const DIR_BY_RPGEN_DIRECTION: Record<Direction, Dir4Name> = {
   [Direction.West]: 'left',
 };
 
+/** #CH_PD / #CH_ND の d パラメータ（生の値）→ エンジンの向き。4以降（斜め等）は未対応。 */
+const DIR_BY_RAW: Record<string, Dir4Name | undefined> = Object.fromEntries(
+  (Object.keys(DIR_BY_RPGEN_DIRECTION) as Direction[]).map(d => [String(RawDirection[d]), DIR_BY_RPGEN_DIRECTION[d]]),
+);
+
+/** #CH_BG / #CH_DV の v（Imgur の画像ID、遠景は "<id>.<ext>" 形式）→ 画像URL。 */
+const imgurUrl = (raw: string | undefined): string => {
+  const value = raw?.trim();
+  if (!value) return '';
+  if (value.startsWith('http')) return value;
+  return `https://i.imgur.com/${/\.[a-z0-9]+$/i.test(value) ? value : `${value}.png`}`;
+};
+
 /** 標準素材の「動く床」→ エンジンの強制スライド床。 */
 const ICE_SPECIAL_BY_TILE: Record<string, string> = {
   '16_13': 'ice-up',
@@ -71,7 +86,10 @@ const ICE_SPECIAL_BY_TILE: Record<string, string> = {
   '17_14': 'ice-down',
 };
 
+/** "A1" = ユーザ投稿の歩行アニメ */
 const ANIMATION_SPRITE_PREFIX = RawSpritePrefix[SpriteType.CustomAnimationSprite];
+/** "-1" = ユーザ投稿の静止スプライト */
+const STILL_SPRITE_PREFIX = RawSpritePrefix[SpriteType.CustomStillSprite];
 
 type ImageFrame = { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number };
 /** 素材ID・ファイル名・URL のいずれかを実URLへ解決する。 */
@@ -84,12 +102,31 @@ const customTileId = (rawTile: string): number | undefined => {
   return Number.isFinite(id) ? id : undefined;
 };
 
-/** コマンドの n パラメータ（"A123"=歩行グラ / "123"=静止スプライト）。 */
-const parseSpriteParam = (raw: string | undefined): { id: number; animated: boolean } | undefined => {
-  if (!raw) return undefined;
-  const animated = raw.startsWith(ANIMATION_SPRITE_PREFIX);
-  const id = Number(animated ? raw.slice(ANIMATION_SPRITE_PREFIX.length) : raw);
-  return Number.isFinite(id) ? { id, animated } : undefined;
+/** #CH_HM / #CH_SP の n パラメータが指す素材。#HUMAN のスプライト指定と同じ規約。 */
+type SpriteParam =
+  /** 接頭辞なし "19" ＝ 標準素材の歩行グラ（値はサーフェス番号でファイルが決まる） */
+  | { kind: typeof SpriteType.DQAnimationSprite; surface: number }
+  /** "A1" ＝ rpgen-search のユーザ投稿歩行アニメ（値は素材ID） */
+  | { kind: typeof SpriteType.CustomAnimationSprite; id: number }
+  /** "-1" ＝ rpgen-search のユーザ投稿静止スプライト（値は素材ID） */
+  | { kind: typeof SpriteType.CustomStillSprite; id: number };
+
+const parseSpriteParam = (raw: string | undefined): SpriteParam | undefined => {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const digitsAfter = (prefix: string): number | undefined => {
+    const rest = value.slice(prefix.length);
+    return /^\d+$/.test(rest) ? Number(rest) : undefined;
+  };
+  if (value.startsWith(ANIMATION_SPRITE_PREFIX)) {
+    const id = digitsAfter(ANIMATION_SPRITE_PREFIX);
+    return id === undefined ? undefined : { kind: SpriteType.CustomAnimationSprite, id };
+  }
+  if (value.startsWith(STILL_SPRITE_PREFIX)) {
+    const id = digitsAfter(STILL_SPRITE_PREFIX);
+    return id === undefined ? undefined : { kind: SpriteType.CustomStillSprite, id };
+  }
+  return /^\d+$/.test(value) ? { kind: SpriteType.DQAnimationSprite, surface: Number(value) } : undefined;
 };
 
 /** #DW_IMG/#DW_IMA/#DW_FL の u 系パラメータのうち、素材IDで指定されたもの。 */
@@ -277,8 +314,10 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     switch (cmd.type) {
       case CommandType.ChangeObjectSprite:
       case CommandType.ChangeHumanSprite: {
+        // 標準素材（接頭辞なし）はサーフェス番号でリポジトリ同梱のシートを引くだけなので、
+        // encode API に問い合わせるのはユーザ投稿素材（"A1" / "-1"）のIDだけにする。
         const spec = parseSpriteParam(cmd.params.n);
-        if (spec) idsToTranslate.add(spec.id);
+        if (spec && spec.kind !== SpriteType.DQAnimationSprite) idsToTranslate.add(spec.id);
         break;
       }
       case CommandType.DrawImage:
@@ -454,11 +493,19 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   const spriteChangeOf = (n: string | undefined): { spriteRef: string; spriteUrl: string } => {
     const spec = parseSpriteParam(n);
     if (!spec) return { spriteRef: '', spriteUrl: '' };
-    if (spec.animated) {
-      const url = sAnimUrlOf(spec.id);
-      return { spriteRef: url ? `walk:auto:u:${url}` : '', spriteUrl: '' };
+    switch (spec.kind) {
+      case SpriteType.DQAnimationSprite: {
+        // 標準素材はリポジトリ同梱の歩行グラ（/assets/rpgen/char/NN-*.png）
+        const match = DQ_CHARACTERS.find(c => c.surface === spec.surface);
+        return { spriteRef: match ? `walk:auto:u:${match.url}` : '', spriteUrl: '' };
+      }
+      case SpriteType.CustomAnimationSprite: {
+        const url = sAnimUrlOf(spec.id);
+        return { spriteRef: url ? `walk:auto:u:${url}` : '', spriteUrl: '' };
+      }
+      case SpriteType.CustomStillSprite:
+        return { spriteRef: '', spriteUrl: spriteUrlOf(spec.id) };
     }
-    return { spriteRef: '', spriteUrl: spriteUrlOf(spec.id) };
   };
 
   // ── 人物の参照解決 ──────────────────────────────────────────────────────
@@ -595,7 +642,32 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.ResumeLayer:
       case CommandType.ResumeLayerAnimation: return { type: 'resumeImage', layer: parseInt(cmd.params.l || '0') };
       case CommandType.PlaySound: return { type: 'playSound', src: resolveSoundUrl(cmd.params.i) };
-      case CommandType.ChangeBGM: return { type: 'changeBackground', bgRef: '', bgUrl: cmd.params.v };
+      // v は YouTube 動画ID。s（再生開始位置）は BgmManager に開始位置指定が無いため未対応。
+      case CommandType.ChangeBGM: return { type: 'changeBgm', bgmRef: cmd.params.v ? `youtube:${cmd.params.v}` : '' };
+      case CommandType.StopBGM: return { type: 'changeBgm', bgmRef: '' };
+      // 壁紙(v=ImgurのID)・遠景(v="<id>.<ext>") はどちらもマップ背景画像として扱う
+      case CommandType.ChangeWallpaper:
+      case CommandType.ChangeDistantView: {
+        const url = imgurUrl(cmd.params.v);
+        return { type: 'changeBackground', bgRef: url ? `url:${url}` : '', bgUrl: url || undefined };
+      }
+      case CommandType.ChangePartyDirection: {
+        const dir = DIR_BY_RAW[cmd.params.d ?? ''];
+        return dir ? { type: 'changeDirection', objId: 'player', dir } : null;
+      }
+      case CommandType.ChangeNpcDirection: {
+        const dir = DIR_BY_RAW[cmd.params.d ?? ''];
+        const objId = npcObjId(cmd.params.nx, cmd.params.ny);
+        return dir && objId ? { type: 'changeDirection', objId, dir } : null;
+      }
+      case CommandType.ChangeNpcMovement: {
+        const objId = npcObjId(cmd.params.nx, cmd.params.ny);
+        if (!objId) return null;
+        // m は #HUMAN の動き方と同じ生の値、r は移動確率(%)。静止(0)のときは m/r ともに省略される。
+        const behavior = NPC_BEHAVIOR_BY_HUMAN_BEHAVIOR[parseHumanBehavior(cmd.params.m) ?? HumanBehavior.Still] ?? 'still';
+        const chance = Number(cmd.params.r);
+        return { type: 'changeNpcMovement', objId, behavior, moveChance: Number.isFinite(chance) ? Math.max(0, Math.min(100, chance)) : 0 };
+      }
       case CommandType.ChangePhase: return { type: 'changePhase', phaseIndex: parseInt(cmd.params.p || '1') };
       case CommandType.OnSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: true };
       case CommandType.OffSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: false };

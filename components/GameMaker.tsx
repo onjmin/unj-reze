@@ -2037,6 +2037,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const actionDirRef = useRef<1 | -1>(1);     // action エンジン：プレイヤー向き
   /** rpg/touhou: 入力中の方向（移動不可でも向きを更新するために使用）*/
   const playerInputDirRef = useRef<WayKey | null>(null);
+  /** イベント（#CH_PD）で指定された主人公の向き。実際に移動すると解除される。 */
+  const playerFacingRef = useRef<WayKey | null>(null);
   /** rpg: ブロックされたときの向き（静止中に overrideDir として渡すために保持）*/
   const playerBlockedDirRef = useRef<WayKey | null>(null);
   /** rpg: 直前フレームのプレイヤー描画位置（静止判定に使用）*/
@@ -4801,6 +4803,42 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           gameDataRef.current.mapBgUrl = cmd.bgUrl;
           setTimeout(advance, 0);
           break;
+        case 'changeBgm': {
+          // bgmRef が空なら停止（RPGEN の #ST_YB）。それ以外はボスBGM切替と同じ経路で差し替える。
+          const bgmAsset = cmd.bgmRef ? bgmRefToAsset(cmd.bgmRef) : null;
+          if (bgmAsset?.src) {
+            bgmManager.play({
+              bgm: { type: bgmAsset.type, src: bgmAsset.src, loop: bgmAsset.loop, volume: applyMasterVolume(bgmAsset.volume ?? 50) },
+              tileset: {},
+            } as never);
+          } else {
+            bgmManager.stop();
+          }
+          setTimeout(advance, 0);
+          break;
+        }
+        case 'changeDirection': {
+          const way = WAY_BY_DIR4[cmd.dir];
+          if (cmd.objId === 'player') playerFacingRef.current = way;
+          else {
+            const obj = engineRef.current.entities?.find(o => o.def.id === cmd.objId);
+            if (obj) obj.facing = way;
+          }
+          setTimeout(advance, 0);
+          break;
+        }
+        case 'changeNpcMovement': {
+          const obj = engineRef.current.entities?.find(o => o.def.id === cmd.objId);
+          if (obj) {
+            // 敵/NPCの定義そのものを書き換える（マリオのパワーアップで behavior を差し替えるのと同じ方式）
+            obj.def.behavior = cmd.behavior;
+            obj.def.moveChance = cmd.moveChance;
+            obj.stepTarget = undefined;
+            obj.vx = 0; obj.vy = 0;
+          }
+          setTimeout(advance, 0);
+          break;
+        }
         case 'showImage':
           setOverlayImages(prev => ({
             ...prev, [cmd.imgId]: {
@@ -9684,9 +9722,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const isStationary = lastPos && p.x === lastPos.x && p.y === lastPos.y;
         const blockedOverride = gameData.engine === 'rpg' && isStationary && playerBlockedDirRef.current
           ? playerBlockedDirRef.current : undefined;
+        // イベントで向きを指定された（#CH_PD）場合はそれを優先し、自分で歩き出したら解除する
+        if (!isStationary) playerFacingRef.current = null;
         lastDrawnPlayerPosRef.current = { x: p.x, y: p.y };
         drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
-          gameData.engine === 'touhou' ? 'w' : blockedOverride);
+          gameData.engine === 'touhou' ? 'w' : (playerFacingRef.current ?? blockedOverride));
         if (isStar) {
           ctx.restore();
         }
@@ -17420,7 +17460,9 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   restoreHp: 'HP回復', restoreMp: 'MP回復',
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
   overheadMessage: '頭上メッセージ', playSound: '効果音再生',
-  changeSprite: '画像変更', changeBackground: '背景変更', showImage: '画像表示', hideImage: '画像消去',
+  changeSprite: '画像変更', changeBackground: '背景変更', changeBgm: 'BGM変更',
+  changeDirection: '向き変更', changeNpcMovement: 'NPCの動き変更',
+  showImage: '画像表示', hideImage: '画像消去',
   followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
   moveCamera: 'カメラ移動', resetCamera: 'カメラリセット', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', clearScreenEffect: '画面エフェクト消去', changePhase: 'フェーズ変更',
   playEffect: 'エフェクト再生',
@@ -17647,6 +17689,9 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
         case 'playSound': return { type: 'playSound', src: '' };
         case 'changeSprite': return { type: 'changeSprite', spriteRef: '', objId: '' };
         case 'changeBackground': return { type: 'changeBackground', bgRef: '' };
+        case 'changeBgm': return { type: 'changeBgm', bgmRef: '' };
+        case 'changeDirection': return { type: 'changeDirection', objId: 'player', dir: 'down' };
+        case 'changeNpcMovement': return { type: 'changeNpcMovement', objId: '', behavior: 'still' };
         case 'showImage': return { type: 'showImage', imgId: '', url: '', x: 0, y: 0 };
         case 'hideImage': return { type: 'hideImage', imgId: '' };
         case 'moveCamera': return { type: 'moveCamera', tx: 0, ty: 0, duration: 0 };
@@ -17838,6 +17883,53 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                 <label className="text-[10px] text-gray-400 block">移動先マップID（空=同一マップ内で座標移動）
                   <input value={(cmd as any).mapId ?? ''} onChange={e => onChange({ mapId: e.target.value || undefined } as Partial<EventCommand>)}
                     className={`${inputCls} mt-0.5`} placeholder="RPGEN マップ番号など" />
+                </label>
+              </div>
+            )}
+            {type === 'changeBgm' && (
+              <label className="text-[10px] text-gray-400 block">BGM参照（asset ref）
+                <input value={(cmd as any).bgmRef ?? ''} onChange={e => onChange({ bgmRef: e.target.value })}
+                  className={`${inputCls} mt-0.5`} placeholder="youtube:動画ID / direct:https://… （空=停止）" />
+              </label>
+            )}
+            {type === 'changeDirection' && (
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">対象
+                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="player またはオブジェクトID" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">向き
+                  <select value={(cmd as any).dir ?? 'down'} onChange={e => onChange({ dir: e.target.value as Dir4Name })}
+                    className={`${inputCls} mt-0.5`}>
+                    <option value="up">↑ 上</option>
+                    <option value="down">↓ 下</option>
+                    <option value="left">← 左</option>
+                    <option value="right">→ 右</option>
+                  </select>
+                </label>
+              </div>
+            )}
+            {type === 'changeNpcMovement' && (
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">対象オブジェクトID
+                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
+                    className={`${inputCls} mt-0.5`} placeholder="オブジェクトID" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">挙動
+                  <select value={(cmd as any).behavior ?? 'still'} onChange={e => onChange({ behavior: e.target.value as NpcBehavior })}
+                    className={`${inputCls} mt-0.5`}>
+                    {Object.entries(BEHAVIOR_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </label>
+                <label className="text-[10px] text-gray-400 block">1マス移動の確率 %（空=連続移動）
+                  <input type="text" inputMode="numeric" value={(cmd as any).moveChance ?? ''}
+                    onChange={e => {
+                      const raw = e.target.value.trim();
+                      if (raw === '') { onChange({ moveChance: undefined } as Partial<EventCommand>); return; }
+                      const v = parseInt(raw, 10);
+                      if (!isNaN(v)) onChange({ moveChance: Math.max(0, Math.min(100, v)) });
+                    }}
+                    className={`${inputCls} mt-0.5`} placeholder="0〜100" />
                 </label>
               </div>
             )}
@@ -18163,6 +18255,9 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'choice': return c.choices?.length ? `${c.choices.length}択${c.random ? '(ランダム)' : ''}` : 'なし';
       case 'changeSprite': return `${c.objId || 'player'}`;
       case 'changeBackground': return c.bgUrl || c.bgRef || '';
+      case 'changeBgm': return c.bgmRef || '（停止）';
+      case 'changeDirection': return `${c.objId || 'player'} → ${({ up: '↑', down: '↓', left: '←', right: '→' } as Record<string, string>)[c.dir] ?? c.dir}`;
+      case 'changeNpcMovement': return `${c.objId || '?'} → ${BEHAVIOR_LABELS[c.behavior as NpcBehavior]}${c.moveChance != null ? ` ${c.moveChance}%` : ''}`;
       case 'showImage': return `ID:${c.imgId || '?'} ${c.url ? '📷' : ''}`;
       case 'hideImage': return `ID:${c.imgId || '?'}`;
       case 'followImage': return `ID:${c.imgId || '?'} → ${c.targetObjId || 'player'}`;

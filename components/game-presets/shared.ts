@@ -92,6 +92,12 @@ export type EventCommand =
   | { type: 'playSound'; src: string }
   | { type: 'changeSprite'; spriteRef: string; spriteUrl?: string; objId: string }
   | { type: 'changeBackground'; bgRef: string; bgUrl?: string }
+  /** BGM を差し替える（RPGEN の #CH_YB）。bgmRef が空文字なら停止（#ST_YB）。 */
+  | { type: 'changeBgm'; bgmRef: string }
+  /** 向きを変える（RPGEN の #CH_PD / #CH_ND）。objId='player' で主人公。 */
+  | { type: 'changeDirection'; objId: string; dir: Dir4Name }
+  /** NPC の動き方を変える（RPGEN の #CH_MT）。moveChance は1マス移動の確率(0〜100)。 */
+  | { type: 'changeNpcMovement'; objId: string; behavior: NpcBehavior; moveChance?: number }
   | { 
       type: 'showImage'; 
       imgId: string; 
