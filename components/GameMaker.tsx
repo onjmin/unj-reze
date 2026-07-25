@@ -945,7 +945,8 @@ type PickTarget =
   | { t: 'yumeMcSkin' }
   | { t: 'playerMcSkin' }
   | { t: 'effectImage'; id: string }
-  | { t: 'effectSfx'; id: string };
+  | { t: 'effectSfx'; id: string }
+  | { t: 'cmdChangeSprite' };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -964,7 +965,7 @@ const SpriteThumbnail = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const walk = spriteRef ? parseWalkRef(spriteRef) : null;
-  let resolvedUrl = spriteUrl ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+  let resolvedUrl = (spriteUrl && spriteUrl.length > 0) ? spriteUrl : (walk?.source.kind === 'url' ? walk.source.url : undefined);
   let resolvedSMC = resolvedUrl;
   let sxOffset = 0, syOffset = 0, swOffset = 0, shOffset = 0;
   let hasSMCFrame = false;
@@ -1441,6 +1442,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [eventChoice, setEventChoice] = useState<{ text: string; choices: { label: string; commands: EventCommand[] }[]; onPick: (idx: number) => void } | null>(null);
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
+  const cmdPickCallbackRef = useRef<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>(null);
   const [showControlGuide, setShowControlGuide] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
@@ -4789,13 +4791,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const target = !cmd.objId ? 'player' : cmd.objId;
           ensureImageFromRef(cmd.spriteRef, cmd.spriteUrl);
           if (target === 'player') {
-            engineRef.current.player.spriteRef = cmd.spriteRef;
-            engineRef.current.player.spriteUrl = cmd.spriteUrl;
+            engineRef.current.player.spriteRef = cmd.spriteRef || undefined;
+            engineRef.current.player.spriteUrl = cmd.spriteUrl || undefined;
           } else {
             const obj = engineRef.current.entities?.find(o => o.def.id === target);
             if (obj) {
-              obj.spriteRef = cmd.spriteRef;
-              obj.spriteUrl = cmd.spriteUrl;
+              obj.spriteRef = cmd.spriteRef || undefined;
+              obj.spriteUrl = cmd.spriteUrl || undefined;
             }
           }
           setTimeout(advance, 0);
@@ -5816,9 +5818,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 床タイルの可否をそのまま使う。
     const isCellPassable = (px: number, py: number) => {
       const overlay = getOverlayTileAt(Math.floor(px / TILE_SIZE), Math.floor(py / TILE_SIZE));
-      if (overlay?.info) return overlay.info.passable;
+      if (overlay?.info) return !!overlay.info.passable;
       const floor = getTile(px, py);
-      return !!floor?.info.passable;
+      return !!floor?.info?.passable;
     };
     // NPC/敵の自律移動用：矩形の対角2隅がともに通行可か。プレイヤーと同じ isCellPassable を
     // 使い、床（map）だけでなくオーバーレイ層（壁・扉・橋など）も含めた最終判定で移動可否を
@@ -5921,8 +5923,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       overrideDir?: WayKey,
     ) => {
       const walk = def.spriteRef ? parseWalkRef(def.spriteRef) : null;
-      const resolvedUrl = def.spriteUrl
-        ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
+      const resolvedUrl = (def.spriteUrl && def.spriteUrl.length > 0)
+        ? def.spriteUrl
+        : (walk?.source.kind === 'url' ? walk.source.url : undefined);
 
       // 向き・移動を画面上の移動量から導出（エンジン非依存）
       const key = animKey ?? resolvedUrl ?? 'unknown';
@@ -6666,7 +6669,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           let hitGround = false;
           for (let dx = 2; dx <= pw - 2; dx += 8) {
             const tBottom = getTile(p.x + dx, p.y + ph + 2); // 2px 下をチェック
-            if (tBottom && !tBottom.info.passable) hitGround = true;
+            if (tBottom && !tBottom.info?.passable) hitGround = true;
           }
           if (hitGround || p.y >= worldH - ph - TILE_SIZE) {
             goal.phase = 'walk';
@@ -6770,7 +6773,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const yOffset = Math.min(dy, ph - 2);
             const t1 = getTile(p.x + 2, p.y + yOffset);
             const t2 = getTile(p.x + pw - 2, p.y + yOffset);
-            if ((t1 && !t1.info.passable) || (t2 && !t2.info.passable)) {
+            if ((t1 && !t1.info?.passable) || (t2 && !t2.info?.passable)) {
               overlapping = true;
               break;
             }
@@ -6779,7 +6782,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // 接地判定ライン（最下部）の重なりもチェック
             const t3 = getTile(p.x + 2, p.y + ph);
             const t4 = getTile(p.x + pw - 2, p.y + ph);
-            if ((t3 && !t3.info.passable) || (t4 && !t4.info.passable)) {
+            if ((t3 && !t3.info?.passable) || (t4 && !t4.info?.passable)) {
               overlapping = true;
             }
           }
@@ -6915,13 +6918,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const tLeft = getTile(p.x + 2, p.y + yOffset);
             const tRight = getTile(p.x + pw - 2, p.y + yOffset);
             // Ignore one-way platforms during horizontal checks
-            if (tLeft && !tLeft.info.passable && tLeft.info.special !== 'oneway') xHits.push(tLeft);
-            if (tRight && !tRight.info.passable && tRight.info.special !== 'oneway') xHits.push(tRight);
+            if (tLeft && !tLeft.info?.passable && tLeft.info?.special !== 'oneway') xHits.push(tLeft);
+            if (tRight && !tRight.info?.passable && tRight.info?.special !== 'oneway') xHits.push(tRight);
           }
           const tLeftBottom = getTile(p.x + 2, p.y + ph - 2);
           const tRightBottom = getTile(p.x + pw - 2, p.y + ph - 2);
-          if (tLeftBottom && !tLeftBottom.info.passable && tLeftBottom.info.special !== 'oneway') xHits.push(tLeftBottom);
-          if (tRightBottom && !tRightBottom.info.passable && tRightBottom.info.special !== 'oneway') xHits.push(tRightBottom);
+          if (tLeftBottom && !tLeftBottom.info?.passable && tLeftBottom.info?.special !== 'oneway') xHits.push(tLeftBottom);
+          if (tRightBottom && !tRightBottom.info?.passable && tRightBottom.info?.special !== 'oneway') xHits.push(tRightBottom);
 
           let wallDir = 0;
           const tile = xHits[0];
@@ -6954,29 +6957,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           for (let dx = 2; dx <= pw - 2; dx += 8) {
             const tBottom = getTile(p.x + dx, p.y + ph);
             if (tBottom) {
-              if (tBottom.info.special === 'oneway') {
+              if (tBottom.info?.special === 'oneway') {
                 if (p.vy >= 0 && (p.y + ph - p.vy <= tBottom.rect.y + 4)) {
                   yHits.push({ tile: tBottom, dir: 'down' });
                 }
-              } else if (!tBottom.info.passable) {
+              } else if (!tBottom.info?.passable) {
                 yHits.push({ tile: tBottom, dir: 'down' });
               }
             }
             const tTop = getTile(p.x + dx, p.y + 2);
-            if (tTop && !tTop.info.passable && tTop.info.special !== 'oneway') yHits.push({ tile: tTop, dir: 'up' });
+            if (tTop && !tTop.info?.passable && tTop.info?.special !== 'oneway') yHits.push({ tile: tTop, dir: 'up' });
           }
           const tBottomRight = getTile(p.x + pw - 2, p.y + ph);
           if (tBottomRight) {
-            if (tBottomRight.info.special === 'oneway') {
+            if (tBottomRight.info?.special === 'oneway') {
               if (p.vy >= 0 && (p.y + ph - p.vy <= tBottomRight.rect.y + 4)) {
                 yHits.push({ tile: tBottomRight, dir: 'down' });
               }
-            } else if (!tBottomRight.info.passable) {
+            } else if (!tBottomRight.info?.passable) {
               yHits.push({ tile: tBottomRight, dir: 'down' });
             }
           }
           const tTopRight = getTile(p.x + pw - 2, p.y + 2);
-          if (tTopRight && !tTopRight.info.passable && tTopRight.info.special !== 'oneway') yHits.push({ tile: tTopRight, dir: 'up' });
+          if (tTopRight && !tTopRight.info?.passable && tTopRight.info?.special !== 'oneway') yHits.push({ tile: tTopRight, dir: 'up' });
 
           const yHit = yHits[0];
           if (yHit) {
@@ -7239,16 +7242,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             playSfx(sfxRef.current.shot);
           }
 
-          // ── 💣 ボム設置（Cキー / C / 💣ボムボタン）──
+          // ── 💣 ボム投擲（Cキー / C / 💣ボムボタン）──
           const B_FUSE = 96;        // 導火線（約1.6秒）
           const B_BLAST = 36;       // 爆発エフェクト持続（約0.6秒）
           const B_R = TILE_SIZE * 1.6;   // 通常ボムの爆風半径
           const B_DMG = 3;          // 爆風ダメージ
+          const B_FLY = 18;         // 飛翔時間（約0.3秒）
           const pcx0 = p.x + pData.w / 2, pcy0 = p.y + pData.h / 2;
           const isBombKey = keys.has('c') || keys.has('C') || t.bomb;
           if (onjBombCoolRef.current > 0) onjBombCoolRef.current--;
           if (isPlaying && !dead && isBombKey && onjBombCoolRef.current <= 0) {
-            onjBombsRef.current.push({ x: pcx0, y: pcy0, fuse: B_FUSE, maxFuse: B_FUSE, r: B_R, dmg: B_DMG, head: false });
+            const throwDist = TILE_SIZE * 3.5;
+            const tx = pcx0 + onjRezeDirRef.current.x * throwDist;
+            const ty = pcy0 + onjRezeDirRef.current.y * throwDist;
+            onjFliesRef.current.push({
+              fx: pcx0, fy: pcy0,
+              tx, ty,
+              t: 0, dur: B_FLY,
+              fuse: B_FUSE, r: B_R, dmg: B_DMG, head: false
+            });
             onjBombCoolRef.current = 24; playSfx(sfxRef.current.shot);
           }
           // 飛行 → 着地
@@ -7614,7 +7626,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const nx = e.x + e.vx;
                 const leadX = e.vx > 0 ? nx + ew - 1 : nx;
                 const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + eh - 2);
-                const wall = (wt && !wt.info.passable) || (wb && !wb.info.passable);
+                const wall = (wt && !wt.info?.passable) || (wb && !wb.info?.passable);
                 if (wall || nx < 0 || nx > worldW - ew) e.vx = -e.vx; // 壁・画面端で跳ね返る
                 else e.x = nx;
               } else {
@@ -7624,7 +7636,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               e.y += e.vy; e.isGrounded = false;
               if (e.vy > 0) {
                 const fl = getTile(e.x + 2, e.y + eh), fr = getTile(e.x + ew - 2, e.y + eh);
-                const g = (fl && !fl.info.passable) ? fl : (fr && !fr.info.passable) ? fr : null;
+                const g = (fl && !fl.info?.passable) ? fl : (fr && !fr.info?.passable) ? fr : null;
                 if (g) { e.y = g.rect.y - eh; e.vy = 0; e.isGrounded = true; }
               }
               e.x = Math.max(0, Math.min(worldW - ew, e.x));
@@ -7656,11 +7668,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 } else {
                   const leadX = e.vx > 0 ? nx + ew - 1 : nx;
                   const wt = getTile(leadX, e.y + 2), wb = getTile(leadX, e.y + eh - 2);
-                  const wall = (wt && !wt.info.passable) || (wb && !wb.info.passable);
+                  const wall = (wt && !wt.info?.passable) || (wb && !wb.info?.passable);
                   let edge = false;
                   if (d.behavior === 'walker' && e.isGrounded) {
                     const f = getTile(leadX, e.y + eh + 2);
-                    edge = !f || f.info.passable;
+                    edge = !f || !!f.info?.passable;
                   }
                   if (wall || edge || nx < 0 || nx > worldW - ew) e.vx = -e.vx;
                   else e.x = nx;
@@ -7675,11 +7687,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 e.isGrounded = false;
                 if (e.vy > 0) {
                   const fl = getTile(e.x + 2, e.y + eh), fr = getTile(e.x + ew - 2, e.y + eh);
-                  const g = (fl && !fl.info.passable) ? fl : (fr && !fr.info.passable) ? fr : null;
+                  const g = (fl && !fl.info?.passable) ? fl : (fr && !fr.info?.passable) ? fr : null;
                   if (g) { e.y = g.rect.y - eh; e.vy = 0; e.isGrounded = true; }
                 } else if (e.vy < 0) {
                   const hl = getTile(e.x + 2, e.y), hr = getTile(e.x + ew - 2, e.y);
-                  const c = (hl && !hl.info.passable) ? hl : (hr && !hr.info.passable) ? hr : null;
+                  const c = (hl && !hl.info?.passable) ? hl : (hr && !hr.info?.passable) ? hr : null;
                   if (c) { e.y = c.rect.y + TILE_SIZE; e.vy = 0; }
                 }
               }
@@ -10961,6 +10973,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return { ref: res.ref, src, type };
     };
     if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, spriteRef: res.ref, spriteUrl: res.url } }));
+    else if (target.t === 'cmdChangeSprite') { if (cmdPickCallbackRef.current) cmdPickCallbackRef.current({ spriteRef: res.ref, spriteUrl: res.url }); }
     else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, spriteRef: res.ref, spriteUrl: res.url } : o) })); }
     else if (target.t === 'mapBg') { ensureImage(res.url); setGameData(p => ({ ...p, mapBgRef: res.ref, mapBgUrl: res.url })); }
     else if (target.t === 'objsprite') setObjTemplate(o => ({ ...o, spriteRef: res.ref, spriteUrl: res.url }));
@@ -13879,7 +13892,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {gameData.engine === 'onjReze' && (
                       <>
                         <li>剣攻撃 … [Z]</li>
-                        <li>ボム設置 … [C]</li>
+                        <li>ボム投擲 … [C]</li>
                         <li>ボム投擲 … [X]</li>
                         <li>首爆弾投擲 … [V]</li>
                       </>
@@ -14860,6 +14873,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           items={gameData.items ?? []}
                           effects={gameData.effects ?? []}
                           setPreviewCommand={setPreviewCommand}
+                          onPickImage={target => setPicker({ mode: 'image', target })}
+                          imgCache={imgCache}
+                          cmdPickCallbackRef={cmdPickCallbackRef}
                         />
                       </div>
                     ) : (
@@ -14997,6 +15013,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             items={gameData.items ?? []}
                             effects={gameData.effects ?? []}
                             setPreviewCommand={setPreviewCommand}
+                            onPickImage={target => setPicker({ mode: 'image', target })}
+                            imgCache={imgCache}
+                            cmdPickCallbackRef={cmdPickCallbackRef}
                           />
                         </div>
                       );
@@ -15548,6 +15567,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           items={gameData.items ?? []}
                           effects={gameData.effects ?? []}
                           setPreviewCommand={setPreviewCommand}
+                          onPickImage={target => setPicker({ mode: 'image', target })}
+                          imgCache={imgCache}
+                          cmdPickCallbackRef={cmdPickCallbackRef}
                         />
                       )}
                     </>) : (
@@ -17624,8 +17646,8 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
 
-function EventPageEditor({ pages, setPages, switches, items, effects, setPreviewCommand }:
-  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[]; setPreviewCommand: (cmd: EventCommand | null) => void; }) {
+function EventPageEditor({ pages, setPages, switches, items, effects, setPreviewCommand, onPickImage, imgCache, cmdPickCallbackRef }:
+  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[]; setPreviewCommand: (cmd: EventCommand | null) => void; onPickImage?: (target: PickTarget) => void; imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>; cmdPickCallbackRef?: React.MutableRefObject<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>; }) {
   const [expanded, setExpanded] = useState<number>(0);
   const [detailsCmdIndex, setDetailsCmdIndex] = useState<{ pi: number; ci: number } | null>(null);
   const addPage = () => {
@@ -17671,6 +17693,9 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
             setPreviewCommand(newCmd);
           }}
           onClose={() => { setDetailsCmdIndex(null); setPreviewCommand(null); }}
+          onPickImage={onPickImage}
+          imgCache={imgCache}
+          cmdPickCallbackRef={cmdPickCallbackRef}
         />
       )}
       <div className="flex items-center justify-between">
@@ -17814,9 +17839,12 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
 
 // ── 単一イベントコマンドエディタ ──
 
-function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onClose }: {
+function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onClose, onPickImage, imgCache, cmdPickCallbackRef }: {
   cmd: EventCommand; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[];
   onChange: (patch: Partial<EventCommand>) => void; onClose: () => void;
+  onPickImage?: (target: PickTarget) => void;
+  imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>;
+  cmdPickCallbackRef?: React.MutableRefObject<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>;
 }) {
   const type = cmd.type;
   const setType = (t: EventCommand['type']) => {
@@ -18120,24 +18148,57 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                 className={inputCls} placeholder="効果音URL（mp3）" />
             )}
             {type === 'changeSprite' && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <label className="text-[10px] text-gray-400 block">対象ID（空=プレイヤー）
                   <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
                     className={`${inputCls} mt-0.5`} placeholder="player / オブジェクトID" />
                 </label>
-                <label className="text-[10px] text-gray-400 block">歩行アニメ参照（walk:… 形式）
-                  <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="walk:auto:u:https://…" />
-                </label>
-                <label className="text-[10px] text-gray-400 block">静止画像URL（単一スプライト）
-                  <input value={(cmd as any).spriteUrl ?? ''} onChange={e => onChange({ spriteUrl: e.target.value || undefined } as Partial<EventCommand>)}
-                    className={`${inputCls} mt-0.5`} placeholder="https://…/sprites/xxxx.png" />
-                </label>
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">画像 / 歩行グラフィック選択</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cmdPickCallbackRef) {
+                        cmdPickCallbackRef.current = (res: { spriteRef: string; spriteUrl?: string }) => {
+                          onChange({ spriteRef: res.spriteRef, spriteUrl: res.spriteUrl || undefined } as Partial<EventCommand>);
+                        };
+                      }
+                      onPickImage?.({ t: 'cmdChangeSprite' });
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-blue-300 font-bold transition"
+                  >
+                    <ImageIcon size={14} className="text-blue-400" />
+                    画像/歩行グラを参照
+                  </button>
+                </div>
                 {((cmd as any).spriteUrl || (cmd as any).spriteRef) && (
-                  <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
-                    <img src={(cmd as any).spriteUrl || (cmd as any).spriteRef.replace(/^walk:[^:]*:[^:]*:/, '')} className="max-h-24 object-contain" alt="preview" />
+                  <div className="flex items-center gap-2 border border-gray-700 bg-gray-900 rounded p-2 mt-1">
+                    {imgCache ? (
+                      <SpriteThumbnail spriteRef={(cmd as any).spriteRef} spriteUrl={(cmd as any).spriteUrl} emoji="" size={32} imgCache={imgCache} />
+                    ) : (
+                      <img src={(cmd as any).spriteUrl || (cmd as any).spriteRef?.replace(/^walk:[^:]*:[^:]*:/, '')} className="w-8 h-8 object-contain" alt="preview" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] text-gray-300 truncate font-mono">{(cmd as any).spriteRef || (cmd as any).spriteUrl}</div>
+                    </div>
+                    <button type="button" onClick={() => onChange({ spriteRef: '', spriteUrl: undefined } as Partial<EventCommand>)} className="text-gray-400 hover:text-red-400 p-1">
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 )}
+                <details className="text-[10px] text-gray-500">
+                  <summary className="cursor-pointer hover:text-gray-400">直接テキスト入力（高度）</summary>
+                  <div className="space-y-2 mt-2 pt-2 border-t border-gray-800">
+                    <label className="text-[10px] text-gray-400 block">歩行アニメ参照（walk:… 形式）
+                      <input value={(cmd as any).spriteRef ?? ''} onChange={e => onChange({ spriteRef: e.target.value })}
+                        className={`${inputCls} mt-0.5`} placeholder="walk:auto:u:https://…" />
+                    </label>
+                    <label className="text-[10px] text-gray-400 block">静止画像URL（単一スプライト）
+                      <input value={(cmd as any).spriteUrl ?? ''} onChange={e => onChange({ spriteUrl: e.target.value || undefined } as Partial<EventCommand>)}
+                        className={`${inputCls} mt-0.5`} placeholder="https://…/sprites/xxxx.png" />
+                    </label>
+                  </div>
+                </details>
               </div>
             )}
             {type === 'changeBackground' && (
