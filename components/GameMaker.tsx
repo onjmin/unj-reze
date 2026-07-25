@@ -219,6 +219,11 @@ const VIEW_H = VIEW_ROWS * TILE_SIZE;   // 352 px
 const SCALE_X = PLAY_W / VIEW_W;        // 640/480 = 4/3
 const SCALE_Y = PLAY_H / VIEW_H;        // 480/352 = 15/11
 
+/** RPGEN 本家のゲーム画面サイズ（px）。#SEL の表示位置など「画面座標」で書かれた値を
+ *  こちらのキャンバスの相対位置へ読み替えるための基準。 */
+const RPGEN_SCREEN_W = 480;
+const RPGEN_SCREEN_H = 384;
+
 const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
 
 /** 全シーンを1枚のワールドマップに合成する。シーン0を原点にBFS展開。
@@ -1436,10 +1441,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [partyEquipment, setPartyEquipment] = useState<Record<string, { weapon?: string; armor?: string }>>({});
   const partyEquipmentRef = useRef<Record<string, { weapon?: string; armor?: string }>>({});
   const selfSwitchesRef = useRef<Record<string, Record<string, boolean>>>({});
+  /** #CH_PH（フェーズ変更）で明示的に指定されたページ添字。オブジェクトIDごとに保持し、
+   *  発生条件による自動選択より優先する。値は 0 始まりの配列添字（コマンド側は1始まり）。 */
+  const forcedPagesRef = useRef<Record<string, number>>({});
   const eventRunningRef = useRef(false);
   const eventIdRef = useRef(0);
-  const eventChoiceRef = useRef<{ text: string; choices: { label: string; commands: EventCommand[] }[]; onPick: (idx: number) => void } | null>(null);
-  const [eventChoice, setEventChoice] = useState<{ text: string; choices: { label: string; commands: EventCommand[] }[]; onPick: (idx: number) => void } | null>(null);
+  /** 選択肢ウィンドウの状態。posX/posY は RPGEN #SEL の表示位置で、ゲーム画面（キャンバス）左上を
+   *  原点とするピクセル座標。ワールド座標／自機座標ではないため、カメラ移動中でも常に画面内に出る。 */
+  type EventChoiceState = {
+    text: string; choices: { label: string; commands: EventCommand[] }[];
+    posX?: number; posY?: number;
+    onPick: (idx: number) => void;
+  };
+  const eventChoiceRef = useRef<EventChoiceState | null>(null);
+  const [eventChoice, setEventChoice] = useState<EventChoiceState | null>(null);
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
   const cmdPickCallbackRef = useRef<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>(null);
@@ -1510,6 +1525,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     url: string; x: number; y: number; w?: number; h?: number; opacity?: number; isPercent?: boolean;
     m?: boolean; c?: boolean; sxp?: boolean; swp?: boolean; xp?: boolean; wp?: boolean; lp?: boolean;
     ms?: number;
+    /** #DW_IMG（画像）か #DW_IMA（アニメ）か。#ST_IMG / #ST_IMA の全消去で対象を絞るのに使う。 */
+    kind?: 'image' | 'anim';
     startTime?: number;
     pausedAt?: number;
     pauseOffset?: number;
@@ -4526,6 +4543,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const findActivePage = useCallback((obj: { id: string; pages?: EventPage[] }): EventPage | null => {
     if (!obj.pages || obj.pages.length === 0) return null;
+    // #CH_PH で切り替えられたページは発生条件より優先する（自分自身にも他イベントにも効く）。
+    const forced = forcedPagesRef.current[obj.id];
+    if (forced != null && obj.pages[forced]) return obj.pages[forced];
     const hasConditions = (c?: EventCondition) => {
       if (!c) return false;
       return c.switchId != null || c.switch2Id != null || c.itemId != null || c.selfSwitchId != null || c.minGold != null;
@@ -4642,6 +4662,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
           eventChoiceRef.current = {
             text: cmd.text, choices: cmd.choices,
+            posX: cmd.posX, posY: cmd.posY,
             onPick: (idx: number) => {
               eventChoiceRef.current = null;
               setEventChoice(null);
@@ -4911,7 +4932,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             ...prev, [cmd.imgId]: {
               url: cmd.url, x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h, opacity: cmd.opacity, isPercent: cmd.isPercent,
               m: cmd.m, c: cmd.c, sxp: cmd.sxp, swp: cmd.swp, xp: cmd.xp, wp: cmd.wp, lp: cmd.lp,
-              ms: cmd.ms, frames: cmd.frames, startTime: Date.now()
+              ms: cmd.ms, kind: cmd.kind ?? 'image', frames: cmd.frames, startTime: Date.now()
             }
           }));
           if (cmd.frames && cmd.frames.length > 0 && !cmd.lp && cmd.ms) {
@@ -4921,11 +4942,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             setTimeout(advance, 0);
           }
           break;
-        case 'hideImage':
-          setOverlayImages(prev => { const next = { ...prev }; delete next[cmd.imgId]; return next; });
-          setFollowImages(prev => { const next = { ...prev }; delete next[cmd.imgId]; return next; });
+        case 'hideImage': {
+          // RPGEN の #ST_IMG / #ST_IMA は管理番号を取らず「表示中のものをすべて終了」する。
+          // imgId 指定時のみ1件を消し、未指定なら kind（画像/アニメ）に一致するものを全部消す。
+          const targetId = cmd.imgId;
+          if (targetId) {
+            setOverlayImages(prev => { const next = { ...prev }; delete next[targetId]; return next; });
+            setFollowImages(prev => { const next = { ...prev }; delete next[targetId]; return next; });
+          } else {
+            setOverlayImages(prev => {
+              const next: typeof prev = {};
+              for (const [id, img] of Object.entries(prev)) {
+                // kind 未記録の旧データは画像扱い（#ST_IMG で消える）にしておく
+                if (cmd.kind && (img.kind ?? 'image') !== cmd.kind) next[id] = img;
+              }
+              return next;
+            });
+            if (!cmd.kind || cmd.followImages) setFollowImages({});
+          }
           setTimeout(advance, 0);
           break;
+        }
         case 'followImage':
           setFollowImages(prev => ({
             ...prev,
@@ -5120,12 +5157,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           break;
         }
         case 'changePhase': {
-          index = cmds.length; // 現在のイベント実行を直ちに中断する
-          const targetPhaseIdx = Math.max(0, cmd.phaseIndex ?? 0);
+          // phaseIndex は GUI の「ページ1」と揃えた 1 始まり。配列添字へは -1 して変換する。
+          const targetPageIdx = Math.max(0, (cmd.phaseIndex ?? 1) - 1);
+          // tx/ty 指定時は、そのマスにいる別イベントのフェーズを切り替えるだけで、実行は継続する。
+          if (cmd.tx != null && cmd.ty != null) {
+            const other = engineRef.current.entities?.find(o => o.def.col === cmd.tx && o.def.row === cmd.ty);
+            if (other && other.def.pages && other.def.pages[targetPageIdx]) {
+              other.activePageIdx = targetPageIdx;
+              forcedPagesRef.current[other.def.id] = targetPageIdx;
+            }
+            setTimeout(advance, 0);
+            break;
+          }
+          index = cmds.length; // 自分自身の切り替えでは現在のイベント実行を直ちに中断する
           const targetObj = engineRef.current.entities?.find(o => o.def.id === objId);
-          if (targetObj && targetObj.def.pages && targetObj.def.pages[targetPhaseIdx]) {
-            targetObj.activePageIdx = targetPhaseIdx;
-            const targetPage = targetObj.def.pages[targetPhaseIdx];
+          if (targetObj && targetObj.def.pages && targetObj.def.pages[targetPageIdx]) {
+            targetObj.activePageIdx = targetPageIdx;
+            forcedPagesRef.current[targetObj.def.id] = targetPageIdx;
+            const targetPage = targetObj.def.pages[targetPageIdx];
             cmds = targetPage.commands;
             index = 0;
             setTimeout(runNext, 0);
@@ -5703,6 +5752,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setSwitchVals({}); switchValsRef.current = {};
       setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
       selfSwitchesRef.current = {};
+      forcedPagesRef.current = {};
       eventRunningRef.current = false;
     } else {
       eng.map = gameData.map;
@@ -5866,9 +5916,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     ) => {
       const inX = input.left || input.right;
       const inY = input.up || input.down;
+      // 壁に埋まった状態からの脱出可否。埋まっている間も「隣が通行可のマスへ向かう」動きだけは
+      // 許して詰みを防ぐが、当たり判定に囲まれている（どの隣も通行不可）なら一切動かさない。
+      // ここを素通しにすると、壁の中を自由に歩き回れてしまう。
+      const escapeOk = (gx: number, gy: number) => {
+        // 移動後に完全に通行可へ抜けられるなら当然OK
+        if (isAllPassable(gx, gy, w, h)) return true;
+        // まだ抜けきっていない場合は、進行方向の隣マスが通行可のときだけ進ませる
+        const cx = p.x + w / 2, cy = p.y + h / 2;
+        const sx = Math.sign(gx - p.x), sy = Math.sign(gy - p.y);
+        if (sx === 0 && sy === 0) return false;
+        return isCellPassable(cx + sx * TILE_SIZE, cy + sy * TILE_SIZE);
+      };
       const canGo = (gx: number, gy: number) =>
         gx >= 0 && gx <= worldW - w && gy >= 0 && gy <= worldH - h &&
-        (alreadyInWall || isAllPassable(gx, gy, w, h)) && !mobBlocks(gx, gy);
+        (alreadyInWall ? escapeOk(gx, gy) : isAllPassable(gx, gy, w, h)) && !mobBlocks(gx, gy);
 
       // 横移動
       if (nx !== p.x) {
@@ -12759,28 +12821,44 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               />
             )}
 
-            {/* ── イベント選択肢（十字キー上下・Z/Aで確定、初期カーソルは先頭） ── */}
-            {eventChoice && !battle && (
-              <div className="absolute inset-0 flex items-end justify-center pb-16 px-4 font-pixel">
-                <div className="bg-[#1a1a2e] border-2 border-gray-400 p-3 shadow-2xl w-full max-w-xs">
-                  <p
-                    className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap break-words"
-                    style={{ overflowWrap: 'anywhere' }}
-                  >
-                    {eventChoice.text}
-                  </p>
-                  <div className="space-y-1.5">
-                    {eventChoice.choices.map((ch, i) => (
-                      <button key={i} onClick={() => { setEventChoiceCursor(i); eventChoice.onPick(i); }}
-                        className={`w-full py-1.5 text-xs font-bold text-left px-3 whitespace-pre-wrap break-words ${eventChoiceCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white'}`}
-                        style={{ overflowWrap: 'anywhere' }}>
-                        {eventChoiceCursor === i ? '❤ ' : '  '}{ch.label}
-                      </button>
-                    ))}
+            {/* ── イベント選択肢（十字キー上下・Z/Aで確定、初期カーソルは先頭） ──
+                配置はゲームキャンバスの見た目の座標系で決める。RPGEN #SEL の x/y はワールド座標でも
+                自機座標でもなく「ゲーム画面上の表示位置」なので、カメラ移動中（#MV_CA 等でカメラが
+                自機から離れているとき）でもウィンドウが画面外へ流れないようにする。位置は 3x3 の
+                寄せ（左/中央/右 × 上/中央/下）へ丸め、はみ出す長さの選択肢は内部スクロールさせる。 */}
+            {eventChoice && !battle && (() => {
+              const anchor = (v: number | undefined, screen: number): 'start' | 'center' | 'end' | null => {
+                if (v == null || !Number.isFinite(v)) return null;
+                const r = Math.max(0, Math.min(1, v / screen));
+                return r < 1 / 3 ? 'start' : r < 2 / 3 ? 'center' : 'end';
+              };
+              // RPGEN のゲーム画面は 480x384。同じ相対位置になるように割合へ直してから寄せを決める。
+              const justifyContent = anchor(eventChoice.posX, RPGEN_SCREEN_W) ?? 'center';
+              const alignItems = anchor(eventChoice.posY, RPGEN_SCREEN_H) ?? 'end';
+              return (
+                <div className="absolute inset-0 flex px-4 pt-4 font-pixel"
+                  style={{ justifyContent, alignItems, paddingBottom: alignItems === 'end' ? 64 : 16 }}>
+                  <div className="bg-[#1a1a2e] border-2 border-gray-400 p-3 shadow-2xl w-full max-w-xs overflow-y-auto"
+                    style={{ maxHeight: '100%' }}>
+                    <p
+                      className="text-white text-sm leading-relaxed mb-2 whitespace-pre-wrap break-words"
+                      style={{ overflowWrap: 'anywhere' }}
+                    >
+                      {eventChoice.text}
+                    </p>
+                    <div className="space-y-1.5">
+                      {eventChoice.choices.map((ch, i) => (
+                        <button key={i} onClick={() => { setEventChoiceCursor(i); eventChoice.onPick(i); }}
+                          className={`w-full py-1.5 text-xs font-bold text-left px-3 whitespace-pre-wrap break-words ${eventChoiceCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white'}`}
+                          style={{ overflowWrap: 'anywhere' }}>
+                          {eventChoiceCursor === i ? '❤ ' : '  '}{ch.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* ── ターン制戦闘オーバーレイ ── */}
             {/* ── アンダーテール風戦闘（undertale）── */}
@@ -17976,7 +18054,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
         case 'changeDirection': return { type: 'changeDirection', objId: 'player', dir: 'down' };
         case 'changeNpcMovement': return { type: 'changeNpcMovement', objId: '', behavior: 'still' };
         case 'showImage': return { type: 'showImage', imgId: '', url: '', x: 0, y: 0 };
-        case 'hideImage': return { type: 'hideImage', imgId: '' };
+        case 'hideImage': return { type: 'hideImage' };
         case 'moveCamera': return { type: 'moveCamera', tx: 0, ty: 0, duration: 0 };
         case 'resetCamera': return { type: 'resetCamera', duration: 0 };
         case 'moveNpc': return { type: 'moveNpc', objId: 'player', tx: 0, ty: 0, duration: 0 };
@@ -18460,10 +18538,24 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
               </div>
             )}
             {type === 'hideImage' && (
-              <label className="text-[10px] text-gray-400 block">消去する画像の管理番号（ID）
-                <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
-                  className={`${inputCls} mt-0.5`} placeholder="1〜50" />
-              </label>
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">消去する画像の管理番号（ID／空欄で全消去）
+                  <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value || undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="1〜50（空欄=すべて）" />
+                </label>
+                <label className="text-[10px] text-gray-400 block">全消去の対象
+                  <select value={(cmd as any).kind ?? ''} onChange={e => onChange({ kind: (e.target.value || undefined) as 'image' | 'anim' | undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} disabled={!!(cmd as any).imgId}>
+                    <option value="">画像とアニメの両方</option>
+                    <option value="image">画像のみ（#ST_IMG）</option>
+                    <option value="anim">アニメのみ（#ST_IMA）</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
+                  <input type="checkbox" checked={!!(cmd as any).followImages} onChange={e => onChange({ followImages: e.target.checked || undefined } as Partial<EventCommand>)} className="accent-blue-500 w-3.5 h-3.5" />
+                  追随画像（#DW_FL）も消す
+                </label>
+              </div>
             )}
             {(type === 'pauseImage' || type === 'resumeImage') && (
               <div className="space-y-2">
@@ -18600,10 +18692,22 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
               </label>
             )}
             {type === 'changePhase' && (
-              <label className="text-[10px] text-gray-400 block">移行先フェーズ番号（0〜）
-                <input type="number" min={0} max={10} value={(cmd as any).phaseIndex ?? 0} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
-                  className={`${inputCls} mt-0.5`} placeholder="0" />
-              </label>
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">移行先フェーズ番号（1〜／ページタブの番号と同じ）
+                  <input type="number" min={1} max={20} value={(cmd as any).phaseIndex ?? 1} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
+                    className={`${inputCls} mt-0.5`} placeholder="1" />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[10px] text-gray-400">対象イベントX（列/空=自分）
+                    <input type="number" value={(cmd as any).tx ?? ''} onChange={e => onChange({ tx: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="列" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">対象イベントY（行/空=自分）
+                    <input type="number" value={(cmd as any).ty ?? ''} onChange={e => onChange({ ty: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="行" />
+                  </label>
+                </div>
+              </div>
             )}
             {type === 'playEffect' && (
               <div className="flex flex-col gap-2">
@@ -18662,7 +18766,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'changeDirection': return `${c.objId || 'player'} → ${({ up: '↑', down: '↓', left: '←', right: '→' } as Record<string, string>)[c.dir] ?? c.dir}`;
       case 'changeNpcMovement': return `${c.objId || '?'} → ${BEHAVIOR_LABELS[c.behavior as NpcBehavior]}${c.moveChance != null ? ` ${c.moveChance}%` : ''}`;
       case 'showImage': return `ID:${c.imgId || '?'} ${c.url ? '📷' : ''}`;
-      case 'hideImage': return `ID:${c.imgId || '?'}`;
+      case 'hideImage': return c.imgId ? `ID:${c.imgId}` : `${c.kind === 'anim' ? 'アニメ' : c.kind === 'image' ? '画像' : 'すべて'}を全消去`;
       case 'followImage': return `ID:${c.imgId || '?'} → ${c.targetObjId || 'player'}`;
       case 'pauseImage': return c.imgId ? `ID:${c.imgId}` : `レイヤー${c.layer ?? '?'}`;
       case 'resumeImage': return c.imgId ? `ID:${c.imgId}` : `レイヤー${c.layer ?? '?'}`;
@@ -18670,7 +18774,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'resetCamera': return `${c.duration || 0}ms`;
       case 'moveNpc': return `${c.objId || 'player'} → [${c.tx ?? '-'}, ${c.ty ?? '-'}]`;
       case 'screenEffect': return c.effects?.[0]?.color || '';
-      case 'changePhase': return `フェーズ${c.phaseIndex ?? 0}`;
+      case 'changePhase': return `フェーズ${c.phaseIndex ?? 1}${(c.tx != null && c.ty != null) ? ` @[${c.tx}, ${c.ty}]` : ''}`;
       case 'playEffect': return `${c.effectId || '?'} @ ${c.target || 'self'}`;
       default: return '';
     }

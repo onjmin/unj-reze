@@ -222,10 +222,11 @@ const buildFrames = (params: Record<string, string>, resolveUrl: ResolveUrl): Im
   return frames;
 };
 
-const showImageCommand = (params: Record<string, string>, resolveUrl: ResolveUrl): EventCommand => {
+const showImageCommand = (params: Record<string, string>, resolveUrl: ResolveUrl, kind: 'image' | 'anim' = 'image'): EventCommand => {
   const frames = buildFrames(params, resolveUrl);
   return {
     type: 'showImage',
+    kind,
     imgId: params.i || '1',
     url: frames.length > 0 ? frames[0].url : '',
     x: parseInt(params.x || '0'),
@@ -549,11 +550,13 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         const embedded = parseEmbeddedCommand(text);
         switch (embedded?.name) {
           case CommandType.DrawAnimation:
+            return showImageCommand(embedded.params, resolveUrl, 'anim');
           case CommandType.DrawImage:
-            return showImageCommand(embedded.params, resolveUrl);
+            return showImageCommand(embedded.params, resolveUrl, 'image');
           case CommandType.StopAnimation:
+            return { type: 'hideImage', kind: 'anim' };
           case CommandType.StopImage:
-            return { type: 'hideImage', imgId: embedded.params.i || '1' };
+            return { type: 'hideImage', kind: 'image', followImages: embedded.params.bf === '1' };
           case 'ED':
             // 一部の #ED が MSG として残っている場合の後方互換
             return null;
@@ -567,6 +570,10 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
           random: cmd.mode === SelectMode.Random,
           // c:1 で直前のメッセージウィンドウを表示したままにする
           keepMessage: cmd.clearMessage === true,
+          // x/y はゲーム画面上の表示位置（ピクセル）。ワールド座標ではないので、カメラ移動中でも
+          // そのまま画面座標として扱う。
+          posX: cmd.displayPosition?.x,
+          posY: cmd.displayPosition?.y,
         };
         for (const choice of cmd.choices) {
           choiceNode.choices.push({
@@ -630,10 +637,13 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.MinusGold: return { type: 'changeGold', amount: -parseInt(cmd.params.v || '0') };
       case CommandType.SetGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
       case CommandType.DrawAnimation:
+        return showImageCommand(cmd.params, resolveUrl, 'anim');
       case CommandType.DrawImage:
-        return showImageCommand(cmd.params, resolveUrl);
-      case CommandType.StopAnimation:
-      case CommandType.StopImage: return { type: 'hideImage', imgId: cmd.params.i || '1' };
+        return showImageCommand(cmd.params, resolveUrl, 'image');
+      // #ST_IMA / #ST_IMG は管理番号を取らない「表示中のものをすべて終了」コマンド。
+      // i:… を読んで1枚だけ消していたため、i を付けずに出した画像／アニメが消えなかった。
+      case CommandType.StopAnimation: return { type: 'hideImage', kind: 'anim' };
+      case CommandType.StopImage: return { type: 'hideImage', kind: 'image', followImages: cmd.params.bf === '1' };
       case CommandType.DrawFollowImage: {
         const params = cmd.params;
         const dirs: Record<'U' | 'D' | 'L' | 'R', NonNullable<Extract<EventCommand, { type: 'followImage' }>['directions']['U']> | undefined> =
@@ -705,7 +715,19 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         const chance = Number(cmd.params.r);
         return { type: 'changeNpcMovement', objId: objId || '', behavior, moveChance: Number.isFinite(chance) ? Math.max(0, Math.min(100, chance)) : 0 };
       }
-      case CommandType.ChangePhase: return { type: 'changePhase', phaseIndex: parseInt(cmd.params.p || '0', 10) };
+      case CommandType.ChangePhase: {
+        // RPGEN のデータ上の p は 0 始まり（例: #CH_PH p:0）。エンジン側は GUI の「ページ1」と揃えた
+        // 1 始まりで統一しているため、取り込み時に +1 する。
+        const rawPhase = parseInt(cmd.params.p || '0', 10);
+        // x/y は「別イベントの座標」。未指定のときは NaN になるので、自分自身の切り替えとして扱う。
+        const tx = Number(cmd.params.x);
+        const ty = Number(cmd.params.y);
+        return {
+          type: 'changePhase',
+          phaseIndex: (Number.isFinite(rawPhase) ? rawPhase : 0) + 1,
+          ...(Number.isFinite(tx) && Number.isFinite(ty) ? { tx, ty } : {}),
+        };
+      }
       case CommandType.OnSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: true };
       case CommandType.OffSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: false };
       case CommandType.MoveMap: return { type: 'warp', col: parseInt(cmd.params.tx || '0'), row: parseInt(cmd.params.ty || '0'), mapId: cmd.params.n };
@@ -801,7 +823,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     if (!message || !message.trim()) return undefined;
     const commands = translateSequence(parseScript(message));
     if (commands.length === 0) return undefined;
-    return [{ name: 'Phase 0', conditions: {}, trigger: 'action', commands }];
+    // ページ番号は GUI の表示（1 始まり）に合わせる。
+    return [{ name: 'Phase 1', conditions: {}, trigger: 'action', commands }];
   };
 
   for (const human of rpgMap.humans) {
@@ -883,7 +906,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         }
       }
       return {
-        name: `Phase ${idx}`,
+        // #CH_PH の p と同じく 1 始まり（pages[0] が「フェーズ1」）
+        name: `Phase ${idx + 1}`,
         conditions,
         trigger: phase.timing === EventTiming.Touch ? 'playerTouch' as const : 'action' as const,
         commands: translateSequence(parsePhase(phase.sequence)),

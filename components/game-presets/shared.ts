@@ -70,6 +70,9 @@ export type EventCommand =
       /** RPGEN #SEL の c フラグ。true(c:1)なら直前のメッセージウィンドウを表示したままにする。
        *  false(c:0/省略)なら選択肢を出す前にメッセージウィンドウを閉じる。 */
       keepMessage?: boolean;
+      /** RPGEN #SEL の x/y（表示位置）。ゲーム画面（キャンバス）の左上を原点とするピクセル座標で、
+       *  ワールド座標／自機座標ではない。カメラがどこを向いていても必ず画面内へ収まるように使う。 */
+      posX?: number; posY?: number;
     }
   | { type: 'ifSwitch'; switchId: number; value: boolean; then: EventCommand[]; else?: EventCommand[] }
   | { type: 'ifItem'; itemId: string; has: boolean; then: EventCommand[]; else?: EventCommand[] }
@@ -116,6 +119,8 @@ export type EventCommand =
       wp?: boolean;
       lp?: boolean;
       ms?: number;
+      /** #DW_IMG（画像）か #DW_IMA（アニメ）か。#ST_IMG / #ST_IMA の消去対象を絞るために保持する。 */
+      kind?: 'image' | 'anim';
       frames?: {
         url: string;
         sx: number; sy: number;
@@ -125,7 +130,11 @@ export type EventCommand =
         a: number;
       }[];
     }
-  | { type: 'hideImage'; imgId: string }
+  /** 表示中の画像を消す（RPGEN の #ST_IMG / #ST_IMA）。
+   *  RPGEN の消去コマンドは管理番号を取らず「表示中のものをすべて終了」する。imgId 未指定（空文字含む）が
+   *  その全消去にあたり、kind で画像(#DW_IMG)／アニメ(#DW_IMA)のどちらを消すかを絞り込む（未指定は両方）。
+   *  followImages=true（#ST_IMG の bf:1）なら追随画像（#DW_FL）も併せて消す。 */
+  | { type: 'hideImage'; imgId?: string; kind?: 'image' | 'anim'; followImages?: boolean }
   | { 
       type: 'followImage';
       imgId: string;
@@ -143,7 +152,10 @@ export type EventCommand =
   | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number; stepMs?: number; allowDiagonal?: boolean }
   | { type: 'clearScreenEffect' }
   | { type: 'screenEffect'; effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] }
-  | { type: 'changePhase'; phaseIndex: number }
+  /** イベントページ（フェーズ）を切り替える（RPGEN の #CH_PH）。
+   *  phaseIndex は GUI の表示と揃えた 1 始まり（1 = 「ページ1」= pages[0]）。
+   *  tx/ty を指定すると、そのマス（列/行）にある別イベントのフェーズを切り替える（未指定なら自分自身）。 */
+  | { type: 'changePhase'; phaseIndex: number; tx?: number; ty?: number }
   /** エフェクトアニメーション（EffectPreset）を再生する。target='self' はこのイベント自身の位置、'player' はプレイヤーの現在位置。
    *  wait=true のとき、アニメーション1周分の時間だけコマンド進行をブロックする。 */
   | { type: 'playEffect'; effectId: string; target: 'self' | 'player'; wait?: boolean }
