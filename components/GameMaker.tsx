@@ -901,60 +901,6 @@ function buildPhaseEntities(
   return entities;
 }
 
-// SMC素材は「不透明なマット背景（単色）」を持ち、alpha 透明を一切含まない（縁取り枠やバナーが
-// 焼き込まれているシートもある）。そのまま canvas に描くと素材の周囲に矩形が残るため、読込時に
-// マット色を検出して許容誤差つきで透明化したオフスクリーン canvas を作る。
-//  判定（SMC素材 と 透明素材 の切り分け）:
-//   1) 既に透明ピクセルを十分持つ画像（RPGen等の通常PNG）は対象外 → null（他プリセットへ無影響）。
-//   2) ほぼ不透明な画像のみ「最頻色」をマットとみなす。占有率が低ければ素材色の誤検出なので null。
-//      最頻色判定は四隅や縁取り枠に影響されず、シート支配色（=マット）を正しく拾える。
-//  CORS で getImageData が tainted の場合は null を返し、呼び出し側は元画像にフォールバック。
-const CHROMA_TOL = 18;
-const CHROMA_MIN_COVERAGE = 0.18;
-const CHROMA_MAX_COVERAGE = 0.75; // 消去範囲が広すぎる(75%超)場合は、背景ではなく画像全体の地色/単色イラストとみなしてキーイングを行わない
-const CHROMA_MAX_EXISTING_ALPHA = 0.02; // これ以上 alpha<250 を含む画像は「透明素材」とみなしスキップ
-function makeChromaKeyed(img: HTMLImageElement): HTMLCanvasElement | null {
-  const w = img.naturalWidth, h = img.naturalHeight;
-  if (!w || !h) return null;
-  const cnv = document.createElement('canvas');
-  cnv.width = w; cnv.height = h;
-  const c = cnv.getContext('2d', { willReadFrequently: true });
-  if (!c) return null;
-  c.drawImage(img, 0, 0);
-  let data: ImageData;
-  try { data = c.getImageData(0, 0, w, h); } catch { return null; } // tainted
-  const px = data.data;
-  const total = w * h;
-  // 1) 既存の透明度をチェック（透明素材は対象外）＋ 最頻色ヒストグラム（不透明ピクセルのみ）
-  const hist = new Map<number, number>();
-  let translucent = 0;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i + 3] < 250) { translucent++; continue; }
-    const k = (px[i] << 16) | (px[i + 1] << 8) | px[i + 2];
-    hist.set(k, (hist.get(k) ?? 0) + 1);
-  }
-  if (translucent / total > CHROMA_MAX_EXISTING_ALPHA) return null; // 透明素材 → キーイングしない
-  let bestKey = -1, bestN = 0;
-  for (const [k, n] of hist) if (n > bestN) { bestN = n; bestKey = k; }
-  if (bestKey < 0 || bestN / total < CHROMA_MIN_COVERAGE) return null; // マットが支配的でない
-  const kr = (bestKey >> 16) & 0xff, kg = (bestKey >> 8) & 0xff, kb = bestKey & 0xff;
-  // 2) 最頻色（マット）を許容誤差つきで透明化
-  let keyed = 0;
-  for (let i = 0; i < px.length; i += 4) {
-    if (px[i + 3] !== 0 &&
-      Math.abs(px[i] - kr) <= CHROMA_TOL &&
-      Math.abs(px[i + 1] - kg) <= CHROMA_TOL &&
-      Math.abs(px[i + 2] - kb) <= CHROMA_TOL) {
-      px[i + 3] = 0; keyed++;
-    }
-  }
-  if (keyed === 0) return null;
-  const opaqueTotal = total - translucent;
-  if (opaqueTotal > 0 && keyed / opaqueTotal > CHROMA_MAX_COVERAGE) return null; // 消去範囲が広すぎる(75%超)場合はキーイングをキャンセル
-  c.putImageData(data, 0, 0);
-  return cnv;
-}
-
 interface GameMakerProps {
   onClose: () => void;
   userId: string;
@@ -995,7 +941,6 @@ const SpriteThumbnail = ({
   size = 32,
   className = '',
   imgCache,
-  keyedCache,
 }: {
   spriteRef?: string;
   spriteUrl?: string;
@@ -1003,7 +948,6 @@ const SpriteThumbnail = ({
   size?: number;
   className?: string;
   imgCache: React.MutableRefObject<Map<string, HTMLImageElement>>;
-  keyedCache: React.MutableRefObject<Map<string, HTMLCanvasElement>>;
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const walk = spriteRef ? parseWalkRef(spriteRef) : null;
@@ -1050,7 +994,7 @@ const SpriteThumbnail = ({
 
     const imgW = img.naturalWidth;
     const imgH = img.naturalHeight;
-    const srcImg = keyedCache.current.get(resolvedSMC) ?? img;
+    const srcImg = img;
 
     let sx = 0, sy = 0, sw = imgW, sh = imgH;
 
@@ -1527,8 +1471,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     keys: new Set(), bullets: [], enemyBullets: [], entities: [], shotTimer: 0, animId: 0,
   });
   const imgCache = useRef<Map<string, HTMLImageElement>>(new Map());
-  // マット背景を透明化したオフスクリーン canvas（描画ソース用）。キーは imgCache と同じ URL。
-  const keyedCache = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const sfxRef = useRef<PresetData['sfx']>({});
   sfxRef.current = gameData.sfx;
 
@@ -5109,20 +5051,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const existing = imgCache.current.get(baseUrl);
     if (existing) {
       imgCache.current.set(url, existing);
-      const k = keyedCache.current.get(baseUrl);
-      if (k) keyedCache.current.set(url, k);
       return;
     }
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    // 読込完了後にマット背景を検出して透明化し、描画ソース用 canvas をキャッシュ（失敗時は元画像のまま）。
-    img.onload = () => {
-      const keyed = makeChromaKeyed(img);
-      if (keyed) {
-        keyedCache.current.set(url, keyed);
-        if (hashIdx !== -1) keyedCache.current.set(baseUrl, keyed);
-      }
-    };
     img.onerror = () => {
       const currentBg = gameDataRef.current.mapBgUrl;
       const fallbackUrl = 'https://i.imgur.com/xqZTM17.jpg';
@@ -5930,7 +5862,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               targetImg = imgCache.current.get(smcUrl);
             }
             if (targetImg && targetImg.complete && targetImg.naturalWidth > 0) {
-              const srcImg = keyedCache.current.get(smcUrl) ?? targetImg;
+              const srcImg = targetImg;
               const sx = frame.x;
               const sy = frame.y;
               const sw = frame.w;
@@ -5975,7 +5907,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
 
         // 描画ソース: マット透明化済み canvas があればそれを使う（寸法は元画像から取る）。
-        const srcImg: CanvasImageSource = keyedCache.current.get(resolvedUrl) ?? img!;
+        const srcImg: CanvasImageSource = img!;
         const imgW = img!.naturalWidth;
         const imgH = img!.naturalHeight;
         // 下端揃え位置（下端からの距離px・既定0）と表示倍率（小数可・未指定ならセルに合わせて自動フィット）。
@@ -6068,7 +6000,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       if (loaded) {
-        const srcToDraw = keyedCache.current.get(resolvedUrl!) ?? img!;
+        const srcToDraw = img!;
         const hashIdx = resolvedUrl!.indexOf('#');
         if (hashIdx !== -1) {
           const parts = resolvedUrl!.slice(hashIdx + 1).split(',');
@@ -9290,7 +9222,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const sw = imgCrop ? imgCrop[2] : img.naturalWidth;
           const sh = imgCrop ? imgCrop[3] : img.naturalHeight;
           // マット透明化済み canvas があればそれを描画ソースに（寸法は元画像と同じ）。
-          const drawSrc = keyedCache.current.get(rawImgUrl) ?? keyedCache.current.get(baseImgUrl) ?? img;
+          const drawSrc = img;
           if (info.imageScale2x) {
             const zoom = 2.0;
             const destW = sw * zoom;
@@ -9372,7 +9304,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const sy = hash ? hash[1] : 0;
               const sw = hash ? hash[2] : img.naturalWidth;
               const sh = hash ? hash[3] : img.naturalHeight;
-              const drawSrc = keyedCache.current.get(rawImgUrl) ?? keyedCache.current.get(baseImgUrl) ?? img;
+              const drawSrc = img;
 
               if (info.imageScale2x) {
                 const zoom = 2.0;
@@ -9408,7 +9340,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               let std = walkStdCache.get(e.def.spriteUrl);
               if (!std) { std = detectStandard(img.naturalWidth, img.naturalHeight); walkStdCache.set(e.def.spriteUrl, std); }
               const cell = animatedCell(std, img.naturalWidth, img.naturalHeight, { dir: 's', moving: false, timeSec: 0, fps: 7 });
-              const srcImg = keyedCache.current.get(e.def.spriteUrl) ?? img;
+              const srcImg = img;
               const ew = e.def.w ?? TILE_SIZE, eh = e.def.h ?? TILE_SIZE;
               ctx.drawImage(srcImg, cell.sx, cell.sy + cell.sh / 2, cell.sw, cell.sh / 2, e.x, e.y + eh / 2, ew, eh / 2);
             }
@@ -9852,7 +9784,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const swordImg = imgCache.current.get(SWORD_SPRITE_URL);
         const cx = hx + hw / 2, cy = hy + hh / 2;
         if (swordImg && swordImg.complete && swordImg.naturalWidth > 0) {
-          const srcImg = keyedCache.current.get(SWORD_SPRITE_URL) ?? swordImg;
+          const srcImg = swordImg;
           // 素材は右向きが基準。sw.dir に合わせて回転させる（右向き基準なので補正不要）。
           const angle = Math.atan2(sw.dir.y, sw.dir.x);
           const size = Math.max(hw, hh, TILE_SIZE);
@@ -9878,7 +9810,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               let std = walkStdCache.get(url);
               if (!std) { std = detectStandard(img.naturalWidth, img.naturalHeight); walkStdCache.set(url, std); }
               const cell = animatedCell(std, img.naturalWidth, img.naturalHeight, { dir: 's', moving: false, timeSec: 0, fps: 7 });
-              const srcImg = keyedCache.current.get(url) ?? img;
+              const srcImg = img;
               const destW = TILE_SIZE, destH = TILE_SIZE / 2;
               ctx.drawImage(srcImg, cell.sx, cell.sy, cell.sw, cell.sh / 2, cx - destW / 2, cy - destH / 2, destW, destH);
               return;
@@ -14263,7 +14195,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <button key={id} onClick={() => setSelectedTileId(id)} title={tile.name}
                               className={`w-7 h-7 shrink-0 rounded border-2 overflow-hidden ${selectedTileId === id ? 'border-yellow-400' : 'border-gray-700'}`}
                               style={{ backgroundColor: tile.color }}>
-                              {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} keyedCache={keyedCache} className="w-full h-full" />}
+                              {tile.imageUrl && <SpriteThumbnail spriteUrl={tile.imageUrl} size={24} imgCache={imgCache} className="w-full h-full" />}
                             </button>
                           );
                         })}
@@ -15514,7 +15446,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     <button
                       onClick={() => setPicker({ mode: 'image', target: { t: 'player' } })}
                       className="w-full flex items-center gap-3 px-3 py-3 rounded-xl bg-gradient-to-r from-violet-900/60 to-blue-900/50 border border-violet-600/40 hover:border-violet-500/70 active:scale-[0.98] transition text-left">
-                      <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={32} imgCache={imgCache} keyedCache={keyedCache} className="text-2xl" />
+                      <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={32} imgCache={imgCache} className="text-2xl" />
                       <div className="min-w-0">
                         <div className="text-xs font-black text-white">主人公を自分にする</div>
                         <div className="text-[10px] text-violet-300/80 mt-0.5">投稿画像・歩行グラを選択して差し替え</div>
@@ -15531,7 +15463,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </div>
                       {gameData.player.spriteRef && (
                         <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
-                          <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} keyedCache={keyedCache} />
+                          <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} />
                           <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
                           <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
@@ -16134,7 +16066,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />スプライト画像参照</button>
                       {obj.spriteRef && (
                         <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
-                          <SpriteThumbnail spriteRef={obj.spriteRef} spriteUrl={obj.spriteUrl} emoji={obj.emoji} size={20} imgCache={imgCache} keyedCache={keyedCache} className="rounded" />
+                          <SpriteThumbnail spriteRef={obj.spriteRef} spriteUrl={obj.spriteUrl} emoji={obj.emoji} size={20} imgCache={imgCache} className="rounded" />
                           <span className="truncate flex-1">{refLabel(obj.spriteRef)}</span>
                           <button onClick={() => updObj({ spriteRef: undefined, spriteUrl: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
@@ -16167,7 +16099,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             </div>
                             {gameData.player.spriteRef && (
                               <div className="flex items-center gap-2 mt-2 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
-                                <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} keyedCache={keyedCache} />
+                                <SpriteThumbnail spriteRef={gameData.player.spriteRef} spriteUrl={gameData.player.spriteUrl} emoji={gameData.player.emoji} size={24} imgCache={imgCache} />
                                 <span className="truncate flex-1">{refLabel(gameData.player.spriteRef)}</span>
                                 <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, spriteRef: undefined, spriteUrl: undefined } }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                               </div>
@@ -16402,7 +16334,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     {enemies.map((o, ei) => (
                                       <button key={o.id} onClick={() => setSelectedObjId(o.id)}
                                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[10px] text-left border ${activeSelObj?.id === o.id ? 'bg-blue-800/40 border-blue-600/50 text-blue-200' : 'bg-gray-800/40 border-gray-700/40 text-gray-400 hover:bg-gray-700/40'}`}>
-                                        <SpriteThumbnail spriteRef={o.spriteRef} spriteUrl={o.spriteUrl} emoji={o.emoji} size={20} imgCache={imgCache} keyedCache={keyedCache} className="rounded" />
+                                        <SpriteThumbnail spriteRef={o.spriteRef} spriteUrl={o.spriteUrl} emoji={o.emoji} size={20} imgCache={imgCache} className="rounded" />
                                         <span className="truncate flex-1">{o.name || '敵'}</span>
                                         <code className="text-cyan-500/80 text-[9px] shrink-0">{o.name ? `"${o.name}"` : ei + 1}</code>
                                       </button>
