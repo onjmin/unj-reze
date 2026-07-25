@@ -96,6 +96,9 @@ export type EventCommand =
   /** 効果音を1回再生する（直リンクmp3のURL）。 */
   | { type: 'playSound'; src: string }
   | { type: 'changeSprite'; spriteRef: string; spriteUrl?: string; objId: string }
+  /** マップの1マスを別のタイルに差し替える（RPGEN の #CH_SP）。
+   *  layer='floor' は地面レイヤー、'overlay' は置物レイヤー。tileId は tiles に登録済みのタイル番号。 */
+  | { type: 'changeTile'; col: number; row: number; layer: 'floor' | 'overlay'; tileId: number }
   | { type: 'changeBackground'; bgRef: string; bgUrl?: string }
   /** BGM を差し替える（RPGEN の #CH_YB）。bgmRef が空文字なら停止（#ST_YB）。 */
   | { type: 'changeBgm'; bgmRef: string }

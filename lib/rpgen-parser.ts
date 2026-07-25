@@ -506,6 +506,33 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     draft.overheadMap!.push(rowOverhead);
   }
 
+  /** #CH_SP 用のタイル定義を登録して ID を返す。
+   *  #CH_SP は「マスの見た目そのもの」を書き換えるコマンドで、NPC の画像差し替えではない。
+   *  l（スプライトの種類）が 0/1 なら地面レイヤー、2/3 なら置物レイヤー、奇数（1/3）が当たり判定ありなので、
+   *  同じ n でも l ごとに別のタイルとして登録する（マップ本体のタイルとキーがぶつからないよう接頭辞を付ける）。 */
+  const tileIdForSpriteChange = (n: string | undefined, l: number): number | undefined => {
+    const raw = (n ?? '').trim();
+    if (!raw) return undefined;
+    const key = `chsp:${raw}:${l}`;
+    const cached = tileIndexMap.get(key);
+    if (cached !== undefined) return cached;
+    let imageUrl: string | undefined;
+    if (raw.includes(RAW_DQ_STILL_SPRITE_SEPARATOR)) {
+      // 標準素材 "<x>_<y>"：同梱マップチップの該当マスを切り出す
+      const [cStr, rStr] = raw.split(RAW_DQ_STILL_SPRITE_SEPARATOR);
+      imageUrl = `${RPGEN_CHIP_URL}#${parseInt(cStr, 10) * RPGEN_CHIP_SIZE},${parseInt(rStr, 10) * RPGEN_CHIP_SIZE},${RPGEN_CHIP_SIZE},${RPGEN_CHIP_SIZE}`;
+    } else {
+      const spriteId = Number(raw.replace(/^[A-Za-z-]/, ''));
+      if (Number.isFinite(spriteId)) imageUrl = spriteUrlOf(spriteId) || undefined;
+    }
+    if (tileIndexMap.size >= MAX_TILE_CONVERSIONS) return undefined;
+    const id = nextTileIdx++;
+    tileIndexMap.set(key, id);
+    // l が奇数（1=地面ぶつかる / 3=物ぶつかる）なら通行不可
+    draft.tiles[id] = { name: `CH_SP ${raw}`, color: '#333333', passable: l % 2 === 0, imageUrl };
+    return id;
+  };
+
   /** #CH_SP / #CH_HM の n パラメータから見た目の差し替え内容を作る。 */
   const spriteChangeOf = (n: string | undefined): { spriteRef: string; spriteUrl: string } => {
     const spec = parseSpriteParam(n);
@@ -586,8 +613,14 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       // #WAT の t はミリ秒。フレーム換算せずそのまま渡す。
       case CommandType.Wait: return { type: 'wait', ms: cmd.delay || 1000 };
       case CommandType.ChangeObjectSprite: {
-        const { spriteRef, spriteUrl } = spriteChangeOf(cmd.params.n);
-        return { type: 'changeSprite', spriteRef, spriteUrl, objId: npcObjId(cmd.params.tx, cmd.params.ty) };
+        // #CH_SP は tx/ty のマス（地面／置物レイヤー）を書き換えるコマンド。NPC への画像差し替えではない。
+        const col = parseInt(cmd.params.tx ?? '', 10);
+        const row = parseInt(cmd.params.ty ?? '', 10);
+        if (!Number.isFinite(col) || !Number.isFinite(row)) return null;
+        const l = parseInt(cmd.params.l ?? '0', 10) || 0;
+        const tileId = tileIdForSpriteChange(cmd.params.n, l);
+        if (tileId === undefined) return null;
+        return { type: 'changeTile', col, row, layer: l >= 2 ? 'overlay' : 'floor', tileId };
       }
       case CommandType.ChangeHumanSprite: {
         const { spriteRef, spriteUrl } = spriteChangeOf(cmd.params.n);

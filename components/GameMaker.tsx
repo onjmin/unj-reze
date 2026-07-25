@@ -4820,6 +4820,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(runNext, 0);
           break;
         }
+        case 'changeTile': {
+          // マップの1マスを差し替える（#CH_SP）。地面は engine.map、置物は engine.overlayMap を書き換える。
+          // どちらも当たり判定（isCellPassable）と描画がそのまま参照しているグリッドなので、
+          // 書き込んだ時点で見た目も通行可否も切り替わる。
+          const eng = engineRef.current;
+          const tileInfo = gameDataRef.current.tiles[cmd.tileId];
+          if (tileInfo?.imageUrl) ensureImage(tileInfo.imageUrl);
+          const grid = cmd.layer === 'overlay'
+            ? (eng.overlayMap ??= worldLayoutRef.current?.overlayMap ?? gameDataRef.current.overlayMap)
+            : eng.map;
+          if (grid?.[cmd.row] && cmd.col >= 0 && cmd.col < grid[cmd.row].length) {
+            grid[cmd.row][cmd.col] = cmd.tileId;
+          }
+          setTimeout(advance, 0);
+          break;
+        }
         case 'changeSprite': {
           const target = !cmd.objId ? 'player' : cmd.objId;
           ensureImageFromRef(cmd.spriteRef, cmd.spriteUrl);
@@ -17758,7 +17774,7 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   restoreHp: 'HP回復', restoreMp: 'MP回復',
   warp: 'ワープ', wait: 'ウェイト', comment: 'コメント', label: 'ラベル', jump: 'ジャンプ',
   overheadMessage: '頭上メッセージ', playSound: '効果音再生',
-  changeSprite: '画像変更', changeBackground: '背景変更', changeBgm: 'BGM変更',
+  changeSprite: '画像変更', changeTile: 'マップタイル変更', changeBackground: '背景変更', changeBgm: 'BGM変更',
   changeDirection: '向き変更', changeNpcMovement: 'NPCの動き変更',
   showImage: '画像表示', hideImage: '画像消去',
   followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
@@ -18104,6 +18120,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
         case 'overheadMessage': return { type: 'overheadMessage', text: '' };
         case 'playSound': return { type: 'playSound', src: '' };
         case 'changeSprite': return { type: 'changeSprite', spriteRef: '', objId: '' };
+        case 'changeTile': return { type: 'changeTile', col: 0, row: 0, layer: 'floor', tileId: 0 };
         case 'changeBackground': return { type: 'changeBackground', bgRef: '' };
         case 'changeBgm': return { type: 'changeBgm', bgmRef: '' };
         case 'changeDirection': return { type: 'changeDirection', objId: 'player', dir: 'down' };
@@ -18512,6 +18529,31 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                 </details>
               </div>
             )}
+            {type === 'changeTile' && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-[10px] text-gray-400">列（X）
+                    <input type="number" min={0} value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="0" />
+                  </label>
+                  <label className="text-[10px] text-gray-400">行（Y）
+                    <input type="number" min={0} value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`} placeholder="0" />
+                  </label>
+                </div>
+                <label className="text-[10px] text-gray-400 block">レイヤー
+                  <select value={(cmd as any).layer ?? 'floor'} onChange={e => onChange({ layer: e.target.value as 'floor' | 'overlay' } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`}>
+                    <option value="floor">地面</option>
+                    <option value="overlay">置物（中層）</option>
+                  </select>
+                </label>
+                <label className="text-[10px] text-gray-400 block">差し替えるタイル番号
+                  <input type="number" min={0} value={(cmd as any).tileId ?? 0} onChange={e => onChange({ tileId: Number(e.target.value) } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="0（なし）" />
+                </label>
+              </div>
+            )}
             {type === 'changeBackground' && (
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-400 block">背景参照（asset ref）
@@ -18817,6 +18859,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'jump': return c.label || '';
       case 'choice': return c.choices?.length ? `${c.choices.length}択${c.random ? '(ランダム)' : ''}` : 'なし';
       case 'changeSprite': return `${c.objId || 'player'}`;
+      case 'changeTile': return `[${c.col ?? 0}, ${c.row ?? 0}] ${c.layer === 'overlay' ? '置物' : '地面'} → タイル${c.tileId ?? 0}`;
       case 'changeBackground': return c.bgUrl || c.bgRef || '';
       case 'changeBgm': return c.bgmRef || '（停止）';
       case 'changeDirection': return `${c.objId || 'player'} → ${({ up: '↑', down: '↓', left: '←', right: '→' } as Record<string, string>)[c.dir] ?? c.dir}`;
