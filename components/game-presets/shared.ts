@@ -146,7 +146,18 @@ export type EventCommand =
   | { type: 'changePhase'; phaseIndex: number }
   /** エフェクトアニメーション（EffectPreset）を再生する。target='self' はこのイベント自身の位置、'player' はプレイヤーの現在位置。
    *  wait=true のとき、アニメーション1周分の時間だけコマンド進行をブロックする。 */
-  | { type: 'playEffect'; effectId: string; target: 'self' | 'player'; wait?: boolean };
+  | { type: 'playEffect'; effectId: string; target: 'self' | 'player'; wait?: boolean }
+  | { type: 'showGold'; visible: boolean }
+  | { type: 'changeFont'; font: string; googleFont?: string }
+  | { type: 'finishEvent' }
+  | { type: 'removeEvent'; objId?: string }
+  | { type: 'saveData'; switches?: boolean; gold?: boolean; party?: boolean; npc?: boolean }
+  | { type: 'loadData'; switches?: boolean; gold?: boolean; party?: boolean; npc?: boolean }
+  | { type: 'stopSound' }
+  | { type: 'changeSpriteColor'; target: 'materials' | 'human' | 'sprite' | 'animation' | 'wallpaper'; id?: number; h?: number; s?: number; l?: number }
+  | { type: 'resetSpriteColor'; target: 'materials' | 'human' | 'sprite' | 'animation' | 'wallpaper'; id?: number }
+  | { type: 'seekBgm'; seconds: number; relative?: boolean }
+  | { type: 'rateBgm'; rate: number };
 
 export interface EventPage {
   /** ページ名（管理用） */

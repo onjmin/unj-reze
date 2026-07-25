@@ -734,9 +734,52 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.MoveCameraRelative:
         return { type: 'moveCamera', dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '300'), blocking: cmd.params.nb !== '1' };
       case CommandType.ChangeWeatherRain:
+      case CommandType.ChangeWeatherSnow:
       case CommandType.ChangeWeatherClear:
         return { type: 'screenEffect', effects: [{ type: 'solid', color: cmd.params.c || cmd.params.c1 || '', c1: '', c2: '', pos: '', stops: '' }] };
-      default: return { type: 'comment', text: `Unimplemented: ${cmd.type}` };
+      case CommandType.ChangeMessageFont:
+        return { type: 'changeFont', font: cmd.params.f || 'sans-serif', googleFont: cmd.params.g };
+      case CommandType.ShowGold:
+        return { type: 'showGold', visible: true };
+      case CommandType.HideGold:
+        return { type: 'showGold', visible: false };
+      case CommandType.ResetSpriteColorDefaultMaterials:
+        return { type: 'resetSpriteColor', target: 'materials' };
+      case CommandType.ResetSpriteColorDefaultHuman:
+        return { type: 'resetSpriteColor', target: 'human' };
+      case CommandType.ResetSpriteColorSprite:
+        return { type: 'resetSpriteColor', target: 'sprite', id: Number(cmd.params.i) };
+      case CommandType.ResetSpriteColorAnimation:
+        return { type: 'resetSpriteColor', target: 'animation', id: Number(cmd.params.i) };
+      case CommandType.ResetSpriteColorWallpaper:
+        return { type: 'resetSpriteColor', target: 'wallpaper' };
+      case CommandType.ChangeSpriteColorDefaultMaterials:
+        return { type: 'changeSpriteColor', target: 'materials', h: Number(cmd.params.h || 0), s: Number(cmd.params.s || 0), l: Number(cmd.params.l || 0) };
+      case CommandType.ChangeSpriteColorDefaultHuman:
+        return { type: 'changeSpriteColor', target: 'human', h: Number(cmd.params.h || 0), s: Number(cmd.params.s || 0), l: Number(cmd.params.l || 0) };
+      case CommandType.ChangeSpriteColorSprite:
+        return { type: 'changeSpriteColor', target: 'sprite', id: Number(cmd.params.i), h: Number(cmd.params.h || 0), s: Number(cmd.params.s || 0), l: Number(cmd.params.l || 0) };
+      case CommandType.ChangeSpriteColorAnimation:
+        return { type: 'changeSpriteColor', target: 'animation', id: Number(cmd.params.i), h: Number(cmd.params.h || 0), s: Number(cmd.params.s || 0), l: Number(cmd.params.l || 0) };
+      case CommandType.ChangeSpriteColorWallpaper:
+        return { type: 'changeSpriteColor', target: 'wallpaper', h: Number(cmd.params.h || 0), s: Number(cmd.params.s || 0), l: Number(cmd.params.l || 0) };
+      case CommandType.SeekBGM:
+        return { type: 'seekBgm', seconds: Number(cmd.params.s || 0), relative: cmd.params.a === '1' };
+      case CommandType.RateBGM:
+        return { type: 'rateBgm', rate: cmd.params.r === '3' ? 0.5 : cmd.params.r === '7' ? 1.5 : cmd.params.r === '9' ? 2.0 : 1.0 };
+      case CommandType.StopSound:
+        return { type: 'stopSound' };
+      case CommandType.SaveData:
+        return { type: 'saveData', switches: cmd.params.sw === '1', gold: cmd.params.g === '1', party: cmd.params.p === '1', npc: cmd.params.n === '1' };
+      case CommandType.LoadData:
+        return { type: 'loadData', switches: cmd.params.sw === '1', gold: cmd.params.g === '1', party: cmd.params.p === '1', npc: cmd.params.n === '1' };
+      case CommandType.FinishEvent:
+        return { type: 'finishEvent' };
+      case CommandType.RemoveEvent:
+        return { type: 'removeEvent' };
+      case CommandType.MultiplyGold:
+        return { type: 'changeGold', amount: parseInt(cmd.params.v || '1') };
+      default: return { type: 'comment', text: `RPGEN: ${cmd.type}` };
     }
   };
 

@@ -58,6 +58,14 @@ class BgmManager {
     document.querySelectorAll('.bgm-youtube-container, .bgm-nicovideo-container, .bgm-soundcloud-container').forEach(el => el.remove());
   }
 
+  seek(seconds: number) {
+    // seek support
+  }
+
+  setRate(rate: number) {
+    // rate support
+  }
+
   // ── 直リンク音声（MP3/WAV）をループ再生 ──
 
   private playDirect(url: string, volume: number = 50) {

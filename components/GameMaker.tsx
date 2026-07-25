@@ -1517,6 +1517,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const overlayImagesRef = useRef<Record<string, OverlayImageType>>({});
   overlayImagesRef.current = overlayImages;
 
+  const [showGoldOverlay, setShowGoldOverlay] = useState(false);
+  const [messageFont, setMessageFont] = useState<string | undefined>(undefined);
   type FollowImageType = {
     targetObjId: string;
     directions: Record<'U' | 'D' | 'L' | 'R', any>;
@@ -4798,6 +4800,63 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         }
+        case 'showGold':
+          setShowGoldOverlay(cmd.visible);
+          setTimeout(advance, 0);
+          break;
+        case 'changeFont':
+          setMessageFont(cmd.font);
+          setTimeout(advance, 0);
+          break;
+        case 'finishEvent':
+          index = cmds.length;
+          setTimeout(advance, 0);
+          break;
+        case 'removeEvent': {
+          const targetId = cmd.objId || objId;
+          engineRef.current.entities = engineRef.current.entities.filter(e => e.def.id !== targetId);
+          setTimeout(advance, 0);
+          break;
+        }
+        case 'saveData':
+          try {
+            localStorage.setItem('rpgen_save_data', JSON.stringify({
+              progress: progressRef.current,
+              switches: selfSwitchesRef.current,
+              player: engineRef.current.player
+            }));
+          } catch (err) { console.warn('SaveData failed:', err); }
+          setTimeout(advance, 0);
+          break;
+        case 'loadData':
+          try {
+            const raw = localStorage.getItem('rpgen_save_data');
+            if (raw) {
+              const data = JSON.parse(raw);
+              if (data.progress) progressRef.current = data.progress;
+              if (data.switches) selfSwitchesRef.current = data.switches;
+              if (data.player) engineRef.current.player = data.player;
+              forceHud(n => n + 1);
+            }
+          } catch (err) { console.warn('LoadData failed:', err); }
+          setTimeout(advance, 0);
+          break;
+        case 'stopSound':
+          document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch (e) {} });
+          setTimeout(advance, 0);
+          break;
+        case 'seekBgm':
+          bgmManager.seek?.(cmd.seconds);
+          setTimeout(advance, 0);
+          break;
+        case 'rateBgm':
+          bgmManager.setRate?.(cmd.rate);
+          setTimeout(advance, 0);
+          break;
+        case 'changeSpriteColor':
+        case 'resetSpriteColor':
+          setTimeout(advance, 0);
+          break;
         case 'changeBackground':
           gameDataRef.current.mapBgRef = cmd.bgRef;
           gameDataRef.current.mapBgUrl = cmd.bgUrl;
@@ -12496,6 +12555,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               );
             })()}
 
+            {/* ── RPGEN SHOW_GLD 所持金オーバーレイ ── */}
+            {showGoldOverlay && (
+              <div className="absolute top-4 left-4 z-40 bg-black/80 border border-yellow-500/60 rounded-lg px-3 py-1.5 shadow-lg flex items-center gap-2 text-yellow-400 font-pixel text-sm select-none">
+                <span>🪙</span>
+                <span>{(progressRef.current.gold ?? 0).toLocaleString()} G</span>
+              </div>
+            )}
+
             {/* ── セリフカットシーン（ゲーム中） ── */}
             {activeDialogue && (
               <DialogueCutscene
@@ -17498,7 +17565,10 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
   showImage: '画像表示', hideImage: '画像消去',
   followImage: '追随画像', pauseImage: '画像一時停止', resumeImage: '画像再開',
   moveCamera: 'カメラ移動', resetCamera: 'カメラリセット', moveNpc: 'NPC移動', screenEffect: '画面エフェクト', clearScreenEffect: '画面エフェクト消去', changePhase: 'フェーズ変更',
-  playEffect: 'エフェクト再生',
+  playEffect: 'エフェクト再生', showGold: '所持金表示', changeFont: 'フォント変更', finishEvent: 'イベント中断',
+  removeEvent: 'イベント一時削除', saveData: 'データセーブ', loadData: 'データロード',
+  stopSound: '効果音停止', changeSpriteColor: '色調変更', resetSpriteColor: '色調リセット',
+  seekBgm: 'BGMシーク', rateBgm: 'BGM再生速度',
 };
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
@@ -17737,6 +17807,17 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
         case 'screenEffect': return { type: 'screenEffect', effects: [{ type: 'solid', color: '0-0-0-50', c1: '', c2: '', pos: '', stops: '' }] };
         case 'changePhase': return { type: 'changePhase', phaseIndex: 1 };
         case 'playEffect': return { type: 'playEffect', effectId: '', target: 'self' };
+        case 'showGold': return { type: 'showGold', visible: true };
+        case 'changeFont': return { type: 'changeFont', font: 'sans-serif' };
+        case 'finishEvent': return { type: 'finishEvent' };
+        case 'removeEvent': return { type: 'removeEvent' };
+        case 'saveData': return { type: 'saveData' };
+        case 'loadData': return { type: 'loadData' };
+        case 'stopSound': return { type: 'stopSound' };
+        case 'changeSpriteColor': return { type: 'changeSpriteColor', target: 'materials' };
+        case 'resetSpriteColor': return { type: 'resetSpriteColor', target: 'materials' };
+        case 'seekBgm': return { type: 'seekBgm', seconds: 0 };
+        case 'rateBgm': return { type: 'rateBgm', rate: 1.0 };
         default: return { type: 'message', text: '' };
       }
     })();
