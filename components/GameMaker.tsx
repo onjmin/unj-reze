@@ -2402,6 +2402,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const gameDataRef = useRef(gameData);
   const lastTouchTimeMapRef = useRef<Map<string, number>>(new Map());
   gameDataRef.current = gameData;
+  /** プレイ開始時のマップ（地面／置物／天蓋・全シーンぶん）の控え。
+   *  #CH_SP（changeTile）はプレイ中の地形差し替えを編集データにも直接書き込む
+   *  （シーンを跨いでも差し替えが残るようにするため）ので、プレイをやめたら
+   *  ここから書き戻して編集中のマップを元通りにする。 */
+  const playGridBackupRef = useRef<{
+    map: number[][]; overlayMap?: number[][]; overheadMap?: number[][];
+    scenes: Array<{ map: number[][]; overlayMap?: number[][]; overheadMap?: number[][] }>;
+  } | null>(null);
+  // __CLAUDE_DEBUG__ (temporary)
+  useEffect(() => {
+    (window as never as Record<string, unknown>).__gm = { engineRef, gameDataRef, forcedPagesRef, lastTouchTimeMapRef, eventRunningRef, selfSwitchesRef };
+  }, []);
 
   // ── グレイズ ──
   const grazeRef = useRef(0);
@@ -5754,6 +5766,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   useEffect(() => {
     const eng = engineRef.current;
     if (isPlaying) {
+      // プレイ開始時のマップを控えておく（プレイ中の地形差し替えを編集モードへ持ち帰らないため）。
+      // この効果は gameData の変化のたびに走るので、控えるのは「プレイに入った1回目」だけにする。
+      if (!playGridBackupRef.current) {
+        const cloneGrid = (g?: number[][]) => g ? g.map(row => [...row]) : undefined;
+        playGridBackupRef.current = {
+          map: cloneGrid(gameData.map)!,
+          overlayMap: cloneGrid(gameData.overlayMap),
+          overheadMap: cloneGrid(gameData.overheadMap),
+          scenes: (gameData.scenes ?? []).map(s => ({
+            map: cloneGrid(s.map)!, overlayMap: cloneGrid(s.overlayMap), overheadMap: cloneGrid(s.overheadMap),
+          })),
+        };
+      }
       eng.bullets = []; eng.enemyBullets = [];
       const isTouhouWave = (o: ObjectDef) => gameData.engine === 'touhou' && !o.isBoss;
       const oldEntitiesMap = new Map(eng.entities?.map(e => [e.def.id, e]));
@@ -5769,7 +5794,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           _touchStartCol: old ? (old as any)._touchStartCol : undefined,
           _touchStartRow: old ? (old as any)._touchStartRow : undefined,
           _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
-        _touchEndTime: old ? (old as any)._touchEndTime : undefined,
+          _touchEndTime: old ? (old as any)._touchEndTime : undefined,
           spellState: o.spellScript?.length
             ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number },], frame: 0, waitLeft: 0 }
             : undefined,
@@ -5858,7 +5883,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       forcedPagesRef.current = {};
       eventRunningRef.current = false;
     } else {
-      eng.map = gameData.map;
+      // プレイ中に #CH_SP で差し替えた地形を編集データから取り除き、プレイ前の状態へ戻す。
+      const backup = playGridBackupRef.current;
+      playGridBackupRef.current = null;
+      if (backup) {
+        setGameData(prev => ({
+          ...prev,
+          map: backup.map,
+          overlayMap: backup.overlayMap,
+          overheadMap: backup.overheadMap,
+          scenes: prev.scenes?.map((s, i) => backup.scenes[i]
+            ? { ...s, map: backup.scenes[i].map, overlayMap: backup.scenes[i].overlayMap, overheadMap: backup.scenes[i].overheadMap }
+            : s),
+        }));
+        eng.map = backup.map;
+        eng.overlayMap = backup.overlayMap;
+        eng.overheadMap = backup.overheadMap;
+      } else {
+        eng.map = gameData.map;
+      }
       eng.entities = [];
       if (waveCtxRef.current) waveCtxRef.current.cancelled = true;
       waveRunningRef.current = false;
@@ -5972,6 +6015,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (!id) return null;
       return { id, col, row, info: gameData.tiles[id] };
     };
+    // つるつる床の向き。床レイヤーだけでなく置物レイヤーも見る：つるつる床は当たり判定つきの
+    // 置物（RPGEN の l:3 等）として置かれていることがあり、床だけ見ていると NPC が滑らなくなる。
+    // 逆に、つるつる床の上に別の置物が乗っている場合は床側の指定を使う（プレイヤーと同じ挙動）。
+    const iceSpecialAt = (x: number, y: number): string | undefined => {
+      const col = Math.floor(x / TILE_SIZE), row = Math.floor(y / TILE_SIZE);
+      const ov = getOverlayTileAt(col, row)?.info?.special;
+      if (ov && ICE_DIRS[ov]) return ov;
+      const fl = getTile(x, y)?.info?.special;
+      return fl && ICE_DIRS[fl] ? fl : undefined;
+    };
+    // つるつる床のスライド先の判定は、床レイヤーの通行可否だけで行う（プレイヤーの判定と同じ規約）。
+    // 置物レイヤー優先の isCellPassable で見ると、つるつる床の上に当たり判定つきの置物が乗って
+    // いるだけで NPC がスライドを始められず、「プレイヤーだけ滑る」状態になってしまう。
+    const iceDestPassable = (tx: number, ty: number) =>
+      !!getTile(tx, ty)?.info?.passable && !!getTile(tx + TILE_SIZE - 1, ty + TILE_SIZE - 1)?.info?.passable;
     // セル単位の実効通行可否：オブジェクト層タイル（壁・家具・橋など）があれば、床の可否に
     // 関係なくそちらを優先する（上のレイヤーが優先）。木の上部/屋根のように意図的に通行可
     // （passable:true）で置かれているオブジェクト層タイルはそのまま通れるし、逆に床が
@@ -7933,11 +7991,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             else { e.x += (dx / dist) * slideSpd; e.y += (dy / dist) * slideSpd; }
             if (e.x === slide.targetX && e.y === slide.targetY) {
               e.iceSlide = undefined;
-              const landed = getTile(e.x, e.y);
-              const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
+              const landedSp = iceSpecialAt(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2);
+              const nextDir = landedSp ? ICE_DIRS[landedSp] : undefined;
               if (nextDir) {
                 const tx = e.x + nextDir[0] * TILE_SIZE, ty = e.y + nextDir[1] * TILE_SIZE;
-                if (npcCornersPassable(tx, ty, tx + TILE_SIZE - 1, ty + TILE_SIZE - 1) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+                if (iceDestPassable(tx, ty) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
                   e.iceSlide = { targetX: tx, targetY: ty };
                 }
               }
@@ -7946,7 +8004,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const ew = d.w ?? TILE_SIZE; // 敵の当たり判定幅
             const eh = d.h ?? TILE_SIZE; // 敵の当たり判定高さ
             const eStandingTile = getTile(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2);
-            const eStandingSpecial = eStandingTile?.info?.special;
+            const eStandingSpecial = iceSpecialAt(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2) ?? eStandingTile?.info?.special;
             // イベントでマップ外へ飛ばされた NPC は「退場した」扱いにし、AI も位置のクランプも止める。
             // RPGEN では NPC を遠くの座標へ移動させる（#MV_NA tx:500,ty:500 等）ことで退場させる
             // 慣用句があり、クランプするとマップ隅に張り付いてしまうため。
@@ -7960,7 +8018,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 塞がっていて開始できない場合も自由に振る舞わせず、次フレーム以降に再試行させる。
               const [idx, idy] = ICE_DIRS[eStandingSpecial];
               const tx = eStandingTile!.rect.x + idx * TILE_SIZE, ty = eStandingTile!.rect.y + idy * TILE_SIZE;
-              if (npcCornersPassable(tx, ty, tx + TILE_SIZE - 1, ty + TILE_SIZE - 1) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+              if (iceDestPassable(tx, ty) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
                 e.iceSlide = { targetX: tx, targetY: ty };
               }
             } else if (d.moveChance != null) {
@@ -8487,6 +8545,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // なり、転送直後に誤発動する）。発動済みにしておけば、離れて入り直したときに発動する。
               // ただし、当たり判定のあるオブジェクト（壁タイル・NPC）はプレイヤーが侵入できないため、
               // 連続発動の問題が生じない。justMoved による抑制の対象外とする（b）。
+              if (justMoved && touchTriggerOk && !blocksPlayer && !e.talked) {
+                e.talked = true;
+              }
 
             }
             const ot = d.objType ?? 'enemy';
@@ -9143,23 +9204,43 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           h: (pFacing === 'u' || pFacing === 'd') ? 12 : pData.h,
         };
 
-        const target = acrossTable ?? (isPlaying ? eng.entities : gameData.objects).find(o => {
+        // 決定ボタンの対象は「配列の先頭で条件を満たしたもの」ではなく、近さと位置関係の
+        // 優先順位で選ぶ。find() で最初の1件を取ると、たまたま 1.5マス以内に居合わせた徘徊NPCが
+        // 対象を横取りしてしまい、目の前の看板や足元のイベントが発動しなくなる。
+        // 決定で反応できないもの（発動条件を満たすページが無い／トリガーが接触のもの）は
+        // そもそも対象から外す。
+        const actionPageOf = (o: Entity | ObjectDef) => {
+          const def = isPlaying ? (o as Entity).def : (o as ObjectDef);
+          if (!def.pages || def.pages.length === 0) return null;
+          const page = findActivePage(def);
+          return page && (page.trigger ?? 'action') === 'action' && page.commands.length > 0 ? page : null;
+        };
+        let bestTarget: Entity | ObjectDef | undefined;
+        let bestRank = Infinity, bestDist = Infinity;
+        for (const o of (isPlaying ? eng.entities : gameData.objects)) {
+          if (!actionPageOf(o)) continue;
           const oc = isPlaying ? Math.floor(((o as Entity).x + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).col;
           const or_ = isPlaying ? Math.floor(((o as Entity).y + TILE_SIZE / 2) / TILE_SIZE) : (o as ObjectDef).row;
-          if ((oc === frontCol && or_ === frontRow) || (oc === pCol && or_ === pRow)) return true;
-
           const ox = isPlaying ? (o as Entity).x : (o as ObjectDef).col * TILE_SIZE;
           const oy = isPlaying ? (o as Entity).y : (o as ObjectDef).row * TILE_SIZE;
           const oW = (isPlaying ? (o as Entity).def.w : (o as ObjectDef).w) ?? TILE_SIZE;
           const oH = (isPlaying ? (o as Entity).def.h : (o as ObjectDef).h) ?? TILE_SIZE;
-
           // 前面領域が障害物地形上のイベントと接触しているか
           const isFrontTouch = fBox.x < ox + oW && fBox.x + fBox.w > ox &&
             fBox.y < oy + oH && fBox.y + fBox.h > oy;
-          if (isFrontTouch) return true;
-
-          return Math.hypot(pcx - (ox + oW / 2), pcy - (oy + oH / 2)) < TILE_SIZE * 1.5;
-        });
+          const dist = Math.hypot(pcx - (ox + oW / 2), pcy - (oy + oH / 2));
+          // 0=向いている前のマス, 1=足元（自分と同じマス）, 2=前面の当たり判定に接触, 3=1.5マス以内
+          const rank = (oc === frontCol && or_ === frontRow) ? 0
+            : (oc === pCol && or_ === pRow) ? 1
+              : isFrontTouch ? 2
+                : dist < TILE_SIZE * 1.5 ? 3
+                  : Infinity;
+          if (rank === Infinity) continue;
+          if (rank < bestRank || (rank === bestRank && dist < bestDist)) {
+            bestTarget = o; bestRank = rank; bestDist = dist;
+          }
+        }
+        const target = acrossTable ?? bestTarget;
         if (target) {
           const def = isPlaying ? (target as Entity).def : target as ObjectDef;
           if (isPlaying && (target as Entity).fleeing) {
