@@ -259,6 +259,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     } else {
       throw firstErr;
     }
+    console.log(rpgMap);
   }
 
   // ── 解析結果のキャッシュ ────────────────────────────────────────────────
