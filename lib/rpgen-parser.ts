@@ -179,9 +179,20 @@ const directionDelta = (dRaw: string | undefined, vRaw: string | undefined): { d
     case 4: return { dx: v, dy: -v };
     case 5: return { dx: v, dy: v };
     case 6: return { dx: -v, dy: v };
-    case 7: return { dx: -v, dy: -v };
     default: return { dx: 0, dy: 0 };
   }
+};
+
+/** RPGEN の t (移動完了ミリ秒) または p (1マスあたりの移動ペースミリ秒) から全体の duration(ms) を計算する。 */
+const calcMoveDuration = (params: Record<string, string>, steps: number): number => {
+  if (params.t !== undefined && params.t !== '') {
+    return parseInt(params.t, 10) || 0;
+  }
+  if (params.p !== undefined && params.p !== '') {
+    const pace = parseInt(params.p, 10) || 0;
+    return Math.max(0, steps) * pace;
+  }
+  return 0;
 };
 
 const buildFrames = (params: Record<string, string>, resolveUrl: ResolveUrl): ImageFrame[] => {
@@ -573,21 +584,40 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         return { type: 'changeSprite', spriteRef, spriteUrl, objId };
       }
       case CommandType.MovePartyDirection: {
+        const steps = parseInt(cmd.params.v || '1', 10);
         const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
-        return { type: 'moveNpc', objId: 'player', dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+        return { type: 'moveNpc', objId: 'player', dx, dy, duration: calcMoveDuration(cmd.params, steps) };
       }
-      case CommandType.MovePartyAbsolute:
-        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
-      case CommandType.MovePartyRelative:
-        return { type: 'moveNpc', objId: 'player', dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+      case CommandType.MovePartyAbsolute: {
+        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0', 10), ty: parseInt(cmd.params.ty || '0', 10), duration: calcMoveDuration(cmd.params, 1) };
+      }
+      case CommandType.MovePartyRelative: {
+        const dx = parseInt(cmd.params.tx || '0', 10);
+        const dy = parseInt(cmd.params.ty || '0', 10);
+        const steps = cmd.params.s === '1' ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
+        return { type: 'moveNpc', objId: 'player', dx, dy, duration: calcMoveDuration(cmd.params, steps) };
+      }
       case CommandType.MoveNpcDirection: {
+        const steps = parseInt(cmd.params.v || '1', 10);
         const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, duration: calcMoveDuration(cmd.params, steps) };
       }
-      case CommandType.MoveNpcAbsolute:
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
-      case CommandType.MoveNpcRelative:
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+      case CommandType.MoveNpcAbsolute: {
+        const nx = parseInt(cmd.params.nx ?? '0', 10);
+        const ny = parseInt(cmd.params.ny ?? '0', 10);
+        const tx = parseInt(cmd.params.tx ?? '0', 10);
+        const ty = parseInt(cmd.params.ty ?? '0', 10);
+        const delX = Math.abs(tx - nx);
+        const delY = Math.abs(ty - ny);
+        const steps = cmd.params.s === '1' ? Math.max(delX, delY) : (delX + delY);
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx, ty, duration: calcMoveDuration(cmd.params, steps) };
+      }
+      case CommandType.MoveNpcRelative: {
+        const dx = parseInt(cmd.params.tx || '0', 10);
+        const dy = parseInt(cmd.params.ty || '0', 10);
+        const steps = cmd.params.s === '1' ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, duration: calcMoveDuration(cmd.params, steps) };
+      }
       case CommandType.PlusGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
       case CommandType.MinusGold: return { type: 'changeGold', amount: -parseInt(cmd.params.v || '0') };
       case CommandType.SetGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };

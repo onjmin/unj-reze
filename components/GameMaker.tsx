@@ -4891,6 +4891,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           break;
         case 'moveNpc': {
           const target = !cmd.objId ? 'player' : cmd.objId;
+          const duration = cmd.duration ?? 0;
           if (target === 'player') {
             if (cmd.tx != null) engineRef.current.player.x = cmd.tx * TILE_SIZE;
             if (cmd.ty != null) engineRef.current.player.y = cmd.ty * TILE_SIZE;
@@ -4905,13 +4906,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           } else {
             const obj = engineRef.current.entities?.find(o => o.def.id === target);
             if (obj) {
-              if (cmd.tx != null) obj.x = cmd.tx * TILE_SIZE;
-              if (cmd.ty != null) obj.y = cmd.ty * TILE_SIZE;
-              if (cmd.dx != null) obj.x += cmd.dx * TILE_SIZE;
-              if (cmd.dy != null) obj.y += cmd.dy * TILE_SIZE;
+              const startX = obj.x;
+              const startY = obj.y;
+              let targetX = cmd.tx != null ? cmd.tx * TILE_SIZE : startX;
+              let targetY = cmd.ty != null ? cmd.ty * TILE_SIZE : startY;
+              if (cmd.dx != null) targetX += cmd.dx * TILE_SIZE;
+              if (cmd.dy != null) targetY += cmd.dy * TILE_SIZE;
+
+              if (duration > 0) {
+                const totalFrames = Math.max(1, Math.round(duration / 16.667));
+                obj.moveTarget = {
+                  sx: startX,
+                  sy: startY,
+                  tx: targetX,
+                  ty: targetY,
+                  frames: totalFrames,
+                  elapsed: 0,
+                };
+              } else {
+                obj.x = targetX;
+                obj.y = targetY;
+                obj.moveTarget = undefined;
+              }
             }
           }
-          setTimeout(advance, cmd.duration ?? 0);
+          setTimeout(advance, duration);
           break;
         }
         case 'playEffect': {
@@ -7578,6 +7597,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           } else if (e.bombThrown) {
             // レゼ：上半身を投げてから爆発するまでは立ち止まる（原作再現のため棒立ち）
             e.vx = 0; e.vy = 0;
+          } else if (e.moveTarget) {
+            // イベントコマンドによるスムーズな目標地点への移動（lerp）
+            const mt = e.moveTarget;
+            mt.elapsed = (mt.elapsed ?? 0) + 1;
+            const progress = Math.min(1, mt.elapsed / mt.frames);
+            e.x = mt.sx + (mt.tx - mt.sx) * progress;
+            e.y = mt.sy + (mt.ty - mt.sy) * progress;
+            if (mt.elapsed >= mt.frames) {
+              e.x = mt.tx;
+              e.y = mt.ty;
+              e.moveTarget = undefined;
+            }
           } else if (e.fleeing) {
             // 怯えた味方モブ：本来の behavior を無視してプレイヤーから逃げる（壁はすり抜けない）
             const dx = pcx - ecx, dy = pcy - ecy; const dist = Math.hypot(dx, dy) || 1;
