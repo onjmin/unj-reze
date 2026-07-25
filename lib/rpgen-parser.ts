@@ -673,14 +673,14 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.ResumeLayerAnimation: return { type: 'resumeImage', layer: parseInt(cmd.params.l || '0') };
       case CommandType.PlaySound: return { type: 'playSound', src: resolveSoundUrl(cmd.params.i) };
       // v は YouTube 動画ID。s（再生開始位置）は BgmManager に開始位置指定が無いため未対応。
-      case CommandType.ChangeBGM: return { type: 'changeBgm', bgmRef: cmd.params.v ? `youtube:${cmd.params.v}` : '' };
-      case CommandType.StopBGM: return { type: 'changeBgm', bgmRef: '' };
-      // 壁紙(v=ImgurのID)・遠景(v="<id>.<ext>") はどちらもマップ背景画像として扱う
-      case CommandType.ChangeWallpaper:
-      case CommandType.ChangeDistantView: {
-        const url = imgurUrl(cmd.params.v);
-        return { type: 'changeBackground', bgRef: url ? `url:${url}` : '', bgUrl: url || undefined };
+      case CommandType.ChangeBGM: {
+        const v = cmd.params.v?.trim();
+        const bgmRef = !v ? '' : (v.startsWith('http') || v.startsWith('/') ? `direct:${v}` : `youtube:${v}`);
+        return { type: 'changeBgm', bgmRef };
       }
+      case CommandType.StopBGM:
+      case CommandType.PauseBGM:
+        return { type: 'changeBgm', bgmRef: '' };
       case CommandType.ChangePartyDirection: {
         const dir = DIR_BY_RAW[cmd.params.d ?? ''];
         return dir ? { type: 'changeDirection', objId: 'player', dir } : null;
@@ -688,15 +688,14 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.ChangeNpcDirection: {
         const dir = DIR_BY_RAW[cmd.params.d ?? ''];
         const objId = npcObjId(cmd.params.nx, cmd.params.ny);
-        return dir && objId ? { type: 'changeDirection', objId, dir } : null;
+        return dir ? { type: 'changeDirection', objId: objId || '', dir } : null;
       }
       case CommandType.ChangeNpcMovement: {
         const objId = npcObjId(cmd.params.nx, cmd.params.ny);
-        if (!objId) return null;
         // m は #HUMAN の動き方と同じ生の値、r は移動確率(%)。静止(0)のときは m/r ともに省略される。
         const behavior = NPC_BEHAVIOR_BY_HUMAN_BEHAVIOR[parseHumanBehavior(cmd.params.m) ?? HumanBehavior.Still] ?? 'still';
         const chance = Number(cmd.params.r);
-        return { type: 'changeNpcMovement', objId, behavior, moveChance: Number.isFinite(chance) ? Math.max(0, Math.min(100, chance)) : 0 };
+        return { type: 'changeNpcMovement', objId: objId || '', behavior, moveChance: Number.isFinite(chance) ? Math.max(0, Math.min(100, chance)) : 0 };
       }
       case CommandType.ChangePhase: return { type: 'changePhase', phaseIndex: parseInt(cmd.params.p || '1') };
       case CommandType.OnSwitch: return { type: 'setSwitch', switchId: parseInt(cmd.params.n || '0'), value: true };

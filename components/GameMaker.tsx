@@ -4819,22 +4819,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'changeDirection': {
           const way = WAY_BY_DIR4[cmd.dir];
-          if (cmd.objId === 'player') playerFacingRef.current = way;
+          const targetId = cmd.objId || objId;
+          if (targetId === 'player') playerFacingRef.current = way;
           else {
-            const obj = engineRef.current.entities?.find(o => o.def.id === cmd.objId);
-            if (obj) obj.facing = way;
+            const targetObj = engineRef.current.entities?.find(o => o.def.id === targetId);
+            if (targetObj) targetObj.facing = way;
           }
           setTimeout(advance, 0);
           break;
         }
         case 'changeNpcMovement': {
-          const obj = engineRef.current.entities?.find(o => o.def.id === cmd.objId);
-          if (obj) {
-            // 敵/NPCの定義そのものを書き換える（マリオのパワーアップで behavior を差し替えるのと同じ方式）
-            obj.def.behavior = cmd.behavior;
-            obj.def.moveChance = cmd.moveChance;
-            obj.stepTarget = undefined;
-            obj.vx = 0; obj.vy = 0;
+          const targetId = cmd.objId || objId;
+          const targetObj = engineRef.current.entities?.find(o => o.def.id === targetId);
+          if (targetObj) {
+            // 敵/NPCの定義そのものを書き換える
+            targetObj.def.behavior = cmd.behavior;
+            targetObj.def.moveChance = cmd.moveChance;
+            targetObj.stepTarget = undefined;
+            targetObj.vx = 0; targetObj.vy = 0;
           }
           setTimeout(advance, 0);
           break;
