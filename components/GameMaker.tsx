@@ -8262,10 +8262,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 会話など他の判定用に 1.5 マスと広く取ってあり、これを再発動の条件にすると接触に戻るまで
               // 2マス歩かされることになるため、再武装には使わない。
               if (!touchTriggerOk) e.talked = false;
-              // 逆に、移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
+              // 移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
               // わけではないので発動させない（隣が当たり判定持ちだと pBoxTouch の 4px 余裕で接触扱いに
               // なり、転送直後に誤発動する）。発動済みにしておけば、離れて入り直したときに発動する。
-              else if (justMoved) e.talked = true;
+              // ただし、当たり判定のあるオブジェクト（壁タイル・NPC）はプレイヤーが侵入できないため、
+              // 連続発動の問題が生じない。justMoved による抑制の対象外とする（b）。
+              else if (justMoved && !blocksPlayer) e.talked = true;
             }
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
