@@ -23,7 +23,7 @@ import {
 } from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
 import type { Dir4Name, EventCommand, EventCondition, EventPage, NpcBehavior } from '@/components/game-presets/shared';
-import { newObject, TILE_SIZE, chest, localSysTileUrl } from '@/components/game-presets/shared';
+import { newObject, uid, TILE_SIZE, chest, localSysTileUrl } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
 import LZString from 'lz-string';
@@ -461,8 +461,23 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     return { spriteRef: '', spriteUrl: spriteUrlOf(spec.id) };
   };
 
-  const npcObjId = (x: string | undefined, y: string | undefined): string =>
-    (x !== undefined && y !== undefined) ? `obj-human-${x}-${y}` : '';
+  // ── 人物の参照解決 ──────────────────────────────────────────────────────
+  // RPGEN の #MV_N*/#CH_SP/#CH_HM/#DW_FL は対象の人物を「配置時の座標」で指す。
+  // エンジン側は ObjectDef.id で対象を探すため、人物ごとの id を先に採番しておき、
+  // 座標からその id を引けるようにする（座標に人物がいなければ RPGEN でも対象なしなので解決しない）。
+  const humanObjIdByCell = new Map<string, string>();
+  const cellKey = (x: number, y: number) => `${x},${y}`;
+  for (const human of rpgMap.humans) {
+    humanObjIdByCell.set(cellKey(human.position.x, human.position.y), uid());
+  }
+
+  /** 座標パラメータ（文字列）から対象の人物の objId を求める。該当なしのときは実在しない id を返す。 */
+  const npcObjId = (x: string | undefined, y: string | undefined): string => {
+    if (x === undefined || y === undefined) return '';
+    const cx = parseInt(x, 10), cy = parseInt(y, 10);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return '';
+    return humanObjIdByCell.get(cellKey(cx, cy)) ?? `obj-human-${cx}-${cy}`;
+  };
 
   const translateRpgenCommand = (cmd: Command): EventCommand | null => {
     switch (cmd.type) {
@@ -520,12 +535,12 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         return { type: 'moveNpc', objId: 'player', dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
       case CommandType.MoveNpcDirection: {
         const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
-        return { type: 'moveNpc', objId: `obj-human-${parseInt(cmd.params.nx || '0')}-${parseInt(cmd.params.ny || '0')}`, dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, duration: parseInt(cmd.params.t || cmd.params.p || '0') };
       }
       case CommandType.MoveNpcAbsolute:
-        return { type: 'moveNpc', objId: `obj-human-${parseInt(cmd.params.nx || '0')}-${parseInt(cmd.params.ny || '0')}`, tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx: parseInt(cmd.params.tx || '0'), ty: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
       case CommandType.MoveNpcRelative:
-        return { type: 'moveNpc', objId: `obj-human-${parseInt(cmd.params.nx || '0')}-${parseInt(cmd.params.ny || '0')}`, dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx: parseInt(cmd.params.tx || '0'), dy: parseInt(cmd.params.ty || '0'), duration: parseInt(cmd.params.t || cmd.params.p || '0') };
       case CommandType.PlusGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
       case CommandType.MinusGold: return { type: 'changeGold', amount: -parseInt(cmd.params.v || '0') };
       case CommandType.SetGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
@@ -653,6 +668,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
 
     const pages = messageToPages(human.message || '');
     draft.objects.push(newObject({
+      // 座標で人物を指すコマンド（#MV_NA 等）の変換先と一致させるため、先に採番した id を使う
+      id: humanObjIdByCell.get(cellKey(human.position.x, human.position.y)) ?? uid(),
       col: human.position.x, row: human.position.y,
       emoji: (spriteUrl || spriteRef) ? undefined : '🧍',
       spriteUrl,
