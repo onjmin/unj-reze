@@ -2019,6 +2019,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  ワープ（warpSceneId / warpTarget）の発動を無効化する（入場地点付近に別のワープがある場合の
    *  即座の巻き戻り・往復ループを防ぐ）。 */
   const warpCooldownRef = useRef<{ x: number; y: number } | null>(null);
+  /** イベント/ワープでプレイヤーを移動させた直後の1スキャンだけ立つフラグ。
+   *  移動先ですでに発動範囲内にあった接触イベントは「プレイヤー自身が入り込んだ」わけではないので、
+   *  発動させずに発動済み扱いにするために使う。範囲外へ出て入り直せば再武装されて通常どおり発動する。
+   *  距離ではなく「移動した瞬間」で判定するため、隣のマスへ普通に歩いて接触する分は抑制されない。 */
+  const playerJustMovedRef = useRef(false);
   /** つるつる床（システムタイル）：強制スライド中の目標座標。null なら通常操作。 */
   const iceSlideRef = useRef<{ targetX: number; targetY: number } | null>(null);
   /** つるつる床の多重発動防止：直近に発動開始したタイル座標キー。 */
@@ -4718,6 +4723,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const pw = gameDataRef.current.player.w ?? TILE_SIZE;
             const ph = gameDataRef.current.player.h ?? TILE_SIZE;
             warpCooldownRef.current = { x: tx + pw / 2, y: ty + ph / 2 };
+            playerJustMovedRef.current = true;
             setTimeout(advance, 50);
           }
           break;
@@ -4857,6 +4863,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const pw = gameDataRef.current.player.w ?? TILE_SIZE;
             const ph = gameDataRef.current.player.h ?? TILE_SIZE;
             warpCooldownRef.current = { x: px + pw / 2, y: py + ph / 2 };
+            playerJustMovedRef.current = true;
           } else {
             const obj = engineRef.current.entities?.find(o => o.def.id === target);
             if (obj) {
@@ -7368,13 +7375,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // ラウンド終了演出中（roundOver）は敵・弾・当たり判定も止める（残機の死亡中は継続）
       if (isPlaying && !roundOverRef.current && !battleRef.current.active && !encounterAlertRef.current) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
-        // ワープ／イベントでプレイヤーが移動した直後の再発動抑制。
-        // 発動範囲は「隣接1マス」なので、そこから出た時点（1マス超）で解除する。
-        // これより広く取ると、接触に戻るまで2マス歩かされることになり抑制が効きすぎる。
+        // ワープ直後の再発動抑制：入場座標から十分離れたら解除（overlap判定の半径 TILE_SIZE*1.1 より広めに取る）。
+        // ※接触イベント（pages）の抑制はこの距離ではなく playerJustMovedRef で行う。
         if (warpCooldownRef.current) {
           const wc = warpCooldownRef.current;
-          if (Math.hypot(pcx - wc.x, pcy - wc.y) > TILE_SIZE) warpCooldownRef.current = null;
+          if (Math.hypot(pcx - wc.x, pcy - wc.y) > TILE_SIZE * 1.5) warpCooldownRef.current = null;
         }
+        // 直前のフレームでプレイヤーが移動させられたか。今回のスキャンで消費するので先に降ろしておく
+        // （スキャン中にワープが発動して再度立った分は、次のスキャンで使う）。
+        const justMoved = playerJustMovedRef.current;
+        playerJustMovedRef.current = false;
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
@@ -8045,10 +8055,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
 
           if (overlap) {
-            // イベント（ページ）を持つオブジェクトは、発動範囲（＝touchTriggerOk。隣接1マス）から
-            // 出た時点で再武装する。overlap はダメージ・会話など他の判定用に 1.5 マスと広く取って
-            // あり、これを再発動の条件にすると接触に戻るまで2マス歩かされることになるため。
-            if (d.pages && d.pages.length > 0 && !touchTriggerOk) e.talked = false;
+            if (d.pages && d.pages.length > 0) {
+              // 発動範囲（＝touchTriggerOk。隣接1マス）から出た時点で再武装する。overlap はダメージ・
+              // 会話など他の判定用に 1.5 マスと広く取ってあり、これを再発動の条件にすると接触に戻るまで
+              // 2マス歩かされることになるため、再武装には使わない。
+              if (!touchTriggerOk) e.talked = false;
+              // 逆に、移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
+              // わけではないので発動させない（隣が当たり判定持ちだと pBoxTouch の 4px 余裕で接触扱いに
+              // なり、転送直後に誤発動する）。発動済みにしておけば、離れて入り直したときに発動する。
+              else if (justMoved) e.talked = true;
+            }
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
               // 発動方向が指定されていれば、その向きを押しているときだけ通す。
@@ -8063,6 +8079,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 // 移動先がワープ地点に重なっていると即座に再発動して往復するため、
                 // その場所から離れるまでは次のワープを発動させない。
                 warpCooldownRef.current = { x: tx + pData.w / 2, y: ty + pData.h / 2 };
+                playerJustMovedRef.current = true;
               }
               break;
             }
@@ -8162,11 +8179,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
                   const trig = page.trigger ?? 'action';
-                  // 移動直後の抑制は「転送先に乗ったまま即再発動する」のを防ぐためのもの。
-                  // 侵入できない場所に置かれたイベントは乗ったままになりようがないので、
-                  // 抑制を掛けず連続で発動させる（そちらが意図した挙動）。
-                  const cooldownBlocks = !blocksPlayer && !!warpCooldownRef.current;
-                  if ((trig === 'playerTouch' || trig === 'eventTouch') && !cooldownBlocks && touchTriggerOk) {
+                  // 移動直後の抑制は playerJustMovedRef による e.talked の事前セットで済ませてあるので、
+                  // ここでは距離ベースの warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
+                  if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
                     e.talked = true;
                     runEventCommands(d.id, page.commands);
                   }
@@ -8253,7 +8268,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
           } else { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
         }
-
         // ── 敵同士の衝突反射（横歩き系のみ。テレサ＝chase 等はすり抜ける）──
         if (gameData.engine === 'action') {
           const ents = eng.entities;
@@ -10271,6 +10285,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               eng.bullets = []; eng.enemyBullets = [];
               encounterGaugeRef.current = 0; encounterNextRef.current = 0;
               warpCooldownRef.current = { x: targetWx + pData.w / 2, y: targetWy + pData.h / 2 };
+              playerJustMovedRef.current = true;
               if (gameData.id === 'mario') {
                 marioPipeRef.current = {
                   phase: 'exiting',
@@ -10300,6 +10315,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               eng.player.x = fade.entryX; eng.player.y = fade.entryY;
               eng.player.vx = 0; eng.player.vy = 0;
               warpCooldownRef.current = { x: fade.entryX + pData.w / 2, y: fade.entryY + pData.h / 2 };
+              playerJustMovedRef.current = true;
               if (gameData.id === 'mario') {
                 marioPipeRef.current = {
                   phase: 'exiting',
