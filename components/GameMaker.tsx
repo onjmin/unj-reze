@@ -4970,12 +4970,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const tileDx = Math.abs(targetX - startX) / TILE_SIZE;
             const tileDy = Math.abs(targetY - startY) / TILE_SIZE;
             const steps = cmd.allowDiagonal ? Math.max(tileDx, tileDy) : (tileDx + tileDy);
-
-            let duration = cmd.duration ?? 0;
-            if (cmd.stepMs && cmd.stepMs > 0 && steps > 0) {
+            const isInstant = cmd.duration === 0;
+            let duration = cmd.duration;
+            if (isInstant) {
+              duration = 0;
+            } else if (cmd.stepMs && cmd.stepMs > 0 && steps > 0) {
               duration = Math.round(steps * cmd.stepMs);
-            } else if (duration <= 0 && steps > 0) {
+            } else if ((duration == null || duration < 0) && steps > 0) {
               duration = Math.round(steps * 120); // デフォルト 120ms / マス
+            } else if (duration == null) {
+              duration = 0;
             }
 
             if (duration > 0) {
@@ -17839,6 +17843,95 @@ function EventPageEditor({ pages, setPages, switches, items, effects, setPreview
   );
 }
 
+// ── ネストされた階層の命令一覧エディタ（分岐・選択肢内用） ──
+
+function NestedCommandList({
+  label = "命令一覧",
+  commands,
+  onChangeCommands,
+  switches,
+  items,
+  effects,
+  onPickImage,
+  imgCache,
+  cmdPickCallbackRef,
+}: {
+  label?: string;
+  commands: EventCommand[];
+  onChangeCommands: (cmds: EventCommand[]) => void;
+  switches: SwitchDef[];
+  items: ItemDef[];
+  effects: EffectPreset[];
+  onPickImage?: (target: PickTarget) => void;
+  imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>;
+  cmdPickCallbackRef?: React.MutableRefObject<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>;
+}) {
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
+  const addCmd = () => {
+    const newCmd: EventCommand = { type: 'message', text: '' };
+    const updated = [...commands, newCmd];
+    onChangeCommands(updated);
+    setEditingIndex(commands.length);
+  };
+
+  const delCmd = (idx: number) => {
+    onChangeCommands(commands.filter((_, i) => i !== idx));
+    if (editingIndex === idx) setEditingIndex(null);
+  };
+
+  const moveCmd = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= commands.length) return;
+    const updated = [...commands];
+    const temp = updated[idx];
+    updated[idx] = updated[target];
+    updated[target] = temp;
+    onChangeCommands(updated);
+  };
+
+  return (
+    <div className="border border-gray-700/60 rounded bg-gray-900/60 p-1.5 space-y-1 mt-1">
+      <div className="flex items-center justify-between text-[9px] text-gray-300 font-bold border-b border-gray-800 pb-0.5">
+        <span>{label} ({commands.length})</span>
+        <button type="button" onClick={addCmd}
+          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[9px]">
+          <Plus size={10} /> 追加
+        </button>
+      </div>
+      {commands.length === 0 && <p className="text-[9px] text-gray-500 py-0.5 text-center font-mono">（命令なし）</p>}
+      {commands.map((c, idx) => (
+        <CommandEditor
+          key={idx}
+          cmd={c}
+          index={idx}
+          count={commands.length}
+          onDelete={() => delCmd(idx)}
+          onMove={dir => moveCmd(idx, dir)}
+          onShowDetails={() => setEditingIndex(idx)}
+        />
+      ))}
+      {editingIndex !== null && commands[editingIndex] && (
+        <EventCommandDetailsModal
+          cmd={commands[editingIndex]}
+          switches={switches}
+          items={items}
+          effects={effects}
+          onPickImage={onPickImage}
+          imgCache={imgCache}
+          cmdPickCallbackRef={cmdPickCallbackRef}
+          onClose={() => setEditingIndex(null)}
+          onChange={patch => {
+            const updated = [...commands];
+            updated[editingIndex] = { ...updated[editingIndex], ...patch } as EventCommand;
+            onChangeCommands(updated);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── 単一イベントコマンドエディタ ──
 
 function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onClose, onPickImage, imgCache, cmdPickCallbackRef }: {
@@ -17941,7 +18034,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                     <input type="checkbox" checked={!!(cmd as any).random}
                       onChange={e => onChange({ random: e.target.checked || undefined } as Partial<EventCommand>)}
                       className="accent-blue-500 w-3.5 h-3.5" />
-                    ランダム選択（選択肢を出さず1つを自動実行 / RPGEN x,y省略時）
+                    ランダム選択（選択肢を出さず1つを自動実行）
                   </label>
                   <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
                     <input type="checkbox" checked={!!(cmd as any).keepMessage}
@@ -17949,24 +18042,35 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                       className="accent-blue-500 w-3.5 h-3.5" />
                     直前のメッセージを消さない（RPGEN c:1）
                   </label>
-                  <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">選択肢</div>
+                  <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">選択肢一覧</div>
                   {choices.length === 0 && <p className="text-[10px] text-gray-500">（なし）</p>}
                   {choices.map((ch, ci) => (
-                    <div key={ci} className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-gray-500 w-4 text-center shrink-0">{ci + 1}</span>
-                      <input value={ch.label}
-                        onChange={e => setChoices(choices.map((c, j) => j === ci ? { ...c, label: e.target.value } : c))}
-                        className={inputCls} placeholder={`選択肢${ci + 1}`} />
-                      <span className="text-[9px] text-gray-500 shrink-0 whitespace-nowrap">{ch.commands.length}命令</span>
-                      <button onClick={() => setChoices(choices.filter((_, j) => j !== ci))}
-                        className="text-red-400 hover:text-red-300 text-[12px] px-1 shrink-0">×</button>
+                    <div key={ci} className="border border-gray-700/60 bg-gray-800/30 rounded p-1.5 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-gray-500 w-4 text-center shrink-0">{ci + 1}</span>
+                        <input value={ch.label}
+                          onChange={e => setChoices(choices.map((c, j) => j === ci ? { ...c, label: e.target.value } : c))}
+                          className={inputCls} placeholder={`選択肢${ci + 1}`} />
+                        <button onClick={() => setChoices(choices.filter((_, j) => j !== ci))}
+                          className="text-red-400 hover:text-red-300 text-[12px] px-1 shrink-0">×</button>
+                      </div>
+                      <NestedCommandList
+                        label={`選択肢「${ch.label || ci + 1}」の実行命令`}
+                        commands={ch.commands ?? []}
+                        onChangeCommands={newCmds => setChoices(choices.map((c, j) => j === ci ? { ...c, commands: newCmds } : c))}
+                        switches={switches}
+                        items={items}
+                        effects={effects}
+                        onPickImage={onPickImage}
+                        imgCache={imgCache}
+                        cmdPickCallbackRef={cmdPickCallbackRef}
+                      />
                     </div>
                   ))}
                   <button onClick={() => setChoices([...choices, { label: `選択肢${choices.length + 1}`, commands: [] }])}
                     className="w-full flex items-center justify-center gap-0.5 py-1 rounded border border-dashed border-gray-600 text-[9px] text-gray-400 hover:bg-gray-100/5">
                     <Plus size={10} />選択肢を追加
                   </button>
-                  <p className="text-[9px] text-gray-500">各選択肢の中で実行する命令はインポート結果を保持します（分岐内の命令編集は今後対応）。</p>
                 </div>
               );
             })()}
@@ -17982,6 +18086,28 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                   className={inputCls}>
                   <option value="ON">ON</option><option value="OFF">OFF</option>
                 </select>
+                <NestedCommandList
+                  label="条件一致時（Then）の命令"
+                  commands={(cmd as any).then ?? []}
+                  onChangeCommands={newCmds => onChange({ then: newCmds } as Partial<EventCommand>)}
+                  switches={switches}
+                  items={items}
+                  effects={effects}
+                  onPickImage={onPickImage}
+                  imgCache={imgCache}
+                  cmdPickCallbackRef={cmdPickCallbackRef}
+                />
+                <NestedCommandList
+                  label="条件不一致時（Else）の命令"
+                  commands={(cmd as any).else ?? []}
+                  onChangeCommands={newCmds => onChange({ else: newCmds } as Partial<EventCommand>)}
+                  switches={switches}
+                  items={items}
+                  effects={effects}
+                  onPickImage={onPickImage}
+                  imgCache={imgCache}
+                  cmdPickCallbackRef={cmdPickCallbackRef}
+                />
               </div>
             )}
             {type === 'ifItem' && (
@@ -17996,6 +18122,28 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                   className={inputCls}>
                   <option value="あり">持っている</option><option value="なし">持っていない</option>
                 </select>
+                <NestedCommandList
+                  label="条件一致時（Then）の命令"
+                  commands={(cmd as any).then ?? []}
+                  onChangeCommands={newCmds => onChange({ then: newCmds } as Partial<EventCommand>)}
+                  switches={switches}
+                  items={items}
+                  effects={effects}
+                  onPickImage={onPickImage}
+                  imgCache={imgCache}
+                  cmdPickCallbackRef={cmdPickCallbackRef}
+                />
+                <NestedCommandList
+                  label="条件不一致時（Else）の命令"
+                  commands={(cmd as any).else ?? []}
+                  onChangeCommands={newCmds => onChange({ else: newCmds } as Partial<EventCommand>)}
+                  switches={switches}
+                  items={items}
+                  effects={effects}
+                  onPickImage={onPickImage}
+                  imgCache={imgCache}
+                  cmdPickCallbackRef={cmdPickCallbackRef}
+                />
               </div>
             )}
             {type === 'setSwitch' && (
@@ -18060,7 +18208,28 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                   <input type="number" value={(cmd as any).amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
                     className={inputCls} placeholder="金額" />
                 </div>
-                <p className="text-[9px] text-gray-500">条件を満たしたとき/満たさないときの命令はインポート結果を保持します。</p>
+                <NestedCommandList
+                  label="条件一致時（Then）の命令"
+                  commands={(cmd as any).then ?? []}
+                  onChangeCommands={newCmds => onChange({ then: newCmds } as Partial<EventCommand>)}
+                  switches={switches}
+                  items={items}
+                  effects={effects}
+                  onPickImage={onPickImage}
+                  imgCache={imgCache}
+                  cmdPickCallbackRef={cmdPickCallbackRef}
+                />
+                <NestedCommandList
+                  label="条件不一致時（Else）の命令"
+                  commands={(cmd as any).else ?? []}
+                  onChangeCommands={newCmds => onChange({ else: newCmds } as Partial<EventCommand>)}
+                  switches={switches}
+                  items={items}
+                  effects={effects}
+                  onPickImage={onPickImage}
+                  imgCache={imgCache}
+                  cmdPickCallbackRef={cmdPickCallbackRef}
+                />
               </div>
             )}
             {type === 'warp' && (

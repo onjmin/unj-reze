@@ -561,10 +561,8 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.Select: {
         const choiceNode: EventCommand = {
           type: 'choice', text: '', choices: [],
-          // x/y の指定がない #SEL はランダムな位置に出るため、選択肢UIを出さずランダムに1つ実行する
-          random: cmd.displayPosition === undefined,
-          // ライブラリの clearMessage は c フラグそのもの。RPGENの実際の挙動は
-          // c:1で直前のメッセージウィンドウを表示したままにする、というものなのでそのまま使う。
+          random: false,
+          // c:1 で直前のメッセージウィンドウを表示したままにする
           keepMessage: cmd.clearMessage === true,
         };
         for (const choice of cmd.choices) {
