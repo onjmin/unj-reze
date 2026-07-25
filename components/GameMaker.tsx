@@ -4586,7 +4586,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const runEventCommands = useCallback((objId: string, commands: EventCommand[], onDone?: () => void) => {
     if (eventRunningRef.current && !onDone) return;
-    eventIdRef.current++;
+    // サブ呼び出し（分岐・選択肢の中身実行）では eventIdRef をインクリメントしない。
+    // インクリメントすると親コンテキストの advance/runNext が currentEventId 不一致で即座に
+    // 中断されてしまい、分岐後の残りコマンドが一切実行されなくなるため。
+    if (!onDone) eventIdRef.current++;
     const currentEventId = eventIdRef.current;
     let index = 0;
     let cmds = commands;
