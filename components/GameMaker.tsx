@@ -7368,10 +7368,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // ラウンド終了演出中（roundOver）は敵・弾・当たり判定も止める（残機の死亡中は継続）
       if (isPlaying && !roundOverRef.current && !battleRef.current.active && !encounterAlertRef.current) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
-        // ワープ直後の再発動抑制：入場座標から十分離れたら解除（overlap判定の半径 TILE_SIZE*1.1 より広めに取る）
+        // ワープ／イベントでプレイヤーが移動した直後の再発動抑制。
+        // 発動範囲は「隣接1マス」なので、そこから出た時点（1マス超）で解除する。
+        // これより広く取ると、接触に戻るまで2マス歩かされることになり抑制が効きすぎる。
         if (warpCooldownRef.current) {
           const wc = warpCooldownRef.current;
-          if (Math.hypot(pcx - wc.x, pcy - wc.y) > TILE_SIZE * 1.5) warpCooldownRef.current = null;
+          if (Math.hypot(pcx - wc.x, pcy - wc.y) > TILE_SIZE) warpCooldownRef.current = null;
         }
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
@@ -7559,7 +7561,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const eh = d.h ?? TILE_SIZE; // 敵の当たり判定高さ
             const eStandingTile = getTile(e.x + TILE_SIZE / 2, e.y + TILE_SIZE / 2);
             const eStandingSpecial = eStandingTile?.info?.special;
-            if (eStandingSpecial && ICE_DIRS[eStandingSpecial]) {
+            // イベントでマップ外へ飛ばされた NPC は「退場した」扱いにし、AI も位置のクランプも止める。
+            // RPGEN では NPC を遠くの座標へ移動させる（#MV_NA tx:500,ty:500 等）ことで退場させる
+            // 慣用句があり、クランプするとマップ隅に張り付いてしまうため。
+            const banished = e.x < -TILE_SIZE || e.x > worldW || e.y < -TILE_SIZE || e.y > worldH;
+            if (banished) {
+              // 場外に置いたまま何もしない
+            } else if (eStandingSpecial && ICE_DIRS[eStandingSpecial]) {
               // つるつる床に乗った瞬間：behavior による移動を無視し、強制スライドを開始する。
               // 塞がっていて開始できない場合も自由に振る舞わせず、次フレーム以降に再試行させる。
               const [idx, idy] = ICE_DIRS[eStandingSpecial];
@@ -7675,8 +7683,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
               if (e.y < e.homeY - TILE_SIZE * 3 || e.y > e.homeY + TILE_SIZE * 3) e.vy *= -1;
             }
-            e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
-            e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
+            if (!banished) {
+              e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
+              e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
+            }
           }
 
           // 見下ろし型：実際に動いた向きを保持する。まだ一度も動いていなければ def.dir を初期の向きにする。
@@ -8026,13 +8036,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // 当たり判定が有る場所（壁・看板）：進入不可能なため境界接触（pBoxTouch）または直前で向いたときに発動
           // NPC（モブコリジョンあり）：プレイヤーが侵入できないためソリッドタイルと同様の判定を使う
           const isNpcBlocker = (d.objType === 'npc') && !d.hazard;
-          const touchTriggerOk = (isSolidTile || isNpcBlocker)
+          // プレイヤーが侵入できない場所（壁・看板・モブ）に置かれたイベントかどうか
+          const blocksPlayer = isSolidTile || isNpcBlocker;
+          const touchTriggerOk = blocksPlayer
             ? (pBoxTouch || (isFacingEventTile && isAdjacentTile))
             : (exactOverlap || (pCol === eCol && pRow === eRow));
 
           const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
 
           if (overlap) {
+            // イベント（ページ）を持つオブジェクトは、発動範囲（＝touchTriggerOk。隣接1マス）から
+            // 出た時点で再武装する。overlap はダメージ・会話など他の判定用に 1.5 マスと広く取って
+            // あり、これを再発動の条件にすると接触に戻るまで2マス歩かされることになるため。
+            if (d.pages && d.pages.length > 0 && !touchTriggerOk) e.talked = false;
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
               // 発動方向が指定されていれば、その向きを押しているときだけ通す。
@@ -8146,7 +8162,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
                   const trig = page.trigger ?? 'action';
-                  if ((trig === 'playerTouch' || trig === 'eventTouch') && !warpCooldownRef.current && touchTriggerOk) {
+                  // 移動直後の抑制は「転送先に乗ったまま即再発動する」のを防ぐためのもの。
+                  // 侵入できない場所に置かれたイベントは乗ったままになりようがないので、
+                  // 抑制を掛けず連続で発動させる（そちらが意図した挙動）。
+                  const cooldownBlocks = !blocksPlayer && !!warpCooldownRef.current;
+                  if ((trig === 'playerTouch' || trig === 'eventTouch') && !cooldownBlocks && touchTriggerOk) {
                     e.talked = true;
                     runEventCommands(d.id, page.commands);
                   }
