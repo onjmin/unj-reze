@@ -176,6 +176,8 @@ export interface GameManifestDraft {
   preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
   /** つるつる床の強制スライド速度（px/frame）。未指定時は既定値。 */
   iceSlideSpeed?: number;
+  /** 接触イベント（playerTouch / eventTouch）が連続発動するときのクールダウン間隔 (ms)。既定 300ms。 */
+  touchTriggerCooldownMs?: number;
   player: {
     emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string; minecraftSkin?: string;
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number;
@@ -358,6 +360,7 @@ const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId
     gravity: manifest.gravity ?? base.gravity,
     friction: manifest.friction ?? base.friction,
     iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
+    touchTriggerCooldownMs: (manifest as any).touchTriggerCooldownMs ?? base.touchTriggerCooldownMs ?? 300,
     player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player?.spriteRef) },
     tiles: manifest.tiles
       ? Object.fromEntries(
@@ -453,6 +456,10 @@ interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; 
 interface Entity {
   def: ObjectDef; x: number; y: number; homeX: number; homeY: number;
   hp: number; timer: number; vx: number; vy: number; talked: boolean;
+  touchEventRunning?: boolean;
+  _touchStartCol?: number;
+  _touchStartRow?: number;
+  _lastTouchTime?: number;
   spriteRef?: string; spriteUrl?: string; activePageIdx?: number;
   isGrounded?: boolean; // 横スク（action）敵の接地状態
   spellState?: SpellExecState;
@@ -470,9 +477,6 @@ interface Entity {
   rezeStateTimer?: number;
   /** 味方モブが攻撃されて怯え、プレイヤーから逃げるようになった状態。 */
   fleeing?: boolean;
-  /** 接触トリガー（playerTouch / eventTouch）のイベントを実際に起動した直後で、まだ完了していない状態。
-   *  完了を検知して talked を戻す（＝接触が続く限り再発動させる）ためのフラグ。 */
-  touchEventRunning?: boolean;
   /** つるつる床の強制スライド中の目標タイル（プレイヤーの iceSlideRef と同等の仕組みを敵/NPCにも適用）。 */
   iceSlide?: { targetX: number; targetY: number };
   /** 見下ろし型での現在の向き。初期値は def.dir、移動すると実際の移動方向で更新される。 */
@@ -1533,6 +1537,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     startTime?: number;
     pausedAt?: number;
     pauseOffset?: number;
+    hidden?: boolean;
     frames?: { url: string; sx: number; sy: number; sw: number; sh: number; ox: number; oy: number; r: number; a: number; }[];
   };
   const [overlayImages, setOverlayImages] = useState<Record<string, OverlayImageType>>({});
@@ -2390,6 +2395,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const bossBgmActiveRef = useRef(false);
   const battleBgmActiveRef = useRef<'none' | 'battle' | 'boss'>('none');
   const gameDataRef = useRef(gameData);
+  const lastTouchTimeMapRef = useRef<Map<string, number>>(new Map());
   gameDataRef.current = gameData;
 
   // ── グレイズ ──
@@ -4821,18 +4827,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           break;
         }
         case 'changeTile': {
-          // マップの1マスを差し替える（#CH_SP）。地面は engine.map、置物は engine.overlayMap を書き換える。
-          // どちらも当たり判定（isCellPassable）と描画がそのまま参照しているグリッドなので、
-          // 書き込んだ時点で見た目も通行可否も切り替わる。
           const eng = engineRef.current;
           const tileInfo = gameDataRef.current.tiles[cmd.tileId];
           if (tileInfo?.imageUrl) ensureImage(tileInfo.imageUrl);
-          const grid = cmd.layer === 'overlay'
-            ? (eng.overlayMap ??= worldLayoutRef.current?.overlayMap ?? gameDataRef.current.overlayMap)
-            : eng.map;
-          if (grid?.[cmd.row] && cmd.col >= 0 && cmd.col < grid[cmd.row].length) {
-            grid[cmd.row][cmd.col] = cmd.tileId;
+          const r = cmd.row, c = cmd.col;
+          const targetLayer = (cmd.layer as string) === 'overlay' ? 'overlay' : (cmd.layer as string) === 'overhead' ? 'overhead' : 'map';
+
+          const writeToGrid = (g: number[][] | undefined) => {
+            if (!g || r < 0 || c < 0) return;
+            while (g.length <= r) g.push([]);
+            while (g[r].length <= c) g[r].push(0);
+            g[r][c] = cmd.tileId;
+          };
+
+          if (targetLayer === 'overlay') {
+            if (!eng.overlayMap || eng.overlayMap.length === 0) eng.overlayMap = emptyGridLike(eng.map);
+            writeToGrid(eng.overlayMap);
+            writeToGrid(worldLayoutRef.current?.overlayMap);
+            writeToGrid(gameDataRef.current.overlayMap);
+          } else if (targetLayer === 'overhead') {
+            if (!eng.overheadMap || eng.overheadMap.length === 0) eng.overheadMap = emptyGridLike(eng.map);
+            writeToGrid(eng.overheadMap);
+            writeToGrid(worldLayoutRef.current?.overheadMap);
+            writeToGrid(gameDataRef.current.overheadMap);
+          } else {
+            writeToGrid(eng.map);
+            writeToGrid(worldLayoutRef.current?.map);
+            writeToGrid(gameDataRef.current.map);
           }
+
+          forceHud(n => n + 1);
           setTimeout(advance, 0);
           break;
         }
@@ -4952,12 +4976,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         }
-        case 'showImage':
+        case 'showImage': {
+          const id = String(cmd.imgId ?? '1');
           setOverlayImages(prev => ({
-            ...prev, [cmd.imgId]: {
+            ...prev, [id]: {
               url: cmd.url, x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h, opacity: cmd.opacity, isPercent: cmd.isPercent,
               m: cmd.m, c: cmd.c, sxp: cmd.sxp, swp: cmd.swp, xp: cmd.xp, wp: cmd.wp, lp: cmd.lp,
-              ms: cmd.ms, kind: cmd.kind ?? 'image', frames: cmd.frames, startTime: Date.now()
+              ms: cmd.ms, kind: cmd.kind ?? 'image', frames: cmd.frames, startTime: Date.now(), hidden: false, pausedAt: undefined
             }
           }));
           if (cmd.frames && cmd.frames.length > 0 && !cmd.lp && cmd.ms) {
@@ -4967,6 +4992,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             setTimeout(advance, 0);
           }
           break;
+        }
         case 'hideImage': {
           const targetId = cmd.imgId;
           if (targetId) {
@@ -5003,39 +5029,41 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         case 'pauseImage': {
-          const targetId = cmd.imgId;
-          if (targetId) {
-            setOverlayImages(prev => {
-              const next = { ...prev };
-              delete next[targetId];
-              delete next[String(targetId)];
-              return next;
-            });
-            setFollowImages(prev => {
-              const next = { ...prev };
-              delete next[targetId];
-              delete next[String(targetId)];
-              return next;
-            });
-          } else {
-            setOverlayImages({});
-            setFollowImages({});
-          }
+          const id = cmd.imgId ? String(cmd.imgId) : undefined;
+          setOverlayImages(prev => {
+            const next = { ...prev };
+            if (id) {
+              if (next[id]) next[id] = { ...next[id], hidden: true, pausedAt: Date.now() };
+            } else {
+              for (const k of Object.keys(next)) {
+                next[k] = { ...next[k], hidden: true, pausedAt: Date.now() };
+              }
+            }
+            return next;
+          });
           setTimeout(advance, 0);
           break;
         }
-        case 'resumeImage':
-          if (cmd.imgId) {
-            const id = cmd.imgId;
-            setOverlayImages(prev => {
-              const img = prev[id];
-              if (!img || !img.pausedAt) return prev;
-              const pauseDuration = Date.now() - img.pausedAt;
-              return { ...prev, [id]: { ...img, pausedAt: undefined, startTime: (img.startTime || Date.now()) + pauseDuration } };
-            });
-          }
+        case 'resumeImage': {
+          const id = cmd.imgId ? String(cmd.imgId) : undefined;
+          setOverlayImages(prev => {
+            const next = { ...prev };
+            if (id) {
+              if (next[id]) {
+                const pauseDuration = next[id].pausedAt ? Date.now() - next[id].pausedAt : 0;
+                next[id] = { ...next[id], hidden: false, pausedAt: undefined, startTime: (next[id].startTime || Date.now()) + pauseDuration };
+              }
+            } else {
+              for (const k of Object.keys(next)) {
+                const pauseDuration = next[k].pausedAt ? Date.now() - next[k].pausedAt : 0;
+                next[k] = { ...next[k], hidden: false, pausedAt: undefined, startTime: (next[k].startTime || Date.now()) + pauseDuration };
+              }
+            }
+            return next;
+          });
           setTimeout(advance, 0);
           break;
+        }
         case 'moveNpc': {
           const target = !cmd.objId ? 'player' : cmd.objId;
           const targetObj = target === 'player'
@@ -5671,14 +5699,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     // アクティブシーンのエンティティをワールド座標で配置
     const s0l = layout.layouts.find(l => l.sceneIdx === activeSceneIdxRef.current) ?? layout.layouts[0];
-    engineRef.current.entities = (scenesRef.current[activeSceneIdxRef.current]?.objects ?? []).map(o => ({
-      x: (s0l.originX + o.col) * TILE_SIZE,
-      y: (s0l.originY + o.row) * TILE_SIZE,
-      homeX: (s0l.originX + o.col) * TILE_SIZE,
-      homeY: (s0l.originY + o.row) * TILE_SIZE,
-      vx: 0, vy: 0, hp: o.hp, timer: 0, talked: false,
-      def: o, // spriteUrl を保持する（SceneDef.objects は spriteUrl を含む ObjectDef）
-    })) as unknown as Entity[];
+    const oldEntitiesMap = new Map(engineRef.current.entities?.map(e => [e.def.id, e]));
+    engineRef.current.entities = (scenesRef.current[activeSceneIdxRef.current]?.objects ?? []).map(o => {
+      const old = oldEntitiesMap.get(o.id);
+      return {
+        x: (s0l.originX + o.col) * TILE_SIZE,
+        y: (s0l.originY + o.row) * TILE_SIZE,
+        homeX: (s0l.originX + o.col) * TILE_SIZE,
+        homeY: (s0l.originY + o.row) * TILE_SIZE,
+        vx: 0, vy: 0, hp: o.hp, timer: 0,
+        talked: old ? old.talked : false,
+        touchEventRunning: old ? old.touchEventRunning : false,
+        _touchStartCol: old ? (old as any)._touchStartCol : undefined,
+        _touchStartRow: old ? (old as any)._touchStartRow : undefined,
+        _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
+        def: o,
+      };
+    }) as unknown as Entity[];
     // 全シーンのスプライト画像を事前ロード（spriteUrl は Entity.def から除外されるため spriteRef も参照）
     gameData.scenes?.forEach(s => s.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl)));
   }, [isPlaying, gameData.scenes, gameData.player.start, editSceneIdx, ensureImage, ensureImageFromRef]);
@@ -5710,15 +5747,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (isPlaying) {
       eng.bullets = []; eng.enemyBullets = [];
       const isTouhouWave = (o: ObjectDef) => gameData.engine === 'touhou' && !o.isBoss;
-      const makeEntity = (o: ObjectDef): Entity => ({
-        def: o, x: o.col * TILE_SIZE,
-        y: isTouhouWave(o) ? -TILE_SIZE * 2 : (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
-        homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
-        hp: o.hp, timer: 0, vx: 0, vy: 0, talked: false,
-        spellState: o.spellScript?.length
-          ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number },], frame: 0, waitLeft: 0 }
-          : undefined,
-      });
+      const oldEntitiesMap = new Map(eng.entities?.map(e => [e.def.id, e]));
+      const makeEntity = (o: ObjectDef): Entity => {
+        const old = oldEntitiesMap.get(o.id);
+        return {
+          def: o, x: o.col * TILE_SIZE,
+          y: isTouhouWave(o) ? -TILE_SIZE * 2 : (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
+          homeX: o.col * TILE_SIZE, homeY: (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE),
+          hp: o.hp, timer: 0, vx: 0, vy: 0,
+          talked: old ? old.talked : false,
+          touchEventRunning: old ? old.touchEventRunning : false,
+          _touchStartCol: old ? (old as any)._touchStartCol : undefined,
+          _touchStartRow: old ? (old as any)._touchStartRow : undefined,
+          _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
+          spellState: o.spellScript?.length
+            ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number },], frame: 0, waitLeft: 0 }
+            : undefined,
+        };
+      };
       const spawnEntities = (entities: Entity[]) => {
         if (gameData.engine === 'touhou') {
           entities.forEach(e => {
@@ -8382,15 +8428,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 発動範囲（＝touchTriggerOk。隣接1マス）から出た時点で再武装する。overlap はダメージ・
               // 会話など他の判定用に 1.5 マスと広く取ってあり、これを再発動の条件にすると接触に戻るまで
               // 2マス歩かされることになるため、再武装には使わない。
-              if (!touchTriggerOk) e.talked = false;
+              if (!touchTriggerOk) {
+                const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
+                const lastTouch = (e as any)._lastTouchTime ?? 0;
+                if (performance.now() - lastTouch >= cooldownMs) {
+                  e.talked = false;
+                }
+              }
               // 発動時のタイル座標からプレイヤーが移動していない場合のみ再武装する。
               // moveNpc 等で別のマスに移動された場合は再武装せず、プレイヤーが離れて talked が
               // 消えた後、再接触時に発動する。同一座標に戻った場合は再発動を許可する。
               else if (e.touchEventRunning && !eventRunningRef.current && !frozen) {
-                e.touchEventRunning = false;
                 const sc = (e as any)._touchStartCol, sr = (e as any)._touchStartRow;
+                const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
+                const lastTouch = (e as any)._lastTouchTime ?? 0;
+                const now = performance.now();
                 if (sc == null || sr == null || (pCol === sc && pRow === sr) || sameCell) {
-                  e.talked = false;
+                  if (now - lastTouch >= cooldownMs) {
+                    e.touchEventRunning = false;
+                    e.talked = false;
+                  }
+                } else {
+                  e.touchEventRunning = false;
                 }
               }
               // 移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
@@ -8518,15 +8577,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   // 移動直後の抑制は playerJustMovedRef による e.talked の事前セットで済ませてあるので、
                   // ここでは距離ベースの warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
                   if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
-                    e.talked = true;
-                    // 完了を検知して再武装するための印。接触が続く限り繰り返し発動させる。
-                    e.touchEventRunning = true;
-                    // 発動時のプレイヤーのタイル座標を記録。moveNpc 等で別のマスに移動された場合、
-                    // 再武装して即再発動しない（同一マスに戻った場合は再発動する）。
-                    (e as any)._touchStartCol = pCol;
-                    (e as any)._touchStartRow = pRow;
-                    runEventCommands(d.id, page.commands);
-                    ran = true;
+                    const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
+                    const lastTouch = Math.max((e as any)._lastTouchTime ?? 0, lastTouchTimeMapRef.current.get(d.id) ?? 0);
+                    const now = performance.now();
+                    if (now - lastTouch >= cooldownMs) {
+                      e.talked = true;
+                      e.touchEventRunning = true;
+                      (e as any)._touchStartCol = pCol;
+                      (e as any)._touchStartRow = pRow;
+                      (e as any)._lastTouchTime = now;
+                      lastTouchTimeMapRef.current.set(d.id, now);
+                      runEventCommands(d.id, page.commands);
+                      ran = true;
+                    }
                   }
                 }
               }
@@ -8614,7 +8677,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const wrapped = wrapWithKinsoku(ctx, text, Math.min(PLAY_W - 16, 220));
               npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped, lastShown: 0 };
             }
-          } else { e.talked = false; if (npcTalkRef.current?.entity === e) npcTalkRef.current = null; }
+          } else {
+            const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
+            const lastTouch = (e as any)._lastTouchTime ?? 0;
+            if (performance.now() - lastTouch >= cooldownMs) {
+              e.talked = false;
+            }
+            if (npcTalkRef.current?.entity === e) npcTalkRef.current = null;
+          }
         }
         // ── 敵同士の衝突反射（横歩き系のみ。テレサ＝chase 等はすり抜ける）──
         if (gameData.engine === 'action') {
@@ -10323,6 +10393,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── RPGEN オーバーレイ描画 ──────────────────────────────────────────
       Object.values(overlayImagesRef.current).forEach(img => {
+          if ((img as any).hidden) return;
         let currentUrl = img.url;
         let tX = 0, tY = 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
 
@@ -11254,6 +11325,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const buildManifest = (): GameManifestDraft => ({
     preset: gameData.id, engine: gameData.engine, name: title.trim() || gameData.name,
     gravity: gameData.gravity, friction: gameData.friction, iceSlideSpeed: gameData.iceSlideSpeed,
+    touchTriggerCooldownMs: gameData.touchTriggerCooldownMs ?? 300,
     player: {
       emoji: gameData.player.emoji, color: gameData.player.color, speed: gameData.player.speed,
       jumpPower: gameData.player.jumpPower, w: gameData.player.w, h: gameData.player.h,
@@ -12133,6 +12205,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </button>
                   )}
 
+                  <div className="border-t border-gray-700 my-1" />
+                  <div className="px-3 py-1.5 space-y-1">
+                    <div className="flex justify-between items-center text-[10px] text-gray-300">
+                      <span>⏱ 接触発動クールダウン</span>
+                      <span className="font-mono text-yellow-300">{(gameData.touchTriggerCooldownMs ?? 300)}ms</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1000"
+                      step="50"
+                      value={gameData.touchTriggerCooldownMs ?? 300}
+                      onChange={e => {
+                        const val = parseInt(e.target.value, 10);
+                        setGameData(prev => ({ ...prev, touchTriggerCooldownMs: val }));
+                      }}
+                      className="w-full h-1 bg-gray-700 rounded appearance-none cursor-pointer accent-yellow-400"
+                    />
+                  </div>
                   <div className="border-t border-gray-700 my-1" />
                   {/* エクスポート */}
                   <button
@@ -14800,6 +14891,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <button onClick={() => setGameData(p => ({ ...p, mapBgRef: undefined, mapBgUrl: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
                       )}
+                    </div>
+
+                    {/* ── 接触イベント連打防止クールダウン設定 ── */}
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[11px] font-bold text-gray-300">⏱ 接触イベント連続発動間隔</p>
+                        <span className="font-mono text-xs text-yellow-300">{(gameData.touchTriggerCooldownMs ?? 300)}ms</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1000"
+                        step="50"
+                        value={gameData.touchTriggerCooldownMs ?? 300}
+                        onChange={e => {
+                          const val = parseInt(e.target.value, 10);
+                          setGameData(prev => ({ ...prev, touchTriggerCooldownMs: val }));
+                        }}
+                        className="w-full h-1 bg-gray-700 rounded appearance-none cursor-pointer accent-yellow-400"
+                      />
+                      <p className="text-[10px] text-gray-500">矢印キー長押し時に隣接イベントが連続で発動する間隔（ミリ秒）。RPGEN標準は 300ms です。</p>
                     </div>
 
                     {/* ── マップサイズ（自由拡張・東方以外）── */}

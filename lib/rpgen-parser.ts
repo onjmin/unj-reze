@@ -521,24 +521,19 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
   const tileIdForSpriteChange = (n: string | undefined, l: number): number | undefined => {
     const raw = (n ?? '').trim();
     if (!raw) return undefined;
-    const key = `chsp:${raw}:${l}`;
-    const cached = tileIndexMap.get(key);
-    if (cached !== undefined) return cached;
-    let imageUrl: string | undefined;
-    if (raw.includes(RAW_DQ_STILL_SPRITE_SEPARATOR)) {
-      // 標準素材 "<x>_<y>"：同梱マップチップの該当マスを切り出す
-      const [cStr, rStr] = raw.split(RAW_DQ_STILL_SPRITE_SEPARATOR);
-      imageUrl = `${RPGEN_CHIP_URL}#${parseInt(cStr, 10) * RPGEN_CHIP_SIZE},${parseInt(rStr, 10) * RPGEN_CHIP_SIZE},${RPGEN_CHIP_SIZE},${RPGEN_CHIP_SIZE}`;
-    } else {
-      const spriteId = Number(raw.replace(/^[A-Za-z-]/, ''));
-      if (Number.isFinite(spriteId)) imageUrl = spriteUrlOf(spriteId) || undefined;
+    const isPassable = l % 2 === 0;
+    const rawWithCollision = isPassable ? raw.replaceAll(RAW_TILE_COLLISION_SUFFIX, '') : (raw.includes(RAW_TILE_COLLISION_SUFFIX) ? raw : raw + RAW_TILE_COLLISION_SUFFIX);
+    const rawWithoutCollision = raw.replaceAll(RAW_TILE_COLLISION_SUFFIX, '');
+
+    // マップ解析時に登録された既存タイル定義（11853, 11853C 等）を優先参照
+    const existing = tileIndexMap.get(rawWithCollision) ?? tileIndexMap.get(rawWithoutCollision) ?? tileIndexMap.get(raw);
+    if (existing !== undefined) return existing;
+
+    try {
+      return parseTile(rawWithCollision);
+    } catch {
+      return undefined;
     }
-    if (tileIndexMap.size >= MAX_TILE_CONVERSIONS) return undefined;
-    const id = nextTileIdx++;
-    tileIndexMap.set(key, id);
-    // l が奇数（1=地面ぶつかる / 3=物ぶつかる）なら通行不可
-    draft.tiles[id] = { name: `CH_SP ${raw}`, color: '#333333', passable: l % 2 === 0, imageUrl };
-    return id;
   };
 
   /** #CH_SP / #CH_HM の n パラメータから見た目の差し替え内容を作る。 */
@@ -1000,5 +995,6 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     }));
   }
 
+  draft.touchTriggerCooldownMs = 300;
   return draft;
 }
