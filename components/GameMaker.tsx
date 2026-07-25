@@ -4953,47 +4953,54 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           break;
         case 'moveNpc': {
           const target = !cmd.objId ? 'player' : cmd.objId;
-          const duration = cmd.duration ?? 0;
-          if (target === 'player') {
-            if (cmd.tx != null) engineRef.current.player.x = cmd.tx * TILE_SIZE;
-            if (cmd.ty != null) engineRef.current.player.y = cmd.ty * TILE_SIZE;
-            if (cmd.dx != null) engineRef.current.player.x += cmd.dx * TILE_SIZE;
-            if (cmd.dy != null) engineRef.current.player.y += cmd.dy * TILE_SIZE;
-            const px = engineRef.current.player.x;
-            const py = engineRef.current.player.y;
-            const pw = gameDataRef.current.player.w ?? TILE_SIZE;
-            const ph = gameDataRef.current.player.h ?? TILE_SIZE;
-            warpCooldownRef.current = { x: px + pw / 2, y: py + ph / 2 };
-            playerJustMovedRef.current = true;
-          } else {
-            const obj = engineRef.current.entities?.find(o => o.def.id === target);
-            if (obj) {
-              const startX = obj.x;
-              const startY = obj.y;
-              let targetX = cmd.tx != null ? cmd.tx * TILE_SIZE : startX;
-              let targetY = cmd.ty != null ? cmd.ty * TILE_SIZE : startY;
-              if (cmd.dx != null) targetX += cmd.dx * TILE_SIZE;
-              if (cmd.dy != null) targetY += cmd.dy * TILE_SIZE;
+          const targetObj = target === 'player'
+            ? (engineRef.current.player as unknown as Entity)
+            : engineRef.current.entities?.find(o => o.def.id === target);
 
-              if (duration > 0) {
-                const totalFrames = Math.max(1, Math.round(duration / 16.667));
-                obj.moveTarget = {
-                  sx: startX,
-                  sy: startY,
-                  tx: targetX,
-                  ty: targetY,
-                  frames: totalFrames,
-                  elapsed: 0,
-                  allowDiagonal: cmd.allowDiagonal,
-                };
-              } else {
-                obj.x = targetX;
-                obj.y = targetY;
-                obj.moveTarget = undefined;
-              }
+          if (targetObj) {
+            const startX = targetObj.x;
+            const startY = targetObj.y;
+            let targetX = cmd.tx != null ? cmd.tx * TILE_SIZE : startX;
+            let targetY = cmd.ty != null ? cmd.ty * TILE_SIZE : startY;
+            if (cmd.dx != null) targetX += cmd.dx * TILE_SIZE;
+            if (cmd.dy != null) targetY += cmd.dy * TILE_SIZE;
+
+            const tileDx = Math.abs(targetX - startX) / TILE_SIZE;
+            const tileDy = Math.abs(targetY - startY) / TILE_SIZE;
+            const steps = cmd.allowDiagonal ? Math.max(tileDx, tileDy) : (tileDx + tileDy);
+
+            let duration = cmd.duration ?? 0;
+            if (duration <= 0 && steps > 0) {
+              duration = Math.round(steps * 250); // デフォルト 250ms / マス
             }
+
+            if (duration > 0) {
+              const totalFrames = Math.max(1, Math.round(duration / 16.667));
+              targetObj.moveTarget = {
+                sx: startX,
+                sy: startY,
+                tx: targetX,
+                ty: targetY,
+                frames: totalFrames,
+                elapsed: 0,
+                allowDiagonal: cmd.allowDiagonal,
+              };
+            } else {
+              targetObj.x = targetX;
+              targetObj.y = targetY;
+              targetObj.moveTarget = undefined;
+            }
+
+            if (target === 'player') {
+              const pw = gameDataRef.current.player.w ?? TILE_SIZE;
+              const ph = gameDataRef.current.player.h ?? TILE_SIZE;
+              warpCooldownRef.current = { x: targetX + pw / 2, y: targetY + ph / 2 };
+              playerJustMovedRef.current = true;
+            }
+            setTimeout(advance, duration);
+          } else {
+            setTimeout(advance, 0);
           }
-          setTimeout(advance, duration);
           break;
         }
         case 'playEffect': {
@@ -7174,6 +7181,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const [dxz, dyz] = ICE_DIRS[zStandingSpecial!];
             const tx = zStandingTile!.rect.x + dxz * TILE_SIZE, ty = zStandingTile!.rect.y + dyz * TILE_SIZE;
             if (zCanStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+          } else if ((p as any).moveTarget) {
+            const mt = (p as any).moveTarget;
+            mt.elapsed = (mt.elapsed ?? 0) + 1;
+            const progress = Math.min(1, mt.elapsed / mt.frames);
+            if (mt.allowDiagonal || mt.sx === mt.tx || mt.sy === mt.ty) {
+              p.x = mt.sx + (mt.tx - mt.sx) * progress;
+              p.y = mt.sy + (mt.ty - mt.sy) * progress;
+            } else {
+              const dxAbs = Math.abs(mt.tx - mt.sx);
+              const dyAbs = Math.abs(mt.ty - mt.sy);
+              const totalDist = dxAbs + dyAbs;
+              const ratioX = totalDist > 0 ? dxAbs / totalDist : 0.5;
+              if (progress <= ratioX) {
+                const pX = ratioX > 0 ? progress / ratioX : 1;
+                p.x = mt.sx + (mt.tx - mt.sx) * pX;
+                p.y = mt.sy;
+              } else {
+                const pY = (1 - ratioX) > 0 ? (progress - ratioX) / (1 - ratioX) : 1;
+                p.x = mt.tx;
+                p.y = mt.sy + (mt.ty - mt.sy) * pY;
+              }
+            }
+            if (mt.elapsed >= mt.frames) {
+              p.x = mt.tx;
+              p.y = mt.ty;
+              (p as any).moveTarget = undefined;
+            }
           } else {
             let nx = p.x, ny = p.y;
             if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
@@ -7194,43 +7228,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           else if (isRight) onjRezeDirRef.current = { x: 1, y: 0 };
           else if (isUp) onjRezeDirRef.current = { x: 0, y: -1 };
           else if (isDown) onjRezeDirRef.current = { x: 0, y: 1 };
-          // ── ⚔ 近接攻撃（Z / Space / Enter / ⚔ボタン）──
+          // ── ⚔ 近接攻撃（Xキー / X / ⚔攻撃ボタン）──
+          // Z / Enter / Space / 決定ボタンは会話・調査（Talk/Examine/Confirm）専用とし、攻撃を発動させない
+          const isAttackKey = keys.has('x') || keys.has('X') || t.shoot;
           const sw = swordRef.current;
           if (sw.cool > 0) sw.cool--;
           if (sw.active > 0) sw.active--;
-          if (isPlaying && !dead && isAction && !prevActionRef.current && sw.cool <= 0) {
+          if (isPlaying && !dead && isAttackKey && sw.cool <= 0) {
             sw.active = 12; sw.cool = 18; sw.dir = { ...onjRezeDirRef.current }; sw.hit.clear();
             playSfx(sfxRef.current.shot);
           }
 
-          // ── 💣ボム挙動の再現（原作 onj-reze.html: placeBomb / throwBomb / headBomb）──
-          // 定数（フレーム / px）。原作 fuse/radius はサーバー値のため挙動が同等になるよう設定。
+          // ── 💣 ボム設置（Cキー / C / 💣ボムボタン）──
           const B_FUSE = 96;        // 導火線（約1.6秒）
-          const B_FLY = 24;         // 投げの飛行時間（約0.4秒）
           const B_BLAST = 36;       // 爆発エフェクト持続（約0.6秒）
           const B_R = TILE_SIZE * 1.6;   // 通常ボムの爆風半径
-          const H_R = TILE_SIZE * 2.2;   // 💀首爆弾の爆風半径（大きめ）
-          const B_DMG = 3, H_DMG = 5;    // 爆風ダメージ（スライム1/ゴースト2/ボス6 を基準）
-          const THROW_DIST = TILE_SIZE * 3; // 投げ距離（原作 攻撃間合い 3マスに合わせる）
+          const B_DMG = 3;          // 爆風ダメージ
           const pcx0 = p.x + pData.w / 2, pcy0 = p.y + pData.h / 2;
-          // 入力（長押しでクールダウン連射。原作 BOMB_INTERVAL 相当）
-          const isBomb = keys.has('c') || keys.has('C') || t.bomb;       // 💣 足元に設置
-          const isThrow = keys.has('x') || keys.has('X') || t.shoot;     // 🎯 向きへ投げる
-          const isHead = keys.has('v') || keys.has('V') || t.slow;       // 💀 首爆弾（強）を投げる
+          const isBombKey = keys.has('c') || keys.has('C') || t.bomb;
           if (onjBombCoolRef.current > 0) onjBombCoolRef.current--;
-          if (onjThrowCoolRef.current > 0) onjThrowCoolRef.current--;
-          if (isPlaying && !dead) {
-            if (isBomb && onjBombCoolRef.current <= 0) {
-              onjBombsRef.current.push({ x: pcx0, y: pcy0, fuse: B_FUSE, maxFuse: B_FUSE, r: B_R, dmg: B_DMG, head: false });
-              onjBombCoolRef.current = 24; playSfx(sfxRef.current.shot);
-            }
-            if ((isThrow || isHead) && onjThrowCoolRef.current <= 0) {
-              const dr = onjRezeDirRef.current; const head = isHead && !isThrow;
-              const tx = Math.max(8, Math.min(worldW - 8, pcx0 + dr.x * THROW_DIST));
-              const ty = Math.max(8, Math.min(worldH - 8, pcy0 + dr.y * THROW_DIST));
-              onjFliesRef.current.push({ fx: pcx0, fy: pcy0, tx, ty, t: 0, dur: B_FLY, fuse: B_FUSE, r: head ? H_R : B_R, dmg: head ? H_DMG : B_DMG, head });
-              onjThrowCoolRef.current = 24; playSfx(sfxRef.current.shot);
-            }
+          if (isPlaying && !dead && isBombKey && onjBombCoolRef.current <= 0) {
+            onjBombsRef.current.push({ x: pcx0, y: pcy0, fuse: B_FUSE, maxFuse: B_FUSE, r: B_R, dmg: B_DMG, head: false });
+            onjBombCoolRef.current = 24; playSfx(sfxRef.current.shot);
           }
           // 飛行 → 着地
           for (let i = onjFliesRef.current.length - 1; i >= 0; i--) {
