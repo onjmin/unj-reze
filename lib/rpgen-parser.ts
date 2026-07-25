@@ -1,5 +1,6 @@
 import {
   CommandType,
+  Direction,
   EventTiming,
   HumanBehavior,
   RAW_DQ_STILL_SPRITE_SEPARATOR,
@@ -21,7 +22,7 @@ import {
   type RawTile,
 } from "@rpgja/rpgen-map";
 import type { GameManifestDraft } from '@/components/GameMaker';
-import type { EventCommand, EventCondition, EventPage, NpcBehavior } from '@/components/game-presets/shared';
+import type { Dir4Name, EventCommand, EventCondition, EventPage, NpcBehavior } from '@/components/game-presets/shared';
 import { newObject, TILE_SIZE, chest, localSysTileUrl } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
 import { youtubeRefFromUrl } from '@/lib/asset-ref';
@@ -38,16 +39,28 @@ const BGM_BASE = `${ORIGIN}/data/audio/bgm`;
 const RPGEN_CHIP_URL = '/assets/rpgen/map.png';
 const RPGEN_CHIP_SIZE = 16;
 
-/** RPGEN の人物の動き方 → エンジンの NPC ビヘイビア。 */
+/** RPGEN の人物の動き方 → エンジンの NPC ビヘイビア。
+ *  RPGEN の人物は「一定間隔で speed% の判定を行い、当たったら1マス歩く」という DQ 風の動き方をするため、
+ *  必ず moveChance（1マス移動モード）とセットで使う。1マス移動モードでの各 behavior の意味は
+ *  ObjectDef.moveChance のコメントを参照。 */
 const NPC_BEHAVIOR_BY_HUMAN_BEHAVIOR: Record<HumanBehavior, NpcBehavior> = {
   [HumanBehavior.Still]: 'still',
   [HumanBehavior.RandomMove]: 'random',
-  // 方向転換するだけでマスは移動しないため静止扱い
+  // 1マス移動モードの still は「移動せず向きだけ変える」なので、そのまま方向転換になる
   [HumanBehavior.RandomDirection]: 'still',
+  // 1マス移動モードの patrolH/patrolV は左右／上下のランダム移動になる
   [HumanBehavior.RandomMoveHorizontal]: 'patrolH',
   [HumanBehavior.RandomMoveVertical]: 'patrolV',
   [HumanBehavior.GoNear]: 'chase',
   [HumanBehavior.RunAway]: 'flee',
+};
+
+/** RPGEN の人物の向き → エンジンの初期の向き。 */
+const DIR_BY_RPGEN_DIRECTION: Record<Direction, Dir4Name> = {
+  [Direction.North]: 'up',
+  [Direction.East]: 'right',
+  [Direction.South]: 'down',
+  [Direction.West]: 'left',
 };
 
 /** 標準素材の「動く床」→ エンジンの強制スライド床。 */
@@ -645,6 +658,9 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       spriteUrl,
       spriteRef,
       behavior: NPC_BEHAVIOR_BY_HUMAN_BEHAVIOR[human.behavior] ?? 'still',
+      dir: DIR_BY_RPGEN_DIRECTION[human.direction] ?? 'down',
+      // RPGEN の speed は「移動する確率(%)」。一定間隔で判定し、当たったら1マス歩く。
+      moveChance: Number.isFinite(human.speed) ? Math.max(0, Math.min(100, human.speed)) : 0,
       hazard: false,
       message: pages ? '' : (human.message || ''), objType: 'npc',
       pages

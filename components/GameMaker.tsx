@@ -28,6 +28,8 @@ import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
   uid, newObject,
+  NPC_STEP_INTERVAL,
+  type Dir4Name,
   SPELL_PALETTE,
   type SpellBlock,
   type DialogueLine,
@@ -465,7 +467,18 @@ interface Entity {
   fleeing?: boolean;
   /** つるつる床の強制スライド中の目標タイル（プレイヤーの iceSlideRef と同等の仕組みを敵/NPCにも適用）。 */
   iceSlide?: { targetX: number; targetY: number };
+  /** 見下ろし型での現在の向き。初期値は def.dir、移動すると実際の移動方向で更新される。 */
+  facing?: WayKey;
+  /** DQ風1マス移動（def.moveChance）で歩いている途中の目標タイル。着くまで次の判定を行わない。 */
+  stepTarget?: { x: number; y: number };
 }
+
+/** ObjectDef.dir（見下ろし4方向）→ 歩行グラの行キー。 */
+const WAY_BY_DIR4: Record<Dir4Name, WayKey> = { up: 'w', down: 's', left: 'a', right: 'd' };
+/** 歩行グラの行キー → 1マス移動の差分（タイル単位）。 */
+const STEP_BY_WAY: Record<'w' | 'a' | 's' | 'd', [number, number]> = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0] };
+/** 見下ろし型エンジンの初期向き（未指定なら正面）。 */
+const initialFacing = (d: ObjectDef): WayKey | undefined => (d.dir ? WAY_BY_DIR4[d.dir] : undefined);
 // onjReze: 近接攻撃の剣スプライト（素材は右向きが基準）
 const SWORD_SPRITE_URL = 'https://rpgen-search.pages.dev/data/images/sprites/BkIGjOn.png';
 // ── マリオ系アクションの落下・踏みつけ定数（SMC core 準拠）─────────────────
@@ -7367,6 +7380,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             continue;
           }
           const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
+          const prevX = e.x, prevY = e.y; // 向き（e.facing）の更新に使う移動前の座標
 
           const sp = (gameData.engine === 'onjReze' && d.name === 'レゼ' && Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) ? 2.2 : d.speed;
           if (gameData.engine === 'touhou') {
@@ -7553,6 +7567,35 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (npcCornersPassable(tx, ty, tx + TILE_SIZE - 1, ty + TILE_SIZE - 1) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
                 e.iceSlide = { targetX: tx, targetY: ty };
               }
+            } else if (d.moveChance != null) {
+              // ── DQ風の1マス移動 ───────────────────────────────────────────
+              // 一定間隔ごとに moveChance%（0〜100）の判定を行い、当たったときだけ
+              // behavior に応じた向きへ1マス歩く。歩いている間は次の判定を行わない。
+              if (e.stepTarget) {
+                const stx = e.stepTarget.x - e.x, sty = e.stepTarget.y - e.y;
+                const sdist = Math.hypot(stx, sty);
+                const stepSp = sp > 0 ? sp : 1;
+                if (sdist <= stepSp || sdist === 0) { e.x = e.stepTarget.x; e.y = e.stepTarget.y; e.stepTarget = undefined; }
+                else { e.x += (stx / sdist) * stepSp; e.y += (sty / sdist) * stepSp; }
+              } else if (e.timer % NPC_STEP_INTERVAL === 0 && Math.random() * 100 < Math.max(0, Math.min(100, d.moveChance))) {
+                const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
+                const way: WayKey | null =
+                  d.behavior === 'patrolH' ? pick(['a', 'd'] as const)
+                    : d.behavior === 'patrolV' ? pick(['w', 's'] as const)
+                      : d.behavior === 'chase' ? dirFromDelta(pcx - ecx, pcy - ecy)
+                        : d.behavior === 'flee' ? dirFromDelta(ecx - pcx, ecy - pcy)
+                          : pick(['w', 'a', 's', 'd'] as const);
+                if (way) {
+                  // 判定に当たったらまず向きを変える（still は方向転換のみで移動しない）
+                  e.facing = way;
+                  const [sdx, sdy] = STEP_BY_WAY[way as 'w' | 'a' | 's' | 'd'];
+                  const stx = e.x + sdx * TILE_SIZE, sty = e.y + sdy * TILE_SIZE;
+                  const inWorld = stx >= 0 && stx <= worldW - ew && sty >= 0 && sty <= worldH - eh;
+                  if (d.behavior !== 'still' && inWorld && (d.through || npcCornersPassable(stx, sty, stx + ew - 1, sty + eh - 1))) {
+                    e.stepTarget = { x: stx, y: sty };
+                  }
+                }
+              }
             } else if (d.behavior === 'random') {
               if (e.timer % 40 === 0) { e.vx = (Math.random() * 2 - 1) * sp; e.vy = (Math.random() * 2 - 1) * sp; }
               if (d.through) {
@@ -7634,6 +7677,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             e.x = Math.max(0, Math.min(worldW - TILE_SIZE, e.x));
             e.y = Math.max(0, Math.min(worldH - TILE_SIZE, e.y));
+          }
+
+          // 見下ろし型：実際に動いた向きを保持する。まだ一度も動いていなければ def.dir を初期の向きにする。
+          // （横スク・touhou は描画側の移動量ベース判定に任せるため触らない）
+          if (gameData.engine !== 'action' && gameData.engine !== 'touhou') {
+            const moved = dirFromDelta(e.x - prevX, e.y - prevY);
+            if (moved && Math.hypot(e.x - prevX, e.y - prevY) > 0.15) e.facing = moved;
+            else if (!e.facing) e.facing = initialFacing(d);
           }
 
           // ── レゼ（敵）: 一定間隔でプレイヤーめがけて爆弾を投げる ──
@@ -9354,7 +9405,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 emoji: e.def.emoji,
                 spriteUrl: eOpened ? e.def.altSpriteUrl : e.def.spriteUrl,
                 spriteRef: eOpened ? e.def.altSpriteRef : e.def.spriteRef,
-              }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`);
+              }, e.x, e.y, e.def.w ?? TILE_SIZE, e.def.h ?? TILE_SIZE, `ent${e.def.id}_${ei}`, e.facing ?? initialFacing(e.def));
             }
           }
           // レゼが近接戦闘AIに移行している時（プレイヤーが近くにいる時）は赤いオーラを描画
@@ -9494,7 +9545,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       } else {
         for (const o of gameData.objects) {
-          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE), o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `obj${o.id}`);
+          drawSprite({ emoji: o.emoji, spriteUrl: o.spriteUrl, spriteRef: o.spriteRef }, o.col * TILE_SIZE, (o.row + 1) * TILE_SIZE - (o.h ?? TILE_SIZE), o.w ?? TILE_SIZE, o.h ?? TILE_SIZE, `obj${o.id}`, initialFacing(o));
           const isSel = o.id === selectedObjIdRef.current;
           ctx.strokeStyle = o.hazard ? 'rgba(255,80,80,0.6)' : 'rgba(80,200,255,0.6)';
           ctx.lineWidth = isSel ? 3 : 1.5;
@@ -15123,6 +15174,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               <select value={selObj.behavior} onChange={e => updObj({ behavior: e.target.value as NpcBehavior })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none">
                                 {Object.entries(BEHAVIOR_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                               </select>
+                            </label>
+                            <label className="text-[10px] text-gray-400 block">初期の向き
+                              <select value={selObj.dir ?? ''} onChange={e => updObj({ dir: (e.target.value || undefined) as ObjectDef['dir'] })}
+                                className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 outline-none text-[10px]">
+                                <option value="">正面（指定なし）</option>
+                                <option value="up">↑ 後ろ向き</option>
+                                <option value="down">↓ 正面</option>
+                                <option value="left">← 左向き</option>
+                                <option value="right">→ 右向き</option>
+                              </select>
+                            </label>
+                            <label className="text-[10px] text-gray-400 block">1マス移動の確率
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <input type="text" inputMode="numeric" value={selObj.moveChance ?? ''} placeholder="なし"
+                                  onChange={e => {
+                                    const raw = e.target.value.trim();
+                                    if (raw === '') { updObj({ moveChance: undefined }); return; }
+                                    const v = parseInt(raw, 10);
+                                    if (!isNaN(v)) updObj({ moveChance: Math.max(0, Math.min(100, v)) });
+                                  }}
+                                  className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[10px] text-white outline-none" />
+                                <span className="text-[9px] text-gray-500">%（空欄=連続移動）</span>
+                              </div>
+                              <span className="block mt-0.5 text-[9px] text-gray-500">
+                                指定すると DQ 風に一定間隔で判定し、当たったときだけ1マス歩きます。
+                                挙動は 静止=向きだけ変える／左右往復=左右ランダム／上下往復=上下ランダム になります。
+                              </span>
                             </label>
                             <label className="flex items-center gap-1.5 text-[10px] text-gray-400">
                               <input type="checkbox" checked={!!selObj.through}

@@ -332,7 +332,25 @@ export interface ObjectDef {
   /** true のとき、この NPC/敵は壁・オブジェクトの衝突判定を無視してすり抜ける。
    *  未指定/false は従来どおり壁に接触して反転・停止する。 */
   through?: boolean;
+  /** 見下ろし型エンジンでの初期の向き（歩行グラのどの行を出すか）。未指定は 'down'（正面）。
+   *  移動を始めると実際の移動方向で上書きされる。 */
+  dir?: Dir4Name;
+  /** DQ風の1マス移動。0〜100 の移動確率(%)。設定すると連続移動をやめ、
+   *  NPC_STEP_INTERVAL フレームごとに判定して当たったときだけ behavior に応じた向きへ1マス歩く。
+   *  behavior は 1マス移動時に次の意味になる:
+   *   still=移動せず向きだけ変える / random=4方向ランダム / patrolH=左右ランダム /
+   *   patrolV=上下ランダム / chase=プレイヤーへ1歩 / flee=プレイヤーから1歩。
+   *  未指定なら従来どおり毎フレーム連続移動する。 */
+  moveChance?: number;
 }
+
+/** 見下ろし型エンジンの4方向（ObjectDef.dir / RPGENの人物の向き）。2.5Dの数値 Dir4 とは別物。 */
+export type Dir4Name = 'up' | 'down' | 'left' | 'right';
+
+/** DQ風1マス移動（ObjectDef.moveChance）の判定間隔（フレーム）。
+ *  速度 1.5px/frame で 1マス(32px)を歩き切るのに約22フレームかかるため、
+ *  歩き終わってから少し間が空く程度の値にしている。 */
+export const NPC_STEP_INTERVAL = 30;
 
 /** スペルカード定義（touhou ボス用）。HP が triggerHp 以下になったとき発動する。 */
 export interface SpellCardDef {
