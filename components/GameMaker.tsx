@@ -8175,6 +8175,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               break;
             }
             if (d.pages && d.pages.length > 0) {
+              let ran = false;
               if (!eventRunningRef.current && !e.talked && !frozen) {
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
@@ -8184,10 +8185,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
                     e.talked = true;
                     runEventCommands(d.id, page.commands);
+                    ran = true;
                   }
                 }
               }
-              break;
+              // 実際にイベントを走らせたときだけ他オブジェクトの判定を打ち切る。
+              // 何もしなかった場合まで break すると、overlap（1.5マス）に入っているだけの
+              // 開封済みの宝箱などが以降のオブジェクトの判定を丸ごと食い潰し、
+              // 隣に立っているNPCの playerTouch が発動しなくなる。
+              if (ran) break;
+              continue;
             }
             if (d.hazard && (d.objType ?? 'enemy') === 'enemy') {
               if (starTimerRef.current > 0) {
