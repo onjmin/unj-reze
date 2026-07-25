@@ -159,8 +159,9 @@ export type EventCommand =
   | { type: 'screenEffect'; effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] }
   /** イベントページ（フェーズ）を切り替える（RPGEN の #CH_PH）。
    *  phaseIndex は GUI の表示と揃えた 1 始まり（1 = 「ページ1」= pages[0]）。
-   *  tx/ty を指定すると、そのマス（列/行）にある別イベントのフェーズを切り替える（未指定なら自分自身）。 */
-  | { type: 'changePhase'; phaseIndex: number; tx?: number; ty?: number }
+   *  objId を指定すると、その ID のイベントのフェーズを切り替える。未指定なら自分自身。
+   *  tx/ty は RPGEN インポート時の座標（ランタイムの後方互換フォールバック用）。 */
+  | { type: 'changePhase'; phaseIndex: number; objId?: string; tx?: number; ty?: number }
   /** エフェクトアニメーション（EffectPreset）を再生する。target='self' はこのイベント自身の位置、'player' はプレイヤーの現在位置。
    *  wait=true のとき、アニメーション1周分の時間だけコマンド進行をブロックする。 */
   | { type: 'playEffect'; effectId: string; target: 'self' | 'player'; wait?: boolean }

@@ -5185,16 +5185,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // phaseIndex は GUI の「ページ1」と揃えた 1 始まり。配列添字へは -1 して変換する。
           const targetPageIdx = Math.max(0, (cmd.phaseIndex ?? 1) - 1);
           const entities = engineRef.current.entities ?? [];
-          // 対象イベントの解決。x/y は「別イベントの座標」だが、RPGEN のデータは自分自身の座標を
-          // そのまま書き出していることが多い（例: (13,17) のイベントに #CH_PH p:1,x:13,y:17）。
-          // 座標が自分を指しているときは自己切り替えとして扱わないと、フェーズを記録するだけで
-          // 実行が切り替わらず「効かない」ように見える。
-          let targetObj = entities.find(o => o.def.id === objId);
-          if (cmd.tx != null && cmd.ty != null) {
+          // 対象イベントの解決。優先順位: objId（RPGEN インポート時に座標から解決済み） > tx/ty座標 > 自分自身
+          let targetObj = cmd.objId ? entities.find(o => o.def.id === cmd.objId) : undefined;
+          if (!targetObj && cmd.tx != null && cmd.ty != null) {
             const atCell = entities.find(o =>
               o.def.col === cmd.tx && o.def.row === cmd.ty && (o.def.pages?.length ?? 0) > 0);
             if (atCell) targetObj = atCell;
           }
+          if (!targetObj) targetObj = entities.find(o => o.def.id === objId);
           const isSelf = !!targetObj && targetObj.def.id === objId;
           const targetPage = targetObj?.def.pages?.[targetPageIdx];
           if (targetObj && targetPage) {
@@ -8348,9 +8346,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // （pBoxTouch）と、隣接マスからそちらを向いた状態も「接触」として扱う。押し込み入力は要求しない
           // ——接触は座標の話であって操作の話ではない。接触が続く限り再発動する仕組みは、
           // イベント完了時に talked を戻す方式（下の再武装処理）で担保する。
-          const touchTriggerOk = blocksPlayer
-            ? (sameCell || pBoxTouch || (isFacingEventTile && isAdjacentTile))
-            : sameCell;
+          const touchTriggerOk = sameCell; // blocksPlayer
+            // ? (sameCell || pBoxTouch || (isFacingEventTile && isAdjacentTile))
+            // : sameCell;
 
           const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
 
@@ -8360,13 +8358,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 会話など他の判定用に 1.5 マスと広く取ってあり、これを再発動の条件にすると接触に戻るまで
               // 2マス歩かされることになるため、再武装には使わない。
               if (!touchTriggerOk) e.talked = false;
-              // 接触トリガーは「接触している間ずっと発動し続ける」。自分が起動したイベントが完了したら
-              // その場で再武装し、まだ接触が続いていれば次のフレームで再発動させる。壁・看板のように
-              // 乗り越えられない場所のイベントは離れないと再武装できず、1回しか発動しなかった。
-              // なお justMoved による抑制（下）は touchEventRunning を立てないので、ここでは戻らない。
+              // 発動時のタイル座標からプレイヤーが移動していない場合のみ再武装する。
+              // moveNpc 等で別のマスに移動された場合は再武装せず、プレイヤーが離れて talked が
+              // 消えた後、再接触時に発動する。同一座標に戻った場合は再発動を許可する。
               else if (e.touchEventRunning && !eventRunningRef.current && !frozen) {
                 e.touchEventRunning = false;
-                e.talked = false;
+                const sc = (e as any)._touchStartCol, sr = (e as any)._touchStartRow;
+                if (sc == null || sr == null || (pCol === sc && pRow === sr) || sameCell) {
+                  e.talked = false;
+                }
               }
               // 移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
               // わけではないので発動させない（隣が当たり判定持ちだと pBoxTouch の 4px 余裕で接触扱いに
@@ -8496,6 +8496,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     e.talked = true;
                     // 完了を検知して再武装するための印。接触が続く限り繰り返し発動させる。
                     e.touchEventRunning = true;
+                    // 発動時のプレイヤーのタイル座標を記録。moveNpc 等で別のマスに移動された場合、
+                    // 再武装して即再発動しない（同一マスに戻った場合は再発動する）。
+                    (e as any)._touchStartCol = pCol;
+                    (e as any)._touchStartRow = pRow;
                     runEventCommands(d.id, page.commands);
                     ran = true;
                   }
@@ -9999,7 +10003,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // イベントで向きを指定された（#CH_PD）場合はそれを優先し、自分で歩き出したら解除する
         if (!isStationary) playerFacingRef.current = null;
         lastDrawnPlayerPosRef.current = { x: p.x, y: p.y };
-        drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
+        drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? (p.spriteRef ? hydrateUrlFromRef(p.spriteRef) : undefined) ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
           gameData.engine === 'touhou' ? 'w' : (playerFacingRef.current ?? blockedOverride));
         if (isStar) {
           ctx.restore();
@@ -18873,7 +18877,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'resetCamera': return `${c.duration || 0}ms`;
       case 'moveNpc': return `${c.objId || 'player'} → [${c.tx ?? '-'}, ${c.ty ?? '-'}]`;
       case 'screenEffect': return c.effects?.[0]?.color || '';
-      case 'changePhase': return `フェーズ${c.phaseIndex ?? 1}${(c.tx != null && c.ty != null) ? ` @[${c.tx}, ${c.ty}]` : ''}`;
+      case 'changePhase': return `フェーズ${c.phaseIndex ?? 1}${c.objId ? ` →${c.objId}` : (c.tx != null && c.ty != null ? ` @[${c.tx}, ${c.ty}]` : '')}`;
       case 'playEffect': return `${c.effectId || '?'} @ ${c.target || 'self'}`;
       default: return '';
     }

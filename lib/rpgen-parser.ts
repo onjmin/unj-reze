@@ -552,22 +552,34 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     }
   };
 
-  // ── 人物の参照解決 ──────────────────────────────────────────────────────
-  // RPGEN の #MV_N*/#CH_SP/#CH_HM/#DW_FL は対象の人物を「配置時の座標」で指す。
-  // エンジン側は ObjectDef.id で対象を探すため、人物ごとの id を先に採番しておき、
-  // 座標からその id を引けるようにする（座標に人物がいなければ RPGEN でも対象なしなので解決しない）。
-  const humanObjIdByCell = new Map<string, string>();
+  // ── エンティティの参照解決 ──────────────────────────────────────────────
+  // RPGEN の #MV_N*/#CH_SP/#CH_HM/#DW_FL/#CH_PH は対象を「配置時の座標」で指す。
+  // エンジン側は ObjectDef.id で対象を探すため、各エンティティごとの id を先に採番しておき、
+  // 座標からその id を引けるようにする。
+  const entityObjIdByCell = new Map<string, string>();
   const cellKey = (x: number, y: number) => `${x},${y}`;
   for (const human of rpgMap.humans) {
-    humanObjIdByCell.set(cellKey(human.position.x, human.position.y), uid());
+    entityObjIdByCell.set(cellKey(human.position.x, human.position.y), uid());
+  }
+  for (const ep of rpgMap.eventPoints) {
+    const key = cellKey(ep.position.x, ep.position.y);
+    if (!entityObjIdByCell.has(key)) entityObjIdByCell.set(key, uid());
+  }
+  for (const sp of rpgMap.lookPoints) {
+    const key = cellKey(sp.position.x, sp.position.y);
+    if (!entityObjIdByCell.has(key)) entityObjIdByCell.set(key, uid());
+  }
+  for (const tb of rpgMap.treasureBoxPoints) {
+    const key = cellKey(tb.position.x, tb.position.y);
+    if (!entityObjIdByCell.has(key)) entityObjIdByCell.set(key, uid());
   }
 
-  /** 座標パラメータ（文字列）から対象の人物の objId を求める。該当なしのときは実在しない id を返す。 */
+  /** 座標パラメータ（文字列）から対象のエンティティの objId を求める。該当なしのときは仮の id を返す。 */
   const npcObjId = (x: string | undefined, y: string | undefined): string => {
     if (x === undefined || y === undefined) return '';
     const cx = parseInt(x, 10), cy = parseInt(y, 10);
     if (!Number.isFinite(cx) || !Number.isFinite(cy)) return '';
-    return humanObjIdByCell.get(cellKey(cx, cy)) ?? `obj-human-${cx}-${cy}`;
+    return entityObjIdByCell.get(cellKey(cx, cy)) ?? `obj-human-${cx}-${cy}`;
   };
 
   const translateRpgenCommand = (cmd: Command): EventCommand | null => {
@@ -753,12 +765,14 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         // RPGEN のデータ上の p は 0 始まり（例: #CH_PH p:0）。エンジン側は GUI の「ページ1」と揃えた
         // 1 始まりで統一しているため、取り込み時に +1 する。
         const rawPhase = parseInt(cmd.params.p || '0', 10);
-        // x/y は「別イベントの座標」。未指定のときは NaN になるので、自分自身の切り替えとして扱う。
+        // x/y は「別イベントの座標」。未指定のときは自分自身の切り替え。
         const tx = Number(cmd.params.x);
         const ty = Number(cmd.params.y);
+        const targetObjId = npcObjId(cmd.params.x, cmd.params.y);
         return {
           type: 'changePhase',
           phaseIndex: (Number.isFinite(rawPhase) ? rawPhase : 0) + 1,
+          ...(targetObjId ? { objId: targetObjId } : {}),
           ...(Number.isFinite(tx) && Number.isFinite(ty) ? { tx, ty } : {}),
         };
       }
@@ -878,7 +892,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     const pages = messageToPages(human.message || '');
     draft.objects.push(newObject({
       // 座標で人物を指すコマンド（#MV_NA 等）の変換先と一致させるため、先に採番した id を使う
-      id: humanObjIdByCell.get(cellKey(human.position.x, human.position.y)) ?? uid(),
+      id: entityObjIdByCell.get(cellKey(human.position.x, human.position.y)) ?? uid(),
       col: human.position.x, row: human.position.y,
       emoji: (spriteUrl || spriteRef) ? undefined : '🧍',
       spriteUrl,
@@ -953,6 +967,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       humanObj.pages = pages;
     } else {
       draft.objects.push(newObject({
+        id: entityObjIdByCell.get(cellKey(ep.position.x, ep.position.y)) ?? uid(),
         col: ep.position.x, row: ep.position.y, emoji: '', objType: 'event',
         behavior: 'still', hazard: false,
         editorSprite: localSysTileUrl(tileOfEvent.x, tileOfEvent.y),
