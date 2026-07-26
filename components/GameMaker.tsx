@@ -2471,6 +2471,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   activeDialogueRef.current = activeDialogue;
   const afterDialogueRef = useRef<(() => void) | null>(null);
   const [, forceHud] = useState(0);
+  /** 1フレームに1回だけに間引いた再描画トリガー。画像のロード完了のように短時間に何百回も
+   *  発火しうる箇所で使う（この巨大コンポーネントを毎回再レンダリングすると、RPGEN インポート直後の
+   *  編集モードやパネル切り替えで目に見えて重くなる）。 */
+  const hudBumpPendingRef = useRef(false);
+  const bumpHud = useCallback(() => {
+    if (hudBumpPendingRef.current) return;
+    hudBumpPendingRef.current = true;
+    requestAnimationFrame(() => { hudBumpPendingRef.current = false; forceHud(n => n + 1); });
+  }, []);
 
   const calcDmg = (atk: number, def: number) => Math.max(1, Math.round((atk - def / 2) * (0.85 + Math.random() * 0.3)));
   const appendLog = (line: string, patch: Partial<BattleView> = {}) =>
@@ -5461,9 +5470,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      forceHud(n => n + 1);
-    };
+    // ロード完了ごとに再レンダリングすると、タイル画像が数百枚ある RPGEN マップで
+    // その枚数ぶん再レンダリングが走る。1フレームぶんに束ねる。
+    img.onload = bumpHud;
     img.onerror = () => {
       const currentBg = gameDataRef.current.mapBgUrl;
       const fallbackUrl = 'https://i.imgur.com/xqZTM17.jpg';
@@ -5475,7 +5484,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     img.src = baseUrl;
     imgCache.current.set(url, img);
     if (hashIdx !== -1) imgCache.current.set(baseUrl, img); // ベースURLでも登録
-  }, []);
+  }, [bumpHud]);
 
   // spriteRef から URL を抽出して ensureImage する（Entity.def は spriteUrl を除外するため）
   const ensureImageFromRef = useCallback((spriteRef?: string, spriteUrl?: string) => {
@@ -7533,9 +7542,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
           };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
-          const zStandingTile = getTile(p.x + pData.w / 2, p.y + pData.h / 2);
-          const zStandingSpecial = zStandingTile?.info?.special;
+          // rpg 側と同じ規約：判定は置物レイヤー込み（iceSpecialAt）、スライド先の可否は床レイヤー。
+          const zIceCx = p.x + pData.w / 2, zIceCy = p.y + pData.h / 2;
+          const zIceCol = Math.floor(zIceCx / TILE_SIZE), zIceRow = Math.floor(zIceCy / TILE_SIZE);
+          const zStandingSpecial = iceSpecialAt(zIceCx, zIceCy);
           const zOnIceTile = !!(zStandingSpecial && ICE_DIRS[zStandingSpecial]);
+          const zCanSlideTo = (x: number, y: number) =>
+            iceDestPassable(x, y) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
+            (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
           if (iceSlideRef.current) {
             const slide = iceSlideRef.current;
             const dxz = slide.targetX - p.x, dyz = slide.targetY - p.y;
@@ -7544,19 +7558,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             else { p.x += (dxz / distz) * iceSpd; p.y += (dyz / distz) * iceSpd; }
             if (p.x === slide.targetX && p.y === slide.targetY) {
               iceSlideRef.current = null;
-              const landed = getTile(p.x, p.y);
-              const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
+              const landedSp = iceSpecialAt(p.x + pData.w / 2, p.y + pData.h / 2);
+              const nextDir = landedSp ? ICE_DIRS[landedSp] : undefined;
               if (nextDir) {
                 const tx = p.x + nextDir[0] * TILE_SIZE, ty = p.y + nextDir[1] * TILE_SIZE;
-                if (zCanStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+                if (zCanSlideTo(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
               }
             }
           } else if (zOnIceTile) {
             // つるつる床の上に立っている間は、スライドが（モブ等で）一時的に塞がれていても
             // 自由入力を受け付けない。塞がりが解消され次第、毎フレーム再スライドを試みる。
             const [dxz, dyz] = ICE_DIRS[zStandingSpecial!];
-            const tx = zStandingTile!.rect.x + dxz * TILE_SIZE, ty = zStandingTile!.rect.y + dyz * TILE_SIZE;
-            if (zCanStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+            const tx = (zIceCol + dxz) * TILE_SIZE, ty = (zIceRow + dyz) * TILE_SIZE;
+            if (zCanSlideTo(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
           } else if ((p as any).moveTarget) {
             const mt = (p as any).moveTarget;
             mt.elapsed = (mt.elapsed ?? 0) + 1;
@@ -7738,9 +7752,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
           };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
-          const standingTile = gameData.engine === 'rpg' ? getTile(p.x + pData.w / 2, p.y + pData.h / 2) : undefined;
-          const standingSpecial = standingTile?.info?.special;
+          // つるつる床は床レイヤーだけでなく置物レイヤーにも置かれる（RPGEN は l:3 の置物として置く）。
+          // 床しか見ないと「NPC は滑るのにプレイヤーだけ滑らない」状態になるので、NPC と同じ
+          // iceSpecialAt（置物→床の順に見る）で判定する。
+          const iceCenterX = p.x + pData.w / 2, iceCenterY = p.y + pData.h / 2;
+          const iceCol = Math.floor(iceCenterX / TILE_SIZE), iceRow = Math.floor(iceCenterY / TILE_SIZE);
+          const standingSpecial = gameData.engine === 'rpg' ? iceSpecialAt(iceCenterX, iceCenterY) : undefined;
           const onIceTile = !!(standingSpecial && ICE_DIRS[standingSpecial]);
+          // スライド先の通行可否は床レイヤーで見る（NPC の iceDestPassable と同じ規約）。
+          // isAllPassable は置物レイヤー優先なので、つるつる床の上に当たり判定つきの置物が
+          // 乗っているだけでスライドを開始できず、氷の上で身動きが取れなくなる。
+          const canSlideTo = (x: number, y: number) =>
+            iceDestPassable(x, y) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
+            (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
           if (gameData.engine === 'rpg' && iceSlideRef.current) {
             const slide = iceSlideRef.current;
             const dx = slide.targetX - p.x, dy = slide.targetY - p.y;
@@ -7749,11 +7773,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             else { p.x += (dx / dist) * iceSpd; p.y += (dy / dist) * iceSpd; }
             if (p.x === slide.targetX && p.y === slide.targetY) {
               iceSlideRef.current = null;
-              const landed = getTile(p.x, p.y);
-              const nextDir = landed?.info?.special ? ICE_DIRS[landed.info.special] : undefined;
+              // 着地マスの判定も中心座標＋置物レイヤー込みで見る（角の座標＆床限定だと
+              // つるつる床が続いていても連鎖が途切れる）。
+              const landedSp = iceSpecialAt(p.x + pData.w / 2, p.y + pData.h / 2);
+              const nextDir = landedSp ? ICE_DIRS[landedSp] : undefined;
               if (nextDir) {
                 const tx = p.x + nextDir[0] * TILE_SIZE, ty = p.y + nextDir[1] * TILE_SIZE;
-                if (canStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+                if (canSlideTo(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
               }
             }
           } else if (gameData.engine === 'rpg' && onIceTile) {
@@ -7761,8 +7787,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // 自由入力を受け付けない。塞がりが解消され次第、毎フレーム再スライドを試みる。
             // これをしないと閉ループ上でも一時的に操作権が戻り、抜け出せてしまう（要修正のバグだった）。
             const [dx, dy] = ICE_DIRS[standingSpecial!];
-            const tx = standingTile!.rect.x + dx * TILE_SIZE, ty = standingTile!.rect.y + dy * TILE_SIZE;
-            if (canStandAt(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
+            const tx = (iceCol + dx) * TILE_SIZE, ty = (iceRow + dy) * TILE_SIZE;
+            if (canSlideTo(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
           } else {
             let nx = p.x, ny = p.y;
             if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
@@ -9087,6 +9113,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (!dead) {
           if (gameData.engine !== 'touhou') {
             const center = getTile(pcx, pcy);
+            // つるつる床は置物レイヤーに置かれることもあるので、床限定の center とは別に見る
+            const centerIceSpecial = iceSpecialAt(pcx, pcy);
             if (center?.info?.special === 'goal') {
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
@@ -9164,26 +9192,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // ── システムタイル：つるつる床（スライド開始） ──
             // action（マリオ系）は重力に沿った物理移動のため、左右方向のみ強制スライドに対応する（上下は無効）。
             // rpg/onjReze は元々グリッド上の自由8方向移動なので4方向すべてに対応する。
-            else if (center?.info?.special && ICE_DIRS[center.info.special] &&
+            // 置物レイヤーに置かれたつるつる床も拾う（床レイヤーだけ見ると滑らない）
+            else if (centerIceSpecial &&
               (gameData.engine === 'rpg' || gameData.engine === 'onjReze' ||
-                (gameData.engine === 'action' && center.info.special !== 'ice-up' && center.info.special !== 'ice-down')) &&
+                (gameData.engine === 'action' && centerIceSpecial !== 'ice-up' && centerIceSpecial !== 'ice-down')) &&
               !iceSlideRef.current) {
-              const tileKey = `${center.rect.x},${center.rect.y}`;
+              const cellX = Math.floor(pcx / TILE_SIZE) * TILE_SIZE, cellY = Math.floor(pcy / TILE_SIZE) * TILE_SIZE;
+              const tileKey = `${cellX},${cellY}`;
               if (lastIceTileRef.current !== tileKey) {
                 lastIceTileRef.current = tileKey;
-                const [dx, dy] = ICE_DIRS[center.info.special];
-                const tx = center.rect.x + dx * TILE_SIZE, ty = center.rect.y + dy * TILE_SIZE;
-                const ta = getTile(tx, ty), tb = getTile(tx + pData.w - 1, ty + pData.h - 1);
-                if (ta?.info.passable && tb?.info.passable && tx >= 0 && tx <= worldW - pData.w && ty >= 0 && ty <= worldH - pData.h) {
-                  if (gameData.engine === 'rpg' || gameData.engine === 'onjReze') { p.x = center.rect.x; p.y = center.rect.y; }
-                  else { p.x = center.rect.x; }
+                const [dx, dy] = ICE_DIRS[centerIceSpecial];
+                const tx = cellX + dx * TILE_SIZE, ty = cellY + dy * TILE_SIZE;
+                // 進入先の可否は床レイヤーで見る（置物優先で見ると、つるつる床の上に
+                // 当たり判定つきの置物が乗っているだけでスライドできなくなる）
+                if (iceDestPassable(tx, ty) && tx >= 0 && tx <= worldW - pData.w && ty >= 0 && ty <= worldH - pData.h) {
+                  if (gameData.engine === 'rpg' || gameData.engine === 'onjReze') { p.x = cellX; p.y = cellY; }
+                  else { p.x = cellX; }
                   iceSlideRef.current = { targetX: tx, targetY: (gameData.engine === 'rpg' || gameData.engine === 'onjReze') ? ty : p.y };
                 }
               }
             }
             else {
               bossWarnRef.current = false;
-              if (!(center?.info?.special && ICE_DIRS[center.info.special])) lastIceTileRef.current = null;
+              if (!centerIceSpecial) lastIceTileRef.current = null;
             }
             // コインタイル：プレイヤーが重なったら回収（actionエンジン）
             if (isAction) {
@@ -15195,27 +15226,40 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           2回目以降も発動し、当たり判定がない床イベントは乗った1回だけ発動します。
                           この既定を変えたいタイルだけ、ここで上書きしてください。
                         </p>
-                        <div className="space-y-1.5">
-                          {Object.entries(gameData.tiles).map(([k, tile]) => {
-                            const id = Number(k);
-                            const cur = tile.touchRetrigger === undefined ? 'auto' : (tile.touchRetrigger ? 'on' : 'off');
-                            return (
-                              <div key={id} className="flex items-center gap-2">
-                                <span className="w-4 h-4 shrink-0 rounded border border-gray-600 overflow-hidden inline-flex items-center justify-center" style={{ backgroundColor: tile.color }}>
-                                  {(tile.imageUrl || tile.imageRef) && <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={16} />}
-                                </span>
-                                <span className="flex-1 truncate text-[10px] text-gray-300">{tile.name || `タイル${id}`}</span>
-                                <select value={cur}
-                                  onChange={e => updateTile(id, { touchRetrigger: e.target.value === 'auto' ? undefined : e.target.value === 'on' })}
-                                  className="shrink-0 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none">
-                                  <option value="auto">システム既定</option>
-                                  <option value="on">くり返し発動</option>
-                                  <option value="off">1回だけ</option>
-                                </select>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {/* 上のスウォッチ列で選んだタイルの設定だけを出す（＝詳細方式）。
+                            RPGEN インポートはタイルが数百枚になるので、全タイルを常時一覧にすると
+                            パネルを開くたびに重くなる。既定から変えたタイルだけ下に一覧で出す。 */}
+                        {(() => {
+                          const tiles = gameData.tiles;
+                          const sel = tiles[selectedTileId];
+                          const valOf = (t?: TileDef) => t?.touchRetrigger === undefined ? 'auto' : (t.touchRetrigger ? 'on' : 'off');
+                          const row = (id: number, t: TileDef) => (
+                            <div key={id} className="flex items-center gap-2">
+                              <span className="w-4 h-4 shrink-0 rounded border border-gray-600" style={{ backgroundColor: t.color }} />
+                              <span className="flex-1 truncate text-[10px] text-gray-300">{t.name || `タイル${id}`}</span>
+                              <select value={valOf(t)}
+                                onChange={e => updateTile(id, { touchRetrigger: e.target.value === 'auto' ? undefined : e.target.value === 'on' })}
+                                className="shrink-0 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none">
+                                <option value="auto">システム既定</option>
+                                <option value="on">くり返し発動</option>
+                                <option value="off">1回だけ</option>
+                              </select>
+                            </div>
+                          );
+                          const overridden = Object.entries(tiles)
+                            .filter(([k, t]) => t.touchRetrigger !== undefined && Number(k) !== selectedTileId);
+                          return (
+                            <div className="space-y-1.5">
+                              {sel ? row(selectedTileId, sel) : <p className="text-[10px] text-gray-500">タイルを選ぶと設定できます。</p>}
+                              {overridden.length > 0 && (
+                                <div className="pt-1.5 mt-1 border-t border-gray-700/50 space-y-1.5">
+                                  <p className="text-[9px] text-gray-500">既定から変更中のタイル</p>
+                                  {overridden.map(([k, t]) => row(Number(k), t))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         <p className="text-[9px] text-gray-500">イベントが乗っているタイル（置物レイヤーがあればそちら）の指定が使われます。</p>
                       </div>
                     )}
