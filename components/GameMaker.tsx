@@ -4583,9 +4583,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   const findActivePage = useCallback((obj: { id: string; col?: number; row?: number; pages?: EventPage[] }): EventPage | null => {
     if (!obj.pages || obj.pages.length === 0) return null;
+    const checkConditions = (c?: EventCondition) => {
+      if (!c) return true;
+      if (c.switchId != null && (switchValsRef.current[c.switchId] ?? false) !== !!c.switchValue) return false;
+      if (c.switch2Id != null && (switchValsRef.current[c.switch2Id] ?? false) !== !!c.switch2Value) return false;
+      if (c.itemId != null && (!!inventoryRef.current[c.itemId]) !== !!c.hasItem) return false;
+      if (c.minGold != null && (progressRef.current.gold ?? 0) < c.minGold) return false;
+      if (c.selfSwitchId != null) {
+        const ss = selfSwitchesRef.current[obj.id]?.[c.selfSwitchId] ?? false;
+        if (ss !== !!c.selfSwitchValue) return false;
+      }
+      return true;
+    };
     // #CH_PH で切り替えられたページは発生条件より優先する（自分自身にも他イベントにも効く）。
+    // ただし、切り替え先ページに未充足の条件（所持金・スイッチ等）がある場合は無効とし、通常の条件評価へフォールバックする。
     const forced = forcedPagesRef.current[obj.id] ?? (obj.col != null && obj.row != null ? forcedPagesRef.current[`${obj.col},${obj.row}`] : undefined);
-    if (forced != null && obj.pages[forced]) return obj.pages[forced];
+    if (forced != null && obj.pages[forced] && checkConditions(obj.pages[forced].conditions)) {
+      return obj.pages[forced];
+    }
     const hasConditions = (c?: EventCondition) => {
       if (!c) return false;
       return c.switchId != null || c.switch2Id != null || c.itemId != null || c.selfSwitchId != null || c.minGold != null;
@@ -4593,14 +4608,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     for (let i = obj.pages.length - 1; i >= 0; i--) {
       const page = obj.pages[i];
       const c = page.conditions;
-      if (c.switchId != null && (switchValsRef.current[c.switchId] ?? false) !== !!c.switchValue) continue;
-      if (c.switch2Id != null && (switchValsRef.current[c.switch2Id] ?? false) !== !!c.switch2Value) continue;
-      if (c.itemId != null && (!!inventoryRef.current[c.itemId]) !== !!c.hasItem) continue;
-      if (c.minGold != null && (progressRef.current.gold ?? 0) < c.minGold) continue;
-      if (c.selfSwitchId != null) {
-        const ss = selfSwitchesRef.current[obj.id]?.[c.selfSwitchId] ?? false;
-        if (ss !== !!c.selfSwitchValue) continue;
-      }
+      if (!checkConditions(c)) continue;
       // 条件が未設定でかつ実行コマンドも無い空のページ（i > 0）は未構成タブのためスキップし、
       // 実際にコマンドや条件が設定されている下位ページを評価する。
       if (i > 0 && !hasConditions(c) && (!page.commands || page.commands.length === 0)) continue;
