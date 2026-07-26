@@ -92,6 +92,7 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
 - **Single-Threaded State Machine**
   - `runEventCommands` manages event execution with `eventRunningRef` guarding re-entrancy.
   - Never call `runEventCommands` recursively while an event is running unless passing an explicit `onDone` callback (e.g. choice subroutines).
+  - An `onDone` sub-call must **not** clear `eventRunningRef` when it finishes — the parent is still running, and dropping the guard lets the same touch event restart (bumping `eventIdRef`, which silently aborts the parent) and NPC AI resume mid-event.
 - **Phase Jump (`changePhase` / `#CH_PH`)**
   - `#CH_PH` is an **execution context jump**, not a subroutine call or passive condition flag update.
   - Transfer active execution context (`curObjId = targetId`), replace command buffer (`cmds = targetPage.commands`), and reset command step (`index = 0; setTimeout(runNext, 0)`).

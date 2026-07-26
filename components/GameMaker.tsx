@@ -4678,7 +4678,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const runNext = () => {
       if (currentEventId !== eventIdRef.current) return;
       if (index >= cmds.length) {
-        eventRunningRef.current = false;
+        // サブ呼び出し（選択肢の中身）が終わっただけのときは実行中フラグを降ろさない。
+        // 降ろすと親イベントがまだ走っている最中に「イベント実行中ではない」状態になり、
+        // NPC の自律移動が再開したり、同じ接触イベントが再発動して二重実行される。
+        if (!onDone) eventRunningRef.current = false;
         forceHud(n => n + 1);
         onDone?.();
         return;
@@ -4707,8 +4710,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // RPGEN #SEL の x/y 省略時は選択肢UIを出さず、ランダムに1つ選んで即実行する。
           if (cmd.random) {
             if (cmd.choices.length === 0) { setTimeout(advance, 0); break; }
+            // 中身が空の選択肢も抽選対象。RPGEN では「何も起きない」当たりを混ぜるのに使うので、
+            // 空だからと除外してはいけない。当たったらサブ実行はせずそのまま次へ進める。
             const idx = Math.floor(Math.random() * cmd.choices.length);
-            runEventCommands(curObjId, cmd.choices[idx].commands, advance);
+            const picked = cmd.choices[idx].commands;
+            if (picked.length === 0) { setTimeout(advance, 0); break; }
+            runEventCommands(curObjId, picked, advance);
             break;
           }
           eventChoiceRef.current = {
@@ -4717,8 +4724,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             onPick: (idx: number) => {
               eventChoiceRef.current = null;
               setEventChoice(null);
-              if (idx >= 0 && idx < cmd.choices.length) {
-                runEventCommands(curObjId, cmd.choices[idx].commands, advance);
+              const picked = idx >= 0 && idx < cmd.choices.length ? cmd.choices[idx].commands : [];
+              if (picked.length > 0) {
+                runEventCommands(curObjId, picked, advance);
               } else {
                 advance();
               }
