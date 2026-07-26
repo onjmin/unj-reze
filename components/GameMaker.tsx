@@ -1091,8 +1091,8 @@ const SpriteThumbnail = ({
   );
 };
 
-/** イベントコマンドの「対象オブジェクト」選択。ID を手入力せず、見た目のアイコンから選ばせる。
- *  スウォッチ列＋選択中の詳細表示という、他のパネルと同じ方式に揃えてある。 */
+/** イベントコマンドの「対象オブジェクト」選択。ID を手入力することも、見た目のアイコンから選ぶことも可能。
+ *  スウォッチ列＋直接テキスト入力＋選択中の詳細表示。 */
 const ObjectIdPicker = ({ value, objects, imgCache, onChange, allowPlayer = true, allowEmpty = true, emptyLabel = '（指定なし）' }: {
   value?: string;
   objects: ObjectDef[];
@@ -1107,10 +1107,10 @@ const ObjectIdPicker = ({ value, objects, imgCache, onChange, allowPlayer = true
   const selected = objects.find(o => o.id === value);
   const labelOf = (o: ObjectDef) => o.name || o.message?.slice(0, 8) || `[${o.col},${o.row}]`;
   const btn = (active: boolean) =>
-    `w-8 h-8 shrink-0 rounded border-2 grid place-items-center overflow-hidden ${active ? 'border-yellow-400' : 'border-gray-700 hover:border-gray-500'}`;
+    `w-8 h-8 shrink-0 rounded border-2 grid place-items-center overflow-hidden transition ${active ? 'border-yellow-400 bg-yellow-950/30' : 'border-gray-700 bg-gray-800 hover:border-gray-500'}`;
   return (
-    <div className="space-y-1">
-      <div className="flex gap-1 overflow-x-auto pb-1">
+    <div className="space-y-1.5 mt-1">
+      <div className="flex gap-1 overflow-x-auto pb-1 max-w-full">
         {allowEmpty && (
           <button type="button" onClick={() => onChange(undefined)} title={emptyLabel}
             className={`${btn(!value)} text-[9px] text-gray-400`}>—</button>
@@ -1126,8 +1126,30 @@ const ObjectIdPicker = ({ value, objects, imgCache, onChange, allowPlayer = true
           </button>
         ))}
       </div>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={value ?? ''}
+          onChange={e => {
+            const val = e.target.value.trim();
+            onChange(val || undefined);
+          }}
+          className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500 font-mono"
+          placeholder="オブジェクトIDを直接入力..."
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            className="px-1.5 py-1 text-[10px] text-gray-400 hover:text-red-400 border border-gray-700 rounded bg-gray-800"
+            title="クリア"
+          >
+            クリア
+          </button>
+        )}
+      </div>
       <p className="text-[9px] text-gray-500 truncate">
-        {value === 'player' ? 'プレイヤー' : selected ? `${labelOf(selected)} — ${selected.id}` : (value ? `未配置のID: ${value}` : emptyLabel)}
+        {value === 'player' ? '🧑 プレイヤー' : selected ? `${labelOf(selected)} — ID: ${selected.id}` : (value ? `ID: ${value}` : emptyLabel)}
       </p>
     </div>
   );
@@ -4916,10 +4938,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               ?? (gameDataRef.current.objects ?? []).find(o => o.id === cmd.objId);
             const targetPage = targetDef ? findActivePage(targetDef) : null;
             const at = targetPage?.commands.findIndex(c => c.type === 'label' && c.name === cmd.label) ?? -1;
-            if (targetPage && at >= 0) {
+            if (targetPage && (!cmd.label || at >= 0)) {
               curObjId = targetDef!.id;
               cmds = targetPage.commands;
-              index = at;               // advance() でラベルの次のコマンドから続行
+              index = cmd.label ? at : -1; // advance() でラベルの次のコマンド（未指定なら先頭コマンド）から続行
+              onDone = undefined;          // ジャンプで実行コンテキストが移動したため、親の onDone (選択肢元の advance) を無効化
               setTimeout(advance, 0);
               break;
             }
@@ -5450,6 +5473,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (targetId) curObjId = targetId;
               cmds = targetPage.commands;
               index = 0;
+              onDone = undefined;
               setTimeout(runNext, 0);
               break;
             }
@@ -19904,7 +19928,7 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
       case 'overheadMessage': return c.text ? c.text.split('\n')[0] : '';
       case 'playSound': return c.src || '';
       case 'label': return c.name || '';
-      case 'jump': return c.label || '';
+      case 'jump': return `${c.objId ? `${c.objId} @ ` : ''}${c.label || ''}`;
       case 'choice': return c.choices?.length ? `${c.choices.length}択${c.random ? '(ランダム)' : ''}` : 'なし';
       case 'changeSprite': return `${c.objId || 'player'}`;
       case 'changeTile': return `[${c.col ?? 0}, ${c.row ?? 0}] ${c.layer === 'overlay' ? '置物' : '地面'} → タイル${c.tileId ?? 0}`;
