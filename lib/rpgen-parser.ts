@@ -1024,6 +1024,5 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     }));
   }
 
-  draft.touchTriggerCooldownMs = 300;
   return draft;
 }

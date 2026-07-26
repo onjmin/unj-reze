@@ -176,8 +176,6 @@ export interface GameManifestDraft {
   preset: PresetId; engine: EngineKind; name: string; gravity: number; friction: number;
   /** つるつる床の強制スライド速度（px/frame）。未指定時は既定値。 */
   iceSlideSpeed?: number;
-  /** 接触イベント（playerTouch / eventTouch）が連続発動するときのクールダウン間隔 (ms)。既定 300ms。 */
-  touchTriggerCooldownMs?: number;
   player: {
     emoji: string; color: string; speed: number; jumpPower: number; w: number; h: number; start: { x: number; y: number }; spriteRef?: string; minecraftSkin?: string;
     bombCount?: number; bombSpellName?: string; bombCutinCharName?: string; bombCutinImageUrl?: string; bombCutinImageX?: number; bombCutinImageY?: number; bombCutinScale?: number;
@@ -360,7 +358,6 @@ const manifestToPresetData = (manifest: GameManifestDraft): { presetId: PresetId
     gravity: manifest.gravity ?? base.gravity,
     friction: manifest.friction ?? base.friction,
     iceSlideSpeed: manifest.iceSlideSpeed ?? base.iceSlideSpeed,
-    touchTriggerCooldownMs: (manifest as any).touchTriggerCooldownMs ?? base.touchTriggerCooldownMs ?? 300,
     player: { ...base.player, ...manifest.player, spriteUrl: hydrateUrlFromRef(manifest.player?.spriteRef) },
     tiles: manifest.tiles
       ? Object.fromEntries(
@@ -4950,7 +4947,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         case 'stopSound':
-          document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch (e) {} });
+          document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch (e) { } });
           setTimeout(advance, 0);
           break;
         case 'seekBgm':
@@ -7867,16 +7864,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const justMoved = playerJustMovedRef.current;
         playerJustMovedRef.current = false;
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
-        // 接触イベントのクールタイムの基点。発動時刻と終了時刻の新しい方を使うので、
-        // 実行に時間のかかるイベントでも「終わってからクールタイム分の間」は再発動しない。
-        // マップ側（id / マス座標）の記録も見るのは、エンティティが作り直されても
-        // 記録が消えないようにするため。
-        const touchCooldownBase = (e: Entity, d: ObjectDef) => Math.max(
-          e._lastTouchTime ?? 0,
-          e._touchEndTime ?? 0,
-          lastTouchTimeMapRef.current.get(d.id) ?? 0,
-          lastTouchTimeMapRef.current.get(`${d.col},${d.row}`) ?? 0,
-        );
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
           if (e.spawnGrace && e.spawnGrace > 0) {
@@ -8593,23 +8580,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // 会話など他の判定用に 1.5 マスと広く取ってあり、これを再発動の条件にすると接触に戻るまで
               // 2マス歩かされることになるため、再武装には使わない。
               if (!touchTriggerOk) {
-                const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
                 // 発動範囲から出た時点でイベントは終わったものとして扱う（実行中に
                 // 移動させられた場合など、終了時刻が付かないまま離れることがある）。
                 if (e.touchEventRunning && !eventRunningRef.current) {
                   e.touchEventRunning = false;
                   if (e._touchEndTime == null) e._touchEndTime = performance.now();
                 }
-                if (performance.now() - touchCooldownBase(e, d) >= cooldownMs) {
-                  e.talked = false;
-                }
+                e.talked = false;
               }
               // 発動時のタイル座標からプレイヤーが移動していない場合のみ再武装する。
               // moveNpc 等で別のマスに移動された場合は再武装せず、プレイヤーが離れて talked が
               // 消えた後、再接触時に発動する。同一座標に戻った場合は再発動を許可する。
               else if (e.touchEventRunning && !eventRunningRef.current && !frozen) {
                 const sc = (e as any)._touchStartCol, sr = (e as any)._touchStartRow;
-                const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
                 const now = performance.now();
                 // イベントが終わった最初のフレームで終了時刻を記録し、ここからクールタイムを数える。
                 if (e._touchEndTime == null) {
@@ -8618,10 +8601,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   lastTouchTimeMapRef.current.set(`${d.col},${d.row}`, now);
                 }
                 if (sc == null || sr == null || (pCol === sc && pRow === sr) || sameCell) {
-                  if (now - touchCooldownBase(e, d) >= cooldownMs) {
-                    e.touchEventRunning = false;
-                    e.talked = false;
-                  }
+                  e.touchEventRunning = false;
+                  e.talked = false;
                 } else {
                   e.touchEventRunning = false;
                 }
@@ -8755,22 +8736,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   // 移動直後の抑制は playerJustMovedRef による e.talked の事前セットで済ませてあるので、
                   // ここでは距離ベースの warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
                   if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
-                    const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
                     const cellKey = `${d.col},${d.row}`;
                     const now = performance.now();
-                    if (now - touchCooldownBase(e, d) >= cooldownMs) {
-                      e.talked = true;
-                      e.touchEventRunning = true;
-                      (e as any)._touchStartCol = pCol;
-                      (e as any)._touchStartRow = pRow;
-                      e._lastTouchTime = now;
-                      // 発動したら終了時刻は次の終了まで無効。以降は発動時刻でクールタイムを測る。
-                      e._touchEndTime = undefined;
-                      lastTouchTimeMapRef.current.set(d.id, now);
-                      lastTouchTimeMapRef.current.set(cellKey, now);
-                      runEventCommands(d.id, page.commands);
-                      ran = true;
-                    }
+                    e.talked = true;
+                    e.touchEventRunning = true;
+                    (e as any)._touchStartCol = pCol;
+                    (e as any)._touchStartRow = pRow;
+                    e._lastTouchTime = now;
+                    // 発動したら終了時刻は次の終了まで無効。以降は発動時刻でクールタイムを測る。
+                    e._touchEndTime = undefined;
+                    lastTouchTimeMapRef.current.set(d.id, now);
+                    lastTouchTimeMapRef.current.set(cellKey, now);
+                    runEventCommands(d.id, page.commands);
+                    ran = true;
                   }
                 }
               }
@@ -8859,14 +8837,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               npcTalkRef.current = { entity: e, text, startTime: performance.now(), wrapped, lastShown: 0 };
             }
           } else {
-            const cooldownMs = gameDataRef.current.touchTriggerCooldownMs ?? 300;
+            const cooldownMs = 0;
             if (e.touchEventRunning && !eventRunningRef.current) {
               e.touchEventRunning = false;
               if (e._touchEndTime == null) e._touchEndTime = performance.now();
             }
-            if (performance.now() - touchCooldownBase(e, d) >= cooldownMs) {
-              e.talked = false;
-            }
+            e.talked = false;
             if (npcTalkRef.current?.entity === e) npcTalkRef.current = null;
           }
         }
@@ -10601,7 +10577,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── RPGEN オーバーレイ描画 ──────────────────────────────────────────
       Object.values(overlayImagesRef.current).forEach(img => {
-          if ((img as any).hidden) return;
+        if ((img as any).hidden) return;
         let currentUrl = img.url;
         let tX = 0, tY = 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
 
@@ -11533,7 +11509,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const buildManifest = (): GameManifestDraft => ({
     preset: gameData.id, engine: gameData.engine, name: title.trim() || gameData.name,
     gravity: gameData.gravity, friction: gameData.friction, iceSlideSpeed: gameData.iceSlideSpeed,
-    touchTriggerCooldownMs: gameData.touchTriggerCooldownMs ?? 300,
     player: {
       emoji: gameData.player.emoji, color: gameData.player.color, speed: gameData.player.speed,
       jumpPower: gameData.player.jumpPower, w: gameData.player.w, h: gameData.player.h,
@@ -12430,25 +12405,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </button>
                   )}
 
-                  <div className="border-t border-gray-700 my-1" />
-                  <div className="px-3 py-1.5 space-y-1">
-                    <div className="flex justify-between items-center text-[10px] text-gray-300">
-                      <span>⏱ 接触発動クールダウン</span>
-                      <span className="font-mono text-yellow-300">{(gameData.touchTriggerCooldownMs ?? 300)}ms</span>
-                    </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1000"
-                      step="50"
-                      value={gameData.touchTriggerCooldownMs ?? 300}
-                      onChange={e => {
-                        const val = parseInt(e.target.value, 10);
-                        setGameData(prev => ({ ...prev, touchTriggerCooldownMs: val }));
-                      }}
-                      className="w-full h-1 bg-gray-700 rounded appearance-none cursor-pointer accent-yellow-400"
-                    />
-                  </div>
                   <div className="border-t border-gray-700 my-1" />
                   {/* エクスポート */}
                   <button
@@ -15138,27 +15094,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <button onClick={() => setGameData(p => ({ ...p, mapBgRef: undefined, mapBgUrl: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
                       )}
-                    </div>
-
-                    {/* ── 接触イベント連打防止クールダウン設定 ── */}
-                    <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <p className="text-[11px] font-bold text-gray-300">⏱ 接触イベント連続発動間隔</p>
-                        <span className="font-mono text-xs text-yellow-300">{(gameData.touchTriggerCooldownMs ?? 300)}ms</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1000"
-                        step="50"
-                        value={gameData.touchTriggerCooldownMs ?? 300}
-                        onChange={e => {
-                          const val = parseInt(e.target.value, 10);
-                          setGameData(prev => ({ ...prev, touchTriggerCooldownMs: val }));
-                        }}
-                        className="w-full h-1 bg-gray-700 rounded appearance-none cursor-pointer accent-yellow-400"
-                      />
-                      <p className="text-[10px] text-gray-500">矢印キー長押し時に隣接イベントが連続で発動する間隔（ミリ秒）。RPGEN標準は 300ms です。</p>
                     </div>
 
                     {/* ── マップサイズ（自由拡張・東方以外）── */}

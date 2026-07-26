@@ -780,8 +780,6 @@ export interface PresetData {
   /** つるつる床（システムタイル ice-*）の強制スライド速度（px/frame）。未指定時は既定値を使う。
    *  rpg / onjReze エンジン（グリッド4/8方向移動）でのみ使用。action は friction ベースの物理挙動のため対象外。 */
   iceSlideSpeed?: number;
-  /** 接触イベント（playerTouch / eventTouch）が連続発動するときのクールダウン間隔 (ms)。既定 300ms。 */
-  touchTriggerCooldownMs?: number;
   player: PlayerDef; tiles: Record<number, TileDef>; map: number[][];
   /** 置物レイヤー。map と同サイズのグリッド。プレイヤーの後ろに描画され、当たり判定を持つ。 */
   overlayMap?: number[][];
