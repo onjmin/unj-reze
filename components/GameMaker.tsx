@@ -5513,6 +5513,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
     actionDirRef.current = 1; actionShootCoolRef.current = 0;
     eng.map = JSON.parse(JSON.stringify(data.map));
+    eng.overlayMap = data.overlayMap ? JSON.parse(JSON.stringify(data.overlayMap)) : undefined;
+    eng.overheadMap = data.overheadMap ? JSON.parse(JSON.stringify(data.overheadMap)) : undefined;
     const sw = data.scroll?.worldCols ?? COLS; const sh = data.scroll?.worldRows ?? ROWS;
     setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - VIEW_W, data.player.start.x + data.player.w / 2 - VIEW_W / 2)));
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
