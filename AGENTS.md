@@ -13,12 +13,19 @@
 
 RPGEN is an integrated platform combining:
 
-- Social networking
-- Game creation
-- Asset sharing
-- Community features
+- **Social Networking & Community**: User feeds, posts, comments, likes, and creator profiles.
+- **Game Creation Engine**: Browser-based 2D RPG engine (`components/GameMaker.tsx` and `lib/rpgen-parser.ts`).
+- **Asset & Game Sharing**: Public sharing and discovery of user-created sprites, tilesets, and full games.
 
-This repository contains both the web platform and the game engine (`components/GameMaker.tsx` and `lib/rpgen-parser.ts`).
+---
+
+# System Architecture & Edge Stack
+
+- **Edge Deployment**: Built on Next.js targeting Cloudflare via `@opennextjs/cloudflare`.
+- **Database (Cloudflare D1)**: Serverless SQLite for user profiles, posts, social feeds, and game manifests (`lib/db/`).
+- **KV Storage (Cloudflare KV)**: Fast key-value store for session caching and rate-limiting (`lib/kv/`).
+- **Asset Storage (Cloudflare R2)**: S3-compatible object storage for game sprites, images, and user media (`lib/storage/`).
+- **Security & Anti-Abuse**: Multi-layered protection using Cloudflare Turnstile (`lib/security/turnstile.ts`), JA4/device fingerprinting, and Geo-headers (`cf-ipcountry`).
 
 ---
 
@@ -58,7 +65,7 @@ This repository contains both the web platform and the game engine (`components/
 
 # Debugging Protocol
 
-Before modifying the event engine or parser:
+Before modifying the event engine, DB schemas, or API endpoints:
 
 - Perform mental execution simulation across state machine transitions.
 - Trace key runtime references:
