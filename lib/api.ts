@@ -156,16 +156,18 @@ const staticApi = {
   users: {
     profile: async (id: string, userId?: string, tab?: string) => {
       let posts: Post[];
-      if (tab === 'likes' && userId) {
-        posts = (await mockDbInstance.getLikedPosts(userId)).map(encodePost);
-      } else if (tab === 'dislikes' && userId) {
-        posts = (await mockDbInstance.getDislikedPosts(userId)).map(encodePost);
-      } else if (tab === 'hearts' && userId) {
-        posts = (await mockDbInstance.getHeartedPosts(userId)).map(encodePost);
+      // いいね/だめね/ハートの記録は displayName をキーに持つため、
+      // スラッグではなく持ち主のdisplayNameで引く（サーバー側の /api/users/[id] と同じ扱い）。
+      const displayName = mockDbInstance.getUserDisplayName(id) || id;
+      if (tab === 'likes') {
+        posts = (await mockDbInstance.getLikedPosts(displayName)).map(encodePost);
+      } else if (tab === 'dislikes') {
+        posts = (await mockDbInstance.getDislikedPosts(displayName)).map(encodePost);
+      } else if (tab === 'hearts') {
+        posts = (await mockDbInstance.getHeartedPosts(displayName)).map(encodePost);
       } else {
         posts = (await mockDbInstance.getUserPostsBySlug(id, userId)).map(encodePost);
       }
-      const displayName = mockDbInstance.getUserDisplayName(id) || id;
       const avatarUrl = mockDbInstance.getUserAvatarUrl(id);
       const bio = mockDbInstance.getUserBio(id);
       return { id, displayName, avatarUrl, bio, posts, postCount: posts.length };

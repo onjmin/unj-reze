@@ -59,7 +59,7 @@ export default function MediaGrid({ items }: MediaGridProps) {
           <button
             key={post.id}
             onClick={() => { cachePost(post); router.push(`/post/${post.id}`); }}
-            className="relative aspect-square bg-[#1a1b26] overflow-hidden group"
+            className="relative aspect-square bg-[#1a1b26] overflow-hidden group gimp-checkered-background-white"
           >
             <img
               src={post.imageSrc}

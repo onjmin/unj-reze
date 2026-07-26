@@ -614,7 +614,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                   {p.hasImage && (
                     <div
                       onClick={() => handlePostClick(p)}
-                      className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer"
+                      className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
                     >
                       <img
                         src={p.imageSrc}

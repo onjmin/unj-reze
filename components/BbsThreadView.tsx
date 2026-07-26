@@ -18,6 +18,16 @@ import { extractChordsFromContent } from '@/lib/chord';
 import PostComposer from './PostComposer';
 import GameBox from './GameBox';
 import { OriginType } from '@/lib/types';
+import { showToast } from '@/lib/toast';
+import dynamic from 'next/dynamic';
+import type { GameManifestDraft } from './GameMaker';
+
+const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
+const DotDrawingEditor = dynamic(() => import('./DotDrawingEditor'), { ssr: false });
+const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
+const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
+
+type ReplyGameDraft = { manifest: GameManifestDraft; title: string; preset: string };
 
 interface BbsThreadViewProps {
   post: Post;
@@ -63,9 +73,12 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const [replyText, setReplyText] = useState('');
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [replyMml, setReplyMml] = useState<string | null>(null);
-  const [replyGameDraft, setReplyGameDraft] = useState<{ title: string } | null>(null);
+  const [replyGameDraft, setReplyGameDraft] = useState<ReplyGameDraft | null>(null);
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [replyTo, setReplyTo] = useState<number | null>(null);
+  /** 全画面エディタ（お絵描き/ドット絵/MML/ゲーム）。返信欄は閉じずに上へ重ねるので、
+   *  保存後もレス番指定（replyTo）や書きかけの本文はそのまま残る。 */
+  const [activeScreen, setActiveScreen] = useState<'drawing' | 'dotdrawing' | 'mml' | 'gamemaker' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
   const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
@@ -92,13 +105,19 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
     if (submitting) return;
     setSubmitting(true);
     const replyNum = replyTo !== null ? `>>${replyTo}\n` : '';
+    // MMLは本文の行として保存する（他の投稿経路と同じ書式）
+    const parts: string[] = [];
+    if (replyText.trim()) parts.push(replyText.trim());
+    if (replyMml) parts.push(`#mml ${replyMml}`);
+    const content = replyNum + parts.join('\n');
+
     const tempId = `temp-${Date.now()}`;
     const optimisticReply: Post = {
       id: tempId,
       displayName: userId,
       createdAt: new Date().toISOString(),
       time: 'たった今',
-      content: replyNum + replyText,
+      content,
       likes: 0, dislikes: 0, liked: false, disliked: false,
       repliesCount: 0, reposts: 0, reposted: false,
       avatarColor: 'from-blue-500 to-indigo-600',
@@ -107,10 +126,12 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
       parentPostId: post.id,
       hasImage: !!replyImage,
       imageSrc: replyImage ?? undefined,
+      originType: replyOriginType,
     };
     setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
-    const capturedText = replyText;
     const capturedImage = replyImage;
+    const capturedGameDraft = replyGameDraft;
+    const capturedOriginType = replyOriginType;
     setReplyText('');
     setReplyImage(null);
     setReplyMml(null);
@@ -119,20 +140,71 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
     setReplyTo(null);
 
     try {
+      // dataURLのまま送るとDBに巨大な文字列が入ってしまうため、必ずアップロードしてURL化する
+      let imageSrc: string | undefined;
+      if (capturedImage) {
+        const result = await api.upload.image({ image: capturedImage });
+        imageSrc = result.url;
+      }
+      let gameId: number | undefined;
+      if (capturedGameDraft) {
+        const res = await fetch('/api/games', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: capturedGameDraft.preset, title: capturedGameDraft.title, manifest: capturedGameDraft.manifest, creatorSlug: userSlug }),
+        });
+        if (res.ok) {
+          const savedGame = await res.json();
+          gameId = savedGame.id;
+        }
+      }
+
       const reply = await api.posts.replies.create(post.id, {
         displayName: userId,
-        content: replyNum + capturedText,
+        content,
         parentPostId: post.id,
         hasImage: !!capturedImage,
-        imageSrc: capturedImage ?? undefined,
+        imageSrc,
+        gameId,
+        originType: capturedOriginType,
       });
       setPost(p => ({
         ...p,
         replies: p.replies.map(r => r.id === tempId ? reply : r),
       }));
+    } catch {
+      setPost(p => ({
+        ...p,
+        replies: p.replies.filter(r => r.id !== tempId),
+        repliesCount: Math.max(0, p.repliesCount - 1),
+      }));
+      showToast('error', '書き込みに失敗しました');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSaveDrawing = (canvasData: string) => {
+    setReplyImage(canvasData);
+    setActiveScreen(null);
+    setReplyText(prev => prev.trim() ? prev : '#お絵描き 自作イラスト完成！');
+  };
+
+  const handleSaveDotDrawing = (canvasData: string) => {
+    setReplyImage(canvasData);
+    setActiveScreen(null);
+    setReplyText(prev => prev.trim() ? prev : '#ドット絵 自作ドット絵完成！');
+  };
+
+  const handleSaveMml = (mml: string) => {
+    setReplyMml(mml);
+    setActiveScreen(null);
+  };
+
+  const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
+    setReplyGameDraft({ manifest, title: meta.title, preset: meta.preset });
+    setActiveScreen(null);
+    setReplyText(prev => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
   };
 
   const handleHeart = useCallback((targetPost: Post) => {
@@ -305,12 +377,25 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
           setOriginType={setReplyOriginType}
           onClose={() => {}}
           onSubmit={handleAddReply}
-          onOpenDrawing={() => {}}
-          onOpenDotDrawing={() => {}}
-          onOpenMml={() => {}}
-          onOpenGameMaker={() => {}}
+          onOpenDrawing={() => setActiveScreen('drawing')}
+          onOpenDotDrawing={() => setActiveScreen('dotdrawing')}
+          onOpenMml={() => setActiveScreen('mml')}
+          onOpenGameMaker={() => setActiveScreen('gamemaker')}
         />
       </div>
+
+      {activeScreen === 'drawing' && (
+        <DrawingEditor onClose={() => setActiveScreen(null)} onSave={handleSaveDrawing} collabImageUrl={replyImage ?? undefined} />
+      )}
+      {activeScreen === 'dotdrawing' && (
+        <DotDrawingEditor onClose={() => setActiveScreen(null)} onSave={handleSaveDotDrawing} collabImageUrl={replyImage ?? undefined} />
+      )}
+      {activeScreen === 'mml' && (
+        <MmlEditor onClose={() => setActiveScreen(null)} onSave={handleSaveMml} initialMml={replyMml ?? undefined} />
+      )}
+      {activeScreen === 'gamemaker' && (
+        <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} initialManifest={replyGameDraft?.manifest} />
+      )}
 
       {selectedUser && (
         <UserActionMenu

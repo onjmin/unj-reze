@@ -715,7 +715,8 @@ export const sqliteStore: DataStore = {
          (SELECT COUNT(*) FROM post_hearts ph2 WHERE ph2.post_id = p.id) as hearts_total
        FROM posts p
        LEFT JOIN anonymous_users au ON p.slug = au.slug
-       JOIN post_hearts ph ON ph.post_id = p.id AND ph.user_id = ?
+       -- 1ハート1行なので投稿単位に畳んでからJOINする（重複＆LIMIT食い潰し防止）
+       JOIN (SELECT DISTINCT post_id FROM post_hearts WHERE user_id = ?) ph ON ph.post_id = p.id
        ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [userId]
     );

@@ -108,6 +108,29 @@ export default function App() {
   const [originalPostContent, setOriginalPostContent] = useState<string>('');
   const [showGlobalEditModal, setShowGlobalEditModal] = useState(false);
 
+  /** エディタ（お絵描き/ドット絵/MML/ゲーム）を開くためにコンポーザを閉じたか。
+   *  返信コンポーザからエディタへ移ると `replyTargetPost` だけが残り、
+   *  保存後にコンポーザを開き直さないとフィードのインラインコンポーザから
+   *  「通常投稿」として送信されてしまう（返信先が失われる）。
+   *  復帰の要否をここで覚えておき、エディタを閉じるときに戻す。 */
+  const composerReturnRef = useRef(false);
+
+  /** 全画面エディタを開く。`fromComposer` のときだけ閉じ際にコンポーザへ復帰する。 */
+  const openScreen = useCallback((screen: string, fromComposer = false) => {
+    composerReturnRef.current = fromComposer;
+    setComposerOpen(false);
+    setActiveScreen(screen);
+  }, []);
+
+  /** 全画面エディタを閉じる。コンポーザ由来なら返信先を保ったまま開き直す。 */
+  const closeScreen = useCallback(() => {
+    setActiveScreen(null);
+    if (composerReturnRef.current) {
+      composerReturnRef.current = false;
+      setComposerOpen(true);
+    }
+  }, []);
+
   const sessionInitialized = useRef(false);
 
   useEffect(() => {
@@ -386,7 +409,8 @@ export default function App() {
   };
 
   const handleCreatePost = async () => {
-    if (!inputText.trim() && !attachedImage && !attachedMml) return;
+    // ゲームだけ添付してコメントを消した場合も投稿できるようにする（送信ボタンの活性条件と揃える）
+    if (!inputText.trim() && !attachedImage && !attachedMml && !gameDraft) return;
     // #MML作曲行は1行目、自由コメントはその下の行として保存する
     // （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
     const parts: string[] = [];
@@ -460,22 +484,22 @@ export default function App() {
     const postMml = extractMmlFromContent(post.content);
     if (!post.hasImage && postMml) {
       setAttachedMml(postMml);
-      setActiveScreen('mml');
+      openScreen('mml');
       return;
     }
     setCollabImageUrl(post.imageSrc);
     setShowCollabSelector(true);
-  }, []);
+  }, [openScreen]);
 
   const handleCollabSelectDrawing = useCallback(() => {
     setShowCollabSelector(false);
-    setActiveScreen('drawing');
-  }, []);
+    openScreen('drawing');
+  }, [openScreen]);
 
   const handleCollabSelectDotDrawing = useCallback(() => {
     setShowCollabSelector(false);
-    setActiveScreen('dotdrawing');
-  }, []);
+    openScreen('dotdrawing');
+  }, [openScreen]);
 
   const handleCloseCollabSelector = useCallback(() => {
     setShowCollabSelector(false);
@@ -494,9 +518,9 @@ export default function App() {
     setCollabImageUrl(post.imageSrc);
     setShowGlobalEditModal(false);
     if (post.content.includes('#ドット絵')) {
-      setActiveScreen('dotdrawing');
+      openScreen('dotdrawing');
     } else {
-      setActiveScreen('drawing');
+      openScreen('drawing');
     }
   };
 
@@ -504,19 +528,19 @@ export default function App() {
     setEditingPost(post);
     setOriginalPostContent(prev => prev || post.content);
     setShowGlobalEditModal(false);
-    setActiveScreen('mml');
+    openScreen('mml');
   };
 
   const handleSaveDrawing = async (canvasData: string) => {
     if (editingPost) {
       setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
-      setActiveScreen(null);
+      closeScreen();
       setCollabImageUrl(undefined);
       setShowGlobalEditModal(true);
       return;
     }
     setAttachedImage(canvasData);
-    setActiveScreen(null);
+    closeScreen();
     setCollabImageUrl(undefined);
     setInputText("#お絵描き 自作イラスト完成！");
   };
@@ -524,13 +548,13 @@ export default function App() {
   const handleSaveDotDrawing = async (canvasData: string) => {
     if (editingPost) {
       setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
-      setActiveScreen(null);
+      closeScreen();
       setCollabImageUrl(undefined);
       setShowGlobalEditModal(true);
       return;
     }
     setAttachedImage(canvasData);
-    setActiveScreen(null);
+    closeScreen();
     setCollabImageUrl(undefined);
     setInputText("#ドット絵 自作ドット絵完成！");
   };
@@ -540,11 +564,11 @@ export default function App() {
       const stripped = stripMmlLine(editingPost.content);
       const newContent = `${stripped}\n#mml ${mml}`.trim();
       setEditingPost(prev => prev ? { ...prev, content: newContent } : null);
-      setActiveScreen(null);
+      closeScreen();
       setShowGlobalEditModal(true);
       return;
     }
-    setActiveScreen(null);
+    closeScreen();
     setAttachedMml(mml);
   };
 
@@ -557,7 +581,7 @@ export default function App() {
       setPostGameDanmaku([]);
       postGameLastIdRef.current = 0;
       setPlayingGame({ manifest: game.manifest, title: game.title, postId, gameId, creatorSlug: game.creatorSlug });
-      setActiveScreen('postgame');
+      openScreen('postgame');
     } catch {}
   };
 
@@ -572,7 +596,7 @@ export default function App() {
         body: JSON.stringify({ title: meta.title, manifest, userSlug: currentUser?.slug }),
       });
     } catch {}
-    setActiveScreen(null);
+    closeScreen();
     setPlayingGame(null);
     setPostGameDanmaku([]);
     if (editingPost) {
@@ -582,7 +606,7 @@ export default function App() {
 
   const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
     setGameDraft({ manifest, title: meta.title, preset: meta.preset });
-    setActiveScreen(null);
+    closeScreen();
     setInputText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
   };
 
@@ -620,8 +644,8 @@ export default function App() {
       }
     }
 
-    setComposerOpen(false);
-    setActiveScreen(screenType);
+    // 返信コンポーザから来た場合は、保存/キャンセル後にコンポーザ（＝返信先）へ戻す
+    openScreen(screenType, composerOpen);
   };
 
   const handleConfirmDiscard = () => {
@@ -632,8 +656,7 @@ export default function App() {
     if (discardType === 'mml') setAttachedMml(null);
     if (discardType === 'game') setGameDraft(null);
 
-    setComposerOpen(false);
-    setActiveScreen(targetScreen);
+    openScreen(targetScreen, composerOpen);
     setDiscardModalConfig(null);
   };
 
@@ -644,25 +667,25 @@ export default function App() {
 
       {activeScreen === 'drawing' && (
         <DrawingEditor
-          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
+          onClose={() => { closeScreen(); setCollabImageUrl(undefined); }}
           onSave={handleSaveDrawing}
           collabImageUrl={collabImageUrl}
         />
       )}
       {activeScreen === 'dotdrawing' && (
         <DotDrawingEditor
-          onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
+          onClose={() => { closeScreen(); setCollabImageUrl(undefined); }}
           onSave={handleSaveDotDrawing}
           collabImageUrl={collabImageUrl}
         />
       )}
       {activeScreen === 'gamemaker' && (
-        <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} initialManifest={gameDraft?.manifest} />
+        <GameMaker onClose={closeScreen} userId={userId} onSave={handleSaveGame} initialManifest={gameDraft?.manifest} />
       )}
       {activeScreen === 'postgame' && playingGame && (
         <GameMaker
           onClose={() => {
-            setActiveScreen(null);
+            closeScreen();
             setPlayingGame(null);
             setPostGameDanmaku([]);
             if (editingPost) {
@@ -690,7 +713,7 @@ export default function App() {
       {activeScreen === 'mml' && (
         <MmlEditor
           onClose={() => {
-            setActiveScreen(null);
+            closeScreen();
             if (editingPost) setShowGlobalEditModal(true);
           }}
           onSave={handleSaveMml}
@@ -740,7 +763,7 @@ export default function App() {
                   activeTab={topTab}
                   setActiveTab={(tab) => {
                     setTopTab(tab);
-                    if (tab !== 'game') setActiveScreen(null);
+                    if (tab !== 'game') { composerReturnRef.current = false; setActiveScreen(null); }
                     if (tab === 'ranking') {
                       setRankCategory('イイ');
                     }
@@ -824,7 +847,7 @@ export default function App() {
                       if (gameId) handleOpenPostGame(gameId, postId);
                     }}
                     openCollab={handleOpenCollab}
-                    openMml={() => setActiveScreen('mml')}
+                    openMml={() => openScreen('mml')}
                     currentUserSlug={currentUser?.slug}
                     currentUserDisplayName={currentUser?.displayName}
                     onModerationChange={fetchPosts}
