@@ -154,7 +154,7 @@ export type EventCommand =
   | { type: 'resumeImage'; imgId?: string; layer?: number }
   | { type: 'resetCamera'; duration: number; easing?: number }
   | { type: 'moveCamera'; tx?: number; ty?: number; duration: number; dx?: number; dy?: number; easing?: number; blocking?: boolean }
-  | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number; stepMs?: number; allowDiagonal?: boolean }
+  | { type: 'moveNpc'; objId?: string; tx?: number; ty?: number; dx?: number; dy?: number; duration?: number; stepMs?: number; allowDiagonal?: boolean; lockDirection?: boolean }
   | { type: 'clearScreenEffect' }
   | { type: 'screenEffect'; effects: { type: 'solid' | 'gradient'; color: string; c1: string; c2: string; pos: string; stops: string }[] }
   /** イベントページ（フェーズ）を切り替える（RPGEN の #CH_PH）。
@@ -194,6 +194,10 @@ export interface TileDef {
   warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number;
   /** special='damage'（どく沼/ダメージ床）の被ダメージ量。未指定時は3。 */
   damageAmount?: number;
+  /** このタイルに乗っている接触イベントを「触れている間くり返し発動」させるかの明示指定。
+   *  未指定（undefined）＝システム既定：当たり判定があれば連続発動、無ければ1回だけ。
+   *  true＝常に連続発動 / false＝常に1回だけ。 */
+  touchRetrigger?: boolean;
   /** true: 長方形素材を正方形に潰さず、セル幅基準でアスペクト比を保ち下端固定で上方向へはみ出して描く
    *  （1マスに置く単独の縦長素材＝ゴール旗など）。既定は cell-fill（マスいっぱい）で、土管トップ＋ボディのように
    *  欠片を縦に積んでも継ぎ目が出ない。 */

@@ -182,7 +182,8 @@ export interface GameManifestDraft {
   };
   tiles: Record<number, {
     name: string; color: string; passable: boolean; special?: string; imageRef?: string; imageUrl?: string;
-    warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number; damageAmount?: number
+    warpSceneId?: string; warpEntryCol?: number; warpEntryRow?: number; damageAmount?: number;
+    touchRetrigger?: boolean
   }>;
   map: number[][];
   overlayMap?: number[][];
@@ -449,13 +450,19 @@ async function playSfx(s?: SfxRef) {
 interface SpellFrame { script: SpellBlock[]; ip: number; timesLeft: number; }
 interface SpellExecState { stack: SpellFrame[]; frame: number; waitLeft: number; }
 
-interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; sx: number; sy: number; allowDiagonal?: boolean; }
+interface MoveTarget { tx: number; ty: number; frames: number; elapsed: number; sx: number; sy: number; allowDiagonal?: boolean; lockDirection?: boolean; }
 interface Entity {
   def: ObjectDef; x: number; y: number; homeX: number; homeY: number;
   hp: number; timer: number; vx: number; vy: number; talked: boolean;
   touchEventRunning?: boolean;
+  /** 接触イベントを発動した時点の「プレイヤー」のマス座標。 */
   _touchStartCol?: number;
   _touchStartRow?: number;
+  /** 接触イベントを発動した時点の「イベント側」のマス座標。
+   *  moveNpc 等でイベントが別のマスへ動かされたかを判定し、動いていたら再武装しない
+   *  （動かした先でもまだ発動範囲に入っていると、1回の接触で何度も動いてしまう）。 */
+  _touchStartECol?: number;
+  _touchStartERow?: number;
   /** 接触イベントを「発動した」時刻。 */
   _lastTouchTime?: number;
   /** 接触イベントが「終わった」時刻。クールタイムはこちらを基点に測る
@@ -2091,6 +2098,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const playerInputDirRef = useRef<WayKey | null>(null);
   /** イベント（#CH_PD）で指定された主人公の向き。実際に移動すると解除される。 */
   const playerFacingRef = useRef<WayKey | null>(null);
+  /** イベントの移動コマンド（#MV_PD/PA/PR）の n（方向転換しない）が指定されている間 true。
+   *  移動が終わってプレイヤー操作に戻った最初のフレームで解除する。 */
+  const playerFacingLockRef = useRef(false);
   /** rpg: ブロックされたときの向き（静止中に overrideDir として渡すために保持）*/
   const playerBlockedDirRef = useRef<WayKey | null>(null);
   /** rpg: 直前フレームのプレイヤー描画位置（静止判定に使用）*/
@@ -5140,6 +5150,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 frames: totalFrames,
                 elapsed: 0,
                 allowDiagonal: cmd.allowDiagonal,
+                lockDirection: cmd.lockDirection,
               };
             } else {
               targetObj.x = targetX;
@@ -5157,6 +5168,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               if (isInstant) {
                 playerJustMovedRef.current = true;
               }
+              // n（方向転換しない）：主人公は e.facing ではなく描画側の移動量から向きを
+              // 決めているので、ref で「今の向きを維持する」ことを描画側に伝える。
+              // 移動コマンドごとに指定し直す（n なしの移動が続いたときに固定が残らないように）。
+              playerFacingLockRef.current = cmd.lockDirection === true;
             }
             setTimeout(advance, duration);
           } else {
@@ -5418,6 +5433,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     const img = new Image();
     img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      forceHud(n => n + 1);
+    };
     img.onerror = () => {
       const currentBg = gameDataRef.current.mapBgUrl;
       const fallbackUrl = 'https://i.imgur.com/xqZTM17.jpg';
@@ -5801,6 +5819,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         touchEventRunning: old ? old.touchEventRunning : false,
         _touchStartCol: old ? (old as any)._touchStartCol : undefined,
         _touchStartRow: old ? (old as any)._touchStartRow : undefined,
+        _touchStartECol: old ? (old as any)._touchStartECol : undefined,
+        _touchStartERow: old ? (old as any)._touchStartERow : undefined,
         _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
         _touchEndTime: old ? (old as any)._touchEndTime : undefined,
         def: o,
@@ -5862,6 +5882,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           touchEventRunning: old ? old.touchEventRunning : false,
           _touchStartCol: old ? (old as any)._touchStartCol : undefined,
           _touchStartRow: old ? (old as any)._touchStartRow : undefined,
+          _touchStartECol: old ? (old as any)._touchStartECol : undefined,
+          _touchStartERow: old ? (old as any)._touchStartERow : undefined,
           _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
           _touchEndTime: old ? (old as any)._touchEndTime : undefined,
           spellState: o.spellScript?.length
@@ -7536,6 +7558,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               playerJustMovedRef.current = true;
             }
           } else {
+            // イベント移動が終わってプレイヤー操作に戻ったので、n（方向転換しない）の固定を解除する。
+            // 移動完了フレームの描画までは固定を残す必要があるため、ここ（次フレーム）で解除する。
+            playerFacingLockRef.current = false;
             let nx = p.x, ny = p.y;
             if (isLeft) nx -= moveSpd; if (isRight) nx += moveSpd;
             if (isUp) ny -= moveSpd; if (isDown) ny += moveSpd;
@@ -7869,7 +7894,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         // 直前のフレームでプレイヤーが移動させられたか。今回のスキャンで消費するので先に降ろしておく
         // （スキャン中にワープが発動して再度立った分は、次のスキャンで使う）。
-        const justMoved = playerJustMovedRef.current;
+        // ※ かつては「移動させられた先のイベントは発動させない」抑制に使っていたが、
+        //   転送先のイベントは当たり判定の有無にかかわらず発動するのが正しいので廃止した。
         playerJustMovedRef.current = false;
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
@@ -7879,6 +7905,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
           const ecx = e.x + TILE_SIZE / 2, ecy = e.y + TILE_SIZE / 2;
           const prevX = e.x, prevY = e.y; // 向き（e.facing）の更新に使う移動前の座標
+          // RPGEN の n（方向転換しない）。移動処理の中で最終フレームに moveTarget が
+          // 消えるため、向きの更新判定より前に控えておく。
+          const lockFacing = e.moveTarget?.lockDirection === true;
 
           const sp = (gameData.engine === 'onjReze' && d.name === 'レゼ' && Math.hypot(pcx - ecx, pcy - ecy) < TILE_SIZE * 4) ? 2.2 : d.speed;
           if (gameData.engine === 'touhou') {
@@ -8220,7 +8249,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // （横スク・touhou は描画側の移動量ベース判定に任せるため触らない）
           if (gameData.engine !== 'action' && gameData.engine !== 'touhou') {
             const moved = dirFromDelta(e.x - prevX, e.y - prevY);
-            if (moved && Math.hypot(e.x - prevX, e.y - prevY) > 0.15) e.facing = moved;
+            if (moved && Math.hypot(e.x - prevX, e.y - prevY) > 0.15 && !lockFacing) e.facing = moved;
             else if (!e.facing) e.facing = initialFacing(d);
           }
 
@@ -8579,6 +8608,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const touchTriggerOk = isCollisionEvent
             ? (sameCell || ((pBoxTouch || isAdjacentTile) && isFacingEventTile))
             : sameCell;
+          // 接触イベントを「触れている間くり返し発動」させるか。
+          // 既定は当たり判定の有無で決まる：当たり判定があると同じ座標に留まる限り接触が続いている
+          // 扱いになるので 2回目以降も発動し、当たり判定が無い（床イベント）と乗った1回だけ発動する。
+          // イベントが乗っているタイルで明示指定があればそちらを優先する（システム挙動の上書き）。
+          const tileRetrigger = overlayInfo?.touchRetrigger ?? floorInfo?.touchRetrigger;
+          const retriggerOnContact = tileRetrigger ?? isCollisionEvent;
 
           const overlap = touchTriggerOk || Math.hypot(pcx - (e.x + eW / 2), pcy - (e.y + eH / 2)) < TILE_SIZE * 1.5;
 
@@ -8600,7 +8635,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // moveNpc 等で別のマスに移動された場合は再武装せず、プレイヤーが離れて talked が
               // 消えた後、再接触時に発動する。同一座標に戻った場合は再発動を許可する。
               else if (e.touchEventRunning && !eventRunningRef.current && !frozen) {
-                const sc = (e as any)._touchStartCol, sr = (e as any)._touchStartRow;
+                const sc = e._touchStartCol, sr = e._touchStartRow;
+                const ec = e._touchStartECol, er = e._touchStartERow;
                 const now = performance.now();
                 // イベントが終わった最初のフレームで終了時刻を記録し、ここからクールタイムを数える。
                 if (e._touchEndTime == null) {
@@ -8608,22 +8644,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   lastTouchTimeMapRef.current.set(d.id, now);
                   lastTouchTimeMapRef.current.set(`${d.col},${d.row}`, now);
                 }
-                if (sc == null || sr == null || (pCol === sc && pRow === sr) || sameCell) {
-                  e.touchEventRunning = false;
+                // プレイヤーが発動時のマスに留まっている（＝接触が続いている）
+                const playerStayed = sc == null || sr == null || (pCol === sc && pRow === sr) || sameCell;
+                // イベント側も発動時のマスに留まっている。moveNpc で動かされた場合や、
+                // まだ移動中（moveTarget が残っている）場合は「動かされた」扱いにする。
+                // ここを見ないと、動かした先がまだ発動範囲内のときに 1 回の接触で
+                // 何マスも動き続けてしまう（#MV_ND 1マスのつもりが数マス動く）。
+                const eventStayed = !e.moveTarget && (ec == null || er == null || (eCol === ec && eRow === er));
+                e.touchEventRunning = false;
+                // retriggerOnContact が false のイベント（＝当たり判定なしの床イベント）は
+                // 乗っている間の再発動をしない。離れて talked が消えてから、入り直しで再発動する。
+                if (retriggerOnContact && playerStayed && eventStayed) {
                   e.talked = false;
-                } else {
-                  e.touchEventRunning = false;
                 }
               }
-              // 移動させられた瞬間すでに発動範囲内にいたイベントは、プレイヤー自身が入り込んだ
-              // わけではないので発動させない（隣が当たり判定持ちだと pBoxTouch の 4px 余裕で接触扱いに
-              // なり、転送直後に誤発動する）。発動済みにしておけば、離れて入り直したときに発動する。
-              // ただし、当たり判定のあるオブジェクト（壁タイル・NPC）はプレイヤーが侵入できないため、
-              // 連続発動の問題が生じない。justMoved による抑制の対象外とする（b）。
-              if (justMoved && touchTriggerOk && !blocksPlayer && !e.talked) {
-                e.talked = true;
-              }
-
             }
             const ot = d.objType ?? 'enemy';
             if (ot === 'warp' && d.warpTarget) {
@@ -8748,8 +8782,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     const now = performance.now();
                     e.talked = true;
                     e.touchEventRunning = true;
-                    (e as any)._touchStartCol = pCol;
-                    (e as any)._touchStartRow = pRow;
+                    e._touchStartCol = pCol;
+                    e._touchStartRow = pRow;
+                    e._touchStartECol = eCol;
+                    e._touchStartERow = eRow;
                     e._lastTouchTime = now;
                     // 発動したら終了時刻は次の終了まで無効。以降は発動時刻でクールタイムを測る。
                     e._touchEndTime = undefined;
@@ -10287,11 +10323,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const isStationary = lastPos && p.x === lastPos.x && p.y === lastPos.y;
         const blockedOverride = gameData.engine === 'rpg' && isStationary && playerBlockedDirRef.current
           ? playerBlockedDirRef.current : undefined;
-        // イベントで向きを指定された（#CH_PD）場合はそれを優先し、自分で歩き出したら解除する
-        if (!isStationary) playerFacingRef.current = null;
+        // イベントで向きを指定された（#CH_PD）場合はそれを優先し、自分で歩き出したら解除する。
+        // ただし n（方向転換しない）の移動中は、動いても指定された向きを保つ。
+        if (!isStationary && !playerFacingLockRef.current) playerFacingRef.current = null;
+        // n（方向転換しない）：移動量からの向き更新を止めるため、今の向きをそのまま overrideDir に渡す
+        const lockedFacing = playerFacingLockRef.current ? walkInst.get('player')?.dir : undefined;
         lastDrawnPlayerPosRef.current = { x: p.x, y: p.y };
         drawSprite({ emoji: pData.emoji, spriteUrl: p.spriteUrl ?? (p.spriteRef ? hydrateUrlFromRef(p.spriteRef) : undefined) ?? pData.spriteUrl, spriteRef: p.spriteRef ?? pData.spriteRef }, p.x, p.y, pData.w, drawH, 'player',
-          gameData.engine === 'touhou' ? 'w' : (playerFacingRef.current ?? blockedOverride));
+          gameData.engine === 'touhou' ? 'w' : (playerFacingRef.current ?? lockedFacing ?? blockedOverride));
         if (isStar) {
           ctx.restore();
         }
@@ -11660,6 +11699,52 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       const manifest = await parseRpgen(textToParse);
       const createBlankGrid = (m: number[][]) => Array.from({ length: m.length }, () => Array(m[0]?.length ?? 0).fill(0));
+
+      // 1回目のインポート時でも地形画像（RPGENチップ）が完全表示されるよう、状態更新前に全画像を事前読み込みして完了を待つ
+      const urlsToPreload: string[] = [];
+      Object.values(manifest.tiles).forEach(t => {
+        if (t.imageUrl) urlsToPreload.push(t.imageUrl);
+        if (t.imageRef) {
+          const u = imageRefToUrl(t.imageRef) ?? hydrateUrlFromRef(t.imageRef);
+          if (u) urlsToPreload.push(u);
+        }
+      });
+      manifest.objects.forEach(o => {
+        if (o.editorSprite) urlsToPreload.push(o.editorSprite);
+        if (o.spriteRef) {
+          const u = imageRefToUrl(o.spriteRef) ?? hydrateUrlFromRef(o.spriteRef);
+          if (u) urlsToPreload.push(u);
+        }
+      });
+      if (manifest.player?.spriteRef) {
+        const u = imageRefToUrl(manifest.player.spriteRef) ?? hydrateUrlFromRef(manifest.player.spriteRef);
+        if (u) urlsToPreload.push(u);
+      }
+
+      const uniqueUrls = Array.from(new Set(urlsToPreload.filter(Boolean)));
+      await Promise.all(uniqueUrls.map(url => {
+        const hashIdx = url.indexOf('#');
+        const baseUrl = hashIdx !== -1 ? url.slice(0, hashIdx) : url;
+        const existing = imgCache.current.get(url) ?? imgCache.current.get(baseUrl);
+        if (existing && existing.complete && existing.naturalWidth > 0) {
+          return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            imgCache.current.set(url, img);
+            if (hashIdx !== -1) imgCache.current.set(baseUrl, img);
+            resolve();
+          };
+          img.onerror = () => { resolve(); };
+          img.src = baseUrl;
+          imgCache.current.set(url, img);
+          if (hashIdx !== -1) imgCache.current.set(baseUrl, img);
+        });
+      }));
+
+      playGridBackupRef.current = null;
 
       if (gameData.scenes && gameData.scenes.length > 0) {
         const existingIds = Object.keys(gameData.tiles).map(Number);

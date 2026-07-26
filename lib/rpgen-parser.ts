@@ -668,23 +668,27 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.MovePartyDirection: {
         const steps = parseInt(cmd.params.v || '1', 10);
         const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
-        return { type: 'moveNpc', objId: 'player', dx, dy, ...calcMoveDuration(cmd.params, steps) };
+        const lockDirection = cmd.params.n === '1';
+        return { type: 'moveNpc', objId: 'player', dx, dy, ...calcMoveDuration(cmd.params, steps), lockDirection };
       }
       case CommandType.MovePartyAbsolute: {
         const allowDiagonal = cmd.params.s === '1';
-        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0', 10), ty: parseInt(cmd.params.ty || '0', 10), ...calcMoveDuration(cmd.params, 1), allowDiagonal };
+        const lockDirection = cmd.params.n === '1';
+        return { type: 'moveNpc', objId: 'player', tx: parseInt(cmd.params.tx || '0', 10), ty: parseInt(cmd.params.ty || '0', 10), ...calcMoveDuration(cmd.params, 1), allowDiagonal, lockDirection };
       }
       case CommandType.MovePartyRelative: {
         const dx = parseInt(cmd.params.tx || '0', 10);
         const dy = parseInt(cmd.params.ty || '0', 10);
         const allowDiagonal = cmd.params.s === '1';
+        const lockDirection = cmd.params.n === '1';
         const steps = allowDiagonal ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
-        return { type: 'moveNpc', objId: 'player', dx, dy, ...calcMoveDuration(cmd.params, steps), allowDiagonal };
+        return { type: 'moveNpc', objId: 'player', dx, dy, ...calcMoveDuration(cmd.params, steps), allowDiagonal, lockDirection };
       }
       case CommandType.MoveNpcDirection: {
         const steps = parseInt(cmd.params.v || '1', 10);
         const { dx, dy } = directionDelta(cmd.params.d, cmd.params.v);
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, ...calcMoveDuration(cmd.params, steps) };
+        const lockDirection = cmd.params.n === '1';
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, ...calcMoveDuration(cmd.params, steps), lockDirection };
       }
       case CommandType.MoveNpcAbsolute: {
         const nx = parseInt(cmd.params.nx ?? '0', 10);
@@ -694,15 +698,17 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
         const delX = Math.abs(tx - nx);
         const delY = Math.abs(ty - ny);
         const allowDiagonal = cmd.params.s === '1';
+        const lockDirection = cmd.params.n === '1';
         const steps = allowDiagonal ? Math.max(delX, delY) : (delX + delY);
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx, ty, ...calcMoveDuration(cmd.params, steps), allowDiagonal };
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), tx, ty, ...calcMoveDuration(cmd.params, steps), allowDiagonal, lockDirection };
       }
       case CommandType.MoveNpcRelative: {
         const dx = parseInt(cmd.params.tx || '0', 10);
         const dy = parseInt(cmd.params.ty || '0', 10);
         const allowDiagonal = cmd.params.s === '1';
+        const lockDirection = cmd.params.n === '1';
         const steps = allowDiagonal ? Math.max(Math.abs(dx), Math.abs(dy)) : (Math.abs(dx) + Math.abs(dy));
-        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, ...calcMoveDuration(cmd.params, steps), allowDiagonal };
+        return { type: 'moveNpc', objId: npcObjId(cmd.params.nx ?? '0', cmd.params.ny ?? '0'), dx, dy, ...calcMoveDuration(cmd.params, steps), allowDiagonal, lockDirection };
       }
       case CommandType.PlusGold: return { type: 'changeGold', amount: parseInt(cmd.params.v || '0') };
       case CommandType.MinusGold: return { type: 'changeGold', amount: -parseInt(cmd.params.v || '0') };
