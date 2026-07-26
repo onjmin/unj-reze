@@ -2078,11 +2078,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  ワープ（warpSceneId / warpTarget）の発動を無効化する（入場地点付近に別のワープがある場合の
    *  即座の巻き戻り・往復ループを防ぐ）。 */
   const warpCooldownRef = useRef<{ x: number; y: number } | null>(null);
-  /** イベント/ワープでプレイヤーを移動させた直後の1スキャンだけ立つフラグ。
-   *  移動先ですでに発動範囲内にあった接触イベントは「プレイヤー自身が入り込んだ」わけではないので、
-   *  発動させずに発動済み扱いにするために使う。範囲外へ出て入り直せば再武装されて通常どおり発動する。
-   *  距離ではなく「移動した瞬間」で判定するため、隣のマスへ普通に歩いて接触する分は抑制されない。 */
-  const playerJustMovedRef = useRef(false);
   /** つるつる床（システムタイル）：強制スライド中の目標座標。null なら通常操作。 */
   const iceSlideRef = useRef<{ targetX: number; targetY: number } | null>(null);
   /** つるつる床の多重発動防止：直近に発動開始したタイル座標キー。 */
@@ -4814,7 +4809,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const pw = gameDataRef.current.player.w ?? TILE_SIZE;
             const ph = gameDataRef.current.player.h ?? TILE_SIZE;
             warpCooldownRef.current = { x: tx + pw / 2, y: ty + ph / 2 };
-            playerJustMovedRef.current = true;
             setTimeout(advance, 50);
           }
           break;
@@ -5165,9 +5159,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const tCol = Math.floor((targetX + pw / 2) / TILE_SIZE);
               const tRow = Math.floor((targetY + ph / 2) / TILE_SIZE);
               lastTouchTimeMapRef.current.set(`${tCol},${tRow}`, performance.now());
-              if (isInstant) {
-                playerJustMovedRef.current = true;
-              }
               // n（方向転換しない）：主人公は e.facing ではなく描画側の移動量から向きを
               // 決めているので、ref で「今の向きを維持する」ことを描画側に伝える。
               // 移動コマンドごとに指定し直す（n なしの移動が続いたときに固定が残らないように）。
@@ -7555,7 +7546,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               p.x = mt.tx;
               p.y = mt.ty;
               (p as any).moveTarget = undefined;
-              playerJustMovedRef.current = true;
             }
           } else {
             // イベント移動が終わってプレイヤー操作に戻ったので、n（方向転換しない）の固定を解除する。
@@ -7887,16 +7877,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (isPlaying && !roundOverRef.current && !battleRef.current.active && !encounterAlertRef.current) {
         const pcx = p.x + pData.w / 2, pcy = p.y + pData.h / 2;
         // ワープ直後の再発動抑制：入場座標から十分離れたら解除（overlap判定の半径 TILE_SIZE*1.1 より広めに取る）。
-        // ※接触イベント（pages）の抑制はこの距離ではなく playerJustMovedRef で行う。
         if (warpCooldownRef.current) {
           const wc = warpCooldownRef.current;
           if (Math.hypot(pcx - wc.x, pcy - wc.y) > TILE_SIZE * 1.5) warpCooldownRef.current = null;
         }
-        // 直前のフレームでプレイヤーが移動させられたか。今回のスキャンで消費するので先に降ろしておく
-        // （スキャン中にワープが発動して再度立った分は、次のスキャンで使う）。
-        // ※ かつては「移動させられた先のイベントは発動させない」抑制に使っていたが、
-        //   転送先のイベントは当たり判定の有無にかかわらず発動するのが正しいので廃止した。
-        playerJustMovedRef.current = false;
         const marioInvincible = gameData.id === 'mario' && starTimerRef.current > 0; // スター無敵
         for (let ei = eng.entities.length - 1; ei >= 0; ei--) {
           const e = eng.entities[ei]; const d = e.def; e.timer++;
@@ -8674,7 +8658,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 // その場所から離れるまでは次のワープを発動させない。
                 warpCooldownRef.current = { x: tx + pData.w / 2, y: ty + pData.h / 2 };
                 lastTouchTimeMapRef.current.set(`${d.warpTarget.col},${d.warpTarget.row}`, performance.now());
-                playerJustMovedRef.current = true;
               }
               break;
             }
@@ -8775,8 +8758,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const page = findActivePage(d);
                 if (page && page.commands.length > 0) {
                   const trig = page.trigger ?? 'action';
-                  // 移動直後の抑制は playerJustMovedRef による e.talked の事前セットで済ませてあるので、
-                  // ここでは距離ベースの warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
+                  // 転送・イベント移動で乗せられた場合も接触は接触なので、ここでは距離ベースの
+                  // warpCooldown を見ない（見ると再接触まで余計に歩かされる）。
                   if ((trig === 'playerTouch' || trig === 'eventTouch') && touchTriggerOk) {
                     const cellKey = `${d.col},${d.row}`;
                     const now = performance.now();
@@ -10937,7 +10920,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               eng.bullets = []; eng.enemyBullets = [];
               encounterGaugeRef.current = 0; encounterNextRef.current = 0;
               warpCooldownRef.current = { x: targetWx + pData.w / 2, y: targetWy + pData.h / 2 };
-              playerJustMovedRef.current = true;
               if (gameData.id === 'mario') {
                 marioPipeRef.current = {
                   phase: 'exiting',
@@ -10967,7 +10949,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               eng.player.x = fade.entryX; eng.player.y = fade.entryY;
               eng.player.vx = 0; eng.player.vy = 0;
               warpCooldownRef.current = { x: fade.entryX + pData.w / 2, y: fade.entryY + pData.h / 2 };
-              playerJustMovedRef.current = true;
               if (gameData.id === 'mario') {
                 marioPipeRef.current = {
                   phase: 'exiting',
@@ -11575,6 +11556,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // imageRef がなければ imageUrl をそのまま使う。
       imageUrl: t.imageRef ? undefined : t.imageUrl,
       warpSceneId: t.warpSceneId, warpEntryCol: t.warpEntryCol, warpEntryRow: t.warpEntryRow, damageAmount: t.damageAmount,
+      touchRetrigger: t.touchRetrigger,
     }])),
     map: gameData.map,
     overlayMap: gameData.overlayMap,
@@ -15166,6 +15148,40 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </div>
                     )}
 
+                    {/* ── 接触イベントの発動仕様（タイルごとの上書き）：仕様が細かいので専用パネルに分離 ── */}
+                    {(gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
+                      <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
+                        <p className="text-[12px] font-bold text-gray-200">🔁 接触イベントの連続発動</p>
+                        <p className="text-[10px] text-gray-500">
+                          「触れたとき」のイベントを、乗っている（触れている）間くり返し発動させるかの指定です。
+                          既定では当たり判定の有無で決まります——当たり判定があると同じ座標に留まっている限り接触が続いている扱いになるので
+                          2回目以降も発動し、当たり判定がない床イベントは乗った1回だけ発動します。
+                          この既定を変えたいタイルだけ、ここで上書きしてください。
+                        </p>
+                        <div className="space-y-1.5">
+                          {Object.entries(gameData.tiles).map(([k, tile]) => {
+                            const id = Number(k);
+                            const cur = tile.touchRetrigger === undefined ? 'auto' : (tile.touchRetrigger ? 'on' : 'off');
+                            return (
+                              <div key={id} className="flex items-center gap-2">
+                                <span className="w-4 h-4 shrink-0 rounded border border-gray-600 overflow-hidden inline-flex items-center justify-center" style={{ backgroundColor: tile.color }}>
+                                  {(tile.imageUrl || tile.imageRef) && <AssetThumb refStr={tile.imageRef || tile.imageUrl || ''} url={tile.imageUrl} size={16} />}
+                                </span>
+                                <span className="flex-1 truncate text-[10px] text-gray-300">{tile.name || `タイル${id}`}</span>
+                                <select value={cur}
+                                  onChange={e => updateTile(id, { touchRetrigger: e.target.value === 'auto' ? undefined : e.target.value === 'on' })}
+                                  className="shrink-0 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[10px] text-gray-200 outline-none">
+                                  <option value="auto">システム既定</option>
+                                  <option value="on">くり返し発動</option>
+                                  <option value="off">1回だけ</option>
+                                </select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[9px] text-gray-500">イベントが乗っているタイル（置物レイヤーがあればそちら）の指定が使われます。</p>
+                      </div>
+                    )}
 
                   </div>
                 )}
