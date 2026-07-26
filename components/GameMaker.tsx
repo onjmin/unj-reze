@@ -4584,10 +4584,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     phaseIndexRef.current = pending;
   }, [gameData, playSfx, showGameMsg]);
 
-  const findActivePage = useCallback((obj: { id: string; pages?: EventPage[] }): EventPage | null => {
+  const findActivePage = useCallback((obj: { id: string; col?: number; row?: number; pages?: EventPage[] }): EventPage | null => {
     if (!obj.pages || obj.pages.length === 0) return null;
     // #CH_PH で切り替えられたページは発生条件より優先する（自分自身にも他イベントにも効く）。
-    const forced = forcedPagesRef.current[obj.id];
+    const forced = forcedPagesRef.current[obj.id] ?? (obj.col != null && obj.row != null ? forcedPagesRef.current[`${obj.col},${obj.row}`] : undefined);
     if (forced != null && obj.pages[forced]) return obj.pages[forced];
     const hasConditions = (c?: EventCondition) => {
       if (!c) return false;
@@ -4656,6 +4656,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const currentEventId = eventIdRef.current;
     let index = 0;
     let cmds = commands;
+    // #CH_PH は RPGEN 本家だと rpgEG.curEIdx を書き換えて「実行主体そのもの」を相手イベントへ移す。
+    // 以降の自分自身向けコマンド（セルフスイッチ・#RM_EV・座標省略の #CH_ND 等）はジャンプ先が対象になる。
+    let curObjId = objId;
     const ss = selfSwitchesRef.current;
     const advance = () => {
       if (currentEventId !== eventIdRef.current) return;
@@ -4700,7 +4703,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           if (cmd.random) {
             if (cmd.choices.length === 0) { setTimeout(advance, 0); break; }
             const idx = Math.floor(Math.random() * cmd.choices.length);
-            runEventCommands(objId, cmd.choices[idx].commands, advance);
+            runEventCommands(curObjId, cmd.choices[idx].commands, advance);
             break;
           }
           eventChoiceRef.current = {
@@ -4710,7 +4713,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               eventChoiceRef.current = null;
               setEventChoice(null);
               if (idx >= 0 && idx < cmd.choices.length) {
-                runEventCommands(objId, cmd.choices[idx].commands, advance);
+                runEventCommands(curObjId, cmd.choices[idx].commands, advance);
               } else {
                 advance();
               }
@@ -4743,8 +4746,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 30);
           break;
         case 'setSelfSwitch': {
-          const cur = ss[objId] ?? {};
-          ss[objId] = { ...cur, [cmd.id]: cmd.value };
+          const cur = ss[curObjId] ?? {};
+          ss[curObjId] = { ...cur, [cmd.id]: cmd.value };
           setTimeout(advance, 30);
           break;
         }
@@ -4923,7 +4926,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         case 'removeEvent': {
-          const targetId = cmd.objId || objId;
+          const targetId = cmd.objId || curObjId;
           engineRef.current.entities = engineRef.current.entities.filter(e => e.def.id !== targetId);
           setTimeout(advance, 0);
           break;
@@ -4988,7 +4991,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         case 'changeDirection': {
           const way = WAY_BY_DIR4[cmd.dir];
-          const targetId = cmd.objId || objId;
+          const targetId = cmd.objId || curObjId;
           if (targetId === 'player') playerFacingRef.current = way;
           else {
             const targetObj = engineRef.current.entities?.find(o => o.def.id === targetId);
@@ -4998,7 +5001,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           break;
         }
         case 'changeNpcMovement': {
-          const targetId = cmd.objId || objId;
+          const targetId = cmd.objId || curObjId;
           const targetObj = engineRef.current.entities?.find(o => o.def.id === targetId);
           if (targetObj) {
             // 敵/NPCの定義そのものを書き換える
@@ -5169,7 +5172,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               worldX = engineRef.current.player.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
               worldY = engineRef.current.player.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
             } else {
-              const obj = engineRef.current.entities?.find(o => o.def.id === objId);
+              const obj = engineRef.current.entities?.find(o => o.def.id === curObjId);
               if (obj) {
                 worldX = obj.x + TILE_SIZE / 2;
                 worldY = obj.y + TILE_SIZE / 2;
@@ -5270,27 +5273,57 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // phaseIndex は GUI の「ページ1」と揃えた 1 始まり。配列添字へは -1 して変換する。
           const targetPageIdx = Math.max(0, (cmd.phaseIndex ?? 1) - 1);
           const entities = engineRef.current.entities ?? [];
-          // 対象イベントの解決。優先順位: objId（RPGEN インポート時に座標から解決済み） > tx/ty座標 > 自分自身
-          let targetObj = cmd.objId ? entities.find(o => o.def.id === cmd.objId) : undefined;
-          if (!targetObj && cmd.tx != null && cmd.ty != null) {
-            const atCell = entities.find(o =>
-              o.def.col === cmd.tx && o.def.row === cmd.ty && (o.def.pages?.length ?? 0) > 0);
-            if (atCell) targetObj = atCell;
+          const gameObjects = gameDataRef.current.objects ?? [];
+
+          // 対象イベントの解決。優先順位: objId > tx/ty座標 > パラメータ無しなら自分自身
+          let targetEntity = cmd.objId ? entities.find(o => o.def.id === cmd.objId) : undefined;
+          if (!targetEntity && cmd.tx != null && cmd.ty != null) {
+            targetEntity = entities.find(o => o.def.col === cmd.tx && o.def.row === cmd.ty && (o.def.pages?.length ?? 0) > 0);
           }
-          if (!targetObj) targetObj = entities.find(o => o.def.id === objId);
-          const isSelf = !!targetObj && targetObj.def.id === objId;
-          const targetPage = targetObj?.def.pages?.[targetPageIdx];
-          if (targetObj && targetPage) {
-            targetObj.activePageIdx = targetPageIdx;
-            forcedPagesRef.current[targetObj.def.id] = targetPageIdx;
-            if (isSelf) {
-              // 自分自身の切り替えは、現在のコマンド列を破棄して新しいフェーズを続けて実行する。
+          if (!targetEntity && !cmd.objId && cmd.tx == null && cmd.ty == null) {
+            targetEntity = entities.find(o => o.def.id === curObjId);
+          }
+
+          const targetDef = targetEntity?.def
+            ?? (cmd.objId ? gameObjects.find(o => o.id === cmd.objId) : undefined)
+            ?? (cmd.tx != null && cmd.ty != null ? gameObjects.find(o => o.col === cmd.tx && o.row === cmd.ty && (o.pages?.length ?? 0) > 0) : undefined)
+            ?? (!cmd.objId && cmd.tx == null && cmd.ty == null ? gameObjects.find(o => o.id === curObjId) : undefined);
+
+          if (targetDef || targetEntity) {
+            const pages = targetDef?.pages ?? targetEntity?.def.pages;
+            const targetPage = pages?.[targetPageIdx];
+            if (targetPage) {
+              if (targetEntity) {
+                targetEntity.activePageIdx = targetPageIdx;
+                targetEntity.talked = false;
+                targetEntity.touchEventRunning = false;
+                delete (targetEntity as any)._lastTouchTime;
+              }
+
+              const targetId = targetDef?.id ?? targetEntity?.def.id;
+              if (targetId) forcedPagesRef.current[targetId] = targetPageIdx;
+              if (cmd.objId) forcedPagesRef.current[cmd.objId] = targetPageIdx;
+
+              const col = targetDef?.col ?? targetEntity?.def.col ?? cmd.tx;
+              const row = targetDef?.row ?? targetEntity?.def.row ?? cmd.ty;
+              if (col != null && row != null) {
+                forcedPagesRef.current[`${col},${row}`] = targetPageIdx;
+                lastTouchTimeMapRef.current.delete(`${col},${row}`);
+              }
+              if (targetId) lastTouchTimeMapRef.current.delete(targetId);
+
+              // 本家 #CH_PH は「ジャンプ」。相手イベントが対象でも新しいイベントを起こすのではなく、
+              // 実行中のイベントコンテキストの主体を相手へ移し、そのフェーズの先頭から続行する。
+              // ここで runEventCommands を呼び直すと eventRunningRef のガードに弾かれて何も起きない。
+              if (targetId) curObjId = targetId;
               cmds = targetPage.commands;
               index = 0;
               setTimeout(runNext, 0);
               break;
             }
-            // 別イベントのフェーズ切り替えは、そのイベントの次回発動に効くだけで実行は継続する。
+            console.warn(`[changePhase] Target page index ${targetPageIdx} (phaseIndex ${cmd.phaseIndex}) not found on target! Total pages: ${pages?.length ?? 0}`);
+          } else {
+            console.warn(`[changePhase] Target event NOT found! objId=${cmd.objId}, tx=${cmd.tx}, ty=${cmd.ty}`);
           }
           setTimeout(advance, 0);
           break;
@@ -5512,9 +5545,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     eng.keys.clear();
     eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
     actionDirRef.current = 1; actionShootCoolRef.current = 0;
+    const makeBlankGrid = (m: number[][]) => Array.from({ length: m.length }, () => Array(m[0]?.length ?? 0).fill(0));
     eng.map = JSON.parse(JSON.stringify(data.map));
-    eng.overlayMap = data.overlayMap ? JSON.parse(JSON.stringify(data.overlayMap)) : undefined;
-    eng.overheadMap = data.overheadMap ? JSON.parse(JSON.stringify(data.overheadMap)) : undefined;
+    eng.overlayMap = JSON.parse(JSON.stringify(data.overlayMap ?? makeBlankGrid(data.map)));
+    eng.overheadMap = JSON.parse(JSON.stringify(data.overheadMap ?? makeBlankGrid(data.map)));
     const sw = data.scroll?.worldCols ?? COLS; const sh = data.scroll?.worldRows ?? ROWS;
     setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - VIEW_W, data.player.start.x + data.player.w / 2 - VIEW_W / 2)));
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
@@ -11623,13 +11657,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         textToParse = raw; // will fall back to decompression inside parseRpgen call below
       }
       const manifest = await parseRpgen(textToParse);
+      const createBlankGrid = (m: number[][]) => Array.from({ length: m.length }, () => Array(m[0]?.length ?? 0).fill(0));
 
-      // シーンモードで編集中なら、ゲーム全体を作り直すのではなく「今開いているシーン」だけを
-      // 上書きする。BGM・イベント（オブジェクト）・マップは丸ごと差し替え、それ以外
-      // （プリセット・エンジン・プレイヤー設定・他シーン等）はそのまま維持する。
       if (gameData.scenes && gameData.scenes.length > 0) {
-        // タイルIDはゲーム全体で共有されるため、インポートしたタイルは既存タイルとIDが衝突しないよう
-        // 空きIDへ振り直してからマップ/上層マップの参照を書き換える（id=0の「なし」だけは共通で再利用）。
         const existingIds = Object.keys(gameData.tiles).map(Number);
         let nextTileId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
         const tileIdRemap = new Map<number, number>([[0, 0]]);
@@ -11643,11 +11673,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         const remapGrid = (grid: number[][]) => grid.map(row => row.map(cell => tileIdRemap.get(cell) ?? 0));
         const remappedMap = remapGrid(manifest.map);
-        const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : undefined;
-        const remappedOverheadMap = manifest.overheadMap ? remapGrid(manifest.overheadMap) : undefined;
-        // イベントコマンドの changeTile（#CH_SP）もタイルIDを参照しているため、マップと同じ表に沿って
-        // 振り直す。選択肢や条件分岐の中に入れ子になっているコマンドも辿らないと、
-        // インポート後に「差し替え先が全く別のタイルになる」ことになる。
+        const remappedOverlayMap = manifest.overlayMap ? remapGrid(manifest.overlayMap) : createBlankGrid(manifest.map);
+        const remappedOverheadMap = manifest.overheadMap ? remapGrid(manifest.overheadMap) : createBlankGrid(manifest.map);
+
         const remapCommandTileIds = (commands: EventCommand[]): EventCommand[] =>
           commands.map(cmd => {
             if (cmd.type === 'changeTile') return { ...cmd, tileId: tileIdRemap.get(cmd.tileId) ?? cmd.tileId };
@@ -11697,8 +11725,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }));
         const eng = engineRef.current;
         eng.map = JSON.parse(JSON.stringify(remappedMap));
-        eng.overlayMap = remappedOverlayMap ? JSON.parse(JSON.stringify(remappedOverlayMap)) : undefined;
-        eng.overheadMap = remappedOverheadMap ? JSON.parse(JSON.stringify(remappedOverheadMap)) : undefined;
+        eng.overlayMap = JSON.parse(JSON.stringify(remappedOverlayMap));
+        eng.overheadMap = JSON.parse(JSON.stringify(remappedOverheadMap));
         eng.bullets = []; eng.enemyBullets = []; eng.entities = [];
         if (manifest.player?.start) {
           eng.player.x = manifest.player.start.x;
@@ -11712,7 +11740,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         return;
       }
 
-      const preset = manifest.preset as PresetId;
+      const preset = (manifest.preset as PresetId) || 'onjReze';
       const base = clone(PRESETS[preset]);
       const blackBgRef = 'tile:#000000';
       const blackBgUrl = colorToDataUrl('#000000');
@@ -11725,9 +11753,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         player: manifest.player,
         tiles: manifest.tiles,
         map: manifest.map,
-        overlayMap: manifest.overlayMap,
-        overheadMap: manifest.overheadMap,
+        overlayMap: manifest.overlayMap ?? createBlankGrid(manifest.map),
+        overheadMap: manifest.overheadMap ?? createBlankGrid(manifest.map),
         objects: manifest.objects,
+        scenes: manifest.scenes as any,
         mapBgRef: blackBgRef,
         mapBgUrl: blackBgUrl,
         bgm: hydrateBgmFromRef(manifest.bgm),
@@ -19131,10 +19160,13 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'changePhase' && (
               <div className="space-y-2">
-                <label className="text-[10px] text-gray-400 block">移行先フェーズ番号（1〜／ページタブの番号と同じ）
+                <label className="text-[10px] text-gray-400 block">ジャンプ先フェーズ番号（1〜／ページタブの番号と同じ）
                   <input type="number" min={1} max={20} value={(cmd as any).phaseIndex ?? 1} onChange={e => onChange({ phaseIndex: Number(e.target.value) })}
                     className={`${inputCls} mt-0.5`} placeholder="1" />
                 </label>
+                <p className="text-[10px] text-gray-500 leading-snug">
+                  このコマンド以降は実行されず、指定フェーズの先頭へジャンプします。対象イベントを指定した場合はそのイベントへ実行が移ります。
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="text-[10px] text-gray-400">対象イベントX（列/空=自分）
                     <input type="number" value={(cmd as any).tx ?? ''} onChange={e => onChange({ tx: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
