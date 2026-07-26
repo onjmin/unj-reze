@@ -771,8 +771,10 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
 
     if (tool === 'floor') {
       onLayoutChange(l => {
-        if ((l.floor[r]?.[c] ?? 0) === selFloor) return l;
-        const floor = l.floor.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? selFloor : v) : row);
+        const cur = l.floor[r]?.[c] ?? 0;
+        const nextVal = (!isDrag && cur === selFloor) ? 0 : selFloor;
+        if (cur === nextVal) return l;
+        const floor = l.floor.map((row, ri) => ri === r ? row.map((v, ci) => ci === c ? nextVal : v) : row);
         return { ...l, floor };
       });
       return;
@@ -795,8 +797,8 @@ const Yume25DMaker = forwardRef<Yume25DMakerHandle, Yume25DMakerProps>(function 
       onLayoutChange(l => {
         const hit = l.billboards.find(b => b.col === c && b.row === r && (b.level ?? 0) === lv);
         if (hit && hit.tex === selSprite) {
-          const nextDir = (((hit.dir ?? 2) + 1) % 4) as Dir4;
-          return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, dir: nextDir } : b) };
+          // 同じスプライトを再クリック → 削除して取り除く
+          return { ...l, billboards: l.billboards.filter(b => b !== hit) };
         }
         if (hit) return { ...l, billboards: l.billboards.map(b => b === hit ? { ...b, tex: selSprite, dir: editDir } : b) };
         return { ...l, billboards: [...l.billboards, { id: uid(), col: c, row: r, tex: selSprite, scale: 1, dir: editDir, ...(lv > 0 ? { level: lv } : {}) }] };
