@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCountryFromHeaders, isBlockedCountry } from '@/lib/geo';
 import { kvGet, kvSetEx } from '@/lib/kv';
 import { getClientIp } from '@/lib/ip';
+import {
+  assessTls,
+  isBotUserAgent,
+  readTlsSignalsFromCf,
+  tlsSignalsToHeaderEntries,
+  EMPTY_TLS_SIGNALS,
+  type CfTlsProperties,
+  type TlsSignals,
+} from '@/lib/security/tls';
 
 // Next.js 16: middleware は proxy に改称。
 // 注意: next.config.ts が output:"export"(GitHub Pages)の場合 proxy は動作しない。
@@ -10,9 +19,12 @@ import { getClientIp } from '@/lib/ip';
 // ── レートリミット設定 ──
 const RATE_LIMIT_WINDOW_SEC = 10;
 const RATE_LIMIT_MAX = 30; // 1ウィンドウ(10s)あたりの書き込み上限 / IP
+// TLSハンドシェイクがブラウザのものではないと判定された場合の上限。
+// ブロックはせず「予算を絞る」に留める(誤検知時の被害を限定するため)。
+const RATE_LIMIT_MAX_NON_BROWSER = 5;
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-async function isRateLimited(ip: string): Promise<{ limited: boolean; retryAfter: number }> {
+async function isRateLimited(ip: string, max: number): Promise<{ limited: boolean; retryAfter: number }> {
   const windowIndex = Math.floor(Date.now() / (RATE_LIMIT_WINDOW_SEC * 1000));
   const key = `ratelimit:${ip}:${windowIndex}`;
   let count = 0;
@@ -26,7 +38,19 @@ async function isRateLimited(ip: string): Promise<{ limited: boolean; retryAfter
   }
   const nextWindowStart = (windowIndex + 1) * RATE_LIMIT_WINDOW_SEC * 1000;
   const retryAfter = Math.max(1, Math.ceil((nextWindowStart - Date.now()) / 1000));
-  return { limited: count + 1 > RATE_LIMIT_MAX, retryAfter };
+  return { limited: count + 1 > max, retryAfter };
+}
+
+/** Cloudflare Workers 上でのみ request.cf が取れる。
+ * `next dev`(workerd 外)や静的エクスポートでは取得できないため、その場合は空シグナルに倒す。 */
+async function getTlsSignals(): Promise<TlsSignals> {
+  try {
+    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
+    const { cf } = await getCloudflareContext({ async: true });
+    return readTlsSignalsFromCf(cf as CfTlsProperties | undefined);
+  } catch {
+    return EMPTY_TLS_SIGNALS;
+  }
 }
 
 const BLOCKED_HTML = `<!doctype html>
@@ -61,10 +85,19 @@ export async function middleware(request: NextRequest) {
     });
   }
 
-  // API の書き込みメソッドにレートリミット
+  // TLSを終端しているのは自分自身(Cloudflare Workers)なので、ここで直接ハンドシェイク情報を読む。
+  const tls = await getTlsSignals();
+
+  // API の書き込みメソッドにレートリミット。
+  // ブラウザを名乗りながらTLSハンドシェイクが一致しない相手は書き込み予算を絞る。
   if (pathname.startsWith('/api/') && WRITE_METHODS.has(request.method)) {
+    const userAgent = request.headers.get('user-agent') || '';
+    const claimsBrowser = !isBotUserAgent(userAgent);
+    const suspiciousTls = claimsBrowser && assessTls(tls).verdict === 'non-browser';
+    const max = suspiciousTls || !claimsBrowser ? RATE_LIMIT_MAX_NON_BROWSER : RATE_LIMIT_MAX;
+
     const ip = getClientIp(request.headers);
-    const { limited, retryAfter } = await isRateLimited(ip);
+    const { limited, retryAfter } = await isRateLimited(ip, max);
     if (limited) {
       return NextResponse.json(
         { error: 'リクエストが多すぎます。しばらくしてから再試行してください。' },
@@ -73,7 +106,16 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  // TLSシグナルを下流のルートハンドラへ受け渡す。
+  // 重要: クライアントが同名ヘッダを送りつけて指紋を偽装できないよう、
+  // 実測値が無い場合は「マージ」ではなく「削除」する。
+  const forwarded = new Headers(request.headers);
+  for (const [name, value] of tlsSignalsToHeaderEntries(tls)) {
+    if (value === null) forwarded.delete(name);
+    else forwarded.set(name, value);
+  }
+
+  return NextResponse.next({ request: { headers: forwarded } });
 }
 
 export const config = {

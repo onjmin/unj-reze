@@ -6,6 +6,7 @@ import type { OriginType } from '@/lib/types';
 import { getClientIp } from '@/lib/ip';
 import { verifyTurnstileToken } from '@/lib/security/turnstile';
 import { scoreRequest } from '@/lib/security/scoring';
+import { readTlsSignalsFromHeaders } from '@/lib/security/tls';
 import type { FingerprintSignals } from '@/lib/security/types';
 
 export async function GET(request: NextRequest) {
@@ -50,11 +51,11 @@ export async function POST(request: NextRequest) {
       const ip = getClientIp(request.headers);
       const sessionId = request.cookies.get('unj_reze_session')?.value || null;
       const userAgent = request.headers.get('user-agent') || '';
-      const ja4 = request.headers.get('x-ja4-fingerprint') || request.headers.get('x-ja3-fingerprint') || null;
+      const tls = readTlsSignalsFromHeaders(request.headers);
 
       const turnstileResult = await verifyTurnstileToken(turnstileToken ?? null, ip);
       const assessment = await scoreRequest({
-        fingerprint, ip, sessionId, userAgent, ja4,
+        fingerprint, ip, sessionId, userAgent, tls,
         turnstileOk: turnstileResult.success,
         turnstileUnreachable: turnstileResult.unreachable,
       });

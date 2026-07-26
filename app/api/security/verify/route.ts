@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getClientIp } from '@/lib/ip';
 import { verifyTurnstileToken } from '@/lib/security/turnstile';
 import { scoreRequest } from '@/lib/security/scoring';
+import { readTlsSignalsFromHeaders } from '@/lib/security/tls';
 import type { VerifyRequestBody } from '@/lib/security/types';
 
 function getSessionIdFromCookie(request: NextRequest): string | null {
@@ -28,9 +29,9 @@ export async function POST(request: NextRequest) {
   const ip = getClientIp(request.headers);
   const sessionId = getSessionIdFromCookie(request);
   const userAgent = request.headers.get('user-agent') || '';
-  // JA4/JA3 は Next.js/Netlify では取得できないため、TLSを終端する上流
-  // (Cloudflare Worker等)が注入する前提のヘッダを読む。無ければ null（判定不能）扱い。
-  const ja4 = request.headers.get('x-ja4-fingerprint') || request.headers.get('x-ja3-fingerprint') || null;
+  // TLSシグナルは proxy(middleware) が request.cf から取り出して詰め直したものだけを読む。
+  // proxy はクライアント由来の同名ヘッダを必ず上書き/削除するため、ここでの偽装は成立しない。
+  const tls = readTlsSignalsFromHeaders(request.headers);
 
   const turnstileResult = await verifyTurnstileToken(body.turnstileToken, ip);
 
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
     ip,
     sessionId,
     userAgent,
-    ja4,
+    tls,
     turnstileOk: turnstileResult.success,
     turnstileUnreachable: turnstileResult.unreachable,
   });

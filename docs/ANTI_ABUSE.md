@@ -1,13 +1,13 @@
 # Anti-Abuse / Device Identification System
 
 Stateless, no-login, multi-layered detection for IP rotation, incognito/private-tab
-recycling, and headless/automation spoofing — built for edge deployment (Netlify).
+recycling, and headless/automation spoofing — built for edge deployment (Cloudflare Workers).
 
 ## Why this exists
 
 We previously relied on client IP to recognize returning anonymous users
-(see `lib/session.ts`), but discovered Netlify's edge network — including its own
-`context.ip` — only ever exposes an internal load-balancer address in this deployment,
+(see `lib/session.ts`), but discovered the edge network — including its own
+`context.ip` — only ever exposed an internal load-balancer address in that deployment,
 not the real visitor IP. That ruled out IP as an identity or abuse signal on its own.
 This system replaces "trust the IP" with three independent, corroborating signals that
 each fail differently, so an attacker has to defeat all three simultaneously.
@@ -15,15 +15,15 @@ each fail differently, so an attacker has to defeat all three simultaneously.
 ## Architecture
 
 ```
-Browser                          Edge / Network                     Next.js API Route
-────────                         ──────────────                     ──────────────────
-1. Turnstile (invisible)         TLS handshake terminates here.      /api/security/verify
-   renders, executes right       If Cloudflare (or a custom          or inline in a write
-   before a critical action  ──▶ TLS-terminating proxy) sits    ──▶  route (see posts/route.ts):
-2. collectFingerprint()          in front, it can compute JA3/JA4    - verify Turnstile token
-   (canvas/webgl/hw/screen/      and inject it as a header before    - correlate signals in KV
-   tz/lang/platform), sent       forwarding to Netlify/Next.js.      - score 0–100
-   as raw JSON, not a hash                                          - 200 / 403 / 429
+Browser                          proxy (middleware.ts)              Next.js API Route
+────────                         ─────────────────────              ──────────────────
+1. Turnstile (invisible)         Runs on the Worker that             /api/security/verify
+   renders, executes right       terminated TLS, so it reads         or inline in a write
+   before a critical action  ──▶ request.cf directly and       ──▶  route (see posts/route.ts):
+2. collectFingerprint()          rewrites x-ja4-fingerprint /        - verify Turnstile token
+   (canvas/webgl/hw/screen/      x-tls-* (overwrite or delete,       - correlate signals in KV
+   tz/lang/platform), sent       never merge — see tls.ts).          - score 0–100
+   as raw JSON, not a hash                                           - 200 / 403 / 429
 ```
 
 ## 1. Client-side layer
@@ -96,39 +96,37 @@ different"), which a pre-hashed client blob would destroy.
 
 ## 2. Infrastructure / Edge layer — TLS fingerprinting (JA3/JA4)
 
-**Honest limitation:** Next.js API routes (`export const runtime = 'edge'`) and Netlify
-Edge Functions run in a V8 isolate with no access to the raw TLS handshake — there is no
-API in this stack to read cipher suites or extensions ourselves. This is not a bug we can
-fix in application code; the handshake is already complete by the time any JS runs.
+Reading the raw TLS handshake is impossible from inside a V8 isolate — the handshake is
+already complete by the time any JS runs. It therefore has to come from whatever terminates
+TLS. **Since the app now runs on Cloudflare Workers, that is us**, so no extra proxy layer
+is required: `request.cf` carries the handshake data directly.
 
-Two real ways to get an actual JA3/JA4 value, both requiring infrastructure *in front of*
-Netlify that terminates (or observes) the TLS connection itself:
+The flow is one-directional and lives in `lib/security/tls.ts`:
 
-**Option A — Cloudflare in front of Netlify (recommended, and consistent with already
-using Cloudflare Turnstile):** point DNS through Cloudflare, use a Worker to read
-`request.cf.botManagement.ja3Hash` / `ja4` (Enterprise Bot Management) and forward it:
+1. `middleware.ts` calls `getCloudflareContext()` and reads `request.cf` via
+   `readTlsSignalsFromCf()`.
+2. It writes the values onto the downstream request as `x-ja4-fingerprint`,
+   `x-ja3-fingerprint`, `x-tls-version`, `x-tls-cipher`.
+3. Route handlers read them back with `readTlsSignalsFromHeaders()` and pass them to
+   `scoreRequest()`.
 
-```js
-// Cloudflare Worker — fetches the origin (Netlify) with the JA4 injected as a header
-export default {
-  async fetch(request) {
-    const ja4 = request.cf?.botManagement?.ja4 ?? null;
-    const headers = new Headers(request.headers);
-    if (ja4) headers.set('x-ja4-fingerprint', ja4);
-    return fetch(request, { headers });
-  },
-};
-```
+**These headers are attacker-controllable, so step 2 overwrites or deletes them — never
+merges.** A client that sends its own `x-ja4-fingerprint` has it discarded before any
+scoring code sees it. Outside Cloudflare (`next dev`, static export) `request.cf` is
+unavailable, so every TLS header is *deleted* and the signal degrades to "unknown" rather
+than trusting client input.
 
-**Option B — custom TLS-terminating reverse proxy** (e.g. a small Go service using
-`utls`/a JA3/JA4 fingerprinting library) placed before Netlify, injecting the same
-`x-ja4-fingerprint` header.
+What is actually available depends on the plan:
 
-Either way, our backend only ever needs to **consume** that header — see
-`looksLikeBrowserTls()` in `lib/security/scoring.ts`, which reads
-`x-ja4-fingerprint` / `x-ja3-fingerprint` and returns `null` (not "mismatch") when
-absent, so the signal degrades gracefully rather than false-flagging everyone when
-this infra isn't in place yet.
+| Signal | Availability | Used for |
+|---|---|---|
+| `botManagement.ja4` / `ja3Hash` | Bot Management only | Prefix match against known-browser JA4s → high-confidence verdict |
+| `tlsVersion` | all plans | Legacy TLS (1.0/1.1) from a self-declared modern browser → low-confidence verdict |
+| `tlsCipher` | all plans | Recorded; not yet scored |
+
+`assessTls()` returns `browser` / `non-browser` / `unknown` plus a confidence level, and
+`unknown` never adds score — the signal degrades gracefully rather than false-flagging
+everyone when Bot Management isn't enabled.
 
 ## 3. Backend layer — `app/api/security/verify/route.ts`
 
@@ -198,10 +196,11 @@ where you'd rather call it as a separate pre-flight check instead of inlining.
 
 ## Known limitations (stated explicitly, not glossed over)
 
-- **JA3/JA4 requires infra we don't control from Next.js alone.** Until Cloudflare (or an
-  equivalent TLS-terminating proxy) is placed in front of Netlify and configured to inject
-  `x-ja4-fingerprint`, Pattern B falls back to UA-string heuristics only, which are
-  weaker and easier to spoof than a real TLS mismatch.
+- **A real JA4 requires Cloudflare Bot Management.** Running on Workers gives us
+  `request.cf`, but `botManagement.ja4` is populated only with Bot Management enabled.
+  Without it Pattern B is limited to `tlsVersion` (which catches legacy-TLS clients
+  claiming to be modern browsers) plus UA-string heuristics — weaker than a real
+  fingerprint mismatch, since a bot using a current TLS stack looks the same as a browser.
 - **`deviceMemory` and WebGL debug info are increasingly restricted** by Chrome's privacy
   budget and Firefox's fingerprinting protections; over time these fields will trend
   toward `null` for a growing share of real users, which is handled (treated as "no

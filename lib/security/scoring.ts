@@ -1,4 +1,5 @@
 import { kvGet, kvSetEx, kvHSet, kvHDel, kvHGetAll } from '@/lib/kv';
+import { scoreUaTlsMismatch, type TlsSignals } from './tls';
 import type { FingerprintSignals, ScoreResult } from './types';
 
 const IP_HOP_WINDOW_MS = 10 * 60 * 1000; // 10分
@@ -9,16 +10,6 @@ const SESSION_RECYCLE_THRESHOLD = 4; // 同一指紋で30分以内に異なるse
 
 const RATE_WINDOW_SEC = 10;
 const RATE_SOFT_LIMIT = 20; // 同一指紋からのアクション数ソフト上限/10秒
-
-// TLS指紋が取得できない場合のフォールバック: 既知のボット/HTTPクライアントのUser-Agent断片
-const BOT_UA_PATTERNS = [
-  /curl/i, /python-requests/i, /go-http-client/i, /axios/i,
-  /node-fetch/i, /puppeteer/i, /headlesschrome/i, /playwright/i,
-];
-
-// 「一般的なブラウザ」として知られるJA4指紋のプレフィックス例。
-// 実運用では既知ハッシュのデータベース/専用サービスと突き合わせる。ここでは代表例のみ。
-const KNOWN_BROWSER_JA4_PREFIXES = ['t13d1516h2_', 't13d1517h2_', 't13d1715h2_'];
 
 /** 高速・決定的な文字列ハッシュ（FNV-1a 32bit）。暗号強度は不要で速度を優先する。 */
 function fnv1aHash(input: string): string {
@@ -47,22 +38,13 @@ export function computeFingerprintHash(fp: FingerprintSignals): string {
   return fnv1aHash(canonical);
 }
 
-function isBotUserAgent(userAgent: string): boolean {
-  return BOT_UA_PATTERNS.some(re => re.test(userAgent));
-}
-
-/** null = TLS指紋が取得できず判定不能（Netlify単体構成など）。true/falseはブラウザ標準ハンドシェイクとの一致可否。 */
-function looksLikeBrowserTls(ja4: string | null): boolean | null {
-  if (!ja4) return null;
-  return KNOWN_BROWSER_JA4_PREFIXES.some(p => ja4.startsWith(p));
-}
-
 interface ScoreInput {
   fingerprint: FingerprintSignals;
   ip: string;
   sessionId: string | null;
   userAgent: string;
-  ja4: string | null;
+  /** proxy が request.cf から取り出してヘッダ経由で渡す TLS ハンドシェイク情報。 */
+  tls: TlsSignals;
   turnstileOk: boolean;
   turnstileUnreachable: boolean;
 }
@@ -77,7 +59,7 @@ async function pruneStale(key: string, entries: Record<string, string>, windowMs
 }
 
 export async function scoreRequest(input: ScoreInput): Promise<ScoreResult> {
-  const { fingerprint, ip, sessionId, userAgent, ja4, turnstileOk, turnstileUnreachable } = input;
+  const { fingerprint, ip, sessionId, userAgent, tls, turnstileOk, turnstileUnreachable } = input;
   const hash = computeFingerprintHash(fingerprint);
   const now = Date.now();
   const reasons: string[] = [];
@@ -114,15 +96,9 @@ export async function scoreRequest(input: ScoreInput): Promise<ScoreResult> {
   }
 
   // ── Pattern B: User-Agent / TLS mismatch ──
-  const claimsBrowser = !isBotUserAgent(userAgent);
-  const tlsLooksBrowser = looksLikeBrowserTls(ja4);
-  if (claimsBrowser && tlsLooksBrowser === false) {
-    score += 40;
-    reasons.push('ua-tls-mismatch');
-  } else if (!claimsBrowser) {
-    score += 30;
-    reasons.push('bot-user-agent');
-  }
+  const uaTls = scoreUaTlsMismatch(userAgent, tls);
+  score += uaTls.score;
+  reasons.push(...uaTls.reasons);
 
   // ── レートリミット（このスコアリング系を通過するアクションの頻度） ──
   const windowIndex = Math.floor(now / (RATE_WINDOW_SEC * 1000));
