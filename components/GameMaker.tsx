@@ -967,7 +967,10 @@ type PickTarget =
   | { t: 'playerMcSkin' }
   | { t: 'effectImage'; id: string }
   | { t: 'effectSfx'; id: string }
-  | { t: 'cmdChangeSprite' };
+  | { t: 'cmdChangeSprite' }
+  | { t: 'cmdImage' }
+  | { t: 'cmdBgm' }
+  | { t: 'cmdSfx' };
 
 const SpriteThumbnail = ({
   spriteRef,
@@ -1519,7 +1522,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [eventChoice, setEventChoice] = useState<EventChoiceState | null>(null);
 
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: PickTarget } | null>(null);
-  const cmdPickCallbackRef = useRef<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>(null);
+  const cmdPickCallbackRef = useRef<((res: PickResult) => void) | null>(null);
   const [showControlGuide, setShowControlGuide] = useState(false);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameMsg, setGameMsg] = useState<{ text: string; mode: 'instant' | 'timed'; onDismiss: () => void } | null>(null);
@@ -5501,7 +5504,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return false;
   }, [findActivePage, runEventCommands]);
 
-  const previewMmlAsset = useCallback(async (_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' }) => {
+  const previewMmlAsset = useCallback(async (_key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' | 'nicovideo' | 'soundcloud' }) => {
     previewStopRef.current?.();
     previewStopRef.current = null;
     if (!asset?.src) return;
@@ -11542,7 +11545,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return { ref: res.ref, src, type };
     };
     if (target.t === 'player') setGameData(p => ({ ...p, player: { ...p.player, spriteRef: res.ref, spriteUrl: res.url } }));
-    else if (target.t === 'cmdChangeSprite') { if (cmdPickCallbackRef.current) cmdPickCallbackRef.current({ spriteRef: res.ref, spriteUrl: res.url }); }
+    else if (target.t === 'cmdChangeSprite' || target.t === 'cmdImage' || target.t === 'cmdBgm' || target.t === 'cmdSfx') { if (cmdPickCallbackRef.current) cmdPickCallbackRef.current(res); }
     else if (target.t === 'selObjSprite') { if (selectedObjId) setGameData(p => ({ ...p, objects: p.objects.map(o => o.id === selectedObjId ? { ...o, spriteRef: res.ref, spriteUrl: res.url } : o) })); }
     else if (target.t === 'mapBg') { ensureImage(res.url); setGameData(p => ({ ...p, mapBgRef: res.ref, mapBgUrl: res.url })); }
     else if (target.t === 'objsprite') setObjTemplate(o => ({ ...o, spriteRef: res.ref, spriteUrl: res.url }));
@@ -11612,6 +11615,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       });
     }
   };
+
+  const handlePickAsset = useCallback((target: PickTarget) => {
+    const isBgmMode = target.t === 'cmdBgm' || target.t === 'cmdSfx' || target.t === 'bgm' || target.t === 'battleBgm' || target.t === 'bossBgm' || target.t === 'sfx' || target.t === 'titleBgm' || target.t === 'endingBgm' || target.t === 'sceneBgm' || target.t === 'effectSfx' || target.t === 'yumeTexSound';
+    setPicker({ mode: isBgmMode ? 'bgm' : 'image', target });
+  }, []);
 
   const addTile = () => {
     const id = Math.max(...Object.keys(gameData.tiles).map(Number)) + 1;
@@ -15596,11 +15604,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           switches={gameData.switches ?? []}
                           items={gameData.items ?? []}
                           effects={gameData.effects ?? []}
+                          tiles={gameData.tiles}
                           objects={gameData.objects ?? []}
                           setPreviewCommand={setPreviewCommand}
-                          onPickImage={target => setPicker({ mode: 'image', target })}
+                          onPickImage={handlePickAsset}
                           imgCache={imgCache}
                           cmdPickCallbackRef={cmdPickCallbackRef}
+                          previewMmlAsset={previewMmlAsset}
                         />
                       </div>
                     ) : (
@@ -15737,11 +15747,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             switches={gameData.switches ?? []}
                             items={gameData.items ?? []}
                             effects={gameData.effects ?? []}
+                            tiles={gameData.tiles}
                             objects={gameData.objects ?? []}
                             setPreviewCommand={setPreviewCommand}
-                            onPickImage={target => setPicker({ mode: 'image', target })}
+                            onPickImage={handlePickAsset}
                             imgCache={imgCache}
                             cmdPickCallbackRef={cmdPickCallbackRef}
+                            previewMmlAsset={previewMmlAsset}
                           />
                         </div>
                       );
@@ -16292,11 +16304,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           switches={gameData.switches ?? []}
                           items={gameData.items ?? []}
                           effects={gameData.effects ?? []}
+                          tiles={gameData.tiles}
                           objects={gameData.objects ?? []}
                           setPreviewCommand={setPreviewCommand}
-                          onPickImage={target => setPicker({ mode: 'image', target })}
+                          onPickImage={handlePickAsset}
                           imgCache={imgCache}
                           cmdPickCallbackRef={cmdPickCallbackRef}
+                          previewMmlAsset={previewMmlAsset}
                         />
                       )}
                     </>) : (
@@ -18277,7 +18291,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         return (
           <ContentPicker
             mode={picker.mode}
-            bgmKind={target.t === 'sfx' ? 'sfx' : 'bgm'}
+            bgmKind={target.t === 'sfx' || target.t === 'cmdSfx' ? 'sfx' : 'bgm'}
             userId={userId}
             currentRef={currentRef}
             onPick={applyPick}
@@ -18373,8 +18387,8 @@ const COMMAND_LABELS: Record<EventCommand['type'], string> = {
 
 const NEW_COMMAND = (): EventCommand => ({ type: 'message', text: '' });
 
-function EventPageEditor({ pages, setPages, switches, items, effects, objects = [], setPreviewCommand, onPickImage, imgCache, cmdPickCallbackRef }:
-  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[]; objects?: ObjectDef[]; setPreviewCommand: (cmd: EventCommand | null) => void; onPickImage?: (target: PickTarget) => void; imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>; cmdPickCallbackRef?: React.MutableRefObject<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>; }) {
+function EventPageEditor({ pages, setPages, switches, items, effects, tiles, objects = [], setPreviewCommand, onPickImage, imgCache, cmdPickCallbackRef, previewMmlAsset }:
+  { pages: EventPage[]; setPages: (p: EventPage[]) => void; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[]; tiles?: Record<number, TileDef>; objects?: ObjectDef[]; setPreviewCommand: (cmd: EventCommand | null) => void; onPickImage?: (target: PickTarget) => void; imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>; cmdPickCallbackRef?: React.MutableRefObject<((res: PickResult) => void) | null>; previewMmlAsset?: (key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' | 'nicovideo' | 'soundcloud' }) => void; }) {
   const [expanded, setExpanded] = useState<number>(0);
   const [detailsCmdIndex, setDetailsCmdIndex] = useState<{ pi: number; ci: number } | null>(null);
   const addPage = () => {
@@ -18412,7 +18426,7 @@ function EventPageEditor({ pages, setPages, switches, items, effects, objects = 
     <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
       {detailsCmdIndex && (
         <EventCommandDetailsModal
-          switches={switches} items={items} effects={effects} objects={objects}
+          switches={switches} items={items} effects={effects} tiles={tiles} objects={objects}
           cmd={pages[detailsCmdIndex.pi].commands[detailsCmdIndex.ci]}
           onChange={(patch) => {
             const newCmd = { ...pages[detailsCmdIndex.pi].commands[detailsCmdIndex.ci], ...patch } as EventCommand;
@@ -18423,6 +18437,7 @@ function EventPageEditor({ pages, setPages, switches, items, effects, objects = 
           onPickImage={onPickImage}
           imgCache={imgCache}
           cmdPickCallbackRef={cmdPickCallbackRef}
+          previewMmlAsset={previewMmlAsset}
         />
       )}
       <div className="flex items-center justify-between">
@@ -18592,10 +18607,12 @@ function NestedCommandList({
   switches,
   items,
   effects,
+  tiles,
   objects = [],
   onPickImage,
   imgCache,
   cmdPickCallbackRef,
+  previewMmlAsset,
 }: {
   label?: string;
   commands: EventCommand[];
@@ -18603,10 +18620,12 @@ function NestedCommandList({
   switches: SwitchDef[];
   items: ItemDef[];
   effects: EffectPreset[];
+  tiles?: Record<number, TileDef>;
   objects?: ObjectDef[];
   onPickImage?: (target: PickTarget) => void;
   imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>;
-  cmdPickCallbackRef?: React.MutableRefObject<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>;
+  cmdPickCallbackRef?: React.MutableRefObject<((res: PickResult) => void) | null>;
+  previewMmlAsset?: (key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' | 'nicovideo' | 'soundcloud' }) => void;
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
@@ -18659,10 +18678,12 @@ function NestedCommandList({
           switches={switches}
           items={items}
           effects={effects}
+          tiles={tiles}
           objects={objects}
           onPickImage={onPickImage}
           imgCache={imgCache}
           cmdPickCallbackRef={cmdPickCallbackRef}
+          previewMmlAsset={previewMmlAsset}
           onClose={() => setEditingIndex(null)}
           onChange={patch => {
             const updated = [...commands];
@@ -18678,14 +18699,16 @@ function NestedCommandList({
 
 // ── 単一イベントコマンドエディタ ──
 
-function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [], onChange, onClose, onPickImage, imgCache, cmdPickCallbackRef }: {
+function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, objects = [], onChange, onClose, onPickImage, imgCache, cmdPickCallbackRef, previewMmlAsset }: {
   cmd: EventCommand; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[];
+  tiles?: Record<number, TileDef>;
   /** 対象オブジェクト選択（アイコンから選ぶ）用の一覧。 */
   objects?: ObjectDef[];
   onChange: (patch: Partial<EventCommand>) => void; onClose: () => void;
   onPickImage?: (target: PickTarget) => void;
   imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>;
-  cmdPickCallbackRef?: React.MutableRefObject<((res: { spriteRef: string; spriteUrl?: string }) => void) | null>;
+  cmdPickCallbackRef?: React.MutableRefObject<((res: PickResult) => void) | null>;
+  previewMmlAsset?: (key: string, asset?: { src?: string; type?: 'youtube' | 'mml' | 'direct' | 'nicovideo' | 'soundcloud' }) => void;
 }) {
   const type = cmd.type;
   // コマンドごとに持つフィールドが違うため、詳細UIでは union を絞らずこの別名から読む。
@@ -18811,10 +18834,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                         switches={switches}
                         items={items}
                         effects={effects}
+                        tiles={tiles}
                         objects={objects}
                         onPickImage={onPickImage}
                         imgCache={imgCache}
                         cmdPickCallbackRef={cmdPickCallbackRef}
+                        previewMmlAsset={previewMmlAsset}
                       />
                     </div>
                   ))}
@@ -18844,10 +18869,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                   switches={switches}
                   items={items}
                   effects={effects}
+                  tiles={tiles}
                   objects={objects}
                   onPickImage={onPickImage}
                   imgCache={imgCache}
                   cmdPickCallbackRef={cmdPickCallbackRef}
+                  previewMmlAsset={previewMmlAsset}
                 />
                 <NestedCommandList
                   label="条件不一致時（Else）の命令"
@@ -18856,10 +18883,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                   switches={switches}
                   items={items}
                   effects={effects}
+                  tiles={tiles}
                   objects={objects}
                   onPickImage={onPickImage}
                   imgCache={imgCache}
                   cmdPickCallbackRef={cmdPickCallbackRef}
+                  previewMmlAsset={previewMmlAsset}
                 />
               </div>
             )}
@@ -18882,10 +18911,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                   switches={switches}
                   items={items}
                   effects={effects}
+                  tiles={tiles}
                   objects={objects}
                   onPickImage={onPickImage}
                   imgCache={imgCache}
                   cmdPickCallbackRef={cmdPickCallbackRef}
+                  previewMmlAsset={previewMmlAsset}
                 />
                 <NestedCommandList
                   label="条件不一致時（Else）の命令"
@@ -18894,10 +18925,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                   switches={switches}
                   items={items}
                   effects={effects}
+                  tiles={tiles}
                   objects={objects}
                   onPickImage={onPickImage}
                   imgCache={imgCache}
                   cmdPickCallbackRef={cmdPickCallbackRef}
+                  previewMmlAsset={previewMmlAsset}
                 />
               </div>
             )}
@@ -18970,10 +19003,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                   switches={switches}
                   items={items}
                   effects={effects}
+                  tiles={tiles}
                   objects={objects}
                   onPickImage={onPickImage}
                   imgCache={imgCache}
                   cmdPickCallbackRef={cmdPickCallbackRef}
+                  previewMmlAsset={previewMmlAsset}
                 />
                 <NestedCommandList
                   label="条件不一致時（Else）の命令"
@@ -18982,10 +19017,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                   switches={switches}
                   items={items}
                   effects={effects}
+                  tiles={tiles}
                   objects={objects}
                   onPickImage={onPickImage}
                   imgCache={imgCache}
                   cmdPickCallbackRef={cmdPickCallbackRef}
+                  previewMmlAsset={previewMmlAsset}
                 />
               </div>
             )}
@@ -19008,10 +19045,67 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
               </div>
             )}
             {type === 'changeBgm' && (
-              <label className="text-[10px] text-gray-400 block">BGM参照（asset ref）
-                <input value={(cmd as any).bgmRef ?? ''} onChange={e => onChange({ bgmRef: e.target.value })}
-                  className={`${inputCls} mt-0.5`} placeholder="youtube:動画ID / direct:https://… （空=停止）" />
-              </label>
+              <div className="space-y-2.5">
+                <label className="text-[10px] text-gray-400 block mb-1">BGM選択</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cmdPickCallbackRef) {
+                      cmdPickCallbackRef.current = (res: PickResult) => {
+                        onChange({ bgmRef: res.ref } as Partial<EventCommand>);
+                      };
+                    }
+                    onPickImage?.({ t: 'cmdBgm' });
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-emerald-300 font-bold transition"
+                >
+                  <Music size={14} className="text-emerald-400" />
+                  BGMを参照
+                </button>
+                <div className="flex items-center gap-2 border border-gray-700 bg-gray-900 rounded p-2 mt-1">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[10px] text-gray-300 truncate font-mono">{cv.bgmRef ? refLabel(cv.bgmRef) : '（停止）'}</div>
+                  </div>
+                  {cv.bgmRef && previewMmlAsset && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const asset = bgmRefToAsset(cv.bgmRef);
+                        if (asset) previewMmlAsset('cmdBgm', asset);
+                      }}
+                      className="px-2 py-1 rounded text-[10px] text-emerald-300 hover:text-emerald-200 border border-emerald-800 bg-emerald-950/40"
+                    >
+                      ▶ 試聴
+                    </button>
+                  )}
+                  {cv.bgmRef && (
+                    <button
+                      type="button"
+                      onClick={() => onChange({ bgmRef: '' } as Partial<EventCommand>)}
+                      className="text-gray-400 hover:text-red-400 p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+                {cv.bgmRef && (
+                  <>
+                    <BgmVolumeSettings
+                      bgm={{ ref: cv.bgmRef }}
+                      onChange={(newRef) => onChange({ bgmRef: newRef } as Partial<EventCommand>)}
+                    />
+                    <MmlLoopSettings
+                      bgm={{ ref: cv.bgmRef }}
+                      onChange={(newRef) => onChange({ bgmRef: newRef } as Partial<EventCommand>)}
+                    />
+                  </>
+                )}
+                <details className="text-[10px] text-gray-500">
+                  <summary className="cursor-pointer hover:text-gray-400">直接テキスト入力</summary>
+                  <input value={cv.bgmRef ?? ''} onChange={e => onChange({ bgmRef: e.target.value })}
+                    className={`${inputCls} mt-1`} placeholder="youtube:動画ID / direct:https://… （空=停止）" />
+                </details>
+              </div>
             )}
             {type === 'changeDirection' && (
               <div className="space-y-2">
@@ -19092,8 +19186,59 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                 rows={2} className={inputCls} placeholder="頭上メッセージ" />
             )}
             {type === 'playSound' && (
-              <input value={(cmd as any).src ?? ''} onChange={e => onChange({ src: e.target.value })}
-                className={inputCls} placeholder="効果音URL（mp3）" />
+              <div className="space-y-2.5">
+                <label className="text-[10px] text-gray-400 block mb-1">効果音選択</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cmdPickCallbackRef) {
+                      cmdPickCallbackRef.current = (res: PickResult) => {
+                        onChange({ src: res.ref || res.url || '' } as Partial<EventCommand>);
+                      };
+                    }
+                    onPickImage?.({ t: 'cmdSfx' });
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-emerald-300 font-bold transition"
+                >
+                  <Music size={14} className="text-emerald-400" />
+                  効果音を参照
+                </button>
+                {cv.src && (
+                  <div className="flex items-center gap-2 border border-gray-700 bg-gray-900 rounded p-2 mt-1">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] text-gray-300 truncate font-mono">{refLabel(cv.src)}</div>
+                    </div>
+                    {previewMmlAsset && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const asset = bgmRefToAsset(cv.src) ?? { type: 'direct', src: cv.src };
+                          previewMmlAsset('cmdPlaySound', asset);
+                        }}
+                        className="px-2 py-1 rounded text-[10px] text-emerald-300 hover:text-emerald-200 border border-emerald-800 bg-emerald-950/40"
+                      >
+                        ▶ 試聴
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onChange({ src: '' } as Partial<EventCommand>)}
+                      className="text-gray-400 hover:text-red-400 p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
+                <details className="text-[10px] text-gray-500">
+                  <summary className="cursor-pointer hover:text-gray-400">直接入力（URL/参照）</summary>
+                  <input
+                    value={cv.src ?? ''}
+                    onChange={e => onChange({ src: e.target.value })}
+                    className={`${inputCls} mt-1`}
+                    placeholder="効果音URL (mp3) や参照キー"
+                  />
+                </details>
+              </div>
             )}
             {type === 'changeSprite' && (
               <div className="space-y-2.5">
@@ -19108,8 +19253,8 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                     type="button"
                     onClick={() => {
                       if (cmdPickCallbackRef) {
-                        cmdPickCallbackRef.current = (res: { spriteRef: string; spriteUrl?: string }) => {
-                          onChange({ spriteRef: res.spriteRef, spriteUrl: res.spriteUrl || undefined } as Partial<EventCommand>);
+                        cmdPickCallbackRef.current = (res: PickResult) => {
+                          onChange({ spriteRef: res.ref, spriteUrl: res.url || undefined } as Partial<EventCommand>);
                         };
                       }
                       onPickImage?.({ t: 'cmdChangeSprite' });
@@ -19150,84 +19295,205 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                 </details>
               </div>
             )}
-            {type === 'changeTile' && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="text-[10px] text-gray-400">列（X）
-                    <input type="number" min={0} value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) } as Partial<EventCommand>)}
-                      className={`${inputCls} mt-0.5`} placeholder="0" />
+            {type === 'changeTile' && (() => {
+              const selectedTile = tiles?.[cv.tileId ?? 0];
+              const tileList = tiles ? Object.entries(tiles) : [];
+              return (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-[10px] text-gray-400">列（X）
+                      <input type="number" min={0} value={cv.col ?? 0} onChange={e => onChange({ col: Number(e.target.value) } as Partial<EventCommand>)}
+                        className={`${inputCls} mt-0.5`} placeholder="0" />
+                    </label>
+                    <label className="text-[10px] text-gray-400">行（Y）
+                      <input type="number" min={0} value={cv.row ?? 0} onChange={e => onChange({ row: Number(e.target.value) } as Partial<EventCommand>)}
+                        className={`${inputCls} mt-0.5`} placeholder="0" />
+                    </label>
+                  </div>
+                  <label className="text-[10px] text-gray-400 block">レイヤー
+                    <select value={cv.layer ?? 'floor'} onChange={e => onChange({ layer: e.target.value as 'floor' | 'overlay' } as Partial<EventCommand>)}
+                      className={`${inputCls} mt-0.5`}>
+                      <option value="floor">地面</option>
+                      <option value="overlay">置物（中層）</option>
+                    </select>
                   </label>
-                  <label className="text-[10px] text-gray-400">行（Y）
-                    <input type="number" min={0} value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) } as Partial<EventCommand>)}
-                      className={`${inputCls} mt-0.5`} placeholder="0" />
-                  </label>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">差し替えるタイル選択</label>
+                    {tileList.length > 0 && (
+                      <div className="grid grid-cols-5 gap-1.5 max-h-36 overflow-y-auto p-1.5 border border-gray-700 bg-gray-950 rounded mb-1">
+                        {tileList.map(([idStr, t]) => {
+                          const idNum = Number(idStr);
+                          const isSelected = (cv.tileId ?? 0) === idNum;
+                          const imgUrl = t.imageUrl || imageRefToUrl(t.imageRef || '');
+                          return (
+                            <button
+                              key={idNum}
+                              type="button"
+                              onClick={() => onChange({ tileId: idNum } as Partial<EventCommand>)}
+                              className={`flex flex-col items-center justify-center p-1 rounded border transition ${
+                                isSelected ? 'border-blue-400 bg-blue-900/40' : 'border-gray-800 hover:border-gray-600 bg-gray-900'
+                              }`}
+                              title={`${t.name || `タイル#${idNum}`}`}
+                            >
+                              {imgUrl ? (
+                                <img src={imgUrl} className="w-6 h-6 object-contain" alt={`tile-${idNum}`} />
+                              ) : (
+                                <div className="w-6 h-6 rounded" style={{ backgroundColor: t.color || '#444' }} />
+                              )}
+                              <span className="text-[9px] text-gray-400 font-mono mt-0.5 truncate max-w-full">#{idNum}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {selectedTile && (
+                      <div className="flex items-center gap-2 border border-gray-700 bg-gray-900 rounded p-1.5 text-[10px]">
+                        {selectedTile.imageUrl || imageRefToUrl(selectedTile.imageRef || '') ? (
+                          <img src={selectedTile.imageUrl || imageRefToUrl(selectedTile.imageRef || '') || ''} className="w-6 h-6 object-contain" alt="tile" />
+                        ) : (
+                          <div className="w-6 h-6 rounded shrink-0" style={{ backgroundColor: selectedTile.color || '#444' }} />
+                        )}
+                        <span className="text-gray-300 font-bold flex-1 truncate">{selectedTile.name || `タイル#${cv.tileId}`}</span>
+                        <span className="text-gray-500 font-mono text-[9px]">ID: {cv.tileId}</span>
+                      </div>
+                    )}
+                  </div>
+                  <details className="text-[10px] text-gray-500">
+                    <summary className="cursor-pointer hover:text-gray-400">直接数値入力</summary>
+                    <label className="text-[10px] text-gray-400 block mt-1">タイル番号
+                      <input type="number" min={0} value={cv.tileId ?? 0} onChange={e => onChange({ tileId: Number(e.target.value) } as Partial<EventCommand>)}
+                        className={`${inputCls} mt-0.5`} placeholder="0（なし）" />
+                    </label>
+                  </details>
                 </div>
-                <label className="text-[10px] text-gray-400 block">レイヤー
-                  <select value={(cmd as any).layer ?? 'floor'} onChange={e => onChange({ layer: e.target.value as 'floor' | 'overlay' } as Partial<EventCommand>)}
-                    className={`${inputCls} mt-0.5`}>
-                    <option value="floor">地面</option>
-                    <option value="overlay">置物（中層）</option>
-                  </select>
-                </label>
-                <label className="text-[10px] text-gray-400 block">差し替えるタイル番号
-                  <input type="number" min={0} value={(cmd as any).tileId ?? 0} onChange={e => onChange({ tileId: Number(e.target.value) } as Partial<EventCommand>)}
-                    className={`${inputCls} mt-0.5`} placeholder="0（なし）" />
-                </label>
-              </div>
-            )}
+              );
+            })()}
             {type === 'changeBackground' && (
-              <div className="space-y-2">
-                <label className="text-[10px] text-gray-400 block">背景参照（asset ref）
-                  <input value={(cmd as any).bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="tile:#000000 / url:… 等" />
-                </label>
-                <label className="text-[10px] text-gray-400 block">背景画像URL / BGM ID
-                  <input value={(cmd as any).bgUrl ?? ''} onChange={e => onChange({ bgUrl: e.target.value || undefined } as Partial<EventCommand>)}
-                    className={`${inputCls} mt-0.5`} placeholder="https://… または YouTube ID" />
-                </label>
-                {(cmd as any).bgUrl && /^https?:\/\//.test((cmd as any).bgUrl) && (
-                  <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
-                    <img src={(cmd as any).bgUrl} className="max-h-24 object-contain" alt="preview" />
+              <div className="space-y-2.5">
+                <label className="text-[10px] text-gray-400 block mb-1">背景画像選択</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (cmdPickCallbackRef) {
+                      cmdPickCallbackRef.current = (res: PickResult) => {
+                        onChange({ bgRef: res.ref, bgUrl: res.url } as Partial<EventCommand>);
+                      };
+                    }
+                    onPickImage?.({ t: 'cmdImage' });
+                  }}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-blue-300 font-bold transition"
+                >
+                  <ImageIcon size={14} className="text-blue-400" />
+                  背景画像を参照
+                </button>
+                {(cv.bgUrl || cv.bgRef) && (
+                  <div className="flex items-center gap-2 border border-gray-700 bg-gray-900 rounded p-2 mt-1">
+                    {cv.bgUrl ? (
+                      <img src={cv.bgUrl} className="w-8 h-8 object-contain rounded" alt="bg-preview" />
+                    ) : (
+                      <div className="w-8 h-8 bg-gray-800 rounded flex items-center justify-center text-xs">🖼</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] text-gray-300 truncate font-mono">{refLabel(cv.bgRef || cv.bgUrl)}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onChange({ bgRef: '', bgUrl: undefined } as Partial<EventCommand>)}
+                      className="text-gray-400 hover:text-red-400 p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 )}
+                <details className="text-[10px] text-gray-500">
+                  <summary className="cursor-pointer hover:text-gray-400">直接入力（高度）</summary>
+                  <div className="space-y-2 mt-2 pt-2 border-t border-gray-800">
+                    <label className="text-[10px] text-gray-400 block">背景参照（asset ref）
+                      <input value={cv.bgRef ?? ''} onChange={e => onChange({ bgRef: e.target.value })}
+                        className={`${inputCls} mt-0.5`} placeholder="tile:#000000 / url:… 等" />
+                    </label>
+                    <label className="text-[10px] text-gray-400 block">背景画像URL / BGM ID
+                      <input value={cv.bgUrl ?? ''} onChange={e => onChange({ bgUrl: e.target.value || undefined } as Partial<EventCommand>)}
+                        className={`${inputCls} mt-0.5`} placeholder="https://… または YouTube ID" />
+                    </label>
+                  </div>
+                </details>
               </div>
             )}
             {type === 'showImage' && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 <div className="grid grid-cols-2 gap-2">
                   <label className="text-[10px] text-gray-400">管理番号(ID)
-                    <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                    <input value={cv.imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
                       className={`${inputCls} mt-0.5`} placeholder="1〜50" />
                   </label>
                   <label className="text-[10px] text-gray-400">表示ミリ秒(ms)
-                    <input type="number" value={(cmd as any).ms ?? 100} onChange={e => onChange({ ms: Number(e.target.value) })}
+                    <input type="number" value={cv.ms ?? 100} onChange={e => onChange({ ms: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="100" />
                   </label>
                 </div>
-                <label className="text-[10px] text-gray-400 block">画像URL
-                  <input value={(cmd as any).url ?? ''} onChange={e => onChange({ url: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="https://…" />
-                </label>
+
+                <div>
+                  <label className="text-[10px] text-gray-400 block mb-1">画像選択</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (cmdPickCallbackRef) {
+                        cmdPickCallbackRef.current = (res: PickResult) => {
+                          onChange({ url: res.url || res.ref } as Partial<EventCommand>);
+                        };
+                      }
+                      onPickImage?.({ t: 'cmdImage' });
+                    }}
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs text-blue-300 font-bold transition"
+                  >
+                    <ImageIcon size={14} className="text-blue-400" />
+                    画像を参照
+                  </button>
+                </div>
+
+                {cv.url && (
+                  <div className="flex items-center gap-2 border border-gray-700 bg-gray-900 rounded p-2">
+                    <img src={cv.url} className="w-8 h-8 object-contain rounded" alt="preview" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] text-gray-300 truncate font-mono">{cv.url}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onChange({ url: '' } as Partial<EventCommand>)}
+                      className="text-gray-400 hover:text-red-400 p-1"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
+
+                <details className="text-[10px] text-gray-500">
+                  <summary className="cursor-pointer hover:text-gray-400">画像URL直接入力</summary>
+                  <input value={cv.url ?? ''} onChange={e => onChange({ url: e.target.value })}
+                    className={`${inputCls} mt-1`} placeholder="https://…" />
+                </details>
+
                 <div className="grid grid-cols-2 gap-2">
                   <label className="text-[10px] text-gray-400">表示位置X
-                    <input type="number" value={(cmd as any).x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
+                    <input type="number" value={cv.x ?? 0} onChange={e => onChange({ x: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="X" />
                   </label>
                   <label className="text-[10px] text-gray-400">表示位置Y
-                    <input type="number" value={(cmd as any).y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
+                    <input type="number" value={cv.y ?? 0} onChange={e => onChange({ y: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="Y" />
                   </label>
                   <label className="text-[10px] text-gray-400">表示幅W(0=元幅)
-                    <input type="number" value={(cmd as any).w ?? 0} onChange={e => onChange({ w: Number(e.target.value) })}
+                    <input type="number" value={cv.w ?? 0} onChange={e => onChange({ w: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="W" />
                   </label>
                   <label className="text-[10px] text-gray-400">表示高H(0=元高)
-                    <input type="number" value={(cmd as any).h ?? 0} onChange={e => onChange({ h: Number(e.target.value) })}
+                    <input type="number" value={cv.h ?? 0} onChange={e => onChange({ h: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="H" />
                   </label>
                 </div>
                 <label className="text-[10px] text-gray-400 block">透明度%（0〜100）
-                  <input type="number" min={0} max={100} value={(cmd as any).opacity ?? 100} onChange={e => onChange({ opacity: Number(e.target.value) })}
+                  <input type="number" min={0} max={100} value={cv.opacity ?? 100} onChange={e => onChange({ opacity: Number(e.target.value) })}
                     className={`${inputCls} mt-0.5`} placeholder="100" />
                 </label>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-1 bg-gray-900/50 p-1.5 rounded">
@@ -19239,20 +19505,15 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
                     ['lp', 'ループ再生'],
                   ] as const).map(([k, label]) => (
                     <label key={k} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
-                      <input type="checkbox" checked={!!(cmd as any)[k]}
+                      <input type="checkbox" checked={!!cv[k]}
                         onChange={e => onChange({ [k]: e.target.checked || undefined } as any)}
                         className="accent-blue-500 w-3 h-3" />
                       {label}
                     </label>
                   ))}
                 </div>
-                {(cmd as any).frames?.length > 1 && (
-                  <p className="text-[9px] text-gray-500">アニメーション {(cmd as any).frames.length} フレーム（切り取り等の詳細はインポート結果を保持）。</p>
-                )}
-                {(cmd as any).url && (
-                  <div className="flex justify-center border border-gray-700 bg-gray-900 rounded p-1 mt-2">
-                    <img src={(cmd as any).url} className="max-h-24 object-contain" alt="preview" />
-                  </div>
+                {cv.frames?.length > 1 && (
+                  <p className="text-[9px] text-gray-500">アニメーション {cv.frames.length} フレーム（切り取り等の詳細はインポート結果を保持）。</p>
                 )}
               </div>
             )}
@@ -19289,7 +19550,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
               </div>
             )}
             {type === 'followImage' && (() => {
-              const dirs = (cmd as any).directions ?? {};
+              const dirs = cv.directions ?? {};
               const DIR_LABELS: Record<'U' | 'D' | 'L' | 'R', string> = { U: '上', D: '下', L: '左', R: '右' };
               const setDir = (d: 'U' | 'D' | 'L' | 'R', patch: any) => {
                 const base = dirs[d] ?? { url: '', x: 0, y: 0 };
@@ -19297,31 +19558,59 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [],
               };
               const clearDir = (d: 'U' | 'D' | 'L' | 'R') => onChange({ directions: { ...dirs, [d]: undefined } } as Partial<EventCommand>);
               return (
-                <div className="space-y-2">
+                <div className="space-y-2.5">
                   <label className="text-[10px] text-gray-400 block">管理番号（ID）
-                    <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
+                    <input value={cv.imgId ?? ''} onChange={e => onChange({ imgId: e.target.value })}
                       className={`${inputCls} mt-0.5`} placeholder="1〜50" />
                   </label>
                   <label className="text-[10px] text-gray-400 block">追随対象ID
-                    <input value={(cmd as any).targetObjId ?? 'player'} onChange={e => onChange({ targetObjId: e.target.value })}
+                    <input value={cv.targetObjId ?? 'player'} onChange={e => onChange({ targetObjId: e.target.value })}
                       className={`${inputCls} mt-0.5`} placeholder="player / obj-human-X-Y" />
                   </label>
                   {(['U', 'D', 'L', 'R'] as const).map(d => (
-                    <div key={d} className="bg-gray-900/50 p-1.5 rounded space-y-1">
+                    <div key={d} className="bg-gray-900/50 p-2 rounded space-y-1.5 border border-gray-800">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-gray-300 font-bold">{DIR_LABELS[d]}向き</span>
+                        <span className="text-[10px] text-gray-300 font-bold">{DIR_LABELS[d]}向き画像</span>
                         {dirs[d] && (
                           <button onClick={() => clearDir(d)} className="text-red-400 hover:text-red-300 text-[9px]">削除</button>
                         )}
                       </div>
-                      <input value={dirs[d]?.url ?? ''} onChange={e => setDir(d, { url: e.target.value })}
-                        className={inputCls} placeholder={`${DIR_LABELS[d]}向きの画像URL`} />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (cmdPickCallbackRef) {
+                            cmdPickCallbackRef.current = (res: PickResult) => {
+                              setDir(d, { url: res.url || res.ref });
+                            };
+                          }
+                          onPickImage?.({ t: 'cmdImage' });
+                        }}
+                        className="w-full flex items-center justify-center gap-1 py-1 px-2 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-blue-300 font-bold transition"
+                      >
+                        <ImageIcon size={12} className="text-blue-400" />
+                        {DIR_LABELS[d]}向き画像を参照
+                      </button>
+                      {dirs[d]?.url && (
+                        <div className="flex items-center gap-2 border border-gray-800 bg-gray-950 rounded p-1.5">
+                          <img src={dirs[d].url} className="w-6 h-6 object-contain rounded" alt={`${d}-preview`} />
+                          <span className="text-[9px] text-gray-400 truncate flex-1 font-mono">{dirs[d].url}</span>
+                        </div>
+                      )}
+                      <details className="text-[9px] text-gray-500">
+                        <summary className="cursor-pointer hover:text-gray-400">URL直接入力</summary>
+                        <input value={dirs[d]?.url ?? ''} onChange={e => setDir(d, { url: e.target.value })}
+                          className={`${inputCls} mt-1`} placeholder={`${DIR_LABELS[d]}向きの画像URL`} />
+                      </details>
                       {dirs[d] && (
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <input type="number" value={dirs[d]?.x ?? 0} onChange={e => setDir(d, { x: Number(e.target.value) })}
-                            className={inputCls} placeholder="X" />
-                          <input type="number" value={dirs[d]?.y ?? 0} onChange={e => setDir(d, { y: Number(e.target.value) })}
-                            className={inputCls} placeholder="Y" />
+                        <div className="grid grid-cols-2 gap-1.5 pt-1">
+                          <label className="text-[9px] text-gray-400">オフセットX
+                            <input type="number" value={dirs[d]?.x ?? 0} onChange={e => setDir(d, { x: Number(e.target.value) })}
+                              className={`${inputCls} mt-0.5`} placeholder="X" />
+                          </label>
+                          <label className="text-[9px] text-gray-400">オフセットY
+                            <input type="number" value={dirs[d]?.y ?? 0} onChange={e => setDir(d, { y: Number(e.target.value) })}
+                              className={`${inputCls} mt-0.5`} placeholder="Y" />
+                          </label>
                         </div>
                       )}
                     </div>
