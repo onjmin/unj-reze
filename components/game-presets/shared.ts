@@ -90,7 +90,9 @@ export type EventCommand =
   | { type: 'wait'; ms?: number; frames?: number }
   | { type: 'comment'; text: string }
   | { type: 'label'; name: string }
-  | { type: 'jump'; label: string }
+  /** ラベルジャンプ。objId を指定すると、そのイベントの現在のページにあるラベルへ
+   *  実行コンテキストごと移る（#CH_PH と同じジャンプ扱いで、元のコマンド列は続行しない）。 */
+  | { type: 'jump'; label: string; objId?: string }
   /** プレイヤー頭上に一時的なメッセージを表示する（メッセージウィンドウは開かない）。 */
   | { type: 'overheadMessage'; text: string }
   /** 効果音を1回再生する（直リンクmp3のURL）。 */

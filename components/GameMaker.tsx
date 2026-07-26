@@ -1088,6 +1088,48 @@ const SpriteThumbnail = ({
   );
 };
 
+/** イベントコマンドの「対象オブジェクト」選択。ID を手入力せず、見た目のアイコンから選ばせる。
+ *  スウォッチ列＋選択中の詳細表示という、他のパネルと同じ方式に揃えてある。 */
+const ObjectIdPicker = ({ value, objects, imgCache, onChange, allowPlayer = true, allowEmpty = true, emptyLabel = '（指定なし）' }: {
+  value?: string;
+  objects: ObjectDef[];
+  imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>;
+  onChange: (objId: string | undefined) => void;
+  allowPlayer?: boolean;
+  allowEmpty?: boolean;
+  emptyLabel?: string;
+}) => {
+  const cache = useRef<Map<string, HTMLImageElement>>(new Map());
+  const cacheRef = imgCache ?? cache;
+  const selected = objects.find(o => o.id === value);
+  const labelOf = (o: ObjectDef) => o.name || o.message?.slice(0, 8) || `[${o.col},${o.row}]`;
+  const btn = (active: boolean) =>
+    `w-8 h-8 shrink-0 rounded border-2 grid place-items-center overflow-hidden ${active ? 'border-yellow-400' : 'border-gray-700 hover:border-gray-500'}`;
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {allowEmpty && (
+          <button type="button" onClick={() => onChange(undefined)} title={emptyLabel}
+            className={`${btn(!value)} text-[9px] text-gray-400`}>—</button>
+        )}
+        {allowPlayer && (
+          <button type="button" onClick={() => onChange('player')} title="プレイヤー"
+            className={`${btn(value === 'player')} text-sm`}>🧑</button>
+        )}
+        {objects.map(o => (
+          <button key={o.id} type="button" onClick={() => onChange(o.id)} title={`${labelOf(o)} (${o.id})`}
+            className={btn(value === o.id)}>
+            <SpriteThumbnail spriteRef={o.spriteRef} spriteUrl={o.spriteUrl} emoji={o.emoji} size={26} imgCache={cacheRef} />
+          </button>
+        ))}
+      </div>
+      <p className="text-[9px] text-gray-500 truncate">
+        {value === 'player' ? 'プレイヤー' : selected ? `${labelOf(selected)} — ${selected.id}` : (value ? `未配置のID: ${value}` : emptyLabel)}
+      </p>
+    </div>
+  );
+};
+
 /** 汎用エフェクトアニメーション（横一列スプライトシート）を再生する小さな DOM コンポーネント。
  *  バトル演出（1回だけ再生→onDone）と、エディタのプレビュー（loop=true で繰り返し再生）の両方から使う。
  *  クラシックな「スプライトストリップ」手法: 外側 div を1コマ分の幅で overflow:hidden にし、
@@ -4674,7 +4716,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return (member.def ?? 0) + getMemberEquipBonus(member.id).def;
   }, [getMemberEquipBonus]);
 
-  const runEventCommands = useCallback((objId: string, commands: EventCommand[], onDone?: () => void) => {
+  /** ラベルジャンプの委譲。選択肢の中身から、呼び出し元（親）のコマンド列のラベルへ飛ぶために使う。
+   *  飛べたら true。親でジャンプが成立したら、子（選択肢）のコンテキストはそこで終了する。 */
+  type JumpHost = (label: string) => boolean;
+  const runEventCommands = useCallback((objId: string, commands: EventCommand[], onDone?: () => void, parentJump?: JumpHost) => {
     if (eventRunningRef.current && !onDone) return;
     // サブ呼び出し（分岐・選択肢の中身実行）では eventIdRef をインクリメントしない。
     // インクリメントすると親コンテキストの advance/runNext が currentEventId 不一致で即座に
@@ -4691,6 +4736,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (currentEventId !== eventIdRef.current) return;
       index++;
       runNext();
+    };
+    /** 自分のコマンド列にラベルがあればそこへ飛ぶ。無ければ親へ委譲する。
+     *  戻り値 true = どこかで飛んだ（＝呼び出し元は以降の処理をしてはいけない）。 */
+    const jumpTo: JumpHost = (label) => {
+      const found = cmds.findIndex(c => c.type === 'label' && c.name === label);
+      if (found >= 0) {
+        index = found;          // advance() で index+1（ラベルの次のコマンド）から再開する
+        setTimeout(advance, 0);
+        return true;
+      }
+      return parentJump ? parentJump(label) : false;
     };
     const runNext = () => {
       if (currentEventId !== eventIdRef.current) return;
@@ -4732,7 +4788,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const idx = Math.floor(Math.random() * cmd.choices.length);
             const picked = cmd.choices[idx].commands;
             if (picked.length === 0) { setTimeout(advance, 0); break; }
-            runEventCommands(curObjId, picked, advance);
+            // jumpTo を渡して、選択肢の中の「ラベルジャンプ」からこちらのコマンド列のラベルへ
+            // 飛べるようにする（飛んだ場合は advance が呼ばれず、この選択肢以降は実行されない）。
+            runEventCommands(curObjId, picked, advance, jumpTo);
             break;
           }
           eventChoiceRef.current = {
@@ -4743,7 +4801,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               setEventChoice(null);
               const picked = idx >= 0 && idx < cmd.choices.length ? cmd.choices[idx].commands : [];
               if (picked.length > 0) {
-                runEventCommands(curObjId, picked, advance);
+                runEventCommands(curObjId, picked, advance, jumpTo);
               } else {
                 advance();
               }
@@ -4848,8 +4906,27 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         case 'jump': {
-          const found = cmds.findIndex((c, i) => c.type === 'label' && c.name === cmd.label);
-          if (found >= 0) index = found;
+          // 相手イベント指定つきのジャンプ：#CH_PH と同じく実行コンテキストごと相手へ移す。
+          if (cmd.objId) {
+            const entities = engineRef.current.entities ?? [];
+            const targetDef = entities.find(o => o.def.id === cmd.objId)?.def
+              ?? (gameDataRef.current.objects ?? []).find(o => o.id === cmd.objId);
+            const targetPage = targetDef ? findActivePage(targetDef) : null;
+            const at = targetPage?.commands.findIndex(c => c.type === 'label' && c.name === cmd.label) ?? -1;
+            if (targetPage && at >= 0) {
+              curObjId = targetDef!.id;
+              cmds = targetPage.commands;
+              index = at;               // advance() でラベルの次のコマンドから続行
+              setTimeout(advance, 0);
+              break;
+            }
+            // 相手にラベルが無いときは自分／親のコマンド列を探す（下へフォールスルー）
+          }
+          // 選択肢の中身から飛ぶ場合、ラベルは呼び出し元（イベントページ側）にあるので親まで探す。
+          // 親で成立したら実行はそちらへ移るので、ここでは advance を呼ばない
+          // （呼ぶと選択肢の呼び出し元の続きが二重に走る）。
+          if (jumpTo(cmd.label)) break;
+          // ラベルがどこにも無いときは何もせず次のコマンドへ
           setTimeout(advance, 0);
           break;
         }
@@ -6171,8 +6248,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // つるつる床のスライド先の判定は、床レイヤーの通行可否だけで行う（プレイヤーの判定と同じ規約）。
     // 置物レイヤー優先の isCellPassable で見ると、つるつる床の上に当たり判定つきの置物が乗って
     // いるだけで NPC がスライドを始められず、「プレイヤーだけ滑る」状態になってしまう。
-    const iceDestPassable = (tx: number, ty: number) =>
-      !!getTile(tx, ty)?.info?.passable && !!getTile(tx + TILE_SIZE - 1, ty + TILE_SIZE - 1)?.info?.passable;
+    // つるつる床のスライド先は当たり判定を見ない。強制移動（つるつる床・イベントコマンド）は
+    // 当たり判定を無視して進む仕様で、止まるのは「自分で歩いたとき」と「AI の自律移動」だけ。
+    // ワールド外にだけは出さない（座標が場外に出ると戻れなくなるため）。
+    const iceDestInWorld = (tx: number, ty: number, w = TILE_SIZE, h = TILE_SIZE) =>
+      tx >= 0 && tx <= worldW - w && ty >= 0 && ty <= worldH - h;
     // セル単位の実効通行可否：オブジェクト層タイル（壁・家具・橋など）があれば、床の可否に
     // 関係なくそちらを優先する（上のレイヤーが優先）。木の上部/屋根のように意図的に通行可
     // （passable:true）で置かれているオブジェクト層タイルはそのまま通れるし、逆に床が
@@ -7536,20 +7616,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           p.vx = 0; p.vy = 0;
           const moveSpd = pData.speed;
           const iceSpd = gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED;
-          const zAlreadyOverlapping0 = isBlockedByMob(p.x, p.y, pData.w, pData.h);
-          const zCanStandAt = (x: number, y: number) => {
-            return isAllPassable(x, y, pData.w, pData.h) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
-              (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
-          };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
-          // rpg 側と同じ規約：判定は置物レイヤー込み（iceSpecialAt）、スライド先の可否は床レイヤー。
+          // rpg 側と同じ規約：判定は置物レイヤー込み（iceSpecialAt）、スライド先は当たり判定を見ない。
           const zIceCx = p.x + pData.w / 2, zIceCy = p.y + pData.h / 2;
           const zIceCol = Math.floor(zIceCx / TILE_SIZE), zIceRow = Math.floor(zIceCy / TILE_SIZE);
           const zStandingSpecial = iceSpecialAt(zIceCx, zIceCy);
           const zOnIceTile = !!(zStandingSpecial && ICE_DIRS[zStandingSpecial]);
           const zCanSlideTo = (x: number, y: number) =>
-            iceDestPassable(x, y) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
-            (zAlreadyOverlapping0 || !isBlockedByMob(x, y, pData.w, pData.h));
+            x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h;
           if (iceSlideRef.current) {
             const slide = iceSlideRef.current;
             const dxz = slide.targetX - p.x, dyz = slide.targetY - p.y;
@@ -7747,10 +7821,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const iceSpd = gameData.iceSlideSpeed ?? DEFAULT_ICE_SLIDE_SPEED;
           const prevPx = p.x, prevPy = p.y;
           const mobBlockActive = gameData.engine === 'rpg';
-          const canStandAt = (x: number, y: number) => {
-            return isAllPassable(x, y, pData.w, pData.h) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
-              (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
-          };
           // ── つるつる床：強制スライド中は入力を無視し、目標タイルへ直進する ──
           // つるつる床は床レイヤーだけでなく置物レイヤーにも置かれる（RPGEN は l:3 の置物として置く）。
           // 床しか見ないと「NPC は滑るのにプレイヤーだけ滑らない」状態になるので、NPC と同じ
@@ -7759,12 +7829,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const iceCol = Math.floor(iceCenterX / TILE_SIZE), iceRow = Math.floor(iceCenterY / TILE_SIZE);
           const standingSpecial = gameData.engine === 'rpg' ? iceSpecialAt(iceCenterX, iceCenterY) : undefined;
           const onIceTile = !!(standingSpecial && ICE_DIRS[standingSpecial]);
-          // スライド先の通行可否は床レイヤーで見る（NPC の iceDestPassable と同じ規約）。
-          // isAllPassable は置物レイヤー優先なので、つるつる床の上に当たり判定つきの置物が
-          // 乗っているだけでスライドを開始できず、氷の上で身動きが取れなくなる。
+          // 強制移動（つるつる床・イベントコマンド）は当たり判定を無視して進む。
+          // 当たり判定で止まるのは「自分で歩いたとき」と「AI が自律移動するとき」だけ。
+          // マップ外にだけは出さない（座標がワールドの外に出ると復帰できなくなるため）。
           const canSlideTo = (x: number, y: number) =>
-            iceDestPassable(x, y) && x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h &&
-            (!mobBlockActive || isBlockedByMob(p.x, p.y, pData.w, pData.h) || !isBlockedByMob(x, y, pData.w, pData.h));
+            x >= 0 && x <= worldW - pData.w && y >= 0 && y <= worldH - pData.h;
           if (gameData.engine === 'rpg' && iceSlideRef.current) {
             const slide = iceSlideRef.current;
             const dx = slide.targetX - p.x, dy = slide.targetY - p.y;
@@ -8152,7 +8221,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const nextDir = landedSp ? ICE_DIRS[landedSp] : undefined;
               if (nextDir) {
                 const tx = e.x + nextDir[0] * TILE_SIZE, ty = e.y + nextDir[1] * TILE_SIZE;
-                if (iceDestPassable(tx, ty) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+                if (iceDestInWorld(tx, ty)) {
                   e.iceSlide = { targetX: tx, targetY: ty };
                 }
               }
@@ -8172,10 +8241,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               // イベント実行中（メッセージ表示・演出中）はNPCの自律移動（ランダム移動等）を一時停止
             } else if (eStandingSpecial && ICE_DIRS[eStandingSpecial]) {
               // つるつる床に乗った瞬間：behavior による移動を無視し、強制スライドを開始する。
-              // 塞がっていて開始できない場合も自由に振る舞わせず、次フレーム以降に再試行させる。
+              // 当たり判定は見ない（強制移動なので壁・モブがあっても進む）。
               const [idx, idy] = ICE_DIRS[eStandingSpecial];
-              const tx = eStandingTile!.rect.x + idx * TILE_SIZE, ty = eStandingTile!.rect.y + idy * TILE_SIZE;
-              if (iceDestPassable(tx, ty) && tx >= 0 && tx <= worldW - TILE_SIZE && ty >= 0 && ty <= worldH - TILE_SIZE) {
+              const eIceCol = Math.floor((e.x + TILE_SIZE / 2) / TILE_SIZE), eIceRow = Math.floor((e.y + TILE_SIZE / 2) / TILE_SIZE);
+              const tx = (eIceCol + idx) * TILE_SIZE, ty = (eIceRow + idy) * TILE_SIZE;
+              if (iceDestInWorld(tx, ty)) {
                 e.iceSlide = { targetX: tx, targetY: ty };
               }
             } else if (d.moveChance != null) {
@@ -9205,7 +9275,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 const tx = cellX + dx * TILE_SIZE, ty = cellY + dy * TILE_SIZE;
                 // 進入先の可否は床レイヤーで見る（置物優先で見ると、つるつる床の上に
                 // 当たり判定つきの置物が乗っているだけでスライドできなくなる）
-                if (iceDestPassable(tx, ty) && tx >= 0 && tx <= worldW - pData.w && ty >= 0 && ty <= worldH - pData.h) {
+                if (iceDestInWorld(tx, ty, pData.w, pData.h)) {
                   if (gameData.engine === 'rpg' || gameData.engine === 'onjReze') { p.x = cellX; p.y = cellY; }
                   else { p.x = cellX; }
                   iceSlideRef.current = { targetX: tx, targetY: (gameData.engine === 'rpg' || gameData.engine === 'onjReze') ? ty : p.y };
@@ -18602,8 +18672,10 @@ function NestedCommandList({
 
 // ── 単一イベントコマンドエディタ ──
 
-function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onClose, onPickImage, imgCache, cmdPickCallbackRef }: {
+function EventCommandDetailsModal({ cmd, switches, items, effects, objects = [], onChange, onClose, onPickImage, imgCache, cmdPickCallbackRef }: {
   cmd: EventCommand; switches: SwitchDef[]; items: ItemDef[]; effects: EffectPreset[];
+  /** 対象オブジェクト選択（アイコンから選ぶ）用の一覧。 */
+  objects?: ObjectDef[];
   onChange: (patch: Partial<EventCommand>) => void; onClose: () => void;
   onPickImage?: (target: PickTarget) => void;
   imgCache?: React.MutableRefObject<Map<string, HTMLImageElement>>;
@@ -18927,10 +18999,11 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'changeDirection' && (
               <div className="space-y-2">
-                <label className="text-[10px] text-gray-400 block">対象
-                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="player またはオブジェクトID" />
-                </label>
+                <div className="text-[10px] text-gray-400">対象
+                  <ObjectIdPicker value={(cmd as any).objId} objects={objects} imgCache={imgCache}
+                    onChange={v => onChange({ objId: v } as Partial<EventCommand>)}
+                    emptyLabel={'（このイベント自身）'} />
+                </div>
                 <label className="text-[10px] text-gray-400 block">向き
                   <select value={(cmd as any).dir ?? 'down'} onChange={e => onChange({ dir: e.target.value as Dir4Name })}
                     className={`${inputCls} mt-0.5`}>
@@ -18944,10 +19017,11 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'changeNpcMovement' && (
               <div className="space-y-2">
-                <label className="text-[10px] text-gray-400 block">対象オブジェクトID
-                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="オブジェクトID" />
-                </label>
+                <div className="text-[10px] text-gray-400">対象オブジェクト
+                  <ObjectIdPicker value={(cmd as any).objId} objects={objects} imgCache={imgCache}
+                    onChange={v => onChange({ objId: v } as Partial<EventCommand>)}
+                    emptyLabel={'（このイベント自身）'} />
+                </div>
                 <label className="text-[10px] text-gray-400 block">挙動
                   <select value={(cmd as any).behavior ?? 'still'} onChange={e => onChange({ behavior: e.target.value as NpcBehavior })}
                     className={`${inputCls} mt-0.5`}>
@@ -18975,10 +19049,27 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
                   className={inputCls} />
               </div>
             )}
-            {(type === 'comment' || type === 'label' || type === 'jump') && (
-              <input value={(cmd as any).text ?? (cmd as any).name ?? (cmd as any).label ?? ''}
-                onChange={e => onChange(type === 'comment' ? { text: e.target.value } : { name: e.target.value, ...(type === 'jump' ? { label: e.target.value } : {}) })}
-                className={inputCls} placeholder={type === 'comment' ? 'コメント' : type === 'label' ? 'ラベル名' : 'ジャンプ先ラベル'} />
+            {(type === 'comment' || type === 'label') && (
+              <input value={(cmd as any).text ?? (cmd as any).name ?? ''}
+                onChange={e => onChange(type === 'comment' ? { text: e.target.value } : { name: e.target.value })}
+                className={inputCls} placeholder={type === 'comment' ? 'コメント' : 'ラベル名'} />
+            )}
+            {type === 'jump' && (
+              <div className="space-y-2">
+                <label className="text-[10px] text-gray-400 block">ジャンプ先ラベル
+                  <input value={(cmd as any).label ?? ''} onChange={e => onChange({ label: e.target.value } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} placeholder="ラベル名" />
+                </label>
+                <div className="text-[10px] text-gray-400">ジャンプ先のイベント（空=このイベント）
+                  <ObjectIdPicker value={(cmd as any).objId} objects={objects} imgCache={imgCache}
+                    onChange={v => onChange({ objId: v } as Partial<EventCommand>)}
+                    allowPlayer={false} emptyLabel="（このイベント内のラベル）" />
+                </div>
+                <p className="text-[9px] text-gray-500">
+                  ジャンプすると今のコマンド列は終了し、ジャンプ先から実行が続きます（選択肢の中から飛んだ場合も、
+                  選択肢の後ろのコマンドは実行されません）。
+                </p>
+              </div>
             )}
             {type === 'overheadMessage' && (
               <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
@@ -18990,10 +19081,11 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'changeSprite' && (
               <div className="space-y-2.5">
-                <label className="text-[10px] text-gray-400 block">対象ID（空=プレイヤー）
-                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="player / オブジェクトID" />
-                </label>
+                <div className="text-[10px] text-gray-400">対象（空=プレイヤー）
+                  <ObjectIdPicker value={(cmd as any).objId} objects={objects} imgCache={imgCache}
+                    onChange={v => onChange({ objId: v } as Partial<EventCommand>)}
+                    emptyLabel={'（プレイヤー）'} />
+                </div>
                 <div>
                   <label className="text-[10px] text-gray-400 block mb-1">画像 / 歩行グラフィック選択</label>
                   <button
@@ -19261,10 +19353,11 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, onChange, onC
             )}
             {type === 'moveNpc' && (
               <div className="space-y-2">
-                <label className="text-[10px] text-gray-400 block">対象ID（空=プレイヤー）
-                  <input value={(cmd as any).objId ?? ''} onChange={e => onChange({ objId: e.target.value })}
-                    className={`${inputCls} mt-0.5`} placeholder="player / オブジェクトID" />
-                </label>
+                <div className="text-[10px] text-gray-400">対象（空=プレイヤー）
+                  <ObjectIdPicker value={(cmd as any).objId} objects={objects} imgCache={imgCache}
+                    onChange={v => onChange({ objId: v } as Partial<EventCommand>)}
+                    emptyLabel={'（プレイヤー）'} />
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="text-[10px] text-gray-400">目標X(列/任意)
                     <input type="number" value={(cmd as any).tx ?? ''} onChange={e => onChange({ tx: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
