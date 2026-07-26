@@ -22,15 +22,19 @@ export function normalizeIp(raw: string): string {
 }
 
 /** リクエストヘッダからクライアントIPを取り出す。
- * x-nf-real-client-ip は netlify/edge-functions/inject-client-ip.ts が Netlify の
- * context.ip を詰め替えたもので、内部ロードバランサーのアドレスに化けない唯一信頼できる値。
- * 未設定（ローカル開発など）の場合は他ヘッダにフォールバックする。 */
+ * Cloudflare Workers では `cf-connecting-ip` が最も信頼できる値。
+ * Netlify やローカル開発環境へのフォールバック構造を保持。 */
 export function getClientIp(headers: Headers): string {
-  return normalizeIp(
-    headers.get('x-nf-real-client-ip') ||
+  // X-Forwarded-For はカンマ区切りの先頭を取得
+  const xForwardedFor = headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+
+  const rawIp =
+    headers.get('cf-connecting-ip') ||        // Cloudflare 最優先
+    headers.get('x-nf-real-client-ip') ||     // Netlify 独自ヘッダー
     headers.get('x-nf-client-connection-ip') ||
-    headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    xForwardedFor ||
     headers.get('x-real-ip') ||
-    '127.0.0.1'
-  );
+    '127.0.0.1';
+
+  return normalizeIp(rawIp);
 }
