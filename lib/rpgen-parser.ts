@@ -28,7 +28,7 @@ import type { GameManifestDraft } from '@/components/GameMaker';
 import type { Dir4Name, EventCommand, EventCondition, EventPage, NpcBehavior } from '@/components/game-presets/shared';
 import { newObject, uid, TILE_SIZE, chest, localSysTileUrl } from '@/components/game-presets/shared';
 import { DQ_CHARACTERS } from '@/lib/local-assets';
-import { youtubeRefFromUrl } from '@/lib/asset-ref';
+import { youtubeRefFromUrl, updateRefBgmParams, parseBgmParams } from '@/lib/asset-ref';
 import LZString from 'lz-string';
 
 export const MAX_TILE_CONVERSIONS = 500;
@@ -761,10 +761,17 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.ResumeLayer:
       case CommandType.ResumeLayerAnimation: return { type: 'resumeImage', layer: parseInt(cmd.params.l || '0') };
       case CommandType.PlaySound: return { type: 'playSound', src: resolveSoundUrl(cmd.params.i) };
-      // v は YouTube 動画ID。s（再生開始位置）は BgmManager に開始位置指定が無いため未対応。
+      // v は YouTube 動画ID。s は再生開始位置（秒単位）。
       case CommandType.ChangeBGM: {
         const v = cmd.params.v?.trim();
-        const bgmRef = !v ? '' : (v.startsWith('http') || v.startsWith('/') ? `direct:${v}` : `youtube:${v}`);
+        const s = cmd.params.s?.trim();
+        let bgmRef = !v ? '' : (v.startsWith('http') || v.startsWith('/') ? `direct:${v}` : `youtube:${v}`);
+        if (bgmRef && s && !isNaN(Number(s))) {
+          const startVal = Number(s);
+          if (startVal > 0) {
+            bgmRef = updateRefBgmParams(bgmRef, { ...parseBgmParams(bgmRef), start: startVal });
+          }
+        }
         return { type: 'changeBgm', bgmRef };
       }
       case CommandType.StopBGM:

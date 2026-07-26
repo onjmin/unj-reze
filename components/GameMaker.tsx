@@ -4975,7 +4975,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const bgmAsset = cmd.bgmRef ? bgmRefToAsset(cmd.bgmRef) : null;
           if (bgmAsset?.src) {
             bgmManager.play({
-              bgm: { type: bgmAsset.type, src: bgmAsset.src, loop: bgmAsset.loop, volume: applyMasterVolume(bgmAsset.volume ?? 50) },
+              bgm: { type: bgmAsset.type, src: bgmAsset.src, loop: bgmAsset.loop, volume: applyMasterVolume(bgmAsset.volume ?? 50), start: bgmAsset.start },
               tileset: {},
             } as never);
           } else {

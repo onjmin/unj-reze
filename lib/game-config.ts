@@ -44,6 +44,8 @@ export interface WinCondition {
 export interface BgmAsset {
   type: 'midi' | 'mml' | 'youtube' | 'nicovideo' | 'soundcloud' | 'direct';
   src: string;
+  volume?: number;
+  start?: number;
   loop?: boolean | {
     start?: {
       bar?: number;

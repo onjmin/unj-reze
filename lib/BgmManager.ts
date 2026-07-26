@@ -5,6 +5,7 @@ interface BgmHandle {
   stop: () => void;
   /** マスター音量変更時に即時反映するための再設定（対応できない再生方式は省略可）。 */
   setBaseVolume?: (baseVolume: number) => void;
+  seek?: (seconds: number) => void;
 }
 
 class BgmManager {
@@ -25,11 +26,15 @@ class BgmManager {
     const type = manifest.bgm.type ?? 'youtube';
     const src = manifest.bgm.src;
     const volume = (manifest.bgm as any).volume !== undefined ? (manifest.bgm as any).volume : 50;
+    const start = (manifest.bgm as any).start !== undefined ? (manifest.bgm as any).start : 0;
 
     // シーン切替等で同じBGM（type, srcが同一）が指定された場合は巻き戻さず継続再生する
     if (this.currentKey && this.currentKey.type === type && this.currentKey.src === src && this.current) {
       this.baseVolume = volume;
       this.current.setBaseVolume?.(volume);
+      if (start > 0) {
+        this.current.seek?.(start);
+      }
       return;
     }
 
@@ -40,7 +45,7 @@ class BgmManager {
     if (type === 'midi') {
       await this.playMidi(src, volume);
     } else if (type === 'youtube') {
-      this.playYoutube(src, volume);
+      this.playYoutube(src, volume, start);
     } else if (type === 'nicovideo') {
       this.playNicovideo(src, volume);
     } else if (type === 'soundcloud') {
@@ -48,7 +53,7 @@ class BgmManager {
     } else if (type === 'mml') {
       this.playMml(src, manifest.bgm.loop, volume);
     } else if (type === 'direct') {
-      this.playDirect(src, volume);
+      this.playDirect(src, volume, start);
     }
   }
 
@@ -59,7 +64,7 @@ class BgmManager {
   }
 
   seek(seconds: number) {
-    // seek support
+    this.current?.seek?.(seconds);
   }
 
   setRate(rate: number) {
@@ -68,14 +73,18 @@ class BgmManager {
 
   // ── 直リンク音声（MP3/WAV）をループ再生 ──
 
-  private playDirect(url: string, volume: number = 50) {
+  private playDirect(url: string, volume: number = 50, startSeconds: number = 0) {
     const audio = new Audio(url);
     audio.loop = true;
     audio.volume = (applyMasterVolume(volume) / 100) * 0.6;
+    if (startSeconds > 0) {
+      audio.currentTime = startSeconds;
+    }
     audio.play().catch(() => {});
     this.current = {
       stop: () => { try { audio.pause(); audio.src = ''; } catch (e) { } },
       setBaseVolume: (v) => { audio.volume = (applyMasterVolume(v) / 100) * 0.6; },
+      seek: (s) => { try { audio.currentTime = s; } catch (e) {} },
     };
   }
 
@@ -159,14 +168,22 @@ class BgmManager {
 
   // ── YouTube ──
 
-  private extractVideoId(url: string): string | null {
-    const m = url.match(/(?:v=|youtu\.be\/|\/embed\/)([a-zA-Z0-9_-]{11})/);
-    return m ? m[1] : null;
+  private extractVideoId(url: string): { videoId: string; start?: number } | null {
+    const m = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
+    if (!m) return null;
+    let start: number | undefined;
+    const tMatch = url.match(/(?:[?&]t=|\bstart=)(\d+)/);
+    if (tMatch) {
+      start = parseInt(tMatch[1], 10);
+    }
+    return { videoId: m[1], start };
   }
 
-  private playYoutube(url: string, volume: number = 50) {
-    const videoId = this.extractVideoId(url);
-    if (!videoId) return;
+  private playYoutube(url: string, volume: number = 50, startSeconds: number = 0) {
+    const extracted = this.extractVideoId(url);
+    if (!extracted) return;
+    const videoId = extracted.videoId;
+    const finalStart = startSeconds > 0 ? startSeconds : (extracted.start || 0);
 
     const existing = document.querySelector('.bgm-youtube-container');
     if (existing) existing.remove();
@@ -217,14 +234,21 @@ class BgmManager {
           loop: 1,
           playlist: videoId,
           controls: 0,
+          start: Math.floor(finalStart),
         },
         events: {
           onReady: (event: any) => {
             event.target.setVolume(applyMasterVolume(volume));
+            if (finalStart > 0) {
+              try { event.target.seekTo(finalStart, true); } catch (e) {}
+            }
             event.target.playVideo();
           },
           onStateChange: (event: any) => {
             if (event.data === (window as any).YT.PlayerState.ENDED) {
+              if (finalStart > 0) {
+                try { event.target.seekTo(finalStart, true); } catch (e) {}
+              }
               event.target.playVideo();
             }
           }
@@ -238,6 +262,7 @@ class BgmManager {
         container.remove();
       },
       setBaseVolume: (v) => { try { player?.setVolume(applyMasterVolume(v)); } catch (e) {} },
+      seek: (s) => { try { player?.seekTo(s, true); } catch (e) {} },
     };
   }
 

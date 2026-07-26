@@ -70,6 +70,7 @@ export interface LoopConfig {
 export interface BgmParams {
   loop?: LoopConfig;
   volume?: number;
+  start?: number;
 }
 
 export function parseBgmParams(ref?: string): BgmParams {
@@ -106,6 +107,11 @@ export function parseBgmParams(ref?: string): BgmParams {
       if (!isNaN(vol)) {
         result.volume = Math.max(0, Math.min(100, vol));
       }
+    } else if ((key === 'start' || key === 's' || key === 't') && val) {
+      const start = parseFloat(val);
+      if (!isNaN(start)) {
+        result.start = Math.max(0, start);
+      }
     }
   }
   return result;
@@ -124,6 +130,9 @@ export function updateRefBgmParams(ref: string, params: BgmParams): string {
   }
   if (params.volume !== undefined) {
     hashParts.push(`vol=${params.volume}`);
+  }
+  if (params.start !== undefined && params.start > 0) {
+    hashParts.push(`start=${params.start}`);
   }
 
   if (hashParts.length === 0) return base;
@@ -158,17 +167,23 @@ export function getBgmVolume(ref?: string): number {
   return params.volume !== undefined ? params.volume : 50;
 }
 
-/** BGM参照を BgmManager が解釈できる {type, src, loop, volume} へ。
+export function getBgmStart(ref?: string): number {
+  const params = parseBgmParams(ref);
+  return params.start !== undefined ? params.start : 0;
+}
+
+/** BGM参照を BgmManager が解釈できる {type, src, loop, volume, start} へ。
  *  mml:post:N はその投稿のMML本文(rawMml)が要るため省略可。 */
 export function bgmRefToAsset(
   raw: string,
   rawMml?: string,
-): { type: 'youtube' | 'nicovideo' | 'soundcloud' | 'mml' | 'direct'; src: string; loop?: any; volume?: number } | null {
+): { type: 'youtube' | 'nicovideo' | 'soundcloud' | 'mml' | 'direct'; src: string; loop?: any; volume?: number; start?: number } | null {
   const ref = parseRef(raw);
   if (!ref || ref.scheme === 'none' || !ref.value) return null;
 
   const loopOption = getLoopOption(raw);
   const volume = getBgmVolume(raw);
+  const start = getBgmStart(raw);
 
   let valStr = ref.value;
   const hashIdx = valStr.indexOf('#');
@@ -176,21 +191,21 @@ export function bgmRefToAsset(
     valStr = valStr.slice(0, hashIdx);
   }
 
-  if (ref.scheme === 'youtube') return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
-  if (ref.scheme === 'nicovideo') return { type: 'nicovideo', src: valStr, volume };
-  if (ref.scheme === 'soundcloud') return { type: 'soundcloud', src: valStr, volume };
-  if (ref.scheme === 'direct') return { type: 'direct', src: valStr, volume };
+  if (ref.scheme === 'youtube') return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume, start };
+  if (ref.scheme === 'nicovideo') return { type: 'nicovideo', src: valStr, volume, start };
+  if (ref.scheme === 'soundcloud') return { type: 'soundcloud', src: valStr, volume, start };
+  if (ref.scheme === 'direct') return { type: 'direct', src: valStr, volume, start };
   if (ref.scheme === 'url') {
-    if (valStr.includes('nicovideo.jp')) return { type: 'nicovideo', src: valStr, volume };
-    if (valStr.includes('soundcloud.com')) return { type: 'soundcloud', src: valStr, volume };
-    if (valStr.includes('youtube.com') || valStr.includes('youtu.be')) return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume };
-    return { type: 'direct', src: valStr, volume };
+    if (valStr.includes('nicovideo.jp')) return { type: 'nicovideo', src: valStr, volume, start };
+    if (valStr.includes('soundcloud.com')) return { type: 'soundcloud', src: valStr, volume, start };
+    if (valStr.includes('youtube.com') || valStr.includes('youtu.be')) return { type: 'youtube', src: toYoutubeWatchUrl(valStr), volume, start };
+    return { type: 'direct', src: valStr, volume, start };
   }
   if (ref.scheme === 'mml') {
     if (valStr.startsWith('post:')) {
-      return rawMml ? { type: 'mml', src: rawMml, loop: loopOption, volume } : null;
+      return rawMml ? { type: 'mml', src: rawMml, loop: loopOption, volume, start } : null;
     }
-    return { type: 'mml', src: valStr, loop: loopOption, volume };
+    return { type: 'mml', src: valStr, loop: loopOption, volume, start };
   }
   return null;
 }
@@ -220,7 +235,12 @@ export function refLabel(raw: string): string {
 
 export function youtubeRefFromUrl(url: string): string {
   const m = url.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
-  return m ? `youtube:${m[1]}` : `youtube:${url}`;
+  const tMatch = url.match(/(?:[?&]t=|\bstart=)(\d+)/);
+  const base = m ? `youtube:${m[1]}` : `youtube:${url}`;
+  if (tMatch) {
+    return updateRefBgmParams(base, { start: parseInt(tMatch[1], 10) });
+  }
+  return base;
 }
 
 export function nicovideoRefFromUrl(url: string): string {
