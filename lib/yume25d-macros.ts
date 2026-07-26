@@ -24,6 +24,9 @@ export const billboardGroups = (l: Layout25D): BillboardGroup[] => {
     .sort((a, b) => a.tex - b.tex);
 };
 
+/** 平行移動マクロの対象レイヤー・グループ。 */
+export type LayerShiftTarget = 'all' | 'floor' | 'wall' | 'billboard' | number;
+
 /** グループ全員が (dc, dr) マス・dlv 段の平行移動でマップ内（高さ0以上）に収まるか。 */
 export const canShiftGroup = (l: Layout25D, tex: number, dc: number, dr: number, dlv = 0): boolean => {
   const members = l.billboards.filter(b => b.tex === tex);
@@ -32,6 +35,40 @@ export const canShiftGroup = (l: Layout25D, tex: number, dc: number, dr: number,
     const c = b.col + dc, r = b.row + dr, lv = (b.level ?? 0) + dlv;
     return c >= 0 && c < l.cols && r >= 0 && r < l.rows && lv >= 0;
   });
+};
+
+/** 対象レイヤー・グループが (dc, dr) マス・dlv 段だけ平行移動できるか判定する。 */
+export const canShiftLayer = (l: Layout25D, target: LayerShiftTarget, dc: number, dr: number, dlv = 0): boolean => {
+  if (typeof target === 'number') {
+    return canShiftGroup(l, target, dc, dr, dlv);
+  }
+  if (target === 'floor') {
+    if (dlv !== 0) return false;
+    return dc !== 0 || dr !== 0;
+  }
+  if (target === 'wall') {
+    if (!l.walls.length) return false;
+    if (dlv !== 0) {
+      return l.walls.every(w => (w.level ?? 0) + dlv >= 0);
+    }
+    return dc !== 0 || dr !== 0;
+  }
+  if (target === 'billboard') {
+    if (!l.billboards.length) return false;
+    if (dlv !== 0) {
+      return l.billboards.every(b => (b.level ?? 0) + dlv >= 0);
+    }
+    return dc !== 0 || dr !== 0;
+  }
+  if (target === 'all') {
+    if (dlv !== 0) {
+      const wallOk = l.walls.every(w => (w.level ?? 0) + dlv >= 0);
+      const bbOk = l.billboards.every(b => (b.level ?? 0) + dlv >= 0);
+      return wallOk && bbOk && (l.walls.length > 0 || l.billboards.length > 0);
+    }
+    return dc !== 0 || dr !== 0;
+  }
+  return false;
 };
 
 /** マクロ：同じテクスチャのビルボード全員を (dc, dr) マス・dlv 段だけ平行移動する。
@@ -45,6 +82,83 @@ export const shiftBillboardGroup = (l: Layout25D, tex: number, dc: number, dr: n
       const lv = (b.level ?? 0) + dlv;
       return { ...b, col: b.col + dc, row: b.row + dr, level: lv > 0 ? lv : undefined };
     }),
+  };
+};
+
+/** マクロ：指定したレイヤー（地形/壁/スプライト/全レイヤー/特定グループ）の要素を (dc, dr) マス・dlv 段だけ一括平行移動する。 */
+export const shiftLayer = (l: Layout25D, target: LayerShiftTarget, dc: number, dr: number, dlv = 0): Layout25D => {
+  if (typeof target === 'number') {
+    return shiftBillboardGroup(l, target, dc, dr, dlv);
+  }
+
+  let floor = l.floor;
+  if ((target === 'all' || target === 'floor') && (dc !== 0 || dr !== 0)) {
+    const rows = l.rows, cols = l.cols;
+    floor = Array.from({ length: rows }, () => Array(cols).fill(0));
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const nr = r + dr;
+        const nc = c + dc;
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          floor[nr][nc] = l.floor[r][c];
+        }
+      }
+    }
+  }
+
+  let walls = l.walls;
+  if (target === 'all' || target === 'wall') {
+    walls = l.walls
+      .map(w => {
+        const lv = (w.level ?? 0) + dlv;
+        return {
+          ...w,
+          col: w.col + dc,
+          row: w.row + dr,
+          level: lv > 0 ? lv : undefined,
+        };
+      })
+      .filter(w =>
+        (w.level ?? 0) >= 0 &&
+        w.col >= 0 && w.col <= l.cols - (w.dir === 3 ? 0 : 1) &&
+        w.row >= 0 && w.row <= l.rows - (w.dir === 0 ? 0 : 1)
+      );
+  }
+
+  let billboards = l.billboards;
+  if (target === 'all' || target === 'billboard') {
+    billboards = l.billboards
+      .map(b => {
+        const lv = (b.level ?? 0) + dlv;
+        return {
+          ...b,
+          col: b.col + dc,
+          row: b.row + dr,
+          level: lv > 0 ? lv : undefined,
+        };
+      })
+      .filter(b =>
+        (b.level ?? 0) >= 0 &&
+        b.col >= 0 && b.col < l.cols &&
+        b.row >= 0 && b.row < l.rows
+      );
+  }
+
+  let start = l.start;
+  if (target === 'all' && (dc !== 0 || dr !== 0)) {
+    start = {
+      ...l.start,
+      col: Math.max(0, Math.min(l.cols - 1, l.start.col + dc)),
+      row: Math.max(0, Math.min(l.rows - 1, l.start.row + dr)),
+    };
+  }
+
+  return {
+    ...l,
+    floor,
+    walls,
+    billboards,
+    start,
   };
 };
 

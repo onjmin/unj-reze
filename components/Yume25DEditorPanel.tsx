@@ -14,7 +14,7 @@ import {
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
-import { billboardGroups, canShiftGroup, shiftBillboardGroup, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
+import { billboardGroups, canShiftLayer, shiftLayer, type LayerShiftTarget, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
 import AssetThumb from './AssetThumb';
 
@@ -92,14 +92,14 @@ export default function Yume25DEditorPanel({
   const [modelSearchOpen, setModelSearchOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState('');
 
-  // マクロ（一括編集）パネル：同じ見た目のスプライト/3Dモデルのグループをまとめて動かす
+  // マクロ（一括編集）パネル：レイヤー（地形/壁/スプライト/全レイヤー）やスプライトグループをまとめて動かす
   const [macroOpen, setMacroOpen] = useState(false);
-  const [macroTex, setMacroTex] = useState(0);
+  const [macroTarget, setMacroTarget] = useState<LayerShiftTarget>('all');
   const macroGroups = billboardGroups(layout);
-  // 選択中のグループが消えていたら（削除・全消去）先頭グループへフォールバック
-  const macroSel = macroGroups.some(g => g.tex === macroTex) ? macroTex : (macroGroups[0]?.tex ?? 0);
+  const canShift = (dc: number, dr: number, dlv = 0) =>
+    canShiftLayer(layout, macroTarget, dc, dr, dlv);
   const runShiftMacro = (dc: number, dr: number, dlv = 0) =>
-    onLayoutChange(l => shiftBillboardGroup(l, macroSel, dc, dr, dlv));
+    onLayoutChange(l => shiftLayer(l, macroTarget, dc, dr, dlv));
   // 地形自動生成マクロ：XYZ（列・行・最大高さ）の数値指定＋地形タイプ・水の量・洞窟。
   // 押すたびにランダムシードで生成し直す。XY が現在のマップサイズと違えば自動で拡張/縮小される。
   const [terrainCols, setTerrainCols] = useState(layout.cols);
@@ -250,48 +250,64 @@ export default function Yume25DEditorPanel({
           </div>
           <p className="text-[9px] text-gray-500">マイクラと同じパーリンノイズの高さマップで、内蔵素材のブロックを積んだ地形（海底の起伏〜砂浜〜草原〜山、雪山）を作ります。水の量を入れると海面より低い場所は泳いで潜れる海になり、洞窟ONで山の中にトンネルがくり抜かれます。押すたびに別の地形になります。床とブロック/木は描き替えますが、ほかのスプライトや壁は残ります。スタート周辺は平地になります。XYZが大きいほど生成後の動作が重くなります</p>
 
-          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">↔️ グループ平行移動</p>
-          {macroGroups.length === 0 ? (
-            <p className="text-gray-500">マップにスプライト/3Dモデルが配置されていません。スプライトツールで配置すると、同じ見た目のグループをまとめて動かせます</p>
-          ) : (
-            <>
-              <label className="flex items-center gap-1.5">対象グループ
-                <select value={macroSel} onChange={e => setMacroTex(Number(e.target.value))}
-                  className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">↔️ レイヤー・タイルのバッチ移動</p>
+          <label className="flex items-center gap-1.5">対象レイヤー / グループ
+            <select
+              value={typeof macroTarget === 'number' ? `group:${macroTarget}` : macroTarget}
+              onChange={e => {
+                const val = e.target.value;
+                if (val.startsWith('group:')) {
+                  setMacroTarget(Number(val.replace('group:', '')));
+                } else {
+                  setMacroTarget(val as LayerShiftTarget);
+                }
+              }}
+              className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
+            >
+              <option value="all">🌐 全レイヤー (床・壁・スプライト全て)</option>
+              <option value="floor">🗺️ 地形(床)レイヤー</option>
+              <option value="wall">🧱 壁レイヤー</option>
+              <option value="billboard">🧍 スプライト(ビルボード)レイヤー</option>
+              {macroGroups.length > 0 && (
+                <optgroup label="📦 スプライトグループ">
                   {macroGroups.map(g => (
-                    <option key={g.tex} value={g.tex}>{g.emoji ? `${g.emoji} ` : ''}{g.name} ×{g.count}</option>
+                    <option key={g.tex} value={`group:${g.tex}`}>
+                      {g.emoji ? `${g.emoji} ` : ''}{g.name} ×{g.count}
+                    </option>
                   ))}
-                </select>
-              </label>
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex flex-col items-center gap-0.5">
-                  <span className="text-gray-400">1マスずつ移動</span>
-                  <div className="grid grid-cols-3 gap-0.5">
-                    <span />
-                    <button onClick={() => runShiftMacro(0, -1)} disabled={!canShiftGroup(layout, macroSel, 0, -1)}
-                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">↑</button>
-                    <span />
-                    <button onClick={() => runShiftMacro(-1, 0)} disabled={!canShiftGroup(layout, macroSel, -1, 0)}
-                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">←</button>
-                    <button onClick={() => runShiftMacro(0, 1)} disabled={!canShiftGroup(layout, macroSel, 0, 1)}
-                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">↓</button>
-                    <button onClick={() => runShiftMacro(1, 0)} disabled={!canShiftGroup(layout, macroSel, 1, 0)}
-                      className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">→</button>
-                  </div>
-                </div>
-                <div className="flex flex-col items-center gap-0.5">
-                  <span className="text-gray-400">高さ（段）</span>
-                  <div className="flex flex-col gap-0.5">
-                    <button onClick={() => runShiftMacro(0, 0, 1)} disabled={!canShiftGroup(layout, macroSel, 0, 0, 1)}
-                      className="w-12 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[11px] font-bold disabled:opacity-30">＋1段</button>
-                    <button onClick={() => runShiftMacro(0, 0, -1)} disabled={!canShiftGroup(layout, macroSel, 0, 0, -1)}
-                      className="w-12 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[11px] font-bold disabled:opacity-30">−1段</button>
-                  </div>
-                </div>
+                </optgroup>
+              )}
+            </select>
+          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-gray-400">1マスずつ移動</span>
+              <div className="grid grid-cols-3 gap-0.5">
+                <span />
+                <button onClick={() => runShiftMacro(0, -1)} disabled={!canShift(0, -1)}
+                  className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">↑</button>
+                <span />
+                <button onClick={() => runShiftMacro(-1, 0)} disabled={!canShift(-1, 0)}
+                  className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">←</button>
+                <button onClick={() => runShiftMacro(0, 1)} disabled={!canShift(0, 1)}
+                  className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">↓</button>
+                <button onClick={() => runShiftMacro(1, 0)} disabled={!canShift(1, 0)}
+                  className="w-8 h-8 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[13px] font-bold disabled:opacity-30">→</button>
               </div>
-              <p className="text-[9px] text-gray-500">選んだグループ（同じ見た目のスプライト/3Dモデル全部）をまとめて1マスずつ平行移動します。1体でもマップ外に出てしまう方向へは動かせません（形は崩れません）</p>
-            </>
-          )}
+            </div>
+            <div className="flex flex-col items-center gap-0.5">
+              <span className="text-gray-400">高さ（段）</span>
+              <div className="flex flex-col gap-0.5">
+                <button onClick={() => runShiftMacro(0, 0, 1)} disabled={!canShift(0, 0, 1)}
+                  className="w-12 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[11px] font-bold disabled:opacity-30">＋1段</button>
+                <button onClick={() => runShiftMacro(0, 0, -1)} disabled={!canShift(0, 0, -1)}
+                  className="w-12 h-7 rounded border-2 border-gray-700 bg-gray-800 text-gray-200 text-[11px] font-bold disabled:opacity-30">−1段</button>
+              </div>
+            </div>
+          </div>
+          <p className="text-[9px] text-gray-500">
+            選択したレイヤー（地形/壁/スプライト/全レイヤー/特定グループ）のタイルやオブジェクトを一括で上下左右・高さ方向に平行移動します。
+          </p>
         </div>
       )}
 
