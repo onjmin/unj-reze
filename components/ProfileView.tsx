@@ -384,8 +384,8 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-gray-800 bg-gradient-to-b from-gray-100/[0.03] to-transparent">
+    <div className="flex flex-col min-h-full">
+      <div className="p-4 border-b border-gray-800 bg-gradient-to-b from-gray-100/[0.03] to-transparent shrink-0">
         <div className="flex items-start space-x-3.5 mb-3">
           <div className="relative shrink-0">
             <div
@@ -426,7 +426,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
             <h2 className="font-bold text-base text-white truncate">{avatarInfo.username}</h2>
             <span className="text-[10px] text-gray-500 block truncate">@{resolvedName}</span>
             <span className="text-[11px] text-gray-500 block mt-0.5">登録: 2026-06-13</span>
-            <p className="text-xs text-gray-400 leading-relaxed mt-2 whitespace-pre-wrap">
+            <p className="text-xs text-gray-400 leading-relaxed mt-2 whitespace-pre-wrap break-words">
               {bio || (isSelf ? '自己紹介を追加してみましょう' : '')}
             </p>
             {avatarError && (
@@ -530,7 +530,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
         )}
       </div>
 
-      <div className="flex border-b border-gray-800 overflow-x-auto scrollbar-none">
+      <div className="flex border-b border-gray-800 overflow-x-auto scrollbar-none shrink-0">
         {stats.map(s => {
           const isActive = activeTab === s.id;
           return (
@@ -588,8 +588,10 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                       </div>
                     </div>
 
+                  {/* break-words が無いと長いURLが折り返せず、プロフィールが横に伸びて
+                      中央寄せのレイアウトごと左へずれる（＝左端の要素が画面外に隠れる） */}
                   <p
-                    className="text-[13px] text-gray-200 whitespace-pre-wrap leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
+                    className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
                     onClick={() => handlePostClick(p)}
                   >
                     {(() => {

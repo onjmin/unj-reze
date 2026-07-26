@@ -35,7 +35,7 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
           <span className="ml-3 font-bold text-sm text-gray-200">プロフィール</span>
         </div>
       </div>
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1">
         <ProfileView userId={id} />
       </div>
     </AppShell>
