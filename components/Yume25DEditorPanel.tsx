@@ -14,7 +14,7 @@ import {
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
 import { drawPlayerIconCanvas } from '@/lib/yume25d';
-import { billboardGroups, canShiftLayer, shiftLayer, type LayerShiftTarget, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
+import { billboardGroups, canShiftLayer, shiftLayer, setWallHeight, stackBlockLayer, type LayerShiftTarget, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
 import AssetThumb from './AssetThumb';
 
@@ -95,6 +95,9 @@ export default function Yume25DEditorPanel({
   // マクロ（一括編集）パネル：レイヤー（地形/壁/スプライト/全レイヤー）やスプライトグループをまとめて動かす
   const [macroOpen, setMacroOpen] = useState(false);
   const [macroTarget, setMacroTarget] = useState<LayerShiftTarget>('all');
+  const [stackTex, setStackTex] = useState<number>(0);
+  const texIds = Object.keys(layout.textures).map(Number);
+  const selStackTex = layout.textures[stackTex] ? stackTex : (texIds[0] ?? 0);
   const macroGroups = billboardGroups(layout);
   const canShift = (dc: number, dr: number, dlv = 0) =>
     canShiftLayer(layout, macroTarget, dc, dr, dlv);
@@ -251,34 +254,44 @@ export default function Yume25DEditorPanel({
           <p className="text-[9px] text-gray-500">マイクラと同じパーリンノイズの高さマップで、内蔵素材のブロックを積んだ地形（海底の起伏〜砂浜〜草原〜山、雪山）を作ります。水の量を入れると海面より低い場所は泳いで潜れる海になり、洞窟ONで山の中にトンネルがくり抜かれます。押すたびに別の地形になります。床とブロック/木は描き替えますが、ほかのスプライトや壁は残ります。スタート周辺は平地になります。XYZが大きいほど生成後の動作が重くなります</p>
 
           <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">↔️ レイヤー・タイルのバッチ移動</p>
-          <label className="flex items-center gap-1.5">対象レイヤー / グループ
-            <select
-              value={typeof macroTarget === 'number' ? `group:${macroTarget}` : macroTarget}
-              onChange={e => {
-                const val = e.target.value;
-                if (val.startsWith('group:')) {
-                  setMacroTarget(Number(val.replace('group:', '')));
-                } else {
-                  setMacroTarget(val as LayerShiftTarget);
-                }
-              }}
-              className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-            >
-              <option value="all">🌐 全レイヤー (床・壁・スプライト全て)</option>
-              <option value="floor">🗺️ 地形(床)レイヤー</option>
-              <option value="wall">🧱 壁レイヤー</option>
-              <option value="billboard">🧍 スプライト(ビルボード)レイヤー</option>
-              {macroGroups.length > 0 && (
-                <optgroup label="📦 スプライトグループ">
-                  {macroGroups.map(g => (
-                    <option key={g.tex} value={`group:${g.tex}`}>
-                      {g.emoji ? `${g.emoji} ` : ''}{g.name} ×{g.count}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1">
+            <span className="text-gray-400 font-bold">対象レイヤー / グループ:</span>
+            <div className="flex items-center gap-1 flex-wrap">
+              {[
+                { id: 'all', label: '🌐 全体' },
+                { id: 'floor', label: '🗺️ 地形' },
+                { id: 'wall', label: '🧱 壁' },
+                { id: 'billboard', label: '🧍 スプライト' },
+              ].map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setMacroTarget(item.id as LayerShiftTarget)}
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded border ${
+                    macroTarget === item.id
+                      ? 'bg-blue-600 border-blue-400 text-white'
+                      : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+              {macroGroups.map(g => (
+                <button
+                  key={g.tex}
+                  onClick={() => setMacroTarget(g.tex)}
+                  title={`${g.name} (×${g.count})`}
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded border flex items-center gap-1 ${
+                    macroTarget === g.tex
+                      ? 'bg-blue-600 border-blue-400 text-white'
+                      : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {g.emoji ? `${g.emoji} ` : ''}{g.name}
+                  <span className="opacity-70 text-[9px]">×{g.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex flex-col items-center gap-0.5">
               <span className="text-gray-400">1マスずつ移動</span>
@@ -307,6 +320,64 @@ export default function Yume25DEditorPanel({
           </div>
           <p className="text-[9px] text-gray-500">
             選択したレイヤー（地形/壁/スプライト/全レイヤー/特定グループ）のタイルやオブジェクトを一括で上下左右・高さ方向に平行移動します。
+          </p>
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-700/50 flex-wrap">
+            <span className="text-gray-400 font-bold">📐 マップ層の高さスケール</span>
+            <div className="flex items-center gap-1">
+              {[0.5, 1.0, 1.5, 2.0].map(h => (
+                <button
+                  key={h}
+                  onClick={() => onLayoutChange(l => setWallHeight(l, h))}
+                  className={`px-2 py-0.5 text-[10px] font-bold rounded border ${
+                    layout.wallHeight === h
+                      ? 'bg-blue-600 border-blue-400 text-white'
+                      : 'bg-gray-800 border-gray-600 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  {h}x
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">🧱 ブロック層の積み上げ</p>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-gray-400 font-bold">素材アイコンを選択:</span>
+            <div className="flex items-center gap-1 flex-wrap">
+              {Object.values(layout.textures).map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setStackTex(t.id)}
+                  title={`${t.name} (#${t.id})`}
+                  className={`w-7 h-7 rounded border-2 flex items-center justify-center text-sm overflow-hidden transition-all ${
+                    selStackTex === t.id ? 'border-yellow-400 ring-2 ring-yellow-400/40' : 'border-gray-700 hover:border-gray-500'
+                  }`}
+                  style={{ background: t.imageUrl ? undefined : t.emoji ? '#1c1826' : t.color }}
+                >
+                  {t.imageUrl && (t.kind === 'sprite' || t.imageUrl.includes('#')) ? (
+                    <SpriteThumb t={t} />
+                  ) : t.imageUrl ? (
+                    <div className="w-full h-full" style={{ background: `url(${t.imageUrl}) center/contain no-repeat #1c1826` }} />
+                  ) : (
+                    t.emoji ?? ''
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span className="text-[11px] text-gray-300 font-bold">
+                選択中: {layout.textures[selStackTex]?.emoji ? `${layout.textures[selStackTex].emoji} ` : ''}{layout.textures[selStackTex]?.name ?? `#${selStackTex}`}
+              </span>
+              <button
+                onClick={() => onLayoutChange(l => stackBlockLayer(l, selStackTex))}
+                className="px-2.5 py-1 rounded border-2 border-blue-500 bg-blue-600 text-white text-[11px] font-bold hover:bg-blue-500"
+              >
+                🧱 ブロック層を積み上げる (+1段)
+              </button>
+            </div>
+          </div>
+          <p className="text-[9px] text-gray-500">
+            選んだ素材が存在する床・ブロックの全座標を自動識別し、同じ素材のブロックを1段上に一括生成します。連打すると2段目・3段目へと積み上がります。
           </p>
         </div>
       )}

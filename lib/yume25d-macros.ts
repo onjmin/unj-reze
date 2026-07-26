@@ -43,7 +43,11 @@ export const canShiftLayer = (l: Layout25D, target: LayerShiftTarget, dc: number
     return canShiftGroup(l, target, dc, dr, dlv);
   }
   if (target === 'floor') {
-    if (dlv !== 0) return false;
+    if (dlv !== 0) {
+      const blocks = l.billboards.filter(b => l.textures[b.tex]?.special === 'block');
+      if (!blocks.length) return false;
+      return blocks.every(b => (b.level ?? 0) + dlv >= 0);
+    }
     return dc !== 0 || dr !== 0;
   }
   if (target === 'wall') {
@@ -126,9 +130,10 @@ export const shiftLayer = (l: Layout25D, target: LayerShiftTarget, dc: number, d
   }
 
   let billboards = l.billboards;
-  if (target === 'all' || target === 'billboard') {
+  if (target === 'all' || target === 'billboard' || (target === 'floor' && dlv !== 0)) {
     billboards = l.billboards
       .map(b => {
+        if (target === 'floor' && l.textures[b.tex]?.special !== 'block') return b;
         const lv = (b.level ?? 0) + dlv;
         return {
           ...b,
@@ -159,6 +164,71 @@ export const shiftLayer = (l: Layout25D, target: LayerShiftTarget, dc: number, d
     walls,
     billboards,
     start,
+  };
+};
+
+/** マクロ：マップ全体の壁・レイヤーの高さ（wallHeight）を一括変更する。 */
+export const setWallHeight = (l: Layout25D, wallHeight: number): Layout25D => ({
+  ...l,
+  wallHeight: Math.max(0.2, Math.min(4.0, Math.round(wallHeight * 100) / 100)),
+});
+
+/** マクロ：指定したテクスチャ/スプライトが存在する床・ブロックの座標を識別し、
+ *  その素材のブロックを全対象座標の1段上に一括配置（積み上げ）する。 */
+export const stackBlockLayer = (l: Layout25D, tex: number): Layout25D => {
+  if (!l.textures[tex]) return l;
+
+  const textures = { ...l.textures };
+  if (textures[tex].special !== 'block') {
+    textures[tex] = { ...textures[tex], special: 'block' };
+  }
+
+  const topLevelsByCoord = new Map<string, number>();
+  const targetCoords = new Set<string>();
+
+  // 1. 床面で指定テクスチャが存在する座標
+  for (let r = 0; r < l.rows; r++) {
+    for (let c = 0; c < l.cols; c++) {
+      if (l.floor[r]?.[c] === tex) {
+        targetCoords.add(`${c},${r}`);
+      }
+    }
+  }
+
+  // 2. 配置済みビルボード/ブロックで指定テクスチャが存在する座標
+  for (const b of l.billboards) {
+    if (b.tex === tex) {
+      const key = `${b.col},${b.row}`;
+      targetCoords.add(key);
+      const lv = b.level ?? 0;
+      const curTop = topLevelsByCoord.get(key);
+      if (curTop === undefined || lv > curTop) {
+        topLevelsByCoord.set(key, lv);
+      }
+    }
+  }
+
+  if (targetCoords.size === 0) return l;
+
+  const newBillboards: Billboard25D[] = [];
+  for (const key of targetCoords) {
+    const [cStr, rStr] = key.split(',');
+    const c = Number(cStr), r = Number(rStr);
+    const curTop = topLevelsByCoord.get(key);
+    const newLv = curTop !== undefined ? curTop + 1 : 0;
+    newBillboards.push({
+      id: uid(),
+      col: c,
+      row: r,
+      tex,
+      ...(newLv > 0 ? { level: newLv } : {}),
+    });
+  }
+
+  return {
+    ...l,
+    textures,
+    billboards: [...l.billboards, ...newBillboards],
   };
 };
 
