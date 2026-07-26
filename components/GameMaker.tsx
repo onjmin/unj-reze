@@ -4600,16 +4600,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       return true;
     };
-    // #CH_PH で切り替えられたページは発生条件より優先する（自分自身にも他イベントにも効く）。
-    // ただし、切り替え先ページに未充足の条件（所持金・スイッチ等）がある場合は無効とし、通常の条件評価へフォールバックする。
-    const forced = forcedPagesRef.current[obj.id] ?? (obj.col != null && obj.row != null ? forcedPagesRef.current[`${obj.col},${obj.row}`] : undefined);
-    if (forced != null && obj.pages[forced] && checkConditions(obj.pages[forced].conditions)) {
-      return obj.pages[forced];
-    }
     const hasConditions = (c?: EventCondition) => {
       if (!c) return false;
       return c.switchId != null || c.switch2Id != null || c.itemId != null || c.selfSwitchId != null || c.minGold != null;
     };
+    // #CH_PH で切り替えられたページは発生条件より優先する（自分自身にも他イベントにも効く）。
+    // ただし、切り替え先ページに未充足の条件（所持金・スイッチ等）がある場合は無効とし、通常の条件評価へフォールバックする。
+    const forced = forcedPagesRef.current[obj.id] ?? (obj.col != null && obj.row != null ? forcedPagesRef.current[`${obj.col},${obj.row}`] : undefined);
+    if (forced != null && obj.pages[forced] && checkConditions(obj.pages[forced].conditions)) {
+      // ただしピン留めは「発生条件を持つ上位ページ」には負ける。条件付きページはスイッチ等で
+      // 後から成立するものなので、一度 #CH_PH したイベントで永久に隠れてしまってはいけない
+      // （本家もページ番号の大きい順に条件を判定し、最初に成立したページを使う）。
+      let outranked: EventPage | null = null;
+      for (let i = obj.pages.length - 1; i > forced; i--) {
+        const p = obj.pages[i];
+        if (p && hasConditions(p.conditions) && checkConditions(p.conditions)) { outranked = p; break; }
+      }
+      return outranked ?? obj.pages[forced];
+    }
     for (let i = obj.pages.length - 1; i >= 0; i--) {
       const page = obj.pages[i];
       const c = page.conditions;
@@ -4943,29 +4951,50 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(advance, 0);
           break;
         }
+        // RPGEN の #SV_DT / #LD_DT は sw（スイッチ）/ g（所持金）/ p（パーティ）/ n（NPC）で
+        // 対象を選ぶ。エディタで手置きしたコマンドはフラグを持たないので、その場合は全部扱いにする。
         case 'saveData':
+        case 'loadData': {
+          const anyFlag = !!(cmd.switches || cmd.gold || cmd.party || cmd.npc);
+          const want = {
+            switches: anyFlag ? !!cmd.switches : true,
+            gold: anyFlag ? !!cmd.gold : true,
+            party: anyFlag ? !!cmd.party : true,
+            npc: anyFlag ? !!cmd.npc : true,
+          };
           try {
-            localStorage.setItem('rpgen_save_data', JSON.stringify({
-              progress: progressRef.current,
-              switches: selfSwitchesRef.current,
-              player: engineRef.current.player
-            }));
-          } catch (err) { console.warn('SaveData failed:', err); }
-          setTimeout(advance, 0);
-          break;
-        case 'loadData':
-          try {
-            const raw = localStorage.getItem('rpgen_save_data');
-            if (raw) {
-              const data = JSON.parse(raw);
-              if (data.progress) progressRef.current = data.progress;
-              if (data.switches) selfSwitchesRef.current = data.switches;
-              if (data.player) engineRef.current.player = data.player;
-              forceHud(n => n + 1);
+            if (cmd.type === 'saveData') {
+              const prev = JSON.parse(localStorage.getItem('rpgen_save_data') || '{}');
+              localStorage.setItem('rpgen_save_data', JSON.stringify({
+                ...prev,
+                // グローバルスイッチ（#ON_SW/#OF_SW）。以前はここに selfSwitches を
+                // 入れていたためスイッチの状態が一切保存されていなかった。
+                ...(want.switches ? { switches: switchValsRef.current } : {}),
+                // セルフスイッチはイベント個々の進行状況なので、スイッチ指定と一緒に扱う
+                ...(want.switches ? { selfSwitches: selfSwitchesRef.current } : {}),
+                ...(want.gold ? { gold: progressRef.current.gold } : {}),
+                ...(want.party ? { progress: progressRef.current } : {}),
+                ...(want.npc ? { player: engineRef.current.player } : {}),
+              }));
+            } else {
+              const raw = localStorage.getItem('rpgen_save_data');
+              if (raw) {
+                const data = JSON.parse(raw);
+                if (want.switches && data.switches) {
+                  switchValsRef.current = data.switches;
+                  setSwitchVals(data.switches);
+                }
+                if (want.switches && data.selfSwitches) selfSwitchesRef.current = data.selfSwitches;
+                if (want.party && data.progress) progressRef.current = data.progress;
+                if (want.gold && data.gold != null) progressRef.current.gold = data.gold;
+                if (want.npc && data.player) engineRef.current.player = data.player;
+                forceHud(n => n + 1);
+              }
             }
-          } catch (err) { console.warn('LoadData failed:', err); }
+          } catch (err) { console.warn(`${cmd.type} failed:`, err); }
           setTimeout(advance, 0);
           break;
+        }
         case 'stopSound':
           document.querySelectorAll('audio').forEach(a => { try { a.pause(); a.currentTime = 0; } catch (e) { } });
           setTimeout(advance, 0);

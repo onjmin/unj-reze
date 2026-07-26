@@ -367,7 +367,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       case CommandType.OnSwitch:
       case CommandType.OffSwitch: {
         const id = Number(cmd.params.n);
-        if (Number.isFinite(id)) switchIds.add(id);
+        if (Number.isFinite(id) && id > 0) switchIds.add(id);
         break;
       }
       case CommandType.Message: {
@@ -387,7 +387,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     for (const phase of ep.phases) {
       collectFrom(parsePhase(phase.sequence));
       const sw = 'condition' in phase ? phase.condition.switch : undefined;
-      if (sw !== undefined && Number.isFinite(sw)) switchIds.add(sw);
+      if (sw !== undefined && Number.isFinite(sw) && sw > 0) switchIds.add(sw);
     }
   }
 
@@ -985,8 +985,11 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
       if ('condition' in phase) {
         const goldCond = Number(phase.condition.gold);
         if (Number.isFinite(goldCond) && goldCond > 0) conditions.minGold = goldCond;
+        // スイッチ番号は 1〜100（#ON_SW/#OF_SW の n）。0 は「スイッチ条件なし」であって
+        // 「0番がONのとき」ではない。0 を条件にすると 0番を立てる手段が無いため
+        // そのページが永久に非アクティブになる（所持金条件が > 0 を見ているのと同じ理由）。
         const switchCond = Number(phase.condition.switch);
-        if (Number.isFinite(switchCond)) {
+        if (Number.isFinite(switchCond) && switchCond > 0) {
           conditions.switchId = switchCond;
           conditions.switchValue = true;
         }
