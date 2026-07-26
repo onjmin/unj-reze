@@ -5547,6 +5547,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const sw = data.scroll?.worldCols ?? COLS; const sh = data.scroll?.worldRows ?? ROWS;
     setEditScroll(Math.max(0, Math.min(sw * TILE_SIZE - VIEW_W, data.player.start.x + data.player.w / 2 - VIEW_W / 2)));
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
+    const b = data.battle;
+    progressRef.current = b
+      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
+      : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+    setSwitchVals({}); switchValsRef.current = {};
+    setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
+    selfSwitchesRef.current = {};
+    setShowGoldOverlay(false);
     isTestPlayRef.current = true;
     setIsPlaying(false); setSelectedObjId(null);
     setShowTitle(false); setShowEnding(false);
@@ -5620,6 +5628,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     gameOverActiveRef.current = false;
     roundOverRef.current = false;
     warpCooldownRef.current = null;
+    const b = gameData.battle;
+    progressRef.current = b
+      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
+      : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+    setSwitchVals({}); switchValsRef.current = {};
+    setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
+    selfSwitchesRef.current = {};
+    setShowGoldOverlay(false);
     setIsPlaying(false); setSelectedObjId(null);
     setShowEnding(false); setGameOverResult(null); setShowDeathScreen(false);
   }, [gameData]);
@@ -5887,7 +5903,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
-      if (b) progressRef.current = { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 };
+      progressRef.current = b
+        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
+        : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+      setShowGoldOverlay(false);
       setEquipment({}); equipmentRef.current = {};
       setPartyEquipment({}); partyEquipmentRef.current = {};
       battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
@@ -5956,6 +5975,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       eng.player.vx = 0; eng.player.vy = 0; eng.player.isGrounded = false;
       battleRef.current.active = false;
       setBattle(null);
+      const b = gameData.battle;
+      progressRef.current = b
+        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
+        : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+      setShowGoldOverlay(false);
     }
   }, [isPlaying, gameData]);
 
