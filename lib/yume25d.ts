@@ -821,10 +821,24 @@ export class Yume25DEngine {
     const planeDist = planeHit ? pt.distanceTo(raycaster.ray.origin) : Infinity;
 
     if (hit && (preferGeometry || hit.distance <= planeDist)) {
+      const bbCol = hit.object.userData.bbCol as number | undefined;
+      const bbRow = hit.object.userData.bbRow as number | undefined;
+      const bbLevel = hit.object.userData.bbLevel as number | undefined;
+
+      if (bbCol !== undefined && bbRow !== undefined && bbLevel !== undefined) {
+        let level = bbLevel;
+        if (!preferGeometry && hit.face && hit.face.normal.y > 0.5) {
+          level = bbLevel + 1;
+        }
+        return { x: bbCol + 0.5, z: bbRow + 0.5, level };
+      }
+
       // 面上ぴったりだとセルが裏側に落ちるので、視点側へ僅かに戻した点でセルを判定する
       const p = hit.point.clone().addScaledVector(raycaster.ray.direction, -1e-3);
-      const bbLevel = hit.object.userData.bbLevel as number | undefined;
-      const level = bbLevel ?? Math.max(0, Math.floor(p.y / H));
+      let level = bbLevel ?? Math.max(0, Math.floor(p.y / H));
+      if (!preferGeometry && bbLevel !== undefined && hit.face && hit.face.normal.y > 0.5) {
+        level = bbLevel + 1;
+      }
       return { x: p.x, z: p.z, level };
     }
     if (planeHit && planeDist <= this.layout.fogFar) return { x: pt.x, z: pt.z, level: flightLevel };
@@ -1380,7 +1394,7 @@ export class Yume25DEngine {
         const proxy = new THREE.Mesh(proxyGeo, proxyMat);
         proxy.visible = false;  // 不可視でもレイキャストには当たる（編集の消去・配置先判定用）
         proxy.position.set(b.col + 0.5, baseY + s / 2, b.row + 0.5);
-        proxy.userData.bbLevel = b.level ?? 0;
+        proxy.userData = { bbCol: b.col, bbRow: b.row, bbLevel: b.level ?? 0 };
         this.scene.add(proxy);
         this.worldObjects.push(proxy);
         const gen = this.buildGen;
@@ -1458,7 +1472,7 @@ export class Yume25DEngine {
         const proxy = new THREE.Mesh(proxyGeo, proxyMat);
         proxy.visible = false;  // 不可視でもレイキャストには当たる（編集の消去・配置先判定用）
         proxy.position.set(b.col + 0.5, baseY + (0.95 * s) / 2, b.row + 0.5);
-        proxy.userData.bbLevel = b.level ?? 0;
+        proxy.userData = { bbCol: b.col, bbRow: b.row, bbLevel: b.level ?? 0 };
         this.scene.add(proxy);
         this.worldObjects.push(proxy);
         const gen = this.buildGen;
@@ -1493,7 +1507,7 @@ export class Yume25DEngine {
         }
         const mesh = new THREE.Mesh(blockGeoShared, mat);
         mesh.position.set(b.col + 0.5, base + BLOCK_SIZE / 2, b.row + 0.5);
-        mesh.userData.bbLevel = b.level ?? 0;
+        mesh.userData = { bbCol: b.col, bbRow: b.row, bbLevel: b.level ?? 0 };
         this.scene.add(mesh);
         this.worldObjects.push(mesh);
         const key = `${b.col},${b.row}`;
@@ -1515,7 +1529,7 @@ export class Yume25DEngine {
         const x = b.col + 0.5, z = b.row + 0.5;
         const y = (b.level ?? 0) * H + r;
         mesh.position.set(x, y, z);
-        mesh.userData.bbLevel = b.level ?? 0;
+        mesh.userData = { bbCol: b.col, bbRow: b.row, bbLevel: b.level ?? 0 };
         this.scene.add(mesh);
         this.worldObjects.push(mesh);
         this.balls.push({ mesh, r, homeX: x, homeZ: z, homeY: y, x, z, y, vx: 0, vz: 0, vy: 0 });
@@ -1553,7 +1567,7 @@ export class Yume25DEngine {
       // level 段ぶん浮かせる（足元が y = level*H に揃う）
       mesh.position.set(b.col + 0.5, (b.level ?? 0) * H + (s * 0.9) / 2, b.row + 0.5);
       // 編集ピッキング用：交点の y からではなくビルボード自身の段を採用する（壁の高さと縮尺が違うため）
-      mesh.userData.bbLevel = b.level ?? 0;
+      mesh.userData = { bbCol: b.col, bbRow: b.row, bbLevel: b.level ?? 0 };
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
       this.billboardMeshes.push(mesh);
