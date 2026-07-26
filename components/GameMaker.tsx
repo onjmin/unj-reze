@@ -4674,18 +4674,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         return;
       }
       const cmd = cmds[index];
-      console.log(cmd.type)
       switch (cmd.type) {
         case 'message':
-          console.log(index);
           showGameMsg(cmd.text, 'instant', advance);
-          console.log(index);
           break;
         case 'overheadMessage':
           itemGetRef.current = { text: cmd.text, startTime: performance.now() };
-          console.log(index);
           setTimeout(advance, 30);
-          console.log(index);
           break;
         case 'playSound':
           playSfx({ ref: `direct:${cmd.src}`, src: cmd.src, type: 'direct' });
