@@ -1329,6 +1329,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [panelFullscreen]);
+  /** 編集モードでゲーム画面上に出す座標ジャンプ入力欄の中身。null なら閉じている。
+   *  ゲーム画面にフォーカスがある状態で Enter を押すと開き、もう一度 Enter か
+   *  移動の実行で閉じる（編集パネルの入力欄で打つ Enter では開かない）。 */
+  const [coordJump, setCoordJump] = useState<string | null>(null);
   /** マップタブの編集ツール（tile のみ。初期位置は🏁ドラッグで変更）。 */
   const [mapTool] = useState<'tile'>('tile');
   const isDraggingStartRef = useRef(false);
@@ -1523,6 +1527,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const editScrollYRef = useRef(0);
   editScrollRef.current = editScroll;
   editScrollYRef.current = editScrollY;
+  /** 「10,9」のような座標入力で主人公（編集モードのカーソル）をそのマスへ飛ばす。
+   *  区切りは半角/全角のカンマ・空白どれでもよい。実行したら入力欄は閉じる。 */
+  const jumpToCoord = useCallback((raw: string) => {
+    const nums = raw.replace(/[，、]/g, ',').split(/[\s,]+/).filter(Boolean).map(Number);
+    if (nums.length < 2 || !Number.isFinite(nums[0]) || !Number.isFinite(nums[1])) return;
+    const grid = engineRef.current.map;
+    const maxCol = Math.max(0, (grid[0]?.length ?? 1) - 1);
+    const maxRow = Math.max(0, grid.length - 1);
+    const col = Math.max(0, Math.min(maxCol, Math.floor(nums[0])));
+    const row = Math.max(0, Math.min(maxRow, Math.floor(nums[1])));
+    const x = col * TILE_SIZE, y = row * TILE_SIZE;
+    engineRef.current.player = { x, y, vx: 0, vy: 0, isGrounded: false };
+    // 飛んだ先が画面外にならないよう、編集ビューもその位置を中心に寄せる。
+    setEditScroll(Math.max(0, Math.min((maxCol + 1) * TILE_SIZE - VIEW_W, x + TILE_SIZE / 2 - VIEW_W / 2)));
+    setEditScrollY(Math.max(0, Math.min((maxRow + 1) * TILE_SIZE - VIEW_H, y + TILE_SIZE / 2 - VIEW_H / 2)));
+    setCoordJump(null);
+  }, []);
   /** 現在のカメラのワールド座標オフセット。エンカウント演出でスクリーン固定位置へ変換するために毎フレーム更新する。 */
   const camXRef = useRef(0);
   const camYRef = useRef(0);
@@ -2410,10 +2431,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     map: number[][]; overlayMap?: number[][]; overheadMap?: number[][];
     scenes: Array<{ map: number[][]; overlayMap?: number[][]; overheadMap?: number[][] }>;
   } | null>(null);
-  // __CLAUDE_DEBUG__ (temporary)
-  useEffect(() => {
-    (window as never as Record<string, unknown>).__gm = { engineRef, gameDataRef, forcedPagesRef, lastTouchTimeMapRef, eventRunningRef, selfSwitchesRef };
-  }, []);
 
   // ── グレイズ ──
   const grazeRef = useRef(0);
@@ -5991,7 +6008,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
     };
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 入力欄（編集パネルのテキストボックス等）で打っている Enter はここまで伝わらせない。
       if (isInputTarget(e)) return;
+      // 編集モード：Enter で座標ジャンプ入力欄を開閉する（"10,9" のように入れて主人公を飛ばす）。
+      if (e.key === 'Enter' && !isPlaying) {
+        e.preventDefault();
+        setCoordJump(prev => (prev === null ? '' : null));
+        return;
+      }
       engineRef.current.keys.add(e.key);
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
       if (e.key === 'i' || e.key === 'I') { touchRef.current.inv = true; setTimeout(() => { touchRef.current.inv = false; }, 80); e.preventDefault(); }
@@ -6993,10 +7017,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 土管アニメーション中、変身中、ゴール演出中も操作を凍結
       const frozen = isPlaying && (roundOverRef.current || isPlayerDeadRef.current || !!sceneFadeRef.current || !!sceneTransRef.current || marioTransformingRef.current > 0 || !!marioPipeRef.current || !!marioGoalRef.current || bagOpenRef.current || invOpenRef.current || !!gameMsgRef.current || !!activeDialogueRef.current || !!eventChoiceRef.current || !!shopModalRef.current || !!encounterAlertRef.current);
 
-      // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）
+      // 起動直後／リスタート時の埋まり防止イジェクト処理（2マスキャラ等の開始時埋まりバグ対策）。
+      // 1pxずつ上へ逃がす処理なので、マス目に乗って動く見下ろし型（rpg/onjReze）でやると
+      // 当たり判定つきの地形に開始位置を置いただけで開始座標がマスの中心からズレてしまう。
+      // 横スクロール（action）は接地のために必要なので、そちらだけに残す。
       if (justStartedRef.current && isPlaying && !frozen) {
         justStartedRef.current = false;
-        let safety = 0;
+        // 見下ろし型（rpg/onjReze）はマス目に乗って動くので、このイジェクトを掛けると
+        // 当たり判定つきの地形に開始位置を置いただけで開始座標がマスからズレてしまう。
+        // 埋まったままでも「通行可の隣マスへ出る」動きは移動処理側で許してあるので何もしない。
+        const ejectOnStart = gameData.engine !== 'rpg' && gameData.engine !== 'onjReze';
+        let safety = ejectOnStart ? 0 : 128;
         const ph = getPlayerHeight();
         const pw = getPlayerWidth();
         while (safety < 128) {
@@ -12611,6 +12642,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 onTouchMove={e => editorTab !== 'object' && handleCanvasAction(e)}
                 onTouchEnd={() => { isDraggingStartRef.current = false; endEditGesture(); }}
                 onContextMenu={e => e.preventDefault()} />
+            )}
+
+            {/* 編集モード：Enter で開く座標ジャンプ入力欄（"10,9" で主人公をその位置へ飛ばす） */}
+            {coordJump !== null && !isPlaying && (
+              <div className="absolute inset-x-0 top-2 z-30 flex justify-center pointer-events-none">
+                <div className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-gray-600 bg-gray-900/95 px-2 py-1.5 shadow-lg">
+                  <span className="text-[10px] text-gray-400 font-bold">座標へ移動</span>
+                  <input
+                    autoFocus
+                    value={coordJump}
+                    onChange={e => setCoordJump(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); jumpToCoord(coordJump); }
+                      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setCoordJump(null); }
+                    }}
+                    placeholder="10,9"
+                    className="w-24 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-200 outline-none focus:border-blue-500"
+                  />
+                  <button onClick={() => jumpToCoord(coordJump)}
+                    className="px-2 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10 font-bold">移動</button>
+                </div>
+              </div>
             )}
 
             {/* SMC素材クレジットバッジ（マリオプリセット プレイ中） */}
