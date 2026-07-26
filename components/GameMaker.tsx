@@ -1418,6 +1418,30 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const justStartedRef = useRef(false);
   const isTestPlayRef = useRef(false);
   const editorCoordRef = useRef<HTMLDivElement>(null);
+  const [coordHudVisible, setCoordHudVisible] = useState(false);
+  const coordTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (isPlaying) return;
+    const handleActivity = () => {
+      setCoordHudVisible(false);
+      if (coordTimeoutRef.current) clearTimeout(coordTimeoutRef.current);
+      coordTimeoutRef.current = setTimeout(() => {
+        setCoordHudVisible(true);
+      }, 1200);
+    };
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('mousedown', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('mousedown', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      if (coordTimeoutRef.current) clearTimeout(coordTimeoutRef.current);
+    };
+  }, [isPlaying]);
 
   // ── プレビュー用 ──
   const [previewCommand, setPreviewCommand] = useState<EventCommand | null>(null);
@@ -1606,8 +1630,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const grid = engineRef.current.map;
     const maxCol = Math.max(0, (grid[0]?.length ?? 1) - 1);
     const maxRow = Math.max(0, grid.length - 1);
-    const col = Math.max(0, Math.min(maxCol, Math.floor(nums[0])));
-    const row = Math.max(0, Math.min(maxRow, Math.floor(nums[1])));
+    const col = Math.floor(nums[0]);
+    const row = Math.floor(nums[1]);
     const x = col * TILE_SIZE, y = row * TILE_SIZE;
     engineRef.current.player = { x, y, vx: 0, vy: 0, isGrounded: false };
     // 飛んだ先が画面外にならないよう、編集ビューもその位置を中心に寄せる。
@@ -7287,8 +7311,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const es = pData.speed * editSpeedMult;
           if (isLeft) p.x -= es; if (isRight) p.x += es;
           if (isUp) p.y -= es; if (isDown) p.y += es;
-          p.x = Math.max(0, Math.min(worldW - pData.w, p.x));
-          p.y = Math.max(0, Math.min(worldH - pData.h, p.y));
         } else if (frozen) {
           p.vx = 0; p.vy = 0; p.isGrounded = false;
         } else if (gameData.engine === 'action') {
@@ -11396,28 +11418,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
         const curX = p.x;
         const curY = p.y;
-        const curW = pData.w;
         const curH = pData.h;
-        const startX = gameData.player.start.x;
-        const startY = gameData.player.start.y;
 
         const curGridX = Math.floor(curX / TILE_SIZE);
         const curGridY = Math.floor((curY + curH - TILE_SIZE) / TILE_SIZE);
-        const startGridX = Math.floor(startX / TILE_SIZE);
-        const startGridY = Math.floor((startY + curH - TILE_SIZE) / TILE_SIZE);
 
-        editorCoordRef.current.innerHTML = `
-          <div class="flex items-center justify-end gap-1.5">
-            <span class="text-blue-400 font-bold">👤</span>
-            <span class="font-semibold text-white">(${curGridX}, ${curGridY})</span>
-            <span class="text-[9px] text-gray-400">px: (${Math.round(curX)}, ${Math.round(curY)})</span>
-          </div>
-          <div class="flex items-center justify-end gap-1.5 opacity-80">
-            <span class="text-emerald-400 font-bold">🏁</span>
-            <span class="font-semibold text-white">(${startGridX}, ${startGridY})</span>
-            <span class="text-[9px] text-gray-400">px: (${Math.round(startX)}, ${Math.round(startY)})</span>
-          </div>
-        `;
+        editorCoordRef.current.textContent = `現在座標: (${curGridX}, ${curGridY})`;
       }
 
       eng.animId = requestAnimationFrame(loop);
@@ -12931,11 +12937,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               </a>
             )}
 
-            {/* ゲーム編集時は主人公の現在座標および初期位置を表示(x,y) */}
+            {/* ゲーム編集時は主人公の現在座標を表示(x,y)（非操作時のみフェードイン） */}
             {gameData.engine !== 'yume25d' && !isPlaying && !introOpen && !showTitle && !showEnding && (
               <div
                 ref={editorCoordRef}
-                className="absolute top-2 right-2 z-30 bg-black/85 text-[11px] font-pixel text-gray-200 px-2.5 py-2 border border-white/20 rounded shadow-lg select-none flex flex-col gap-1 pointer-events-none text-right min-w-[140px]"
+                style={{
+                  textShadow: '-1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 4px #fff, 0 0 2px #fff',
+                }}
+                className={`absolute bottom-2 right-2 z-30 text-[13px] font-pixel text-blue-600 font-bold select-none pointer-events-none transition-opacity duration-500 ease-in-out ${
+                  coordHudVisible ? 'opacity-100' : 'opacity-0'
+                }`}
               />
             )}
             {/* ── タイトル画面オーバーレイ ── */}
@@ -15666,23 +15677,50 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           {/* スタート地点（消せないので座標の確認と移動のみ） */}
                           <div className="flex items-center gap-1.5 rounded bg-gray-800/60 px-1.5 py-1">
                             <span className="text-[11px]">🏁</span>
-                            <span className="text-[10px] text-gray-300 flex-1 truncate">スタート地点 ({startCol},{startRow})</span>
+                            <span className="text-[10px] text-gray-300 flex-1 truncate">スタート ({startCol},{startRow})</span>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                value={startCol}
+                                onChange={e => {
+                                  const c = parseInt(e.target.value, 10);
+                                  if (!isNaN(c)) {
+                                    const sx = c * TILE_SIZE;
+                                    setGameData(prev => ({ ...prev, player: { ...prev.player, start: { ...prev.player.start, x: sx } } }));
+                                  }
+                                }}
+                                className="w-11 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-white font-mono"
+                                title="X (列)"
+                              />
+                              <input
+                                type="number"
+                                value={startRow}
+                                onChange={e => {
+                                  const r = parseInt(e.target.value, 10);
+                                  if (!isNaN(r)) {
+                                    const sy = r * TILE_SIZE + TILE_SIZE - gameData.player.h;
+                                    setGameData(prev => ({ ...prev, player: { ...prev.player, start: { ...prev.player.start, y: sy } } }));
+                                  }
+                                }}
+                                className="w-11 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-white font-mono"
+                                title="Y (行)"
+                              />
+                            </div>
                             <button
                               onClick={() => {
                                 const sx = startCol * TILE_SIZE, sy = gameData.player.start.y;
                                 engineRef.current.player = { x: sx, y: sy, vx: 0, vy: 0, isGrounded: false };
                               }}
-                              className="px-2 py-1 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
+                              className="px-1 py-0.5 rounded text-[10px] text-blue-300 hover:bg-blue-500/10">ここへ</button>
                             <button
                               onClick={() => {
-                                // カーソル（主人公マーカー）の位置をゲーム開始位置にする
                                 const cp = engineRef.current.player;
                                 const col = Math.floor((cp.x + 12) / TILE_SIZE), row = Math.floor((cp.y + 12) / TILE_SIZE);
                                 pushUndo();
                                 const sx = col * TILE_SIZE, sy = row * TILE_SIZE + TILE_SIZE - gameData.player.h;
                                 setGameData(prev => ({ ...prev, player: { ...prev.player, start: { x: sx, y: sy } } }));
                               }}
-                              className="px-2 py-1 rounded text-[10px] text-green-300 hover:bg-green-500/10">現在地に設定</button>
+                              className="px-1 py-0.5 rounded text-[10px] text-green-300 hover:bg-green-500/10">現在地</button>
                           </div>
                           {warps.length === 0 && <p className="text-[10px] text-gray-500 px-1">まだ登録されていません。カーソルを置いてZキー／Aボタンで追加します。</p>}
                           {warps.map(o => (
@@ -15821,6 +15859,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </button>
                           <input value={selObj.name ?? ''} onChange={e => updObj({ name: e.target.value || undefined })} placeholder="名前(任意)"
                             className="flex-1 min-w-0 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none" />
+                        </div>
+                        {/* 初期座標(列, 行) — マップ外の座標も設定可能 */}
+                        <div className="flex items-center gap-2">
+                          <label className="text-[10px] text-gray-400 flex items-center gap-1">
+                            X(列):
+                            <input
+                              type="number"
+                              value={selObj.col}
+                              onChange={e => {
+                                const v = parseInt(e.target.value, 10);
+                                if (!isNaN(v)) updObj({ col: v });
+                              }}
+                              className="w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 font-mono outline-none"
+                            />
+                          </label>
+                          <label className="text-[10px] text-gray-400 flex items-center gap-1">
+                            Y(行):
+                            <input
+                              type="number"
+                              value={selObj.row}
+                              onChange={e => {
+                                const v = parseInt(e.target.value, 10);
+                                if (!isNaN(v)) updObj({ row: v });
+                              }}
+                              className="w-16 bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[11px] text-gray-200 font-mono outline-none"
+                            />
+                          </label>
                         </div>
                         {/* 種別 */}
                         <label className="text-[10px] text-gray-400 block">種別
