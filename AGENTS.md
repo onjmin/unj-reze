@@ -1,31 +1,88 @@
-# RPGEN
+# unj-reze
 
 ## About this document
 
 - This file contains repository-wide instructions only.
 - Keep this file concise (target: under 150 lines).
-- Store detailed documentation under `.agents/`.
-- Link to specialized documents instead of duplicating their contents.
+- Store detailed, checked-in documentation under `docs/`. Link to it instead of duplicating contents.
+- `.agents/` and `.claude/` are **gitignored** (local-only). Never assume a teammate or CI has those files.
 
 ---
 
 # Project Overview
 
-RPGEN is an integrated platform combining:
+RPGEN (`unj-reze`) is an anonymous, login-less SNS with heavy creation tooling attached:
 
-- **Social Networking & Community**: User feeds, posts, comments, likes, and creator profiles.
-- **Game Creation Engine**: Browser-based 2D RPG engine (`components/GameMaker.tsx` and `lib/rpgen-parser.ts`).
-- **Asset & Game Sharing**: Public sharing and discovery of user-created sprites, tilesets, and full games.
+- **Social / Community**: feed, posts, replies, likes, hashtags, DMs, notifications, blocks/mutes,
+  reports, ranking, and a 2ch-style BBS view (`BbsBoardView.tsx` / `BbsThreadView.tsx`).
+  Identity is session/fingerprint based — there are no accounts.
+- **Creation tools** attached to the composer: game editor (`GameMaker.tsx`), drawing editors
+  (`DrawingEditor.tsx` / `DotDrawingEditor.tsx`, `@onjmin/oekaki`), MML music editor/player
+  (`MmlEditor.tsx`, `@onjmin/dtm`).
+- **Asset & Game Sharing**: games/sprites/music embedded into posts and played inline
+  (`GameBox.tsx` → `GamePreview.tsx` → `GameMaker.tsx`).
+
+The whole app is a client-side SPA driven from `app/page.tsx`, talking to route handlers
+under `app/api/`.
+
+## Game engines
+
+`components/GameMaker.tsx` is the single live engine host (~19k lines). It covers **two**
+runtimes, selected by `gameData.engine` (`EngineKind` in `components/game-presets/shared.ts`:
+`'action' | 'rpg' | 'touhou' | 'onjReze' | 'yume25d'`):
+
+- **2D engine** — canvas 2D, implemented inline in `GameMaker.tsx`. Used by all non-`yume25d` kinds.
+- **yume25d** — first-person 2.5D via three.js (`components/Yume25DMaker.tsx`, `lib/yume25d.ts`).
+
+Presets live in `components/game-presets/`. `components/MiniScriptVM.ts` is the small DSL VM
+used by bullet-hell/spell scripting.
 
 ---
 
-# System Architecture & Edge Stack
+# System Architecture & Backends
 
-- **Edge Deployment**: Built on Next.js targeting Cloudflare via `@opennextjs/cloudflare`.
-- **Database (Cloudflare D1)**: Serverless SQLite for user profiles, posts, social feeds, and game manifests (`lib/db/`).
-- **KV Storage (Cloudflare KV)**: Fast key-value store for session caching and rate-limiting (`lib/kv/`).
-- **Asset Storage (Cloudflare R2)**: S3-compatible object storage for game sprites, images, and user media (`lib/storage/`).
-- **Security & Anti-Abuse**: Multi-layered protection using Cloudflare Turnstile (`lib/security/turnstile.ts`), JA4/device fingerprinting, and Geo-headers (`cf-ipcountry`).
+Every backend is **pluggable via env var, defaulting to a mock**, so the app runs with zero
+external services. Do not hard-code a provider.
+
+| Concern | Env var | Values (default first) | Code |
+|---|---|---|---|
+| Database | `DATABASE_PROVIDER` | `mock` / `neon` (Postgres, **production**) / `d1` (SQLite file) | `lib/db.ts`, `lib/db/{mock,pg,sqlite}.ts` |
+| KV | `KV_PROVIDER` | `mock` (in-memory Map) / `cloudflare` (KV REST API) | `lib/kv/` |
+| Object storage | `STORAGE_PROVIDER` | `local` / `r2` (Cloudflare R2) | `lib/storage/` |
+
+- All stores implement a shared interface — `DataStore` in `lib/db/interface.ts`. Adding a query
+  means editing **all three** of `mock.ts`, `pg.ts`, `sqlite.ts`.
+- `lib/db.ts` wraps the store in a Proxy that **auto-falls back to `mockStore`** on connection
+  errors. A "working" local run may silently be on mock data.
+- `lib/storage/s3.ts` is the **local filesystem** provider (writes `./public/uploads`) despite the
+  name; it does not use AWS S3. Only `lib/storage/r2.ts` uses `@aws-sdk/client-s3`.
+- Schema lives in `data/schema.sql`, which is **gitignored** — it is not in the repo. Migrations are
+  applied manually (see `README.md`).
+
+## Deployment targets
+
+- **Cloudflare Workers** — production, `@opennextjs/cloudflare` + `wrangler.json`, served at
+  `https://unj-reze.onjmin.workers.dev` with `neon` / `cloudflare` / `r2` providers. KV and R2 are
+  reached over REST / the S3 API with account credentials, **not** Worker bindings — hence no
+  `kv_namespaces` or `r2_buckets` in `wrangler.json`.
+- **GitHub Pages** static demo (`.github/workflows/gh-pages.yml`) — `NEXT_PUBLIC_STATIC_EXPORT=true`
+  (or `GITHUB_ACTIONS=true`) flips `next.config.ts` to `output: 'export'` (`basePath: /unj-reze`).
+  No API routes exist in this mode; everything must be static-safe.
+- **Netlify** (`netlify.toml`) is a legacy/alternate server-mode config, no longer primary.
+
+## Security & Anti-Abuse
+
+Stateless, login-less abuse scoring: `lib/security/scoring.ts` (patterns + weights),
+`lib/security/turnstile.ts` (Cloudflare Turnstile), `lib/fingerprint.ts`, `lib/geo.ts`.
+
+- JA3/JA4 TLS fingerprints are not obtainable from Next.js route handlers directly. Scoring reads an
+  `x-ja4-fingerprint` / `x-ja3-fingerprint` header that an upstream proxy would inject; nothing
+  injects it today, so it is `null` and Pattern B degrades to User-Agent heuristics.
+- The client half is **staged but unwired**: no caller sends `fingerprint`/`turnstileToken`, so
+  `app/api/posts` skips scoring (`if (fingerprint)`) and nothing calls `app/api/security/verify`.
+  Wiring `collectFingerprint()` + `useTurnstile()` into the composer activates it.
+- Geo comes from `cf-ipcountry` with `x-vercel-ip-country` / other fallbacks (`lib/geo.ts`).
+- Full rationale: [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md).
 
 ---
 
@@ -40,26 +97,29 @@ RPGEN is an integrated platform combining:
 - **Phase Jump (`changePhase` / `#CH_PH`)**
   - `#CH_PH` is an **execution context jump**, not a subroutine call or passive condition flag update.
   - Transfer active execution context (`curObjId = targetId`), replace command buffer (`cmds = targetPage.commands`), and reset command step (`index = 0; setTimeout(runNext, 0)`).
-  - Never spawn concurrent execution or nested `runEventCommands` calls for cross-event jumps.
+  - Never spawn concurrent execution or nested `runEventCommands` calls for cross-event jumps — the `eventRunningRef` guard would swallow them silently.
 
 - **Implicit Self References**
   - Commands omitting an explicit target (`setSelfSwitch`, `removeEvent`, `changeDirection`, `changeNpcMovement`, self `playEffect`, etc.) MUST target the active execution context (`curObjId`).
 
 - **Movement & Touch Cooldowns**
-  - Instant movement (`moveNpc` with duration 0, `warp`) must register cell-coordinate cooldown timestamps (`lastTouchTimeMapRef.set(`${col},${row}`, performance.now())`) to prevent rapid-fire event re-triggering upon arrival.
+  - `lastTouchTimeMapRef` is keyed by **both** object id and cell coordinate (`` `${col},${row}` ``); touch checks read the max of the two.
+  - Instant movement (`moveNpc` with duration 0, `warp`) must register cooldown timestamps on arrival (`performance.now()`) to prevent rapid-fire event re-triggering.
+  - A phase jump must *clear* the corresponding cooldown entries so the new page can fire.
 
-## RPGEN Map & Tile Import (`lib/rpgen-parser.ts` & `submitRpgenImport`)
+## RPGEN Map & Tile Import (`lib/rpgen-parser.ts` + `submitRpgenImport` in `GameMaker.tsx`)
 
 - **Terrain Layer Overwriting**
   - Imported maps must completely overwrite all terrain layers (`map`, `overlayMap`, `overheadMap`).
-  - Missing upper layers (`overlayMap` or `overheadMap`) must be explicitly generated as matching blank (`0`) 2D grids to wipe out previous scene/preset terrain.
+  - Missing upper layers must be explicitly generated as matching blank (`0`) grids (`createBlankGrid`) to wipe out previous scene/preset terrain.
 
 - **Tile & Command ID Remapping**
-  - Assign non-conflicting tile IDs in `draft.tiles`.
-  - Recursively remap `#CH_SP` / `changeTile` tile IDs inside nested commands (`choice`, `ifSwitch`, `ifItem`, `ifGold`) to match `draft.tiles`.
+  - When merging into an existing scene, assign non-conflicting tile IDs and keep a `tileIdRemap` (with `0 → 0`).
+  - Recursively remap `#CH_SP` / `changeTile` tile IDs inside nested commands (`choice`, and the `then`/`else` branches of `ifSwitch` / `ifItem` / `ifGold`).
 
-- **API Token Authentication**
-  - Sprite hash resolutions against `rpgen-search.pages.dev` require authentication header/token fallback (`n4CrMK7W`) when `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` is unset.
+- **RPGEN Search access has two paths**
+  - Client/parse-time (`lib/rpgen-parser.ts`): `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN`, falling back to the public token `n4CrMK7W`.
+  - Server proxy `app/api/rpgen/[...path]/route.ts`: uses `RPGEN_SEARCH_TOKEN`, with an endpoint allowlist. Route media through it — upstream `/data/*` sends no CORS headers, and direct loads would taint the game canvas and break export.
 
 ---
 
@@ -73,14 +133,18 @@ Before modifying the event engine, DB schemas, or API endpoints:
   - `curObjId` (active event execution context)
   - `cmds` and `index` (active instruction stream)
   - `forcedPagesRef` (multi-key phase overrides by `id`, `col,row`, and `objId`)
-  - `lastTouchTimeMapRef` (cell-coordinate touch cooldowns)
+  - `lastTouchTimeMapRef` (object-id + cell-coordinate touch cooldowns)
+- When touching `DataStore`, update `mock.ts` / `pg.ts` / `sqlite.ts` together.
 
-Verify that no execution-context leaks, state desynchronizations, or deadlocks are introduced.
+Verify that no execution-context leaks, state desynchronizations, or deadlocks are introduced,
+then run `pnpm typecheck` and `pnpm lint`.
 
 ---
 
-# Skills
+# Documentation
 
-## External APIs
-
-- `.agents/skills/rpgen-search.md`
+- [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md) — abuse-scoring design and threat model.
+- [docs/dsl-current-state.md](docs/dsl-current-state.md) — asset-reference / DSL layering as it stands.
+- [docs/game-feature-design.md](docs/game-feature-design.md) — game↔post binding design (`games` table).
+- [README.md](README.md) — deploy and local-setup instructions.
+- `.agents/skills/rpgen-search.md` — rpgen-search API endpoints and auth (local-only, gitignored).
