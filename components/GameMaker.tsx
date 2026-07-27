@@ -3631,6 +3631,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             }
             if (pr2.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
             // 呪文ダメージ適用
+            spawnBattleEffect(m.effectId, tIdx);
             b.enemyHp = Math.max(0, b.enemyHp - dmg);
             triggerClassicEnemyDmgFx();
             playBattleSfx('attack');
@@ -3641,6 +3642,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           setTimeout(enemyAct, 600);
           dtAdvanceTurn(); return;
         }
+        spawnBattleEffect(m.effectId, tIdx);
         b.enemyHp = Math.max(0, b.enemyHp - dmg);
         triggerClassicEnemyDmgFx();
         playBattleSfx('attack');
@@ -6034,6 +6036,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setSwitchVals({}); switchValsRef.current = {};
     setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
     selfSwitchesRef.current = {};
+    sceneTransRef.current = null;
+    sceneFadeRef.current = null;
+    encounterAlertRef.current = null;
+    livesRef.current = 3;
+    scoreRef.current = 0;
+    marioTransformingRef.current = 0;
+    marioPipeRef.current = null;
+    marioGoalRef.current = null;
     setShowGoldOverlay(false);
     setIsPlaying(false); setSelectedObjId(null);
     setShowEnding(false); setGameOverResult(null); setShowDeathScreen(false);
@@ -6382,6 +6392,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       progressRef.current = b
         ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
         : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
+      invulnRef.current = 0;
+      bombInvulnRef.current = 0;
+      isPlayerDeadRef.current = false;
+      roundOverRef.current = false;
+      sceneTransRef.current = null;
+      sceneFadeRef.current = null;
+      encounterAlertRef.current = null;
+      livesRef.current = 3;
+      scoreRef.current = 0;
+      marioTransformingRef.current = 0;
+      marioPipeRef.current = null;
+      marioGoalRef.current = null;
+      bossDefeatedRef.current = false;
+      bossWarnRef.current = false;
+      outroModeRef.current = false;
+      npcTalkRef.current = false;
+      itemGetRef.current = false;
+      justStartedRef.current = true;
       setShowGoldOverlay(false);
     }
   }, [isPlaying, gameData]);
@@ -14685,6 +14713,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             {battle.log[battle.log.length - 1]?.match(/(\d+)のダメージ/)?.[1] ?? ''}
                           </div>
                         )}
+                        {/* 呪文エフェクトアニメーション */}
+                        {battleEffects.map(be => (
+                          <div key={be.key} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
+                            <EffectSpriteAnim effect={be.effect} url={be.url} sizePx={72} onDone={() => removeBattleEffect(be.key)} />
+                          </div>
+                        ))}
                       </div>
                     ) : (
                       <div className="text-5xl sm:text-6xl leading-none drop-shadow opacity-0">.</div>
@@ -14706,7 +14740,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                 {/* ログ + コマンド */}
                 <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
-                  <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] mb-2">
+                  <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] max-h-[3.5em] overflow-hidden mb-2">
                     {battle.log.slice(-3).map((l, i) => <p key={i}>{l}</p>)}
                   </div>
                   {battle.canAct && !battle.over && (battleItemsOpen ? (

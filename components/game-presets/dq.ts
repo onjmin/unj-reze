@@ -552,11 +552,11 @@ export const dq: PresetData = {
     maxHp: 30, maxMp: 6, atk: 10, def: 8, agility: 10,
     gold: 40,
     moves: [
-      { name: 'メラ',     cost: 2,  power: 13 },
+      { name: 'メラ',     cost: 2,  power: 13, effectId: 'dq-fire' },
       { name: 'ホイミ',   cost: 3,  power: 32, heal: true },
-      { name: 'ギラ',     cost: 5,  power: 26 },
+      { name: 'ギラ',     cost: 5,  power: 26, effectId: 'dq-flame' },
       { name: 'ベホイミ', cost: 8,  power: 55, heal: true },
-      { name: 'ベギラマ', cost: 11, power: 45 },
+      { name: 'ベギラマ', cost: 11, power: 45, effectId: 'dq-explosion' },
     ],
     labels: { attack: 'たたかう', move: 'じゅもん', flee: 'にげる', item: 'どうぐ' },
     encounterEffect: 'flash',
@@ -614,4 +614,9 @@ export const dq: PresetData = {
     defeat:      { ref: `direct:${su('rEaCCP')}`, src: su('rEaCCP'), type: 'direct' as const }, // [ﾄﾞﾗｸｴ]全滅
     flee:        { ref: `direct:${su('FTCG4H')}`, src: su('FTCG4H'), type: 'direct' as const }, // 逃走
   },
+  effects: [
+    { id: 'dq-fire',       name: '火の玉', imageRef: 'url:https://rpgen.org/dq/spells/7/spell.png',  imageUrl: 'https://rpgen.org/dq/spells/7/spell.png',  frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/usF2l8.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/usF2l8.mp3', type: 'direct' } },
+    { id: 'dq-flame',      name: '炎',     imageRef: 'url:https://rpgen.org/dq/spells/18/spell.png', imageUrl: 'https://rpgen.org/dq/spells/18/spell.png', frameCount: 8,  fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HyTVhK.mp3',  src: 'https://rpgen-search.pages.dev/data/audio/sound/HyTVhK.mp3',  type: 'direct' } },
+    { id: 'dq-explosion',  name: '爆発',   imageRef: 'url:https://rpgen.org/dq/spells/6/spell.png',  imageUrl: 'https://rpgen.org/dq/spells/6/spell.png',  frameCount: 10, fps: 15, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/HydVaH.mp3',  src: 'https://rpgen-search.pages.dev/data/audio/sound/HydVaH.mp3',  type: 'direct' } },
+  ],
 };
