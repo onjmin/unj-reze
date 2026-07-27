@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { ArrowLeft, Share2, ThumbsUp } from 'lucide-react';
+import { ArrowLeft, Edit3, Share2, ThumbsUp } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
@@ -21,6 +21,7 @@ import { OriginType } from '@/lib/types';
 import { showToast } from '@/lib/toast';
 import dynamic from 'next/dynamic';
 import type { GameManifestDraft } from './GameMaker';
+import ImagePreview from './ImagePreview';
 
 const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('./DotDrawingEditor'), { ssr: false });
@@ -31,6 +32,7 @@ type ReplyGameDraft = { manifest: GameManifestDraft; title: string; preset: stri
 
 interface BbsThreadViewProps {
   post: Post;
+  openCollab: (post: Post) => void;
 }
 
 function parseContent(text: string, replyMap: Map<string, number>) {
@@ -67,7 +69,7 @@ function parseContent(text: string, replyMap: Map<string, number>) {
   });
 }
 
-export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
+export default function BbsThreadView({ post: initial, openCollab }: BbsThreadViewProps) {
   const router = useRouter();
   const [post, setPost] = useState<Post>(initial);
   const [replyText, setReplyText] = useState('');
@@ -87,13 +89,14 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
   const [userMenuPos, setUserMenuPos] = useState<{ x: number; y: number } | null>(null);
   const heartQueue = useRef(0);
   const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
   useEffect(() => {
     const sessionId = ensureSessionId();
     api.auth.anonymous(sessionId).then(user => {
       setUserId(user.displayName);
       setUserSlug(user.slug);
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // Build ordered list: OP as #1, then replies in order
@@ -308,11 +311,32 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
               })()}
 
               {/* Image */}
-              {p.hasImage && p.imageSrc && (
-                <div className="pl-6 mt-2">
-                  <div className="rounded-lg overflow-hidden border border-gray-800 inline-block max-w-full">
-                    <img src={p.imageSrc} alt="" className="max-h-[200px] w-auto" />
-                  </div>
+              {p.hasImage && (
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (post.imageSrc) setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
+                  }}
+                  className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
+                >
+                  <img
+                    src={post.imageSrc}
+                    alt={post.imageAlt || "ユーザーアート"}
+                    className="max-w-full h-auto max-h-55 block mx-auto"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><circle cx="160" cy="90" r="50" fill="orange" opacity="0.8"/><text x="160" y="95" fill="white" font-weight="bold" text-anchor="middle" font-size="14">うんｊレゼ</text></svg>`;
+                    }}
+                  />
+                  {post.hasCollabButton && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openCollab(post); }}
+                      className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
+                    >
+                      <Edit3 size={11} />
+                      <span>コラボ</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -375,7 +399,7 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
           setGameDraft={setReplyGameDraft}
           originType={replyOriginType}
           setOriginType={setReplyOriginType}
-          onClose={() => {}}
+          onClose={() => { }}
           onSubmit={handleAddReply}
           onOpenDrawing={() => setActiveScreen('drawing')}
           onOpenDotDrawing={() => setActiveScreen('dotdrawing')}
@@ -407,6 +431,14 @@ export default function BbsThreadView({ post: initial }: BbsThreadViewProps) {
           currentUserSlug={userSlug}
           onMention={(username) => setReplyText(prev => prev ? `${prev} @${username} ` : `@${username} `)}
           position={userMenuPos}
+        />
+      )}
+
+      {previewImage && (
+        <ImagePreview
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
         />
       )}
     </>

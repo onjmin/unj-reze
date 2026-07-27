@@ -82,8 +82,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   useEffect(() => {
     const targetSlug = post.slug || post.displayName;
     if (!userSlug || userSlug === targetSlug) return;
-    api.mute.list(userSlug).then(r => setMuted(r.muted.includes(targetSlug))).catch(() => {});
-    api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => {});
+    api.mute.list(userSlug).then(r => setMuted(r.muted.includes(targetSlug))).catch(() => { });
+    api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => { });
   }, [userSlug, post.slug, post.displayName]);
 
   // サーバーから届いた正規データでキャッシュを更新しておく。
@@ -548,7 +548,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const chordRes = extractChordsFromContent(post.content);
 
   if (bbsMode === '掲示板モード') {
-    return <BbsThreadView post={initial} />;
+    return <BbsThreadView post={initial} openCollab={handleOpenCollab} />;
   }
 
   return (
@@ -994,8 +994,8 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
     if (!menuOpen || !userSlug) return;
     const targetSlug = localPost.slug || localPost.displayName;
     if (userSlug === targetSlug) return;
-    api.mute.list(userSlug).then(r => setMuted(r.muted.includes(targetSlug))).catch(() => {});
-    api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => {});
+    api.mute.list(userSlug).then(r => setMuted(r.muted.includes(targetSlug))).catch(() => { });
+    api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => { });
   }, [menuOpen, userSlug, localPost.slug, localPost.displayName]);
 
   /** 返信者をミュート／ブロックする。SNSモードの返信からも導線を出す。 */

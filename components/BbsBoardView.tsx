@@ -129,13 +129,11 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
         </div>
         <button
           onClick={() => setAutoUpdate(v => !v)}
-          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${
-            autoUpdate ? 'border-green-600/60 text-green-400' : 'border-gray-700 text-gray-500'
-          }`}
+          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition-colors ${autoUpdate ? 'border-green-600/60 text-green-400' : 'border-gray-700 text-gray-500'
+            }`}
         >
-          <span className={`inline-flex items-center justify-center w-3 h-3 rounded-sm border text-[7px] font-bold transition-colors ${
-            autoUpdate ? 'bg-green-500 border-green-500 text-white' : 'border-gray-600 text-transparent'
-          }`}>✓</span>
+          <span className={`inline-flex items-center justify-center w-3 h-3 rounded-sm border text-[7px] font-bold transition-colors ${autoUpdate ? 'bg-green-500 border-green-500 text-white' : 'border-gray-600 text-transparent'
+            }`}>✓</span>
           自動更新
           {autoUpdate && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
         </button>
@@ -219,7 +217,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
               {(() => {
                 if (post.hasImage && post.imageSrc) {
                   return (
-                    <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60">
+                    <div className="shrink-0 w-11 h-11 rounded overflow-hidden border border-gray-700/60 gimp-checkered-background-white">
                       <img src={post.imageSrc} alt="" className="w-full h-full object-cover" />
                     </div>
                   );
