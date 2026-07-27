@@ -43,7 +43,7 @@ export default function AppShell({ current, children }: AppShellProps) {
   };
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 h-dvh w-full flex justify-center overflow-hidden select-none font-sans" onWheel={handleOuterWheel}>
+    <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex justify-center select-none font-sans" onWheel={handleOuterWheel}>
       <LeftSidebar
         current={current}
         set={(id) => { if (id === 'home') router.push('/'); }}
@@ -53,8 +53,8 @@ export default function AppShell({ current, children }: AppShellProps) {
         userSlug={currentUser?.slug}
         onPost={() => router.push('/')}
       />
-      <div className="relative w-full max-w-2xl border-x border-gray-800 h-dvh flex flex-col shrink-0 overflow-hidden">
-        <div id="scrollable-content" className="flex-1 overflow-y-auto scrollbar-none flex flex-col min-h-0 pb-14 md:pb-0">
+      <div className="relative w-full max-w-2xl border-x border-gray-800 flex flex-col shrink-0">
+        <div id="scrollable-content" className="flex-1 scrollbar-none flex flex-col min-h-0 pb-14 md:pb-0">
           {children}
         </div>
         <ScrollJumpControls />
