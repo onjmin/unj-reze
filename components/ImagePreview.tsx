@@ -110,10 +110,11 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 
   return (
     <div
-      className="fixed inset-0 z-60 flex items-center justify-center"
+      className="fixed inset-0 z-60 flex items-center justify-center transition-opacity duration-250 ease-out"
       style={{
-        backgroundColor: closing ? 'rgba(0,0,0,0)' : 'rgba(255,255,255,0.5)',
-        transition: 'background-color 250ms ease-out',
+        /* 中心が濃い白(不透明度0.8)、外側に向かって薄い白(不透明度0.2)になるグラデーション */
+        background: 'radial-gradient(ellipse, rgba(255,255,255,1) 0%, rgba(255,255,255,0.8) 100%)',
+        opacity: closing ? 0 : 1,
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
       onTransitionEnd={handleTransitionEnd}
