@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { db as mockDb } from '@/lib/mock-db';
 import ProfileView from '@/components/ProfileView';
 import AppShell from '@/components/AppShell';
+import VolumeControl from '@/components/VolumeControl';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { SITE_URL } from '@/lib/site';
@@ -33,6 +34,11 @@ export default async function UserPage({ params }: { params: Promise<{ id: strin
             <ArrowLeft size={18} className="text-gray-300" />
           </Link>
           <span className="ml-3 font-bold text-sm text-gray-200">プロフィール</span>
+          {/* 推しリストの試聴（Apple Musicプレビュー）にも掛かるマスター音量。
+              ホームのヘッダーと同じ操作をこの画面だけで完結できるようにする。 */}
+          <div className="ml-auto">
+            <VolumeControl />
+          </div>
         </div>
       </div>
       <div className="flex-1">

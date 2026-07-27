@@ -15,6 +15,7 @@ import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 import UserActionMenu from './UserActionMenu';
+import ImagePreview from './ImagePreview';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false });
@@ -81,6 +82,8 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
+  /** 投稿画像のタップで開く拡大表示（フィードと同じ ImagePreview を共用） */
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
   const isSelf = useMemo(() => {
     if (!userId) return false;
@@ -615,7 +618,10 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
                   {p.hasImage && (
                     <div
-                      onClick={() => handlePostClick(p)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (p.imageSrc) setPreviewImage({ src: p.imageSrc, alt: p.imageAlt || 'ユーザーアート' });
+                      }}
                       className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
                     >
                       <img
@@ -812,6 +818,14 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
             router.push(`/?mention=${encodeURIComponent(username)}`);
           }}
           position={avatarMenuPos}
+        />
+      )}
+
+      {previewImage && (
+        <ImagePreview
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
         />
       )}
     </div>
