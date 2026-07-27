@@ -6300,10 +6300,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         }
       } else {
         // レガシー：全オブジェクトをスポーン（touhou の isBoss は除外）
-        const stageObjs = gameData.engine === 'touhou'
-          ? gameData.objects.filter(o => !o.isBoss)
-          : gameData.objects;
-        eng.entities = spawnEntities(stageObjs.map(makeEntity));
+        // シーンモードではシーン init エフェクトが scenesRef.current のディープコピーで
+        // ワールド座標付きエンティティを生成済みなので、ここでは上書きしない
+        // （gameData.objects を使うと entity.def が同一参照になり、プレイ中の
+        // behavior/name 書き換えが React state を直接汚染してしまうため）。
+        if (!gameData.scenes?.length) {
+          const stageObjs = gameData.engine === 'touhou'
+            ? gameData.objects.filter(o => !o.isBoss)
+            : gameData.objects;
+          eng.entities = spawnEntities(stageObjs.map(makeEntity));
+        }
         phaseIndexRef.current = 0;
       }
       if (!gameData.scenes?.length) {
@@ -6363,25 +6369,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       forcedPagesRef.current = {};
       eventRunningRef.current = false;
     } else {
-      // プレイ中に #CH_SP で差し替えた地形を編集データから取り除き、プレイ前の状態へ戻す。
-      const backup = playGridBackupRef.current;
+      // プレイ終了時のクリーンアップ。
+      // gameData.map の復元はメインの play/pause ボタンハンドラが正しいシーンの map を設定済み。
       playGridBackupRef.current = null;
-      if (backup) {
-        setGameData(prev => ({
-          ...prev,
-          map: backup.map,
-          overlayMap: backup.overlayMap,
-          overheadMap: backup.overheadMap,
-          scenes: prev.scenes?.map((s, i) => backup.scenes[i]
-            ? { ...s, map: backup.scenes[i].map, overlayMap: backup.scenes[i].overlayMap, overheadMap: backup.scenes[i].overheadMap }
-            : s),
-        }));
-        eng.map = backup.map;
-        eng.overlayMap = backup.overlayMap;
-        eng.overheadMap = backup.overheadMap;
-      } else {
-        eng.map = gameData.map;
-      }
       eng.entities = [];
       if (waveCtxRef.current) waveCtxRef.current.cancelled = true;
       waveRunningRef.current = false;
@@ -13064,6 +13054,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     pp.y = localY;
 
                     if (activeScene) {
+                      // eslint-disable-next-line no-console
+                      console.debug('[play-stop] activeIdx=', activeIdx, 'editSceneIdx=', editSceneIdx, 'activeSceneObjects=', activeScene.objects?.length, 'currentObjects=', gameData.objects?.length, 'sameRef=', activeScene.objects === gameData.objects, 'sceneDefSample=', activeScene.objects?.[0] ? { id: activeScene.objects[0].id, name: activeScene.objects[0].name, col: activeScene.objects[0].col, row: activeScene.objects[0].row, behavior: activeScene.objects[0].behavior } : 'EMPTY');
                       setGameData(prev => ({
                         ...prev,
                         map: activeScene.map,

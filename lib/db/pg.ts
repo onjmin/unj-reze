@@ -1,9 +1,12 @@
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 import { AnonymousUser, OriginType } from '../types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
+
+// Worker環境で Fetch API を明示的に使用するように設定
+neonConfig.fetchConnectionCache = true;
 
 export function getDb() {
   const connectionString = process.env.DATABASE_URL || 'postgresql://neon:neon@localhost:5432/unj_reze';
