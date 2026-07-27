@@ -143,6 +143,49 @@
   }
 }
 
+/* classic 戦闘：敵絵文字へのダメージ演出（シェーク＋白色フラッシュ）。Undertale の被弾演出に相当。 */
+@keyframes enemyClassicShake {
+  0% {
+    transform: translateX(0);
+    filter: brightness(1);
+  }
+
+  10% {
+    transform: translateX(-8px);
+    filter: brightness(3) saturate(0);
+  }
+
+  20% {
+    transform: translateX(8px);
+    filter: brightness(3) saturate(0);
+  }
+
+  30% {
+    transform: translateX(-6px);
+    filter: brightness(2.5) saturate(0);
+  }
+
+  40% {
+    transform: translateX(6px);
+    filter: brightness(2) saturate(0.5);
+  }
+
+  55% {
+    transform: translateX(-3px);
+    filter: brightness(1.5) saturate(0.8);
+  }
+
+  70% {
+    transform: translateX(2px);
+    filter: brightness(1.2);
+  }
+
+  100% {
+    transform: translateX(0);
+    filter: brightness(1);
+  }
+}
+
 @keyframes danmaku-slide {
   from {
     left: 105%;

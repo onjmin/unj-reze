@@ -36,10 +36,10 @@ const foe = (o: {
   name: string; emoji: string; col: number; row: number;
   hp: number; atk: number; def: number; exp: number; gold: number;
   moves?: { name: string; power: number; heal?: boolean }[];
-  behavior?: 'still' | 'random' | 'patrolH' | 'patrolV' | 'chase'; speed?: number; spriteId?: string;
+  behavior?: 'still' | 'random' | 'patrolH' | 'patrolV' | 'chase'; speed?: number; spriteId?: string; agility?: number;
 }) => newObject({
   emoji: o.emoji, name: o.name, col: o.col, row: o.row,
-  hp: o.hp, atk: o.atk, def: o.def, exp: o.exp, gold: o.gold, moves: o.moves,
+  hp: o.hp, atk: o.atk, def: o.def, exp: o.exp, gold: o.gold, moves: o.moves, agility: o.agility,
   behavior: o.behavior ?? 'still', speed: o.speed ?? 1.2, hazard: true,
   ...(o.spriteId ? { spriteRef: wr(o.spriteId), spriteUrl: sa(o.spriteId) } : {}),
 });
@@ -187,25 +187,25 @@ const sceneField: SceneDef = {
   // 南は弱く北は強い——は1テーブルでは表せないので、テーブルは弱〜中でまとめ、
   // 北側は強めのシンボルエンカウントで難度を出す。
   randomEncounters: [
-    { name: 'スライム',     emoji: '🟦', hp: 14,  atk: 6,  def: 1, exp: 3,  gold: 4  },
-    { name: 'スライム',     emoji: '🟦', hp: 14,  atk: 6,  def: 1, exp: 3,  gold: 4  },
-    { name: 'スライムベス', emoji: '🟥', hp: 20, atk: 7, def: 2, exp: 5,  gold: 7  },
-    { name: 'ドラキー',     emoji: '🦇', hp: 23, atk: 8, def: 3, exp: 7,  gold: 10 },
-    { name: 'ゴースト',     emoji: '👻', hp: 29, atk: 11, def: 4, exp: 10, gold: 14 },
-    { name: 'まどうし',     emoji: '🧙', hp: 35, atk: 11, def: 5, exp: 15, gold: 22, moves: [{ name: 'ギラ', power: 7 }] },
+    { name: 'スライム',     emoji: '🟦', hp: 14,  atk: 6,  def: 1, exp: 3,  gold: 4,  agility: 5  },
+    { name: 'スライム',     emoji: '🟦', hp: 14,  atk: 6,  def: 1, exp: 3,  gold: 4,  agility: 5  },
+    { name: 'スライムベス', emoji: '🟥', hp: 20, atk: 7, def: 2, exp: 5,  gold: 7,  agility: 6  },
+    { name: 'ドラキー',     emoji: '🦇', hp: 23, atk: 8, def: 3, exp: 7,  gold: 10, agility: 12 },
+    { name: 'ゴースト',     emoji: '👻', hp: 29, atk: 11, def: 4, exp: 10, gold: 14, agility: 8  },
+    { name: 'まどうし',     emoji: '🧙', hp: 35, atk: 11, def: 5, exp: 15, gold: 22, moves: [{ name: 'ギラ', power: 7 }], agility: 7  },
   ],
   encounterRate: 11,
   bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
   objects: [
     // ── 南部（弱い敵）──
-    foe({ name: 'スライム', emoji: '🟦', col: 12, row: 14, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6' }),
-    foe({ name: 'スライム', emoji: '🟦', col: 17, row: 20, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6' }),
-    foe({ name: 'スライムベス', emoji: '🟥', col: 25, row: 13, hp: 20, atk: 7, def: 2, exp: 5, gold: 7, behavior: 'random', speed: 1.0, spriteId: 'hswBaA' }),
+    foe({ name: 'スライム', emoji: '🟦', col: 12, row: 14, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6', agility: 5 }),
+    foe({ name: 'スライム', emoji: '🟦', col: 17, row: 20, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6', agility: 5 }),
+    foe({ name: 'スライムベス', emoji: '🟥', col: 25, row: 13, hp: 20, atk: 7, def: 2, exp: 5, gold: 7, behavior: 'random', speed: 1.0, spriteId: 'hswBaA', agility: 6 }),
     // ── 北部（強い敵）──
-    foe({ name: 'ドラキー', emoji: '🦇', col: 8, row: 7, hp: 23, atk: 8, def: 3, exp: 7, gold: 10, behavior: 'random', spriteId: 'R42ett' }),
-    foe({ name: 'がいこつ', emoji: '💀', col: 16, row: 6, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
-    foe({ name: 'おおさそり', emoji: '🦂', col: 22, row: 7, hp: 48, atk: 19, def: 10, exp: 33, gold: 40, behavior: 'random' }),
-    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 6, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolV' }),
+    foe({ name: 'ドラキー', emoji: '🦇', col: 8, row: 7, hp: 23, atk: 8, def: 3, exp: 7, gold: 10, behavior: 'random', spriteId: 'R42ett', agility: 12 }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 16, row: 6, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs', agility: 6 }),
+    foe({ name: 'おおさそり', emoji: '🦂', col: 22, row: 7, hp: 48, atk: 19, def: 10, exp: 33, gold: 40, behavior: 'random', agility: 10 }),
+    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 6, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolV', agility: 8 }),
     // ── NPC ──
     npc('🧑‍🌾', 16, 11, '橋の北はまものが強い。レベル5……いや、くさりかたびらを買ってからのほうがいいぞ。'),
     npc('👴', 10, 19, '西の城がラダトーム城、東の町がリムルダールじゃ。北西の山には洞窟の入り口があるらしい。', 'M05nRh'),
@@ -354,11 +354,11 @@ const sceneCave: SceneDef = {
   id: 'cave', name: '沼地の洞窟',
   map: caveMap,
   randomEncounters: [
-    { name: 'メーダ',     emoji: '👁️', hp: 35, atk: 14, def: 6,  exp: 16, gold: 20, moves: [{ name: 'メラ', power: 7 }] },
-    { name: 'がいこつ',   emoji: '💀', hp: 45, atk: 17, def: 8, exp: 24, gold: 30 },
-    { name: 'まどうし',   emoji: '🧙', hp: 38, atk: 15, def: 7, exp: 28, gold: 36, moves: [{ name: 'ギラ', power: 9 }, { name: 'ホイミ', power: 12, heal: true }] },
-    { name: 'おおさそり', emoji: '🦂', hp: 48, atk: 19, def: 10, exp: 33, gold: 40 },
-    { name: 'リカント',   emoji: '🐺', hp: 54, atk: 22, def: 10, exp: 40, gold: 48 },
+    { name: 'メーダ',     emoji: '👁️', hp: 35, atk: 14, def: 6,  exp: 16, gold: 20, moves: [{ name: 'メラ', power: 7 }], agility: 9  },
+    { name: 'がいこつ',   emoji: '💀', hp: 45, atk: 17, def: 8, exp: 24, gold: 30, agility: 6  },
+    { name: 'まどうし',   emoji: '🧙', hp: 38, atk: 15, def: 7, exp: 28, gold: 36, moves: [{ name: 'ギラ', power: 9 }, { name: 'ホイミ', power: 12, heal: true }], agility: 7  },
+    { name: 'おおさそり', emoji: '🦂', hp: 48, atk: 19, def: 10, exp: 33, gold: 40, agility: 10 },
+    { name: 'リカント',   emoji: '🐺', hp: 54, atk: 22, def: 10, exp: 40, gold: 48, agility: 11 },
   ],
   encounterRate: 7,
   bgm: { ref: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', src: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', type: 'youtube' },
@@ -369,7 +369,7 @@ const sceneCave: SceneDef = {
     chest(7, 9, [
       { type: 'changeGold', amount: 120 },
     ]),
-    foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs', agility: 6 }),
     // 石板スイッチ（隠し部屋の封印を解く）
     newObject({
       emoji: '🪨', col: 14, row: 12, behavior: 'still', hazard: false,
@@ -382,7 +382,7 @@ const sceneCave: SceneDef = {
       ],
     }),
     // ── 隠し部屋（まほうのよろい）──
-    foe({ name: 'がいこつ', emoji: '💀', col: 11, row: 17, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs' }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 11, row: 17, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs', agility: 6 }),
     newObject({
       emoji: '🔒', col: 7, row: 17, behavior: 'still', hazard: false,
       spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL'),
@@ -397,9 +397,9 @@ const sceneCave: SceneDef = {
       ],
     }),
     // ── 右の通路と最深部 ──
-    foe({ name: 'メーダ', emoji: '👁️', col: 26, row: 9, hp: 35, atk: 14, def: 6, exp: 16, gold: 20, moves: [{ name: 'メラ', power: 7 }], behavior: 'patrolV', spriteId: 'oE4l1x' }),
+    foe({ name: 'メーダ', emoji: '👁️', col: 26, row: 9, hp: 35, atk: 14, def: 6, exp: 16, gold: 20, moves: [{ name: 'メラ', power: 7 }], behavior: 'patrolV', spriteId: 'oE4l1x', agility: 9 }),
     // 番人ドラゴン
-    foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 120, atk: 35, def: 19, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 18 }], behavior: 'patrolV', speed: 1.4 }),
+    foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 120, atk: 35, def: 19, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 18 }], behavior: 'patrolV', speed: 1.4, agility: 15 }),
     // まほうのカギの宝箱
     chest(26, 15, [
       { type: 'giveItem', itemId: 'magicKey', count: 1 },
@@ -459,10 +459,10 @@ const sceneDragonCastle: SceneDef = {
   id: 'dragonCastle', name: '竜王の城',
   map: dragonCastleMap,
   randomEncounters: [
-    { name: 'キメラ',       emoji: '🦅', hp: 58, atk: 26, def: 11, exp: 60, gold: 70,  moves: [{ name: 'かえんのいき', power: 13 }] },
-    { name: 'しりょうのきし', emoji: '🧟', hp: 68, atk: 28, def: 15, exp: 75, gold: 85,  moves: [{ name: 'ベホイミ', power: 16, heal: true }] },
-    { name: 'だいまどう',   emoji: '🔮', hp: 60, atk: 27, def: 11, exp: 85, gold: 105, moves: [{ name: 'ベギラマ', power: 19 }] },
-    { name: 'よろいのきし', emoji: '🤺', hp: 77, atk: 30, def: 18, exp: 95, gold: 110 },
+    { name: 'キメラ',       emoji: '🦅', hp: 58, atk: 26, def: 11, exp: 60, gold: 70,  moves: [{ name: 'かえんのいき', power: 13 }], agility: 14 },
+    { name: 'しりょうのきし', emoji: '🧟', hp: 68, atk: 28, def: 15, exp: 75, gold: 85,  moves: [{ name: 'ベホイミ', power: 16, heal: true }], agility: 10 },
+    { name: 'だいまどう',   emoji: '🔮', hp: 60, atk: 27, def: 11, exp: 85, gold: 105, moves: [{ name: 'ベギラマ', power: 19 }], agility: 12 },
+    { name: 'よろいのきし', emoji: '🤺', hp: 77, atk: 30, def: 18, exp: 95, gold: 110, agility: 8  },
   ],
   encounterRate: 6,
   bgm: { ref: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', src: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', type: 'youtube' },
@@ -483,15 +483,15 @@ const sceneDragonCastle: SceneDef = {
       ],
     }),
     // ── 大広間 ──
-    foe({ name: 'しりょうのきし', emoji: '🧟', col: 10, row: 7, hp: 68, atk: 28, def: 15, exp: 75, gold: 85, moves: [{ name: 'ベホイミ', power: 16, heal: true }], behavior: 'patrolH' }),
-    foe({ name: 'キメラ', emoji: '🦅', col: 19, row: 8, hp: 58, atk: 26, def: 11, exp: 60, gold: 70, moves: [{ name: 'かえんのいき', power: 13 }], behavior: 'random' }),
+    foe({ name: 'しりょうのきし', emoji: '🧟', col: 10, row: 7, hp: 68, atk: 28, def: 15, exp: 75, gold: 85, moves: [{ name: 'ベホイミ', power: 16, heal: true }], behavior: 'patrolH', agility: 10 }),
+    foe({ name: 'キメラ', emoji: '🦅', col: 19, row: 8, hp: 58, atk: 26, def: 11, exp: 60, gold: 70, moves: [{ name: 'かえんのいき', power: 13 }], behavior: 'random', agility: 14 }),
     // 西翼：ロトのつるぎ（ストーンマンが守る）
-    foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 103, atk: 32, def: 20, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8 }),
+    foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 103, atk: 32, def: 20, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8, agility: 5 }),
     chest(3, 9, [
       { type: 'giveItem', itemId: 'lotoSword', count: 1 },
     ]),
     // 東翼：軍資金
-    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolH' }),
+    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolH', agility: 8 }),
     chest(26, 10, [
       { type: 'changeGold', amount: 300 },
     ]),
@@ -549,7 +549,7 @@ export const dq: PresetData = {
   scroll: { worldCols: 30, worldRows: 24 },
   battle: {
     playerName: '勇者',
-    maxHp: 30, maxMp: 6, atk: 10, def: 8,
+    maxHp: 30, maxMp: 6, atk: 10, def: 8, agility: 10,
     gold: 40,
     moves: [
       { name: 'メラ',     cost: 2,  power: 13 },
@@ -562,20 +562,20 @@ export const dq: PresetData = {
     encounterEffect: 'flash',
     // レベルアップテーブル（exp は「次のレベルに必要な追加経験値」）
     levelTable: [
-      { level: 2,  exp: 6,   maxHp: 38,  maxMp: 10,  atk: 12, def: 9  },
-      { level: 3,  exp: 14,  maxHp: 46,  maxMp: 14,  atk: 14, def: 11 },
-      { level: 4,  exp: 25,  maxHp: 54,  maxMp: 18,  atk: 16, def: 13 },
-      { level: 5,  exp: 40,  maxHp: 62,  maxMp: 24,  atk: 19, def: 15 },
-      { level: 6,  exp: 60,  maxHp: 70,  maxMp: 30,  atk: 22, def: 17 },
-      { level: 7,  exp: 85,  maxHp: 78,  maxMp: 36,  atk: 25, def: 19 },
-      { level: 8,  exp: 115, maxHp: 88,  maxMp: 42,  atk: 28, def: 22 },
-      { level: 9,  exp: 150, maxHp: 98,  maxMp: 48,  atk: 31, def: 25 },
-      { level: 10, exp: 190, maxHp: 108, maxMp: 54,  atk: 34, def: 28 },
-      { level: 11, exp: 240, maxHp: 118, maxMp: 62,  atk: 38, def: 31 },
-      { level: 12, exp: 300, maxHp: 128, maxMp: 70,  atk: 42, def: 34 },
-      { level: 13, exp: 370, maxHp: 138, maxMp: 78,  atk: 46, def: 37 },
-      { level: 14, exp: 450, maxHp: 150, maxMp: 88,  atk: 50, def: 40 },
-      { level: 15, exp: 550, maxHp: 165, maxMp: 100, atk: 55, def: 44 },
+      { level: 2,  exp: 6,   maxHp: 38,  maxMp: 10,  atk: 12, def: 9,  agility: 11 },
+      { level: 3,  exp: 14,  maxHp: 46,  maxMp: 14,  atk: 14, def: 11, agility: 12 },
+      { level: 4,  exp: 25,  maxHp: 54,  maxMp: 18,  atk: 16, def: 13, agility: 13 },
+      { level: 5,  exp: 40,  maxHp: 62,  maxMp: 24,  atk: 19, def: 15, agility: 15 },
+      { level: 6,  exp: 60,  maxHp: 70,  maxMp: 30,  atk: 22, def: 17, agility: 17 },
+      { level: 7,  exp: 85,  maxHp: 78,  maxMp: 36,  atk: 25, def: 19, agility: 19 },
+      { level: 8,  exp: 115, maxHp: 88,  maxMp: 42,  atk: 28, def: 22, agility: 21 },
+      { level: 9,  exp: 150, maxHp: 98,  maxMp: 48,  atk: 31, def: 25, agility: 23 },
+      { level: 10, exp: 190, maxHp: 108, maxMp: 54,  atk: 34, def: 28, agility: 26 },
+      { level: 11, exp: 240, maxHp: 118, maxMp: 62,  atk: 38, def: 31, agility: 29 },
+      { level: 12, exp: 300, maxHp: 128, maxMp: 70,  atk: 42, def: 34, agility: 32 },
+      { level: 13, exp: 370, maxHp: 138, maxMp: 78,  atk: 46, def: 37, agility: 35 },
+      { level: 14, exp: 450, maxHp: 150, maxMp: 88,  atk: 50, def: 40, agility: 38 },
+      { level: 15, exp: 550, maxHp: 165, maxMp: 100, atk: 55, def: 44, agility: 42 },
     ],
   },
   switches: [

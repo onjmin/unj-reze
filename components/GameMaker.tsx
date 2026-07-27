@@ -1699,19 +1699,19 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // mercy: こうどう技で溜まる「敵意がなくなった度」ゲージ 0〜100（アンダーテール系。labels.mercy 設定時のみUIに出る）
   /** undertale/deltarune 戦闘の敵1体ぶん。1回のエンカウントで同種の敵が1〜3体現れ（foes 配列）、
    *  HP・敵意ゲージ・撃破/みのがし状態は1体ずつ独立に持つ。atk/def/moves/弾幕は同種なので battleRef 共有。 */
-  interface BattleFoe { name: string; emoji: string; sprite?: EnemyBattleSprite; hp: number; maxHp: number; mercy: number; exp: number; gold: number; gone?: 'dead' | 'spared'; dialogue?: (string | EnemyDialogueLine)[]; }
+  interface BattleFoe { name: string; emoji: string; sprite?: EnemyBattleSprite; hp: number; maxHp: number; mercy: number; exp: number; gold: number; gone?: 'dead' | 'spared'; dialogue?: (string | EnemyDialogueLine)[]; agility?: number; }
   interface BattleView { enemyName: string; enemyEmoji: string; enemySprite?: EnemyBattleSprite; enemyHp: number; enemyMaxHp: number; mercy: number; foes: BattleFoe[]; log: string[]; canAct: boolean; over: boolean; }
   const [battle, setBattle] = useState<BattleView | null>(null);
   const battleViewRef = useRef<BattleView | null>(null);
   battleViewRef.current = battle;
-  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }[]; exp: number; gold: number; isBoss: boolean; mercy: number; foes: BattleFoe[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }>(
-    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [], miniScript: undefined, undertaleMode: undefined, dialogue: undefined });
+  const battleRef = useRef<{ active: boolean; entity: Entity | null; enemyName: string; enemyHp: number; enemyMaxHp: number; enemyAtk: number; enemyDef: number; enemyAgility: number; enemyMoves: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }[]; exp: number; gold: number; isBoss: boolean; mercy: number; foes: BattleFoe[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }>(
+    { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyAgility: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [], miniScript: undefined, undertaleMode: undefined, dialogue: undefined });
   /** undertale 戦闘：プレイヤーが直前に使った「こうどう」技名（敵セリフの actUsed 条件判定用）。バトル開始時にリセット。 */
   const lastActRef = useRef<string | null>(null);
   /** バトル開始時のプレイヤー座標。終了後にここへ正確に戻す（シンボルエンカウントで敵側へ押し出されるのを防ぐ）。 */
   const battleReturnPosRef = useRef<{ x: number; y: number } | null>(null);
   // baseAtk/baseDef は装備ボーナスを含まないレベル基礎値。atk/def = base + 装備ボーナス。
-  const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 });
+  const progressRef = useRef({ hp: 0, mp: 0, maxHp: 0, maxMp: 0, atk: 0, def: 0, baseAtk: 0, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 });
   const invulnRef = useRef(0);
   /** 天蓋タイル(overhead)の描画アルファ。プレイヤーが真下にいる間だけ滑らかに半透明化する。 */
   const overheadAlphaRef = useRef(1);
@@ -2296,6 +2296,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** アンダーテール風戦闘：敵HPゲージ（敵ごと）。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<Record<number, { pct: number; id: number } | undefined>>({});
   const [enemyShakeFx, setEnemyShakeFx] = useState<Record<number, { id: number } | undefined>>({});
+  /** classic 戦闘：敵絵文字へのダメージ演出（シェーク＋白色フラッシュ）。Undertale の被弾演出に相当。 */
+  const [classicEnemyDmgFx, setClassicEnemyDmgFx] = useState<{ id: number } | null>(null);
+  const classicEnemyDmgFxRef = useRef<{ id: number } | null>(null);
+  const CLASSIC_ENEMY_DMG_FX_MS = 500;
+  const triggerClassicEnemyDmgFx = () => {
+    const id = ++enemyFxIdRef.current;
+    const fx = { id };
+    classicEnemyDmgFxRef.current = fx;
+    setClassicEnemyDmgFx(fx);
+    setTimeout(() => {
+      if (classicEnemyDmgFxRef.current?.id === id) {
+        classicEnemyDmgFxRef.current = null;
+        setClassicEnemyDmgFx(null);
+      }
+    }, CLASSIC_ENEMY_DMG_FX_MS);
+  };
   /** バトル演出用エフェクトアニメーション（EffectPreset）の再生中インスタンス一覧。
    *  foeIdx 指定時は該当する敵スロット内に重ねて表示し、未指定（パーティ側）は現状 castSpell/doMove の
    *  攻撃系（敵へ命中）のみ配線済み。「見方が受ける」側の演出（EnemyMove 由来）は今回未配線。 */
@@ -2795,7 +2811,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   };
 
-  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; entity?: Entity | null; isBoss?: boolean; encounterMax?: number; outroDialogue?: DialogueLine[] }) => {
+  const beginBattle = (opts: { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; agility?: number; moves?: { name: string; power: number; heal?: boolean; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[] }[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; entity?: Entity | null; isBoss?: boolean; encounterMax?: number; outroDialogue?: DialogueLine[] }) => {
     // バトル開始位置を記録し、終了後はここへ正確に復帰させる
     const startEng = engineRef.current;
     battleReturnPosRef.current = { x: startEng.player.x, y: startEng.player.y };
@@ -2814,11 +2830,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       emoji: opts.emoji, sprite: opts.battleSprite,
       hp: opts.hp, maxHp: opts.hp, mercy: 0,
       exp: opts.exp, gold: opts.gold ?? Math.round(opts.exp * 0.6),
-      dialogue: opts.dialogue,
+      dialogue: opts.dialogue, agility: opts.agility,
     }));
     battleRef.current = {
       active: true, entity: opts.entity ?? null, enemyName: opts.name, enemyHp: opts.hp, enemyMaxHp: opts.hp,
-      enemyAtk: opts.atk, enemyDef: opts.def, enemyMoves: opts.moves ?? [], exp: opts.exp,
+      enemyAtk: opts.atk, enemyDef: opts.def, enemyAgility: opts.agility ?? 0, enemyMoves: opts.moves ?? [], exp: opts.exp,
       gold: opts.gold ?? Math.round(opts.exp * 0.6), isBoss: !!opts.isBoss, mercy: 0, foes,
       miniScript: opts.miniScript, undertaleMode: opts.undertaleMode, dialogue: opts.dialogue,
     };
@@ -2887,7 +2903,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // シンボルエンカウント（フィールド上の敵に接触）。ボスにも使う。
   const startBattle = (e: Entity) => {
     const d = e.def;
-    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, moves: d.moves, miniScript: d.miniScript, undertaleMode: d.undertaleMode, dialogue: d.dialogue, battleSprite: d.battleSprite, entity: e, isBoss: d.isBoss, encounterMax: d.encounterMax, outroDialogue: d.outroDialogue });
+    beginBattle({ name: d.name ?? 'てき', emoji: d.emoji, hp: d.hp, atk: d.atk ?? Math.round(d.hp), def: d.def ?? Math.round(d.hp * 0.4), exp: d.exp ?? Math.round(d.hp * 1.5), gold: d.gold, agility: d.agility, moves: d.moves, miniScript: d.miniScript, undertaleMode: d.undertaleMode, dialogue: d.dialogue, battleSprite: d.battleSprite, entity: e, isBoss: d.isBoss, encounterMax: d.encounterMax, outroDialogue: d.outroDialogue });
   };
 
   // spare（みのがす）: 敵は撃破と同じく消えるが EXP は入らずゴールドだけ貰える。
@@ -2947,9 +2963,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (nextEntry.maxMp != null) pr.maxMp = nextEntry.maxMp;
             if (nextEntry.atk != null) pr.baseAtk = nextEntry.atk;
             if (nextEntry.def != null) pr.baseDef = nextEntry.def;
+            if (nextEntry.agility != null) pr.agility = nextEntry.agility;
             pr.hp = pr.maxHp; pr.mp = pr.maxMp;
           } else {
-            pr.maxHp += growth.hp; pr.maxMp += growth.mp; pr.baseAtk += growth.atk; pr.baseDef += growth.def;
+            pr.maxHp += growth.hp; pr.maxMp += growth.mp; pr.baseAtk += growth.atk; pr.baseDef += growth.def; pr.agility += growth.agility;
             pr.hp = pr.maxHp; pr.mp = pr.maxMp;
           }
           const nextNext = levelTable.find(e => e.level === pr.level + 1);
@@ -2964,7 +2981,21 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (lvUp) applyEquipment(equipmentRef.current); // 基礎値の上に装備ボーナスを再計算
       }
       pr.gold = (pr.gold ?? 0) + goldGain;
-      setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を たおした！${expGain > 0 ? ` EXP+${expGain}` : ''}${goldGain > 0 ? ` ${goldGain}G` : ''}`, ...(lvUp ? [lvUp] : [])].slice(-6) } : v));
+      // 勝利メッセージを順番に表示（SE付き）
+      setBattle(v => (v ? { ...v, over: true, canAct: false, log: [...v.log, `${b.enemyName}を たおした！`].slice(-6) } : v));
+      playBattleSfx('victory');
+      setTimeout(() => {
+        const expMsg = expGain > 0 ? `EXP+${expGain}を かくとく` : (goldGain > 0 ? `${goldGain}Gを かくとく` : null);
+        if (expMsg) {
+          setBattle(v => (v ? { ...v, log: [...v.log, expMsg].slice(-6) } : v));
+          playBattleSfx('cursor');
+        }
+        if (lvUp) {
+          setTimeout(() => {
+            setBattle(v => (v ? { ...v, log: [...v.log, lvUp].slice(-6) } : v));
+          }, 400);
+        }
+      }, 500);
       if (wasBoss) bossDefeatedRef.current = true;
     }
     // バトル開始位置へ正確に戻す（再エンカウントは invulnRef の無敵時間で防止する）
@@ -3449,16 +3480,78 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   /** 攻撃開始SE（振りかぶり）→ 少し遅れて命中SE。2つ重ならないように間を空ける。 */
   const ATTACK_HIT_SFX_DELAY_MS = 180;
+  /** はやさ判定：プレイヤーと敵の敏捷性を比較し、プレイヤーが先手なら true を返す。
+   *  はやさが同値ならランダム。0 の場合はプレイヤー固定（後方互換）。 */
+  const rollPlayerInitiative = () => {
+    const pr = progressRef.current;
+    const b = battleRef.current;
+    const playerAgi = pr.agility;
+    const enemyAgi = b.enemyAgility;
+    if (playerAgi === 0 && enemyAgi === 0) return true; // はやさ未設定なら従来どおりプレイヤー先行
+    return playerAgi + Math.floor(Math.random() * 11) >= enemyAgi + Math.floor(Math.random() * 11);
+  };
   const doAttack = () => {
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
-    playBattleSfx('attackStart');
     const b = battleRef.current; const pr = progressRef.current;
     const dmg = calcDmg(pr.atk, b.enemyDef);
-    b.enemyHp = Math.max(0, b.enemyHp - dmg);
-    setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
-    appendLog(`${gameData.battle?.playerName || '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
-    if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
-    queueEnemyTurn();
+    const playerName = gameData.battle?.playerName || '勇者';
+    const playerFirst = rollPlayerInitiative();
+    const setCanActFalse = { canAct: false } as const;
+    if (playerFirst) {
+      // プレイヤー先行：攻撃SE → 命中SE → ログ → 敵ターン
+      playBattleSfx('attackStart');
+      b.enemyHp = Math.max(0, b.enemyHp - dmg);
+      triggerClassicEnemyDmgFx();
+      setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
+      appendLog(`${playerName}の こうげき！`, setCanActFalse);
+      setTimeout(() => {
+        appendLog(`${dmg}のダメージを 与えた！`);
+        if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+        queueEnemyTurn();
+      }, 500);
+    } else {
+      // 敵先行：敵ターン → まだ生存ならプレイヤー攻撃
+      playBattleSfx('attackStart');
+      b.enemyHp = Math.max(0, b.enemyHp - dmg);
+      triggerClassicEnemyDmgFx();
+      const doPlayerAttack = () => {
+        setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
+        appendLog(`${playerName}の こうげき！`, setCanActFalse);
+        setTimeout(() => {
+          appendLog(`${dmg}のダメージを 与えた！`);
+          if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+          queueEnemyTurn();
+        }, 500);
+      };
+      appendLog(`${playerName}は せんせいだ！`, setCanActFalse);
+      // 敵ターンを先に実行し、生存ならプレイヤー攻撃を続ける
+      const savedEnemyTurn = () => {
+        const b2 = battleRef.current; const pr2 = progressRef.current;
+        if (!b2.active) return;
+        const hitLeader2 = (dmg2: number) => {
+          pr2.hp = Math.max(0, pr2.hp - dmg2); forceHud(n => n + 1);
+          const leaderId = ptParty()[0]?.id ?? '__self';
+          triggerMemberDamageFx(leaderId, dmg2);
+          triggerMemberStatusShake(leaderId);
+        };
+        const move = b2.enemyMoves.length && Math.random() < 0.4 ? b2.enemyMoves[Math.floor(Math.random() * b2.enemyMoves.length)] : null;
+        if (move?.heal) {
+          const before = b2.enemyHp; b2.enemyHp = Math.min(b2.enemyMaxHp, b2.enemyHp + move.power);
+          appendLog(`${b2.enemyName}は ${move.name}を となえた！ HPが ${b2.enemyHp - before} かいふく`);
+        } else if (move) {
+          const dmg2 = Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3)));
+          hitLeader2(dmg2);
+          appendLog(`${b2.enemyName}の ${move.name}！ ${dmg2}のダメージ`);
+        } else {
+          const dmg2 = calcDmg(b2.enemyAtk, pr2.def);
+          hitLeader2(dmg2);
+          appendLog(`${b2.enemyName}の こうげき！ ${dmg2}のダメージ`);
+        }
+        if (pr2.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
+        doPlayerAttack();
+      };
+      setTimeout(savedEnemyTurn, 600);
+    }
   };
 
   const doMove = (m: BattleMove, targetIdx?: number) => {
@@ -3520,8 +3613,53 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).enemyDamage);
         appendLog(`${m.name}！ ${b.foes.length > 1 ? `${foe.name}に ` : ''}${dmg}のダメージ${killed ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
         if (over) return;
+      } else if (!dodge) {
+        // classic 戦闘：はやさ判定で敵が先手の場合は敵ターンを先に実行
+        const playerFirst = rollPlayerInitiative();
+        if (!playerFirst) {
+          // 敵先手：敵ターン → 呪文ダメージ
+          appendLog(`${gameData.battle?.playerName || '勇者'}は おそい！`);
+          const enemyAct = () => {
+            const b2 = battleRef.current; const pr2 = progressRef.current;
+            if (!b2.active) return;
+            const hitLeader2 = (d: number) => {
+              pr2.hp = Math.max(0, pr2.hp - d); forceHud(n => n + 1);
+              const leaderId = ptParty()[0]?.id ?? '__self';
+              triggerMemberDamageFx(leaderId, d);
+              triggerMemberStatusShake(leaderId);
+            };
+            const mv = b2.enemyMoves.length && Math.random() < 0.4 ? b2.enemyMoves[Math.floor(Math.random() * b2.enemyMoves.length)] : null;
+            if (mv?.heal) {
+              const bef = b2.enemyHp; b2.enemyHp = Math.min(b2.enemyMaxHp, b2.enemyHp + mv.power);
+              appendLog(`${b2.enemyName}は ${mv.name}を となえた！ HPが ${b2.enemyHp - bef} かいふく`);
+            } else if (mv) {
+              const d2 = Math.max(1, Math.round(mv.power * (0.85 + Math.random() * 0.3)));
+              hitLeader2(d2);
+              appendLog(`${b2.enemyName}の ${mv.name}！ ${d2}のダメージ`);
+            } else {
+              const d2 = calcDmg(b2.enemyAtk, pr2.def);
+              hitLeader2(d2);
+              appendLog(`${b2.enemyName}の こうげき！ ${d2}のダメージ`);
+            }
+            if (pr2.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
+            // 呪文ダメージ適用
+            b.enemyHp = Math.max(0, b.enemyHp - dmg);
+            triggerClassicEnemyDmgFx();
+            playBattleSfx('attack');
+            appendLog(`${m.name}！ ${dmg}のダメージを 与えた！`);
+            if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+            queueEnemyTurn();
+          };
+          setTimeout(enemyAct, 600);
+          dtAdvanceTurn(); return;
+        }
+        b.enemyHp = Math.max(0, b.enemyHp - dmg);
+        triggerClassicEnemyDmgFx();
+        playBattleSfx('attack');
+        appendLog(`${m.name}！ ${dmg}のダメージを 与えた！`, { canAct: false });
+        if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
       } else {
-        const beforeHp = b.enemyHp;
+        // dodge スタイル（undertale/deltarune）：はやさ判定なし
         b.enemyHp = Math.max(0, b.enemyHp - dmg);
         appendLog(`${m.name}！ ${dmg}のダメージ`, { canAct: false });
         if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
@@ -5822,8 +5960,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
     const b = data.battle;
     progressRef.current = b
-      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
-      : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+      : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
     setSwitchVals({}); switchValsRef.current = {};
     setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
     selfSwitchesRef.current = {};
@@ -5903,8 +6041,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     warpCooldownRef.current = null;
     const b = gameData.battle;
     progressRef.current = b
-      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
-      : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+      : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
     setSwitchVals({}); switchValsRef.current = {};
     setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
     selfSwitchesRef.current = {};
@@ -6181,8 +6319,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
       progressRef.current = b
-        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
-        : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+        : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
       setShowGoldOverlay(false);
       setEquipment({}); equipmentRef.current = {};
       setPartyEquipment({}); partyEquipmentRef.current = {};
@@ -6254,8 +6392,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setBattle(null);
       const b = gameData.battle;
       progressRef.current = b
-        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0 }
-        : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0 };
+        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+        : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
       setShowGoldOverlay(false);
     }
   }, [isPlaying, gameData]);
@@ -9328,7 +9466,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const boss = gameData.battle?.boss;
               const symbolBossLeft = eng.entities.some(e => e.def.isBoss);
               if (boss && !bossDefeatedRef.current) {
-                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, moves: boss.moves, miniScript: boss.miniScript, undertaleMode: boss.undertaleMode, dialogue: boss.dialogue, battleSprite: boss.battleSprite, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
+                if (!debugInvincibleRef.current && invulnRef.current <= 0) { beginBattle({ name: boss.name, emoji: boss.emoji, hp: boss.hp, atk: boss.atk, def: boss.def, exp: boss.exp, gold: boss.gold, agility: boss.agility, moves: boss.moves, miniScript: boss.miniScript, undertaleMode: boss.undertaleMode, dialogue: boss.dialogue, battleSprite: boss.battleSprite, entity: null, isBoss: true, outroDialogue: gameData.battle?.outroDialogue }); dead = true; }
               } else if (symbolBossLeft) {
                 if (!bossWarnRef.current) { bossWarnRef.current = true; showGameMsg('まだ強敵がいる！倒してから来るのだ！', 'instant', () => { }); }
               } else {
@@ -12896,7 +13034,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   sceneTransRef.current = null;
                   sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
                   setBattle(null);
-                  battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
+      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyAgility: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
                   if (gameData.scenes?.length) {
                     const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
                     const activeScene = gameData.scenes[activeIdx];
@@ -14545,16 +14683,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </div>
                   {/* 敵 */}
                   <div className="flex flex-col items-center mt-1">
-                    <div className="text-5xl sm:text-6xl leading-none drop-shadow">{battle.enemyEmoji}</div>
-                    {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風） */}
-                    <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
-                    <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
-                      <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
-                    </div>
-                    {gameData.battle?.labels.mercy && (
-                      <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
-                        <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                    {battle.enemyHp > 0 ? (
+                      <div className="relative">
+                        <div
+                          className={`text-5xl sm:text-6xl leading-none drop-shadow transition-transform ${classicEnemyDmgFx ? 'animate-[enemyClassicShake_0.5s_ease-in-out]' : ''}`}
+                          style={classicEnemyDmgFx ? { filter: 'brightness(3) saturate(0)', animation: `enemyClassicShake ${CLASSIC_ENEMY_DMG_FX_MS}ms ease-in-out` } : undefined}>
+                          {battle.enemyEmoji}
+                        </div>
+                        {/* ダメージ数値ポップアップ（絵文字の頭上） */}
+                        {classicEnemyDmgFx && (
+                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-xl sm:text-2xl whitespace-nowrap z-10"
+                            style={{ color: '#fff', textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e', animation: 'dmgPopUp 0.7s ease-out forwards' }}>
+                            {battle.log[battle.log.length - 1]?.match(/(\d+)のダメージ/)?.[1] ?? ''}
+                          </div>
+                        )}
                       </div>
+                    ) : (
+                      <div className="text-5xl sm:text-6xl leading-none drop-shadow opacity-0">.</div>
+                    )}
+                    {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風） */}
+                    {battle.enemyHp > 0 && (
+                      <>
+                        <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
+                        <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
+                          <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
+                        </div>
+                        {gameData.battle?.labels.mercy && (
+                          <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
+                            <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 {/* ログ + コマンド */}

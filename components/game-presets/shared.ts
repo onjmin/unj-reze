@@ -323,7 +323,7 @@ export interface ObjectDef {
   /** オブジェクト種別（エディタで表示項目を切り替え）。未指定=enemy。 */
   objType?: ObjType;
   /** ターン制戦闘用ステータス（rpg + battle のとき使用。未指定なら hp から自動算出）。 */
-  name?: string; atk?: number; def?: number; exp?: number;
+  name?: string; atk?: number; def?: number; exp?: number; agility?: number;
   /** 撃破時に得るゴールド（rpg）。未指定なら exp から自動算出。 */
   gold?: number;
   /** 敵の攻撃パターン（呪文/特技）。 */
@@ -467,13 +467,13 @@ export interface DeathScreenConfig {
 
 /** レベルアップ時のステータス成長テーブル。exp 以上になったとき適用。
  *  levelTable に該当レベルの行が無いとき、growthType/growth（下記）による自動計算にフォールバックする。 */
-export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?: number; atk?: number; def?: number; }
+export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?: number; atk?: number; def?: number; agility?: number; }
 
 /** 経験値カーブの成長タイプ。早熟＝序盤ほど少ない経験値でレベルが上がる、晩成＝逆に必要経験値が急激に増えていく。 */
 export type GrowthType = 'early' | 'standard' | 'late';
 
 /** レベルアップ1回ごとのステータス増分（levelTable に該当レベルの行が無いときに使う自動成長）。 */
-export interface StatGrowth { hp: number; mp: number; atk: number; def: number; }
+export interface StatGrowth { hp: number; mp: number; atk: number; def: number; agility: number; }
 
 const GROWTH_EXP_PARAMS: Record<GrowthType, { base: number; pow: number }> = {
   early: { base: 8, pow: 1.8 },
@@ -525,7 +525,7 @@ export interface EnemyMove { name: string; power: number; heal?: boolean; miniSc
 /** ランダムエンカウント／ボスで出現する敵。gold 未指定時は exp から自動算出。
  *  dialogue＝通常攻撃（moves 抽選に外れたとき）の予告セリフ候補。
  *  battleSprite＝戦闘オーバーレイで絵文字の代わりに描くスプライト。 */
-export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; }
+export interface EncounterEnemy { name: string; emoji: string; hp: number; atk: number; def: number; exp: number; gold?: number; moves?: EnemyMove[]; miniScript?: string; undertaleMode?: UndertaleMode; dialogue?: (string | EnemyDialogueLine)[]; battleSprite?: EnemyBattleSprite; agility?: number; }
 
 /** ランダムエンカウントのグループ（例：「森」「洞窟」）。weight（省略時1）で抽選比重をつける。
  *  scene.encounterGroups が1件以上あるときはこちらが優先され、scene.randomEncounters は無視される。 */
@@ -589,7 +589,7 @@ export interface PartyMember { id: string; name: string; emoji: string; spriteRe
  *  フィールド上の敵に接触（シンボルエンカウント）でコマンド戦闘に入る。 */
 export interface BattleConfig {
   playerName: string;
-  maxHp: number; maxMp: number; atk: number; def: number;
+  maxHp: number; maxMp: number; atk: number; def: number; agility?: number;
   /** 戦闘スタイル。'undertale'＝アンダーテール風：FIGHT/ACT/ITEM/MERCY の4コマンド、
    *  たたかう＝タイミングバー、敵ターン＝バトルボックスが変形してハート弾幕よけ。
    *  'deltarune'＝デルタルーン風：'undertale'の弾幕よけ・タイミング攻撃を流用しつつ、
