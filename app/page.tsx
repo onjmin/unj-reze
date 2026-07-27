@@ -661,7 +661,7 @@ export default function App() {
   };
 
   return (
-    <div className="bg-[#0b0e14] text-gray-100 h-dvh w-full flex flex-col overflow-hidden select-none font-sans relative">
+    <div className="bg-[#0b0e14] text-gray-100 min-h-screen w-full flex flex-col select-none font-sans relative">
       <ToastContainer />
       <HeartBurst />
 
@@ -731,7 +731,7 @@ export default function App() {
         />
       )}
 
-      <div className="w-full h-dvh flex justify-center overflow-hidden bg-[#0b0e14]" onWheel={handleOuterWheel}>
+      <div className="w-full min-h-screen flex justify-center bg-[#0b0e14]" onWheel={handleOuterWheel}>
         <LeftSidebar
           current={currentNav}
           set={handleNavigate}
@@ -741,7 +741,7 @@ export default function App() {
           userSlug={currentUser?.slug}
           onPost={() => handleQuickPost()}
         />
-        <div className="relative w-full max-w-2xl border-x border-gray-800 h-dvh flex flex-col shrink-0 overflow-hidden">
+        <div className="relative w-full max-w-2xl border-x border-gray-800 flex flex-col shrink-0">
         {!activeScreen && (
           <>
             <Header
@@ -777,7 +777,7 @@ export default function App() {
               );
             })()}
 
-            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col pb-14' : 'overflow-y-auto pb-20'}`}>
+            <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col pb-14' : 'pb-20'}`}>
               {currentNav === 'home' && topTab === 'game' && (
                 <LiveGameView
                   userId={userId}
