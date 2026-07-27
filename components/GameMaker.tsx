@@ -6328,7 +6328,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setShowGoldOverlay(false);
       setEquipment({}); equipmentRef.current = {};
       setPartyEquipment({}); partyEquipmentRef.current = {};
-      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
+      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyAgility: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
       encounterGaugeRef.current = 0; encounterNextRef.current = 0;
       invulnRef.current = 0; isPlayerDeadRef.current = false; roundOverRef.current = false; livesRef.current = 3; scoreRef.current = 0;
       // onjReze：ハート・向き・剣の初期化
@@ -6397,8 +6397,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       bossDefeatedRef.current = false;
       bossWarnRef.current = false;
       outroModeRef.current = false;
-      npcTalkRef.current = false;
-      itemGetRef.current = false;
+      npcTalkRef.current = null;
+      itemGetRef.current = null;
       justStartedRef.current = true;
       setShowGoldOverlay(false);
     }
@@ -13040,7 +13040,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   sceneTransRef.current = null;
                   sceneFadeRef.current = null; // フェード遷移の途中で編集に戻った場合、次回プレイへ持ち越さない
                   setBattle(null);
-      battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyAgility: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
+                  battleRef.current = { active: false, entity: null, enemyName: '', enemyHp: 0, enemyMaxHp: 0, enemyAtk: 0, enemyDef: 0, enemyAgility: 0, enemyMoves: [], exp: 0, gold: 0, isBoss: false, mercy: 0, foes: [] };
                   if (gameData.scenes?.length) {
                     const activeIdx = Math.min(Math.max(0, activeSceneIdxRef.current), gameData.scenes.length - 1);
                     const activeScene = gameData.scenes[activeIdx];
@@ -13221,9 +13221,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 style={{
                   textShadow: '-1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 4px #fff, 0 0 2px #fff',
                 }}
-                className={`absolute bottom-2 right-2 z-30 text-[13px] font-pixel text-blue-600 font-bold select-none pointer-events-none transition-opacity duration-500 ease-in-out ${
-                  coordHudVisible ? 'opacity-100' : 'opacity-0'
-                }`}
+                className={`absolute bottom-2 right-2 z-30 text-[13px] font-pixel text-blue-600 font-bold select-none pointer-events-none transition-opacity duration-500 ease-in-out ${coordHudVisible ? 'opacity-100' : 'opacity-0'
+                  }`}
               />
             )}
             {/* ── タイトル画面オーバーレイ ── */}
@@ -14730,56 +14729,56 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </>
                     )}
                   </div>
-                {/* ログ + コマンド */}
-                <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
-                  <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] max-h-[3.5em] overflow-hidden mb-2">
-                    {battle.log.slice(-3).map((l, i) => <p key={i}>{l}</p>)}
+                  {/* ログ + コマンド */}
+                  <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
+                    <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] max-h-[3.5em] overflow-hidden mb-2">
+                      {battle.log.slice(-3).map((l, i) => <p key={i}>{l}</p>)}
+                    </div>
+                    {battle.canAct && !battle.over && (battleItemsOpen ? (
+                      <div className="space-y-1.5">
+                        {usableItems().map((it, i) => (
+                          <button key={it.id} onClick={() => { setBattleItemsCursor(i); useHealItem(it, true); }}
+                            className={`w-full flex justify-between items-center px-3 py-1.5 text-[11px] font-bold ${battleItemsCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}>
+                            <span>{battleItemsCursor === i ? '❤ ' : '  '}{it.emoji} {it.name}</span>
+                            <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
+                          </button>
+                        ))}
+                        <button onClick={() => { playBattleSfx('cursor'); setBattleItemsCursor(usableItems().length); setBattleItemsOpen(false); }}
+                          className={`w-full py-1.5 text-[11px] font-bold ${battleItemsCursor === usableItems().length ? 'bg-gray-600 text-yellow-300' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}>
+                          {battleItemsCursor === usableItems().length ? '❤ ' : '  '}もどる
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {([
+                          { label: gameData.battle?.labels.attack, disabled: false, onClick: doAttack, cls: 'bg-gray-700 hover:bg-gray-600 text-white' },
+                          { label: gameData.battle?.labels.flee, disabled: false, onClick: doFlee, cls: 'bg-gray-700 hover:bg-gray-600 text-white' },
+                          ...(gameData.battle?.moves ?? []).map(m => ({
+                            label: <>{m.name}{m.cost > 0 && <span className={`ml-1 ${m.mercy != null ? 'text-teal-300' : 'text-indigo-300'}`}>{m.cost}</span>}</>,
+                            disabled: progressRef.current.mp < m.cost,
+                            onClick: () => doMove(m),
+                            cls: m.mercy != null ? 'bg-teal-700 hover:bg-teal-600 text-white' : 'bg-indigo-700 hover:bg-indigo-600 text-white',
+                          })),
+                          ...(gameData.battle?.labels.mercy ? [{
+                            label: gameData.battle.labels.mercy, disabled: false, onClick: doSpare,
+                            cls: spareReady(battle) ? 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse' : 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200/70',
+                          }] : []),
+                          ...(usableItems().length > 0 ? [{
+                            label: gameData.battle?.labels.item ?? 'どうぐ', disabled: false, onClick: () => { playBattleSfx('cursor'); setBattleItemsOpen(true); },
+                            cls: 'bg-amber-700 hover:bg-amber-600 text-white',
+                          }] : []),
+                        ] as { label: React.ReactNode; disabled: boolean; onClick: () => void; cls: string }[]).map((c, i) => (
+                          <button key={i} onClick={() => { setClassicBattleCursor(i); c.onClick(); }} disabled={c.disabled}
+                            className={`py-1.5 disabled:opacity-40 text-[11px] sm:text-xs font-bold ${classicBattleCursor === i ? 'ring-2 ring-yellow-300 ring-inset' : ''} ${c.cls}`}>
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
                   </div>
-                  {battle.canAct && !battle.over && (battleItemsOpen ? (
-                    <div className="space-y-1.5">
-                      {usableItems().map((it, i) => (
-                        <button key={it.id} onClick={() => { setBattleItemsCursor(i); useHealItem(it, true); }}
-                          className={`w-full flex justify-between items-center px-3 py-1.5 text-[11px] font-bold ${battleItemsCursor === i ? 'bg-gray-500 text-yellow-300' : 'bg-gray-700 hover:bg-gray-600 text-white'}`}>
-                          <span>{battleItemsCursor === i ? '❤ ' : '  '}{it.emoji} {it.name}</span>
-                          <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
-                        </button>
-                      ))}
-                      <button onClick={() => { playBattleSfx('cursor'); setBattleItemsCursor(usableItems().length); setBattleItemsOpen(false); }}
-                        className={`w-full py-1.5 text-[11px] font-bold ${battleItemsCursor === usableItems().length ? 'bg-gray-600 text-yellow-300' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}>
-                        {battleItemsCursor === usableItems().length ? '❤ ' : '  '}もどる
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {([
-                        { label: gameData.battle?.labels.attack, disabled: false, onClick: doAttack, cls: 'bg-gray-700 hover:bg-gray-600 text-white' },
-                        { label: gameData.battle?.labels.flee, disabled: false, onClick: doFlee, cls: 'bg-gray-700 hover:bg-gray-600 text-white' },
-                        ...(gameData.battle?.moves ?? []).map(m => ({
-                          label: <>{m.name}{m.cost > 0 && <span className={`ml-1 ${m.mercy != null ? 'text-teal-300' : 'text-indigo-300'}`}>{m.cost}</span>}</>,
-                          disabled: progressRef.current.mp < m.cost,
-                          onClick: () => doMove(m),
-                          cls: m.mercy != null ? 'bg-teal-700 hover:bg-teal-600 text-white' : 'bg-indigo-700 hover:bg-indigo-600 text-white',
-                        })),
-                        ...(gameData.battle?.labels.mercy ? [{
-                          label: gameData.battle.labels.mercy, disabled: false, onClick: doSpare,
-                          cls: spareReady(battle) ? 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse' : 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200/70',
-                        }] : []),
-                        ...(usableItems().length > 0 ? [{
-                          label: gameData.battle?.labels.item ?? 'どうぐ', disabled: false, onClick: () => { playBattleSfx('cursor'); setBattleItemsOpen(true); },
-                          cls: 'bg-amber-700 hover:bg-amber-600 text-white',
-                        }] : []),
-                      ] as { label: React.ReactNode; disabled: boolean; onClick: () => void; cls: string }[]).map((c, i) => (
-                        <button key={i} onClick={() => { setClassicBattleCursor(i); c.onClick(); }} disabled={c.disabled}
-                          className={`py-1.5 disabled:opacity-40 text-[11px] sm:text-xs font-bold ${classicBattleCursor === i ? 'ring-2 ring-yellow-300 ring-inset' : ''} ${c.cls}`}>
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
 
             {/* ── ショップモーダル ── */}
             {shopModal && (
@@ -19697,9 +19696,8 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                               key={idNum}
                               type="button"
                               onClick={() => onChange({ tileId: idNum } as Partial<EventCommand>)}
-                              className={`flex flex-col items-center justify-center p-1 rounded border transition ${
-                                isSelected ? 'border-blue-400 bg-blue-900/40' : 'border-gray-800 hover:border-gray-600 bg-gray-900'
-                              }`}
+                              className={`flex flex-col items-center justify-center p-1 rounded border transition ${isSelected ? 'border-blue-400 bg-blue-900/40' : 'border-gray-800 hover:border-gray-600 bg-gray-900'
+                                }`}
                               title={`${t.name || `タイル#${idNum}`}`}
                             >
                               {imgUrl ? (
