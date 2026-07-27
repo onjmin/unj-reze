@@ -15,7 +15,13 @@ export type PresetId = 'dq' | 'mario' | 'rockman' | 'touhou' | 'onjReze' | 'unde
 export type EngineKind = 'action' | 'rpg' | 'touhou' | 'onjReze' | 'yume25d';
 export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'patrolV' | 'walker' | 'randomDash' | 'randomHop';
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
-export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn' | 'coin' | 'save';
+export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn' | 'coin' | 'save'
+  // ターン制戦闘（battle 定義時）専用のSE
+  | 'encounter' | 'attackStart' | 'attack' | 'miss' | 'spell' | 'cursor' | 'victory' | 'defeat' | 'flee';
+/** 戦闘開始時のエンカウント演出。'none'＝演出なしで即開始, 'flash'＝黒フラッシュ明滅,
+ *  'whirl'＝回転しながら黒が広がる, 'iris'＝円が中心へ閉じる, 'stripes'＝横帯が交互に閉じる,
+ *  'undertale'＝頭上の「！」→ハートがコマンド位置へ移動（UNDERTALE風）。 */
+export type EncounterEffect = 'none' | 'flash' | 'whirl' | 'iris' | 'stripes' | 'undertale';
 export type ObjectKind = 'npc' | 'tile' | 'bullet';
 export type ObjType = 'enemy' | 'npc' | 'item' | 'warp' | 'event' | 'platform';
 
@@ -619,6 +625,10 @@ export interface BattleConfig {
   mercyThreshold?: number;
   /** みのがし可能になる敵HP割合 %（デフォルト20）。 */
   hpSpareThreshold?: number;
+  /** エンカウント演出（戦闘開始時の画面遷移演出）。未指定時はプリセット既定
+   *  （undertale／deltarune はそれぞれ専用演出、それ以外は演出なし）。
+   *  演出中に鳴らすSEは gameData.sfx.encounter。 */
+  encounterEffect?: EncounterEffect;
 }
 
 

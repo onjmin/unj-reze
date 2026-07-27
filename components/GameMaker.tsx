@@ -35,7 +35,7 @@ import {
   type DialogueLine,
   type StagePhase,
   type SpellCardDef,
-  type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger,
+  type PresetId, type EngineKind, type NpcBehavior, type BulletType, type SfxTrigger, type EncounterEffect,
   type ObjectKind, type TileDef, type SfxRef, type ObjectDef, type PresetData,
   type ObjType, type WarpTarget,
   type BattleMove, type SwitchDef, type ItemDef, type EquipmentDef, type BattleConfig, type UndertaleMode, type EnemyDialogueLine,
@@ -331,7 +331,20 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ', encounter: 'エンカウント', attackStart: '攻撃開始', attack: '攻撃命中', miss: '攻撃ミス', spell: '呪文/とくぎ', cursor: 'カーソル移動', victory: '戦闘勝利', defeat: '全滅', flee: '逃走成功' };
+/** エンカウント演出の実行中フェーズ。'alert' は UNDERTALE 演出の「！」表示、それ以外は画面遷移アニメ本体。 */
+type EncounterPhase = 'alert' | 'flash' | 'whirl' | 'iris' | 'stripes';
+/** ターン制戦闘（battle 定義時）でしか鳴らないSE。オーディオ設定では battle 有りのときだけ出す。 */
+const BATTLE_SFX_TRIGGERS: SfxTrigger[] = ['encounter', 'attackStart', 'attack', 'miss', 'spell', 'cursor', 'victory', 'defeat', 'flee'];
+/** エンカウント演出のプリセット一覧（戦闘設定のセレクトに出る順）。 */
+const ENCOUNTER_EFFECT_OPTIONS: { value: EncounterEffect; label: string }[] = [
+  { value: 'none', label: 'なし（すぐ戦闘へ）' },
+  { value: 'flash', label: 'フラッシュ（画面が黒く明滅）' },
+  { value: 'whirl', label: 'うずまき（回転しながら閉じる）' },
+  { value: 'iris', label: 'アイリスイン（円が中心へ閉じる）' },
+  { value: 'stripes', label: 'ブラインド（横帯が交互に閉じる）' },
+  { value: 'undertale', label: '「！」＋ハート移動（アンダーテール風）' },
+];
 
 // ── システムタイル（宝箱以外）: ワープ床・どく沼/ダメージ床・つるつる床 ──────────
 // special の値ごとに固定の効果音・挙動を持つ。画像は /assets/rpgen/map.png の16pxグリッドから
@@ -2375,11 +2388,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** アンダーテール風エンカウント演出：頭上に「！」→ プレイヤーがハートに変わって明滅しつつ
    *  バトル画面のコマンド位置へ直線移動 → バトル開始 */
   const encounterAlertRef = useRef<{
-    startTime: number; fire: () => void; phase: 'alert' | 'flash';
+    startTime: number; fire: () => void; phase: EncounterPhase;
+    /** 'flash' フェーズでハートを from→to へ飛ばすか（'undertale' 演出だけ true）。 */
+    heart: boolean;
     fromX: number; fromY: number; toX: number; toY: number;
   } | null>(null);
   const ENCOUNTER_ALERT_MS = 650;
   const ENCOUNTER_FLASH_MS = 450; // ハートが移動しながら明滅する演出の表示時間。SEの再生完了は待たない（短く保つ）
+  /** エンカウント演出の各フェーズの長さ（ms）。この時間が過ぎたら次のフェーズ、または fire()＝バトル開始へ進む。
+   *  描画側（drawEncounterEffect）も同じ値で進捗を求めるので、必ずここだけを直す。 */
+  const ENCOUNTER_PHASE_MS: Record<EncounterPhase, number> = {
+    alert: ENCOUNTER_ALERT_MS, flash: ENCOUNTER_FLASH_MS, whirl: 600, iris: 500, stripes: 550,
+  };
   const UNDERTALE_SHOOT_SFX = { ref: 'direct:undertale-shoot', src: 'https://rpgen-search.pages.dev/audio/sound/pMxknZ.mp3', type: 'direct' as const };
   /** メッセージウィンドウ送り／持ち物の選択・確定・せつめい・すてる共通のUI効果音（UNDERTALE戦闘系以外のプリセット用）。 */
   const MSG_ADVANCE_SFX = { ref: 'direct:msg-advance', src: 'https://rpgen-search.pages.dev/audio/sound/OzsJfs.mp3', type: 'direct' as const };
@@ -2412,34 +2432,65 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   } as const;
   const undertaleSfx = UNDERTALE_SFX_BY_PRESET[presetId as keyof typeof UNDERTALE_SFX_BY_PRESET];
   const isUndertalePreset = !!undertaleSfx;
+  /** 戦闘SEを鳴らす。オーディオ設定（gameData.sfx）で未設定のトリガーは無音＝何も起きない。
+   *  プリセット既定音はここではなく各プリセットの sfx に持たせる（dq.ts 参照）。 */
+  const playBattleSfx = (key: SfxTrigger) => playSfx(gameDataRef.current.sfx?.[key]);
+
+  /** 被弾したメンバーのステータス欄を揺らす期間（ms）。この間 statusShakeMap に載る。 */
+  const STATUS_SHAKE_MS = 420;
+  /** 被弾演出中のメンバーID → 演出終了時刻。ターン制戦闘のステータス欄の振動に使う。 */
+  const [statusShakeMap, setStatusShakeMap] = useState<Record<string, number>>({});
+  const statusShakeSeqRef = useRef(0);
+  /** メンバー被弾時：ダメージSEを鳴らし、そのメンバーのステータス欄だけを揺らす。
+   *  複数人パーティでも「誰が殴られたか」がひと目で分かるようにするための演出。 */
+  const triggerMemberStatusShake = (memberId: string) => {
+    playBattleSfx('damage');
+    const seq = ++statusShakeSeqRef.current;
+    setStatusShakeMap(prev => ({ ...prev, [memberId]: seq }));
+    setTimeout(() => setStatusShakeMap(prev => {
+      if (prev[memberId] !== seq) return prev; // 新しい被弾で上書き済み：何もしない
+      const next = { ...prev };
+      delete next[memberId];
+      return next;
+    }), STATUS_SHAKE_MS);
+  };
+
   /** メニューで選択を決定したときのSE。UNDERTALE戦闘系プリセットは専用の決定音、それ以外は共通のUI効果音を使う。 */
   const playMenuConfirmSfx = () => playSfx(undertaleSfx ? undertaleSfx.menuConfirm : MSG_ADVANCE_SFX);
   /** メニューをキャンセル・後退したときのSE。UNDERTALE戦闘系プリセットは専用のキャンセル音、それ以外は共通のUI効果音を使う。 */
   const playMenuCancelSfx = () => playSfx(undertaleSfx ? undertaleSfx.menuCancel : MSG_ADVANCE_SFX);
-  /** UNDERTALE戦闘系プリセットではバトル開始前に「！」演出を挟む。それ以外は即開始。
-   *  デルタルーンはアンダーテールと違い「！」マーク・専用SEを出さない（Deltarune本編の遭遇演出に
-   *  準拠）ため、'alert' フェーズを飛ばして直接 'flash'（BGM停止＋テンションホルンの和音＋
-   *  剣を抜く音＋黒フラッシュ）から始める。 */
+  /** エンカウント演出（戦闘開始時の画面遷移演出）を挟んでから fire() でバトルを開始する。
+   *  battle.encounterEffect が未設定のときは従来どおりプリセット既定の挙動
+   *  （undertale＝「！」＋ハート移動 / deltarune＝和音＋黒フラッシュ / それ以外＝演出なしで即開始）。
+   *  明示指定があればそのプリセット演出を使い、演出開始時に sfx.encounter を鳴らす。 */
   const triggerEncounter = (fire: () => void) => {
     if (encounterAlertRef.current) return; // 演出中の多重トリガー防止
-    if (presetId === 'deltarune') {
-      encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'flash', fromX: 0, fromY: 0, toX: 0, toY: 0 };
-      switchBgm(undefined);
-      playDtEncounterChord();
-      setTimeout(() => playSfx(DT_SFX.weaponPull), 400);
-    } else if (undertaleSfx) {
+    const configured = gameDataRef.current.battle?.encounterEffect;
+    const effect: EncounterEffect = configured ?? (presetId === 'undertale' ? 'undertale' : presetId === 'deltarune' ? 'flash' : 'none');
+    // deltarune 既定：'flash' だが専用の和音＋剣を抜く音を伴う（本編の遭遇演出に準拠）
+    const deltaruneDefault = !configured && presetId === 'deltarune';
+    if (effect === 'none') { fire(); return; }
+    const begin = (phase: EncounterPhase, heart = false, from = { x: 0, y: 0 }, to = { x: 0, y: 0 }) => {
+      encounterAlertRef.current = { startTime: performance.now(), fire, phase, heart, fromX: from.x, fromY: from.y, toX: to.x, toY: to.y };
+    };
+    if (effect === 'undertale') {
       const p2 = engineRef.current.player;
-      const fromX = p2.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2;
-      const fromY = p2.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2;
       // 移動先＝現在のカメラオフセットを基準に、画面上で常に中央下部（バトル画面の
       // FIGHT/ACT/ITEM/MERCYコマンド位置）に一致するワールド座標を逆算する
       // （プレイヤーがマップ端でカメラがクランプされていてもズレない）
-      const toX = camXRef.current + VIEW_W / 2;
-      const toY = camYRef.current + VIEW_H - 26;
-      encounterAlertRef.current = { startTime: performance.now(), fire, phase: 'alert', fromX, fromY, toX, toY };
-      playSfx(undertaleSfx.encounter);
+      begin('alert', true,
+        { x: p2.x + (gameDataRef.current.player.w ?? TILE_SIZE) / 2, y: p2.y + (gameDataRef.current.player.h ?? TILE_SIZE) / 2 },
+        { x: camXRef.current + VIEW_W / 2, y: camYRef.current + VIEW_H - 26 });
+      playSfx(undertaleSfx?.encounter ?? gameDataRef.current.sfx?.encounter);
+      return;
+    }
+    begin(effect);
+    switchBgm(undefined);
+    if (deltaruneDefault) {
+      playDtEncounterChord();
+      setTimeout(() => playSfx(DT_SFX.weaponPull), 400);
     } else {
-      fire();
+      playBattleSfx('encounter');
     }
   };
   /** 現在のフェーズインデックス（phases 定義時）。-1=未開始 */
@@ -2512,7 +2563,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── バトル/ボス戦 BGM ──
   const bossBgmActiveRef = useRef(false);
-  const battleBgmActiveRef = useRef<'none' | 'battle' | 'boss'>('none');
+  /** バトルBGMの状態。'result'＝決着してBGMを止め、リザルト文を読ませている最中
+   *  （'none' 以外なのでリザルトを閉じるときにフィールドBGMへ戻る）。 */
+  const battleBgmActiveRef = useRef<'none' | 'battle' | 'boss' | 'result'>('none');
+  /** リザルト表示を閉じる処理。読み終えて決定ボタンを押したら待たずに閉じられるよう保持する。 */
+  const battleResultCloseRef = useRef<(() => void) | null>(null);
   const gameDataRef = useRef(gameData);
   const lastTouchTimeMapRef = useRef<Map<string, number>>(new Map());
   gameDataRef.current = gameData;
@@ -2670,6 +2725,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const reduced = ptRef.current.defended.includes(m.id) ? Math.max(1, Math.ceil(dmg / 2)) : dmg;
     dtSetHp(m.id, m.hp - reduced);
     triggerMemberDamageFx(m.id, reduced);
+    triggerMemberStatusShake(m.id);
     return reduced;
   };
   const ptAliveMembers = () => ptParty().filter(mm => !ptIsDown(mm));
@@ -2843,7 +2899,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (result === 'lose') {
       battleRef.current.active = false; setBattle(null);
       battleBgmActiveRef.current = 'none';
-      shakeRef.current = 18; playSfx(sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => { gameOverActiveRef.current = true; setGameOverResult({ score: scoreRef.current }); });
+      // 全滅SE（sfx.defeat）が設定されていればそちらを優先。未設定なら従来どおり被弾SE。
+      shakeRef.current = 18; playSfx(sfxRef.current.defeat ?? sfxRef.current.damage); showGameMsg('ゲームオーバー…', 'timed', () => { gameOverActiveRef.current = true; setGameOverResult({ score: scoreRef.current }); });
       return;
     }
     const wasBoss = b.isBoss;
@@ -2856,6 +2913,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const usesFoes = isDodgeBattleStyle(styleNow) || isPartyBattleStyle(styleNow);
     const expGain = usesFoes ? b.foes.reduce((s, f) => s + (f.gone === 'dead' ? f.exp : 0), 0) : b.exp;
     const goldGain = usesFoes ? b.foes.reduce((s, f) => s + (f.gone ? f.gold : 0), 0) : b.gold;
+    if (result === 'flee') playBattleSfx('flee');
+    // みのがし・撃破ともに「戦闘終了」。敵を全滅させた時点でバトルBGMを止めてから勝利SEを鳴らし、
+    // リザルト文を読み終えて画面が閉じるときにフィールドBGMへ戻す（下の close 参照）。
+    if (result === 'win' || result === 'spare') {
+      if (battleBgmActiveRef.current !== 'none') { battleBgmActiveRef.current = 'result'; switchBgm(undefined); }
+      playBattleSfx('victory');
+    }
     if (result === 'spare') {
       if (b.entity) { const idx = eng.entities.indexOf(b.entity); if (idx >= 0) eng.entities.splice(idx, 1); }
       pr.gold = (pr.gold ?? 0) + goldGain;
@@ -2910,9 +2974,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       battleReturnPosRef.current = null;
     }
     invulnRef.current = 60; forceHud(n => n + 1);
-    setTimeout(() => {
+    /** リザルト文を読み終えたら呼ぶ：戦闘画面を閉じ、フィールドBGMを鳴らし直す。
+     *  自動タイマーと決定ボタン（下の battleResultCloseRef）のどちらから来ても一度しか走らない。 */
+    const close = () => {
+      if (battleResultCloseRef.current !== close) return;
+      battleResultCloseRef.current = null;
       battleRef.current.active = false; battleRef.current.entity = null; setBattle(null); forceHud(n => n + 1);
-      // バトルBGM終了 → フィールドBGMに戻す
+      // リザルトを読み終えた → フィールドBGMに戻す
       if (battleBgmActiveRef.current !== 'none') {
         battleBgmActiveRef.current = 'none';
         switchBgm(getCurrentFieldBgm());
@@ -2927,7 +2995,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); });
         }
       }
-    }, result === 'win' || result === 'spare' ? 1100 : 500);
+    };
+    battleResultCloseRef.current = close;
+    // 勝利／みのがしは戦果（EXP・ゴールド・レベルアップ）を読ませるぶん長め。決定ボタンで早送りできる。
+    setTimeout(close, result === 'win' || result === 'spare' ? 2000 : 500);
   };
 
   /** みのがし成立条件：こうどうでゲージ満タン（閾値 %）、または敵HPが所定の割合以下。 */
@@ -2973,6 +3044,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const enemyTurn = () => {
     const b = battleRef.current; const pr = progressRef.current;
     if (!b.active) return;
+    /** classic 戦闘の被弾処理。HPを減らし、ダメージ数値のポップアップとステータス欄の振動＋SEを出す。
+     *  classic はパーティ編成があっても実際に戦うのは先頭（フィールドの pr）のみ。 */
+    const hitLeader = (dmg: number) => {
+      pr.hp = Math.max(0, pr.hp - dmg); forceHud(n => n + 1);
+      const leaderId = ptParty()[0]?.id ?? '__self';
+      triggerMemberDamageFx(leaderId, dmg);
+      triggerMemberStatusShake(leaderId);
+    };
     // 攻撃パターン：40% で呪文/特技、それ以外は通常攻撃
     const move = b.enemyMoves.length && Math.random() < 0.4 ? b.enemyMoves[Math.floor(Math.random() * b.enemyMoves.length)] : null;
     if (move?.heal) {
@@ -2980,11 +3059,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       appendLog(`${b.enemyName}は ${move.name}を となえた！ HPが ${b.enemyHp - before} かいふく`, { canAct: pr.hp > 0 });
     } else if (move) {
       const dmg = Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3)));
-      pr.hp = Math.max(0, pr.hp - dmg); forceHud(n => n + 1);
+      hitLeader(dmg);
       appendLog(`${b.enemyName}の ${move.name}！ ${dmg}のダメージ`, { canAct: pr.hp > 0 });
     } else {
       const dmg = calcDmg(b.enemyAtk, pr.def);
-      pr.hp = Math.max(0, pr.hp - dmg); forceHud(n => n + 1);
+      hitLeader(dmg);
       appendLog(`${b.enemyName}の こうげき！ ${dmg}のダメージ`, { canAct: pr.hp > 0 });
     }
     if (pr.hp <= 0) setTimeout(() => endBattle('lose'), 600);
@@ -3363,15 +3442,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
     triggerEnemyMissFx(retargetFoe(attackTargetRef.current));
     if (!dtNextIsAttack()) setUndertalePhase('menu');
+    playBattleSfx('miss');
     appendLog('こうげきは ハズれた！', { canAct: false });
     dtAdvanceTurn();
   };
 
+  /** 攻撃開始SE（振りかぶり）→ 少し遅れて命中SE。2つ重ならないように間を空ける。 */
+  const ATTACK_HIT_SFX_DELAY_MS = 180;
   const doAttack = () => {
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
+    playBattleSfx('attackStart');
     const b = battleRef.current; const pr = progressRef.current;
     const dmg = calcDmg(pr.atk, b.enemyDef);
     b.enemyHp = Math.max(0, b.enemyHp - dmg);
+    setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
     appendLog(`${gameData.battle?.playerName || '勇者'}の こうげき！ ${dmg}のダメージ`, { canAct: false });
     if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
     queueEnemyTurn();
@@ -3424,6 +3508,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       dtAdvanceTurn();
       return;
     }
+    playBattleSfx('spell'); // 呪文/とくぎの詠唱SE（こうどう技＝mercy は上で return 済み）
     if (m.heal) {
       const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + m.power);
       appendLog(`${m.name}！ HPが ${pr.hp - before} かいふくした`, { canAct: false });
@@ -7116,18 +7201,23 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (starTimerRef.current > 0) starTimerRef.current--;
       if (bombInvulnRef.current > 0) bombInvulnRef.current--;
       if (bombCooldownRef.current > 0) bombCooldownRef.current--;
-      if (encounterAlertRef.current?.phase === 'alert' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_ALERT_MS) {
-        // 「！」演出終了 → 現在のBGMを止め、バトル開始SEを鳴らしてハート明滅演出へ
-        // （デルタルーンはそもそも 'alert' フェーズを使わないため、ここは undertale/undertale 系のみ通る）
+      if (encounterAlertRef.current) {
         const alert = encounterAlertRef.current;
-        alert.phase = 'flash';
-        alert.startTime = performance.now();
-        switchBgm(undefined);
-        playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).battleStart);
-      } else if (encounterAlertRef.current?.phase === 'flash' && performance.now() - encounterAlertRef.current.startTime >= ENCOUNTER_FLASH_MS) {
-        const { fire } = encounterAlertRef.current;
-        encounterAlertRef.current = null;
-        fire();
+        const elapsed = performance.now() - alert.startTime;
+        if (elapsed >= ENCOUNTER_PHASE_MS[alert.phase]) {
+          if (alert.phase === 'alert') {
+            // 「！」演出終了 → 現在のBGMを止め、バトル開始SEを鳴らしてハート明滅演出へ
+            alert.phase = 'flash';
+            alert.startTime = performance.now();
+            switchBgm(undefined);
+            playSfx((undertaleSfx ?? UNDERTALE_SFX_BY_PRESET.undertale).battleStart);
+          } else {
+            // 演出フェーズ終了 → バトル開始
+            const { fire } = alert;
+            encounterAlertRef.current = null;
+            fire();
+          }
+        }
       }
 
       // マリオ巨大化変身タイマー
@@ -9695,6 +9785,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (menuUpEdge) c -= 1;
             if (menuDownEdge) c += 1;
             c = ((c % n) + n) % n;
+            if (c !== battleItemsCursorRef.current) playBattleSfx('cursor');
             battleItemsCursorRef.current = c; setBattleItemsCursor(c);
           }
         } else {
@@ -9707,6 +9798,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (menuUpEdge) c -= 2;
             if (menuDownEdge) c += 2;
             c = ((c % n) + n) % n;
+            if (c !== classicBattleCursorRef.current) playBattleSfx('cursor');
             classicBattleCursorRef.current = c; setClassicBattleCursor(c);
           }
         }
@@ -9865,7 +9957,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           }
         } else if (isPlaying && battleRef.current.active && !isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
           const canActNow = !!battleViewRef.current?.canAct && !battleViewRef.current?.over;
-          if (battleItemsOpenRef.current) {
+          // 決着後のリザルト文は決定ボタンで読み飛ばせる（押さなければ自動で閉じる）
+          if (battleViewRef.current?.over && battleResultCloseRef.current) { battleResultCloseRef.current(); }
+          else if (battleItemsOpenRef.current) {
             const items = usableItems();
             const idx = battleItemsCursorRef.current;
             if (idx < items.length) { if (canActNow) useHealItem(items[idx], true); }
@@ -10615,38 +10709,63 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           });
         }
       }
-      // アンダーテール風エンカウント演出：プレイヤーの手前で明滅するハートが画面全体の
-      // 明滅（黒フラッシュ）と同期しつつ、バトル画面のコマンド位置へ一直線に移動する
-      if (isPlaying && encounterAlertRef.current?.phase === 'flash') {
+      // エンカウント演出（戦闘開始時の画面遷移）。'alert' は下の「！」吹き出し側で描くのでここでは扱わない。
+      // どのフェーズも「画面がだんだん黒く覆われる」形で終わり、そのままバトル画面へ引き継がれる。
+      if (isPlaying && encounterAlertRef.current && encounterAlertRef.current.phase !== 'alert') {
         const alert = encounterAlertRef.current;
-        const t = performance.now() - alert.startTime;
-        const ratio = Math.min(1, t / ENCOUNTER_FLASH_MS);
-        const eased = ratio < 0.5 ? 2 * ratio * ratio : 1 - Math.pow(-2 * ratio + 2, 2) / 2; // ease-in-out
-        const visible = Math.floor(t / 90) % 2 === 0; // 明滅
-        if (visible) {
-          // 画面全体の黒フラッシュ（現在の座標変換をリセットしてキャンバス全体を覆う）
-          ctx.save();
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.fillStyle = 'rgba(0,0,0,0.6)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.restore();
-          // ハート本体（プレイヤーの手前＝プレイヤー描画より後に重ねて描く）。
-          // デルタルーンは「！」演出（'alert'フェーズ）自体を使わないので、その延長のハート移動も出さない
-          // （黒フラッシュの明滅のみ＝Deltarune本編の遭遇演出に合わせる）。
-          if (presetId !== 'deltarune') {
-            const cx = Math.round(alert.fromX + (alert.toX - alert.fromX) * eased);
-            const cy = Math.round(alert.fromY + (alert.toY - alert.fromY) * eased);
-            const s = 7;
-            ctx.save();
-            ctx.imageSmoothingEnabled = false;
-            ctx.fillStyle = '#ff3355';
-            ctx.beginPath();
-            ctx.moveTo(cx, cy + s * 0.9);
-            ctx.bezierCurveTo(cx + s, cy + s * 0.2, cx + s * 0.8, cy - s * 0.8, cx, cy - s * 0.2);
-            ctx.bezierCurveTo(cx - s * 0.8, cy - s * 0.8, cx - s, cy + s * 0.2, cx, cy + s * 0.9);
-            ctx.fill();
-            ctx.restore();
+        const W = canvas.width, H = canvas.height;
+        const ratio = Math.min(1, (performance.now() - alert.startTime) / ENCOUNTER_PHASE_MS[alert.phase]);
+        let heartVisible = false;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (alert.phase === 'whirl') {
+          // 回転しながら中心から広がる黒い矩形。対角より一回り大きくなるので最後は必ず全面を覆う
+          const size = Math.hypot(W, H) * 1.1 * ratio;
+          ctx.translate(W / 2, H / 2);
+          ctx.rotate(ratio * Math.PI * 4);
+          ctx.fillStyle = '#000';
+          ctx.fillRect(-size / 2, -size / 2, size, size);
+        } else if (alert.phase === 'iris') {
+          // 中心へ閉じる円形の穴（穴の外を黒で塗る＝evenodd）
+          const r = Math.max(0, (1 - ratio) * Math.hypot(W, H) / 2);
+          ctx.fillStyle = '#000';
+          ctx.beginPath();
+          ctx.rect(0, 0, W, H);
+          ctx.arc(W / 2, H / 2, r, 0, Math.PI * 2);
+          ctx.fill('evenodd');
+        } else if (alert.phase === 'stripes') {
+          // 横帯が左右交互に伸びて画面を切り分ける（ブラインド）
+          const stripeCount = 8;
+          const stripeH = H / stripeCount;
+          ctx.fillStyle = '#000';
+          for (let i = 0; i < stripeCount; i++) {
+            const w = W * ratio;
+            ctx.fillRect(i % 2 === 0 ? 0 : W - w, i * stripeH, w, stripeH + 1);
           }
+        } else {
+          // flash：黒で明滅しつつ、進行につれて地の暗さも増していく
+          const blink = Math.floor((performance.now() - alert.startTime) / 90) % 2 === 0;
+          ctx.fillStyle = `rgba(0,0,0,${blink ? 0.75 : ratio * 0.5})`;
+          ctx.fillRect(0, 0, W, H);
+          heartVisible = alert.heart && blink;
+        }
+        ctx.restore();
+        // ハート本体はワールド座標系（＝上の restore 後の変換）のまま描く。
+        // プレイヤー位置からバトル画面のコマンド位置へ一直線に移動する（UNDERTALE風）。
+        if (heartVisible) {
+          const eased = ratio < 0.5 ? 2 * ratio * ratio : 1 - Math.pow(-2 * ratio + 2, 2) / 2; // ease-in-out
+          const cx = Math.round(alert.fromX + (alert.toX - alert.fromX) * eased);
+          const cy = Math.round(alert.fromY + (alert.toY - alert.fromY) * eased);
+          const s = 7;
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.fillStyle = '#ff3355';
+          ctx.beginPath();
+          ctx.moveTo(cx, cy + s * 0.9);
+          ctx.bezierCurveTo(cx + s, cy + s * 0.2, cx + s * 0.8, cy - s * 0.8, cx, cy - s * 0.2);
+          ctx.bezierCurveTo(cx - s * 0.8, cy - s * 0.8, cx - s, cy + s * 0.2, cx, cy + s * 0.9);
+          ctx.fill();
+          ctx.restore();
         }
       }
       // アンダーテール風エンカウント演出：プレイヤー頭上にドット絵の吹き出し「！」を表示
@@ -14389,22 +14508,55 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               );
             })()}
 
-            {battle && !isDodgeBattleStyle(battleStyle) && !isPartyBattleStyle(battleStyle) && (
-              <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40 font-pixel">
-                {/* 敵 */}
-                <div className="flex flex-col items-center mt-2">
-                  <div className="text-5xl sm:text-6xl leading-none drop-shadow">{battle.enemyEmoji}</div>
-                  {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風） */}
-                  <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
-                  <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
-                    <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
+            {battle && !isDodgeBattleStyle(battleStyle) && !isPartyBattleStyle(battleStyle) && (() => {
+              const roster = ptParty();
+              return (
+                <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40 font-pixel select-none">
+                  {/* ステータスエリア：メンバーごとの枠。被弾したメンバーの枠だけが赤くなって震える */}
+                  <div className="flex flex-wrap gap-2 items-start justify-start z-10">
+                    {roster.map(m => {
+                      const hurtSeq = statusShakeMap[m.id];
+                      const pop = dtDmgPopups[m.id];
+                      return (
+                        // key に被弾シーケンスを混ぜて要素を作り直すことで、連続被弾でもアニメが必ず頭から再生される
+                        <div key={`${m.id}:${hurtSeq ?? 0}`}
+                          className={`relative bg-black/90 border-2 rounded px-2.5 py-1.5 text-white min-w-[96px] shadow-xl ${hurtSeq ? 'border-red-500 bg-red-950/90' : 'border-gray-300'}`}
+                          style={hurtSeq ? { animation: `statusHurtShake ${STATUS_SHAKE_MS}ms ease-in-out` } : undefined}>
+                          <div className="text-[11px] font-bold text-yellow-300 truncate">{m.name}</div>
+                          <div className="text-[10px] text-gray-200 mt-0.5 flex justify-between gap-2">
+                            <span>ＨＰ</span>
+                            <span className={m.hp <= 0 ? 'text-red-400 font-bold' : m.hp / m.maxHp <= 0.25 ? 'text-yellow-300 font-bold' : 'text-white'}>{m.hp}/{m.maxHp}</span>
+                          </div>
+                          <div className="text-[10px] text-gray-200 flex justify-between gap-2">
+                            <span>ＭＰ</span>
+                            <span className="text-indigo-200">{m.mp}/{m.maxMp ?? m.mp}</span>
+                          </div>
+                          <div className="text-[9px] text-gray-400 mt-0.5 text-right">Lv.{progressRef.current.level}</div>
+                          {/* 被弾ダメージ数値のポップアップ */}
+                          {pop && (
+                            <div key={pop.id} className="absolute -top-2 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-xl sm:text-2xl whitespace-nowrap z-10"
+                              style={{ color: '#000', textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e', animation: 'dmgPopUp 0.7s ease-out forwards' }}>
+                              {pop.text}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  {gameData.battle?.labels.mercy && (
-                    <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
-                      <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                  {/* 敵 */}
+                  <div className="flex flex-col items-center mt-1">
+                    <div className="text-5xl sm:text-6xl leading-none drop-shadow">{battle.enemyEmoji}</div>
+                    {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風） */}
+                    <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
+                    <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
+                      <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
                     </div>
-                  )}
-                </div>
+                    {gameData.battle?.labels.mercy && (
+                      <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
+                        <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                      </div>
+                    )}
+                  </div>
                 {/* ログ + コマンド */}
                 <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
                   <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] mb-2">
@@ -14419,7 +14571,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <span className="text-gray-400">×{inventory[it.id] ?? 0}</span>
                         </button>
                       ))}
-                      <button onClick={() => { setBattleItemsCursor(usableItems().length); setBattleItemsOpen(false); }}
+                      <button onClick={() => { playBattleSfx('cursor'); setBattleItemsCursor(usableItems().length); setBattleItemsOpen(false); }}
                         className={`w-full py-1.5 text-[11px] font-bold ${battleItemsCursor === usableItems().length ? 'bg-gray-600 text-yellow-300' : 'bg-gray-800 hover:bg-gray-700 text-gray-300'}`}>
                         {battleItemsCursor === usableItems().length ? '❤ ' : '  '}もどる
                       </button>
@@ -14440,7 +14592,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           cls: spareReady(battle) ? 'bg-yellow-500 hover:bg-yellow-400 text-black animate-pulse' : 'bg-yellow-900 hover:bg-yellow-800 text-yellow-200/70',
                         }] : []),
                         ...(usableItems().length > 0 ? [{
-                          label: gameData.battle?.labels.item ?? 'どうぐ', disabled: false, onClick: () => setBattleItemsOpen(true),
+                          label: gameData.battle?.labels.item ?? 'どうぐ', disabled: false, onClick: () => { playBattleSfx('cursor'); setBattleItemsOpen(true); },
                           cls: 'bg-amber-700 hover:bg-amber-600 text-white',
                         }] : []),
                       ] as { label: React.ReactNode; disabled: boolean; onClick: () => void; cls: string }[]).map((c, i) => (
@@ -14453,7 +14605,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   ))}
                 </div>
               </div>
-            )}
+            );
+          })()}
 
             {/* ── ショップモーダル ── */}
             {shopModal && (
@@ -16968,6 +17121,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <option value="milky">行動値カウント戦闘（ミルキークエスト風）</option>
                         </select>
                       </label>
+                      <label className="block text-[10px] text-gray-400">エンカウント演出
+                        <select value={gameData.battle.encounterEffect ?? ''} onChange={e => {
+                          const v = e.target.value;
+                          const encounterEffect = v ? (v as EncounterEffect) : undefined;
+                          setGameData(p => ({ ...p, battle: { ...p.battle!, encounterEffect } }));
+                        }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1.5 py-1.5 text-[11px] text-gray-200 outline-none">
+                          <option value="">プリセット既定</option>
+                          {ENCOUNTER_EFFECT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      </label>
+                      <p className="text-[9px] text-gray-500 leading-relaxed">戦闘開始時の画面遷移演出。演出中に鳴らす音は「オーディオ」タブの効果音「エンカウント」で設定します。</p>
                       {(gameData.battle.style === 'deltarune' || isPartyBattleStyle(gameData.battle.style)) && (
                         <p className="text-[9px] text-gray-500 leading-relaxed">
                           {{
@@ -18096,6 +18260,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         {(Object.keys(SFX_LABELS) as SfxTrigger[]).filter(trig => {
                           // 東方専用SE は東方エンジンのときだけ表示
                           if (trig === 'graze' || trig === 'spellcard') return gameData.engine === 'touhou';
+                          // 戦闘専用SE は戦闘設定があるときだけ表示
+                          if (BATTLE_SFX_TRIGGERS.includes(trig)) return !!gameData.battle;
                           return true;
                         }).map(trig => (
                           <div key={trig} className="bg-gray-900 rounded-lg p-2 border border-gray-800 space-y-1.5">

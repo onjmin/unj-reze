@@ -559,6 +559,7 @@ export const dq: PresetData = {
       { name: 'ベギラマ', cost: 11, power: 45 },
     ],
     labels: { attack: 'たたかう', move: 'じゅもん', flee: 'にげる', item: 'どうぐ' },
+    encounterEffect: 'flash',
     // レベルアップテーブル（exp は「次のレベルに必要な追加経験値」）
     levelTable: [
       { level: 2,  exp: 6,   maxHp: 38,  maxMp: 10,  atk: 12, def: 9  },
@@ -615,7 +616,18 @@ export const dq: PresetData = {
     levelup:  { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
     purchase: { ref: `direct:${su('PEeN5M')}`, src: su('PEeN5M'), type: 'direct' as const },
     inn:      { ref: `direct:${su('L5Npni')}`, src: su('L5Npni'), type: 'direct' as const },
-    damage:   { ref: `direct:${su('HlYVmj')}`, src: su('HlYVmj'), type: 'direct' as const },
+    // 被弾＝「[ﾄﾞﾗｸｴ]敵攻撃」。戦闘中はステータス欄の振動と同時に鳴る
+    damage:   { ref: `direct:${su('bC3ZP1')}`, src: su('bC3ZP1'), type: 'direct' as const },
     clear:    { ref: 'clear' },
+    // ── ターン制戦闘SE（すべて RPGEN 素材のドラクエ系サウンド） ──
+    encounter:   { ref: `direct:${su('qm03Mw')}`, src: su('qm03Mw'), type: 'direct' as const }, // [ﾄﾞﾗｸｴ6]エンカウント
+    attackStart: { ref: `direct:${su('n0fqek')}`, src: su('n0fqek'), type: 'direct' as const }, // ﾄﾞﾗｸｴ攻撃時（振りかぶり）
+    attack:      { ref: `direct:${su('7JKd21')}`, src: su('7JKd21'), type: 'direct' as const }, // ﾄﾞﾗｸｴ攻撃（命中）
+    miss:        { ref: `direct:${su('AeNs0l')}`, src: su('AeNs0l'), type: 'direct' as const }, // ﾄﾞﾗｸｴﾐｽ
+    spell:       { ref: `direct:${su('wGCfnC')}`, src: su('wGCfnC'), type: 'direct' as const }, // ﾄﾞﾗｸｴ呪文
+    cursor:      { ref: `direct:${su('GklUsK')}`, src: su('GklUsK'), type: 'direct' as const }, // ﾄﾞﾗｸｴｶｰｿﾙ
+    victory:     { ref: `direct:${su('tSHy6V')}`, src: su('tSHy6V'), type: 'direct' as const }, // ﾄﾞﾗｸｴ戦闘終了
+    defeat:      { ref: `direct:${su('rEaCCP')}`, src: su('rEaCCP'), type: 'direct' as const }, // [ﾄﾞﾗｸｴ]全滅
+    flee:        { ref: `direct:${su('FTCG4H')}`, src: su('FTCG4H'), type: 'direct' as const }, // 逃走
   },
 };
