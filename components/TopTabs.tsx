@@ -18,7 +18,7 @@ function formatCount(n: number) {
 
 export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedSubMode, latestThreadCount = 0, latestReplyCount = 0, mediaCount = 0 }: TopTabsProps) {
   return (
-    <div className="flex flex-col border-b border-gray-800 shrink-0 bg-[#0b0e14] z-10">
+    <div className="sticky top-0 flex flex-col border-b border-gray-800 shrink-0 bg-[#0b0e14]/90 backdrop-blur-md z-20">
       <div className="flex px-2 py-2.5 font-bold text-sm text-gray-500">
         <button
           onClick={() => setActiveTab('everyone')}
@@ -47,26 +47,26 @@ export default function TopTabs({ activeTab, setActiveTab, feedSubMode, setFeedS
       </div>
       {/* 最新スレ/最新レス/メディア はタイムライン（みんな）でのみ意味を持つので他タブでは出さない */}
       {activeTab === 'everyone' && (
-      <div className="flex px-2 py-1.5 text-xs bg-gray-100/5 text-gray-400 border-t border-gray-800/40">
-        <button
-          onClick={() => setFeedSubMode('threads')}
-          className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'threads' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
-        >
-          最新スレ {latestThreadCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'threads' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestThreadCount)}</span>)}
-        </button>
-        <button
-          onClick={() => setFeedSubMode('replies')}
-          className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'replies' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
-        >
-          最新レス {latestReplyCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'replies' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestReplyCount)}</span>)}
-        </button>
-        <button
-          onClick={() => setFeedSubMode('media')}
-          className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'media' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
-        >
-          メディア {mediaCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'media' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(mediaCount)}</span>)}
-        </button>
-      </div>
+        <div className="flex px-2 py-1.5 text-xs bg-gray-100/5 text-gray-400 border-t border-gray-800/40">
+          <button
+            onClick={() => setFeedSubMode('threads')}
+            className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'threads' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
+          >
+            最新スレ {latestThreadCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'threads' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestThreadCount)}</span>)}
+          </button>
+          <button
+            onClick={() => setFeedSubMode('replies')}
+            className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'replies' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
+          >
+            最新レス {latestReplyCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'replies' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(latestReplyCount)}</span>)}
+          </button>
+          <button
+            onClick={() => setFeedSubMode('media')}
+            className={`flex-1 flex items-center justify-center transition-colors ${feedSubMode === 'media' ? 'font-bold text-gray-100' : 'hover:text-gray-300'}`}
+          >
+            メディア {mediaCount > 0 && (<span className={`text-white text-[9px] rounded-full px-1.5 ml-1 font-bold ${feedSubMode === 'media' ? 'bg-blue-600' : 'bg-blue-600/50'}`}>{formatCount(mediaCount)}</span>)}
+          </button>
+        </div>
       )}
     </div>
   );
