@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2, FlaskConical } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash2, Save, Plus, Volume2, Shield, ShieldOff, Download, Upload, Settings, History, Map as MapIcon, Box, MessageSquare, Users, Sword, Maximize2, Minimize2, Undo2, Redo2, FlaskConical, Brush, Globe, Grid3x3, Wrench, Palette, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Pencil, Gamepad2, SquarePen } from 'lucide-react';
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
@@ -12570,14 +12570,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         aria-pressed={editModeType === 'move_place'}
         title="移動・設置モード"
         className={`px-2.5 py-2 text-xs transition ${editModeType === 'move_place' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
-      >🕹️</button>
+      ><Gamepad2 size={14} /></button>
       <button
         onClick={() => setEditModeType('panel_input')}
         aria-label="パネル編集モード"
         aria-pressed={editModeType === 'panel_input'}
         title="パネル編集モード"
         className={`px-2.5 py-2 text-xs transition ${editModeType === 'panel_input' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400'}`}
-      >📝</button>
+      ><SquarePen size={14} /></button>
     </div>
   ) : null;
 
@@ -12594,7 +12594,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             {!embedded && <button onClick={onClose} className="p-1 text-gray-400 hover:bg-gray-100/10 shrink-0"><X size={16} /></button>}
-            {embedded && <span className="text-xs font-bold text-white shrink-0">▶ プレイ中</span>}
+            {embedded && <span className="text-xs font-bold text-white shrink-0 flex items-center gap-1"><Play size={12} />プレイ中</span>}
             {!isPlaying && !playOnly && (
               <select value={presetId} onChange={e => resetGame(e.target.value as PresetId)}
                 className="bg-gray-800 border border-gray-700 px-2 py-1 text-[11px] text-gray-200 outline-none max-w-[110px]">
@@ -12631,20 +12631,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       onClick={() => setCanvasDraw(v => !v)}
                       className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${canvasDraw ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
                     >
-                      🖌️ キャンバスに直接描く {canvasDraw ? 'ON' : 'OFF'}
+                      <Brush size={13} />キャンバスに直接描く {canvasDraw ? 'ON' : 'OFF'}
                     </button>
                   )}
                   <button
                     onClick={() => { setOnlineTestMode(v => !v); setSettingsOpen(false); }}
                     className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${onlineTestMode ? 'bg-blue-500/20 text-blue-300' : 'text-gray-400 hover:bg-gray-700'}`}
                   >
-                    🌐 オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
+                    <Globe size={13} />オンラインテスト {onlineTestMode ? 'ON' : 'OFF'}
                   </button>
                   <button
                     onClick={() => setShowCollisionBoundaries(v => !v)}
                     className={`w-full flex items-center gap-2 px-3 py-2 text-xs font-bold transition ${showCollisionBoundaries ? 'bg-purple-500/20 text-purple-300' : 'text-gray-400 hover:bg-gray-700'}`}
                   >
-                    🧱 衝突バウンダリ {showCollisionBoundaries ? 'ON' : 'OFF'}
+                    <Grid3x3 size={13} />衝突バウンダリ {showCollisionBoundaries ? 'ON' : 'OFF'}
                   </button>
 
                   {!playOnly && (
@@ -12652,9 +12652,25 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       onClick={() => { handleTestPlay(); setSettingsOpen(false); }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-green-400 hover:bg-gray-700 hover:text-green-300 transition"
                     >
-                      <FlaskConical size={13} /> 🧪 テストプレイ
+                      <FlaskConical size={13} />テストプレイ
                     </button>
                   )}
+
+                  <div className="border-t border-gray-700 my-1" />
+                  {/* 履歴・スナップショット / リスタート：モバイルのヘッダーが窮屈になるため
+                      ヘッダーの常設ボタンからこのメニューへ移動した。 */}
+                  <button
+                    onClick={() => { setShowHistory(true); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  >
+                    <History size={13} />履歴・スナップショット
+                  </button>
+                  <button
+                    onClick={() => { restart(); setSettingsOpen(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                  >
+                    <RotateCcw size={13} />リスタート（再読み込み）
+                  </button>
 
                   <div className="border-t border-gray-700 my-1" />
                   {/* エクスポート */}
@@ -12683,7 +12699,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     <>
                       <div className="border-t border-gray-700 my-1" />
                       <div className="px-3 py-2">
-                        <div className="text-[10px] font-bold text-gray-400 mb-1">🔧 エンジン変更</div>
+                        <div className="text-[10px] font-bold text-gray-400 mb-1 flex items-center gap-1"><Wrench size={11} />エンジン変更</div>
                         <select
                           value={presetId}
                           onChange={e => {
@@ -12713,7 +12729,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     <>
                       <div className="border-t border-gray-700 my-1" />
                       <div className="px-3 py-2 text-[10px] text-gray-500 leading-relaxed">
-                        <div className="font-bold text-gray-400 mb-1">🎨 素材クレジット</div>
+                        <div className="font-bold text-gray-400 mb-1 flex items-center gap-1"><Palette size={11} />素材クレジット</div>
                         <div>キャラクタースプライト:</div>
                         <div>© Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph</div>
                         <div className="mt-1">
@@ -12734,14 +12750,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 </div>
               )}
             </div>
-            <button
-              onClick={() => setShowHistory(true)}
-              className="p-2 text-gray-400 hover:text-white bg-gray-700/50"
-              title="履歴・スナップショット"
-            >
-              <History size={14} />
-            </button>
-            <button onClick={restart} className="p-2 text-gray-400 hover:text-white bg-gray-700/50" title="リスタート"><RotateCcw size={14} /></button>
+            {/* 履歴・スナップショットとリスタートは設定メニューへ移動（モバイルのヘッダー圧迫対策） */}
             {/* 配置のやり直し（編集中のみ）。モバイルはSELECT/STARTボタンからも操作できる。 */}
             {!isPlaying && !playOnly && (
               <>
@@ -12814,13 +12823,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 setIsPlaying(true);
                 justStartedRef.current = true;
               }}
-                className={`flex items-center gap-1 px-3 py-1.5 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
-                {isPlaying ? <><Pause size={14} /><span className="hidden sm:inline">編集</span></> : <><Play size={14} /><span className="hidden sm:inline">プレイ</span></>}
+                aria-label={isPlaying ? '編集' : 'プレイ'}
+                title={isPlaying ? '編集' : 'プレイ'}
+                className={`flex items-center justify-center p-2 text-xs font-bold ${isPlaying ? 'bg-yellow-500 text-yellow-900' : 'bg-green-500 text-green-900'}`}>
+                {isPlaying ? <Pause size={14} /> : <Play size={14} />}
               </button>
             )}
             {onSave && (
-              <button onClick={handleSave} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
-                <Save size={14} /><span className="hidden sm:inline">投稿に添付</span>
+              <button onClick={handleSave} aria-label="投稿に添付" title="投稿に添付"
+                className="flex items-center justify-center p-2 text-xs font-bold bg-blue-600 text-white hover:bg-blue-500">
+                <Save size={14} />
               </button>
             )}
           </div>
@@ -12933,7 +12945,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 title="Sprites: SMC-released-sprites © Smuglutena, Cube, Fesh, Nitrox, NotAToon, Noveni, Red Bun, TheCrushedJoycon, Tristaph (non-commercial)"
                 onClick={e => e.stopPropagation()}
               >
-                🎨 SMC sprites
+                <span className="flex items-center gap-1"><Palette size={9} />SMC sprites</span>
               </a>
             )}
 
@@ -13085,9 +13097,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   {/* カルーセル */}
                   <div className="flex-1 flex items-center justify-center relative overflow-hidden">
                     {/* 左矢印 */}
-                    <button onClick={() => navigateIntro(-1)}
-                      className="absolute left-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 text-3xl font-thin active:scale-90 transition">
-                      ‹
+                    <button onClick={() => navigateIntro(-1)} aria-label="前のゲーム"
+                      className="absolute left-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 active:scale-90 transition">
+                      <ChevronLeft size={28} strokeWidth={1.5} />
                     </button>
 
                     {/* ゲームボックス */}
@@ -13109,9 +13121,9 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </div>
 
                     {/* 右矢印 */}
-                    <button onClick={() => navigateIntro(1)}
-                      className="absolute right-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 text-3xl font-thin active:scale-90 transition">
-                      ›
+                    <button onClick={() => navigateIntro(1)} aria-label="次のゲーム"
+                      className="absolute right-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 active:scale-90 transition">
+                      <ChevronRight size={28} strokeWidth={1.5} />
                     </button>
                   </div>
 
@@ -14661,16 +14673,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         <div className="absolute w-8 h-24 bg-gray-800 rounded shadow pointer-events-none"></div>
                         <div className="absolute w-8 h-8 bg-gray-900 rounded-full z-10 pointer-events-none border border-gray-800/80"></div>
                         <div className={`absolute top-0.5 left-1/2 -translate-x-1/2 w-8 h-8 pointer-events-none transition-colors rounded-t ${touchRef.current.up ? 'bg-indigo-500/30' : ''} flex items-start justify-center pt-1`}>
-                          <span className={`text-[8px] leading-none ${touchRef.current.up ? 'text-indigo-400' : 'text-gray-600'}`}>▲</span>
+                          <ChevronUp size={10} className={touchRef.current.up ? 'text-indigo-400' : 'text-gray-600'} />
                         </div>
                         <div className={`absolute bottom-0.5 left-1/2 -translate-x-1/2 w-8 h-8 pointer-events-none transition-colors rounded-b ${touchRef.current.down ? 'bg-indigo-500/30' : ''} flex items-end justify-center pb-1`}>
-                          <span className={`text-[8px] leading-none ${touchRef.current.down ? 'text-indigo-400' : 'text-gray-600'}`}>▼</span>
+                          <ChevronDown size={10} className={touchRef.current.down ? 'text-indigo-400' : 'text-gray-600'} />
                         </div>
                         <div className={`absolute left-0.5 top-1/2 -translate-y-1/2 w-8 h-8 pointer-events-none transition-colors rounded-l ${touchRef.current.left ? 'bg-indigo-500/30' : ''} flex items-center justify-start pl-1`}>
-                          <span className={`text-[8px] leading-none ${touchRef.current.left ? 'text-indigo-400' : 'text-gray-600'}`}>◀</span>
+                          <ChevronLeft size={10} className={touchRef.current.left ? 'text-indigo-400' : 'text-gray-600'} />
                         </div>
                         <div className={`absolute right-0.5 top-1/2 -translate-y-1/2 w-8 h-8 pointer-events-none transition-colors rounded-r ${touchRef.current.right ? 'bg-indigo-500/30' : ''} flex items-center justify-end pr-1`}>
-                          <span className={`text-[8px] leading-none ${touchRef.current.right ? 'text-indigo-400' : 'text-gray-600'}`}>▶</span>
+                          <ChevronRight size={10} className={touchRef.current.right ? 'text-indigo-400' : 'text-gray-600'} />
                         </div>
                       </div>
 
@@ -14683,7 +14695,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           </button>
                           <button onClick={enterEditFromIntro}
                             className="w-28 h-9 border border-white/25 bg-white/10 active:bg-white/20 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition touch-none select-none">
-                            ✏ 改造する
+                            <Pencil size={12} /> 改造する
                           </button>
                         </div>
                       ) : (() => {
@@ -15170,7 +15182,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </>
                     ) : (
                       <div className="text-center py-4 space-y-1">
-                        <p className="text-2xl">📝</p>
+                        <SquarePen size={24} className="mx-auto text-gray-500" />
                         <p className="text-xs text-gray-500">オブジェクトを選択すると MiniScript を編集できます</p>
                       </div>
                     )}
@@ -15239,7 +15251,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 ) : (
                                   <span className="w-3.5 h-3.5 rounded shrink-0 border border-gray-600 inline-block" style={{ backgroundColor: tile.color }} />
                                 )}
-                                🎨 {tile.name || 'タイル'} の設定
+                                <Palette size={12} />{tile.name || 'タイル'} の設定
                               </span>
                               {id !== 0 && (
                                 <button onClick={() => deleteTile(id)} className="px-2 py-1 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10">削除</button>
@@ -15304,7 +15316,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         いずれも「歩ける床」なので、その配置物を選んでいるときだけ出す ── */}
                     {placeKind === 'ground' && (gameData.engine === 'rpg' || gameData.engine === 'onjReze' || gameData.engine === 'action') && (
                       <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
-                        <p className="text-[12px] font-bold text-gray-200">⚙️ システムタイル</p>
+                        <p className="text-[12px] font-bold text-gray-200 flex items-center gap-1"><Settings size={12} />システムタイル</p>
                         <p className="text-[10px] text-gray-500">クリックで既定の見た目・効果音つきの床タイルがタイル一覧に追加されるので、マップに塗ってください。
                           {gameData.engine === 'action' && '重力で移動するこのエンジンでは、つるつる床は左右方向のみ効果があります。'}
                         </p>
