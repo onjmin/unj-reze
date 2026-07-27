@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy, FileText, Shield, Cookie, Eye, ChevronRight } from 'lucide-react';
+import { ExternalLink, Lock, EyeOff, Heart, KeyRound, Copy, FileText, Shield, Cookie, Eye, ChevronRight, Info } from 'lucide-react';
 import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
@@ -24,7 +24,7 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
 
   useEffect(() => {
     if (currentUser?.slug) {
-      api.auth.getSettings(currentUser.slug).then(setPrivacy).catch(() => {});
+      api.auth.getSettings(currentUser.slug).then(setPrivacy).catch(() => { });
     }
   }, [currentUser?.slug]);
 
@@ -193,6 +193,14 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
         <div className="space-y-2">
           <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block">規約・ポリシー・アクセシビリティ</label>
           <div className="space-y-1">
+            <Link
+              href="/about"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-xs text-gray-300"
+            >
+              <Info size={14} className="text-blue-400 shrink-0" />
+              <span className="flex-1">サイトについて</span>
+              <ChevronRight size={14} className="text-gray-600 shrink-0" />
+            </Link>
             <Link
               href="/terms"
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-xs text-gray-300"

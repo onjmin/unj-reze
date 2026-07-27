@@ -64,6 +64,7 @@ export default function RightSidebar({ onSearch }: RightSidebarProps) {
       )}
 
       <div className="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-1.5 px-2 pb-4">
+        <Link href="/about" className="hover:text-gray-300 hover:underline transition-colors">サイトについて</Link>
         <Link href="/terms" className="hover:text-gray-300 hover:underline transition-colors">利用規約</Link>
         <Link href="/privacy" className="hover:text-gray-300 hover:underline transition-colors">プライバシーポリシー</Link>
         <Link href="/cookies" className="hover:text-gray-300 hover:underline transition-colors">Cookie</Link>
