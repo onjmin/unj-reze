@@ -151,17 +151,19 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
-      <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-scale-in">
-        <div className="p-4 border-b border-gray-800 flex justify-between items-center">
+      <div className="bg-gray-900 border border-gray-800 w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-scale-in max-h-[90vh]">
+        {/* ヘッダー (固定) */}
+        <div className="p-4 border-b border-gray-800 flex justify-between items-center shrink-0">
           <span className="font-bold text-sm text-gray-200">アイコンを調整</span>
           <button onClick={onCancel} className="text-gray-400 hover:text-white transition-colors">
             <X size={16} />
           </button>
         </div>
 
-        <div className="p-5 flex flex-col items-center space-y-4">
+        {/* 調整領域 (溢れた場合のみ縦スクロール) */}
+        <div className="p-5 flex flex-col items-center space-y-4 overflow-y-auto flex-1 scrollbar-thin">
           <div
-            className="relative rounded-full overflow-hidden border-2 border-gray-700 bg-gray-950 touch-none cursor-grab active:cursor-grabbing select-none"
+            className="relative rounded-full overflow-hidden border-2 border-gray-700 bg-gray-950 touch-none cursor-grab active:cursor-grabbing select-none shrink-0"
             style={{ width: FRAME_SIZE, height: FRAME_SIZE }}
             onWheel={handleWheel}
             onPointerDown={handlePointerDown}
@@ -234,7 +236,7 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
               className="flex-1 accent-blue-500 disabled:opacity-40"
             />
           </div>
- 
+
           <div className="w-full flex items-center justify-between gap-2.5 pt-1">
             <span className="text-xs text-gray-400 flex items-center gap-1.5 select-none">
               <FlipHorizontal size={13} />
@@ -243,11 +245,10 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
             <button
               type="button"
               onClick={() => setIsFlipped(!isFlipped)}
-              className={`text-xs font-bold px-3 py-1 rounded-full transition-all border ${
-                isFlipped
+              className={`text-xs font-bold px-3 py-1 rounded-full transition-all border ${isFlipped
                   ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/20'
                   : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700'
-              }`}
+                }`}
             >
               {isFlipped ? 'オン' : 'オフ'}
             </button>
@@ -256,7 +257,8 @@ export default function CropAvatarModal({ imageSrc, onCancel, onConfirm }: CropA
           <p className="text-[10px] text-gray-500 text-center">ドラッグやスライダーで位置を調整・ピンチ/ホイールで拡大縮小できます</p>
         </div>
 
-        <div className="p-4 border-t border-gray-800 flex justify-end items-center space-x-2">
+        {/* フッター (固定) */}
+        <div className="p-4 border-t border-gray-800 flex justify-end items-center space-x-2 shrink-0 bg-gray-900">
           <button
             onClick={onCancel}
             className="text-gray-400 font-bold px-4 py-1.5 rounded-full text-xs hover:bg-gray-100/10 transition-colors"
