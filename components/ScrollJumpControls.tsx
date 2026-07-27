@@ -10,9 +10,7 @@ export default function ScrollJumpControls() {
 
   return (
     <div
-      className={`absolute right-3 z-30 flex flex-col gap-1.5 transition-all duration-200 md:bottom-6 ${
-        footerHidden ? 'bottom-20' : 'bottom-32'
-      } ${scrolled ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}
+      className={`fixed right-3 z-30 flex flex-col gap-1.5 transition-all duration-200 md:bottom-6 bottom-64 ${scrolled ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}
     >
       <button
         onClick={scrollToTop}

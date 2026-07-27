@@ -113,15 +113,7 @@ export function useScrollNav() {
   const local = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const scrollTo = useCallback((top: number) => {
-    const el = getScrollContainer();
-    if (!el) return;
-    
-    // id 指定要素があればその中をスクロール、なければ window をスクロール
-    if (el.id === SCROLL_CONTAINER_ID) {
-      el.scrollTo({ top, behavior: document.hidden ? 'auto' : 'smooth' });
-    } else {
-      window.scrollTo({ top, behavior: document.hidden ? 'auto' : 'smooth' });
-    }
+    window.scrollTo({ top, behavior: document.hidden ? 'auto' : 'smooth' });
     
     publish({ footerHidden: false });
   }, []);
