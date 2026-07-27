@@ -465,14 +465,11 @@ export interface DeathScreenConfig {
   textColor?: string;     // 文字色（Minecraft風スタイル時の見出し）
 }
 
-/** レベルアップ時のステータス成長テーブル。exp 以上になったとき適用。
- *  levelTable に該当レベルの行が無いとき、growthType/growth（下記）による自動計算にフォールバックする。 */
-export interface LevelEntry { level: number; exp: number; maxHp?: number; maxMp?: number; atk?: number; def?: number; agility?: number; }
-
 /** 経験値カーブの成長タイプ。早熟＝序盤ほど少ない経験値でレベルが上がる、晩成＝逆に必要経験値が急激に増えていく。 */
 export type GrowthType = 'early' | 'standard' | 'late';
 
-/** レベルアップ1回ごとのステータス増分（levelTable に該当レベルの行が無いときに使う自動成長）。 */
+/** レベルアップ1回ごとのステータス増分。base stats（BattleConfig の maxHp/maxMp/atk/def/agility）
+ *  にこの増分を level-1 倍した値が各レベルでのステータスとなる。 */
 export interface StatGrowth { hp: number; mp: number; atk: number; def: number; agility: number; }
 
 const GROWTH_EXP_PARAMS: Record<GrowthType, { base: number; pow: number }> = {
@@ -610,12 +607,10 @@ export interface BattleConfig {
   party?: PartyMember[];
   /** 初期所持金。 */
   gold?: number;
-  /** レベルアップテーブル（任意・特定レベルだけ手動で上書きしたいとき用）。exp 到達時に対応ステータスへ上書き。
-   *  該当レベルの行が無いときは growthType/growth による自動成長が使われる。 */
-  levelTable?: LevelEntry[];
   /** 経験値カーブの成長タイプ（早熟/標準/晩成）。省略時 'standard'。 */
   growthType?: GrowthType;
-  /** レベルアップ1回ごとの自動ステータス増分。省略時は控えめな既定値（HP+6/MP+3/攻+2/防+1）。 */
+  /** レベルアップ1回ごとのステータス増分。主人公の base stats + (growth × (level-1)) が各レベルでのステータス。
+   *  省略時は控えめな既定値（HP+6/MP+3/攻+2/防+1/素早+1）。 */
   growth?: StatGrowth;
   /** ゴール（城/ジム）到達時に戦うボス。倒すとクリア。 */
   boss?: EncounterEnemy;

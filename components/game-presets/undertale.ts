@@ -724,15 +724,7 @@ export const undertale: PresetData = {
       { name: 'けつい',   cost: 4, power: 30, heal: true },
     ],
     labels: { attack: 'たたかう', move: 'こうどう', flee: 'にげる', item: 'アイテム', mercy: 'みのがす' },
-    levelTable: [
-      { level: 2, exp: 8,   maxHp: 32, maxMp: 14, atk: 11, def: 8  },
-      { level: 3, exp: 18,  maxHp: 40, maxMp: 16, atk: 14, def: 10 },
-      { level: 4, exp: 32,  maxHp: 48, maxMp: 20, atk: 17, def: 12 },
-      { level: 5, exp: 50,  maxHp: 56, maxMp: 24, atk: 20, def: 15 },
-      { level: 6, exp: 75,  maxHp: 64, maxMp: 28, atk: 24, def: 18 },
-      { level: 7, exp: 110, maxHp: 72, maxMp: 32, atk: 28, def: 21 },
-      { level: 8, exp: 160, maxHp: 80, maxMp: 38, atk: 32, def: 25 },
-    ],
+    growth: { hp: 8, mp: 4, atk: 3, def: 3, agility: 1 },
   },
   items: [
     { id: 'monsterCandy', name: 'モンスターキャンディ', emoji: '🍬', description: 'HPを 14 回復する。ちょっと しょっぱい',    category: 'consumable', healHp: 14 },

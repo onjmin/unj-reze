@@ -2948,29 +2948,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       let lvUp = '';
       {
         const bd0 = gameDataRef.current.battle;
-        const levelTable = bd0?.levelTable ?? [];
         const growthType: GrowthType = bd0?.growthType ?? 'standard';
-        const growth: StatGrowth = bd0?.growth ?? { hp: 6, mp: 3, atk: 2, def: 1 };
+        const growth: StatGrowth = bd0?.growth ?? { hp: 6, mp: 3, atk: 2, def: 1, agility: 1 };
         const learned: string[] = [];
         while (true) {
-          const nextEntry = levelTable.find(e => e.level === pr.level + 1);
-          const nextExpNeeded = nextEntry?.exp ?? pr.expNext;
+          const nextExpNeeded = pr.expNext;
           if (pr.exp < nextExpNeeded) break;
           pr.exp -= nextExpNeeded;
           pr.level++;
-          if (nextEntry) {
-            if (nextEntry.maxHp != null) pr.maxHp = nextEntry.maxHp;
-            if (nextEntry.maxMp != null) pr.maxMp = nextEntry.maxMp;
-            if (nextEntry.atk != null) pr.baseAtk = nextEntry.atk;
-            if (nextEntry.def != null) pr.baseDef = nextEntry.def;
-            if (nextEntry.agility != null) pr.agility = nextEntry.agility;
-            pr.hp = pr.maxHp; pr.mp = pr.maxMp;
-          } else {
-            pr.maxHp += growth.hp; pr.maxMp += growth.mp; pr.baseAtk += growth.atk; pr.baseDef += growth.def; pr.agility += growth.agility;
-            pr.hp = pr.maxHp; pr.mp = pr.maxMp;
-          }
-          const nextNext = levelTable.find(e => e.level === pr.level + 1);
-          pr.expNext = nextNext?.exp ?? expToNextLevel(pr.level, growthType);
+          pr.maxHp += growth.hp; pr.maxMp += growth.mp; pr.baseAtk += growth.atk; pr.baseDef += growth.def; pr.agility += growth.agility;
+          pr.hp = pr.maxHp; pr.mp = pr.maxMp;
+          pr.expNext = expToNextLevel(pr.level, growthType);
           // このレベルで新しく使えるようになった戦闘コマンド／呪文（主人公＝party[0]）を集めてログに出す
           (bd0?.moves ?? []).forEach(m => { if (m.learnLevel === pr.level) learned.push(m.name); });
           (bd0?.party?.[0]?.spells ?? []).forEach(s => { if (s.learnLevel === pr.level) learned.push(s.name); });
@@ -5960,7 +5948,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setEditScrollY(Math.max(0, Math.min(sh * TILE_SIZE - VIEW_H, data.player.start.y + data.player.h / 2 - VIEW_H / 2)));
     const b = data.battle;
     progressRef.current = b
-      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
       : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
     setSwitchVals({}); switchValsRef.current = {};
     setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
@@ -6041,7 +6029,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     warpCooldownRef.current = null;
     const b = gameData.battle;
     progressRef.current = b
-      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+      ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
       : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
     setSwitchVals({}); switchValsRef.current = {};
     setInventory({}); inventoryRef.current = {}; setInvSlots([]); invSlotsRef.current = [];
@@ -6319,7 +6307,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       // 戦闘プレイヤーの初期化
       const b = gameData.battle;
       progressRef.current = b
-        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
         : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
       setShowGoldOverlay(false);
       setEquipment({}); equipmentRef.current = {};
@@ -6392,7 +6380,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setBattle(null);
       const b = gameData.battle;
       progressRef.current = b
-        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: b.levelTable?.find(e => e.level === 2)?.exp ?? expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
+        ? { hp: b.maxHp, mp: b.maxMp, maxHp: b.maxHp, maxMp: b.maxMp, atk: b.atk, def: b.def, baseAtk: b.atk, baseDef: b.def, level: 1, exp: 0, expNext: expToNextLevel(1, b.growthType ?? 'standard'), gold: b.gold ?? 0, agility: b.agility ?? 0 }
         : { hp: 10, mp: 0, maxHp: 10, maxMp: 0, atk: 1, def: 0, baseAtk: 1, baseDef: 0, level: 1, exp: 0, expNext: 10, gold: 0, agility: 0 };
       setShowGoldOverlay(false);
     }
@@ -17440,7 +17428,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {/* 4. レベルアップ成長率・経験値カーブ */}
                     <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
                       <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長率・経験値カーブ</p>
-                      <p className="text-[9px] text-gray-500 leading-relaxed">主人公のレベルが上がるたびに、下の増分がステータスへ自動加算されます（下の「成長表」で特定レベルだけ手動指定した場合はそちらが優先）。</p>
+                      <p className="text-[9px] text-gray-500 leading-relaxed">主人公のレベルが上がるたびに、下の増分がステータスへ自動加算されます。各ステータスは base + growth × (level-1) で計算。</p>
                       <label className="block text-[10px] text-gray-400">経験値カーブ（成長タイプ）
                         <select value={gameData.battle.growthType ?? 'standard'} onChange={e => {
                           const v = e.target.value as GrowthType;
@@ -17451,93 +17439,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <option value="late">晩成（レベルが上がるほど必要経験値が急激に増える）</option>
                         </select>
                       </label>
-                      <div className="grid grid-cols-4 gap-1.5">
+                      <div className="grid grid-cols-5 gap-1.5">
                         {([
-                          ['hp', '最大HP+'], ['mp', '最大MP+'], ['atk', '攻撃+'], ['def', '防御+'],
-                        ] as ['hp' | 'mp' | 'atk' | 'def', string][]).map(([key, label]) => (
+                          ['hp', '最大HP+'], ['mp', '最大MP+'], ['atk', '攻撃+'], ['def', '防御+'], ['agility', '素早+'],
+                        ] as ['hp' | 'mp' | 'atk' | 'def' | 'agility', string][]).map(([key, label]) => (
                           <label key={key} className="text-[10px] text-gray-400">{label}
-                            <input type="text" inputMode="numeric" value={gameData.battle!.growth?.[key] ?? { hp: 6, mp: 3, atk: 2, def: 1 }[key]} onChange={e => {
+                            <input type="text" inputMode="numeric" value={gameData.battle!.growth?.[key] ?? { hp: 6, mp: 3, atk: 2, def: 1, agility: 1 }[key]} onChange={e => {
                               const v = parseInt(e.target.value);
                               setGameData(p => {
                                 const b = p.battle!;
-                                const cur = b.growth ?? { hp: 6, mp: 3, atk: 2, def: 1 };
+                                const cur = b.growth ?? { hp: 6, mp: 3, atk: 2, def: 1, agility: 1 };
                                 return { ...p, battle: { ...b, growth: { ...cur, [key]: !isNaN(v) ? v : cur[key] } } };
                               });
                             }} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
                           </label>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 4.5 レベルアップ成長表（手動指定・任意） */}
-                    <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-900/40 p-2.5">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <p className="text-[10px] text-gray-300 font-bold">レベルアップ成長表（手動指定・任意）</p>
-                          <p className="text-[9px] text-gray-500">特定のレベルだけ、上の自動成長ではなく指定した値に置き換えたいときに追加。</p>
-                        </div>
-                        <button onClick={() => setGameData(p => {
-                          const b = p.battle!;
-                          const table = b.levelTable ?? [];
-                          const nextLv = table.length > 0 ? Math.max(...table.map(e => e.level)) + 1 : 2;
-                          const prevExp = table.length > 0 ? table[table.length - 1].exp : 0;
-                          return { ...p, battle: { ...b, levelTable: [...table, { level: nextLv, exp: prevExp + 10, maxHp: b.maxHp + 8, maxMp: b.maxMp + 2, atk: b.atk + 3, def: b.def + 2 }] } };
-                        })} className="inline-flex items-center px-3 py-1.5 rounded-md text-[11px] text-emerald-400 border border-emerald-700 active:bg-emerald-500/10 font-bold">+ 追加</button>
-                      </div>
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {(gameData.battle.levelTable ?? []).length === 0 && <p className="text-[10px] text-gray-500 px-1">（なし - レベル固定）</p>}
-                        {(gameData.battle.levelTable ?? []).map((le, i) => (
-                          <div key={i} className="bg-gray-850 rounded border border-gray-700 p-2 space-y-1">
-                            <div className="flex justify-between items-center">
-                              <span className="text-[10px] text-yellow-400 font-bold">Lv {le.level}</span>
-                              <button onClick={() => setGameData(p => {
-                                const b = p.battle!; const next = [...(b.levelTable ?? [])]; next.splice(i, 1);
-                                return { ...p, battle: { ...b, levelTable: next } };
-                              })} className="shrink-0 grid place-items-center w-8 h-8 -my-1 rounded-lg text-gray-400 hover:text-red-400 active:bg-red-500/20 text-sm">✕</button>
-                            </div>
-                            <div className="grid grid-cols-3 gap-1.5">
-                              <label className="text-[10px] text-gray-400">必要累計EXP
-                                <input type="text" inputMode="numeric" value={le.exp} onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                  const v = parseInt(e.target.value);
-                                  next[i] = { ...next[i], exp: !isNaN(v) ? v : 0 };
-                                  return { ...p, battle: { ...b, levelTable: next } };
-                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                              </label>
-                              <label className="text-[10px] text-gray-400">最大HP
-                                <input type="text" inputMode="numeric" value={le.maxHp ?? ''} onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                  const v = parseInt(e.target.value);
-                                  next[i] = { ...next[i], maxHp: !isNaN(v) ? v : undefined };
-                                  return { ...p, battle: { ...b, levelTable: next } };
-                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                              </label>
-                              <label className="text-[10px] text-gray-400">最大MP
-                                <input type="text" inputMode="numeric" value={le.maxMp ?? ''} onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                  const v = parseInt(e.target.value);
-                                  next[i] = { ...next[i], maxMp: !isNaN(v) ? v : undefined };
-                                  return { ...p, battle: { ...b, levelTable: next } };
-                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                              </label>
-                              <label className="text-[10px] text-gray-400">攻撃力
-                                <input type="text" inputMode="numeric" value={le.atk ?? ''} onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                  const v = parseInt(e.target.value);
-                                  next[i] = { ...next[i], atk: !isNaN(v) ? v : undefined };
-                                  return { ...p, battle: { ...b, levelTable: next } };
-                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                              </label>
-                              <label className="text-[10px] text-gray-400">防御力
-                                <input type="text" inputMode="numeric" value={le.def ?? ''} onChange={e => setGameData(p => {
-                                  const b = p.battle!; const next = [...(b.levelTable ?? [])];
-                                  const v = parseInt(e.target.value);
-                                  next[i] = { ...next[i], def: !isNaN(v) ? v : undefined };
-                                  return { ...p, battle: { ...b, levelTable: next } };
-                                })} className="w-full mt-0.5 bg-gray-700 rounded px-1.5 py-1.5 text-[11px] text-white text-right outline-none" />
-                              </label>
-                            </div>
-                          </div>
                         ))}
                       </div>
                     </div>

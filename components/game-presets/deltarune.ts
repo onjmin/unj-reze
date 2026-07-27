@@ -440,14 +440,7 @@ export const deltarune: PresetData = {
         { name: 'ちからのかぜ', tpCost: 24, power: 22 },
       ] },
     ],
-    levelTable: [
-      { level: 2, exp: 10,  maxHp: 34, maxMp: 0, atk: 12, def: 8  },
-      { level: 3, exp: 22,  maxHp: 42, maxMp: 0, atk: 15, def: 10 },
-      { level: 4, exp: 38,  maxHp: 50, maxMp: 0, atk: 18, def: 13 },
-      { level: 5, exp: 58,  maxHp: 58, maxMp: 0, atk: 21, def: 16 },
-      { level: 6, exp: 85,  maxHp: 66, maxMp: 0, atk: 25, def: 19 },
-      { level: 7, exp: 120, maxHp: 74, maxMp: 0, atk: 29, def: 22 },
-    ],
+    growth: { hp: 8, mp: 0, atk: 3, def: 3, agility: 1 },
   },
   items: [
     { id: 'darkCandy', name: 'ダークキャンディ', emoji: '🍬', description: 'HPを 16 回復する。くらやみの あじ',      category: 'consumable', healHp: 16 },
