@@ -15,13 +15,27 @@ import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
 import { buildMinecraftModel, type MinecraftLimbs } from '@/lib/minecraft-model';
 import { applyMasterVolume } from '@/lib/master-volume';
 
-/** Minecraft Shader Mod custom post-processing pass (BSL, SEUS, Complementary style tone mapping and vignette) */
+/** Minecraft のシェーダーMod（BSL / SEUS / Complementary）風のカラーグレーディングパス。
+ *
+ *  色空間の約束ごと（ここを間違えると色が壊れる）:
+ *  EffectComposer の中身は **線形（リニア）HDR** で、最後の OutputPass が sRGB へエンコードする。
+ *  彩度・コントラスト・ビネットのような「見た目を整える」操作は、線形のままかけると暗部の色相が
+ *  崩壊する（緑と青だけが潰れて全部が赤黒くなる）。そこで
+ *
+ *    線形HDR → 露出 → トーンマップ(ACES) → sRGBへ変換 → グレーディング → 線形へ戻す
+ *
+ *  という順で、グレーディングだけを表示空間で行う。OutputPass が最後にもう一度 sRGB へ変換する。 */
 const MinecraftShaderModShader = {
   uniforms: {
     tDiffuse: { value: null },
-    uPreset: { value: 0 },
-    uVignette: { value: 0.35 },
-    uExposure: { value: 1.05 },
+    uExposure: { value: 1 },
+    uToneMap: { value: 1 },      // 0=トーンマップなし（vanilla） 1=ACESフィルミック
+    uContrast: { value: 1 },     // 1=そのまま。中間調(0.5)を軸に伸ばす
+    uSaturation: { value: 1 },   // 1=そのまま
+    uVignette: { value: 0 },
+    uShadowTint: { value: new THREE.Vector3(1, 1, 1) },  // 暗部へ寄せる色（表示空間の乗算）
+    uHighTint: { value: new THREE.Vector3(1, 1, 1) },    // 明部へ寄せる色
+    uTintAmount: { value: 0 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -32,58 +46,104 @@ const MinecraftShaderModShader = {
   `,
   fragmentShader: `
     uniform sampler2D tDiffuse;
-    uniform int uPreset;
-    uniform float uVignette;
     uniform float uExposure;
+    uniform float uToneMap;
+    uniform float uContrast;
+    uniform float uSaturation;
+    uniform float uVignette;
+    uniform vec3 uShadowTint;
+    uniform vec3 uHighTint;
+    uniform float uTintAmount;
     varying vec2 vUv;
 
-    vec3 ACESFilm(vec3 x) {
-      float a = 2.51;
-      float b = 0.03;
-      float c = 2.43;
-      float d = 0.59;
-      float e = 0.14;
-      return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+    // Narkowicz の ACES 近似。線形HDR → 表示線形。
+    vec3 acesFilm(vec3 x) {
+      return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
+    }
+
+    vec3 linearToSrgb(vec3 c) {
+      c = max(c, vec3(0.0));
+      return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+    }
+    vec3 srgbToLinear(vec3 c) {
+      c = max(c, vec3(0.0));
+      return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
     }
 
     void main() {
       vec4 texel = texture2D(tDiffuse, vUv);
-      vec3 color = texel.rgb * uExposure;
+      vec3 color = max(texel.rgb, vec3(0.0)) * uExposure;
 
-      if (uPreset == 0) {
-        // BSL Shaders: Warm Golden Sun highlights + rich ACES Filmic grading + vivid saturation
-        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
-        float luminance = dot(color, lumaWeights);
-        color = mix(vec3(luminance), color, 1.25);
-        color.r = pow(color.r, 0.95) * 1.04;
-        color.g = pow(color.g, 0.98) * 1.02;
-        color.b = pow(color.b, 1.02) * 0.96;
-        color = ACESFilm(color);
-      } else if (uPreset == 1) {
-        // SEUS Shaders: High contrast dramatic night / cool moonlight
-        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
-        float luminance = dot(color, lumaWeights);
-        color = mix(vec3(luminance), color, 1.15);
-        color = ACESFilm(color * 1.1);
-        color.b = mix(color.b, color.b * 1.08, 0.3);
-      } else if (uPreset == 2) {
-        // Complementary Reimagined: Ultra-crisp, high dynamic range, punchy colors
-        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
-        float luminance = dot(color, lumaWeights);
-        color = mix(vec3(luminance), color, 1.3);
-        color = ACESFilm(color * 1.12);
+      // ── 線形HDR → 表示線形 ──
+      color = mix(min(color, vec3(1.0)), acesFilm(color), uToneMap);
+
+      // ── ここから表示空間（sRGB）でグレーディングする ──
+      vec3 g = linearToSrgb(color);
+
+      float luma = dot(g, LUMA);
+      g = clamp(mix(vec3(luma), g, uSaturation), 0.0, 1.0);
+      // コントラストはS字カーブで付ける。(x-0.5)*k+0.5 のような直線だと、
+      // 夜のような暗い絵で暗部がまるごと 0 に張り付いて色が消える。
+      g = mix(g, g * g * (3.0 - 2.0 * g), uContrast);
+
+      // スプリットトーン：暗部を寒色・明部を暖色へ寄せる（シェーダーMod定番の色分け）
+      if (uTintAmount > 0.0) {
+        float t = smoothstep(0.0, 0.85, dot(g, LUMA));
+        g = mix(g, g * mix(uShadowTint, uHighTint, t), uTintAmount);
       }
 
       if (uVignette > 0.0) {
-        vec2 uv = (vUv - 0.5) * 2.0;
-        float dist = length(uv);
-        float vig = 1.0 - smoothstep(0.6, 1.4, dist) * uVignette;
-        color *= vig;
+        float d = length((vUv - 0.5) * 2.0);
+        g *= 1.0 - smoothstep(0.55, 1.45, d) * uVignette;
       }
 
-      gl_FragColor = vec4(color, texel.a);
+      // OutputPass がもう一度 sRGB へ変換するので、線形に戻して渡す
+      gl_FragColor = vec4(srgbToLinear(clamp(g, 0.0, 1.0)), texel.a);
     }
-  `
+  `,
+};
+
+/** シェーダーMod プリセットごとの絵づくり。分岐ではなくデータで持つ。
+ *  tint は表示空間の乗算色なので、1.0 前後の穏やかな値にする（原色を入れると色が転ぶ）。 */
+interface ShaderGrade {
+  exposure: number;
+  toneMap: number;
+  /** S字カーブの強さ（0=なし、1=フル）。直線的な伸長ではないので暗部が潰れない。 */
+  contrast: number;
+  saturation: number;
+  vignette: number;
+  shadowTint: [number, number, number];
+  highTint: [number, number, number];
+  tintAmount: number;
+  bloom: { strength: number; radius: number; threshold: number };
+}
+const SHADER_GRADES: Record<'bsl' | 'seus' | 'complementary' | 'vanilla', ShaderGrade> = {
+  // BSL：金色の夕日。暖かいハイライトと寒色の影。
+  bsl: {
+    exposure: 1, toneMap: 1, contrast: 0.18, saturation: 1.16, vignette: 0.3,
+    shadowTint: [0.88, 0.93, 1.12], highTint: [1.1, 1.02, 0.86], tintAmount: 0.6,
+    bloom: { strength: 0.5, radius: 0.5, threshold: 0.7 },
+  },
+  // SEUS：月光。青く沈んだ暗部・強めのコントラストとビネット。
+  seus: {
+    exposure: 1.15, toneMap: 1, contrast: 0.32, saturation: 1.06, vignette: 0.42,
+    shadowTint: [0.8, 0.9, 1.2], highTint: [1.0, 1.02, 1.08], tintAmount: 0.7,
+    bloom: { strength: 0.7, radius: 0.55, threshold: 0.6 },
+  },
+  // Complementary：くっきり鮮やか。色転びは最小限にして彩度とコントラストで見せる。
+  complementary: {
+    exposure: 1.05, toneMap: 1, contrast: 0.28, saturation: 1.3, vignette: 0.2,
+    shadowTint: [0.95, 0.99, 1.06], highTint: [1.05, 1.01, 0.96], tintAmount: 0.35,
+    bloom: { strength: 0.45, radius: 0.4, threshold: 0.78 },
+  },
+  // Vanilla：素の Minecraft。トーンマップも色補正もかけない。
+  vanilla: {
+    exposure: 1, toneMap: 0, contrast: 0, saturation: 1, vignette: 0,
+    shadowTint: [1, 1, 1], highTint: [1, 1, 1], tintAmount: 0,
+    bloom: { strength: 0.3, radius: 0.4, threshold: 0.85 },
+  },
 };
 
 /** 内部レンダリング解像度。CSS 側で pixelated 拡大してドット感を出す。 */
@@ -185,12 +245,120 @@ const SPEAKER_PAUSE_EPS = 0.005;  // これ未満の音量になったら pause 
 // three の物理ライティングでは AmbientLight(白, π) × MeshLambertMaterial ＝ テクスチャ等倍
 // （従来の MeshBasicMaterial と同じ見た目）になる。ambientLight=1 がフルブライトの基準。
 const AMBIENT_SCALE = Math.PI;
+// 光の色は「sRGBの16進をそのまま線形にする」と彩度が暴走する。例えば夕日の '#ffa555' は線形だと
+// (1.00, 0.37, 0.09) ＝ 赤が青の11倍で、これを反射率に掛けると青と緑が消えて画面が赤黒くなる。
+// そこで最大成分で正規化 → 白へ寄せて彩度を落とす → 輝度1へ再正規化する。
+// こうすると「色味は残るが原色を潰さない」光になり、intensity が明るさとして素直に効く。
+const LIGHT_TINT = 0.55;  // 0=完全な白、1=指定色そのまま
+const WHITE_LINEAR = /* @__PURE__ */ new THREE.Color(1, 1, 1);
+const toLightColor = (hex: string, tint = LIGHT_TINT): THREE.Color => {
+  const c = new THREE.Color(hex);  // ColorManagement により線形になる
+  const max = Math.max(c.r, c.g, c.b);
+  if (max <= 0) return new THREE.Color(1, 1, 1);
+  c.multiplyScalar(1 / max);
+  c.lerp(WHITE_LINEAR, 1 - tint);
+  const luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  if (luma > 0) c.multiplyScalar(1 / luma);
+  return c;
+};
 // ランタン（プレイヤー光源）：intensity 1 で約1マス先がほぼ等倍で照る強さ。
 const LANTERN_SCALE = 4 * Math.PI;
 const LANTERN_DEFAULT_COLOR = '#ffd9a0';
 // 背景画像（円筒パノラマ）：霧より遠く・カメラの far(100) より近い半径で常にカメラへ追従する。
 const SKY_RADIUS = 45;
 const SKY_HEIGHT = 36;
+
+// ── 時間帯ごとの絵づくり ──
+// 光の色は toLightColor() を通すので、ここは「見た目の色味」を素直に書いてよい。
+interface TimeOfDayLook {
+  sun: string; sunIntensity: number; sunOffset: { x: number; y: number; z: number };
+  ambient: string; ambientLight: number;
+  /** 空グラデーションの地平線側の色。天頂側はレイアウトの skyColor を使う。 */
+  horizon: string;
+  /** 太陽（月）の円盤の色。ブルームが乗って光って見える。 */
+  disc: string; discSize: number;
+  /** ドット雲の濃さ（0=なし）。 */
+  clouds: number;
+}
+const TIME_OF_DAY: Record<'day' | 'sunset' | 'night', TimeOfDayLook> = {
+  day: {
+    sun: '#fff5dd', sunIntensity: 1.5, sunOffset: { x: 12, y: 24, z: 16 },
+    ambient: '#9fc0f0', ambientLight: 0.7,
+    horizon: '#bcd8f2', disc: '#fffdf0', discSize: 0.055, clouds: 0.5,
+  },
+  sunset: {
+    sun: '#ffb070', sunIntensity: 1.3, sunOffset: { x: 18, y: 10, z: 12 },
+    ambient: '#8f7ba8', ambientLight: 0.5,
+    horizon: '#f0906a', disc: '#ffd9a0', discSize: 0.07, clouds: 0.45,
+  },
+  night: {
+    sun: '#7f9fe0', sunIntensity: 0.7, sunOffset: { x: -12, y: 20, z: -10 },
+    ambient: '#5a6c9c', ambientLight: 0.3,
+    horizon: '#2c3a63', disc: '#e8f0ff', discSize: 0.045, clouds: 0.18,
+  },
+};
+
+/** そのレイアウトで実際に使われる時間帯。未指定ならシェーダープリセットから決まる。 */
+export const yume25dTimeOfDay = (L: Pick<Layout25D, 'timeOfDay' | 'shaderPreset'>): 'day' | 'sunset' | 'night' =>
+  L.timeOfDay ?? (L.shaderPreset === 'seus' ? 'night' : L.shaderPreset === 'complementary' ? 'day' : 'sunset');
+
+/** 環境光の明るさの既定値（時間帯ごと）。編集パネルのスライダー初期値もこれに合わせる。 */
+export const yume25dAmbientDefault = (L: Pick<Layout25D, 'timeOfDay' | 'shaderPreset'>): number =>
+  TIME_OF_DAY[yume25dTimeOfDay(L)].ambientLight;
+
+/** 空（equirect パノラマ）を手続き的に描く。Minecraft のシェーダーMod らしい
+ *  「天頂→地平のグラデーション＋太陽/月の円盤＋角ばったドット雲」を作る。
+ *  three の equirectUv は v=1 が真上・u=atan2(z,x)/2π+0.5。CanvasTexture は flipY なので
+ *  キャンバスの上端が天頂になる。 */
+const drawSkyCanvas = (
+  cv: HTMLCanvasElement, zenith: string, look: TimeOfDayLook,
+  sunDir: { x: number; y: number; z: number },
+) => {
+  const W = cv.width, H = cv.height;
+  const ctx = cv.getContext('2d')!;
+  // 天頂→地平→地面。地面側は地平色を暗く落として、下を向いたときに空が続かないようにする。
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, zenith);
+  grad.addColorStop(0.42, zenith);
+  grad.addColorStop(0.5, look.horizon);
+  grad.addColorStop(0.56, look.horizon);
+  grad.addColorStop(1, zenith);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // 太陽（月）。中心を強く、まわりへ淡いハローを広げる。
+  const len = Math.hypot(sunDir.x, sunDir.y, sunDir.z) || 1;
+  const dx = sunDir.x / len, dy = sunDir.y / len, dz = sunDir.z / len;
+  const sx = (Math.atan2(dz, dx) / (Math.PI * 2) + 0.5) * W;
+  const sy = (0.5 - Math.asin(Math.max(-1, Math.min(1, dy))) / Math.PI) * H;
+  const r = look.discSize * H;
+  const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 5);
+  halo.addColorStop(0, look.disc);
+  halo.addColorStop(0.18, look.disc);
+  halo.addColorStop(0.35, `${look.disc}66`);
+  halo.addColorStop(1, `${look.disc}00`);
+  ctx.fillStyle = halo;
+  ctx.beginPath(); ctx.arc(sx, sy, r * 5, 0, Math.PI * 2); ctx.fill();
+
+  // ドット雲：Minecraft の雲と同じく、角ばった長方形を水平帯に並べるだけ。
+  if (look.clouds > 0) {
+    ctx.globalAlpha = look.clouds;
+    ctx.fillStyle = '#ffffff';
+    let seed = 0x9e3779b9;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
+    const cell = Math.round(W / 64);
+    for (let i = 0; i < 90; i++) {
+      const cx = Math.floor(rnd() * (W / cell)) * cell;
+      // 地平のすこし上（v で 0.55〜0.85 相当）に散らす
+      const cy = Math.floor((0.16 + rnd() * 0.24) * H / cell) * cell;
+      const w = (1 + Math.floor(rnd() * 5)) * cell;
+      const h = cell;
+      ctx.globalAlpha = look.clouds * (0.45 + rnd() * 0.55);
+      ctx.fillRect(cx, cy, w, h);
+    }
+    ctx.globalAlpha = 1;
+  }
+};
 
 // ダメージ床のHP制。2Dエンジン（既定3ダメージ・45フレーム≒0.75秒無敵）に合わせ、
 // 一発で「ゆめから さめる」のではなく HP が尽きたときだけスタートへ戻す。
@@ -344,6 +512,25 @@ const drawCellContain = (
   ctx.drawImage(img, sx, sy, sw, sh, (cv.width - w) / 2, cv.height - h, w, h);
 };
 
+/** 16×16 テクセルのブロック用ドット絵を、基準色から手続き的に作る。
+ *  以前のベタ塗り＋4×4の大きな市松模様は「チェス盤」にしか見えなかったので、
+ *  Minecraft のブロックと同じ密度（16テクセル）でざらつきを入れる。
+ *  同じ色なら必ず同じ模様になる（色から作った決定的ハッシュを使う）ので、
+ *  再描画やタイル間で模様がちらつくことはない。 */
+const BLOCK_TEXELS = 16;
+
+/** Minecraft の面ごとの固定シェーディング（上面=1.0、南北=0.8、東西=0.6、下面=0.5）に倣った係数。
+ *  ただし頂点色は**線形**で掛かるので、Minecraft の値をそのまま置くと効きすぎる。
+ *  見た目（sRGB）でおよそ 0.87 / 0.74 / 0.66 になる線形値にして、動的ライティングと重ねる。 */
+const FACE_SHADE = { top: 1, northSouth: 0.72, eastWest: 0.5, bottom: 0.38 };
+
+/** 32bit の決定的ハッシュ → 0〜1。 */
+const texelNoise = (x: number, y: number, seed: number): number => {
+  let h = (x * 374761393 + y * 668265263 + seed * 1442695040) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177 | 0;
+  return ((h ^ (h >>> 16)) >>> 0) / 0x100000000;
+};
+
 const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
   const ctx = cv.getContext('2d')!;
   ctx.clearRect(0, 0, cv.width, cv.height);
@@ -361,15 +548,35 @@ const texCanvasDraw = (cv: HTMLCanvasElement, def: Tex25D) => {
     }
     return;
   }
-  // 床・壁は不透明。ベタ塗り＋うっすらチェッカーでのっぺり感を消す。
-  ctx.fillStyle = def.color;
-  ctx.fillRect(0, 0, 64, 64);
-  ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
-    if ((x + y) % 2 === 0) ctx.fillRect(x * 16, y * 16, 16, 16);
+
+  // ── 床・壁：不透明なブロック面 ──
+  const base = new THREE.Color(def.color);  // 線形
+  const seed = (def.color.replace('#', '').split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7) >>> 0) % 4096;
+  const px = cv.width / BLOCK_TEXELS;
+  const c = new THREE.Color();
+  // 壁は「石積み」（4テクセルごとの段・段ごとに横へずらした継ぎ目）、床は粒状。
+  const brick = def.kind === 'wall';
+  for (let ty = 0; ty < BLOCK_TEXELS; ty++) {
+    for (let tx = 0; tx < BLOCK_TEXELS; tx++) {
+      // 明暗のざらつき。線形空間で掛けるので、暗い色でも色相が転ばない。
+      let k = 0.82 + texelNoise(tx, ty, seed) * 0.36;
+      if (brick) {
+        const course = Math.floor(ty / 4);
+        const shifted = (tx + course * 5) % BLOCK_TEXELS;
+        // 目地（横の段の境目と、段ごとにずれた縦の継ぎ目）は暗く落とす
+        if (ty % 4 === 3 || shifted % 8 === 7) k *= 0.62;
+        else if (ty % 4 === 0) k *= 1.1;  // 段の上端に軽いハイライト
+      } else {
+        // 床は数テクセルだけ濃い粒を混ぜて砂利っぽくする
+        if (texelNoise(tx, ty, seed + 977) > 0.88) k *= 0.72;
+      }
+      // ブロックの外周は少し暗く。並べたときにブロックの区切りが見える。
+      if (tx === 0 || ty === 0 || tx === BLOCK_TEXELS - 1 || ty === BLOCK_TEXELS - 1) k *= 0.9;
+      c.copy(base).multiplyScalar(k);
+      ctx.fillStyle = `#${c.getHexString()}`;
+      ctx.fillRect(tx * px, ty * px, px, px);
+    }
   }
-  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
-  ctx.strokeRect(0.5, 0.5, 63, 63);
 };
 
 /** プレイヤー自身のビルボード用テクスチャ（三人称視点でのみ表示）。
@@ -596,6 +803,9 @@ export class Yume25DEngine {
   private skyGeo: THREE.CylinderGeometry | null = null;
   private skyCanvas: HTMLCanvasElement | null = null;
   private skyTexture: THREE.CanvasTexture | null = null;
+  // 手続き的な空（scene.background の equirect テクスチャ）。skyUrl のパノラマとは別物。
+  private bgCanvas: HTMLCanvasElement | null = null;
+  private bgTexture: THREE.CanvasTexture | null = null;
   private skyUrlLoaded: string | undefined;
   // 歩行グラプレイヤーのアニメ状態。lastKey は「向き:フレーム」で再描画の要否を判定する。
   private playerAnim: { img: HTMLImageElement; std: WalkStandard; lastKey: string } | null = null;
@@ -631,6 +841,11 @@ export class Yume25DEngine {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(RENDER_W, RENDER_H, false);
+    // 色空間は明示しておく：シーンの中身はすべて線形、画面へ出すときだけ sRGB。
+    // トーンマップは MinecraftShaderModShader が担当するので、レンダラ側では掛けない
+    // （合成パスを通らない vanilla+ブルームOFF の直接描画と絵を揃えるため）。
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.NoToneMapping;
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(72, RENDER_W / RENDER_H, 0.05, 100);
     this.camera.rotation.order = 'YXZ';
@@ -1176,6 +1391,7 @@ export class Yume25DEngine {
     this.skyGeo?.dispose();
     this.skyMat?.dispose();
     this.skyTexture?.dispose();
+    this.bgTexture?.dispose();
     for (const audio of this.speakerAudio.values()) audio.pause();
     this.speakerAudio.clear();
     this.ballShadeTex?.dispose();
@@ -1385,21 +1601,26 @@ export class Yume25DEngine {
       const renderPass = new RenderPass(this.scene, this.camera);
       composer.addPass(renderPass);
 
+      const grade = SHADER_GRADES[L.shaderPreset ?? 'bsl'] ?? SHADER_GRADES.bsl;
+
+      // ブルームはトーンマップより前（＝線形HDRのまま）に掛ける。しきい値も線形基準。
       if (L.bloomEnabled !== false) {
-        const preset = L.shaderPreset ?? 'bsl';
-        const strength = preset === 'bsl' ? 0.65 : preset === 'seus' ? 0.9 : 0.5;
-        const radius = 0.4;
-        const threshold = 0.65;
-        const bloomPass = new UnrealBloomPass(new THREE.Vector2(RENDER_W, RENDER_H), strength, radius, threshold);
+        const b = grade.bloom;
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(RENDER_W, RENDER_H), b.strength, b.radius, b.threshold);
         composer.addPass(bloomPass);
         this.bloomPass = bloomPass;
       }
 
-      const presetIdx = L.shaderPreset === 'seus' ? 1 : L.shaderPreset === 'complementary' ? 2 : L.shaderPreset === 'vanilla' ? 3 : 0;
       const customShaderPass = new ShaderPass(MinecraftShaderModShader);
-      customShaderPass.uniforms.uPreset.value = presetIdx;
-      customShaderPass.uniforms.uVignette.value = L.shaderPreset === 'vanilla' ? 0.0 : 0.35;
-      customShaderPass.uniforms.uExposure.value = L.shaderPreset === 'seus' ? 1.15 : 1.05;
+      const u = customShaderPass.uniforms;
+      u.uExposure.value = grade.exposure;
+      u.uToneMap.value = grade.toneMap;
+      u.uContrast.value = grade.contrast;
+      u.uSaturation.value = grade.saturation;
+      u.uVignette.value = grade.vignette;
+      u.uShadowTint.value.set(...grade.shadowTint);
+      u.uHighTint.value.set(...grade.highTint);
+      u.uTintAmount.value = grade.tintAmount;
       composer.addPass(customShaderPass);
       this.customShaderPass = customShaderPass;
 
@@ -1421,34 +1642,14 @@ export class Yume25DEngine {
     // ── Minecraft Shader Mods & Dynamic Lighting (DirectionalSunLight + SoftShadows) ──
     this.renderer.shadowMap.enabled = L.shadowsEnabled !== false;
 
-    const shaderPreset = L.shaderPreset ?? 'bsl';
-    const timeOfDay = L.timeOfDay ?? (shaderPreset === 'seus' ? 'night' : shaderPreset === 'bsl' ? 'sunset' : 'day');
-
-    if (timeOfDay === 'sunset') {
-      this.sunLight.color.set('#ffa555');
-      this.sunLight.intensity = 1.6;
-      this.sunOffset = { x: 18, y: 16, z: 12 };
-      this.ambientLightObj.color.set(L.ambientColor ?? '#665577');
-      this.ambientLightObj.intensity = (L.ambientLight ?? 0.65) * AMBIENT_SCALE;
-      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || '#3d2a45'), L.fogNear || 2, L.fogFar || 18);
-      this.scene.background = new THREE.Color(L.skyColor || '#281b33');
-    } else if (timeOfDay === 'night') {
-      this.sunLight.color.set('#5577bb');
-      this.sunLight.intensity = 0.9;
-      this.sunOffset = { x: -12, y: 22, z: -10 };
-      this.ambientLightObj.color.set(L.ambientColor ?? '#1a2238');
-      this.ambientLightObj.intensity = (L.ambientLight ?? 0.4) * AMBIENT_SCALE;
-      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || '#0a0e1a'), L.fogNear || 2, L.fogFar || 16);
-      this.scene.background = new THREE.Color(L.skyColor || '#05070e');
-    } else {
-      this.sunLight.color.set('#fff5dd');
-      this.sunLight.intensity = 1.8;
-      this.sunOffset = { x: 12, y: 24, z: 16 };
-      this.ambientLightObj.color.set(L.ambientColor ?? '#789bcf');
-      this.ambientLightObj.intensity = (L.ambientLight ?? 0.75) * AMBIENT_SCALE;
-      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || '#78a3d4'), L.fogNear || 3, L.fogFar || 24);
-      this.scene.background = new THREE.Color(L.skyColor || '#3a78c4');
-    }
+    const look = TIME_OF_DAY[yume25dTimeOfDay(L)];
+    this.sunLight.color.copy(toLightColor(look.sun));
+    this.sunLight.intensity = look.sunIntensity;
+    this.sunOffset = look.sunOffset;
+    this.ambientLightObj.color.copy(toLightColor(L.ambientColor ?? look.ambient, 0.5));
+    this.ambientLightObj.intensity = (L.ambientLight ?? look.ambientLight) * AMBIENT_SCALE;
+    this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || look.horizon), L.fogNear || 2, L.fogFar || 18);
+    this.updateSkyBackground(L, look);
     this.sunLight.castShadow = L.shadowsEnabled !== false;
 
     this.underwater = false;  // フォグを通常に戻したので、水中なら次フレームで再適用される
@@ -1481,22 +1682,26 @@ export class Yume25DEngine {
       arr.push(c, r);
       floorQuads.set(t, arr);
     }
-    const pushQuad = (pos: number[], uv: number[], idx: number[], v: number[][]) => {
+    const pushQuad = (pos: number[], uv: number[], idx: number[], col: number[], v: number[][], shade: number) => {
       const base = pos.length / 3;
-      for (const p of v) pos.push(p[0], p[1], p[2]);
+      for (const p of v) { pos.push(p[0], p[1], p[2]); col.push(shade, shade, shade); }
       uv.push(0, 0, 1, 0, 1, 1, 0, 1);
       idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     };
-    const makeMergedMesh = (texId: number, quads: { v: number[][] }[], doubleSided: boolean) => {
-      const pos: number[] = []; const uv: number[] = []; const idx: number[] = [];
-      for (const q of quads) pushQuad(pos, uv, idx, q.v);
+    const makeMergedMesh = (texId: number, quads: { v: number[][]; s: number }[], doubleSided: boolean) => {
+      const pos: number[] = []; const uv: number[] = []; const idx: number[] = []; const col: number[] = [];
+      for (const q of quads) pushQuad(pos, uv, idx, col, q.v, q.s);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      // Minecraft と同じ面ごとの固定シェーディング（上面が一番明るく、東西面が一番暗い）。
+      // 太陽光だけだと薄板壁は両面同色になって立体に見えないので、頂点色で面の向きを付ける。
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
       geo.setIndex(idx);
       geo.computeVertexNormals();  // Lambert（照明対応）に必要
       const mat = new THREE.MeshLambertMaterial({
         map: this.getTex(texId),
+        vertexColors: true,
         side: doubleSided ? THREE.DoubleSide : THREE.FrontSide,
       });
       this.ownedGeometries.push(geo);
@@ -1513,14 +1718,14 @@ export class Yume25DEngine {
     const ceilY = H * (topLevel + 1);
 
     for (const [texId, cells] of floorQuads) {
-      const quads: { v: number[][] }[] = [];
-      const ceil: { v: number[][] }[] = [];
+      const quads: { v: number[][]; s: number }[] = [];
+      const ceil: { v: number[][]; s: number }[] = [];
       for (let i = 0; i < cells.length; i += 2) {
         const c = cells[i], r = cells[i + 1];
         // 上向きの床（反時計回り = +Y 法線）
-        quads.push({ v: [[c, 0, r + 1], [c + 1, 0, r + 1], [c + 1, 0, r], [c, 0, r]] });
+        quads.push({ v: [[c, 0, r + 1], [c + 1, 0, r + 1], [c + 1, 0, r], [c, 0, r]], s: FACE_SHADE.top });
         if (L.ceiling) {
-          ceil.push({ v: [[c, ceilY, r], [c + 1, ceilY, r], [c + 1, ceilY, r + 1], [c, ceilY, r + 1]] });
+          ceil.push({ v: [[c, ceilY, r], [c + 1, ceilY, r], [c + 1, ceilY, r + 1], [c, ceilY, r + 1]], s: FACE_SHADE.bottom });
         }
       }
       makeMergedMesh(texId, quads, false);
@@ -1529,16 +1734,16 @@ export class Yume25DEngine {
 
     // ── 壁：薄板1枚。両面描画して裏からも見えるようにする。
     //    level の段だけ上（y = level*H 〜 (level+1)*H）に積み上げる ──
-    const wallQuads = new Map<number, { v: number[][] }[]>();
+    const wallQuads = new Map<number, { v: number[][]; s: number }[]>();
     for (const w of L.walls) {
       const arr = wallQuads.get(w.tex) ?? [];
       const y0 = (w.level ?? 0) * H, y1 = y0 + H;
       if (w.dir === 0) {
         // 北辺：z=row、x∈[col, col+1]
-        arr.push({ v: [[w.col, y0, w.row], [w.col + 1, y0, w.row], [w.col + 1, y1, w.row], [w.col, y1, w.row]] });
+        arr.push({ v: [[w.col, y0, w.row], [w.col + 1, y0, w.row], [w.col + 1, y1, w.row], [w.col, y1, w.row]], s: FACE_SHADE.northSouth });
       } else {
         // 西辺：x=col、z∈[row, row+1]
-        arr.push({ v: [[w.col, y0, w.row + 1], [w.col, y0, w.row], [w.col, y1, w.row], [w.col, y1, w.row + 1]] });
+        arr.push({ v: [[w.col, y0, w.row + 1], [w.col, y0, w.row], [w.col, y1, w.row], [w.col, y1, w.row + 1]], s: FACE_SHADE.eastWest });
       }
       wallQuads.set(w.tex, arr);
     }
@@ -1806,9 +2011,31 @@ export class Yume25DEngine {
     }
   }
 
+  /** 空の背景（scene.background）を手続き的なグラデーション＋太陽/月＋ドット雲に差し替える。
+   *  天頂色はレイアウトの skyColor、地平色は時間帯の色を skyColor へ寄せたもの。
+   *  こうすると作者が決めた空の色を保ったまま、遠景に奥行きと光源が出る。 */
+  private updateSkyBackground(L: Layout25D, look: TimeOfDayLook) {
+    if (!this.bgCanvas) {
+      this.bgCanvas = document.createElement('canvas');
+      this.bgCanvas.width = 512; this.bgCanvas.height = 256;
+      this.bgTexture = new THREE.CanvasTexture(this.bgCanvas);
+      this.bgTexture.mapping = THREE.EquirectangularReflectionMapping;
+      this.bgTexture.colorSpace = THREE.SRGBColorSpace;
+      this.bgTexture.magFilter = THREE.LinearFilter;
+      this.bgTexture.minFilter = THREE.LinearFilter;
+      this.bgTexture.generateMipmaps = false;
+    }
+    const zenith = L.skyColor || look.horizon;
+    // 地平は時間帯の色寄り。ただし作者の空色から離れすぎないよう半分だけ混ぜる。
+    const horizon = `#${new THREE.Color(look.horizon).lerp(new THREE.Color(zenith), 0.5).getHexString()}`;
+    drawSkyCanvas(this.bgCanvas, zenith, { ...look, horizon }, look.sunOffset);
+    this.bgTexture!.needsUpdate = true;
+    this.scene.background = this.bgTexture!;
+  }
+
   /** 背景画像（skyUrl）：横360°の円筒パノラマとしてカメラに追従させる。
    *  ワールドより先に描き（renderOrder 負・depthWrite なし）、霧の影響は受けない。
-   *  画像ロード中や上下の余白には scene.background（skyColor）が見える。 */
+   *  画像ロード中や上下の余白には scene.background（空のグラデーション）が見える。 */
   private updateSky(L: Layout25D) {
     if (!L.skyUrl) {
       this.skyUrlLoaded = undefined;
@@ -1943,7 +2170,7 @@ export class Yume25DEngine {
       if (this.skyMesh) this.skyMesh.visible = false;
     } else {
       this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor), L.fogNear, L.fogFar);
-      this.scene.background = new THREE.Color(L.skyColor);
+      this.scene.background = this.bgTexture ?? new THREE.Color(L.skyColor);
       if (this.skyMesh) this.skyMesh.visible = !!L.skyUrl && this.skyUrlLoaded === L.skyUrl;
     }
   }

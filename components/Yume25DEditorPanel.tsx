@@ -13,7 +13,7 @@ import {
 } from './game-presets/shared';
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
-import { drawPlayerIconCanvas } from '@/lib/yume25d';
+import { drawPlayerIconCanvas, yume25dAmbientDefault } from '@/lib/yume25d';
 import { billboardGroups, canShiftLayer, shiftLayer, setWallHeight, stackBlockLayer, type LayerShiftTarget, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
 import AssetThumb from './AssetThumb';
@@ -857,7 +857,7 @@ export default function Yume25DEditorPanel({
           <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">照明</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <label className="flex items-center justify-between gap-1">明るさ
-              <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? 1}
+              <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? yume25dAmbientDefault(layout)}
                 onChange={e => onLayoutChange(l => ({ ...l, ambientLight: Number(e.target.value) }))} className="w-20" />
             </label>
             <label className="flex items-center justify-between gap-1">光の色
