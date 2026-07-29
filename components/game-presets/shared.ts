@@ -745,6 +745,9 @@ export interface Layout25D {
   povDistance?: number;
   /** ジャンプ高さ（速度）。未指定は 3.2。 */
   jumpHeight?: number;
+  /** プレイヤーの大きさ。1＝標準（目線＝壁の高さの約半分）。0.3〜3。
+   *  目線の高さ・三人称スプライト／3Dモデルの大きさ・当たり判定の半径がまとめて変わる。 */
+  playerScale?: number;
   /** Shader Mod プリセット（'bsl' | 'seus' | 'complementary' | 'vanilla'） */
   shaderPreset?: 'bsl' | 'seus' | 'complementary' | 'vanilla';
   /** リアルタイム影（DirectionalLight Shadow Map） */

@@ -150,7 +150,14 @@ const SHADER_GRADES: Record<'bsl' | 'seus' | 'complementary' | 'vanilla', Shader
 export const RENDER_W = 320;
 export const RENDER_H = 240;
 
+/** 等身大（playerScale=1）のときのプレイヤー半径。実際に使う値は playerRadius ゲッター。 */
 const PLAYER_RADIUS = 0.22;
+/** プレイヤーの大きさ（layout.playerScale）の許容範囲。 */
+const PLAYER_SCALE_MIN = 0.3;
+const PLAYER_SCALE_MAX = 3;
+/** 当たり判定半径の上限。壁の判定は「プレイヤーが1マスに収まる」前提で書かれているので、
+ *  見た目をいくら大きくしても半径だけはここで頭打ちにする（すり抜け・詰まりの防止）。 */
+const PLAYER_RADIUS_MAX = 0.45;
 const MOVE_SPEED = 2.4;    // マス/秒
 const STRAFE_SPEED = 2.0;  // マス/秒
 const TURN_SPEED = 2.4;    // ラジアン/秒
@@ -464,6 +471,12 @@ interface SpeechEntry {
   mesh: THREE.Mesh;
 }
 
+/** layout.playerScale を許容範囲に収める（未指定・不正値は 1）。 */
+function clampPlayerScale(v: number | undefined): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 1;
+  return Math.max(PLAYER_SCALE_MIN, Math.min(PLAYER_SCALE_MAX, v));
+}
+
 const POV_MIN_DIST = 0.4;
 const POV_MAX_DIST = 3.5;
 const POV_HEIGHT_ABOVE_EYE = 0.22;  // 三人称視点：目線より上から見下ろす高さ
@@ -725,6 +738,8 @@ export class Yume25DEngine {
   private jumpQueued = false;
   private pov: PovMode = 'first';
   private povDistance = 1.6;
+  /** プレイヤーの大きさ（1=標準）。目線の高さ・見た目・当たり判定半径をまとめて決める。 */
+  private playerScale = 1;
   private hEdges = new Set<string>();  // セル(c,r)の北辺（z=r, x∈[c,c+1]）
   private vEdges = new Set<string>();  // セル(c,r)の西辺（x=c, z∈[r,r+1]）
   private billboardMeshes: THREE.Mesh[] = [];
@@ -875,6 +890,7 @@ export class Yume25DEngine {
     this.layout = layout;
     this.pov = layout.pov ?? 'first';
     this.povDistance = layout.povDistance ?? 1.6;
+    this.playerScale = clampPlayerScale(layout.playerScale);
     if (playerAppearance) this.playerAppearance = playerAppearance;
 
     // プレイヤー自身のビルボード（三人称視点のときだけ表示）。
@@ -890,6 +906,7 @@ export class Yume25DEngine {
     this.playerMat = new THREE.MeshLambertMaterial({ map: this.playerTexture, alphaTest: 0.5, side: THREE.DoubleSide });
     this.playerMesh = new THREE.Mesh(this.playerGeo, this.playerMat);
     this.playerMesh.visible = this.pov === 'third';
+    this.playerMesh.scale.set(this.playerScale, this.playerScale, 1);
     this.scene.add(this.playerMesh);
 
     // システム床の画面フェード：カメラの目の前に貼る板。カメラごとシーンへ入れて子を描画対象にする。
@@ -1018,12 +1035,32 @@ export class Yume25DEngine {
     this.peakHop = this.hop;
   }
 
+  /** 当たり判定に使うプレイヤー半径。見た目は playerScale どおりに大きくなるが、
+   *  半径は PLAYER_RADIUS_MAX で頭打ちにして通路に詰まらないようにする。 */
+  private get playerRadius(): number {
+    return Math.min(PLAYER_RADIUS_MAX, PLAYER_RADIUS * this.playerScale);
+  }
+  /** 足元からの目線の高さ（hop は含まない）。等身大では壁の高さの約半分。 */
+  private get eyeHeight(): number {
+    return this.layout.wallHeight * 0.52 * this.playerScale;
+  }
+
+  /** playerScale を見た目（三人称のビルボード／マイクラモデル）へ反映する。
+   *  ジオメトリは作り直さず scale だけ変えるので、エディタのスライダー操作にも即座に追従する。 */
+  private applyPlayerScale() {
+    const s = this.playerScale;
+    this.playerMesh.scale.set(s, s, 1);
+    if (this.playerMcGroup) this.playerMcGroup.scale.setScalar(s);
+  }
+
   /** レイアウト差し替え。シーンを丸ごと作り直す（カメラ位置は維持）。 */
   setLayout(layout: Layout25D) {
     this.layout = layout;
     this.pov = layout.pov ?? this.pov;
     this.povDistance = layout.povDistance ?? this.povDistance;
+    this.playerScale = clampPlayerScale(layout.playerScale);
     this.playerMesh.visible = this.pov === 'third';
+    this.applyPlayerScale();
     this.buildScene();
     this.clampToBounds();
     this.resolveWalls();  // 編集で足元に壁が置かれた場合のめり込みを解消
@@ -1060,6 +1097,7 @@ export class Yume25DEngine {
       this.loadMcSkin(a.minecraftSkin).then(tex => {
         if (this.disposed || gen !== this.buildGen || this.playerAppearance !== a || !tex) return;
         const { group, limbs } = buildMinecraftModel(tex, 0.95);
+        group.scale.setScalar(this.playerScale);
         group.traverse(o => {
           const m = o as THREE.Mesh;
           if (m.isMesh) {
@@ -3188,7 +3226,7 @@ export class Yume25DEngine {
       }
     }
 
-    const eyeY = this.layout.wallHeight * 0.52 + this.hop;
+    const eyeY = this.eyeHeight + this.hop;
     // プレイヤー本体（三人称のときだけ見える）は常に最新の位置・向き・高さへ追従
     if (this.playerMcGroup) {
       this.playerMcGroup.position.set(this.x, this.hop, this.z);
@@ -3218,17 +3256,20 @@ export class Yume25DEngine {
         for (const limb of [this.playerMcLimbs.rArm, this.playerMcLimbs.lArm, this.playerMcLimbs.rLeg, this.playerMcLimbs.lLeg]) limb.rotation.x *= k;
       }
     } else {
-      this.playerMesh.position.set(this.x, this.hop + 0.42, this.z);
+      // 板の中心は足元から高さの半分ぶん上（0.8×scale の板なので 0.42×scale）。
+      this.playerMesh.position.set(this.x, this.hop + 0.42 * this.playerScale, this.z);
       this.playerMesh.rotation.y = this.yaw;
     }
 
     if (this.pov === 'third') {
       const backX = Math.sin(this.yaw), backZ = Math.cos(this.yaw);
       const dist = this.raycastClamp(backX, backZ, this.povDistance);
-      this.camera.position.set(this.x + backX * dist, eyeY + POV_HEIGHT_ABOVE_EYE, this.z + backZ * dist);
+      // 見下ろし量もプレイヤーの大きさに比例させる（小さいキャラを真上から覗き込まないように）
+      const above = POV_HEIGHT_ABOVE_EYE * this.playerScale;
+      this.camera.position.set(this.x + backX * dist, eyeY + above, this.z + backZ * dist);
       this.camera.rotation.y = this.yaw;
       // 肩越しの俯瞰チルト＋ユーザーの上下見回し操作分を加算
-      this.camera.rotation.x = -Math.atan2(POV_HEIGHT_ABOVE_EYE + 0.1, Math.max(0.35, dist)) + this.pitch;
+      this.camera.rotation.x = -Math.atan2(above + 0.1, Math.max(0.35, dist)) + this.pitch;
     } else {
       this.camera.position.set(this.x, eyeY, this.z);
       this.camera.rotation.y = this.yaw;
