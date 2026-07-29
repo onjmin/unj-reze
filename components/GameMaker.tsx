@@ -12975,6 +12975,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       onContextMenu={(e) => { const t = e.target as HTMLElement; if (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA' && t.tagName !== 'SELECT' && !t.isContentEditable) e.preventDefault(); }}>
       {/* Header：スマホでは通常隠しておき（描画エリアを圧迫しない）、
           上端のハンドルを下スワイプ／タップで引き出す。md以上は従来どおり常時表示。 */}
+      <button
+        type="button"
+        onClick={() => setHeaderOpen(v => !v)}
+        aria-label={headerOpen ? 'メニューを閉じる' : 'メニューを開く'}
+        aria-pressed={headerOpen}
+        className={`md:hidden absolute top-1 right-1 z-[70] w-7 h-7 flex items-center justify-center bg-[#0f0f11]/90 border border-gray-700 text-gray-300 active:bg-gray-700 transition-opacity duration-200 ${headerOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+      >
+        <ChevronDown size={14} />
+      </button>
       <div
         className={`absolute md:static top-0 left-0 right-0 z-[60] shrink-0 transition-transform duration-200 md:translate-y-0 ${headerOpen ? 'translate-y-0' : '-translate-y-[calc(100%-20px)]'}`}
         onTouchStart={onHeaderTouchStart}
@@ -13226,6 +13235,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 <Save size={14} />
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setHeaderOpen(false)}
+              aria-label="メニューを閉じる"
+              className="md:hidden p-2 text-gray-400 hover:text-white bg-gray-700/50"
+            >
+              <ChevronUp size={14} />
+            </button>
           </div>
         </div>
         {/* 引き出しハンドル（スマホのみ）。閉じているときはこの20pxだけが画面に残る。 */}
