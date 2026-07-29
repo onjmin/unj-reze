@@ -57,10 +57,39 @@ const foe = (o: {
   ...(o.spriteId ? { spriteRef: wr(o.spriteId), spriteUrl: sa(o.spriteId) } : {}),
 });
 
-/** 会話 NPC（頭上セリフ）。 */
-const npc = (emoji: string, col: number, row: number, message: string, spriteId?: string) => newObject({
+// ── 歩行グラ／静止スプライトの id 一覧 ────────────────────────────────────
+// 絵文字だけで表示していたキャラにドット絵を割り当てるための対応表。
+// 注意: sAnims（歩行グラ）と sprites（静止画）は id 空間が別。例えば EVAhBn は
+// 歩行グラでは「カエル」、静止画では「レジカウンター」で、別の素材になる。
+const SPR = {
+  human:    '0OBT7X',  // 🧒 主人公（おちてきたニンゲン）
+  frog:     'EVAhBn',  // 🐸 カエル
+  ghost:    'h1ABuE',  // 👻 napstablook → ないてるおばけ／ゴミのおばけ
+  toriel:   'SmiIJl',  // 🐐 シスター → ヤギのママ（ローブ姿の保護者）
+  sans:     'BKRjJx',  // 💀 sans（通常）→ 弟のガイコツ（まちの NPC）
+  dogKnight:'h9iBuH',  // 🐕 犬 → わんわんナイト
+  snowman:  'UejLXD',  // ⛄ 雪だるま → スノーマン
+  bunny:    'o6dlqi',  // 🐰 うさぎ → 宿屋うさぎ
+  bunnyTown:'ugY21t',  // 🐰 白うさぎ（二足歩行）→ まちのうさぎ
+  temmie:   'nhYqpO',  // 🐱 黒猫（二足歩行）→ テミー
+  fish:     'vpsmyG',  // 🐟 魚プロ → うたうさかな
+  undyne:   'jb1wLY',  // 🐠 ワルキューレ → よろいのさかなヒーロー
+  king:     'VnfXiP',  // 🐐 王様 → やさしいおうさま
+  papyrus:  'YFwEEx',  // 💀 Papyrus → ハデなガイコツ（ボス）
+} as const;
+/** 静止画スプライト（動かない置物・看板・花など）の id。 */
+const DECO = {
+  sign:    '4vT7OGY',  // 🪧 看板
+  flower:  'b7EYZPh',  // 🌷🌼 桜の花 → ものを言うはな
+  counter: 'EVAhBn',   // 🧺 レジカウンター → 屋台
+  table:   'VTRYXYy',  // 🫖 テーブル → おうさまのお茶の席
+} as const;
+
+/** 会話 NPC（頭上セリフ）。spriteId=歩行グラ、decoId=静止画（置物・看板など）。 */
+const npc = (emoji: string, col: number, row: number, message: string, spriteId?: string, decoId?: string) => newObject({
   emoji, col, row, behavior: 'still', hazard: false, message,
   ...(spriteId ? { spriteRef: wr(spriteId), spriteUrl: sa(spriteId) } : {}),
+  ...(decoId ? { spriteRef: ir(decoId), spriteUrl: sp(decoId) } : {}),
 });
 
 /** シーン間ワープ（扉・穴）。 */
@@ -138,6 +167,7 @@ end while
     // ヤギのママ（いえ・回復とパイ）
     newObject({
       emoji: '🐐', col: 4, row: 14, behavior: 'still', hazard: false,
+      spriteRef: wr(SPR.toriel), spriteUrl: sa(SPR.toriel),
       pages: [
         {
           name: 'パイをくれる',
@@ -170,7 +200,7 @@ end while
       { type: 'changeGold', amount: 30 },
     ]),
     // 遺跡のモンスター
-    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 17, atk: 5, def: 1, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
+    foe({ name: 'カエルさん', emoji: '🐸', col: 8, row: 7, hp: 17, atk: 5, def: 1, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: SPR.frog, dialogue: [
       { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
@@ -178,7 +208,7 @@ end while
       { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] }),
-    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 17, atk: 5, def: 1, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: 'EVAhBn', dialogue: [
+    foe({ name: 'カエルさん', emoji: '🐸', col: 21, row: 10, hp: 17, atk: 5, def: 1, exp: 3, gold: 5, behavior: 'random', speed: 1.0, spriteId: SPR.frog, dialogue: [
       { text: 'こっちに きたかったら かえずなくといいよ', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'けろ？ なに いってるの？', actUsed: 'はなす' },
       { text: 'けろ……？ なぜ ほめるの？', actUsed: 'ほめる' },
@@ -186,7 +216,7 @@ end while
       { text: 'けろけろ！ たのしいな！', hpAbovePct: 80 },
       'かえず なくぞ！',
     ] }),
-    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 20, atk: 4, def: 2, exp: 4, gold: 6, dialogue: [
+    foe({ name: 'ないてるおばけ', emoji: '👻', col: 15, row: 10, hp: 20, atk: 4, def: 2, exp: 4, gold: 6, spriteId: SPR.ghost, dialogue: [
       { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '……はなしかけて くれるの？ うれしい……', actUsed: 'はなす' },
       { text: '……ほめられても なきょうみ ないのに……', actUsed: 'ほめる' },
@@ -211,7 +241,7 @@ end while
         ]},
       ],
     }),
-    foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 155, atk: 14, def: 12, exp: 45, gold: 40, encounterMax: 1,
+    foe({ name: 'ヤギのママ', emoji: '🐐', col: 14, row: 21, hp: 155, atk: 14, def: 12, exp: 45, gold: 40, encounterMax: 1, spriteId: SPR.toriel,
       // 通常攻撃：ゆっくり降るオレンジの火の粉（やさしい）
       miniScript: `
 while true
@@ -315,7 +345,7 @@ const sceneSnowdin: SceneDef = {
   bgm: { ref: 'https://www.youtube.com/watch?v=vYyLL9QstbI', src: 'https://www.youtube.com/watch?v=vYyLL9QstbI', type: 'youtube' },
   objects: [
     // ホネの兄弟
-    npc('💀', 5, 13, 'よう にんげん。ほねのある やつは きらいじゃないぜ。……おっと、おれの ことか。', 'BKRjJx'),
+    npc('💀', 5, 13, 'よう にんげん。ほねのある やつは きらいじゃないぜ。……おっと、おれの ことか。', SPR.sans),
     foe({ name: 'ハデなガイコツ', emoji: '💀', col: 21, row: 11, hp: 175, atk: 16, def: 14, exp: 55, gold: 60,
       dialogue: [
         { text: 'こっちの チームに いられるのは おまえだけじゃないぜ', actUsed: 'Investigation', mercyAbovePct: 60 },
@@ -361,16 +391,16 @@ while true
 end while
 `.trim(),
         },
-      ], spriteId: 'YFwEEx' }),
+      ], spriteId: SPR.papyrus }),
     // 橋の前の看板がわりのイベント
     newObject({
-      emoji: '🪧', col: 17, row: 11, behavior: 'still', hazard: false,
+      emoji: '🪧', col: 17, row: 11, behavior: 'still', hazard: false, spriteRef: ir(DECO.sign), spriteUrl: sp(DECO.sign),
       pages: [{ conditions: {}, commands: [
         { type: 'message', text: '看板「この橋のさきは まちの中心。\nただし ハデなガイコツが【にんげん とりしまり中】」' },
       ]}],
     }),
     // 番犬・スノーマン
-    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 28, atk: 8, def: 4, exp: 9, gold: 14, behavior: 'patrolH', spriteId: 'h9iBuH', dialogue: [
+    foe({ name: 'わんわんナイト', emoji: '🐕', col: 10, row: 5, hp: 28, atk: 8, def: 4, exp: 9, gold: 14, behavior: 'patrolH', spriteId: SPR.dogKnight, dialogue: [
       { text: '……おまえの なかまに なるのはちょっと……', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: 'うるさい！ こっちを むかするな！', actUsed: 'はなす' },
       { text: '……？ なぜ おだまきを お投げする？', actUsed: 'ほめる' },
@@ -378,7 +408,7 @@ end while
       'いのちがけで まもるぜ！',
     ] }),
     newObject({
-      emoji: '⛄', col: 8, row: 17, behavior: 'still', hazard: false,
+      emoji: '⛄', col: 8, row: 17, behavior: 'still', hazard: false, spriteRef: wr(SPR.snowman), spriteUrl: sa(SPR.snowman),
       pages: [
         { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [{ type: 'message', text: 'スノーマン「とおくへ つれていってくれて ありがとう…」' }] },
         { conditions: {}, commands: [
@@ -391,7 +421,7 @@ end while
     }),
     // まち（川のひがし）：宿屋と店
     newObject({
-      emoji: '🏨', col: 24, row: 7, behavior: 'still', hazard: false,
+      emoji: '🏨', col: 24, row: 7, behavior: 'still', hazard: false, spriteRef: wr(SPR.bunny), spriteUrl: sa(SPR.bunny),
       pages: [{
         conditions: {},
         commands: [
@@ -412,7 +442,7 @@ end while
       }],
     }),
     newObject({
-      emoji: '🧺', col: 26, row: 14, behavior: 'still', hazard: false,
+      emoji: '🧺', col: 26, row: 14, behavior: 'still', hazard: false, spriteRef: ir(DECO.counter), spriteUrl: sp(DECO.counter),
       shopItems: [
         { itemId: 'spiderDonut', price: 16 },
         { itemId: 'noodles',     price: 45 },
@@ -423,7 +453,7 @@ end while
         { type: 'message', text: '店番うさぎ「いらっしゃい。ドーナツは クモの巣まで\nとどけてくれる ふしぎな おかしだよ」' },
       ]}],
     }),
-    npc('🐰', 23, 17, 'このまちの ガイコツ兄弟は ゆうめい人でね。おとうとは ジョークずき、おにいさんは パズルずきさ。'),
+    npc('🐰', 23, 17, 'このまちの ガイコツ兄弟は ゆうめい人でね。おとうとは ジョークずき、おにいさんは パズルずきさ。', SPR.bunnyTown),
     // ワープ
     warp('🚪', 1, 11, 'ruins', 14, 20),        // いせきへ戻る
     warp('🕳️', 28, 11, 'waterfall', 2, 3),      // みずのどうくつへ
@@ -493,13 +523,13 @@ const sceneWaterfall: SceneDef = {
   bgm: { ref: 'https://www.youtube.com/watch?v=DVUh7caufKU', src: 'https://www.youtube.com/watch?v=DVUh7caufKU', type: 'youtube' },
   objects: [
     // ゆううつなゴースト
-    npc('👻', 6, 3, 'や… ぼく ここで ねそべってるんだ… ゴミになった きぶんで…… …じゃまだったら ごめん…', 'h1ABuE'),
+    npc('👻', 6, 3, 'や… ぼく ここで ねそべってるんだ… ゴミになった きぶんで…… …じゃまだったら ごめん…', SPR.ghost),
     // エコーフラワー
-    npc('🌷', 10, 13, '（はなが だれかの こえを こだまする…\n『いつか そとの せかいを みてみたいな』）'),
-    npc('🌷', 18, 15, '（はなが だれかの こえを こだまする…\n『ほしぞらって どんな ばしょなんだろう』）'),
+    npc('🌷', 10, 13, '（はなが だれかの こえを こだまする…\n『いつか そとの せかいを みてみたいな』）', undefined, DECO.flower),
+    npc('🌷', 18, 15, '（はなが だれかの こえを こだまする…\n『ほしぞらって どんな ばしょなんだろう』）', undefined, DECO.flower),
     // テミーのみせ
     newObject({
-      emoji: '🐱', col: 24, row: 13, behavior: 'still', hazard: false,
+      emoji: '🐱', col: 24, row: 13, behavior: 'still', hazard: false, spriteRef: wr(SPR.temmie), spriteUrl: sa(SPR.temmie),
       shopItems: [
         { itemId: 'toughGlove',  price: 140 },
         { itemId: 'bandanna',    price: 160 },
@@ -518,7 +548,7 @@ const sceneWaterfall: SceneDef = {
       { type: 'giveItem', itemId: 'tutu', count: 1 },
     ]),
     // どうくつのモンスター
-    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 38, atk: 11, def: 6, exp: 15, gold: 22, dialogue: [
+    foe({ name: 'うたうさかな', emoji: '🐟', col: 12, row: 12, hp: 38, atk: 11, def: 6, exp: 15, gold: 22, spriteId: SPR.fish, dialogue: [
       { text: '♪…… いっしょに うたわない？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '♪…… きいてくれるの？', actUsed: 'はなす' },
       { text: '♪♪！ もっと うたってあげる！', actUsed: 'ほめる' },
@@ -526,8 +556,8 @@ const sceneWaterfall: SceneDef = {
       '♪ うたって しかえし するよ！',
     ], moves: [{ name: 'ソウルフルなうた', power: 7 }], behavior: 'random' }),
     // 出口の通路をまもる さかなのヒーロー
-    npc('🪧', 6, 16, '看板「この先 せまい通路。\n【えいゆう】が にんげんを まちかまえている とのこと」'),
-    foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 220, atk: 20, def: 16, exp: 80, gold: 80,
+    npc('🪧', 6, 16, '看板「この先 せまい通路。\n【えいゆう】が にんげんを まちかまえている とのこと」', undefined, DECO.sign),
+    foe({ name: 'よろいのさかなヒーロー', emoji: '🐠', col: 24, row: 18, hp: 220, atk: 20, def: 16, exp: 80, gold: 80, spriteId: SPR.undyne,
       dialogue: [
         { text: 'ここは まもるべき ばしょなんだ…… いけない', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: 'ふん！ なんの ひつようもない こうどうだ！', actUsed: 'はなす' },
@@ -611,10 +641,10 @@ const sceneNewHome: SceneDef = {
   bgm: { ref: 'https://www.youtube.com/watch?v=1HIKNbnV8nw', src: 'https://www.youtube.com/watch?v=1HIKNbnV8nw', type: 'youtube' },
   objects: [
     // はなのケモノ、再登場
-    npc('🌼', 14, 15, 'はな「……ここまで きちゃったんだ。\nこのさきに いるのは この せかいの おうさま。\nきみは… どうするんだろうね。ヒヒヒ……」'),
+    npc('🌼', 14, 15, 'はな「……ここまで きちゃったんだ。\nこのさきに いるのは この せかいの おうさま。\nきみは… どうするんだろうね。ヒヒヒ……」', undefined, DECO.flower),
     // おうさまの問いかけ
     newObject({
-      emoji: '🫖', col: 14, row: 17, behavior: 'still', hazard: false,
+      emoji: '🫖', col: 14, row: 17, behavior: 'still', hazard: false, spriteRef: ir(DECO.table), spriteUrl: sp(DECO.table),
       pages: [
         { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [] },
         { conditions: {}, commands: [
@@ -633,7 +663,7 @@ const sceneNewHome: SceneDef = {
     }),
     // 最後のボス。たおしても みのがしても クリア（spare でも bossDefeated になる）
     foe({
-      name: 'やさしいおうさま', emoji: '🐐', col: 14, row: 19, hp: 260, atk: 20, def: 18, exp: 300, gold: 0,
+      name: 'やさしいおうさま', emoji: '🐐', col: 14, row: 19, hp: 260, atk: 20, def: 18, exp: 300, gold: 0, spriteId: SPR.king,
       // 通常攻撃：上からランダムな向きの炎の扇
       miniScript: `
 while true
@@ -705,7 +735,7 @@ export const undertale: PresetData = {
   player: {
     emoji: '🧒', color: '#ff4b4b', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 14, y: TILE_SIZE * 2 },  // いせきの おちばの上
-    spriteRef: wr('0OBT7X'), spriteUrl: sa('0OBT7X'),
+    spriteRef: wr(SPR.human), spriteUrl: sa(SPR.human),
   },
   tiles,
   map: JSON.parse(JSON.stringify(ruinsMap)),
@@ -764,6 +794,6 @@ export const undertale: PresetData = {
     inn:      { ref: `direct:${undertaleSfxUrl('snd_item_heal')}`, src: undertaleSfxUrl('snd_item_heal'), type: 'direct' as const },
     save:     { ref: `direct:${undertaleSfxUrl('snd_save')}`, src: undertaleSfxUrl('snd_save'), type: 'direct' as const },
     damage:   { ref: `direct:${undertaleSfxUrl('snd_hurt')}`, src: undertaleSfxUrl('snd_hurt'), type: 'direct' as const },
-    clear:    { ref: 'clear' },
+    clear:    { ref: `direct:${undertaleSfxUrl('snd_logo')}`, src: undertaleSfxUrl('snd_logo'), type: 'direct' as const },
   },
 };

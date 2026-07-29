@@ -68,6 +68,17 @@ const E = {
   princessUrl: resolveSMCUrl('images/npc-sheet0.png'),
 };
 
+// ── アイテム用 SMC スプライト ─────────────────────────────────────────────
+// フィールドに落ちている取得アイテムを絵文字ではなく原作のドット絵で出す。
+// SMC のアイテムはすべて shared-2-sheet0.png に同居している。
+const ITEM_SHEET = resolveSMCUrl('images/shared-2-sheet0.png');
+const smcItem = (name: string) => ({ spriteRef: `walk:smc_json:${name}`, spriteUrl: ITEM_SHEET });
+const IT = {
+  dragonCoin: smcItem('DragonCoin'),  // 🔴 レッドコイン（原作のドラゴンコイン）
+  oneUp:      smcItem('OneUp'),       // 💚 1UPキノコ
+  star:       smcItem('Starman'),     // ⭐ スーパースター
+};
+
 // 地下ネズミ: SMC に対応スプライトなし → RPGen を使用（id は rpgen-search API の id）
 const sa93 = sa('UWDL7g');
 const wr93 = `walk:auto:u:${sa('UWDL7g')}`;
@@ -142,15 +153,15 @@ const scene1: SceneDef = {
       warpSceneId: 'underground2', warpEntryCol: 2, warpEntryRow: ROWS - 4 }),
     // レッドコイン（土管の上と高層ブロックの上）
     newObject({ emoji: '🔴', col: 46,  row: 9, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
-      itemId: 'redCoin', message: '' }),
+      itemId: 'redCoin', message: '', ...IT.dragonCoin }),
     newObject({ emoji: '🔴', col: 122, row: 5, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
-      itemId: 'redCoin', message: '' }),
+      itemId: 'redCoin', message: '', ...IT.dragonCoin }),
     // スター（原作でスターが入っているレンガの位置）
     newObject({ emoji: '⭐', col: 101, row: 9, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
-      itemId: 'star', message: '' }),
+      itemId: 'star', message: '', ...IT.star }),
     // 1UP キノコ（原作の隠しブロック付近）
     newObject({ emoji: '💚', col: 64, row: 9, objType: 'item', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none',
-      itemId: 'oneUp', message: '' }),
+      itemId: 'oneUp', message: '', ...IT.oneUp }),
     // 動くリフト（3マス幅の穴の上）
     newObject({ emoji: '🛹', col: 87, row: 10, objType: 'platform', name: 'movingPlatform', hazard: false, hp: 1, speed: 1.0, behavior: 'patrolH', bullet: 'none' }),
   ],

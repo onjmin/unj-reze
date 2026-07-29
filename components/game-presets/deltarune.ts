@@ -1,5 +1,26 @@
 import { type PresetData, type SceneDef, type EnemyDialogueLine, type EnemyBattleSprite, newObject, chest, TILE_SIZE } from './shared';
 import { tldrMusicUrl, tldrSfxUrl, TLDR_PARTY_SPRITES, TLDR_PARTY_UI, TLDR_ENEMY_SPRITES } from '@/lib/deltarune-tldr-assets';
+import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
+
+// tlDR Engine に無いモンスター・NPC は RPGen の素材で代用する（絵文字のままにしない）。
+// id は rpgen-search API の id フィールド。
+const wr = (id: string) => `walk:auto:u:${sa(id)}`;
+const ir = (id: string) => `url:${sp(id)}`;
+const SPR = {
+  bikeOni:  'm9nxuZ',  // 🏍️ 赤鬼 → バイクにのった鬼
+  hatGhost: 'XCnbu9',  // 🎩 男Ⅹ（紫のフード姿）→ ぼうしおばけ
+  puzzle:   'gmLHHM',  // 🧩 ロボット → ぱずるにんぎょう
+  wolf:     'zEvcVI',  // 🐺 キラータイガー → でんせんおおかみ
+  mannequin:'r9YCz5',  // 🪞 ロボ → きれたマネキン
+  noelle:   'jkAwdz',  // ❄️ 白い少女 → ノエル
+  cardKing: 'Mj7nJe',  // 👑 マグニフィコ王 → カードのおうさま
+} as const;
+/** 静止画スプライト（置物）。 */
+const DECO = {
+  sign:    '4vT7OGY',  // 🪧 看板
+  bed:     'xPARoP7',  // 🏨 ベッド → やどや
+  counter: 'EVAhBn',   // 🛍️ レジカウンター → みせ
+} as const;
 
 // ══════════════════════════════════════════════════════════════════════════
 //  デルタルーン風プリセット（tlDR Engine を参考にしたダークワールド冒険）
@@ -59,10 +80,15 @@ const symbolSprite = (a: { frames: readonly string[]; w: number; h: number }) =>
   spriteUrl: a.frames[0],
 });
 
-/** 会話 NPC（頭上セリフ）。 */
-const npc = (emoji: string, col: number, row: number, message: string) => newObject({
-  emoji, col, row, behavior: 'still', hazard: false, message,
+/** 会話 NPC（頭上セリフ）。sprite は symbolSprite(...) / walkSprite(...) の戻り値。 */
+const npc = (emoji: string, col: number, row: number, message: string, sprite?: { spriteRef: string; spriteUrl: string }) => newObject({
+  emoji, col, row, behavior: 'still', hazard: false, message, ...sprite,
 });
+
+/** RPGen 歩行グラ（32x64 の4方向シート）を徘徊シンボルに使うための spriteRef/spriteUrl。 */
+const walkSprite = (id: string) => ({ spriteRef: wr(id), spriteUrl: sa(id) });
+/** RPGen 静止画スプライト（16x16）を置物に使うための spriteRef/spriteUrl。 */
+const decoSprite = (id: string) => ({ spriteRef: ir(id), spriteUrl: sp(id) });
 
 /** シーン間ワープ（扉・穴）。 */
 const warp = (emoji: string, col: number, row: number, sceneId: string, entryCol: number, entryRow: number) => newObject({
@@ -107,12 +133,13 @@ const sceneField: SceneDef = {
   bgm: { ref: `direct:${tldrMusicUrl('exForest')}`, src: tldrMusicUrl('exForest'), type: 'direct' },
   objects: [
     // スージー（同行NPC・強気なコメント）
-    npc('😈', 20, 3, 'スージー「はっ、こんな くらい ところ ビビらせようったって そうはいかないっての」'),
+    npc('😈', 20, 3, 'スージー「はっ、こんな くらい ところ ビビらせようったって そうはいかないっての」', symbolSprite(TLDR_PARTY_SPRITES.susie.idle)),
     // 宝物庫
     chest(6, 13, [{ type: 'giveItem', itemId: 'darkCandy', count: 2 }]),
     chest(24, 13, [{ type: 'changeGold', amount: 25 }]),
     // 野原のモンスター
     foe({ name: 'バイクにのった鬼', emoji: '🏍️', col: 8, row: 8, hp: 20, atk: 5, def: 1, exp: 3, gold: 12, behavior: 'patrolH', speed: 1.4,
+      ...walkSprite(SPR.bikeOni),
       dialogue: [
         { text: 'ふん。おまえも こっちに くるのか？', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: 'うるさい！ こっちを むかするな！', actUsed: 'はげます' },
@@ -151,6 +178,7 @@ end while
 `.trim() }),
     // ぼうしおばけ：ランダムエンカウント廃止に伴い徘徊シンボルとして再配置
     foe({ name: 'ぼうしおばけ', emoji: '🎩', col: 20, row: 8, hp: 16, atk: 4, def: 1, exp: 2, gold: 10, behavior: 'random',
+      ...walkSprite(SPR.hatGhost),
       dialogue: [
         { text: 'ぼくの なかまに なる？ すごい！', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: '……えへへ…… やさしく してくれるの？', actUsed: 'はげます' },
@@ -161,6 +189,7 @@ end while
       ],
       moves: [{ name: 'ハイタッチをもとめる', power: 3 }] }),
     foe({ name: 'ぱずるにんぎょう', emoji: '🧩', col: 22, row: 16, hp: 20, atk: 6, def: 2, exp: 4, gold: 14, behavior: 'random',
+      ...walkSprite(SPR.puzzle),
       dialogue: [
         { text: 'パズルの なかまに なるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: 'すごい！ パズルが とける！', actUsed: 'はげます' },
@@ -218,7 +247,7 @@ const sceneTown: SceneDef = {
   objects: [
     // 宿・回復ポイント
     newObject({
-      emoji: '🏨', col: 5, row: 4, behavior: 'still', hazard: false,
+      emoji: '🏨', col: 5, row: 4, behavior: 'still', hazard: false, ...decoSprite(DECO.bed),
       pages: [{ conditions: {}, commands: [
         { type: 'message', text: '宿の主人「やあ、旅の人。ゆっくり やすんで いきなよ」' },
         { type: 'restoreHp' }, { type: 'restoreMp' },
@@ -227,7 +256,7 @@ const sceneTown: SceneDef = {
     }),
     // 武器・防具ショップ
     newObject({
-      emoji: '🛍️', col: 24, row: 4, behavior: 'still', hazard: false,
+      emoji: '🛍️', col: 24, row: 4, behavior: 'still', hazard: false, ...decoSprite(DECO.counter),
       shopItems: [
         { itemId: 'rustyDagger', price: 30 },
         { itemId: 'manlyBandanna', price: 35 },
@@ -239,16 +268,16 @@ const sceneTown: SceneDef = {
       ]}],
     }),
     // ノエル（雪の女の子・寄り道NPC）
-    npc('❄️', 6, 8, 'ノエル「あ、あの……だいじょうぶ、ですか？ わたしで よければ おてつだい します……」'),
+    npc('❄️', 6, 8, 'ノエル「あ、あの……だいじょうぶ、ですか？ わたしで よければ おてつだい します……」', walkSprite(SPR.noelle)),
     // 看板イベント
     newObject({
-      emoji: '🪧', col: 16, row: 11, behavior: 'still', hazard: false,
+      emoji: '🪧', col: 16, row: 11, behavior: 'still', hazard: false, ...decoSprite(DECO.sign),
       pages: [{ conditions: {}, commands: [
         { type: 'message', text: '看板「このさき カード城。\nおうさまが にんげんを まちかまえている らしい」' },
       ]}],
     }),
     // まちのモンスター
-    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 28, atk: 8, def: 3, exp: 8, gold: 16, behavior: 'random', dialogue: [
+    foe({ name: 'でんせんおおかみ', emoji: '🐺', col: 10, row: 16, hp: 28, atk: 8, def: 3, exp: 8, gold: 16, behavior: 'random', ...walkSprite(SPR.wolf), dialogue: [
       { text: 'おまえも くらやみに くろうか？', actUsed: 'Investigation', mercyAbovePct: 60 },
       { text: '……？ なに おだまきを お投げする？', actUsed: 'はげます' },
       { text: 'うるさい！ こっちを むかするな！', actUsed: 'ちょうさ' },
@@ -257,6 +286,7 @@ const sceneTown: SceneDef = {
       'いのちがけで まもるぜ！',
     ] }),
     foe({ name: 'きれたマネキン', emoji: '🪞', col: 22, row: 16, hp: 32, atk: 8, def: 4, exp: 9, gold: 18, behavior: 'still',
+      ...walkSprite(SPR.mannequin),
       dialogue: [
         { text: '……われても いっしょに いてくれるの？', actUsed: 'Investigation', mercyAbovePct: 60 },
         { text: '……ほめられても なきょうみ ないのに……', actUsed: 'はげます' },
@@ -314,10 +344,10 @@ const sceneCastle: SceneDef = {
   bgm: { ref: `direct:${tldrMusicUrl('story')}`, src: tldrMusicUrl('story'), type: 'direct' },
   objects: [
     // ラルセイの応援
-    npc('🐐', 15, 4, 'ラルセイ「おうさまは きっと わかりあえる。\nでも……ゆだんは できないよ」'),
+    npc('🐐', 15, 4, 'ラルセイ「おうさまは きっと わかりあえる。\nでも……ゆだんは できないよ」', symbolSprite(TLDR_PARTY_SPRITES.ralsei.idle)),
     // 玉座の前・王とのやりとり
     newObject({
-      emoji: '👑', col: 15, row: 12, behavior: 'still', hazard: false,
+      emoji: '👑', col: 15, row: 12, behavior: 'still', hazard: false, ...walkSprite(SPR.cardKing),
       pages: [
         { conditions: { selfSwitchId: 'A', selfSwitchValue: true }, commands: [] },
         { conditions: {}, commands: [
@@ -337,6 +367,7 @@ const sceneCastle: SceneDef = {
     // 最終ボス：カードのおうさま（たおしても みのがしても クリア）
     foe({
       name: 'カードのおうさま', emoji: '👑', col: 15, row: 14, hp: 220, atk: 18, def: 16, exp: 260, gold: 0,
+      ...walkSprite(SPR.cardKing),
       miniScript: `
 while true
   a = rand(45, 135)
@@ -475,6 +506,6 @@ export const deltarune: PresetData = {
     inn:      { ref: `direct:${tldrSfxUrl('heal')}`, src: tldrSfxUrl('heal'), type: 'direct' },
     save:     { ref: `direct:${tldrSfxUrl('save')}`, src: tldrSfxUrl('save'), type: 'direct' },
     damage:   { ref: `direct:${tldrSfxUrl('hurt')}`, src: tldrSfxUrl('hurt'), type: 'direct' },
-    clear:    { ref: 'clear' },
+    clear:    { ref: `direct:${tldrSfxUrl('won')}`, src: tldrSfxUrl('won'), type: 'direct' },
   },
 };

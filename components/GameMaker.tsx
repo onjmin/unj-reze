@@ -2285,6 +2285,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const onjThrowCoolRef = useRef(0);  // 🎯投げ／💀首爆弾のクールダウン
 
   const bossDefeatedRef = useRef(false);
+  /** onjReze エンジンのクリア判定用ラッチ。「今いるシーンでボスと対面した」ことを覚えておき、
+   *  そのボスが居なくなった＝倒したときにクリアさせる。gameData.objects はシーン切り替えでは
+   *  更新されない（scenes[0] のまま）ため、そちらを見るとボスが別シーンにいる構成で永久に
+   *  クリアできない。逆にシーンを跨いだだけで誤発火しないよう resetSceneState で解除する。 */
+  const onjBossSeenRef = useRef<ObjectDef | null>(null);
   /** NPCに接触中のセリフ表示（フキダシではなく頭上に1文字ずつ表示） */
   const npcTalkRef = useRef<{ entity: Entity; text: string; startTime: number; wrapped?: string[]; lastShown: number } | null>(null);
   /** アイテム取得演出（メッセージウィンドウではなく頭上に一定時間表示） */
@@ -5810,6 +5815,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // 残ったままだと、次にプレイ再開した瞬間に本来ありえない座標へ強制移動が再開してしまう。
     iceSlideRef.current = null;
     lastIceTileRef.current = null;
+    // ボス部屋から逃げただけでクリア扱いにならないよう、対面ラッチも解除する。
+    onjBossSeenRef.current = null;
     for (const e of engineRef.current.entities ?? []) { e.iceSlide = undefined; }
   }, []);
 
@@ -6453,6 +6460,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       marioPipeRef.current = null;
       marioGoalRef.current = null;
       bossDefeatedRef.current = false;
+      onjBossSeenRef.current = null;
       bossWarnRef.current = false;
       outroModeRef.current = false;
       npcTalkRef.current = null;
@@ -9654,9 +9662,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             }
             // onjReze：ダンジョンボスを倒したらクリア（ゴールタイル不要）
+            // 「対面したボスが居なくなった」で判定する。gameData.objects は初期シーンのまま
+            // 更新されないので、そこから探すとボスが別シーンにいる構成では発火しない。
             if (gameData.engine === 'onjReze' && !bossDefeatedRef.current) {
-              const bossDef = gameData.objects.find(o => o.isBoss);
-              if (bossDef && eng.entities.every(e => !e.def.isBoss)) {
+              const bossAlive = eng.entities.find(e => e.def.isBoss);
+              if (bossAlive) {
+                onjBossSeenRef.current = bossAlive.def;
+              } else if (onjBossSeenRef.current) {
+                const bossDef = onjBossSeenRef.current;
                 bossDefeatedRef.current = true;
                 if (bossDef.outroDialogue?.length) {
                   afterDialogueRef.current = () => win();
@@ -15037,10 +15050,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
                     {gameData.engine === 'onjReze' && (
                       <>
-                        <li>剣攻撃 … [Z]</li>
+                        {/* 実装（isAttackKey / isBombKey）と一致させること。
+                            Z/Enter/Space は会話・調査専用で攻撃には割り当てられていない。 */}
+                        <li>剣攻撃 … [X]</li>
                         <li>ボム投擲 … [C]</li>
-                        <li>ボム投擲 … [X]</li>
-                        <li>首爆弾投擲 … [V]</li>
+                        <li>話す・調べる … [Z]</li>
                       </>
                     )}
                   </ul>

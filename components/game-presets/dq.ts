@@ -4,6 +4,39 @@ import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-ass
 const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
 const ir  = (id: string) => `url:${sp(id)}`;
 
+// ── 歩行グラの id 一覧 ─────────────────────────────────────────────────────
+// 絵文字だけで表示していたモンスター・NPC にドット絵を割り当てるための対応表。
+// 注意: sAnims と sound は id 空間が別なので、同じ文字列でも別素材（例: L5Npni は
+// 歩行グラでは「死靈貴公子」、効果音では「ﾄﾞﾗｸｴ宿屋」）。混同しないこと。
+const SPR = {
+  // モンスター
+  slime:     'k3vKh6',  // 🟦 ミナギルスライム
+  slimeBess: 'hswBaA',  // 🟥 明白スライム → スライムベス
+  drakee:    'R42ett',  // 🦇 青鬼 → ドラキー
+  skeleton:  'MtRnE6',  // 💀 動くホネ人間 → がいこつ
+  scorpion:  '0SnTTj',  // 🦂 動く蟹 → おおさそり
+  armorKnight: 'j8Lwkw',// 🤺 黒騎士 → よろいのきし
+  meda:      'oE4l1x',  // 👁️ 青鬼(改) → メーダ
+  dragon:    'Hu2Vks',  // 🐲 超古代狛犬怪獣ガーディ― → ドラゴン
+  wight:     'L5Npni',  // 🧟 死靈貴公子 → しりょうのきし
+  chimera:   'iHaD7p',  // 🦅 キメラ
+  stoneman:  'VOpXq9',  // 🗿 石像 → ストーンマン
+  dragonlord:'Ilpvcu',  // 🐉 竜王
+  // 人物
+  hero:      '0yyTSP',  // 🧝 主人公(DQ3)
+  king:      'VnfXiP',  // 🤴 王様 → ラルス王
+  laura:     'uBb2Ml',  // 👸 ローラ姫
+  guardA:    '0xlTdC',  // 💂 上級兵士
+  guardB:    'GHlUP0',  // 💂 仮面兵士
+  mage:      'xP8oPz',  // 🧙‍♂️ 老人（魔法使い風）
+  elder:     'M05nRh',  // 👴 老人
+  woman:     'okIlh5',  // 👩 女性
+  girl:      'mLHxrK',  // 👧 こども
+  farmer:    'Za3MwF',  // 🧑‍🌾 一般の民
+  townsman:  'HydVaH',  // 👨 男Green
+  merchant:  'XCdbnX',  // 🧔 男Orange
+} as const;
+
 // ══════════════════════════════════════════════════════════════════════════
 //  ドラゴンクエスト風プリセット（DQ1 縮約版）
 //  ラダトーム城で王さまに使命を受け、リムルダールの町で装備を整え、
@@ -94,6 +127,7 @@ const sceneCastle: SceneDef = {
     // ラルス王：使命 → 姫救出の報告 → 回復係
     newObject({
       emoji: '🤴', col: 14, row: 2, behavior: 'still', hazard: false,
+      spriteRef: wr(SPR.king), spriteUrl: sa(SPR.king),
       pages: [
         {
           name: '姫救出の報告',
@@ -133,11 +167,11 @@ const sceneCastle: SceneDef = {
       ],
     }),
     // 衛兵・家臣たち
-    npc('💂', 12, 9, '王さまの前では れいぎ正しくな。こまったら王さまに会うといい。傷をいやしてくださるぞ。'),
-    npc('💂', 17, 9, '城を出て東へ行けば 町リムルダールだ。フィールドではまものが襲ってくる。そなえは万全にな。'),
-    npc('🧙‍♂️', 10, 11, '竜王の城は北の山おくにある。だが【まほうのカギ】がなければ扉は開かん。カギは北西の洞窟じゃ。', 'xP8oPz'),
-    npc('👩', 19, 12, 'ローラ姫さまが さらわれてしまわれた……洞窟の奥にとらわれているそうです。どうか お助けを！', 'okIlh5'),
-    npc('👴', 4, 11, '戦いのコツを教えよう。MPを使う呪文は強力だが、まずは【たたかう】で様子を見ることじゃ。にげるが勝ちのときもある。', 'M05nRh'),
+    npc('💂', 12, 9, '王さまの前では れいぎ正しくな。こまったら王さまに会うといい。傷をいやしてくださるぞ。', SPR.guardA),
+    npc('💂', 17, 9, '城を出て東へ行けば 町リムルダールだ。フィールドではまものが襲ってくる。そなえは万全にな。', SPR.guardB),
+    npc('🧙‍♂️', 10, 11, '竜王の城は北の山おくにある。だが【まほうのカギ】がなければ扉は開かん。カギは北西の洞窟じゃ。', SPR.mage),
+    npc('👩', 19, 12, 'ローラ姫さまが さらわれてしまわれた……洞窟の奥にとらわれているそうです。どうか お助けを！', SPR.woman),
+    npc('👴', 4, 11, '戦いのコツを教えよう。MPを使う呪文は強力だが、まずは【たたかう】で様子を見ることじゃ。にげるが勝ちのときもある。', SPR.elder),
     // 宝物庫
     chest(25, 10, [
       { type: 'changeGold', amount: 40 },
@@ -198,17 +232,17 @@ const sceneField: SceneDef = {
   bgm: { ref: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', src: 'https://www.youtube.com/watch?v=9rWBQNDlNW4', type: 'youtube' },
   objects: [
     // ── 南部（弱い敵）──
-    foe({ name: 'スライム', emoji: '🟦', col: 12, row: 14, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6', agility: 5 }),
-    foe({ name: 'スライム', emoji: '🟦', col: 17, row: 20, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: 'k3vKh6', agility: 5 }),
-    foe({ name: 'スライムベス', emoji: '🟥', col: 25, row: 13, hp: 20, atk: 7, def: 2, exp: 5, gold: 7, behavior: 'random', speed: 1.0, spriteId: 'hswBaA', agility: 6 }),
+    foe({ name: 'スライム', emoji: '🟦', col: 12, row: 14, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: SPR.slime, agility: 5 }),
+    foe({ name: 'スライム', emoji: '🟦', col: 17, row: 20, hp: 14, atk: 6, def: 1, exp: 3, gold: 4, behavior: 'random', speed: 1.0, spriteId: SPR.slime, agility: 5 }),
+    foe({ name: 'スライムベス', emoji: '🟥', col: 25, row: 13, hp: 20, atk: 7, def: 2, exp: 5, gold: 7, behavior: 'random', speed: 1.0, spriteId: SPR.slimeBess, agility: 6 }),
     // ── 北部（強い敵）──
-    foe({ name: 'ドラキー', emoji: '🦇', col: 8, row: 7, hp: 23, atk: 8, def: 3, exp: 7, gold: 10, behavior: 'random', spriteId: 'R42ett', agility: 12 }),
-    foe({ name: 'がいこつ', emoji: '💀', col: 16, row: 6, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs', agility: 6 }),
-    foe({ name: 'おおさそり', emoji: '🦂', col: 22, row: 7, hp: 48, atk: 19, def: 10, exp: 33, gold: 40, behavior: 'random', agility: 10 }),
-    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 6, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolV', agility: 8 }),
+    foe({ name: 'ドラキー', emoji: '🦇', col: 8, row: 7, hp: 23, atk: 8, def: 3, exp: 7, gold: 10, behavior: 'random', spriteId: SPR.drakee, agility: 12 }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 16, row: 6, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: SPR.skeleton, agility: 6 }),
+    foe({ name: 'おおさそり', emoji: '🦂', col: 22, row: 7, hp: 48, atk: 19, def: 10, exp: 33, gold: 40, behavior: 'random', spriteId: SPR.scorpion, agility: 10 }),
+    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 6, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolV', spriteId: SPR.armorKnight, agility: 8 }),
     // ── NPC ──
-    npc('🧑‍🌾', 16, 11, '橋の北はまものが強い。レベル5……いや、くさりかたびらを買ってからのほうがいいぞ。'),
-    npc('👴', 10, 19, '西の城がラダトーム城、東の町がリムルダールじゃ。北西の山には洞窟の入り口があるらしい。', 'M05nRh'),
+    npc('🧑‍🌾', 16, 11, '橋の北はまものが強い。レベル5……いや、くさりかたびらを買ってからのほうがいいぞ。', SPR.farmer),
+    npc('👴', 10, 19, '西の城がラダトーム城、東の町がリムルダールじゃ。北西の山には洞窟の入り口があるらしい。', SPR.elder),
     // ── 宝箱（北東の隠しポケット）──
     chest(28, 2, [
       { type: 'changeGold', amount: 64 },
@@ -260,7 +294,7 @@ const sceneVillage: SceneDef = {
     // 宿屋（8G で全回復）
     newObject({
       emoji: '🏨', col: 4, row: 5, behavior: 'still', hazard: false,
-      spriteRef: wr('M05nRh'), spriteUrl: sa('M05nRh'),
+      spriteRef: wr(SPR.elder), spriteUrl: sa(SPR.elder),
       pages: [{
         conditions: {},
         commands: [
@@ -310,11 +344,11 @@ const sceneVillage: SceneDef = {
       ]}],
     }),
     // 町の人々
-    npc('👴', 8, 12, '竜王の城の扉は【まほうのカギ】がなければ開かんそうじゃ。カギは沼地の洞窟のドラゴンが守っておるという……', 'M05nRh'),
-    npc('👩', 17, 11, 'ローラ姫さまが まものにさらわれたの……王さまは ずっとお嘆きよ。', 'okIlh5'),
-    npc('👨', 12, 15, '戦いで傷ついたら宿屋で休むといい。ここの宿はひと晩8ゴールドだ。安いだろ？'),
-    npc('👧', 6, 17, '洞窟のおくで ひかる石板を見たんだ！さわったら どこかで ゴゴゴ…って音がしたよ！', 'mLHxrK'),
-    npc('🧔', 20, 14, '金がたまったら【くさりかたびら】を買いな。命には かえられないぜ。'),
+    npc('👴', 8, 12, '竜王の城の扉は【まほうのカギ】がなければ開かんそうじゃ。カギは沼地の洞窟のドラゴンが守っておるという……', SPR.elder),
+    npc('👩', 17, 11, 'ローラ姫さまが まものにさらわれたの……王さまは ずっとお嘆きよ。', SPR.woman),
+    npc('👨', 12, 15, '戦いで傷ついたら宿屋で休むといい。ここの宿はひと晩8ゴールドだ。安いだろ？', SPR.townsman),
+    npc('👧', 6, 17, '洞窟のおくで ひかる石板を見たんだ！さわったら どこかで ゴゴゴ…って音がしたよ！', SPR.girl),
+    npc('🧔', 20, 14, '金がたまったら【くさりかたびら】を買いな。命には かえられないぜ。', SPR.merchant),
     // 町の出口 → フィールド
     warp('🚪', 15, 22, 'field', 23, 19),
   ],
@@ -364,12 +398,12 @@ const sceneCave: SceneDef = {
   bgm: { ref: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', src: 'https://www.youtube.com/watch?v=kpXqFuFe5pM', type: 'youtube' },
   objects: [
     // 入り口の老人
-    npc('👴', 3, 19, 'この洞窟のおくには ドラゴンが住みついておる。ローラ姫とまほうのカギは その先じゃ……むりはするなよ。', 'M05nRh'),
+    npc('👴', 3, 19, 'この洞窟のおくには ドラゴンが住みついておる。ローラ姫とまほうのカギは その先じゃ……むりはするなよ。', SPR.elder),
     // ── 西の部屋（石板と金貨）──
     chest(7, 9, [
       { type: 'changeGold', amount: 120 },
     ]),
-    foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs', agility: 6 }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 10, row: 11, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: SPR.skeleton, agility: 6 }),
     // 石板スイッチ（隠し部屋の封印を解く）
     newObject({
       emoji: '🪨', col: 14, row: 12, behavior: 'still', hazard: false,
@@ -382,7 +416,7 @@ const sceneCave: SceneDef = {
       ],
     }),
     // ── 隠し部屋（まほうのよろい）──
-    foe({ name: 'がいこつ', emoji: '💀', col: 11, row: 17, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: 'pyPkIs', agility: 6 }),
+    foe({ name: 'がいこつ', emoji: '💀', col: 11, row: 17, hp: 45, atk: 17, def: 8, exp: 24, gold: 30, behavior: 'patrolH', spriteId: SPR.skeleton, agility: 6 }),
     newObject({
       emoji: '🔒', col: 7, row: 17, behavior: 'still', hazard: false,
       spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL'),
@@ -397,9 +431,9 @@ const sceneCave: SceneDef = {
       ],
     }),
     // ── 右の通路と最深部 ──
-    foe({ name: 'メーダ', emoji: '👁️', col: 26, row: 9, hp: 35, atk: 14, def: 6, exp: 16, gold: 20, moves: [{ name: 'メラ', power: 7 }], behavior: 'patrolV', spriteId: 'oE4l1x', agility: 9 }),
+    foe({ name: 'メーダ', emoji: '👁️', col: 26, row: 9, hp: 35, atk: 14, def: 6, exp: 16, gold: 20, moves: [{ name: 'メラ', power: 7 }], behavior: 'patrolV', spriteId: SPR.meda, agility: 9 }),
     // 番人ドラゴン
-    foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 120, atk: 35, def: 19, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 18 }], behavior: 'patrolV', speed: 1.4, agility: 15 }),
+    foe({ name: 'ドラゴン', emoji: '🐲', col: 21, row: 16, hp: 120, atk: 35, def: 19, exp: 120, gold: 150, moves: [{ name: 'かえんのいき', power: 18 }], behavior: 'patrolV', speed: 1.4, spriteId: SPR.dragon, agility: 15 }),
     // まほうのカギの宝箱
     chest(26, 15, [
       { type: 'giveItem', itemId: 'magicKey', count: 1 },
@@ -407,6 +441,7 @@ const sceneCave: SceneDef = {
     // ローラ姫
     newObject({
       emoji: '👸', col: 25, row: 18, behavior: 'still', hazard: false,
+      spriteRef: wr(SPR.laura), spriteUrl: sa(SPR.laura),
       pages: [
         { conditions: { switchId: 2, switchValue: true }, commands: [
           { type: 'message', text: 'ローラ「わたしのことは しんぱいいりません。\nはやく父上……ラルス王に ぶじを伝えてください！」' },
@@ -483,15 +518,15 @@ const sceneDragonCastle: SceneDef = {
       ],
     }),
     // ── 大広間 ──
-    foe({ name: 'しりょうのきし', emoji: '🧟', col: 10, row: 7, hp: 68, atk: 28, def: 15, exp: 75, gold: 85, moves: [{ name: 'ベホイミ', power: 16, heal: true }], behavior: 'patrolH', agility: 10 }),
-    foe({ name: 'キメラ', emoji: '🦅', col: 19, row: 8, hp: 58, atk: 26, def: 11, exp: 60, gold: 70, moves: [{ name: 'かえんのいき', power: 13 }], behavior: 'random', agility: 14 }),
+    foe({ name: 'しりょうのきし', emoji: '🧟', col: 10, row: 7, hp: 68, atk: 28, def: 15, exp: 75, gold: 85, moves: [{ name: 'ベホイミ', power: 16, heal: true }], behavior: 'patrolH', spriteId: SPR.wight, agility: 10 }),
+    foe({ name: 'キメラ', emoji: '🦅', col: 19, row: 8, hp: 58, atk: 26, def: 11, exp: 60, gold: 70, moves: [{ name: 'かえんのいき', power: 13 }], behavior: 'random', spriteId: SPR.chimera, agility: 14 }),
     // 西翼：ロトのつるぎ（ストーンマンが守る）
-    foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 103, atk: 32, def: 20, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8, agility: 5 }),
+    foe({ name: 'ストーンマン', emoji: '🗿', col: 3, row: 11, hp: 103, atk: 32, def: 20, exp: 110, gold: 130, behavior: 'patrolV', speed: 0.8, spriteId: SPR.stoneman, agility: 5 }),
     chest(3, 9, [
       { type: 'giveItem', itemId: 'lotoSword', count: 1 },
     ]),
     // 東翼：軍資金
-    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolH', agility: 8 }),
+    foe({ name: 'よろいのきし', emoji: '🤺', col: 23, row: 12, hp: 77, atk: 30, def: 18, exp: 95, gold: 110, behavior: 'patrolH', spriteId: SPR.armorKnight, agility: 8 }),
     chest(26, 10, [
       { type: 'changeGold', amount: 300 },
     ]),
@@ -519,7 +554,7 @@ const sceneDragonCastle: SceneDef = {
       emoji: '🐉', name: 'りゅうおう', col: 15, row: 3, behavior: 'still', speed: 0, hazard: true, isBoss: true,
       hp: 220, atk: 60, def: 38, exp: 500, gold: 0,
       moves: [{ name: 'はげしいほのお', power: 34 }, { name: 'かえんのいき', power: 26 }],
-      spriteRef: wr('Ilpvcu'), spriteUrl: sa('Ilpvcu'),
+      spriteRef: wr(SPR.dragonlord), spriteUrl: sa(SPR.dragonlord),
       outroDialogue: [
         { speaker: 'りゅうおう', emoji: '🐉', text: 'ぐ……ぐわああ……！\nこの わしが……勇者ごときに……' },
         { speaker: 'りゅうおう', emoji: '🐉', text: 'おぼえておれ……闇はいつの日か……\nかならず よみがえる……！' },
@@ -540,7 +575,7 @@ export const dq: PresetData = {
   player: {
     emoji: '🧝', color: '#4444ff', speed: 3, jumpPower: 0, w: TILE_SIZE, h: TILE_SIZE,
     start: { x: TILE_SIZE * 15, y: TILE_SIZE * 18 },  // ラダトーム城 玉座の間の前
-    spriteRef: wr('0yyTSP'), spriteUrl: sa('0yyTSP'),
+    spriteRef: wr(SPR.hero), spriteUrl: sa(SPR.hero),
   },
   tiles,
   map: JSON.parse(JSON.stringify(castleMap)),
@@ -602,7 +637,7 @@ export const dq: PresetData = {
     inn:      { ref: `direct:${su('L5Npni')}`, src: su('L5Npni'), type: 'direct' as const },
     // 被弾＝「[ﾄﾞﾗｸｴ]敵攻撃」。戦闘中はステータス欄の振動と同時に鳴る
     damage:   { ref: `direct:${su('bC3ZP1')}`, src: su('bC3ZP1'), type: 'direct' as const },
-    clear:    { ref: 'clear' },
+    clear:    { ref: `direct:${su('oFwlq5')}`, src: su('oFwlq5'), type: 'direct' as const }, // エンディング（クリア時のファンファーレ）
     // ── ターン制戦闘SE（すべて RPGEN 素材のドラクエ系サウンド） ──
     encounter:   { ref: `direct:${su('qm03Mw')}`, src: su('qm03Mw'), type: 'direct' as const }, // [ﾄﾞﾗｸｴ6]エンカウント
     attackStart: { ref: `direct:${su('n0fqek')}`, src: su('n0fqek'), type: 'direct' as const }, // ﾄﾞﾗｸｴ攻撃時（振りかぶり）

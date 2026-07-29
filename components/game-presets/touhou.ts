@@ -295,9 +295,27 @@ end while
       ],
     }),
   ],
+  // タイトル／エンディング画面はエンジン非依存のオーバーレイなので東方エンジンでも表示される。
+  titleScreen: {
+    enabled: true,
+    heading: '東方弾幕ごっこ',
+    subtitle: '方向キーで移動（弾は自動連射）／ Shift で低速移動 ／ X でボム',
+    textColor: '#ffd0e6',
+    menu: [
+      { kind: 'newGame', label: 'はじめる' },
+    ],
+  },
+  ending: {
+    enabled: true,
+    heading: 'ALL CLEAR',
+    message: '道中もボスも すべて突破した！\nチルノの氷はとけ、幻想郷に静けさが戻った。\n\n——次はもっと上の難易度で会いましょう。',
+    textColor: '#ffd0e6',
+  },
   sfx: {
     graze:     { ref: `direct:${su('8x4RbZ')}`, src: su('8x4RbZ'), type: 'direct' as const },
     damage:    { ref: `direct:${su('EWsh6F')}#vol=25`, src: su('EWsh6F'), type: 'direct' as const },
     spellcard: { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
+    // クリア時のファンファーレ（全フェーズ突破 → エンディング画面）
+    clear:     { ref: `direct:${su('CvnSzp')}`, src: su('CvnSzp'), type: 'direct' as const },
   },
 };

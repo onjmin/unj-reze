@@ -108,8 +108,6 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
   }, [lines]);
 
   const current = lines[index];
-  if (!current) return null;
-  const currentKey = keyOf(current);
 
   const advance = () => {
     if (index < lines.length - 1) {
@@ -140,6 +138,13 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // 早期 return はフックを1つも飛ばさないよう、必ず全フックの呼び出し後に置く。
+  // ここより上に置くと、最終行を送って current が undefined になった瞬間だけ
+  // フック数が減り、React が #300「Rendered fewer hooks than expected」で
+  // ツリーごと落ちる（＝ボス撃破のセリフを読み終えた瞬間に画面が真っ白になる）。
+  if (!current) return null;
+  const currentKey = keyOf(current);
 
   const isLast = index === lines.length - 1;
 

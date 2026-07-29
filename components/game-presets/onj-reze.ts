@@ -1,8 +1,23 @@
 import { type PresetData, type SceneDef, newObject, COLS, ROWS, TILE_SIZE } from './shared';
-import { spriteUrl as sp, sAnimUrl as sa } from '@/lib/rpgen-assets';
+import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-assets';
 // id は rpgen-search API の id フィールド（ハッシュ文字列）
 const wr  = (id: string) => `walk:auto:u:${sa(id)}`;
 const ir  = (id: string) => `url:${sp(id)}`;
+
+// ── モンスターの歩行グラ ────────────────────────────────────────────────────
+// 種族ごとに別の素材を割り当てる（以前は全モンスターがレゼの歩行グラを流用していた）。
+// レゼだけは本人の素材（sAnims/US6LgA「レゼ」）を使う。
+const MON = {
+  reze:   'US6LgA',  // 🧨 レゼ（ボス本人）
+  slime:  'YwpE7Q',  // 🟢 スライム
+  wolf:   'h9iBuH',  // 🐺 犬 → オオカミ
+  ghost:  'qoc3wW',  // 👻 怨霊 → ゴースト
+  beast:  'ckrurk',  // 🐗 熊 → ワーウルフ
+  goblin: 'JrUaKI',  // 👹 ゴブリン
+  golem:  'VOpXq9',  // 🪨 石像 → ストーンゴーレム
+};
+/** モンスター1体ぶんの spriteRef/spriteUrl。 */
+const mon = (id: string) => ({ spriteRef: wr(id), spriteUrl: sa(id) });
 // フィールド用マップチップ（旧 gomi.html / tmp/gomi/gomi2.json と同じ field.png チップシート。16pxマス・30列）。
 // sx,sy は元データのタイルID(id%30*16, floor(id/30)*16)から算出したチップ切り出し座標。
 const FIELD_TILESET = '/assets/rpg-reze/field.png';
@@ -171,6 +186,18 @@ const scene1: SceneDef = {
             { type: 'message', text: '（甘い記憶の奥から、ソ連の爆弾兵器としての本性が覗く……）' },
             { type: 'message', text: 'レゼ「デンジ君の心臓貰うね？」' },
             { type: 'message', text: 'レゼ「おいでデンジ君　私達の戦い方ってのを教えてあげる」' },
+            // 花屋で買った💐花束を、彼女が働いていたテーブルに供える（花束の唯一の使い道）
+            {
+              type: 'ifItem', itemId: 'flower', has: true,
+              then: [
+                { type: 'message', text: '（花屋で買った花束を、彼女がいつも立っていたテーブルに置いた。）' },
+                { type: 'removeItem', itemId: 'flower', count: 1 },
+                { type: 'restoreHp' },
+                { type: 'restoreMp' },
+                { type: 'message', text: 'ふしぎと 気持ちが 落ち着いた。\nHP と MP が全回復した！' },
+                { type: 'message', text: '（……次に会うときは、爆弾じゃなくて この花を渡そう。）' },
+              ],
+            },
           ],
         },
       ],
@@ -195,7 +222,7 @@ const scene1: SceneDef = {
       }],
     }),
     newObject({ emoji: '👴', col: 16, row: 11, behavior: 'still', hazard: false,
-      message: 'フィールドの奥でレゼが彷徨っとるぞ。レベルを上げてから挑むんじゃ。\n剣を振り回すコツを掴んだら一気に楽になる。',
+      message: 'フィールドの南のおくで レゼが彷徨っとる。あやつを倒せば この騒ぎも終わりじゃ。\nじゃが今のままでは勝てん。道中のモンスターでレベルを上げてから挑むんじゃぞ。',
       spriteRef: wr('oLrlUq'), spriteUrl: sa('oLrlUq') }),
     // ── 花屋の内装 ──
     newObject({ kind: 'tile', col: 14, row: 11, behavior: 'still', hazard: false, message: '',
@@ -328,8 +355,16 @@ const scene2: SceneDef = {
     newObject({ emoji: '🏠', col: 27, row: 21, objType: 'warp', hazard: false, hp: 1, speed: 0, behavior: 'still', bullet: 'none', message: '',
       warpSceneId: 'town', warpEntryCol: 10, warpEntryRow: ROWS - 3 }),
     // ── レゼ（爆弾を投げてくる敵）──
+    // isBoss: true が onjReze エンジンのクリア判定（フィールド上の isBoss を全滅させたら
+    // outroDialogue → エンディング）を発火させる。これが無いとゲームがクリア不能になる。
     newObject({ emoji: '🧨', name: 'レゼ', col: 25, row: 30, behavior: 'chase', speed: 0.9, hp: 50, atk: 30, def: 18, exp: 60, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      isBoss: true, ...mon(MON.reze),
+      outroDialogue: [
+        { speaker: 'レゼ', emoji: '🧨', text: 'あはっ……　つよいんだね、キミ。' },
+        { speaker: 'レゼ', emoji: '🧨', text: 'ねえ、いっしょに　いかない？\nここじゃない　どこかへ。' },
+        { speaker: 'なんJ民', emoji: '🧑', side: 'right', text: '……悪いけど、ワイにはこの街があるんや。' },
+        { speaker: 'レゼ', emoji: '🧨', text: 'そっか。……ざんねん。\nでも、たのしかったよ。ありがとう。' },
+      ] }),
     // ── フィールド NPC ──
     newObject({ emoji: '🧑', col: 24, row: 19, behavior: 'still', hazard: false,
       message: '道の先にレゼがおるって噂や。爆弾を投げてくるから気をつけてな。',
@@ -342,22 +377,26 @@ const scene2: SceneDef = {
       objType: 'item', itemId: 'holyWater', message: '草むらの中に「せいすい」が落ちていた！',
       spriteRef: ir('lzUOisL'), spriteUrl: sp('lzUOisL') }),
     // ── モンスター配置（tmp/gomi/gomi2.json の monsters を移植・敵性のもののみ）──
+    // 街の出口（col26,row21 付近）からレゼ（col25,row30）へ向かうにつれ強くなるよう、
+    // 弱い順に道沿いへ散らす。同一マスに重ねない（重なると開幕から袋叩きになる）。
     newObject({ emoji: '🟢', name: 'スライム', col: 36, row: 5, behavior: 'random', speed: 0.6, hp: 20, atk: 8, def: 4, exp: 10, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      ...mon(MON.slime) }),
+    newObject({ emoji: '🟢', name: 'スライム', col: 29, row: 24, behavior: 'random', speed: 0.6, hp: 20, atk: 8, def: 4, exp: 10, hazard: true,
+      ...mon(MON.slime) }),
     newObject({ emoji: '🐺', name: 'オオカミ', col: 44, row: 1, behavior: 'chase', speed: 0.8, hp: 35, atk: 14, def: 6, exp: 18, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      ...mon(MON.wolf) }),
     newObject({ emoji: '👻', name: 'ゴースト', col: 34, row: 6, behavior: 'chase', speed: 0.7, hp: 30, atk: 12, def: 5, exp: 16, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
-    newObject({ emoji: '🐺', name: 'オオカミ', col: 26, row: 31, behavior: 'chase', speed: 0.8, hp: 35, atk: 14, def: 6, exp: 18, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      ...mon(MON.ghost) }),
+    newObject({ emoji: '🐺', name: 'オオカミ', col: 30, row: 27, behavior: 'chase', speed: 0.8, hp: 35, atk: 14, def: 6, exp: 18, hazard: true,
+      ...mon(MON.wolf) }),
     newObject({ emoji: '🐗', name: 'ワーウルフ', col: 35, row: 33, behavior: 'chase', speed: 0.85, hp: 60, atk: 22, def: 10, exp: 30, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      ...mon(MON.beast) }),
     newObject({ emoji: '🐗', name: 'ワーウルフ', col: 11, row: 13, behavior: 'chase', speed: 0.85, hp: 60, atk: 22, def: 10, exp: 30, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
-    newObject({ emoji: '👹', name: 'ゴブリンリーダー', col: 26, row: 31, behavior: 'chase', speed: 0.75, hp: 55, atk: 20, def: 12, exp: 28, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      ...mon(MON.beast) }),
+    newObject({ emoji: '👹', name: 'ゴブリンリーダー', col: 28, row: 32, behavior: 'chase', speed: 0.75, hp: 55, atk: 20, def: 12, exp: 28, hazard: true,
+      ...mon(MON.goblin) }),
     newObject({ emoji: '🪨', name: 'ストーンゴーレム', col: 11, row: 7, behavior: 'still', speed: 0, hp: 34, atk: 16, def: 20, exp: 22, hazard: true,
-      spriteRef: wr('US6LgA'), spriteUrl: sa('US6LgA') }),
+      ...mon(MON.golem) }),
   ],
 };
 
@@ -390,9 +429,22 @@ export const onjReze: PresetData = {
       { kind: 'newGame',   label: 'ぼうけんをはじめる' },
     ],
   },
+  ending: {
+    enabled: true,
+    heading: 'THE END',
+    message: 'レゼは 街を去っていった。\nもう爆弾の音がしない朝が、また来る。\n\n——なんJ民の夏は、これでおしまい。',
+    textColor: '#ffaacc',
+  },
   bgm: { ref: 'https://www.youtube.com/watch?v=0_jEpB40aYw', src: 'https://www.youtube.com/watch?v=0_jEpB40aYw', type: 'youtube' },
+  // bossBgm は onjReze エンジンでは鳴らない（ターン制戦闘 or touhou のボスフェーズ専用）ので置かない。
+  // SE は必ず src まで埋める（src が無いと playSfx が即 return して無音になる）
   sfx: {
-    clear:  { ref: 'clear' },
-    damage: { ref: 'damage' },
+    shot:     { ref: `direct:${su('3JcWxQ')}`, src: su('3JcWxQ'), type: 'direct' as const }, // 爆弾を投げる
+    damage:   { ref: `direct:${su('bC3ZP1')}`, src: su('bC3ZP1'), type: 'direct' as const },
+    levelup:  { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
+    purchase: { ref: `direct:${su('PEeN5M')}`, src: su('PEeN5M'), type: 'direct' as const },
+    inn:      { ref: `direct:${su('L5Npni')}`, src: su('L5Npni'), type: 'direct' as const },
+    save:     { ref: `direct:${su('Kyp5z7')}`, src: su('Kyp5z7'), type: 'direct' as const },
+    clear:    { ref: `direct:${su('CvnSzp')}`, src: su('CvnSzp'), type: 'direct' as const },
   },
 };

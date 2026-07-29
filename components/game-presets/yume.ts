@@ -4,6 +4,7 @@ import {
   type PresetData, type Layout25D, type Wall25D, type Billboard25D, type Dir4,
   normalizeWall25D, TILE_SIZE, COLS, ROWS, defaultDeathScreen,
 } from './shared';
+import { soundUrl as su } from '@/lib/rpgen-assets';
 
 const YCOLS = 16, YROWS = 16;
 
@@ -126,7 +127,22 @@ export const yume: PresetData = {
   tiles: { 0: { name: 'なし', color: '#000000', passable: true } },
   map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
   objects: [],
+  // 「謎の曲(ループ対応)」。direct 音源はループ再生される。
+  bgm: { ref: `direct:${su('B3rjnX')}`, src: su('B3rjnX'), type: 'direct' },
+  // yume25d は効果音を自前の定数（足音・食事・システム床）で鳴らすため preset.sfx は参照しない。
+  // ここに書いても鳴らないので空のままにしておく。
   sfx: {},
+  titleScreen: {
+    enabled: true,
+    heading: 'ゆめにっき3D',
+    subtitle: '方向キーで歩く ／ ドラッグで見まわす ／ 近づいて調べる',
+    textColor: '#c9b6f0',
+    menu: [
+      { kind: 'newGame', label: 'ゆめをみる' },
+    ],
+  },
+  // ending は置かない：yume25d にクリア条件が無く、エンディング画面を出す経路が存在しない
+  // （ゆめにっき同様、目的のない徘徊がゲーム性。終わりは deathScreen＝「めがさめる」だけ）。
   layout25d,
   deathScreen: defaultDeathScreen(),
 };
