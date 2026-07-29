@@ -1059,7 +1059,7 @@ export const convertMapToLayout25D = (src: PresetData, base: Layout25D): Layout2
     wallHeight: base.wallHeight, skyColor: base.skyColor,
     fogColor: base.fogColor, fogNear: base.fogNear, fogFar: base.fogFar,
     start: { col: startCol, row: startRow, dir: 0 },
-    pov: base.pov, povDistance: base.povDistance, jumpHeight: base.jumpHeight,
+    pov: base.pov, povDistance: base.povDistance, jumpHeight: base.jumpHeight, playerScale: base.playerScale,
   };
 };
 

@@ -808,6 +808,8 @@ export default function Yume25DEditorPanel({
               <SliderField label="カメラ距離" value={layout.povDistance ?? 1.6} min={0.4} max={3.5} step={0.1}
                 onChange={v => onLayoutChange(l => ({ ...l, povDistance: v }))} />
             )}
+            <SliderField label="プレイヤーの大きさ" value={layout.playerScale ?? 1} min={0.3} max={3} step={0.1} suffix="倍"
+              onChange={v => onLayoutChange(l => ({ ...l, playerScale: Math.round(v * 10) / 10 }))} />
           </div>
 
           {/* グラフィック：シェーダーMod プリセットと時間帯。以降は見た目まわりの設定が続く */}
