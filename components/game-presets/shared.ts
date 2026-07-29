@@ -753,6 +753,12 @@ export interface Layout25D {
   timeOfDay?: 'day' | 'sunset' | 'night';
   /** ブルーム / 光彩エフェクト */
   bloomEnabled?: boolean;
+  /** 太陽（月）の方位角。度で 0=北、時計回りに 90=東 / 180=南 / 270=西。未指定は時間帯ごとの既定値。 */
+  sunAzimuth?: number;
+  /** 太陽（月）の仰角。度で 0=地平線、90=真上。未指定は時間帯ごとの既定値。 */
+  sunElevation?: number;
+  /** 太陽（月）を隠す。空の円盤が消え、太陽光と影も無くなって環境光だけの平らな光になる。 */
+  sunHidden?: boolean;
 }
 
 /** 壁の置き場所を北辺/西辺に正規化する。 */

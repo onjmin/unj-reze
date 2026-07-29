@@ -13,7 +13,7 @@ import {
 } from './game-presets/shared';
 import { searchModels, type ModelCatalogEntry } from './game-presets/model-catalog';
 import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
-import { drawPlayerIconCanvas, yume25dAmbientDefault } from '@/lib/yume25d';
+import { drawPlayerIconCanvas, yume25dAmbientDefault, yume25dTimeOfDay, yume25dSunAngles } from '@/lib/yume25d';
 import { billboardGroups, canShiftLayer, shiftLayer, setWallHeight, stackBlockLayer, type LayerShiftTarget, generateYumeTerrain, type YumeTerrainOptions } from '@/lib/yume25d-macros';
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from '@/lib/terrain-gen';
 import AssetThumb from './AssetThumb';
@@ -29,6 +29,39 @@ function SpriteThumb({ t }: { t: Tex25D }) {
   }, [t.imageUrl, t.imageRef, t.emoji, t.color]);
   return <canvas ref={cvRef} className="w-full h-full" style={{ imageRendering: 'pixelated' }} />;
 }
+
+/** 設定パネルの行のうち、幅いっぱいのコントロール（セレクト等）を置くもの。
+ *  他の行と同じ「ラベル｜コントロール」の横並びにすると、コントロールが幅を取り切って
+ *  ラベルが1文字ずつ縦に折り返してしまうため、こちらはラベルを上に積む。 */
+function WideField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="col-span-2 block">
+      <span className="block text-gray-400 mb-0.5">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+/** スライダー行：ラベル・つまみ・現在値を1行に収める。値が見えないと角度の調整ができない。 */
+function SliderField({ label, value, min, max, step = 1, suffix = '', onChange }: {
+  label: string; value: number; min: number; max: number; step?: number; suffix?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="col-span-2 flex items-center justify-between gap-2">
+      <span className="shrink-0">{label}</span>
+      <span className="flex items-center gap-1.5 min-w-0">
+        <input type="range" min={min} max={max} step={step} value={value}
+          onChange={e => onChange(Number(e.target.value))} className="w-28 min-w-0" />
+        <span className="w-11 shrink-0 text-right tabular-nums text-gray-400">{value}{suffix}</span>
+      </span>
+    </label>
+  );
+}
+
+/** 方位角（度）を8方位の名前へ。数字だけだとどちらを向いているか分からない。 */
+const COMPASS = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+const compassName = (deg: number) => COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
 
 interface Yume25DEditorPanelProps {
   layout: Layout25D;
@@ -64,6 +97,8 @@ export default function Yume25DEditorPanel({
     else if (tool === 'wall') onSelWallChange(id);
     else onSelSpriteChange(id);
   };
+  /** スライダーには実際に使われている角度を出す（未設定なら時間帯ごとの既定値）。 */
+  const sunAngles = yume25dSunAngles(layout);
 
   /** 2Dエンジンの「シーン切替床」は yume25d ではマップ内転送なので表示名を読み替える。 */
   const sysTileLabel = (tpl: SystemTileTemplate) => tpl.special === 'warp' ? 'ワープ床' : tpl.label;
@@ -729,7 +764,7 @@ export default function Yume25DEditorPanel({
           <p className="text-[12px] font-bold text-gray-200">⚙️ ワールド設定</p>
 
           {/* マップ：広さ・壁・天井・ジャンプ */}
-          <p className="font-bold text-gray-400">マップ</p>
+          <p className="font-bold text-gray-400">🗺️ マップ</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <label className="flex items-center justify-between gap-1">広さ(列)
               <input type="number" min={4} max={48} value={layout.cols}
@@ -756,8 +791,123 @@ export default function Yume25DEditorPanel({
             </label>
           </div>
 
+          {/* 視点 */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">👁️ 視点</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1 col-span-2">視点
+              <span className="flex overflow-hidden rounded border border-gray-600">
+                {(['first', 'third'] as const).map(m => (
+                  <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
+                    className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
+                    {m === 'first' ? '一人称' : '三人称'}
+                  </button>
+                ))}
+              </span>
+            </label>
+            {(layout.pov ?? 'first') === 'third' && (
+              <SliderField label="カメラ距離" value={layout.povDistance ?? 1.6} min={0.4} max={3.5} step={0.1}
+                onChange={v => onLayoutChange(l => ({ ...l, povDistance: v }))} />
+            )}
+          </div>
+
+          {/* グラフィック：シェーダーMod プリセットと時間帯。以降は見た目まわりの設定が続く */}
+          <p className="font-bold text-yellow-400 pt-1.5 mt-1 border-t border-gray-700/50">✨ グラフィック（Minecraft Shader Mods）</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <WideField label="シェーダープリセット">
+              <select value={layout.shaderPreset ?? 'bsl'}
+                onChange={e => onLayoutChange(l => ({ ...l, shaderPreset: e.target.value as 'bsl' | 'seus' | 'complementary' | 'vanilla' }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-white">
+                <option value="bsl">🌅 BSL Shaders（夕焼け・温かな太陽光）</option>
+                <option value="seus">🌌 SEUS Shaders（月光・ドラマチック）</option>
+                <option value="complementary">⚡ Complementary（鮮やか・高コントラスト）</option>
+                <option value="vanilla">🧱 Vanilla（クラシック・補正なし）</option>
+              </select>
+            </WideField>
+            <WideField label="時間帯（光と空の色）">
+              <select value={yume25dTimeOfDay(layout)}
+                onChange={e => onLayoutChange(l => ({ ...l, timeOfDay: e.target.value as 'sunset' | 'day' | 'night' }))}
+                className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-white">
+                <option value="sunset">🌆 夕焼け（Golden Hour）</option>
+                <option value="day">☀️ 昼（Daylight）</option>
+                <option value="night">🌙 夜（Midnight）</option>
+              </select>
+            </WideField>
+            <label className="flex items-center justify-between gap-1">リアルタイム影
+              <input type="checkbox" disabled={!!layout.sunHidden}
+                checked={!layout.sunHidden && layout.shadowsEnabled !== false}
+                onChange={e => onLayoutChange(l => ({ ...l, shadowsEnabled: e.target.checked }))} />
+            </label>
+            <label className="flex items-center justify-between gap-1">光彩ブルーム
+              <input type="checkbox" checked={layout.bloomEnabled !== false}
+                onChange={e => onLayoutChange(l => ({ ...l, bloomEnabled: e.target.checked }))} />
+            </label>
+          </div>
+
+          {/* 太陽・月：空のどこに出すか。隠すと太陽光も影も無くなる */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">
+            {yume25dTimeOfDay(layout) === 'night' ? '🌙 月' : '☀️ 太陽'}の位置
+          </p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1 col-span-2">空に出す
+              <input type="checkbox" checked={!layout.sunHidden}
+                onChange={e => onLayoutChange(l => ({ ...l, sunHidden: e.target.checked ? undefined : true }))} />
+            </label>
+            {!layout.sunHidden && (
+              <>
+                <SliderField label="向き（方位）" value={sunAngles.azimuth} min={0} max={359} suffix="°"
+                  onChange={v => onLayoutChange(l => ({ ...l, sunAzimuth: v }))} />
+                <SliderField label="高さ（仰角）" value={sunAngles.elevation} min={0} max={90} suffix="°"
+                  onChange={v => onLayoutChange(l => ({ ...l, sunElevation: v }))} />
+                <p className="col-span-2 text-[9px] text-gray-500">
+                  向きは {sunAngles.azimuth}°＝{compassName(sunAngles.azimuth)}（0°=北・90°=東・180°=南・270°=西）。
+                  高さは 0°で地平線すれすれ（影が長く伸びる）、90°で真上（影が足元に落ちる）。
+                </p>
+              </>
+            )}
+            {layout.sunHidden && (
+              <p className="col-span-2 text-[9px] text-gray-500">
+                空から{yume25dTimeOfDay(layout) === 'night' ? '月' : '太陽'}が消え、太陽光と影も無くなります。
+                下の「照明」の明るさだけで照らす、影のない平らな光になります（曇り空・夢の中のような見た目）
+              </p>
+            )}
+          </div>
+
+          {/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）とランタン */}
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">💡 照明</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1">明るさ
+              <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? yume25dAmbientDefault(layout)}
+                onChange={e => onLayoutChange(l => ({ ...l, ambientLight: Number(e.target.value) }))} className="w-20" />
+            </label>
+            <label className="flex items-center justify-between gap-1">光の色
+              <input type="color" value={layout.ambientColor ?? '#ffffff'}
+                onChange={e => onLayoutChange(l => ({ ...l, ambientColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
+            </label>
+            {/* プレイヤー光源（ランタン）：暗くした夢空間で足元だけ照らす演出用 */}
+            <label className="flex items-center justify-between gap-1 col-span-2">ランタン（プレイヤー光源）
+              <input type="checkbox" checked={!!layout.playerLight?.enabled}
+                onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight, enabled: e.target.checked } }))} />
+            </label>
+            {layout.playerLight?.enabled && (
+              <>
+                <label className="flex items-center justify-between gap-1">光源の色
+                  <input type="color" value={layout.playerLight.color ?? '#ffd9a0'}
+                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, color: e.target.value } }))} className="w-8 h-5 bg-transparent" />
+                </label>
+                <label className="flex items-center justify-between gap-1">光源の強さ
+                  <input type="range" min={0.2} max={3} step={0.1} value={layout.playerLight.intensity ?? 1}
+                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, intensity: Number(e.target.value) } }))} className="w-20" />
+                </label>
+                <label className="flex items-center justify-between gap-1 col-span-2">光の届く距離
+                  <input type="range" min={2} max={20} step={1} value={layout.playerLight.distance ?? 8}
+                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, distance: Number(e.target.value) } }))} className="w-28" />
+                </label>
+              </>
+            )}
+          </div>
+
           {/* 空と霧：空の色・霧・背景パノラマ */}
-          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">空と霧</p>
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">🌫️ 空と霧</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <label className="flex items-center justify-between gap-1">空の色
               <input type="color" value={layout.skyColor}
@@ -790,7 +940,7 @@ export default function Yume25DEditorPanel({
           </div>
 
           {/* 海：この高さから下がすべて水（溶岩）になる（0=なし）。プレイヤーは泳げる */}
-          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">海</p>
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">🌊 海</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <label className="flex items-center justify-between gap-1">水面の高さ
               <input type="range" min={0} max={3} step={0.05} value={layout.waterLevel ?? 0}
@@ -838,7 +988,7 @@ export default function Yume25DEditorPanel({
           </div>
 
           {/* サバイバル：空腹ゲージ（Minecraft風）。「食べ物」スプライト（オブジェタブ）で回復する */}
-          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">サバイバル</p>
+          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">🍖 サバイバル</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
             <label className="flex items-center justify-between gap-1 col-span-2">空腹ゲージ（Minecraft風）
               <input type="checkbox" checked={!!layout.hunger}
@@ -853,94 +1003,6 @@ export default function Yume25DEditorPanel({
             )}
           </div>
 
-          {/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）とランタン */}
-          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">照明</p>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-            <label className="flex items-center justify-between gap-1">明るさ
-              <input type="range" min={0.1} max={2} step={0.05} value={layout.ambientLight ?? yume25dAmbientDefault(layout)}
-                onChange={e => onLayoutChange(l => ({ ...l, ambientLight: Number(e.target.value) }))} className="w-20" />
-            </label>
-            <label className="flex items-center justify-between gap-1">光の色
-              <input type="color" value={layout.ambientColor ?? '#ffffff'}
-                onChange={e => onLayoutChange(l => ({ ...l, ambientColor: e.target.value }))} className="w-8 h-5 bg-transparent" />
-            </label>
-            {/* プレイヤー光源（ランタン）：暗くした夢空間で足元だけ照らす演出用 */}
-            <label className="flex items-center justify-between gap-1 col-span-2">ランタン（プレイヤー光源）
-              <input type="checkbox" checked={!!layout.playerLight?.enabled}
-                onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight, enabled: e.target.checked } }))} />
-            </label>
-            {layout.playerLight?.enabled && (
-              <>
-                <label className="flex items-center justify-between gap-1">光源の色
-                  <input type="color" value={layout.playerLight.color ?? '#ffd9a0'}
-                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, color: e.target.value } }))} className="w-8 h-5 bg-transparent" />
-                </label>
-                <label className="flex items-center justify-between gap-1">光源の強さ
-                  <input type="range" min={0.2} max={3} step={0.1} value={layout.playerLight.intensity ?? 1}
-                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, intensity: Number(e.target.value) } }))} className="w-20" />
-                </label>
-                <label className="flex items-center justify-between gap-1 col-span-2">光の届く距離
-                  <input type="range" min={2} max={20} step={1} value={layout.playerLight.distance ?? 8}
-                    onChange={e => onLayoutChange(l => ({ ...l, playerLight: { ...l.playerLight!, distance: Number(e.target.value) } }))} className="w-28" />
-                </label>
-              </>
-            )}
-          </div>
-
-          {/* 視点 */}
-          <p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">視点</p>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-            <label className="flex items-center justify-between gap-1 col-span-2">視点
-              <span className="flex overflow-hidden rounded border border-gray-600">
-                {(['first', 'third'] as const).map(m => (
-                  <button key={m} onClick={() => onLayoutChange(l => ({ ...l, pov: m }))}
-                    className={`px-2 py-0.5 text-[10px] font-bold ${(layout.pov ?? 'first') === m ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>
-                    {m === 'first' ? '一人称' : '三人称'}
-                  </button>
-                ))}
-              </span>
-            </label>
-            {(layout.pov ?? 'first') === 'third' && (
-              <label className="flex items-center justify-between gap-1 col-span-2">カメラ距離
-                <input type="range" min={0.4} max={3.5} step={0.1} value={layout.povDistance ?? 1.6}
-                  onChange={e => onLayoutChange(l => ({ ...l, povDistance: Number(e.target.value) }))} className="w-28" />
-              </label>
-            )}
-          </div>
-
-          {/* Minecraft Shader Mods (グラフィック) */}
-          <p className="font-bold text-yellow-400 pt-1.5 mt-1 border-t border-gray-700/50 flex items-center gap-1">
-            ✨ Minecraft Shader Mods (グラフィック)
-          </p>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-            <label className="flex items-center justify-between gap-1 col-span-2">シェーダープリセット
-              <select value={layout.shaderPreset ?? 'bsl'}
-                onChange={e => onLayoutChange(l => ({ ...l, shaderPreset: e.target.value as 'bsl' | 'seus' | 'complementary' | 'vanilla' }))}
-                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
-                <option value="bsl">🌅 BSL Shaders (夕焼け・温かな太陽光)</option>
-                <option value="seus">🌌 SEUS Shaders (月光・ドラマチック)</option>
-                <option value="complementary">⚡ Complementary (鮮やか・高コントラスト)</option>
-                <option value="vanilla">🧱 Vanilla (クラシック)</option>
-              </select>
-            </label>
-            <label className="flex items-center justify-between gap-1 col-span-2">太陽 / 月の位置 (時間帯)
-              <select value={layout.timeOfDay ?? 'sunset'}
-                onChange={e => onLayoutChange(l => ({ ...l, timeOfDay: e.target.value as 'sunset' | 'day' | 'night' }))}
-                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
-                <option value="sunset">🌆 夕焼け (Golden Hour)</option>
-                <option value="day">☀️ 昼 (Daylight)</option>
-                <option value="night">🌙 夜 (Midnight)</option>
-              </select>
-            </label>
-            <label className="flex items-center justify-between gap-1">リアルタイム影
-              <input type="checkbox" checked={layout.shadowsEnabled !== false}
-                onChange={e => onLayoutChange(l => ({ ...l, shadowsEnabled: e.target.checked }))} />
-            </label>
-            <label className="flex items-center justify-between gap-1">光彩ブルーム
-              <input type="checkbox" checked={layout.bloomEnabled !== false}
-                onChange={e => onLayoutChange(l => ({ ...l, bloomEnabled: e.target.checked }))} />
-            </label>
-          </div>
         </div>
       )}
     </div>

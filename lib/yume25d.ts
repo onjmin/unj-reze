@@ -271,7 +271,9 @@ const SKY_HEIGHT = 36;
 // ── 時間帯ごとの絵づくり ──
 // 光の色は toLightColor() を通すので、ここは「見た目の色味」を素直に書いてよい。
 interface TimeOfDayLook {
-  sun: string; sunIntensity: number; sunOffset: { x: number; y: number; z: number };
+  sun: string; sunIntensity: number;
+  /** 太陽（月）の方位角・仰角（度）。レイアウトの sunAzimuth / sunElevation で上書きできる。 */
+  azimuth: number; elevation: number;
   ambient: string; ambientLight: number;
   /** 空グラデーションの地平線側の色。天頂側はレイアウトの skyColor を使う。 */
   horizon: string;
@@ -282,20 +284,31 @@ interface TimeOfDayLook {
 }
 const TIME_OF_DAY: Record<'day' | 'sunset' | 'night', TimeOfDayLook> = {
   day: {
-    sun: '#fff5dd', sunIntensity: 1.5, sunOffset: { x: 12, y: 24, z: 16 },
+    sun: '#fff5dd', sunIntensity: 1.5, azimuth: 143, elevation: 50,
     ambient: '#9fc0f0', ambientLight: 0.7,
     horizon: '#bcd8f2', disc: '#fffdf0', discSize: 0.055, clouds: 0.5,
   },
   sunset: {
-    sun: '#ffb070', sunIntensity: 1.3, sunOffset: { x: 18, y: 10, z: 12 },
+    sun: '#ffb070', sunIntensity: 1.3, azimuth: 124, elevation: 25,
     ambient: '#8f7ba8', ambientLight: 0.5,
     horizon: '#f0906a', disc: '#ffd9a0', discSize: 0.07, clouds: 0.45,
   },
   night: {
-    sun: '#7f9fe0', sunIntensity: 0.7, sunOffset: { x: -12, y: 20, z: -10 },
+    sun: '#7f9fe0', sunIntensity: 0.7, azimuth: 310, elevation: 52,
     ambient: '#5a6c9c', ambientLight: 0.3,
     horizon: '#2c3a63', disc: '#e8f0ff', discSize: 0.045, clouds: 0.18,
   },
+};
+
+/** 光源としての太陽の距離（マス）。影のカメラ範囲（±20）の外に置く。 */
+const SUN_DISTANCE = 26;
+
+/** 方位角・仰角（度）から太陽の位置ベクトルへ。方位角は 0=北(-Z)、時計回りに 90=東(+X)。 */
+const sunVector = (azimuthDeg: number, elevationDeg: number) => {
+  const az = (azimuthDeg * Math.PI) / 180;
+  const el = (Math.max(0, Math.min(90, elevationDeg)) * Math.PI) / 180;
+  const c = Math.cos(el) * SUN_DISTANCE;
+  return { x: Math.sin(az) * c, y: Math.sin(el) * SUN_DISTANCE, z: -Math.cos(az) * c };
 };
 
 /** そのレイアウトで実際に使われる時間帯。未指定ならシェーダープリセットから決まる。 */
@@ -306,13 +319,21 @@ export const yume25dTimeOfDay = (L: Pick<Layout25D, 'timeOfDay' | 'shaderPreset'
 export const yume25dAmbientDefault = (L: Pick<Layout25D, 'timeOfDay' | 'shaderPreset'>): number =>
   TIME_OF_DAY[yume25dTimeOfDay(L)].ambientLight;
 
+/** 実際に使われる太陽（月）の方位角・仰角（度）。未指定なら時間帯ごとの既定値。 */
+export const yume25dSunAngles = (
+  L: Pick<Layout25D, 'timeOfDay' | 'shaderPreset' | 'sunAzimuth' | 'sunElevation'>,
+): { azimuth: number; elevation: number } => {
+  const look = TIME_OF_DAY[yume25dTimeOfDay(L)];
+  return { azimuth: L.sunAzimuth ?? look.azimuth, elevation: L.sunElevation ?? look.elevation };
+};
+
 /** 空（equirect パノラマ）を手続き的に描く。Minecraft のシェーダーMod らしい
  *  「天頂→地平のグラデーション＋太陽/月の円盤＋角ばったドット雲」を作る。
  *  three の equirectUv は v=1 が真上・u=atan2(z,x)/2π+0.5。CanvasTexture は flipY なので
  *  キャンバスの上端が天頂になる。 */
 const drawSkyCanvas = (
   cv: HTMLCanvasElement, zenith: string, look: TimeOfDayLook,
-  sunDir: { x: number; y: number; z: number },
+  sunDir: { x: number; y: number; z: number } | null,
 ) => {
   const W = cv.width, H = cv.height;
   const ctx = cv.getContext('2d')!;
@@ -326,19 +347,21 @@ const drawSkyCanvas = (
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // 太陽（月）。中心を強く、まわりへ淡いハローを広げる。
-  const len = Math.hypot(sunDir.x, sunDir.y, sunDir.z) || 1;
-  const dx = sunDir.x / len, dy = sunDir.y / len, dz = sunDir.z / len;
-  const sx = (Math.atan2(dz, dx) / (Math.PI * 2) + 0.5) * W;
-  const sy = (0.5 - Math.asin(Math.max(-1, Math.min(1, dy))) / Math.PI) * H;
-  const r = look.discSize * H;
-  const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 5);
-  halo.addColorStop(0, look.disc);
-  halo.addColorStop(0.18, look.disc);
-  halo.addColorStop(0.35, `${look.disc}66`);
-  halo.addColorStop(1, `${look.disc}00`);
-  ctx.fillStyle = halo;
-  ctx.beginPath(); ctx.arc(sx, sy, r * 5, 0, Math.PI * 2); ctx.fill();
+  // 太陽（月）。中心を強く、まわりへ淡いハローを広げる。sunDir が null なら描かない（＝隠す）。
+  if (sunDir) {
+    const len = Math.hypot(sunDir.x, sunDir.y, sunDir.z) || 1;
+    const dx = sunDir.x / len, dy = sunDir.y / len, dz = sunDir.z / len;
+    const sx = (Math.atan2(dz, dx) / (Math.PI * 2) + 0.5) * W;
+    const sy = (0.5 - Math.asin(Math.max(-1, Math.min(1, dy))) / Math.PI) * H;
+    const r = look.discSize * H;
+    const halo = ctx.createRadialGradient(sx, sy, 0, sx, sy, r * 5);
+    halo.addColorStop(0, look.disc);
+    halo.addColorStop(0.18, look.disc);
+    halo.addColorStop(0.35, `${look.disc}66`);
+    halo.addColorStop(1, `${look.disc}00`);
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(sx, sy, r * 5, 0, Math.PI * 2); ctx.fill();
+  }
 
   // ドット雲：Minecraft の雲と同じく、角ばった長方形を水平帯に並べるだけ。
   if (look.clouds > 0) {
@@ -1640,17 +1663,19 @@ export class Yume25DEngine {
     const H = L.wallHeight;
 
     // ── Minecraft Shader Mods & Dynamic Lighting (DirectionalSunLight + SoftShadows) ──
-    this.renderer.shadowMap.enabled = L.shadowsEnabled !== false;
-
+    // 太陽を隠すと、空の円盤も太陽光も影も消えて環境光だけの平らな光になる。
     const look = TIME_OF_DAY[yume25dTimeOfDay(L)];
+    const shadows = !L.sunHidden && L.shadowsEnabled !== false;
+    this.renderer.shadowMap.enabled = shadows;
     this.sunLight.color.copy(toLightColor(look.sun));
     this.sunLight.intensity = look.sunIntensity;
-    this.sunOffset = look.sunOffset;
+    this.sunOffset = sunVector(L.sunAzimuth ?? look.azimuth, L.sunElevation ?? look.elevation);
+    this.sunLight.visible = !L.sunHidden;
+    this.sunLight.castShadow = shadows;
     this.ambientLightObj.color.copy(toLightColor(L.ambientColor ?? look.ambient, 0.5));
     this.ambientLightObj.intensity = (L.ambientLight ?? look.ambientLight) * AMBIENT_SCALE;
     this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || look.horizon), L.fogNear || 2, L.fogFar || 18);
     this.updateSkyBackground(L, look);
-    this.sunLight.castShadow = L.shadowsEnabled !== false;
 
     this.underwater = false;  // フォグを通常に戻したので、水中なら次フレームで再適用される
 
@@ -2028,7 +2053,7 @@ export class Yume25DEngine {
     const zenith = L.skyColor || look.horizon;
     // 地平は時間帯の色寄り。ただし作者の空色から離れすぎないよう半分だけ混ぜる。
     const horizon = `#${new THREE.Color(look.horizon).lerp(new THREE.Color(zenith), 0.5).getHexString()}`;
-    drawSkyCanvas(this.bgCanvas, zenith, { ...look, horizon }, look.sunOffset);
+    drawSkyCanvas(this.bgCanvas, zenith, { ...look, horizon }, L.sunHidden ? null : this.sunOffset);
     this.bgTexture!.needsUpdate = true;
     this.scene.background = this.bgTexture!;
   }
