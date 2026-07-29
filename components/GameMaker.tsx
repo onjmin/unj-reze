@@ -2312,6 +2312,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
     }, CLASSIC_ENEMY_DMG_FX_MS);
   };
+  /** classic 戦闘：敵HPバーは常時表示せず、アンダーテール風に被ダメージ時だけ一時的に見せる
+   *  （減少アニメーション付き）。ダメージを与えていないあいだは表示しない。 */
+  const [classicEnemyGaugeAnim, setClassicEnemyGaugeAnim] = useState<{ pct: number; id: number } | null>(null);
+  const CLASSIC_ENEMY_GAUGE_FX_MS = 1200;
+  const triggerClassicEnemyGaugeFx = (beforeHp: number, afterHp: number, maxHp: number) => {
+    const id = ++enemyFxIdRef.current;
+    const beforePct = Math.max(0, Math.min(100, (beforeHp / maxHp) * 100));
+    const afterPct = Math.max(0, Math.min(100, (afterHp / maxHp) * 100));
+    setClassicEnemyGaugeAnim({ pct: beforePct, id });
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      setClassicEnemyGaugeAnim(p => (p?.id === id ? { pct: afterPct, id } : p));
+    }));
+    setTimeout(() => setClassicEnemyGaugeAnim(p => (p?.id === id ? null : p)), CLASSIC_ENEMY_GAUGE_FX_MS);
+  };
   /** バトル演出用エフェクトアニメーション（EffectPreset）の再生中インスタンス一覧。
    *  foeIdx 指定時は該当する敵スロット内に重ねて表示し、未指定（パーティ側）は現状 castSpell/doMove の
    *  攻撃系（敵へ命中）のみ配線済み。「見方が受ける」側の演出（EnemyMove 由来）は今回未配線。 */
@@ -3488,8 +3502,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (playerFirst) {
       // プレイヤー先行：攻撃SE → 命中SE → ログ → 敵ターン
       playBattleSfx('attackStart');
+      const beforeHp1 = b.enemyHp;
       b.enemyHp = Math.max(0, b.enemyHp - dmg);
       triggerClassicEnemyDmgFx();
+      triggerClassicEnemyGaugeFx(beforeHp1, b.enemyHp, b.enemyMaxHp);
       setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
       appendLog(`${playerName}の こうげき！`, setCanActFalse);
       setTimeout(() => {
@@ -3499,10 +3515,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }, 500);
     } else {
       // 敵先行：敵ターン → まだ生存ならプレイヤー攻撃
-      playBattleSfx('attackStart');
-      b.enemyHp = Math.max(0, b.enemyHp - dmg);
-      triggerClassicEnemyDmgFx();
+      // （攻撃SE・HP減算・ダメージ演出は「敵先行」ログや敵の攻撃より前に確定させず、
+      //   実際にプレイヤーが攻撃するタイミング＝doPlayerAttack 内で発火させる）
       const doPlayerAttack = () => {
+        playBattleSfx('attackStart');
+        const beforeHp2 = b.enemyHp;
+        b.enemyHp = Math.max(0, b.enemyHp - dmg);
+        triggerClassicEnemyDmgFx();
+        triggerClassicEnemyGaugeFx(beforeHp2, b.enemyHp, b.enemyMaxHp);
         setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
         appendLog(`${playerName}の こうげき！`, setCanActFalse);
         setTimeout(() => {
@@ -3632,8 +3652,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (pr2.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
             // 呪文ダメージ適用
             spawnBattleEffect(m.effectId, tIdx);
-            b.enemyHp = Math.max(0, b.enemyHp - dmg);
-            triggerClassicEnemyDmgFx();
+            {
+              const beforeHp3 = b.enemyHp;
+              b.enemyHp = Math.max(0, b.enemyHp - dmg);
+              triggerClassicEnemyDmgFx();
+              triggerClassicEnemyGaugeFx(beforeHp3, b.enemyHp, b.enemyMaxHp);
+            }
             playBattleSfx('attack');
             appendLog(`${m.name}！ ${dmg}のダメージを 与えた！`);
             if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
@@ -3643,8 +3667,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           dtAdvanceTurn(); return;
         }
         spawnBattleEffect(m.effectId, tIdx);
-        b.enemyHp = Math.max(0, b.enemyHp - dmg);
-        triggerClassicEnemyDmgFx();
+        {
+          const beforeHp4 = b.enemyHp;
+          b.enemyHp = Math.max(0, b.enemyHp - dmg);
+          triggerClassicEnemyDmgFx();
+          triggerClassicEnemyGaugeFx(beforeHp4, b.enemyHp, b.enemyMaxHp);
+        }
         playBattleSfx('attack');
         appendLog(`${m.name}！ ${dmg}のダメージを 与えた！`, { canAct: false });
         if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
@@ -14688,9 +14716,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       );
                     })}
                   </div>
-                  {/* 敵 */}
+                  {/* 敵：HPが尽きても「たおした！」等のリザルト読み上げ（battle.over）が終わるまでは
+                      画面上に残す。即座に消してしまうとダメージ/撃破メッセージより早く敵が消える。 */}
                   <div className="flex flex-col items-center mt-1">
-                    {battle.enemyHp > 0 ? (
+                    {(battle.enemyHp > 0 || battle.over) ? (
                       <div className="relative">
                         <div
                           className={`text-5xl sm:text-6xl leading-none drop-shadow transition-transform ${classicEnemyDmgFx ? 'animate-[enemyClassicShake_0.5s_ease-in-out]' : ''}`}
@@ -14714,13 +14743,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     ) : (
                       <div className="text-5xl sm:text-6xl leading-none drop-shadow opacity-0">.</div>
                     )}
-                    {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風） */}
-                    {battle.enemyHp > 0 && (
+                    {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風）。
+                        HPバーは常時表示せず、アンダーテール同様ダメージを与えた直後だけ一時的に見せる。 */}
+                    {(battle.enemyHp > 0 || battle.over) && (
                       <>
                         <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
-                        <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
-                          <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.max(0, (battle.enemyHp / battle.enemyMaxHp) * 100)}%` }} />
-                        </div>
+                        {classicEnemyGaugeAnim && (
+                          <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
+                            <div className="h-full bg-red-500 transition-all" style={{ width: `${classicEnemyGaugeAnim.pct}%` }} />
+                          </div>
+                        )}
                         {gameData.battle?.labels.mercy && (
                           <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
                             <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
