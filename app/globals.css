@@ -211,8 +211,10 @@
   }
 }
 
-/* classic 戦闘：撃破演出。ドラクエのモンスターは白く数回点滅してから消えるので、
-   点滅（明滅）→ 縮みながらフェードアウト の順で見せる。fill-mode: forwards で消えたままにする。 */
+/* classic 戦闘：撃破演出。白く発光させてから、縮みながらフェードアウトさせて消す。
+   （以前は opacity を明滅させていたが、消滅済みのはずの敵が一瞬だけ再度見えてしまう
+   表示バグにつながっていたため、可視/不可視を切り替えない単調なフェードのみにする。）
+   fill-mode: forwards で消えたままにする。 */
 @keyframes enemyClassicVanish {
   0% {
     opacity: 1;
@@ -220,46 +222,16 @@
     transform: scale(1);
   }
 
-  8% {
+  15% {
     opacity: 1;
     filter: brightness(4) saturate(0);
-    transform: scale(1.02);
-  }
-
-  20% {
-    opacity: 0.15;
-    filter: brightness(4) saturate(0);
-    transform: scale(1.02);
-  }
-
-  32% {
-    opacity: 1;
-    filter: brightness(4) saturate(0);
-    transform: scale(1.02);
-  }
-
-  44% {
-    opacity: 0.15;
-    filter: brightness(4) saturate(0);
-    transform: scale(1.01);
-  }
-
-  56% {
-    opacity: 1;
-    filter: brightness(4) saturate(0);
-    transform: scale(1);
-  }
-
-  70% {
-    opacity: 0.6;
-    filter: brightness(4) saturate(0);
-    transform: scale(0.98);
+    transform: scale(1.05);
   }
 
   100% {
     opacity: 0;
     filter: brightness(4) saturate(0);
-    transform: scale(0.88);
+    transform: scale(0.85);
   }
 }
 

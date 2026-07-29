@@ -607,6 +607,7 @@ export const dq: PresetData = {
     encounter:   { ref: `direct:${su('qm03Mw')}`, src: su('qm03Mw'), type: 'direct' as const }, // [ﾄﾞﾗｸｴ6]エンカウント
     attackStart: { ref: `direct:${su('n0fqek')}`, src: su('n0fqek'), type: 'direct' as const }, // ﾄﾞﾗｸｴ攻撃時（振りかぶり）
     attack:      { ref: `direct:${su('7JKd21')}`, src: su('7JKd21'), type: 'direct' as const }, // ﾄﾞﾗｸｴ攻撃（命中）
+    enemyAttack: { ref: `direct:${su('Ln5pje')}`, src: su('Ln5pje'), type: 'direct' as const }, // 敵の攻撃（振りかぶり）。プレイヤーの attackStart とは別音にする
     miss:        { ref: `direct:${su('AeNs0l')}`, src: su('AeNs0l'), type: 'direct' as const }, // ﾄﾞﾗｸｴﾐｽ
     spell:       { ref: `direct:${su('wGCfnC')}`, src: su('wGCfnC'), type: 'direct' as const }, // ﾄﾞﾗｸｴ呪文
     cursor:      { ref: `direct:${su('GklUsK')}`, src: su('GklUsK'), type: 'direct' as const }, // ﾄﾞﾗｸｴｶｰｿﾙ

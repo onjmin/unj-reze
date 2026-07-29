@@ -17,7 +17,9 @@ export type NpcBehavior = 'still' | 'random' | 'chase' | 'flee' | 'patrolH' | 'p
 export type BulletType = 'none' | 'aimed' | 'spread' | 'spiral';
 export type SfxTrigger = 'jump' | 'shot' | 'clear' | 'damage' | 'graze' | 'spellcard' | 'levelup' | 'purchase' | 'inn' | 'coin' | 'save'
   // ターン制戦闘（battle 定義時）専用のSE
-  | 'encounter' | 'attackStart' | 'attack' | 'miss' | 'spell' | 'cursor' | 'victory' | 'defeat' | 'flee';
+  // attackStart/attack はプレイヤーの通常攻撃（振りかぶり/命中）専用。enemyAttack は敵の攻撃宣言（振りかぶり）専用で、
+  // プレイヤーの攻撃SEと混同しないよう分けている。着弾（プレイヤーの被弾）は damage を使う。
+  | 'encounter' | 'attackStart' | 'attack' | 'enemyAttack' | 'miss' | 'spell' | 'cursor' | 'victory' | 'defeat' | 'flee';
 /** 戦闘開始時のエンカウント演出。'none'＝演出なしで即開始, 'flash'＝黒フラッシュ明滅,
  *  'whirl'＝回転しながら黒が広がる, 'iris'＝円が中心へ閉じる, 'stripes'＝横帯が交互に閉じる,
  *  'undertale'＝頭上の「！」→ハートがコマンド位置へ移動（UNDERTALE風）。 */

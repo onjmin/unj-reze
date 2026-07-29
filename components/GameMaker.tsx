@@ -331,11 +331,11 @@ const BEHAVIOR_LABELS: Record<NpcBehavior, string> = { still: '静止', random: 
 const BULLET_LABELS: Record<BulletType, string> = { none: 'なし', aimed: '狙い弾', spread: '拡散', spiral: '回転' };
 const OBJECT_KIND_LABELS: Record<ObjectKind, string> = { npc: 'NPC / 敵', tile: 'タイル', bullet: '弾 / 攻撃' };
 const OBJTYPE_LABELS: Record<ObjType, string> = { enemy: '敵', npc: 'NPC', item: 'アイテム', warp: 'ワープ', event: 'イベント', platform: '動くリフト' };
-const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ', encounter: 'エンカウント', attackStart: '攻撃開始', attack: '攻撃命中', miss: '攻撃ミス', spell: '呪文/とくぎ', cursor: 'カーソル移動', victory: '戦闘勝利', defeat: '全滅', flee: '逃走成功' };
+const SFX_LABELS: Record<SfxTrigger, string> = { jump: 'ジャンプ', shot: 'ショット', clear: 'クリア', damage: 'ミス/被弾', graze: 'グレイズ', spellcard: 'スペルカード', levelup: 'レベルアップ', purchase: '購入', inn: '宿泊/回復', coin: 'コイン', save: 'セーブ', encounter: 'エンカウント', attackStart: '攻撃開始（自分）', attack: '攻撃命中（自分）', enemyAttack: '敵の攻撃', miss: '攻撃ミス', spell: '呪文/とくぎ', cursor: 'カーソル移動', victory: '戦闘勝利', defeat: '全滅', flee: '逃走成功' };
 /** エンカウント演出の実行中フェーズ。'alert' は UNDERTALE 演出の「！」表示、それ以外は画面遷移アニメ本体。 */
 type EncounterPhase = 'alert' | 'flash' | 'whirl' | 'iris' | 'stripes';
 /** ターン制戦闘（battle 定義時）でしか鳴らないSE。オーディオ設定では battle 有りのときだけ出す。 */
-const BATTLE_SFX_TRIGGERS: SfxTrigger[] = ['encounter', 'attackStart', 'attack', 'miss', 'spell', 'cursor', 'victory', 'defeat', 'flee'];
+const BATTLE_SFX_TRIGGERS: SfxTrigger[] = ['encounter', 'attackStart', 'attack', 'enemyAttack', 'miss', 'spell', 'cursor', 'victory', 'defeat', 'flee'];
 /** エンカウント演出のプリセット一覧（戦闘設定のセレクトに出る順）。 */
 const ENCOUNTER_EFFECT_OPTIONS: { value: EncounterEffect; label: string }[] = [
   { value: 'none', label: 'なし（すぐ戦闘へ）' },
@@ -2347,8 +2347,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const CLASSIC_ENEMY_LUNGE_MS = 520;
   /** 敵の攻撃モーション開始から、こちらが被弾するまで。 */
   const CLASSIC_ENEMY_HIT_MS = 260;
-  /** 撃破演出（白く点滅 → 消滅）の長さ。 */
-  const CLASSIC_ENEMY_VANISH_MS = 900;
+  /** 撃破演出（白く発光 → 消滅）の長さ。長すぎると勝利メッセージまでの間延びが目立つので短く。 */
+  const CLASSIC_ENEMY_VANISH_MS = 420;
+  /** トドメのダメージメッセージから撃破演出を始めるまでの間。通常の余韻より短く詰める。 */
+  const CLASSIC_KILL_HOLD_MS = 320;
   /** classic 戦闘：敵の攻撃モーション（跳ね上がって手前へ踏み込む）。
    *  DQ6 以降のモンスターが行動時にアニメーションするのに倣い、敵ターンの被弾より先に再生する。 */
   const [classicEnemyAttackFx, setClassicEnemyAttackFx] = useState<{ id: number } | null>(null);
@@ -2362,15 +2364,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
    *  演出後も「消えたまま」を保つため自動では解除せず、次の戦闘開始時にリセットする。 */
   const [classicEnemyDefeatFx, setClassicEnemyDefeatFx] = useState<{ id: number } | null>(null);
   const triggerClassicEnemyDefeatFx = () => setClassicEnemyDefeatFx({ id: ++enemyFxIdRef.current });
+  /** classic 戦闘：トドメを刺した瞬間から撃破演出が始まるまでの「表示継続」フラグ。
+   *  トドメのダメージメッセージを appendLog すると battle.enemyHp が 0 として同期されてしまい、
+   *  これだけを根拠に敵の表示可否を決めると「0になった瞬間に一度消え、撃破演出の開始でまた
+   *  現れて、消滅アニメで再度消える」という二度消えバグになる。このフラグが立っているあいだは
+   *  敵HPが0でも表示を継続させる。 */
+  const [classicEnemyKillPending, setClassicEnemyKillPending] = useState(false);
   /** classic 戦闘：敵にトドメを刺したときの締め。
    *  ダメージメッセージを読ませる → 撃破アニメーション（点滅→消滅）→ 消え切ってから
    *  「たおした！」以降のリザルト（endBattle）へ、という順に流す。 */
   const finishClassicKill = () => {
+    setClassicEnemyKillPending(true);
     setTimeout(() => {
       if (!battleRef.current.active) return;
       triggerClassicEnemyDefeatFx();
       setTimeout(() => endBattle('win'), CLASSIC_ENEMY_VANISH_MS);
-    }, CLASSIC_MSG_HOLD_MS);
+    }, CLASSIC_KILL_HOLD_MS);
   };
   /** バトル演出用エフェクトアニメーション（EffectPreset）の再生中インスタンス一覧。
    *  foeIdx 指定時は該当する敵スロット内に重ねて表示し、未指定（パーティ側）は現状 castSpell/doMove の
@@ -2905,7 +2914,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // classic の敵演出をリセット（撃破演出は自動解除しないので、ここで必ず戻す）
     setClassicEnemyDefeatFx(null); setClassicEnemyAttackFx(null);
     setClassicEnemyDmgFx(null); classicEnemyDmgFxRef.current = null;
-    setClassicEnemyGaugeAnim(null);
+    setClassicEnemyGaugeAnim(null); setClassicEnemyKillPending(false);
     // デルタルーン風パーティ戦闘：TPは毎戦闘0から、2人目以降のHPは各自 maxHp から再開、行動選択は先頭メンバーから
     if (gameDataRef.current.battle?.style === 'deltarune') {
       setTp(0); tpRef.current = 0;
@@ -3159,13 +3168,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const dmg = move
       ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3)))
       : calcDmg(b.enemyAtk, pr.def);
-    // 行動宣言＋モーション（跳ねて踏み込む）を先に見せ、着弾はワンテンポ置いてから
+    // 行動宣言＋モーション（跳ねて踏み込む）を先に見せ、着弾はワンテンポ置いてから。
+    // 攻撃開始SEは敵専用の enemyAttack を使い、プレイヤー自身の attackStart とは鳴らし分ける。
     triggerClassicEnemyAttackFx();
-    playBattleSfx(move ? 'spell' : 'attackStart');
+    playBattleSfx(move ? 'spell' : 'enemyAttack');
     appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`, { canAct: false });
     setTimeout(() => {
       if (!battleRef.current.active) return;
-      playBattleSfx('attack');
+      // 着弾SEはプレイヤーの被弾音（damage）。attack はプレイヤー自身の命中音なのでここでは使わない。
+      playBattleSfx('damage');
       hitLeader(dmg);
       appendLog(`${dmg}のダメージを うけた！`, { canAct: false });
       setTimeout(settle, CLASSIC_MSG_HOLD_MS);
@@ -3560,16 +3571,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (playerAgi === 0 && enemyAgi === 0) return true; // はやさ未設定なら従来どおりプレイヤー先行
     return playerAgi + Math.floor(Math.random() * 11) >= enemyAgi + Math.floor(Math.random() * 11);
   };
+  /** classic 戦闘：1コマンド＝1ターン。はやさ判定で順番を決め、プレイヤーと敵が「1回ずつ」行動して終わる。
+   *  先制を特別扱いせず、どちらが先でも締めは同じ形にする（先制のときに敵がもう一度動く二重行動を防ぐ）。
+   *  playerAction は自分の行動を1回ぶん実行し、終わったら onDone を呼ぶ。
+   *  ただし敵を倒した／こちらが倒れた場合は onDone を呼ばずにそこで打ち切る。 */
+  const runClassicTurn = (playerAction: (onDone: () => void) => void) => {
+    const backToCommand = () => setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
+    if (rollPlayerInitiative()) {
+      // プレイヤー先攻：自分 → 敵（queueEnemyTurn の中で敵が動き、終わればコマンドへ戻る）
+      playerAction(() => queueEnemyTurn());
+    } else {
+      // 敵先攻：敵 → 自分 → コマンドへ
+      runClassicEnemyAction(() => playerAction(backToCommand));
+    }
+  };
   const doAttack = () => {
     if (!battleViewRef.current?.canAct || battleViewRef.current.over) return;
     const b = battleRef.current; const pr = progressRef.current;
     const dmg = calcDmg(pr.atk, b.enemyDef);
     const playerName = gameData.battle?.playerName || '勇者';
-    const playerFirst = rollPlayerInitiative();
     /** プレイヤーの一撃。ドラクエの順序に合わせて
      *  「◯◯の こうげき！」→（振りかぶり）→ 命中SE＋敵が点滅＋ダメージ数値
-     *  → 「◯のダメージを 与えた！」→ 撃破なら消滅演出、生存なら敵ターン、と1段ずつ流す。 */
-    const doPlayerAttack = () => {
+     *  → 「◯のダメージを 与えた！」→ 撃破なら消滅演出、生存なら次の行動へ、と1段ずつ流す。 */
+    const playerAttack = (onDone: () => void) => {
       if (!battleRef.current.active) return;
       playBattleSfx('attackStart');
       appendLog(`${playerName}の こうげき！`, { canAct: false });
@@ -3583,17 +3607,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         setTimeout(() => {
           appendLog(`${dmg}のダメージを 与えた！`, { canAct: false });
           if (b.enemyHp <= 0) { finishClassicKill(); return; }
-          queueEnemyTurn();
+          onDone();
         }, CLASSIC_DMG_MSG_MS);
       }, CLASSIC_SWING_MS);
     };
-    if (playerFirst) {
-      doPlayerAttack();
-    } else {
-      // 敵先行：宣言 → 敵の行動をひととおり見せてから、生存していればこちらの攻撃へ
-      appendLog(`${b.enemyName}は すばやい！`, { canAct: false });
-      setTimeout(() => runClassicEnemyAction(doPlayerAttack), CLASSIC_MSG_HOLD_MS);
-    }
+    runClassicTurn(playerAttack);
   };
 
   const doMove = (m: BattleMove, targetIdx?: number) => {
@@ -3663,7 +3681,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         // 着弾して敵が点滅＋ダメージ数値 →「◯のダメージを 与えた！」の順に流れる。
         // 全部を同時に出すと何が当たったのか読めないので、1段ずつ間を置いて見せる。
         const playerName = gameData.battle?.playerName || '勇者';
-        const castAtEnemy = () => {
+        const castAtEnemy = (onDone: () => void) => {
           if (!battleRef.current.active) return;
           playBattleSfx('spell');
           spawnBattleEffect(m.effectId, tIdx);
@@ -3679,16 +3697,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             setTimeout(() => {
               appendLog(`${dmg}のダメージを 与えた！`, { canAct: false });
               if (b.enemyHp <= 0) { finishClassicKill(); return; }
-              queueEnemyTurn();
+              onDone();
             }, CLASSIC_DMG_MSG_MS);
           }, CLASSIC_SPELL_IMPACT_MS);
         };
-        // はやさ判定で敵が先手なら、敵の行動をひととおり見せてから詠唱へ
-        if (rollPlayerInitiative()) castAtEnemy();
-        else {
-          appendLog(`${b.enemyName}は すばやい！`, { canAct: false });
-          setTimeout(() => runClassicEnemyAction(castAtEnemy), CLASSIC_MSG_HOLD_MS);
-        }
+        // はやさ順に1回ずつ行動して1ターン（先制でも敵が2回動かない）
+        runClassicTurn(castAtEnemy);
         return; // 敵ターンは上の流れの中で予約済み（dtAdvanceTurn で二重に回さない）
       } else {
         // dodge スタイル（undertale/deltarune）：はやさ判定なし
@@ -14744,7 +14758,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     const STAGE_W = 220, STAGE_H = 150, ENEMY_PX = 64;
                     const vanishing = !!classicEnemyDefeatFx;
                     // 消滅演出中／演出後は「消えたまま」を保つ（fill-mode: forwards）。
-                    const shown = battle.enemyHp > 0 || vanishing;
+                    // classicEnemyKillPending は、トドメのダメージメッセージで battle.enemyHp が
+                    // 0 として同期されてから撃破演出が始まるまでの空白を埋め、表示が一瞬消えて
+                    // また現れるのを防ぐ。
+                    const shown = battle.enemyHp > 0 || vanishing || classicEnemyKillPending;
                     const enemyAnim = vanishing
                       ? `enemyClassicVanish ${CLASSIC_ENEMY_VANISH_MS}ms ease-in forwards`
                       : classicEnemyDmgFx
