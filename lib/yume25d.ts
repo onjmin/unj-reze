@@ -4,11 +4,87 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneWithSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { SYS_TILE_WARP_SFX, SYS_TILE_DAMAGE_SFX, type Layout25D, type Tex25D, type Dir4, type Billboard25D } from '@/components/game-presets/shared';
 import { detectStandard, standardById, cellRect, walkFrameIndex, type WalkStandard, type WayKey } from '@/lib/walk-sprite';
 import { parseWalkRef, type WalkRef } from '@/lib/asset-ref';
 import { buildMinecraftModel, type MinecraftLimbs } from '@/lib/minecraft-model';
 import { applyMasterVolume } from '@/lib/master-volume';
+
+/** Minecraft Shader Mod custom post-processing pass (BSL, SEUS, Complementary style tone mapping and vignette) */
+const MinecraftShaderModShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uPreset: { value: 0 },
+    uVignette: { value: 0.35 },
+    uExposure: { value: 1.05 },
+  },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform sampler2D tDiffuse;
+    uniform int uPreset;
+    uniform float uVignette;
+    uniform float uExposure;
+    varying vec2 vUv;
+
+    vec3 ACESFilm(vec3 x) {
+      float a = 2.51;
+      float b = 0.03;
+      float c = 2.43;
+      float d = 0.59;
+      float e = 0.14;
+      return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+    }
+
+    void main() {
+      vec4 texel = texture2D(tDiffuse, vUv);
+      vec3 color = texel.rgb * uExposure;
+
+      if (uPreset == 0) {
+        // BSL Shaders: Warm Golden Sun highlights + rich ACES Filmic grading + vivid saturation
+        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+        float luminance = dot(color, lumaWeights);
+        color = mix(vec3(luminance), color, 1.25);
+        color.r = pow(color.r, 0.95) * 1.04;
+        color.g = pow(color.g, 0.98) * 1.02;
+        color.b = pow(color.b, 1.02) * 0.96;
+        color = ACESFilm(color);
+      } else if (uPreset == 1) {
+        // SEUS Shaders: High contrast dramatic night / cool moonlight
+        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+        float luminance = dot(color, lumaWeights);
+        color = mix(vec3(luminance), color, 1.15);
+        color = ACESFilm(color * 1.1);
+        color.b = mix(color.b, color.b * 1.08, 0.3);
+      } else if (uPreset == 2) {
+        // Complementary Reimagined: Ultra-crisp, high dynamic range, punchy colors
+        vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+        float luminance = dot(color, lumaWeights);
+        color = mix(vec3(luminance), color, 1.3);
+        color = ACESFilm(color * 1.12);
+      }
+
+      if (uVignette > 0.0) {
+        vec2 uv = (vUv - 0.5) * 2.0;
+        float dist = length(uv);
+        float vig = 1.0 - smoothstep(0.6, 1.4, dist) * uVignette;
+        color *= vig;
+      }
+
+      gl_FragColor = vec4(color, texel.a);
+    }
+  `
+};
 
 /** 内部レンダリング解像度。CSS 側で pixelated 拡大してドット感を出す。 */
 export const RENDER_W = 320;
@@ -510,6 +586,11 @@ export class Yume25DEngine {
   // ── 照明・背景 ──
   private ambientLightObj!: THREE.AmbientLight;
   private lantern!: THREE.PointLight;
+  private sunLight!: THREE.DirectionalLight;
+  private sunOffset = { x: 18, y: 16, z: 12 };
+  private composer: EffectComposer | null = null;
+  private bloomPass: UnrealBloomPass | null = null;
+  private customShaderPass: ShaderPass | null = null;
   private skyMesh: THREE.Mesh | null = null;
   private skyMat: THREE.MeshBasicMaterial | null = null;
   private skyGeo: THREE.CylinderGeometry | null = null;
@@ -594,13 +675,30 @@ export class Yume25DEngine {
     this.ghostMesh.visible = false;
     this.scene.add(this.ghostMesh);
 
-    // 照明：環境光（全体の明るさ/色）＋プレイヤー光源（ランタン）。
+    // 照明：環境光（全体の明るさ/色）＋太陽光/月光（DirectionalLight リアルタイム影）＋プレイヤー光源（ランタン）。
     // ワールドの材質は Lambert なので、環境光 π（=ambientLight 1.0）でフルブライトになる。
+    this.renderer.shadowMap.enabled = layout.shadowsEnabled !== false;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
     this.ambientLightObj = new THREE.AmbientLight('#ffffff', AMBIENT_SCALE);
     this.scene.add(this.ambientLightObj);
     this.lantern = new THREE.PointLight(LANTERN_DEFAULT_COLOR, 0, 8, 2);
     this.lantern.visible = false;
     this.scene.add(this.lantern);
+
+    this.sunLight = new THREE.DirectionalLight('#fffae6', 1.5);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.width = 1024;
+    this.sunLight.shadow.mapSize.height = 1024;
+    this.sunLight.shadow.camera.near = 0.5;
+    this.sunLight.shadow.camera.far = 60;
+    this.sunLight.shadow.camera.left = -20;
+    this.sunLight.shadow.camera.right = 20;
+    this.sunLight.shadow.camera.top = 20;
+    this.sunLight.shadow.camera.bottom = -20;
+    this.sunLight.shadow.bias = -0.0005;
+    this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
 
     this.buildScene();
     this.resetToStart();
@@ -1033,7 +1131,18 @@ export class Yume25DEngine {
       this.updateTexAnimations(t / 1000);
       this.updateBillboardDirSprites(t / 1000);
       this.updatePlayerAnim(t / 1000);
-      this.renderer.render(this.scene, this.camera);
+
+      if (this.sunLight) {
+        this.sunLight.position.set(this.x + this.sunOffset.x, this.sunOffset.y, this.z + this.sunOffset.z);
+        this.sunLight.target.position.set(this.x, 0, this.z);
+        this.sunLight.target.updateMatrixWorld();
+      }
+
+      if (this.composer) {
+        this.composer.render();
+      } else {
+        this.renderer.render(this.scene, this.camera);
+      }
       this.raf = requestAnimationFrame(loop);
     };
     this.raf = requestAnimationFrame(loop);
@@ -1051,6 +1160,10 @@ export class Yume25DEngine {
     this.disposed = true;
     this.stop();
     this.clearWorld();
+    if (this.composer) {
+      this.composer.dispose();
+      this.composer = null;
+    }
     if (this.playerMcGroup) { this.scene.remove(this.playerMcGroup); this.playerMcGroup = null; this.playerMcLimbs = null; }
     this.playerGeo.dispose();
     this.playerMat.dispose();
@@ -1250,18 +1363,96 @@ export class Yume25DEngine {
     this.playerTexture.needsUpdate = true;
   }
 
+  private setupPostProcessing() {
+    const L = this.layout;
+    if (L.shaderPreset === 'vanilla' && !L.bloomEnabled) {
+      if (this.composer) {
+        this.composer.dispose();
+        this.composer = null;
+      }
+      return;
+    }
+
+    try {
+      if (this.composer) {
+        this.composer.dispose();
+        this.composer = null;
+      }
+
+      const composer = new EffectComposer(this.renderer);
+      composer.setSize(RENDER_W, RENDER_H);
+
+      const renderPass = new RenderPass(this.scene, this.camera);
+      composer.addPass(renderPass);
+
+      if (L.bloomEnabled !== false) {
+        const preset = L.shaderPreset ?? 'bsl';
+        const strength = preset === 'bsl' ? 0.65 : preset === 'seus' ? 0.9 : 0.5;
+        const radius = 0.4;
+        const threshold = 0.65;
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(RENDER_W, RENDER_H), strength, radius, threshold);
+        composer.addPass(bloomPass);
+        this.bloomPass = bloomPass;
+      }
+
+      const presetIdx = L.shaderPreset === 'seus' ? 1 : L.shaderPreset === 'complementary' ? 2 : L.shaderPreset === 'vanilla' ? 3 : 0;
+      const customShaderPass = new ShaderPass(MinecraftShaderModShader);
+      customShaderPass.uniforms.uPreset.value = presetIdx;
+      customShaderPass.uniforms.uVignette.value = L.shaderPreset === 'vanilla' ? 0.0 : 0.35;
+      customShaderPass.uniforms.uExposure.value = L.shaderPreset === 'seus' ? 1.15 : 1.05;
+      composer.addPass(customShaderPass);
+      this.customShaderPass = customShaderPass;
+
+      const outputPass = new OutputPass();
+      composer.addPass(outputPass);
+
+      this.composer = composer;
+    } catch (e) {
+      console.warn('Post-processing initialization failed:', e);
+      this.composer = null;
+    }
+  }
+
   private buildScene() {
     this.clearWorld();
     const L = this.layout;
     const H = L.wallHeight;
 
-    this.scene.background = new THREE.Color(L.skyColor);
-    this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor), L.fogNear, L.fogFar);
+    // ── Minecraft Shader Mods & Dynamic Lighting (DirectionalSunLight + SoftShadows) ──
+    this.renderer.shadowMap.enabled = L.shadowsEnabled !== false;
+
+    const shaderPreset = L.shaderPreset ?? 'bsl';
+    const timeOfDay = L.timeOfDay ?? (shaderPreset === 'seus' ? 'night' : shaderPreset === 'bsl' ? 'sunset' : 'day');
+
+    if (timeOfDay === 'sunset') {
+      this.sunLight.color.set('#ffa555');
+      this.sunLight.intensity = 1.6;
+      this.sunOffset = { x: 18, y: 16, z: 12 };
+      this.ambientLightObj.color.set(L.ambientColor ?? '#665577');
+      this.ambientLightObj.intensity = (L.ambientLight ?? 0.65) * AMBIENT_SCALE;
+      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || '#3d2a45'), L.fogNear || 2, L.fogFar || 18);
+      this.scene.background = new THREE.Color(L.skyColor || '#281b33');
+    } else if (timeOfDay === 'night') {
+      this.sunLight.color.set('#5577bb');
+      this.sunLight.intensity = 0.9;
+      this.sunOffset = { x: -12, y: 22, z: -10 };
+      this.ambientLightObj.color.set(L.ambientColor ?? '#1a2238');
+      this.ambientLightObj.intensity = (L.ambientLight ?? 0.4) * AMBIENT_SCALE;
+      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || '#0a0e1a'), L.fogNear || 2, L.fogFar || 16);
+      this.scene.background = new THREE.Color(L.skyColor || '#05070e');
+    } else {
+      this.sunLight.color.set('#fff5dd');
+      this.sunLight.intensity = 1.8;
+      this.sunOffset = { x: 12, y: 24, z: 16 };
+      this.ambientLightObj.color.set(L.ambientColor ?? '#789bcf');
+      this.ambientLightObj.intensity = (L.ambientLight ?? 0.75) * AMBIENT_SCALE;
+      this.scene.fog = new THREE.Fog(new THREE.Color(L.fogColor || '#78a3d4'), L.fogNear || 3, L.fogFar || 24);
+      this.scene.background = new THREE.Color(L.skyColor || '#3a78c4');
+    }
+    this.sunLight.castShadow = L.shadowsEnabled !== false;
+
     this.underwater = false;  // フォグを通常に戻したので、水中なら次フレームで再適用される
 
-    // 照明：環境光（明るさ・色）とランタン（プレイヤー光源）の設定を反映
-    this.ambientLightObj.color.set(L.ambientColor ?? '#ffffff');
-    this.ambientLightObj.intensity = (L.ambientLight ?? 1) * AMBIENT_SCALE;
     const pl = L.playerLight;
     this.lantern.visible = !!pl?.enabled;
     if (pl?.enabled) {
@@ -1271,6 +1462,7 @@ export class Yume25DEngine {
     }
     this.updateSky(L);
     this.updateWater(L);
+    this.setupPostProcessing();
 
     // 当たり判定用のエッジ集合。上段（level>0）の壁は当たり判定なし＝下をくぐれる。
     this.hEdges.clear(); this.vEdges.clear();
@@ -1310,6 +1502,8 @@ export class Yume25DEngine {
       this.ownedGeometries.push(geo);
       this.ownedMaterials.push(mat);
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = L.shadowsEnabled !== false;
+      mesh.receiveShadow = L.shadowsEnabled !== false;
       this.scene.add(mesh);
       this.worldObjects.push(mesh);
     };

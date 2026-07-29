@@ -745,6 +745,14 @@ export interface Layout25D {
   povDistance?: number;
   /** ジャンプ高さ（速度）。未指定は 3.2。 */
   jumpHeight?: number;
+  /** Shader Mod プリセット（'bsl' | 'seus' | 'complementary' | 'vanilla'） */
+  shaderPreset?: 'bsl' | 'seus' | 'complementary' | 'vanilla';
+  /** リアルタイム影（DirectionalLight Shadow Map） */
+  shadowsEnabled?: boolean;
+  /** 時間帯（'day' | 'sunset' | 'night'） */
+  timeOfDay?: 'day' | 'sunset' | 'night';
+  /** ブルーム / 光彩エフェクト */
+  bloomEnabled?: boolean;
 }
 
 /** 壁の置き場所を北辺/西辺に正規化する。 */

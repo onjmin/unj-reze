@@ -110,6 +110,11 @@ const layout25d: Layout25D = {
   povDistance: 1.6,
   // 空腹ゲージ（Minecraft風）：ダッシュで減り、🍖に触れると回復する
   hunger: true,
+  // Minecraft Shader Mods 設定（BSL Shaders, リアルタイム影, 夕焼けライティング, ブルーム）
+  shaderPreset: 'bsl',
+  shadowsEnabled: true,
+  timeOfDay: 'sunset',
+  bloomEnabled: true,
 };
 
 export const yume: PresetData = {

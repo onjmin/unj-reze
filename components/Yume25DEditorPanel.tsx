@@ -907,6 +907,40 @@ export default function Yume25DEditorPanel({
               </label>
             )}
           </div>
+
+          {/* Minecraft Shader Mods (グラフィック) */}
+          <p className="font-bold text-yellow-400 pt-1.5 mt-1 border-t border-gray-700/50 flex items-center gap-1">
+            ✨ Minecraft Shader Mods (グラフィック)
+          </p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <label className="flex items-center justify-between gap-1 col-span-2">シェーダープリセット
+              <select value={layout.shaderPreset ?? 'bsl'}
+                onChange={e => onLayoutChange(l => ({ ...l, shaderPreset: e.target.value as 'bsl' | 'seus' | 'complementary' | 'vanilla' }))}
+                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                <option value="bsl">🌅 BSL Shaders (夕焼け・温かな太陽光)</option>
+                <option value="seus">🌌 SEUS Shaders (月光・ドラマチック)</option>
+                <option value="complementary">⚡ Complementary (鮮やか・高コントラスト)</option>
+                <option value="vanilla">🧱 Vanilla (クラシック)</option>
+              </select>
+            </label>
+            <label className="flex items-center justify-between gap-1 col-span-2">太陽 / 月の位置 (時間帯)
+              <select value={layout.timeOfDay ?? 'sunset'}
+                onChange={e => onLayoutChange(l => ({ ...l, timeOfDay: e.target.value as 'sunset' | 'day' | 'night' }))}
+                className="bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white">
+                <option value="sunset">🌆 夕焼け (Golden Hour)</option>
+                <option value="day">☀️ 昼 (Daylight)</option>
+                <option value="night">🌙 夜 (Midnight)</option>
+              </select>
+            </label>
+            <label className="flex items-center justify-between gap-1">リアルタイム影
+              <input type="checkbox" checked={layout.shadowsEnabled !== false}
+                onChange={e => onLayoutChange(l => ({ ...l, shadowsEnabled: e.target.checked }))} />
+            </label>
+            <label className="flex items-center justify-between gap-1">光彩ブルーム
+              <input type="checkbox" checked={layout.bloomEnabled !== false}
+                onChange={e => onLayoutChange(l => ({ ...l, bloomEnabled: e.target.checked }))} />
+            </label>
+          </div>
         </div>
       )}
     </div>
