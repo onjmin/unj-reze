@@ -10,6 +10,17 @@ export interface CreateGameParams {
   creatorSlug?: string;
 }
 
+export interface RecordGamePlayParams {
+  /** クリアまで到達したか（false ならゲームオーバー/中断） */
+  cleared: boolean;
+  /** そのプレイのスコア。ハイスコア更新の判定に使う。 */
+  score?: number;
+  /** ハイスコアを更新したときに残す表示名 */
+  displayName?: string;
+  /** プレイ回数を加算するか（同一プレイ中の再挑戦では false にする） */
+  countPlay?: boolean;
+}
+
 export interface AddOshiItemParams {
   kind: OshiItemKind;
   trackId?: number;
@@ -116,6 +127,12 @@ export interface DataStore {
   getGamesByIds(ids: number[]): Promise<DbGameRecord[]>;
   updateGame(id: number, data: { title: string; manifest: GameManifestDraft }): Promise<DbGameRecord | null>;
   listAllGames(limit?: number): Promise<DbGameRecord[]>;
+  /** プレイ結果を記録する。plays/clears を加算し、スコアが上回っていればハイスコアを更新する。 */
+  recordGamePlay(gameId: number, data: RecordGamePlayParams): Promise<DbGameRecord | null>;
+  /** プレイ数の多い順のゲームランキング。postId を含む。 */
+  listTopGames(limit?: number): Promise<DbGameRecord[]>;
+  /** ゲームにひもづく最初の投稿ID（コメント欄への導線に使う） */
+  getPostIdByGameId(gameId: number): Promise<number | null>;
   getLiveGameInfo(ipAddress: string): Promise<{ gameId: number | null; gameTitle: string; gamePreset: string; hourSlot: string; postId: number | null; nextCandidates: GameVoteCandidate[]; myVote: number | null }>;
   voteGame(gameId: number, ipAddress: string): Promise<void>;
   updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string): Promise<void>;

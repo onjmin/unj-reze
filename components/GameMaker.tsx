@@ -24,6 +24,9 @@ import { segment } from '@/lib/tiny-segmenter';
 import { parseRpgen } from '@/lib/rpgen-parser';
 import LZString from 'lz-string';
 import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
+import ShareButton from './ShareButton';
+import { gameShareUrl } from '@/lib/share';
+import { buildGameShareText } from '@/lib/share-text';
 
 import {
   TILE_SIZE, COLS, ROWS, PLAY_W, PLAY_H,
@@ -962,6 +965,10 @@ interface GameMakerProps {
   onPositionChange?: (x: number, y: number, emoji: string) => void;
   /** ゲームポストのID（コメント返信先） */
   postId?: string;
+  /** 保存済みゲームのID。プレイ数/クリア数の記録と共有リンクに使う。 */
+  gameId?: string;
+  /** 他人のゲームを「改造する」ボタンで自分の下書きに取り込む */
+  onRemix?: (manifest: GameManifestDraft, meta: { title: string; preset: PresetId }) => void;
   /** ニコニコ風弾幕コメント（新しい文字列が追加されるたびに流れる） */
   danmakuComments?: string[];
   /** コメント送信コールバック */
@@ -1354,7 +1361,7 @@ function getDodgeImg(url: string): HTMLImageElement {
   return img;
 }
 
-export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, fixedControls, ghostPlayers, onPositionChange, postId, danmakuComments, onComment }: GameMakerProps) {
+export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, fixedControls, ghostPlayers, onPositionChange, postId, gameId, onRemix, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // canvas エリア（親フレックス）の実測サイズを ResizeObserver で追いかけ、PLAY_W:PLAY_H を保った
   // まま contain フィットさせる。CSS の aspect-ratio + width:auto;height:auto だけに頼ると、親の高さが
@@ -1588,6 +1595,49 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const gameMsgRef = useRef<typeof gameMsg>(null);
   gameMsgRef.current = gameMsg;
   const [gameOverResult, setGameOverResult] = useState<{ score: number; marioDeathAnim?: boolean } | null>(null);
+  /** クリア後に出す「結果＋共有」パネル。保存済みゲームを遊んでいるときだけ使う。 */
+  const [clearResult, setClearResult] = useState<{ score: number } | null>(null);
+  /** プレイ開始の二重送信よけ（マウント中1回だけ数える） */
+  const playStartSentRef = useRef(false);
+
+  /**
+   * プレイ結果をサーバーへ記録する。
+   * 投稿されたゲームを実際に遊んでいるとき（playOnly かつ gameId あり）だけ送る。
+   * 作者がエディタでプレビューするたびにプレイ数が増えるのは数字として意味がないため。
+   */
+  const reportPlayEvent = useCallback((phase: 'start' | 'end', cleared: boolean, score: number) => {
+    if (!gameId || !playOnly) return;
+    if (phase === 'start') {
+      if (playStartSentRef.current) return;
+      playStartSentRef.current = true;
+    }
+    fetch(`/api/games/${gameId}/play`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phase, cleared, score, displayName: userId }),
+    }).catch(() => { /* 記録に失敗してもプレイ体験は止めない */ });
+  }, [gameId, playOnly, userId]);
+
+  useEffect(() => {
+    if (isPlaying) reportPlayEvent('start', false, 0);
+  }, [isPlaying, reportPlayEvent]);
+
+  useEffect(() => {
+    if (gameOverResult) reportPlayEvent('end', false, gameOverResult.score);
+  }, [gameOverResult, reportPlayEvent]);
+
+  /**
+   * クリア時の共通後処理。各エンジンのクリア判定から呼ぶ。
+   * エンディングがあれば流しつつ、クリア数の記録と結果パネルの表示を行う。
+   */
+  const finishClear = useCallback(() => {
+    setIsPlaying(false);
+    if (endingRef.current?.enabled) setShowEnding(true);
+    const score = scoreRef.current || 0;
+    reportPlayEvent('end', true, score);
+    if (gameId && playOnly) setClearResult({ score });
+  }, [reportPlayEvent, gameId, playOnly]);
+
   const gameMsgReadyRef = useRef(false);
   const gameMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewStopRef = useRef<(() => void) | null>(null);
@@ -3089,7 +3139,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           pendingPhaseRef.current = -1;
           setActiveDialogue(outro);
         } else {
-          playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); });
+          playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', finishClear);
         }
       }
     };
@@ -4920,7 +4970,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // pendingPhaseRef は -1 のまま残す（null に戻すとゲームループが再トリガーするため）
     if (pending === -1) {
       playSfx(sfxRef.current.clear);
-      showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); });
+      showGameMsg('🎉 クリア！', 'timed', finishClear);
       return;
     }
     pendingPhaseRef.current = null;
@@ -7005,7 +7055,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
     };
 
-    const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', () => { setIsPlaying(false); if (endingRef.current?.enabled) setShowEnding(true); }); };
+    const win = () => { playSfx(sfxRef.current.clear); showGameMsg('🎉 クリア！', 'timed', finishClear); };
     const lose = (msg: string) => {
       // ── マリオ体力制ゲームオーバー ──────────────────────────────────
       // 小状態でのミスはHPを-1し、0になったらフキダシなしで直接ゲームオーバー演出へ。
@@ -12113,6 +12163,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     onSave?.(buildManifest(), { title: title.trim() || gameData.name, preset: gameData.id });
   };
 
+  /** 他人のゲームを自分の下書きとして開き直す（改造）。元ネタ表記は投稿側で付ける。 */
+  const handleRemix = () => {
+    onRemix?.(buildManifest(), { title: `${title.trim() || gameData.name}（改造）`, preset: gameData.id });
+  };
+
   const handleExport = () => {
     const json = JSON.stringify(buildManifest(), null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -13581,10 +13636,61 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         >
                           ✕ 終了
                         </button>
+                        {gameId && (
+                          <div className="flex justify-center pt-1 text-gray-400">
+                            <ShareButton
+                              url={gameShareUrl(gameId)}
+                              text={buildGameShareText(title)}
+                              size={13}
+                              label="このゲームを共有"
+                            />
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 )
+            )}
+
+            {/* ── クリア結果（保存済みゲームをプレイしたときだけ）── */}
+            {clearResult && !showEnding && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/75 z-50 px-4">
+                <div className="bg-gray-950 border-2 border-yellow-500 px-7 py-6 text-center min-w-[220px] max-w-[300px] space-y-4 font-pixel">
+                  <p className="text-yellow-300 text-xl font-bold tracking-widest">🎉 クリア！</p>
+                  {clearResult.score > 0 && (
+                    <div className="border border-gray-700 px-4 py-2">
+                      <p className="text-gray-400 text-[11px] tracking-widest">SCORE</p>
+                      <p className="text-yellow-300 text-xl font-bold">{clearResult.score.toLocaleString()}</p>
+                    </div>
+                  )}
+                  <div className="flex flex-col gap-2 pt-1">
+                    {gameId && (
+                      <div className="flex justify-center text-sky-300">
+                        <ShareButton
+                          url={gameShareUrl(gameId)}
+                          text={buildGameShareText(title, true)}
+                          size={14}
+                          label="クリアを自慢する"
+                        />
+                      </div>
+                    )}
+                    {onRemix && (
+                      <button
+                        onClick={() => { setClearResult(null); handleRemix(); }}
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-bold tracking-wide transition-colors"
+                      >
+                        ✎ このゲームを改造する
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setClearResult(null)}
+                      className="w-full py-2 bg-gray-700 hover:bg-gray-600 active:bg-gray-800 text-gray-200 text-sm font-bold tracking-wide transition-colors"
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* ── yume25d 死亡画面 ── */}

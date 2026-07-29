@@ -1,9 +1,13 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { GameManifestDraft } from './GameMaker';
+import ShareButton from './ShareButton';
+import { gameShareUrl } from '@/lib/share';
+import { buildGameShareText } from '@/lib/share-text';
+import { startRemix } from '@/lib/remix';
 
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
 
@@ -50,6 +54,10 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
     return () => { cancelled = true; };
   }, [gameId]);
 
+  const handleRemix = useCallback((remixed: GameManifestDraft, meta: { title: string; preset: string }) => {
+    startRemix({ manifest: remixed, title: meta.title, preset: meta.preset, sourceGameId: gameId, sourceTitle: title });
+  }, [gameId, title]);
+
   const wrapClass = inline
     ? "relative w-full h-full rounded-xl overflow-hidden border border-gray-800"
     : "fixed inset-0 z-[60]";
@@ -76,9 +84,12 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
     <div className={`${wrapClass} bg-[#07080b] flex flex-col`}>
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <span className="text-xs font-bold text-white truncate">{title || 'ゲーム'}</span>
-        <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100/10 rounded transition-colors">
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0 text-gray-400">
+          <ShareButton url={gameShareUrl(gameId)} text={buildGameShareText(title)} size={14} className="p-1.5 rounded hover:bg-gray-100/10" />
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100/10 rounded transition-colors">
+            <X size={16} />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-hidden">
         <GameMaker
@@ -89,6 +100,8 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
           embedded={inline}
           fixedControls={inline}
           postId={postId}
+          gameId={gameId}
+          onRemix={handleRemix}
         />
       </div>
     </div>

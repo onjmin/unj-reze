@@ -348,6 +348,8 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
                     postId={p.id}
                     gameTitle={p.gameTitle || 'ゲーム'}
                     gameThumbnail={p.gameThumbnail}
+                    gamePlays={p.gamePlays}
+                    gameClears={p.gameClears}
                     userId={userId}
                   />
                 </div>

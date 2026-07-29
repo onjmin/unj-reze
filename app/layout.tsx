@@ -1,10 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, DotGothic16, Press_Start_2P } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 import { AudioFocusProvider } from '@/lib/audio-focus-context';
 import DemoNoticeModal from '@/components/DemoNoticeModal';
-import { SITE_NAME, SITE_URL } from '@/lib/site';
+import PwaRegister from '@/components/PwaRegister';
+import { SITE_NAME, SITE_URL, SITE_DESCRIPTION, assetPath } from '@/lib/site';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,7 +30,12 @@ const pressStart2P = Press_Start_2P({
   preload: false,
 });
 
-const description = "お絵描き・ゲーム・雑談ができる匿名掲示板コミュニティ。";
+const description = SITE_DESCRIPTION;
+
+export const viewport: Viewport = {
+  themeColor: "#0b0e14",
+  colorScheme: "dark",
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -55,8 +60,12 @@ export const metadata: Metadata = {
     title: SITE_NAME,
     description,
   },
-  icons: {
-    icon: "https://avatars.githubusercontent.com/u/88383494",
+  // アイコンは metadataBase による絶対URL化に巻き込まれないよう、
+  // basePath を明示した相対パスを <head> に直接書く（下の RootLayout を参照）。
+  appleWebApp: {
+    capable: true,
+    title: SITE_NAME,
+    statusBarStyle: "black-translucent",
   },
   other: {
     "google-site-verification": "cMogkuhgfKNyue0pALIrQx9G9ClFbSeRo5CqLomVgVk",
@@ -79,10 +88,13 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="ja"
       className={`${geistSans.variable} ${geistMono.variable} ${dotGothic16.variable} ${pressStart2P.variable} h-full antialiased`}
     >
       <head>
+        <link rel="icon" href={assetPath('/icon-192.png')} type="image/png" sizes="192x192" />
+        <link rel="icon" href={assetPath('/icon-512.png')} type="image/png" sizes="512x512" />
+        <link rel="apple-touch-icon" href={assetPath('/apple-icon.png')} sizes="180x180" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
@@ -103,7 +115,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col"><AudioFocusProvider>{children}</AudioFocusProvider>{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
+      <body className="min-h-full flex flex-col"><AudioFocusProvider>{children}</AudioFocusProvider><PwaRegister />{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
     </html>
   );
 }

@@ -14,6 +14,7 @@ import EditPostModal from '@/components/EditPostModal';
 import TopTabs, { type FeedSubMode } from '@/components/TopTabs';
 import dynamic from 'next/dynamic';
 import RankingSubTabs from '@/components/RankingSubTabs';
+import GameRankingView from '@/components/GameRankingView';
 import FeedList from '@/components/FeedList';
 import BottomNav from '@/components/BottomNav';
 import LeftSidebar from '@/components/LeftSidebar';
@@ -28,6 +29,7 @@ import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
 import ToastContainer from '@/components/ToastContainer';
 import HeartBurst from '@/components/HeartBurst';
 import { showToast, triggerHeartBurst } from '@/lib/toast';
+import { setRemixHandler, takeStashedRemix, type RemixDraft } from '@/lib/remix';
 
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
@@ -70,6 +72,15 @@ export default function App() {
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
+
+      // ?tab=game のように上部タブを直接指定して開けるようにする。
+      // PWA のショートカットやライブゲームへの導線から使う。
+      const tab = params.get('tab');
+      if (tab && ['everyone', 'following', 'ranking', 'game'].includes(tab)) {
+        setTopTab(tab);
+        if (tab === 'ranking') setRankCategory('イイ');
+      }
+
       const mention = params.get('mention');
       if (mention) {
         handleQuickPost(`@${mention}`);
@@ -610,6 +621,37 @@ export default function App() {
     setInputText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
   };
 
+  /**
+   * 他人のゲームを「改造する」で受け取ったときの処理。
+   * 下書きに取り込んだうえでエディタを開き、そのまま手を入れられる状態にする。
+   * 元ネタは自作ではないので権利表記は「not自作 & 改変OK」を初期値にしておく。
+   */
+  const handleRemixDraft = useCallback((draft: RemixDraft) => {
+    setPlayingGame(null);
+    setPostGameDanmaku([]);
+    setGameDraft({ manifest: draft.manifest, title: draft.title, preset: draft.preset });
+    setOriginType('others_modify_ok');
+    setInputText(prev => prev.trim()
+      ? prev
+      : `#ゲーム 「${draft.sourceTitle || '元ゲーム'}」を改造したよ！`);
+    composerReturnRef.current = false;
+    setComposerOpen(false);
+    setActiveScreen('gamemaker');
+    showToast('success', '下書きに取り込んだよ。好きに改造してね');
+  }, []);
+
+  useEffect(() => {
+    const dispose = setRemixHandler(handleRemixDraft);
+    // 投稿詳細やゲーム単独ページから飛ばされてきた場合はここで受け取る。
+    // エフェクト内で同期的に state を書くとカスケードレンダリングになるので次のタスクへ回す。
+    const stashed = takeStashedRemix();
+    const timer = stashed ? setTimeout(() => handleRemixDraft(stashed), 0) : null;
+    return () => {
+      if (timer) clearTimeout(timer);
+      dispose();
+    };
+  }, [handleRemixDraft]);
+
   const handleOpenEditor = (screenType: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker') => {
     const hasImage = !!attachedImage;
     const hasMml = !!attachedMml;
@@ -702,6 +744,14 @@ export default function App() {
           playOnly={!editingPost}
           onSave={editingPost && !!currentUser?.slug && playingGame.creatorSlug === currentUser.slug ? handleSaveEditedGame : undefined}
           postId={playingGame.postId}
+          gameId={playingGame.gameId}
+          onRemix={(manifest, meta) => handleRemixDraft({
+            manifest,
+            title: meta.title,
+            preset: meta.preset,
+            sourceGameId: playingGame.gameId,
+            sourceTitle: playingGame.title,
+          })}
           danmakuComments={postGameDanmaku}
           onComment={async (text, displayName) => {
             if (!playingGame.postId) return;
@@ -831,6 +881,10 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* ゲームランキングは投稿ではなくゲームを並べるので FeedList を通さない */}
+                  {topTab === 'ranking' && rankCategory === 'ゲーム' ? (
+                  <GameRankingView />
+                  ) : (
                   <FeedList
                     posts={posts}
                     activeTab={topTab}
@@ -861,6 +915,7 @@ export default function App() {
                     onEditPost={handleEditPost}
                     userId={userId}
                   />
+                  )}
                 </>
               )}
 

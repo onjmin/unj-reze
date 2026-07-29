@@ -46,6 +46,10 @@ export interface Post {
   gameId?: string;
   gameTitle?: string;
   gameThumbnail?: string;
+  /** ゲームの累計プレイ数（フィードのサムネに出す） */
+  gamePlays?: number;
+  /** ゲームの累計クリア数 */
+  gameClears?: number;
   /** 自己申告の権利表記。未設定(申告なし)なら undefined */
   originType?: OriginType;
   /** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
@@ -64,6 +68,21 @@ export interface GameRecord {
   title: string;
   manifest: GameManifestDraft;
   createdAt: string;
+  creatorSlug?: string;
+  /** 累計プレイ回数 */
+  plays?: number;
+  /** 累計クリア回数 */
+  clears?: number;
+  /** 記録されたハイスコア */
+  bestScore?: number;
+  /** ハイスコア保持者の表示名 */
+  bestScoreBy?: string;
+}
+
+/** ゲームランキング1件。一覧表示に manifest は要らないので落としてある。 */
+export interface GameRankingEntry extends Omit<GameRecord, 'manifest'> {
+  /** ひもづく投稿（コメントへの導線）。ない場合もある。 */
+  postId?: string;
 }
 
 export interface AnonymousUser {

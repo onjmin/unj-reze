@@ -94,6 +94,18 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!gameColNames.includes('creator_slug')) {
     d.run("ALTER TABLE games ADD COLUMN creator_slug TEXT");
   }
+  if (!gameColNames.includes('plays')) {
+    d.run("ALTER TABLE games ADD COLUMN plays INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!gameColNames.includes('clears')) {
+    d.run("ALTER TABLE games ADD COLUMN clears INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!gameColNames.includes('best_score')) {
+    d.run("ALTER TABLE games ADD COLUMN best_score INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!gameColNames.includes('best_score_by')) {
+    d.run("ALTER TABLE games ADD COLUMN best_score_by TEXT");
+  }
   d.run(`CREATE TABLE IF NOT EXISTS game_schedule (
     hour_slot TEXT PRIMARY KEY,
     game_id INTEGER NOT NULL
@@ -307,6 +319,16 @@ function generateDisplayNameSqlite(): string {
 
 function randomGradientSqlite(): string {
   return AVATAR_GRADIENTS_SQLITE[Math.floor(Math.random() * AVATAR_GRADIENTS_SQLITE.length)];
+}
+
+/** games 行からプレイ統計を取り出す。列が未マイグレーションでも 0 として扱う。 */
+function gameStatsFromRow(row: any) {
+  return {
+    plays: Number(row.plays ?? 0),
+    clears: Number(row.clears ?? 0),
+    bestScore: Number(row.best_score ?? 0),
+    bestScoreBy: row.best_score_by ?? undefined,
+  };
 }
 
 function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[] {
@@ -1148,14 +1170,53 @@ export const sqliteStore: DataStore = {
     const rows = rowsToObjects(d, 'SELECT * FROM games WHERE id = ?', [id]);
     if (rows.length === 0) return null;
     const r = rows[0];
-    return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined };
+    return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
+  },
+
+  async recordGamePlay(id, data) {
+    const d = await getDb();
+    const score = Number(data.score) || 0;
+    d.run(
+      `UPDATE games
+          SET plays = COALESCE(plays, 0) + ?,
+              clears = COALESCE(clears, 0) + ?,
+              best_score = CASE WHEN ? > COALESCE(best_score, 0) THEN ? ELSE COALESCE(best_score, 0) END,
+              best_score_by = CASE WHEN ? > COALESCE(best_score, 0) THEN ? ELSE best_score_by END
+        WHERE id = ?`,
+      [data.countPlay === false ? 0 : 1, data.cleared ? 1 : 0, score, score, score, data.displayName || '名無し', id]
+    );
+    saveDb();
+    return this.getGame(id);
+  },
+
+  async listTopGames(limit?: number) {
+    const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+    const rows = rowsToObjects(d, `
+      SELECT g.id, g.preset, g.title, g.created_at, g.creator_slug, g.plays, g.clears, g.best_score, g.best_score_by,
+             (SELECT p.id FROM posts p WHERE p.game_id = g.id ORDER BY p.id ASC LIMIT 1) AS post_id
+        FROM games g
+       ORDER BY COALESCE(g.plays, 0) DESC, g.id DESC
+       LIMIT ${safeLimit}`, []);
+    return rows.map(r => ({
+      id: r.id, preset: r.preset, title: r.title, manifest: {} as any, createdAt: r.created_at,
+      creatorSlug: r.creator_slug ?? undefined,
+      postId: r.post_id ?? undefined,
+      ...gameStatsFromRow(r),
+    }));
+  },
+
+  async getPostIdByGameId(gameId: number) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT id FROM posts WHERE game_id = ? ORDER BY id ASC LIMIT 1', [gameId]);
+    return rows.length > 0 ? Number(rows[0].id) : null;
   },
 
   async getGamesByIds(ids) {
     if (!ids || ids.length === 0) return [];
     const d = await getDb();
     const placeholders = ids.map(() => '?').join(',');
-    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest, created_at, creator_slug FROM games WHERE id IN (${placeholders})`, ids);
+    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest, created_at, creator_slug, plays, clears, best_score, best_score_by FROM games WHERE id IN (${placeholders})`, ids);
     return rows.map(r => {
       let manifest: any = {};
       if (typeof r.manifest === 'string') {
@@ -1164,7 +1225,7 @@ export const sqliteStore: DataStore = {
       } else if (r.manifest && typeof r.manifest === 'object') {
         manifest = r.manifest;
       }
-      return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined };
+      return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
     });
   },
 
@@ -1179,7 +1240,7 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     const safeLimit = Math.max(1, Math.min(limit || 30, 50));
     const rows = rowsToObjects(d, `SELECT * FROM games ORDER BY id DESC LIMIT ${safeLimit}`, []);
-    return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at }));
+    return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, ...gameStatsFromRow(r) }));
   },
 
   async getLiveGameInfo(ipAddress: string) {

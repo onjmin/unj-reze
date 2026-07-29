@@ -34,6 +34,8 @@ export async function attachGameInfo<T extends DbPost | null | (DbPost | null)[]
       const game = gameMap.get(p.gameId)!;
       p.gameTitle = game.title;
       p.gameThumbnail = thumbnailFromGame(game);
+      p.gamePlays = game.plays ?? 0;
+      p.gameClears = game.clears ?? 0;
     }
     p.replies?.forEach(apply);
   };

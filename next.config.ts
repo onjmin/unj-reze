@@ -29,6 +29,11 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  // basePath はクライアント側（Service Worker の登録パスや manifest のアイコン URL）でも
+  // 必要になるが、Next は basePath を公開してくれないのでビルド時に環境変数として埋め込む。
+  env: {
+    NEXT_PUBLIC_BASE_PATH: isGhPages ? "/unj-reze" : "",
+  },
   allowedDevOrigins: [getLocalIp(), `localhost:${process.env.PORT || 3000}`],
 };
 

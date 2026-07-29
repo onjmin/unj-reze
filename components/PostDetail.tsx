@@ -18,6 +18,9 @@ import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 import GameBox from './GameBox';
+import ShareButton from './ShareButton';
+import { postShareUrl } from '@/lib/share';
+import { buildPostShareText } from '@/lib/share-text';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
@@ -731,6 +734,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               postId={post.id}
               gameTitle={post.gameTitle || 'ゲーム'}
               gameThumbnail={post.gameThumbnail}
+              gamePlays={post.gamePlays}
+              gameClears={post.gameClears}
               userId={userId}
               className="mb-2.5"
             />
@@ -759,7 +764,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             return embed ? <EmbedPart embed={embed} /> : null;
           })()}
 
-          <div className="flex justify-between items-center text-gray-500 mt-2 max-w-[280px]">
+          <div className="flex justify-between items-center text-gray-500 mt-2 max-w-[320px]">
             <button onClick={handleLike} className={`flex items-center space-x-1 hover:text-blue-400 transition-colors ${post.liked ? 'text-blue-400 font-bold' : ''}`}>
               <ThumbsUp size={14} /><span className="text-[11px]">{post.likes || ''}</span>
             </button>
@@ -779,6 +784,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               <Heart size={12} className="fill-current text-pink-600/65" />
               <span className="text-[10px]">{post.heartsTotal || '0'}</span>
             </button>
+            <ShareButton url={postShareUrl(post.id)} text={buildPostShareText(post)} />
           </div>
         </div>
       </div>

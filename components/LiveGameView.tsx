@@ -175,6 +175,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
             ghostPlayers={ghostPlayers}
             onPositionChange={handlePositionChange}
             postId={info.postId ?? undefined}
+            gameId={info.gameId ?? undefined}
             danmakuComments={danmakuComments}
             onComment={async (text, displayName) => {
               if (!info.postId) return;

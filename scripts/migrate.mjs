@@ -138,6 +138,19 @@ const migrations = [
       ALTER TABLE game_players ALTER COLUMN game_id TYPE BIGINT;
       ALTER TABLE posts ALTER COLUMN game_id TYPE BIGINT;
     `
+  },
+  {
+    name: '10_add_play_stats_to_games',
+    sql: `
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS plays BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS clears BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS best_score BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS best_score_by TEXT;
+
+      -- ランキング（プレイ数降順）と、ゲーム→投稿の逆引き用
+      CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
+      CREATE INDEX IF NOT EXISTS idx_posts_game_id ON posts(game_id);
+    `
   }
 ];
 

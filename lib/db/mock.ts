@@ -1,6 +1,6 @@
 import { db as mockDb } from '../mock-db';
 import { OriginType } from '../types';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, ReportParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, ReportParams, RecordGamePlayParams } from './interface';
 import type { DbGameRecord } from '../types-db';
 
 
@@ -232,6 +232,34 @@ export const mockStore: DataStore = {
   async listAllGames(limit?: number) {
     const list = Array.from(gameStore.values());
     return limit && limit > 0 ? list.slice(0, limit) : list;
+  },
+
+  async recordGamePlay(gameId: number, data: RecordGamePlayParams): Promise<DbGameRecord | null> {
+    const existing = gameStore.get(gameId);
+    if (!existing) return null;
+    const score = Number(data.score) || 0;
+    const updated: DbGameRecord = {
+      ...existing,
+      plays: (existing.plays ?? 0) + (data.countPlay === false ? 0 : 1),
+      clears: (existing.clears ?? 0) + (data.cleared ? 1 : 0),
+    };
+    if (score > (existing.bestScore ?? 0)) {
+      updated.bestScore = score;
+      updated.bestScoreBy = data.displayName || '名無し';
+    }
+    gameStore.set(gameId, updated);
+    return updated;
+  },
+
+  async listTopGames(limit?: number) {
+    const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+    return Array.from(gameStore.values())
+      .sort((a, b) => (b.plays ?? 0) - (a.plays ?? 0) || b.id - a.id)
+      .slice(0, safeLimit);
+  },
+
+  async getPostIdByGameId(_gameId: number) {
+    return null;
   },
 
   async getLiveGameInfo(_ipAddress: string) {

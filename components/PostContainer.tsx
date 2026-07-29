@@ -23,6 +23,9 @@ import OriginTypeModal from './OriginTypeModal';
 import UserActionMenu from './UserActionMenu';
 import ImagePreview from './ImagePreview';
 import GameBox from './GameBox';
+import ShareButton from './ShareButton';
+import { postShareUrl } from '@/lib/share';
+import { buildPostShareText } from '@/lib/share-text';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
@@ -75,6 +78,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
   const [optimisticallyDeleted, setOptimisticallyDeleted] = useState(false);
   const targetSlug = post.slug || post.displayName;
   const isSelf = !!currentUserSlug && currentUserSlug === targetSlug;
+  const shareText = buildPostShareText(post);
 
   const toggleMenu = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -455,6 +459,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               postId={post.id}
               gameTitle={post.gameTitle || 'ゲーム'}
               gameThumbnail={post.gameThumbnail}
+              gamePlays={post.gamePlays}
+              gameClears={post.gameClears}
               userId={userId}
               className="mb-3"
             />
@@ -577,6 +583,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               <Heart size={12} className="fill-current text-pink-600/65" />
               <span className="text-[10px]">{post.heartsTotal || '0'}</span>
             </button>
+
+            <ShareButton url={postShareUrl(post.id)} text={shareText} />
           </div>
 
           {post.replies.length > 0 && (

@@ -14,11 +14,13 @@ interface GameBoxProps {
   postId: string;
   gameTitle: string;
   gameThumbnail?: string;
+  gamePlays?: number;
+  gameClears?: number;
   userId?: string;
   className?: string;
 }
 
-export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, userId, className }: GameBoxProps) {
+export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, gamePlays = 0, gameClears = 0, userId, className }: GameBoxProps) {
   const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed');
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -106,8 +108,14 @@ export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, user
           </div>
           <span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">TAP TO PLAY GAME</span>
         </div>
-        <div className="absolute bottom-2 left-2.5 z-10">
+        <div className="absolute bottom-2 left-2.5 z-10 flex items-center gap-1.5">
           <span className="font-bold text-xs bg-red-600/90 text-white px-2 py-0.5 rounded">{gameTitle || 'ゲーム'}</span>
+          {gamePlays > 0 && (
+            <span className="text-[10px] text-gray-300 bg-black/60 px-1.5 py-0.5 rounded backdrop-blur">
+              ▶ {gamePlays.toLocaleString()}
+              {gameClears > 0 && ` / 🏁 ${gameClears.toLocaleString()}`}
+            </span>
+          )}
         </div>
       </div>
 

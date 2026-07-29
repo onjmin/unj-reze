@@ -6,7 +6,7 @@ interface RankingSubTabsProps {
 }
 
 export default function RankingSubTabs({ activeCategory, setActiveCategory }: RankingSubTabsProps) {
-  const categories = ['コメ', 'イイ', 'ダメ', 'フォロワー', '返信', 'スレ', 'グルチャ', '🥺'];
+  const categories = ['ゲーム', 'コメ', 'イイ', 'ダメ', 'フォロワー', '返信', 'スレ', 'グルチャ', '🥺'];
 
   return (
     <div className="flex items-center space-x-1 border-b border-gray-800 px-2 py-1 bg-gray-900/40 overflow-x-auto scrollbar-none shrink-0">

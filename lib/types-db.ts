@@ -26,6 +26,10 @@ export interface DbPost {
   gameId?: number;
   gameTitle?: string;
   gameThumbnail?: string;
+  /** ゲームの累計プレイ数（フィードのサムネに出す） */
+  gamePlays?: number;
+  /** ゲームの累計クリア数 */
+  gameClears?: number;
   originType?: OriginType;
   isFalseDeclaration?: boolean;
   isEdited?: boolean;
@@ -41,6 +45,16 @@ export interface DbGameRecord {
   manifest: GameManifestDraft;
   createdAt: string;
   creatorSlug?: string;
+  /** 累計プレイ回数 */
+  plays?: number;
+  /** 累計クリア回数 */
+  clears?: number;
+  /** 記録されたハイスコア */
+  bestScore?: number;
+  /** ハイスコア保持者の表示名 */
+  bestScoreBy?: string;
+  /** ひもづく投稿ID（ランキングからコメントへ飛ぶ用） */
+  postId?: number;
 }
 
 export interface DbOshiItem {

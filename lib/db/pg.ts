@@ -90,6 +90,16 @@ async function rowToPost(row: any): Promise<Post> {
   };
 }
 
+/** games 行からプレイ統計を取り出す。列が未マイグレーションでも 0 として扱う。 */
+function gameStatsFromRow(row: any) {
+  return {
+    plays: Number(row.plays ?? 0),
+    clears: Number(row.clears ?? 0),
+    bestScore: Number(row.best_score ?? 0),
+    bestScoreBy: row.best_score_by ?? undefined,
+  };
+}
+
 async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<number, Post[]>> {
   if (threadIds.length === 0) return new Map();
   const result = await client.query(
@@ -1280,7 +1290,7 @@ export const pgStore: DataStore = {
       if (result.rows.length === 0) return null;
       const r = result.rows[0];
       const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
+      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
     } finally {
       client.release();
     }
@@ -1290,7 +1300,10 @@ export const pgStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT id, preset, title, manifest, created_at, creator_slug FROM games WHERE id = ANY($1::bigint[])', [ids]);
+      // フィードの主要導線なので、列を明示せず SELECT * にしておく。
+      // プレイ統計のマイグレーション前にデプロイされても、ここが落ちて投稿一覧ごと
+      // 500 になることがない（gameStatsFromRow が未マイグレーションを 0 として扱う）。
+      const result = await client.query('SELECT * FROM games WHERE id = ANY($1::bigint[])', [ids]);
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
         let manifest: any = {};
@@ -1300,8 +1313,68 @@ export const pgStore: DataStore = {
         } else if (r.manifest && typeof r.manifest === 'object') {
           manifest = r.manifest;
         }
-        return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt, creatorSlug: r.creator_slug ?? undefined };
+        return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
       });
+    } finally {
+      client.release();
+    }
+  },
+
+  async recordGamePlay(id, data) {
+    const client = await getPool().connect();
+    try {
+      const score = Number(data.score) || 0;
+      // ハイスコアは「上回ったときだけ」置き換える。GREATEST では保持者名がずれるので CASE で揃える。
+      const result = await client.query(
+        `UPDATE games
+            SET plays = COALESCE(plays, 0) + $2,
+                clears = COALESCE(clears, 0) + $3,
+                best_score = CASE WHEN $4 > COALESCE(best_score, 0) THEN $4 ELSE COALESCE(best_score, 0) END,
+                best_score_by = CASE WHEN $4 > COALESCE(best_score, 0) THEN $5 ELSE best_score_by END
+          WHERE id = $1
+          RETURNING *`,
+        [id, data.countPlay === false ? 0 : 1, data.cleared ? 1 : 0, score, data.displayName || '名無し']
+      );
+      if (result.rows.length === 0) return null;
+      const r = result.rows[0];
+      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
+    } finally {
+      client.release();
+    }
+  },
+
+  async listTopGames(limit?: number) {
+    const client = await getPool().connect();
+    try {
+      const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+      // manifest は重いので取らない（ランキング表示には不要）
+      const result = await client.query(
+        `SELECT g.id, g.preset, g.title, g.created_at, g.creator_slug, g.plays, g.clears, g.best_score, g.best_score_by,
+                (SELECT p.id FROM posts p WHERE p.game_id = g.id ORDER BY p.id ASC LIMIT 1) AS post_id
+           FROM games g
+          ORDER BY COALESCE(g.plays, 0) DESC, g.id DESC
+          LIMIT ${safeLimit}`
+      );
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+        return {
+          id: r.id, preset: r.preset, title: r.title, manifest: {} as any, createdAt,
+          creatorSlug: r.creator_slug ?? undefined,
+          postId: r.post_id ? Number(r.post_id) : undefined,
+          ...gameStatsFromRow(r),
+        };
+      });
+    } finally {
+      client.release();
+    }
+  },
+
+  async getPostIdByGameId(gameId: number) {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query('SELECT id FROM posts WHERE game_id = $1 ORDER BY id ASC LIMIT 1', [gameId]);
+      return result.rows.length > 0 ? Number(result.rows[0].id) : null;
     } finally {
       client.release();
     }
@@ -1330,7 +1403,7 @@ export const pgStore: DataStore = {
       const result = await client.query(`SELECT * FROM games ORDER BY id DESC LIMIT ${safeLimit}`);
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt };
+        return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, ...gameStatsFromRow(r) };
       });
     } finally {
       client.release();
