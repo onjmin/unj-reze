@@ -186,6 +186,83 @@
   }
 }
 
+/* classic 戦闘：敵の攻撃モーション。ドラクエは DQ6（SFC）から戦闘中のモンスターが動くようになり、
+   行動するたびにアニメーションする。それに倣って、軽く跳ね上がってから手前（プレイヤー側）へ
+   踏み込み、元の位置へ戻る。手前に来るほど大きく見せて奥行きを出す。 */
+@keyframes enemyClassicLunge {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+
+  22% {
+    transform: translateY(-14px) scale(1.03);
+  }
+
+  48% {
+    transform: translateY(8px) scale(1.14);
+  }
+
+  68% {
+    transform: translateY(3px) scale(1.06);
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* classic 戦闘：撃破演出。ドラクエのモンスターは白く数回点滅してから消えるので、
+   点滅（明滅）→ 縮みながらフェードアウト の順で見せる。fill-mode: forwards で消えたままにする。 */
+@keyframes enemyClassicVanish {
+  0% {
+    opacity: 1;
+    filter: brightness(1);
+    transform: scale(1);
+  }
+
+  8% {
+    opacity: 1;
+    filter: brightness(4) saturate(0);
+    transform: scale(1.02);
+  }
+
+  20% {
+    opacity: 0.15;
+    filter: brightness(4) saturate(0);
+    transform: scale(1.02);
+  }
+
+  32% {
+    opacity: 1;
+    filter: brightness(4) saturate(0);
+    transform: scale(1.02);
+  }
+
+  44% {
+    opacity: 0.15;
+    filter: brightness(4) saturate(0);
+    transform: scale(1.01);
+  }
+
+  56% {
+    opacity: 1;
+    filter: brightness(4) saturate(0);
+    transform: scale(1);
+  }
+
+  70% {
+    opacity: 0.6;
+    filter: brightness(4) saturate(0);
+    transform: scale(0.98);
+  }
+
+  100% {
+    opacity: 0;
+    filter: brightness(4) saturate(0);
+    transform: scale(0.88);
+  }
+}
+
 @keyframes danmaku-slide {
   from {
     left: 105%;

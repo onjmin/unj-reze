@@ -2296,13 +2296,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   /** アンダーテール風戦闘：敵HPゲージ（敵ごと）。被ダメージ時のみ一時的に表示し、減少アニメーション後に隠す */
   const [enemyGaugeAnim, setEnemyGaugeAnim] = useState<Record<number, { pct: number; id: number } | undefined>>({});
   const [enemyShakeFx, setEnemyShakeFx] = useState<Record<number, { id: number } | undefined>>({});
-  /** classic 戦闘：敵絵文字へのダメージ演出（シェーク＋白色フラッシュ）。Undertale の被弾演出に相当。 */
-  const [classicEnemyDmgFx, setClassicEnemyDmgFx] = useState<{ id: number } | null>(null);
+  /** classic 戦闘：敵絵文字へのダメージ演出（シェーク＋白色フラッシュ）。Undertale の被弾演出に相当。
+   *  ダメージ数値は演出と一緒に受け取る。ドラクエ準拠でメッセージは着弾より後に出るため、
+   *  ログ文字列から数字を拾うことはできない。 */
+  const [classicEnemyDmgFx, setClassicEnemyDmgFx] = useState<{ id: number; text: string } | null>(null);
   const classicEnemyDmgFxRef = useRef<{ id: number } | null>(null);
-  const CLASSIC_ENEMY_DMG_FX_MS = 500;
-  const triggerClassicEnemyDmgFx = () => {
+  /** シェーク＋フラッシュの長さ。 */
+  const CLASSIC_ENEMY_SHAKE_MS = 500;
+  /** ダメージ数値のポップアップが浮かび上がりきるまで（globals.css の dmgPopUp と揃える）。 */
+  const CLASSIC_ENEMY_DMG_FX_MS = 700;
+  const triggerClassicEnemyDmgFx = (dmg: number) => {
     const id = ++enemyFxIdRef.current;
-    const fx = { id };
+    const fx = { id, text: String(dmg) };
     classicEnemyDmgFxRef.current = fx;
     setClassicEnemyDmgFx(fx);
     setTimeout(() => {
@@ -2325,6 +2330,47 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       setClassicEnemyGaugeAnim(p => (p?.id === id ? { pct: afterPct, id } : p));
     }));
     setTimeout(() => setClassicEnemyGaugeAnim(p => (p?.id === id ? null : p)), CLASSIC_ENEMY_GAUGE_FX_MS);
+  };
+  // ── classic（ドラクエ風コマンド戦闘）の演出タイミング ───────────────────────
+  // ドラクエの1手は「行動宣言メッセージ → モーション／エフェクト → 着弾（点滅＋ダメージ数値）
+  // → ダメージメッセージ」の順で流れる。すべて同時に出すと何が起きたか読めないので、
+  // 下の各定数ぶんだけ間を置いて1段ずつ見せる。
+  /** 攻撃コマンド：振りかぶり（attackStart SE）から命中するまで。 */
+  const CLASSIC_SWING_MS = 220;
+  /** 呪文：詠唱メッセージ／エフェクト再生の開始から、着弾して敵が点滅するまで。 */
+  const CLASSIC_SPELL_IMPACT_MS = 480;
+  /** 着弾の点滅から、ダメージ数値のメッセージを出すまで。 */
+  const CLASSIC_DMG_MSG_MS = 420;
+  /** メッセージを1行読ませる間（次の行動へ移るまでの余韻）。 */
+  const CLASSIC_MSG_HOLD_MS = 620;
+  /** 敵の攻撃モーション（跳ねて踏み込む）の長さ。 */
+  const CLASSIC_ENEMY_LUNGE_MS = 520;
+  /** 敵の攻撃モーション開始から、こちらが被弾するまで。 */
+  const CLASSIC_ENEMY_HIT_MS = 260;
+  /** 撃破演出（白く点滅 → 消滅）の長さ。 */
+  const CLASSIC_ENEMY_VANISH_MS = 900;
+  /** classic 戦闘：敵の攻撃モーション（跳ね上がって手前へ踏み込む）。
+   *  DQ6 以降のモンスターが行動時にアニメーションするのに倣い、敵ターンの被弾より先に再生する。 */
+  const [classicEnemyAttackFx, setClassicEnemyAttackFx] = useState<{ id: number } | null>(null);
+  const triggerClassicEnemyAttackFx = () => {
+    const id = ++enemyFxIdRef.current;
+    setClassicEnemyAttackFx({ id });
+    setTimeout(() => setClassicEnemyAttackFx(p => (p?.id === id ? null : p)), CLASSIC_ENEMY_LUNGE_MS);
+  };
+  /** classic 戦闘：撃破演出（白く点滅してから消える）。
+   *  ダメージ演出を見せ切ってから再生し、消え終わってはじめて勝利処理へ進む。
+   *  演出後も「消えたまま」を保つため自動では解除せず、次の戦闘開始時にリセットする。 */
+  const [classicEnemyDefeatFx, setClassicEnemyDefeatFx] = useState<{ id: number } | null>(null);
+  const triggerClassicEnemyDefeatFx = () => setClassicEnemyDefeatFx({ id: ++enemyFxIdRef.current });
+  /** classic 戦闘：敵にトドメを刺したときの締め。
+   *  ダメージメッセージを読ませる → 撃破アニメーション（点滅→消滅）→ 消え切ってから
+   *  「たおした！」以降のリザルト（endBattle）へ、という順に流す。 */
+  const finishClassicKill = () => {
+    setTimeout(() => {
+      if (!battleRef.current.active) return;
+      triggerClassicEnemyDefeatFx();
+      setTimeout(() => endBattle('win'), CLASSIC_ENEMY_VANISH_MS);
+    }, CLASSIC_MSG_HOLD_MS);
   };
   /** バトル演出用エフェクトアニメーション（EffectPreset）の再生中インスタンス一覧。
    *  foeIdx 指定時は該当する敵スロット内に重ねて表示し、未指定（パーティ側）は現状 castSpell/doMove の
@@ -2856,6 +2902,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setBattleItemsOpen(false); setBagOpen(false);
     setUndertalePhase('menu'); setUndertaleMenu('root'); undertaleDodgeRef.current = null;
     clearEnemyBubble();
+    // classic の敵演出をリセット（撃破演出は自動解除しないので、ここで必ず戻す）
+    setClassicEnemyDefeatFx(null); setClassicEnemyAttackFx(null);
+    setClassicEnemyDmgFx(null); classicEnemyDmgFxRef.current = null;
+    setClassicEnemyGaugeAnim(null);
     // デルタルーン風パーティ戦闘：TPは毎戦闘0から、2人目以降のHPは各自 maxHp から再開、行動選択は先頭メンバーから
     if (gameDataRef.current.battle?.style === 'deltarune') {
       setTp(0); tpRef.current = 0;
@@ -3074,7 +3124,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     return aliveFoeIdxs()[0] ?? idx;
   };
 
-  const enemyTurn = () => {
+  /** classic 戦闘：敵1体ぶんの行動。ドラクエの流れに合わせて
+   *  「行動宣言メッセージ → モンスターのモーション → 着弾（被弾演出）→ ダメージメッセージ」の順に見せる。
+   *  onDone を渡すと被弾処理のあと（＝プレイヤー生存時のみ）そちらへ続きを委ねる。
+   *  省略時はコマンド入力へ戻す（通常の敵ターン）。全滅した場合はどちらの場合もゲームオーバーへ。 */
+  const runClassicEnemyAction = (onDone?: () => void) => {
     const b = battleRef.current; const pr = progressRef.current;
     if (!b.active) return;
     /** classic 戦闘の被弾処理。HPを減らし、ダメージ数値のポップアップとステータス欄の振動＋SEを出す。
@@ -3085,21 +3139,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       triggerMemberDamageFx(leaderId, dmg);
       triggerMemberStatusShake(leaderId);
     };
+    /** 敵の行動が終わったあと：全滅ならゲームオーバー、生存なら続き（またはコマンド入力）へ。 */
+    const settle = () => {
+      if (pr.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
+      if (onDone) { onDone(); return; }
+      setBattle(v => (v && !v.over ? { ...v, canAct: true } : v));
+    };
     // 攻撃パターン：40% で呪文/特技、それ以外は通常攻撃
     const move = b.enemyMoves.length && Math.random() < 0.4 ? b.enemyMoves[Math.floor(Math.random() * b.enemyMoves.length)] : null;
     if (move?.heal) {
+      // 回復呪文は踏み込まない（その場で詠唱）。回復ぶんもHPバーで見せる。
+      playBattleSfx('spell');
       const before = b.enemyHp; b.enemyHp = Math.min(b.enemyMaxHp, b.enemyHp + move.power);
-      appendLog(`${b.enemyName}は ${move.name}を となえた！ HPが ${b.enemyHp - before} かいふく`, { canAct: pr.hp > 0 });
-    } else if (move) {
-      const dmg = Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3)));
-      hitLeader(dmg);
-      appendLog(`${b.enemyName}の ${move.name}！ ${dmg}のダメージ`, { canAct: pr.hp > 0 });
-    } else {
-      const dmg = calcDmg(b.enemyAtk, pr.def);
-      hitLeader(dmg);
-      appendLog(`${b.enemyName}の こうげき！ ${dmg}のダメージ`, { canAct: pr.hp > 0 });
+      triggerClassicEnemyGaugeFx(before, b.enemyHp, b.enemyMaxHp);
+      appendLog(`${b.enemyName}は ${move.name}を となえた！ HPが ${b.enemyHp - before} かいふく`, { canAct: false });
+      setTimeout(settle, CLASSIC_MSG_HOLD_MS);
+      return;
     }
-    if (pr.hp <= 0) setTimeout(() => endBattle('lose'), 600);
+    const dmg = move
+      ? Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3)))
+      : calcDmg(b.enemyAtk, pr.def);
+    // 行動宣言＋モーション（跳ねて踏み込む）を先に見せ、着弾はワンテンポ置いてから
+    triggerClassicEnemyAttackFx();
+    playBattleSfx(move ? 'spell' : 'attackStart');
+    appendLog(move ? `${b.enemyName}の ${move.name}！` : `${b.enemyName}の こうげき！`, { canAct: false });
+    setTimeout(() => {
+      if (!battleRef.current.active) return;
+      playBattleSfx('attack');
+      hitLeader(dmg);
+      appendLog(`${dmg}のダメージを うけた！`, { canAct: false });
+      setTimeout(settle, CLASSIC_MSG_HOLD_MS);
+    }, CLASSIC_ENEMY_HIT_MS);
   };
 
   /** undertale: テキスト表示後、プレイヤーがボタン（Z/A）を押すまで進行を止めておくための予約関数。 */
@@ -3206,7 +3276,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   /** プレイヤーの行動後に敵ターンへ。undertale スタイルはテキストを読み、ボタン入力を待ってから弾幕よけへ。
-   *  classic なら従来どおり一定時間後に即時ダメージ。 */
+   *  classic は間を置いてから敵の行動（モーション → 被弾）を再生する。 */
   const queueEnemyTurn = (delay = 1350) => {
     if (isDodgeBattleStyle(gameDataRef.current.battle?.style)) {
       clearQueuedUndertaleTurnTimer();
@@ -3216,7 +3286,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         undertaleEnemyTurn();
       }, delay);
     } else {
-      setTimeout(() => enemyTurn(), delay);
+      setTimeout(() => runClassicEnemyAction(), delay);
     }
   };
 
@@ -3480,8 +3550,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     dtAdvanceTurn();
   };
 
-  /** 攻撃開始SE（振りかぶり）→ 少し遅れて命中SE。2つ重ならないように間を空ける。 */
-  const ATTACK_HIT_SFX_DELAY_MS = 180;
   /** はやさ判定：プレイヤーと敵の敏捷性を比較し、プレイヤーが先手なら true を返す。
    *  はやさが同値ならランダム。0 の場合はプレイヤー固定（後方互換）。 */
   const rollPlayerInitiative = () => {
@@ -3498,67 +3566,33 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     const dmg = calcDmg(pr.atk, b.enemyDef);
     const playerName = gameData.battle?.playerName || '勇者';
     const playerFirst = rollPlayerInitiative();
-    const setCanActFalse = { canAct: false } as const;
-    if (playerFirst) {
-      // プレイヤー先行：攻撃SE → 命中SE → ログ → 敵ターン
+    /** プレイヤーの一撃。ドラクエの順序に合わせて
+     *  「◯◯の こうげき！」→（振りかぶり）→ 命中SE＋敵が点滅＋ダメージ数値
+     *  → 「◯のダメージを 与えた！」→ 撃破なら消滅演出、生存なら敵ターン、と1段ずつ流す。 */
+    const doPlayerAttack = () => {
+      if (!battleRef.current.active) return;
       playBattleSfx('attackStart');
-      const beforeHp1 = b.enemyHp;
-      b.enemyHp = Math.max(0, b.enemyHp - dmg);
-      triggerClassicEnemyDmgFx();
-      triggerClassicEnemyGaugeFx(beforeHp1, b.enemyHp, b.enemyMaxHp);
-      setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
-      appendLog(`${playerName}の こうげき！`, setCanActFalse);
+      appendLog(`${playerName}の こうげき！`, { canAct: false });
       setTimeout(() => {
-        appendLog(`${dmg}のダメージを 与えた！`);
-        if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
-        queueEnemyTurn();
-      }, 500);
-    } else {
-      // 敵先行：敵ターン → まだ生存ならプレイヤー攻撃
-      // （攻撃SE・HP減算・ダメージ演出は「敵先行」ログや敵の攻撃より前に確定させず、
-      //   実際にプレイヤーが攻撃するタイミング＝doPlayerAttack 内で発火させる）
-      const doPlayerAttack = () => {
-        playBattleSfx('attackStart');
-        const beforeHp2 = b.enemyHp;
+        if (!battleRef.current.active) return;
+        playBattleSfx('attack');
+        const beforeHp = b.enemyHp;
         b.enemyHp = Math.max(0, b.enemyHp - dmg);
-        triggerClassicEnemyDmgFx();
-        triggerClassicEnemyGaugeFx(beforeHp2, b.enemyHp, b.enemyMaxHp);
-        setTimeout(() => playBattleSfx('attack'), ATTACK_HIT_SFX_DELAY_MS);
-        appendLog(`${playerName}の こうげき！`, setCanActFalse);
+        triggerClassicEnemyDmgFx(dmg);
+        triggerClassicEnemyGaugeFx(beforeHp, b.enemyHp, b.enemyMaxHp);
         setTimeout(() => {
-          appendLog(`${dmg}のダメージを 与えた！`);
-          if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+          appendLog(`${dmg}のダメージを 与えた！`, { canAct: false });
+          if (b.enemyHp <= 0) { finishClassicKill(); return; }
           queueEnemyTurn();
-        }, 500);
-      };
-      appendLog(`${playerName}は せんせいだ！`, setCanActFalse);
-      // 敵ターンを先に実行し、生存ならプレイヤー攻撃を続ける
-      const savedEnemyTurn = () => {
-        const b2 = battleRef.current; const pr2 = progressRef.current;
-        if (!b2.active) return;
-        const hitLeader2 = (dmg2: number) => {
-          pr2.hp = Math.max(0, pr2.hp - dmg2); forceHud(n => n + 1);
-          const leaderId = ptParty()[0]?.id ?? '__self';
-          triggerMemberDamageFx(leaderId, dmg2);
-          triggerMemberStatusShake(leaderId);
-        };
-        const move = b2.enemyMoves.length && Math.random() < 0.4 ? b2.enemyMoves[Math.floor(Math.random() * b2.enemyMoves.length)] : null;
-        if (move?.heal) {
-          const before = b2.enemyHp; b2.enemyHp = Math.min(b2.enemyMaxHp, b2.enemyHp + move.power);
-          appendLog(`${b2.enemyName}は ${move.name}を となえた！ HPが ${b2.enemyHp - before} かいふく`);
-        } else if (move) {
-          const dmg2 = Math.max(1, Math.round(move.power * (0.85 + Math.random() * 0.3)));
-          hitLeader2(dmg2);
-          appendLog(`${b2.enemyName}の ${move.name}！ ${dmg2}のダメージ`);
-        } else {
-          const dmg2 = calcDmg(b2.enemyAtk, pr2.def);
-          hitLeader2(dmg2);
-          appendLog(`${b2.enemyName}の こうげき！ ${dmg2}のダメージ`);
-        }
-        if (pr2.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
-        doPlayerAttack();
-      };
-      setTimeout(savedEnemyTurn, 600);
+        }, CLASSIC_DMG_MSG_MS);
+      }, CLASSIC_SWING_MS);
+    };
+    if (playerFirst) {
+      doPlayerAttack();
+    } else {
+      // 敵先行：宣言 → 敵の行動をひととおり見せてから、生存していればこちらの攻撃へ
+      appendLog(`${b.enemyName}は すばやい！`, { canAct: false });
+      setTimeout(() => runClassicEnemyAction(doPlayerAttack), CLASSIC_MSG_HOLD_MS);
     }
   };
 
@@ -3609,7 +3643,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       dtAdvanceTurn();
       return;
     }
-    playBattleSfx('spell'); // 呪文/とくぎの詠唱SE（こうどう技＝mercy は上で return 済み）
+    // 呪文/とくぎの詠唱SE（こうどう技＝mercy は上で return 済み）。
+    // classic の攻撃呪文だけは「実際に となえる瞬間」（敵先手なら敵の行動が終わってから）に鳴らしたいので、
+    // ここでは鳴らさず下の castAtEnemy に任せる。
+    if (dodge || m.heal) playBattleSfx('spell');
     if (m.heal) {
       const before = pr.hp; pr.hp = Math.min(pr.maxHp, pr.hp + m.power);
       appendLog(`${m.name}！ HPが ${pr.hp - before} かいふくした`, { canAct: false });
@@ -3622,60 +3659,37 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         appendLog(`${m.name}！ ${b.foes.length > 1 ? `${foe.name}に ` : ''}${dmg}のダメージ${killed ? `！ ${foe.name}を たおした` : ''}`, { canAct: false });
         if (over) return;
       } else if (!dodge) {
-        // classic 戦闘：はやさ判定で敵が先手の場合は敵ターンを先に実行
-        const playerFirst = rollPlayerInitiative();
-        if (!playerFirst) {
-          // 敵先手：敵ターン → 呪文ダメージ
-          appendLog(`${gameData.battle?.playerName || '勇者'}は おそい！`);
-          const enemyAct = () => {
-            const b2 = battleRef.current; const pr2 = progressRef.current;
-            if (!b2.active) return;
-            const hitLeader2 = (d: number) => {
-              pr2.hp = Math.max(0, pr2.hp - d); forceHud(n => n + 1);
-              const leaderId = ptParty()[0]?.id ?? '__self';
-              triggerMemberDamageFx(leaderId, d);
-              triggerMemberStatusShake(leaderId);
-            };
-            const mv = b2.enemyMoves.length && Math.random() < 0.4 ? b2.enemyMoves[Math.floor(Math.random() * b2.enemyMoves.length)] : null;
-            if (mv?.heal) {
-              const bef = b2.enemyHp; b2.enemyHp = Math.min(b2.enemyMaxHp, b2.enemyHp + mv.power);
-              appendLog(`${b2.enemyName}は ${mv.name}を となえた！ HPが ${b2.enemyHp - bef} かいふく`);
-            } else if (mv) {
-              const d2 = Math.max(1, Math.round(mv.power * (0.85 + Math.random() * 0.3)));
-              hitLeader2(d2);
-              appendLog(`${b2.enemyName}の ${mv.name}！ ${d2}のダメージ`);
-            } else {
-              const d2 = calcDmg(b2.enemyAtk, pr2.def);
-              hitLeader2(d2);
-              appendLog(`${b2.enemyName}の こうげき！ ${d2}のダメージ`);
-            }
-            if (pr2.hp <= 0) { setTimeout(() => endBattle('lose'), 600); return; }
-            // 呪文ダメージ適用
-            spawnBattleEffect(m.effectId, tIdx);
-            {
-              const beforeHp3 = b.enemyHp;
-              b.enemyHp = Math.max(0, b.enemyHp - dmg);
-              triggerClassicEnemyDmgFx();
-              triggerClassicEnemyGaugeFx(beforeHp3, b.enemyHp, b.enemyMaxHp);
-            }
+        // classic 戦闘：ドラクエの呪文は「◯◯は メラを となえた！」→ 呪文エフェクト →
+        // 着弾して敵が点滅＋ダメージ数値 →「◯のダメージを 与えた！」の順に流れる。
+        // 全部を同時に出すと何が当たったのか読めないので、1段ずつ間を置いて見せる。
+        const playerName = gameData.battle?.playerName || '勇者';
+        const castAtEnemy = () => {
+          if (!battleRef.current.active) return;
+          playBattleSfx('spell');
+          spawnBattleEffect(m.effectId, tIdx);
+          appendLog(`${playerName}は ${m.name}を となえた！`, { canAct: false });
+          // エフェクトが敵に届くころに着弾（点滅・HPバー・ダメージ数値）
+          setTimeout(() => {
+            if (!battleRef.current.active) return;
             playBattleSfx('attack');
-            appendLog(`${m.name}！ ${dmg}のダメージを 与えた！`);
-            if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
-            queueEnemyTurn();
-          };
-          setTimeout(enemyAct, 600);
-          dtAdvanceTurn(); return;
+            const beforeHp = b.enemyHp;
+            b.enemyHp = Math.max(0, b.enemyHp - dmg);
+            triggerClassicEnemyDmgFx(dmg);
+            triggerClassicEnemyGaugeFx(beforeHp, b.enemyHp, b.enemyMaxHp);
+            setTimeout(() => {
+              appendLog(`${dmg}のダメージを 与えた！`, { canAct: false });
+              if (b.enemyHp <= 0) { finishClassicKill(); return; }
+              queueEnemyTurn();
+            }, CLASSIC_DMG_MSG_MS);
+          }, CLASSIC_SPELL_IMPACT_MS);
+        };
+        // はやさ判定で敵が先手なら、敵の行動をひととおり見せてから詠唱へ
+        if (rollPlayerInitiative()) castAtEnemy();
+        else {
+          appendLog(`${b.enemyName}は すばやい！`, { canAct: false });
+          setTimeout(() => runClassicEnemyAction(castAtEnemy), CLASSIC_MSG_HOLD_MS);
         }
-        spawnBattleEffect(m.effectId, tIdx);
-        {
-          const beforeHp4 = b.enemyHp;
-          b.enemyHp = Math.max(0, b.enemyHp - dmg);
-          triggerClassicEnemyDmgFx();
-          triggerClassicEnemyGaugeFx(beforeHp4, b.enemyHp, b.enemyMaxHp);
-        }
-        playBattleSfx('attack');
-        appendLog(`${m.name}！ ${dmg}のダメージを 与えた！`, { canAct: false });
-        if (b.enemyHp <= 0) { setTimeout(() => endBattle('win'), 600); return; }
+        return; // 敵ターンは上の流れの中で予約済み（dtAdvanceTurn で二重に回さない）
       } else {
         // dodge スタイル（undertale/deltarune）：はやさ判定なし
         b.enemyHp = Math.max(0, b.enemyHp - dmg);
@@ -3814,8 +3828,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return;
     }
     if (spareReady(b)) {
+      // 立ち去るところを見せてから戦闘終了（撃破と同じく、消えるまでリザルトへ進めない）
       appendLog(`${b.enemyName}は しずかに たちさった…`, { canAct: false, over: true });
-      setTimeout(() => endBattle('spare'), 700);
+      triggerClassicEnemyDefeatFx();
+      setTimeout(() => endBattle('spare'), CLASSIC_ENEMY_VANISH_MS);
     } else {
       appendLog(`${b.enemyName}は まだ たたかう気だ！`, { canAct: false });
       queueEnemyTurn();
@@ -14684,7 +14700,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             {battle && !isDodgeBattleStyle(battleStyle) && !isPartyBattleStyle(battleStyle) && (() => {
               const roster = ptParty();
               return (
-                <div className="absolute inset-0 flex flex-col justify-between p-2 sm:p-3 bg-black/40 font-pixel select-none">
+                // ドラクエの戦闘画面と同じ縦並び：上にステータス、その真下の固定位置にモンスター、
+                // メッセージウィンドウは最下段（mt-auto）に固定する。justify-between だと
+                // ウィンドウの高さでモンスターの立ち位置が上下してしまうので使わない。
+                <div className="absolute inset-0 flex flex-col p-2 bg-black/40 font-pixel select-none">
                   {/* ステータスエリア：メンバーごとの枠。被弾したメンバーの枠だけが赤くなって震える */}
                   <div className="flex flex-wrap gap-2 items-start justify-start z-10">
                     {roster.map(m => {
@@ -14716,53 +14735,74 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       );
                     })}
                   </div>
-                  {/* 敵：HPが尽きても「たおした！」等のリザルト読み上げ（battle.over）が終わるまでは
-                      画面上に残す。即座に消してしまうとダメージ/撃破メッセージより早く敵が消える。 */}
-                  <div className="flex flex-col items-center mt-1">
-                    {(battle.enemyHp > 0 || battle.over) ? (
-                      <div className="relative">
-                        <div
-                          className={`text-5xl sm:text-6xl leading-none drop-shadow transition-transform ${classicEnemyDmgFx ? 'animate-[enemyClassicShake_0.5s_ease-in-out]' : ''}`}
-                          style={classicEnemyDmgFx ? { filter: 'brightness(3) saturate(0)', animation: `enemyClassicShake ${CLASSIC_ENEMY_DMG_FX_MS}ms ease-in-out` } : undefined}>
-                          {battle.enemyEmoji}
+                  {/* 敵：ドラクエの戦闘画面と同じく、モンスターは画面サイズに関係なく
+                      固定サイズ・固定位置（ステージ中央）に立たせる。ウィンドウを縮めても
+                      敵の大きさや立ち位置がブレないよう、ステージの寸法とフォントサイズは px 固定。
+                      HPが尽きても即座には消さず、撃破演出（点滅→消滅）が終わるまで残す。 */}
+                  {(() => {
+                    /** 敵ステージの固定寸法（px）。この箱の中央に敵・その下に名前とHPバーを置く。 */
+                    const STAGE_W = 220, STAGE_H = 150, ENEMY_PX = 64;
+                    const vanishing = !!classicEnemyDefeatFx;
+                    // 消滅演出中／演出後は「消えたまま」を保つ（fill-mode: forwards）。
+                    const shown = battle.enemyHp > 0 || vanishing;
+                    const enemyAnim = vanishing
+                      ? `enemyClassicVanish ${CLASSIC_ENEMY_VANISH_MS}ms ease-in forwards`
+                      : classicEnemyDmgFx
+                        ? `enemyClassicShake ${CLASSIC_ENEMY_SHAKE_MS}ms ease-in-out`
+                        : classicEnemyAttackFx
+                          ? `enemyClassicLunge ${CLASSIC_ENEMY_LUNGE_MS}ms ease-in-out`
+                          : undefined;
+                    return (
+                      <div className="mx-auto relative shrink-0" style={{ width: STAGE_W, height: STAGE_H, marginTop: 10 }}>
+                        {/* 敵本体：ステージ上部の固定位置に中央揃えで立たせる */}
+                        <div className="absolute left-1/2 -translate-x-1/2" style={{ top: 6 }}>
+                          <div className="relative">
+                            {shown && (
+                              // key に演出の種類＋idを混ぜて要素を作り直し、連続で同じ演出が来ても頭から再生させる
+                              <div key={vanishing ? `v${classicEnemyDefeatFx.id}` : classicEnemyDmgFx ? `d${classicEnemyDmgFx.id}` : classicEnemyAttackFx ? `a${classicEnemyAttackFx.id}` : 'idle'}
+                                className="leading-none drop-shadow flex items-center justify-center"
+                                style={{ fontSize: ENEMY_PX, width: ENEMY_PX * 1.5, height: ENEMY_PX * 1.2, animation: enemyAnim }}>
+                                {battle.enemyEmoji}
+                              </div>
+                            )}
+                            {/* ダメージ数値ポップアップ（敵の頭上） */}
+                            {classicEnemyDmgFx && !vanishing && (
+                              <div key={`p${classicEnemyDmgFx.id}`} className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-2xl whitespace-nowrap z-10"
+                                style={{ color: '#fff', textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e', animation: 'dmgPopUp 0.7s ease-out forwards' }}>
+                                {classicEnemyDmgFx.text}
+                              </div>
+                            )}
+                            {/* 呪文エフェクトアニメーション（敵に重ねる） */}
+                            {battleEffects.map(be => (
+                              <div key={be.key} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
+                                <EffectSpriteAnim effect={be.effect} url={be.url} sizePx={72} onDone={() => removeBattleEffect(be.key)} />
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        {/* ダメージ数値ポップアップ（絵文字の頭上） */}
-                        {classicEnemyDmgFx && (
-                          <div className="absolute -top-3 left-1/2 -translate-x-1/2 pointer-events-none font-misaki text-xl sm:text-2xl whitespace-nowrap z-10"
-                            style={{ color: '#fff', textShadow: '1px 0 #e6231e, -1px 0 #e6231e, 0 1px #e6231e, 0 -1px #e6231e, 1px 1px #e6231e, -1px -1px #e6231e, 1px -1px #e6231e, -1px 1px #e6231e', animation: 'dmgPopUp 0.7s ease-out forwards' }}>
-                            {battle.log[battle.log.length - 1]?.match(/(\d+)のダメージ/)?.[1] ?? ''}
+                        {/* 名前とゲージ：ステージ下部の固定位置。表示が出入りしても敵の位置は動かない。
+                            みのがし可能になったら敵名が黄色くなる（アンダーテール風）。
+                            HPバーは常時表示せず、アンダーテール同様ダメージを与えた直後だけ一時的に見せる。 */}
+                        {shown && !vanishing && (
+                          <div className="absolute left-1/2 -translate-x-1/2 bottom-0 w-40 flex flex-col items-center">
+                            <div className={`text-xs ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
+                            {classicEnemyGaugeAnim && (
+                              <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
+                                <div className="h-full bg-red-500 transition-all duration-500 ease-out" style={{ width: `${classicEnemyGaugeAnim.pct}%` }} />
+                              </div>
+                            )}
+                            {gameData.battle?.labels.mercy && (
+                              <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
+                                <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
+                              </div>
+                            )}
                           </div>
                         )}
-                        {/* 呪文エフェクトアニメーション */}
-                        {battleEffects.map(be => (
-                          <div key={be.key} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-20 pointer-events-none">
-                            <EffectSpriteAnim effect={be.effect} url={be.url} sizePx={72} onDone={() => removeBattleEffect(be.key)} />
-                          </div>
-                        ))}
                       </div>
-                    ) : (
-                      <div className="text-5xl sm:text-6xl leading-none drop-shadow opacity-0">.</div>
-                    )}
-                    {/* みのがし可能になったら敵名が黄色くなる（アンダーテール風）。
-                        HPバーは常時表示せず、アンダーテール同様ダメージを与えた直後だけ一時的に見せる。 */}
-                    {(battle.enemyHp > 0 || battle.over) && (
-                      <>
-                        <div className={`mt-1 text-xs sm:text-sm ${gameData.battle?.labels.mercy && spareReady(battle) ? 'text-yellow-300' : 'text-white'}`}>{battle.enemyName}</div>
-                        {classicEnemyGaugeAnim && (
-                          <div className="w-40 h-2 bg-gray-700 mt-1 overflow-hidden">
-                            <div className="h-full bg-red-500 transition-all" style={{ width: `${classicEnemyGaugeAnim.pct}%` }} />
-                          </div>
-                        )}
-                        {gameData.battle?.labels.mercy && (
-                          <div className="w-40 h-1 bg-gray-800 mt-0.5 overflow-hidden">
-                            <div className="h-full bg-yellow-400 transition-all" style={{ width: `${battle.mercy}%` }} />
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  {/* ログ + コマンド */}
-                  <div className="bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
+                    );
+                  })()}
+                  {/* ログ + コマンド：mt-auto で最下段へ固定（敵の立ち位置を押し下げない） */}
+                  <div className="mt-auto bg-[#1a1a2e] border-2 border-gray-400 p-2 sm:p-3 shadow-2xl">
                     <div className="text-white text-[11px] sm:text-sm leading-relaxed min-h-[3.5em] max-h-[3.5em] overflow-hidden mb-2">
                       {battle.log.slice(-3).map((l, i) => <p key={i}>{l}</p>)}
                     </div>
