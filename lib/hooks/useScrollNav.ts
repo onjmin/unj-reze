@@ -7,6 +7,7 @@ export const SCROLL_CONTAINER_ID = 'scrollable-content';
 const DELTA_THRESHOLD = 8;
 const EDGE_MARGIN = 12;
 const SHOW_JUMP_AFTER = 400;
+const REAPPEAR_DELAY = 800;
 
 export function getScrollContainer(): HTMLElement | Element | null {
   if (typeof document === 'undefined') return null;
@@ -36,6 +37,14 @@ function attach() {
   
   let ticking = false;
   let pendingTarget: EventTarget | null = null;
+  let reappearTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearReappearTimer = () => {
+    if (reappearTimer !== null) {
+      clearTimeout(reappearTimer);
+      reappearTimer = null;
+    }
+  };
 
   const update = () => {
     ticking = false;
@@ -63,10 +72,19 @@ function attach() {
     const delta = y - lastY;
 
     if (y <= EDGE_MARGIN || max - y <= EDGE_MARGIN) {
+      clearReappearTimer();
       publish({ footerHidden: false });
       lastY = y;
     } else if (Math.abs(delta) > DELTA_THRESHOLD) {
-      publish({ footerHidden: delta > 0 });
+      if (delta > 0) {
+        publish({ footerHidden: true });
+        if (reappearTimer === null) {
+          reappearTimer = setTimeout(() => {
+            reappearTimer = null;
+            publish({ footerHidden: false });
+          }, REAPPEAR_DELAY);
+        }
+      }
       lastY = y;
     }
     publish({ scrolled: y > SHOW_JUMP_AFTER });
@@ -92,6 +110,7 @@ function attach() {
   document.addEventListener('scroll', onScroll, true);
   detach = () => {
     document.removeEventListener('scroll', onScroll, true);
+    clearReappearTimer();
     detach = null;
   };
 }
