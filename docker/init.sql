@@ -202,6 +202,43 @@ CREATE TABLE IF NOT EXISTS oshi_items (
 );
 CREATE INDEX IF NOT EXISTS idx_oshi_items_user_slug ON oshi_items(user_slug);
 
+-- === 匿名ユーザーデータ（通知・投稿・メッセージの外部キー参照を満たすための初期ユーザー） ===
+INSERT INTO anonymous_users (id, ip_address, session_id, display_name, slug, avatar_color) VALUES
+  ('名無しXz9', '127.0.0.1', 'seed_session_1', '名無しXz9', 'Xz9', 'from-pink-400 to-rose-500'),
+  ('名無しLm8', '127.0.0.1', 'seed_session_2', '名無しLm8', 'Lm8', 'from-gray-300 to-slate-400'),
+  ('名無しBn5', '127.0.0.1', 'seed_session_3', '名無しBn5', 'Bn5', 'from-emerald-400 to-teal-500'),
+  ('名無しVc1', '127.0.0.1', 'seed_session_4', '名無しVc1', 'Vc1', 'from-purple-400 to-violet-500'),
+  ('名無しvFZ', '127.0.0.1', 'seed_session_5', '名無しvFZ', 'vFZ', 'from-purple-500 to-pink-600'),
+  ('名無しQp7', '127.0.0.1', 'seed_session_6', '名無しQp7', 'Qp7', 'from-amber-400 to-yellow-500'),
+  ('名無しaB3', '127.0.0.1', 'seed_session_7', '名無しaB3', 'aB3', 'from-sky-400 to-blue-500'),
+  ('名無しR9k', '127.0.0.1', 'seed_session_8', '名無しR9k', 'R9k', 'from-red-500 to-rose-600'),
+  ('名無しNe4', '127.0.0.1', 'seed_session_9', '名無しNe4', 'Ne4', 'from-cyan-400 to-indigo-500'),
+  ('名無しMm1', '127.0.0.1', 'seed_session_10', '名無しMm1', 'Mm1', 'from-pink-400 to-rose-500'),
+  ('名無しTb7', '127.0.0.1', 'seed_session_11', '名無しTb7', 'Tb7', 'from-cyan-400 to-blue-500'),
+  ('名無しJk8', '127.0.0.1', 'seed_session_12', '名無しJk8', 'Jk8', 'from-rose-400 to-pink-600'),
+  ('名無しxY7', '127.0.0.1', 'seed_session_13', '名無しxY7', 'xY7', 'from-blue-400 to-indigo-500'),
+  ('名無しQw3', '127.0.0.1', 'seed_session_14', '名無しQw3', 'Qw3', 'from-blue-400 to-indigo-500'),
+  ('名無しTp4', '127.0.0.1', 'seed_session_15', '名無しTp4', 'Tp4', 'from-blue-400 to-indigo-500'),
+  ('名無しDf2', '127.0.0.1', 'seed_session_16', '名無しDf2', 'Df2', 'from-blue-400 to-indigo-500'),
+  ('名無しGh6', '127.0.0.1', 'seed_session_17', '名無しGh6', 'Gh6', 'from-blue-400 to-indigo-500'),
+  ('名無しJk9', '127.0.0.1', 'seed_session_18', '名無しJk9', 'Jk9', 'from-blue-400 to-indigo-500'),
+  ('名無しWx8', '127.0.0.1', 'seed_session_19', '名無しWx8', 'Wx8', 'from-blue-400 to-indigo-500'),
+  ('名無しYz2', '127.0.0.1', 'seed_session_20', '名無しYz2', 'Yz2', 'from-blue-400 to-indigo-500'),
+  ('名無しRt3', '127.0.0.1', 'seed_session_21', '名無しRt3', 'Rt3', 'from-blue-400 to-indigo-500'),
+  ('名無しUv6', '127.0.0.1', 'seed_session_22', '名無しUv6', 'Uv6', 'from-blue-400 to-indigo-500'),
+  ('名無しAs5', '127.0.0.1', 'seed_session_23', '名無しAs5', 'As5', 'from-blue-400 to-indigo-500'),
+  ('名無しDf9', '127.0.0.1', 'seed_session_24', '名無しDf9', 'Df9', 'from-blue-400 to-indigo-500'),
+  ('名無しGh2', '127.0.0.1', 'seed_session_25', '名無しGh2', 'Gh2', 'from-blue-400 to-indigo-500'),
+  ('名無しJk3', '127.0.0.1', 'seed_session_26', '名無しJk3', 'Jk3', 'from-blue-400 to-indigo-500'),
+  ('名無しLz9', '127.0.0.1', 'seed_session_27', '名無しLz9', 'Lz9', 'from-blue-400 to-indigo-500'),
+  ('名無しKt1', '127.0.0.1', 'seed_session_28', '名無しKt1', 'Kt1', 'from-green-400 to-teal-500'),
+  ('名無しWk2', '127.0.0.1', 'seed_session_29', '名無しWk2', 'Wk2', 'from-orange-400 to-red-500'),
+  ('名無しQm9', '127.0.0.1', 'seed_session_30', '名無しQm9', 'Qm9', 'from-teal-400 to-cyan-500'),
+  ('名無しRf6', '127.0.0.1', 'seed_session_31', '名無しRf6', 'Rf6', 'from-sky-400 to-indigo-500'),
+  ('名無しHn3', '127.0.0.1', 'seed_session_32', '名無しHn3', 'Hn3', 'from-lime-400 to-green-500'),
+  ('名無しPz5', '127.0.0.1', 'seed_session_33', '名無しPz5', 'Pz5', 'from-pink-300 to-rose-400')
+ON CONFLICT (id) DO NOTHING;
+
 -- === 通知データ ===
 INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, created_at) VALUES
   (1, '名無しXz9', 'がいいねしました', '青空の写真', 'like', 7, NULL, NOW() - INTERVAL '3 minutes'),
