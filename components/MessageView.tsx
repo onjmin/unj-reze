@@ -20,6 +20,7 @@ export default function MessageView({ userId }: MessageViewProps) {
   const [msgInput, setMsgInput] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isSendingRef = useRef(false);
 
   const currentSender = userId || '名無し';
 
@@ -59,15 +60,20 @@ export default function MessageView({ userId }: MessageViewProps) {
 
   const sendMsg = async () => {
     const targetRecipient = isStartingNew ? newRecipientInput.trim() : selectedPartner;
-    if (!msgInput.trim() || !targetRecipient) return;
+    const text = msgInput.trim();
+    if (!text || !targetRecipient || isSendingRef.current) return;
 
+    isSendingRef.current = true;
     try {
       const msg = await api.messages.send({
         sender: currentSender,
         recipient: targetRecipient,
-        text: msgInput,
+        text,
       });
-      setMessages(prev => [msg, ...prev]);
+      setMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        return [msg, ...prev];
+      });
       setMsgInput('');
       if (isStartingNew) {
         setSelectedPartner(targetRecipient);
@@ -77,6 +83,8 @@ export default function MessageView({ userId }: MessageViewProps) {
       setTimeout(() => scrollToBottom(true), 50);
     } catch {
       /* noop */
+    } finally {
+      isSendingRef.current = false;
     }
   };
 
@@ -227,7 +235,12 @@ export default function MessageView({ userId }: MessageViewProps) {
           }
           disabled={!activePartner}
           className="flex-1 bg-gray-100/10 hover:bg-gray-100/15 disabled:opacity-50 rounded-full py-2 px-4 text-xs outline-none text-white border border-gray-800"
-          onKeyDown={e => e.key === 'Enter' && sendMsg()}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              sendMsg();
+            }
+          }}
         />
         <button
           onClick={sendMsg}
