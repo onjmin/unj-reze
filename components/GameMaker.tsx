@@ -6824,7 +6824,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     /** 歩行グラのコマ切り替え速度（fps）。
      *  プレイヤーは「実際に移動している間だけ」この速さで足踏みする（止まれば待機ポーズ）。
      *  NPC は静止中も足踏みを続けるエンジンがあるため、せわしなく見えないよう遅めにする。 */
-    const WALK_FPS_PLAYER = 7;
+    const WALK_FPS_PLAYER_IDLE = 4;
+    const WALK_FPS_PLAYER_MOVE = 10;
     const WALK_FPS_NPC = 4;
 
     const drawSpriteInner = (
@@ -6845,14 +6846,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       if (prev) { dx = x - prev.px; dy = y - prev.py; }
       let dir: WayKey = overrideDir ?? prev?.dir ?? 's';
       const moving = Math.hypot(dx, dy) > 0.15;
-      // 操作キャラ（自分・他プレイヤーのゴースト）は実際に動いている間だけ足踏みする。
-      // 立ち止まったまま足踏みし続けると忙しなく見えるうえ、歩いている実感も薄れるため。
       const isPlayerSprite = key === 'player' || key.startsWith('fake_');
-      // NPC は従来どおり：dq/onjReze/touhou は静止中も足踏みアニメを続ける（向き判定には影響させない）
-      const animMoving = isPlayerSprite
-        ? moving
-        : (moving || gameData.engine === 'rpg' || gameData.engine === 'touhou' || gameData.engine === 'onjReze');
-      const walkFps = isPlayerSprite ? WALK_FPS_PLAYER : WALK_FPS_NPC;
+
+      // 静止時もプレイヤー・NPC共に見栄え良く足踏みを有効化し、移動時のみ足踏み速度を速くする
+      const animMoving = true;
+      const walkFps = moving ? WALK_FPS_PLAYER_MOVE : WALK_FPS_PLAYER_IDLE;
       if (!overrideDir && moving) {
         if (horizontalEngine) dir = dx >= 0 ? (Math.abs(dx) > 0.05 ? 'd' : dir) : 'a';
         else dir = dirFromDelta(dx, dy) ?? dir;
@@ -13177,63 +13175,73 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   </button>
                   {/* ゲーム（プリセット）切り替え：ヘッダーの select から移設。
                     エンジン変更と違い、編集中の内容は引き継がずプリセットを丸ごと読み直す。 */}
+                  {/* プリセット初期化 & エンジン変換 */}
                   {!playOnly && !isPlaying && (
                     <>
                       <div className="border-t border-gray-700 my-1" />
-                      <div className="px-3 py-2">
-                        <div className="text-[10px] font-bold text-gray-400 mb-1 flex items-center gap-1"><Gamepad2 size={11} />ゲームを切り替え</div>
-                        <select
-                          value={presetId}
-                          onChange={e => {
-                            const id = e.target.value as PresetId;
-                            if (id === presetId) return;
-                            customConfirm(
-                              `「${PRESETS[id].name}」を読み込みますか？\n編集中の内容は破棄されます`,
-                              () => {
-                                resetGame(id);
-                                setSettingsOpen(false);
-                              },
-                              'ゲーム切り替えの確認'
-                            );
-                          }}
-                          className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
-                        >
-                          {PRESET_ORDER.map(pid => (
-                            <option key={pid} value={pid}>{PRESETS[pid].name}{pid === presetId ? '（現在）' : ''}</option>
-                          ))}
-                        </select>
-                        <p className="mt-1 text-[9px] text-gray-500 leading-relaxed">選んだゲームを最初から読み込みます（編集中の内容は残りません）</p>
-                      </div>
-                    </>
-                  )}
-                  {/* エンジン変更：編集中のゲームを別プリセット（別エンジン）へ切り替える。
-                    タイトル・プレイヤーの見た目・BGMを引き継ぎ、マップは可能な範囲で変換する（ロッシー）。 */}
-                  {!playOnly && !isPlaying && (
-                    <>
-                      <div className="border-t border-gray-700 my-1" />
-                      <div className="px-3 py-2">
-                        <div className="text-[10px] font-bold text-gray-400 mb-1 flex items-center gap-1"><Wrench size={11} />エンジン変更</div>
-                        <select
-                          value={presetId}
-                          onChange={e => {
-                            const id = e.target.value as PresetId;
-                            if (id === presetId) return;
-                            customConfirm(
-                              `「${PRESETS[id].name}」エンジンへ切り替えますか？\nマップはできるだけ変換して引き継ぎますが、完全には再現されません（元に戻すには再度切り替えても戻りません）`,
-                              () => {
-                                switchEngine(id);
-                                setSettingsOpen(false);
-                              },
-                              'エンジン変更の確認'
-                            );
-                          }}
-                          className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
-                        >
-                          {PRESET_ORDER.map(pid => (
-                            <option key={pid} value={pid}>{PRESETS[pid].name}{pid === presetId ? '（現在）' : ''}</option>
-                          ))}
-                        </select>
-                        <p className="mt-1 text-[9px] text-gray-500 leading-relaxed">タイトル・見た目・BGMに加え、マップも近似変換で引き継ぎます（2D⇄3Dは一部が失われます）</p>
+                      <div className="px-3 py-2 space-y-2.5">
+                        <div className="text-[10px] font-bold text-gray-400 flex items-center gap-1">
+                          <Gamepad2 size={11} />ゲーム切り替え・エンジン変換
+                        </div>
+
+                        {/* 1. プリセット初期ロード */}
+                        <div className="space-y-1">
+                          <div className="text-[9px] font-bold text-gray-300">① プリセットを初期ロード（編集内容破棄）</div>
+                          <select
+                            value={presetId}
+                            onChange={e => {
+                              const id = e.target.value as PresetId;
+                              if (id === presetId) return;
+                              customConfirm(
+                                `「${PRESETS[id].name}」を初期データで読み込みますか？\n※編集中の内容は破棄されます`,
+                                () => {
+                                  resetGame(id);
+                                  setSettingsOpen(false);
+                                },
+                                'ゲーム切り替えの確認'
+                              );
+                            }}
+                            className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none rounded"
+                          >
+                            {PRESET_ORDER.map(pid => (
+                              <option key={pid} value={pid}>
+                                {PRESETS[pid].name}{pid === presetId ? '（現在選択中）' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[9px] text-gray-500 leading-tight">選んだゲームの初期状態をロードします</p>
+                        </div>
+
+                        {/* 2. 現データ引継ぎエンジン変換 */}
+                        <div className="pt-2 border-t border-gray-800 space-y-1">
+                          <div className="text-[9px] font-bold text-amber-300 flex items-center gap-1">
+                            <Wrench size={10} />② 編集中のゲームを別エンジンへ変換
+                          </div>
+                          <select
+                            value=""
+                            onChange={e => {
+                              const id = e.target.value as PresetId;
+                              if (!id || id === presetId) return;
+                              customConfirm(
+                                `「${PRESETS[id].name}」エンジンへ変換しますか？\nタイトル・見た目・BGM・マップを引き継ぎます（2D⇄3D変換は一部が近似変換されます）`,
+                                () => {
+                                  switchEngine(id);
+                                  setSettingsOpen(false);
+                                },
+                                'エンジン変換の確認'
+                              );
+                            }}
+                            className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-amber-200 outline-none rounded font-medium"
+                          >
+                            <option value="" disabled>-- 変換先のエンジンを選択 --</option>
+                            {PRESET_ORDER.filter(pid => pid !== presetId).map(pid => (
+                              <option key={pid} value={pid}>
+                                ➡️ {PRESETS[pid].name} エンジンへ変換
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-[9px] text-gray-500 leading-tight">現在のマップやグラフィックを維持したまま別のゲーム種別へ変換します</p>
+                        </div>
                       </div>
                     </>
                   )}
