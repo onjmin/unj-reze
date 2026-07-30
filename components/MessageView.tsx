@@ -49,7 +49,7 @@ export default function MessageView({ userId }: MessageViewProps) {
 
   return (
     <div className="flex flex-col flex-1 min-h-[calc(100vh-44px-56px)] md:min-h-[calc(100vh-44px)]">
-      <div className="flex-1 p-4 space-y-4 pb-4">
+      <div className="flex-1 p-4 space-y-4 pb-24">
         {messages.map(m => (
           <div key={m.id} className={`flex flex-col group ${m.sender === currentSender ? 'items-end' : 'items-start'}`}>
             <span className="text-[10px] text-gray-500 mb-0.5">{getAvatarInfo(m.sender).username} ・ {m.time}</span>
@@ -82,7 +82,7 @@ export default function MessageView({ userId }: MessageViewProps) {
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="sticky bottom-14 md:bottom-0 z-20 p-3 border-t border-gray-800 flex items-center space-x-2 bg-[#0b0e14]/95 backdrop-blur">
+      <div className="sticky bottom-14 z-30 p-3 border-t border-gray-800 flex items-center space-x-2 bg-[#0b0e14]/95 backdrop-blur">
         <input
           type="text"
           value={msgInput}
