@@ -347,7 +347,7 @@ function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[]
 }
 
 /** フィード1スレッドあたりに載せる返信の上限（lib/db/pg.ts と揃える）。 */
-const FEED_REPLIES_PER_THREAD = 20;
+const FEED_REPLIES_PER_THREAD = 5;
 
 const VOTED_SELECT = `
   SELECT p.*,
