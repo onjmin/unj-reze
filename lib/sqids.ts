@@ -2,61 +2,75 @@ import Sqids from 'sqids';
 import type { Post as ApiPost, GameRecord as ApiGame, Notification as ApiNotification, OshiItem as ApiOshiItem } from './types';
 import type { DbPost, DbGameRecord, DbNotification, DbOshiItem } from './types-db';
 
-const sqids = new Sqids({
+/**
+ * ID は数値をそのまま文字列にして返す（旧実装は sqids でエンコードしていた）。
+ *
+ * なぜやめたか:
+ * Cloudflare Workers の無料枠は1リクエストあたり CPU 10ms しかない。
+ * `sqids.encode` は1回あたり約15µs かかり、`encodePost` は1投稿につき
+ * id / threadId / parentPostId / gameId を変換する。フィードは「スレッド＋返信」を
+ * 全部encodeするので、420投稿で **ID変換だけで約17ms** に達し、
+ * `Error: Worker exceeded CPU time limit` で /api/posts と /post/[id] が落ちていた。
+ * 生の数値なら `String(id)` で済み、実測 17ms → 0.02ms になる。
+ *
+ * 隠す必要が無い理由:
+ * 権限判定はどこも userId / slug / target_user の照合で行っており、
+ * IDの推測困難性には一切依存していない（例: 通知は `AND target_user = $1`、
+ * 投稿の編集・削除は display_name / slug の一致を見る）。
+ * 投稿自体も公開フィードに出ているので、IDを隠しても得られる情報は増えない。
+ *
+ * sqids は**旧URLを読むためだけ**に残してある。
+ */
+const LEGACY_SQIDS_MIN_LENGTH = 6;
+
+const legacySqids = new Sqids({
   alphabet: 'FsaJLNPRTVXZbdfhjklnpqrtvwxyz8u64o20mYWGUSQOMKIECAegicBDH31975',
-  minLength: 6,
+  minLength: LEGACY_SQIDS_MIN_LENGTH,
 });
 
 function getChecksum(id: number): number {
   return (id * 17 + 5) % 97;
 }
 
-/**
- * ID変換のメモ化。
- *
- * Cloudflare Workers の無料枠は1リクエストあたり CPU 10ms しかない。
- * sqids.encode は1回あたり約15µs かかり、フィード1ページ（スレッド＋返信）では
- * 1投稿につき id / threadId / parentPostId / gameId の最大4回呼ばれる。
- * 400投稿ぶんで 17ms 前後になり、**これだけで CPU 上限を超えて 500 になる**。
- *
- * 同じIDは何度も現れる（threadId はスレッド内で共通、再リクエストでも同じ投稿が並ぶ）ため、
- * アイソレート内でメモ化するだけで実測13倍速くなる。
- * 変換は純粋な関数なので、キャッシュしても結果は変わらない。
- */
-const MEMO_MAX = 5000;
-const encodeMemo = new Map<number, string>();
-const decodeMemo = new Map<string, number | null>();
-
-export function encodeId(id: number): string {
-  const hit = encodeMemo.get(id);
-  if (hit !== undefined) return hit;
-  const encoded = sqids.encode([id, getChecksum(id)]);
-  // アイソレートは長生きしうるので、際限なく溜めない
-  if (encodeMemo.size >= MEMO_MAX) encodeMemo.clear();
-  encodeMemo.set(id, encoded);
-  return encoded;
+/** 旧 sqids 形式のIDを読む。checksum が合わなければ null。 */
+function decodeLegacySqid(value: string): number | null {
+  try {
+    const numbers = legacySqids.decode(value);
+    if (numbers.length !== 2) return null;
+    const [id, checksum] = numbers;
+    return getChecksum(id) === checksum ? id : null;
+  } catch {
+    return null;
+  }
 }
 
-export function decodeId(sqid: string): number | null {
-  if (!sqid) return null;
-  const hit = decodeMemo.get(sqid);
-  if (hit !== undefined) return hit;
-  let result: number | null;
-  try {
-    const numbers = sqids.decode(sqid);
-    if (numbers.length !== 2) {
-      result = null;
-    } else {
-      const [id, checksum] = numbers;
-      result = getChecksum(id) !== checksum ? null : id;
-    }
-  } catch {
-    result = null;
+function parseRawId(value: string): number | null {
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+export function encodeId(id: number): string {
+  return String(id);
+}
+
+/**
+ * IDを読む。新形式（生の数値）と旧形式（sqids）の両方を受ける。
+ *
+ * 曖昧さの扱い: 旧 sqids は最短6文字で、英数字なので「全部数字」の旧IDもあり得る。
+ * そのため 5桁以下の数字だけが新形式だと確定でき、6桁以上の数字列は
+ * まず旧形式として checksum 込みで検証し、駄目なら生の数値として扱う。
+ * （既存の投稿IDは連番で当面5桁に収まるため、実際に衝突する余地はほぼ無い。）
+ */
+export function decodeId(value: string): number | null {
+  if (!value) return null;
+
+  if (/^\d+$/.test(value)) {
+    if (value.length < LEGACY_SQIDS_MIN_LENGTH) return parseRawId(value);
+    return decodeLegacySqid(value) ?? parseRawId(value);
   }
-  // 不正な文字列を無限に溜め込まないよう、こちらも上限を設ける
-  if (decodeMemo.size >= MEMO_MAX) decodeMemo.clear();
-  decodeMemo.set(sqid, result);
-  return result;
+
+  // 数字以外を含むものは旧形式か、そもそもIDではない（楽観更新の `temp-...` など）
+  return decodeLegacySqid(value);
 }
 
 export function decodeIdOrThrow(sqid: string, errorMessage = 'Invalid ID'): number {

@@ -66,15 +66,12 @@ const POST_COLUMNS = [
 ].join(', ');
 
 /**
- * フィード1スレッドあたりに載せる返信の上限。
+ * フィード1スレッドあたりに載せる返信の上限。スレッドが伸びても転送量が線形に増えないようにする。
  *
- * 転送量だけでなく **Cloudflare Workers の CPU 上限（無料枠 10ms/req）** で決まる値。
- * 返信を含めた投稿1件ごとに sqids のエンコードが走るため、
- * 20スレッド×20返信(=420投稿) では ID 変換だけで約17msかかり CPU 上限を超える。
- * 5件なら約2ms に収まる。フィードは ReplyPreview で数件しか見せないので実害は小さい。
- * 詳細は docs/NEON_EGRESS.md を参照。
+ * 一時期 CPU 都合で 5 件まで絞っていたが、ID を sqids から生の数値に変えて
+ * エンコード費用が消えた（lib/sqids.ts 参照）ため、転送量基準の 20 件へ戻した。
  */
-const FEED_REPLIES_PER_THREAD = 5;
+const FEED_REPLIES_PER_THREAD = 20;
 
 async function rowToPost(row: any): Promise<Post> {
   const createdAt = typeof row.created_at === 'object' && row.created_at?.toISOString

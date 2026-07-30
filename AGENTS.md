@@ -64,10 +64,10 @@ single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md)
   `COALESCE(au.display_name, p.display_name)` alias or every author renders as 名無し.
 - Never select `games.manifest` in a list query; never reintroduce `COUNT(*) FROM post_hearts`
   (use denormalized `posts.hearts_total`); never uncap feed replies.
-- **Workers free tier allows 10ms CPU per request.** `sqids.encode` costs ~15µs and runs up to 4× per
-  post, so response size is CPU-bound, not just bytes: an uncapped feed cost 17ms in ID encoding
-  alone and 500'd. `lib/sqids.ts` memoizes encode/decode; `FEED_REPLIES_PER_THREAD` is 5. Budget
-  ~15µs per post before adding posts to any response.
+- **Workers free tier allows 10ms CPU per request** — response size is CPU-bound, not just bytes.
+  `sqids.encode` (~15µs, up to 4× per post) once cost 17ms on a single feed page and 500'd every
+  posts route; IDs are now raw numbers (`lib/sqids.ts`), which took that to 0.67ms. `decodeId` still
+  accepts legacy sqids so old links keep working — don't remove that fallback.
 - Read routes go through `withEdgeCache` (`lib/edge-cache.ts`) — Cloudflare does **not** cache
   Worker responses from `Cache-Control` alone, so it calls the Cache API. `userId`-keyed
   responses stay `private`.
