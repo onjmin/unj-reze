@@ -834,12 +834,26 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     let rows;
     if (userId) {
-      rows = rowsToObjects(d, 'SELECT * FROM notifications WHERE target_user = ? ORDER BY id', [userId]);
+      rows = rowsToObjects(
+        d,
+        `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+         FROM notifications n
+         LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
+         WHERE n.target_user = ? OR n.target_user = (SELECT slug FROM anonymous_users WHERE id = ? LIMIT 1)
+         ORDER BY n.id DESC LIMIT 20`,
+        [userId, userId]
+      );
     } else {
-      rows = rowsToObjects(d, 'SELECT * FROM notifications ORDER BY id');
+      rows = rowsToObjects(
+        d,
+        `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+         FROM notifications n
+         LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
+         ORDER BY n.id DESC LIMIT 20`
+      );
     }
     return rows.map(r => ({
-      id: r.id, user: r.user_name, action: r.action, target: r.target,
+      id: r.id, user: r.resolved_name || r.user_name, action: r.action, target: r.target,
       type: r.type || 'like', postId: r.post_id ?? undefined, targetUser: r.target_user ?? undefined,
       recipientId: r.target_user ?? undefined, read: !!r.read,
       createdAt: r.created_at, time: formatRelativeTime(r.created_at),
@@ -874,11 +888,32 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     let rows;
     if (userId) {
-      rows = rowsToObjects(d, 'SELECT * FROM messages WHERE recipient IS NULL OR sender = ? OR recipient = ? ORDER BY id', [userId, userId]);
+      rows = rowsToObjects(
+        d,
+        `SELECT m.*, 
+                COALESCE(s.display_name, m.sender) as sender_name,
+                COALESCE(r.display_name, m.recipient) as recipient_name
+         FROM messages m
+         LEFT JOIN anonymous_users s ON m.sender = s.id OR m.sender = s.slug OR m.sender = s.display_name
+         LEFT JOIN anonymous_users r ON m.recipient = r.id OR m.recipient = r.slug OR m.recipient = r.display_name
+         WHERE m.sender = ? OR m.recipient = ? OR s.id = ? OR r.id = ? OR s.slug = ? OR r.slug = ?
+         ORDER BY m.id DESC LIMIT 50`,
+        [userId, userId, userId, userId, userId, userId]
+      );
     } else {
-      rows = rowsToObjects(d, 'SELECT * FROM messages ORDER BY id');
+      rows = rowsToObjects(
+        d,
+        `SELECT m.*, 
+                COALESCE(s.display_name, m.sender) as sender_name,
+                COALESCE(r.display_name, m.recipient) as recipient_name
+         FROM messages m
+         LEFT JOIN anonymous_users s ON m.sender = s.id OR m.sender = s.slug OR m.sender = s.display_name
+         LEFT JOIN anonymous_users r ON m.recipient = r.id OR m.recipient = r.slug OR m.recipient = r.display_name
+         WHERE m.recipient IS NOT NULL
+         ORDER BY m.id DESC LIMIT 50`
+      );
     }
-    return rows.map(r => ({ id: r.id, sender: r.sender, text: r.text, recipient: r.recipient ?? undefined, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
+    return rows.map(r => ({ id: r.id, sender: r.sender_name || r.sender, text: r.text, recipient: r.recipient_name || r.recipient || undefined, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
   },
 
   async addMessage(data: MessageParams) {

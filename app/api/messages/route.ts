@@ -12,9 +12,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { sender, text, recipient } = body;
 
-  if (!sender || !text) {
+  if (!sender || !text || !recipient) {
     return NextResponse.json(
-      { error: 'sender and text are required' },
+      { error: 'sender, recipient, and text are required' },
       { status: 400 }
     );
   }

@@ -805,6 +805,96 @@ export const pgStore: DataStore = {
     }
   },
 
+  async getNotifications(userId?: string) {
+    const client = await getPool().connect();
+    try {
+      let result;
+      if (userId) {
+        result = await client.query(
+          `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+           FROM notifications n
+           LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
+           WHERE n.target_user = $1 OR n.target_user = (SELECT slug FROM anonymous_users WHERE id = $1 LIMIT 1)
+           ORDER BY n.created_at DESC LIMIT 20`,
+          [userId]
+        );
+      } else {
+        result = await client.query(
+          `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+           FROM notifications n
+           LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
+           ORDER BY n.created_at DESC LIMIT 20`
+        );
+      }
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
+          ? r.created_at.toISOString()
+          : String(r.created_at);
+        return {
+          id: r.id,
+          user: r.resolved_name || r.user_name,
+          action: r.action,
+          target: r.target,
+          type: r.type || 'like',
+          postId: r.post_id ?? undefined,
+          targetUser: r.target_user ?? undefined,
+          recipientId: r.target_user ?? undefined,
+          read: !!r.read,
+          createdAt,
+          time: formatRelativeTime(createdAt),
+        } as Notification;
+      });
+    } finally {
+      client.release();
+    }
+  },
+
+  async getMessages(userId?: string) {
+    const client = await getPool().connect();
+    try {
+      let result;
+      if (userId) {
+        result = await client.query(
+          `SELECT m.*, 
+                  COALESCE(s.display_name, m.sender) as sender_name,
+                  COALESCE(r.display_name, m.recipient) as recipient_name
+           FROM messages m
+           LEFT JOIN anonymous_users s ON m.sender = s.id OR m.sender = s.slug OR m.sender = s.display_name
+           LEFT JOIN anonymous_users r ON m.recipient = r.id OR m.recipient = r.slug OR m.recipient = r.display_name
+           WHERE m.sender = $1 OR m.recipient = $1 OR s.id = $1 OR r.id = $1 OR s.slug = $1 OR r.slug = $1
+           ORDER BY m.created_at DESC LIMIT 50`,
+          [userId]
+        );
+      } else {
+        result = await client.query(
+          `SELECT m.*, 
+                  COALESCE(s.display_name, m.sender) as sender_name,
+                  COALESCE(r.display_name, m.recipient) as recipient_name
+           FROM messages m
+           LEFT JOIN anonymous_users s ON m.sender = s.id OR m.sender = s.slug OR m.sender = s.display_name
+           LEFT JOIN anonymous_users r ON m.recipient = r.id OR m.recipient = r.slug OR m.recipient = r.display_name
+           WHERE m.recipient IS NOT NULL
+           ORDER BY m.created_at DESC LIMIT 50`
+        );
+      }
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
+          ? r.created_at.toISOString()
+          : String(r.created_at);
+        return {
+          id: r.id,
+          sender: r.sender_name || r.sender,
+          text: r.text,
+          recipient: r.recipient_name || r.recipient || undefined,
+          createdAt,
+          time: formatRelativeTime(createdAt),
+        } as Message;
+      });
+    } finally {
+      client.release();
+    }
+  },
+
   async getUserBio(slug: string) {
     const client = await getPool().connect();
     try {
@@ -852,41 +942,6 @@ export const pgStore: DataStore = {
     }
   },
 
-  async getNotifications(userId?: string) {
-    const client = await getPool().connect();
-    try {
-      let result;
-      if (userId) {
-        result = await client.query(
-          'SELECT * FROM notifications WHERE target_user = $1 ORDER BY created_at DESC LIMIT 20',
-          [userId]
-        );
-      } else {
-        result = await client.query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20');
-      }
-      return result.rows.map((r: any) => {
-        const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
-          ? r.created_at.toISOString()
-          : String(r.created_at);
-        return {
-          id: r.id,
-          user: r.user_name,
-          action: r.action,
-          target: r.target,
-          type: r.type || 'like',
-          postId: r.post_id ?? undefined,
-          targetUser: r.target_user ?? undefined,
-          recipientId: r.target_user ?? undefined,
-          read: !!r.read,
-          createdAt,
-          time: formatRelativeTime(createdAt),
-        } as Notification;
-      });
-    } finally {
-      client.release();
-    }
-  },
-
   async markNotificationRead(id: number, userId: string) {
     const client = await getPool().connect();
     try {
@@ -915,36 +970,6 @@ export const pgStore: DataStore = {
       const result = await client.query('SELECT COUNT(*) AS cnt FROM notifications WHERE target_user = $1 AND read = false', [userId]);
       return parseInt(result.rows[0].cnt, 10);
     } finally { client.release(); }
-  },
-
-  async getMessages(userId?: string) {
-    const client = await getPool().connect();
-    try {
-      let result;
-      if (userId) {
-        result = await client.query(
-          'SELECT * FROM messages WHERE recipient IS NULL OR sender = $1 OR recipient = $1 ORDER BY created_at DESC LIMIT 20',
-          [userId]
-        );
-      } else {
-        result = await client.query('SELECT * FROM messages ORDER BY created_at DESC LIMIT 20');
-      }
-      return result.rows.map((r: any) => {
-        const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
-          ? r.created_at.toISOString()
-          : String(r.created_at);
-        return {
-          id: r.id,
-          sender: r.sender,
-          text: r.text,
-          recipient: r.recipient ?? undefined,
-          createdAt,
-          time: formatRelativeTime(createdAt),
-        } as Message;
-      });
-    } finally {
-      client.release();
-    }
   },
 
   async addMessage(data: MessageParams) {

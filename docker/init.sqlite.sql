@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS messages (
   recipient TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(sender, recipient, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS trends (
   id INTEGER PRIMARY KEY,

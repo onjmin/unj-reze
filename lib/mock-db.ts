@@ -566,10 +566,10 @@ class MockDB {
   }
 
   getMessages(userId?: string): Message[] {
-    if (!userId) return this.messages;
+    if (!userId) return this.messages.filter(m => !!m.recipient);
     const hidden = this.getHiddenSlugs(userId);
     return this.messages
-      .filter(m => !m.recipient || m.sender === userId || m.recipient === userId)
+      .filter(m => !!m.recipient && (m.sender === userId || m.recipient === userId))
       .filter(m => !hidden.has(this.slugForUser(m.sender)));
   }
 

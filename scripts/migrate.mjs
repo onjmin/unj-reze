@@ -194,6 +194,82 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_game_players_updated_at ON game_players(updated_at);
       CREATE INDEX IF NOT EXISTS idx_game_players_game_updated ON game_players(game_id, updated_at DESC);
     `
+  },
+  {
+    name: '14_relational_user_ids_and_fk_indexes',
+    sql: `
+      -- Ensure anonymous_users has unique constraint on slug
+      ALTER TABLE anonymous_users ADD CONSTRAINT unq_anonymous_users_slug UNIQUE (slug);
+
+      -- Add Foreign Key constraints and indexes to user_follows
+      ALTER TABLE user_follows
+        ADD CONSTRAINT fk_user_follows_follower FOREIGN KEY (follower_id) REFERENCES anonymous_users(id) ON DELETE CASCADE,
+        ADD CONSTRAINT fk_user_follows_followed FOREIGN KEY (followed_id) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_user_follows_follower ON user_follows(follower_id);
+      CREATE INDEX IF NOT EXISTS idx_user_follows_followed ON user_follows(followed_id);
+
+      -- Add Foreign Key constraints and indexes to user_blocks & user_mutes
+      ALTER TABLE user_blocks
+        ADD CONSTRAINT fk_user_blocks_blocker FOREIGN KEY (blocker_slug) REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+        ADD CONSTRAINT fk_user_blocks_blocked FOREIGN KEY (blocked_slug) REFERENCES anonymous_users(slug) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker ON user_blocks(blocker_slug);
+      CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_slug);
+
+      ALTER TABLE user_mutes
+        ADD CONSTRAINT fk_user_mutes_muter FOREIGN KEY (muter_slug) REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+        ADD CONSTRAINT fk_user_mutes_muted FOREIGN KEY (muted_slug) REFERENCES anonymous_users(slug) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_user_mutes_muter ON user_mutes(muter_slug);
+
+      -- Add Foreign Key constraints to post_votes & post_hearts
+      ALTER TABLE post_votes
+        ADD CONSTRAINT fk_post_votes_user FOREIGN KEY (user_id) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_post_votes_user ON post_votes(user_id);
+
+      ALTER TABLE post_hearts
+        ADD CONSTRAINT fk_post_hearts_user FOREIGN KEY (user_id) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_post_hearts_user ON post_hearts(user_id);
+
+      -- Add Foreign Key constraints to posts
+      ALTER TABLE posts
+        ADD CONSTRAINT fk_posts_slug FOREIGN KEY (slug) REFERENCES anonymous_users(slug) ON DELETE SET NULL;
+
+      -- Add Foreign Key constraints and indexes to reports
+      ALTER TABLE reports
+        ADD CONSTRAINT fk_reports_reporter FOREIGN KEY (reporter_slug) REFERENCES anonymous_users(slug) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_reports_reporter ON reports(reporter_slug);
+      CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id);
+
+      -- Add Foreign Key constraint to oshi_items
+      ALTER TABLE oshi_items
+        ADD CONSTRAINT fk_oshi_items_user FOREIGN KEY (user_slug) REFERENCES anonymous_users(slug) ON DELETE CASCADE;
+
+      -- Add Foreign Key constraint and index to games
+      ALTER TABLE games
+        ADD CONSTRAINT fk_games_creator FOREIGN KEY (creator_slug) REFERENCES anonymous_users(slug) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_games_creator ON games(creator_slug);
+
+      -- Add Foreign Key constraints and indexes to game tables
+      ALTER TABLE game_schedule
+        ADD CONSTRAINT fk_game_schedule_game FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE;
+
+      ALTER TABLE game_votes
+        ADD CONSTRAINT fk_game_votes_game FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS idx_game_votes_game_id ON game_votes(game_id);
+
+      ALTER TABLE game_players
+        ADD CONSTRAINT fk_game_players_game FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE;
+
+      -- Add Foreign Key constraint to migration_tokens
+      ALTER TABLE migration_tokens
+        ADD CONSTRAINT fk_migration_tokens_user FOREIGN KEY (user_id) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+
+      -- Add indexes for messages & notifications
+      CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(sender, recipient, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_notifications_target_user ON notifications(target_user, read, created_at DESC);
+    `
   }
 ];
 
