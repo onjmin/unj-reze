@@ -294,6 +294,14 @@ async function resolveViewerSlug(client: any, userId: string): Promise<string> {
 
 const hiddenSlugsCache = new Map<string, { hidden: Set<string>; expiresAt: number }>();
 
+export function clearHiddenSlugsCache(userId?: string) {
+  if (userId) {
+    hiddenSlugsCache.delete(userId);
+  } else {
+    hiddenSlugsCache.clear();
+  }
+}
+
 /** 閲覧者に対して非表示にすべき slug 集合(自分がブロック/ミュート ＋ 自分をブロックした相手)。 */
 async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>> {
   if (!userId) return new Set();
@@ -302,22 +310,27 @@ async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>
   if (cached && cached.expiresAt > now) {
     return cached.hidden;
   }
-  const viewerSlug = await resolveViewerSlug(client, userId);
-  if (!viewerSlug) return new Set();
-  const [blocks, mutes] = await Promise.all([
-    client.query(
-      'SELECT blocker_slug, blocked_slug FROM user_blocks WHERE blocker_slug = $1 OR blocked_slug = $1',
-      [viewerSlug]
-    ),
-    client.query('SELECT muted_slug FROM user_mutes WHERE muter_slug = $1', [viewerSlug])
-  ]);
+  const res = await client.query(
+    `WITH viewer AS (
+       SELECT slug FROM anonymous_users 
+       WHERE id = $1 OR display_name = $1 OR slug = $1 
+       LIMIT 1
+     ),
+     v_slug AS (
+       SELECT COALESCE((SELECT slug FROM viewer), $1) as slug
+     )
+     SELECT blocker_slug as other_slug FROM user_blocks WHERE blocked_slug = (SELECT slug FROM v_slug)
+     UNION
+     SELECT blocked_slug as other_slug FROM user_blocks WHERE blocker_slug = (SELECT slug FROM v_slug)
+     UNION
+     SELECT muted_slug as other_slug FROM user_mutes WHERE muter_slug = (SELECT slug FROM v_slug)`,
+    [userId]
+  );
   const hidden = new Set<string>();
-  for (const r of blocks.rows) {
-    if (r.blocker_slug === viewerSlug) hidden.add(r.blocked_slug);
-    if (r.blocked_slug === viewerSlug) hidden.add(r.blocker_slug);
+  for (const r of res.rows) {
+    if (r.other_slug) hidden.add(r.other_slug);
   }
-  for (const r of mutes.rows) hidden.add(r.muted_slug);
-  hiddenSlugsCache.set(userId, { hidden, expiresAt: now + 10000 });
+  hiddenSlugsCache.set(userId, { hidden, expiresAt: now + 60000 });
   return hidden;
 }
 
@@ -1271,6 +1284,7 @@ export const pgStore: DataStore = {
 
   async blockUser(blockerSlug: string, blockedSlug: string) {
     if (blockerSlug === blockedSlug) return;
+    clearHiddenSlugsCache();
     const client = await getPool().connect();
     try {
       await client.query(
@@ -1281,6 +1295,7 @@ export const pgStore: DataStore = {
   },
 
   async unblockUser(blockerSlug: string, blockedSlug: string) {
+    clearHiddenSlugsCache();
     const client = await getPool().connect();
     try {
       await client.query('DELETE FROM user_blocks WHERE blocker_slug = $1 AND blocked_slug = $2', [blockerSlug, blockedSlug]);
@@ -1297,6 +1312,7 @@ export const pgStore: DataStore = {
 
   async muteUser(muterSlug: string, mutedSlug: string) {
     if (muterSlug === mutedSlug) return;
+    clearHiddenSlugsCache();
     const client = await getPool().connect();
     try {
       await client.query(
@@ -1307,6 +1323,7 @@ export const pgStore: DataStore = {
   },
 
   async unmuteUser(muterSlug: string, mutedSlug: string) {
+    clearHiddenSlugsCache();
     const client = await getPool().connect();
     try {
       await client.query('DELETE FROM user_mutes WHERE muter_slug = $1 AND muted_slug = $2', [muterSlug, mutedSlug]);
