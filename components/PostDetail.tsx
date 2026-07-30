@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import BbsThreadView from './BbsThreadView';
-import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag, Pencil, Trash2, VolumeX, User as UserIcon } from 'lucide-react';
+import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag, Pencil, Trash2, VolumeX, User as UserIcon, Edit3 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
@@ -21,6 +21,7 @@ import GameBox from './GameBox';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
+import ImagePreview from './ImagePreview';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
@@ -67,6 +68,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -724,8 +726,33 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           })()}
 
           {post.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background-white">
-              <img src={post.imageSrc} alt={post.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
+            <div
+              onClick={() => {
+                if (post.imageSrc) setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
+              }}
+              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
+            >
+              <img
+                src={post.imageSrc}
+                alt={post.imageAlt || "ユーザーアート"}
+                className="max-w-full h-auto max-h-[220px] block mx-auto"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
+                }}
+              />
+              {post.hasCollabButton && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenCollab(post);
+                  }}
+                  className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
+                >
+                  <Edit3 size={11} />
+                  <span>コラボ</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -802,7 +829,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           <div className="border-t border-gray-800 px-3 py-3 space-y-2">
             <span className="text-[11px] text-gray-500 font-bold">返信</span>
             {roots.map(reply => (
-              <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={openComposer} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} />
+              <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={openComposer} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} onPreviewImage={(src, alt) => setPreviewImage({ src, alt })} onOpenCollab={handleOpenCollab} />
             ))}
           </div>
         );
@@ -817,6 +844,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           <button className="text-blue-500 text-xs font-bold px-1">送信</button>
         </div>
       </div>
+
+      {previewImage && (
+        <ImagePreview
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
+        />
+      )}
 
       {composerOpen && (
         <PostComposer
@@ -947,7 +982,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick, onPreviewImage, onOpenCollab }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void; onPreviewImage?: (src: string, alt?: string) => void; onOpenCollab?: (post: Post) => void }) {
   const router = useRouter();
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
@@ -1224,8 +1259,33 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           </p>
 
           {localPost.hasImage && (
-            <div className="rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] gimp-checkered-background-white">
-              <img src={localPost.imageSrc} alt={localPost.imageAlt || "ユーザーアート"} className="max-w-full h-auto max-h-[220px] block mx-auto" />
+            <div
+              onClick={() => {
+                if (localPost.imageSrc) onPreviewImage?.(localPost.imageSrc, localPost.imageAlt || 'ユーザーアート');
+              }}
+              className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
+            >
+              <img
+                src={localPost.imageSrc}
+                alt={localPost.imageAlt || "ユーザーアート"}
+                className="max-w-full h-auto max-h-[220px] block mx-auto"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
+                }}
+              />
+              {localPost.hasCollabButton && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenCollab?.(localPost);
+                  }}
+                  className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
+                >
+                  <Edit3 size={11} />
+                  <span>コラボ</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -1272,7 +1332,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
       {!collapsed && children.length > 0 && (
         <div>
           {children.map(child => (
-            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} onAvatarClick={onAvatarClick} />
+            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} onAvatarClick={onAvatarClick} onPreviewImage={onPreviewImage} onOpenCollab={onOpenCollab} />
           ))}
         </div>
       )}
