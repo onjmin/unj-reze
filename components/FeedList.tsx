@@ -33,9 +33,13 @@ interface FeedListProps {
   onEditMml?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
   userId?: string;
+  /** 続きの読み込み。未指定なら「すべて表示されました」で終わる。 */
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
 
-export default function FeedList({ posts, activeTab, feedSubMode = 'threads', rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditPost, userId }: FeedListProps) {
+export default function FeedList({ posts, activeTab, feedSubMode = 'threads', rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditPost, userId, onLoadMore, hasMore, loadingMore }: FeedListProps) {
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -177,9 +181,23 @@ export default function FeedList({ posts, activeTab, feedSubMode = 'threads', ra
           />
         </VirtualizedItem>
       ))}
-      <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
-        すべて表示されました 🌱
-      </div>
+      {onLoadMore && hasMore ? (
+        // 無限スクロール（IntersectionObserver）は iframe 内で rootMargin が効かない事例があるため、
+        // 明示的なボタンにしている。
+        <div className="p-6 text-center bg-gray-900/10">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="px-5 py-2 rounded-full text-xs font-bold bg-gray-100/10 text-gray-200 hover:bg-gray-100/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {loadingMore ? '読み込み中…' : 'もっと読み込む'}
+          </button>
+        </div>
+      ) : (
+        <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
+          すべて表示されました 🌱
+        </div>
+      )}
     </div>
   );
 }

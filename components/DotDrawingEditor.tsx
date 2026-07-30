@@ -68,13 +68,11 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const selectAnchorRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const selectRotateAngleRef = useRef(0);
   const lassoPointsRef = useRef<[number, number][]>([]);
-  const pinchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-  /** 2本指ピンチ中フラグ。立っている間は描画コールバックを無視する。 */
-  const pinchingRef = useRef(false);
+  const multiTouchPointsRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  /** 複数指タッチ中フラグ。立っている間は描画コールバックを無視する。 */
+  const multiTouchingRef = useRef(false);
   /** 1本目の指が触れた時点のレイヤー内容。2本目が触れたらここまで巻き戻す。 */
   const strokeSnapshotRef = useRef<{ layer: { data: Uint8ClampedArray }; data: Uint8ClampedArray } | null>(null);
-  const pinchStartDistRef = useRef<number | null>(null);
-  const pinchStartZoomRef = useRef(1);
   const [gridW, setGridW] = useState(32);
   const [gridH, setGridH] = useState(32);
   const [showPresets, setShowPresets] = useState(false);
@@ -709,8 +707,8 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     let selectRotateLastAngle = 0;
 
     oekaki.onDraw((x, y, buttons) => {
-      // ピンチ（2本指ズーム）中はペンを動かさない
-      if (pinchingRef.current) return;
+      // 複数指タッチ中はペンを動かさない
+      if (multiTouchingRef.current) return;
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       if (!active?.editable) return;
 
@@ -790,8 +788,8 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
 
     oekaki.onDrawn((x, y) => {
       px = null; py = null;
-      // ピンチ中に指が離れた場合は、描いていないので履歴も残さない
-      if (pinchingRef.current) {
+      // 複数指タッチ中に指が離れた場合は、描いていないので履歴も残さない
+      if (multiTouchingRef.current) {
         lassoPointsRef.current = [];
         return;
       }
@@ -1283,50 +1281,39 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const zoomIn = () => setZoom(v => Math.min(4, Math.round((v + 0.25) * 100) / 100));
   const zoomOut = () => setZoom(v => Math.max(0.25, Math.round((v - 0.25) * 100) / 100));
 
-  // 二本指ピンチでキャンバスをズーム。1本指の描画はcanvas側のpointer captureが処理するため干渉しない。
-  const handlePinchPointerDown = (e: React.PointerEvent) => {
-    pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  // スマホでの2本指ピンチによるズームは行わない（描画中に不用意に拡大縮小されるため）。
+  // ただし複数指タッチの検出自体は残す — 2本目の指がそのまま線として描かれるのを防ぐ必要がある。
+  // ズームはツールバーのボタンとPCのホイールから操作する。
+  const handleMultiTouchPointerDown = (e: React.PointerEvent) => {
+    multiTouchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     // 1本目の指はそのまま描画が始まってしまうため、内容を控えておき、
-    // 2本目が触れた時点（＝ピンチ確定）で巻き戻して描き込みを無かったことにする。
-    if (pinchPointsRef.current.size === 1 && e.pointerType === 'touch') {
+    // 2本目が触れた時点で巻き戻して描き込みを無かったことにする。
+    if (multiTouchPointsRef.current.size === 1 && e.pointerType === 'touch') {
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
       strokeSnapshotRef.current = active?.editable ? { layer: active, data: active.data } : null;
     }
-    if (pinchPointsRef.current.size >= 2) {
-      pinchingRef.current = true;
+    if (multiTouchPointsRef.current.size >= 2) {
+      multiTouchingRef.current = true;
       const snapshot = strokeSnapshotRef.current;
       if (snapshot) {
         snapshot.layer.data = snapshot.data;
         strokeSnapshotRef.current = null;
       }
     }
-    if (pinchPointsRef.current.size === 2) {
-      const [p1, p2] = Array.from(pinchPointsRef.current.values());
-      pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      pinchStartZoomRef.current = zoom;
-    }
   };
 
-  const handlePinchPointerMove = (e: React.PointerEvent) => {
-    if (!pinchPointsRef.current.has(e.pointerId)) return;
-    pinchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pinchPointsRef.current.size === 2 && pinchStartDistRef.current) {
-      const [p1, p2] = Array.from(pinchPointsRef.current.values());
-      const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      const ratio = dist / pinchStartDistRef.current;
-      const next = Math.min(4, Math.max(0.25, Math.round(pinchStartZoomRef.current * ratio * 100) / 100));
-      setZoom(next);
-    }
+  const handleMultiTouchPointerMove = (e: React.PointerEvent) => {
+    if (!multiTouchPointsRef.current.has(e.pointerId)) return;
+    multiTouchPointsRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
   };
 
   // キャンバス外（ツールバー上など）で指が離れると要素側の pointerup を取りこぼし、
-  // ピンチ中フラグが立ちっぱなしで描けなくなるため、window側でも後始末する。
+  // 複数指フラグが立ちっぱなしで描けなくなるため、window側でも後始末する。
   useEffect(() => {
     const release = (e: PointerEvent) => {
-      if (!pinchPointsRef.current.delete(e.pointerId)) return;
-      pinchStartDistRef.current = null;
-      if (pinchPointsRef.current.size === 0) {
-        pinchingRef.current = false;
+      if (!multiTouchPointsRef.current.delete(e.pointerId)) return;
+      if (multiTouchPointsRef.current.size === 0) {
+        multiTouchingRef.current = false;
         strokeSnapshotRef.current = null;
       }
     };
@@ -1338,18 +1325,12 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     };
   }, []);
 
-  const handlePinchPointerUp = (e: React.PointerEvent) => {
-    pinchPointsRef.current.delete(e.pointerId);
-    pinchStartDistRef.current = null;
+  const handleMultiTouchPointerUp = (e: React.PointerEvent) => {
+    multiTouchPointsRef.current.delete(e.pointerId);
     // 指が全部離れるまでは描画を再開しない（1本残った指で線が出るのを防ぐ）
-    if (pinchPointsRef.current.size === 0) {
-      pinchingRef.current = false;
+    if (multiTouchPointsRef.current.size === 0) {
+      multiTouchingRef.current = false;
       strokeSnapshotRef.current = null;
-    }
-    if (pinchPointsRef.current.size === 2) {
-      const [p1, p2] = Array.from(pinchPointsRef.current.values());
-      pinchStartDistRef.current = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      pinchStartZoomRef.current = zoom;
     }
   };
 
@@ -1510,10 +1491,10 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       <div
         ref={canvasAreaRef}
         className={'flex-1 flex items-center justify-center bg-[#1a1b26] m-3 mb-1 rounded-xl border border-gray-800 shadow-inner overflow-hidden p-4' + (isDragover ? ' ring-4 ring-blue-400/60' : '')}
-        onPointerDown={handlePinchPointerDown}
-        onPointerMove={handlePinchPointerMove}
-        onPointerUp={handlePinchPointerUp}
-        onPointerCancel={handlePinchPointerUp}
+        onPointerDown={handleMultiTouchPointerDown}
+        onPointerMove={handleMultiTouchPointerMove}
+        onPointerUp={handleMultiTouchPointerUp}
+        onPointerCancel={handleMultiTouchPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       >
         <div ref={mountRef} className="inline-block unj-canvas-grid" style={{ transform: `scale(${zoom})`, transformOrigin: 'center' }} />

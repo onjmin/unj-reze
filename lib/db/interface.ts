@@ -72,7 +72,8 @@ export interface ReportParams {
 }
 
 export interface DataStore {
-  getPosts(userId?: string, limit?: number): Promise<DbPost[]>;
+  /** `beforeId` はキーセットページング用のカーソル（そのIDより古いスレッドを返す）。 */
+  getPosts(userId?: string, limit?: number, beforeId?: number): Promise<DbPost[]>;
   getPost(id: number, userId?: string): Promise<DbPost | null>;
   createPost(data: CreatePostParams): Promise<DbPost>;
   likePost(id: number, userId: string): Promise<DbPost | null>;

@@ -148,10 +148,18 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
   return map;
 }
 
-async function getPostsWithVotes(client: any, userId?: string, limit?: number): Promise<Post[]> {
+/**
+ * フィードのスレッド一覧。
+ *
+ * `beforeId` はキーセット（カーソル）ページング用で、「そのIDより古いスレッド」を返す。
+ * OFFSET を使わないのは、件数が増えるほど読み飛ばしぶんのコストが増えるのと、
+ * 読み込み中に新規投稿が入ると境界がずれて重複・取りこぼしが起きるため。
+ */
+async function getPostsWithVotes(client: any, userId?: string, limit?: number, beforeId?: number): Promise<Post[]> {
   let result;
   const safeLimit = Math.max(1, Math.min(limit || 20, 50));
   const limitClause = ` LIMIT ${safeLimit}`;
+  const cursor = beforeId ?? null;
   if (userId) {
     result = await client.query(`
       SELECT ${POST_COLUMNS},
@@ -163,8 +171,9 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number): 
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
       WHERE p.thread_id = p.id
+        AND ($2::bigint IS NULL OR p.id < $2::bigint)
       ORDER BY p.id DESC${limitClause}
-    `, [userId]);
+    `, [userId, cursor]);
   } else {
     result = await client.query(`
       SELECT ${POST_COLUMNS},
@@ -175,8 +184,9 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number): 
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.thread_id = p.id
+        AND ($1::bigint IS NULL OR p.id < $1::bigint)
       ORDER BY p.id DESC${limitClause}
-    `);
+    `, [cursor]);
   }
 
   const rows = result.rows;
@@ -307,12 +317,12 @@ async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>
 }
 
 export const pgStore: DataStore = {
-  async getPosts(userId?: string, limit?: number) {
+  async getPosts(userId?: string, limit?: number, beforeId?: number) {
     const client = await getPool().connect();
     try {
       // Run posts query and hidden-slugs lookup concurrently — they are independent.
       const [posts, hidden] = await Promise.all([
-        getPostsWithVotes(client, userId, limit),
+        getPostsWithVotes(client, userId, limit, beforeId),
         getHiddenSlugs(client, userId),
       ]);
       if (hidden.size === 0) return posts;
@@ -869,7 +879,8 @@ export const pgStore: DataStore = {
   async markAllNotificationsRead(userId: string) {
     const client = await getPool().connect();
     try {
-      await client.query('UPDATE notifications SET read = true WHERE target_user = $1', [userId]);
+      // read = false の行だけ更新する（自動既読で毎回呼ばれるため、全行の書き換えは避ける）
+      await client.query('UPDATE notifications SET read = true WHERE target_user = $1 AND read = false', [userId]);
     } finally { client.release(); }
   },
 

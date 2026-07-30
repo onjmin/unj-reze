@@ -32,6 +32,10 @@ import ToastContainer from '@/components/ToastContainer';
 import HeartBurst from '@/components/HeartBurst';
 import { showToast, triggerHeartBurst } from '@/lib/toast';
 import { setRemixHandler, takeStashedRemix, type RemixDraft } from '@/lib/remix';
+import { countUnreadMessages, MESSAGES_READ_EVENT, NOTIFICATIONS_READ_EVENT } from '@/lib/read-state';
+
+/** フィード1ページあたりのスレッド数。サーバー側の上限は50。 */
+const FEED_PAGE_SIZE = 20;
 
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
@@ -42,6 +46,10 @@ export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [newPosts, setNewPosts] = useState<Post[]>([]);
   const postsRef = useRef<Post[]>([]);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  /** 連打・多重発火の抑止（state だと同一tick内で追いつかない） */
+  const loadingMoreRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [currentNav, setCurrentNav] = useState('home');
   const [topTab, setTopTab] = useState('everyone');
@@ -158,7 +166,7 @@ export default function App() {
         setNotifCount(count);
       }).catch(() => {});
       api.messages.list(user.displayName).then(msgs => {
-        setMessageCount(msgs.length);
+        setMessageCount(countUnreadMessages(msgs, user.displayName));
       }).catch(() => {});
     }).catch(() => {
       setUserId('名無しvFZ');
@@ -230,13 +238,48 @@ export default function App() {
 
   const fetchPosts = useCallback(async () => {
     try {
-      const data = await api.posts.list(userId);
+      const data = await api.posts.list(userId, { limit: FEED_PAGE_SIZE });
       setPosts(data);
       postsRef.current = data;
+      // 満載で返ってきたなら、まだ先がある可能性が高い
+      setHasMorePosts(data.length >= FEED_PAGE_SIZE);
     } finally {
       setLoading(false);
     }
   }, [userId]);
+
+  /**
+   * 続きを読み込む。表示中で最も古いスレッドのIDをカーソルにする（キーセットページング）。
+   * OFFSET だと読み込み中に新規投稿が入った際に境界がずれて重複・取りこぼしが起きる。
+   */
+  const loadMorePosts = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMorePosts) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      let cursor: Post | null = null;
+      let minId = Number.POSITIVE_INFINITY;
+      for (const p of postsRef.current) {
+        const n = decodeId(p.id) || 0;
+        if (n > 0 && n < minId) { minId = n; cursor = p; }
+      }
+      if (!cursor) { setHasMorePosts(false); return; }
+
+      const older = await api.posts.list(userId, { beforeId: cursor.id, limit: FEED_PAGE_SIZE });
+      setPosts(prev => {
+        const seen = new Set(prev.map(p => String(p.id)));
+        const merged = [...prev, ...older.filter(p => !seen.has(String(p.id)))];
+        postsRef.current = merged;
+        return merged;
+      });
+      setHasMorePosts(older.length >= FEED_PAGE_SIZE);
+    } catch {
+      // 失敗しても次のタップで再試行できるようにするだけ
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [userId, hasMorePosts]);
 
   useEffect(() => {
     postsRef.current = posts;
@@ -336,6 +379,18 @@ export default function App() {
     const id = setInterval(() => { void refreshNotifications(userId); }, pollInterval(20000, 300000));
     return () => { notifCancelledRef.current = true; clearInterval(id); };
   }, [userId, refreshNotifications]);
+
+  // メッセージ／通知が既読になったらバッジを即座に落とす。
+  useEffect(() => {
+    const clearMessages = () => setMessageCount(0);
+    const clearNotifs = () => setNotifCount(0);
+    window.addEventListener(MESSAGES_READ_EVENT, clearMessages);
+    window.addEventListener(NOTIFICATIONS_READ_EVENT, clearNotifs);
+    return () => {
+      window.removeEventListener(MESSAGES_READ_EVENT, clearMessages);
+      window.removeEventListener(NOTIFICATIONS_READ_EVENT, clearNotifs);
+    };
+  }, []);
 
   const handleShowNewPosts = () => {
     setPosts(prev => [...newPosts, ...prev]);
@@ -951,6 +1006,9 @@ export default function App() {
                     currentUserDisplayName={currentUser?.displayName}
                     onModerationChange={fetchPosts}
                     loading={loading}
+                    onLoadMore={loadMorePosts}
+                    hasMore={hasMorePosts}
+                    loadingMore={loadingMore}
                     onReplyClick={(post) => {
                       setReplyTargetPost(post);
                       setComposerOpen(true);

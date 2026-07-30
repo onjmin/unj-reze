@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
+import { markMessagesSeen } from '@/lib/read-state';
 
 interface MessageViewProps {
   userId?: string;
@@ -14,7 +15,11 @@ export default function MessageView({ userId }: MessageViewProps) {
   const [msgInput, setMsgInput] = useState('');
 
   useEffect(() => {
-    api.messages.list(userId).then(setMessages);
+    api.messages.list(userId).then(msgs => {
+      setMessages(msgs);
+      // 一覧を開いた時点で既読にする。これがないとバッジが消えない。
+      markMessagesSeen(msgs);
+    });
   }, [userId]);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);

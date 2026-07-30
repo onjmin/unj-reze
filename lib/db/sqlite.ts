@@ -408,20 +408,24 @@ async function getThreadRepliesSqlite(d: SqlJsDatabase, threadIds: number[]): Pr
 }
 
 export const sqliteStore: DataStore = {
-  async getPosts(userId?: string, limit?: number) {
+  async getPosts(userId?: string, limit?: number, beforeId?: number) {
     const d = await getDb();
     const limitClause = limit ? ` LIMIT ${Math.max(1, Math.min(limit, 100))}` : '';
+    // キーセットページング（lib/db/pg.ts と同じ意味）: カーソルより古いスレッドだけ返す
+    const cursorClause = beforeId ? ' AND p.id < ?' : '';
+    const cursorParams = beforeId ? [beforeId] : [];
     let rows;
     if (userId) {
       rows = rowsToObjects(
         d,
-        `${VOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC${limitClause}`,
-        [userId]
+        `${VOTED_SELECT} WHERE p.thread_id = p.id${cursorClause} ORDER BY p.id DESC${limitClause}`,
+        [userId, ...cursorParams]
       );
     } else {
       rows = rowsToObjects(
         d,
-        `${UNVOTED_SELECT} WHERE p.thread_id = p.id ORDER BY p.id DESC${limitClause}`
+        `${UNVOTED_SELECT} WHERE p.thread_id = p.id${cursorClause} ORDER BY p.id DESC${limitClause}`,
+        cursorParams
       );
     }
     if (rows.length === 0) return [];
@@ -850,7 +854,7 @@ export const sqliteStore: DataStore = {
 
   async markAllNotificationsRead(userId: string) {
     const d = await getDb();
-    d.run('UPDATE notifications SET read = 1 WHERE target_user = ?', [userId]);
+    d.run('UPDATE notifications SET read = 1 WHERE target_user = ? AND read = 0', [userId]);
     saveDb();
   },
 

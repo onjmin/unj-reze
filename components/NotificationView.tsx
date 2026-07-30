@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
+import { emitNotificationsRead } from '@/lib/read-state';
 
 const tabs = ['すべて', 'メンション'];
 
@@ -38,7 +39,14 @@ export default function NotificationView({ userId }: NotificationViewProps) {
   const [notifs, setNotifs] = useState<Notif[]>([]);
 
   useEffect(() => {
-    api.notifications.list(userId).then(setNotifs);
+    api.notifications.list(userId).then(list => {
+      setNotifs(list.map(n => ({ ...n, read: true })));
+      // 一覧を開いた＝目に入ったので既読にする。未読が無いときは書き込みに行かない。
+      if (userId && list.some(n => !n.read)) {
+        api.notifications.markAllRead(userId).catch(() => {});
+      }
+      emitNotificationsRead();
+    });
   }, [userId]);
 
   const handleClick = (n: Notif) => {
@@ -62,6 +70,7 @@ export default function NotificationView({ userId }: NotificationViewProps) {
   const handleMarkAllRead = () => {
     if (userId) api.notifications.markAllRead(userId).catch(() => {});
     setNotifs(prev => prev.map(n => ({ ...n, read: true })));
+    emitNotificationsRead();
   };
 
   const filtered = tab === 'メンション' ? notifs.filter(n => (n.type || 'like') === 'mention') : notifs;

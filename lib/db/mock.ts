@@ -8,8 +8,8 @@ import type { DbGameRecord } from '../types-db';
 const gameStore = new Map<number, DbGameRecord>();
 
 export const mockStore: DataStore = {
-  async getPosts(userId?: string, limit?: number) {
-    return mockDb.getPosts(userId, limit);
+  async getPosts(userId?: string, limit?: number, beforeId?: number) {
+    return mockDb.getPosts(userId, limit, beforeId);
   },
 
   async getPost(id: number, userId?: string) {

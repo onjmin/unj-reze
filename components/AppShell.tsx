@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { api } from '@/lib/api';
@@ -8,6 +8,7 @@ import LeftSidebar from './LeftSidebar';
 import RightSidebar from './RightSidebar';
 import BottomNav from './BottomNav';
 import ScrollJumpControls from './ScrollJumpControls';
+import { countUnreadMessages, MESSAGES_READ_EVENT, NOTIFICATIONS_READ_EVENT } from '@/lib/read-state';
 
 interface AppShellProps {
   /** LeftSidebar / BottomNav のどの項目をハイライトするか（例: 'settings'） */
@@ -22,13 +23,39 @@ export default function AppShell({ current, children }: AppShellProps) {
   const currentUser = useCurrentUser();
   const [notifCount, setNotifCount] = useState(0);
   const [messageCount, setMessageCount] = useState(0);
+  /**
+   * 既読化が済んだかどうか。
+   * 通知画面を直接開くと、こちらの件数取得と画面側の既読化が同時に走る。
+   * 取得リクエストの方が既読化より先にサーバーへ届くと「0にした直後に古い件数で上書き」され、
+   * バッジが消えないまま残る。既読を受け取ったあとは、飛行中の取得結果を捨てる。
+   */
+  const notifsClearedRef = useRef(false);
+  const messagesClearedRef = useRef(false);
 
   useEffect(() => {
     const displayName = currentUser?.displayName;
     if (!displayName) return;
-    api.notifications.unreadCount(displayName).then(({ count }) => setNotifCount(count)).catch(() => {});
-    api.messages.list(displayName).then(msgs => setMessageCount(msgs.length)).catch(() => {});
+    notifsClearedRef.current = false;
+    messagesClearedRef.current = false;
+    api.notifications.unreadCount(displayName).then(({ count }) => {
+      if (!notifsClearedRef.current) setNotifCount(count);
+    }).catch(() => {});
+    api.messages.list(displayName).then(msgs => {
+      if (!messagesClearedRef.current) setMessageCount(countUnreadMessages(msgs, displayName));
+    }).catch(() => {});
   }, [currentUser?.displayName]);
+
+  // メッセージ／通知が既読になったらバッジを即座に落とす。
+  useEffect(() => {
+    const clearMessages = () => { messagesClearedRef.current = true; setMessageCount(0); };
+    const clearNotifs = () => { notifsClearedRef.current = true; setNotifCount(0); };
+    window.addEventListener(MESSAGES_READ_EVENT, clearMessages);
+    window.addEventListener(NOTIFICATIONS_READ_EVENT, clearNotifs);
+    return () => {
+      window.removeEventListener(MESSAGES_READ_EVENT, clearMessages);
+      window.removeEventListener(NOTIFICATIONS_READ_EVENT, clearNotifs);
+    };
+  }, []);
 
   const handleOuterWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const scrollable = document.getElementById('scrollable-content');

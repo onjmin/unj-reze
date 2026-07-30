@@ -276,12 +276,18 @@ class MockDB {
     return post;
   }
 
-  getPosts(userId?: string, limit?: number): Post[] {
+  getPosts(userId?: string, limit?: number, beforeId?: number): Post[] {
     const hidden = this.getHiddenSlugs(userId);
     const result = this.posts
       .filter(p => p.id === p.threadId)
+      // キーセットページング: カーソルより古いスレッドだけ返す
+      .filter(p => !beforeId || p.id < beforeId)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => this.canViewAuthor(p.slug ?? '', p.displayName, userId))
+      // pg/sqlite の `ORDER BY p.id DESC` に合わせる。
+      // ここで並べ替えないと slice(0, limit) が配列順に切り出してしまい、
+      // カーソル（p.id < beforeId）と噛み合わずページ間で重複・取りこぼしが出る。
+      .sort((a, b) => b.id - a.id)
       .map(p => this.applyUserState({ ...p, replies: [...p.replies].filter(r => !hidden.has(r.slug ?? '')).map(r => this.applyUserState(r, userId)) }, userId));
     if (limit && limit > 0) {
       return result.slice(0, limit);

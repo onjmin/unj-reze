@@ -42,8 +42,9 @@ const staticApi = {
     image: async (data: { image: string; filename?: string }) => ({ url: data.image }),
   },
   posts: {
-    list: async (userId?: string) => {
-      const posts = await mockDbInstance.getPosts(userId);
+    list: async (userId?: string, opts?: { beforeId?: string; limit?: number }) => {
+      const beforeId = opts?.beforeId ? decodeIdOrThrow(opts.beforeId) : undefined;
+      const posts = await mockDbInstance.getPosts(userId, opts?.limit, beforeId);
       return posts.map(encodePost);
     },
     get: async (id: string, userId?: string) => {
@@ -231,9 +232,14 @@ const liveApi = {
       fetcher<{ url: string }>('/upload', { method: 'POST', body: JSON.stringify(data) }),
   },
   posts: {
-    list: (userId?: string) => {
-      const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
-      return fetcher<Post[]>(`/posts${qs}`);
+    /** `beforeId` を渡すとそのスレッドより古いページを取得する（キーセットページング）。 */
+    list: (userId?: string, opts?: { beforeId?: string; limit?: number }) => {
+      const params = new URLSearchParams();
+      if (userId) params.set('userId', userId);
+      if (opts?.beforeId) params.set('beforeId', opts.beforeId);
+      if (opts?.limit) params.set('limit', String(opts.limit));
+      const qs = params.toString();
+      return fetcher<Post[]>(`/posts${qs ? `?${qs}` : ''}`);
     },
     get: (id: string, userId?: string) => {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';

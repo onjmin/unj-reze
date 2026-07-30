@@ -18,11 +18,24 @@ export async function GET(request: NextRequest) {
     const userId = url.searchParams.get('userId') || undefined;
     const limitParam = url.searchParams.get('limit');
     const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : 20;
+
+    // キーセットページングのカーソル。クライアントは sqids でエンコードされたIDを持っているのでデコードする。
+    const beforeIdParam = url.searchParams.get('beforeId');
+    let beforeId: number | undefined;
+    if (beforeIdParam) {
+      const decoded = decodeId(beforeIdParam);
+      if (decoded === null) {
+        return NextResponse.json({ error: 'Invalid beforeId' }, { status: 400 });
+      }
+      beforeId = decoded;
+    }
+
     return await withEdgeCache(
       request,
-      { sMaxAge: 10, personalized: !!userId },
+      // 過去ページ（カーソル付き）は内容がほぼ変わらないので長めに持たせる。
+      { sMaxAge: beforeId ? 60 : 10, personalized: !!userId },
       async () => {
-        const posts = await db.getPosts(userId, limit);
+        const posts = await db.getPosts(userId, limit, beforeId);
         await attachGameInfo(posts);
         return NextResponse.json(posts.map(encodePost));
       }
