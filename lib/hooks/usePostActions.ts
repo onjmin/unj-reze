@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
 import { showToast } from '@/lib/toast';
+import { mergePostCounters } from '@/lib/post-merge';
 
 type UpdatePost = (postId: string, updater: (p: Post) => Post) => void;
 
@@ -51,7 +52,7 @@ export function usePostActions(userId: string, updatePost: UpdatePost, options?:
       if (p % 2 === 0) return;
       try {
         const updated = await api.posts.like(postId, userId);
-        updatePost(postId, () => updated);
+        updatePost(postId, prev => mergePostCounters(prev, updated));
       } catch {
         updatePost(postId, toggleLike);
         showToast('error', 'いいねの送信に失敗しました');
@@ -71,7 +72,7 @@ export function usePostActions(userId: string, updatePost: UpdatePost, options?:
       if (p % 2 === 0) return;
       try {
         const updated = await api.posts.dislike(postId, userId);
-        updatePost(postId, () => updated);
+        updatePost(postId, prev => mergePostCounters(prev, updated));
       } catch {
         updatePost(postId, toggleDislike);
         showToast('error', '低評価の送信に失敗しました');
@@ -83,7 +84,7 @@ export function usePostActions(userId: string, updatePost: UpdatePost, options?:
     updatePost(postId, toggleRepost);
     try {
       const updated = await api.posts.repost(postId);
-      updatePost(postId, () => updated);
+      updatePost(postId, prev => mergePostCounters(prev, updated));
     } catch {
       updatePost(postId, toggleRepost);
       showToast('error', 'リポストに失敗しました');
@@ -101,7 +102,7 @@ export function usePostActions(userId: string, updatePost: UpdatePost, options?:
       heartTimers.current.delete(postId);
       try {
         const updated = await api.posts.heart(postId, userId, count);
-        updatePost(postId, () => updated);
+        updatePost(postId, prev => mergePostCounters(prev, updated));
       } catch {
         updatePost(postId, p => ({ ...p, heartsTotal: Math.max(0, (Number(p.heartsTotal) || 0) - count) }));
         showToast('error', 'ハートの送信に失敗しました');

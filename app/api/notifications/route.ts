@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodeNotification } from '@/lib/sqids';
+import { withEdgeCache } from '@/lib/edge-cache';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -9,8 +10,15 @@ export async function GET(request: NextRequest) {
     const count = await db.getUnreadCount(userId);
     return NextResponse.json({ count });
   }
-  const notifications = await db.getNotifications(userId);
-  return NextResponse.json(notifications.map(encodeNotification));
+  // 通知は常に個人向けなので共有キャッシュには載せない（private のみ）。
+  return await withEdgeCache(
+    request,
+    { sMaxAge: 10, personalized: true },
+    async () => {
+      const notifications = await db.getNotifications(userId);
+      return NextResponse.json(notifications.map(encodeNotification));
+    }
+  );
 }
 
 export async function PATCH(request: NextRequest) {

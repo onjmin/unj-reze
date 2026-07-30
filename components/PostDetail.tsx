@@ -33,6 +33,7 @@ const DeletePostModal = dynamic(() => import('./DeletePostModal'), { ssr: false 
 const OriginTypeModal = dynamic(() => import('./OriginTypeModal'), { ssr: false });
 import CollabSelector from './CollabSelector';
 import UserActionMenu from './UserActionMenu';
+import { mergePostCounters } from '@/lib/post-merge';
 
 interface PostDetailProps {
   post: Post;
@@ -225,7 +226,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       if (likeParity.current % 2 === 0) { likeParity.current = 0; return; }
       likeParity.current = 0;
       const updated = await api.posts.like(postId, userId);
-      setPost(updated);
+      setPost(prev => mergePostCounters(prev, updated));
     }, 2000);
   }, [post.id, userId]);
 
@@ -243,7 +244,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       if (dislikeParity.current % 2 === 0) { dislikeParity.current = 0; return; }
       dislikeParity.current = 0;
       const updated = await api.posts.dislike(postId, userId);
-      setPost(updated);
+      setPost(prev => mergePostCounters(prev, updated));
     }, 2000);
   }, [post.id, userId]);
 
@@ -253,7 +254,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
     }));
     const updated = await api.posts.repost(post.id);
-    setPost(updated);
+    setPost(prev => mergePostCounters(prev, updated));
   }, [post.id]);
 
   const handleHeart = useCallback(() => {
@@ -265,7 +266,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       const count = heartQueue.current;
       heartQueue.current = 0;
       const updated = await api.posts.heart(postId, userId, count);
-      setPost(updated);
+      setPost(prev => mergePostCounters(prev, updated));
     }, 2000);
   }, [post.id, userId]);
 
@@ -1066,7 +1067,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
       disliked: p.liked ? p.disliked : false,
       dislikes: p.liked ? p.dislikes : (p.disliked ? Math.max(0, p.dislikes - 1) : p.dislikes),
     }));
-    api.posts.like(id, userId).then(setLocalPost);
+    api.posts.like(id, userId).then(u => setLocalPost(prev => mergePostCounters(prev, u)));
   }, [localPost.id, userId]);
 
   const handleDislike = useCallback(() => {
@@ -1077,7 +1078,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
       liked: p.disliked ? p.liked : false,
       likes: p.disliked ? p.likes : (p.liked ? Math.max(0, p.likes - 1) : p.likes),
     }));
-    api.posts.dislike(id, userId).then(setLocalPost);
+    api.posts.dislike(id, userId).then(u => setLocalPost(prev => mergePostCounters(prev, u)));
   }, [localPost.id, userId]);
 
   const handleRepost = useCallback(async () => {
@@ -1086,13 +1087,13 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
       reposts: Math.max(0, p.reposted ? p.reposts - 1 : p.reposts + 1),
     }));
     const updated = await api.posts.repost(localPost.id);
-    setLocalPost(updated);
+    setLocalPost(prev => mergePostCounters(prev, updated));
   }, [localPost.id]);
 
   const handleHeart = useCallback(() => {
     const id = localPost.id;
     setLocalPost(p => ({ ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
-    api.posts.heart(id, userId, 1).then(setLocalPost);
+    api.posts.heart(id, userId, 1).then(u => setLocalPost(prev => mergePostCounters(prev, u)));
   }, [localPost.id, userId]);
 
   const mmlCode = extractMmlFromContent(localPost.content);

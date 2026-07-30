@@ -1,0 +1,17 @@
+{
+  "name": "unj-reze-realtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "unj-reze realtime hub (presence + push fanout). Deployed separately from the Next.js app.",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  }
+}

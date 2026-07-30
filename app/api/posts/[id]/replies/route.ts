@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachGameInfo } from '@/lib/game-embed';
+import { withEdgeCache } from '@/lib/edge-cache';
+import { publishRealtime } from '@/lib/realtime/publish';
+import { CH_FEED, chThread } from '@/lib/realtime/channels';
 
 export async function GET(
   _request: NextRequest,
@@ -13,9 +16,15 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const userId = new URL(_request.url).searchParams.get('userId') || undefined;
-  const replies = await db.getReplies(decodedId, userId);
-  await attachGameInfo(replies);
-  return NextResponse.json(replies.map(encodePost));
+  return await withEdgeCache(
+    _request,
+    { sMaxAge: 5, personalized: !!userId },
+    async () => {
+      const replies = await db.getReplies(decodedId, userId);
+      await attachGameInfo(replies);
+      return NextResponse.json(replies.map(encodePost));
+    }
+  );
 }
 
 export async function POST(
@@ -65,5 +74,14 @@ export async function POST(
   }
 
   await attachGameInfo(reply);
-  return NextResponse.json(encodePost(reply), { status: 201 });
+  const encoded = encodePost(reply);
+
+  // スレッド購読者（詳細画面・実況コメント）とフィードの返信タブへ push する。
+  // ライブ配信中の 2〜3秒ポーリングを置き換えるのがここ。
+  publishRealtime([
+    { channel: chThread(id), event: 'reply.created', data: encoded },
+    { channel: CH_FEED, event: 'reply.created', data: encoded },
+  ]);
+
+  return NextResponse.json(encoded, { status: 201 });
 }

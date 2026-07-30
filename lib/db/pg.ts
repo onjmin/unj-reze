@@ -4,6 +4,8 @@ import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../t
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
+import { publishRealtime } from '../realtime/publish';
+import { chUser } from '../realtime/channels';
 
 // Worker環境で Fetch API を明示的に使用するように設定
 neonConfig.fetchConnectionCache = true;
@@ -49,6 +51,22 @@ function rowToOshiItemPg(row: any): DbOshiItem {
     createdAt,
   };
 }
+
+/**
+ * 一覧系で転送する posts の列。`SELECT p.*` は Neon の下り転送量をそのまま食うので使わない。
+ * - display_name は COALESCE(au.display_name, p.display_name) を別名で足すので含めない。
+ * - liked / disliked は post_votes 由来の値で必ず上書きされる死に列なので含めない。
+ */
+const POST_COLUMNS = [
+  'p.id', 'p.thread_id', 'p.parent_post_id', 'p.slug', 'p.created_at', 'p.content',
+  'p.likes', 'p.dislikes', 'p.replies_count', 'p.reposts', 'p.reposted',
+  'p.has_image', 'p.image_src', 'p.image_alt', 'p.avatar_color', 'p.has_collab_button',
+  'p.hearts_total', 'p.has_game', 'p.game_id', 'p.origin_type',
+  'p.is_false_declaration', 'p.is_edited',
+].join(', ');
+
+/** フィード1スレッドあたりに載せる返信の上限。スレッドが伸びても転送量が線形に増えないようにする。 */
+const FEED_REPLIES_PER_THREAD = 20;
 
 async function rowToPost(row: any): Promise<Post> {
   const createdAt = typeof row.created_at === 'object' && row.created_at?.toISOString
@@ -102,14 +120,21 @@ function gameStatsFromRow(row: any) {
 
 async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<number, Post[]>> {
   if (threadIds.length === 0) return new Map();
+  // スレッドごとに新しい順で FEED_REPLIES_PER_THREAD 件までに絞ってから取り出す。
+  // 絞らないと「500レスのスレッド」がフィードのポーリングのたびに丸ごと流れる。
   const result = await client.query(
-    `SELECT p.*,
-       COALESCE(au.display_name, p.display_name) as display_name,
-       au.avatar_url as avatar_url
-     FROM posts p
-     LEFT JOIN anonymous_users au ON p.slug = au.slug
-     WHERE p.thread_id = ANY($1::bigint[]) AND p.id != p.thread_id ORDER BY p.id`,
-    [threadIds]
+    `SELECT * FROM (
+       SELECT ${POST_COLUMNS},
+         COALESCE(au.display_name, p.display_name) as display_name,
+         au.avatar_url as avatar_url,
+         ROW_NUMBER() OVER (PARTITION BY p.thread_id ORDER BY p.id DESC) AS rn
+       FROM posts p
+       LEFT JOIN anonymous_users au ON p.slug = au.slug
+       WHERE p.thread_id = ANY($1::bigint[]) AND p.id != p.thread_id
+     ) t
+     WHERE t.rn <= $2
+     ORDER BY t.id`,
+    [threadIds, FEED_REPLIES_PER_THREAD]
   );
   const map = new Map<number, Post[]>();
   const posts = await Promise.all(result.rows.map((row: any) => rowToPost(row)));
@@ -129,12 +154,11 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number): 
   const limitClause = ` LIMIT ${safeLimit}`;
   if (userId) {
     result = await client.query(`
-      SELECT p.*,
+      SELECT ${POST_COLUMNS},
         COALESCE(au.display_name, p.display_name) as display_name,
         au.avatar_url as avatar_url,
         COALESCE(pv.vote_type = 'like', false) as liked,
-        COALESCE(pv.vote_type = 'dislike', false) as disliked,
-        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        COALESCE(pv.vote_type = 'dislike', false) as disliked
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
@@ -143,12 +167,11 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number): 
     `, [userId]);
   } else {
     result = await client.query(`
-      SELECT p.*,
+      SELECT ${POST_COLUMNS},
         COALESCE(au.display_name, p.display_name) as display_name,
         au.avatar_url as avatar_url,
         false as liked,
-        false as disliked,
-        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        false as disliked
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.thread_id = p.id
@@ -168,16 +191,20 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number): 
   })));
 }
 
-async function getPostWithVotes(client: any, id: number, userId?: string): Promise<Post | null> {
+/**
+ * 単体の投稿を取得する。
+ * `withReplies` が false のときは返信を読まない — いいね/ハートのように「更新後の1件を返すだけ」の
+ * 経路でスレッド全体を引き直すと、書き込みのたびにスレッド丸ごとの転送が発生する。
+ */
+async function getPostWithVotes(client: any, id: number, userId?: string, withReplies = true): Promise<Post | null> {
   let result;
   if (userId) {
     result = await client.query(`
-      SELECT p.*,
+      SELECT ${POST_COLUMNS},
         COALESCE(au.display_name, p.display_name) as display_name,
         au.avatar_url as avatar_url,
         COALESCE(pv.vote_type = 'like', false) as liked,
-        COALESCE(pv.vote_type = 'dislike', false) as disliked,
-        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        COALESCE(pv.vote_type = 'dislike', false) as disliked
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
@@ -185,12 +212,11 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
     `, [userId, id]);
   } else {
     result = await client.query(`
-      SELECT p.*,
+      SELECT ${POST_COLUMNS},
         COALESCE(au.display_name, p.display_name) as display_name,
         au.avatar_url as avatar_url,
         false as liked,
-        false as disliked,
-        (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+        false as disliked
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.id = $1
@@ -200,10 +226,10 @@ async function getPostWithVotes(client: any, id: number, userId?: string): Promi
   if (result.rows.length === 0) return null;
   const post = await rowToPost(result.rows[0]);
 
-  if (post.threadId === post.id) {
+  if (withReplies && post.threadId === post.id) {
     // It's a thread, load replies
     const repliesResult = await client.query(
-      `SELECT p.*,
+      `SELECT ${POST_COLUMNS},
          COALESCE(au.display_name, p.display_name) as display_name,
          au.avatar_url as avatar_url
        FROM posts p
@@ -230,6 +256,15 @@ async function insertNotificationPg(client: any, d: { recipientId: string; actor
        VALUES ($1, $2, $3, $4, $5, $6, false, NOW())`,
       [d.actor, d.action, d.target ?? '', d.type, d.postId ?? null, d.recipientId]
     );
+    // 通知はすべてこの関数を通るので、ここで push すれば いいね/ハート/返信/メンション/フォロー を
+    // まとめて拾える。宛先本人だけに「1件届いた」と知らせ、中身の取得はクライアントに任せる
+    // （このイベント自体に通知本文を載せると、他人の投稿内容がハブ経由で広がりうるため）。
+    // トランザクションがこの後ロールバックした場合は空振りの再取得になるだけで害はない。
+    publishRealtime({
+      channel: chUser(d.recipientId),
+      event: 'notify',
+      data: { type: d.type },
+    });
   } catch { /* notifications テーブル未整備時は無視 */ }
 }
 
@@ -272,12 +307,12 @@ async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>
 }
 
 export const pgStore: DataStore = {
-  async getPosts(userId?: string) {
+  async getPosts(userId?: string, limit?: number) {
     const client = await getPool().connect();
     try {
       // Run posts query and hidden-slugs lookup concurrently — they are independent.
       const [posts, hidden] = await Promise.all([
-        getPostsWithVotes(client, userId),
+        getPostsWithVotes(client, userId, limit),
         getHiddenSlugs(client, userId),
       ]);
       if (hidden.size === 0) return posts;
@@ -320,7 +355,11 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       await client.query('BEGIN');
-      const postResult = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
+      // 行ロックと通知スニペットのためだけなので全列は引かない。
+      const postResult = await client.query(
+        'SELECT id, display_name, LEFT(content, 20) AS snippet FROM posts WHERE id = $1 FOR UPDATE',
+        [id]
+      );
       if (postResult.rows.length === 0) {
         await client.query('ROLLBACK');
         return null;
@@ -348,11 +387,12 @@ export const pgStore: DataStore = {
         );
         await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
         const author = postResult.rows[0];
-        await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', action: 'がいいねしました', target: snippetPg(author.content ?? ''), postId: id });
+        await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', action: 'がいいねしました', target: author.snippet ?? '', postId: id });
       }
 
       await client.query('COMMIT');
-      return await getPostWithVotes(client, id, userId);
+      // 投票のレスポンスにスレッド全体の返信は要らない（クライアントはカウンタしか使わない）。
+      return await getPostWithVotes(client, id, userId, false);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -365,7 +405,7 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       await client.query('BEGIN');
-      const postResult = await client.query('SELECT * FROM posts WHERE id = $1 FOR UPDATE', [id]);
+      const postResult = await client.query('SELECT id FROM posts WHERE id = $1 FOR UPDATE', [id]);
       if (postResult.rows.length === 0) {
         await client.query('ROLLBACK');
         return null;
@@ -395,7 +435,8 @@ export const pgStore: DataStore = {
       }
 
       await client.query('COMMIT');
-      return await getPostWithVotes(client, id, userId);
+      // 投票のレスポンスにスレッド全体の返信は要らない（クライアントはカウンタしか使わない）。
+      return await getPostWithVotes(client, id, userId, false);
     } catch (e) {
       await client.query('ROLLBACK');
       throw e;
@@ -407,22 +448,27 @@ export const pgStore: DataStore = {
   async heartPost(id: number, userId: string, count: number = 1) {
     const client = await getPool().connect();
     try {
-      const postResult = await client.query('SELECT id, display_name, content FROM posts WHERE id = $1', [id]);
+      // 通知スニペットにしか使わないので content 全文は引かない（LEFT で20文字だけ）。
+      const postResult = await client.query(
+        'SELECT id, display_name, LEFT(content, 20) AS snippet FROM posts WHERE id = $1',
+        [id]
+      );
       if (postResult.rows.length === 0) return null;
 
-      const insertPromises = [];
-      for (let i = 0; i < count; i++) {
-        insertPromises.push(
-          client.query(
-            'INSERT INTO post_hearts (post_id, user_id) VALUES ($1, $2)',
-            [id, userId]
-          )
-        );
-      }
-      await Promise.all(insertPromises);
+      const n = Math.max(1, Math.floor(count) || 1);
+      // count 回ぶんの INSERT を1往復にまとめる。Neon は HTTP 越しなので
+      // 往復数がそのままレイテンシと転送量になる。
+      await client.query(
+        `INSERT INTO post_hearts (post_id, user_id)
+         SELECT $1, $2 FROM generate_series(1, $3)`,
+        [id, userId, n]
+      );
+      // 非正規化カウンタを更新して、一覧側の相関サブクエリ COUNT(*) を不要にする。
+      await client.query('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + $2 WHERE id = $1', [id, n]);
+
       const author = postResult.rows[0];
-      await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: snippetPg(author.content ?? ''), postId: id });
-      return await getPostWithVotes(client, id);
+      await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: author.snippet ?? '', postId: id });
+      return await getPostWithVotes(client, id, undefined, false);
     } finally {
       client.release();
     }
@@ -447,7 +493,12 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       const result = await client.query(
-        'SELECT * FROM posts WHERE thread_id = $1 AND id != thread_id ORDER BY id',
+        `SELECT ${POST_COLUMNS},
+           COALESCE(au.display_name, p.display_name) as display_name,
+           au.avatar_url as avatar_url
+         FROM posts p
+         LEFT JOIN anonymous_users au ON p.slug = au.slug
+         WHERE p.thread_id = $1 AND p.id != p.thread_id ORDER BY p.id`,
         [postId]
       );
       const replies = await Promise.all(result.rows.map(rowToPost));
@@ -552,7 +603,10 @@ export const pgStore: DataStore = {
   async deletePost(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      const postResult = await client.query('SELECT * FROM posts WHERE id = $1', [id]);
+      const postResult = await client.query(
+        'SELECT id, thread_id, parent_post_id, display_name, slug FROM posts WHERE id = $1',
+        [id]
+      );
       if (postResult.rows.length === 0) return false;
       const post = postResult.rows[0];
       const viewerSlug = await resolveViewerSlug(client, userId);
@@ -599,12 +653,11 @@ export const pgStore: DataStore = {
     try {
       const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
-        SELECT p.*,
+        SELECT ${POST_COLUMNS},
           COALESCE(au.display_name, p.display_name) as display_name,
           au.avatar_url as avatar_url,
           COALESCE(pv.vote_type = 'like', false) as liked,
-          COALESCE(pv.vote_type = 'dislike', false) as disliked,
-          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          COALESCE(pv.vote_type = 'dislike', false) as disliked
         FROM posts p
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'like'
@@ -622,12 +675,11 @@ export const pgStore: DataStore = {
     try {
       const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
-        SELECT p.*,
+        SELECT ${POST_COLUMNS},
           COALESCE(au.display_name, p.display_name) as display_name,
           au.avatar_url as avatar_url,
           COALESCE(pv.vote_type = 'like', false) as liked,
-          COALESCE(pv.vote_type = 'dislike', false) as disliked,
-          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          COALESCE(pv.vote_type = 'dislike', false) as disliked
         FROM posts p
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1 AND pv.vote_type = 'dislike'
@@ -645,12 +697,11 @@ export const pgStore: DataStore = {
     try {
       const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
-        SELECT p.*,
+        SELECT ${POST_COLUMNS},
           COALESCE(au.display_name, p.display_name) as display_name,
           au.avatar_url as avatar_url,
           false as liked,
-          false as disliked,
-          (SELECT COUNT(*) FROM post_hearts ph2 WHERE ph2.post_id = p.id) as hearts_total
+          false as disliked
         FROM posts p
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         -- post_hearts は1ハート1行なので、そのままJOINすると同じ投稿がハート数だけ重複し、
@@ -672,12 +723,11 @@ export const pgStore: DataStore = {
       let result;
       if (userId) {
         result = await client.query(`
-          SELECT p.*,
+          SELECT ${POST_COLUMNS},
             COALESCE(au.display_name, p.display_name) as display_name,
             au.avatar_url as avatar_url,
             COALESCE(pv.vote_type = 'like', false) as liked,
-            COALESCE(pv.vote_type = 'dislike', false) as disliked,
-            (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+            COALESCE(pv.vote_type = 'dislike', false) as disliked
           FROM posts p
           LEFT JOIN anonymous_users au ON p.slug = au.slug
           LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
@@ -687,12 +737,11 @@ export const pgStore: DataStore = {
         `, [userId, slug]);
       } else {
         result = await client.query(`
-          SELECT p.*,
+          SELECT ${POST_COLUMNS},
             COALESCE(au.display_name, p.display_name) as display_name,
             au.avatar_url as avatar_url,
             false as liked,
-            false as disliked,
-            (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+            false as disliked
           FROM posts p
           LEFT JOIN anonymous_users au ON p.slug = au.slug
           WHERE p.slug = $1
@@ -927,12 +976,11 @@ export const pgStore: DataStore = {
     try {
       const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
-        SELECT p.*,
+        SELECT ${POST_COLUMNS},
           COALESCE(au.display_name, p.display_name) as display_name,
           au.avatar_url as avatar_url,
           false as liked,
-          false as disliked,
-          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          false as disliked
         FROM posts p
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         WHERE p.thread_id = p.id
@@ -957,12 +1005,11 @@ export const pgStore: DataStore = {
     try {
       const safeLimit = Math.max(1, Math.min(limit || 20, 50));
       const result = await client.query(`
-        SELECT p.*,
+        SELECT ${POST_COLUMNS},
           COALESCE(au.display_name, p.display_name) as display_name,
           au.avatar_url as avatar_url,
           false as liked,
-          false as disliked,
-          (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+          false as disliked
         FROM posts p
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         WHERE p.thread_id = p.id
@@ -1300,19 +1347,32 @@ export const pgStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const client = await getPool().connect();
     try {
-      // フィードの主要導線なので、列を明示せず SELECT * にしておく。
-      // プレイ統計のマイグレーション前にデプロイされても、ここが落ちて投稿一覧ごと
-      // 500 になることがない（gameStatsFromRow が未マイグレーションを 0 として扱う）。
-      const result = await client.query('SELECT * FROM games WHERE id = ANY($1::bigint[])', [ids]);
+      // フィードの主要導線。ここで manifest を丸ごと引くと、ゲーム1本ぶんのデータ
+      // （スプライトやマップを含む数百KB〜）がフィードのポーリングのたびに Neon から流れる。
+      // 実際に使うのは title と titleScreen.bgRef の1本だけなので、
+      // bgRef の抽出は DB 側でやって列自体は転送しない。
+      const BG_REF_SQL = `substring(g.manifest::text from '"bgRef"[[:space:]]*:[[:space:]]*"(https?://[^"]+)"')`;
+      const COLUMNS = `g.id, g.preset, g.title, g.created_at, g.creator_slug,
+                       g.plays, g.clears, g.best_score, g.best_score_by,
+                       ${BG_REF_SQL} AS bg_ref`;
+      let result;
+      try {
+        result = await client.query(
+          `SELECT ${COLUMNS} FROM games g WHERE g.id = ANY($1::bigint[])`,
+          [ids]
+        );
+      } catch {
+        // プレイ統計（migration 10）が未適用の環境でも投稿一覧ごと 500 にしない。
+        // gameStatsFromRow が欠けた列を 0 として扱う。
+        result = await client.query(
+          `SELECT g.id, g.preset, g.title, g.created_at, g.creator_slug, ${BG_REF_SQL} AS bg_ref
+             FROM games g WHERE g.id = ANY($1::bigint[])`,
+          [ids]
+        );
+      }
       return result.rows.map((r: any) => {
         const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        let manifest: any = {};
-        if (typeof r.manifest === 'string') {
-          const match = r.manifest.match(/"bgRef"\s*:\s*"(https?:\/\/[^"]+)"/);
-          manifest = match ? { titleScreen: { bgRef: match[1] } } : {};
-        } else if (r.manifest && typeof r.manifest === 'object') {
-          manifest = r.manifest;
-        }
+        const manifest: any = r.bg_ref ? { titleScreen: { bgRef: r.bg_ref } } : {};
         return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
       });
     } finally {
@@ -1470,7 +1530,13 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       await client.query('INSERT INTO game_players (session_id, game_id, x, y, emoji, updated_at) VALUES ($1, $2, $3, $4, $5, NOW()) ON CONFLICT (session_id, game_id) DO UPDATE SET x=$3, y=$4, emoji=$5, updated_at=NOW()', [sessionId, gameId, x, y, emoji]);
-      await client.query("DELETE FROM game_players WHERE updated_at < NOW() - INTERVAL '15 seconds'");
+      // 掃除は毎回やらない。位置更新は1人あたり2秒に1回来るので、そのたびに
+      // 全表 DELETE を撃つと参加人数×更新頻度ぶんの無駄な書き込みになる。
+      // 5% の確率で回せば、実用上は数十秒以内に必ず掃除される。
+      // ※そもそも REALTIME_URL を設定していればこの経路自体を通らない（presence はハブのメモリ上）。
+      if (Math.random() < 0.05) {
+        await client.query("DELETE FROM game_players WHERE updated_at < NOW() - INTERVAL '15 seconds'");
+      }
     } finally {
       client.release();
     }

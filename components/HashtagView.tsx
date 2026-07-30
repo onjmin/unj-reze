@@ -8,6 +8,7 @@ import { ensureSessionId } from '@/lib/session';
 import PostContainer from './PostContainer';
 import VirtualizedItem from './VirtualizedItem';
 import PageHeader from './PageHeader';
+import { mergePostCounters } from '@/lib/post-merge';
 
 interface HashtagViewProps {
   tag: string;
@@ -50,14 +51,14 @@ export default function HashtagView({ tag }: HashtagViewProps) {
 
   const handleLike = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, liked: !p.liked, likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1) }));
-    try { const u = await api.posts.like(id, userId); setPosts(prev => prev.map(p => p.id === id ? u : p)); } catch {}
+    try { const u = await api.posts.like(id, userId); setPosts(prev => prev.map(p => p.id === id ? mergePostCounters(p, u) : p)); } catch {}
   };
   const handleDislike = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, disliked: !p.disliked, dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1) }));
-    try { const u = await api.posts.dislike(id, userId); setPosts(prev => prev.map(p => p.id === id ? u : p)); } catch {}
+    try { const u = await api.posts.dislike(id, userId); setPosts(prev => prev.map(p => p.id === id ? mergePostCounters(p, u) : p)); } catch {}
   };
   const handleRepost = async (id: string) => {
-    try { const u = await api.posts.repost(id); setPosts(prev => prev.map(p => p.id === id ? u : p)); } catch {}
+    try { const u = await api.posts.repost(id); setPosts(prev => prev.map(p => p.id === id ? mergePostCounters(p, u) : p)); } catch {}
   };
   const handleHeart = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));

@@ -45,6 +45,7 @@ external services. Do not hard-code a provider.
 | Database | `DATABASE_PROVIDER` | `mock` / `neon` (Postgres, **production**) / `d1` (SQLite file) | `lib/db.ts`, `lib/db/{mock,pg,sqlite}.ts` |
 | KV | `KV_PROVIDER` | `mock` (in-memory Map) / `cloudflare` (KV REST API) | `lib/kv/` |
 | Object storage | `STORAGE_PROVIDER` | `local` / `r2` (Cloudflare R2) | `lib/storage/` |
+| Realtime push | `REALTIME_URL` + `NEXT_PUBLIC_REALTIME_URL` + `REALTIME_PUBLISH_SECRET` | unset (polling fallback) / a Koyeb-hosted hub | `lib/realtime/`, `services/realtime/` |
 
 - All stores implement `DataStore` (`lib/db/interface.ts`); adding a query means editing **all
   three** of `mock.ts`, `pg.ts`, `sqlite.ts`. `lib/db.ts` wraps the store in a Proxy that
@@ -54,16 +55,23 @@ external services. Do not hard-code a provider.
 - Schema lives in `data/schema.sql`, which is **gitignored** — not in the repo. Migrations are
   applied manually (see `README.md`).
 
-## Deployment targets
+## Neon egress budget & realtime
 
-- **Cloudflare Workers** — production, `@opennextjs/cloudflare` + `wrangler.json`, served at
-  `https://unj-reze.onjmin.workers.dev` with `neon` / `cloudflare` / `r2` providers. KV and R2 are
-  reached over REST / the S3 API with account credentials, **not** Worker bindings — hence no
-  `kv_namespaces` or `r2_buckets` in `wrangler.json`.
-- **GitHub Pages** static demo (`.github/workflows/gh-pages.yml`) — `NEXT_PUBLIC_STATIC_EXPORT=true`
-  (or `GITHUB_ACTIONS=true`) flips `next.config.ts` to `output: 'export'` (`basePath: /unj-reze`);
-  no API routes or middleware run in this mode, so everything must be static-safe.
-- **Netlify** (`netlify.toml`) is a legacy/alternate server-mode config, no longer primary.
+Neon's free tier caps public network transfer at 5 GB/month, and this app once burned it with a
+single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md).
+
+- Never `SELECT p.*` on `posts` — use `POST_COLUMNS` (`lib/db/pg.ts`), always paired with the
+  `COALESCE(au.display_name, p.display_name)` alias or every author renders as 名無し.
+- Never select `games.manifest` in a list query; never reintroduce `COUNT(*) FROM post_hearts`
+  (use denormalized `posts.hearts_total`); never uncap feed replies.
+- Read routes go through `withEdgeCache` (`lib/edge-cache.ts`) — Cloudflare does **not** cache
+  Worker responses from `Cache-Control` alone, so it calls the Cache API. `userId`-keyed
+  responses stay `private`.
+- `services/realtime/` is a single-instance Node WebSocket hub on Koyeb that holds ghost-player
+  presence in memory (**`game_players` is not written on that path**) and pushes
+  `post.created` / `reply.created` / `notify`. Channel names come from `lib/realtime/channels.ts`;
+  `publishRealtime()` is a no-op when unconfigured and clients keep a slow polling fallback.
+  Before adding any new "poll every N seconds", check whether the hub can push it instead.
 
 ## Security & Anti-Abuse
 
@@ -143,6 +151,8 @@ then run `pnpm typecheck` and `pnpm lint`.
 
 # Documentation
 
+- [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md) — Neon transfer budget rules and the queries that broke it.
+- [services/realtime/README.md](services/realtime/README.md) — realtime hub protocol and Koyeb deploy.
 - [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md) — abuse-scoring design and threat model.
 - [docs/dsl-current-state.md](docs/dsl-current-state.md) — asset-reference / DSL layering.
 - [docs/game-feature-design.md](docs/game-feature-design.md) — game↔post binding (`games` table).

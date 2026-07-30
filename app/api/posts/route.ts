@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachGameInfo } from '@/lib/game-embed';
+import { withEdgeCache } from '@/lib/edge-cache';
+import { publishRealtime } from '@/lib/realtime/publish';
+import { CH_FEED } from '@/lib/realtime/channels';
 import type { OriginType } from '@/lib/types';
 import { getClientIp } from '@/lib/ip';
 import { verifyTurnstileToken } from '@/lib/security/turnstile';
@@ -15,9 +18,15 @@ export async function GET(request: NextRequest) {
     const userId = url.searchParams.get('userId') || undefined;
     const limitParam = url.searchParams.get('limit');
     const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : 20;
-    const posts = await db.getPosts(userId, limit);
-    await attachGameInfo(posts);
-    return NextResponse.json(posts.map(encodePost));
+    return await withEdgeCache(
+      request,
+      { sMaxAge: 10, personalized: !!userId },
+      async () => {
+        const posts = await db.getPosts(userId, limit);
+        await attachGameInfo(posts);
+        return NextResponse.json(posts.map(encodePost));
+      }
+    );
   } catch (e) {
     console.error('[GET /api/posts]', e);
     const message = e instanceof Error ? e.message : String(e);
@@ -78,7 +87,13 @@ export async function POST(request: NextRequest) {
 
     const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId: decodedGameId === null ? undefined : decodedGameId, originType });
     await attachGameInfo(post);
-    return NextResponse.json(encodePost(post), { status: 201 });
+    const encoded = encodePost(post);
+
+    // フィード購読者へ push する。これがあるおかげでクライアントは
+    // 「新着があるか」を確かめるためだけの定期ポーリングをしなくて済む。
+    publishRealtime({ channel: CH_FEED, event: 'post.created', data: encoded });
+
+    return NextResponse.json(encoded, { status: 201 });
   } catch (e) {
     console.error('[POST /api/posts]', e);
     const message = e instanceof Error ? e.message : String(e);

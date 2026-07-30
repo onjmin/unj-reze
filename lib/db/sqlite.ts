@@ -6,6 +6,8 @@ import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
 import { formatRelativeTime } from '../time';
 import { cleanContentForTrends, isValidTrendKeyword } from '../mml';
+import { publishRealtime } from '../realtime/publish';
+import { chUser } from '../realtime/channels';
 
 
 let db: SqlJsDatabase | null = null;
@@ -211,6 +213,8 @@ function insertNotificationSqlite(d: SqlJsDatabase, data: { recipientId: string;
        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
       [id, data.actor, data.action, data.target ?? '', data.type, data.postId ?? null, data.recipientId, new Date().toISOString()]
     );
+    // pg 側と同じく、宛先本人へ「1件届いた」だけを push する（lib/db/pg.ts の同関数を参照）。
+    publishRealtime({ channel: chUser(data.recipientId), event: 'notify', data: { type: data.type } });
   } catch { /* notifications 未整備時は無視 */ }
 }
 
@@ -342,12 +346,14 @@ function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[]
   });
 }
 
+/** フィード1スレッドあたりに載せる返信の上限（lib/db/pg.ts と揃える）。 */
+const FEED_REPLIES_PER_THREAD = 20;
+
 const VOTED_SELECT = `
   SELECT p.*,
     COALESCE(au.display_name, p.display_name) as display_name,
     au.avatar_url as avatar_url,
-    COALESCE((SELECT vote_type FROM post_votes pv WHERE pv.post_id = p.id AND pv.user_id = ?), '') as vote_type,
-    (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+    COALESCE((SELECT vote_type FROM post_votes pv WHERE pv.post_id = p.id AND pv.user_id = ?), '') as vote_type
   FROM posts p
   LEFT JOIN anonymous_users au ON p.slug = au.slug
 `;
@@ -356,8 +362,7 @@ const UNVOTED_SELECT = `
   SELECT p.*,
     COALESCE(au.display_name, p.display_name) as display_name,
     au.avatar_url as avatar_url,
-    0 as liked, 0 as disliked,
-    (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total
+    0 as liked, 0 as disliked
   FROM posts p
   LEFT JOIN anonymous_users au ON p.slug = au.slug
 `;
@@ -384,7 +389,13 @@ async function getThreadRepliesSqlite(d: SqlJsDatabase, threadIds: number[]): Pr
        au.avatar_url as avatar_url
      FROM posts p
      LEFT JOIN anonymous_users au ON p.slug = au.slug
-     WHERE p.thread_id IN (${placeholders}) AND p.id != p.thread_id ORDER BY p.id`,
+     WHERE p.thread_id IN (${placeholders}) AND p.id != p.thread_id
+       AND p.id > COALESCE((
+         SELECT q.id FROM posts q
+          WHERE q.thread_id = p.thread_id AND q.id != q.thread_id
+          ORDER BY q.id DESC LIMIT 1 OFFSET ${FEED_REPLIES_PER_THREAD}
+       ), -1)
+     ORDER BY p.id`,
     threadIds
   );
   const map = new Map<number, Post[]>();
@@ -544,18 +555,20 @@ export const sqliteStore: DataStore = {
     const postRows = rowsToObjects(d, 'SELECT id FROM posts WHERE id = ?', [id]);
     if (postRows.length === 0) return null;
 
-    for (let i = 0; i < count; i++) {
+    const n = Math.max(1, Math.floor(count) || 1);
+    for (let i = 0; i < n; i++) {
       d.run('INSERT INTO post_hearts (post_id, user_id) VALUES (?, ?)', [id, userId]);
     }
-    const heartAuthor = rowsToObjects(d, 'SELECT display_name, content FROM posts WHERE id = ?', [id]);
+    d.run('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + ? WHERE id = ?', [n, id]);
+    const heartAuthor = rowsToObjects(d, 'SELECT display_name, substr(content, 1, 20) AS snippet FROM posts WHERE id = ?', [id]);
     if (heartAuthor.length > 0) {
-      insertNotificationSqlite(d, { recipientId: heartAuthor[0].display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: snippetSqlite(heartAuthor[0].content ?? ''), postId: id });
+      insertNotificationSqlite(d, { recipientId: heartAuthor[0].display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: heartAuthor[0].snippet ?? '', postId: id });
     }
     saveDb();
 
     const rows = rowsToObjects(
       d,
-      `SELECT p.*, 0 as liked, 0 as disliked, (SELECT COUNT(*) FROM post_hearts ph WHERE ph.post_id = p.id) as hearts_total FROM posts p WHERE p.id = ?`,
+      `SELECT p.*, 0 as liked, 0 as disliked FROM posts p WHERE p.id = ?`,
       [id]
     );
     if (rows.length === 0) return null;
@@ -733,8 +746,7 @@ export const sqliteStore: DataStore = {
       `SELECT p.*,
          COALESCE(au.display_name, p.display_name) as display_name,
          au.avatar_url as avatar_url,
-         0 as liked, 0 as disliked,
-         (SELECT COUNT(*) FROM post_hearts ph2 WHERE ph2.post_id = p.id) as hearts_total
+         0 as liked, 0 as disliked
        FROM posts p
        LEFT JOIN anonymous_users au ON p.slug = au.slug
        -- 1ハート1行なので投稿単位に畳んでからJOINする（重複＆LIMIT食い潰し防止）

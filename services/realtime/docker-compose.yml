@@ -1,0 +1,21 @@
+# ローカルで Next 側と繋いで動かすとき用。
+#   docker compose -f services/realtime/docker-compose.yml up --build
+# その後 .env.local に以下を書く:
+#   NEXT_PUBLIC_REALTIME_URL=ws://localhost:8000/ws
+#   REALTIME_URL=http://localhost:8000
+#   REALTIME_PUBLISH_SECRET=dev-secret
+services:
+  realtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unj-reze-realtime:local
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      # 本番では必ずランダムな長い値にする。Next 側の REALTIME_PUBLISH_SECRET と一致させること。
+      REALTIME_PUBLISH_SECRET: "dev-secret"
+      # カンマ区切り。空なら Origin 制限なし（ローカル用）。
+      ALLOWED_ORIGINS: ""
+    restart: unless-stopped

@@ -6,6 +6,9 @@ import GameMaker, { type GameManifestDraft } from './GameMaker';
 import type { GhostPlayer, GameVoteCandidate } from '@/lib/types';
 import { decodeId } from '@/lib/sqids';
 import { getAvatarInfo } from '@/lib/avatar';
+import { useRealtimeSubscription, realtimeConfigured } from '@/lib/hooks/useRealtime';
+import { getRealtimeClient } from '@/lib/realtime/client';
+import { chGame, chThread } from '@/lib/realtime/channels';
 
 interface LiveInfo {
   gameId: string | null;
@@ -63,8 +66,61 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 
   useEffect(() => { fetchInfo(); }, [fetchInfo]);
 
-  // プレイヤー位置同期 + コメントポーリング（2秒ごと）
+  // ── リアルタイムハブ経路 ─────────────────────────────────────
+  // ゴーストの位置は Postgres に一切書かない。ハブのメモリ上だけで完結する。
+  // （従来は 2秒ごとに upsert + 全表 DELETE + SELECT を叩いており、
+  //   1人が開いているだけで Neon の転送量を延々と消費していた。）
+
+  // 自分の位置を送る
   useEffect(() => {
+    if (!realtimeConfigured || !info?.gameId) return;
+    const gameId = info.gameId;
+    const client = getRealtimeClient();
+    if (!client) return;
+    const send = () => {
+      if (posRef.current.x > 0 || posRef.current.y > 0) {
+        client.sendPosition(gameId, sessionId, posRef.current.x, posRef.current.y, posRef.current.emoji);
+      }
+    };
+    send();
+    const id = setInterval(send, 2000);
+    return () => {
+      clearInterval(id);
+      client.leaveGame(gameId);
+    };
+  }, [info?.gameId, sessionId]);
+
+  // 他プレイヤーの位置を受け取る
+  useRealtimeSubscription(
+    info?.gameId ? [chGame(info.gameId)] : [],
+    useCallback((msg) => {
+      if (msg.t !== 'presence') return;
+      // ハブは直列化を1回で済ませるため自分を含めた全員を配る。自分はここで除く。
+      const others = msg.players.filter(p => p.sessionId !== sessionId);
+      setGhostPlayers(others);
+      setOnlineCount(others.length + 1);
+    }, [sessionId]),
+    realtimeConfigured && !!info?.gameId
+  );
+
+  // 実況コメントを受け取る
+  useRealtimeSubscription(
+    info?.postId ? [chThread(info.postId)] : [],
+    useCallback((msg) => {
+      if (msg.t !== 'event' || msg.event !== 'reply.created') return;
+      const r = msg.data as { id: string; displayName: string; content: string };
+      const rid = decodeId(r.id) || 0;
+      if (rid <= commentLastIdRef.current) return;
+      commentLastIdRef.current = rid;
+      setDanmakuComments(prev => [...prev, `${getAvatarInfo(r.displayName).username}: ${r.content}`]);
+    }, []),
+    realtimeConfigured && !!info?.postId
+  );
+
+  // ── フォールバック経路（ハブ未設定時のみ） ───────────────────
+  // NEXT_PUBLIC_REALTIME_URL を設定していない環境では従来どおり2秒ポーリングで動く。
+  useEffect(() => {
+    if (realtimeConfigured) return;
     if (!info?.gameId) return;
     const gameId = info.gameId;
     const postId = info.postId;

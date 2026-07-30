@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Post, AnonymousUser, OriginType } from '@/lib/types';
 import { api } from '@/lib/api';
 import { usePostActions } from '@/lib/hooks/usePostActions';
+import { useRealtimeSubscription, pollInterval } from '@/lib/hooks/useRealtime';
+import { CH_FEED, chThread, chUser } from '@/lib/realtime/channels';
 import { ensureSessionId } from '@/lib/session';
 import { decodeId } from '@/lib/sqids';
 import { stripMmlLine, extractMmlFromContent } from '@/lib/mml';
@@ -189,6 +191,22 @@ export default function App() {
     }
   }, [posts]);
 
+  const postGameActive = activeScreen === 'postgame' && !!playingGame?.postId;
+
+  // 実況コメントはハブからの push で流す。ハブ未設定のときだけ従来のポーリングに落ちる。
+  useRealtimeSubscription(
+    postGameActive && playingGame?.postId ? [chThread(playingGame.postId)] : [],
+    useCallback((msg) => {
+      if (msg.t !== 'event' || msg.event !== 'reply.created') return;
+      const r = msg.data as Post;
+      const rid = decodeId(r.id) || 0;
+      if (rid <= postGameLastIdRef.current) return;
+      postGameLastIdRef.current = rid;
+      setPostGameDanmaku(prev => [...prev, `${r.displayName}: ${r.content}`]);
+    }, []),
+    postGameActive
+  );
+
   useEffect(() => {
     if (activeScreen !== 'postgame' || !playingGame?.postId) return;
     const pid = playingGame.postId;
@@ -205,7 +223,8 @@ export default function App() {
       } catch {}
     };
     poll();
-    const id = setInterval(poll, 3000);
+    // ハブがあれば初回の1回だけ。取りこぼし対策の保険として長い間隔で回す。
+    const id = setInterval(poll, pollInterval(3000, 120000));
     return () => clearInterval(id);
   }, [activeScreen, playingGame?.postId]);
 
@@ -227,70 +246,96 @@ export default function App() {
     fetchPosts();
   }, [fetchPosts]);
 
+  /** 新着候補を「まだ表示していないもの」だけ積む。push とポーリング双方から呼ぶ。 */
+  const pushNewPosts = useCallback((incoming: Post[]) => {
+    if (incoming.length === 0) return;
+    const existingIds = new Set(postsRef.current.map(p => String(p.id)));
+    setNewPosts(current => {
+      const seen = new Set(current.map(p => String(p.id)));
+      const fresh = incoming.filter(p => !existingIds.has(String(p.id)) && !seen.has(String(p.id)));
+      return fresh.length > 0 ? [...fresh, ...current] : current;
+    });
+  }, []);
+
+  // 新着投稿はハブから丸ごと届くので、確認のためだけの再取得は要らない。
+  useRealtimeSubscription(
+    userId ? [CH_FEED] : [],
+    useCallback((msg) => {
+      if (msg.t !== 'event' || msg.event !== 'post.created') return;
+      pushNewPosts([msg.data as Post]);
+    }, [pushNewPosts]),
+    !!userId
+  );
+
   useEffect(() => {
     if (!userId) return;
+    // ハブ設定時は「接続が切れていた間の取りこぼし」を拾う保険だけ。
     const intervalId = setInterval(async () => {
       try {
-        const data = await api.posts.list(userId);
-        const existingIds = new Set(postsRef.current.map(p => String(p.id)));
-        
-        setNewPosts(currentNewPosts => {
-          const newIds = new Set(currentNewPosts.map(p => String(p.id)));
-          const incomingNewPosts = data.filter(p => !existingIds.has(String(p.id)) && !newIds.has(String(p.id)));
-          
-          if (incomingNewPosts.length > 0) {
-            return [...incomingNewPosts, ...currentNewPosts];
-          }
-          return currentNewPosts;
-        });
-      } catch (err) {
+        pushNewPosts(await api.posts.list(userId));
+      } catch {
         // ignore errors
       }
-    }, 15000);
-    
-    return () => clearInterval(intervalId);
-  }, [userId]);
+    }, pollInterval(15000, 300000));
 
-  // Socket.io を使わないため、通知一覧のポーリング差分で「フォローされた」「いいね／ハートされた」を検知し、
-  // Snackbar通知とハート受信時の演出を出す。初回ポーリングは既存通知をseenに登録するだけでトーストは出さない
-  // （履歴を新着として誤検知しないため）。以降は未見のIDだけをトースト＆ハート数はSetサイズを上限で刈り込んで抑える。
+    return () => clearInterval(intervalId);
+  }, [userId, pushNewPosts]);
+
+  // 通知一覧の差分で「フォローされた」「いいね／ハートされた」を検知し、Snackbar と
+  // ハート受信演出を出す。初回は既存通知を seen に登録するだけでトーストは出さない
+  // （履歴を新着として誤検知しないため）。以降は未見のIDだけをトースト＆Setサイズを上限で刈り込む。
+  //
+  // ハブ設定時は「1件届いた」という push を受けたときだけ取りに行く。
+  // 通知の中身は push に載せていないので、ここは常に自分の通知一覧を引く経路のまま。
   const seenNotifIds = useRef<Set<string> | null>(null);
+  const notifCancelledRef = useRef(false);
+
+  const refreshNotifications = useCallback(async (uid: string) => {
+    try {
+      const notifs = await api.notifications.list(uid);
+      if (notifCancelledRef.current) return;
+      if (seenNotifIds.current === null) {
+        seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
+      } else {
+        const freshOnes = notifs.filter(n => !seenNotifIds.current!.has(String(n.id)));
+        for (const n of freshOnes) {
+          seenNotifIds.current!.add(String(n.id));
+          if (n.type === 'follow') {
+            showToast('info', `${n.user}さんにフォローされました`);
+          } else if (n.type === 'like') {
+            showToast('info', `${n.user}さんがあなたの投稿にいいねしました`);
+          } else if (n.type === 'heart') {
+            showToast('info', `${n.user}さんがあなたの投稿にハートを送りました`);
+            triggerHeartBurst();
+          }
+        }
+        if (seenNotifIds.current!.size > 500) {
+          seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
+        }
+      }
+      setNotifCount(notifs.filter(n => !n.read).length);
+    } catch {
+      // ignore fetch errors
+    }
+  }, []);
+
+  useRealtimeSubscription(
+    userId ? [chUser(userId)] : [],
+    useCallback((msg) => {
+      if (msg.t !== 'event' || msg.event !== 'notify') return;
+      if (userId) void refreshNotifications(userId);
+    }, [userId, refreshNotifications]),
+    !!userId
+  );
 
   useEffect(() => {
     if (!userId) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const notifs = await api.notifications.list(userId);
-        if (cancelled) return;
-        if (seenNotifIds.current === null) {
-          seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
-        } else {
-          const freshOnes = notifs.filter(n => !seenNotifIds.current!.has(String(n.id)));
-          for (const n of freshOnes) {
-            seenNotifIds.current!.add(String(n.id));
-            if (n.type === 'follow') {
-              showToast('info', `${n.user}さんにフォローされました`);
-            } else if (n.type === 'like') {
-              showToast('info', `${n.user}さんがあなたの投稿にいいねしました`);
-            } else if (n.type === 'heart') {
-              showToast('info', `${n.user}さんがあなたの投稿にハートを送りました`);
-              triggerHeartBurst();
-            }
-          }
-          if (seenNotifIds.current!.size > 500) {
-            seenNotifIds.current = new Set(notifs.map(n => String(n.id)));
-          }
-        }
-        setNotifCount(notifs.filter(n => !n.read).length);
-      } catch {
-        // ignore polling errors
-      }
-    };
-    poll();
-    const id = setInterval(poll, 20000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [userId]);
+    notifCancelledRef.current = false;
+    void refreshNotifications(userId);
+    // ハブ設定時は push が主。ここは取りこぼし用の保険。
+    const id = setInterval(() => { void refreshNotifications(userId); }, pollInterval(20000, 300000));
+    return () => { notifCancelledRef.current = true; clearInterval(id); };
+  }, [userId, refreshNotifications]);
 
   const handleShowNewPosts = () => {
     setPosts(prev => [...newPosts, ...prev]);

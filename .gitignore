@@ -38,6 +38,8 @@ yarn-error.log*
 .env.local
 .env.production
 .env.development
+# 本番相当のローカル検証用上書き（秘密が入りうるのでコミットしない）
+.env*.local
 
 # vercel
 .vercel
@@ -60,3 +62,9 @@ tmp
 .agents
 .claude
 .eslintcache
+
+# realtime サービスは独立した npm パッケージなので個別に無視する
+/services/realtime/node_modules
+
+# wrangler / miniflare のローカル実行状態（ビルド時に生成される）
+.wrangler/

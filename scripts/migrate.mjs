@@ -151,6 +151,49 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
       CREATE INDEX IF NOT EXISTS idx_posts_game_id ON posts(game_id);
     `
+  },
+  {
+    name: '11_denormalize_hearts_total',
+    sql: `
+      -- posts.hearts_total は列としては存在していたが、これまで heartPost が
+      -- post_hearts に行を挿すだけで一度も更新していなかった。一覧クエリを
+      -- 相関サブクエリ (SELECT COUNT(*) FROM post_hearts ...) から列参照に切り替えるので、
+      -- 既存分をここで一度だけ実数に合わせる（これを飛ばすと全投稿のハートが0に見える）。
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS hearts_total BIGINT NOT NULL DEFAULT 0;
+
+      UPDATE posts p
+         SET hearts_total = c.cnt
+        FROM (SELECT post_id, COUNT(*) AS cnt FROM post_hearts GROUP BY post_id) c
+       WHERE c.post_id = p.id
+         AND p.hearts_total IS DISTINCT FROM c.cnt;
+
+      CREATE INDEX IF NOT EXISTS idx_post_hearts_post_id ON post_hearts(post_id);
+      CREATE INDEX IF NOT EXISTS idx_post_hearts_user_id ON post_hearts(user_id);
+    `
+  },
+  {
+    name: '12_indexes_for_feed_queries',
+    sql: `
+      -- フィード: WHERE thread_id = id ORDER BY id DESC
+      CREATE INDEX IF NOT EXISTS idx_posts_thread_self ON posts(id DESC) WHERE thread_id = id;
+      -- 返信の取り出し（スレッドごと新しい順に上限N件）
+      CREATE INDEX IF NOT EXISTS idx_posts_thread_id_id ON posts(thread_id, id DESC);
+      -- 閲覧者ごとの投票の突き合わせ
+      CREATE INDEX IF NOT EXISTS idx_post_votes_user_post ON post_votes(user_id, post_id);
+      -- プロフィール一覧
+      CREATE INDEX IF NOT EXISTS idx_posts_slug_id ON posts(slug, id DESC);
+      -- 通知のポーリング（宛先ごと新しい順 / 未読数）
+      CREATE INDEX IF NOT EXISTS idx_notifications_target_created ON notifications(target_user, created_at DESC);
+    `
+  },
+  {
+    name: '13_game_players_cleanup_index',
+    sql: `
+      -- リアルタイム presence を Koyeb 側へ寄せたあとも、DB フォールバック経路
+      -- （REALTIME_URL 未設定時）が使う掃除クエリのために最低限の索引は残す。
+      CREATE INDEX IF NOT EXISTS idx_game_players_updated_at ON game_players(updated_at);
+      CREATE INDEX IF NOT EXISTS idx_game_players_game_updated ON game_players(game_id, updated_at DESC);
+    `
   }
 ];
 
