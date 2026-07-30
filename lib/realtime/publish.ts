@@ -21,20 +21,26 @@ export function realtimeEnabled(): boolean {
   return config() !== null;
 }
 
+type CfModule = {
+  getCloudflareContext: () => { ctx?: { waitUntil?: (p: Promise<unknown>) => void } };
+};
+
+// Workers のモジュール参照は「先読み」しておく。
+// publish の時点で `await import(...)` すると、その解決を待つあいだにレスポンスが返り、
+// waitUntil を登録する前に進行中の fetch が打ち切られることがある（＝配信が無言で落ちる）。
+// アイソレート初期化時に読み込んでおけば、publish 側は同期で waitUntil できる。
+let cfModule: CfModule | null = null;
+void import('@opennextjs/cloudflare')
+  .then(m => { cfModule = m as unknown as CfModule; })
+  .catch(() => { /* Workers 以外（next dev / Node / 静的エクスポート）では使わない */ });
+
 /** Cloudflare Workers ではレスポンス後の非同期処理が打ち切られるので waitUntil に預ける。 */
-async function keepAlive(promise: Promise<unknown>): Promise<void> {
+function keepAlive(promise: Promise<unknown>): void {
   try {
-    const { getCloudflareContext } = await import('@opennextjs/cloudflare');
-    const { ctx } = await getCloudflareContext({ async: true });
-    const waitUntil = (ctx as { waitUntil?: (p: Promise<unknown>) => void } | undefined)?.waitUntil;
-    if (waitUntil) {
-      waitUntil(promise);
-      return;
-    }
+    cfModule?.getCloudflareContext().ctx?.waitUntil?.(promise);
   } catch {
-    // Workers 以外（next dev / Node）では単に投げっぱなしにする
+    // Workers 以外、またはリクエストコンテキスト外。投げっぱなしで構わない。
   }
-  void promise;
 }
 
 /**
@@ -67,5 +73,5 @@ export function publishRealtime(events: RealtimeEvent | RealtimeEvent[]): void {
       console.warn('[realtime] publish error', err instanceof Error ? err.message : err);
     });
 
-  void keepAlive(request);
+  keepAlive(request);
 }
