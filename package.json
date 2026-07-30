@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "vglc": "node scripts/import-vglc.mjs",
     "slice-assets": "node scripts/slice-rpg-assets.mjs",
-    "db:migrate": "node scripts/migrate.mjs"
+    "db:migrate": "node scripts/migrate.mjs",
+    "deploy": "npx wrangler secret bulk .env.production && wrangler deploy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1067.0",

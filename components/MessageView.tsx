@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
@@ -13,22 +13,28 @@ interface MessageViewProps {
 export default function MessageView({ userId }: MessageViewProps) {
   const [messages, setMessages] = useState<{ id: number; sender: string; text: string; recipient?: string; time: string }[]>([]);
   const [msgInput, setMsgInput] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = (smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+  };
 
   useEffect(() => {
     api.messages.list(userId).then(msgs => {
       setMessages(msgs);
       // 一覧を開いた時点で既読にする。これがないとバッジが消えない。
       markMessagesSeen(msgs);
+      setTimeout(() => scrollToBottom(false), 50);
     });
   }, [userId]);
-
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const sendMsg = async () => {
     if (!msgInput.trim()) return;
     const msg = await api.messages.send({ sender: userId || '名無し', text: msgInput });
-    setMessages([...messages, msg]);
+    setMessages(prev => [...prev, msg]);
     setMsgInput('');
+    setTimeout(() => scrollToBottom(true), 50);
   };
 
   const currentSender = userId || '名無し';
@@ -42,8 +48,8 @@ export default function MessageView({ userId }: MessageViewProps) {
   };
 
   return (
-    <div className="flex flex-col flex-1 pb-20">
-      <div className="flex-1 p-4 space-y-4">
+    <div className="flex flex-col flex-1 min-h-[calc(100vh-44px-56px)] md:min-h-[calc(100vh-44px)]">
+      <div className="flex-1 p-4 space-y-4 pb-4">
         {messages.map(m => (
           <div key={m.id} className={`flex flex-col group ${m.sender === currentSender ? 'items-end' : 'items-start'}`}>
             <span className="text-[10px] text-gray-500 mb-0.5">{getAvatarInfo(m.sender).username} ・ {m.time}</span>
@@ -74,8 +80,9 @@ export default function MessageView({ userId }: MessageViewProps) {
         {messages.length === 0 && (
           <div className="p-10 text-center text-xs text-gray-600">メッセージはまだありません</div>
         )}
+        <div ref={messagesEndRef} />
       </div>
-      <div className="p-3 border-t border-gray-800 flex items-center space-x-2 bg-[#0b0e14]">
+      <div className="sticky bottom-14 md:bottom-0 z-20 p-3 border-t border-gray-800 flex items-center space-x-2 bg-[#0b0e14]/95 backdrop-blur">
         <input
           type="text"
           value={msgInput}
