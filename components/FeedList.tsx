@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { encodeId } from '@/lib/sqids';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
@@ -40,6 +41,49 @@ interface FeedListProps {
 }
 
 export default function FeedList({ posts, activeTab, feedSubMode = 'threads', rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditPost, userId, onLoadMore, hasMore, loadingMore }: FeedListProps) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  const hasMoreRef = useRef(hasMore);
+  const loadingMoreRef = useRef(loadingMore);
+
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore;
+    hasMoreRef.current = hasMore;
+    loadingMoreRef.current = loadingMore;
+  });
+
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    const sentinel = sentinelRef.current;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMoreRef.current && !loadingMoreRef.current && onLoadMoreRef.current) {
+          onLoadMoreRef.current();
+        }
+      },
+      { rootMargin: '400px 0px 400px 0px', threshold: 0 }
+    );
+
+    observer.observe(sentinel);
+
+    const scrollContainer = document.getElementById('scrollable-content') || window;
+    const handleScroll = () => {
+      if (!hasMoreRef.current || loadingMoreRef.current || !onLoadMoreRef.current) return;
+      const target = scrollContainer === window ? document.documentElement : (scrollContainer as HTMLElement);
+      if (target.scrollHeight - target.scrollTop - target.clientHeight < 500) {
+        onLoadMoreRef.current();
+      }
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      scrollContainer.removeEventListener('scroll', handleScroll);
+    };
+  }, [posts.length]);
+
   let displayPosts = [...posts];
 
   if (activeTab === 'ranking') {
@@ -182,16 +226,9 @@ export default function FeedList({ posts, activeTab, feedSubMode = 'threads', ra
         </VirtualizedItem>
       ))}
       {onLoadMore && hasMore ? (
-        // 無限スクロール（IntersectionObserver）は iframe 内で rootMargin が効かない事例があるため、
-        // 明示的なボタンにしている。
-        <div className="p-6 text-center bg-gray-900/10">
-          <button
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="px-5 py-2 rounded-full text-xs font-bold bg-gray-100/10 text-gray-200 hover:bg-gray-100/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loadingMore ? '読み込み中…' : 'もっと読み込む'}
-          </button>
+        <div ref={sentinelRef} className="p-6 text-center bg-gray-900/10 flex items-center justify-center space-x-2">
+          <Loader2 className="animate-spin text-blue-500" size={16} />
+          <span className="text-xs text-gray-400 font-bold">自動読み込み中…</span>
         </div>
       ) : (
         <div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
