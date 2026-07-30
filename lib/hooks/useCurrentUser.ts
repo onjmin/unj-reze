@@ -5,19 +5,26 @@ import { AnonymousUser } from '@/lib/types';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
 
+function getCachedUser(): AnonymousUser | null {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+  try {
+    const cached = localStorage.getItem('unj_current_user');
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function useCurrentUser() {
-  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(getCachedUser);
 
   useEffect(() => {
-    try {
-      const cached = localStorage.getItem('unj_current_user');
-      if (cached) setCurrentUser(JSON.parse(cached));
-    } catch {}
-
     const sessionId = ensureSessionId();
     api.auth.anonymous(sessionId).then(user => {
       setCurrentUser(user);
-      localStorage.setItem('unj_current_user', JSON.stringify(user));
+      try {
+        localStorage.setItem('unj_current_user', JSON.stringify(user));
+      } catch {}
     }).catch(() => {});
   }, []);
 
