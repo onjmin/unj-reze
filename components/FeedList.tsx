@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { encodeId } from '@/lib/sqids';
 import { Post } from '@/lib/types';
 import PostContainer from './PostContainer';
+import ConsecutivePostGroup from './ConsecutivePostGroup';
 import BbsBoardView from './BbsBoardView';
 import VirtualizedItem from './VirtualizedItem';
 import MediaGrid from './MediaGrid';
@@ -196,35 +197,56 @@ export default function FeedList({ posts, activeTab, feedSubMode = 'threads', ra
     );
   }
 
+  const groups: { id: string; authorKey: string; posts: Post[] }[] = [];
+  for (const post of displayPosts) {
+    const authorKey = (post.slug || post.displayName).trim();
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup && lastGroup.authorKey === authorKey) {
+      lastGroup.posts.push(post);
+    } else {
+      groups.push({
+        id: post.id,
+        authorKey,
+        posts: [post],
+      });
+    }
+  }
+
+  let currentIndex = 0;
+
   return (
     <div className="divide-y divide-gray-800/80">
-      {displayPosts.map((post, index) => (
-        <VirtualizedItem key={post.id} initialVisible={index < 8}>
-          <PostContainer
-            post={post}
-            isRankingMode={activeTab === 'ranking'}
-            rankIndex={index + 1}
-            rankCategory={rankCategory}
-            onLike={onLike}
-            onDislike={onDislike}
-            onRepost={onRepost}
-            onHeart={onHeart}
-            onAddReply={onAddReply}
-            onQuickPost={onQuickPost}
-            openGame={openGame}
-            openCollab={openCollab}
-            openMml={openMml}
-            currentUserSlug={currentUserSlug}
-            currentUserDisplayName={currentUserDisplayName}
-            onModerationChange={onModerationChange}
-            onReplyClick={onReplyClick}
-            onEditImage={onEditImage}
-            onEditMml={onEditMml}
-            onEditPost={onEditPost}
-            userId={userId}
-          />
-        </VirtualizedItem>
-      ))}
+      {groups.map((group, groupIdx) => {
+        const startIndex = currentIndex;
+        currentIndex += group.posts.length;
+        return (
+          <VirtualizedItem key={group.id} initialVisible={groupIdx < 8}>
+            <ConsecutivePostGroup
+              posts={group.posts}
+              startIndex={startIndex}
+              isRankingMode={activeTab === 'ranking'}
+              rankCategory={rankCategory}
+              onLike={onLike}
+              onDislike={onDislike}
+              onRepost={onRepost}
+              onHeart={onHeart}
+              onAddReply={onAddReply}
+              onQuickPost={onQuickPost}
+              openGame={openGame}
+              openCollab={openCollab}
+              openMml={openMml}
+              currentUserSlug={currentUserSlug}
+              currentUserDisplayName={currentUserDisplayName}
+              onModerationChange={onModerationChange}
+              onReplyClick={onReplyClick}
+              onEditImage={onEditImage}
+              onEditMml={onEditMml}
+              onEditPost={onEditPost}
+              userId={userId}
+            />
+          </VirtualizedItem>
+        );
+      })}
       {onLoadMore && hasMore ? (
         <div ref={sentinelRef} className="p-6 text-center bg-gray-900/10 flex items-center justify-center space-x-2">
           <Loader2 className="animate-spin text-blue-500" size={16} />

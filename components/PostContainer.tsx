@@ -241,13 +241,12 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
     return `${post.repliesCount} レス`;
   };
 
-  const hasReplies = (post.repliesCount > 0 || (post.replies && post.replies.length > 0)) && !quotedPost;
   const threadTime = getThreadDisplayTime(post);
 
   if (optimisticallyDeleted) return null;
 
   return (
-    <div className={`flex relative transition-all ${isRankingMode ? 'bg-gradient-to-r from-gray-900/10 via-transparent to-transparent' : ''} ${hasReplies ? 'border border-blue-500/40 bg-blue-950/20 shadow-[0_0_12px_rgba(59,130,246,0.08)] rounded-xl my-1 mx-1' : ''}`}>
+    <div className={`flex relative transition-all ${isRankingMode ? 'bg-gradient-to-r from-gray-900/10 via-transparent to-transparent' : ''}`}>
       {isRankingMode && (
         <div className="w-10 shrink-0 flex items-start justify-center pt-4 pl-1">
           <span className={`font-mono font-bold text-sm ${rankIndex === 1 ? 'text-yellow-500 scale-110 drop-shadow-[0_0_8px_rgba(234,179,8,0.2)]' :
@@ -315,11 +314,6 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               })()}
               {post.isFalseDeclaration && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
-              )}
-              {hasReplies && (
-                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 shrink-0">
-                  返信あり
-                </span>
               )}
               <span className="text-gray-500 text-[10px] font-medium" title={threadTime.isReplyUpdate ? `最新返信: ${threadTime.time} (スレ作成: ${post.time})` : undefined}>
                 {quotedPost ? post.time : threadTime.time}

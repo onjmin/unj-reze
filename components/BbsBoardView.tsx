@@ -183,7 +183,6 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
           </div>
         ) : (
           pagePosts.map(post => {
-            const hasReplies = post.repliesCount > 0 || (post.replies && post.replies.length > 0);
             const threadTime = getThreadDisplayTime(post);
             return (
               <div
@@ -192,11 +191,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                   cachePost(post);
                   router.push(`/post/${post.id}`);
                 }}
-                className={`flex items-start gap-2.5 px-3 py-2.5 cursor-pointer transition-colors ${
-                  hasReplies
-                    ? 'bg-blue-950/20 border-l-2 border-l-blue-500 hover:bg-blue-900/30'
-                    : 'hover:bg-gray-800/25 active:bg-gray-800/40'
-                }`}
+                className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
               >
                 {/* Reply count badge */}
                 <div className={`shrink-0 min-w-[28px] h-6 rounded px-1.5 flex items-center justify-center text-[11px] font-bold tabular-nums ${badgeClass(post.repliesCount)}`}>
