@@ -44,6 +44,7 @@ export default function UserActionMenu({
   const [dmText, setDmText] = useState('');
   const [sendingDm, setSendingDm] = useState(false);
   const [dmSuccess, setDmSuccess] = useState(false);
+  const [reported, setReported] = useState(false);
 
   const targetIdOrSlug = targetUserSlug || targetUserDisplayName;
   const isSelf = currentUserId === targetUserDisplayName || currentUserSlug === targetUserSlug;
@@ -78,6 +79,7 @@ export default function UserActionMenu({
 
     setMuted(false);
     setBlocked(false);
+    setReported(false);
 
     if (currentUserId && !isSelf) {
       api.follow.isFollowing(currentUserId, targetUserDisplayName)
@@ -142,8 +144,6 @@ export default function UserActionMenu({
       setModerating(false);
     }
   };
-
-  const [reported, setReported] = useState(false);
 
   const handleReportUser = async () => {
     if (!currentUserSlug || isSelf || reported) return;
