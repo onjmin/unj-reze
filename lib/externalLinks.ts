@@ -23,10 +23,10 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
   {
     title: 'kusa',
     links: [
-      { name: 'kusa本家', description: 'kusa本家', src: 'https://kusa.open2ch.net/' },
-      { name: 'kusaWiki', description: 'kusaWiki', src: 'https://w.atwiki.jp/kusawiki/' },
-      { name: 'kusa鯖', description: 'kusa鯖', src: 'https://realms.gg/aasxKKAsUBkfvVg' },
-      { name: 'kusa避難所', description: 'kusa避難所', src: 'https://warasns.pages.dev/' },
+      { name: 'kusa本家', description: '毎日リセットされる匿名SNS', src: 'https://kusa.open2ch.net/' },
+      { name: 'kusaWiki', description: 'おーぷん２ちゃんねる kusaの歴史をまとめるWiki', src: 'https://w.atwiki.jp/kusawiki/' },
+      { name: 'kusa鯖', description: 'Minecraft Realms サーバー招待リンク', src: 'https://realms.gg/aasxKKAsUBkfvVg' },
+      { name: 'kusa避難所', description: 'kusaの避難所SNS (wara)', src: 'https://warasns.pages.dev/' },
     ],
   },
   {
