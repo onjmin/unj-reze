@@ -25,14 +25,21 @@ interface LayerPanelProps {
 export type { LayerEntry };
 
 function useIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    }
+    return false;
+  });
+
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const mq = window.matchMedia('(hover: hover) and (pointer: fine)');
-    setIsDesktop(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
   return isDesktop;
 }
 
@@ -44,18 +51,10 @@ export default function LayerPanel({
   const [dropTarget, setDropTarget] = useState<number | null>(null);
   const isDesktop = useIsDesktop();
 
-  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [position, setPosition] = useState({ x: 20, y: 80 });
   const [dragging, setDragging] = useState(false);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
-
-  useEffect(() => {
-    if (isDesktop && !initializedRef.current) {
-      initializedRef.current = true;
-      setPosition({ x: 20, y: 80 });
-    }
-  }, [isDesktop]);
 
   const handleHeaderPointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -187,11 +186,11 @@ export default function LayerPanel({
 }
 
 function LayerRow({
-  layer, index, isActive, isDropTarget, onSelect,
+  layer, isActive, isDropTarget, onSelect,
   onDragStart, onDragEnter, onDragEnd, onDrop,
   onToggleVisibility, onToggleLock, onOpacityChange, onDelete, canDelete,
 }: {
-  layer: LayerEntry; index: number; isActive: boolean; isDropTarget: boolean;
+  layer: LayerEntry; index?: number; isActive: boolean; isDropTarget: boolean;
   onSelect: () => void; onDragStart: () => void; onDragEnter: () => void; onDragEnd: () => void; onDrop: () => void;
   onToggleVisibility: () => void; onToggleLock: () => void; onOpacityChange: (v: number) => void; onDelete: () => void; canDelete: boolean;
 }) {
