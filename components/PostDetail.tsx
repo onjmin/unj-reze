@@ -804,7 +804,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             <button onClick={handleRepost} className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${post.reposted ? 'text-purple-400' : ''}`}>
               <Repeat size={14} /><span className="text-[11px]">{post.reposts || ''}</span>
             </button>
-            <button className="flex items-center hover:text-blue-400 transition-colors">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const targetSlug = post.slug || post.displayName;
+                if (targetSlug) {
+                  router.push(`/messages/${encodeURIComponent(targetSlug)}`);
+                }
+              }}
+              className="flex items-center hover:text-blue-400 transition-colors"
+              title="DMを送る"
+            >
               <Mail size={14} />
             </button>
             <button onClick={handleHeart} className="flex items-center space-x-1 hover:text-pink-400 transition-colors">
@@ -1310,7 +1320,17 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
             <button onClick={handleRepost} className={`flex items-center space-x-1 hover:text-purple-400 transition-colors ${localPost.reposted ? 'text-purple-400' : ''}`}>
               <Repeat size={14} /><span className="text-[11px]">{localPost.reposts || ''}</span>
             </button>
-            <button className="flex items-center hover:text-blue-400 transition-colors">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const targetSlug = localPost.slug || localPost.displayName;
+                if (targetSlug) {
+                  router.push(`/messages/${encodeURIComponent(targetSlug)}`);
+                }
+              }}
+              className="flex items-center hover:text-blue-400 transition-colors"
+              title="DMを送る"
+            >
               <Mail size={14} />
             </button>
             <button onClick={handleHeart} className="flex items-center space-x-1 hover:text-pink-400 transition-colors">

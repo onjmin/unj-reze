@@ -791,7 +791,17 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                       <Repeat size={14} />
                       <span className="text-[11px]">{p.reposts || ''}</span>
                     </button>
-                    <button onClick={(e) => e.stopPropagation()} className="flex items-center hover:text-blue-400 transition-colors">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const targetSlug = p.slug || p.displayName;
+                        if (targetSlug) {
+                          router.push(`/messages/${encodeURIComponent(targetSlug)}`);
+                        }
+                      }}
+                      className="flex items-center hover:text-blue-400 transition-colors"
+                      title="DMを送る"
+                    >
                       <Mail size={14} />
                     </button>
                     <button

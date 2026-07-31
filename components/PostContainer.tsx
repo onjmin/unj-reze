@@ -578,7 +578,17 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               <span className="text-[11px]">{post.reposts || ''}</span>
             </button>
 
-            <button className="flex items-center hover:text-blue-400 transition-colors">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const targetSlug = post.slug || post.displayName;
+                if (targetSlug) {
+                  router.push(`/messages/${encodeURIComponent(targetSlug)}`);
+                }
+              }}
+              className="flex items-center hover:text-blue-400 transition-colors"
+              title="DMを送る"
+            >
               <Mail size={14} />
             </button>
 
