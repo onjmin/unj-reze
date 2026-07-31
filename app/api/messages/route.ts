@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { publishRealtime } from '@/lib/realtime/publish';
+import { chUser } from '@/lib/realtime/channels';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -20,6 +22,13 @@ export async function POST(request: NextRequest) {
   }
 
   const message = await db.addMessage({ sender, text, recipient });
+
+  // Koyeb Realtime WS ハブ経由で送信先および送信元に即時プッシュ配信
+  publishRealtime([
+    { channel: chUser(recipient), event: 'message.created', data: message },
+    { channel: chUser(sender), event: 'message.created', data: message },
+  ]);
+
   return NextResponse.json(message, { status: 201 });
 }
 

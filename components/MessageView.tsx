@@ -6,6 +6,9 @@ import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
 import { markMessagesSeen } from '@/lib/read-state';
 
+import { getRealtimeClient } from '@/lib/realtime/client';
+import { chUser } from '@/lib/realtime/channels';
+
 interface MessageViewProps {
   userId?: string;
 }
@@ -23,6 +26,30 @@ export default function MessageView({ userId }: MessageViewProps) {
   const isSendingRef = useRef(false);
 
   const currentSender = userId || '名無し';
+
+  useEffect(() => {
+    const client = getRealtimeClient();
+    if (!client || !currentSender) return;
+    const unsubChannel = client.subscribe([chUser(currentSender)]);
+    const unsubHandler = client.addHandler(msg => {
+      if (msg.t === 'event' && msg.channel === chUser(currentSender) && msg.event === 'message.created') {
+        const data = msg.data as MsgItem;
+        if (data && data.id) {
+          setMessages(prev => {
+            if (prev.some(m => m.id === data.id)) return prev;
+            const updated = [data, ...prev];
+            markMessagesSeen(updated);
+            return updated;
+          });
+          setTimeout(() => scrollToBottom(true), 50);
+        }
+      }
+    });
+    return () => {
+      unsubChannel();
+      unsubHandler();
+    };
+  }, [currentSender]);
 
   const scrollToBottom = (smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });

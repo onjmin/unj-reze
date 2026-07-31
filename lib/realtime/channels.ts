@@ -20,7 +20,8 @@ export const chUser = (userId: string) => `user:${userId}`;
 export type RealtimeEventName =
   | 'post.created'
   | 'reply.created'
-  | 'notify';
+  | 'notify'
+  | 'message.created';
 
 export interface RealtimeEvent {
   channel: string;
