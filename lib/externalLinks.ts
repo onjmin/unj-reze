@@ -21,6 +21,15 @@ export const externalLinkGroups: ExternalLinkGroup[] = [
     ],
   },
   {
+    title: 'kusa',
+    links: [
+      { name: 'kusa本家', description: 'kusa本家', src: 'https://kusa.open2ch.net/' },
+      { name: 'kusaWiki', description: 'kusaWiki', src: 'https://w.atwiki.jp/kusawiki/' },
+      { name: 'kusa鯖', description: 'kusa鯖', src: 'https://realms.gg/aasxKKAsUBkfvVg' },
+      { name: 'kusa避難所', description: 'kusa避難所', src: 'https://warasns.pages.dev/' },
+    ],
+  },
+  {
     title: 'ボカロ制作スレ',
     links: [
       { name: '【公式】束音ロゼ', description: '安価でおんJ発のボカロキャラを作ろう', src: 'https://tabaneroze.ninja-web.net/' },
