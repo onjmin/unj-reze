@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { db as mockDb } from '@/lib/mock-db';
 import PostDetail from '@/components/PostDetail';
 import Link from 'next/link';
-import { decodeId, encodePost } from '@/lib/sqids';
+import { decodeId, encodeId, encodePost } from '@/lib/sqids';
 import { attachGameInfo } from '@/lib/game-embed';
 import { getDisplayContent } from '@/lib/mml';
 import { SITE_NAME, SITE_URL } from '@/lib/site';
@@ -21,7 +21,8 @@ const getCachedPost = cache(async (decodedId: number) => {
 
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
-  return mockDb.getPosts().map(post => ({ id: encodePost(post).id }));
+  const params = mockDb.getPosts().map(post => ({ id: encodePost(post).id }));
+  return params.length > 0 ? params : [{ id: encodeId(1) }];
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {

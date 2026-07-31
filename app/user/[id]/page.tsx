@@ -11,7 +11,8 @@ import { SITE_URL } from '@/lib/site';
 export function generateStaticParams() {
   if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
   const slugs = new Set(mockDb.getPosts().map(p => p.slug));
-  return Array.from(slugs).map(slug => ({ id: slug! }));
+  const params = Array.from(slugs).filter(Boolean).map(slug => ({ id: slug! }));
+  return params.length > 0 ? params : [{ id: 'demo' }];
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {

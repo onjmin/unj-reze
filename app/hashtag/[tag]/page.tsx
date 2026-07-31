@@ -10,7 +10,8 @@ export function generateStaticParams() {
     const matches = p.content.match(/#[^\s#]+/g);
     if (matches) for (const m of matches) tags.add(m.slice(1));
   }
-  return Array.from(tags).map(tag => ({ tag }));
+  const result = Array.from(tags).map(tag => ({ tag }));
+  return result.length > 0 ? result : [{ tag: 'demo' }];
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ tag: string }> }): Promise<Metadata> {

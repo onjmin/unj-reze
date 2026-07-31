@@ -16,8 +16,8 @@ function thumbnailOf(manifest: { titleScreen?: { bgRef?: string } } | undefined)
 }
 
 export function generateStaticParams() {
-  // 静的エクスポート(GitHub Pages デモ)にはゲームのデータが無いのでページを作らない
-  return [];
+  if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== 'true') return [];
+  return [{ id: encodeId(1) }];
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
