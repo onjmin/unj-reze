@@ -997,10 +997,12 @@ export const pgStore: DataStore = {
   async addMessage(data: MessageParams) {
     const client = await getPool().connect();
     try {
+      const senderSlug = await resolveViewerSlug(client, data.sender);
+      const recipientSlug = data.recipient ? await resolveViewerSlug(client, data.recipient) : null;
       const result = await client.query(
         `INSERT INTO messages (id, sender, text, recipient, created_at)
          VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM messages), $1, $2, $3, NOW()) RETURNING *`,
-        [data.sender, data.text, data.recipient || null]
+        [senderSlug, data.text, recipientSlug]
       );
       const r = result.rows[0];
       const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString

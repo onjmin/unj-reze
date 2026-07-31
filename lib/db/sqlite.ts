@@ -953,12 +953,14 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
+    const senderSlug = resolveViewerSlugSqlite(d, data.sender);
+    const recipientSlug = data.recipient ? resolveViewerSlugSqlite(d, data.recipient) : null;
     d.run(
       `INSERT INTO messages (id, sender, text, recipient, created_at) VALUES (?, ?, ?, ?, ?)`,
-      [id, data.sender, data.text, data.recipient || null, now]
+      [id, senderSlug, data.text, recipientSlug, now]
     );
     saveDb();
-    return { id, sender: data.sender, text: data.text, recipient: data.recipient, createdAt: now, time: formatRelativeTime(now) } as Message;
+    return { id, sender: senderSlug, text: data.text, recipient: recipientSlug ?? undefined, createdAt: now, time: formatRelativeTime(now) } as Message;
   },
 
   async getTrends() {

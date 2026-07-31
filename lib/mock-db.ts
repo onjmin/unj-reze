@@ -591,9 +591,9 @@ class MockDB {
     const createdAt = this.now();
     const msg: Message = {
       id: this.genId(),
-      sender: data.sender,
+      sender: this.slugForUser(data.sender),
       text: data.text,
-      recipient: data.recipient,
+      recipient: data.recipient ? this.slugForUser(data.recipient) : undefined,
       createdAt,
       time: formatRelativeTime(createdAt),
     };
