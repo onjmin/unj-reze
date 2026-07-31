@@ -391,7 +391,7 @@ export async function parseRpgen(text: string): Promise<GameManifestDraft> {
     }
   }
 
-  const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || 'n4CrMK7W';
+  const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || '';
 
   const uniqueIds = Array.from(idsToTranslate);
   const idToHash = new Map<number, string>();

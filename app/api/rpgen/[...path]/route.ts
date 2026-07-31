@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // 参照: tmp/asset_collect_guide.md, rpgen-crawler/deploy/api
 
 const ORIGIN = 'https://rpgen-search.pages.dev';
-const AUTH_TOKEN = process.env.RPGEN_SEARCH_TOKEN;
+const AUTH_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || '';
 
 // 許可するトップレベルAPI（プロキシ濫用防止の allowlist）。
 const ALLOWED_API = new Set(['sprites', 'sprite-anims', 'sheets', 'sounds', 'maps']);

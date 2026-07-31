@@ -125,8 +125,8 @@ Stateless, login-less abuse scoring: `lib/security/{scoring,tls,turnstile}.ts`,
   - When merging into an existing scene, assign non-conflicting tile IDs and keep a `tileIdRemap` (with `0 → 0`).
   - Recursively remap `#CH_SP` / `changeTile` tile IDs inside nested commands (`choice`, and the `then`/`else` branches of `ifSwitch` / `ifItem` / `ifGold`).
 - **RPGEN Search access has two paths**
-  - Client/parse-time (`lib/rpgen-parser.ts`): `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN`, falling back to the public token `n4CrMK7W`.
-  - Server proxy `app/api/rpgen/[...path]/route.ts`: uses `RPGEN_SEARCH_TOKEN`, with an endpoint allowlist. Route media through it — upstream `/data/*` sends no CORS headers, and direct loads would taint the game canvas and break export.
+  - Client/parse-time (`lib/rpgen-parser.ts`, `lib/rpgen-assets.ts`): `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` (privileged agent token configured via local env / `.agents/`).
+  - Server proxy `app/api/rpgen/[...path]/route.ts`: uses `NEXT_PUBLIC_RPGEN_SEARCH_TOKEN` or `RPGEN_SEARCH_TOKEN`, with an endpoint allowlist for legacy routing.
 
 ---
 

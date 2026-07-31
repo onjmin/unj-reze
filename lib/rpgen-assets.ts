@@ -5,8 +5,8 @@
 //
 // 参照: tmp/asset_collect_guide.md, rpgen-crawler/deploy/api
 
-const PROXY = '/api/rpgen';
 const CDN = 'https://rpgen-search.pages.dev';
+const PUBLIC_TOKEN = process.env.NEXT_PUBLIC_RPGEN_SEARCH_TOKEN || '';
 
 // ───────────────── アセット実体URL ─────────────────
 // rpgen-search.pages.dev はCORSヘッダーを返すため直リンクで安全に扱える。
@@ -119,7 +119,7 @@ export interface SearchParams {
   signal?: AbortSignal;
 }
 
-// ───────────────── 検索（プロキシ経由） ─────────────────
+// ───────────────── 検索（フロントエンド直叩き） ─────────────────
 
 async function get<T>(endpoint: string, params: SearchParams = {}): Promise<RpgenList<T>> {
   const usp = new URLSearchParams();
@@ -128,7 +128,10 @@ async function get<T>(endpoint: string, params: SearchParams = {}): Promise<Rpge
   usp.set('limit', String(params.limit ?? 60));
   if (params.category1 != null) usp.set('category1', String(params.category1));
   if (params.category2 != null) usp.set('category2', String(params.category2));
-  const res = await fetch(`${PROXY}/${endpoint}?${usp.toString()}`, { signal: params.signal });
+  const res = await fetch(`${CDN}/api/rpgen/${endpoint}?${usp.toString()}`, {
+    headers: { Authorization: `Bearer ${PUBLIC_TOKEN}` },
+    signal: params.signal,
+  });
   if (!res.ok) throw new Error(`rpgen ${endpoint} ${res.status}`);
   return res.json();
 }
@@ -143,13 +146,16 @@ export const searchSAnimSheets = (p?: SearchParams) => get<SAnimSheetItem>('shee
 /** 人間がまとめた効果音セット一覧。`/api/sheets/sound` */
 export const searchSoundSheets = (p?: SearchParams) => get<SoundSheetItem>('sheets/sound', p);
 
-// ───────────────── 単体詳細（プロキシ経由） ─────────────────
+// ───────────────── 単体詳細（フロントエンド直叩き） ─────────────────
 // `sheets/*` のメンバー配列は `{id}` のみ（name等は含まれない）。名前を出すには
 // メンバーの id ごとに単体詳細（GET /sprites/:id 等）を引く必要がある。
 
 async function getById<T>(endpoint: string, id: string, signal?: AbortSignal): Promise<T | null> {
   try {
-    const res = await fetch(`${PROXY}/${endpoint}/${encodeURIComponent(id)}`, { signal });
+    const res = await fetch(`${CDN}/api/rpgen/${endpoint}/${encodeURIComponent(id)}`, {
+      headers: { Authorization: `Bearer ${PUBLIC_TOKEN}` },
+      signal,
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
