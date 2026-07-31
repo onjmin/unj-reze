@@ -77,13 +77,19 @@ function attach() {
       lastY = y;
     } else if (Math.abs(delta) > DELTA_THRESHOLD) {
       if (delta > 0) {
+        // 下スクロール中: フッターを非表示にする
         publish({ footerHidden: true });
-        if (reappearTimer === null) {
-          reappearTimer = setTimeout(() => {
-            reappearTimer = null;
-            publish({ footerHidden: false });
-          }, REAPPEAR_DELAY);
-        }
+        // スクロールが進行している間は自動表示タイマーをリセットし続ける
+        // （スクロール操作が完全に停止してから REAPPEAR_DELAY 秒後にのみ復帰させる）
+        clearReappearTimer();
+        reappearTimer = setTimeout(() => {
+          reappearTimer = null;
+          publish({ footerHidden: false });
+        }, REAPPEAR_DELAY);
+      } else {
+        // 上スクロール中: フッターを即座に表示
+        clearReappearTimer();
+        publish({ footerHidden: false });
       }
       lastY = y;
     }
