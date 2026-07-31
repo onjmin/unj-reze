@@ -1255,10 +1255,10 @@ export const pgStore: DataStore = {
       if (followerSlug === followedSlug) return;
       const ins = await client.query(
         'INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [followerId, followedId]
+        [followerSlug, followedSlug]
       );
       if (ins.rowCount && ins.rowCount > 0) {
-        await insertNotificationPg(client, { recipientId: followedId, actor: followerId, type: 'follow', action: 'がフォローしました', target: '' });
+        await insertNotificationPg(client, { recipientId: followedSlug, actor: followerSlug, type: 'follow', action: 'がフォローしました', target: '' });
       }
     } finally {
       client.release();
@@ -1268,9 +1268,13 @@ export const pgStore: DataStore = {
   async unfollowUser(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
+      const [followerSlug, followedSlug] = await Promise.all([
+        resolveViewerSlug(client, followerId),
+        resolveViewerSlug(client, followedId),
+      ]);
       await client.query(
-        'DELETE FROM user_follows WHERE follower_id = $1 AND followed_id = $2',
-        [followerId, followedId]
+        'DELETE FROM user_follows WHERE (follower_id = $1 OR follower_id = $2) AND (followed_id = $3 OR followed_id = $4)',
+        [followerSlug, followerId, followedSlug, followedId]
       );
     } finally {
       client.release();
@@ -1280,9 +1284,13 @@ export const pgStore: DataStore = {
   async isFollowing(followerId: string, followedId: string) {
     const client = await getPool().connect();
     try {
+      const [followerSlug, followedSlug] = await Promise.all([
+        resolveViewerSlug(client, followerId),
+        resolveViewerSlug(client, followedId),
+      ]);
       const result = await client.query(
-        'SELECT 1 FROM user_follows WHERE follower_id = $1 AND followed_id = $2 LIMIT 1',
-        [followerId, followedId]
+        'SELECT 1 FROM user_follows WHERE (follower_id = $1 OR follower_id = $2) AND (followed_id = $3 OR followed_id = $4) LIMIT 1',
+        [followerSlug, followerId, followedSlug, followedId]
       );
       return result.rows.length > 0;
     } finally {
@@ -1293,11 +1301,12 @@ export const pgStore: DataStore = {
   async getFollowCounts(userId: string) {
     const client = await getPool().connect();
     try {
+      const slug = await resolveViewerSlug(client, userId);
       const result = await client.query(`
         SELECT
-          (SELECT COUNT(*) FROM user_follows WHERE followed_id = $1) AS followers,
-          (SELECT COUNT(*) FROM user_follows WHERE follower_id = $1) AS following
-      `, [userId]);
+          (SELECT COUNT(*) FROM user_follows WHERE followed_id = $1 OR followed_id = $2) AS followers,
+          (SELECT COUNT(*) FROM user_follows WHERE follower_id = $1 OR follower_id = $2) AS following
+      `, [slug, userId]);
       return {
         followers: parseInt(result.rows[0].followers, 10),
         following: parseInt(result.rows[0].following, 10),

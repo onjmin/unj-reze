@@ -305,6 +305,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
       setFollowers((f: number) => Math.max(0, f - 1));
       try {
         await api.follow.unfollow(currentUserId, userId);
+        const counts = await api.follow.getCounts(userId);
+        setFollowers(counts.followers);
+        setFollowing(counts.following);
       } catch {
         setIsFollow(true);
         setFollowers((f: number) => f + 1);
@@ -314,6 +317,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
       setFollowers((f: number) => f + 1);
       try {
         await api.follow.follow(currentUserId, userId);
+        const counts = await api.follow.getCounts(userId);
+        setFollowers(counts.followers);
+        setFollowing(counts.following);
       } catch {
         setIsFollow(false);
         setFollowers((f: number) => Math.max(0, f - 1));

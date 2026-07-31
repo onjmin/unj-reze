@@ -1120,42 +1120,49 @@ export const sqliteStore: DataStore = {
 
   async followUser(followerId: string, followedId: string) {
     const d = await getDb();
+    const followerSlug = resolveViewerSlugSqlite(d, followerId);
+    const followedSlug = resolveViewerSlugSqlite(d, followedId);
     // 同一ユーザーを id / display_name / slug の別表記で指した自己フォローを防ぐ。
-    if (resolveViewerSlugSqlite(d, followerId) === resolveViewerSlugSqlite(d, followedId)) return;
-    const before = rowsToObjects(d, 'SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ? LIMIT 1', [followerId, followedId]);
+    if (followerSlug === followedSlug) return;
+    const before = rowsToObjects(d, 'SELECT 1 FROM user_follows WHERE (follower_id = ? OR follower_id = ?) AND (followed_id = ? OR followed_id = ?) LIMIT 1', [followerSlug, followerId, followedSlug, followedId]);
     d.run(
       'INSERT OR IGNORE INTO user_follows (follower_id, followed_id) VALUES (?, ?)',
-      [followerId, followedId]
+      [followerSlug, followedSlug]
     );
     if (before.length === 0) {
-      insertNotificationSqlite(d, { recipientId: followedId, actor: followerId, type: 'follow', action: 'がフォローしました', target: '' });
+      insertNotificationSqlite(d, { recipientId: followedSlug, actor: followerSlug, type: 'follow', action: 'がフォローしました', target: '' });
     }
     saveDb();
   },
 
   async unfollowUser(followerId: string, followedId: string) {
     const d = await getDb();
+    const followerSlug = resolveViewerSlugSqlite(d, followerId);
+    const followedSlug = resolveViewerSlugSqlite(d, followedId);
     d.run(
-      'DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?',
-      [followerId, followedId]
+      'DELETE FROM user_follows WHERE (follower_id = ? OR follower_id = ?) AND (followed_id = ? OR followed_id = ?)',
+      [followerSlug, followerId, followedSlug, followedId]
     );
     saveDb();
   },
 
   async isFollowing(followerId: string, followedId: string) {
     const d = await getDb();
+    const followerSlug = resolveViewerSlugSqlite(d, followerId);
+    const followedSlug = resolveViewerSlugSqlite(d, followedId);
     const rows = rowsToObjects(
       d,
-      'SELECT 1 FROM user_follows WHERE follower_id = ? AND followed_id = ? LIMIT 1',
-      [followerId, followedId]
+      'SELECT 1 FROM user_follows WHERE (follower_id = ? OR follower_id = ?) AND (followed_id = ? OR followed_id = ?) LIMIT 1',
+      [followerSlug, followerId, followedSlug, followedId]
     );
     return rows.length > 0;
   },
 
   async getFollowCounts(userId: string) {
     const d = await getDb();
-    const followers = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM user_follows WHERE followed_id = ?', [userId]);
-    const following = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM user_follows WHERE follower_id = ?', [userId]);
+    const slug = resolveViewerSlugSqlite(d, userId);
+    const followers = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM user_follows WHERE followed_id = ? OR followed_id = ?', [slug, userId]);
+    const following = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM user_follows WHERE follower_id = ? OR follower_id = ?', [slug, userId]);
     return {
       followers: followers[0]?.cnt ?? 0,
       following: following[0]?.cnt ?? 0,

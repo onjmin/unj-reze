@@ -638,27 +638,43 @@ class MockDB {
   }
 
   followUser(followerId: string, followedId: string): void {
+    const followerSlug = this.slugForUser(followerId);
+    const followedSlug = this.slugForUser(followedId);
     // 同一ユーザーを別表記(id/displayName/slug)で指した自己フォローも弾く。
-    if (followerId === followedId || this.slugForUser(followerId) === this.slugForUser(followedId)) return;
-    const exists = this.follows.some(f => f.followerId === followerId && f.followedId === followedId);
+    if (followerSlug === followedSlug) return;
+    const exists = this.follows.some(
+      f => (f.followerId === followerSlug || f.followerId === followerId) &&
+           (f.followedId === followedSlug || f.followedId === followedId)
+    );
     if (!exists) {
-      this.follows.push({ followerId, followedId });
-      this.createNotification({ recipientId: followedId, actor: followerId, type: 'follow', action: 'がフォローしました', target: '', postId: undefined });
+      this.follows.push({ followerId: followerSlug, followedId: followedSlug });
+      this.createNotification({ recipientId: followedSlug, actor: followerSlug, type: 'follow', action: 'がフォローしました', target: '', postId: undefined });
     }
   }
 
   unfollowUser(followerId: string, followedId: string): void {
-    this.follows = this.follows.filter(f => !(f.followerId === followerId && f.followedId === followedId));
+    const followerSlug = this.slugForUser(followerId);
+    const followedSlug = this.slugForUser(followedId);
+    this.follows = this.follows.filter(
+      f => !((f.followerId === followerSlug || f.followerId === followerId) &&
+             (f.followedId === followedSlug || f.followedId === followedId))
+    );
   }
 
   isFollowing(followerId: string, followedId: string): boolean {
-    return this.follows.some(f => f.followerId === followerId && f.followedId === followedId);
+    const followerSlug = this.slugForUser(followerId);
+    const followedSlug = this.slugForUser(followedId);
+    return this.follows.some(
+      f => (f.followerId === followerSlug || f.followerId === followerId) &&
+           (f.followedId === followedSlug || f.followedId === followedId)
+    );
   }
 
   getFollowCounts(userId: string): { followers: number; following: number } {
+    const slug = this.slugForUser(userId);
     return {
-      followers: this.follows.filter(f => f.followedId === userId).length,
-      following: this.follows.filter(f => f.followerId === userId).length,
+      followers: this.follows.filter(f => f.followedId === slug || f.followedId === userId).length,
+      following: this.follows.filter(f => f.followerId === slug || f.followerId === userId).length,
     };
   }
 
