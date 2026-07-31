@@ -330,6 +330,20 @@ const migrations = [
       ALTER TABLE games ADD COLUMN IF NOT EXISTS best_score_by TEXT;
       CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
     `
+  },
+  {
+    name: '17_restore_user_slugs_and_relink_data',
+    sql: `
+      -- 既存の投稿・ゲーム・ブロック・ミュート・通報・推しアイテムの紐付けを u.slug に復元（本番データの完全再リンク）
+      UPDATE posts p SET slug = u.slug FROM anonymous_users u WHERE p.slug = u.id OR p.slug = u.display_name;
+      UPDATE games g SET creator_slug = u.slug FROM anonymous_users u WHERE g.creator_slug = u.id OR g.creator_slug = u.display_name;
+      UPDATE user_blocks b SET blocker_slug = u1.slug FROM anonymous_users u1 WHERE b.blocker_slug = u1.id OR b.blocker_slug = u1.display_name;
+      UPDATE user_blocks b SET blocked_slug = u2.slug FROM anonymous_users u2 WHERE b.blocked_slug = u2.id OR b.blocked_slug = u2.display_name;
+      UPDATE user_mutes m SET muter_slug = u1.slug FROM anonymous_users u1 WHERE m.muter_slug = u1.id OR m.muter_slug = u1.display_name;
+      UPDATE user_mutes m SET muted_slug = u2.slug FROM anonymous_users u2 WHERE m.muted_slug = u2.id OR m.muted_slug = u2.display_name;
+      UPDATE reports r SET reporter_slug = u.slug FROM anonymous_users u WHERE r.reporter_slug = u.id OR r.reporter_slug = u.display_name;
+      UPDATE oshi_items o SET user_slug = u.slug FROM anonymous_users u WHERE o.user_slug = u.id OR o.user_slug = u.display_name;
+    `
   }
 ];
 

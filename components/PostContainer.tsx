@@ -377,7 +377,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             </div>
           </div>
 
-          <p
+          <div
             onClick={handlePostClick}
             className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
           >
@@ -408,7 +408,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                 </span>
               ));
             })()}
-          </p>
+          </div>
 
           {(() => {
             const displayText = getDisplayContent(post.content);

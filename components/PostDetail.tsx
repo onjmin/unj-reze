@@ -691,7 +691,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             </span>
           </div>
 
-          <p className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
+          <div className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
             {(() => {
               const displayText = getDisplayContent(post.content);
               const allLines = displayText ? displayText.split('\n') : [];
@@ -709,7 +709,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                 </span>
               ));
             })()}
-          </p>
+          </div>
 
           {(() => {
             const displayText = getDisplayContent(post.content);

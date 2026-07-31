@@ -757,9 +757,9 @@ export const pgStore: DataStore = {
             COALESCE(pv.vote_type = 'like', false) as liked,
             COALESCE(pv.vote_type = 'dislike', false) as disliked
           FROM posts p
-          LEFT JOIN anonymous_users au ON p.slug = au.slug
+          LEFT JOIN anonymous_users au ON (p.slug = au.slug OR p.slug = au.id OR p.slug = au.display_name)
           LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
-          WHERE p.slug = $2
+          WHERE (p.slug = $2 OR au.slug = $2 OR au.id = $2 OR au.display_name = $2)
           ORDER BY p.id DESC
           LIMIT ${safeLimit}
         `, [userId, slug]);
@@ -771,8 +771,8 @@ export const pgStore: DataStore = {
             false as liked,
             false as disliked
           FROM posts p
-          LEFT JOIN anonymous_users au ON p.slug = au.slug
-          WHERE p.slug = $1
+          LEFT JOIN anonymous_users au ON (p.slug = au.slug OR p.slug = au.id OR p.slug = au.display_name)
+          WHERE (p.slug = $1 OR au.slug = $1 OR au.id = $1 OR au.display_name = $1)
           ORDER BY p.id DESC
           LIMIT ${safeLimit}
         `, [slug]);

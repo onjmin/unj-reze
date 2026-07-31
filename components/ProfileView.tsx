@@ -599,7 +599,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
                   {/* break-words が無いと長いURLが折り返せず、プロフィールが横に伸びて
                       中央寄せのレイアウトごと左へずれる（＝左端の要素が画面外に隠れる） */}
-                  <p
+                  <div
                     className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
                     onClick={() => handlePostClick(p)}
                   >
@@ -620,7 +620,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                         </span>
                       ));
                     })()}
-                  </p>
+                  </div>
 
                   {p.hasImage && (
                     <div

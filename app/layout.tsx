@@ -90,6 +90,7 @@ export default function RootLayout({
     <html
       lang="ja"
       className={`${geistSans.variable} ${geistMono.variable} ${dotGothic16.variable} ${pressStart2P.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
       <head>
         <link rel="icon" href={assetPath('/icon-192.png')} type="image/png" sizes="192x192" />
@@ -115,7 +116,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col"><AudioFocusProvider>{children}</AudioFocusProvider><PwaRegister />{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning><AudioFocusProvider>{children}</AudioFocusProvider><PwaRegister />{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
     </html>
   );
 }
