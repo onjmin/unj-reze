@@ -145,6 +145,7 @@ function findMmlLineIndex(lines: string[]): number {
 // MML行は他の行と混在しうる（1行下に自由コメントが入る等）ため、
 // マーカーが現れた行だけを対象に抽出・除去する。マーカー以降を全部飲み込まない。
 export function extractMmlFromContent(content: string): string | null {
+  if (!content || typeof content !== 'string') return null;
   const lines = content.split('\n');
   const idx = findMmlLineIndex(lines);
   if (idx === -1) return null;
@@ -155,6 +156,7 @@ export function extractMmlFromContent(content: string): string | null {
 
 /** MMLマーカー行だけを取り除いたcontentを返す。前後の自由コメント行は維持する。 */
 export function stripMmlLine(content: string): string {
+  if (!content || typeof content !== 'string') return content || '';
   const lines = content.split('\n');
   const idx = findMmlLineIndex(lines);
   if (idx === -1) return content;
@@ -168,6 +170,7 @@ export function stripMmlLine(content: string): string {
  * #chordは従来通りマーカー以降を丸ごと埋め込みに譲る。
  */
 export function getDisplayContent(content: string): string {
+  if (!content || typeof content !== 'string') return '';
   const withoutMml = stripMmlLine(content);
   const chordIdx = withoutMml.indexOf('#コード進行');
   const sliced = chordIdx >= 0 ? withoutMml.slice(0, chordIdx) : withoutMml;

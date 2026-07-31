@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
@@ -246,19 +246,56 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
 
   useEffect(() => {
     let alive = true;
-    api.posts.list(userId)
-      .then(data => { if (alive) setPosts(data); })
-      .catch(() => {})
-      .finally(() => { if (alive) setLoading(false); });
+    if (mode === 'bgm' && bgmTab === 'mmlPost') {
+      Promise.resolve().then(() => { if (alive) setLoading(true); });
+      const trimmedQ = query.trim();
+      const req = trimmedQ
+        ? api.search.posts(trimmedQ, userId)
+        : api.posts.list(userId, { limit: 50 });
+
+      req
+        .then(data => {
+          if (alive) setPosts(Array.isArray(data) ? data : []);
+        })
+        .catch(err => {
+          console.error('[ContentPicker] Error loading MML posts:', err);
+          if (alive) setPosts([]);
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+    }
     return () => { alive = false; };
-  }, [userId]);
+  }, [mode, bgmTab, userId, query]);
 
   const q = query.trim().toLowerCase();
-  // BGM欄の「MML投稿」タブ用。画像投稿の直接ピックは廃止（マイシート＝素材定義パネルへ集約）。
-  const mmlPosts = posts.filter(p => {
-    const mml = extractMmlFromContent(p.content);
-    return !!mml && (!q || p.content.toLowerCase().includes(q));
-  });
+  // BGM欄の「MML投稿」タブ用。親投稿だけでなくスレッド返信(replies)に含まれるMML投稿も網羅する。
+  const mmlPosts = useMemo(() => {
+    const list: Post[] = [];
+    const seen = new Set<string>();
+    for (const p of posts) {
+      if (!p) continue;
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        const mml = extractMmlFromContent(p.content);
+        if (mml && (!q || p.content?.toLowerCase().includes(q))) {
+          list.push(p);
+        }
+      }
+      if (p.replies && Array.isArray(p.replies)) {
+        for (const r of p.replies) {
+          if (r && !seen.has(r.id)) {
+            seen.add(r.id);
+            const mml = extractMmlFromContent(r.content);
+            if (mml && (!q || r.content?.toLowerCase().includes(q))) {
+              list.push(r);
+            }
+          }
+        }
+      }
+    }
+    return list;
+  }, [posts, q]);
 
   const pickYoutube = () => {
     const v = urlInput.trim();
