@@ -324,8 +324,16 @@ const liveApi = {
     remove: (userSlug: string, id: string) => fetcher<{ success: boolean }>(`/oshi/${id}`, { method: 'DELETE', body: JSON.stringify({ userSlug }) }),
   },
   music: {
-    search: (term: string, entity: 'song' | 'album' | 'musicArtist') =>
-      fetcher<{ resultCount: number; results: any[] }>(`/music/search?term=${encodeURIComponent(term)}&entity=${entity}`),
+    search: async (term: string, entity: 'song' | 'album' | 'musicArtist') => {
+      try {
+        const params = new URLSearchParams({ term, entity, limit: '25', country: 'JP', lang: 'ja_jp' });
+        const res = await fetch(`https://itunes.apple.com/search?${params.toString()}`);
+        if (!res.ok) return { resultCount: 0, results: [] };
+        return await res.json();
+      } catch {
+        return { resultCount: 0, results: [] };
+      }
+    },
   },
   follow: {
     getCounts: (userId: string) => fetcher<{ followers: number; following: number }>(`/follow?userId=${encodeURIComponent(userId)}`),
