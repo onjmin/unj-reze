@@ -1,11 +1,13 @@
 import { db as mockDb } from '../mock-db';
 import { OriginType } from '../types';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, ReportParams, RecordGamePlayParams } from './interface';
-import type { DbGameRecord } from '../types-db';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, CreateMvParams, ReportParams, RecordGamePlayParams } from './interface';
+import type { DbGameRecord, DbMvRecord } from '../types-db';
+import type { MvManifest } from '../mv-config';
 
 
 
 const gameStore = new Map<number, DbGameRecord>();
+const mvStore = new Map<number, DbMvRecord>();
 
 export const mockStore: DataStore = {
   async getPosts(userId?: string, limit?: number, beforeId?: number) {
@@ -248,6 +250,45 @@ export const mockStore: DataStore = {
   async listAllGames(limit?: number) {
     const list = Array.from(gameStore.values());
     return limit && limit > 0 ? list.slice(0, limit) : list;
+  },
+
+  async createMv(data: CreateMvParams): Promise<DbMvRecord> {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const record: DbMvRecord = {
+      id,
+      preset: data.preset,
+      title: data.title,
+      manifest: data.manifest,
+      createdAt: new Date().toISOString(),
+      creatorSlug: data.creatorSlug,
+      plays: 0,
+    };
+    mvStore.set(id, record);
+    return record;
+  },
+
+  async getMv(id: number): Promise<DbMvRecord | null> {
+    return mvStore.get(id) ?? null;
+  },
+
+  async getMvsByIds(ids: number[]): Promise<DbMvRecord[]> {
+    if (!ids || ids.length === 0) return [];
+    const set = new Set(ids);
+    return Array.from(mvStore.values()).filter(m => set.has(m.id));
+  },
+
+  async updateMv(id: number, data: { title: string; manifest: MvManifest }): Promise<DbMvRecord | null> {
+    const existing = mvStore.get(id);
+    if (!existing) return null;
+    const updated: DbMvRecord = { ...existing, title: data.title, manifest: data.manifest };
+    mvStore.set(id, updated);
+    return updated;
+  },
+
+  async recordMvPlay(id: number) {
+    const existing = mvStore.get(id);
+    if (!existing) return;
+    mvStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
   },
 
   async recordGamePlay(gameId: number, data: RecordGamePlayParams): Promise<DbGameRecord | null> {

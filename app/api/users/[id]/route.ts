@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { DbPost } from '@/lib/types-db';
 import { encodePost } from '@/lib/sqids';
-import { attachGameInfo } from '@/lib/game-embed';
+import { attachEmbedInfo } from '@/lib/post-embeds';
 
 export async function GET(
   request: NextRequest,
@@ -47,7 +47,7 @@ export async function GET(
   ]);
 
   const displayName = ownerId;
-  await attachGameInfo(posts);
+  await attachEmbedInfo(posts);
 
   return NextResponse.json({
     id,

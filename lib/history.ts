@@ -170,10 +170,12 @@ export const isSimilarMml = (a: string, b: string): boolean => {
 };
 
 export const getStorageKey = (
-  type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay',
+  type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay' | 'mv',
   idSuffix?: string
 ): string => {
   switch (type) {
+    case 'mv':
+      return `unj-mvmaker-history-${idSuffix || 'new'}`;
     case 'mml':
       return 'dtm-work-history'; // reference key
     case 'drawing':
@@ -207,10 +209,15 @@ interface GameplayPreviewData {
   progress?: { level?: number; hp?: number; maxHp?: number; gold?: number };
 }
 
+interface MvPreviewData {
+  title?: string;
+  preset?: string;
+}
+
 export const saveHistory = <T = unknown>(
   key: string,
   data: T,
-  type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay',
+  type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay' | 'mv',
   maxItems = 50
 ): boolean => {
   if (typeof window === 'undefined') return false;
@@ -263,6 +270,9 @@ export const saveHistory = <T = unknown>(
     } else if (type === 'gameplay') {
       const gp = data as GameplayPreviewData;
       previewText = `Lv.${gp.progress?.level || 1} HP:${gp.progress?.hp || 0}/${gp.progress?.maxHp || 0} G:${gp.progress?.gold || 0}`;
+    } else if (type === 'mv') {
+      const mv = data as MvPreviewData;
+      previewText = `${mv.title || '無題'} (${mv.preset || 'preset'})`;
     }
 
     const newItem: HistoryItem<T> = {

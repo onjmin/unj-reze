@@ -341,6 +341,8 @@ function rowToPost(row: any): Post {
     heartsTotal: row.hearts_total ?? 0,
     hasGame: !!row.has_game,
     gameId: row.game_id ?? undefined,
+    hasMv: !!row.has_mv,
+    mvId: row.mv_id ?? undefined,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: !!row.is_false_declaration,
     isEdited: !!row.is_edited,
@@ -535,11 +537,11 @@ export const sqliteStore: DataStore = {
     const now = new Date().toISOString();
     const originTypeVal = data.originType ?? null;
     d.run(
-      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
       [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null,
-       data.gameId ? 1 : 0, data.gameId || null, originTypeVal]
+       data.gameId ? 1 : 0, data.gameId || null, data.mvId ? 1 : 0, data.mvId || null, originTypeVal]
     );
     saveDb();
     return {
@@ -552,7 +554,9 @@ export const sqliteStore: DataStore = {
         image_src: data.imageSrc || null, image_alt: data.imageAlt || null,
         avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
         has_collab_button: 1, hearts_total: 0, has_game: data.gameId ? 1 : 0,
-        game_id: data.gameId || null, origin_type: originTypeVal,
+        game_id: data.gameId || null,
+        has_mv: data.mvId ? 1 : 0, mv_id: data.mvId || null,
+        origin_type: originTypeVal,
       }),
       replies: []
     };
@@ -666,10 +670,11 @@ export const sqliteStore: DataStore = {
     const now = new Date().toISOString();
     const parentPostId = data.parentPostId ?? postId;
     d.run(
-      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, postId, parentPostId, data.displayName, slug, data.content, now, data.avatarColor || 'from-blue-500 to-indigo-600',
-       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null, data.originType || null]
+       data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null,
+       data.mvId ? 1 : 0, data.mvId || null, data.originType || null]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
     const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
@@ -701,7 +706,9 @@ export const sqliteStore: DataStore = {
         has_image: data.hasImage ? 1 : 0, image_src: data.imageSrc || null, image_alt: data.imageAlt || null,
         avatar_color: data.avatarColor || 'from-blue-500 to-indigo-600',
         has_collab_button: 0, hearts_total: 0, has_game: data.gameId ? 1 : 0,
-        game_id: data.gameId || null, origin_type: data.originType || null,
+        game_id: data.gameId || null,
+        has_mv: data.mvId ? 1 : 0, mv_id: data.mvId || null,
+        origin_type: data.originType || null,
       }),
       replies: [],
     };
@@ -751,7 +758,7 @@ export const sqliteStore: DataStore = {
     const hasChildren = (childRows[0]?.cnt ?? 0) > 0;
 
     if (!isReply && hasChildren) {
-      d.run(`UPDATE posts SET content = '(削除されました)', has_image = 0, image_src = NULL, has_game = 0, game_id = NULL WHERE id = ?`, [id]);
+      d.run(`UPDATE posts SET content = '(削除されました)', has_image = 0, image_src = NULL, has_game = 0, game_id = NULL, has_mv = 0, mv_id = NULL WHERE id = ?`, [id]);
     } else {
       d.run('DELETE FROM posts WHERE id = ?', [id]);
       if (isReply) d.run('UPDATE posts SET replies_count = MAX(replies_count - 1, 0) WHERE id = ?', [post.thread_id]);
@@ -1322,6 +1329,72 @@ export const sqliteStore: DataStore = {
   async reportContent(data: ReportParams) {
     const d = await getDb();
     d.run('INSERT INTO reports (reporter_slug, target_type, target_id, reason) VALUES (?, ?, ?, ?)', [data.reporterSlug, data.targetType, data.targetId, data.reason]);
+    saveDb();
+  },
+
+  async createMv(data) {
+    const d = await getDb();
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    const now = new Date().toISOString();
+    d.run(
+      `INSERT INTO mvs (id, preset, title, manifest, created_at, creator_slug) VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, data.preset, data.title, JSON.stringify(data.manifest), now, data.creatorSlug || null]
+    );
+    saveDb();
+    return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug, plays: 0 };
+  },
+
+  async getMv(id) {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM mvs WHERE id = ?', [id]);
+    if (rows.length === 0) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      preset: r.preset,
+      title: r.title,
+      manifest: JSON.parse(r.manifest),
+      createdAt: r.created_at,
+      creatorSlug: r.creator_slug ?? undefined,
+      plays: Number(r.plays ?? 0),
+    };
+  },
+
+  async getMvsByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    const d = await getDb();
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest, created_at, creator_slug, plays FROM mvs WHERE id IN (${placeholders})`, ids);
+    return rows.map(r => {
+      // pg 版と同じく、サムネに使う背景URLだけを抜いた不完全な manifest を返す。
+      // 再生用には getMv() で取り直すこと。
+      let manifest: any = {};
+      if (typeof r.manifest === 'string') {
+        const match = r.manifest.match(/"bgUrl"\s*:\s*"(https?:\/\/[^"]+)"/);
+        manifest = match ? { stage: { bgUrl: match[1] } } : {};
+      }
+      return {
+        id: r.id,
+        preset: r.preset,
+        title: r.title,
+        manifest,
+        createdAt: r.created_at,
+        creatorSlug: r.creator_slug ?? undefined,
+        plays: Number(r.plays ?? 0),
+      };
+    });
+  },
+
+  async updateMv(id, data) {
+    const d = await getDb();
+    d.run('UPDATE mvs SET title = ?, manifest = ? WHERE id = ?', [data.title, JSON.stringify(data.manifest), id]);
+    saveDb();
+    return this.getMv(id);
+  },
+
+  async recordMvPlay(id) {
+    const d = await getDb();
+    d.run('UPDATE mvs SET plays = COALESCE(plays, 0) + 1 WHERE id = ?', [id]);
     saveDb();
   },
 

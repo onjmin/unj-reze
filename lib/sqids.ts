@@ -1,6 +1,6 @@
 import Sqids from 'sqids';
-import type { Post as ApiPost, GameRecord as ApiGame, Notification as ApiNotification, OshiItem as ApiOshiItem } from './types';
-import type { DbPost, DbGameRecord, DbNotification, DbOshiItem } from './types-db';
+import type { Post as ApiPost, GameRecord as ApiGame, MvRecord as ApiMv, Notification as ApiNotification, OshiItem as ApiOshiItem } from './types';
+import type { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem } from './types-db';
 
 /**
  * ID は数値をそのまま文字列にして返す（旧実装は sqids でエンコードしていた）。
@@ -87,9 +87,17 @@ export function encodePost(post: DbPost): ApiPost {
     id: encodeId(post.id),
     parentPostId: post.parentPostId ? encodeId(post.parentPostId) : undefined,
     gameId: post.gameId ? encodeId(post.gameId) : undefined,
+    mvId: post.mvId ? encodeId(post.mvId) : undefined,
     threadId: encodeId(post.threadId),
     replies: post.replies ? post.replies.map(encodePost) : [],
   } as ApiPost;
+}
+
+export function encodeMv(mv: DbMvRecord): ApiMv {
+  return {
+    ...mv,
+    id: encodeId(mv.id),
+  } as ApiMv;
 }
 
 export function encodeGame(game: DbGameRecord): ApiGame {

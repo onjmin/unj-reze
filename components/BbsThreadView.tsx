@@ -18,6 +18,7 @@ import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import PostComposer from './PostComposer';
 import GameBox from './GameBox';
+import MvBox from './MvBox';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
@@ -25,12 +26,14 @@ import { OriginType } from '@/lib/types';
 import { showToast } from '@/lib/toast';
 import dynamic from 'next/dynamic';
 import type { GameManifestDraft } from './GameMaker';
+import type { MvManifest, MvPresetKind } from '@/lib/mv-config';
 import ImagePreview from './ImagePreview';
 
 const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('./DotDrawingEditor'), { ssr: false });
 const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
+const MvMaker = dynamic(() => import('./MvMaker'), { ssr: false });
 
 type ReplyGameDraft = { manifest: GameManifestDraft; title: string; preset: string };
 
@@ -80,11 +83,12 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [replyMml, setReplyMml] = useState<string | null>(null);
   const [replyGameDraft, setReplyGameDraft] = useState<ReplyGameDraft | null>(null);
+  const [replyMvDraft, setReplyMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [replyTo, setReplyTo] = useState<number | null>(null);
   /** 全画面エディタ（お絵描き/ドット絵/MML/ゲーム）。返信欄は閉じずに上へ重ねるので、
    *  保存後もレス番指定（replyTo）や書きかけの本文はそのまま残る。 */
-  const [activeScreen, setActiveScreen] = useState<'drawing' | 'dotdrawing' | 'mml' | 'gamemaker' | null>(null);
+  const [activeScreen, setActiveScreen] = useState<'drawing' | 'dotdrawing' | 'mml' | 'gamemaker' | 'mvmaker' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
   const [userSlug, setUserSlug] = useState<string | undefined>(undefined);
@@ -108,7 +112,7 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
   const indexMap = new Map<string, number>(allPosts.map((p, i) => [p.id, i + 1]));
 
   const handleAddReply = async () => {
-    if (!replyText.trim() && !replyImage && !replyMml && !replyGameDraft) return;
+    if (!replyText.trim() && !replyImage && !replyMml && !replyGameDraft && !replyMvDraft) return;
     if (submitting) return;
     setSubmitting(true);
     const replyNum = replyTo !== null ? `>>${replyTo}\n` : '';
@@ -138,11 +142,13 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
     setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
     const capturedImage = replyImage;
     const capturedGameDraft = replyGameDraft;
+    const capturedMvDraft = replyMvDraft;
     const capturedOriginType = replyOriginType;
     setReplyText('');
     setReplyImage(null);
     setReplyMml(null);
     setReplyGameDraft(null);
+    setReplyMvDraft(null);
     setReplyOriginType(undefined);
     setReplyTo(null);
 
@@ -166,6 +172,19 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
         }
       }
 
+      let mvId: number | undefined;
+      if (capturedMvDraft) {
+        const res = await fetch('/api/mvs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: capturedMvDraft.preset, title: capturedMvDraft.title, manifest: capturedMvDraft.manifest, creatorSlug: userSlug }),
+        });
+        if (res.ok) {
+          const savedMv = await res.json();
+          mvId = savedMv.id;
+        }
+      }
+
       const reply = await api.posts.replies.create(post.id, {
         displayName: userId,
         content,
@@ -173,6 +192,7 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
         hasImage: !!capturedImage,
         imageSrc,
         gameId,
+        mvId,
         originType: capturedOriginType,
       });
       setPost(p => ({
@@ -212,6 +232,12 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
     setReplyGameDraft({ manifest, title: meta.title, preset: meta.preset });
     setActiveScreen(null);
     setReplyText(prev => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
+  };
+
+  const handleSaveMv = (data: { manifest: MvManifest; title: string; preset: MvPresetKind }) => {
+    setReplyMvDraft(data);
+    setActiveScreen(null);
+    setReplyText(prev => prev.trim() ? prev : `#MV 「${data.title}」を作ったよ！`);
   };
 
   const handleHeart = useCallback((targetPost: Post) => {
@@ -347,6 +373,20 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
                 </div>
               )}
 
+              {/* MV */}
+              {p.hasMv && p.mvId && (
+                <div className="pl-6 mt-2">
+                  <MvBox
+                    mvId={p.mvId}
+                    postId={p.id}
+                    mvTitle={p.mvTitle || 'MV'}
+                    mvThumbnail={p.mvThumbnail}
+                    mvPreset={p.mvPreset}
+                    mvPlays={p.mvPlays}
+                  />
+                </div>
+              )}
+
               {/* Game */}
               {p.hasGame && (
                 <div className="pl-6 mt-2">
@@ -406,6 +446,8 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
           setMml={setReplyMml}
           gameDraft={replyGameDraft}
           setGameDraft={setReplyGameDraft}
+          mvDraft={replyMvDraft}
+          setMvDraft={setReplyMvDraft}
           originType={replyOriginType}
           setOriginType={setReplyOriginType}
           onClose={() => { }}
@@ -414,6 +456,7 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
           onOpenDotDrawing={() => setActiveScreen('dotdrawing')}
           onOpenMml={() => setActiveScreen('mml')}
           onOpenGameMaker={() => setActiveScreen('gamemaker')}
+          onOpenMvMaker={() => setActiveScreen('mvmaker')}
         />
       </div>
 
@@ -428,6 +471,9 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
       )}
       {activeScreen === 'gamemaker' && (
         <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} initialManifest={replyGameDraft?.manifest} />
+      )}
+      {activeScreen === 'mvmaker' && (
+        <MvMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveMv} initialManifest={replyMvDraft?.manifest} isEditing={!!replyMvDraft} />
       )}
 
       {selectedUser && (

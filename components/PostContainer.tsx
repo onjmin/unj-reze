@@ -25,6 +25,7 @@ import OriginTypeModal from './OriginTypeModal';
 import UserActionMenu from './UserActionMenu';
 import ImagePreview from './ImagePreview';
 import GameBox from './GameBox';
+import MvBox from './MvBox';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
@@ -457,6 +458,18 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                 </button>
               )}
             </div>
+          )}
+
+          {post.hasMv && post.mvId && (
+            <MvBox
+              mvId={post.mvId}
+              postId={post.id}
+              mvTitle={post.mvTitle || 'MV'}
+              mvThumbnail={post.mvThumbnail}
+              mvPreset={post.mvPreset}
+              mvPlays={post.mvPlays}
+              className="mb-3"
+            />
           )}
 
           {post.hasGame && userId && (

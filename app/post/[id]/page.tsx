@@ -5,7 +5,7 @@ import { db as mockDb } from '@/lib/mock-db';
 import PostDetail from '@/components/PostDetail';
 import Link from 'next/link';
 import { decodeId, encodeId, encodePost } from '@/lib/sqids';
-import { attachGameInfo } from '@/lib/game-embed';
+import { attachEmbedInfo } from '@/lib/post-embeds';
 import { getDisplayContent } from '@/lib/mml';
 import { SITE_NAME, SITE_URL } from '@/lib/site';
 
@@ -15,7 +15,7 @@ const DEFAULT_USER_ID = '名無しvFZ';
 const getCachedPost = cache(async (decodedId: number) => {
   const post = await db.getPost(decodedId, DEFAULT_USER_ID);
   if (!post) return null;
-  await attachGameInfo(post);
+  await attachEmbedInfo(post);
   return post;
 });
 

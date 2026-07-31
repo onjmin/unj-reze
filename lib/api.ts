@@ -53,9 +53,10 @@ const staticApi = {
       if (!post) throw new Error('Post not found');
       return encodePost(post);
     },
-    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType }) => {
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType }) => {
       const decodedGameId = data.gameId ? decodeIdOrThrow(data.gameId) : undefined;
-      const post = await mockDbInstance.createPost({ ...data, gameId: decodedGameId });
+      const decodedMvId = data.mvId ? decodeIdOrThrow(data.mvId) : undefined;
+      const post = await mockDbInstance.createPost({ ...data, gameId: decodedGameId, mvId: decodedMvId });
       return encodePost(post);
     },
     like: async (id: string, userId?: string) => {
@@ -102,14 +103,17 @@ const staticApi = {
         imageAlt?: string;
         avatarColor?: string;
         gameId?: string | number;
+        mvId?: string | number;
         originType?: OriginType;
       }) => {
         const decodedParentPostId = data.parentPostId ? decodeIdOrThrow(data.parentPostId) : undefined;
         const gameIdNum = data.gameId ? Number(data.gameId) : undefined;
+        const mvIdNum = data.mvId ? Number(data.mvId) : undefined;
         const reply = await mockDbInstance.addReply(decodeIdOrThrow(postId), {
           ...data,
           parentPostId: decodedParentPostId,
-          gameId: gameIdNum
+          gameId: gameIdNum,
+          mvId: mvIdNum
         });
         if (!reply) throw new Error('Post not found');
         return encodePost(reply);
@@ -265,7 +269,7 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
-    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; originType?: OriginType }) =>
+    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType }) =>
       fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
     like: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
     dislike: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
@@ -287,6 +291,7 @@ const liveApi = {
         imageAlt?: string;
         avatarColor?: string;
         gameId?: string | number;
+        mvId?: string | number;
         originType?: OriginType;
       }) =>
         fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),

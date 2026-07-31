@@ -33,6 +33,7 @@ import HeartBurst from '@/components/HeartBurst';
 import { showToast, triggerHeartBurst } from '@/lib/toast';
 import { setRemixHandler, takeStashedRemix, type RemixDraft } from '@/lib/remix';
 import { countUnreadMessages, MESSAGES_READ_EVENT, NOTIFICATIONS_READ_EVENT } from '@/lib/read-state';
+import type { MvManifest, MvPresetKind } from '@/lib/mv-config';
 
 /** フィード1ページあたりのスレッド数。サーバー側の上限は50。 */
 const FEED_PAGE_SIZE = 20;
@@ -40,6 +41,7 @@ const FEED_PAGE_SIZE = 20;
 const DrawingEditor = dynamic(() => import('@/components/DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('@/components/DotDrawingEditor'), { ssr: false });
 const MmlEditor = dynamic(() => import('@/components/MmlEditor'), { ssr: false });
+const MvMaker = dynamic(() => import('@/components/MvMaker'), { ssr: false });
 
 export default function App() {
   const router = useRouter();
@@ -117,6 +119,7 @@ export default function App() {
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
+  const [mvDraft, setMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
   const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string; gameId?: string; creatorSlug?: string } | null>(null);
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
@@ -464,6 +467,7 @@ export default function App() {
     setAttachedImage(null);
     setAttachedMml(null);
     setGameDraft(null);
+    setMvDraft(null);
     setOriginType(undefined);
 
     try {
@@ -484,6 +488,18 @@ export default function App() {
           gameId = savedGame.id;
         }
       }
+      let mvId: number | undefined;
+      if (mvDraft) {
+        const res = await fetch('/api/mvs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: mvDraft.preset, title: mvDraft.title, manifest: mvDraft.manifest, creatorSlug: currentUser?.slug }),
+        });
+        if (res.ok) {
+          const savedMv = await res.json();
+          mvId = savedMv.id;
+        }
+      }
 
       const reply = await api.posts.replies.create(postId, {
         displayName: userId,
@@ -492,6 +508,7 @@ export default function App() {
         hasImage: !!attachedImage,
         imageSrc,
         gameId,
+        mvId,
         originType,
       });
 
@@ -521,8 +538,8 @@ export default function App() {
   };
 
   const handleCreatePost = async () => {
-    // ゲームだけ添付してコメントを消した場合も投稿できるようにする（送信ボタンの活性条件と揃える）
-    if (!inputText.trim() && !attachedImage && !attachedMml && !gameDraft) return;
+    // ゲーム/MVだけ添付してコメントを消した場合も投稿できるようにする（送信ボタンの活性条件と揃える）
+    if (!inputText.trim() && !attachedImage && !attachedMml && !gameDraft && !mvDraft) return;
     // #MML作曲行は1行目、自由コメントはその下の行として保存する
     // （パース側は行頭一致でMML行だけを抽出するため、コメントと混在させて良い）
     const parts: string[] = [];
@@ -548,6 +565,7 @@ export default function App() {
     setAttachedImage(null);
     setAttachedMml(null);
     setGameDraft(null);
+    setMvDraft(null);
     setOriginType(undefined);
 
     try {
@@ -568,6 +586,18 @@ export default function App() {
           gameId = savedGame.id;
         }
       }
+      let mvId: string | undefined;
+      if (mvDraft) {
+        const res = await fetch('/api/mvs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: mvDraft.preset, title: mvDraft.title, manifest: mvDraft.manifest, creatorSlug: currentUser?.slug }),
+        });
+        if (res.ok) {
+          const savedMv = await res.json();
+          mvId = savedMv.id;
+        }
+      }
       const post = await api.posts.create({
         displayName: userId,
         content,
@@ -575,6 +605,7 @@ export default function App() {
         imageSrc,
         avatarColor: "from-blue-500 to-indigo-600",
         gameId,
+        mvId,
         originType,
       });
       setPosts(prev => {
@@ -746,6 +777,12 @@ export default function App() {
     setInputText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
   };
 
+  const handleSaveMv = (data: { manifest: MvManifest; title: string; preset: MvPresetKind }) => {
+    setMvDraft(data);
+    closeScreen();
+    setInputText((prev) => prev.trim() ? prev : `#MV 「${data.title}」を作ったよ！`);
+  };
+
   /**
    * 他人のゲームを「改造する」で受け取ったときの処理。
    * 下書きに取り込んだうえでエディタを開き、そのまま手を入れられる状態にする。
@@ -777,7 +814,7 @@ export default function App() {
     };
   }, [handleRemixDraft]);
 
-  const handleOpenEditor = (screenType: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker') => {
+  const handleOpenEditor = (screenType: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker' | 'mvmaker') => {
     const hasImage = !!attachedImage;
     const hasMml = !!attachedMml;
     const hasGame = !!gameDraft;
@@ -848,6 +885,15 @@ export default function App() {
       )}
       {activeScreen === 'gamemaker' && (
         <GameMaker onClose={closeScreen} userId={userId} onSave={handleSaveGame} initialManifest={gameDraft?.manifest} />
+      )}
+      {activeScreen === 'mvmaker' && (
+        <MvMaker
+          onClose={closeScreen}
+          userId={userId}
+          onSave={handleSaveMv}
+          initialManifest={mvDraft?.manifest}
+          isEditing={!!mvDraft}
+        />
       )}
       {activeScreen === 'postgame' && playingGame && (
         <GameMaker
@@ -969,6 +1015,8 @@ export default function App() {
                       setMml={setAttachedMml}
                       gameDraft={gameDraft}
                       setGameDraft={setGameDraft}
+                      mvDraft={mvDraft}
+                      setMvDraft={setMvDraft}
                       originType={originType}
                       setOriginType={setOriginType}
                       onClose={() => {}}
@@ -977,6 +1025,7 @@ export default function App() {
                       onOpenDotDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('dotdrawing'); }}
                       onOpenMml={() => handleOpenEditor('mml')}
                       onOpenGameMaker={() => handleOpenEditor('gamemaker')}
+                      onOpenMvMaker={() => handleOpenEditor('mvmaker')}
                     />
                   )}
 
@@ -1063,6 +1112,8 @@ export default function App() {
             setMml={setAttachedMml}
             gameDraft={gameDraft}
             setGameDraft={setGameDraft}
+            mvDraft={mvDraft}
+            setMvDraft={setMvDraft}
             originType={originType}
             setOriginType={setOriginType}
             onClose={() => { setComposerOpen(false); setReplyTargetPost(null); }}
@@ -1080,6 +1131,7 @@ export default function App() {
             onOpenDotDrawing={() => { setCollabImageUrl(attachedImage || undefined); handleOpenEditor('dotdrawing'); }}
             onOpenMml={() => handleOpenEditor('mml')}
             onOpenGameMaker={() => handleOpenEditor('gamemaker')}
+            onOpenMvMaker={() => handleOpenEditor('mvmaker')}
             replyToDisplayName={replyTargetPost ? replyTargetPost.displayName : undefined}
           />
         )}
@@ -1129,6 +1181,8 @@ export default function App() {
             hasGame={editingPost.hasGame}
             gameTitle={editingPost.gameTitle}
             onEditGame={() => handleOpenPostGame(editingPost.gameId || '', editingPost.id)}
+            hasMv={editingPost.hasMv}
+            mvTitle={editingPost.mvTitle}
           />
         )}
         </div>

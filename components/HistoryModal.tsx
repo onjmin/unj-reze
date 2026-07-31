@@ -8,7 +8,7 @@ interface HistoryModalProps<T = unknown> {
   isOpen: boolean;
   onClose: () => void;
   storageKey: string;
-  type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay';
+  type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay' | 'mv';
   onRestore: (data: T) => void;
   // getCurrentData returns the current state of the editor to capture a manual snapshot
   getCurrentData?: () => T | null;

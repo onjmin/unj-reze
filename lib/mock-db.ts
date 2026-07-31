@@ -359,6 +359,7 @@ class MockDB {
     avatarColor?: string;
     slug?: string;
     gameId?: number;
+    mvId?: number;
     originType?: OriginType;
   }): Post {
     const createdAt = this.now();
@@ -384,6 +385,8 @@ class MockDB {
       heartsTotal: 0,
       hasGame: !!data.gameId,
       gameId: data.gameId,
+      hasMv: !!data.mvId,
+      mvId: data.mvId,
       originType: data.originType,
       isFalseDeclaration: false,
       threadId: this.genId(),
@@ -465,6 +468,7 @@ class MockDB {
     imageAlt?: string;
     avatarColor?: string;
     gameId?: number;
+    mvId?: number;
     originType?: OriginType;
   }): Post | null {
     const post = this.posts.find(p => p.id === postId);
@@ -482,6 +486,8 @@ class MockDB {
       imageAlt: data.imageAlt,
       gameId: data.gameId,
       hasGame: !!data.gameId,
+      mvId: data.mvId,
+      hasMv: !!data.mvId,
       originType: data.originType,
     };
     this.posts.push(reply);
@@ -872,6 +878,8 @@ class MockDB {
       post.imageSrc = undefined;
       post.hasGame = false;
       post.gameId = undefined;
+      post.hasMv = false;
+      post.mvId = undefined;
       return true;
     }
 

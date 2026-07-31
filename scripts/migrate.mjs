@@ -389,6 +389,25 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_notifications_target_slug ON notifications(target_slug, read, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_notifications_actor_slug ON notifications(actor_slug);
     `
+  },
+  {
+    name: '20_create_mvs_and_link_posts',
+    sql: `
+      CREATE TABLE IF NOT EXISTS mvs (
+        id BIGINT PRIMARY KEY,
+        preset TEXT NOT NULL,
+        title TEXT NOT NULL,
+        manifest TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        creator_slug TEXT,
+        plays BIGINT NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_mvs_plays ON mvs(plays DESC);
+
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS has_mv BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_posts_mv_id ON posts(mv_id);
+    `
   }
 ];
 

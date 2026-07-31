@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS posts (
   hearts_total INTEGER NOT NULL DEFAULT 0,
   has_game INTEGER NOT NULL DEFAULT 0,
   game_id INTEGER,
+  has_mv INTEGER NOT NULL DEFAULT 0,
+  mv_id INTEGER,
   origin_type TEXT,
   is_false_declaration INTEGER NOT NULL DEFAULT 0,
   is_edited INTEGER NOT NULL DEFAULT 0
@@ -74,6 +76,19 @@ CREATE TABLE IF NOT EXISTS games (
   best_score_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
+
+-- MV（ミュージックビデオ）テーブル
+CREATE TABLE IF NOT EXISTS mvs (
+  id INTEGER PRIMARY KEY,
+  preset TEXT NOT NULL,
+  title TEXT NOT NULL,
+  manifest TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  creator_slug TEXT,
+  plays INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_mvs_plays ON mvs(plays DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_mv_id ON posts(mv_id);
 
 -- いいね/わるい 投票テーブル (1ユーザー1投票)
 CREATE TABLE IF NOT EXISTS post_votes (

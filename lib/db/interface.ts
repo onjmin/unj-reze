@@ -1,12 +1,20 @@
 import { AnonymousUser, FollowUser, GhostPlayer, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
-import { DbPost, DbGameRecord, DbNotification, DbOshiItem } from '../types-db';
+import { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem } from '../types-db';
 import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
+import type { MvManifest, MvPresetKind } from '../mv-config';
 
 export interface CreateGameParams {
   preset: string;
   title: string;
   manifest: GameManifestDraft;
+  creatorSlug?: string;
+}
+
+export interface CreateMvParams {
+  preset: MvPresetKind;
+  title: string;
+  manifest: MvManifest;
   creatorSlug?: string;
 }
 
@@ -42,6 +50,7 @@ export interface CreatePostParams {
   avatarColor?: string;
   slug?: string;
   gameId?: number;
+  mvId?: number;
   /** 自己申告の権利表記。未設定なら undefined */
   originType?: OriginType;
 }
@@ -55,6 +64,7 @@ export interface ReplyParams {
   imageAlt?: string;
   avatarColor?: string;
   gameId?: number;
+  mvId?: number;
   originType?: OriginType;
 }
 
@@ -136,6 +146,17 @@ export interface DataStore {
   getGamesByIds(ids: number[]): Promise<DbGameRecord[]>;
   updateGame(id: number, data: { title: string; manifest: GameManifestDraft }): Promise<DbGameRecord | null>;
   listAllGames(limit?: number): Promise<DbGameRecord[]>;
+  createMv(data: CreateMvParams): Promise<DbMvRecord>;
+  getMv(id: number): Promise<DbMvRecord | null>;
+  /**
+   * 投稿一覧に埋めるMV情報をまとめて引く。
+   * 転送量の都合で manifest 本体は返さず、サムネに使う背景URLだけを含む形にすること
+   * （docs/NEON_EGRESS.md）。
+   */
+  getMvsByIds(ids: number[]): Promise<DbMvRecord[]>;
+  updateMv(id: number, data: { title: string; manifest: MvManifest }): Promise<DbMvRecord | null>;
+  /** MVの再生数を1加算する。 */
+  recordMvPlay(id: number): Promise<void>;
   /** プレイ結果を記録する。plays/clears を加算し、スコアが上回っていればハイスコアを更新する。 */
   recordGamePlay(gameId: number, data: RecordGamePlayParams): Promise<DbGameRecord | null>;
   /** プレイ数の多い順のゲームランキング。postId を含む。 */

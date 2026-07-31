@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
-import { attachGameInfo } from '@/lib/game-embed';
+import { attachEmbedInfo } from '@/lib/post-embeds';
 import { withEdgeCache } from '@/lib/edge-cache';
 import { publishRealtime } from '@/lib/realtime/publish';
 import { CH_FEED } from '@/lib/realtime/channels';
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
       { sMaxAge: beforeId ? 60 : 10, personalized: !!userId },
       async () => {
         const posts = await db.getPosts(userId, limit, beforeId);
-        await attachGameInfo(posts);
+        await attachEmbedInfo(posts);
         return NextResponse.json(posts.map(encodePost));
       }
     );
@@ -51,11 +51,11 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const {
-      displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType,
+      displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, mvId, originType,
       turnstileToken, fingerprint,
     }: {
       displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string;
-      avatarColor?: string; gameId?: string; originType?: OriginType;
+      avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType;
       turnstileToken?: string | null; fingerprint?: FingerprintSignals | null;
     } = body;
 
@@ -97,9 +97,18 @@ export async function POST(request: NextRequest) {
     if (gameId && decodedGameId === null) {
       return NextResponse.json({ error: 'Invalid gameId' }, { status: 400 });
     }
+    const decodedMvId = mvId ? decodeId(mvId) : undefined;
+    if (mvId && decodedMvId === null) {
+      return NextResponse.json({ error: 'Invalid mvId' }, { status: 400 });
+    }
 
-    const post = await db.createPost({ displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId: decodedGameId === null ? undefined : decodedGameId, originType });
-    await attachGameInfo(post);
+    const post = await db.createPost({
+      displayName, content, hasImage, imageSrc, imageAlt, avatarColor,
+      gameId: decodedGameId === null ? undefined : decodedGameId,
+      mvId: decodedMvId === null ? undefined : decodedMvId,
+      originType,
+    });
+    await attachEmbedInfo(post);
     const encoded = encodePost(post);
 
     // フィード購読者へ push する。これがあるおかげでクライアントは

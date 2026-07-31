@@ -1,4 +1,5 @@
 import type { GameManifestDraft } from '@/components/GameMaker';
+import type { MvManifest, MvPresetKind } from './mv-config';
 
 /** 投稿本文をこの行数を超えたら折りたたむ（タイムライン・投稿個別ページ共通） */
 export const POST_BODY_COLLAPSE_LINES = 8;
@@ -50,6 +51,14 @@ export interface Post {
   gamePlays?: number;
   /** ゲームの累計クリア数 */
   gameClears?: number;
+  hasMv?: boolean;
+  mvId?: string;
+  mvTitle?: string;
+  /** MVのサムネイル（背景画像URL。無ければプリセットの色で描く） */
+  mvThumbnail?: string;
+  mvPreset?: MvPresetKind;
+  /** MVの累計再生数 */
+  mvPlays?: number;
   /** 自己申告の権利表記。未設定(申告なし)なら undefined */
   originType?: OriginType;
   /** 権利自己申告が虚偽だったと運営が手動で付与するフラグ。ユーザーからは設定不可 */
@@ -77,6 +86,17 @@ export interface GameRecord {
   bestScore?: number;
   /** ハイスコア保持者の表示名 */
   bestScoreBy?: string;
+}
+
+export interface MvRecord {
+  id: string;
+  preset: MvPresetKind;
+  title: string;
+  manifest: MvManifest;
+  createdAt: string;
+  creatorSlug?: string;
+  /** 累計再生回数 */
+  plays?: number;
 }
 
 /** ゲームランキング1件。一覧表示に manifest は要らないので落としてある。 */

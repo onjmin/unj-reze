@@ -26,8 +26,12 @@ export interface PickResult {
 
 interface ContentPickerProps {
   mode: 'image' | 'bgm';
-  /** mode==='bgm' のときのみ有効。'bgm'=BGM欄（YouTube/MML/URL）、'sfx'=効果音欄（rpgen効果音/URL）でタブを出し分ける。 */
-  bgmKind?: 'bgm' | 'sfx';
+  /**
+   * mode==='bgm' のときのみ有効。タブを出し分ける。
+   * 'bgm'=BGM欄（YouTube/MML/URL）、'sfx'=効果音欄（rpgen効果音/URL）、
+   * 'mml'=MML専用（MVのように外部音源を使えない用途）。
+   */
+  bgmKind?: 'bgm' | 'sfx' | 'mml';
   userId: string;
   /** mode==='image' のときのみ有効。このゲーム内で現在使われている画像参照の一覧（履歴タブで再選択できる）。 */
   usedAssets?: { ref: string; url?: string; label: string }[];
@@ -43,6 +47,8 @@ type BgmTab = 'youtube' | 'nicovideo' | 'soundcloud' | 'mmlPost' | 'mmlRaw' | 'd
 // BGM欄と効果音欄で選べるタブを分ける。BGMはYouTube/MML/内蔵ゲーム音源/URL、効果音はrpgen効果音/内蔵ゲーム音源/URLのみ。
 const BGM_TABS: BgmTab[] = ['youtube', 'nicovideo', 'soundcloud', 'mmlPost', 'builtinGame', 'mmlRaw', 'direct'];
 const SFX_TABS: BgmTab[] = ['rpgenSe', 'builtinGame', 'direct'];
+// MV は音源がMMLだけ（ノートから映像を作るので外部音源では成立しない）。
+const MML_TABS: BgmTab[] = ['mmlPost', 'mmlRaw'];
 
 // モーダルは閉じるたびにアンマウントされるため、タブ選択とスクロール位置をモジュール変数で覚えておき、
 // 再度開いたときに前回見ていた場所へ復元する。BGM欄/効果音欄は選べるタブが違うので別々に覚える。
@@ -50,7 +56,7 @@ const SFX_TABS: BgmTab[] = ['rpgenSe', 'builtinGame', 'direct'];
 // 廃止タブが最後の選択として復元されると空白になるため、既定のマイシートへ振り替える。
 const REMOVED_IMAGE_TABS = new Set<string>(['posts', 'slice', 'walk', 'url']);
 let lastImageTab: ImageTab = 'mySheet';
-const lastBgmTabByKind: Record<'bgm' | 'sfx', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe' };
+const lastBgmTabByKind: Record<'bgm' | 'sfx' | 'mml', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe', mml: 'mmlPost' };
 const scrollPositions = new Map<string, number>();
 
 
@@ -69,7 +75,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   // 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
   // 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
   const [imageTab, setImageTab] = useState<ImageTab>(REMOVED_IMAGE_TABS.has(lastImageTab) ? 'mySheet' : lastImageTab);
-  const allowedBgmTabs = bgmKind === 'sfx' ? SFX_TABS : BGM_TABS;
+  const allowedBgmTabs = bgmKind === 'sfx' ? SFX_TABS : bgmKind === 'mml' ? MML_TABS : BGM_TABS;
   // 現在選択中のBGM/効果音がある場合は、それが属するタブとURL/MML欄をあらかじめ復元する
   // （従来は毎回タブ・入力欄が空になり、既存の設定を再編集できなかった）。
   const currentRefBase = currentRef?.split('#')[0];
@@ -303,7 +309,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
           <span className="text-xs font-bold text-gray-200">
-            {mode === 'image' ? '画像を参照' : bgmKind === 'sfx' ? '効果音を参照' : 'BGMを参照'}
+            {mode === 'image' ? '画像を参照' : bgmKind === 'sfx' ? '効果音を参照' : bgmKind === 'mml' ? 'MMLを参照' : 'BGMを参照'}
           </span>
           <button onClick={() => { stopAllPreviews(); onClose(); }} className="text-gray-400 hover:text-gray-200 p-1 rounded-full hover:bg-gray-100/10">
             <X size={16} />

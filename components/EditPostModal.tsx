@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X, Music, ChevronDown, Gamepad2 } from 'lucide-react';
+import { X, Music, ChevronDown, Gamepad2, Clapperboard } from 'lucide-react';
 import { extractMmlFromContent, getDisplayContent, MML_MARKERS } from '@/lib/mml';
 import dynamic from 'next/dynamic';
 
@@ -19,6 +19,8 @@ interface EditPostModalProps {
   gameTitle?: string;
   onEditGame?: () => void;
   onRemoveGame?: () => void;
+  hasMv?: boolean;
+  mvTitle?: string;
 }
 
 /** content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す */
@@ -45,7 +47,9 @@ export default function EditPostModal({
   hasGame,
   gameTitle,
   onEditGame,
-  onRemoveGame
+  onRemoveGame,
+  hasMv,
+  mvTitle
 }: EditPostModalProps) {
   const { mmlLine: initialMml, textOnly: initialText } = splitMml(initialContent);
 
@@ -196,6 +200,17 @@ export default function EditPostModal({
             {!expanded && (
               <p className="text-[10px] text-pink-400/50 font-mono truncate">{mmlLine}</p>
             )}
+          </div>
+        )}
+
+        {/* MV添付（投稿後の差し替えは未対応なので表示のみ） */}
+        {hasMv && (
+          <div className="relative flex items-center gap-2.5 rounded-lg border border-cyan-700/50 bg-cyan-500/10 px-3 py-2 max-w-[280px] self-start w-full">
+            <Clapperboard size={16} className="text-cyan-400 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold text-cyan-200 truncate">{mvTitle || 'MV'}</p>
+              <p className="text-[10px] text-cyan-400/70">MVを添付中</p>
+            </div>
           </div>
         )}
 

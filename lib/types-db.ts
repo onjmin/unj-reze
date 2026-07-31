@@ -1,4 +1,5 @@
 import type { GameManifestDraft } from '@/components/GameMaker';
+import type { MvManifest, MvPresetKind } from './mv-config';
 import type { OriginType, OshiItemKind } from './types';
 
 export interface DbPost {
@@ -30,6 +31,13 @@ export interface DbPost {
   gamePlays?: number;
   /** ゲームの累計クリア数 */
   gameClears?: number;
+  hasMv?: boolean;
+  mvId?: number;
+  mvTitle?: string;
+  mvThumbnail?: string;
+  mvPreset?: MvPresetKind;
+  /** MVの累計再生数 */
+  mvPlays?: number;
   originType?: OriginType;
   isFalseDeclaration?: boolean;
   isEdited?: boolean;
@@ -55,6 +63,17 @@ export interface DbGameRecord {
   bestScoreBy?: string;
   /** ひもづく投稿ID（ランキングからコメントへ飛ぶ用） */
   postId?: number;
+}
+
+export interface DbMvRecord {
+  id: number;
+  preset: MvPresetKind;
+  title: string;
+  manifest: MvManifest;
+  createdAt: string;
+  creatorSlug?: string;
+  /** 累計再生回数 */
+  plays?: number;
 }
 
 export interface DbOshiItem {

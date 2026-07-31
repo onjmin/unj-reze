@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
-import { X, Pen, Grid3x3, Music, Gamepad2, Image } from 'lucide-react';
+import { X, Pen, Grid3x3, Music, Gamepad2, Image, Clapperboard } from 'lucide-react';
 import { OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
 import OriginTypeModal from './OriginTypeModal';
 import { getAvatarInfo } from '@/lib/avatar';
@@ -20,6 +20,8 @@ interface PostComposerProps {
   setMml: (v: string | null) => void;
   gameDraft: { title: string } | null;
   setGameDraft: (v: null) => void;
+  mvDraft: { title: string } | null;
+  setMvDraft: (v: null) => void;
   originType?: OriginType;
   setOriginType: (v: OriginType | undefined) => void;
   onClose: () => void;
@@ -28,6 +30,7 @@ interface PostComposerProps {
   onOpenDotDrawing: () => void;
   onOpenMml: () => void;
   onOpenGameMaker: () => void;
+  onOpenMvMaker: () => void;
   replyToDisplayName?: string;
   inline?: boolean;
   bbsMode?: string;
@@ -50,7 +53,7 @@ function ToolbarButton({ onClick, title, hoverColor, children }: {
   );
 }
 
-export default function PostComposer({ userId, avatarUrl, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, replyToDisplayName, inline, bbsMode }: PostComposerProps) {
+export default function PostComposer({ userId, avatarUrl, text, setText, image, setImage, mml, setMml, gameDraft, setGameDraft, mvDraft, setMvDraft, originType, setOriginType, onClose, onSubmit, onOpenDrawing, onOpenDotDrawing, onOpenMml, onOpenGameMaker, onOpenMvMaker, replyToDisplayName, inline, bbsMode }: PostComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showOriginModal, setShowOriginModal] = useState(false);
@@ -175,6 +178,29 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
           </div>
         </div>
       )}
+      {mvDraft && (
+        <div className={`relative mt-2 flex items-center gap-2 rounded-lg border border-cyan-700/50 bg-cyan-500/10 px-3 py-2 max-w-[280px] ${md ? 'md:px-4 md:py-3 md:max-w-[420px]' : ''}`}>
+          <Clapperboard size={16} className="text-cyan-400 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-cyan-200 truncate">{mvDraft.title}</p>
+            <p className="text-[10px] text-cyan-400/70">MVを添付中</p>
+          </div>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={onOpenMvMaker}
+              className="text-cyan-300 hover:text-cyan-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-cyan-700/40 hover:bg-cyan-500/25 active:scale-95 transition-all"
+            >
+              編集
+            </button>
+            <button
+              onClick={() => setMvDraft(null)}
+              className="text-cyan-300/70 hover:text-red-400 shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -199,6 +225,10 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       <ToolbarButton onClick={onOpenGameMaker} title="ゲーム作成" hoverColor="hover:text-yellow-400">
         <Gamepad2 size={18} className={md ? 'md:hidden' : undefined} />
         {md && <Gamepad2 size={22} className="hidden md:block" />}
+      </ToolbarButton>
+      <ToolbarButton onClick={onOpenMvMaker} title="MV作成" hoverColor="hover:text-cyan-400">
+        <Clapperboard size={18} className={md ? 'md:hidden' : undefined} />
+        {md && <Clapperboard size={22} className="hidden md:block" />}
       </ToolbarButton>
       <input
         ref={fileInputRef}
@@ -229,7 +259,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
   const submitButton = (
     <button
       onClick={onSubmit}
-      disabled={!text.trim() && !image && !mml && !gameDraft}
+      disabled={!text.trim() && !image && !mml && !gameDraft && !mvDraft}
       className={`bg-blue-600 text-white font-bold rounded-full transition-colors hover:bg-blue-500 disabled:opacity-50 ${md ? 'px-4 py-1.5 md:px-6 md:py-2.5 text-xs md:text-sm' : 'px-4 py-1.5 text-xs'}`}
     >
       投稿
@@ -256,7 +286,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
       e.preventDefault();
-      const canSubmit = text.trim() || image || mml || gameDraft;
+      const canSubmit = text.trim() || image || mml || gameDraft || mvDraft;
       if (canSubmit) {
         onSubmit();
       }

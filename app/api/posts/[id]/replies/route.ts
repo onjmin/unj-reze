@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
-import { attachGameInfo } from '@/lib/game-embed';
+import { attachEmbedInfo } from '@/lib/post-embeds';
 import { withEdgeCache } from '@/lib/edge-cache';
 import { publishRealtime } from '@/lib/realtime/publish';
 import { CH_FEED, chThread } from '@/lib/realtime/channels';
@@ -21,7 +21,7 @@ export async function GET(
     { sMaxAge: 5, personalized: !!userId },
     async () => {
       const replies = await db.getReplies(decodedId, userId);
-      await attachGameInfo(replies);
+      await attachEmbedInfo(replies);
       return NextResponse.json(replies.map(encodePost));
     }
   );
@@ -37,7 +37,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { displayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, originType } = body;
+  const { displayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, mvId, originType } = body;
 
   if (!displayName) {
     return NextResponse.json(
@@ -46,7 +46,7 @@ export async function POST(
     );
   }
 
-  if (!content && !hasImage && !gameId) {
+  if (!content && !hasImage && !gameId && !mvId) {
     return NextResponse.json(
       { error: 'content, image, or game is required' },
       { status: 400 }
@@ -67,13 +67,14 @@ export async function POST(
     imageAlt,
     avatarColor,
     gameId: gameId ? Number(gameId) : undefined,
+    mvId: mvId ? Number(mvId) : undefined,
     originType,
   });
   if (!reply) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
 
-  await attachGameInfo(reply);
+  await attachEmbedInfo(reply);
   const encoded = encodePost(reply);
 
   // スレッド購読者（詳細画面・実況コメント）とフィードの返信タブへ push する。

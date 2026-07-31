@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
-import { attachGameInfo } from '@/lib/game-embed';
+import { attachEmbedInfo } from '@/lib/post-embeds';
 
 export async function GET(
   _request: NextRequest,
@@ -18,7 +18,7 @@ export async function GET(
   if (!post) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
-  await attachGameInfo(post);
+  await attachEmbedInfo(post);
   return NextResponse.json(encodePost(post));
 }
 
@@ -57,7 +57,7 @@ export async function PUT(
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
 
-  await attachGameInfo(result);
+  await attachEmbedInfo(result);
   return NextResponse.json(encodePost(result));
 }
 
@@ -77,7 +77,7 @@ export async function POST(
   if (!result) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
-  await attachGameInfo(result);
+  await attachEmbedInfo(result);
   return NextResponse.json(encodePost(result));
 }
 

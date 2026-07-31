@@ -61,7 +61,7 @@ const POST_COLUMNS = [
   'p.id', 'p.thread_id', 'p.parent_post_id', 'p.slug', 'p.created_at', 'p.content',
   'p.likes', 'p.dislikes', 'p.replies_count', 'p.reposts', 'p.reposted',
   'p.has_image', 'p.image_src', 'p.image_alt', 'p.avatar_color', 'p.has_collab_button',
-  'p.hearts_total', 'p.has_game', 'p.game_id', 'p.origin_type',
+  'p.hearts_total', 'p.has_game', 'p.game_id', 'p.has_mv', 'p.mv_id', 'p.origin_type',
   'p.is_false_declaration', 'p.is_edited',
 ].join(', ');
 
@@ -104,6 +104,8 @@ async function rowToPost(row: any): Promise<Post> {
     heartsTotal: row.hearts_total ?? 0,
     hasGame: row.has_game,
     gameId: row.game_id ?? undefined,
+    hasMv: row.has_mv ?? false,
+    mvId: row.mv_id ?? undefined,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: row.is_false_declaration ?? false,
     isEdited: row.is_edited ?? false,
@@ -425,12 +427,12 @@ export const pgStore: DataStore = {
     try {
       const slug = data.slug || deriveSlugPg(data.displayName);
       const insertResult = await client.query(
-        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10, $11, $12)
          RETURNING *`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-         !!data.gameId, data.gameId || null, data.originType ?? null]
+         !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, data.originType ?? null]
       );
       return { ...(await rowToPost(insertResult.rows[0])), replies: [] };
     } finally {
@@ -605,14 +607,14 @@ export const pgStore: DataStore = {
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const result = await client.query(
-        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12)
+        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING *`,
         [
           postId, parentPostId, data.displayName, slug, data.content,
           data.avatarColor || 'from-blue-500 to-indigo-600',
           data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-          !!data.gameId, data.gameId || null, data.originType ?? null
+          !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, data.originType ?? null
         ]
       );
       await client.query(
@@ -705,7 +707,7 @@ export const pgStore: DataStore = {
 
       if (!isReply && hasChildren) {
         await client.query(
-          `UPDATE posts SET content = '(削除されました)', has_image = false, image_src = NULL, has_game = false, game_id = NULL WHERE id = $1`,
+          `UPDATE posts SET content = '(削除されました)', has_image = false, image_src = NULL, has_game = false, game_id = NULL, has_mv = false, mv_id = NULL WHERE id = $1`,
           [id]
         );
       } else {
@@ -1520,6 +1522,94 @@ export const pgStore: DataStore = {
         [data.reporterSlug, data.targetType, data.targetId, data.reason]
       );
     } finally { client.release(); }
+  },
+
+  async createMv(data) {
+    const client = await getPool().connect();
+    try {
+      const id = Date.now() + Math.floor(Math.random() * 1000);
+      const now = new Date().toISOString();
+      await client.query(
+        `INSERT INTO mvs (id, preset, title, manifest, created_at, creator_slug) VALUES ($1, $2, $3, $4, NOW(), $5)`,
+        [id, data.preset, data.title, JSON.stringify(data.manifest), data.creatorSlug || null]
+      );
+      return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug, plays: 0 };
+    } finally {
+      client.release();
+    }
+  },
+
+  async getMv(id) {
+    const client = await getPool().connect();
+    try {
+      const result = await client.query('SELECT * FROM mvs WHERE id = $1', [id]);
+      if (result.rows.length === 0) return null;
+      const r = result.rows[0];
+      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+      return {
+        id: r.id,
+        preset: r.preset,
+        title: r.title,
+        manifest: JSON.parse(r.manifest),
+        createdAt,
+        creatorSlug: r.creator_slug ?? undefined,
+        plays: Number(r.plays ?? 0),
+      };
+    } finally {
+      client.release();
+    }
+  },
+
+  async getMvsByIds(ids) {
+    if (!ids || ids.length === 0) return [];
+    const client = await getPool().connect();
+    try {
+      // getGamesByIds と同じ理由で manifest 列は転送しない（docs/NEON_EGRESS.md）。
+      // フィードのサムネに要るのは背景URLだけなので、抽出は DB 側でやる。
+      const BG_URL_SQL = `substring(m.manifest::text from '"bgUrl"[[:space:]]*:[[:space:]]*"(https?://[^"]+)"')`;
+      const result = await client.query(
+        `SELECT m.id, m.preset, m.title, m.created_at, m.creator_slug, m.plays,
+                ${BG_URL_SQL} AS bg_url
+           FROM mvs m WHERE m.id = ANY($1::bigint[])`,
+        [ids]
+      );
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
+        // manifest は「サムネに必要な最小限」だけを組み立てた不完全な形。
+        // 再生には使えないので、必ず getMv() で取り直すこと。
+        const manifest: any = r.bg_url ? { stage: { bgUrl: r.bg_url } } : {};
+        return {
+          id: r.id,
+          preset: r.preset,
+          title: r.title,
+          manifest,
+          createdAt,
+          creatorSlug: r.creator_slug ?? undefined,
+          plays: Number(r.plays ?? 0),
+        };
+      });
+    } finally {
+      client.release();
+    }
+  },
+
+  async updateMv(id, data) {
+    const client = await getPool().connect();
+    try {
+      await client.query('UPDATE mvs SET title = $1, manifest = $2 WHERE id = $3', [data.title, JSON.stringify(data.manifest), id]);
+    } finally {
+      client.release();
+    }
+    return this.getMv(id);
+  },
+
+  async recordMvPlay(id) {
+    const client = await getPool().connect();
+    try {
+      await client.query('UPDATE mvs SET plays = COALESCE(plays, 0) + 1 WHERE id = $1', [id]);
+    } finally {
+      client.release();
+    }
   },
 
   async createGame(data) {

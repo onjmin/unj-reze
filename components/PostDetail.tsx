@@ -20,7 +20,9 @@ import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 import GameBox from './GameBox';
+import MvBox from './MvBox';
 import type { GameManifestDraft } from './GameMaker';
+import type { MvManifest, MvPresetKind } from '@/lib/mv-config';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
@@ -31,6 +33,7 @@ const DrawingEditor = dynamic(() => import('./DrawingEditor'), { ssr: false });
 const DotDrawingEditor = dynamic(() => import('./DotDrawingEditor'), { ssr: false });
 const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
+const MvMaker = dynamic(() => import('./MvMaker'), { ssr: false });
 const PostComposer = dynamic(() => import('./PostComposer'), { ssr: false });
 const EditPostModal = dynamic(() => import('./EditPostModal'), { ssr: false });
 const DeletePostModal = dynamic(() => import('./DeletePostModal'), { ssr: false });
@@ -67,6 +70,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [replyMml, setReplyMml] = useState<string | null>(null);
   const [replyGameDraft, setReplyGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
+  const [replyMvDraft, setReplyMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
@@ -300,6 +304,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setReplyImage(null);
     setReplyMml(null);
     setReplyGameDraft(null);
+    setReplyMvDraft(null);
     setReplyOriginType(undefined);
     setComposerOpen(false);
 
@@ -322,6 +327,19 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         }
       }
 
+      let mvId: number | undefined;
+      if (replyMvDraft) {
+        const res = await fetch('/api/mvs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset: replyMvDraft.preset, title: replyMvDraft.title, manifest: replyMvDraft.manifest, creatorSlug: userSlug }),
+        });
+        if (res.ok) {
+          const savedMv = await res.json();
+          mvId = savedMv.id;
+        }
+      }
+
       const reply = await api.posts.replies.create(post.id, {
         displayName: userId,
         content,
@@ -329,6 +347,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         hasImage: !!replyImage,
         imageSrc,
         gameId,
+        mvId,
         originType: replyOriginType,
       });
 
@@ -438,6 +457,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setReplyGameDraft({ manifest, title: meta.title, preset: meta.preset });
     setActiveScreen(null);
     setReplyText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
+  };
+
+  const handleSaveMv = (data: { manifest: MvManifest; title: string; preset: MvPresetKind }) => {
+    setReplyMvDraft(data);
+    setActiveScreen(null);
+    setReplyText((prev) => prev.trim() ? prev : `#MV 「${data.title}」を作ったよ！`);
   };
 
   const handleSaveEdit = async (newContent: string, nextImageSrc?: string | null) => {
@@ -755,6 +780,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
             </div>
           )}
 
+          {post.hasMv && post.mvId && (
+            <MvBox
+              mvId={post.mvId}
+              postId={post.id}
+              mvTitle={post.mvTitle || 'MV'}
+              mvThumbnail={post.mvThumbnail}
+              mvPreset={post.mvPreset}
+              mvPlays={post.mvPlays}
+              className="mb-2.5"
+            />
+          )}
+
           {post.hasGame && userId && (
             <GameBox
               gameId={post.gameId || ''}
@@ -874,6 +911,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           setMml={setReplyMml}
           gameDraft={replyGameDraft}
           setGameDraft={setReplyGameDraft}
+          mvDraft={replyMvDraft}
+          setMvDraft={setReplyMvDraft}
           originType={replyOriginType}
           setOriginType={setReplyOriginType}
           onClose={handleComposerClose}
@@ -882,6 +921,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           onOpenDotDrawing={() => { setCollabImageUrl(undefined); handleCollabSelectDotDrawing(); }}
           onOpenMml={() => openScreen('mml')}
           onOpenGameMaker={() => openScreen('gamemaker')}
+          onOpenMvMaker={() => openScreen('mvmaker')}
           replyToDisplayName={replyTo ? replyTo.displayName : post.displayName}
         />
       )}
@@ -902,6 +942,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       )}
       {activeScreen === 'gamemaker' && (
         <GameMaker onClose={() => setActiveScreen(null)} userId={userId} onSave={handleSaveGame} />
+      )}
+      {activeScreen === 'mvmaker' && (
+        <MvMaker
+          onClose={() => setActiveScreen(null)}
+          userId={userId}
+          onSave={handleSaveMv}
+          initialManifest={replyMvDraft?.manifest}
+          isEditing={!!replyMvDraft}
+        />
       )}
       {activeScreen === 'mml' && (
         <MmlEditor

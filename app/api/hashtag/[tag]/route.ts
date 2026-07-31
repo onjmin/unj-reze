@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { encodePost } from '@/lib/sqids';
-import { attachGameInfo } from '@/lib/game-embed';
+import { attachEmbedInfo } from '@/lib/post-embeds';
 
 export async function GET(
   request: NextRequest,
@@ -14,6 +14,6 @@ export async function GET(
   const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : 20;
   const decoded = decodeURIComponent(tag);
   const posts = await db.getPostsByHashtag(decoded, userId, limit);
-  await attachGameInfo(posts);
+  await attachEmbedInfo(posts);
   return NextResponse.json(posts.map(encodePost));
 }
