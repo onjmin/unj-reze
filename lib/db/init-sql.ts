@@ -57,10 +57,14 @@ CREATE TABLE IF NOT EXISTS posts (
   game_id INTEGER,
   has_mv INTEGER NOT NULL DEFAULT 0,
   mv_id INTEGER,
+  has_mml INTEGER NOT NULL DEFAULT 0,
   origin_type TEXT,
   is_false_declaration INTEGER NOT NULL DEFAULT 0,
   is_edited INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_posts_has_mml ON posts(id DESC) WHERE has_mml = 1;
+CREATE INDEX IF NOT EXISTS idx_posts_has_image ON posts(id DESC) WHERE has_image = 1;
 
 -- ゲームテーブル
 CREATE TABLE IF NOT EXISTS games (

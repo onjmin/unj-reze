@@ -408,6 +408,19 @@ const migrations = [
       ALTER TABLE posts ADD COLUMN IF NOT EXISTS mv_id BIGINT REFERENCES mvs(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS idx_posts_mv_id ON posts(mv_id);
     `
+  },
+  {
+    name: '21_add_has_mml_and_partial_indexes',
+    sql: `
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS has_mml BOOLEAN NOT NULL DEFAULT FALSE;
+      CREATE INDEX IF NOT EXISTS idx_posts_has_mml ON posts(id DESC) WHERE has_mml = TRUE;
+      CREATE INDEX IF NOT EXISTS idx_posts_has_image ON posts(id DESC) WHERE has_image = TRUE;
+
+      UPDATE posts
+      SET has_mml = TRUE
+      WHERE has_mml = FALSE
+        AND (content LIKE '%#mml%' OR content LIKE '%#MML作曲%');
+    `
   }
 ];
 

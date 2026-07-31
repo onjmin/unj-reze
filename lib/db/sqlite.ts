@@ -3,9 +3,9 @@ import { INIT_SQL } from './init-sql';
 import { AnonymousUser, FollowUser, OriginType } from '../types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions } from './interface';
 import { formatRelativeTime } from '../time';
-import { cleanContentForTrends, isValidTrendKeyword } from '../mml';
+import { cleanContentForTrends, isValidTrendKeyword, extractMmlFromContent } from '../mml';
 import { publishRealtime } from '../realtime/publish';
 import { chUser } from '../realtime/channels';
 
@@ -147,6 +147,11 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   }
   if (!postColNames.includes('is_edited')) {
     d.run("ALTER TABLE posts ADD COLUMN is_edited INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!postColNames.includes('has_mml')) {
+    d.run("ALTER TABLE posts ADD COLUMN has_mml INTEGER NOT NULL DEFAULT 0");
+    d.run("CREATE INDEX IF NOT EXISTS idx_posts_has_mml ON posts(id DESC) WHERE has_mml = 1");
+    d.run("UPDATE posts SET has_mml = 1 WHERE content LIKE '%#mml%' OR content LIKE '%#MML作曲%'");
   }
   d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_slug TEXT NOT NULL,
@@ -343,6 +348,7 @@ function rowToPost(row: any): Post {
     gameId: row.game_id ?? undefined,
     hasMv: !!row.has_mv,
     mvId: row.mv_id ?? undefined,
+    hasMml: !!row.has_mml,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: !!row.is_false_declaration,
     isEdited: !!row.is_edited,
@@ -464,24 +470,46 @@ async function getThreadRepliesSqlite(d: SqlJsDatabase, threadIds: number[]): Pr
 }
 
 export const sqliteStore: DataStore = {
-  async getPosts(userId?: string, limit?: number, beforeId?: number) {
+  async getPosts(userId?: string, limitOrOptions?: number | GetPostsOptions, beforeId?: number, optionsArg?: GetPostsOptions) {
+    const options = typeof limitOrOptions === 'object' ? limitOrOptions : (optionsArg || {});
+    const limit = typeof limitOrOptions === 'number' ? limitOrOptions : options.limit;
+    const before = beforeId ?? options.beforeId;
+
     const d = await getDb();
     const limitClause = limit ? ` LIMIT ${Math.max(1, Math.min(limit, 100))}` : '';
-    // キーセットページング（lib/db/pg.ts と同じ意味）: カーソルより古いスレッドだけ返す
-    const cursorClause = beforeId ? ' AND p.id < ?' : '';
-    const cursorParams = beforeId ? [beforeId] : [];
+    let filterClause = before ? ' AND p.id < ?' : '';
+    const params: any[] = userId ? [userId] : [];
+    if (before) params.push(before);
+
+    if (options.hasMml !== undefined) {
+      filterClause += ` AND p.has_mml = ?`;
+      params.push(options.hasMml ? 1 : 0);
+    }
+    if (options.hasImage !== undefined) {
+      filterClause += ` AND p.has_image = ?`;
+      params.push(options.hasImage ? 1 : 0);
+    }
+    if (options.hasGame !== undefined) {
+      filterClause += ` AND p.has_game = ?`;
+      params.push(options.hasGame ? 1 : 0);
+    }
+    if (options.hasMv !== undefined) {
+      filterClause += ` AND p.has_mv = ?`;
+      params.push(options.hasMv ? 1 : 0);
+    }
+
     let rows;
     if (userId) {
       rows = rowsToObjects(
         d,
-        `${VOTED_SELECT} WHERE p.thread_id = p.id${cursorClause} ORDER BY p.id DESC${limitClause}`,
-        [userId, ...cursorParams]
+        `${VOTED_SELECT} WHERE p.thread_id = p.id${filterClause} ORDER BY p.id DESC${limitClause}`,
+        params
       );
     } else {
       rows = rowsToObjects(
         d,
-        `${UNVOTED_SELECT} WHERE p.thread_id = p.id${cursorClause} ORDER BY p.id DESC${limitClause}`,
-        cursorParams
+        `${UNVOTED_SELECT} WHERE p.thread_id = p.id${filterClause} ORDER BY p.id DESC${limitClause}`,
+        params
       );
     }
     if (rows.length === 0) return [];
@@ -536,12 +564,13 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     const originTypeVal = data.originType ?? null;
+    const hasMml = extractMmlFromContent(data.content) !== null ? 1 : 0;
     d.run(
-      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, origin_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
       [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null,
-       data.gameId ? 1 : 0, data.gameId || null, data.mvId ? 1 : 0, data.mvId || null, originTypeVal]
+       data.gameId ? 1 : 0, data.gameId || null, data.mvId ? 1 : 0, data.mvId || null, hasMml, originTypeVal]
     );
     saveDb();
     return {
@@ -556,6 +585,7 @@ export const sqliteStore: DataStore = {
         has_collab_button: 1, hearts_total: 0, has_game: data.gameId ? 1 : 0,
         game_id: data.gameId || null,
         has_mv: data.mvId ? 1 : 0, mv_id: data.mvId || null,
+        has_mml: hasMml,
         origin_type: originTypeVal,
       }),
       replies: []
@@ -669,12 +699,13 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     const parentPostId = data.parentPostId ?? postId;
+    const hasMml = extractMmlFromContent(data.content) !== null ? 1 : 0;
     d.run(
-      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, origin_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, postId, parentPostId, data.displayName, slug, data.content, now, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null,
-       data.mvId ? 1 : 0, data.mvId || null, data.originType || null]
+       data.mvId ? 1 : 0, data.mvId || null, hasMml, data.originType || null]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
     const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
@@ -708,6 +739,7 @@ export const sqliteStore: DataStore = {
         has_collab_button: 0, hearts_total: 0, has_game: data.gameId ? 1 : 0,
         game_id: data.gameId || null,
         has_mv: data.mvId ? 1 : 0, mv_id: data.mvId || null,
+        has_mml: hasMml,
         origin_type: data.originType || null,
       }),
       replies: [],
@@ -724,9 +756,10 @@ export const sqliteStore: DataStore = {
     const hasContentChanged = rows[0].content !== content;
     const hasOriginTypeChanged = originType !== undefined && (rows[0].origin_type !== (originType ?? null));
     const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined;
+    const hasMml = extractMmlFromContent(content) !== null ? 1 : 0;
 
-    const sets: string[] = ['content = ?'];
-    const values: (string | number)[] = [content];
+    const sets: string[] = ['content = ?', 'has_mml = ?'];
+    const values: (string | number)[] = [content, hasMml];
     if (originType !== undefined) {
       sets.push('origin_type = ?');
       values.push(originType as string);

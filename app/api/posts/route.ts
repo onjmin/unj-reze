@@ -29,13 +29,21 @@ export async function GET(request: NextRequest) {
       }
       beforeId = decoded;
     }
+    const hasMmlParam = url.searchParams.get('hasMml');
+    const hasMml = hasMmlParam !== null ? hasMmlParam === 'true' : undefined;
+    const hasImageParam = url.searchParams.get('hasImage');
+    const hasImage = hasImageParam !== null ? hasImageParam === 'true' : undefined;
+    const hasGameParam = url.searchParams.get('hasGame');
+    const hasGame = hasGameParam !== null ? hasGameParam === 'true' : undefined;
+    const hasMvParam = url.searchParams.get('hasMv');
+    const hasMv = hasMvParam !== null ? hasMvParam === 'true' : undefined;
 
     return await withEdgeCache(
       request,
       // 過去ページ（カーソル付き）は内容がほぼ変わらないので長めに持たせる。
       { sMaxAge: beforeId ? 60 : 10, personalized: !!userId },
       async () => {
-        const posts = await db.getPosts(userId, limit, beforeId);
+        const posts = await db.getPosts(userId, { limit, beforeId, hasMml, hasImage, hasGame, hasMv });
         await attachEmbedInfo(posts);
         return NextResponse.json(posts.map(encodePost));
       }

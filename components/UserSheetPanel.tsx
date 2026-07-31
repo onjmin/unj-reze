@@ -424,12 +424,17 @@ function PostImageGrid({ userId, selectedUrl, onSelect }: { userId: string; sele
 
   useEffect(() => {
     let alive = true;
-    api.posts.list(userId)
-      .then(data => { if (alive) setPosts(data); })
-      .catch(() => { })
+    Promise.resolve().then(() => { if (alive) setLoading(true); });
+    const trimmedQ = query.trim();
+    const req = trimmedQ
+      ? api.search.posts(trimmedQ, userId)
+      : api.posts.list(userId, { hasImage: true, limit: 50 });
+    req
+      .then(data => { if (alive) setPosts(Array.isArray(data) ? data : []); })
+      .catch(() => { if (alive) setPosts([]); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [userId]);
+  }, [userId, query]);
 
   const q = query.trim().toLowerCase();
   const allPostsAndReplies = useMemo(() => {

@@ -52,6 +52,7 @@ export interface Post {
   /** ゲームの累計クリア数 */
   gameClears?: number;
   hasMv?: boolean;
+  hasMml?: boolean;
   mvId?: string;
   mvTitle?: string;
   /** MVのサムネイル（背景画像URL。無ければプリセットの色で描く） */

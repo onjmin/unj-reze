@@ -50,12 +50,17 @@ export default function PostSlicePanel({ userId, onPick, initialAsset, allowUplo
       Promise.resolve().then(() => setLoading(false));
       return;
     }
-    api.posts.list(userId)
-      .then(data => { if (alive) setPosts(data); })
-      .catch(() => {})
+    Promise.resolve().then(() => { if (alive) setLoading(true); });
+    const trimmedQ = query.trim();
+    const req = trimmedQ
+      ? api.search.posts(trimmedQ, userId)
+      : api.posts.list(userId, { hasImage: true, limit: 50 });
+    req
+      .then(data => { if (alive) setPosts(Array.isArray(data) ? data : []); })
+      .catch(() => { if (alive) setPosts([]); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [userId]);
+  }, [userId, query]);
 
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

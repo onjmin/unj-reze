@@ -81,9 +81,18 @@ export interface ReportParams {
   reason: string;
 }
 
+export interface GetPostsOptions {
+  limit?: number;
+  beforeId?: number;
+  hasMml?: boolean;
+  hasImage?: boolean;
+  hasGame?: boolean;
+  hasMv?: boolean;
+}
+
 export interface DataStore {
   /** `beforeId` はキーセットページング用のカーソル（そのIDより古いスレッドを返す）。 */
-  getPosts(userId?: string, limit?: number, beforeId?: number): Promise<DbPost[]>;
+  getPosts(userId?: string, limitOrOptions?: number | GetPostsOptions, beforeId?: number, options?: GetPostsOptions): Promise<DbPost[]>;
   getPost(id: number, userId?: string): Promise<DbPost | null>;
   createPost(data: CreatePostParams): Promise<DbPost>;
   likePost(id: number, userId: string): Promise<DbPost | null>;

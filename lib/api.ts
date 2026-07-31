@@ -43,9 +43,9 @@ const staticApi = {
     image: async (data: { image: string; filename?: string }) => ({ url: data.image }),
   },
   posts: {
-    list: async (userId?: string, opts?: { beforeId?: string; limit?: number }) => {
+    list: async (userId?: string, opts?: { beforeId?: string; limit?: number; hasMml?: boolean; hasImage?: boolean; hasGame?: boolean; hasMv?: boolean }) => {
       const beforeId = opts?.beforeId ? decodeIdOrThrow(opts.beforeId) : undefined;
-      const posts = await mockDbInstance.getPosts(userId, opts?.limit, beforeId);
+      const posts = await mockDbInstance.getPosts(userId, { limit: opts?.limit, beforeId, hasMml: opts?.hasMml, hasImage: opts?.hasImage, hasGame: opts?.hasGame, hasMv: opts?.hasMv });
       return posts.map(encodePost);
     },
     get: async (id: string, userId?: string) => {
@@ -257,11 +257,15 @@ const liveApi = {
   },
   posts: {
     /** `beforeId` を渡すとそのスレッドより古いページを取得する（キーセットページング）。 */
-    list: (userId?: string, opts?: { beforeId?: string; limit?: number }) => {
+    list: (userId?: string, opts?: { beforeId?: string; limit?: number; hasMml?: boolean; hasImage?: boolean; hasGame?: boolean; hasMv?: boolean }) => {
       const params = new URLSearchParams();
       if (userId) params.set('userId', userId);
       if (opts?.beforeId) params.set('beforeId', opts.beforeId);
       if (opts?.limit) params.set('limit', String(opts.limit));
+      if (opts?.hasMml !== undefined) params.set('hasMml', String(opts.hasMml));
+      if (opts?.hasImage !== undefined) params.set('hasImage', String(opts.hasImage));
+      if (opts?.hasGame !== undefined) params.set('hasGame', String(opts.hasGame));
+      if (opts?.hasMv !== undefined) params.set('hasMv', String(opts.hasMv));
       const qs = params.toString();
       return fetcher<Post[]>(`/posts${qs ? `?${qs}` : ''}`);
     },

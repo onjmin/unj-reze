@@ -73,10 +73,16 @@ CREATE TABLE IF NOT EXISTS posts (
   hearts_total INTEGER NOT NULL DEFAULT 0,
   has_game BOOLEAN NOT NULL DEFAULT FALSE,
   game_id BIGINT,
+  has_mv BOOLEAN NOT NULL DEFAULT FALSE,
+  mv_id BIGINT,
+  has_mml BOOLEAN NOT NULL DEFAULT FALSE,
   origin_type TEXT,
   is_false_declaration BOOLEAN NOT NULL DEFAULT FALSE,
   is_edited BOOLEAN NOT NULL DEFAULT FALSE
 );
+
+CREATE INDEX IF NOT EXISTS idx_posts_has_mml ON posts(id DESC) WHERE has_mml = TRUE;
+CREATE INDEX IF NOT EXISTS idx_posts_has_image ON posts(id DESC) WHERE has_image = TRUE;
 
 -- ゲームテーブル
 CREATE TABLE IF NOT EXISTS games (

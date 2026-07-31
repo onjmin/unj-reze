@@ -251,7 +251,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
       const trimmedQ = query.trim();
       const req = trimmedQ
         ? api.search.posts(trimmedQ, userId)
-        : api.posts.list(userId, { limit: 50 });
+        : api.posts.list(userId, { hasMml: true, limit: 50 });
 
       req
         .then(data => {

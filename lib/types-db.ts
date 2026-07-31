@@ -38,6 +38,7 @@ export interface DbPost {
   mvPreset?: MvPresetKind;
   /** MVの累計再生数 */
   mvPlays?: number;
+  hasMml?: boolean;
   originType?: OriginType;
   isFalseDeclaration?: boolean;
   isEdited?: boolean;

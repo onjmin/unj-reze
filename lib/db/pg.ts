@@ -2,10 +2,11 @@ import { neon, neonConfig } from '@neondatabase/serverless';
 import { AnonymousUser, FollowUser, OriginType } from '../types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions } from './interface';
 import { formatRelativeTime } from '../time';
 import { publishRealtime } from '../realtime/publish';
 import { chUser } from '../realtime/channels';
+import { extractMmlFromContent } from '../mml';
 
 // Worker環境で Fetch API を明示的に使用するように設定
 neonConfig.fetchConnectionCache = true;
@@ -61,7 +62,7 @@ const POST_COLUMNS = [
   'p.id', 'p.thread_id', 'p.parent_post_id', 'p.slug', 'p.created_at', 'p.content',
   'p.likes', 'p.dislikes', 'p.replies_count', 'p.reposts', 'p.reposted',
   'p.has_image', 'p.image_src', 'p.image_alt', 'p.avatar_color', 'p.has_collab_button',
-  'p.hearts_total', 'p.has_game', 'p.game_id', 'p.has_mv', 'p.mv_id', 'p.origin_type',
+  'p.hearts_total', 'p.has_game', 'p.game_id', 'p.has_mv', 'p.mv_id', 'p.has_mml', 'p.origin_type',
   'p.is_false_declaration', 'p.is_edited',
 ].join(', ');
 
@@ -106,6 +107,7 @@ async function rowToPost(row: any): Promise<Post> {
     gameId: row.game_id ?? undefined,
     hasMv: row.has_mv ?? false,
     mvId: row.mv_id ?? undefined,
+    hasMml: row.has_mml ?? false,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: row.is_false_declaration ?? false,
     isEdited: row.is_edited ?? false,
@@ -162,11 +164,16 @@ async function getThreadReplies(client: any, threadIds: number[]): Promise<Map<n
  * OFFSET を使わないのは、件数が増えるほど読み飛ばしぶんのコストが増えるのと、
  * 読み込み中に新規投稿が入ると境界がずれて重複・取りこぼしが起きるため。
  */
-async function getPostsWithVotes(client: any, userId?: string, limit?: number, beforeId?: number): Promise<Post[]> {
+async function getPostsWithVotes(client: any, userId?: string, limit?: number, beforeId?: number, options?: GetPostsOptions): Promise<Post[]> {
   let result;
   const safeLimit = Math.max(1, Math.min(limit || 20, 50));
   const limitClause = ` LIMIT ${safeLimit}`;
   const cursor = beforeId ?? null;
+  const hasMml = options?.hasMml ?? null;
+  const hasImage = options?.hasImage ?? null;
+  const hasGame = options?.hasGame ?? null;
+  const hasMv = options?.hasMv ?? null;
+
   if (userId) {
     result = await client.query(`
       SELECT ${POST_COLUMNS},
@@ -179,8 +186,12 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number, b
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
       WHERE p.thread_id = p.id
         AND ($2::bigint IS NULL OR p.id < $2::bigint)
+        AND ($3::boolean IS NULL OR p.has_mml = $3::boolean)
+        AND ($4::boolean IS NULL OR p.has_image = $4::boolean)
+        AND ($5::boolean IS NULL OR p.has_game = $5::boolean)
+        AND ($6::boolean IS NULL OR p.has_mv = $6::boolean)
       ORDER BY p.id DESC${limitClause}
-    `, [userId, cursor]);
+    `, [userId, cursor, hasMml, hasImage, hasGame, hasMv]);
   } else {
     result = await client.query(`
       SELECT ${POST_COLUMNS},
@@ -192,8 +203,12 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number, b
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.thread_id = p.id
         AND ($1::bigint IS NULL OR p.id < $1::bigint)
+        AND ($2::boolean IS NULL OR p.has_mml = $2::boolean)
+        AND ($3::boolean IS NULL OR p.has_image = $3::boolean)
+        AND ($4::boolean IS NULL OR p.has_game = $4::boolean)
+        AND ($5::boolean IS NULL OR p.has_mv = $5::boolean)
       ORDER BY p.id DESC${limitClause}
-    `, [cursor]);
+    `, [cursor, hasMml, hasImage, hasGame, hasMv]);
   }
 
   const rows = result.rows;
@@ -396,12 +411,16 @@ async function getHiddenSlugs(client: any, userId?: string): Promise<Set<string>
 }
 
 export const pgStore: DataStore = {
-  async getPosts(userId?: string, limit?: number, beforeId?: number) {
+  async getPosts(userId?: string, limitOrOptions?: number | GetPostsOptions, beforeId?: number, optionsArg?: GetPostsOptions) {
+    const options = typeof limitOrOptions === 'object' ? limitOrOptions : (optionsArg || {});
+    const limit = typeof limitOrOptions === 'number' ? limitOrOptions : options.limit;
+    const cursor = beforeId ?? options.beforeId;
+
     const client = await getPool().connect();
     try {
       // Run posts query and hidden-slugs lookup concurrently — they are independent.
       const [posts, hidden] = await Promise.all([
-        getPostsWithVotes(client, userId, limit, beforeId),
+        getPostsWithVotes(client, userId, limit, cursor, options),
         getHiddenSlugs(client, userId),
       ]);
       if (hidden.size === 0) return posts;
@@ -426,13 +445,14 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       const slug = data.slug || deriveSlugPg(data.displayName);
+      const hasMml = extractMmlFromContent(data.content) !== null;
       const insertResult = await client.query(
-        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10, $11, $12)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-         !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, data.originType ?? null]
+         !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, hasMml, data.originType ?? null]
       );
       return { ...(await rowToPost(insertResult.rows[0])), replies: [] };
     } finally {
@@ -606,15 +626,16 @@ export const pgStore: DataStore = {
       await client.query('SELECT pg_advisory_xact_lock(42)');
       const slug = deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
+      const hasMml = extractMmlFromContent(data.content) !== null;
       const result = await client.query(
-        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING *`,
         [
           postId, parentPostId, data.displayName, slug, data.content,
           data.avatarColor || 'from-blue-500 to-indigo-600',
           data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-          !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, data.originType ?? null
+          !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, hasMml, data.originType ?? null
         ]
       );
       await client.query(
@@ -668,9 +689,10 @@ export const pgStore: DataStore = {
       const hasContentChanged = row.content !== content;
       const hasOriginTypeChanged = originType !== undefined && (row.origin_type !== (originType ?? null));
       const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined;
+      const hasMml = extractMmlFromContent(content) !== null;
 
-      const sets: string[] = ['content = $1'];
-      const values: unknown[] = [content];
+      const sets: string[] = ['content = $1', 'has_mml = $2'];
+      const values: unknown[] = [content, hasMml];
       if (originType !== undefined) {
         sets.push(`origin_type = $${values.length + 1}`);
         values.push(originType);

@@ -2,7 +2,8 @@ import { AnonymousUser, FollowUser, OriginType } from './types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from './types-db';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
-import { cleanContentForTrends, isValidTrendKeyword } from './mml';
+import { cleanContentForTrends, isValidTrendKeyword, extractMmlFromContent } from './mml';
+import type { GetPostsOptions } from './db/interface';
 
 
 export interface Trend {
@@ -105,10 +106,12 @@ class MockDB {
     for (const post of this.posts) {
       if (!post.slug) post.slug = deriveSlug(post.displayName);
       if (!post.createdAt) post.createdAt = parseRelativeTime(post.time);
+      if (post.hasMml === undefined) post.hasMml = extractMmlFromContent(post.content) !== null;
       this.heartCounts.set(post.id, post.heartsTotal);
       for (const reply of post.replies) {
         if (!reply.slug) reply.slug = deriveSlug(reply.displayName);
         if (!reply.createdAt) reply.createdAt = parseRelativeTime(reply.time);
+        if (reply.hasMml === undefined) reply.hasMml = extractMmlFromContent(reply.content) !== null;
       }
     }
     this.notifications = NOTIFICATION_INFOS.map((n, i) => ({
@@ -276,17 +279,22 @@ class MockDB {
     return post;
   }
 
-  getPosts(userId?: string, limit?: number, beforeId?: number): Post[] {
+  getPosts(userId?: string, limitOrOptions?: number | GetPostsOptions, beforeId?: number, optionsArg?: GetPostsOptions): Post[] {
+    const options = typeof limitOrOptions === 'object' ? limitOrOptions : (optionsArg || {});
+    const limit = typeof limitOrOptions === 'number' ? limitOrOptions : options.limit;
+    const before = beforeId ?? options.beforeId;
+
     const hidden = this.getHiddenSlugs(userId);
     const result = this.posts
       .filter(p => p.id === p.threadId)
       // キーセットページング: カーソルより古いスレッドだけ返す
-      .filter(p => !beforeId || p.id < beforeId)
+      .filter(p => !before || p.id < before)
+      .filter(p => options.hasMml === undefined || !!p.hasMml === options.hasMml)
+      .filter(p => options.hasImage === undefined || !!p.hasImage === options.hasImage)
+      .filter(p => options.hasGame === undefined || !!p.hasGame === options.hasGame)
+      .filter(p => options.hasMv === undefined || !!p.hasMv === options.hasMv)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => this.canViewAuthor(p.slug ?? '', p.displayName, userId))
-      // pg/sqlite の `ORDER BY p.id DESC` に合わせる。
-      // ここで並べ替えないと slice(0, limit) が配列順に切り出してしまい、
-      // カーソル（p.id < beforeId）と噛み合わずページ間で重複・取りこぼしが出る。
       .sort((a, b) => b.id - a.id)
       .map(p => this.applyUserState({ ...p, replies: [...p.replies].filter(r => !hidden.has(r.slug ?? '')).map(r => this.applyUserState(r, userId)) }, userId));
     if (limit && limit > 0) {
@@ -387,6 +395,7 @@ class MockDB {
       gameId: data.gameId,
       hasMv: !!data.mvId,
       mvId: data.mvId,
+      hasMml: extractMmlFromContent(data.content) !== null,
       originType: data.originType,
       isFalseDeclaration: false,
       threadId: this.genId(),
@@ -488,6 +497,7 @@ class MockDB {
       hasGame: !!data.gameId,
       mvId: data.mvId,
       hasMv: !!data.mvId,
+      hasMml: extractMmlFromContent(data.content) !== null,
       originType: data.originType,
     };
     this.posts.push(reply);
@@ -851,6 +861,7 @@ class MockDB {
       post.isEdited = true;
     }
     post.content = content;
+    post.hasMml = extractMmlFromContent(content) !== null;
     if (originType !== undefined) post.originType = originType == null ? undefined : originType;
     if (imageSrc !== undefined) post.imageSrc = imageSrc;
     // 親スレッドの replies 配列内の同一投稿も更新
@@ -858,6 +869,7 @@ class MockDB {
       const child = thread.replies?.find(r => r.id === id);
       if (child) {
         child.content = content;
+        child.hasMml = extractMmlFromContent(content) !== null;
         if (originType !== undefined) child.originType = originType == null ? undefined : originType;
         if (imageSrc !== undefined) child.imageSrc = imageSrc;
         if (hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined) {
