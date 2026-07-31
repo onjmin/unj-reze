@@ -65,8 +65,13 @@ CREATE TABLE IF NOT EXISTS games (
   title TEXT NOT NULL,
   manifest TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  creator_slug TEXT
+  creator_slug TEXT,
+  plays INTEGER NOT NULL DEFAULT 0,
+  clears INTEGER NOT NULL DEFAULT 0,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  best_score_by TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
 
 -- いいね/わるい 投票テーブル (1ユーザー1投票)
 CREATE TABLE IF NOT EXISTS post_votes (

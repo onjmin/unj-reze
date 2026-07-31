@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { User, UserPlus, UserMinus, AtSign, Mail, VolumeX, Volume2, Ban, CircleSlash } from 'lucide-react';
+import { User, UserPlus, UserMinus, AtSign, Mail, VolumeX, Volume2, Ban, CircleSlash, Flag } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
+import { showToast } from '@/lib/toast';
 
 interface UserActionMenuProps {
   isOpen: boolean;
@@ -139,6 +140,25 @@ export default function UserActionMenu({
       setBlocked(was);
     } finally {
       setModerating(false);
+    }
+  };
+
+  const [reported, setReported] = useState(false);
+
+  const handleReportUser = async () => {
+    if (!currentUserSlug || isSelf || reported) return;
+    try {
+      await api.report.create({
+        reporterSlug: currentUserSlug,
+        targetType: 'user',
+        targetId: targetIdOrSlug,
+        reason: '不適切なユーザー行為の通報',
+      });
+      setReported(true);
+      showToast('info', 'ユーザーを通報しました');
+      setTimeout(() => onClose(), 800);
+    } catch {
+      showToast('error', '通報に失敗しました');
     }
   };
 
@@ -303,6 +323,14 @@ export default function UserActionMenu({
             >
               {blocked ? <CircleSlash size={14} className="shrink-0 text-red-400" /> : <Ban size={14} className="shrink-0 text-red-400" />}
               <span>{blocked ? 'ブロック解除' : 'ブロックする'}</span>
+            </button>
+            <button
+              onClick={handleReportUser}
+              disabled={reported}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-yellow-400 hover:bg-gray-100/10 text-left transition-colors font-semibold disabled:opacity-50"
+            >
+              <Flag size={14} className="shrink-0 text-yellow-400" />
+              <span>{reported ? '通報済み' : 'ユーザーを通報'}</span>
             </button>
           </>
         )}

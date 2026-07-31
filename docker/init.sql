@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS posts (
   thread_id INTEGER NOT NULL REFERENCES posts(id),
   parent_post_id INTEGER REFERENCES posts(id),
   display_name TEXT NOT NULL,
-  slug TEXT REFERENCES anonymous_users(slug) ON DELETE SET NULL,
+  slug TEXT REFERENCES anonymous_users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   content TEXT NOT NULL,
   likes INTEGER NOT NULL DEFAULT 0,
@@ -86,9 +86,14 @@ CREATE TABLE IF NOT EXISTS games (
   title TEXT NOT NULL,
   manifest TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  creator_slug TEXT REFERENCES anonymous_users(slug) ON DELETE SET NULL
+  creator_slug TEXT REFERENCES anonymous_users(id) ON DELETE SET NULL,
+  plays BIGINT NOT NULL DEFAULT 0,
+  clears BIGINT NOT NULL DEFAULT 0,
+  best_score BIGINT NOT NULL DEFAULT 0,
+  best_score_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_games_creator ON games(creator_slug);
+CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
 
 -- ゲームスケジュールテーブル
 CREATE TABLE IF NOT EXISTS game_schedule (
@@ -155,8 +160,8 @@ CREATE INDEX IF NOT EXISTS idx_user_follows_followed ON user_follows(followed_id
 
 -- ブロックテーブル
 CREATE TABLE IF NOT EXISTS user_blocks (
-  blocker_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
-  blocked_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+  blocker_slug TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
+  blocked_slug TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (blocker_slug, blocked_slug)
 );
@@ -165,8 +170,8 @@ CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_slug);
 
 -- ミュートテーブル
 CREATE TABLE IF NOT EXISTS user_mutes (
-  muter_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
-  muted_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+  muter_slug TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
+  muted_slug TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (muter_slug, muted_slug)
 );
@@ -175,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_user_mutes_muter ON user_mutes(muter_slug);
 -- 通報テーブル
 CREATE TABLE IF NOT EXISTS reports (
   id SERIAL PRIMARY KEY,
-  reporter_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+  reporter_slug TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
   target_type TEXT NOT NULL,
   target_id TEXT NOT NULL,
   reason TEXT NOT NULL DEFAULT '',
@@ -187,7 +192,7 @@ CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_type, target_id)
 -- 推しアイテムテーブル
 CREATE TABLE IF NOT EXISTS oshi_items (
   id BIGINT PRIMARY KEY,
-  user_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+  user_slug TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   track_id BIGINT,
   collection_id BIGINT,

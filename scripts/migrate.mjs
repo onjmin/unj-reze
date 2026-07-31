@@ -270,6 +270,66 @@ const migrations = [
 
       CREATE INDEX IF NOT EXISTS idx_notifications_target_user ON notifications(target_user, read, created_at DESC);
     `
+  },
+  {
+    name: '15_align_all_foreign_keys_to_user_id',
+    sql: `
+      -- Step 1: 既存の slug 参照データを anonymous_users の正解 id へデータ変換・補正（投稿やデータの消失を防止）
+      UPDATE posts p SET slug = u.id FROM anonymous_users u WHERE p.slug = u.slug AND p.slug IS NOT NULL;
+      UPDATE games g SET creator_slug = u.id FROM anonymous_users u WHERE g.creator_slug = u.slug AND g.creator_slug IS NOT NULL;
+      UPDATE user_blocks b SET blocker_slug = u1.id FROM anonymous_users u1 WHERE b.blocker_slug = u1.slug;
+      UPDATE user_blocks b SET blocked_slug = u2.id FROM anonymous_users u2 WHERE b.blocked_slug = u2.slug;
+      UPDATE user_mutes m SET muter_slug = u1.id FROM anonymous_users u1 WHERE m.muter_slug = u1.slug;
+      UPDATE user_mutes m SET muted_slug = u2.id FROM anonymous_users u2 WHERE m.muted_slug = u2.slug;
+      UPDATE reports r SET reporter_slug = u.id FROM anonymous_users u WHERE r.reporter_slug = u.slug;
+      UPDATE oshi_items o SET user_slug = u.id FROM anonymous_users u WHERE o.user_slug = u.slug;
+
+      -- Step 2: 古い slug ベースの外部キー制約が存在すれば削除
+      ALTER TABLE posts DROP CONSTRAINT IF EXISTS fk_posts_slug;
+      ALTER TABLE games DROP CONSTRAINT IF EXISTS fk_games_creator;
+      ALTER TABLE user_blocks DROP CONSTRAINT IF EXISTS fk_user_blocks_blocker, DROP CONSTRAINT IF EXISTS fk_user_blocks_blocked;
+      ALTER TABLE user_mutes DROP CONSTRAINT IF EXISTS fk_user_mutes_muter, DROP CONSTRAINT IF EXISTS fk_user_mutes_muted;
+      ALTER TABLE reports DROP CONSTRAINT IF EXISTS fk_reports_reporter;
+      ALTER TABLE oshi_items DROP CONSTRAINT IF EXISTS fk_oshi_items_user;
+
+      -- Step 3: 全関係テーブルに anonymous_users(id) を参照する新しい外部キー制約を付与
+      ALTER TABLE posts ADD CONSTRAINT fk_posts_user_id FOREIGN KEY (slug) REFERENCES anonymous_users(id) ON DELETE SET NULL;
+      ALTER TABLE games ADD CONSTRAINT fk_games_creator_id FOREIGN KEY (creator_slug) REFERENCES anonymous_users(id) ON DELETE SET NULL;
+      ALTER TABLE user_blocks ADD CONSTRAINT fk_user_blocks_blocker_id FOREIGN KEY (blocker_slug) REFERENCES anonymous_users(id) ON DELETE CASCADE, ADD CONSTRAINT fk_user_blocks_blocked_id FOREIGN KEY (blocked_slug) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+      ALTER TABLE user_mutes ADD CONSTRAINT fk_user_mutes_muter_id FOREIGN KEY (muter_slug) REFERENCES anonymous_users(id) ON DELETE CASCADE, ADD CONSTRAINT fk_user_mutes_muted_id FOREIGN KEY (muted_slug) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+      ALTER TABLE reports ADD CONSTRAINT fk_reports_reporter_id FOREIGN KEY (reporter_slug) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+      ALTER TABLE oshi_items ADD CONSTRAINT fk_oshi_items_user_id FOREIGN KEY (user_slug) REFERENCES anonymous_users(id) ON DELETE CASCADE;
+
+      -- Step 4: UPDATE 後のインデックス断片化解消および高速化のため、インデックスを再作成・貼り直し
+      CREATE INDEX IF NOT EXISTS idx_posts_user_id ON posts(slug);
+
+      DROP INDEX IF EXISTS idx_games_creator;
+      CREATE INDEX IF NOT EXISTS idx_games_creator ON games(creator_slug);
+
+      DROP INDEX IF EXISTS idx_user_blocks_blocker;
+      DROP INDEX IF EXISTS idx_user_blocks_blocked;
+      CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker ON user_blocks(blocker_slug);
+      CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_slug);
+
+      DROP INDEX IF EXISTS idx_user_mutes_muter;
+      CREATE INDEX IF NOT EXISTS idx_user_mutes_muter ON user_mutes(muter_slug);
+
+      DROP INDEX IF EXISTS idx_reports_reporter;
+      CREATE INDEX IF NOT EXISTS idx_reports_reporter ON reports(reporter_slug);
+
+      DROP INDEX IF EXISTS idx_oshi_items_user_slug;
+      CREATE INDEX IF NOT EXISTS idx_oshi_items_user ON oshi_items(user_slug);
+    `
+  },
+  {
+    name: '16_add_game_metrics_columns',
+    sql: `
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS plays BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS clears BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS best_score BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS best_score_by TEXT;
+      CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
+    `
   }
 ];
 
