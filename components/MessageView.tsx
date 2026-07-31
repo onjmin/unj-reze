@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Plus, Trash2, User, MessageSquare } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
 import { markMessagesSeen } from '@/lib/read-state';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 import { getRealtimeClient } from '@/lib/realtime/client';
 import { chUser } from '@/lib/realtime/channels';
@@ -16,6 +17,7 @@ interface MessageViewProps {
 type MsgItem = { id: number; sender: string; text: string; recipient?: string; time: string };
 
 export default function MessageView({ userId }: MessageViewProps) {
+  const me = useCurrentUser();
   const [messages, setMessages] = useState<MsgItem[]>([]);
   const [selectedPartner, setSelectedPartner] = useState<string | null>(null);
   const [newRecipientInput, setNewRecipientInput] = useState('');
@@ -25,7 +27,15 @@ export default function MessageView({ userId }: MessageViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isSendingRef = useRef(false);
 
-  const currentSender = userId || '名無し';
+  const currentSender = userId || me?.slug || me?.displayName || '名無し';
+
+  const myIdentifiers = useMemo(
+    () => new Set([userId, me?.slug, me?.displayName, me?.id].filter(Boolean) as string[]),
+    [userId, me?.slug, me?.displayName, me?.id]
+  );
+
+  const isMine = useCallback((m: MsgItem) => myIdentifiers.has(m.sender), [myIdentifiers]);
+  const getPartner = useCallback((m: MsgItem) => (isMine(m) ? m.recipient : m.sender), [isMine]);
 
   const scrollToBottom = (smooth = true) => {
     messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
@@ -34,9 +44,10 @@ export default function MessageView({ userId }: MessageViewProps) {
   useEffect(() => {
     const client = getRealtimeClient();
     if (!client || !currentSender) return;
-    const unsubChannel = client.subscribe([chUser(currentSender)]);
+    const channelsToSub = Array.from(new Set(Array.from(myIdentifiers).map(chUser)));
+    const unsubChannel = client.subscribe(channelsToSub);
     const unsubHandler = client.addHandler(msg => {
-      if (msg.t === 'event' && msg.channel === chUser(currentSender) && msg.event === 'message.created') {
+      if (msg.t === 'event' && channelsToSub.includes(msg.channel) && msg.event === 'message.created') {
         const data = msg.data as MsgItem;
         if (data && data.id) {
           setMessages(prev => {
@@ -53,36 +64,36 @@ export default function MessageView({ userId }: MessageViewProps) {
       unsubChannel();
       unsubHandler();
     };
-  }, [currentSender]);
+  }, [currentSender, myIdentifiers]);
 
   useEffect(() => {
-    api.messages.list(userId).then(msgs => {
+    if (!currentSender) return;
+    api.messages.list(currentSender).then(msgs => {
       setMessages(msgs);
       markMessagesSeen(msgs);
 
       // 対話相手の自動選択（最初に見つかったパートナー）
-      const firstPartner = msgs.map(m => m.sender === currentSender ? m.recipient : m.sender).find(Boolean);
+      const firstPartner = msgs.map(m => getPartner(m)).find(Boolean);
       if (firstPartner) {
         setSelectedPartner(firstPartner);
       }
       setTimeout(() => scrollToBottom(false), 50);
     });
-  }, [userId, currentSender]);
+  }, [currentSender, getPartner]);
 
   // 対話相手（パートナー）の重複なしリスト
-  const partners = Array.from(new Set(
-    messages.map(m => (m.sender === currentSender ? m.recipient : m.sender)).filter(Boolean) as string[]
-  ));
+  const partners = Array.from(
+    new Set(messages.map(m => getPartner(m)).filter(Boolean) as string[])
+  );
 
   const activePartner = isStartingNew ? newRecipientInput.trim() : selectedPartner;
 
   // 選択中パートナーとの 1対1 メッセージのみにフィルター
   const activeMessages = activePartner
-    ? messages.filter(
-        m =>
-          (m.sender === currentSender && m.recipient === activePartner) ||
-          (m.sender === activePartner && m.recipient === currentSender)
-      )
+    ? messages.filter(m => {
+        const p = getPartner(m);
+        return p === activePartner || (p && getAvatarInfo(p).username === getAvatarInfo(activePartner).username);
+      })
     : [];
 
   const sendMsg = async () => {
@@ -184,31 +195,33 @@ export default function MessageView({ userId }: MessageViewProps) {
 
       {/* 1対1 メッセージタイムライン */}
       <div className="flex-1 p-4 space-y-4 pb-24">
-        {activeMessages.map(m => (
-          <div
-            key={m.id}
-            className={`flex flex-col group w-full mb-3 ${
-              m.sender === currentSender ? 'items-end' : 'items-start'
-            }`}
-          >
-            <span className="text-[10px] text-gray-500 mb-1 px-1">
-              {getAvatarInfo(m.sender).username} ・ {m.time}
-            </span>
+        {activeMessages.map(m => {
+          const mine = isMine(m);
+          return (
             <div
-              className={`flex items-end gap-1.5 max-w-[85%] sm:max-w-[75%] ${
-                m.sender === currentSender ? 'flex-row-reverse' : 'flex-row'
+              key={m.id}
+              className={`flex flex-col group w-full mb-3 ${
+                mine ? 'items-end' : 'items-start'
               }`}
             >
+              <span className="text-[10px] text-gray-500 mb-1 px-1">
+                {getAvatarInfo(m.sender).username} ・ {m.time}
+              </span>
               <div
-                className={`px-3.5 py-2 rounded-2xl text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed shadow-sm ${
-                  m.sender === currentSender
-                    ? 'bg-blue-600 text-white rounded-tr-xs'
-                    : 'bg-gray-800/90 text-gray-100 border border-gray-700/60 rounded-tl-xs'
+                className={`flex items-end gap-1.5 max-w-[85%] sm:max-w-[75%] ${
+                  mine ? 'flex-row-reverse' : 'flex-row'
                 }`}
               >
-                {m.text}
-              </div>
-              {m.sender === currentSender &&
+                <div
+                  className={`px-3.5 py-2 rounded-2xl text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed shadow-sm ${
+                    mine
+                      ? 'bg-blue-600 text-white rounded-tr-xs'
+                      : 'bg-gray-800/90 text-gray-100 border border-gray-700/60 rounded-tl-xs'
+                  }`}
+                >
+                  {m.text}
+                </div>
+                {mine &&
                 (confirmDeleteId === m.id ? (
                   <div className="flex items-center gap-1 text-[10px] shrink-0 bg-gray-900 px-2 py-1 rounded border border-gray-800">
                     <span className="text-red-400 font-bold">削除？</span>
@@ -236,7 +249,8 @@ export default function MessageView({ userId }: MessageViewProps) {
                 ))}
             </div>
           </div>
-        ))}
+        );
+      })}
 
         {!activePartner && partners.length === 0 && (
           <div className="p-10 text-center text-xs text-gray-500 flex flex-col items-center gap-2">

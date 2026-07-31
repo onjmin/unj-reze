@@ -37,6 +37,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 
   const [partnerName, setPartnerName] = useState<string>(partnerSlug);
   const [partnerAvatar, setPartnerAvatar] = useState<string | undefined>(undefined);
+  const [partnerActualSlug, setPartnerActualSlug] = useState<string | undefined>(undefined);
   const [partnerFollowers, setPartnerFollowers] = useState<number | null>(null);
   const [relation, setRelation] = useState<Relation>('none');
 
@@ -52,12 +53,17 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
   const sendingRef = useRef(false);
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
 
-  const myId = me?.displayName;
+  const myId = me?.slug || me?.displayName;
 
   /** サーバーの応答は slug と displayName が混在するので、どちらでも本人判定できるようにする。 */
   const myIdentifiers = useMemo(
     () => new Set([me?.displayName, me?.slug, me?.id].filter(Boolean) as string[]),
     [me?.displayName, me?.slug, me?.id]
+  );
+
+  const partnerIdentifiers = useMemo(
+    () => new Set([partnerSlug, partnerName, partnerActualSlug].filter(Boolean) as string[]),
+    [partnerSlug, partnerName, partnerActualSlug]
   );
 
   const isMine = useCallback((m: Message) => myIdentifiers.has(m.sender), [myIdentifiers]);
@@ -72,6 +78,8 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
       .then(u => {
         setPartnerName(u.displayName || partnerSlug);
         setPartnerAvatar(u.avatarUrl);
+        const userMeta = u as { id?: string; slug?: string };
+        if (userMeta.slug || userMeta.id) setPartnerActualSlug(userMeta.slug || userMeta.id);
       })
       .catch(() => {});
     api.follow.getCounts(partnerSlug)
@@ -112,13 +120,14 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
   useEffect(() => {
     const client = getRealtimeClient();
     if (!client || !myId) return;
-    const unsubChannel = client.subscribe([chUser(myId)]);
+    const channelsToSub = Array.from(new Set(Array.from(myIdentifiers).map(chUser)));
+    const unsubChannel = client.subscribe(channelsToSub);
     const unsubHandler = client.addHandler(msg => {
-      if (msg.t !== 'event' || msg.channel !== chUser(myId) || msg.event !== 'message.created') return;
+      if (msg.t !== 'event' || !channelsToSub.includes(msg.channel) || msg.event !== 'message.created') return;
       const data = msg.data as Message;
       if (!data?.id) return;
       const involvesPartner = [data.sender, data.recipient].some(
-        v => v === partnerSlug || v === partnerName
+        v => v && partnerIdentifiers.has(v)
       );
       if (!involvesPartner) return;
       setMessages(prev => {
@@ -134,7 +143,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
       unsubChannel();
       unsubHandler();
     };
-  }, [myId, partnerSlug, partnerName, myIdentifiers]);
+  }, [myId, partnerIdentifiers, myIdentifiers]);
 
   const open = isDmOpen(gate);
   const canSend = canSendDm(gate);
@@ -145,9 +154,7 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
     sendingRef.current = true;
     setSendError(null);
     try {
-      // 相手は displayName で指定する。realtime のチャンネル名が displayName 基準のため、
-      // slug で送ると相手の画面へ即時プッシュされない。
-      const msg = await api.messages.send({ sender: myId, recipient: partnerName, text });
+      const msg = await api.messages.send({ sender: myId, recipient: partnerSlug, text });
       setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [msg, ...prev]));
       setGate(g => ({ ...g, sent: g.sent + 1 }));
       setInput('');

@@ -21,7 +21,7 @@ export default function MessagesPage() {
         </div>
       </div>
       <div className="flex-1">
-        <MessageView userId={currentUser?.displayName} />
+        <MessageView userId={currentUser?.slug || currentUser?.displayName} />
       </div>
     </AppShell>
   );

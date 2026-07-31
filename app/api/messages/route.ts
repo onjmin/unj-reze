@@ -44,10 +44,19 @@ export async function POST(request: NextRequest) {
   const message = await db.addMessage({ sender, text, recipient });
 
   // Koyeb Realtime WS ハブ経由で送信先および送信元に即時プッシュ配信
-  publishRealtime([
-    { channel: chUser(recipient), event: 'message.created', data: message },
-    { channel: chUser(sender), event: 'message.created', data: message },
-  ]);
+  const targetChannels = new Set<string>();
+  if (sender) targetChannels.add(chUser(sender));
+  if (recipient) targetChannels.add(chUser(recipient));
+  if (message.sender) targetChannels.add(chUser(message.sender));
+  if (message.recipient) targetChannels.add(chUser(message.recipient));
+
+  publishRealtime(
+    Array.from(targetChannels).map(channel => ({
+      channel,
+      event: 'message.created',
+      data: message,
+    }))
+  );
 
   return NextResponse.json(message, { status: 201 });
 }
