@@ -411,7 +411,7 @@ class MockDB {
       }
       this.votes.set(likeKey, 'like');
       post.likes += 1;
-      this.createNotification({ recipientId: post.displayName, actor: userId, type: 'like', action: 'がいいねしました', target: this.snippet(post.content), postId: id });
+      this.createNotification({ recipientId: post.displayName, actor: userId, type: 'like', postId: id });
     }
     return this.getPost(id, userId) ?? null;
   }
@@ -444,7 +444,7 @@ class MockDB {
     }
     const current = this.heartCounts.get(id) ?? 0;
     this.heartCounts.set(id, current + count);
-    this.createNotification({ recipientId: post.displayName, actor: userId, type: 'heart', action: 'がハートを送りました', target: this.snippet(post.content), postId: id });
+    this.createNotification({ recipientId: post.displayName, actor: userId, type: 'heart', postId: id });
     return this.getPost(id) ?? null;
   }
 
@@ -491,7 +491,7 @@ class MockDB {
     // 返信先の投稿主へ通知(自己宛は除外)
     const parentId = data.parentPostId ?? post.id;
     const parent = this.posts.find(p => p.id === parentId) ?? post;
-    this.createNotification({ recipientId: parent.displayName, actor: data.displayName, type: 'reply', action: 'が返信しました', target: this.snippet(data.content), postId: post.id });
+    this.createNotification({ recipientId: parent.displayName, actor: data.displayName, type: 'reply', postId: post.id });
 
     // 本文中の @slug メンション宛に通知
     const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
@@ -503,7 +503,7 @@ class MockDB {
         seen.add(slug);
         const target = this.posts.find(p => p.slug === slug);
         if (target && target.displayName !== parent.displayName) {
-          this.createNotification({ recipientId: target.displayName, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: this.snippet(data.content), postId: post.id });
+          this.createNotification({ recipientId: target.displayName, actor: data.displayName, type: 'mention', postId: post.id });
         }
       }
     }
@@ -525,13 +525,27 @@ class MockDB {
   }
 
   /** 通知を生成する。自己宛(actor===recipient)は生成しない。 */
-  createNotification(data: { recipientId: string; actor: string; type: string; action: string; target?: string; postId?: number }): void {
+  createNotification(data: { recipientId: string; actor: string; type: string; postId?: number }): void {
     if (!data.recipientId || data.recipientId === data.actor) return;
+    const post = data.postId ? this.posts.find(p => p.id === data.postId) : undefined;
+    const actionText = (() => {
+      switch (data.type) {
+        case 'reply': return 'が返信しました';
+        case 'like': return 'がいいねしました';
+        case 'heart': return 'がハートを送りました';
+        case 'follow': return 'がフォローしました';
+        case 'mention': return 'があなたにメンションしました';
+        case 'repost': return 'がリポストしました';
+        default: return 'がいいねしました';
+      }
+    })();
     this.notifications.push({
       id: this.genId(),
+      actorSlug: data.actor,
+      targetSlug: data.recipientId,
       user: data.actor,
-      action: data.action,
-      target: data.target ?? '',
+      action: actionText,
+      target: post ? this.snippet(post.content) : '',
       type: data.type,
       postId: data.postId,
       recipientId: data.recipientId,
@@ -648,7 +662,7 @@ class MockDB {
     );
     if (!exists) {
       this.follows.push({ followerId: followerSlug, followedId: followedSlug });
-      this.createNotification({ recipientId: followedSlug, actor: followerSlug, type: 'follow', action: 'がフォローしました', target: '', postId: undefined });
+      this.createNotification({ recipientId: followedSlug, actor: followerSlug, type: 'follow', postId: undefined });
     }
   }
 

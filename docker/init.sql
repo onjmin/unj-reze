@@ -20,16 +20,15 @@ CREATE INDEX IF NOT EXISTS idx_anonymous_users_slug ON anonymous_users(slug);
 -- 通知テーブル
 CREATE TABLE IF NOT EXISTS notifications (
   id SERIAL PRIMARY KEY,
-  user_name TEXT NOT NULL REFERENCES anonymous_users(id) ON DELETE CASCADE,
-  action TEXT NOT NULL,
-  target TEXT NOT NULL DEFAULT '',
-  type TEXT NOT NULL DEFAULT 'like',
-  post_id INTEGER,
-  target_user TEXT REFERENCES anonymous_users(id) ON DELETE CASCADE,
+  actor_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+  target_slug TEXT NOT NULL REFERENCES anonymous_users(slug) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('like', 'heart', 'reply', 'follow', 'mention', 'repost')),
+  post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
   read BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_notifications_target_user ON notifications(target_user, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_target_slug ON notifications(target_slug, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_actor_slug ON notifications(actor_slug);
 
 -- メッセージテーブル
 CREATE TABLE IF NOT EXISTS messages (
@@ -245,11 +244,11 @@ INSERT INTO anonymous_users (id, ip_address, session_id, display_name, slug, ava
 ON CONFLICT (id) DO NOTHING;
 
 -- === 通知データ ===
-INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, created_at) VALUES
-  (1, '名無しXz9', 'がいいねしました', '青空の写真', 'like', 7, NULL, NOW() - INTERVAL '3 minutes'),
-  (2, '名無しLm8', 'がリポストしました', 'ドット絵の練習中', 'repost', 6, NULL, NOW() - INTERVAL '8 minutes'),
-  (3, '名無しBn5', 'が返信しました', '作業用BGM何聴いてる？', 'reply', 5, NULL, NOW() - INTERVAL '15 minutes'),
-  (4, '名無しVc1', 'がフォローしました', '', 'follow', NULL, '名無しvFZ', NOW() - INTERVAL '1 hour');
+INSERT INTO notifications (id, actor_slug, target_slug, type, post_id, created_at) VALUES
+  (1, 'Xz9', 'vFZ', 'like', 7, NOW() - INTERVAL '3 minutes'),
+  (2, 'Lm8', 'vFZ', 'repost', 6, NOW() - INTERVAL '8 minutes'),
+  (3, 'Bn5', 'vFZ', 'reply', 5, NOW() - INTERVAL '15 minutes'),
+  (4, 'Vc1', 'vFZ', 'follow', NULL, NOW() - INTERVAL '1 hour');
 
 -- === メッセージデータ ===
 INSERT INTO messages (id, sender, text, created_at) VALUES

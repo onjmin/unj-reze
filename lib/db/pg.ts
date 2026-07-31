@@ -262,21 +262,31 @@ function snippetPg(text: string): string {
   return text.length > 20 ? text.slice(0, 20) + '…' : text;
 }
 
+function formatNotificationAction(type: string): string {
+  switch (type) {
+    case 'reply': return 'が返信しました';
+    case 'like': return 'がいいねしました';
+    case 'heart': return 'がハートを送りました';
+    case 'follow': return 'がフォローしました';
+    case 'mention': return 'があなたにメンションしました';
+    case 'repost': return 'がリポストしました';
+    default: return 'がいいねしました';
+  }
+}
+
 /** 通知を挿入。自己宛は生成しない。 */
-async function insertNotificationPg(client: any, d: { recipientId: string; actor: string; type: string; action: string; target?: string; postId?: number }): Promise<void> {
-  if (!d.recipientId || d.recipientId === d.actor) return;
+async function insertNotificationPg(client: any, d: { recipientId: string; actor: string; type: string; postId?: number }): Promise<void> {
+  const recipientSlug = await resolveViewerSlug(client, d.recipientId);
+  const actorSlug = await resolveViewerSlug(client, d.actor);
+  if (!recipientSlug || !actorSlug || recipientSlug === actorSlug) return;
   try {
     await client.query(
-      `INSERT INTO notifications (user_name, action, target, type, post_id, target_user, read, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, false, NOW())`,
-      [d.actor, d.action, d.target ?? '', d.type, d.postId ?? null, d.recipientId]
+      `INSERT INTO notifications (actor_slug, target_slug, type, post_id, read, created_at)
+       VALUES ($1, $2, $3, $4, false, NOW())`,
+      [actorSlug, recipientSlug, d.type, d.postId ?? null]
     );
-    // 通知はすべてこの関数を通るので、ここで push すれば いいね/ハート/返信/メンション/フォロー を
-    // まとめて拾える。宛先本人だけに「1件届いた」と知らせ、中身の取得はクライアントに任せる
-    // （このイベント自体に通知本文を載せると、他人の投稿内容がハブ経由で広がりうるため）。
-    // トランザクションがこの後ロールバックした場合は空振りの再取得になるだけで害はない。
     publishRealtime({
-      channel: chUser(d.recipientId),
+      channel: chUser(recipientSlug),
       event: 'notify',
       data: { type: d.type },
     });
@@ -415,7 +425,7 @@ export const pgStore: DataStore = {
         );
         await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
         const author = postResult.rows[0];
-        await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', action: 'がいいねしました', target: author.snippet ?? '', postId: id });
+        await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', postId: id });
       }
 
       await client.query('COMMIT');
@@ -495,7 +505,7 @@ export const pgStore: DataStore = {
       await client.query('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + $2 WHERE id = $1', [id, n]);
 
       const author = postResult.rows[0];
-      await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: author.snippet ?? '', postId: id });
+      await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', postId: id });
       return await getPostWithVotes(client, id, undefined, false);
     } finally {
       client.release();
@@ -563,7 +573,7 @@ export const pgStore: DataStore = {
       const parentRes = await client.query('SELECT display_name FROM posts WHERE id = $1', [parentPostId]);
       const parentAuthor = parentRes.rows[0]?.display_name;
       if (parentAuthor) {
-        await insertNotificationPg(client, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', action: 'が返信しました', target: snippetPg(data.content), postId: result.rows[0].id });
+        await insertNotificationPg(client, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: result.rows[0].id });
       }
       const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
       if (mentions) {
@@ -577,7 +587,7 @@ export const pgStore: DataStore = {
             const mres = await client.query('SELECT display_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
             const mname = mres.rows[0]?.display_name;
             if (mname && mname !== parentAuthor) {
-              await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: snippetPg(data.content), postId: result.rows[0].id });
+              await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', postId: result.rows[0].id });
             }
           })());
         }
@@ -810,19 +820,26 @@ export const pgStore: DataStore = {
     try {
       let result;
       if (userId) {
+        const viewerSlug = await resolveViewerSlug(client, userId);
         result = await client.query(
-          `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+          `SELECT n.id, n.actor_slug, n.target_slug, n.type, n.post_id, n.read, n.created_at,
+                  COALESCE(au.display_name, n.actor_slug) as resolved_name,
+                  COALESCE(p.content, '') as post_content
            FROM notifications n
-           LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
-           WHERE n.target_user = $1 OR n.target_user = (SELECT slug FROM anonymous_users WHERE id = $1 LIMIT 1)
+           LEFT JOIN anonymous_users au ON n.actor_slug = au.slug
+           LEFT JOIN posts p ON n.post_id = p.id
+           WHERE n.target_slug = $1
            ORDER BY n.created_at DESC LIMIT 20`,
-          [userId]
+          [viewerSlug]
         );
       } else {
         result = await client.query(
-          `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+          `SELECT n.id, n.actor_slug, n.target_slug, n.type, n.post_id, n.read, n.created_at,
+                  COALESCE(au.display_name, n.actor_slug) as resolved_name,
+                  COALESCE(p.content, '') as post_content
            FROM notifications n
-           LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
+           LEFT JOIN anonymous_users au ON n.actor_slug = au.slug
+           LEFT JOIN posts p ON n.post_id = p.id
            ORDER BY n.created_at DESC LIMIT 20`
         );
       }
@@ -832,13 +849,15 @@ export const pgStore: DataStore = {
           : String(r.created_at);
         return {
           id: r.id,
-          user: r.resolved_name || r.user_name,
-          action: r.action,
-          target: r.target,
+          actorSlug: r.actor_slug,
+          targetSlug: r.target_slug,
+          user: r.resolved_name || r.actor_slug,
+          action: formatNotificationAction(r.type),
+          target: r.post_content ? snippetPg(r.post_content) : '',
           type: r.type || 'like',
           postId: r.post_id ?? undefined,
-          targetUser: r.target_user ?? undefined,
-          recipientId: r.target_user ?? undefined,
+          targetUser: r.target_slug,
+          recipientId: r.target_slug,
           read: !!r.read,
           createdAt,
           time: formatRelativeTime(createdAt),
@@ -945,29 +964,32 @@ export const pgStore: DataStore = {
   async markNotificationRead(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await client.query('UPDATE notifications SET read = true WHERE id = $1 AND target_user = $2', [id, userId]);
+      const slug = await resolveViewerSlug(client, userId);
+      await client.query('UPDATE notifications SET read = true WHERE id = $1 AND target_slug = $2', [id, slug]);
     } finally { client.release(); }
   },
 
   async markAllNotificationsRead(userId: string) {
     const client = await getPool().connect();
     try {
-      // read = false の行だけ更新する（自動既読で毎回呼ばれるため、全行の書き換えは避ける）
-      await client.query('UPDATE notifications SET read = true WHERE target_user = $1 AND read = false', [userId]);
+      const slug = await resolveViewerSlug(client, userId);
+      await client.query('UPDATE notifications SET read = true WHERE target_slug = $1 AND read = false', [slug]);
     } finally { client.release(); }
   },
 
   async deleteNotification(id: number, userId: string) {
     const client = await getPool().connect();
     try {
-      await client.query('DELETE FROM notifications WHERE id = $1 AND target_user = $2', [id, userId]);
+      const slug = await resolveViewerSlug(client, userId);
+      await client.query('DELETE FROM notifications WHERE id = $1 AND target_slug = $2', [id, slug]);
     } finally { client.release(); }
   },
 
   async getUnreadCount(userId: string) {
     const client = await getPool().connect();
     try {
-      const result = await client.query('SELECT COUNT(*) AS cnt FROM notifications WHERE target_user = $1 AND read = false', [userId]);
+      const slug = await resolveViewerSlug(client, userId);
+      const result = await client.query('SELECT COUNT(*) AS cnt FROM notifications WHERE target_slug = $1 AND read = false', [slug]);
       return parseInt(result.rows[0].cnt, 10);
     } finally { client.release(); }
   },
@@ -1258,7 +1280,7 @@ export const pgStore: DataStore = {
         [followerSlug, followedSlug]
       );
       if (ins.rowCount && ins.rowCount > 0) {
-        await insertNotificationPg(client, { recipientId: followedSlug, actor: followerSlug, type: 'follow', action: 'がフォローしました', target: '' });
+        await insertNotificationPg(client, { recipientId: followedSlug, actor: followerSlug, type: 'follow' });
       }
     } finally {
       client.release();

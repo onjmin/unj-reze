@@ -203,18 +203,31 @@ function snippetSqlite(text: string): string {
   return text.length > 20 ? text.slice(0, 20) + '…' : text;
 }
 
+function formatNotificationActionSqlite(type: string): string {
+  switch (type) {
+    case 'reply': return 'が返信しました';
+    case 'like': return 'がいいねしました';
+    case 'heart': return 'がハートを送りました';
+    case 'follow': return 'がフォローしました';
+    case 'mention': return 'があなたにメンションしました';
+    case 'repost': return 'がリポストしました';
+    default: return 'がいいねしました';
+  }
+}
+
 /** 通知を挿入。自己宛は生成しない。 */
-function insertNotificationSqlite(d: SqlJsDatabase, data: { recipientId: string; actor: string; type: string; action: string; target?: string; postId?: number }): void {
-  if (!data.recipientId || data.recipientId === data.actor) return;
+function insertNotificationSqlite(d: SqlJsDatabase, data: { recipientId: string; actor: string; type: string; postId?: number }): void {
+  const recipientSlug = resolveViewerSlugSqlite(d, data.recipientId);
+  const actorSlug = resolveViewerSlugSqlite(d, data.actor);
+  if (!recipientSlug || !actorSlug || recipientSlug === actorSlug) return;
   try {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     d.run(
-      `INSERT INTO notifications (id, user_name, action, target, type, post_id, target_user, read, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-      [id, data.actor, data.action, data.target ?? '', data.type, data.postId ?? null, data.recipientId, new Date().toISOString()]
+      `INSERT INTO notifications (id, actor_slug, target_slug, type, post_id, read, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      [id, actorSlug, recipientSlug, data.type, data.postId ?? null, new Date().toISOString()]
     );
-    // pg 側と同じく、宛先本人へ「1件届いた」だけを push する（lib/db/pg.ts の同関数を参照）。
-    publishRealtime({ channel: chUser(data.recipientId), event: 'notify', data: { type: data.type } });
+    publishRealtime({ channel: chUser(recipientSlug), event: 'notify', data: { type: data.type } });
   } catch { /* notifications 未整備時は無視 */ }
 }
 
@@ -520,7 +533,7 @@ export const sqliteStore: DataStore = {
       d.run('UPDATE posts SET likes = likes + 1 WHERE id = ?', [id]);
       const authorRows = rowsToObjects(d, 'SELECT display_name, content FROM posts WHERE id = ?', [id]);
       if (authorRows.length > 0) {
-        insertNotificationSqlite(d, { recipientId: authorRows[0].display_name, actor: userId, type: 'like', action: 'がいいねしました', target: snippetSqlite(authorRows[0].content ?? ''), postId: id });
+        insertNotificationSqlite(d, { recipientId: authorRows[0].display_name, actor: userId, type: 'like', postId: id });
       }
     }
     saveDb();
@@ -566,7 +579,7 @@ export const sqliteStore: DataStore = {
     d.run('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + ? WHERE id = ?', [n, id]);
     const heartAuthor = rowsToObjects(d, 'SELECT display_name, substr(content, 1, 20) AS snippet FROM posts WHERE id = ?', [id]);
     if (heartAuthor.length > 0) {
-      insertNotificationSqlite(d, { recipientId: heartAuthor[0].display_name, actor: userId, type: 'heart', action: 'がハートを送りました', target: heartAuthor[0].snippet ?? '', postId: id });
+      insertNotificationSqlite(d, { recipientId: heartAuthor[0].display_name, actor: userId, type: 'heart', postId: id });
     }
     saveDb();
 
@@ -621,7 +634,7 @@ export const sqliteStore: DataStore = {
     const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
     const parentAuthor = parentRows[0]?.display_name;
     if (parentAuthor) {
-      insertNotificationSqlite(d, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', action: 'が返信しました', target: snippetSqlite(data.content), postId: id });
+      insertNotificationSqlite(d, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: id });
     }
     const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
     if (mentions) {
@@ -633,7 +646,7 @@ export const sqliteStore: DataStore = {
         const mrows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE slug = ? LIMIT 1', [mslug]);
         const mname = mrows[0]?.display_name;
         if (mname && mname !== parentAuthor) {
-          insertNotificationSqlite(d, { recipientId: mname, actor: data.displayName, type: 'mention', action: 'があなたにメンションしました', target: snippetSqlite(data.content), postId: id });
+          insertNotificationSqlite(d, { recipientId: mname, actor: data.displayName, type: 'mention', postId: id });
         }
       }
     }
@@ -834,53 +847,73 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     let rows;
     if (userId) {
+      const viewerSlug = resolveViewerSlugSqlite(d, userId);
       rows = rowsToObjects(
         d,
-        `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+        `SELECT n.id, n.actor_slug, n.target_slug, n.type, n.post_id, n.read, n.created_at,
+                COALESCE(au.display_name, n.actor_slug) as resolved_name,
+                COALESCE(p.content, '') as post_content
          FROM notifications n
-         LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
-         WHERE n.target_user = ? OR n.target_user = (SELECT slug FROM anonymous_users WHERE id = ? LIMIT 1)
+         LEFT JOIN anonymous_users au ON n.actor_slug = au.slug
+         LEFT JOIN posts p ON n.post_id = p.id
+         WHERE n.target_slug = ?
          ORDER BY n.id DESC LIMIT 20`,
-        [userId, userId]
+        [viewerSlug]
       );
     } else {
       rows = rowsToObjects(
         d,
-        `SELECT n.*, COALESCE(au.display_name, n.user_name) as resolved_name
+        `SELECT n.id, n.actor_slug, n.target_slug, n.type, n.post_id, n.read, n.created_at,
+                COALESCE(au.display_name, n.actor_slug) as resolved_name,
+                COALESCE(p.content, '') as post_content
          FROM notifications n
-         LEFT JOIN anonymous_users au ON n.user_name = au.id OR n.user_name = au.slug OR n.user_name = au.display_name
+         LEFT JOIN anonymous_users au ON n.actor_slug = au.slug
+         LEFT JOIN posts p ON n.post_id = p.id
          ORDER BY n.id DESC LIMIT 20`
       );
     }
     return rows.map(r => ({
-      id: r.id, user: r.resolved_name || r.user_name, action: r.action, target: r.target,
-      type: r.type || 'like', postId: r.post_id ?? undefined, targetUser: r.target_user ?? undefined,
-      recipientId: r.target_user ?? undefined, read: !!r.read,
-      createdAt: r.created_at, time: formatRelativeTime(r.created_at),
+      id: r.id,
+      actorSlug: r.actor_slug,
+      targetSlug: r.target_slug,
+      user: r.resolved_name || r.actor_slug,
+      action: formatNotificationActionSqlite(r.type),
+      target: r.post_content ? snippetSqlite(r.post_content) : '',
+      type: r.type || 'like',
+      postId: r.post_id ?? undefined,
+      targetUser: r.target_slug,
+      recipientId: r.target_slug,
+      read: !!r.read,
+      createdAt: r.created_at,
+      time: formatRelativeTime(r.created_at),
     } as Notification));
   },
 
   async markNotificationRead(id: number, userId: string) {
     const d = await getDb();
-    d.run('UPDATE notifications SET read = 1 WHERE id = ? AND target_user = ?', [id, userId]);
+    const slug = resolveViewerSlugSqlite(d, userId);
+    d.run('UPDATE notifications SET read = 1 WHERE id = ? AND target_slug = ?', [id, slug]);
     saveDb();
   },
 
   async markAllNotificationsRead(userId: string) {
     const d = await getDb();
-    d.run('UPDATE notifications SET read = 1 WHERE target_user = ? AND read = 0', [userId]);
+    const slug = resolveViewerSlugSqlite(d, userId);
+    d.run('UPDATE notifications SET read = 1 WHERE target_slug = ? AND read = 0', [slug]);
     saveDb();
   },
 
   async deleteNotification(id: number, userId: string) {
     const d = await getDb();
-    d.run('DELETE FROM notifications WHERE id = ? AND target_user = ?', [id, userId]);
+    const slug = resolveViewerSlugSqlite(d, userId);
+    d.run('DELETE FROM notifications WHERE id = ? AND target_slug = ?', [id, slug]);
     saveDb();
   },
 
   async getUnreadCount(userId: string) {
     const d = await getDb();
-    const rows = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM notifications WHERE target_user = ? AND read = 0', [userId]);
+    const slug = resolveViewerSlugSqlite(d, userId);
+    const rows = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM notifications WHERE target_slug = ? AND read = 0', [slug]);
     return rows[0]?.cnt ?? 0;
   },
 
@@ -1130,7 +1163,7 @@ export const sqliteStore: DataStore = {
       [followerSlug, followedSlug]
     );
     if (before.length === 0) {
-      insertNotificationSqlite(d, { recipientId: followedSlug, actor: followerSlug, type: 'follow', action: 'がフォローしました', target: '' });
+      insertNotificationSqlite(d, { recipientId: followedSlug, actor: followerSlug, type: 'follow' });
     }
     saveDb();
   },

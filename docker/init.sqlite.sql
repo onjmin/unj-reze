@@ -3,15 +3,15 @@
 
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY,
-  user_name TEXT NOT NULL,
-  action TEXT NOT NULL,
-  target TEXT NOT NULL DEFAULT '',
+  actor_slug TEXT NOT NULL,
+  target_slug TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'like',
   post_id INTEGER,
-  target_user TEXT,
   read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_notifications_target_slug ON notifications(target_slug, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_actor_slug ON notifications(actor_slug);
 
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY,
@@ -197,11 +197,11 @@ INSERT OR IGNORE INTO anonymous_users (id, ip_address, session_id, display_name,
   ('名無しPz5', '127.0.0.1', 'seed_session_33', '名無しPz5', 'Pz5', 'from-pink-300 to-rose-400');
 
 -- 通知データ
-INSERT INTO notifications (id, user_name, action, target, created_at) VALUES
-  (1, '名無しXz9', 'がいいねしました', '青空の写真', datetime('now', '-3 minutes')),
-  (2, '名無しLm8', 'がリポストしました', 'ドット絵の練習中', datetime('now', '-8 minutes')),
-  (3, '名無しBn5', 'が返信しました', '作業用BGM何聴いてる？', datetime('now', '-15 minutes')),
-  (4, '名無しVc1', 'がフォローしました', '', datetime('now', '-1 hours'));
+INSERT INTO notifications (id, actor_slug, target_slug, type, post_id, created_at) VALUES
+  (1, 'Xz9', 'vFZ', 'like', 7, datetime('now', '-3 minutes')),
+  (2, 'Lm8', 'vFZ', 'repost', 6, datetime('now', '-8 minutes')),
+  (3, 'Bn5', 'vFZ', 'reply', 5, datetime('now', '-15 minutes')),
+  (4, 'Vc1', 'vFZ', 'follow', NULL, datetime('now', '-1 hours'));
 
 -- メッセージデータ
 INSERT INTO messages (id, sender, text, created_at) VALUES

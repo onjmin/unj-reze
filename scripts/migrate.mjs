@@ -361,6 +361,34 @@ const migrations = [
       -- 2. anonymous_users.id 自体の日本語表記を英数字 'usr_' + slug へ補正統一
       UPDATE anonymous_users SET id = 'usr_' || slug WHERE id LIKE '名無し%' AND slug IS NOT NULL;
     `
+  },
+  {
+    name: '19_normalize_notifications_schema',
+    sql: `
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS actor_slug TEXT;
+      ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_slug TEXT;
+
+      UPDATE notifications n
+      SET actor_slug = COALESCE(au_a.slug, substring(n_orig.user_name FROM '[a-zA-Z0-9]+$'), n_orig.user_name),
+          target_slug = COALESCE(au_t.slug, substring(n_orig.target_user FROM '[a-zA-Z0-9]+$'), n_orig.target_user)
+      FROM notifications n_orig
+      LEFT JOIN anonymous_users au_a ON au_a.id = n_orig.user_name OR au_a.display_name = n_orig.user_name OR au_a.slug = n_orig.user_name
+      LEFT JOIN anonymous_users au_t ON au_t.id = n_orig.target_user OR au_t.display_name = n_orig.target_user OR au_t.slug = n_orig.target_user
+      WHERE n.id = n_orig.id AND (n.actor_slug IS NULL OR n.target_slug IS NULL);
+
+      DELETE FROM notifications WHERE actor_slug IS NULL OR target_slug IS NULL OR actor_slug = target_slug;
+
+      ALTER TABLE notifications DROP COLUMN IF EXISTS user_name;
+      ALTER TABLE notifications DROP COLUMN IF EXISTS action;
+      ALTER TABLE notifications DROP COLUMN IF EXISTS target;
+      ALTER TABLE notifications DROP COLUMN IF EXISTS target_user;
+
+      DROP INDEX IF EXISTS idx_notifications_target_user;
+      DROP INDEX IF EXISTS idx_notifications_target_created;
+
+      CREATE INDEX IF NOT EXISTS idx_notifications_target_slug ON notifications(target_slug, read, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_notifications_actor_slug ON notifications(actor_slug);
+    `
   }
 ];
 

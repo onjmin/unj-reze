@@ -75,6 +75,8 @@ export interface DbOshiItem {
 
 export interface DbNotification {
   id: number;
+  actorSlug?: string;
+  targetSlug?: string;
   user: string;
   action: string;
   target: string;

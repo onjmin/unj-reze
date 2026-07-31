@@ -6,12 +6,10 @@ WITH expected_schema (table_name, column_name) AS (
   VALUES
     -- notifications
     ('notifications', 'id'),
-    ('notifications', 'user_name'),
-    ('notifications', 'action'),
-    ('notifications', 'target'),
+    ('notifications', 'actor_slug'),
+    ('notifications', 'target_slug'),
     ('notifications', 'type'),
     ('notifications', 'post_id'),
-    ('notifications', 'target_user'),
     ('notifications', 'read'),
     ('notifications', 'created_at'),
 
