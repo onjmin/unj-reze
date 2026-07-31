@@ -33,10 +33,6 @@ const pressStart2P = Press_Start_2P({
 const description = SITE_DESCRIPTION;
 
 export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   themeColor: "#0b0e14",
   colorScheme: "dark",
 };
@@ -116,15 +112,6 @@ export default function RootLayout({
               gtag('js', new Date());
 
               gtag('config', 'G-HL7EMH1N1B');
-            `,
-          }}
-        />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
-              document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
-              document.addEventListener('gestureend', function(e) { e.preventDefault(); });
             `,
           }}
         />
