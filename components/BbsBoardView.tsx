@@ -144,7 +144,11 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
         >
           <Plus size={11} /> スレ作成
         </button>
-        <button className="p-1 hover:bg-gray-800 rounded text-gray-500 transition-colors">
+        <button
+          onClick={() => router.push('/search')}
+          className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-gray-300 transition-colors"
+          title="検索"
+        >
           <Search size={14} />
         </button>
       </div>

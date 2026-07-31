@@ -18,6 +18,9 @@ import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import PostComposer from './PostComposer';
 import GameBox from './GameBox';
+import ShareButton from './ShareButton';
+import { postShareUrl } from '@/lib/share';
+import { buildPostShareText } from '@/lib/share-text';
 import { OriginType } from '@/lib/types';
 import { showToast } from '@/lib/toast';
 import dynamic from 'next/dynamic';
@@ -247,9 +250,12 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
             <ArrowLeft size={16} className="text-gray-300" />
             <span className="text-xs text-gray-400">板トップ</span>
           </Link>
-          <button className="ml-auto p-1.5 hover:bg-gray-100/10 rounded-full transition-colors text-gray-500">
-            <Share2 size={15} />
-          </button>
+          <ShareButton
+            url={postShareUrl(post.id)}
+            text={buildPostShareText(post)}
+            size={15}
+            className="ml-auto p-1.5 hover:bg-gray-100/10 rounded-full transition-colors text-gray-500 hover:text-gray-300"
+          />
         </div>
       </div>
 
