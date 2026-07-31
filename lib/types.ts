@@ -149,6 +149,17 @@ export interface Obstacle {
   passed?: boolean;
 }
 
+/** フォロワー/フォロー一覧の1行。表示に必要な最小限だけを返す（egress削減）。 */
+export interface FollowUser {
+  slug: string;
+  displayName: string;
+  avatarUrl?: string;
+  /** 閲覧者がこのユーザーをフォローしているか。viewerId 未指定なら undefined。 */
+  isFollowing?: boolean;
+  /** 閲覧者自身の行か（フォローボタンを出さないため） */
+  isSelf?: boolean;
+}
+
 export interface Notification {
   id: string;
   user: string;

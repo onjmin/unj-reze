@@ -11,6 +11,7 @@ import { api } from '@/lib/api';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
 import { cachePost } from '@/lib/post-cache';
+import { cacheProfileSeed } from '@/lib/profile-cache';
 import { getThreadDisplayTime } from '@/lib/time';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -270,6 +271,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
         <div
           onClick={(e) => {
             e.stopPropagation();
+            // プロフィールへ行く可能性があるので、一覧で判っている見た目を先に渡しておく。
+            cacheProfileSeed({ slug: post.slug || undefined, displayName: post.displayName, avatarUrl: post.avatarUrl });
             if (isSelf) {
               router.push(`/user/${post.slug || post.displayName}`);
             } else {

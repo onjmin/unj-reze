@@ -1,4 +1,4 @@
-import { AnonymousUser, GhostPlayer, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
+import { AnonymousUser, FollowUser, GhostPlayer, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
 import { DbPost, DbGameRecord, DbNotification, DbOshiItem } from '../types-db';
 import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
@@ -96,6 +96,10 @@ export interface DataStore {
   deleteNotification(id: number, userId: string): Promise<void>;
   getUnreadCount(userId: string): Promise<number>;
   getMessages(userId?: string): Promise<Message[]>;
+  /** userId と partnerId の1対1スレッドだけを新しい順に返す。 */
+  getConversation(userId: string, partnerId: string, limit?: number): Promise<Message[]>;
+  /** 初回DM制限の判定材料。sent=自分が送った通数 / received=相手から届いた通数。 */
+  getDmGate(userId: string, partnerId: string): Promise<{ sent: number; received: number }>;
   addMessage(data: MessageParams): Promise<Message>;
   getTrends(): Promise<Trend[]>;
   searchPosts(query: string, userId?: string, limit?: number): Promise<DbPost[]>;
@@ -115,6 +119,10 @@ export interface DataStore {
   unfollowUser(followerId: string, followedId: string): Promise<void>;
   isFollowing(followerId: string, followedId: string): Promise<boolean>;
   getFollowCounts(userId: string): Promise<{ followers: number; following: number }>;
+  /** userId をフォローしているユーザー一覧。viewerId を渡すと isFollowing / isSelf が埋まる。 */
+  getFollowers(userId: string, viewerId?: string, limit?: number): Promise<FollowUser[]>;
+  /** userId がフォローしているユーザー一覧。 */
+  getFollowing(userId: string, viewerId?: string, limit?: number): Promise<FollowUser[]>;
   // ブロック / ミュート / 通報（slug 単位で識別）
   blockUser(blockerSlug: string, blockedSlug: string): Promise<void>;
   unblockUser(blockerSlug: string, blockedSlug: string): Promise<void>;

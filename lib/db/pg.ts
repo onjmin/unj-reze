@@ -1,5 +1,5 @@
 import { neon, neonConfig } from '@neondatabase/serverless';
-import { AnonymousUser, OriginType } from '../types';
+import { AnonymousUser, FollowUser, OriginType } from '../types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
@@ -300,6 +300,55 @@ async function resolveViewerSlug(client: any, userId: string): Promise<string> {
     [userId]
   );
   return u.rows[0]?.slug ?? deriveSlugPg(userId);
+}
+
+/**
+ * フォロワー/フォロー一覧。表示に要る3列だけを引く（`SELECT u.*` は egress 予算を壊す）。
+ * user_follows は slug を保持しているので、anonymous_users とは slug で突き合わせる。
+ */
+async function listFollowsPg(
+  kind: 'followers' | 'following',
+  userId: string,
+  viewerId?: string,
+  limit = 100
+): Promise<FollowUser[]> {
+  const client = await getPool().connect();
+  try {
+    const slug = await resolveViewerSlug(client, userId);
+    // followers なら「followed_id が本人」の follower_id 側を、following ならその逆を引く。
+    const selfCol = kind === 'followers' ? 'followed_id' : 'follower_id';
+    const otherCol = kind === 'followers' ? 'follower_id' : 'followed_id';
+    const result = await client.query(
+      `SELECT f.${otherCol} AS slug, u.display_name, u.avatar_url
+       FROM user_follows f
+       LEFT JOIN anonymous_users u ON u.slug = f.${otherCol}
+       WHERE f.${selfCol} = $1 OR f.${selfCol} = $2
+       ORDER BY f.created_at DESC
+       LIMIT $3`,
+      [slug, userId, limit]
+    );
+
+    let viewerSlug: string | undefined;
+    let viewerFollowing: Set<string> | null = null;
+    if (viewerId) {
+      viewerSlug = await resolveViewerSlug(client, viewerId);
+      const mine = await client.query('SELECT followed_id FROM user_follows WHERE follower_id = $1', [viewerSlug]);
+      viewerFollowing = new Set(mine.rows.map((r: any) => r.followed_id));
+    }
+
+    const hidden = await getHiddenSlugs(client, viewerId);
+    return result.rows
+      .filter((r: any) => !hidden.has(r.slug))
+      .map((r: any) => ({
+        slug: r.slug,
+        displayName: r.display_name || r.slug,
+        avatarUrl: r.avatar_url || undefined,
+        isFollowing: viewerFollowing ? viewerFollowing.has(r.slug) : undefined,
+        isSelf: viewerSlug ? viewerSlug === r.slug : undefined,
+      }));
+  } finally {
+    client.release();
+  }
 }
 
 const hiddenSlugsCache = new Map<string, { hidden: Set<string>; expiresAt: number }>();
@@ -914,6 +963,65 @@ export const pgStore: DataStore = {
     }
   },
 
+  /**
+   * 1対1スレッド。sender/recipient は slug で保存されているので JOIN 無しで引ける
+   * （表示名は呼び出し側が知っている＝一覧クエリのように毎行 JOIN する必要がない）。
+   */
+  async getConversation(userId: string, partnerId: string, limit = 100) {
+    const client = await getPool().connect();
+    try {
+      const [meSlug, partnerSlug] = await Promise.all([
+        resolveViewerSlug(client, userId),
+        resolveViewerSlug(client, partnerId),
+      ]);
+      const result = await client.query(
+        `SELECT id, sender, text, recipient, created_at FROM messages
+         WHERE (sender = $1 AND recipient = $2) OR (sender = $2 AND recipient = $1)
+         ORDER BY created_at DESC LIMIT $3`,
+        [meSlug, partnerSlug, limit]
+      );
+      return result.rows.map((r: any) => {
+        const createdAt = typeof r.created_at === 'object' && r.created_at?.toISOString
+          ? r.created_at.toISOString()
+          : String(r.created_at);
+        return {
+          id: r.id,
+          sender: r.sender,
+          text: r.text,
+          recipient: r.recipient || undefined,
+          createdAt,
+          time: formatRelativeTime(createdAt),
+        } as Message;
+      });
+    } finally {
+      client.release();
+    }
+  },
+
+  async getDmGate(userId: string, partnerId: string) {
+    const client = await getPool().connect();
+    try {
+      const [meSlug, partnerSlug] = await Promise.all([
+        resolveViewerSlug(client, userId),
+        resolveViewerSlug(client, partnerId),
+      ]);
+      const r = await client.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE sender = $1) AS sent,
+           COUNT(*) FILTER (WHERE sender = $2) AS received
+         FROM messages
+         WHERE (sender = $1 AND recipient = $2) OR (sender = $2 AND recipient = $1)`,
+        [meSlug, partnerSlug]
+      );
+      return {
+        sent: parseInt(r.rows[0]?.sent ?? '0', 10),
+        received: parseInt(r.rows[0]?.received ?? '0', 10),
+      };
+    } finally {
+      client.release();
+    }
+  },
+
   async getUserBio(slug: string) {
     const client = await getPool().connect();
     try {
@@ -1338,6 +1446,14 @@ export const pgStore: DataStore = {
     } finally {
       client.release();
     }
+  },
+
+  async getFollowers(userId: string, viewerId?: string, limit = 100) {
+    return listFollowsPg('followers', userId, viewerId, limit);
+  },
+
+  async getFollowing(userId: string, viewerId?: string, limit = 100) {
+    return listFollowsPg('following', userId, viewerId, limit);
   },
 
   async blockUser(blockerSlug: string, blockedSlug: string) {

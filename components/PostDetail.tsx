@@ -11,6 +11,7 @@ import { ensureSessionId } from '@/lib/session';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
 import { cachePost } from '@/lib/post-cache';
+import { cacheProfileSeed } from '@/lib/profile-cache';
 import { getThreadDisplayTime } from '@/lib/time';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
@@ -645,6 +646,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <div
           onClick={(e) => {
             e.stopPropagation();
+            cacheProfileSeed({ slug: post.slug || undefined, displayName: post.displayName, avatarUrl: post.avatarUrl });
             if (isSelf) {
               router.push(`/user/${post.slug || post.displayName}`);
             } else {
@@ -1025,6 +1027,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
   /** 返信者のプロフィールへ移動する。 */
   const handleMenuProfile = () => {
     setMenuOpen(false);
+    cacheProfileSeed({ slug: localPost.slug || undefined, displayName: localPost.displayName, avatarUrl: localPost.avatarUrl });
     router.push(`/user/${localPost.slug || localPost.displayName}`);
   };
 

@@ -14,6 +14,17 @@ export async function GET(
   const userId = url.searchParams.get('userId') || undefined;
   const tab = url.searchParams.get('tab');
 
+  // DMスレッドのヘッダーのように「表示名とアイコンだけ」欲しい呼び出し。
+  // 投稿一覧まで引くと転送量が跳ねるので、メタ情報だけを返す。
+  if (url.searchParams.get('meta') === '1') {
+    const [name, avatarUrl, bio] = await Promise.all([
+      db.getUserDisplayName(id),
+      db.getUserAvatarUrl(id),
+      db.getUserBio(id),
+    ]);
+    return NextResponse.json({ id, displayName: name || id, avatarUrl, bio });
+  }
+
   const limitParam = url.searchParams.get('limit');
   const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50) : 20;
 

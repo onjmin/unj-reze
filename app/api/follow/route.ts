@@ -6,6 +6,16 @@ export async function GET(request: NextRequest) {
   const userId = url.searchParams.get('userId');
   const followerId = url.searchParams.get('followerId');
   const followedId = url.searchParams.get('followedId');
+  const list = url.searchParams.get('list');
+  const viewerId = url.searchParams.get('viewerId') || undefined;
+
+  // フォロワー / フォロー一覧（プロフィールのカウントをタップして開くシート）
+  if (userId && (list === 'followers' || list === 'following')) {
+    const users = list === 'followers'
+      ? await db.getFollowers(userId, viewerId, 100)
+      : await db.getFollowing(userId, viewerId, 100);
+    return NextResponse.json({ users });
+  }
 
   if (userId) {
     const counts = await db.getFollowCounts(userId);

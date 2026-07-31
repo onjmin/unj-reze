@@ -1,7 +1,8 @@
-import { Post, AnonymousUser, OriginType, Notification, OshiItem, OshiItemKind } from './types';
+import { Post, AnonymousUser, FollowUser, OriginType, Notification, OshiItem, OshiItemKind } from './types';
 import { db as mockDbInstance } from './mock-db';
 import type { Message, Trend } from './mock-db';
 import { decodeIdOrThrow, encodePost, encodeNotification, encodeId, encodeOshiItem } from './sqids';
+import { rejectDmReason, type DmGate } from './dm-rules';
 
 const BASE = '/api';
 const useStaticMockData = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' || process.env.GITHUB_ACTIONS === 'true';
@@ -133,7 +134,18 @@ const staticApi = {
   },
   messages: {
     list: async (userId?: string) => mockDbInstance.getMessages(userId),
-    send: async (data: { sender: string; text: string; recipient?: string }) => mockDbInstance.addMessage(data),
+    conversation: async (userId: string, partner: string) => ({
+      messages: mockDbInstance.getConversation(userId, partner),
+      gate: mockDbInstance.getDmGate(userId, partner),
+    }),
+    send: async (data: { sender: string; text: string; recipient?: string }) => {
+      if (data.recipient) {
+        const gate = mockDbInstance.getDmGate(data.sender, data.recipient);
+        const rejection = rejectDmReason(gate, data.text);
+        if (rejection) throw new Error(rejection);
+      }
+      return mockDbInstance.addMessage(data);
+    },
     remove: async (id: number, userId: string) => {
       const ok = mockDbInstance.deleteMessage(id, userId);
       if (!ok) throw new Error('Message not found or not owned');
@@ -173,6 +185,12 @@ const staticApi = {
       const bio = mockDbInstance.getUserBio(id);
       return { id, displayName, avatarUrl, bio, posts, postCount: posts.length };
     },
+    meta: async (id: string) => ({
+      id,
+      displayName: mockDbInstance.getUserDisplayName(id) || id,
+      avatarUrl: mockDbInstance.getUserAvatarUrl(id),
+      bio: mockDbInstance.getUserBio(id),
+    }),
   },
   oshi: {
     list: async (userSlug: string) => mockDbInstance.listOshiItems(userSlug).map(encodeOshiItem),
@@ -194,6 +212,8 @@ const staticApi = {
   },
   follow: {
     getCounts: async (userId: string) => mockDbInstance.getFollowCounts(userId),
+    getFollowers: async (userId: string, viewerId?: string) => ({ users: mockDbInstance.getFollowers(userId, viewerId) }),
+    getFollowing: async (userId: string, viewerId?: string) => ({ users: mockDbInstance.getFollowing(userId, viewerId) }),
     isFollowing: async (followerId: string, followedId: string) => ({ isFollowing: mockDbInstance.isFollowing(followerId, followedId) }),
     follow: async (followerId: string, followedId: string) => { mockDbInstance.followUser(followerId, followedId); return { success: true }; },
     unfollow: async (followerId: string, followedId: string) => { mockDbInstance.unfollowUser(followerId, followedId); return { success: true }; },
@@ -287,6 +307,10 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Message[]>(`/messages${qs}`);
     },
+    conversation: (userId: string, partner: string) =>
+      fetcher<{ messages: Message[]; gate: DmGate }>(
+        `/messages?userId=${encodeURIComponent(userId)}&partner=${encodeURIComponent(partner)}`
+      ),
     send: (data: { sender: string; text: string; recipient?: string }) =>
       fetcher<Message>('/messages', { method: 'POST', body: JSON.stringify(data) }),
     remove: (id: number, userId: string) =>
@@ -314,6 +338,9 @@ const liveApi = {
       const qs = params.toString() ? `?${params.toString()}` : '';
       return fetcher<{ id: string; displayName: string; avatarUrl?: string; bio?: string; posts: Post[]; postCount: number }>(`/users/${encodeURIComponent(id)}${qs}`);
     },
+    /** 表示名とアイコンだけ（投稿一覧を引かない軽い版）。 */
+    meta: (id: string) =>
+      fetcher<{ id: string; displayName: string; avatarUrl?: string; bio?: string }>(`/users/${encodeURIComponent(id)}?meta=1`),
   },
   oshi: {
     list: (userSlug: string) => fetcher<OshiItem[]>(`/oshi?slug=${encodeURIComponent(userSlug)}`),
@@ -337,6 +364,10 @@ const liveApi = {
   },
   follow: {
     getCounts: (userId: string) => fetcher<{ followers: number; following: number }>(`/follow?userId=${encodeURIComponent(userId)}`),
+    getFollowers: (userId: string, viewerId?: string) =>
+      fetcher<{ users: FollowUser[] }>(`/follow?list=followers&userId=${encodeURIComponent(userId)}${viewerId ? `&viewerId=${encodeURIComponent(viewerId)}` : ''}`),
+    getFollowing: (userId: string, viewerId?: string) =>
+      fetcher<{ users: FollowUser[] }>(`/follow?list=following&userId=${encodeURIComponent(userId)}${viewerId ? `&viewerId=${encodeURIComponent(viewerId)}` : ''}`),
     isFollowing: (followerId: string, followedId: string) => fetcher<{ isFollowing: boolean }>(`/follow?followerId=${encodeURIComponent(followerId)}&followedId=${encodeURIComponent(followedId)}`),
     follow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'POST', body: JSON.stringify({ followerId, followedId }) }),
     unfollow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'DELETE', body: JSON.stringify({ followerId, followedId }) }),

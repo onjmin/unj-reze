@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Post, OshiItem, AnonymousUser } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil, Play, Pause } from 'lucide-react';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil, Play, Pause, MoreHorizontal } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
@@ -16,6 +16,7 @@ import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 import UserActionMenu from './UserActionMenu';
 import ImagePreview from './ImagePreview';
+import FollowListSheet, { type FollowListTab } from './FollowListSheet';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false });
@@ -23,6 +24,7 @@ const MusicShareModal = dynamic(() => import('./MusicShareModal'), { ssr: false 
 
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { cachePost } from '@/lib/post-cache';
+import { cacheProfileSeed, readProfileSeed } from '@/lib/profile-cache';
 
 interface ProfileViewProps {
   userId: string;
@@ -89,6 +91,8 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const [selectedUser, setSelectedUser] = useState<{ displayName: string; slug?: string } | null>(null);
   const [avatarMenuPos, setAvatarMenuPos] = useState<{ x: number; y: number } | null>(null);
+  /** フォロワー/フォロー一覧シート。カウントのタップで開く。 */
+  const [followListTab, setFollowListTab] = useState<FollowListTab | null>(null);
   /** 投稿画像のタップで開く拡大表示（フィードと同じ ImagePreview を共用） */
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
@@ -102,6 +106,11 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const resolvedName = profileDisplayName || displayName || myPosts[0]?.displayName || userId;
   const avatarInfo = getAvatarInfo(resolvedName);
+
+  // /user/[id] は currentUserId を渡さないため、セッションから解決した自分の表示名で補う。
+  // これが無いとフォロー/メッセージの導線がプロフィールページに一切出ない。
+  const viewerId = currentUserId || currentUser?.displayName;
+  const viewerSlug = currentUserSlug || currentUser?.slug;
 
   useEffect(() => {
     if (isEditModalOpen) {
@@ -208,18 +217,21 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
         }
       } catch {}
     } else {
+      // 全体キャッシュが無い＝初訪問。一覧側が積んだ種（名前・アイコン）だけでも先に描く。
+      // loading は落とさないので、投稿一覧は従来どおり読み込み表示のままになる。
+      const seed = readProfileSeed(slug) || readProfileSeed(cleanUserId);
       Promise.resolve().then(() => {
         setMyPosts([]);
-        setAvatarUrl(undefined);
+        setAvatarUrl(seed?.avatarUrl);
         setBio('');
-        setProfileDisplayName(displayName);
+        setProfileDisplayName(seed?.displayName || displayName);
         setFollowers(0);
         setFollowing(0);
         setOshiItems([]);
         setLoading(true);
       });
     }
-  }, [slug, displayName]);
+  }, [slug, cleanUserId, displayName]);
 
   // Update localStorage cache whenever profile data is updated
   useEffect(() => {
@@ -260,9 +272,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
   // Separate effect: only checks follow status, and only when we know isSelf.
   // Runs independently so it never triggers a reload of the main data.
   useEffect(() => {
-    if (!currentUserId || isSelf) return;
-    api.follow.isFollowing(currentUserId, userId).then(r => setIsFollow(r.isFollowing)).catch(() => {});
-  }, [currentUserId, userId, isSelf]);
+    if (!viewerId || isSelf) return;
+    api.follow.isFollowing(viewerId, userId).then(r => setIsFollow(r.isFollowing)).catch(() => {});
+  }, [viewerId, userId, isSelf]);
 
   useEffect(() => () => { oshiAudioRef.current?.pause(); }, []);
 
@@ -311,13 +323,13 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
   };
 
   const handleFollow = async () => {
-    if (!currentUserId) return;
+    if (!viewerId) return;
     const wasFollowing = isFollow;
     if (wasFollowing) {
       setIsFollow(false);
       setFollowers((f: number) => Math.max(0, f - 1));
       try {
-        await api.follow.unfollow(currentUserId, userId);
+        await api.follow.unfollow(viewerId, userId);
         const counts = await api.follow.getCounts(userId);
         setFollowers(counts.followers);
         setFollowing(counts.following);
@@ -329,7 +341,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
       setIsFollow(true);
       setFollowers((f: number) => f + 1);
       try {
-        await api.follow.follow(currentUserId, userId);
+        await api.follow.follow(viewerId, userId);
         const counts = await api.follow.getCounts(userId);
         setFollowers(counts.followers);
         setFollowing(counts.following);
@@ -337,6 +349,25 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
         setIsFollow(false);
         setFollowers((f: number) => Math.max(0, f - 1));
       }
+    }
+  };
+
+  /** DMスレッドへ。相手は slug で指定する（表示名は変わりうるため）。 */
+  const handleOpenDm = () => {
+    router.push(`/messages/${encodeURIComponent(slug)}`);
+  };
+
+  /**
+   * 一覧シート内でのフォロー操作を、このプロフィールのカウントにも反映する。
+   * 自分のプロフィールを見ているなら「フォロー」数、
+   * 表示中ユーザー本人を一覧からフォローしたなら「フォロワー」数が動く。
+   */
+  const handleListFollowChange = (targetSlug: string, nowFollowing: boolean) => {
+    const delta = nowFollowing ? 1 : -1;
+    if (isSelf) setFollowing((f: number) => Math.max(0, f + delta));
+    if (targetSlug === slug) {
+      setIsFollow(nowFollowing);
+      setFollowers((f: number) => Math.max(0, f + delta));
     }
   };
 
@@ -397,7 +428,11 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     router.push(`/post/${post.id}`);
   };
 
-  if (loading && myPosts.length === 0 && likedPosts.length === 0 && dislikedPosts.length === 0 && heartedPosts.length === 0) {
+  // 名前かアイコンだけでも判っていればヘッダーを先に出す（投稿一覧だけが読み込み表示になる）。
+  // 何も判らないときだけ、従来どおり全面の読み込み表示にする。
+  const hasHeaderData = !!(profileDisplayName || avatarUrl || bio);
+
+  if (loading && !hasHeaderData && myPosts.length === 0 && likedPosts.length === 0 && dislikedPosts.length === 0 && heartedPosts.length === 0) {
     return (
       <div className="flex flex-col h-full items-center justify-center">
         <div className="text-xs text-gray-500">読み込み中...</div>
@@ -455,36 +490,69 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
               <p className="text-[10px] text-red-400 mt-1">{avatarError}</p>
             )}
           </div>
+          {!isSelf && (
+            <button
+              onClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setAvatarMenuPos({ x: rect.right - 176, y: rect.bottom });
+                setSelectedUser({ displayName: resolvedName, slug });
+              }}
+              className="shrink-0 w-8 h-8 rounded-full border border-gray-700 text-gray-400 flex items-center justify-center hover:bg-gray-100/10 hover:text-white transition-colors"
+              aria-label="このユーザーの操作"
+            >
+              <MoreHorizontal size={16} />
+            </button>
+          )}
         </div>
         <div className="flex space-x-4 text-xs mt-0.5">
-          <button className="text-gray-400 hover:text-white transition-colors">
+          <span className="text-gray-400">
             <span className="font-bold text-white">{myPosts.length}</span>{' '}投稿
-          </button>
-          <button className="text-gray-400 hover:text-white transition-colors">
-            <span className="font-bold text-white">{following}</span>{' '}フォロー
-          </button>
-          <button className="text-gray-400 hover:text-white transition-colors">
+          </span>
+          <button
+            onClick={() => setFollowListTab('followers')}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
             <span className="font-bold text-white">{followers}</span>{' '}フォロワー
           </button>
-          {isSelf && (
+          <button
+            onClick={() => setFollowListTab('following')}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            <span className="font-bold text-white">{following}</span>{' '}フォロー
+          </button>
+        </div>
+
+        {/* フォロー / メッセージ。プロフィールから次の行動へ最短で行けるよう主導線として並べる。 */}
+        <div className="flex gap-2 mt-3">
+          {isSelf ? (
             <button
               onClick={() => setIsEditModalOpen(true)}
-              className="ml-auto px-3 py-1 rounded-full text-[11px] font-bold border border-gray-600 text-gray-300 hover:border-white hover:text-white transition-colors cursor-pointer"
+              className="flex-1 py-2 rounded-full text-xs font-bold border border-gray-700 text-gray-200 hover:border-white hover:text-white transition-colors"
             >
               プロフィールを編集
             </button>
-          )}
-          {currentUserId && !isSelf && (
-            <button
-              onClick={handleFollow}
-              className={`ml-auto px-3 py-1 rounded-full text-[11px] font-bold border transition-colors ${
-                isFollow
-                  ? 'border-gray-600 text-gray-400 hover:border-red-500 hover:text-red-400'
-                  : 'border-[#a3e635] text-[#a3e635] hover:bg-[#a3e635]/10'
-              }`}
-            >
-              {isFollow ? 'フォロー中' : 'フォロー'}
-            </button>
+          ) : (
+            <>
+              <button
+                onClick={handleFollow}
+                disabled={!viewerId}
+                className={`flex-1 py-2 rounded-full text-xs font-bold transition-colors disabled:opacity-50 ${
+                  isFollow
+                    ? 'border border-gray-700 text-gray-200 hover:border-red-500 hover:text-red-400'
+                    : 'bg-white text-black hover:bg-gray-200'
+                }`}
+              >
+                {isFollow ? 'フォロー中' : 'フォロー'}
+              </button>
+              <button
+                onClick={handleOpenDm}
+                disabled={!viewerId}
+                className="flex-1 py-2 rounded-full text-xs font-bold border border-gray-700 text-gray-200 hover:border-white hover:text-white transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                <Mail size={13} />
+                メッセージ
+              </button>
+            </>
           )}
         </div>
 
@@ -581,6 +649,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                   <div
                     onClick={(e) => {
                       e.stopPropagation();
+                      cacheProfileSeed({ slug: p.slug || undefined, displayName: p.displayName, avatarUrl: p.avatarUrl });
                       const isSelfPost = currentUser && (p.slug === currentUser.slug || p.displayName === currentUser.displayName);
                       if (isSelfPost) {
                         router.push(`/user/${p.slug || p.displayName}`);
@@ -831,12 +900,24 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
           onClose={() => setSelectedUser(null)}
           targetUserDisplayName={selectedUser.displayName}
           targetUserSlug={selectedUser.slug}
-          currentUserId={currentUser?.displayName}
-          currentUserSlug={currentUser?.slug}
+          currentUserId={viewerId}
+          currentUserSlug={viewerSlug}
           onMention={(username) => {
             router.push(`/?mention=${encodeURIComponent(username)}`);
           }}
           position={avatarMenuPos}
+        />
+      )}
+
+      {followListTab && (
+        <FollowListSheet
+          userId={userId}
+          initialTab={followListTab}
+          followersCount={followers}
+          followingCount={following}
+          viewerId={viewerId}
+          onClose={() => setFollowListTab(null)}
+          onFollowChange={handleListFollowChange}
         />
       )}
 

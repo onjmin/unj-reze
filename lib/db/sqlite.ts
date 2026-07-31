@@ -1,6 +1,6 @@
 import type { Database as SqlJsDatabase } from 'sql.js';
 import { INIT_SQL } from './init-sql';
-import { AnonymousUser, OriginType } from '../types';
+import { AnonymousUser, FollowUser, OriginType } from '../types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
 import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams } from './interface';
@@ -251,6 +251,47 @@ function getHiddenSlugsSqlite(d: SqlJsDatabase, userId?: string): Set<string> {
   const mutes = rowsToObjects(d, 'SELECT muted_slug FROM user_mutes WHERE muter_slug = ?', [viewerSlug]);
   for (const r of mutes) hidden.add(r.muted_slug);
   return hidden;
+}
+
+/** フォロワー/フォロー一覧。user_follows は slug を保持しているので slug で JOIN する。 */
+function listFollowsSqlite(
+  d: SqlJsDatabase,
+  kind: 'followers' | 'following',
+  userId: string,
+  viewerId?: string,
+  limit = 100
+): FollowUser[] {
+  const slug = resolveViewerSlugSqlite(d, userId);
+  const selfCol = kind === 'followers' ? 'followed_id' : 'follower_id';
+  const otherCol = kind === 'followers' ? 'follower_id' : 'followed_id';
+  const rows = rowsToObjects(
+    d,
+    `SELECT f.${otherCol} AS slug, u.display_name, u.avatar_url
+     FROM user_follows f
+     LEFT JOIN anonymous_users u ON u.slug = f.${otherCol}
+     WHERE f.${selfCol} = ? OR f.${selfCol} = ?
+     ORDER BY f.id DESC LIMIT ?`,
+    [slug, userId, limit]
+  );
+
+  let viewerSlug: string | undefined;
+  let viewerFollowing: Set<string> | null = null;
+  if (viewerId) {
+    viewerSlug = resolveViewerSlugSqlite(d, viewerId);
+    const mine = rowsToObjects(d, 'SELECT followed_id FROM user_follows WHERE follower_id = ?', [viewerSlug]);
+    viewerFollowing = new Set(mine.map(r => r.followed_id));
+  }
+
+  const hidden = getHiddenSlugsSqlite(d, viewerId);
+  return rows
+    .filter(r => !hidden.has(r.slug))
+    .map(r => ({
+      slug: r.slug,
+      displayName: r.display_name || r.slug,
+      avatarUrl: r.avatar_url || undefined,
+      isFollowing: viewerFollowing ? viewerFollowing.has(r.slug) : undefined,
+      isSelf: viewerSlug ? viewerSlug === r.slug : undefined,
+    }));
 }
 
 function saveDb() {
@@ -949,6 +990,36 @@ export const sqliteStore: DataStore = {
     return rows.map(r => ({ id: r.id, sender: r.sender_name || r.sender, text: r.text, recipient: r.recipient_name || r.recipient || undefined, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
   },
 
+  async getConversation(userId: string, partnerId: string, limit = 100) {
+    const d = await getDb();
+    const meSlug = resolveViewerSlugSqlite(d, userId);
+    const partnerSlug = resolveViewerSlugSqlite(d, partnerId);
+    const rows = rowsToObjects(
+      d,
+      `SELECT id, sender, text, recipient, created_at FROM messages
+       WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)
+       ORDER BY id DESC LIMIT ?`,
+      [meSlug, partnerSlug, partnerSlug, meSlug, limit]
+    );
+    return rows.map(r => ({ id: r.id, sender: r.sender, text: r.text, recipient: r.recipient || undefined, createdAt: r.created_at, time: formatRelativeTime(r.created_at) } as Message));
+  },
+
+  async getDmGate(userId: string, partnerId: string) {
+    const d = await getDb();
+    const meSlug = resolveViewerSlugSqlite(d, userId);
+    const partnerSlug = resolveViewerSlugSqlite(d, partnerId);
+    const rows = rowsToObjects(
+      d,
+      `SELECT
+         SUM(CASE WHEN sender = ? THEN 1 ELSE 0 END) AS sent,
+         SUM(CASE WHEN sender = ? THEN 1 ELSE 0 END) AS received
+       FROM messages
+       WHERE (sender = ? AND recipient = ?) OR (sender = ? AND recipient = ?)`,
+      [meSlug, partnerSlug, meSlug, partnerSlug, partnerSlug, meSlug]
+    );
+    return { sent: rows[0]?.sent ?? 0, received: rows[0]?.received ?? 0 };
+  },
+
   async addMessage(data: MessageParams) {
     const d = await getDb();
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -1202,6 +1273,14 @@ export const sqliteStore: DataStore = {
       followers: followers[0]?.cnt ?? 0,
       following: following[0]?.cnt ?? 0,
     };
+  },
+
+  async getFollowers(userId: string, viewerId?: string, limit = 100) {
+    return listFollowsSqlite(await getDb(), 'followers', userId, viewerId, limit);
+  },
+
+  async getFollowing(userId: string, viewerId?: string, limit = 100) {
+    return listFollowsSqlite(await getDb(), 'following', userId, viewerId, limit);
   },
 
   async blockUser(blockerSlug: string, blockedSlug: string) {

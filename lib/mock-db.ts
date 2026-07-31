@@ -1,4 +1,4 @@
-import { AnonymousUser, OriginType } from './types';
+import { AnonymousUser, FollowUser, OriginType } from './types';
 import { DbPost as Post, DbNotification as Notification, DbOshiItem } from './types-db';
 import { INITIAL_POSTS } from './data';
 import { formatRelativeTime, nowISO } from './time';
@@ -587,6 +587,33 @@ class MockDB {
       .filter(m => !hidden.has(this.slugForUser(m.sender)));
   }
 
+  /** 1対1スレッド。id/displayName/slug のどの表記で渡されても slug に正規化して突き合わせる。 */
+  getConversation(userId: string, partnerId: string, limit = 100): Message[] {
+    const me = this.slugForUser(userId);
+    const partner = this.slugForUser(partnerId);
+    return this.messages
+      .filter(m => {
+        const sender = this.slugForUser(m.sender);
+        const recipient = m.recipient ? this.slugForUser(m.recipient) : undefined;
+        return (sender === me && recipient === partner) || (sender === partner && recipient === me);
+      })
+      .slice()
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .slice(0, limit);
+  }
+
+  getDmGate(userId: string, partnerId: string): { sent: number; received: number } {
+    const me = this.slugForUser(userId);
+    const convo = this.getConversation(userId, partnerId, Number.MAX_SAFE_INTEGER);
+    let sent = 0;
+    let received = 0;
+    for (const m of convo) {
+      if (this.slugForUser(m.sender) === me) sent++;
+      else received++;
+    }
+    return { sent, received };
+  }
+
   addMessage(data: { sender: string; text: string; recipient?: string }): Message {
     const createdAt = this.now();
     const msg: Message = {
@@ -690,6 +717,43 @@ class MockDB {
       followers: this.follows.filter(f => f.followedId === slug || f.followedId === userId).length,
       following: this.follows.filter(f => f.followerId === slug || f.followerId === userId).length,
     };
+  }
+
+  /** slug から一覧表示用のユーザー情報を組み立てる。匿名ユーザー未登録なら投稿から拾う。 */
+  private followUserForSlug(slug: string): { slug: string; displayName: string; avatarUrl?: string } {
+    const stored = this.getUserInfoBySlug(slug);
+    if (stored) return { slug, displayName: stored.displayName, avatarUrl: stored.avatarUrl };
+    const post = this.posts.find(p => p.slug === slug);
+    if (post) return { slug, displayName: post.displayName, avatarUrl: post.avatarUrl };
+    return { slug, displayName: slug };
+  }
+
+  private buildFollowList(slugs: string[], viewerId?: string, limit = 100): FollowUser[] {
+    const hidden = this.getHiddenSlugs(viewerId);
+    const viewerSlug = viewerId ? this.slugForUser(viewerId) : undefined;
+    const viewerFollowing = viewerSlug
+      ? new Set(this.follows.filter(f => f.followerId === viewerSlug).map(f => f.followedId))
+      : null;
+    return slugs
+      .filter(s => !hidden.has(s))
+      .slice(0, limit)
+      .map(s => ({
+        ...this.followUserForSlug(s),
+        isFollowing: viewerFollowing ? viewerFollowing.has(s) : undefined,
+        isSelf: viewerSlug ? viewerSlug === s : undefined,
+      }));
+  }
+
+  getFollowers(userId: string, viewerId?: string, limit = 100): FollowUser[] {
+    const slug = this.slugForUser(userId);
+    const slugs = this.follows.filter(f => f.followedId === slug || f.followedId === userId).map(f => f.followerId);
+    return this.buildFollowList(slugs.reverse(), viewerId, limit);
+  }
+
+  getFollowing(userId: string, viewerId?: string, limit = 100): FollowUser[] {
+    const slug = this.slugForUser(userId);
+    const slugs = this.follows.filter(f => f.followerId === slug || f.followerId === userId).map(f => f.followedId);
+    return this.buildFollowList(slugs.reverse(), viewerId, limit);
   }
 
   // ── ブロック / ミュート / 通報 ──

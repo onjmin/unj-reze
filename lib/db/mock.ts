@@ -100,6 +100,14 @@ export const mockStore: DataStore = {
     return mockDb.getMessages(userId);
   },
 
+  async getConversation(userId: string, partnerId: string, limit?: number) {
+    return mockDb.getConversation(userId, partnerId, limit);
+  },
+
+  async getDmGate(userId: string, partnerId: string) {
+    return mockDb.getDmGate(userId, partnerId);
+  },
+
   async addMessage(data: MessageParams) {
     return mockDb.addMessage(data);
   },
@@ -174,6 +182,14 @@ export const mockStore: DataStore = {
 
   async getFollowCounts(userId: string) {
     return mockDb.getFollowCounts(userId);
+  },
+
+  async getFollowers(userId: string, viewerId?: string, limit?: number) {
+    return mockDb.getFollowers(userId, viewerId, limit);
+  },
+
+  async getFollowing(userId: string, viewerId?: string, limit?: number) {
+    return mockDb.getFollowing(userId, viewerId, limit);
   },
 
   async blockUser(blockerSlug: string, blockedSlug: string) {

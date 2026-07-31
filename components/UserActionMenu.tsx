@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { User, UserPlus, UserMinus, AtSign, Mail, VolumeX, Volume2, Ban, CircleSlash, Flag } from 'lucide-react';
 import { api } from '@/lib/api';
 import { getAvatarInfo } from '@/lib/avatar';
+import { cacheProfileSeed } from '@/lib/profile-cache';
 import { showToast } from '@/lib/toast';
 
 interface UserActionMenuProps {
@@ -19,6 +20,8 @@ interface UserActionMenuProps {
   position?: { x: number; y: number } | null;
   /** ミュート/ブロックの変更後に一覧を作り直したいとき用。 */
   onModerationChange?: () => void;
+  /** DMスレッド内など、既にDMを書ける場所では「DMする」を出さない。 */
+  hideDm?: boolean;
 }
 
 export default function UserActionMenu({
@@ -31,6 +34,7 @@ export default function UserActionMenu({
   onMention,
   position,
   onModerationChange,
+  hideDm,
 }: UserActionMenuProps) {
   const router = useRouter();
   const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
@@ -217,6 +221,8 @@ export default function UserActionMenu({
         <button
           onClick={() => {
             onClose();
+            // 名前だけでもプロフィール側が即描画できる（アイコンは呼び出し元が先に積んでいることが多い）。
+            cacheProfileSeed({ slug: targetUserSlug, displayName: targetUserDisplayName });
             router.push(`/user/${targetIdOrSlug}`);
           }}
           className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
@@ -244,7 +250,7 @@ export default function UserActionMenu({
           </button>
         )}
 
-        {!isSelf && currentUserId && (
+        {!isSelf && currentUserId && !hideDm && (
           <>
             {showDmInput ? (
               <div className="px-3 py-2 border-t border-gray-800/80 bg-gray-950/20 flex flex-col gap-1.5">
