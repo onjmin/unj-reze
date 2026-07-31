@@ -7,6 +7,7 @@ import { Post } from '@/lib/types';
 import { extractFirstEmbed, getEmbedThumbnail } from '@/lib/embed';
 import { cachePost } from '@/lib/post-cache';
 import { getUserIdLabel } from '@/lib/avatar';
+import { getThreadDisplayTime } from '@/lib/time';
 
 interface BbsBoardViewProps {
   posts: Post[];
@@ -181,37 +182,44 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
             <p className="text-xs text-gray-400 mt-1 font-medium">最初の投稿をしてみましょう！</p>
           </div>
         ) : (
-          pagePosts.map(post => (
-            <div
-              key={post.id}
-              onClick={() => {
-                cachePost(post);
-                router.push(`/post/${post.id}`);
-              }}
-              className="flex items-start gap-2.5 px-3 py-2.5 hover:bg-gray-800/25 cursor-pointer transition-colors active:bg-gray-800/40"
-            >
-              {/* Reply count badge */}
-              <div className={`shrink-0 min-w-[28px] h-6 rounded px-1.5 flex items-center justify-center text-[11px] font-bold tabular-nums ${badgeClass(post.repliesCount)}`}>
-                {post.repliesCount}
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] text-gray-100 leading-snug line-clamp-2 break-words">
-                  {post.content.split('\n')[0]}
-                </p>
-                <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
-                  <span>ID:{getUserIdLabel(post.displayName, post.slug)}</span>
-                  <span>{formatDate(post.createdAt)}</span>
-                  <span className="text-gray-600">({post.time}){post.isEdited && ' (編集済み)'}</span>
-                  {post.likes > 0 && (
-                    <span className="flex items-center gap-0.5">
-                      <span className="text-gray-600">👍</span>
-                      <span>{post.likes}</span>
-                    </span>
-                  )}
+          pagePosts.map(post => {
+            const hasReplies = post.repliesCount > 0 || (post.replies && post.replies.length > 0);
+            const threadTime = getThreadDisplayTime(post);
+            return (
+              <div
+                key={post.id}
+                onClick={() => {
+                  cachePost(post);
+                  router.push(`/post/${post.id}`);
+                }}
+                className={`flex items-start gap-2.5 px-3 py-2.5 cursor-pointer transition-colors ${
+                  hasReplies
+                    ? 'bg-blue-950/20 border-l-2 border-l-blue-500 hover:bg-blue-900/30'
+                    : 'hover:bg-gray-800/25 active:bg-gray-800/40'
+                }`}
+              >
+                {/* Reply count badge */}
+                <div className={`shrink-0 min-w-[28px] h-6 rounded px-1.5 flex items-center justify-center text-[11px] font-bold tabular-nums ${badgeClass(post.repliesCount)}`}>
+                  {post.repliesCount}
                 </div>
-              </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] text-gray-100 leading-snug line-clamp-2 break-words">
+                    {post.content.split('\n')[0]}
+                  </p>
+                  <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
+                    <span>ID:{getUserIdLabel(post.displayName, post.slug)}</span>
+                    <span>{formatDate(threadTime.iso)}</span>
+                    <span className="text-gray-600">({threadTime.time}){post.isEdited && ' (編集済み)'}</span>
+                    {post.likes > 0 && (
+                      <span className="flex items-center gap-0.5">
+                        <span className="text-gray-600">👍</span>
+                        <span>{post.likes}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
 
               {/* Thumbnail */}
               {(() => {
@@ -239,7 +247,8 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                 );
               })()}
             </div>
-          ))
+          );
+        })
         )}
       </div>
 

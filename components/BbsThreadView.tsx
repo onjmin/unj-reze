@@ -8,6 +8,7 @@ import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
 import { getUserIdLabel } from '@/lib/avatar';
+import { getThreadDisplayTime } from '@/lib/time';
 import UserActionMenu from './UserActionMenu';
 import EmbedPart from './EmbedPart';
 import MmlPlayer from './MmlPlayer';
@@ -256,7 +257,7 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-800/60 text-[10px] text-gray-500 shrink-0">
         <span>全 <span className="text-gray-300 font-bold">{allPosts.length}</span> レス</span>
         <span>👁 {viewCount}</span>
-        <span>⏱ {post.time}{post.isEdited && ' (編集済み)'}</span>
+        <span>⏱ {getThreadDisplayTime(post).time}{post.isEdited && ' (編集済み)'}</span>
         <span>💬 {post.repliesCount}件</span>
       </div>
 

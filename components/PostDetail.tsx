@@ -11,6 +11,7 @@ import { ensureSessionId } from '@/lib/session';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
 import { cachePost } from '@/lib/post-cache';
+import { getThreadDisplayTime } from '@/lib/time';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
@@ -682,7 +683,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 border border-red-500/40">虚偽申告</span>
             )}
             <span className="text-gray-500 text-[10px] font-medium">
-              {post.time}
+              {getThreadDisplayTime(post).time}
               {post.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
             </span>
           </div>

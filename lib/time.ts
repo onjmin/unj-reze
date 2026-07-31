@@ -1,6 +1,7 @@
 export function formatRelativeTime(isoString: string): string {
   const now = Date.now();
   const date = new Date(isoString).getTime();
+  if (isNaN(date)) return isoString;
   const diffMs = now - date;
 
   const diffSec = Math.floor(diffMs / 1000);
@@ -22,3 +23,43 @@ export function formatRelativeTime(isoString: string): string {
 export function nowISO(): string {
   return new Date().toISOString();
 }
+
+export interface ThreadActivityTime {
+  iso: string;
+  time: string;
+  isReplyUpdate: boolean;
+}
+
+export function getThreadDisplayTime(post: { createdAt: string; time: string; replies?: { createdAt: string; time: string }[] }): ThreadActivityTime {
+  let latestMs = post.createdAt ? new Date(post.createdAt).getTime() : 0;
+  let latestIso = post.createdAt;
+  let latestTime = post.time;
+  let isReplyUpdate = false;
+
+  if (post.replies && post.replies.length > 0) {
+    for (const r of post.replies) {
+      const rMs = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+      if (!isNaN(rMs) && rMs > latestMs) {
+        latestMs = rMs;
+        latestIso = r.createdAt;
+        latestTime = r.time || (r.createdAt ? formatRelativeTime(r.createdAt) : post.time);
+        isReplyUpdate = true;
+      }
+    }
+  }
+
+  let displayTime = latestTime;
+  if (latestIso) {
+    const parsed = new Date(latestIso).getTime();
+    if (!isNaN(parsed)) {
+      displayTime = formatRelativeTime(latestIso);
+    }
+  }
+
+  return {
+    iso: latestIso || post.createdAt,
+    time: displayTime,
+    isReplyUpdate,
+  };
+}
+
