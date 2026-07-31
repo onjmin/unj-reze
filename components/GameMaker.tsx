@@ -1698,6 +1698,49 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const gameMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewStopRef = useRef<(() => void) | null>(null);
   const ghostPlayersRef = useRef(ghostPlayers || []);
+  // 他プレイヤー（ghost）の描画用補間ステート。
+  // 座標は 2 秒間隔でしか届かないため、受信のたびにワープさせず
+  // 「前回描画位置 → 受信座標」を実測到着間隔ぶんかけて線形補間する。
+  // 向きは drawSprite が animKey ごとの移動量から導出するので、
+  // 補間で滑らかに動かすだけで歩行グラの向き・足踏みが自動的に付く。
+  interface GhostRenderState {
+    x: number; y: number;
+    fromX: number; fromY: number;
+    toX: number; toY: number;
+    start: number; dur: number; lastRecv: number;
+  }
+  const ghostRenderRef = useRef(new Map<string, GhostRenderState>());
+  useEffect(() => {
+    const now = performance.now();
+    const states = ghostRenderRef.current;
+    const alive = new Set<string>();
+    for (const g of ghostPlayers || []) {
+      alive.add(g.sessionId);
+      const cur = states.get(g.sessionId);
+      if (!cur) {
+        states.set(g.sessionId, {
+          x: g.x, y: g.y, fromX: g.x, fromY: g.y, toX: g.x, toY: g.y,
+          start: now, dur: 0, lastRecv: now,
+        });
+        continue;
+      }
+      if (cur.toX !== g.x || cur.toY !== g.y) {
+        // ワープ・リスポーン・シーン切替は補間するとおかしいので即座に反映する
+        if (Math.hypot(g.x - cur.x, g.y - cur.y) > TILE_SIZE * 8) {
+          cur.x = g.x; cur.y = g.y; cur.fromX = g.x; cur.fromY = g.y;
+          cur.toX = g.x; cur.toY = g.y; cur.start = now; cur.dur = 0;
+        } else {
+          // 到着間隔の実測値を補間時間にする（送信間隔が揺れても速度が破綻しない）
+          cur.fromX = cur.x; cur.fromY = cur.y;
+          cur.toX = g.x; cur.toY = g.y;
+          cur.start = now;
+          cur.dur = Math.min(3000, Math.max(200, now - cur.lastRecv));
+        }
+      }
+      cur.lastRecv = now;
+    }
+    for (const key of [...states.keys()]) if (!alive.has(key)) states.delete(key);
+  }, [ghostPlayers]);
 
   // 弾幕コメント
   interface DanmakuItem { id: number; text: string; row: number; color: string; }
@@ -10841,15 +10884,31 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
 
       // ghost players（他プレイヤー・当たり判定なし）
-      for (const ghost of ghostPlayersRef.current) {
-        const ghostCol = ghost.color ?? colorFromId(ghost.sessionId);
-        ctx.globalAlpha = 0.45;
-        ctx.font = `${pData.w}px Arial`; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-        ctx.fillText(ghost.emoji, ghost.x + pData.w / 2, ghost.y + pData.h + 4);
-        // 名前タグ代わりに色ドット
-        ctx.fillStyle = ghostCol; ctx.globalAlpha = 0.7;
-        ctx.beginPath(); ctx.arc(ghost.x + pData.w / 2, ghost.y - 4, 4, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 1;
+      // 見た目は絵文字ではなく自分と同じプレイヤースプライトで描く（同じゲームを遊んでいるため）。
+      // 座標は ghostRenderRef の線形補間値を使い、向きと足踏みは drawSprite が
+      // animKey=`ghost_*` の移動量から導出する。
+      if (ghostPlayersRef.current.length > 0) {
+        const nowMs = performance.now();
+        for (const ghost of ghostPlayersRef.current) {
+          const gr = ghostRenderRef.current.get(ghost.sessionId);
+          let gx = ghost.x, gy = ghost.y;
+          if (gr) {
+            const t = gr.dur > 0 ? Math.min(1, (nowMs - gr.start) / gr.dur) : 1;
+            gx = gr.fromX + (gr.toX - gr.fromX) * t;
+            gy = gr.fromY + (gr.toY - gr.fromY) * t;
+            gr.x = gx; gr.y = gy;
+          }
+          ctx.globalAlpha = 0.75;
+          drawSprite(
+            { emoji: ghost.emoji || pData.emoji, spriteUrl: pData.spriteUrl, spriteRef: pData.spriteRef },
+            gx, gy, pData.w, pData.h, `ghost_${ghost.sessionId}`,
+          );
+          // 名前タグ代わりに色ドット
+          ctx.fillStyle = ghost.color ?? colorFromId(ghost.sessionId);
+          ctx.globalAlpha = 0.7;
+          ctx.beginPath(); ctx.arc(gx + pData.w / 2, gy - 4, 4, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
+        }
       }
       // オンラインテストモード：疑似プレイヤー描画
       if (isPlaying && onlineTestModeRef.current) {

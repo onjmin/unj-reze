@@ -116,6 +116,7 @@ export interface GhostPlayer {
   x: number;
   y: number;
   emoji: string;
+  dir?: 'down' | 'left' | 'right' | 'up';
   color?: string;
   updatedAt?: string;
 }
