@@ -27,11 +27,19 @@ async function getStore(): Promise<DataStore> {
   return store;
 }
 
-function isConnError(err: any): boolean {
+interface ErrorLike {
+  message?: unknown;
+  code?: unknown;
+  cause?: { message?: unknown; code?: unknown };
+  sourceError?: { code?: unknown };
+}
+
+function isConnError(err: unknown): boolean {
   if (!err) return false;
-  const msg = String(err.message || err);
-  const causeMsg = err.cause ? String(err.cause.message || err.cause) : '';
-  const code = err.code || err.cause?.code || err.sourceError?.code;
+  const e = err as ErrorLike;
+  const msg = String(e.message || err);
+  const causeMsg = e.cause ? String(e.cause.message || e.cause) : '';
+  const code = e.code || e.cause?.code || e.sourceError?.code;
   return (
     code === 'ECONNREFUSED' ||
     msg.includes('fetch failed') ||
@@ -49,10 +57,10 @@ export const db = new Proxy<DataStore>({} as DataStore, {
       if (typeof method === 'function') {
         try {
           return await (method as (...args: unknown[]) => unknown).apply(s, args);
-        } catch (err: any) {
+        } catch (err) {
           const provider = process.env.DATABASE_PROVIDER || 'mock';
           if (provider !== 'mock' && isConnError(err)) {
-            console.warn(`[db] Database connection failed (${provider}). Falling back to mockStore.`, err.message || err);
+            console.warn(`[db] Database connection failed (${provider}). Falling back to mockStore.`, (err as ErrorLike).message || err);
             const fallbackMethod = mockStore[prop];
             if (typeof fallbackMethod === 'function') {
               return (fallbackMethod as (...args: unknown[]) => unknown).apply(mockStore, args);

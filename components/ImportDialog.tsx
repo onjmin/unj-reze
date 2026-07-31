@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { X, FileImage } from 'lucide-react';
 import { detectPreset, type WalkPreset } from '@/lib/walk-cycle';
 
@@ -18,15 +18,17 @@ export default function ImportDialog({ open, onClose, onImport, walkMode, walkPr
   const [simple, setSimple] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const [detected, setDetected] = useState<WalkPreset | null>(null);
-
-  useEffect(() => {
+  // open が変わったら（閉じたら）フォームをリセットする。レンダー中の条件付き setState。
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (!open) {
       setImageUrl('');
       setOpacity(100);
       setSimple(false);
       setDetected(null);
     }
-  }, [open]);
+  }
 
   const handleFile = (file: File) => {
     const reader = new FileReader();

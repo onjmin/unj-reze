@@ -57,7 +57,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
     return () => document.removeEventListener('mousedown', handler);
   }, [sortOpen]);
 
-  let displayPosts = [...posts];
+  const displayPosts = [...posts];
   if (activeTab === 'ranking') {
     if (rankCategory === 'イイ') displayPosts.sort((a, b) => b.likes - a.likes);
     else if (rankCategory === 'コメ') displayPosts.sort((a, b) => b.repliesCount - a.repliesCount);

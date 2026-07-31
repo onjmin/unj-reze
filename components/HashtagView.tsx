@@ -47,7 +47,7 @@ export default function HashtagView({ tag }: HashtagViewProps) {
       .finally(() => setLoading(false));
   }, [normalized]); // userId deliberately omitted — read via ref to prevent double-fetch
 
-  useEffect(() => { fetchPosts(); }, [fetchPosts]);
+  useEffect(() => { Promise.resolve().then(() => fetchPosts()); }, [fetchPosts]);
 
   const handleLike = async (id: string) => {
     setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, liked: !p.liked, likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1) }));

@@ -1,6 +1,8 @@
-let studioPromise: Promise<any> | null = null;
+import type { DtmStudio } from '@onjmin/dtm';
 
-export const getStudio = (): Promise<any> => {
+let studioPromise: Promise<DtmStudio> | null = null;
+
+export const getStudio = (): Promise<DtmStudio> => {
   if (!studioPromise) {
     studioPromise = (async () => {
       const { createDtmStudio } = await import('@onjmin/dtm');

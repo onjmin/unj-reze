@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { parseWalkRef } from '@/lib/asset-ref';
 import { loadImage, resolveSpriteRect } from '@/lib/walk-sprite';
 
@@ -8,10 +8,7 @@ import { loadImage, resolveSpriteRect } from '@/lib/walk-sprite';
  *  使用履歴（ContentPicker）とマイシートの単体素材（UserSheetPanel）で共有する。 */
 export default function AssetThumb({ refStr, url, size = 48 }: { refStr: string; url?: string; size?: number }) {
   const cvRef = useRef<HTMLCanvasElement>(null);
-  const walkRef = useRef(parseWalkRef(refStr));
-  const prevRefStr = useRef(refStr);
-  if (prevRefStr.current !== refStr) { prevRefStr.current = refStr; walkRef.current = parseWalkRef(refStr); }
-  const walk = walkRef.current;
+  const walk = useMemo(() => parseWalkRef(refStr), [refStr]);
   const imgUrl = url ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
 
   useEffect(() => {
@@ -58,7 +55,7 @@ export default function AssetThumb({ refStr, url, size = 48 }: { refStr: string;
 
   if (!walk && !(url && url.includes('#'))) {
     return url
-      ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={url} alt="" className="w-full h-full object-cover" />
+      ?   <img src={url} alt="" className="w-full h-full object-cover" />
       : <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">?</div>;
   }
 

@@ -17,7 +17,7 @@ export default function PostLoading() {
   useEffect(() => {
     // 一覧側でキャッシュ済みなら、サーバーの応答を待たずにそのまま描画する。
     // 消さずに残すので「戻る→また開く」でも即描画になる。
-    setPost(readCachedPost(id));
+    Promise.resolve().then(() => setPost(readCachedPost(id)));
   }, [id]);
 
   const wrapperStyle: React.CSSProperties = { background: BG, color: '#e5e7eb', minHeight: '100dvh', width: '100%', display: 'flex', flexDirection: 'column' };

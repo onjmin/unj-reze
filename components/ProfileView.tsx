@@ -105,8 +105,10 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   useEffect(() => {
     if (isEditModalOpen) {
-      setEditBio(bio);
-      setEditError(null);
+      Promise.resolve().then(() => {
+        setEditBio(bio);
+        setEditError(null);
+      });
     }
   }, [isEditModalOpen, bio]);
 
@@ -162,9 +164,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
       setLikedPosts(prev => prev.map(updatePost));
       setDislikedPosts(prev => prev.map(updatePost));
       setHeartedPosts(prev => prev.map(updatePost));
-    } catch (err: any) {
+    } catch (err) {
       setAvatarUrl(previousAvatarUrl);
-      setAvatarError(err.message || 'アイコンの保存に失敗しました');
+      setAvatarError((err as Error)?.message || 'アイコンの保存に失敗しました');
     } finally {
       setIsAvatarSaving(false);
     }
@@ -178,8 +180,8 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
       await api.auth.updateDisplayName(targetUserId, avatarInfo.username, undefined, editBio.trim());
       setBio(editBio.trim());
       setIsEditModalOpen(false);
-    } catch (err: any) {
-      setEditError(err.message || '保存に失敗しました');
+    } catch (err) {
+      setEditError((err as Error)?.message || '保存に失敗しました');
     } finally {
       setIsSaving(false);
     }
@@ -193,25 +195,29 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
       try {
         const data = JSON.parse(cached);
         if (data) {
-          if (Array.isArray(data.posts)) setMyPosts(data.posts);
-          if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
-          if (data.bio) setBio(data.bio || '');
-          if (data.displayName) setProfileDisplayName(data.displayName);
-          if (typeof data.followers === 'number') setFollowers(data.followers);
-          if (typeof data.following === 'number') setFollowing(data.following);
-          if (Array.isArray(data.oshiItems)) setOshiItems(data.oshiItems);
-          setLoading(false);
+          Promise.resolve().then(() => {
+            if (Array.isArray(data.posts)) setMyPosts(data.posts);
+            if (data.avatarUrl) setAvatarUrl(data.avatarUrl);
+            if (data.bio) setBio(data.bio || '');
+            if (data.displayName) setProfileDisplayName(data.displayName);
+            if (typeof data.followers === 'number') setFollowers(data.followers);
+            if (typeof data.following === 'number') setFollowing(data.following);
+            if (Array.isArray(data.oshiItems)) setOshiItems(data.oshiItems);
+            setLoading(false);
+          });
         }
       } catch {}
     } else {
-      setMyPosts([]);
-      setAvatarUrl(undefined);
-      setBio('');
-      setProfileDisplayName(displayName);
-      setFollowers(0);
-      setFollowing(0);
-      setOshiItems([]);
-      setLoading(true);
+      Promise.resolve().then(() => {
+        setMyPosts([]);
+        setAvatarUrl(undefined);
+        setBio('');
+        setProfileDisplayName(displayName);
+        setFollowers(0);
+        setFollowing(0);
+        setOshiItems([]);
+        setLoading(true);
+      });
     }
   }, [slug, displayName]);
 

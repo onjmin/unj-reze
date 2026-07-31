@@ -19,7 +19,7 @@ interface PostComposerProps {
   mml: string | null;
   setMml: (v: string | null) => void;
   gameDraft: { title: string } | null;
-  setGameDraft: (v: any) => void;
+  setGameDraft: (v: null) => void;
   originType?: OriginType;
   setOriginType: (v: OriginType | undefined) => void;
   onClose: () => void;

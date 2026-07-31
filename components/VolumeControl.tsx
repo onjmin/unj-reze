@@ -1,24 +1,19 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Volume2, Volume1, Volume, VolumeX, VolumeOff } from 'lucide-react';
 import { getMasterVolume, setMasterVolume, subscribeMasterVolume, getMuted, setMuted, subscribeMuted } from '@/lib/master-volume';
+
+const SERVER_VOLUME = () => 50;
+const SERVER_MUTED = () => false;
 
 /** ヘッダー用マスター音量コントロール。スピーカーアイコン→クリックでスライダーをポップアップ表示する。
  *  MML投稿・YouTube埋め込み・ゲーム画面のBGM/SFXへ一律で掛かる音量倍率をここで操作する。 */
 export default function VolumeControl() {
-  const [volume, setVolume] = useState(50);
-  const [muted, setMutedState] = useState(false);
+  const volume = useSyncExternalStore((onChange) => subscribeMasterVolume(() => onChange()), getMasterVolume, SERVER_VOLUME);
+  const muted = useSyncExternalStore((onChange) => subscribeMuted(() => onChange()), getMuted, SERVER_MUTED);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setVolume(getMasterVolume());
-    setMutedState(getMuted());
-    const unsubV = subscribeMasterVolume(setVolume);
-    const unsubM = subscribeMuted(setMutedState);
-    return () => { unsubV(); unsubM(); };
-  }, []);
 
   useEffect(() => {
     if (!open) return;

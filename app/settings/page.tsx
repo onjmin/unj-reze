@@ -1,25 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import AppShell from '@/components/AppShell';
 import SettingsView from '@/components/SettingsView';
 
+function getSavedBbsMode(): string {
+  if (typeof localStorage === 'undefined') return 'SNSモード';
+  return localStorage.getItem('unj_bbs_mode') || 'SNSモード';
+}
+
 export default function SettingsPage() {
   const currentUser = useCurrentUser();
-  const [bbsMode, setBbsModeRaw] = useState('SNSモード');
+  const [bbsMode, setBbsModeRaw] = useState(getSavedBbsMode);
 
   const setBbsMode = (m: string) => {
     setBbsModeRaw(m);
     if (typeof localStorage !== 'undefined') localStorage.setItem('unj_bbs_mode', m);
   };
-
-  useEffect(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
-    if (saved) setBbsModeRaw(saved);
-  }, []);
 
   return (
     <AppShell current="settings">

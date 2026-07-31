@@ -1,11 +1,101 @@
-import type { AssetManifest } from './game-config';
+import type { AssetManifest, BgmAsset } from './game-config';
 import { applyMasterVolume, subscribeMasterVolume } from './master-volume';
+import type { LoopConfig as DtmLoopConfig, LoopPoint as DtmLoopPoint } from '@onjmin/dtm';
+
+type LoopPointInput = { bar?: number; step?: number; seconds?: number };
+
+/** BgmAsset['loop'] は全項目optionalな緩い形。dtm側は「1キーのみ持つ判別union」なので変換する。 */
+function toDtmLoopPoint(p?: LoopPointInput): DtmLoopPoint | undefined {
+  if (!p) return undefined;
+  if (p.bar !== undefined) return { bar: p.bar };
+  if (p.step !== undefined) return { step: p.step };
+  if (p.seconds !== undefined) return { seconds: p.seconds };
+  return undefined;
+}
+
+function toDtmLoopConfig(loop: BgmAsset['loop']): boolean | DtmLoopConfig | undefined {
+  if (typeof loop === 'boolean' || loop === undefined) return loop;
+  const start = toDtmLoopPoint(loop.start);
+  const end = toDtmLoopPoint(loop.end);
+  return start || end ? { start, end } : undefined;
+}
 
 interface BgmHandle {
   stop: () => void;
   /** マスター音量変更時に即時反映するための再設定（対応できない再生方式は省略可）。 */
   setBaseVolume?: (baseVolume: number) => void;
   seek?: (seconds: number) => void;
+}
+
+// ── 動的スクリプトタグで読み込む外部SDKの最小限のアンビエント型 ──
+
+interface YtPlayerTarget {
+  setVolume(v: number): void;
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
+  playVideo(): void;
+}
+interface YtPlayerInstance {
+  destroy(): void;
+  setVolume(v: number): void;
+  seekTo(seconds: number, allowSeekAhead: boolean): void;
+}
+interface YtPlayerCtor {
+  new (elementId: string, options: {
+    height: string | number;
+    width: string | number;
+    videoId: string;
+    playerVars?: Record<string, unknown>;
+    events?: {
+      onReady?: (event: { target: YtPlayerTarget }) => void;
+      onStateChange?: (event: { data: number; target: YtPlayerTarget }) => void;
+    };
+  }): YtPlayerInstance;
+}
+
+interface ScWidgetInstance {
+  bind(event: string, cb: () => void): void;
+  play(): void;
+  pause(): void;
+  setVolume(v: number): void;
+}
+interface ScWidgetCtor {
+  (iframe: HTMLIFrameElement): ScWidgetInstance;
+  Events: { READY: string; FINISH: string };
+}
+
+interface MidiPlayerEvent {
+  name: string;
+  velocity: number;
+  noteName: string;
+}
+interface MidiPlayerInstance {
+  on(event: string, cb: () => void): void;
+  loadArrayBuffer(buf: ArrayBuffer): void;
+  play(): void;
+  stop(): void;
+}
+interface SoundfontInstrument {
+  play(note: string, when: number, opts: { gain: number; duration: number }): void;
+}
+
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+    onYouTubeIframeAPIReady?: () => void;
+    YT?: {
+      Player: YtPlayerCtor;
+      PlayerState: { ENDED: number };
+    };
+    SC?: {
+      Widget: ScWidgetCtor;
+    };
+    MidiPlayer?: {
+      Player: new (cb: (evt: MidiPlayerEvent) => void) => MidiPlayerInstance;
+    };
+    Soundfont?: {
+      instrument(ctx: AudioContext, name: string, opts: { soundfont: string }): Promise<SoundfontInstrument>;
+    };
+  }
 }
 
 class BgmManager {
@@ -25,8 +115,8 @@ class BgmManager {
 
     const type = manifest.bgm.type ?? 'youtube';
     const src = manifest.bgm.src;
-    const volume = (manifest.bgm as any).volume !== undefined ? (manifest.bgm as any).volume : 50;
-    const start = (manifest.bgm as any).start !== undefined ? (manifest.bgm as any).start : 0;
+    const volume = manifest.bgm.volume !== undefined ? manifest.bgm.volume : 50;
+    const start = manifest.bgm.start !== undefined ? manifest.bgm.start : 0;
 
     // シーン切替等で同じBGM（type, srcが同一）が指定された場合は巻き戻さず継続再生する
     if (this.currentKey && this.currentKey.type === type && this.currentKey.src === src && this.current) {
@@ -59,7 +149,7 @@ class BgmManager {
 
   stop() {
     this.currentKey = null;
-    if (this.current) { try { this.current.stop(); } catch (e) { } this.current = null; }
+    if (this.current) { try { this.current.stop(); } catch { } this.current = null; }
     document.querySelectorAll('.bgm-youtube-container, .bgm-nicovideo-container, .bgm-soundcloud-container').forEach(el => el.remove());
   }
 
@@ -67,7 +157,7 @@ class BgmManager {
     this.current?.seek?.(seconds);
   }
 
-  setRate(rate: number) {
+  setRate(_rate: number) {
     // rate support
   }
 
@@ -82,9 +172,9 @@ class BgmManager {
     }
     audio.play().catch(() => {});
     this.current = {
-      stop: () => { try { audio.pause(); audio.src = ''; } catch (e) { } },
+      stop: () => { try { audio.pause(); audio.src = ''; } catch { } },
       setBaseVolume: (v) => { audio.volume = (applyMasterVolume(v) / 100) * 0.6; },
-      seek: (s) => { try { audio.currentTime = s; } catch (e) {} },
+      seek: (s) => { try { audio.currentTime = s; } catch { } },
     };
   }
 
@@ -107,11 +197,11 @@ class BgmManager {
     await loadScript('https://cdn.jsdelivr.net/npm/midi-player-js@2.0.16/browser/midiplayer.min.js');
     await loadScript('https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js');
 
-    const MP = (window as any).MidiPlayer;
-    const SF = (window as any).Soundfont;
+    const MP = window.MidiPlayer;
+    const SF = window.Soundfont;
     if (!MP || !SF) return;
 
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)!();
     if (ctx.state === 'suspended') await ctx.resume();
 
     const inst = await SF.instrument(ctx, 'lead_1_square', { soundfont: 'MusyngKite' });
@@ -119,17 +209,17 @@ class BgmManager {
     if (!res.ok) return;
     const ab = await res.arrayBuffer();
 
-    const player = new MP.Player((evt: any) => {
+    const player = new MP.Player((evt: MidiPlayerEvent) => {
       if (evt.name === 'Note on' && evt.velocity > 0) {
         inst.play(evt.noteName, ctx.currentTime, { gain: (evt.velocity / 127) * (applyMasterVolume(volume) / 50), duration: 0.25 });
       }
     });
-    player.on('endOfFile', () => { try { player.stop(); player.play(); } catch (e) { } });
+    player.on('endOfFile', () => { try { player.stop(); player.play(); } catch { } });
     player.loadArrayBuffer(ab);
     player.play();
 
     this.current = {
-      stop: () => { try { player.stop(); } catch (e) { } ctx.close(); },
+      stop: () => { try { player.stop(); } catch { } ctx.close(); },
     };
   }
 
@@ -137,13 +227,13 @@ class BgmManager {
 
   private mmlCtx: AudioContext | null = null;
 
-  private async playMml(mml: string, loop?: any, volume: number = 50) {
+  private async playMml(mml: string, loop?: BgmAsset['loop'], volume: number = 50) {
     const { playMML } = await import('@onjmin/dtm');
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)!();
     if (ctx.state === 'suspended') await ctx.resume();
     this.mmlCtx = ctx;
 
-    const loopOption = loop !== undefined ? loop : true;
+    const loopOption = loop !== undefined ? toDtmLoopConfig(loop) : true;
 
     try {
       const bgm = playMML(mml, {
@@ -154,11 +244,11 @@ class BgmManager {
 
       this.current = {
         stop: () => {
-          try { bgm.stop(); } catch (e) {}
-          try { bgm.destroy(); } catch (e) {}
+          try { bgm.stop(); } catch { }
+          try { bgm.destroy(); } catch { }
           ctx.close();
         },
-        setBaseVolume: (v) => { try { bgm.setVolume(applyMasterVolume(v)); } catch (e) {} },
+        setBaseVolume: (v) => { try { bgm.setVolume(applyMasterVolume(v)); } catch { } },
       };
     } catch (err) {
       console.error('Error playing MML BGM:', err);
@@ -198,7 +288,7 @@ class BgmManager {
     container.appendChild(playerDiv);
 
     const loadYtApi = () => {
-      if ((window as any).YT && (window as any).YT.Player) {
+      if (window.YT && window.YT.Player) {
         return Promise.resolve();
       }
       return new Promise<void>((resolve) => {
@@ -209,13 +299,13 @@ class BgmManager {
           const firstScriptTag = document.getElementsByTagName('script')[0];
           firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
         }
-        const prevCallback = (window as any).onYouTubeIframeAPIReady;
-        (window as any).onYouTubeIframeAPIReady = () => {
+        const prevCallback = window.onYouTubeIframeAPIReady;
+        window.onYouTubeIframeAPIReady = () => {
           if (prevCallback) prevCallback();
           resolve();
         };
         const check = setInterval(() => {
-          if ((window as any).YT && (window as any).YT.Player) {
+          if (window.YT && window.YT.Player) {
             clearInterval(check);
             resolve();
           }
@@ -223,9 +313,9 @@ class BgmManager {
       });
     };
 
-    let player: any = null;
+    let player: YtPlayerInstance | null = null;
     loadYtApi().then(() => {
-      player = new (window as any).YT.Player('bgm-youtube-player', {
+      player = new window.YT!.Player('bgm-youtube-player', {
         height: '1',
         width: '1',
         videoId: videoId,
@@ -237,17 +327,17 @@ class BgmManager {
           start: Math.floor(finalStart),
         },
         events: {
-          onReady: (event: any) => {
+          onReady: (event) => {
             event.target.setVolume(applyMasterVolume(volume));
             if (finalStart > 0) {
-              try { event.target.seekTo(finalStart, true); } catch (e) {}
+              try { event.target.seekTo(finalStart, true); } catch { }
             }
             event.target.playVideo();
           },
-          onStateChange: (event: any) => {
-            if (event.data === (window as any).YT.PlayerState.ENDED) {
+          onStateChange: (event) => {
+            if (event.data === window.YT!.PlayerState.ENDED) {
               if (finalStart > 0) {
-                try { event.target.seekTo(finalStart, true); } catch (e) {}
+                try { event.target.seekTo(finalStart, true); } catch { }
               }
               event.target.playVideo();
             }
@@ -258,11 +348,11 @@ class BgmManager {
 
     this.current = {
       stop: () => {
-        try { if (player && player.destroy) player.destroy(); } catch (e) {}
+        try { player?.destroy(); } catch { }
         container.remove();
       },
-      setBaseVolume: (v) => { try { player?.setVolume(applyMasterVolume(v)); } catch (e) {} },
-      seek: (s) => { try { player?.seekTo(s, true); } catch (e) {} },
+      setBaseVolume: (v) => { try { player?.setVolume(applyMasterVolume(v)); } catch { } },
+      seek: (s) => { try { player?.seekTo(s, true); } catch { } },
     };
   }
 
@@ -328,7 +418,7 @@ class BgmManager {
       stop: () => {
         window.removeEventListener('message', handleMsg);
         clearTimeout(initTimer);
-        try { postMsg({ eventName: 'pause' }); } catch (e) {}
+        try { postMsg({ eventName: 'pause' }); } catch { }
         container.remove();
       },
       setBaseVolume: (v) => {
@@ -359,7 +449,7 @@ class BgmManager {
     container.appendChild(iframe);
 
     const loadScSdk = () => {
-      if ((window as any).SC && (window as any).SC.Widget) {
+      if (window.SC) {
         return Promise.resolve();
       }
       return new Promise<void>((resolve) => {
@@ -371,7 +461,7 @@ class BgmManager {
           first?.parentNode?.insertBefore(tag, first);
         }
         const check = setInterval(() => {
-          if ((window as any).SC && (window as any).SC.Widget) {
+          if (window.SC) {
             clearInterval(check);
             resolve();
           }
@@ -379,25 +469,25 @@ class BgmManager {
       });
     };
 
-    let widget: any = null;
+    let widget: ScWidgetInstance | null = null;
     loadScSdk().then(() => {
-      widget = (window as any).SC.Widget(iframe);
-      widget.bind((window as any).SC.Widget.Events.READY, () => {
-        widget.setVolume(applyMasterVolume(volume));
-        widget.play();
+      widget = window.SC!.Widget(iframe);
+      widget.bind(window.SC!.Widget.Events.READY, () => {
+        widget?.setVolume(applyMasterVolume(volume));
+        widget?.play();
       });
-      widget.bind((window as any).SC.Widget.Events.FINISH, () => {
-        widget.play(); // loop
+      widget.bind(window.SC!.Widget.Events.FINISH, () => {
+        widget?.play(); // loop
       });
     });
 
     this.current = {
       stop: () => {
-        try { if (widget) widget.pause(); } catch (e) {}
+        try { widget?.pause(); } catch { }
         container.remove();
       },
       setBaseVolume: (v) => {
-        try { if (widget) widget.setVolume(applyMasterVolume(v)); } catch (e) {}
+        try { widget?.setVolume(applyMasterVolume(v)); } catch { }
       },
     };
   }

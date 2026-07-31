@@ -347,7 +347,8 @@ export function resolveSpriteRect(
     if (hashIdx !== -1) {
       const parts = resolvedUrl.slice(hashIdx + 1).split(',').map(Number);
       if (parts.length >= 4 && parts.slice(0, 4).every(n => !isNaN(n))) {
-        let sw = parts[2], sh = parts[3];
+        let sw = parts[2];
+        const sh = parts[3];
         if (parts.length >= 5 && parts[4] > 1) sw = sw / parts[4];
         return { sx: parts[0], sy: parts[1], sw, sh };
       }

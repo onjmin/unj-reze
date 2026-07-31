@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useId } from 'react';
 import { PlaySquare } from 'lucide-react';
 import GamePreview from './GamePreview';
 import { PLAY_W, PLAY_H } from './game-presets/shared';
@@ -25,7 +25,7 @@ export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, game
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const { requestFocus, releaseFocus } = useAudioFocus();
-  const instanceIdRef = useRef(`gb_${postId}_${Math.random().toString(36).slice(2, 9)}`);
+  const instanceId = `gb_${postId}_${useId()}`;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -45,24 +45,24 @@ export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, game
   }, []);
 
   const handleOpen = useCallback(() => {
-    requestFocus(instanceIdRef.current, () => {
+    requestFocus(instanceId, () => {
       handleClose();
     });
-    window.dispatchEvent(new CustomEvent('unj-game-box-open', { detail: { id: instanceIdRef.current } }));
+    window.dispatchEvent(new CustomEvent('unj-game-box-open', { detail: { id: instanceId } }));
     setPhase(prev => (prev === 'closed' || prev === 'closing') ? 'opening' : prev);
   }, [requestFocus, handleClose]);
 
   useEffect(() => {
     const handleOtherOpen = (e: Event) => {
       const customEvent = e as CustomEvent<{ id: string }>;
-      if (customEvent.detail?.id !== instanceIdRef.current) {
+      if (customEvent.detail?.id !== instanceId) {
         handleClose();
       }
     };
     window.addEventListener('unj-game-box-open', handleOtherOpen);
     return () => {
       window.removeEventListener('unj-game-box-open', handleOtherOpen);
-      releaseFocus(instanceIdRef.current);
+      releaseFocus(instanceId);
     };
   }, [handleClose, releaseFocus]);
 

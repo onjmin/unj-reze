@@ -6,20 +6,60 @@ export function resolveSMCUrl(image: string): string {
   return `https://cdn.jsdelivr.net/gh/zynq-platform/super-mario-construct@main/${normalized}`;
 }
 
-export function extractSmcMetadata(dataJson: any): any {
-  const proj = dataJson.project;
+// Construct 3 プロジェクト書き出しの生JSONは位置ベースの配列（タプル）形式で、
+// フィールド数・型はインデックスごとに固定だがオブジェクト全体の型は提供されない。
+type SmcImagePoint = [name: string, x: number, y: number];
+type SmcRawFrame = [
+  image: string, _1: unknown, x: number, y: number, w: number, h: number,
+  mirrored: boolean, duration: number, originX: number, originY: number,
+  imagePoints: SmcImagePoint[] | undefined, collisionPoly: unknown[] | undefined,
+];
+type SmcRawAnimation = [
+  name: string, speed: number, loop: boolean, repeatCount: number,
+  repeatTo: number, pingPong: boolean, _6: unknown, frames: SmcRawFrame[],
+];
+
+export interface SmcFrame {
+  image: string;
+  x: number; y: number; w: number; h: number;
+  mirrored: boolean;
+  duration: number;
+  originX: number; originY: number;
+  imagePoints: Array<{ name: string; x: number; y: number }>;
+  collisionPoly: unknown[];
+}
+
+export interface SmcAnimation {
+  name: string;
+  speed: number;
+  loop: boolean;
+  repeatCount: number;
+  repeatTo: number;
+  pingPong: boolean;
+  frames: SmcFrame[];
+}
+
+export interface SmcObjectMetadata {
+  name: string;
+  animations: Record<string, SmcAnimation>;
+}
+
+export type SmcMetadata = Record<string, SmcObjectMetadata>;
+
+export function extractSmcMetadata(dataJson: unknown): SmcMetadata | null {
+  const proj = (dataJson as { project?: unknown[] })?.project;
   if (!proj || !Array.isArray(proj[3])) return null;
-  const objectTypes = proj[3];
-  const results: any = {};
+  const objectTypes = proj[3] as unknown[][];
+  const results: SmcMetadata = {};
   for (const obj of objectTypes) {
-    const name = obj[0];
+    const name = obj[0] as string;
     const isFamily = obj[2];
     if (isFamily) continue;
 
-    let animsField = null;
+    let animsField: SmcRawAnimation[] | null = null;
     for (const field of obj) {
       if (Array.isArray(field) && field.length > 0 && Array.isArray(field[0]) && typeof field[0][0] === 'string' && Array.isArray(field[0][7])) {
-        animsField = field;
+        animsField = field as SmcRawAnimation[];
         break;
       }
     }
@@ -46,7 +86,7 @@ export function extractSmcMetadata(dataJson: any): any {
         repeatCount: repeatCount,
         repeatTo: repeatTo,
         pingPong: pingPong,
-        frames: frames.map((f: any) => {
+        frames: frames.map((f) => {
           const imagePath = f[0].replace(/\.webp$/, '.png');
           return {
             image: imagePath,
@@ -58,7 +98,7 @@ export function extractSmcMetadata(dataJson: any): any {
             duration: f[7],
             originX: f[8],
             originY: f[9],
-            imagePoints: f[10] ? f[10].map((ip: any) => ({ name: ip[0], x: ip[1], y: ip[2] })) : [],
+            imagePoints: f[10] ? f[10].map((ip) => ({ name: ip[0], x: ip[1], y: ip[2] })) : [],
             collisionPoly: f[11] || []
           };
         })
@@ -119,9 +159,9 @@ export function extractSmcMetadata(dataJson: any): any {
   return results;
 }
 
-let metadataPromise: Promise<any> | null = null;
+let metadataPromise: Promise<SmcMetadata | null> | null = null;
 
-export function getSmcMetadata(): Promise<any> {
+export function getSmcMetadata(): Promise<SmcMetadata | null> {
   if (!metadataPromise) {
     metadataPromise = fetch('https://cdn.jsdelivr.net/gh/zynq-platform/super-mario-construct@main/data.json')
       .then(res => res.json())

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { PLAY_W } from './game-presets/shared';
 
 export interface SpellCutsceneConfig {
@@ -25,8 +25,8 @@ export default function SpellCutscene({
 }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [uiScale, setUiScale] = useState(1);
-  const idRef = useRef(`sc${Math.random().toString(36).slice(2, 6)}`);
-  const id = idRef.current;
+  // useId() は ":" を含むため、CSS @keyframes 名で使えるよう除去する。
+  const id = `sc${useId().replace(/:/g, '')}`;
 
   useLayoutEffect(() => {
     const el = rootRef.current;

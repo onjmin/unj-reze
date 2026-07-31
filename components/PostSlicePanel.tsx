@@ -47,7 +47,7 @@ export default function PostSlicePanel({ userId, onPick, initialAsset, allowUplo
   useEffect(() => {
     let alive = true;
     if (!userId) {
-      setLoading(false);
+      Promise.resolve().then(() => setLoading(false));
       return;
     }
     api.posts.list(userId)
@@ -306,7 +306,7 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
     if (!img || didInitRef.current) return;
     didInitRef.current = true;
     if (!initialCrop) {
-      setRect({ x: 0, y: 0, w: Math.min(blockW, img.naturalWidth), h: Math.min(blockH, img.naturalHeight) });
+      Promise.resolve().then(() => setRect({ x: 0, y: 0, w: Math.min(blockW, img.naturalWidth), h: Math.min(blockH, img.naturalHeight) }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [img]);
@@ -624,7 +624,7 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
                       再生モード
                       <select
                         value={fieldPlayMode}
-                        onChange={e => setFieldPlayMode(e.target.value as any)}
+                        onChange={e => setFieldPlayMode(e.target.value as 'loop' | 'pingpong' | 'once')}
                         className="bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-gray-200 outline-none focus:border-blue-500"
                       >
                         <option value="loop">ループ (標準)</option>

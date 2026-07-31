@@ -7,6 +7,7 @@ import type { Post } from '@/lib/types';
 import { extractMmlFromContent } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, colorToDataUrl } from '@/lib/asset-ref';
+import type { ParsedMML, MmlPlayback } from '@onjmin/dtm';
 import RpgenAssetPanel from './RpgenAssetPanel';
 import SpriteSheetBrowser from './SpriteSheetBrowser';
 import SMCAssetPanel from './SMCAssetPanel';
@@ -103,7 +104,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const directAudioRef = useRef<HTMLAudioElement | null>(null);
   const stopAllPreviewsRef = useRef<(() => void) | null>(null);
   const bgmRef = useRef<{ setVolume: (v: number) => void } | null>(null);
-  const activeMmlCacheRef = useRef<any>(null);
+  const activeMmlCacheRef = useRef<{ mml: string; parsed: ParsedMML; totalSteps: number; bpm: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentTab = mode === 'image' ? imageTab : bgmTab;
 
@@ -123,8 +124,8 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     stopAllPreviewsRef.current = stopFn;
   };
 
-  const changeImageTab = (tab: ImageTab) => { stopAllPreviews(); lastImageTab = tab; setImageTab(tab); };
-  const changeBgmTab = (tab: BgmTab) => { stopAllPreviews(); lastBgmTabByKind[bgmKind] = tab; setBgmTab(tab); };
+  const changeImageTab = (tab: ImageTab) => { stopAllPreviews(); Promise.resolve().then(() => { lastImageTab = tab; }); setImageTab(tab); };
+  const changeBgmTab = (tab: BgmTab) => { stopAllPreviews(); Promise.resolve().then(() => { lastBgmTabByKind[bgmKind] = tab; }); setBgmTab(tab); };
 
   // タブ切り替え時: 直前のタブのスクロール位置を保存し、切り替え先タブの位置を復元する
   useEffect(() => {
@@ -148,17 +149,17 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
       const dtm = await import('@onjmin/dtm');
       const parsed = dtm.parseMML(mml);
       const totalSteps = parsed.placements?.length > 0
-        ? Math.max(...parsed.placements.map((p: any) => p.startStep + p.durationSteps), 192)
+        ? Math.max(...parsed.placements.map((p) => p.startStep + p.durationSteps), 192)
         : 192;
       const bpm = parsed.bpm || 120;
       activeMmlCacheRef.current = { mml, parsed, totalSteps, bpm };
 
       const startAt = seekStep ?? 0;
-      let bgm: any;
+      let bgm: MmlPlayback;
 
       if (startAt > 0 && dtm.playPlacements && parsed.placements) {
-        const remaining = parsed.placements.filter((p: any) => p.startStep + p.durationSteps > startAt);
-        const shifted = remaining.map((p: any) => ({ ...p, startStep: Math.max(0, p.startStep - startAt) }));
+        const remaining = parsed.placements.filter((p) => p.startStep + p.durationSteps > startAt);
+        const shifted = remaining.map((p) => ({ ...p, startStep: Math.max(0, p.startStep - startAt) }));
         bgm = dtm.playPlacements(shifted, {
           bpm,
           volume: applyMasterVolume(100),

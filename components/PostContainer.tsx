@@ -733,7 +733,7 @@ function ReplyPreview({ replies, post: parentPost }: { replies: Post[]; post: Po
   }, [replies.length]);
 
   useEffect(() => {
-    setPop(true);
+    Promise.resolve().then(() => setPop(true));
     const timeout = setTimeout(() => setPop(false), 350);
     return () => clearTimeout(timeout);
   }, [index]);

@@ -1,3 +1,5 @@
+import type { WalkPreset } from './walk-cycle';
+
 export interface SavedLayer {
   name: string;
   visible: boolean;
@@ -10,10 +12,10 @@ export interface SavedFrame {
   layers: SavedLayer[];
 }
 
-export interface HistoryItem {
+export interface HistoryItem<T = unknown> {
   id: string;
   timestamp: number;
-  data: any;
+  data: T;
   previewUrl?: string; // used for drawings/dotdrawings
   previewText?: string; // used for MML/GameMaker/GamePlay
 }
@@ -29,9 +31,23 @@ export interface DrawingEditorState {
   frames?: SavedFrame[];
   currentFrame?: number;
   fps?: number;
-  walkPreset?: any;
+  walkPreset?: WalkPreset;
   walkActiveIndex?: number;
   walkLayers?: [number, SavedLayer[]][];
+}
+
+/** キャンバス上の「生」レイヤー。oekaki の LayeredCanvas インスタンス、
+ *  および復元後の frames/walkLayers 内のプレーンオブジェクトの両方が満たす形。 */
+export interface LiveLayer {
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+  data: Uint8ClampedArray;
+}
+
+interface LiveFrame {
+  layers: LiveLayer[];
 }
 
 const layerToDataUrl = (data: Uint8ClampedArray, w: number, h: number): string => {
@@ -74,7 +90,7 @@ const dataUrlToLayerData = async (dataUrl: string, w: number, h: number): Promis
   });
 };
 
-export const serializeLayers = (layers: any[], w: number, h: number): SavedLayer[] => {
+export const serializeLayers = (layers: LiveLayer[], w: number, h: number): SavedLayer[] => {
   return layers.map(l => ({
     name: l.name,
     visible: l.visible,
@@ -84,7 +100,7 @@ export const serializeLayers = (layers: any[], w: number, h: number): SavedLayer
   }));
 };
 
-export const deserializeLayers = async (savedLayers: SavedLayer[], w: number, h: number): Promise<any[]> => {
+export const deserializeLayers = async (savedLayers: SavedLayer[], w: number, h: number): Promise<LiveLayer[]> => {
   const promises = savedLayers.map(async sl => {
     const data = await dataUrlToLayerData(sl.dataUrl, w, h);
     return {
@@ -98,13 +114,13 @@ export const deserializeLayers = async (savedLayers: SavedLayer[], w: number, h:
   return Promise.all(promises);
 };
 
-export const serializeFrames = (frames: any[], w: number, h: number): SavedFrame[] => {
+export const serializeFrames = (frames: LiveFrame[], w: number, h: number): SavedFrame[] => {
   return frames.map(f => ({
     layers: serializeLayers(f.layers, w, h)
   }));
 };
 
-export const deserializeFrames = async (savedFrames: SavedFrame[], w: number, h: number): Promise<any[]> => {
+export const deserializeFrames = async (savedFrames: SavedFrame[], w: number, h: number): Promise<LiveFrame[]> => {
   const promises = savedFrames.map(async sf => {
     const layers = await deserializeLayers(sf.layers, w, h);
     return {
@@ -114,7 +130,7 @@ export const deserializeFrames = async (savedFrames: SavedFrame[], w: number, h:
   return Promise.all(promises);
 };
 
-export const serializeWalkLayers = (walkLayers: Map<number, { layers: any[] }>, w: number, h: number): [number, SavedLayer[]][] => {
+export const serializeWalkLayers = (walkLayers: Map<number, { layers: LiveLayer[] }>, w: number, h: number): [number, SavedLayer[]][] => {
   const entries: [number, SavedLayer[]][] = [];
   walkLayers.forEach((val, key) => {
     entries.push([key, serializeLayers(val.layers, w, h)]);
@@ -122,8 +138,8 @@ export const serializeWalkLayers = (walkLayers: Map<number, { layers: any[] }>, 
   return entries;
 };
 
-export const deserializeWalkLayers = async (savedWalkLayers: [number, SavedLayer[]][], w: number, h: number): Promise<Map<number, { layers: any[] }>> => {
-  const map = new Map<number, { layers: any[] }>();
+export const deserializeWalkLayers = async (savedWalkLayers: [number, SavedLayer[]][], w: number, h: number): Promise<Map<number, { layers: LiveLayer[] }>> => {
+  const map = new Map<number, { layers: LiveLayer[] }>();
   for (const [key, savedLayers] of savedWalkLayers) {
     const layers = await deserializeLayers(savedLayers, w, h);
     map.set(key, { layers });
@@ -171,7 +187,7 @@ export const getStorageKey = (
   }
 };
 
-export const getHistory = (key: string): HistoryItem[] => {
+export const getHistory = <T = unknown>(key: string): HistoryItem<T>[] => {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(key);
@@ -182,9 +198,18 @@ export const getHistory = (key: string): HistoryItem[] => {
   }
 };
 
-export const saveHistory = (
+interface GameMakerPreviewData {
+  name?: string;
+  preset?: string;
+}
+
+interface GameplayPreviewData {
+  progress?: { level?: number; hp?: number; maxHp?: number; gold?: number };
+}
+
+export const saveHistory = <T = unknown>(
   key: string,
-  data: any,
+  data: T,
   type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay',
   maxItems = 50
 ): boolean => {
@@ -196,7 +221,7 @@ export const saveHistory = (
       return false;
     }
 
-    const history = getHistory(key);
+    const history = getHistory<T>(key);
     const lastItem = history[0]?.data;
 
     // Check similarity/duplicates
@@ -230,14 +255,17 @@ export const saveHistory = (
         previewUrl = drawingState.walkLayers[0][1][0].dataUrl;
       }
     } else if (type === 'mml') {
-      previewText = data.slice(0, 40) + (data.length > 40 ? '...' : '');
+      const mml = data as string;
+      previewText = mml.slice(0, 40) + (mml.length > 40 ? '...' : '');
     } else if (type === 'gamemaker') {
-      previewText = `${data.name || '無題'} (${data.preset || 'preset'})`;
+      const gm = data as GameMakerPreviewData;
+      previewText = `${gm.name || '無題'} (${gm.preset || 'preset'})`;
     } else if (type === 'gameplay') {
-      previewText = `Lv.${data.progress?.level || 1} HP:${data.progress?.hp || 0}/${data.progress?.maxHp || 0} G:${data.progress?.gold || 0}`;
+      const gp = data as GameplayPreviewData;
+      previewText = `Lv.${gp.progress?.level || 1} HP:${gp.progress?.hp || 0}/${gp.progress?.maxHp || 0} G:${gp.progress?.gold || 0}`;
     }
 
-    const newItem: HistoryItem = {
+    const newItem: HistoryItem<T> = {
       id: Math.random().toString(36).substring(2) + '-' + Date.now(),
       timestamp: Date.now(),
       data,
@@ -266,7 +294,7 @@ export const deleteHistoryItem = (key: string, id: string): void => {
   }
 };
 
-export const saveAutosave = (key: string, data: any): void => {
+export const saveAutosave = <T = unknown>(key: string, data: T): void => {
   if (typeof window === 'undefined') return;
   try {
     const serializedData = JSON.stringify(data);
@@ -283,7 +311,7 @@ export const saveAutosave = (key: string, data: any): void => {
   }
 };
 
-export const getAutosave = (key: string): { timestamp: number; data: any } | null => {
+export const getAutosave = <T = unknown>(key: string): { timestamp: number; data: T } | null => {
   if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(key + '-autosave');

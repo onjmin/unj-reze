@@ -14,6 +14,24 @@ interface SettingsPanelProps {
   currentUser?: AnonymousUser | null;
 }
 
+function PrivacyToggle({ label, desc, icon: Icon, active, onClick }: { label: string; desc: string; icon: React.ElementType; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-left"
+    >
+      <Icon size={14} className={active ? 'text-[#a3e635] shrink-0' : 'text-gray-500 shrink-0'} />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs text-gray-200">{label}</div>
+        <div className="text-[9px] text-gray-500">{desc}</div>
+      </div>
+      <span className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${active ? 'bg-[#a3e635]' : 'bg-gray-700'}`}>
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${active ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+    </button>
+  );
+}
+
 export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser }: SettingsPanelProps) {
   const [privacy, setPrivacy] = useState({ isPrivate: false, hideFromSearch: false, hideReactions: false });
   const [migrationToken, setMigrationToken] = useState('');
@@ -63,22 +81,6 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
       setRedeemMsg('トークンが無効か期限切れです。');
     }
   };
-
-  const PrivacyToggle = ({ label, desc, icon: Icon, active, onClick }: { label: string; desc: string; icon: React.ElementType; active: boolean; onClick: () => void }) => (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border border-gray-800 hover:bg-gray-100/5 transition-colors text-left"
-    >
-      <Icon size={14} className={active ? 'text-[#a3e635] shrink-0' : 'text-gray-500 shrink-0'} />
-      <div className="flex-1 min-w-0">
-        <div className="text-xs text-gray-200">{label}</div>
-        <div className="text-[9px] text-gray-500">{desc}</div>
-      </div>
-      <span className={`w-9 h-5 rounded-full relative transition-colors shrink-0 ${active ? 'bg-[#a3e635]' : 'bg-gray-700'}`}>
-        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${active ? 'left-[18px]' : 'left-0.5'}`} />
-      </span>
-    </button>
-  );
 
   return (
     <div className="flex flex-col">

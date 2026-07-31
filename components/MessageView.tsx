@@ -27,6 +27,10 @@ export default function MessageView({ userId }: MessageViewProps) {
 
   const currentSender = userId || '名無し';
 
+  const scrollToBottom = (smooth = true) => {
+    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+  };
+
   useEffect(() => {
     const client = getRealtimeClient();
     if (!client || !currentSender) return;
@@ -50,10 +54,6 @@ export default function MessageView({ userId }: MessageViewProps) {
       unsubHandler();
     };
   }, [currentSender]);
-
-  const scrollToBottom = (smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
-  };
 
   useEffect(() => {
     api.messages.list(userId).then(msgs => {

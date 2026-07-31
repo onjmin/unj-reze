@@ -30,7 +30,7 @@ function evalExpr(src: string, scope: MiniScope, env: MiniEnv): unknown {
     'true', 'false', 'null', 'undefined', 'NaN', 'Infinity',
     'if', 'else', 'for', 'while', 'return', 'function', 'end', 'then', 'and', 'or', 'not',
   ]);
-  let code = safe.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||').replace(/\bnot\b/g, '!');
+  const code = safe.replace(/\band\b/g, '&&').replace(/\bor\b/g, '||').replace(/\bnot\b/g, '!');
   const getters: string[] = [];
   tokens.forEach(t => {
     if (reserved.has(t) || /^\d/.test(t)) return;
@@ -39,7 +39,6 @@ function evalExpr(src: string, scope: MiniScope, env: MiniEnv): unknown {
   });
   const js = `(function(__env,__scope){ ${getters.join('\n')} return (${code}); })`;
   try {
-    // eslint-disable-next-line no-new-func
     return Function(`return ${js}`)()(env, scope);
   } catch (e) {
     throw new Error(`ExprError in \`${src}\`: ${(e as Error).message}`);

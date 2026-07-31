@@ -18,6 +18,7 @@ import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
 import EmbedPart from './EmbedPart';
 import GameBox from './GameBox';
+import type { GameManifestDraft } from './GameMaker';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
@@ -40,13 +41,14 @@ interface PostDetailProps {
   post: Post;
 }
 
+function getSavedBbsMode(): string {
+  if (typeof localStorage === 'undefined') return 'SNSモード';
+  return localStorage.getItem('unj_bbs_mode') || 'SNSモード';
+}
+
 export default function PostDetail({ post: initial }: PostDetailProps) {
   const router = useRouter();
-  const [bbsMode, setBbsMode] = useState('SNSモード');
-  useEffect(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
-    if (saved) setBbsMode(saved);
-  }, []);
+  const [bbsMode, setBbsMode] = useState(getSavedBbsMode);
 
   const [post, setPost] = useState<Post>(initial);
   const [replyText, setReplyText] = useState('');
@@ -62,7 +64,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [replyMml, setReplyMml] = useState<string | null>(null);
-  const [replyGameDraft, setReplyGameDraft] = useState<any>(null);
+  const [replyGameDraft, setReplyGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
@@ -107,12 +109,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       if (user.avatarColor) setAvatarColor(user.avatarColor);
     }).catch(() => { });
   }, []);
-
-  useEffect(() => {
-    if (replyTo) {
-      setComposerOpen(true);
-    }
-  }, [replyTo]);
 
   /** 返信送信とコンポーザ/エディタ起動の排他制御用。
    *  コンポーザやエディタを開くたびに世代番号を進め、送信完了後の後片付け
@@ -436,7 +432,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setReplyMml(mml);
   };
 
-  const handleSaveGame = (manifest: any, meta: { title: string; preset: string }) => {
+  const handleSaveGame = (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
     setReplyGameDraft({ manifest, title: meta.title, preset: meta.preset });
     setActiveScreen(null);
     setReplyText((prev) => prev.trim() ? prev : `#ゲーム 「${meta.title}」を作ったよ！`);
@@ -989,7 +985,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
   const [localPost, setLocalPost] = useState<Post>(post);
 
   useEffect(() => {
-    setLocalPost(post);
+    Promise.resolve().then(() => setLocalPost(post));
   }, [post]);
 
   const [menuOpen, setMenuOpen] = useState(false);

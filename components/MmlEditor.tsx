@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { X, Music, Loader2, History } from 'lucide-react';
-import { parseMML, parseMmlMeta, TRACKS_SIMPLE, type DawMode } from '@onjmin/dtm';
+import type { DawMode, ModeSwitchInstance } from '@onjmin/dtm';
 import { getStudio } from '@/lib/dtm';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import VolumeControl from '@/components/VolumeControl';
@@ -19,13 +19,13 @@ interface MmlEditorProps {
 // 再編集時: アドバンスモードで作られたMMLを開いたら自動的にアドバンスモードへ切り替える。
 // 判定基準は @onjmin/dtm 側の「シンプルモードで読み込むと上級者モードへの切替を提案する」
 // 条件（mergedTrackCount > 0 || meta.mode === 'advanced'）に合わせる。
-function detectMode(mml?: string): DawMode {
+function detectMode(dtm: typeof import('@onjmin/dtm'), mml?: string): DawMode {
   if (!mml) return 'simple';
   try {
-    if (parseMmlMeta(mml).mode === 'advanced') return 'advanced';
-    const { mergedTrackCount } = parseMML(mml, { clampTrackCount: TRACKS_SIMPLE.length });
+    if (dtm.parseMmlMeta(mml).mode === 'advanced') return 'advanced';
+    const { mergedTrackCount } = dtm.parseMML(mml, { clampTrackCount: dtm.TRACKS_SIMPLE.length });
     return mergedTrackCount > 0 ? 'advanced' : 'simple';
-  } catch (e) {
+  } catch {
     return 'simple';
   }
 }
@@ -46,7 +46,8 @@ const clampVolume = (v: number) => Math.min(100, Math.max(0, Math.round(v)));
 // MIDI読込・コード進行入力まで全部入り。アプリ側はオーバーレイの枠（キャンセル/投稿）を担当。
 export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: MmlEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const modeSwitchRef = useRef<any | null>(null);
+  const modeSwitchRef = useRef<ModeSwitchInstance | null>(null);
+  const dtmModRef = useRef<typeof import('@onjmin/dtm') | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,7 +61,9 @@ export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: Mm
   // DAWへ渡す値は「MML側 × サイト側」の掛け算にする。
   // DAWの getMML() は現在のマスター音量をそのまま #volume= として書き出すため、
   // 掛け算後の値がMMLに焼き付かないよう、保存時は authoredVolumeRef の値へ戻す。
-  const authoredVolumeRef = useRef<number>(parseMmlMeta(initialMml ?? '').volume ?? DAW_DEFAULT_VOLUME);
+  // @onjmin/dtm は動的インポート必須（静的インポートは Edge/サーバー評価時にクラッシュする）ため、
+  // レンダー時点ではまだ実際の値を計算できない。モジュール読み込み後（下の useEffect）に補正する。
+  const authoredVolumeRef = useRef<number>(DAW_DEFAULT_VOLUME);
   /** 直近でDAWへ渡した掛け算後の値。ユーザーがDAW側スライダーを動かしたかの判定に使う。 */
   const pushedVolumeRef = useRef<number | null>(null);
   /** 直近の掛け算係数（サイト音量/100、ミュート時0）。 */
@@ -72,7 +75,7 @@ export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: Mm
     if (!daw) return authoredVolumeRef.current;
     let current: number | undefined;
     try {
-      current = parseMmlMeta(daw.getMML()?.minified ?? '').volume;
+      current = dtmModRef.current?.parseMmlMeta(daw.getMML()?.minified ?? '').volume;
     } catch {
       current = undefined;
     }
@@ -99,12 +102,14 @@ export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: Mm
   useEffect(() => {
     let disposed = false;
 
-    getStudio().then((studio) => {
+    Promise.all([getStudio(), import('@onjmin/dtm')]).then(([studio, dtm]) => {
       if (disposed) return;
+      dtmModRef.current = dtm;
+      authoredVolumeRef.current = dtm.parseMmlMeta(initialMml ?? '').volume ?? DAW_DEFAULT_VOLUME;
       if (mountRef.current) {
         modeSwitchRef.current = studio.mountModeSwitch(mountRef.current, {
           editorTarget: mountRef.current,
-          mode: detectMode(initialMml),
+          mode: detectMode(dtm, initialMml),
           position: 'prepend',
           editorOptions: {
             ...(initialMml ? { initialMML: initialMml } : undefined),
@@ -138,10 +143,13 @@ export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: Mm
 
   // Check autosave on mount
   useEffect(() => {
-    const autosave = getAutosave(storageKey);
+    const autosave = getAutosave<string>(storageKey);
     if (autosave && autosave.data && autosave.data !== initialMml) {
-      setAutosaveData(autosave.data);
-      setHasAutosave(true);
+      const data = autosave.data;
+      Promise.resolve().then(() => {
+        setAutosaveData(data);
+        setHasAutosave(true);
+      });
     }
   }, [initialMml, storageKey]);
 

@@ -106,10 +106,12 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const [restoredState, setRestoredState] = useState<DrawingEditorState | null>(null);
   const storageKey = getStorageKey('dotdrawing');
 
-  toolRef.current = tool;
-  colorRef.current = color;
-  walkModeRef.current = walkMode;
-  walkPresetRef.current = walkPreset;
+  useEffect(() => {
+    toolRef.current = tool;
+    colorRef.current = color;
+    walkModeRef.current = walkMode;
+    walkPresetRef.current = walkPreset;
+  });
 
   const applyColor = (c: string) => {
     setColor(c);
@@ -435,34 +437,14 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
 
   // Check autosave on mount
   useEffect(() => {
-    const autosave = getAutosave(storageKey);
+    const autosave = getAutosave<DrawingEditorState>(storageKey);
     if (autosave && autosave.data) {
-      setAutosaveData(autosave.data);
-      setHasAutosave(true);
+      Promise.resolve().then(() => {
+        setAutosaveData(autosave.data);
+        setHasAutosave(true);
+      });
     }
   }, [storageKey]);
-
-  // Periodic autosave (every 10s) and history snapshot (every 30m)
-  useEffect(() => {
-    const autosaveInterval = setInterval(() => {
-      const state = getCurrentState();
-      if (state) {
-        saveAutosave(storageKey, state);
-      }
-    }, 10000);
-
-    const historyInterval = setInterval(() => {
-      const state = getCurrentState();
-      if (state) {
-        saveHistory(storageKey, state, 'dotdrawing', 50);
-      }
-    }, 1800000);
-
-    return () => {
-      clearInterval(autosaveInterval);
-      clearInterval(historyInterval);
-    };
-  }, [storageKey, animMode, walkMode, zoom, walkActiveIndex, gridH]);
 
   const handleRestoreAutosave = () => {
     if (!autosaveData) return;
@@ -480,6 +462,38 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
   const handleRestoreHistory = (state: DrawingEditorState) => {
     setRestoredState(state);
     setInitKey(k => k + 1);
+  };
+
+  const syncLayerEntries = () => {
+    const entries = oekaki.getLayers().map(inst => ({
+      instance: inst,
+      name: inst.name,
+    })).reverse();
+    setLayerEntries(entries);
+    layerEntriesRef.current = entries;
+  };
+
+  const captureFrame = (): FrameData => ({
+    layers: oekaki.getLayers().map(l => ({
+      name: l.name,
+      visible: l.visible,
+      locked: l.locked,
+      opacity: l.opacity,
+      data: new Uint8ClampedArray(l.data),
+    })),
+  });
+
+  const applyFrame = (frame: FrameData) => {
+    for (const l of oekaki.getLayers()) l.delete();
+    oekaki.refresh();
+    for (const { name, visible, locked, opacity, data } of frame.layers) {
+      const l = new oekaki.LayeredCanvas(name);
+      l.visible = visible;
+      l.locked = locked;
+      l.opacity = opacity;
+      l.data = new Uint8ClampedArray(data);
+    }
+    syncLayerEntries();
   };
 
   const getCurrentState = (): DrawingEditorState | null => {
@@ -538,13 +552,36 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
     }
   };
 
+  // Periodic autosave (every 10s) and history snapshot (every 30m)
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveAutosave(storageKey, state);
+      }
+    }, 10000);
+
+    const historyInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveHistory(storageKey, state, 'dotdrawing', 50);
+      }
+    }, 1800000);
+
+    return () => {
+      clearInterval(autosaveInterval);
+      clearInterval(historyInterval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, animMode, walkMode, zoom, walkActiveIndex, gridH]);
+
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
     el.innerHTML = '';
 
     const isWalk = restoredState ? (restoredState.mode === 'walk') : walkModeRef.current;
-    const preset = restoredState ? restoredState.walkPreset : walkPresetRef.current;
+    const preset = (restoredState ? restoredState.walkPreset : walkPresetRef.current) ?? walkPresetRef.current;
     const canvasW = isWalk ? Math.floor(CANVAS_SIZE * (preset.w / preset.h)) : CANVAS_SIZE;
     const canvasH = CANVAS_SIZE;
 
@@ -589,7 +626,7 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
             }
           }
 
-          setWalkPreset(restoredState.walkPreset);
+          setWalkPreset(preset);
           setWalkActiveIndex(restoredState.walkActiveIndex || 0);
           walkActiveIndexRef.current = restoredState.walkActiveIndex || 0;
           setWalkMode(true);
@@ -1097,38 +1134,6 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
 
   // ── Animation ──
 
-  const syncLayerEntries = () => {
-    const entries = oekaki.getLayers().map(inst => ({
-      instance: inst,
-      name: inst.name,
-    })).reverse();
-    setLayerEntries(entries);
-    layerEntriesRef.current = entries;
-  };
-
-  const captureFrame = (): FrameData => ({
-    layers: oekaki.getLayers().map(l => ({
-      name: l.name,
-      visible: l.visible,
-      locked: l.locked,
-      opacity: l.opacity,
-      data: new Uint8ClampedArray(l.data),
-    })),
-  });
-
-  const applyFrame = (frame: FrameData) => {
-    for (const l of oekaki.getLayers()) l.delete();
-    oekaki.refresh();
-    for (const { name, visible, locked, opacity, data } of frame.layers) {
-      const l = new oekaki.LayeredCanvas(name);
-      l.visible = visible;
-      l.locked = locked;
-      l.opacity = opacity;
-      l.data = new Uint8ClampedArray(data);
-    }
-    syncLayerEntries();
-  };
-
   const selectFrame = (i: number) => {
     framesRef.current[currentFrameRef.current] = captureFrame();
     currentFrameRef.current = i;
@@ -1501,9 +1506,14 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
       </div>
 
       {animMode && (
+        // フレーム数・現在フレーム・fps は毎フレームの高頻度更新を避けるため意図的に ref + forceRender
+        // で管理しており(各更新箇所で forceRender を呼びfresh値を反映)、ここでの ref 読み取りは安全。
         <AnimationBar
+          // eslint-disable-next-line react-hooks/refs
           frameCount={framesRef.current.length}
+          // eslint-disable-next-line react-hooks/refs
           currentFrame={currentFrameRef.current}
+          // eslint-disable-next-line react-hooks/refs
           fps={fpsRef.current}
           isPlaying={isPlaying}
           onSelectFrame={selectFrame}
@@ -1524,6 +1534,8 @@ export default function DotDrawingEditor({ onClose, onSave, collabImageUrl }: Do
         <WalkCyclePanel
           preset={walkPreset}
           activeIndex={walkActiveIndex}
+          // dataUrlByIndex も同様に ref + forceRender で高頻度更新を避ける意図的な設計。
+          // eslint-disable-next-line react-hooks/refs
           dataUrlByIndex={walkDataRef.current}
           onSelectCell={selectWalkCell}
           onChangePreset={handleChangeWalkPreset}

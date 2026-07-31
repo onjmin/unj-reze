@@ -1,16 +1,19 @@
 const UPLOADS_DIR = './public/uploads';
 
-let _fs: any = null;
-let _path: any = null;
+type FsModule = typeof import('fs');
+type PathModule = typeof import('path');
 
-async function loadFs() {
+let _fs: FsModule | null = null;
+let _path: PathModule | null = null;
+
+async function loadFs(): Promise<{ fs: FsModule; path: PathModule }> {
   if (_fs) return { fs: _fs, path: _path! };
   const fsModuleName = 'fs';
   const pathModuleName = 'path';
   const [fsMod, pathMod] = await Promise.all([import(fsModuleName), import(pathModuleName)]);
   _fs = fsMod.default ?? fsMod;
   _path = pathMod.default ?? pathMod;
-  return { fs: _fs, path: _path! };
+  return { fs: _fs!, path: _path! };
 }
 
 export async function uploadImage(
@@ -24,7 +27,7 @@ export async function uploadImage(
 
   const base64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
 
-  let fs: any, pathMod: any;
+  let fs: FsModule, pathMod: PathModule;
   try {
     ({ fs, path: pathMod } = await loadFs());
   } catch {
@@ -43,7 +46,7 @@ export async function uploadImage(
 export async function deleteImage(url: string): Promise<void> {
   if (!url.startsWith('/uploads/')) return;
   const key = url.replace('/uploads/', '');
-  let fs: any, pathMod: any;
+  let fs: FsModule, pathMod: PathModule;
   try {
     ({ fs, path: pathMod } = await loadFs());
   } catch {
@@ -58,7 +61,7 @@ export async function deleteImage(url: string): Promise<void> {
 export async function getImageBuffer(url: string): Promise<Buffer | null> {
   if (!url.startsWith('/uploads/')) return null;
   const key = url.replace('/uploads/', '');
-  let fs: any, pathMod: any;
+  let fs: FsModule, pathMod: PathModule;
   try {
     ({ fs, path: pathMod } = await loadFs());
   } catch {

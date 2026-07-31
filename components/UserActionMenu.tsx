@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { User, UserPlus, UserMinus, AtSign, Mail, VolumeX, Volume2, Ban, CircleSlash, Flag } from 'lucide-react';
@@ -33,7 +33,7 @@ export default function UserActionMenu({
   onModerationChange,
 }: UserActionMenuProps) {
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
   const [isFollowingTarget, setIsFollowingTarget] = useState(false);
   const [muted, setMuted] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -50,16 +50,12 @@ export default function UserActionMenu({
   const isSelf = currentUserId === targetUserDisplayName || currentUserSlug === targetUserSlug;
   const avatarInfo = getAvatarInfo(targetUserDisplayName);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // Cache update helper that merges updates with existing cache data
   const updateCache = (updates: Partial<{ followers: number; following: number }>) => {
     if (typeof localStorage === 'undefined') return;
     const key = `unj_cached_profile_${targetIdOrSlug}`;
     const existingStr = localStorage.getItem(key);
-    let existing: any = {};
+    let existing: Record<string, unknown> = {};
     if (existingStr) {
       try {
         existing = JSON.parse(existingStr) || {};
@@ -72,14 +68,16 @@ export default function UserActionMenu({
   useEffect(() => {
     if (!isOpen) return;
 
-    setIsFollowingTarget(false);
-    setShowDmInput(false);
-    setDmText('');
-    setDmSuccess(false);
+    Promise.resolve().then(() => {
+      setIsFollowingTarget(false);
+      setShowDmInput(false);
+      setDmText('');
+      setDmSuccess(false);
 
-    setMuted(false);
-    setBlocked(false);
-    setReported(false);
+      setMuted(false);
+      setBlocked(false);
+      setReported(false);
+    });
 
     if (currentUserId && !isSelf) {
       api.follow.isFollowing(currentUserId, targetUserDisplayName)

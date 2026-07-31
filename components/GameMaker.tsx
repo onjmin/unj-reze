@@ -19,7 +19,7 @@ import { smcFrameRect, smcFrameCount } from '@/lib/smc-sprite';
 import ContentPicker, { type PickResult } from './ContentPicker';
 import WalkSpritePreview from './WalkSpritePreview';
 import AssetThumb from './AssetThumb';
-import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
+import { resolveSMCUrl, getSmcMetadata, type SmcMetadata } from '@/lib/smc-helper';
 import { segment } from '@/lib/tiny-segmenter';
 import { parseRpgen } from '@/lib/rpgen-parser';
 import LZString from 'lz-string';
@@ -835,7 +835,7 @@ interface GameEngine {
    *   ワープ先シーンの overlayMap/overheadMap を反映できない）。 */
   overlayMap?: number[][];
   overheadMap?: number[][];
-  player: { x: number; y: number; vx: number; vy: number; isGrounded: boolean; spriteRef?: string; spriteUrl?: string };
+  player: { x: number; y: number; vx: number; vy: number; isGrounded: boolean; spriteRef?: string; spriteUrl?: string; moveTarget?: MoveTarget };
   keys: Set<string>;
   bullets: Bullet[];
   enemyBullets: EnemyBullet[];
@@ -1041,7 +1041,7 @@ const SpriteThumbnail = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const walk = spriteRef ? parseWalkRef(spriteRef) : null;
-  let resolvedUrl = (spriteUrl && spriteUrl.length > 0) ? spriteUrl : (walk?.source.kind === 'url' ? walk.source.url : undefined);
+  const resolvedUrl = (spriteUrl && spriteUrl.length > 0) ? spriteUrl : (walk?.source.kind === 'url' ? walk.source.url : undefined);
   let resolvedSMC = resolvedUrl;
   let sxOffset = 0, syOffset = 0, swOffset = 0, shOffset = 0;
   let hasSMCFrame = false;
@@ -1276,7 +1276,7 @@ const BUILT_IN_EFFECT_PRESETS: Omit<EffectPreset, 'id'>[] = [
   { name: '氷', imageRef: 'url:https://rpgen.org/dq/spells/15/spell.png', imageUrl: 'https://rpgen.org/dq/spells/15/spell.png', frameCount: 16, fps: 20, sfx: { ref: 'direct:https://rpgen-search.pages.dev/data/audio/sound/XCdbnX.mp3', src: 'https://rpgen-search.pages.dev/data/audio/sound/XCdbnX.mp3', type: 'direct' } },
 ];
 
-let globalSmcMetadata: any = null;
+let globalSmcMetadata: SmcMetadata | null = null;
 
 // SMC のスプライトは敵キャラの多くが「左向き」で描かれている（プレイヤー Mario / Toad は右向き）。
 // drawSprite は既定で「右向き素材・左移動時に水平反転」を前提とするため、左向き素材を
@@ -1448,7 +1448,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     || (gameData.titleScreen ? '' : (gameData.name ?? '').trim())
     || '無題';
   const [isPlaying, setIsPlaying] = useState(false);
-  const [smcMetadata, setSmcMetadata] = useState<any>(null);
+  const [smcMetadata, setSmcMetadata] = useState<SmcMetadata | null>(null);
   useEffect(() => {
     if (globalSmcMetadata) {
       setSmcMetadata(globalSmcMetadata);
@@ -1831,7 +1831,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [messageFont, setMessageFont] = useState<string | undefined>(undefined);
   type FollowImageType = {
     targetObjId: string;
-    directions: Record<'U' | 'D' | 'L' | 'R', any>;
+    directions: Extract<EventCommand, { type: 'followImage' }>['directions'];
   };
   const [followImages, setFollowImages] = useState<Record<string, FollowImageType>>({});
   const followImagesRef = useRef<Record<string, FollowImageType>>({});
@@ -1978,7 +1978,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // Check autosave on mount (Edit mode)
   useEffect(() => {
     if (playOnly) return;
-    const autosave = getAutosave(editStorageKey);
+    const autosave = getAutosave<GameManifestDraft>(editStorageKey);
     if (autosave && autosave.data) {
       setAutosaveEditData(autosave.data);
       setHasAutosaveEdit(true);
@@ -1988,7 +1988,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   // Check autosave when entering play mode
   useEffect(() => {
     if (isPlaying || playOnly) {
-      const autosave = getAutosave(playStorageKey);
+      const autosave = getAutosave<SavedGameplayState>(playStorageKey);
       if (autosave && autosave.data) {
         setAutosavePlayData(autosave.data);
         setHasAutosavePlay(true);
@@ -2097,11 +2097,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     applyPresetData(preset, data, titleOverride || manifest.name || data.name);
   };
 
-  const handleRestoreHistory = (data: any) => {
+  const handleRestoreHistory = (data: GameManifestDraft | SavedGameplayState) => {
     if (isPlaying || playOnly) {
-      handleRestorePlayState(data);
+      handleRestorePlayState(data as SavedGameplayState);
     } else {
-      loadManifest(data);
+      loadManifest(data as GameManifestDraft);
     }
   };
 
@@ -2386,7 +2386,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     timer: number;
     maxTimer: number;
     originalTile: number;
-    info: any;
+    info: TileDef | undefined;
     oy: number;
     targetTileId?: number;
     spawnCoin?: boolean;
@@ -3028,7 +3028,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (bgm?.src) {
       const loopOption = getLoopOption(bgm.ref);
       const volume = getBgmVolume(bgm.ref);
-      bgmManager.play({ bgm: { type: bgm.type ?? 'youtube', src: bgm.src, loop: loopOption, volume } as any, tileset: {} });
+      bgmManager.play({ bgm: { type: bgm.type ?? 'youtube', src: bgm.src, loop: loopOption, volume }, tileset: {} });
     } else {
       bgmManager.stop();
     }
@@ -4612,7 +4612,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     let raf = 0; let alive = true;
 
     const scriptSrc = st.miniScript;
-    let scriptCtx = { cancelled: false };
+    const scriptCtx = { cancelled: false };
     st.scriptCtx = scriptCtx;
 
     if (scriptSrc) {
@@ -5094,14 +5094,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       bossBgmActiveRef.current = true;
       const loopOption = getLoopOption(bossBgm.ref);
       const volume = getBgmVolume(bossBgm.ref);
-      bgmManager.play({ bgm: { type: bossBgm.type ?? 'youtube', src: bossBgm.src, loop: loopOption, volume } as any, tileset: {} });
+      bgmManager.play({ bgm: { type: bossBgm.type ?? 'youtube', src: bossBgm.src, loop: loopOption, volume }, tileset: {} });
     } else if (!isBossPhase && bossBgmActiveRef.current) {
       bossBgmActiveRef.current = false;
       const normal = getCurrentFieldBgm();
       if (normal?.src) {
         const loopOption = getLoopOption(normal.ref);
         const volume = getBgmVolume(normal.ref);
-        bgmManager.play({ bgm: { type: normal.type ?? 'youtube', src: normal.src, loop: loopOption, volume } as any, tileset: {} });
+        bgmManager.play({ bgm: { type: normal.type ?? 'youtube', src: normal.src, loop: loopOption, volume }, tileset: {} });
       }
       else bgmManager.stop();
     }
@@ -5845,8 +5845,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const layout = worldLayoutRef.current;
           const wCols = layout ? layout.worldCols : curWorldCols(gameDataRef.current);
           const wRows = layout ? layout.worldRows : curWorldRows(gameDataRef.current);
-          let maxCamX = Math.max(0, wCols * TILE_SIZE - VIEW_W);
-          let maxCamY = Math.max(0, wRows * TILE_SIZE - VIEW_H);
+          const maxCamX = Math.max(0, wCols * TILE_SIZE - VIEW_W);
+          const maxCamY = Math.max(0, wRows * TILE_SIZE - VIEW_H);
           let targetTileX = cmd.tx ?? 0;
           let targetTileY = cmd.ty ?? 0;
           if (layout && activeSceneIdxRef.current >= 0) {
@@ -5900,7 +5900,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 targetEntity.activePageIdx = targetPageIdx;
                 targetEntity.talked = false;
                 targetEntity.touchEventRunning = false;
-                delete (targetEntity as any)._lastTouchTime;
+                delete targetEntity._lastTouchTime;
               }
 
               const targetId = targetDef?.id ?? targetEntity?.def.id;
@@ -5990,7 +5990,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (asset.type === 'youtube') {
       // YouTube BGM は再生手段が bgmManager 経由の iframe 埋め込みしかないため、
       // 他タイプ同様ここで直接再生できるようにする（従来 mml/direct 以外は無反応で「試聴」が効かなかった）。
-      bgmManager.play({ bgm: { type: 'youtube', src: asset.src, volume: applyMasterVolume(70) } as any, tileset: {} });
+      bgmManager.play({ bgm: { type: 'youtube', src: asset.src, volume: applyMasterVolume(70) }, tileset: {} });
       previewStopRef.current = () => { bgmManager.stop(); };
       return;
     }
@@ -6347,7 +6347,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         const src = currentBgm.src;
         const loopOption = getLoopOption(currentBgm.ref);
         const volume = getBgmVolume(currentBgm.ref);
-        if (type && src) bgmManager.play({ bgm: { type, src, loop: loopOption, volume } as any, tileset: {} });
+        if (type && src) bgmManager.play({ bgm: { type, src, loop: loopOption, volume }, tileset: {} });
         else {
           const asset = bgmRefToAsset(currentBgm.ref);
           if (asset) bgmManager.play({ bgm: asset, tileset: {} } as never); else bgmManager.stop();
@@ -6416,12 +6416,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         vx: 0, vy: 0, hp: o.hp, timer: 0,
         talked: old ? old.talked : false,
         touchEventRunning: old ? old.touchEventRunning : false,
-        _touchStartCol: old ? (old as any)._touchStartCol : undefined,
-        _touchStartRow: old ? (old as any)._touchStartRow : undefined,
-        _touchStartECol: old ? (old as any)._touchStartECol : undefined,
-        _touchStartERow: old ? (old as any)._touchStartERow : undefined,
-        _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
-        _touchEndTime: old ? (old as any)._touchEndTime : undefined,
+        _touchStartCol: old ? old._touchStartCol : undefined,
+        _touchStartRow: old ? old._touchStartRow : undefined,
+        _touchStartECol: old ? old._touchStartECol : undefined,
+        _touchStartERow: old ? old._touchStartERow : undefined,
+        _lastTouchTime: old ? old._lastTouchTime : undefined,
+        _touchEndTime: old ? old._touchEndTime : undefined,
         def: o,
       };
     }) as unknown as Entity[];
@@ -6483,12 +6483,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           hp: o.hp, timer: 0, vx: 0, vy: 0,
           talked: old ? old.talked : false,
           touchEventRunning: old ? old.touchEventRunning : false,
-          _touchStartCol: old ? (old as any)._touchStartCol : undefined,
-          _touchStartRow: old ? (old as any)._touchStartRow : undefined,
-          _touchStartECol: old ? (old as any)._touchStartECol : undefined,
-          _touchStartERow: old ? (old as any)._touchStartERow : undefined,
-          _lastTouchTime: old ? (old as any)._lastTouchTime : undefined,
-          _touchEndTime: old ? (old as any)._touchEndTime : undefined,
+          _touchStartCol: old ? old._touchStartCol : undefined,
+          _touchStartRow: old ? old._touchStartRow : undefined,
+          _touchStartECol: old ? old._touchStartECol : undefined,
+          _touchStartERow: old ? old._touchStartERow : undefined,
+          _lastTouchTime: old ? old._lastTouchTime : undefined,
+          _touchEndTime: old ? old._touchEndTime : undefined,
           spellState: o.spellScript?.length
             ? { stack: [{ script: o.spellScript, ip: 0, timesLeft: -1 as number },], frame: 0, waitLeft: 0 }
             : undefined,
@@ -6958,7 +6958,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             // （例: Goomba 2Walk は f0=tiles-sheet5, f1=goomba-sheet0）。
             // frames[0] のシート固定で各コマの矩形を切ると別フレームに化けるので、
             // 全コマの画像をプリロードし、描画は選択コマ自身の画像から行う。
-            anim.frames.forEach((f: any) => {
+            anim.frames.forEach((f) => {
               const u = resolveSMCUrl(f.image);
               if (!imgCache.current.get(u)) ensureImage(u);
             });
@@ -7415,7 +7415,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       return gameDataRef.current.player.w;
     };
 
-    const triggerBlockBump = (col: number, row: number, type: 'item' | 'destructible' | 'bounce', info: any) => {
+    const triggerBlockBump = (col: number, row: number, type: 'item' | 'destructible' | 'bounce', info: TileDef | undefined) => {
       const bkey = `${col},${row}`;
       const originalTile = engineRef.current.map[row]?.[col] ?? 0;
       if (type === 'item') {
@@ -7884,7 +7884,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           p.x += p.vx;
           const ph = getPlayerHeight();
           const pw = getPlayerWidth();
-          const xHits: any[] = [];
+          const xHits: NonNullable<ReturnType<typeof getTile>>[] = [];
           for (let dy = 2; dy <= ph - 2; dy += 8) {
             const yOffset = Math.min(dy, ph - 2);
             const tLeft = getTile(p.x + 2, p.y + yOffset);
@@ -7925,7 +7925,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
           // ── Vertical Movement & Collisions ──
           p.y += p.vy; p.isGrounded = false;
-          const yHits: { tile: any; dir: 'up' | 'down' }[] = [];
+          const yHits: { tile: NonNullable<ReturnType<typeof getTile>>; dir: 'up' | 'down' }[] = [];
           for (let dx = 2; dx <= pw - 2; dx += 8) {
             const tBottom = getTile(p.x + dx, p.y + ph);
             if (tBottom) {
@@ -8155,8 +8155,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             const [dxz, dyz] = ICE_DIRS[zStandingSpecial!];
             const tx = (zIceCol + dxz) * TILE_SIZE, ty = (zIceRow + dyz) * TILE_SIZE;
             if (zCanSlideTo(tx, ty)) iceSlideRef.current = { targetX: tx, targetY: ty };
-          } else if ((p as any).moveTarget) {
-            const mt = (p as any).moveTarget;
+          } else if (p.moveTarget) {
+            const mt = p.moveTarget;
             mt.elapsed = (mt.elapsed ?? 0) + 1;
             const progress = Math.min(1, mt.elapsed / mt.frames);
             if (mt.allowDiagonal || mt.sx === mt.tx || mt.sy === mt.ty) {
@@ -8180,7 +8180,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (mt.elapsed >= mt.frames) {
               p.x = mt.tx;
               p.y = mt.ty;
-              (p as any).moveTarget = undefined;
+              p.moveTarget = undefined;
             }
           } else {
             // イベント移動が終わってプレイヤー操作に戻ったので、n（方向転換しない）の固定を解除する。
@@ -11305,7 +11305,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── RPGEN オーバーレイ描画 ──────────────────────────────────────────
       Object.values(overlayImagesRef.current).forEach(img => {
-        if ((img as any).hidden) return;
+        if (img.hidden) return;
         let currentUrl = img.url;
         let tX = 0, tY = 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
 
@@ -11334,10 +11334,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.save();
           ctx.globalAlpha = tA / 100;
 
-          let sW = img.swp ? tW : domImg.naturalWidth * (tW / 100);
-          let sH = img.swp ? tH : domImg.naturalHeight * (tH / 100);
-          let sX = img.sxp ? tX : domImg.naturalWidth * (tX / 100);
-          let sY = img.sxp ? tY : domImg.naturalHeight * (tY / 100);
+          const sW = img.swp ? tW : domImg.naturalWidth * (tW / 100);
+          const sH = img.swp ? tH : domImg.naturalHeight * (tH / 100);
+          const sX = img.sxp ? tX : domImg.naturalWidth * (tX / 100);
+          const sY = img.sxp ? tY : domImg.naturalHeight * (tY / 100);
 
           let dW = sW;
           let dH = sH;
@@ -11404,7 +11404,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── プレビュー用画像描画 (DW_IMA プレビュー) ─────────────────────────
       if (previewCommandRef.current && previewCommandRef.current.type === 'showImage') {
-        const img = previewCommandRef.current as any;
+        const img = previewCommandRef.current;
         if (img.url) {
           let tX = img.x ?? 0, tY = img.y ?? 0, tW = 100, tH = 100, tR = 0, tA = img.opacity ?? 100, tOx = 0, tOy = 0;
           let currentUrl = img.url;
@@ -11422,10 +11422,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             tR = frame.r ?? 0; tA = frame.a ?? 100;
             tOx = frame.ox ?? 0; tOy = frame.oy ?? 0;
           } else {
-            tX = img.sx ?? 0; tY = img.sy ?? 0;
-            tW = img.sw ?? 100; tH = img.sh ?? 100;
-            tR = img.r ?? 0; tA = img.opacity ?? 100;
-            tOx = img.ox ?? 0; tOy = img.oy ?? 0;
+            // 単一画像（アニメ無し）には sx/sy/sw/sh/r/ox/oy 相当のフィールドが無いため既定値のまま。
+            tX = 0; tY = 0;
+            tW = 100; tH = 100;
+            tR = 0; tA = img.opacity ?? 100;
+            tOx = 0; tOy = 0;
           }
 
           ensureImage(currentUrl);
@@ -11434,10 +11435,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             ctx.save();
             ctx.globalAlpha = tA / 100;
 
-            let sW = img.swp ? tW : domImg.naturalWidth * (tW / 100);
-            let sH = img.swp ? tH : domImg.naturalHeight * (tH / 100);
-            let sX = img.sxp ? tX : domImg.naturalWidth * (tX / 100);
-            let sY = img.sxp ? tY : domImg.naturalHeight * (tY / 100);
+            const sW = img.swp ? tW : domImg.naturalWidth * (tW / 100);
+            const sH = img.swp ? tH : domImg.naturalHeight * (tH / 100);
+            const sX = img.sxp ? tX : domImg.naturalWidth * (tX / 100);
+            const sY = img.sxp ? tY : domImg.naturalHeight * (tY / 100);
 
             let dW = sW;
             let dH = sH;
@@ -11475,7 +11476,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
       // ── RPGEN 追随画像描画 (DW_FL) ──────────────────────────────────────────
       Object.values(followImagesRef.current).forEach(img => {
-        let targetEnt: any = null;
+        let targetEnt: Entity | GameEngine['player'] | null = null;
         let tDir = 'd';
         let targetW = TILE_SIZE, targetH = TILE_SIZE;
 
@@ -11485,11 +11486,12 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           targetH = gameData.player.h;
           tDir = walkInst.get('player')?.dir ?? 's';
         } else {
-          targetEnt = engineRef.current.entities?.find(e => e.def.id === img.targetObjId) || null;
-          if (targetEnt) {
-            targetW = targetEnt.w;
-            targetH = targetEnt.h;
-            tDir = targetEnt.dir ?? 's';
+          const ent = engineRef.current.entities?.find(e => e.def.id === img.targetObjId) || null;
+          targetEnt = ent;
+          if (ent) {
+            targetW = ent.def.w ?? TILE_SIZE;
+            targetH = ent.def.h ?? TILE_SIZE;
+            tDir = ent.facing ?? 's';
           }
         }
         if (!targetEnt) return;
@@ -11510,10 +11512,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const tX = dirData.sx ?? 0;
           const tY = dirData.sy ?? 0;
 
-          let sW = dirData.swp ? tW : domImg.naturalWidth * (tW / 100);
-          let sH = dirData.swp ? tH : domImg.naturalHeight * (tH / 100);
-          let sX = dirData.sxp ? tX : domImg.naturalWidth * (tX / 100);
-          let sY = dirData.sxp ? tY : domImg.naturalHeight * (tY / 100);
+          const sW = dirData.swp ? tW : domImg.naturalWidth * (tW / 100);
+          const sH = dirData.swp ? tH : domImg.naturalHeight * (tH / 100);
+          const sX = dirData.sxp ? tX : domImg.naturalWidth * (tX / 100);
+          const sY = dirData.sxp ? tY : domImg.naturalHeight * (tY / 100);
 
           let dW = sW;
           let dH = sH;
@@ -12517,7 +12519,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         overlayMap: manifest.overlayMap ?? createBlankGrid(manifest.map),
         overheadMap: manifest.overheadMap ?? createBlankGrid(manifest.map),
         objects: manifest.objects,
-        scenes: manifest.scenes as any,
+        scenes: manifest.scenes as unknown as SceneDef[],
         mapBgRef: blackBgRef,
         mapBgUrl: blackBgUrl,
         bgm: hydrateBgmFromRef(manifest.bgm),
@@ -12532,8 +12534,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       }
       setShowRpgenModal(false);
       setRpgenInputText('');
-    } catch (err: any) {
-      const msg = typeof err === 'string' ? err : err?.message || 'RPGENの読み込みに失敗しました。';
+    } catch (err) {
+      const msg = typeof err === 'string' ? err : (err as Error)?.message || 'RPGENの読み込みに失敗しました。';
       customAlert(msg, 'RPGENインポートエラー');
       console.error(err);
     }
@@ -13013,7 +13015,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (!it) return;
     const consumable = it.consumable ?? !!(it.healHp || it.healMp);
     // 効果適用
-    let parts: string[] = [];
+    const parts: string[] = [];
     const pr = progressRef.current;
     // フィールドでは常に主人公(self)対象。override があれば回復量を差し替える。敵対象アイテムはフィールドでは自己使用にフォールバック。
     const leadId = gameDataRef.current.battle?.party?.[0]?.id ?? '__self';
@@ -13379,7 +13381,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     pp.y = localY;
 
                     if (activeScene) {
-                      // eslint-disable-next-line no-console
                       console.debug('[play-stop] activeIdx=', activeIdx, 'editSceneIdx=', editSceneIdx, 'activeSceneObjects=', activeScene.objects?.length, 'currentObjects=', gameData.objects?.length, 'sameRef=', activeScene.objects === gameData.objects, 'sceneDefSample=', activeScene.objects?.[0] ? { id: activeScene.objects[0].id, name: activeScene.objects[0].name, col: activeScene.objects[0].col, row: activeScene.objects[0].row, behavior: activeScene.objects[0].behavior } : 'EMPTY');
                       setGameData(prev => ({
                         ...prev,
@@ -15457,7 +15458,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         let btnAActive = false; let btnALabel = "";
                         let btnBActive = false; let btnBLabel = "";
                         let btnXActive = false; let btnXLabel = "";
-                        let btnXKey: keyof typeof touchRef.current = 'slow';
+                        const btnXKey: keyof typeof touchRef.current = 'slow';
                         let btnYActive = false; let btnYLabel = "";
 
                         const hasOverlay = isPlaying && (!!activeDialogue || !!gameMsg || !!shopModal || !!eventChoice || !!gameOverResult || invOpen || !!battle);
@@ -16159,7 +16160,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       </button>
                       {gameData.mapBgRef && (
                         <div className="flex items-center gap-2 mt-1.5 text-[10px] text-gray-400 bg-gray-900 rounded px-2 py-1.5 border border-gray-800">
-                          {gameData.mapBgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.mapBgUrl} alt="" className="w-8 h-8 object-cover rounded shrink-0" />}
+                          {gameData.mapBgUrl &&   <img src={gameData.mapBgUrl} alt="" className="w-8 h-8 object-cover rounded shrink-0" />}
                           <span className="truncate flex-1">{refLabel(gameData.mapBgRef)}</span>
                           <button onClick={() => setGameData(p => ({ ...p, mapBgRef: undefined, mapBgUrl: undefined }))} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                         </div>
@@ -16242,7 +16243,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <button onClick={() => setPicker({ mode: 'image', target: { t: 'titleBg' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />背景画像を参照</button>
                           {gameData.titleScreen.bgRef && (
                             <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
-                              {gameData.titleScreen.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.titleScreen.bgUrl} alt="" className="w-7 h-7 object-cover rounded shrink-0" />}
+                              {gameData.titleScreen.bgUrl &&   <img src={gameData.titleScreen.bgUrl} alt="" className="w-7 h-7 object-cover rounded shrink-0" />}
                               <span className="truncate flex-1">{refLabel(gameData.titleScreen.bgRef)}</span>
                               <button onClick={() => updTitle({ bgRef: undefined, bgUrl: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                             </div>
@@ -16297,7 +16298,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <button onClick={() => setPicker({ mode: 'image', target: { t: 'endingBg' } })} className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-[10px] text-gray-300"><ImageIcon size={12} />背景画像を参照</button>
                           {gameData.ending.bgRef && (
                             <div className="flex items-center gap-2 text-[9px] text-gray-400 bg-gray-800 rounded px-2 py-1 border border-gray-700">
-                              {gameData.ending.bgUrl && /* eslint-disable-next-line @next/next/no-img-element */ <img src={gameData.ending.bgUrl} alt="" className="w-7 h-7 object-cover rounded shrink-0" />}
+                              {gameData.ending.bgUrl &&   <img src={gameData.ending.bgUrl} alt="" className="w-7 h-7 object-cover rounded shrink-0" />}
                               <span className="truncate flex-1">{refLabel(gameData.ending.bgRef)}</span>
                               <button onClick={() => updEnding({ bgRef: undefined, bgUrl: undefined })} className="shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition"><Trash2 size={16} /></button>
                             </div>
@@ -18320,7 +18321,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                               <label className="text-[9px] text-gray-400">
                                 カテゴリ
                                 <select value={it.category ?? ''} onChange={e => setGameData(p => {
-                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], category: e.target.value as any || undefined }; return { ...p, items: copy };
+                                  const copy = [...(p.items ?? [])]; copy[i] = { ...copy[i], category: (e.target.value || undefined) as 'consumable' | 'weapon' | 'armor' | 'key' | undefined }; return { ...p, items: copy };
                                 })} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[9px] text-gray-200 outline-none">
                                   <option value="">なし</option>
                                   <option value="consumable">消費</option>
@@ -19362,7 +19363,7 @@ function EventPageEditor({ pages, setPages, switches, items, effects, tiles, obj
 
               {/* トリガー (起動条件) */}
               <div className="text-[9px] text-gray-400 font-bold mt-1">トリガー（起動条件）</div>
-              <select value={page.trigger ?? 'action'} onChange={e => setPage(pi, { trigger: e.target.value as any })}
+              <select value={page.trigger ?? 'action'} onChange={e => setPage(pi, { trigger: e.target.value as 'action' | 'playerTouch' | 'eventTouch' | 'autorun' })}
                 className="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-[9px] outline-none text-gray-200">
                 <option value="action">決定ボタン</option>
                 <option value="playerTouch">プレイヤーから接触</option>
@@ -19589,24 +19590,24 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             <div className="text-[10px] text-gray-400 border-b border-gray-800 pb-0.5">設定項目</div>
 
             {type === 'message' && (
-              <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+              <textarea value={cv.text ?? ''} onChange={e => onChange({ text: e.target.value })}
                 rows={3} className={inputCls} placeholder="メッセージ" />
             )}
             {type === 'choice' && (() => {
-              const choices: { label: string; commands: EventCommand[] }[] = (cmd as any).choices ?? [];
+              const choices: { label: string; commands: EventCommand[] }[] = cv.choices ?? [];
               const setChoices = (next: { label: string; commands: EventCommand[] }[]) => onChange({ choices: next } as Partial<EventCommand>);
               return (
                 <div className="space-y-2">
-                  <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+                  <textarea value={cv.text ?? ''} onChange={e => onChange({ text: e.target.value })}
                     rows={2} className={inputCls} placeholder="質問文（省略可）" />
                   <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" checked={!!(cmd as any).random}
+                    <input type="checkbox" checked={!!cv.random}
                       onChange={e => onChange({ random: e.target.checked || undefined } as Partial<EventCommand>)}
                       className="accent-blue-500 w-3.5 h-3.5" />
                     ランダム選択（選択肢を出さず1つを自動実行）
                   </label>
                   <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
-                    <input type="checkbox" checked={!!(cmd as any).keepMessage}
+                    <input type="checkbox" checked={!!cv.keepMessage}
                       onChange={e => onChange({ keepMessage: e.target.checked || undefined } as Partial<EventCommand>)}
                       className="accent-blue-500 w-3.5 h-3.5" />
                     直前のメッセージを消さない（RPGEN c:1）
@@ -19649,18 +19650,18 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'ifSwitch' && (
               <div className="flex flex-col gap-2">
                 {switches.length > 0 ? (
-                  <select value={(cmd as any).switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
+                  <select value={cv.switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
                     className={inputCls}>
                     {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 ) : <span className="text-[10px] text-gray-500">スイッチ未定義</span>}
-                <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
+                <select value={cv.value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
                   className={inputCls}>
                   <option value="ON">ON</option><option value="OFF">OFF</option>
                 </select>
                 <NestedCommandList
                   label="条件一致時（Then）の命令"
-                  commands={(cmd as any).then ?? []}
+                  commands={cv.then ?? []}
                   onChangeCommands={newCmds => onChange({ then: newCmds } as Partial<EventCommand>)}
                   switches={switches}
                   items={items}
@@ -19674,7 +19675,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                 />
                 <NestedCommandList
                   label="条件不一致時（Else）の命令"
-                  commands={(cmd as any).else ?? []}
+                  commands={cv.else ?? []}
                   onChangeCommands={newCmds => onChange({ else: newCmds } as Partial<EventCommand>)}
                   switches={switches}
                   items={items}
@@ -19691,18 +19692,18 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'ifItem' && (
               <div className="flex flex-col gap-2">
                 {items.length > 0 ? (
-                  <select value={(cmd as any).itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
+                  <select value={cv.itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
                     className={inputCls}>
                     {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 ) : <span className="text-[10px] text-gray-500">アイテム未定義</span>}
-                <select value={(cmd as any).has ? 'あり' : 'なし'} onChange={e => onChange({ has: e.target.value === 'あり' })}
+                <select value={cv.has ? 'あり' : 'なし'} onChange={e => onChange({ has: e.target.value === 'あり' })}
                   className={inputCls}>
                   <option value="あり">持っている</option><option value="なし">持っていない</option>
                 </select>
                 <NestedCommandList
                   label="条件一致時（Then）の命令"
-                  commands={(cmd as any).then ?? []}
+                  commands={cv.then ?? []}
                   onChangeCommands={newCmds => onChange({ then: newCmds } as Partial<EventCommand>)}
                   switches={switches}
                   items={items}
@@ -19716,7 +19717,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                 />
                 <NestedCommandList
                   label="条件不一致時（Else）の命令"
-                  commands={(cmd as any).else ?? []}
+                  commands={cv.else ?? []}
                   onChangeCommands={newCmds => onChange({ else: newCmds } as Partial<EventCommand>)}
                   switches={switches}
                   items={items}
@@ -19733,12 +19734,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'setSwitch' && (
               <div className="flex flex-col gap-2">
                 {switches.length > 0 ? (
-                  <select value={(cmd as any).switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
+                  <select value={cv.switchId ?? 0} onChange={e => onChange({ switchId: Number(e.target.value) })}
                     className={inputCls}>
                     {switches.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 ) : <span className="text-[10px] text-gray-500">スイッチ未定義</span>}
-                <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
+                <select value={cv.value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
                   className={inputCls}>
                   <option value="ON">ON</option><option value="OFF">OFF</option>
                 </select>
@@ -19746,11 +19747,11 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             )}
             {type === 'setSelfSwitch' && (
               <div className="flex flex-col gap-2">
-                <select value={(cmd as any).id ?? 'A'} onChange={e => onChange({ id: e.target.value })}
+                <select value={cv.id ?? 'A'} onChange={e => onChange({ id: e.target.value })}
                   className={inputCls}>
                   {['A', 'B', 'C', 'D'].map(s => <option key={s} value={s}>セルフ{s}</option>)}
                 </select>
-                <select value={(cmd as any).value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
+                <select value={cv.value ? 'ON' : 'OFF'} onChange={e => onChange({ value: e.target.value === 'ON' })}
                   className={inputCls}>
                   <option value="ON">ON</option><option value="OFF">OFF</option>
                 </select>
@@ -19759,14 +19760,14 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {(type === 'giveItem' || type === 'removeItem') && (
               <div className="flex flex-col gap-2">
                 {items.length > 0 ? (
-                  <select value={(cmd as any).itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
+                  <select value={cv.itemId ?? ''} onChange={e => onChange({ itemId: e.target.value })}
                     className={inputCls}>
                     {items.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 ) : <span className="text-[10px] text-gray-500">アイテム未定義</span>}
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-gray-400">個数:</span>
-                  <input type="number" min={1} value={(cmd as any).count ?? 1} onChange={e => onChange({ count: Math.max(1, Number(e.target.value)) })}
+                  <input type="number" min={1} value={cv.count ?? 1} onChange={e => onChange({ count: Math.max(1, Number(e.target.value)) })}
                     className={inputCls} />
                 </div>
               </div>
@@ -19774,14 +19775,14 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'changeGold' && (
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-gray-400 whitespace-nowrap">増減額（負で減少）:</span>
-                <input type="number" value={(cmd as any).amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
+                <input type="number" value={cv.amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
                   className={inputCls} placeholder="例: 100 / -50" />
               </div>
             )}
             {(type === 'restoreHp' || type === 'restoreMp') && (
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-gray-400 whitespace-nowrap">回復量（空=全回復）:</span>
-                <input type="number" value={(cmd as any).amount ?? ''} onChange={e => onChange({ amount: e.target.value === '' ? undefined : Number(e.target.value) })}
+                <input type="number" value={cv.amount ?? ''} onChange={e => onChange({ amount: e.target.value === '' ? undefined : Number(e.target.value) })}
                   className={inputCls} placeholder="全回復" />
               </div>
             )}
@@ -19789,12 +19790,12 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] text-gray-400 whitespace-nowrap">所持金がこの値以上なら:</span>
-                  <input type="number" value={(cmd as any).amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
+                  <input type="number" value={cv.amount ?? 0} onChange={e => onChange({ amount: Number(e.target.value) })}
                     className={inputCls} placeholder="金額" />
                 </div>
                 <NestedCommandList
                   label="条件一致時（Then）の命令"
-                  commands={(cmd as any).then ?? []}
+                  commands={cv.then ?? []}
                   onChangeCommands={newCmds => onChange({ then: newCmds } as Partial<EventCommand>)}
                   switches={switches}
                   items={items}
@@ -19808,7 +19809,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                 />
                 <NestedCommandList
                   label="条件不一致時（Else）の命令"
-                  commands={(cmd as any).else ?? []}
+                  commands={cv.else ?? []}
                   onChangeCommands={newCmds => onChange({ else: newCmds } as Partial<EventCommand>)}
                   switches={switches}
                   items={items}
@@ -19826,16 +19827,16 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
               <div className="space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <label className="text-[10px] text-gray-400">移動先X(列)
-                    <input type="number" value={(cmd as any).col ?? 0} onChange={e => onChange({ col: Number(e.target.value) })}
+                    <input type="number" value={cv.col ?? 0} onChange={e => onChange({ col: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="X" />
                   </label>
                   <label className="text-[10px] text-gray-400">移動先Y(行)
-                    <input type="number" value={(cmd as any).row ?? 0} onChange={e => onChange({ row: Number(e.target.value) })}
+                    <input type="number" value={cv.row ?? 0} onChange={e => onChange({ row: Number(e.target.value) })}
                       className={`${inputCls} mt-0.5`} placeholder="Y" />
                   </label>
                 </div>
                 <label className="text-[10px] text-gray-400 block">移動先マップID（空=同一マップ内で座標移動）
-                  <input value={(cmd as any).mapId ?? ''} onChange={e => onChange({ mapId: e.target.value || undefined } as Partial<EventCommand>)}
+                  <input value={cv.mapId ?? ''} onChange={e => onChange({ mapId: e.target.value || undefined } as Partial<EventCommand>)}
                     className={`${inputCls} mt-0.5`} placeholder="RPGEN マップ番号など" />
                 </label>
               </div>
@@ -19950,13 +19951,13 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-gray-400">待機時間（ミリ秒）:</span>
                 <input type="number" min={0} max={10000} step={100}
-                  value={(cmd as any).ms ?? Math.round(((cmd as any).frames ?? 30) * 1000 / 60)}
+                  value={cv.ms ?? Math.round((cv.frames ?? 30) * 1000 / 60)}
                   onChange={e => onChange({ ms: Number(e.target.value), frames: undefined } as Partial<EventCommand>)}
                   className={inputCls} />
               </div>
             )}
             {(type === 'comment' || type === 'label') && (
-              <input value={(cmd as any).text ?? (cmd as any).name ?? ''}
+              <input value={cv.text ?? cv.name ?? ''}
                 onChange={e => onChange(type === 'comment' ? { text: e.target.value } : { name: e.target.value })}
                 className={inputCls} placeholder={type === 'comment' ? 'コメント' : 'ラベル名'} />
             )}
@@ -19978,7 +19979,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
               </div>
             )}
             {type === 'overheadMessage' && (
-              <textarea value={(cmd as any).text ?? ''} onChange={e => onChange({ text: e.target.value })}
+              <textarea value={cv.text ?? ''} onChange={e => onChange({ text: e.target.value })}
                 rows={2} className={inputCls} placeholder="頭上メッセージ" />
             )}
             {type === 'playSound' && (
@@ -20301,7 +20302,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
                   ] as const).map(([k, label]) => (
                     <label key={k} className="flex items-center gap-1 text-[10px] text-gray-300 cursor-pointer">
                       <input type="checkbox" checked={!!cv[k]}
-                        onChange={e => onChange({ [k]: e.target.checked || undefined } as any)}
+                        onChange={e => onChange({ [k]: e.target.checked || undefined } as Partial<EventCommand>)}
                         className="accent-blue-500 w-3 h-3" />
                       {label}
                     </label>
@@ -20315,19 +20316,19 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'hideImage' && (
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-400 block">消去する画像の管理番号（ID／空欄で全消去）
-                  <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value || undefined } as Partial<EventCommand>)}
+                  <input value={cv.imgId ?? ''} onChange={e => onChange({ imgId: e.target.value || undefined } as Partial<EventCommand>)}
                     className={`${inputCls} mt-0.5`} placeholder="1〜50（空欄=すべて）" />
                 </label>
                 <label className="text-[10px] text-gray-400 block">全消去の対象
-                  <select value={(cmd as any).kind ?? ''} onChange={e => onChange({ kind: (e.target.value || undefined) as 'image' | 'anim' | undefined } as Partial<EventCommand>)}
-                    className={`${inputCls} mt-0.5`} disabled={!!(cmd as any).imgId}>
+                  <select value={cv.kind ?? ''} onChange={e => onChange({ kind: (e.target.value || undefined) as 'image' | 'anim' | undefined } as Partial<EventCommand>)}
+                    className={`${inputCls} mt-0.5`} disabled={!!cv.imgId}>
                     <option value="">画像とアニメの両方</option>
                     <option value="image">画像のみ（#ST_IMG）</option>
                     <option value="anim">アニメのみ（#ST_IMA）</option>
                   </select>
                 </label>
                 <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
-                  <input type="checkbox" checked={!!(cmd as any).followImages} onChange={e => onChange({ followImages: e.target.checked || undefined } as Partial<EventCommand>)} className="accent-blue-500 w-3.5 h-3.5" />
+                  <input type="checkbox" checked={!!cv.followImages} onChange={e => onChange({ followImages: e.target.checked || undefined } as Partial<EventCommand>)} className="accent-blue-500 w-3.5 h-3.5" />
                   追随画像（#DW_FL）も消す
                 </label>
               </div>
@@ -20335,11 +20336,11 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {(type === 'pauseImage' || type === 'resumeImage') && (
               <div className="space-y-2">
                 <label className="text-[10px] text-gray-400 block">画像の管理番号（ID）
-                  <input value={(cmd as any).imgId ?? ''} onChange={e => onChange({ imgId: e.target.value || undefined } as Partial<EventCommand>)}
+                  <input value={cv.imgId ?? ''} onChange={e => onChange({ imgId: e.target.value || undefined } as Partial<EventCommand>)}
                     className={`${inputCls} mt-0.5`} placeholder="1〜50" />
                 </label>
                 <label className="text-[10px] text-gray-400 block">レイヤータイプ（ID未指定時に使用）
-                  <input type="number" value={(cmd as any).layer ?? ''} onChange={e => onChange({ layer: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
+                  <input type="number" value={cv.layer ?? ''} onChange={e => onChange({ layer: e.target.value === '' ? undefined : Number(e.target.value) } as Partial<EventCommand>)}
                     className={`${inputCls} mt-0.5`} placeholder="1 / 5 / 7 / 9 / 11" />
                 </label>
               </div>
@@ -20347,7 +20348,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'followImage' && (() => {
               const dirs = cv.directions ?? {};
               const DIR_LABELS: Record<'U' | 'D' | 'L' | 'R', string> = { U: '上', D: '下', L: '左', R: '右' };
-              const setDir = (d: 'U' | 'D' | 'L' | 'R', patch: any) => {
+              const setDir = (d: 'U' | 'D' | 'L' | 'R', patch: Partial<NonNullable<Extract<EventCommand, { type: 'followImage' }>['directions'][typeof d]>>) => {
                 const base = dirs[d] ?? { url: '', x: 0, y: 0 };
                 onChange({ directions: { ...dirs, [d]: { ...base, ...patch } } } as Partial<EventCommand>);
               };
@@ -20517,7 +20518,7 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             {type === 'screenEffect' && (
               <label className="text-[10px] text-gray-400 block">画面を覆う色（R-G-B-A / Aは0〜100）
                 <input
-                  value={(cmd as any).effects?.[0]?.color ?? ''}
+                  value={cv.effects?.[0]?.color ?? ''}
                   onChange={e => {
                     onChange({
                       effects: [{ type: 'solid', color: e.target.value, c1: '', c2: '', pos: '', stops: '' }],
@@ -20652,18 +20653,18 @@ function EventCommandDetailsModal({ cmd, switches, items, effects, tiles, object
             )}
             {type === 'playEffect' && (
               <div className="flex flex-col gap-2">
-                <select value={(cmd as any).effectId ?? ''} onChange={e => onChange({ effectId: e.target.value })}
+                <select value={cv.effectId ?? ''} onChange={e => onChange({ effectId: e.target.value })}
                   className={inputCls}>
                   <option value="">（エフェクトを選択）</option>
                   {effects.map(ef => <option key={ef.id} value={ef.id}>{ef.name}</option>)}
                 </select>
-                <select value={(cmd as any).target ?? 'self'} onChange={e => onChange({ target: e.target.value as 'self' | 'player' })}
+                <select value={cv.target ?? 'self'} onChange={e => onChange({ target: e.target.value as 'self' | 'player' })}
                   className={inputCls}>
                   <option value="self">自分の位置</option>
                   <option value="player">プレイヤーの位置</option>
                 </select>
                 <label className="flex items-center gap-1.5 text-[11px] text-gray-300 cursor-pointer">
-                  <input type="checkbox" checked={!!(cmd as any).wait} onChange={e => onChange({ wait: e.target.checked || undefined })} className="accent-blue-500 w-3.5 h-3.5" />
+                  <input type="checkbox" checked={!!cv.wait} onChange={e => onChange({ wait: e.target.checked || undefined })} className="accent-blue-500 w-3.5 h-3.5" />
                   完了まで待つ
                 </label>
               </div>
@@ -20680,6 +20681,8 @@ function CommandEditor({ cmd, index, count, onShowDetails, onDelete, onMove }: {
   onShowDetails: () => void; onDelete: () => void; onMove: (dir: -1 | 1) => void;
 }) {
   const getPreviewText = () => {
+    // コマンドごとに持つフィールドが違うため、プレビュー文言生成では union を絞らずこの別名から読む。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const c = cmd as any;
     switch (cmd.type) {
       case 'message': return c.text ? c.text.split('\n')[0] : 'なし';

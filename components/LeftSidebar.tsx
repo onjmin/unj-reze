@@ -33,10 +33,13 @@ export default function LeftSidebar({ current, set, notifCount = 0, messageCount
   };
   const [avatarBroken, setAvatarBroken] = useState(false);
   const [pendingActiveId, setPendingActiveId] = useState<string | null>(null);
-
-  useEffect(() => {
+  // current（実際のアクティブタブ）が変わったら、楽観的表示用の pendingActiveId をリセットする。
+  // レンダー中の条件付き setState（Reactが公式に認める「propが変わったらstateを調整する」パターン）。
+  const [prevCurrent, setPrevCurrent] = useState(current);
+  if (current !== prevCurrent) {
+    setPrevCurrent(current);
     setPendingActiveId(null);
-  }, [current]);
+  }
 
   useEffect(() => {
     router.prefetch('/');

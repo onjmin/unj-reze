@@ -54,17 +54,22 @@ export default function LiveGameView({ userId, sessionId }: Props) {
   }, []);
 
   // ライブゲーム情報を取得
-  const fetchInfo = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/games/live?userId=${encodeURIComponent(userId)}`);
-      if (!res.ok) return;
-      const data: LiveInfo = await res.json();
-      setInfo(data);
-      setMyVote(data.myVote);
-    } catch {}
+  const fetchInfo = useCallback((signal?: AbortSignal) => {
+    return fetch(`/api/games/live?userId=${encodeURIComponent(userId)}`, { signal })
+      .then(res => res.ok ? res.json() as Promise<LiveInfo> : null)
+      .then((data: LiveInfo | null) => {
+        if (!data || signal?.aborted) return;
+        setInfo(data);
+        setMyVote(data.myVote);
+      })
+      .catch(() => {});
   }, [userId]);
 
-  useEffect(() => { fetchInfo(); }, [fetchInfo]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchInfo(controller.signal);
+    return () => controller.abort();
+  }, [fetchInfo]);
 
   // ── リアルタイムハブ経路 ─────────────────────────────────────
   // ゴーストの位置は Postgres に一切書かない。ハブのメモリ上だけで完結する。

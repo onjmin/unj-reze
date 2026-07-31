@@ -13,6 +13,10 @@
 //    mml:T120 cdefg      インラインMML
 //    none / 空           なし
 
+import type { BgmAsset } from './game-config';
+
+type LoopOption = BgmAsset['loop'];
+
 export interface ParsedRef {
   scheme: string;
   value: string;
@@ -149,11 +153,11 @@ export function updateRefLoop(ref: string, enabled: boolean, config?: LoopConfig
   return updateRefBgmParams(ref, params);
 }
 
-export function getLoopOption(ref?: string): any {
+export function getLoopOption(ref?: string): LoopOption {
   const params = parseBgmParams(ref);
   const loop = params.loop;
   if (!loop) return undefined;
-  const opt: any = {
+  const opt: NonNullable<Exclude<LoopOption, boolean>> = {
     start: { [loop.type]: loop.val }
   };
   if (loop.endType && loop.endType !== 'none' && loop.endVal !== undefined) {
@@ -177,7 +181,7 @@ export function getBgmStart(ref?: string): number {
 export function bgmRefToAsset(
   raw: string,
   rawMml?: string,
-): { type: 'youtube' | 'nicovideo' | 'soundcloud' | 'mml' | 'direct'; src: string; loop?: any; volume?: number; start?: number } | null {
+): { type: 'youtube' | 'nicovideo' | 'soundcloud' | 'mml' | 'direct'; src: string; loop?: LoopOption; volume?: number; start?: number } | null {
   const ref = parseRef(raw);
   if (!ref || ref.scheme === 'none' || !ref.value) return null;
 
@@ -351,7 +355,7 @@ export function parseWalkRef(raw: string): WalkRef | null {
             if (parts.length >= 6 && !isNaN(parts[5])) offsetY = parts[5];
             if (parts.length >= 7 && !isNaN(parts[6]) && parts[6] > 0) renderScale = parts[6];
             if (parts.length >= 8 && !isNaN(parts[7]) && parts[7] >= 0) row = parts[7];
-            if (parts.length >= 9 && ['loop', 'pingpong', 'once'].includes(rawParts[8])) playMode = rawParts[8] as any;
+            if (parts.length >= 9 && ['loop', 'pingpong', 'once'].includes(rawParts[8])) playMode = rawParts[8] as 'loop' | 'pingpong' | 'once';
             if (parts.length >= 10 && !isNaN(parts[9]) && parts[9] > 0) fps = parts[9];
           }
         }

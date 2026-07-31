@@ -55,6 +55,20 @@ export default function App() {
   const [topTab, setTopTab] = useState('everyone');
   const [feedSubMode, setFeedSubMode] = useState<FeedSubMode>('threads');
   const [rankCategory, setRankCategory] = useState('イイ');
+  /** ホームタブの「最新スレ/最新レス」バッジ用。直近24時間の投稿数を posts が変わるたびに数え直す。
+   *  Date.now() は不純関数のためレンダー中には呼べず、effect 側で算出して state へ反映する。 */
+  const [latestCounts, setLatestCounts] = useState({ latestThreadCount: 0, latestReplyCount: 0, mediaCount: 0 });
+  useEffect(() => {
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const recentPosts = posts.filter(p => new Date(p.createdAt).getTime() >= dayAgo);
+    const next = {
+      latestThreadCount: recentPosts.length,
+      latestReplyCount: recentPosts.reduce((sum, p) => sum + p.repliesCount, 0),
+      mediaCount: posts.filter(p => p.hasImage).length,
+    };
+    Promise.resolve().then(() => setLatestCounts(next));
+  }, [posts]);
+  const { latestThreadCount, latestReplyCount, mediaCount } = latestCounts;
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   const [replyTargetPost, setReplyTargetPost] = useState<Post | null>(null);
@@ -73,11 +87,11 @@ export default function App() {
 
   useEffect(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('unj_bbs_mode') : null;
-    if (saved) setBbsModeRaw(saved);
+    Promise.resolve().then(() => { if (saved) setBbsModeRaw(saved); });
 
     try {
       const cached = localStorage.getItem('unj_current_user');
-      if (cached) setCurrentUser(JSON.parse(cached));
+      if (cached) Promise.resolve().then(() => setCurrentUser(JSON.parse(cached)));
     } catch {}
 
     if (typeof window !== 'undefined') {
@@ -87,26 +101,11 @@ export default function App() {
       // PWA のショートカットやライブゲームへの導線から使う。
       const tab = params.get('tab');
       if (tab && ['everyone', 'following', 'ranking', 'game'].includes(tab)) {
-        setTopTab(tab);
-        if (tab === 'ranking') setRankCategory('イイ');
+        Promise.resolve().then(() => {
+          setTopTab(tab);
+          if (tab === 'ranking') setRankCategory('イイ');
+        });
       }
-
-      const mention = params.get('mention');
-      if (mention) {
-        handleQuickPost(`@${mention}`);
-        const newUrl = window.location.pathname;
-        window.history.replaceState({}, '', newUrl);
-      }
-
-      try {
-        const pending = sessionStorage.getItem('unj_pending_game');
-        if (pending) {
-          sessionStorage.removeItem('unj_pending_game');
-          const { gameId, postId, returnTo } = JSON.parse(pending);
-          if (returnTo) setPendingReturnTo(returnTo);
-          if (gameId) handleOpenPostGame(gameId, postId);
-        }
-      } catch {}
     }
   }, []);
   const [notifCount, setNotifCount] = useState(0);
@@ -181,9 +180,11 @@ export default function App() {
         try {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setPosts(parsed);
             postsRef.current = parsed;
-            setLoading(false);
+            Promise.resolve().then(() => {
+              setPosts(parsed);
+              setLoading(false);
+            });
           }
         } catch (e) {
           console.error('Failed to parse cached posts', e);
@@ -374,7 +375,7 @@ export default function App() {
   useEffect(() => {
     if (!userId) return;
     notifCancelledRef.current = false;
-    void refreshNotifications(userId);
+    Promise.resolve().then(() => refreshNotifications(userId));
     // ハブ設定時は push が主。ここは取りこぼし用の保険。
     const id = setInterval(() => { void refreshNotifications(userId); }, pollInterval(20000, 300000));
     return () => { notifCancelledRef.current = true; clearInterval(id); };
@@ -698,6 +699,30 @@ export default function App() {
 
   const [pendingReturnTo, setPendingReturnTo] = useState<string | null>(null);
 
+  // URL の ?mention= と、ゲーム→投稿フローから復帰した際の sessionStorage 保留情報を処理する。
+  // handleQuickPost/handleOpenPostGame/setPendingReturnTo の宣言後に置くための専用effect。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const mention = params.get('mention');
+    if (mention) {
+      Promise.resolve().then(() => handleQuickPost(`@${mention}`));
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    try {
+      const pending = sessionStorage.getItem('unj_pending_game');
+      if (pending) {
+        sessionStorage.removeItem('unj_pending_game');
+        const { gameId, postId, returnTo } = JSON.parse(pending);
+        Promise.resolve().then(() => {
+          if (returnTo) setPendingReturnTo(returnTo);
+          if (gameId) handleOpenPostGame(gameId, postId);
+        });
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleSaveEditedGame = async (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
     if (!playingGame?.gameId) return;
     try {
@@ -902,30 +927,23 @@ export default function App() {
               onToggleBbsMode={() => setBbsMode(bbsMode === '掲示板モード' ? 'SNSモード' : '掲示板モード')}
             />
 
-            {currentNav === 'home' && (() => {
-              const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-              const recentPosts = posts.filter(p => new Date(p.createdAt).getTime() >= dayAgo);
-              const latestThreadCount = recentPosts.length;
-              const latestReplyCount = recentPosts.reduce((sum, p) => sum + p.repliesCount, 0);
-              const mediaCount = posts.filter(p => p.hasImage).length;
-              return (
-                <TopTabs
-                  activeTab={topTab}
-                  setActiveTab={(tab) => {
-                    setTopTab(tab);
-                    if (tab !== 'game') { composerReturnRef.current = false; setActiveScreen(null); }
-                    if (tab === 'ranking') {
-                      setRankCategory('イイ');
-                    }
-                  }}
-                  feedSubMode={feedSubMode}
-                  setFeedSubMode={setFeedSubMode}
-                  latestThreadCount={latestThreadCount}
-                  latestReplyCount={latestReplyCount}
-                  mediaCount={mediaCount}
-                />
-              );
-            })()}
+            {currentNav === 'home' && (
+              <TopTabs
+                activeTab={topTab}
+                setActiveTab={(tab) => {
+                  setTopTab(tab);
+                  if (tab !== 'game') { composerReturnRef.current = false; setActiveScreen(null); }
+                  if (tab === 'ranking') {
+                    setRankCategory('イイ');
+                  }
+                }}
+                feedSubMode={feedSubMode}
+                setFeedSubMode={setFeedSubMode}
+                latestThreadCount={latestThreadCount}
+                latestReplyCount={latestReplyCount}
+                mediaCount={mediaCount}
+              />
+            )}
 
             <div id="scrollable-content" className={`flex-1 scrollbar-none ${currentNav === 'home' && topTab === 'game' ? 'overflow-hidden flex flex-col pb-14' : 'pb-20'}`}>
               {currentNav === 'home' && topTab === 'game' && (

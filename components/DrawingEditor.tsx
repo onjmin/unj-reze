@@ -83,8 +83,10 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   /** 1本目の指が触れた時点のレイヤー内容。2本目が触れたらここまで巻き戻す。 */
   const strokeSnapshotRef = useRef<{ layer: { data: Uint8ClampedArray }; data: Uint8ClampedArray } | null>(null);
 
-  toolRef.current = tool;
-  colorRef.current = color;
+  useEffect(() => {
+    toolRef.current = tool;
+    colorRef.current = color;
+  });
 
   const currentSize = tool === 'brush' ? brushSize : tool === 'eraser' ? eraserSize : penSize;
 
@@ -205,34 +207,14 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   // Check autosave on mount
   useEffect(() => {
-    const autosave = getAutosave(storageKey);
+    const autosave = getAutosave<DrawingEditorState>(storageKey);
     if (autosave && autosave.data) {
-      setAutosaveData(autosave.data);
-      setHasAutosave(true);
+      Promise.resolve().then(() => {
+        setAutosaveData(autosave.data);
+        setHasAutosave(true);
+      });
     }
   }, [storageKey]);
-
-  // Periodic autosave (every 10s) and history snapshot (every 30m)
-  useEffect(() => {
-    const autosaveInterval = setInterval(() => {
-      const state = getCurrentState();
-      if (state) {
-        saveAutosave(storageKey, state);
-      }
-    }, 10000);
-
-    const historyInterval = setInterval(() => {
-      const state = getCurrentState();
-      if (state) {
-        saveHistory(storageKey, state, 'drawing', 50);
-      }
-    }, 1800000);
-
-    return () => {
-      clearInterval(autosaveInterval);
-      clearInterval(historyInterval);
-    };
-  }, [storageKey, animMode, zoom, fpsRef.current]);
 
   const handleRestoreAutosave = () => {
     if (!autosaveData) return;
@@ -250,6 +232,38 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
   const handleRestoreHistory = (state: DrawingEditorState) => {
     setRestoredState(state);
     setInitKey(k => k + 1);
+  };
+
+  const syncLayerEntries = () => {
+    const entries = oekaki.getLayers().map(inst => ({
+      instance: inst,
+      name: inst.name,
+    })).reverse();
+    setLayerEntries(entries);
+    layerEntriesRef.current = entries;
+  };
+
+  const captureFrame = (): FrameData => ({
+    layers: oekaki.getLayers().map(l => ({
+      name: l.name,
+      visible: l.visible,
+      locked: l.locked,
+      opacity: l.opacity,
+      data: new Uint8ClampedArray(l.data),
+    })),
+  });
+
+  const applyFrame = (frame: FrameData) => {
+    for (const l of oekaki.getLayers()) l.delete();
+    oekaki.refresh();
+    for (const { name, visible, locked, opacity, data } of frame.layers) {
+      const l = new oekaki.LayeredCanvas(name);
+      l.visible = visible;
+      l.locked = locked;
+      l.opacity = opacity;
+      l.data = new Uint8ClampedArray(data);
+    }
+    syncLayerEntries();
   };
 
   const getCurrentState = (): DrawingEditorState | null => {
@@ -283,6 +297,29 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       };
     }
   };
+
+  // Periodic autosave (every 10s) and history snapshot (every 30m)
+  useEffect(() => {
+    const autosaveInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveAutosave(storageKey, state);
+      }
+    }, 10000);
+
+    const historyInterval = setInterval(() => {
+      const state = getCurrentState();
+      if (state) {
+        saveHistory(storageKey, state, 'drawing', 50);
+      }
+    }, 1800000);
+
+    return () => {
+      clearInterval(autosaveInterval);
+      clearInterval(historyInterval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey, animMode, zoom]);
 
   useEffect(() => {
     const el = mountRef.current;
@@ -736,38 +773,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
 
   // ── Animation ──
 
-  const syncLayerEntries = () => {
-    const entries = oekaki.getLayers().map(inst => ({
-      instance: inst,
-      name: inst.name,
-    })).reverse();
-    setLayerEntries(entries);
-    layerEntriesRef.current = entries;
-  };
-
-  const captureFrame = (): FrameData => ({
-    layers: oekaki.getLayers().map(l => ({
-      name: l.name,
-      visible: l.visible,
-      locked: l.locked,
-      opacity: l.opacity,
-      data: new Uint8ClampedArray(l.data),
-    })),
-  });
-
-  const applyFrame = (frame: FrameData) => {
-    for (const l of oekaki.getLayers()) l.delete();
-    oekaki.refresh();
-    for (const { name, visible, locked, opacity, data } of frame.layers) {
-      const l = new oekaki.LayeredCanvas(name);
-      l.visible = visible;
-      l.locked = locked;
-      l.opacity = opacity;
-      l.data = new Uint8ClampedArray(data);
-    }
-    syncLayerEntries();
-  };
-
   const selectFrame = (i: number) => {
     framesRef.current[currentFrameRef.current] = captureFrame();
     currentFrameRef.current = i;
@@ -883,6 +888,11 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     return () => { if (playTimerRef.current !== null) clearInterval(playTimerRef.current); };
   }, []);
 
+  const handleSave = () => {
+    clearAutosave(storageKey);
+    onSave(oekaki.render().toDataURL());
+  };
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const active = layerEntriesRef.current[activeLayerIndexRef.current]?.instance;
@@ -992,11 +1002,6 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
     active.paste(bitmap);
     active.trace();
     forceRender(n => n + 1);
-  };
-
-  const handleSave = () => {
-    clearAutosave(storageKey);
-    onSave(oekaki.render().toDataURL());
   };
 
   // スマホでの2本指ピンチによるズームは行わない（描画中に不用意に拡大縮小されるため）。
@@ -1111,9 +1116,14 @@ export default function DrawingEditor({ onClose, onSave, collabImageUrl }: Drawi
       </div>
 
       {animMode && (
+        // フレーム数・現在フレーム・fps は毎フレームの高頻度更新を避けるため意図的に ref + forceRender
+        // で管理しており(各更新箇所で forceRender を呼びfresh値を反映)、ここでの ref 読み取りは安全。
         <AnimationBar
+          // eslint-disable-next-line react-hooks/refs
           frameCount={framesRef.current.length}
+          // eslint-disable-next-line react-hooks/refs
           currentFrame={currentFrameRef.current}
+          // eslint-disable-next-line react-hooks/refs
           fps={fpsRef.current}
           isPlaying={isPlaying}
           onSelectFrame={selectFrame}

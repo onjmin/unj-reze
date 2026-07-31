@@ -43,7 +43,7 @@ export default function WalkSpritePreview({
     let img: HTMLImageElement | null = null;
     let std: WalkStandard | null = null;
     let cancelled = false;
-    setError(false);
+    Promise.resolve().then(() => setError(false));
 
     loadImage(url).then((loaded) => {
       if (cancelled) return;

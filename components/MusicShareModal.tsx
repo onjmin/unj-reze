@@ -72,16 +72,18 @@ export default function MusicShareModal({ userSlug, oshiItems, onAdd, onRemove, 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!term.trim()) {
-      setResults([]);
+      Promise.resolve().then(() => setResults([]));
       return;
     }
-    setLoading(true);
-    debounceRef.current = setTimeout(() => {
-      api.music.search(term.trim(), entity)
-        .then(data => setResults(data.results || []))
-        .catch(() => setResults([]))
-        .finally(() => setLoading(false));
-    }, 350);
+    Promise.resolve().then(() => {
+      setLoading(true);
+      debounceRef.current = setTimeout(() => {
+        api.music.search(term.trim(), entity)
+          .then(data => setResults(data.results || []))
+          .catch(() => setResults([]))
+          .finally(() => setLoading(false));
+      }, 350);
+    });
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [term, entity]);
 

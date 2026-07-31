@@ -13,9 +13,10 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [closing, setClosing] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
-  const dragRef = useRef({ dragging: false, startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
+  const dragRef = useRef({ startX: 0, startY: 0, startOffX: 0, startOffY: 0 });
   const pinchRef = useRef({ pinching: false, startDist: 0, startZoom: 1 });
 
   const clampOffset = useCallback((ox: number, oy: number, z: number) => {
@@ -50,20 +51,21 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (e.pointerType === 'touch' && e.isPrimary === false) return;
-    dragRef.current = { dragging: true, startX: e.clientX, startY: e.clientY, startOffX: offset.x, startOffY: offset.y };
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startOffX: offset.x, startOffY: offset.y };
+    setDragging(true);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }, [offset]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (dragRef.current.dragging && zoom > 1) {
+    if (dragging && zoom > 1) {
       const dx = e.clientX - dragRef.current.startX;
       const dy = e.clientY - dragRef.current.startY;
       setOffset(clampOffset(dragRef.current.startOffX + dx, dragRef.current.startOffY + dy, zoom));
     }
-  }, [zoom, clampOffset]);
+  }, [dragging, zoom, clampOffset]);
 
   const handlePointerUp = useCallback(() => {
-    dragRef.current.dragging = false;
+    setDragging(false);
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -167,7 +169,7 @@ export default function ImagePreview({ src, alt, onClose }: ImagePreviewProps) {
           style={{
             transform: `translate(${offset.x}px, ${offset.y}px) scale(${closing ? 0.92 : zoom})`,
             opacity: closing ? 0 : 1,
-            transition: dragRef.current.dragging ? 'opacity 250ms ease-out' : 'transform 0.15s ease-out, opacity 250ms ease-out',
+            transition: dragging ? 'opacity 250ms ease-out' : 'transform 0.15s ease-out, opacity 250ms ease-out',
           }}
           draggable={false}
           onClick={(e) => e.stopPropagation()}

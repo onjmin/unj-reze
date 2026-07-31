@@ -4,6 +4,7 @@ import { useEffect, useRef, useId } from 'react';
 import { useAudioFocus } from '@/lib/audio-focus-context';
 import { getStudio } from '@/lib/dtm';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
+import type { MmlPlayerInstance } from '@onjmin/dtm';
 
 interface MmlPlayerProps {
   mml: string;
@@ -19,8 +20,9 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
   const claimedRef = useRef(false);
   const instRef = useRef<{ setVolume: (v: number) => void } | null>(null);
   const focusRef = useRef({ requestFocus, releaseFocus });
-  const focusRef_current = { requestFocus, releaseFocus };
-  focusRef.current = focusRef_current;
+  useEffect(() => {
+    focusRef.current = { requestFocus, releaseFocus };
+  }, [requestFocus, releaseFocus]);
 
   useEffect(() => subscribeMasterVolume(() => instRef.current?.setVolume(applyMasterVolume(50))), []);
 
@@ -28,7 +30,7 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
     const el = containerRef.current;
     if (!el) return;
 
-    let inst: any | null = null;
+    let inst: MmlPlayerInstance | null = null;
     let disposed = false;
 
     let cleanup: (() => void) | null = null;

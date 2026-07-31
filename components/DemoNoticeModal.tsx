@@ -1,20 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 const PROD_URL = 'https://unj-reze.onjmin.workers.dev/';
 const DISMISS_KEY = 'unj_demo_notice_dismissed';
 
-export default function DemoNoticeModal() {
-  const [visible, setVisible] = useState(false);
+// 一度閉じた人に毎回出すと、デモを触るたびに邪魔になるだけなので覚えておく
+function shouldShowNotice(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(DISMISS_KEY) !== '1';
+  } catch {
+    return true;
+  }
+}
 
-  useEffect(() => {
-    // 一度閉じた人に毎回出すと、デモを触るたびに邪魔になるだけなので覚えておく
-    try {
-      if (localStorage.getItem(DISMISS_KEY) === '1') return;
-    } catch {}
-    setVisible(true);
-  }, []);
+export default function DemoNoticeModal() {
+  const [visible, setVisible] = useState(shouldShowNotice);
 
   const dismiss = () => {
     try {

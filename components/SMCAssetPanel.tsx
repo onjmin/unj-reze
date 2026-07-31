@@ -4,10 +4,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { loadImage } from '@/lib/walk-sprite';
 import type { PickResult } from './ContentPicker';
-import { resolveSMCUrl, getSmcMetadata } from '@/lib/smc-helper';
+import { resolveSMCUrl, getSmcMetadata, type SmcMetadata } from '@/lib/smc-helper';
 
 // Global cache promise for metadata
-let metadataPromise: Promise<any> | null = null;
+const metadataPromise: Promise<SmcMetadata | null> | null = null;
 function getMetadata() {
   return getSmcMetadata();
 }
@@ -28,7 +28,7 @@ const RECOMMENDED_SPRITES = [
 ];
 
 export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
-  const [metadata, setMetadata] = useState<any>(null);
+  const [metadata, setMetadata] = useState<SmcMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [selectedSprite, setSelectedSprite] = useState<string | null>(null);
@@ -267,7 +267,7 @@ interface SMCSpritePreviewProps {
   animName: string;
   size?: number;
   className?: string;
-  metadata: any;
+  metadata: SmcMetadata | null;
 }
 
 export function SMCSpritePreview({ spriteKey, animName, size = 48, className, metadata }: SMCSpritePreviewProps) {
@@ -277,7 +277,7 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
   useEffect(() => {
     let raf = 0;
     let cancelled = false;
-    setError(false);
+    Promise.resolve().then(() => setError(false));
 
     const sprite = metadata?.[spriteKey];
     const anim = sprite?.animations?.[animName];
@@ -288,7 +288,7 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
     // frames[0] のシート固定で切り抜くと別コマが化けるので、シートごとにロードして
     // 各コマは自分のシートから描く。
     const imgByUrl = new Map<string, HTMLImageElement>();
-    const urls = Array.from(new Set<string>(anim.frames.map((f: any) => resolveSMCUrl(f.image))));
+    const urls = Array.from(new Set<string>(anim.frames.map((f) => resolveSMCUrl(f.image))));
     Promise.all(urls.map(u => loadImage(u).then(img => imgByUrl.set(u, img))))
       .then(() => {
         if (cancelled) return;

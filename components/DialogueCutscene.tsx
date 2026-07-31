@@ -96,7 +96,7 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
   const [textVisible, setTextVisible] = useState(true);
 
   useEffect(() => {
-    setPortraitMap(prev => {
+    Promise.resolve().then(() => setPortraitMap(prev => {
       const next = { ...prev };
       let changed = false;
       for (const l of lines) {
@@ -104,7 +104,7 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
         if (k in next && next[k] !== l) { next[k] = l; changed = true; }
       }
       return changed ? next : prev;
-    });
+    }));
   }, [lines]);
 
   const current = lines[index];
@@ -122,7 +122,7 @@ const DialogueCutscene = forwardRef<DialogueCutsceneHandle, Props>(function Dial
 
   // forwardRef 経由で advance を外部に公開（モバイル「次へ」ボタン用）
   const advanceRef = useRef<() => void>(advance);
-  advanceRef.current = advance;
+  useEffect(() => { advanceRef.current = advance; });
   useImperativeHandle(ref, () => ({ advance: () => advanceRef.current() }), []);
 
   // Z キー / Enter キーでセリフ送り

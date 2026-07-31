@@ -71,10 +71,12 @@ export default function SearchView(props: SearchViewProps) {
   }, []);
 
   useEffect(() => {
-    if (props.initialQuery && props.initialQuery.trim()) {
-      setQuery(props.initialQuery);
-      handleSearch(props.initialQuery);
-    }
+    const q = props.initialQuery;
+    if (!q || !q.trim()) return;
+    Promise.resolve().then(() => {
+      setQuery(q);
+      handleSearch(q);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.initialQuery]);
 

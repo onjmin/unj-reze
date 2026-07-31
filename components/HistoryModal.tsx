@@ -4,25 +4,25 @@ import { useEffect, useState } from 'react';
 import { X, Trash2, RotateCcw, Plus, Calendar } from 'lucide-react';
 import { getHistory, deleteHistoryItem, saveHistory, HistoryItem } from '@/lib/history';
 
-interface HistoryModalProps {
+interface HistoryModalProps<T = unknown> {
   isOpen: boolean;
   onClose: () => void;
   storageKey: string;
   type: 'mml' | 'drawing' | 'dotdrawing' | 'gamemaker' | 'gameplay';
-  onRestore: (data: any) => void;
+  onRestore: (data: T) => void;
   // getCurrentData returns the current state of the editor to capture a manual snapshot
-  getCurrentData?: () => any;
+  getCurrentData?: () => T | null;
 }
 
-export default function HistoryModal({
+export default function HistoryModal<T = unknown>({
   isOpen,
   onClose,
   storageKey,
   type,
   onRestore,
   getCurrentData,
-}: HistoryModalProps) {
-  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
+}: HistoryModalProps<T>) {
+  const [historyItems, setHistoryItems] = useState<HistoryItem<T>[]>([]);
   const [message, setMessage] = useState<{ text: string; color: string } | null>(null);
 
   const loadHistory = () => {
@@ -33,14 +33,16 @@ export default function HistoryModal({
 
   useEffect(() => {
     if (isOpen) {
-      loadHistory();
-      setMessage(null);
+      Promise.resolve().then(() => {
+        loadHistory();
+        setMessage(null);
+      });
     }
   }, [isOpen, storageKey]);
 
   if (!isOpen) return null;
 
-  const handleRestore = (item: HistoryItem) => {
+  const handleRestore = (item: HistoryItem<T>) => {
     onRestore(item.data);
     setMessage({ text: '履歴データを復元しました。', color: 'text-green-400' });
     setTimeout(() => {
