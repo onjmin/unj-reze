@@ -15,16 +15,18 @@ export function generateStaticParams() {
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const { id } = await params;
+  const rawParams = await params;
+  const id = decodeURIComponent(rawParams.id || '');
   return {
     title: 'プロフィール',
-    alternates: { canonical: `${SITE_URL}/user/${id}` },
-    openGraph: { title: 'プロフィール', url: `${SITE_URL}/user/${id}` },
+    alternates: { canonical: `${SITE_URL}/user/${encodeURIComponent(id)}` },
+    openGraph: { title: 'プロフィール', url: `${SITE_URL}/user/${encodeURIComponent(id)}` },
   };
 }
 
 export default async function UserPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const rawParams = await params;
+  const id = decodeURIComponent(rawParams.id || '');
 
   return (
     <AppShell current="profile">

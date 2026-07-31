@@ -52,7 +52,14 @@ const tabs = [
 export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, onProfileUpdate, onEditImage, onEditMml }: ProfileViewProps) {
   const router = useRouter();
   const currentUser = useCurrentUser();
-  const slug = userId.match(/[a-zA-Z0-9]+$/)?.[0] || userId;
+  const cleanUserId = useMemo(() => {
+    try {
+      return decodeURIComponent(userId || '');
+    } catch {
+      return userId || '';
+    }
+  }, [userId]);
+  const slug = useMemo(() => cleanUserId.match(/[a-zA-Z0-9]+$/)?.[0] || cleanUserId, [cleanUserId]);
 
   const [profileDisplayName, setProfileDisplayName] = useState<string | undefined>(displayName);
   const [activeTab, setActiveTab] = useState('threads');

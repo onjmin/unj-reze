@@ -8,7 +8,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id } = await params;
+  const rawParams = await params;
+  const id = decodeURIComponent(rawParams.id || '');
   const url = new URL(request.url);
   const userId = url.searchParams.get('userId') || undefined;
   const tab = url.searchParams.get('tab');

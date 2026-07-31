@@ -344,6 +344,23 @@ const migrations = [
       UPDATE reports r SET reporter_slug = u.slug FROM anonymous_users u WHERE r.reporter_slug = u.id OR r.reporter_slug = u.display_name;
       UPDATE oshi_items o SET user_slug = u.slug FROM anonymous_users u WHERE o.user_slug = u.id OR o.user_slug = u.display_name;
     `
+  },
+  {
+    name: '18_cleanup_japanese_seed_user_ids',
+    sql: `
+      -- 1. シード初期ユーザーの id 内にある日本語表記 ('名無しXXX') を外部キーテーブルで参照先補正
+      UPDATE user_follows f SET follower_id = u.slug FROM anonymous_users u WHERE f.follower_id = u.id AND u.id LIKE '名無し%';
+      UPDATE user_follows f SET followed_id = u.slug FROM anonymous_users u WHERE f.followed_id = u.id AND u.id LIKE '名無し%';
+      UPDATE post_votes v SET user_id = u.slug FROM anonymous_users u WHERE v.user_id = u.id AND u.id LIKE '名無し%';
+      UPDATE post_hearts h SET user_id = u.slug FROM anonymous_users u WHERE h.user_id = u.id AND u.id LIKE '名無し%';
+      UPDATE migration_tokens t SET user_id = u.slug FROM anonymous_users u WHERE t.user_id = u.id AND u.id LIKE '名無し%';
+      UPDATE messages m SET sender = u.slug FROM anonymous_users u WHERE m.sender = u.id AND u.id LIKE '名無し%';
+      UPDATE messages m SET recipient = u.slug FROM anonymous_users u WHERE m.recipient = u.id AND u.id LIKE '名無し%';
+      UPDATE notifications n SET target_user = u.slug FROM anonymous_users u WHERE n.target_user = u.id AND n.target_user LIKE '名無し%';
+
+      -- 2. anonymous_users.id 自体の日本語表記を英数字 'usr_' + slug へ補正統一
+      UPDATE anonymous_users SET id = 'usr_' || slug WHERE id LIKE '名無し%' AND slug IS NOT NULL;
+    `
   }
 ];
 
