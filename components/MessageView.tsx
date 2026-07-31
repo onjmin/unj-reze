@@ -160,17 +160,30 @@ export default function MessageView({ userId }: MessageViewProps) {
         {activeMessages.map(m => (
           <div
             key={m.id}
-            className={`flex flex-col group ${
+            className={`flex flex-col group w-full mb-3 ${
               m.sender === currentSender ? 'items-end' : 'items-start'
             }`}
           >
-            <span className="text-[10px] text-gray-500 mb-0.5">
+            <span className="text-[10px] text-gray-500 mb-1 px-1">
               {getAvatarInfo(m.sender).username} ・ {m.time}
             </span>
-            <div className="flex items-center gap-1.5">
+            <div
+              className={`flex items-end gap-1.5 max-w-[85%] sm:max-w-[75%] ${
+                m.sender === currentSender ? 'flex-row-reverse' : 'flex-row'
+              }`}
+            >
+              <div
+                className={`px-3.5 py-2 rounded-2xl text-xs whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed shadow-sm ${
+                  m.sender === currentSender
+                    ? 'bg-blue-600 text-white rounded-tr-xs'
+                    : 'bg-gray-800/90 text-gray-100 border border-gray-700/60 rounded-tl-xs'
+                }`}
+              >
+                {m.text}
+              </div>
               {m.sender === currentSender &&
                 (confirmDeleteId === m.id ? (
-                  <div className="flex items-center gap-1 text-[10px]">
+                  <div className="flex items-center gap-1 text-[10px] shrink-0 bg-gray-900 px-2 py-1 rounded border border-gray-800">
                     <span className="text-red-400 font-bold">削除？</span>
                     <button
                       onClick={() => handleDelete(m.id)}
@@ -188,21 +201,12 @@ export default function MessageView({ userId }: MessageViewProps) {
                 ) : (
                   <button
                     onClick={() => setConfirmDeleteId(m.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-1"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-500 hover:text-red-400 p-1 shrink-0"
                     title="削除"
                   >
                     <Trash2 size={12} />
                   </button>
                 ))}
-              <div
-                className={`p-2.5 rounded-2xl max-w-[80%] text-xs ${
-                  m.sender === currentSender
-                    ? 'bg-blue-600 text-white rounded-tr-none'
-                    : 'bg-gray-100/10 text-gray-200 rounded-tl-none'
-                }`}
-              >
-                {m.text}
-              </div>
             </div>
           </div>
         ))}
