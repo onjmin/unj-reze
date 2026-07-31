@@ -6429,12 +6429,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     gameData.scenes?.forEach(s => s.objects.forEach(o => ensureImageFromRef(o.spriteRef, o.spriteUrl)));
   }, [isPlaying, gameData.scenes, gameData.player.start, editSceneIdx, ensureImage, ensureImageFromRef]);
 
-  // プレイ開始時に sfx を音量極小で一瞬再生してブラウザにデコード・バッファさせる
+  // プレイ開始時に sfx を無音で一瞬再生してブラウザにデコード・バッファさせる。
+  // iOS Safari は HTMLMediaElement.volume が読み取り専用で代入を黙って無視するため、
+  // volume を絞るだけだと iPhone ではこのウォームアップが実音量で鳴ってしまう。
+  // muted は iOS でも効くので、無音化は必ず muted 側で行う（volume は他ブラウザ向けの保険）。
   useEffect(() => {
     if (!isPlaying) return;
     Object.values(gameData.sfx).forEach(s => {
       if (!s?.src || s.type !== 'direct') return;
       const a = new Audio(s.src);
+      a.muted = true;
       a.volume = 0.00001;
       a.play().then(() => { a.pause(); a.src = ''; }).catch(() => { });
     });
@@ -13049,8 +13053,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     showGameMsg(`${it?.emoji ?? '?'} ${it?.name ?? itemId}を すてた。`, 'instant', () => { });
   };
   /** スマホ用：ヘッダーを畳んで描画エリアを広く取る。上端の帯を下スワイプかタップで開く。
-   *  md以上では常時表示（CSS側で translate を打ち消す）。 */
-  const [headerOpen, setHeaderOpen] = useState(false);
+   *  md以上では常時表示（CSS側で translate を打ち消す）。
+   *  編集画面ではツールバーが使えないと始まらないので既定で開く。
+   *  playOnly（フィード埋め込み・ライブゲーム）は遊ぶ領域を最優先にしたいので畳んだまま。 */
+  const [headerOpen, setHeaderOpen] = useState(!playOnly);
   const headerSwipeRef = useRef<{ y: number; moved: boolean } | null>(null);
   const onHeaderTouchStart = useCallback((e: React.TouchEvent) => {
     headerSwipeRef.current = { y: e.touches[0].clientY, moved: false };
@@ -13128,8 +13134,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       >
         <ChevronDown size={14} />
       </button>
+      {/* 畳んだときの translate は calc の演算子前後に空白が要る（Tailwind の任意値では `_` が空白）。
+          `calc(100%-20px)` は不正な値なのでユーティリティ自体が出力されず、畳んでも動かなかった。 */}
       <div
-        className={`absolute md:static top-0 left-0 right-0 z-[60] shrink-0 transition-transform duration-200 md:translate-y-0 ${headerOpen ? 'translate-y-0' : '-translate-y-[calc(100%-20px)]'}`}
+        className={`absolute md:static top-0 left-0 right-0 z-[60] shrink-0 transition-transform duration-200 md:translate-y-0 ${headerOpen ? 'translate-y-0' : '-translate-y-[calc(100%_-_20px)]'}`}
         onTouchStart={onHeaderTouchStart}
         onTouchMove={onHeaderTouchMove}
       >
