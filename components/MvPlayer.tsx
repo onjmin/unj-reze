@@ -5,7 +5,7 @@ import { Loader2, Pause, Play } from 'lucide-react';
 import { useAudioFocus } from '@/lib/audio-focus-context';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import { startMvPlayback, type MvPlaybackHandle } from '@/lib/mv-audio';
-import { MV_H, MV_STEPS_PER_BEAT, MV_W, mvAudioMode, type MvManifest } from '@/lib/mv-config';
+import { MV_H, MV_STEPS_PER_BAR, MV_STEPS_PER_BEAT, MV_W, mvAudioMode, type MvManifest } from '@/lib/mv-config';
 import { collectMvImageUrls, drawMvFrame, EMPTY_SONG, parseMvSong, preloadMvImages, type MvSong } from '@/lib/mv-engine';
 
 export interface MvPlayerHandle {
@@ -38,6 +38,8 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const seekBarRef = useRef<HTMLInputElement>(null);
+  const timeDisplayRef = useRef<HTMLSpanElement>(null);
   const playbackRef = useRef<MvPlaybackHandle | null>(null);
   const rafRef = useRef<number | null>(null);
   /** 直近の onTick。{ step, atMs } からフレーム時刻を補間する。 */
@@ -125,7 +127,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   }, [paintPoster]);
 
   // ── 停止 ────────────────────────────────────────────────
-  const stop = useCallback(() => {
+  const stop = useCallback((reset = true) => {
     playTokenRef.current += 1;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -133,11 +135,17 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
     }
     playbackRef.current?.stop();
     playbackRef.current = null;
-    tickRef.current = { step: 0, atMs: 0 };
+    
     setPlaying(false);
     setLoading(false);
     focusRef.current.releaseFocus(instanceId);
-    paintPoster();
+    
+    if (reset === true) {
+      tickRef.current = { step: 0, atMs: 0 };
+      if (seekBarRef.current) seekBarRef.current.value = "0";
+      if (timeDisplayRef.current) timeDisplayRef.current.textContent = "0:00";
+      paintPoster();
+    }
   }, [instanceId, paintPoster]);
 
   // ── 再生 ────────────────────────────────────────────────
@@ -161,7 +169,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
       },
       onStop: () => {
         onEndedRef.current?.();
-        stop();
+        stop(true);
       },
     }).then(playback => {
       // 準備中に停止されていたら、遅れて出来た再生をすぐ捨てる
@@ -181,7 +189,18 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
         const tick = tickRef.current;
         // onTick は毎フレーム来るとは限らないので、直近ティックからの経過分を足して補間する
         const step = tick.step + Math.max(0, now - tick.atMs) * stepsPerMs;
-        paint(step, (now - startMsRef.current) / 1000);
+        const timeSec = (now - startMsRef.current) / 1000;
+        paint(step, timeSec);
+        
+        if (seekBarRef.current) {
+          seekBarRef.current.value = String(step);
+        }
+        if (timeDisplayRef.current) {
+          const mm = Math.floor(timeSec / 60);
+          const ss = Math.floor(timeSec % 60).toString().padStart(2, '0');
+          timeDisplayRef.current.textContent = `${mm}:${ss}`;
+        }
+        
         rafRef.current = requestAnimationFrame(loop);
       };
       rafRef.current = requestAnimationFrame(loop);
@@ -233,8 +252,23 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
     focusRef.current.releaseFocus(instanceId);
   }, [instanceId]);
 
-  const toggle = () => (playing ? stop() : play());
+  const toggle = () => (playing ? stop(true) : play());
   const hasMml = !!manifest.mml?.trim();
+
+  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const step = Number(e.target.value);
+    const stepsPerSec = ((songRef.current.bpm || 120) / 60) * MV_STEPS_PER_BEAT;
+    const timeSec = step / stepsPerSec;
+    
+    tickRef.current = { step, atMs: performance.now() }; 
+    paint(step, timeSec);
+    
+    if (timeDisplayRef.current) {
+      const mm = Math.floor(timeSec / 60);
+      const ss = Math.floor(timeSec % 60).toString().padStart(2, '0');
+      timeDisplayRef.current.textContent = `${mm}:${ss}`;
+    }
+  }, [paint]);
 
   return (
     <div className={`relative w-full overflow-hidden rounded-lg bg-black ${className ?? ''}`}>
@@ -251,15 +285,36 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
       )}
 
       {controls && hasMml && (
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={!ready && !playing}
-          className="absolute bottom-2 left-2 flex min-h-9 items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-bold text-gray-100 backdrop-blur transition-colors hover:bg-black/85 active:scale-95 disabled:opacity-50"
-        >
-          {loading ? <Loader2 size={13} className="animate-spin" /> : playing ? <Pause size={13} /> : <Play size={13} />}
-          <span>{loading ? '読み込み中' : playing ? '停止' : '再生'}</span>
-        </button>
+        <div className="absolute bottom-0 inset-x-0 p-3 pt-6 bg-gradient-to-t from-black/90 to-transparent flex items-center gap-3 transition-opacity">
+          <button
+            type="button"
+            onClick={toggle}
+            disabled={!ready && !playing}
+            className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur transition-colors hover:bg-white/30 active:scale-95 disabled:opacity-50"
+            title={playing ? '停止' : '最初から再生'}
+          >
+            {loading ? <Loader2 size={13} className="animate-spin" /> : playing ? <Pause size={13} /> : <Play size={13} />}
+          </button>
+          
+          <input
+            ref={seekBarRef}
+            type="range"
+            min="0"
+            max={Math.max(1, (songRef.current.totalBars || 1) * MV_STEPS_PER_BAR)}
+            step="1"
+            disabled={!ready}
+            defaultValue="0"
+            onPointerDown={() => {
+              if (playing) stop(false);
+            }}
+            onChange={handleSeek}
+            className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-white/30 accent-blue-500 hover:h-2 transition-all focus:outline-none"
+          />
+          
+          <span ref={timeDisplayRef} className="shrink-0 text-[11px] text-gray-200 font-mono w-9 text-right drop-shadow-md">
+            0:00
+          </span>
+        </div>
       )}
     </div>
   );
