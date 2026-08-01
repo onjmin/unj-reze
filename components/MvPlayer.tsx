@@ -30,8 +30,8 @@ interface MvPlayerProps {
  * 時間の出どころは @onjmin/dtm の onTick（＝音声スケジューラのステップ）だけ。
  * rAF はティックとティックの間を線形に補間するだけなので、描画が重くても音とはズレない。
  *
- * 制約: 歌詞トラック(@@n)の歌声合成はヘッドレス再生では鳴らない（@onjmin/dtm の playMML が未対応）。
- * MVでは歌詞は「画面に出す文字」として使い、発音は楽器・ドラムのみになる。
+ * 音の出し方（軽量 / 外部音源 / 外部音源＋歌声）は manifest.audio.mode で切り替わる。
+ * 実際の再生経路と音量の合成は lib/mv-audio.ts が面倒を見る。
  */
 const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   { manifest, controls = true, autoPlay = false, className, onEnded },
@@ -153,7 +153,9 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 
     startMvPlayback(mml, songRef.current.lyricTrackIds, {
       mode: mvAudioMode(manifestRef.current),
-      volume: applyMasterVolume(50),
+      // サイトのマスター音量をそのまま渡す。MML自身の #volume= との合成は mv-audio 側で行う。
+      // ここで 50 のような係数を掛けると、ContentPicker の試聴より小さく鳴ってしまう。
+      volume: applyMasterVolume(100),
       onTick: (step: number) => {
         tickRef.current = { step, atMs: performance.now() };
       },
@@ -213,7 +215,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   }, [paint]);
 
   // マスター音量の変更を再生中の音へ反映
-  useEffect(() => subscribeMasterVolume(() => playbackRef.current?.setVolume(applyMasterVolume(50))), []);
+  useEffect(() => subscribeMasterVolume(() => playbackRef.current?.setVolume(applyMasterVolume(100))), []);
 
   // autoPlay は「素材が揃った最初の1回」だけ。以後の再解析では再発火しない。
   useEffect(() => {

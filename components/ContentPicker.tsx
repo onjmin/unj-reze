@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { Post } from '@/lib/types';
-import { extractMmlFromContent } from '@/lib/mml';
+import { extractMmlFromContent, effectiveMmlVolume, withMmlVolume } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, colorToDataUrl } from '@/lib/asset-ref';
 import type { ParsedMML, MmlPlayback } from '@onjmin/dtm';
@@ -167,7 +167,9 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         const shifted = remaining.map((p) => ({ ...p, startStep: Math.max(0, p.startStep - startAt) }));
         bgm = dtm.playPlacements(shifted, {
           bpm,
-          volume: applyMasterVolume(100),
+          // 実効音量＝MMLの #volume= × サイト音量。playPlacements は metaVolume を持たないので
+          // ここで合成済みの値を渡す。
+          volume: effectiveMmlVolume(mml, applyMasterVolume(100)),
           onTick: (relStep: number) => {
             setMmlStepInfo({ currentStep: Math.min(startAt + relStep, totalSteps), totalSteps });
           },
@@ -178,7 +180,9 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
           }
         });
       } else {
-        bgm = dtm.playMML(mml, {
+        // playMML は `metaVolume ?? options.volume` なので、MMLに #volume= があると
+        // options.volume が無視されサイト音量が効かない。MML側を実効音量へ書き換えて渡す。
+        bgm = dtm.playMML(withMmlVolume(mml, effectiveMmlVolume(mml, applyMasterVolume(100))), {
           loop: false,
           volume: applyMasterVolume(100),
           onTick: (step: number) => {
@@ -241,7 +245,13 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
 
   useEffect(() => () => { stopAllPreviews(); }, []);
 
-  useEffect(() => subscribeMasterVolume(() => bgmRef.current?.setVolume(applyMasterVolume(100))), []);
+  // 再生中に音量スライダーを動かしたときも「MML音量 × サイト音量」を保つ。
+  // setVolume は絶対値で上書きされるので、ここでも実効音量を渡す必要がある。
+  useEffect(() => subscribeMasterVolume(() => {
+    const site = applyMasterVolume(100);
+    const mml = activeMmlCacheRef.current?.mml;
+    bgmRef.current?.setVolume(mml ? effectiveMmlVolume(mml, site) : site);
+  }), []);
 
   useEffect(() => {
     let alive = true;

@@ -8,11 +8,12 @@
 
 import type { MmlPlayback } from '@onjmin/dtm';
 import { getStudio } from './dtm';
+import { effectiveMmlVolume, withMmlVolume } from './mml';
 import type { MvAudioMode } from './mv-config';
 
 export interface MvPlaybackOptions {
   mode: MvAudioMode;
-  /** 0-100 */
+  /** サイトのマスター音量 0-100（applyMasterVolume(100) の値をそのまま渡す）。 */
   volume: number;
   onTick: (step: number) => void;
   onStop: () => void;
@@ -20,8 +21,26 @@ export interface MvPlaybackOptions {
 
 export interface MvPlaybackHandle {
   stop: () => void;
+  /** サイトのマスター音量 0-100 を渡す。MML側の #volume= との合成は内部で面倒を見る。 */
   setVolume: (v: number) => void;
 }
+
+/**
+ * @onjmin/dtm の音量規約は再生経路ごとに違うので、ここで吸収する。
+ *
+ *   playMML / playPlacements / studio.play … `metaVolume ?? options.volume ?? 100`
+ *       → MMLに `#volume=` があると **options.volume は完全に無視される**。
+ *   playSingingMML                         … `metaVolume/100 * (options.volume ?? 100)`
+ *       → こちらは掛け算。
+ *
+ * そのまま両方へ同じ値を渡すと、楽器はサイト音量が効かず、歌声だけ二重に絞られる
+ * （＝歌が楽器より不自然に小さくなる）。そこで:
+ *   - 楽器側は MML の `#volume=` 自体を「MML音量 × サイト音量」へ書き換えて渡す
+ *   - 歌声側は MML をそのままにして options.volume にサイト音量を渡す
+ * どちらも最終的に「MML音量 × サイト音量」に揃う。
+ */
+
+// 実効音量の計算は lib/mml.ts に集約（ContentPicker の試聴と同じ規則を使う）。
 
 /**
  * MMLから歌詞トラック(@@n)が担当する演奏トラック(@n)を取り除く。
@@ -55,30 +74,37 @@ export async function startMvPlayback(
   options: MvPlaybackOptions,
 ): Promise<MvPlaybackHandle> {
   const { mode, volume, onTick, onStop } = options;
+  // 楽器側は `#volume=` が options.volume を上書きしてしまうので、MML自体を書き換えて渡す
+  const scaled = withMmlVolume(mml, effectiveMmlVolume(mml, volume));
 
   if (mode === 'light') {
     const { playMML } = await import('@onjmin/dtm');
-    const playback = playMML(mml, { volume, synth: true, onTick, onStop });
-    return handleOf([playback]);
+    const playback = playMML(scaled, { volume, synth: true, onTick, onStop });
+    return handleOf([{ playback, scaleWithMml: true }], mml);
   }
 
   const studio = await getStudio();
 
   if (mode === 'soundfont') {
-    const playback = studio.play(mml, { volume, onTick, onStop });
-    return handleOf([playback]);
+    const playback = studio.play(scaled, { volume, onTick, onStop });
+    return handleOf([{ playback, scaleWithMml: true }], mml);
   }
 
   // soundfontKoe: 楽器（SoundFont）と歌声（koe）を同じ AudioContext 上で重ねる。
   // 同じ tick で start するので、両者のスケジューラは同一クロックの同じ地点から走る。
   const { playSingingMML } = await import('@onjmin/dtm');
-  const instrumentMml = stripLyricPerformanceTracks(mml, lyricTrackIds);
+  // 楽器側だけ歌詞トラックを外し、さらに `#volume=` をサイト音量込みへ書き換える
+  const instrumentMml = withMmlVolume(
+    stripLyricPerformanceTracks(mml, lyricTrackIds),
+    effectiveMmlVolume(mml, volume),
+  );
 
   // 進行のクロックは楽器側から取る（歌声側は onTick を出さない設定で走らせる）
   const instruments = studio.play(instrumentMml, { volume, onTick, onStop });
 
   let vocals: MmlPlayback | null = null;
   try {
+    // 歌声側は metaVolume × options.volume の掛け算なので、MMLは書き換えずサイト音量を渡す
     vocals = await playSingingMML(mml, {
       audioContext: studio.audioContext,
       singingVoices: studio.singingVoices,
@@ -91,22 +117,37 @@ export async function startMvPlayback(
     console.error('[mv-audio] singing playback failed; continuing with instruments only', e);
   }
 
-  return handleOf(vocals ? [instruments, vocals] : [instruments]);
+  return handleOf(
+    vocals
+      ? [{ playback: instruments, scaleWithMml: true }, { playback: vocals, scaleWithMml: false }]
+      : [{ playback: instruments, scaleWithMml: true }],
+    mml,
+  );
 }
 
-function handleOf(playbacks: MmlPlayback[]): MvPlaybackHandle {
+interface TrackedPlayback {
+  playback: MmlPlayback;
+  /**
+   * true  … setVolume には「MML音量 × サイト音量」を渡す（絶対値で上書きされる経路）
+   * false … setVolume にはサイト音量をそのまま渡す（内部で MML音量 と掛け算される経路）
+   */
+  scaleWithMml: boolean;
+}
+
+function handleOf(playbacks: TrackedPlayback[], sourceMml: string): MvPlaybackHandle {
   let stopped = false;
   return {
     stop: () => {
       if (stopped) return;
       stopped = true;
-      for (const p of playbacks) {
-        try { p.destroy(); } catch { /* すでに閉じている場合は無視 */ }
+      for (const { playback } of playbacks) {
+        try { playback.destroy(); } catch { /* すでに閉じている場合は無視 */ }
       }
     },
-    setVolume: (v: number) => {
-      for (const p of playbacks) {
-        try { p.setVolume(v); } catch { /* 停止済みなら無視 */ }
+    setVolume: (siteVolume: number) => {
+      for (const { playback, scaleWithMml } of playbacks) {
+        const v = scaleWithMml ? effectiveMmlVolume(sourceMml, siteVolume) : siteVolume;
+        try { playback.setVolume(v); } catch { /* 停止済みなら無視 */ }
       }
     },
   };

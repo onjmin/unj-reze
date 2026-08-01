@@ -1279,7 +1279,9 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           mode={picker.mode}
           bgmKind={picker.mode === 'bgm' ? 'mml' : undefined}
           userId={userId}
-          currentRef={picker.mode === 'bgm' ? `mml:${manifest.mml}` : undefined}
+          // currentRef は渡さない。ここは「投稿された曲から選ぶ」導線なので、
+          // 現在のMMLを渡すと ContentPicker が毎回「直接」タブを開いてしまう
+          // （インラインMMLは mml: 始まりなので mmlRaw 判定になる）。
           onPick={handlePick}
           onClose={() => setPicker(null)}
         />

@@ -130,6 +130,38 @@ function countToMmlDiv(count: number): string {
 
 // MML本文の開始マーカー。投稿コンポーザは `#mml <mml>`、過去の投稿は `#MML作曲 <mml>` などのマーカーを使う。
 // 抽出・本文表示の双方でこの定義を共有し、マーカー不一致による埋め込み未認識を防ぐ。
+// ───────────────── 音量の合成 ─────────────────
+//
+// MMLの `#volume=`（作った人が決めた曲の音量）と、サイトのマスター音量（聴く人が決めた音量）は
+// 別物で、実効音量は「MML音量 × サイト音量」に揃える。
+//
+// 注意: @onjmin/dtm は再生経路ごとに音量の扱いが違う。
+//   playMML / playPlacements / studio.play … `metaVolume ?? options.volume ?? 100`
+//       → MMLに `#volume=` があると options.volume が**完全に無視される**（サイト音量が効かない）
+//   playSingingMML                         … `metaVolume/100 * (options.volume ?? 100)`（掛け算）
+//   mountMmlPlayer                         … trackVolume と masterVolume が別引数
+// そのため「options に渡すだけ」では経路によって効いたり効かなかったりする。
+// 前者に渡すときは MML の `#volume=` 自体を実効音量へ書き換えるのが確実。
+
+/** MMLの `#volume=` を読む（無ければ100）。 */
+export function readMmlVolume(mml: string): number {
+  const m = mml.match(/#volume=(\d+)/);
+  const v = m ? Number(m[1]) : NaN;
+  return Number.isFinite(v) ? v : 100;
+}
+
+/** 「MML音量 × サイト音量」の実効音量 0-100。 */
+export function effectiveMmlVolume(mml: string, siteVolume: number): number {
+  return Math.max(0, Math.min(100, Math.round((readMmlVolume(mml) * siteVolume) / 100)));
+}
+
+/** MMLの `#volume=` を指定値へ書き換える（無ければ先頭に足す）。 */
+export function withMmlVolume(mml: string, volume: number): string {
+  const v = Math.max(0, Math.min(100, Math.round(volume)));
+  if (/#volume=\d+/.test(mml)) return mml.replace(/#volume=\d+/, `#volume=${v}`);
+  return `#volume=${v}\n${mml}`;
+}
+
 export const MML_MARKERS = ['#mml', '#MML作曲'];
 // 投稿本文から「埋め込みに置き換える」ために隠すマーカー（MML + コード）。
 export const EMBED_TEXT_MARKERS = [...MML_MARKERS, '#コード進行'];
