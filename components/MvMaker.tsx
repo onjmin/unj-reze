@@ -29,8 +29,6 @@ import {
 } from '@/lib/mv-config';
 import { parseMvSong, resolveLyricLines, EMPTY_SONG, type MvSong } from '@/lib/mv-engine';
 
-const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
-
 type Tab = 'preset' | 'song' | 'stage' | 'layers' | 'lyrics' | 'sections';
 
 /**
@@ -273,7 +271,6 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const [editMode, setEditMode] = useState<EditMode>('easy');
   const [presetName, setPresetName] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: 'stageBg' | { layerId: string } } | null>(null);
-  const [showMmlEditor, setShowMmlEditor] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [song, setSong] = useState<MvSong>(EMPTY_SONG);
@@ -548,9 +545,6 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
         </Hint>
         <button onClick={() => setPicker({ mode: 'bgm', target: 'stageBg' })} className={REF_BTN_CLASS}>
           <Music size={12} />投稿された曲から選ぶ
-        </button>
-        <button onClick={() => setShowMmlEditor(true)} className={REF_BTN_CLASS}>
-          <Music size={12} />自分で作る・編集する
         </button>
         {manifest.mml ? (
           <div className="rounded border border-gray-700 bg-gray-800 p-2">
@@ -1328,18 +1322,6 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           // （インラインMMLは mml: 始まりなので mmlRaw 判定になる）。
           onPick={handlePick}
           onClose={() => setPicker(null)}
-        />
-      )}
-
-      {showMmlEditor && (
-        <MmlEditor
-          initialMml={manifest.mml || undefined}
-          isEditing
-          onClose={() => setShowMmlEditor(false)}
-          onSave={mml => {
-            update(m => ({ ...m, mml }));
-            setShowMmlEditor(false);
-          }}
         />
       )}
 
