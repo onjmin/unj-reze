@@ -35,6 +35,7 @@ const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 // 自由な矩形選択 or グリッド分割で好きな位置から切り出せる。
 export default function PostSlicePanel({ userId, onPick, initialAsset, allowUpload, confirmLabel, hint }: PostSlicePanelProps) {
   const [posts, setPosts] = useState<Post[]>([]);
+  const [failedPostIds, setFailedPostIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<SliceImage | null>(
@@ -145,18 +146,18 @@ export default function PostSlicePanel({ userId, onPick, initialAsset, allowUplo
         <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-500" /></div>
       ) : (
         <div className="grid grid-cols-3 gap-2">
-          {imagePosts.map(p => (
+          {imagePosts.filter(p => !failedPostIds.has(p.id)).map(p => (
             <button
               key={p.id}
               onClick={() => setSelected({ id: p.id, url: p.imageSrc! })}
-              className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
+              className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background-white"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.imageSrc} alt="" className="w-full h-full object-cover" />
+              <img src={p.imageSrc} alt="" onError={() => setFailedPostIds(prev => new Set(prev).add(p.id))} className="w-full h-full object-cover" />
               <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">#{p.id}</span>
             </button>
           ))}
-          {imagePosts.length === 0 && (
+          {imagePosts.filter(p => !failedPostIds.has(p.id)).length === 0 && (
             <p className="col-span-3 text-center text-[11px] text-gray-600 py-8">該当する投稿がありません</p>
           )}
         </div>
@@ -563,7 +564,7 @@ function SliceEditor({ image, initialRef, onBack, onPick, confirmLabel }: {
         <div className="flex justify-center py-8"><Loader2 size={20} className="animate-spin text-gray-500" /></div>
       ) : (
         <>
-          <div ref={wrapRef} className="flex justify-center bg-black/40 border border-gray-800 rounded-lg p-2 overflow-auto gimp-checkered-background">
+          <div ref={wrapRef} className="flex justify-center bg-black/40 border border-gray-800 rounded-lg p-2 overflow-auto gimp-checkered-background-white">
             <canvas
               ref={canvasRef}
               onPointerDown={handlePointerDown}

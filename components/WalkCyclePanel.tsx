@@ -66,7 +66,7 @@ export default function WalkCyclePanel({ preset, activeIndex, dataUrlByIndex, on
                   className={'w-12 h-12 rounded-lg overflow-hidden border-2 transition-all shrink-0 ' + (activeIndex === i ? 'border-[#a3e635] ring-2 ring-[#a3e635]/30 scale-105' : 'border-gray-700 hover:border-gray-500')}
                 >
                   {src ? (
-                    <img src={src} alt="" className="w-full h-full object-contain gimp-checkered-background" />
+                    <img src={src} alt="" className="w-full h-full object-contain gimp-checkered-background-white" />
                   ) : (
                     <div className="w-full h-full bg-[#1a1b26] flex items-center justify-center text-[10px] text-gray-600">
                       {i + 1}

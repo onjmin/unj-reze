@@ -111,6 +111,9 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const bgmRef = useRef<{ setVolume: (v: number) => void } | null>(null);
   const activeMmlCacheRef = useRef<{ mml: string; parsed: ParsedMML; totalSteps: number; bpm: number } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [failedRefs, setFailedRefs] = useState<Set<string>>(new Set());
+  const [failedPostIds, setFailedPostIds] = useState<Set<string>>(new Set());
+
   const currentTab = mode === 'image' ? imageTab : bgmTab;
 
   const stopAllPreviews = () => {
@@ -441,17 +444,17 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
           {/* Image: history（このゲーム内で既に使われている画像を再選択） */}
           {mode === 'image' && imageTab === 'history' && (
             <div className="grid grid-cols-6 gap-2">
-              {usedAssets.map((a, i) => (
+              {usedAssets.filter(a => !failedRefs.has(a.ref)).map((a, i) => (
                 <button
                   key={`${a.ref}-${i}`}
                   onClick={() => onPick(a)}
-                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background"
+                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 group relative gimp-checkered-background-white"
                 >
-                  <AssetThumb refStr={a.ref} url={a.url} />
+                  <AssetThumb refStr={a.ref} url={a.url} onError={() => setFailedRefs(prev => new Set(prev).add(a.ref))} />
                   <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[9px] text-gray-300 px-1 truncate">{a.label}</span>
                 </button>
               ))}
-              {usedAssets.length === 0 && (
+              {usedAssets.filter(a => !failedRefs.has(a.ref)).length === 0 && (
                 <p className="col-span-6 text-center text-[11px] text-gray-600 py-8">このゲームではまだ画像が使われていません</p>
               )}
             </div>
@@ -491,21 +494,21 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-2">
-                  {imagePosts.map(p => (
+                  {imagePosts.filter(p => !failedPostIds.has(p.id)).map(p => (
                     <button
                       key={p.id}
                       onClick={() => onPick({ ref: p.imageSrc!, url: p.imageSrc!, label: `投稿 #${p.id} (${p.displayName || '名無し'})` })}
-                      className="group relative aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 gimp-checkered-background text-left transition"
+                      className="group relative aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 gimp-checkered-background-white text-left transition"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.imageSrc} alt={p.imageAlt || ''} className="w-full h-full object-cover" style={{ imageRendering: 'pixelated' }} />
+                      <img src={p.imageSrc} alt={p.imageAlt || ''} onError={() => setFailedPostIds(prev => new Set(prev).add(p.id))} className="w-full h-full object-cover" style={{ imageRendering: 'pixelated' }} />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-1.5 pt-4">
                         <p className="text-[10px] font-bold text-gray-200 truncate">{p.displayName || '名無し'}</p>
                         <p className="text-[9px] text-gray-400 truncate">#{p.id}</p>
                       </div>
                     </button>
                   ))}
-                  {imagePosts.length === 0 && (
+                  {imagePosts.filter(p => !failedPostIds.has(p.id)).length === 0 && (
                     <p className="col-span-3 text-center text-xs text-gray-500 py-8">画像投稿が見つかりませんでした</p>
                   )}
                 </div>

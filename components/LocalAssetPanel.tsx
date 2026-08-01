@@ -25,6 +25,7 @@ let lastLocalSection = 'chars';
 // キャラは RPGEN 歩行規格へスライス済みシートを walk: 参照、タイルは url:#crop 参照で選ぶ。
 export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
   const [section, setSectionState] = useState<string>(lastLocalSection);
+  const [failedChars, setFailedChars] = useState<Set<number>>(new Set());
   const setSection = (s: string) => { lastLocalSection = s; setSectionState(s); };
 
   const secBtn = (active: boolean) =>
@@ -43,13 +44,13 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
         <>
           <p className="text-[10px] text-gray-600 px-0.5">DQ風キャラ（RPGEN 16px・2フレーム×4方向）</p>
           <div className="grid grid-cols-6 gap-1.5">
-            {DQ_CHARACTERS.map((c) => (
+            {DQ_CHARACTERS.filter(c => !failedChars.has(c.surface)).map((c) => (
               <button
                 key={c.surface}
                 onClick={() => onPick({ ref: buildWalkRef('rpgen', { kind: 'url', url: c.url }), url: c.url, label: c.name })}
-                className="pixel-select-hover flex flex-col items-center gap-1 p-1.5 rounded-lg border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background group"
+                className="pixel-select-hover flex flex-col items-center gap-1 p-1.5 rounded-lg border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white group"
               >
-                <WalkSpritePreview url={c.url} stdId="rpgen" size={44} />
+                <WalkSpritePreview url={c.url} stdId="rpgen" size={44} onError={() => setFailedChars(prev => new Set(prev).add(c.surface))} />
                 <span className="text-[9px] font-bold text-gray-400 group-hover:text-blue-400 truncate w-full text-center">{c.name}</span>
               </button>
             ))}
@@ -271,7 +272,7 @@ function LocalTileGrid({ sheet, onPick }: { sheet: LocalTileSheet; onPick: (res:
               key={c.idx}
               onClick={() => pick(c.idx)}
               title={`(${col},${row})`}
-              className="pixel-select-hover aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background"
+              className="pixel-select-hover aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white"
             >
               <div
                 className="w-full h-full overflow-hidden"

@@ -65,6 +65,7 @@ export default function RpgenAssetPanel({ kind, onPick, onPlayPreview }: RpgenAs
   const [error, setError] = useState(false);
 
   const [open, setOpen] = useState<SAnimSheetItem | SoundSheetItem | null>(cache.open);
+  const [failedAnimIds, setFailedAnimIds] = useState<Set<string>>(new Set());
   const [previewNo, setPreviewNo] = useState<string | null>(null);
   const [soundCurrentTime, setSoundCurrentTime] = useState(0);
   const [soundDuration, setSoundDuration] = useState(0);
@@ -188,16 +189,16 @@ export default function RpgenAssetPanel({ kind, onPick, onPlayPreview }: RpgenAs
             </div>
           </div>
           <div className="grid grid-cols-6 gap-1">
-            {sheet.anim_ids.map((m, i) => {
+            {sheet.anim_ids.filter(m => !failedAnimIds.has(m.id)).map((m, i) => {
               const name = walkNameCache.get(m.id);
               return (
                 <button
                   key={`${m.id}-${i}`}
                   onClick={() => pickWalk(m, sheet.name)}
                   title={`${name ?? m.id} (${m.id})`}
-                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
+                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background-white"
                 >
-                  <WalkSpritePreview url={sAnimUrl(m.id)} size={64} />
+                  <WalkSpritePreview url={sAnimUrl(m.id)} size={64} onError={() => setFailedAnimIds(prev => new Set(prev).add(m.id))} />
                   {name && (
                     <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-0.5 truncate leading-tight">
                       {name}
@@ -287,14 +288,14 @@ export default function RpgenAssetPanel({ kind, onPick, onPlayPreview }: RpgenAs
         <>
           {kind === 'walk' ? (
             <div className="grid grid-cols-6 gap-1">
-              {(items as SpriteAnimItem[]).map((item, i) => (
+              {(items as SpriteAnimItem[]).filter(item => !failedAnimIds.has(item.id)).map((item, i) => (
                 <button
                   key={`${item.id}-${i}`}
                   onClick={() => pickWalkItem(item)}
                   title={`${item.name || `#${item.no}`} (${item.id})`}
-                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
+                  className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background-white"
                 >
-                  <WalkSpritePreview url={sAnimUrl(item.id)} size={64} />
+                  <WalkSpritePreview url={sAnimUrl(item.id)} size={64} onError={() => setFailedAnimIds(prev => new Set(prev).add(item.id))} />
                   <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-0.5 truncate leading-tight">
                     {item.name || `#${item.no}`}
                   </span>
@@ -368,9 +369,9 @@ export default function RpgenAssetPanel({ kind, onPick, onPlayPreview }: RpgenAs
                   className="w-full flex items-center gap-2 p-1.5 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900 text-left"
                 >
                   <div className="flex gap-0.5 shrink-0">
-                    {s.anim_ids.slice(0, 4).map((m, i) => (
-                      <span key={`${m.id}-${i}`} className="w-8 h-8 rounded-sm bg-[#11131a] gimp-checkered-background overflow-hidden shrink-0 flex items-center justify-center">
-                        <WalkSpritePreview url={sAnimUrl(m.id)} size={32} />
+                    {s.anim_ids.filter(m => !failedAnimIds.has(m.id)).slice(0, 4).map((m, i) => (
+                      <span key={`${m.id}-${i}`} className="w-8 h-8 rounded-sm bg-[#11131a] gimp-checkered-background-white overflow-hidden shrink-0 flex items-center justify-center">
+                        <WalkSpritePreview url={sAnimUrl(m.id)} size={32} onError={() => setFailedAnimIds(prev => new Set(prev).add(m.id))} />
                       </span>
                     ))}
                   </div>

@@ -49,6 +49,7 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
 
   const [open, setOpen] = useState<SpriteSheetItem | null>(cache.open);
   const [shown, setShown] = useState(cache.shown);
+  const [failedSpriteIds, setFailedSpriteIds] = useState<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
   // 復元直後の1回だけは、キャッシュ済みのデータをそのまま使い、二重取得・重複追加を避ける
   const skipInitialFetch = useRef(cache.sheets.length > 0 || cache.items.length > 0);
@@ -124,17 +125,17 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
           </div>
         </div>
         <div className="grid grid-cols-6 gap-1">
-          {visible.map((m, i) => {
+          {visible.filter(m => !failedSpriteIds.has(m.id)).map((m, i) => {
             const name = spriteNameCache.get(m.id);
             return (
               <button
                 key={`${m.id}-${i}`}
                 onClick={() => pick(m, open.name)}
-                className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background relative group"
+                className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white relative group"
                 title={`${name ?? m.id} (${m.id})`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={spriteUrl(m.id)} alt="" className="w-full h-full object-contain p-px" style={{ imageRendering: 'pixelated' }} loading="lazy" />
+                <img src={spriteUrl(m.id)} alt="" onError={() => setFailedSpriteIds(prev => new Set(prev).add(m.id))} className="w-full h-full object-contain p-px" style={{ imageRendering: 'pixelated' }} loading="lazy" />
                 {name && (
                   <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-0.5 truncate leading-tight">
                     {name}
@@ -180,15 +181,15 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
       ) : searching ? (
         <>
           <div className="grid grid-cols-6 gap-1">
-            {items.map((item, i) => (
+            {items.filter(item => !failedSpriteIds.has(item.id)).map((item, i) => (
               <button
                 key={`${item.id}-${i}`}
                 onClick={() => pickItem(item)}
                 title={`${item.name || `#${item.no}`} (${item.id})`}
-                className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background relative group"
+                className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white relative group"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={spriteUrl(item.id)} alt="" className="w-full h-full object-contain p-px" style={{ imageRendering: 'pixelated' }} loading="lazy" />
+                <img src={spriteUrl(item.id)} alt="" onError={() => setFailedSpriteIds(prev => new Set(prev).add(item.id))} className="w-full h-full object-contain p-px" style={{ imageRendering: 'pixelated' }} loading="lazy" />
                 <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-gray-300 px-0.5 truncate leading-tight">
                   {item.name || `#${item.no}`}
                 </span>
@@ -196,7 +197,7 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
             ))}
           </div>
           {loading && <div className="flex justify-center py-4"><Loader2 size={18} className="animate-spin text-gray-500" /></div>}
-          {!loading && items.length === 0 && <p className="text-center text-[11px] text-gray-600 py-8">該当する素材がありません</p>}
+          {!loading && items.filter(item => !failedSpriteIds.has(item.id)).length === 0 && <p className="text-center text-[11px] text-gray-600 py-8">該当する素材がありません</p>}
           {!loading && page < pages && (
             <button onClick={() => setPage((p) => p + 1)} className="w-full py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-bold">
               もっと見る（{items.length} / {total}）
@@ -213,10 +214,10 @@ export default function SpriteSheetBrowser({ onPick }: SpriteSheetBrowserProps) 
                 className="w-full flex items-center gap-2 p-1.5 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900 text-left"
               >
                 <div className="flex gap-0.5 shrink-0">
-                  {s.sprite_ids.slice(0, 5).map((m, i) => (
-                    <span key={`${m.id}-${i}`} className="w-7 h-7 rounded-sm bg-[#11131a] gimp-checkered-background overflow-hidden shrink-0">
+                  {s.sprite_ids.filter(m => !failedSpriteIds.has(m.id)).slice(0, 5).map((m, i) => (
+                    <span key={`${m.id}-${i}`} className="w-7 h-7 rounded-sm bg-[#11131a] gimp-checkered-background-white overflow-hidden shrink-0">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spriteUrl(m.id)} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} loading="lazy" />
+                      <img src={spriteUrl(m.id)} alt="" onError={() => setFailedSpriteIds(prev => new Set(prev).add(m.id))} className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} loading="lazy" />
                     </span>
                   ))}
                 </div>

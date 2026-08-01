@@ -6,7 +6,7 @@ import { loadImage, resolveSpriteRect } from '@/lib/walk-sprite';
 
 /** 素材参照のサムネイル。walk: 参照は正面1コマ目を切り出し、url:#fragment はクロップ矩形を表示する。
  *  使用履歴（ContentPicker）とマイシートの単体素材（UserSheetPanel）で共有する。 */
-export default function AssetThumb({ refStr, url, size = 48 }: { refStr: string; url?: string; size?: number }) {
+export default function AssetThumb({ refStr, url, size = 48, onError }: { refStr: string; url?: string; size?: number; onError?: () => void }) {
   const cvRef = useRef<HTMLCanvasElement>(null);
   const walk = useMemo(() => parseWalkRef(refStr), [refStr]);
   const imgUrl = url ?? (walk?.source.kind === 'url' ? walk.source.url : undefined);
@@ -26,6 +26,8 @@ export default function AssetThumb({ refStr, url, size = 48 }: { refStr: string;
         const zoom = Math.min(size / sw, size / sh);
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(img, sx, sy, sw, sh, (size - sw * zoom) / 2, (size - sh * zoom) / 2, sw * zoom, sh * zoom);
+      }).catch(() => {
+        if (!cancelled) onError?.();
       });
       return () => { cancelled = true; };
     }
@@ -46,16 +48,18 @@ export default function AssetThumb({ refStr, url, size = 48 }: { refStr: string;
             const zoom = Math.min(size / fsw, size / fsh);
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(img, rect.sx, rect.sy, rect.sw, rect.sh, (size - rect.sw * zoom) / 2, (size - rect.sh * zoom) / 2, rect.sw * zoom, rect.sh * zoom);
+          }).catch(() => {
+            if (!cancelled) onError?.();
           });
           return () => { cancelled = true; };
         }
       }
     }
-  }, [imgUrl, walk?.crop?.[0], walk?.crop?.[1], walk?.crop?.[2], walk?.crop?.[3], walk?.stdId, walk?.frames, size]);
+  }, [imgUrl, walk?.crop?.[0], walk?.crop?.[1], walk?.crop?.[2], walk?.crop?.[3], walk?.stdId, walk?.frames, size, onError]);
 
   if (!walk && !(url && url.includes('#'))) {
     return url
-      ?   <img src={url} alt="" className="w-full h-full object-cover" />
+      ? <img src={url} alt="" onError={() => onError?.()} className="w-full h-full object-cover" />
       : <div className="w-full h-full flex items-center justify-center text-gray-600 text-[10px]">?</div>;
   }
 

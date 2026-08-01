@@ -32,6 +32,7 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [selectedSprite, setSelectedSprite] = useState<string | null>(null);
+  const [failedAnims, setFailedAnims] = useState<Set<string>>(new Set());
 
   // Filters for PlayerSprite
   // 実データの命名は <姿番号><アクション><0|1>（例: 1Walk0 = スーパーマリオ歩き・マリオ）。
@@ -170,27 +171,28 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
 
         {/* Animations Grid */}
         <div className="text-[10px] text-gray-500">
-          該当アニメーション ({filteredAnims.length}件):
+          該当アニメーション ({filteredAnims.filter(animName => !failedAnims.has(animName)).length}件):
         </div>
         <div className="grid grid-cols-6 gap-2 overflow-y-auto max-h-[220px] scrollbar-none pr-1">
-          {filteredAnims.map(animName => (
+          {filteredAnims.filter(animName => !failedAnims.has(animName)).map(animName => (
             <button
               key={animName}
               onClick={() => handlePick(selectedSprite, animName)}
-              className="flex flex-col items-center gap-1.5 p-2 bg-[#121620] border border-gray-800 hover:border-blue-500/50 rounded-lg text-center transition group active:scale-95 gimp-checkered-background"
+              className="flex flex-col items-center gap-1.5 p-2 bg-[#121620] border border-gray-800 hover:border-blue-500/50 rounded-lg text-center transition group active:scale-95 gimp-checkered-background-white"
             >
               <SMCSpritePreview
                 spriteKey={selectedSprite}
                 animName={animName}
                 metadata={metadata}
                 size={36}
+                onError={() => setFailedAnims(prev => new Set(prev).add(animName))}
               />
               <span className="text-[9px] font-bold text-gray-400 group-hover:text-blue-400 truncate w-full px-1">
                 {animName}
               </span>
             </button>
           ))}
-          {filteredAnims.length === 0 && (
+          {filteredAnims.filter(animName => !failedAnims.has(animName)).length === 0 && (
             <div className="col-span-6 text-center py-6 text-[10px] text-gray-500">
               条件に一致するアニメーションがありません。
             </div>
@@ -262,15 +264,21 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
   );
 }
 
-interface SMCSpritePreviewProps {
+export function SMCSpritePreview({
+  spriteKey,
+  animName,
+  size = 48,
+  metadata,
+  className,
+  onError,
+}: {
   spriteKey: string;
   animName: string;
   size?: number;
-  className?: string;
   metadata: SmcMetadata | null;
-}
-
-export function SMCSpritePreview({ spriteKey, animName, size = 48, className, metadata }: SMCSpritePreviewProps) {
+  className?: string;
+  onError?: () => void;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState(false);
 
@@ -294,7 +302,12 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
         if (cancelled) return;
         raf = requestAnimationFrame(render);
       })
-      .catch(() => { if (!cancelled) setError(true); });
+      .catch(() => {
+        if (!cancelled) {
+          setError(true);
+          onError?.();
+        }
+      });
 
     const render = () => {
       if (cancelled) return;
@@ -334,14 +347,10 @@ export function SMCSpritePreview({ spriteKey, animName, size = 48, className, me
     };
 
     return () => { cancelled = true; cancelAnimationFrame(raf); };
-  }, [spriteKey, animName, size, metadata]);
+  }, [spriteKey, animName, size, metadata, onError]);
 
   if (error) {
-    return (
-      <div className="flex items-center justify-center bg-gray-900 text-gray-600 text-[9px]" style={{ width: size, height: size }}>
-        ✕
-      </div>
-    );
+    return null;
   }
 
   return (

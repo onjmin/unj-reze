@@ -26,6 +26,7 @@ interface WalkSpritePreviewProps {
   playMode?: 'loop' | 'pingpong' | 'once';
   /** 簡易アニメ用 対象行 */
   row?: number;
+  onError?: () => void;
 }
 
 const SHOWCASE_DIRS: WayKey[] = ['s', 'a', 'd', 'w'];
@@ -33,7 +34,7 @@ const SHOWCASE_DIRS: WayKey[] = ['s', 'a', 'd', 'w'];
 // 1枚のシート歩行グラを canvas でアニメーション表示する。
 // AssetBrowser やエディタのプレビューで使う（モバイル・ドット絵想定で pixelated 描画）。
 export default function WalkSpritePreview({
-  url, stdId = 'auto', size = 64, dir, walking = true, fps = 6, className, frames, playMode, row,
+  url, stdId = 'auto', size = 64, dir, walking = true, fps = 6, className, frames, playMode, row, onError,
 }: WalkSpritePreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState(false);
@@ -50,7 +51,12 @@ export default function WalkSpritePreview({
       img = loaded;
       std = stdId === 'auto' ? detectStandard(loaded.naturalWidth, loaded.naturalHeight) : standardById(stdId);
       raf = requestAnimationFrame(render);
-    }).catch(() => { if (!cancelled) setError(true); });
+    }).catch(() => {
+      if (!cancelled) {
+        setError(true);
+        onError?.();
+      }
+    });
 
     const render = (t: DOMHighResTimeStamp) => {
       raf = requestAnimationFrame(render);
@@ -92,17 +98,10 @@ export default function WalkSpritePreview({
     };
 
     return () => { cancelled = true; cancelAnimationFrame(raf); };
-  }, [url, stdId, size, dir, walking, fps]);
+  }, [url, stdId, size, dir, walking, fps, frames, playMode, row, onError]);
 
   if (error) {
-    return (
-      <div
-        className={`flex items-center justify-center bg-gray-900 text-gray-600 text-[9px] ${className ?? ''}`}
-        style={{ width: size, height: size }}
-      >
-        ✕
-      </div>
-    );
+    return null;
   }
 
   return (
