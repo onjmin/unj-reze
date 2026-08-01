@@ -15,6 +15,15 @@ export interface MvPresetEntry {
 export const BUILTIN_WALK_URL = '/assets/rpgen/char/00-hero.png';
 export const BUILTIN_WALK = { stdId: 'rpgen', dir: 's' as const, fps: 4 };
 
+/** 横一列に並べる用の内蔵キャラ。lib/local-assets.ts の DQ_CHARACTERS と同じ実体。 */
+export const DQ_CAST = [
+  '/assets/rpgen/char/00-hero.png',
+  '/assets/rpgen/char/09-woman-a.png',
+  '/assets/rpgen/char/04-child.png',
+  '/assets/rpgen/char/02-merchant.png',
+  '/assets/rpgen/char/11-woman-b.png',
+];
+
 export function cloneManifest(m: MvManifest): MvManifest {
   return JSON.parse(JSON.stringify(m)) as MvManifest;
 }

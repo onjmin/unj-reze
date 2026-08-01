@@ -160,5 +160,6 @@ then run `pnpm typecheck` and `pnpm lint`.
 - [docs/ANTI_ABUSE.md](docs/ANTI_ABUSE.md) — abuse-scoring design and threat model.
 - [docs/dsl-current-state.md](docs/dsl-current-state.md) — asset-reference / DSL layering.
 - [docs/game-feature-design.md](docs/game-feature-design.md) — game↔post binding (`games` table).
+- [docs/mv-feature-design.md](docs/mv-feature-design.md) — music-video feature: layer/section model, audio modes,音→絵モジュレータ, `mvs` table.
 - [README.md](README.md) — deploy and local-setup instructions.
 - `.agents/skills/rpgen-search.md` — rpgen-search API and auth (local-only, gitignored).

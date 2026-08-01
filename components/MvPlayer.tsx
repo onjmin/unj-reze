@@ -2,11 +2,10 @@
 
 import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useRef, useState } from 'react';
 import { Loader2, Pause, Play } from 'lucide-react';
-import type { MmlPlayback } from '@onjmin/dtm';
-import { getStudio } from '@/lib/dtm';
 import { useAudioFocus } from '@/lib/audio-focus-context';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
-import { MV_H, MV_STEPS_PER_BEAT, MV_W, type MvManifest } from '@/lib/mv-config';
+import { startMvPlayback, type MvPlaybackHandle } from '@/lib/mv-audio';
+import { MV_H, MV_STEPS_PER_BEAT, MV_W, mvAudioMode, type MvManifest } from '@/lib/mv-config';
 import { collectMvImageUrls, drawMvFrame, EMPTY_SONG, parseMvSong, preloadMvImages, type MvSong } from '@/lib/mv-engine';
 
 export interface MvPlayerHandle {
@@ -39,7 +38,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const playbackRef = useRef<MmlPlayback | null>(null);
+  const playbackRef = useRef<MvPlaybackHandle | null>(null);
   const rafRef = useRef<number | null>(null);
   /** 直近の onTick。{ step, atMs } からフレーム時刻を補間する。 */
   const tickRef = useRef<{ step: number; atMs: number }>({ step: 0, atMs: 0 });
@@ -132,7 +131,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    playbackRef.current?.destroy();
+    playbackRef.current?.stop();
     playbackRef.current = null;
     tickRef.current = { step: 0, atMs: 0 };
     setPlaying(false);
@@ -152,18 +151,22 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
     setLoading(true);
     focusRef.current.requestFocus(instanceId, () => stop());
 
-    getStudio().then(studio => {
-      if (playTokenRef.current !== token) return;
-      const playback = studio.play(mml, {
-        volume: applyMasterVolume(50),
-        onTick: (step: number) => {
-          tickRef.current = { step, atMs: performance.now() };
-        },
-        onStop: () => {
-          onEndedRef.current?.();
-          stop();
-        },
-      });
+    startMvPlayback(mml, songRef.current.lyricTrackIds, {
+      mode: mvAudioMode(manifestRef.current),
+      volume: applyMasterVolume(50),
+      onTick: (step: number) => {
+        tickRef.current = { step, atMs: performance.now() };
+      },
+      onStop: () => {
+        onEndedRef.current?.();
+        stop();
+      },
+    }).then(playback => {
+      // 準備中に停止されていたら、遅れて出来た再生をすぐ捨てる
+      if (playTokenRef.current !== token) {
+        playback.stop();
+        return;
+      }
       playbackRef.current = playback;
       startMsRef.current = performance.now();
       tickRef.current = { step: 0, atMs: startMsRef.current };
@@ -223,7 +226,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   useEffect(() => () => {
     playTokenRef.current += 1;
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    playbackRef.current?.destroy();
+    playbackRef.current?.stop();
     playbackRef.current = null;
     focusRef.current.releaseFocus(instanceId);
   }, [instanceId]);
@@ -250,7 +253,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
           type="button"
           onClick={toggle}
           disabled={!ready && !playing}
-          className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-bold text-gray-100 backdrop-blur transition-colors hover:bg-black/85 active:scale-95 disabled:opacity-50"
+          className="absolute bottom-2 left-2 flex min-h-9 items-center gap-1.5 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-bold text-gray-100 backdrop-blur transition-colors hover:bg-black/85 active:scale-95 disabled:opacity-50"
         >
           {loading ? <Loader2 size={13} className="animate-spin" /> : playing ? <Pause size={13} /> : <Play size={13} />}
           <span>{loading ? '読み込み中' : playing ? '停止' : '再生'}</span>

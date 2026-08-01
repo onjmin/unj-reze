@@ -36,6 +36,14 @@ Neon の無料枠は **公衆網転送 5GB/月**。これを 1タブ・1ユー�
 > POSIX 正規表現側で `\s` ではなく `[[:space:]]` を使っているのは、
 > JS のテンプレートリテラルで `\s` が `s` に潰れるため。
 
+**`mvs.manifest` も同じ扱い。** `getMvsByIds` はサムネ用の `bgUrl` だけを
+`substring(m.manifest::text from '"bgUrl"...')` で抜き出す。MVの manifest には
+図形のモジュレータ・コード進行・歌詞レイヤーが入るので、一覧で引くと同じ事故になる。
+再生に必要な完全な manifest は、ユーザーが実際に展開したときだけ
+`/api/mvs/[id]`（`withEdgeCache` 付き）で取りにいく。
+
+`POST_COLUMNS` に足したのは `p.has_mv` と `p.mv_id` の2列だけ。
+
 ### 3. 集計は非正規化列で持つ
 
 ハート数は `posts.hearts_total`。`COUNT(*) FROM post_hearts` の相関サブクエリは使わない。

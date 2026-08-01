@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
-  BarChart3, Clapperboard, History, Image as ImageIcon, Layers, Music,
-  Plus, Trash2, Type, X,
+  BarChart3, ChevronDown, ChevronUp, Clapperboard, History, Image as ImageIcon,
+  Layers, ListMusic, Music, Plus, Shapes, Sparkles, Trash2, Type, X,
 } from 'lucide-react';
 import ContentPicker, { type PickResult } from './ContentPicker';
 import HistoryModal from './HistoryModal';
@@ -14,25 +14,45 @@ import { MV_PRESETS, buildMvPreset } from './mv-presets';
 import { refLabel } from '@/lib/asset-ref';
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from '@/lib/history';
 import {
-  MV_H, MV_MOTION_LABELS, MV_VISUALIZER_LABELS, MV_W, mvUid,
+  DEFAULT_MV_RING, DEFAULT_MV_VIEW,
+  MV_AUDIO_MODE_HINTS, MV_AUDIO_MODE_LABELS, MV_BLEND_LABELS, MV_EFFECT_STYLE_LABELS,
+  MV_H, MV_MOD_OP_LABELS, MV_MOD_SOURCE_LABELS, MV_MOD_TARGET_LABELS, MV_MOTION_LABELS,
+  MV_PROJECTION_LABELS, MV_ROOT_TO_PITCH, MV_SHAPE_FORM_LABELS, MV_TRIGGER_LABELS,
+  MV_VISUALIZER_LABELS, MV_W, mvAudioMode, mvUid,
+  type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvEffectLayer, type MvEffectStyle,
   type MvImageLayer, type MvLayer, type MvLyricsLayer, type MvManifest,
-  type MvMotion, type MvPresetKind, type MvSection, type MvTextLayer,
+  type MvModOp, type MvModSource, type MvModTarget, type MvModulator,
+  type MvMotion, type MvPresetKind, type MvProjection, type MvSection,
+  type MvShapeForm, type MvShapeLayer, type MvTextLayer, type MvTrigger,
   type MvVisualizerLayer, type MvVisualizerStyle,
 } from '@/lib/mv-config';
-import { parseMvSong, EMPTY_SONG, type MvSong } from '@/lib/mv-engine';
+import { parseMvSong, resolveLyricLines, EMPTY_SONG, type MvSong } from '@/lib/mv-engine';
 
 const MmlEditor = dynamic(() => import('./MmlEditor'), { ssr: false });
 
 type Tab = 'preset' | 'song' | 'stage' | 'layers' | 'lyrics' | 'sections';
 
+/**
+ * 編集モード。
+ * かんたん = 「見本を選ぶ → 曲を入れる → 絵を差し替える」だけで完成する3タブ。
+ * くわしい = レイヤー・歌詞・場面まで自分で組む。
+ * 既定はかんたん。MMLエディタの シンプル/上級者 切替と同じ考え方で、
+ * はじめて触る人がいきなり全部の設定に出会わないようにする。
+ */
+type EditMode = 'easy' | 'detail';
+
+const EASY_TABS: Tab[] = ['preset', 'song', 'stage'];
+
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'preset', label: 'プリセット' },
-  { id: 'song', label: '楽曲' },
-  { id: 'stage', label: '背景' },
+  { id: 'preset', label: '見本' },
+  { id: 'song', label: '曲' },
+  { id: 'stage', label: '見た目' },
   { id: 'layers', label: 'レイヤー' },
   { id: 'lyrics', label: '歌詞' },
   { id: 'sections', label: '場面' },
 ];
+
+const MODE_STORAGE_KEY = 'unj_mvmaker_mode';
 
 interface MvMakerProps {
   onClose: () => void;
@@ -50,8 +70,18 @@ const REF_BTN_CLASS = 'w-full flex items-center justify-center gap-1 py-1.5 roun
 const ADD_BTN_CLASS = 'w-full flex items-center justify-center gap-1 py-2 rounded-lg border border-dashed border-gray-600 text-[11px] text-gray-400 hover:bg-gray-100/5';
 const DEL_BTN_CLASS = 'shrink-0 grid place-items-center w-9 h-9 -my-1 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 active:bg-red-500/20 transition';
 
+// スマホでの押しやすさを優先し、ラベルは入力欄の上に置いて入力欄は全幅・高さ36px以上にする
+// （狭い画面でラベルと入力欄を横に並べると、どちらも潰れて読めなくなるため）。
+const FIELD_LABEL_CLASS = 'block text-[10px] text-gray-400';
+const FIELD_INPUT_CLASS = 'w-full min-h-9 bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-[12px] text-gray-100 outline-none';
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <p className="text-[12px] font-bold text-gray-200">{children}</p>;
+}
+
+/** 補足説明。専門用語を避けて「何が起きるか」を書くための共通スタイル。 */
+function Hint({ children }: { children: React.ReactNode }) {
+  return <p className="text-[10px] leading-relaxed text-gray-500">{children}</p>;
 }
 
 function NumField({ label, value, onChange, min, max, step = 1 }: {
@@ -59,10 +89,11 @@ function NumField({ label, value, onChange, min, max, step = 1 }: {
   min?: number; max?: number; step?: number;
 }) {
   return (
-    <label className="flex items-center gap-2 text-[10px] text-gray-400">
-      <span className="w-16 shrink-0">{label}</span>
+    <label className="block space-y-0.5">
+      <span className={FIELD_LABEL_CLASS}>{label}</span>
       <input
         type="number"
+        inputMode="decimal"
         value={value}
         min={min}
         max={max}
@@ -71,7 +102,7 @@ function NumField({ label, value, onChange, min, max, step = 1 }: {
           const n = Number(e.target.value);
           if (!Number.isNaN(n)) onChange(n);
         }}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-100 outline-none"
+        className={FIELD_INPUT_CLASS}
       />
     </label>
   );
@@ -79,15 +110,17 @@ function NumField({ label, value, onChange, min, max, step = 1 }: {
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <label className="flex items-center gap-2 text-[10px] text-gray-400">
-      <span className="w-16 shrink-0">{label}</span>
-      <input
-        type="color"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="w-9 h-9 rounded-lg border border-gray-700 bg-transparent cursor-pointer"
-      />
-      <span className="text-[10px] text-gray-500">{value}</span>
+    <label className="block space-y-0.5">
+      <span className={FIELD_LABEL_CLASS}>{label}</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="h-9 w-12 shrink-0 cursor-pointer rounded-lg border border-gray-700 bg-transparent"
+        />
+        <span className="text-[10px] text-gray-500">{value}</span>
+      </div>
     </label>
   );
 }
@@ -96,12 +129,12 @@ function SelectField<T extends string>({ label, value, options, onChange }: {
   label: string; value: T; options: { value: T; label: string }[]; onChange: (v: T) => void;
 }) {
   return (
-    <label className="flex items-center gap-2 text-[10px] text-gray-400">
-      <span className="w-16 shrink-0">{label}</span>
+    <label className="block space-y-0.5">
+      <span className={FIELD_LABEL_CLASS}>{label}</span>
       <select
         value={value}
         onChange={e => onChange(e.target.value as T)}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-[11px] text-gray-100 outline-none"
+        className={FIELD_INPUT_CLASS}
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
@@ -111,22 +144,107 @@ function SelectField<T extends string>({ label, value, options, onChange }: {
 
 function CheckField({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="flex items-center gap-2 text-[11px] text-gray-300">
-      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="accent-blue-500" />
+    <label className="flex min-h-9 items-center gap-2 text-[12px] text-gray-300">
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="h-4 w-4 accent-blue-500" />
       {label}
     </label>
+  );
+}
+
+/**
+ * 詳しい設定のたたみ込み。
+ * 既定は閉じておき、「触らなくても完成する」状態を保つ。
+ */
+function Details({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded border border-gray-700/70 bg-gray-900/60">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex min-h-9 w-full items-center justify-between px-2 py-1.5 text-[11px] text-gray-300"
+      >
+        <span>{label}</span>
+        {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {open && <div className="space-y-2 border-t border-gray-700/70 p-2">{children}</div>}
+    </div>
   );
 }
 
 const MOTION_OPTIONS = (Object.keys(MV_MOTION_LABELS) as MvMotion[]).map(m => ({ value: m, label: MV_MOTION_LABELS[m] }));
 const VISUALIZER_OPTIONS = (Object.keys(MV_VISUALIZER_LABELS) as MvVisualizerStyle[]).map(s => ({ value: s, label: MV_VISUALIZER_LABELS[s] }));
 
+const PROJECTION_OPTIONS = (Object.keys(MV_PROJECTION_LABELS) as MvProjection[]).map(p => ({ value: p, label: MV_PROJECTION_LABELS[p] }));
+const SHAPE_FORM_OPTIONS = (Object.keys(MV_SHAPE_FORM_LABELS) as MvShapeForm[]).map(f => ({ value: f, label: MV_SHAPE_FORM_LABELS[f] }));
+const BLEND_OPTIONS = (Object.keys(MV_BLEND_LABELS) as MvBlend[]).map(b => ({ value: b, label: MV_BLEND_LABELS[b] }));
+const EFFECT_STYLE_OPTIONS = (Object.keys(MV_EFFECT_STYLE_LABELS) as MvEffectStyle[]).map(s => ({ value: s, label: MV_EFFECT_STYLE_LABELS[s] }));
+const TRIGGER_OPTIONS = (Object.keys(MV_TRIGGER_LABELS) as MvTrigger[]).map(t => ({ value: t, label: MV_TRIGGER_LABELS[t] }));
+const MOD_SOURCE_OPTIONS = (Object.keys(MV_MOD_SOURCE_LABELS) as MvModSource[]).map(s => ({ value: s, label: MV_MOD_SOURCE_LABELS[s] }));
+const MOD_TARGET_OPTIONS = (Object.keys(MV_MOD_TARGET_LABELS) as MvModTarget[]).map(t => ({ value: t, label: MV_MOD_TARGET_LABELS[t] }));
+const MOD_OP_OPTIONS = (Object.keys(MV_MOD_OP_LABELS) as MvModOp[]).map(o => ({ value: o, label: MV_MOD_OP_LABELS[o] }));
+const AUDIO_MODE_OPTIONS = (Object.keys(MV_AUDIO_MODE_LABELS) as MvAudioMode[]).map(m => ({ value: m, label: MV_AUDIO_MODE_LABELS[m] }));
+
 const LAYER_ICON = {
   image: ImageIcon,
   text: Type,
   visualizer: BarChart3,
   lyrics: Music,
+  shape: Shapes,
+  effect: Sparkles,
+  chordBar: ListMusic,
 } as const;
+
+/** 図形の「音との連動」1行ぶんの編集UI。 */
+function ModulatorRow({ mod, tracks, onChange, onRemove }: {
+  mod: MvModulator;
+  tracks: number[];
+  onChange: (patch: Partial<MvModulator>) => void;
+  onRemove: () => void;
+}) {
+  const needsTrack = mod.source === 'trackEnergy' || mod.source === 'trackOnset' || mod.source === 'trackPitch';
+  const selectClass = 'min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none';
+  return (
+    <div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
+      <div className="flex items-center gap-1">
+        <select value={mod.source} onChange={e => onChange({ source: e.target.value as MvModSource })} className={selectClass}>
+          {MOD_SOURCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {needsTrack && (
+          <select
+            value={mod.track ?? ''}
+            onChange={e => onChange({ track: e.target.value === '' ? undefined : Number(e.target.value) })}
+            className="min-h-9 w-20 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+          >
+            <option value="">全部</option>
+            {tracks.map(t => <option key={t} value={t}>@{t}</option>)}
+          </select>
+        )}
+        <button onClick={onRemove} className="shrink-0 grid h-7 w-7 place-items-center rounded text-gray-500 hover:text-red-400">
+          <X size={13} />
+        </button>
+      </div>
+      <div className="flex items-center gap-1">
+        <select value={mod.target} onChange={e => onChange({ target: e.target.value as MvModTarget })} className={selectClass}>
+          {MOD_TARGET_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select value={mod.op} onChange={e => onChange({ op: e.target.value as MvModOp })} className="min-h-9 w-24 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none">
+          {MOD_OP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <input
+          type="number"
+          value={mod.amount}
+          step={0.5}
+          onChange={e => {
+            const n = Number(e.target.value);
+            if (!Number.isNaN(n)) onChange({ amount: n });
+          }}
+          className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+        />
+      </div>
+    </div>
+  );
+}
 
 function layerLabel(layer: MvLayer): string {
   switch (layer.kind) {
@@ -134,6 +252,9 @@ function layerLabel(layer: MvLayer): string {
     case 'text': return layer.text.split('\n')[0] || 'テキスト';
     case 'visualizer': return MV_VISUALIZER_LABELS[layer.style];
     case 'lyrics': return '歌詞';
+    case 'shape': return MV_SHAPE_FORM_LABELS[layer.form];
+    case 'effect': return MV_EFFECT_STYLE_LABELS[layer.style];
+    case 'chordBar': return 'コード進行バー';
   }
 }
 
@@ -148,6 +269,8 @@ function layerLabel(layer: MvLayer): string {
 export default function MvMaker({ onClose, onSave, userId, initialManifest, isEditing }: MvMakerProps) {
   const [manifest, setManifest] = useState<MvManifest>(() => initialManifest ?? buildMvPreset('geometric'));
   const [tab, setTab] = useState<Tab>(initialManifest ? 'song' : 'preset');
+  const [editMode, setEditMode] = useState<EditMode>('easy');
+  const [presetName, setPresetName] = useState<string | null>(null);
   const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: 'stageBg' | { layerId: string } } | null>(null);
   const [showMmlEditor, setShowMmlEditor] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -159,6 +282,21 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const storageKey = getStorageKey('mv');
   const manifestRef = useRef(manifest);
   useEffect(() => { manifestRef.current = manifest; }, [manifest]);
+
+  // 前回選んだ編集モードを覚えておく（毎回切り替え直させない）
+  useEffect(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(MODE_STORAGE_KEY) : null;
+    if (saved === 'detail') Promise.resolve().then(() => setEditMode('detail'));
+  }, []);
+
+  const changeEditMode = (next: EditMode) => {
+    setEditMode(next);
+    if (typeof localStorage !== 'undefined') localStorage.setItem(MODE_STORAGE_KEY, next);
+    // かんたんへ戻したとき、詳しい側のタブに居たら見た目タブへ寄せる
+    if (next === 'easy' && !EASY_TABS.includes(tab)) setTab('stage');
+  };
+
+  const visibleTabs = editMode === 'easy' ? TABS.filter(t => EASY_TABS.includes(t.id)) : TABS;
 
   const update = useCallback((patch: (m: MvManifest) => MvManifest) => {
     setManifest(prev => patch(prev));
@@ -245,12 +383,79 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
     setSelectedLayerId(layer.id);
   };
 
+  const updateRepeat = (id: string, patch: Partial<NonNullable<MvImageLayer['repeat']>>) => {
+    updateLayer(id, l => (l.kind === 'image' && l.repeat ? { ...l, repeat: { ...l.repeat, ...patch } } : l));
+  };
+
+  const updateView = (id: string, patch: Partial<MvVisualizerLayer['view'] & object>) => {
+    updateLayer(id, l => (l.kind === 'visualizer' ? { ...l, view: { ...DEFAULT_MV_VIEW, ...l.view, ...patch } } : l));
+  };
+
+  const updateRing = (id: string, patch: Partial<MvVisualizerLayer['ring'] & object>) => {
+    updateLayer(id, l => (l.kind === 'visualizer' ? { ...l, ring: { ...DEFAULT_MV_RING, ...l.ring, ...patch } } : l));
+  };
+
+  const addMod = (id: string) => {
+    updateLayer(id, l => (l.kind === 'shape'
+      ? { ...l, modulators: [...l.modulators, { source: 'trackEnergy', target: 'size', op: 'add', amount: 20 } as MvModulator] }
+      : l));
+  };
+
+  const updateMod = (id: string, index: number, patch: Partial<MvModulator>) => {
+    updateLayer(id, l => (l.kind === 'shape'
+      ? { ...l, modulators: l.modulators.map((m, i) => (i === index ? { ...m, ...patch } : m)) }
+      : l));
+  };
+
+  const removeMod = (id: string, index: number) => {
+    updateLayer(id, l => (l.kind === 'shape'
+      ? { ...l, modulators: l.modulators.filter((_, i) => i !== index) }
+      : l));
+  };
+
+  const addShapeLayer = () => {
+    const layer: MvShapeLayer = {
+      kind: 'shape', id: mvUid('shp'), form: 'ring',
+      x: MV_W / 2, y: MV_H / 2, size: 48, rotation: 0,
+      color: manifest.stage.palette[0] ?? '#ffffff',
+      filled: false, thickness: 2, count: 1, spread: 0, spin: 0,
+      blend: 'normal', z: 15,
+      // 最初から音に反応させる。ここへ演算を足していくのが図形レイヤーの使い方。
+      modulators: [{ source: 'beat', target: 'size', op: 'add', amount: 20 }],
+    };
+    update(m => ({ ...m, layers: [...m.layers, layer] }));
+    setSelectedLayerId(layer.id);
+  };
+
+  const addChordBarLayer = () => {
+    const layer: MvChordBarLayer = {
+      kind: 'chordBar', id: mvUid('chd'),
+      rect: { x: 0, y: MV_H - 22, w: MV_W, h: 22 },
+      chords: [{ bar: 0, label: 'C' }, { bar: 1, label: 'Am7' }, { bar: 2, label: 'F' }, { bar: 3, label: 'G7' }],
+      key: 'C', colorMode: 'degree', color: '#1f2937',
+      activeColor: '#3f6212', textColor: '#e5e7eb', size: 9, z: 60,
+    };
+    update(m => ({ ...m, layers: [...m.layers, layer] }));
+    setSelectedLayerId(layer.id);
+  };
+
+  const addEffectLayer = () => {
+    const layer: MvEffectLayer = {
+      kind: 'effect', id: mvUid('fx'), style: 'flash', trigger: 'bar',
+      amount: 0.5, decayBeats: 0.5, color: '#ffffff', z: 100,
+    };
+    update(m => ({ ...m, layers: [...m.layers, layer] }));
+    setSelectedLayerId(layer.id);
+  };
+
   const removeLayer = (id: string) => {
     update(m => ({ ...m, layers: m.layers.filter(l => l.id !== id) }));
     setSelectedLayerId(prev => (prev === id ? null : prev));
   };
 
+  const imageLayers = manifest.layers.filter((l): l is MvImageLayer => l.kind === 'image');
   const lyricsLayer = manifest.layers.find((l): l is MvLyricsLayer => l.kind === 'lyrics') ?? null;
+  const shownLyricLines = lyricsLayer ? resolveLyricLines(lyricsLayer, song) : [];
 
   const sectionOptions = useMemo(
     () => manifest.sections.map(s => ({ id: s.id, label: `${s.label}（${s.startBar}小節〜）` })),
@@ -261,26 +466,27 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
 
   const presetTab = (
     <div className="space-y-2">
-      <p className="text-[11px] text-gray-400">
-        プリセットを選ぶと、その形にまるごと作り替わります（いまの編集内容は失われます）。
-      </p>
+      <Hint>
+        まず見本をひとつ選びます。あとは「曲」タブで音楽を入れて、「見た目」タブで絵を差し替えれば完成です。
+      </Hint>
       {MV_PRESETS.map(p => {
-        const active = manifest.preset === p.kind;
+        const active = presetName === p.name;
         return (
           <button
-            key={p.kind}
+            key={p.name}
             onClick={() => {
-              if (!active && !confirm(`「${p.name}」に作り替えます。いまの編集内容は失われますが、よろしいですか？`)) return;
-              setManifest(buildMvPreset(p.kind));
+              if (!active && presetName && !confirm(`「${p.name}」に作り替えます。いまの編集内容は失われますが、よろしいですか？`)) return;
+              setManifest(p.build());
+              setPresetName(p.name);
               setSelectedLayerId(null);
               setTab('song');
             }}
-            className={`w-full text-left rounded-lg border p-2.5 transition-colors ${active
+            className={`w-full rounded-lg border p-3 text-left transition-colors ${active
               ? 'border-blue-500/70 bg-blue-500/10'
               : 'border-gray-700 bg-gray-900/60 hover:bg-gray-100/5'}`}
           >
-            <p className="text-[12px] font-bold text-gray-100">{p.name}{active && ' ✓'}</p>
-            <p className="mt-1 text-[10px] leading-relaxed text-gray-400">{p.description}</p>
+            <p className="text-[13px] font-bold text-gray-100">{p.name}{active && ' ✓'}</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-gray-400">{p.description}</p>
             {p.swapHint && <p className="mt-1 text-[10px] leading-relaxed text-blue-300/80">{p.swapHint}</p>}
           </button>
         );
@@ -291,16 +497,16 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const songTab = (
     <div className="space-y-2">
       <div className={SECTION_CLASS}>
-        <SectionTitle>🎵 楽曲（MML）</SectionTitle>
-        <p className="text-[10px] leading-relaxed text-gray-400">
-          MVの時間軸はこのMMLだけで決まります。拍・ビジュアライザ・歌詞の出るタイミングは、
-          すべてここのノートから計算されるのでズレません。
-        </p>
+        <SectionTitle>🎵 曲をえらぶ</SectionTitle>
+        <Hint>
+          映像は曲に合わせて自動で動きます。拍・光り方・歌詞の出るタイミングは全部この曲から計算されるので、
+          あなたがタイミングを合わせる必要はありません。
+        </Hint>
         <button onClick={() => setPicker({ mode: 'bgm', target: 'stageBg' })} className={REF_BTN_CLASS}>
-          <Music size={12} />投稿からMMLを参照
+          <Music size={12} />投稿された曲から選ぶ
         </button>
         <button onClick={() => setShowMmlEditor(true)} className={REF_BTN_CLASS}>
-          <Music size={12} />MMLエディタで作る / 編集する
+          <Music size={12} />自分で作る・編集する
         </button>
         {manifest.mml ? (
           <div className="rounded border border-gray-700 bg-gray-800 p-2">
@@ -316,10 +522,29 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           <p className="text-[10px] text-amber-400">MMLが未設定です。投稿するには曲が要ります。</p>
         )}
         {song.lyricTrackIds.length > 0 && (
-          <p className="text-[10px] leading-relaxed text-gray-500">
-            歌詞トラック（@@）を見つけました。歌詞タブで画面に出せます。
-            なお歌声としては鳴らず、MVでは「画面に出す文字」として使われます。
-          </p>
+          <Hint>この曲には歌詞が入っています。そのまま画面にも出ます。</Hint>
+        )}
+      </div>
+
+      <div className={SECTION_CLASS}>
+        <SectionTitle>🔊 音の出し方</SectionTitle>
+        {AUDIO_MODE_OPTIONS.map(opt => {
+          const active = mvAudioMode(manifest) === opt.value;
+          return (
+            <button
+              key={opt.value}
+              onClick={() => update(m => ({ ...m, audio: { mode: opt.value } }))}
+              className={`w-full rounded-lg border p-2 text-left transition-colors ${active
+                ? 'border-blue-500/70 bg-blue-500/10'
+                : 'border-gray-700 bg-gray-800 hover:bg-gray-100/5'}`}
+            >
+              <p className="text-[11px] font-bold text-gray-100">{opt.label}{active && ' ✓'}</p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400">{MV_AUDIO_MODE_HINTS[opt.value]}</p>
+            </button>
+          );
+        })}
+        {song.lyricTrackIds.length === 0 && mvAudioMode(manifest) === 'soundfontKoe' && (
+          <p className="text-[10px] text-gray-500">この曲には歌詞トラックが無いので、歌声は鳴りません。</p>
         )}
       </div>
 
@@ -337,9 +562,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           placeholder="クレジット（任意）"
           className={INPUT_CLASS}
         />
-        <p className="text-[10px] text-gray-500">
-          画面に出す文字はレイヤータブのテキストで別に持ちます。ここはフィードに出る名前です。
-        </p>
+        <Hint>タイムラインに出る名前です。画面の中に出る文字とは別物です。</Hint>
       </div>
     </div>
   );
@@ -361,37 +584,56 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             </button>
           </div>
         )}
-        <SelectField
-          label="合わせ方"
-          value={manifest.stage.bgFit}
-          options={[
-            { value: 'cover' as const, label: '画面いっぱい（はみ出す）' },
-            { value: 'contain' as const, label: '全体を収める' },
-            { value: 'tile' as const, label: 'タイル状に敷き詰め' },
-          ]}
-          onChange={v => update(m => ({ ...m, stage: { ...m.stage, bgFit: v } }))}
-        />
-        <NumField label="暗くする" value={manifest.stage.bgDim ?? 0} min={0} max={1} step={0.05}
-          onChange={v => update(m => ({ ...m, stage: { ...m.stage, bgDim: v } }))} />
+        <Details label="背景の細かい設定">
+          <SelectField
+            label="合わせ方"
+            value={manifest.stage.bgFit}
+            options={[
+              { value: 'cover' as const, label: '画面いっぱい（はみ出す）' },
+              { value: 'contain' as const, label: '全体を収める' },
+              { value: 'tile' as const, label: 'タイル状に敷き詰め' },
+            ]}
+            onChange={v => update(m => ({ ...m, stage: { ...m.stage, bgFit: v } }))}
+          />
+          <NumField label="暗くする" value={manifest.stage.bgDim ?? 0} min={0} max={1} step={0.05}
+            onChange={v => update(m => ({ ...m, stage: { ...m.stage, bgDim: v } }))} />
+          <SelectField
+            label="拍の演出"
+            value={manifest.stage.pulse}
+            options={[
+              { value: 'none' as const, label: 'なし' },
+              { value: 'breathe' as const, label: '呼吸（中央がふくらむ）' },
+              { value: 'flash' as const, label: '小節頭で光る' },
+            ]}
+            onChange={v => update(m => ({ ...m, stage: { ...m.stage, pulse: v } }))}
+          />
+        </Details>
       </div>
 
-      <div className={SECTION_CLASS}>
-        <SectionTitle>💓 拍の演出</SectionTitle>
-        <SelectField
-          label="演出"
-          value={manifest.stage.pulse}
-          options={[
-            { value: 'none' as const, label: 'なし' },
-            { value: 'breathe' as const, label: '呼吸（中央がふくらむ）' },
-            { value: 'flash' as const, label: '小節頭で光る' },
-          ]}
-          onChange={v => update(m => ({ ...m, stage: { ...m.stage, pulse: v } }))}
-        />
-      </div>
+      {/* かんたんモードでも絵を差し替えられるように、画像レイヤーだけここに出す */}
+      {imageLayers.length > 0 && (
+        <div className={SECTION_CLASS}>
+          <SectionTitle>🎭 出てくる絵</SectionTitle>
+          <Hint>タップすると、あなたの描いたドット絵や画像に差し替えられます。</Hint>
+          {imageLayers.map(l => (
+            <button
+              key={l.id}
+              onClick={() => setPicker({ mode: 'image', target: { layerId: l.id } })}
+              className="flex min-h-11 w-full items-center gap-2 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-left hover:bg-gray-100/5"
+            >
+              {l.url
+                ? <img src={l.url} alt="" className="h-8 w-8 shrink-0 rounded border border-gray-700 object-contain" />
+                : <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-dashed border-gray-600"><ImageIcon size={13} className="text-gray-500" /></div>}
+              <span className="min-w-0 flex-1 truncate text-[11px] text-gray-200">{refLabel(l.ref) || '画像を選ぶ'}</span>
+              <span className="shrink-0 text-[10px] text-blue-300">差し替え</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className={SECTION_CLASS}>
-        <SectionTitle>🎨 トラックの色</SectionTitle>
-        <p className="text-[10px] text-gray-400">ピアノロール・波紋・スペアナが、この並び順で色を使います。</p>
+        <SectionTitle>🎨 色</SectionTitle>
+        <Hint>曲のパートごとに、この順番で色が使われます。</Hint>
         <div className="flex flex-wrap gap-1.5">
           {manifest.stage.palette.map((c, i) => (
             <div key={i} className="flex items-center gap-1">
@@ -399,24 +641,30 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                 type="color"
                 value={c}
                 onChange={e => update(m => ({ ...m, stage: { ...m.stage, palette: m.stage.palette.map((p, j) => (j === i ? e.target.value : p)) } }))}
-                className="h-9 w-9 cursor-pointer rounded-lg border border-gray-700 bg-transparent"
+                className="h-10 w-10 cursor-pointer rounded-lg border border-gray-700 bg-transparent"
               />
               <button
                 onClick={() => update(m => ({ ...m, stage: { ...m.stage, palette: m.stage.palette.filter((_, j) => j !== i) } }))}
-                className="grid h-6 w-6 place-items-center rounded text-gray-500 hover:text-red-400"
+                className="grid h-8 w-8 place-items-center rounded text-gray-500 hover:text-red-400"
               >
-                <X size={12} />
+                <X size={13} />
               </button>
             </div>
           ))}
           <button
             onClick={() => update(m => ({ ...m, stage: { ...m.stage, palette: [...m.stage.palette, '#ffffff'] } }))}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5"
           >
-            <Plus size={14} />
+            <Plus size={15} />
           </button>
         </div>
       </div>
+
+      {editMode === 'easy' && (
+        <Hint>
+          もっと細かく作り込みたいときは、右上の「くわしい」を押すとレイヤー・歌詞・場面のタブが増えます。
+        </Hint>
+      )}
     </div>
   );
 
@@ -433,7 +681,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           return (
             <div key={layer.id} className={`flex items-center gap-2 rounded border px-2 py-1.5 ${active ? 'border-blue-500/70 bg-blue-500/10' : 'border-gray-700 bg-gray-800'}`}>
               <Icon size={13} className="shrink-0 text-gray-400" />
-              <button onClick={() => setSelectedLayerId(active ? null : layer.id)} className="min-w-0 flex-1 text-left">
+              <button onClick={() => setSelectedLayerId(active ? null : layer.id)} className="min-h-10 min-w-0 flex-1 py-1 text-left">
                 <span className="block truncate text-[11px] text-gray-200">{layerLabel(layer)}</span>
                 {layer.sections && layer.sections.length > 0 && (
                   <span className="block truncate text-[9px] text-gray-500">
@@ -449,6 +697,9 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           <button onClick={addImageLayer} className={ADD_BTN_CLASS}><Plus size={12} />画像</button>
           <button onClick={addTextLayer} className={ADD_BTN_CLASS}><Plus size={12} />文字</button>
           <button onClick={addVisualizerLayer} className={ADD_BTN_CLASS}><Plus size={12} />ビジュアライザ</button>
+          <button onClick={addShapeLayer} className={ADD_BTN_CLASS}><Plus size={12} />図形</button>
+          <button onClick={addEffectLayer} className={ADD_BTN_CLASS}><Plus size={12} />演出</button>
+          <button onClick={addChordBarLayer} className={ADD_BTN_CLASS}><Plus size={12} />コード進行</button>
         </div>
       </div>
 
@@ -469,6 +720,30 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                 onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, pixelated: v } as MvLayer))} />
               <CheckField label="歩行グラとしてアニメさせる" checked={!!selectedLayer.walk}
                 onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, walk: v ? { stdId: 'auto', dir: 's', fps: 4 } : undefined } as MvLayer))} />
+              <CheckField
+                label="同じ画像を並べる"
+                checked={!!selectedLayer.repeat}
+                onChange={v => updateLayer(selectedLayer.id, l => ({
+                  ...l,
+                  repeat: v ? { count: 5, dx: 42, dy: 0, scaleStep: 0, alphaStep: -0.12, phase: 0.25 } : undefined,
+                } as MvLayer))}
+              />
+              {selectedLayer.repeat && (
+                <Details label="並べ方を調整する">
+                  <NumField label="個数" value={selectedLayer.repeat.count} min={1} max={64}
+                    onChange={v => updateRepeat(selectedLayer.id, { count: v })} />
+                  <NumField label="横のずれ" value={selectedLayer.repeat.dx}
+                    onChange={v => updateRepeat(selectedLayer.id, { dx: v })} />
+                  <NumField label="縦のずれ" value={selectedLayer.repeat.dy}
+                    onChange={v => updateRepeat(selectedLayer.id, { dy: v })} />
+                  <NumField label="拡大の変化" value={selectedLayer.repeat.scaleStep ?? 0} step={0.1}
+                    onChange={v => updateRepeat(selectedLayer.id, { scaleStep: v })} />
+                  <NumField label="濃さの変化" value={selectedLayer.repeat.alphaStep ?? 0} step={0.05}
+                    onChange={v => updateRepeat(selectedLayer.id, { alphaStep: v })} />
+                  <NumField label="足踏みのずれ" value={selectedLayer.repeat.phase ?? 0} step={0.05}
+                    onChange={v => updateRepeat(selectedLayer.id, { phase: v })} />
+                </Details>
+              )}
             </>
           )}
 
@@ -502,18 +777,202 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                 波紋なら同時に出る輪の数、スペアナなら棒の本数です。
               </p>
               <CheckField label="光らせる" checked={!!selectedLayer.glow} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, glow: v } as MvLayer))} />
+
+              {selectedLayer.style === 'pianoRoll' && (
+                <>
+                  <SelectField label="見せ方" value={selectedLayer.projection ?? 'flat'} options={PROJECTION_OPTIONS}
+                    onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, projection: v } as MvLayer))} />
+                  {(selectedLayer.projection ?? 'flat') === 'perspective' && (
+                    <Details label="見る角度を調整する">
+                      <Hint>MIDITrail のように、ノートの板を好きな角度から見られます。</Hint>
+                      <NumField label="見下ろし" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).pitch} min={-89} max={89}
+                        onChange={v => updateView(selectedLayer.id, { pitch: v })} />
+                      <NumField label="回り込み" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).yaw} min={-89} max={89}
+                        onChange={v => updateView(selectedLayer.id, { yaw: v })} />
+                      <NumField label="傾き" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).roll} min={-180} max={180}
+                        onChange={v => updateView(selectedLayer.id, { roll: v })} />
+                      <NumField label="画角" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).fov} min={10} max={120}
+                        onChange={v => updateView(selectedLayer.id, { fov: v })} />
+                      <NumField label="奥行き" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).depth} min={100} step={50}
+                        onChange={v => updateView(selectedLayer.id, { depth: v })} />
+                      <NumField label="ノートの厚み" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).thickness} min={0} step={1}
+                        onChange={v => updateView(selectedLayer.id, { thickness: v })} />
+                    </Details>
+                  )}
+                  {selectedLayer.projection === 'circular' && (
+                    <Details label="円の形を調整する">
+                      <Hint>音の高さを円周に、時間を外側へ向かって並べます。</Hint>
+                      <NumField label="内側の半径" value={(selectedLayer.ring ?? DEFAULT_MV_RING).innerRadius} min={0}
+                        onChange={v => updateRing(selectedLayer.id, { innerRadius: v })} />
+                      <NumField label="円弧の角度" value={(selectedLayer.ring ?? DEFAULT_MV_RING).sweep} min={30} max={360}
+                        onChange={v => updateRing(selectedLayer.id, { sweep: v })} />
+                      <NumField label="回転" value={(selectedLayer.ring ?? DEFAULT_MV_RING).rotate} min={-360} max={360}
+                        onChange={v => updateRing(selectedLayer.id, { rotate: v })} />
+                    </Details>
+                  )}
+                </>
+              )}
             </>
           )}
 
-          {selectedLayer.kind !== 'lyrics' && (
+          {selectedLayer.kind === 'shape' && (
             <>
-              <SelectField label="動き" value={selectedLayer.kind === 'visualizer' ? 'none' : selectedLayer.motion}
-                options={MOTION_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'visualizer' ? l : ({ ...l, motion: v } as MvLayer)))} />
-              {selectedLayer.kind !== 'visualizer' && (
-                <NumField label="動きの強さ" value={selectedLayer.motionAmount ?? 0} step={1}
-                  onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, motionAmount: v } as MvLayer))} />
+              <SelectField label="形" value={selectedLayer.form} options={SHAPE_FORM_OPTIONS}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, form: v } as MvLayer))} />
+              <NumField label="X" value={selectedLayer.x} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, x: v } as MvLayer))} />
+              <NumField label="Y" value={selectedLayer.y} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, y: v } as MvLayer))} />
+              <NumField label="大きさ" value={selectedLayer.size} min={1} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, size: v } as MvLayer))} />
+              <NumField label="回転" value={selectedLayer.rotation} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, rotation: v } as MvLayer))} />
+              <ColorField label="色" value={selectedLayer.color} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
+              <CheckField label="塗りつぶす" checked={selectedLayer.filled} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, filled: v } as MvLayer))} />
+              <NumField label="線の太さ" value={selectedLayer.thickness} min={0.2} step={0.5} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, thickness: v } as MvLayer))} />
+              {selectedLayer.form === 'polygon' && (
+                <NumField label="角の数" value={selectedLayer.sides ?? 6} min={3} max={24} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, sides: v } as MvLayer))} />
               )}
+              <NumField label="個数" value={selectedLayer.count ?? 1} min={1} max={64} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, count: v } as MvLayer))} />
+              {(selectedLayer.count ?? 1) > 1 && (
+                <Details label="1個ごとのずらし方">
+                  <NumField label="大きさの差" value={selectedLayer.spread ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, spread: v } as MvLayer))} />
+                  <NumField label="回転の差" value={selectedLayer.spin ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, spin: v } as MvLayer))} />
+                  <NumField label="横のずれ" value={selectedLayer.offsetX ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, offsetX: v } as MvLayer))} />
+                  <NumField label="縦のずれ" value={selectedLayer.offsetY ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, offsetY: v } as MvLayer))} />
+                  <NumField label="反応の遅れ" value={selectedLayer.stagger ?? 0} min={0} step={4} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, stagger: v } as MvLayer))} />
+                  <Hint>「反応の遅れ」を入れると、端から順に反応が伝わる波のような動きになります。</Hint>
+                </Details>
+              )}
+              <SelectField label="重ね方" value={selectedLayer.blend ?? 'normal'} options={BLEND_OPTIONS}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, blend: v } as MvLayer))} />
+
+              <Details label={`音との連動（${selectedLayer.modulators.length}件）`}>
+                <Hint>
+                  「曲のどこが」「形のどこに」「どう効くか」を1行ずつ足していきます。
+                  上から順に計算するので、足し算のあとに掛け算を重ねる…といった組み方ができます。
+                  むずかしければ触らなくて大丈夫です。
+                </Hint>
+                {selectedLayer.modulators.map((mod, i) => (
+                  <ModulatorRow
+                    key={i}
+                    mod={mod}
+                    tracks={song.tracks}
+                    onChange={next => updateMod(selectedLayer.id, i, next)}
+                    onRemove={() => removeMod(selectedLayer.id, i)}
+                  />
+                ))}
+                <button onClick={() => addMod(selectedLayer.id)} className={ADD_BTN_CLASS}>
+                  <Plus size={13} />連動を追加
+                </button>
+              </Details>
+            </>
+          )}
+
+          {selectedLayer.kind === 'effect' && (
+            <>
+              <SelectField label="演出" value={selectedLayer.style} options={EFFECT_STYLE_OPTIONS}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, style: v } as MvLayer))} />
+              <SelectField label="タイミング" value={selectedLayer.trigger} options={TRIGGER_OPTIONS}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, trigger: v } as MvLayer))} />
+              {selectedLayer.trigger === 'note' && (
+                <div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
+                  <p className="text-[10px] text-gray-400">どのトラックの音で光らせるか（未選択なら全部）</p>
+                  {song.tracks.map(t => (
+                    <CheckField
+                      key={t}
+                      label={`トラック @${t}`}
+                      checked={!!selectedLayer.tracks?.includes(t)}
+                      onChange={v => updateLayer(selectedLayer.id, l => {
+                        if (l.kind !== 'effect') return l;
+                        const cur = l.tracks ?? [];
+                        const next = v ? [...cur, t] : cur.filter(x => x !== t);
+                        return { ...l, tracks: next.length > 0 ? next : undefined };
+                      })}
+                    />
+                  ))}
+                </div>
+              )}
+              <NumField label="強さ" value={selectedLayer.amount} min={0} max={1} step={0.05}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, amount: v } as MvLayer))} />
+              <NumField label="長さ（拍）" value={selectedLayer.decayBeats ?? 1} min={0.05} step={0.05}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, decayBeats: v } as MvLayer))} />
+              {selectedLayer.style !== 'invert' && (
+                <ColorField label="色" value={selectedLayer.color ?? '#ffffff'}
+                  onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
+              )}
+            </>
+          )}
+
+          {selectedLayer.kind === 'chordBar' && (
+            <>
+              <NumField label="X" value={selectedLayer.rect.x} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
+              <NumField label="Y" value={selectedLayer.rect.y} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, y: v } } : l))} />
+              <NumField label="幅" value={selectedLayer.rect.w} min={8} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, w: v } } : l))} />
+              <NumField label="高さ" value={selectedLayer.rect.h} min={8} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, h: v } } : l))} />
+              <NumField label="文字サイズ" value={selectedLayer.size} min={5} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, size: v } as MvLayer))} />
+              <SelectField label="キー" value={selectedLayer.key}
+                options={Object.keys(MV_ROOT_TO_PITCH).map(k => ({ value: k, label: k }))}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, key: v } as MvLayer))} />
+              <SelectField label="色分け" value={selectedLayer.colorMode}
+                options={[
+                  { value: 'degree' as const, label: '度数で色分け' },
+                  { value: 'fixed' as const, label: '全部同じ色' },
+                ]}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, colorMode: v } as MvLayer))} />
+              {selectedLayer.colorMode === 'fixed' && (
+                <ColorField label="ブロック色" value={selectedLayer.color} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
+              )}
+              <ColorField label="いまの色" value={selectedLayer.activeColor} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, activeColor: v } as MvLayer))} />
+              <ColorField label="文字色" value={selectedLayer.textColor} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, textColor: v } as MvLayer))} />
+
+              <p className="pt-1 text-[10px] font-bold text-gray-400">コード進行</p>
+              <p className="text-[10px] leading-relaxed text-gray-500">
+                小節番号とコード名を並べます。次のコードが始まるまでが1ブロックの長さです。
+              </p>
+              {selectedLayer.chords.map((c, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    value={c.bar}
+                    step={0.25}
+                    min={0}
+                    onChange={e => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                      ? { ...l, chords: l.chords.map((x, j) => (j === i ? { ...x, bar: Number(e.target.value) || 0 } : x)) }
+                      : l))}
+                    className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+                  />
+                  <input
+                    value={c.label}
+                    placeholder="F#m7"
+                    onChange={e => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                      ? { ...l, chords: l.chords.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }
+                      : l))}
+                    className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+                  />
+                  <button
+                    onClick={() => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                      ? { ...l, chords: l.chords.filter((_, j) => j !== i) }
+                      : l))}
+                    className={DEL_BTN_CLASS}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                  ? { ...l, chords: [...l.chords, { bar: l.chords.length, label: 'C' }] }
+                  : l))}
+                className={ADD_BTN_CLASS}
+              >
+                <Plus size={13} />コードを追加
+              </button>
+            </>
+          )}
+
+          {(selectedLayer.kind === 'image' || selectedLayer.kind === 'text') && (
+            <>
+              <SelectField label="動き" value={selectedLayer.motion} options={MOTION_OPTIONS}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, motion: v } as MvLayer))} />
+              <NumField label="動きの強さ" value={selectedLayer.motionAmount ?? 0} step={1}
+                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, motionAmount: v } as MvLayer))} />
             </>
           )}
 
@@ -576,17 +1035,34 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, source: v } as MvLayer))}
             />
             {lyricsLayer.source === 'mml' && (
-              song.lyricLines.length > 0 ? (
-                <div className="rounded border border-gray-700 bg-gray-800 p-2 text-[10px] text-gray-400">
-                  <p className="mb-1">MMLから {song.lyricLines.length} 行を読み取りました。</p>
-                  <ul className="max-h-28 space-y-0.5 overflow-y-auto">
-                    {song.lyricLines.map((line, i) => (
-                      <li key={i} className="truncate text-gray-300">
-                        <span className="mr-1.5 text-gray-500">{line.bar.toFixed(2)}小節</span>{line.text}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              song.lyricTrackIds.length > 0 ? (
+                <>
+                  <SelectField
+                    label="トラック"
+                    value={String(lyricsLayer.trackId ?? song.lyricTrackIds[0])}
+                    options={[
+                      ...song.lyricTrackIds.map(t => ({ value: String(t), label: `@@${t} のみ` })),
+                      { value: 'all', label: '全部（画面が埋まりがち）' },
+                    ]}
+                    onChange={v => updateLayer(lyricsLayer.id, l => ({
+                      ...l,
+                      trackId: v === 'all' ? 'all' : Number(v),
+                    } as MvLayer))}
+                  />
+                  <p className="text-[10px] leading-relaxed text-gray-500">
+                    歌詞トラックが複数あっても、画面に出すのはふつう1本だけです。
+                  </p>
+                  <div className="rounded border border-gray-700 bg-gray-800 p-2 text-[10px] text-gray-400">
+                    <p className="mb-1">このレイヤーが出す歌詞：{shownLyricLines.length} 行</p>
+                    <ul className="max-h-28 space-y-0.5 overflow-y-auto">
+                      {shownLyricLines.map((line, i) => (
+                        <li key={i} className="truncate text-gray-300">
+                          <span className="mr-1.5 text-gray-500">{line.bar.toFixed(2)}小節</span>{line.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
               ) : (
                 <p className="text-[10px] text-amber-400">
                   MMLに歌詞トラック（@@0 klatt …）がありません。MMLエディタで歌詞を付けるか、手入力に切り替えてください。
@@ -605,14 +1081,14 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                       onChange={e => updateLayer(lyricsLayer.id, l => (l.kind === 'lyrics'
                         ? { ...l, lines: (l.lines ?? []).map((x, j) => (j === i ? { ...x, bar: Number(e.target.value) || 0 } : x)) }
                         : l))}
-                      className="w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+                      className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
                     />
                     <input
                       value={line.text}
                       onChange={e => updateLayer(lyricsLayer.id, l => (l.kind === 'lyrics'
                         ? { ...l, lines: (l.lines ?? []).map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) }
                         : l))}
-                      className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+                      className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
                     />
                     <button
                       onClick={() => updateLayer(lyricsLayer.id, l => (l.kind === 'lyrics'
@@ -664,14 +1140,14 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             <input
               value={s.label}
               onChange={e => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }))}
-              className="min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+              className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
             />
             <input
               type="number"
               value={s.startBar}
               min={0}
               onChange={e => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, startBar: Math.max(0, Number(e.target.value) || 0) } : x)) }))}
-              className="w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+              className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
             />
             <span className="shrink-0 text-[10px] text-gray-500">小節</span>
             {manifest.sections.length > 1 && (
@@ -716,6 +1192,21 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
         <span className="mx-1.5 text-[10px] text-gray-600">›</span>
         <span className="text-xs text-gray-400">MV作成</span>
         <div className="flex-1" />
+        {/* 編集モードは常に見える位置に置く（タブ行に入れると狭い画面で流れて押せなくなる） */}
+        <div className="mr-2 flex shrink-0 items-center rounded-full bg-gray-800 p-0.5">
+          <button
+            onClick={() => changeEditMode('easy')}
+            className={`min-h-8 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${editMode === 'easy' ? 'bg-gray-200 text-gray-900' : 'text-gray-400'}`}
+          >
+            かんたん
+          </button>
+          <button
+            onClick={() => changeEditMode('detail')}
+            className={`min-h-8 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${editMode === 'detail' ? 'bg-gray-200 text-gray-900' : 'text-gray-400'}`}
+          >
+            くわしい
+          </button>
+        </div>
         <div className="mr-2"><VolumeControl /></div>
         <button
           onClick={() => setShowHistory(true)}
@@ -760,13 +1251,13 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
         </div>
       </div>
 
-      {/* タブ */}
-      <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-gray-800 px-2 py-1.5">
-        {TABS.map(t => (
+      {/* タブ＋編集モード切替 */}
+      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-gray-800 px-2 py-1.5">
+        {visibleTabs.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-bold transition-colors ${tab === t.id ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+            className={`min-h-9 shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-bold transition-colors ${tab === t.id ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
           >
             {t.label}
           </button>

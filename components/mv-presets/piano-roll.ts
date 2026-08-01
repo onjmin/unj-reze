@@ -20,6 +20,7 @@ const MANIFEST: MvManifest = {
   title: '無題のアレンジ',
   credit: 'Arranged by あなた',
   mml: MML,
+  audio: { mode: 'soundfontKoe' },
   stage: {
     bgColor: '#1b2733',
     bgFit: 'cover',
@@ -38,6 +39,18 @@ const MANIFEST: MvManifest = {
       glow: true,
       z: 10,
       opacity: 0.95,
+      // 平面のまま。レイヤー設定で「立体（3D）」「円形」に切り替えられる。
+      projection: 'flat',
+    },
+    // 小節の頭で画面がすっと光る（参考動画の決めの瞬間）
+    {
+      kind: 'effect',
+      id: 'accent-flash',
+      style: 'flash',
+      trigger: 'bar',
+      amount: 0.22,
+      decayBeats: 0.5,
+      color: '#ffffff',
     },
     {
       kind: 'image',
@@ -90,6 +103,6 @@ export const PIANO_ROLL_PRESET: MvPresetEntry = {
   kind: 'pianoRoll',
   name: 'ピアノロール',
   description: '静止画の上に、曲のノートが横スクロールで流れる。アレンジ動画の定番レイアウト。',
-  swapHint: '背景に1枚絵を、右のキャラをあなたのドット絵に差し替えると一気に完成します。',
+  swapHint: '背景に1枚絵を、右のキャラをあなたのドット絵に差し替えると一気に完成します。ロールは立体・円形にも切り替えられます。',
   build: () => cloneManifest(MANIFEST),
 };
