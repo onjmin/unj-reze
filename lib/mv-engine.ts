@@ -10,9 +10,8 @@ import {
   DEFAULT_MV_RING,
   DEFAULT_MV_VIEW,
   MV_BLEND_COMPOSITE,
-  MV_DEGREE_HUE,
   MV_H,
-  chordDegree,
+  getChordThemeColor,
   MV_STEPS_PER_BAR,
   MV_STEPS_PER_BEAT,
   MV_W,
@@ -666,7 +665,9 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
   ctx.fillRect(x, y, w, h);
 
   ctx.textBaseline = 'middle';
-  ctx.font = `${layer.size}px ${FONT_STACK}`;
+  ctx.font = `${layer.size}px ${getMvFontStack()}`;
+
+  let lastThemeColor: string | undefined;
 
   for (let i = 0; i < chords.length; i++) {
     const c = chords[i];
@@ -679,14 +680,18 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
     const active = d.bar >= c.bar && d.bar < nextBar;
 
     let fill: string;
-    if (layer.colorMode === 'degree') {
-      const deg = chordDegree(c.label, layer.key);
-      // スケール外のコードは彩度を落として区別する
-      fill = deg === null
-        ? 'hsl(0, 0%, 22%)'
-        : `hsl(${MV_DEGREE_HUE[deg]}, 45%, 24%)`;
-    } else {
+    if (layer.colorMode === 'fixed') {
       fill = active ? layer.activeColor : layer.color;
+    } else {
+      const themeColor = getChordThemeColor(c.label, layer.key, layer.colorMode, lastThemeColor);
+      lastThemeColor = themeColor;
+      if (active) {
+        fill = layer.activeColor && layer.activeColor !== '#3b82f6'
+          ? layer.activeColor
+          : themeColor.replace(/(\d+)%\)/, (_, l) => `${Math.min(90, Number(l) + 20)}%)`);
+      } else {
+        fill = themeColor;
+      }
     }
 
     ctx.fillStyle = fill;
@@ -838,7 +843,15 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
 
 // ───────────────── テキストレイヤー ─────────────────
 
-const FONT_STACK = '"Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif';
+export function getMvFontStack(): string {
+  if (typeof document !== 'undefined') {
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--font-pixel').trim();
+    if (raw) return `${raw}, "DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif`;
+  }
+  return '"DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif';
+}
+
+const FONT_STACK = 'var(--font-pixel), "DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif';
 
 function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
   const { ctx } = d;

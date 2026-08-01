@@ -10,6 +10,7 @@
 // 詳細: docs/mv-feature-design.md
 
 import type { WayKey } from './walk-sprite';
+import { parseChord } from '@onjmin/chord-parser';
 
 /** MVの論理解像度(16:9)。描画は常にこの座標系で行い、表示側が CSS transform で拡大する。 */
 export const MV_W = 640;
@@ -476,10 +477,27 @@ export interface MvChordStep {
   label: string;
 }
 
+export type MvChordColorMode =
+  | 'iwashi'
+  | 'budou'
+  | 'kotori'
+  | 'asayake'
+  | 'degree'
+  | 'fixed';
+
+export const MV_CHORD_COLOR_MODE_LABELS: Record<MvChordColorMode, string> = {
+  iwashi: 'イワシがつちからはえてくるんだ風',
+  budou: 'ブドウがかげからのぞいてるんだ風',
+  kotori: 'ことりがそらへとおちてゆく風',
+  asayake: 'あさやけもゆうやけもないんだ風',
+  degree: '度数で色分け',
+  fixed: '単色',
+};
+
 /**
  * 画面下のコード進行バー。
  * ブロックを小節位置で並べ、いま鳴っているコードを強調する。
- * 色は「キーに対する度数」で決める（utau-kit の chord-progression-animation-tool と同じ考え方）。
+ * 色はテーマまたは「キーに対する度数」で決める（utau-kit の chord-progression-animation-tool と同じ考え方）。
  */
 export interface MvChordBarLayer extends MvLayerBase {
   kind: 'chordBar';
@@ -487,8 +505,8 @@ export interface MvChordBarLayer extends MvLayerBase {
   chords: MvChordStep[];
   /** 度数の基準キー（"C" / "F#" など）。色分けに使う。 */
   key: string;
-  /** 'degree' = 度数で色分け / 'fixed' = 全部同じ色 */
-  colorMode: 'degree' | 'fixed';
+  /** カラーテーマまたは色分けモード */
+  colorMode: MvChordColorMode;
   /** colorMode==='fixed' のときの色、および degree のときのベース明度用。 */
   color: string;
   /** いま鳴っているブロックの色。 */
@@ -532,6 +550,85 @@ export function chordDegree(label: string, key: string): number | null {
   const diff = (root - keyPitch + 12) % 12;
   const scaleMap: (number | null)[] = [1, null, 2, null, 3, 4, null, 5, null, 6, null, 7];
   return scaleMap[diff];
+}
+
+function qualityToHue(quality: string): number {
+  if (quality.includes('maj7') || quality.includes('Δ') || quality.includes('△')) return 120;
+  if (quality.includes('maj') || quality.includes('M')) return 110;
+  if (quality.includes('m7') || quality.includes('-7')) return 200;
+  if (quality.includes('7')) return 330;
+  if (quality.includes('dim') || quality.includes('〇')) return 280;
+  return 50;
+}
+
+/**
+ * utau-kit の chord-progression-animation-tool に基づくコード色相テーマ計算。
+ * @onjmin/chord-parser の parseChord を使ってルート音とクオリティを正確に分解する。
+ */
+export function getChordThemeColor(
+  label: string,
+  key: string,
+  colorMode: MvChordColorMode,
+  lastColor?: string
+): string {
+  let rootPitch = MV_ROOT_TO_PITCH[chordRootName(label)] ?? 0;
+  const quality = label.slice(chordRootName(label).length);
+  try {
+    const parsed = parseChord(label);
+    rootPitch = parsed.root;
+  } catch {
+    // parse 失敗時はフォールバック
+  }
+
+  const deg = chordDegree(label, key);
+
+  switch (colorMode) {
+    case 'iwashi': {
+      // イワシがつちからはえてくるんだ風
+      let h = qualityToHue(quality);
+      if (deg === 6 && quality.includes('m7')) {
+        h = (h + 30) % 360;
+      }
+      h = (h + rootPitch * 2) % 360;
+      return `hsl(${h}, 65%, 35%)`;
+    }
+    case 'budou': {
+      // ブドウがかげからのぞいてるんだ風
+      if (deg === 6 && quality === 'm7') return `hsl(220, 65%, 35%)`;
+      if (quality.includes('maj')) return `hsl(140, 65%, 35%)`;
+      if (quality.includes('dim')) return `hsl(280, 65%, 32%)`;
+      if (quality.includes('m7')) return `hsl(210, 65%, 35%)`;
+      if (quality.includes('7')) return `hsl(10, 65%, 35%)`;
+      return `hsl(50, 65%, 35%)`;
+    }
+    case 'kotori': {
+      // ことりがそらへとおちてゆく風
+      const degreeHueMap: Record<number, number> = {
+        1: 0, 2: 40, 3: 80, 4: 120, 5: 160, 6: 200, 7: 240,
+      };
+      const d = deg ?? 1;
+      const baseHue = degreeHueMap[d] ?? 0;
+      const baseColor = `hsl(${baseHue}, 65%, 35%)`;
+      if (baseColor === lastColor) {
+        return `hsl(${baseHue}, 65%, 26%)`;
+      }
+      return baseColor;
+    }
+    case 'asayake': {
+      // あさやけもゆうやけもないんだ風
+      if (deg === 3) return `hsl(200, 65%, 35%)`;
+      if (quality.includes('maj7')) return `hsl(100, 65%, 35%)`;
+      if (quality.includes('m7')) return `hsl(210, 65%, 32%)`;
+      return `hsl(40, 65%, 35%)`;
+    }
+    case 'degree': {
+      if (deg === null) return 'hsl(0, 0%, 25%)';
+      return `hsl(${MV_DEGREE_HUE[deg]}, 55%, 32%)`;
+    }
+    case 'fixed':
+    default:
+      return '';
+  }
 }
 
 /** 場面の切替点。キーフレームではなく「ここから別の絵になる」という区切りだけを持つ。 */

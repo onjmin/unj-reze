@@ -12,14 +12,15 @@ import MvPlayer from './MvPlayer';
 import VolumeControl from './VolumeControl';
 import { MV_PRESETS, buildMvPreset } from './mv-presets';
 import { refLabel } from '@/lib/asset-ref';
+import { parseChords, detectProgression } from '@onjmin/chord-parser';
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from '@/lib/history';
 import {
   DEFAULT_MV_RING, DEFAULT_MV_VIEW,
-  MV_AUDIO_MODE_HINTS, MV_AUDIO_MODE_LABELS, MV_BLEND_LABELS, MV_EFFECT_STYLE_LABELS,
+  MV_AUDIO_MODE_HINTS, MV_AUDIO_MODE_LABELS, MV_BLEND_LABELS, MV_CHORD_COLOR_MODE_LABELS, MV_EFFECT_STYLE_LABELS,
   MV_H, MV_MOD_OP_LABELS, MV_MOD_SOURCE_LABELS, MV_MOD_TARGET_LABELS, MV_MOTION_LABELS,
   MV_PROJECTION_LABELS, MV_ROOT_TO_PITCH, MV_SHAPE_FORM_LABELS, MV_TRIGGER_LABELS,
-  MV_VISUALIZER_LABELS, MV_W, mvAudioMode, mvUid,
-  type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvEffectLayer, type MvEffectStyle,
+  MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, mvAudioMode, mvUid,
+  type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvChordColorMode, type MvChordStep, type MvEffectLayer, type MvEffectStyle,
   type MvImageLayer, type MvLayer, type MvLyricsLayer, type MvManifest,
   type MvModOp, type MvModSource, type MvModTarget, type MvModulator,
   type MvMotion, type MvPresetKind, type MvProjection, type MvSection,
@@ -277,6 +278,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [song, setSong] = useState<MvSong>(EMPTY_SONG);
   const [hasAutosave, setHasAutosave] = useState(false);
+  const [bulkChordInput, setBulkChordInput] = useState('');
   const autosaveDataRef = useRef<MvManifest | null>(null);
 
   const storageKey = getStorageKey('mv');
@@ -305,6 +307,48 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const updateLayer = useCallback((id: string, patch: (l: MvLayer) => MvLayer) => {
     update(m => ({ ...m, layers: m.layers.map(l => (l.id === id ? patch(l) : l)) }));
   }, [update]);
+
+  const handleParseBulkChords = useCallback((rawText: string, layerId: string) => {
+    if (!rawText.trim()) return;
+    try {
+      const events = parseChords(rawText, 120);
+      if (events.length > 0) {
+        const secPerBar = 2; // 120bpm -> 4 beats = 2sec per bar
+        const newChords: MvChordStep[] = events.map(e => ({
+          bar: Math.round((e.when / secPerBar) * 100) / 100,
+          label: (e.key + e.chord) || 'C',
+        }));
+        updateLayer(layerId, l => (l.kind === 'chordBar' ? { ...l, chords: newChords } : l));
+      }
+    } catch (e) {
+      console.warn('Failed to parse bulk chords:', e);
+    }
+  }, [updateLayer]);
+
+  const handleAutoDetectFromMml = useCallback(async (layerId: string) => {
+    if (!manifestRef.current.mml) return;
+    try {
+      const parsedSong = await parseMvSong(manifestRef.current.mml);
+      if (!parsedSong || parsedSong.notes.length === 0) return;
+      const bpm = parsedSong.bpm || 120;
+      const secPerBar = (4 * 60) / bpm;
+      const timedNotes = parsedSong.notes.map(n => ({
+        pitch: n.pitch,
+        when: (n.startStep / MV_STEPS_PER_BAR) * secPerBar,
+        duration: (n.durationSteps / MV_STEPS_PER_BAR) * secPerBar,
+      }));
+      const analysis = detectProgression(timedNotes, { bpm });
+      if (analysis && analysis.chords.length > 0) {
+        const newChords: MvChordStep[] = analysis.chords.map(c => ({
+          bar: Math.round((c.when / secPerBar) * 100) / 100,
+          label: c.symbol,
+        }));
+        updateLayer(layerId, l => (l.kind === 'chordBar' ? { ...l, chords: newChords } : l));
+      }
+    } catch (e) {
+      console.warn('Failed to auto detect chords from MML:', e);
+    }
+  }, [updateLayer]);
 
   // ── 楽曲情報（表示用） ─────────────────────────────────
   useEffect(() => {
