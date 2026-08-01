@@ -53,6 +53,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
    * 遅れて返ってきた studio で鳴らし始めないようにする。
    */
   const playTokenRef = useRef(0);
+  const wasPlayingRef = useRef(false);
   const autoPlayedRef = useRef(false);
 
   const [ready, setReady] = useState(false);
@@ -149,7 +150,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   }, [instanceId, paintPoster]);
 
   // ── 再生 ────────────────────────────────────────────────
-  const play = useCallback(() => {
+  const play = useCallback((startStep?: number) => {
     if (playbackRef.current) return;
     const mml = manifestRef.current.mml?.trim();
     if (!mml) return;
@@ -164,6 +165,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
       // サイトのマスター音量をそのまま渡す。MML自身の #volume= との合成は mv-audio 側で行う。
       // ここで 50 のような係数を掛けると、ContentPicker の試聴より小さく鳴ってしまう。
       volume: applyMasterVolume(100),
+      startStep,
       onTick: (step: number) => {
         tickRef.current = { step, atMs: performance.now() };
       },
@@ -252,7 +254,14 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
     focusRef.current.releaseFocus(instanceId);
   }, [instanceId]);
 
-  const toggle = () => (playing ? stop(true) : play());
+  const toggle = () => {
+    if (playing) {
+      stop(false); // Pause instead of fully resetting
+    } else {
+      const currentStep = seekBarRef.current ? Number(seekBarRef.current.value) : 0;
+      play(currentStep > 0 ? currentStep : undefined);
+    }
+  };
   const hasMml = !!manifest.mml?.trim();
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -305,7 +314,14 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
             disabled={!ready}
             defaultValue="0"
             onPointerDown={() => {
+              wasPlayingRef.current = playing;
               if (playing) stop(false);
+            }}
+            onPointerUp={(e) => {
+              if (wasPlayingRef.current) {
+                const step = Number(e.currentTarget.value);
+                play(step);
+              }
             }}
             onChange={handleSeek}
             className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-white/30 accent-blue-500 hover:h-2 transition-all focus:outline-none"

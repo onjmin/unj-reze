@@ -15,6 +15,7 @@ export interface MvPlaybackOptions {
   mode: MvAudioMode;
   /** サイトのマスター音量 0-100（applyMasterVolume(100) の値をそのまま渡す）。 */
   volume: number;
+  startStep?: number;
   onTick: (step: number) => void;
   onStop: () => void;
 }
@@ -81,20 +82,20 @@ export async function startMvPlayback(
   lyricTrackIds: number[],
   options: MvPlaybackOptions,
 ): Promise<MvPlaybackHandle> {
-  const { mode, volume, onTick, onStop } = options;
+  const { mode, volume, startStep, onTick, onStop } = options;
   // 楽器側は `#volume=` が options.volume を上書きしてしまうので、MML自体を書き換えて渡す
   const scaled = withMmlVolume(mml, effectiveMmlVolume(mml, volume));
 
   if (mode === 'light') {
     const { playMML } = await import('@onjmin/dtm');
-    const playback = playMML(scaled, { volume, synth: true, onTick, onStop });
+    const playback = playMML(scaled, { volume, startStep, synth: true, onTick, onStop });
     return handleOf([{ playback, scaleWithMml: true }], mml);
   }
 
   const studio = await getStudio();
 
   if (mode === 'soundfont') {
-    const playback = studio.play(scaled, { volume, onTick, onStop });
+    const playback = studio.play(scaled, { volume, startStep, onTick, onStop });
     return handleOf([{ playback, scaleWithMml: true }], mml);
   }
 
@@ -108,7 +109,7 @@ export async function startMvPlayback(
   );
 
   // 進行のクロックは楽器側から取る（歌声側は onTick を出さない設定で走らせる）
-  const instruments = studio.play(instrumentMml, { volume, onTick, onStop });
+  const instruments = studio.play(instrumentMml, { volume, startStep, onTick, onStop });
 
   let vocals: MmlPlayback | null = null;
   try {
@@ -117,6 +118,7 @@ export async function startMvPlayback(
       audioContext: studio.audioContext,
       singingVoices: studio.singingVoices,
       volume,
+      startStep,
       // 楽器は上の studio.play が担当するので、こちらは歌だけ鳴らす
       synth: false,
     });
