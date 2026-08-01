@@ -280,26 +280,28 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
   }, [paint]);
 
   return (
-    <div className={`relative w-full overflow-hidden rounded-lg bg-black ${className ?? ''}`}>
-      <canvas
-        ref={canvasRef}
-        className="block h-auto w-full"
-        style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
-      />
+    <div className={`flex flex-col w-full overflow-hidden rounded-lg bg-black ${className ?? ''}`}>
+      <div className="relative w-full">
+        <canvas
+          ref={canvasRef}
+          className="block h-auto w-full"
+          style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
+        />
 
-      {!hasMml && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-gray-500">
-          MMLを設定するとプレビューできます
-        </div>
-      )}
+        {!hasMml && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-gray-500">
+            MMLを設定するとプレビューできます
+          </div>
+        )}
+      </div>
 
       {controls && hasMml && (
-        <div className="absolute bottom-0 inset-x-0 p-3 pt-6 bg-gradient-to-t from-black/90 to-transparent flex items-center gap-3 transition-opacity">
+        <div className="flex shrink-0 items-center gap-3 border-t border-gray-800/80 bg-gray-950/90 px-3 py-2">
           <button
             type="button"
             onClick={toggle}
             disabled={!ready && !playing}
-            className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-full bg-white/20 text-white backdrop-blur transition-colors hover:bg-white/30 active:scale-95 disabled:opacity-50"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/20 text-white transition-colors hover:bg-white/30 active:scale-95 disabled:opacity-50"
             title={playing ? '停止' : '最初から再生'}
           >
             {loading ? <Loader2 size={13} className="animate-spin" /> : playing ? <Pause size={13} /> : <Play size={13} />}
@@ -324,10 +326,10 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
               }
             }}
             onChange={handleSeek}
-            className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-white/30 accent-blue-500 hover:h-2 transition-all focus:outline-none"
+            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/30 accent-blue-500 hover:h-2 transition-all focus:outline-none"
           />
           
-          <span ref={timeDisplayRef} className="shrink-0 text-[11px] text-gray-200 font-mono w-9 text-right drop-shadow-md">
+          <span ref={timeDisplayRef} className="w-9 shrink-0 text-right font-mono text-[11px] text-gray-200">
             0:00
           </span>
         </div>

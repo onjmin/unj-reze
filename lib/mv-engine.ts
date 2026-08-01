@@ -679,16 +679,14 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
     const active = d.bar >= c.bar && d.bar < nextBar;
 
     let fill: string;
-    if (active) {
-      fill = layer.activeColor;
-    } else if (layer.colorMode === 'degree') {
+    if (layer.colorMode === 'degree') {
       const deg = chordDegree(c.label, layer.key);
       // スケール外のコードは彩度を落として区別する
       fill = deg === null
         ? 'hsl(0, 0%, 22%)'
         : `hsl(${MV_DEGREE_HUE[deg]}, 45%, 24%)`;
     } else {
-      fill = layer.color;
+      fill = active ? layer.activeColor : layer.color;
     }
 
     ctx.fillStyle = fill;
