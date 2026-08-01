@@ -245,6 +245,37 @@ function ModulatorRow({ mod, tracks, onChange, onRemove }: {
   );
 }
 
+/**
+ * 貼り付けられたSVGマークアップから d 属性と viewBox を抜き出す。
+ * <path> が複数あっても1本の d に連結する（サブパスとして全部描かれる）。
+ * SVGでなければ null（＝素の d 属性としてそのまま使う）。
+ */
+function extractSvgPaths(text: string): { d: string; box?: [number, number, number, number] } | null {
+  if (!text.includes('<')) return null;
+  const ds = [...text.matchAll(/\bd\s*=\s*(?:"([^"]*)"|'([^']*)')/g)]
+    .map(m => m[1] ?? m[2])
+    .filter(Boolean);
+  if (ds.length === 0) return null;
+  let box: [number, number, number, number] | undefined;
+  const vb = text.match(/viewBox\s*=\s*(?:"([^"]*)"|'([^']*)')/);
+  const raw = vb?.[1] ?? vb?.[2];
+  if (raw) {
+    const nums = raw.trim().split(/[\s,]+/).map(Number);
+    if (nums.length === 4 && nums.every(n => Number.isFinite(n))) {
+      box = [nums[0], nums[1], nums[2], nums[3]];
+    }
+  }
+  return { d: ds.join(' '), box };
+}
+
+/** "0, 8, 16.5" のような小節リスト入力を数値配列へ。 */
+function parseBarList(text: string): number[] {
+  return text
+    .split(/[,、\s]+/)
+    .map(Number)
+    .filter(n => Number.isFinite(n) && n >= 0);
+}
+
 function layerLabel(layer: MvLayer): string {
   switch (layer.kind) {
     case 'image': return refLabel(layer.ref);
@@ -867,6 +898,41 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               {selectedLayer.form === 'polygon' && (
                 <NumField label="角の数" value={selectedLayer.sides ?? 6} min={3} max={24} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, sides: v } as MvLayer))} />
               )}
+              {selectedLayer.form === 'path' && (
+                <>
+                  <label className="block space-y-0.5">
+                    <span className={FIELD_LABEL_CLASS}>形のデータ（SVGを丸ごと貼り付けてもOK）</span>
+                    <textarea
+                      value={selectedLayer.path ?? ''}
+                      placeholder='M50 5 L95 50 L50 95 L5 50 Z　または <svg …>…</svg>'
+                      onChange={e => {
+                        const text = e.target.value;
+                        const extracted = extractSvgPaths(text);
+                        updateLayer(selectedLayer.id, l => (l.kind === 'shape'
+                          ? {
+                              ...l,
+                              path: extracted ? extracted.d : text,
+                              pathBox: extracted?.box ?? l.pathBox,
+                            }
+                          : l));
+                      }}
+                      className={`${INPUT_CLASS} h-20 resize-none font-mono text-[10px]`}
+                    />
+                  </label>
+                  <Hint>
+                    SVGファイルの中身を貼り付けると、パスと viewBox を自動で取り込みます。
+                    複数のパスはひとつの形として重なり、重なった部分は穴として抜けます。
+                  </Hint>
+                  <NumField
+                    label="設計サイズ（viewBoxの幅。自動取り込み時は触らなくてOK）"
+                    value={selectedLayer.pathBox?.[2] ?? 100}
+                    min={1}
+                    onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'shape'
+                      ? { ...l, pathBox: [0, 0, v, v] }
+                      : l))}
+                  />
+                </>
+              )}
               <NumField label="個数" value={selectedLayer.count ?? 1} min={1} max={64} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, count: v } as MvLayer))} />
               {(selectedLayer.count ?? 1) > 1 && (
                 <Details label="1個ごとのずらし方">
@@ -909,6 +975,24 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                 onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, style: v } as MvLayer))} />
               <SelectField label="タイミング" value={selectedLayer.trigger} options={TRIGGER_OPTIONS}
                 onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, trigger: v } as MvLayer))} />
+              {selectedLayer.trigger === 'bars' && (
+                <label className="block space-y-0.5">
+                  <span className={FIELD_LABEL_CLASS}>発火する小節（カンマ区切り。0始まり、小数も可）</span>
+                  <input
+                    key={selectedLayer.id}
+                    defaultValue={(selectedLayer.bars ?? []).join(', ')}
+                    placeholder="例: 8, 16, 24.5"
+                    onChange={e => {
+                      const bars = parseBarList(e.target.value);
+                      updateLayer(selectedLayer.id, l => (l.kind === 'effect'
+                        ? { ...l, bars: bars.length > 0 ? bars : undefined }
+                        : l));
+                    }}
+                    className={FIELD_INPUT_CLASS}
+                  />
+                  <Hint>書いた小節の頭でだけ発火します。サビ頭など「決めの瞬間」に使ってください。</Hint>
+                </label>
+              )}
               {selectedLayer.trigger === 'note' && (
                 <div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
                   <p className="text-[10px] text-gray-400">どのトラックの音で光らせるか（未選択なら全部）</p>
@@ -1100,6 +1184,29 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                       ))}
                     </ul>
                   </div>
+                  {shownLyricLines.length > 0 && (
+                    <>
+                      <button
+                        onClick={() => updateLayer(lyricsLayer.id, l => (l.kind === 'lyrics'
+                          ? {
+                              ...l,
+                              source: 'manual',
+                              lines: shownLyricLines.map(x => ({
+                                bar: Math.round(x.bar * 100) / 100,
+                                text: x.text,
+                              })),
+                            }
+                          : l))}
+                        className={REF_BTN_CLASS}
+                      >
+                        この歌詞を手入力にコピーして編集する
+                      </button>
+                      <Hint>
+                        MMLから作った行を手入力へ写します。写したあとは文言もタイミングも自由に直せます
+                        （MML側の歌詞を変えても追従しなくなります）。
+                      </Hint>
+                    </>
+                  )}
                 </>
               ) : (
                 <p className="text-[10px] text-amber-400">

@@ -134,19 +134,19 @@ export interface MvView {
   roll: number;
   /** 画角。小さいほど望遠（歪みが少ない）。 */
   fov: number;
-  /** ノート板の奥行き（論理px）。大きいほど長いトンネルになる。 */
+  /** トラックのレーンを奥行き方向へ広げる幅（論理px）。0で全トラックが同一平面。 */
   depth: number;
-  /** ノートの厚み（立体表示のときの高さ）。 */
+  /** ノート1枚の厚み（奥行き方向）。 */
   thickness: number;
 }
 
 export const DEFAULT_MV_VIEW: MvView = {
-  pitch: 28,
-  yaw: 0,
+  pitch: 16,
+  yaw: -18,
   roll: 0,
   fov: 55,
-  depth: 900,
-  thickness: 6,
+  depth: 220,
+  thickness: 10,
 };
 
 /** 円形ピアノロールの形。 */
@@ -378,7 +378,7 @@ export interface MvLyricsLayer extends MvLayerBase {
 }
 
 /** 図形の形。 */
-export type MvShapeForm = 'circle' | 'ring' | 'square' | 'diamond' | 'triangle' | 'polygon' | 'cross' | 'bar';
+export type MvShapeForm = 'circle' | 'ring' | 'square' | 'diamond' | 'triangle' | 'polygon' | 'cross' | 'bar' | 'path';
 
 export const MV_SHAPE_FORM_LABELS: Record<MvShapeForm, string> = {
   circle: '円（塗り）',
@@ -389,6 +389,7 @@ export const MV_SHAPE_FORM_LABELS: Record<MvShapeForm, string> = {
   polygon: '多角形',
   cross: '十字',
   bar: '棒',
+  path: '自由な形（SVG）',
 };
 
 /**
@@ -409,6 +410,16 @@ export interface MvShapeLayer extends MvLayerBase {
   thickness: number;
   /** form==='polygon' のときの角数。 */
   sides?: number;
+  /**
+   * form==='path' のときの形。SVGの d 属性そのまま（複数サブパス可）。
+   * 参考動画のような込み入った形は、この欄へSVGを貼り付けて取り込む。
+   */
+  path?: string;
+  /**
+   * path の設計座標系（SVGの viewBox 相当）[x, y, w, h]。
+   * この箱の中心が図形の中心、箱の長辺が size×2 になるよう拡縮して描く。未指定は [0,0,100,100]。
+   */
+  pathBox?: [number, number, number, number];
   /**
    * form==='bar' のときの縦横比（高さ ÷ 幅）。既定 0.32。
    * 帯や罫線のように「横に長くて薄い」形を作るときに小さくする。
@@ -445,12 +456,13 @@ export const MV_EFFECT_STYLE_LABELS: Record<MvEffectStyle, string> = {
 };
 
 /** 演出の発火タイミング。 */
-export type MvTrigger = 'always' | 'beat' | 'bar' | 'note' | 'section';
+export type MvTrigger = 'always' | 'beat' | 'bar' | 'bars' | 'note' | 'section';
 
 export const MV_TRIGGER_LABELS: Record<MvTrigger, string> = {
   always: 'ずっと',
   beat: '拍ごと',
   bar: '小節ごと',
+  bars: '指定した小節だけ',
   note: '指定トラックの音',
   section: '場面が変わったとき',
 };
@@ -461,6 +473,11 @@ export interface MvEffectLayer extends MvLayerBase {
   trigger: MvTrigger;
   /** trigger==='note' のとき対象にするトラック(@n)。未指定＝全トラック。 */
   tracks?: number[];
+  /**
+   * trigger==='bars' のとき発火する小節番号（0始まり、小数可）。
+   * 「サビ頭の8小節目だけ光らせる」のような、狙った瞬間だけの演出に使う。
+   */
+  bars?: number[];
   /** 効きの強さ 0..1 */
   amount: number;
   /** 減衰の長さ（拍）。短いほど鋭い。 */

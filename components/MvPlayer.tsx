@@ -181,17 +181,22 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
       }
       playbackRef.current = playback;
       startMsRef.current = performance.now();
-      tickRef.current = { step: 0, atMs: startMsRef.current };
+      tickRef.current = { step: startStep ?? 0, atMs: startMsRef.current };
       setLoading(false);
       setPlaying(true);
 
       const stepsPerMs = ((songRef.current.bpm || 120) / 60) * MV_STEPS_PER_BEAT / 1000;
+      // 補間した step が新しいティックの到着で巻き戻ると、拍の境界をもう一度またいで
+      // フラッシュ等の演出が二重発火する。step は再生中ずっと単調増加に固定する。
+      let lastStep = startStep ?? 0;
       const loop = () => {
         const now = performance.now();
         const tick = tickRef.current;
         // onTick は毎フレーム来るとは限らないので、直近ティックからの経過分を足して補間する
-        const step = tick.step + Math.max(0, now - tick.atMs) * stepsPerMs;
-        const timeSec = (now - startMsRef.current) / 1000;
+        const step = Math.max(lastStep, tick.step + Math.max(0, now - tick.atMs) * stepsPerMs);
+        lastStep = step;
+        // 時間ベースの動き(drift/zoom等)も step から導出する。壁時計だと途中再生で位相が飛ぶ。
+        const timeSec = step / (stepsPerMs * 1000);
         paint(step, timeSec);
         
         if (seekBarRef.current) {
