@@ -25,7 +25,7 @@ export default function VolumeControl() {
   }, [open]);
 
   return (
-    <div className="relative" ref={rootRef}>
+    <div className="relative z-50" ref={rootRef}>
       <button
         onClick={() => setOpen((v) => !v)}
         className={`p-1.5 rounded-full transition-colors ${open ? 'bg-gray-100/10 text-gray-300' : 'text-gray-500 hover:bg-gray-100/10 hover:text-gray-300'}`}
