@@ -1,6 +1,8 @@
 // 「ピアノロール」プリセット。
 // 参考動画: [Touhou Style Arrangement] Out of Place Magical Girl
-//   静止背景絵 ＋ 右にキャラ絵 ＋ 左上にタイトル/クレジット ＋ 中央帯に横スクロールのピアノロール。
+//   構成は「イントロ（ロールだけ）→ 白フラッシュ →キャラ絵/タイトルが出て以降ずっと表示」の一発もの。
+//   毎小節光るアクセントではない（そう見えたので過去に間違えて実装していた）。
+//   `section` トリガーは「その場面に入った瞬間だけ」発火するので、場面の境目に置くとちょうどこの動きになる。
 // 曲のノートがそのまま絵になるので、素材を1枚も足さなくても成立する（背景・キャラは差し替え推奨）。
 
 import type { MvManifest } from '@/lib/mv-config';
@@ -28,7 +30,12 @@ const MANIFEST: MvManifest = {
     pulse: 'none',
     palette: ['#a3e635', '#38bdf8', '#fbbf24', '#f472b6', '#c4b5fd'],
   },
-  sections: [{ id: 'main', label: '本編', startBar: 0 }],
+  // イントロはロールだけの4小節。そこから「本編」に入った瞬間だけフラッシュが光り、
+  // タイトル・クレジット・キャラ絵が現れて以降ずっと出続ける（参考動画の構成そのもの）。
+  sections: [
+    { id: 'intro', label: 'イントロ', startBar: 0 },
+    { id: 'main', label: '本編', startBar: 4 },
+  ],
   layers: [
     {
       kind: 'visualizer',
@@ -41,15 +48,18 @@ const MANIFEST: MvManifest = {
       opacity: 0.95,
       // 平面のまま。レイヤー設定で「立体（3D）」「円形」に切り替えられる。
       projection: 'flat',
+      // sections未指定＝全場面で表示。イントロから本編までロールはずっと流れ続ける。
     },
-    // 小節の頭で画面がすっと光る（参考動画の決めの瞬間）
+    // 「本編」に入った瞬間に一度だけ光る。sections で本編だけに絞らないと、
+    // イントロの開始（0小節目）でも startBar=0 として誤発火するので注意。
     {
       kind: 'effect',
-      id: 'accent-flash',
+      id: 'reveal-flash',
       style: 'flash',
-      trigger: 'bar',
-      amount: 0.22,
-      decayBeats: 0.5,
+      trigger: 'section',
+      sections: ['main'],
+      amount: 0.9,
+      decayBeats: 2,
       color: '#ffffff',
     },
     {
@@ -66,6 +76,7 @@ const MANIFEST: MvManifest = {
       motionAmount: 3,
       pixelated: true,
       z: 20,
+      sections: ['main'],
     },
     {
       kind: 'text',
@@ -81,6 +92,7 @@ const MANIFEST: MvManifest = {
       bold: true,
       shadow: true,
       z: 30,
+      sections: ['main'],
     },
     {
       kind: 'text',
@@ -95,6 +107,7 @@ const MANIFEST: MvManifest = {
       motion: 'none',
       shadow: true,
       z: 30,
+      sections: ['main'],
     },
   ],
 };
@@ -102,7 +115,7 @@ const MANIFEST: MvManifest = {
 export const PIANO_ROLL_PRESET: MvPresetEntry = {
   kind: 'pianoRoll',
   name: 'ピアノロール',
-  description: '静止画の上に、曲のノートが横スクロールで流れる。アレンジ動画の定番レイアウト。',
-  swapHint: '背景に1枚絵を、右のキャラをあなたのドット絵に差し替えると一気に完成します。ロールは立体・円形にも切り替えられます。',
+  description: 'イントロはロールだけ、4小節目でフラッシュしてタイトルとキャラ絵が現れる。アレンジ動画の定番構成。',
+  swapHint: '背景に1枚絵を、右のキャラをあなたのドット絵に差し替えると一気に完成します。「場面」タブでフラッシュの起こる小節数を調整できます。',
   build: () => cloneManifest(MANIFEST),
 };
