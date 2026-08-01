@@ -649,7 +649,12 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
   if (chords.length === 0) return;
 
   const endBar = Math.max(d.song.totalBars, chords[chords.length - 1].bar + 1);
-  const barToX = (b: number) => x + (b / endBar) * w;
+  const windowBars = layer.windowBars ?? 2;
+  const page = Math.floor(d.bar / windowBars);
+  const pageStartBar = page * windowBars;
+  const pageEndBar = pageStartBar + windowBars;
+
+  const barToX = (b: number) => x + ((b - pageStartBar) / windowBars) * w;
 
   ctx.save();
   ctx.beginPath();
@@ -666,6 +671,9 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
   for (let i = 0; i < chords.length; i++) {
     const c = chords[i];
     const nextBar = i + 1 < chords.length ? chords[i + 1].bar : endBar;
+    
+    if (nextBar <= pageStartBar || c.bar >= pageEndBar) continue;
+
     const bx = barToX(c.bar);
     const bw = Math.max(1, barToX(nextBar) - bx);
     const active = d.bar >= c.bar && d.bar < nextBar;

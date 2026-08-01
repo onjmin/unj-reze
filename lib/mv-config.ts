@@ -495,6 +495,8 @@ export interface MvChordBarLayer extends MvLayerBase {
   activeColor: string;
   textColor: string;
   size: number;
+  /** 1画面に表示する小節数（未指定なら2） */
+  windowBars?: number;
 }
 
 export type MvLayer =
