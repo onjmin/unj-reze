@@ -44,36 +44,6 @@ export interface MvPlaybackHandle {
 // 実効音量の計算は lib/mml.ts に集約（ContentPicker の試聴と同じ規則を使う）。
 
 /**
- * MMLから歌詞トラック(@@n)が担当する演奏トラック(@n)を取り除く。
- *
- * soundfontKoe では「楽器＝SoundFont」「歌＝koe」を別々の再生で重ねるが、
- * 歌詞トラックの音符まで SoundFont で鳴らすと歌と楽器が二重に鳴ってしまう。
- * @onjmin/dtm の正典（mountMmlPlayer）も歌詞トラックの楽器発音はスキップするので、
- * それに合わせて楽器側の入力から当該トラックを落とす。
- */
-const TRACK_NAMES = ["melody", "submelody", "bass", "chord"];
-
-export function stripLyricPerformanceTracks(mml: string, lyricTrackIds: number[]): string {
-  if (lyricTrackIds.length === 0) return mml;
-  const drop = new Set(lyricTrackIds);
-  return mml
-    .split(';')
-    .filter(seg => {
-      // 先頭の空白・改行を無視して "@<数字|名前>" を見る。@@ で始まる歌詞行は対象外。
-      const m = seg.match(/^\s*@([a-zA-Z0-9_]+)\b/);
-      if (!m || seg.trimStart().startsWith('@@')) return true;
-      const raw = m[1];
-      let trackIdx = Number(raw);
-      if (Number.isNaN(trackIdx)) {
-        trackIdx = TRACK_NAMES.indexOf(raw);
-      }
-      if (trackIdx < 0) return true;
-      return !drop.has(trackIdx);
-    })
-    .join(';');
-}
-
-/**
  * MVの再生を開始する。呼び出し元はユーザー操作のコールスタック内から呼ぶこと
  * （ブラウザの自動再生ポリシーのため）。
  */
@@ -100,39 +70,16 @@ export async function startMvPlayback(
   }
 
   // soundfontKoe: 楽器（SoundFont）と歌声（koe）を同じ AudioContext 上で重ねる。
-  // 同じ tick で start するので、両者のスケジューラは同一クロックの同じ地点から走る。
-  const { playSingingMML } = await import('@onjmin/dtm');
-  // 楽器側だけ歌詞トラックを外し、さらに `#volume=` をサイト音量込みへ書き換える
-  const instrumentMml = withMmlVolume(
-    stripLyricPerformanceTracks(mml, lyricTrackIds),
-    effectiveMmlVolume(mml, volume),
-  );
-
-  // 進行のクロックは楽器側から取る（歌声側は onTick を出さない設定で走らせる）
-  const instruments = studio.play(instrumentMml, { volume, startStep, onTick, onStop });
-
-  let vocals: MmlPlayback | null = null;
+  // ライブラリ側の studio.playSingingMML に全て委譲し、同一スケジューラで再生します。
   try {
-    // 歌声側は metaVolume × options.volume の掛け算なので、MMLは書き換えずサイト音量を渡す
-    vocals = await playSingingMML(mml, {
-      audioContext: studio.audioContext,
-      singingVoices: studio.singingVoices,
-      volume,
-      startStep,
-      // 楽器は上の studio.play が担当するので、こちらは歌だけ鳴らす
-      synth: false,
-    });
+    const playback = await studio.playSingingMML(mml, { volume, startStep, onTick, onStop });
+    return handleOf([{ playback, scaleWithMml: true }], mml);
   } catch (e) {
-    // 歌声の準備に失敗しても楽器だけで再生を続ける（無音になるより良い）
-    console.error('[mv-audio] singing playback failed; continuing with instruments only', e);
+    // 歌声モデルの読み込み等に失敗した場合は、楽器のみでフォールバック再生する
+    console.error('[mv-audio] singing playback failed; falling back to instruments only', e);
+    const instruments = studio.play(scaled, { volume, startStep, onTick, onStop });
+    return handleOf([{ playback: instruments, scaleWithMml: true }], mml);
   }
-
-  return handleOf(
-    vocals
-      ? [{ playback: instruments, scaleWithMml: true }, { playback: vocals, scaleWithMml: false }]
-      : [{ playback: instruments, scaleWithMml: true }],
-    mml,
-  );
 }
 
 interface TrackedPlayback {
