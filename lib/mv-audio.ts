@@ -50,16 +50,24 @@ export interface MvPlaybackHandle {
  * @onjmin/dtm の正典（mountMmlPlayer）も歌詞トラックの楽器発音はスキップするので、
  * それに合わせて楽器側の入力から当該トラックを落とす。
  */
+const TRACK_NAMES = ["melody", "submelody", "bass", "chord"];
+
 export function stripLyricPerformanceTracks(mml: string, lyricTrackIds: number[]): string {
   if (lyricTrackIds.length === 0) return mml;
   const drop = new Set(lyricTrackIds);
   return mml
     .split(';')
     .filter(seg => {
-      // 先頭の空白・改行を無視して "@<数字>" を見る。@@ で始まる歌詞行は対象外。
-      const m = seg.match(/^\s*@(\d+)\b/);
-      if (!m) return true;
-      return !drop.has(Number(m[1]));
+      // 先頭の空白・改行を無視して "@<数字|名前>" を見る。@@ で始まる歌詞行は対象外。
+      const m = seg.match(/^\s*@([a-zA-Z0-9_]+)\b/);
+      if (!m || seg.trimStart().startsWith('@@')) return true;
+      const raw = m[1];
+      let trackIdx = Number(raw);
+      if (Number.isNaN(trackIdx)) {
+        trackIdx = TRACK_NAMES.indexOf(raw);
+      }
+      if (trackIdx < 0) return true;
+      return !drop.has(trackIdx);
     })
     .join(';');
 }
