@@ -10,10 +10,10 @@ import { BUILTIN_WALK, cloneManifest, DQ_CAST, type MvPresetEntry } from './shar
 
 const MML = [
   '#volume=50',
-  '@0 t118 q80 v96 o5 l4 e f# g# a g# f# e d# e f# g# a b a g# f# e f# g# a g# f# e d# c# d# e f# g#2;',
-  '@1 t118 q70 v66 o4 l2 c# c# a a b b g# g# c# c# a a f# f# b b;',
-  '@2 t118 q60 v78 o2 l4 c# c# g# g# a a e e b b f# f# c# c# g# g#;',
-  '@3 t118 q50 v52 o3 l2 [o3c#o3eo3g#]2 [o3c#o3eo3g#]2 [o3ao4c#o4e]2 [o3ao4c#o4e]2 [o3bo3d#o3f#]2 [o3bo3d#o3f#]2 [o3g#o3bo4d#]2 [o3g#o3bo4d#]2;',
+  '@0 t118 q80 v96 o5 l4 e f# g# a g# f# e d# e f# g# a b a g# f# e f# g# a g# f# e d# c# d# e f# g#2 e f# g# a g# f# e d# e f# g# a b a g# f# e f# g# a g# f# e d# c# d# e f# g#2;',
+  '@1 t118 q70 v66 o4 l2 c# c# a a b b g# g# c# c# a a f# f# b b a a b b c# c# g# g# a a b b e e e e;',
+  '@2 t118 q60 v78 o2 l4 c# c# g# g# a a e e b b f# f# g# g# d# d# c# c# g# g# a a e e f# f# c# c# b b f# f# a a e e b b f# f# c# c# g# g# g# g# d# d# a a e e b b f# f# e e b b e e b b;',
+  '@3 t118 q50 v52 o3 l2 [o3c#o3eo3g#]2 [o3c#o3eo3g#]2 [o3ao4c#o4e]2 [o3ao4c#o4e]2 [o3bo3d#o3f#]2 [o3bo3d#o3f#]2 [o3g#o3bo4d#]2 [o3g#o3bo4d#]2 [o3c#o3eo3g#]2 [o3c#o3eo3g#]2 [o3ao4c#o4e]2 [o3ao4c#o4e]2 [o3f#o3ao4c#]2 [o3f#o3ao4c#]2 [o3bo3d#o3f#]2 [o3bo3d#o3f#]2 [o3ao4c#o4e]2 [o3ao4c#o4e]2 [o3bo3d#o3f#]2 [o3bo3d#o3f#]2 [o3c#o3eo3g#]2 [o3c#o3eo3g#]2 [o3g#o3bo4d#]2 [o3g#o3bo4d#]2 [o3ao4c#o4e]2 [o3ao4c#o4e]2 [o3bo3d#o3f#]2 [o3bo3d#o3f#]2 [o3eo3g#o3b]2 [o3eo3g#o3b]2 [o3eo3g#o3b]2 [o3eo3g#o3b]2;',
 ].join('');
 
 /** 横一列に並ぶキャラ。x を等間隔に置いていく。 */

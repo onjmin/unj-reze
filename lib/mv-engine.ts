@@ -695,6 +695,13 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
     ctx.restore();
   }
 
+  // ── 再生位置のインジケーター（動くバー） ──
+  const playX = barToX(d.bar);
+  if (playX >= x && playX <= x + w) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.fillRect(playX - 1, y, 2, h);
+  }
+
   ctx.restore();
 }
 
