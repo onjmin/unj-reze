@@ -52,9 +52,8 @@ const MML_TABS: BgmTab[] = ['mmlPost', 'mmlRaw'];
 
 // モーダルは閉じるたびにアンマウントされるため、タブ選択とスクロール位置をモジュール変数で覚えておき、
 // 再度開いたときに前回見ていた場所へ復元する。BGM欄/効果音欄は選べるタブが違うので別々に覚える。
-// 画像タブから「投稿」「切り出し」「投稿グラ」は廃止（素材定義はマイシート＝素材定義パネルへ集約）。
-// 廃止タブが最後の選択として復元されると空白になるため、既定のマイシートへ振り替える。
-const REMOVED_IMAGE_TABS = new Set<string>(['posts', 'slice', 'walk', 'url']);
+// 画像タブから「切り出し」「投稿グラ」「URL」は廃止。
+const REMOVED_IMAGE_TABS = new Set<string>(['slice', 'walk', 'url']);
 let lastImageTab: ImageTab = 'mySheet';
 const lastBgmTabByKind: Record<'bgm' | 'sfx' | 'mml', BgmTab> = { bgm: 'youtube', sfx: 'rpgenSe', mml: 'mmlPost' };
 const scrollPositions = new Map<string, number>();
@@ -246,19 +245,21 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
 
   useEffect(() => {
     let alive = true;
-    if (mode === 'bgm' && bgmTab === 'mmlPost') {
+    const isMmlPost = mode === 'bgm' && bgmTab === 'mmlPost';
+    const isImagePost = mode === 'image' && imageTab === 'posts';
+    if (isMmlPost || isImagePost) {
       Promise.resolve().then(() => { if (alive) setLoading(true); });
       const trimmedQ = query.trim();
       const req = trimmedQ
         ? api.search.posts(trimmedQ, userId)
-        : api.posts.list(userId, { hasMml: true, limit: 50 });
+        : api.posts.list(userId, { hasMml: isMmlPost ? true : undefined, hasImage: isImagePost ? true : undefined, limit: 50 });
 
       req
         .then(data => {
           if (alive) setPosts(Array.isArray(data) ? data : []);
         })
         .catch(err => {
-          console.error('[ContentPicker] Error loading MML posts:', err);
+          console.error('[ContentPicker] Error loading posts:', err);
           if (alive) setPosts([]);
         })
         .finally(() => {
@@ -266,7 +267,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         });
     }
     return () => { alive = false; };
-  }, [mode, bgmTab, userId, query]);
+  }, [mode, bgmTab, imageTab, userId, query]);
 
   const q = query.trim().toLowerCase();
   // BGM欄の「MML投稿」タブ用。親投稿だけでなくスレッド返信(replies)に含まれるMML投稿も網羅する。
@@ -288,6 +289,32 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
             seen.add(r.id);
             const mml = extractMmlFromContent(r.content);
             if (mml && (!q || r.content?.toLowerCase().includes(q))) {
+              list.push(r);
+            }
+          }
+        }
+      }
+    }
+    return list;
+  }, [posts, q]);
+
+  // 画像欄の「投稿画像」タブ用。親投稿およびスレッド返信(replies)に含まれる添付画像を網羅する。
+  const imagePosts = useMemo(() => {
+    const list: Post[] = [];
+    const seen = new Set<string>();
+    for (const p of posts) {
+      if (!p) continue;
+      if (!seen.has(p.id) && p.hasImage && p.imageSrc) {
+        seen.add(p.id);
+        if (!q || p.content?.toLowerCase().includes(q) || p.displayName?.toLowerCase().includes(q)) {
+          list.push(p);
+        }
+      }
+      if (p.replies && Array.isArray(p.replies)) {
+        for (const r of p.replies) {
+          if (r && !seen.has(r.id) && r.hasImage && r.imageSrc) {
+            seen.add(r.id);
+            if (!q || r.content?.toLowerCase().includes(q) || r.displayName?.toLowerCase().includes(r.displayName)) {
               list.push(r);
             }
           }
@@ -357,17 +384,18 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         <div className="flex flex-wrap gap-1 p-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
           {mode === 'image' ? (
             <>
-              {/* メタ（自分の素材）タブ: 使用履歴・マイシート。画像アップロード/投稿からの切り出しは「素材定義」パネルへ移動した。 */}
+              {/* メタ（自分の素材）タブ: 使用履歴・マイシート・投稿画像 */}
               {usedAssets.length > 0 && (
-                <button className={tabBtn(imageTab === 'history')} onClick={() => changeImageTab('history')}>🕘 使用履歴</button>
+                <button className={tabBtn(imageTab === 'history')} onClick={() => changeImageTab('history')}>使用履歴</button>
               )}
-              <button className={tabBtn(imageTab === 'mySheet')} onClick={() => changeImageTab('mySheet')}>🗂️ マイシート</button>
-              <button className={tabBtn(imageTab === 'color')} onClick={() => changeImageTab('color')}>🎨 単色カラー</button>
+              <button className={tabBtn(imageTab === 'mySheet')} onClick={() => changeImageTab('mySheet')}>マイシート</button>
+              <button className={tabBtn(imageTab === 'posts')} onClick={() => changeImageTab('posts')}>投稿画像</button>
+              <button className={tabBtn(imageTab === 'color')} onClick={() => changeImageTab('color')}>単色カラー</button>
               {/* 内蔵素材（リポジトリ同梱）と、rpgen-search 由来の外部素材を分けて示す。 */}
-              <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>🏰 内蔵素材</button>
-              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>🧩 外部素材</button>
-              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>🚶 外部歩行グラ</button>
-              <button className={tabBtn(imageTab === 'smc')} onClick={() => changeImageTab('smc')}>🎮 SMC素材</button>
+              <button className={tabBtn(imageTab === 'local')} onClick={() => changeImageTab('local')}>内蔵素材</button>
+              <button className={tabBtn(imageTab === 'rpgenSprite')} onClick={() => changeImageTab('rpgenSprite')}>外部素材</button>
+              <button className={tabBtn(imageTab === 'rpgenWalk')} onClick={() => changeImageTab('rpgenWalk')}>外部歩行グラ</button>
+              <button className={tabBtn(imageTab === 'smc')} onClick={() => changeImageTab('smc')}>SMC素材</button>
             </>
           ) : (
             <>
@@ -375,25 +403,25 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                 <button className={tabBtn(bgmTab === 'youtube')} onClick={() => changeBgmTab('youtube')}><Video size={12} />YouTube</button>
               )}
               {allowedBgmTabs.includes('nicovideo') && (
-                <button className={tabBtn(bgmTab === 'nicovideo')} onClick={() => changeBgmTab('nicovideo')}>📺 ニコニコ</button>
+                <button className={tabBtn(bgmTab === 'nicovideo')} onClick={() => changeBgmTab('nicovideo')}>ニコニコ</button>
               )}
               {allowedBgmTabs.includes('soundcloud') && (
-                <button className={tabBtn(bgmTab === 'soundcloud')} onClick={() => changeBgmTab('soundcloud')}>☁️ SoundCloud</button>
+                <button className={tabBtn(bgmTab === 'soundcloud')} onClick={() => changeBgmTab('soundcloud')}>SoundCloud</button>
               )}
               {allowedBgmTabs.includes('mmlPost') && (
                 <button className={tabBtn(bgmTab === 'mmlPost')} onClick={() => changeBgmTab('mmlPost')}><Music size={12} />MML投稿</button>
               )}
               {allowedBgmTabs.includes('rpgenSe') && (
-                <button className={tabBtn(bgmTab === 'rpgenSe')} onClick={() => changeBgmTab('rpgenSe')}>🔊 効果音</button>
+                <button className={tabBtn(bgmTab === 'rpgenSe')} onClick={() => changeBgmTab('rpgenSe')}>効果音</button>
               )}
               {allowedBgmTabs.includes('builtinGame') && (
-                <button className={tabBtn(bgmTab === 'builtinGame')} onClick={() => changeBgmTab('builtinGame')}>🎮 他ゲーム音源</button>
+                <button className={tabBtn(bgmTab === 'builtinGame')} onClick={() => changeBgmTab('builtinGame')}>他ゲーム音源</button>
               )}
               {allowedBgmTabs.includes('mmlRaw') && (
-                <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => changeBgmTab('mmlRaw')}>♪ 直接</button>
+                <button className={tabBtn(bgmTab === 'mmlRaw')} onClick={() => changeBgmTab('mmlRaw')}>直接</button>
               )}
               {allowedBgmTabs.includes('direct') && (
-                <button className={tabBtn(bgmTab === 'direct')} onClick={() => changeBgmTab('direct')}>🔗 URL</button>
+                <button className={tabBtn(bgmTab === 'direct')} onClick={() => changeBgmTab('direct')}>URL</button>
               )}
             </>
           )}
@@ -434,6 +462,45 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
           )}
           {mode === 'image' && imageTab === 'mySheet' && (
             <UserSheetPanel onPick={onPick} userId={userId} />
+          )}
+          {/* Image: posts（SNSの画像投稿から直接選択） */}
+          {mode === 'image' && imageTab === 'posts' && (
+            <div className="space-y-3">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="投稿者名や本文で検索..."
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
+                />
+              </div>
+              {loading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 size={20} className="animate-spin text-gray-500" />
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {imagePosts.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => onPick({ ref: p.imageSrc!, url: p.imageSrc!, label: `投稿 #${p.id} (${p.displayName || '名無し'})` })}
+                      className="group relative aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-gray-900 gimp-checkered-background text-left transition"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.imageSrc} alt={p.imageAlt || ''} className="w-full h-full object-cover" style={{ imageRendering: 'pixelated' }} />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-1.5 pt-4">
+                        <p className="text-[10px] font-bold text-gray-200 truncate">{p.displayName || '名無し'}</p>
+                        <p className="text-[9px] text-gray-400 truncate">#{p.id}</p>
+                      </div>
+                    </button>
+                  ))}
+                  {imagePosts.length === 0 && (
+                    <p className="col-span-3 text-center text-xs text-gray-500 py-8">画像投稿が見つかりませんでした</p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           {mode === 'image' && imageTab === 'color' && (
             <div className="space-y-4 p-1">
