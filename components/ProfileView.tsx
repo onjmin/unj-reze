@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Post, OshiItem, AnonymousUser } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Edit3, X, Loader2, Music2, Pencil, Play, Pause, MoreHorizontal } from 'lucide-react';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Clapperboard, Edit3, X, Loader2, Music2, Pencil, Play, Pause, MoreHorizontal } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
@@ -395,7 +395,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const threads = useMemo(() => myPosts.filter(p => p.id === p.threadId), [myPosts]);
   const replies = useMemo(() => myPosts.filter(p => p.id !== p.threadId), [myPosts]);
-  const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage || p.hasGame || !!extractMmlFromContent(p.content)), [myPosts]);
+  const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage || p.hasGame || p.hasMv || !!extractMmlFromContent(p.content) || !!extractChordsFromContent(p.content)), [myPosts]);
 
   const totalHearts = useMemo(() => myPosts.reduce((s, p) => s + Number(p.heartsTotal), 0), [myPosts]);
   const totalLikes = useMemo(() => myPosts.reduce((s, p) => s + Number(p.likes), 0), [myPosts]);
@@ -733,6 +733,25 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                     </div>
                   )}
 
+                  {p.hasMv && (
+                    <div
+                      onClick={() => handlePostClick(p)}
+                      className="w-full aspect-video bg-gray-900 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-gray-800 relative group cursor-pointer transition-all shadow-inner"
+                    >
+                      <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&q=80&w=800')] bg-cover bg-center opacity-30 group-hover:opacity-40 transition-opacity"></div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
+                      <div className="z-10 flex flex-col items-center space-y-1">
+                        <div className="bg-purple-600 p-3 rounded-full shadow-[0_0_15px_rgba(147,51,234,0.5)] group-hover:scale-110 transition-transform">
+                          <Clapperboard size={28} className="text-white ml-0.5" />
+                        </div>
+                        <span className="text-[9px] tracking-widest text-gray-400 font-bold bg-black/60 px-2 py-0.5 rounded backdrop-blur mt-1.5">TAP TO WATCH MV</span>
+                      </div>
+                      <div className="absolute bottom-2 left-2.5 z-10 flex items-center space-x-1.5">
+                        <span className="font-bold text-xs bg-purple-600/90 text-white px-2 py-0.5 rounded">Music Video</span>
+                      </div>
+                    </div>
+                  )}
+
                   {p.hasGame && (
                     <div
                       onClick={() => handlePostClick(p)}
@@ -757,7 +776,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                     if (mmlCode) return <MmlPlayer mml={mmlCode} />;
                     const chordRes = extractChordsFromContent(p.content);
                     if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
-                    if (p.hasImage || p.hasGame) return null;
+                    if (p.hasImage || p.hasGame || p.hasMv) return null;
                     const embed = extractFirstEmbed(p.content);
                     return embed ? <EmbedPart embed={embed} /> : null;
                   })()}

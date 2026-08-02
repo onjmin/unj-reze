@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Loader2, PlaySquare } from 'lucide-react';
+import { Search, Plus, Loader2, PlaySquare, Clapperboard, Music, ListMusic } from 'lucide-react';
 import { Post } from '@/lib/types';
 import { extractFirstEmbed, getEmbedThumbnail } from '@/lib/embed';
+import { extractMmlFromContent } from '@/lib/mml';
+import { extractChordsFromContent } from '@/lib/chord';
 import { cachePost } from '@/lib/post-cache';
 import { getUserIdLabel } from '@/lib/avatar';
 import { getThreadDisplayTime } from '@/lib/time';
@@ -233,6 +235,29 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                   return (
                     <div className="shrink-0 w-11 h-11 rounded bg-red-600/20 border border-red-600/40 flex items-center justify-center">
                       <PlaySquare size={18} className="text-red-400" />
+                    </div>
+                  );
+                }
+                if (post.hasMv) {
+                  return (
+                    <div className="shrink-0 w-11 h-11 rounded bg-purple-600/20 border border-purple-600/40 flex items-center justify-center">
+                      <Clapperboard size={18} className="text-purple-400" />
+                    </div>
+                  );
+                }
+                const mmlCode = extractMmlFromContent(post.content);
+                if (mmlCode) {
+                  return (
+                    <div className="shrink-0 w-11 h-11 rounded bg-blue-600/20 border border-blue-600/40 flex items-center justify-center">
+                      <Music size={18} className="text-blue-400" />
+                    </div>
+                  );
+                }
+                const chordRes = extractChordsFromContent(post.content);
+                if (chordRes) {
+                  return (
+                    <div className="shrink-0 w-11 h-11 rounded bg-emerald-600/20 border border-emerald-600/40 flex items-center justify-center">
+                      <ListMusic size={18} className="text-emerald-400" />
                     </div>
                   );
                 }

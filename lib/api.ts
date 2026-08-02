@@ -235,6 +235,12 @@ const staticApi = {
   report: {
     create: async (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) => { mockDbInstance.reportContent({ ...data, reason: data.reason || '' }); return { success: true }; },
   },
+  mvs: {
+    edit: async (id: string, userSlug: string, title: string, manifest: any) => { return { success: true }; }
+  },
+  games: {
+    edit: async (id: string, userSlug: string, title: string, manifest: any) => { return { success: true }; }
+  }
 };
 
 const liveApi = {
@@ -394,6 +400,14 @@ const liveApi = {
   report: {
     create: (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) =>
       fetcher<{ success: boolean }>('/report', { method: 'POST', body: JSON.stringify(data) }),
+  },
+  mvs: {
+    edit: (id: string, userSlug: string, title: string, manifest: any) =>
+      fetcher<any>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
+  },
+  games: {
+    edit: (id: string, userSlug: string, title: string, manifest: any) =>
+      fetcher<any>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
   },
 };
 

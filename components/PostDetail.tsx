@@ -75,6 +75,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
+  const [editMvDraft, setEditMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
+  const [editGameDraft, setEditGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
 
@@ -92,7 +94,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setAvatarMenuPos(pos);
   }, []);
 
-  // スレ主に対する現在のミュート/ブロック状態をメニュー表記へ反映する。
   useEffect(() => {
     const targetSlug = post.slug || post.displayName;
     if (!userSlug || userSlug === targetSlug) return;
@@ -100,8 +101,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     api.block.list(userSlug).then(r => setBlocked(r.blocked.includes(targetSlug))).catch(() => { });
   }, [userSlug, post.slug, post.displayName]);
 
-  // サーバーから届いた正規データでキャッシュを更新しておく。
-  // 一覧へ戻ってから開き直したときも、最新のスナップショットで即描画できる。
   useEffect(() => {
     cachePost(initial);
   }, [initial]);
@@ -116,24 +115,17 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }).catch(() => { });
   }, []);
 
-  /** 返信送信とコンポーザ/エディタ起動の排他制御用。
-   *  コンポーザやエディタを開くたびに世代番号を進め、送信完了後の後片付け
-   *  （返信先クリア等）は「送信時と同じ世代のときだけ」実行する。
-   *  こうしないと 返信→エディタ起動 の順で操作したとき、遅れて返ってきた
-   *  返信処理がエディタ側の状態を巻き戻してしまう。 */
   const uiSessionRef = useRef(0);
   const replySubmittingRef = useRef(false);
   const beginUiSession = useCallback(() => {
     uiSessionRef.current += 1;
     return uiSessionRef.current;
   }, []);
-  /** 返信コンポーザを開く（target=null で通常のスレ返信）。 */
   const openComposer = useCallback((target: Post | null) => {
     beginUiSession();
     setReplyTo(target);
     setComposerOpen(true);
   }, [beginUiSession]);
-  /** 全画面エディタ（お絵描き/MML/ゲーム）を開く。 */
   const openScreen = useCallback((screen: string) => {
     beginUiSession();
     setActiveScreen(screen);
@@ -167,7 +159,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setMenuOpen(false);
   };
 
-  /** スレ主（＝この投稿の投稿者）をブロックする。以後この人の投稿は一覧から消える。 */
   const handleMenuBlock = async () => {
     setMenuOpen(false);
     const targetSlug = post.slug || post.displayName;
@@ -184,7 +175,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
   };
 
-  /** スレ主をミュートする（ブロックと違い相手には分からない）。 */
   const handleMenuMute = async () => {
     setMenuOpen(false);
     const targetSlug = post.slug || post.displayName;
@@ -275,7 +265,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   }, [post.id, userId]);
 
   const handleCreateReplyFromComposer = async () => {
-    // 二重送信防止（送信ボタン連打・Enter連打）
     if (replySubmittingRef.current) return;
     replySubmittingRef.current = true;
     const session = beginUiSession();
@@ -370,7 +359,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     } finally {
       replySubmittingRef.current = false;
     }
-    // 送信中にコンポーザ/エディタを開き直していたら、その状態を壊さない
     if (uiSessionRef.current === session) setReplyTo(null);
   };
 
@@ -412,7 +400,30 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
   };
 
-  const handleOpenCollab = useCallback((p: Post) => {
+  const handleOpenCollab = useCallback(async (p: Post) => {
+    if (p.hasGame && p.gameId) {
+      try {
+        const res = await fetch(`/api/games/${p.gameId}`);
+        if (!res.ok) throw new Error();
+        const game = await res.json();
+        setReplyGameDraft({ manifest: game.manifest, title: game.title, preset: 'action' });
+        setActiveScreen('gamemaker');
+        return;
+      } catch {
+      }
+    }
+    if (p.hasMv && p.mvId) {
+      try {
+        const res = await fetch(`/api/mvs/${p.mvId}`);
+        if (!res.ok) throw new Error();
+        const mv = await res.json();
+        setReplyMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'piano-roll' });
+        setActiveScreen('mvmaker');
+        return;
+      } catch {
+      }
+    }
+
     const pMml = extractMmlFromContent(p.content);
     if (!p.hasImage && pMml) {
       setCollabMml(pMml);
@@ -500,7 +511,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
   };
 
-  const handleSaveEditedArt = async (canvasData: string) => {
+  const handleSaveEditedImage = async (canvasData: string) => {
     const prevPost = post;
     setActiveScreen(null);
     setCollabImageUrl(undefined);
@@ -518,6 +529,56 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const handleEditMusic = () => {
     setMenuOpen(false);
     setActiveScreen('edit-mml');
+  };
+
+  const handleEditMv = async () => {
+    setMenuOpen(false);
+    if (!post.mvId) return;
+    try {
+      const res = await fetch(`/api/mvs/${post.mvId}`);
+      if (!res.ok) throw new Error();
+      const mv = await res.json();
+      setEditMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'piano-roll' });
+      setActiveScreen('edit-mv');
+    } catch {
+      showToast('error', 'MVの読み込みに失敗しました');
+    }
+  };
+
+  const handleEditGame = async () => {
+    setMenuOpen(false);
+    if (!post.gameId) return;
+    try {
+      const res = await fetch(`/api/games/${post.gameId}`);
+      if (!res.ok) throw new Error();
+      const game = await res.json();
+      setEditGameDraft({ manifest: game.manifest, title: game.title, preset: 'action' });
+      setActiveScreen('edit-game');
+    } catch {
+      showToast('error', 'ゲームの読み込みに失敗しました');
+    }
+  };
+
+  const handleSaveEditedMv = async (data: { manifest: MvManifest; title: string; preset: MvPresetKind }) => {
+    setActiveScreen(null);
+    try {
+      await api.mvs.edit(post.mvId!, userId, data.title, data.manifest);
+      showToast('success', 'MVを更新しました');
+      router.refresh();
+    } catch {
+      showToast('error', 'MVの更新に失敗しました');
+    }
+  };
+
+  const handleSaveEditedGame = async (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
+    setActiveScreen(null);
+    try {
+      await api.games.edit(post.gameId!, userId, meta.title, manifest);
+      showToast('success', 'ゲームを更新しました');
+      router.refresh();
+    } catch {
+      showToast('error', 'ゲームの更新に失敗しました');
+    }
   };
 
   const handleSaveEditedMusic = async (mml: string) => {
@@ -629,6 +690,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   <button role="menuitem" onClick={handleEditMusic} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Pencil size={12} className="shrink-0" />
                     <span>曲を編集</span>
+                  </button>
+                )}
+                {isSelf && post.hasMv && (
+                  <button role="menuitem" onClick={handleEditMv} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>MVを編集</span>
+                  </button>
+                )}
+                {isSelf && post.hasGame && (
+                  <button role="menuitem" onClick={handleEditGame} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>ゲームを編集</span>
                   </button>
                 )}
                 {isSelf && (
@@ -869,9 +942,6 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       </div>
 
       {post.replies.length > 0 && (() => {
-        // 親返信が削除済み／別スレッド由来などで親を辿れない返信は、
-        // 単純な parentPostId 一致だけだとツリーのどこにも現れず消えてしまう。
-        // 親が見つからないものはルート扱いにして必ず描画する。
         const ids = new Set(post.replies.map(r => r.id));
         const roots = post.replies.filter(r =>
           !r.parentPostId || r.parentPostId === post.id || !ids.has(r.parentPostId)
@@ -967,14 +1037,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       {activeScreen === 'edit-drawing' && (
         <DrawingEditor
           onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
-          onSave={handleSaveEditedArt}
+          onSave={handleSaveEditedImage}
           collabImageUrl={collabImageUrl}
         />
       )}
       {activeScreen === 'edit-dotdrawing' && (
         <DotDrawingEditor
           onClose={() => { setActiveScreen(null); setCollabImageUrl(undefined); }}
-          onSave={handleSaveEditedArt}
+          onSave={handleSaveEditedImage}
           collabImageUrl={collabImageUrl}
         />
       )}
@@ -984,6 +1054,23 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           onSave={handleSaveEditedMusic}
           initialMml={mmlCode ?? undefined}
           isEditing
+        />
+      )}
+      {activeScreen === 'edit-mv' && editMvDraft && (
+        <MvMaker
+          onClose={() => setActiveScreen(null)}
+          userId={userId}
+          onSave={handleSaveEditedMv}
+          initialManifest={editMvDraft.manifest}
+          isEditing={true}
+        />
+      )}
+      {activeScreen === 'edit-game' && editGameDraft && (
+        <GameMaker
+          onClose={() => setActiveScreen(null)}
+          userId={userId}
+          onSave={handleSaveEditedGame}
+          initialManifest={editGameDraft.manifest}
         />
       )}
 
