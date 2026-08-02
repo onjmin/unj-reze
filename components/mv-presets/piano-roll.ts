@@ -44,6 +44,8 @@ const MANIFEST: MvManifest = {
     bgFit: 'cover',
     bgDim: 0.3,
     pulse: 'none',
+    fadeIn: true,
+    fadeOut: true,
     palette: ['#a3e635', '#38bdf8', '#fbbf24', '#f472b6', '#c4b5fd'],
   },
   // イントロはロールだけの4小節。そこから「本編」に入った瞬間だけフラッシュが光り、

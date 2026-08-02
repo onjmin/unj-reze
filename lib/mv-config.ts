@@ -249,6 +249,10 @@ export interface MvStage {
   pulse: MvStagePulse;
   /** トラック別の色。ピアノロール/リング/バーが参照する。 */
   palette: string[];
+  /** 開始時に黒からフェードインするか */
+  fadeIn?: boolean;
+  /** 終了時に黒へフェードアウトするか */
+  fadeOut?: boolean;
 }
 
 // ───────────────── レイヤー ─────────────────
@@ -751,6 +755,8 @@ export function emptyMvManifest(): MvManifest {
       bgFit: 'cover',
       pulse: 'none',
       palette: ['#7dd3fc', '#a3e635', '#fbbf24', '#f87171', '#60a5fa'],
+      fadeIn: true,
+      fadeOut: true,
     },
     layers: [],
     sections: [{ id: 'main', label: '本編', startBar: 0 }],

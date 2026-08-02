@@ -28,6 +28,8 @@ const MANIFEST: MvManifest = {
     bgColor: '#000000',
     bgFit: 'cover',
     pulse: 'none',
+    fadeIn: true,
+    fadeOut: true,
     palette: ['#e5e7eb', '#93c5fd', '#a5b4fc', '#fbbf24', '#f9a8d4'],
   },
   sections: [

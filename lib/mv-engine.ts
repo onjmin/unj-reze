@@ -460,6 +460,26 @@ export function drawMvFrame(
 
   // フラッシュ・色反転などは全部の上に重ねる（変形の影響を受けない）
   drawOverlayEffects(d, effects);
+
+  // フェードイン/アウト
+  if (manifest.stage.fadeIn || manifest.stage.fadeOut) {
+    let fadeAlpha = 0;
+    const fadeSteps = MV_STEPS_PER_BAR; // 1小節分をフェードにかける
+
+    if (manifest.stage.fadeIn && d.step < fadeSteps) {
+      fadeAlpha = 1 - d.step / fadeSteps;
+    } else if (manifest.stage.fadeOut && song.totalSteps > 0 && d.step > song.totalSteps - fadeSteps) {
+      fadeAlpha = (d.step - (song.totalSteps - fadeSteps)) / fadeSteps;
+      if (fadeAlpha > 1) fadeAlpha = 1;
+    }
+
+    if (fadeAlpha > 0.001) {
+      ctx.save();
+      ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
+      ctx.fillRect(0, 0, MV_W, MV_H);
+      ctx.restore();
+    }
+  }
 }
 
 // ───────────────── 画面エフェクト ─────────────────

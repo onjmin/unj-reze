@@ -688,6 +688,8 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             ]}
             onChange={v => update(m => ({ ...m, stage: { ...m.stage, pulse: v } }))}
           />
+          <CheckField label="開始時にフェードイン" checked={manifest.stage.fadeIn ?? false} onChange={v => update(m => ({ ...m, stage: { ...m.stage, fadeIn: v } }))} />
+          <CheckField label="終了時にフェードアウト" checked={manifest.stage.fadeOut ?? false} onChange={v => update(m => ({ ...m, stage: { ...m.stage, fadeOut: v } }))} />
         </Details>
       </div>
 

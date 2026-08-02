@@ -27,6 +27,8 @@ const MANIFEST: MvManifest = {
     bgFit: 'cover',
     // 背景は静止。呼吸させると全編が同じ律動になってしまう（参考動画は無音部で完全に静止する）
     pulse: 'none',
+    fadeIn: true,
+    fadeOut: true,
     palette: ['#f5fffd', '#e0f5f1', '#cdeae5', '#b7ded7'],
   },
   // 場面ごとに中央のモチーフを掛け替える。単調ループにしないための骨格。
