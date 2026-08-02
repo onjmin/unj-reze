@@ -59,21 +59,17 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
   const [showOriginModal, setShowOriginModal] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processImageFile = (file: File) => {
     setUploadError(null);
 
     const MAX_SIZE = 5 * 1024 * 1024;
     if (file.size > MAX_SIZE) {
       setUploadError('5MB以下の画像を選択してください');
-      e.target.value = '';
       return;
     }
 
     if (!file.type.startsWith('image/')) {
       setUploadError('画像ファイルを選択してください');
-      e.target.value = '';
       return;
     }
 
@@ -85,7 +81,28 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       setUploadError('ファイルの読み込みに失敗しました');
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processImageFile(file);
     e.target.value = '';
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          processImageFile(file);
+        }
+        break;
+      }
+    }
   };
   const originOption = ORIGIN_TYPE_OPTIONS.find(o => o.value === originType);
 
@@ -299,6 +316,7 @@ export default function PostComposer({ userId, avatarUrl, text, setText, image, 
       value={text}
       onChange={(e) => setText(e.target.value)}
       onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
       className={`w-full bg-gray-100/10 hover:bg-gray-100/15 focus:bg-gray-100/15 rounded-xl px-3 py-2.5 focus:outline-none transition-all placeholder:text-gray-500 text-sm resize-none text-gray-100 ${md ? 'md:px-5 md:py-4 md:text-lg h-24 md:h-48' : 'h-20'}`}
       placeholder={replyAvatarInfo ? '返信を書き込む...' : isBbs ? 'スレタイ + 本文を入力' : 'いまどうしてる？ #お絵描き #ゲーム'}
     />
