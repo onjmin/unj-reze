@@ -1273,6 +1273,7 @@ export default function App() {
             onEditGame={() => handleOpenPostGame(editingPost.gameId || '', editingPost.id)}
             hasMv={editingPost.hasMv}
             mvTitle={editingPost.mvTitle}
+            onEditMv={() => handleEditPostMv(editingPost)}
           />
         )}
         </div>
