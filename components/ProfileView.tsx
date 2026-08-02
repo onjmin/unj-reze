@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Post, OshiItem, AnonymousUser } from '@/lib/types';
-import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Clapperboard, Edit3, X, Loader2, Music2, Pencil, Play, Pause, MoreHorizontal } from 'lucide-react';
+import { Post, OshiItem, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
+import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Clapperboard, Edit3, X, Loader2, Music2, Pencil, Play, Pause, MoreHorizontal, Copy, UserPlus, Ban, Flag, VolumeX, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
@@ -17,6 +17,10 @@ import EmbedPart from './EmbedPart';
 import UserActionMenu from './UserActionMenu';
 import ImagePreview from './ImagePreview';
 import FollowListSheet, { type FollowListTab } from './FollowListSheet';
+import EditPostModal from './EditPostModal';
+import DeletePostModal from './DeletePostModal';
+import OriginTypeModal from './OriginTypeModal';
+import { showToast } from '@/lib/toast';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 const CropAvatarModal = dynamic(() => import('./CropAvatarModal'), { ssr: false });
@@ -37,9 +41,324 @@ interface ProfileViewProps {
   onAddReply?: (id: string, text: string) => void;
   onRepost?: (id: string) => void;
   openCollab?: (post: Post) => void;
+  openGame?: (gameId?: string, postId?: string) => void;
   onProfileUpdate?: (displayName: string, avatarUrl?: string) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditPost?: (post: Post) => void;
+  onModerationChange?: () => void;
+}
+
+/* ─── Per-post three-dot menu (self-contained to isolate state per item) ─── */
+function ProfilePostMenu({
+  post,
+  currentUserSlug,
+  currentUserDisplayName,
+  onModerationChange,
+  onEditPost,
+  onEditImage,
+  onEditMml,
+  openGame,
+  onOptimisticDelete,
+  onUndoDelete,
+}: {
+  post: Post;
+  currentUserSlug?: string;
+  currentUserDisplayName?: string;
+  onModerationChange?: () => void;
+  onEditPost?: (post: Post) => void;
+  onEditImage?: (post: Post) => void;
+  onEditMml?: (post: Post) => void;
+  openGame?: (gameId?: string, postId?: string) => void;
+  onOptimisticDelete?: (postId: string) => void;
+  onUndoDelete?: (postId: string) => void;
+}) {
+  const router = useRouter();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showOriginModal, setShowOriginModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+
+  const pAvatarInfo = getAvatarInfo(post.displayName);
+  const targetSlug = post.slug || post.displayName;
+  const isSelfPost = !!currentUserSlug && currentUserSlug === targetSlug;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const handleMenuCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(post.content);
+    setMenuOpen(false);
+  }, [post.content]);
+
+  const handleMenuEdit = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    if (onEditPost) {
+      onEditPost(post);
+    } else {
+      setShowEditModal(true);
+    }
+  }, [currentUserSlug, onEditPost, post]);
+
+  const handleSaveEdit = useCallback(async (next: string, nextImageSrc?: string | null) => {
+    setShowEditModal(false);
+    if (!currentUserDisplayName) return;
+    try {
+      await api.posts.edit(post.id, currentUserDisplayName, next, post.originType, nextImageSrc === null ? '' : nextImageSrc);
+      onModerationChange?.();
+      router.refresh();
+    } catch {
+      showToast('error', '投稿の編集に失敗しました');
+    }
+  }, [currentUserDisplayName, post.id, post.originType, onModerationChange, router]);
+
+  const handleMenuOriginType = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    setShowOriginModal(true);
+  }, [currentUserSlug]);
+
+  const handleSelectOriginType = useCallback(async (value: OriginType | undefined) => {
+    setShowOriginModal(false);
+    if (!currentUserDisplayName) return;
+    try {
+      await api.posts.edit(post.id, currentUserDisplayName, post.content, value ?? null);
+      onModerationChange?.();
+    } catch {
+      showToast('error', '権利表記の更新に失敗しました');
+    }
+  }, [currentUserDisplayName, post.id, post.content, onModerationChange]);
+
+  const handleMenuDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    setShowDeleteModal(true);
+  }, [currentUserSlug]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    setShowDeleteModal(false);
+    if (!currentUserSlug) return;
+    onOptimisticDelete?.(post.id);
+    try {
+      await api.posts.remove(post.id, currentUserSlug);
+      onModerationChange?.();
+    } catch {
+      onUndoDelete?.(post.id);
+      showToast('error', '投稿の削除に失敗しました');
+    }
+  }, [currentUserSlug, post.id, onModerationChange]);
+
+  const handleMenuFollow = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setFollowing(v => !v);
+    setMenuOpen(false);
+  }, []);
+
+  const handleMenuBlock = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    try {
+      if (blocked) {
+        await api.block.unblock(currentUserSlug, targetSlug);
+        setBlocked(false);
+      } else {
+        await api.block.block(currentUserSlug, targetSlug);
+        setBlocked(true);
+      }
+      onModerationChange?.();
+    } catch { /* noop */ }
+  }, [currentUserSlug, targetSlug, blocked, onModerationChange]);
+
+  const handleMenuMute = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!currentUserSlug) return;
+    try {
+      if (muted) {
+        await api.mute.unmute(currentUserSlug, targetSlug);
+        setMuted(false);
+      } else {
+        await api.mute.mute(currentUserSlug, targetSlug);
+        setMuted(true);
+      }
+      onModerationChange?.();
+    } catch { /* noop */ }
+  }, [currentUserSlug, targetSlug, muted, onModerationChange]);
+
+  const handleMenuReport = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    setShowReportModal(true);
+  }, []);
+
+  const submitReport = useCallback(async () => {
+    try {
+      await api.report.create({
+        reporterSlug: currentUserSlug || '名無し',
+        targetType: 'post',
+        targetId: String(post.id),
+        reason: reportReason,
+      });
+      setShowReportModal(false);
+      setReportReason('');
+      showToast('success', '通報を受け付けました');
+    } catch { /* noop */ }
+  }, [currentUserSlug, post.id, reportReason]);
+
+  return (
+    <>
+      <div ref={menuRef} className="relative">
+        <button
+          onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMenuOpen(v => !v); }}
+          className="p-2 -mr-2 -mt-1 rounded hover:bg-gray-100/10 transition-colors"
+        >
+          <MoreHorizontal size={16} className="text-gray-500 hover:text-gray-300" />
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-6 z-50 w-48 rounded-lg border border-gray-700 bg-[#131720] shadow-xl py-1 text-xs"
+            onClick={e => e.stopPropagation()}
+          >
+            <button role="menuitem" onClick={handleMenuCopy} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+              <Copy size={12} className="shrink-0" />
+              <span>テキストをコピー</span>
+            </button>
+            {isSelfPost && (
+              <button role="menuitem" onClick={handleMenuEdit} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                <Pencil size={12} className="shrink-0" />
+                <span>ポストを編集</span>
+              </button>
+            )}
+            {isSelfPost && (
+              <button role="menuitem" onClick={handleMenuOriginType} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                <Pencil size={12} className="shrink-0" />
+                <span>権利表記を設定</span>
+              </button>
+            )}
+            {isSelfPost && (
+              <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                <Trash2 size={12} className="shrink-0" />
+                <span>ポストを削除</span>
+              </button>
+            )}
+            {!isSelfPost && (
+              <button role="menuitem" onClick={handleMenuFollow} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                <UserPlus size={12} className="shrink-0" />
+                <span>{following ? 'フォロー中' : `${pAvatarInfo.username}さんをフォロー`}</span>
+              </button>
+            )}
+            {!isSelfPost && (
+              <button role="menuitem" onClick={handleMenuMute} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                <VolumeX size={12} className="shrink-0" />
+                <span>{muted ? 'ミュート中' : `${pAvatarInfo.username}さんをミュート`}</span>
+              </button>
+            )}
+            {!isSelfPost && (
+              <button role="menuitem" onClick={handleMenuBlock} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                <Ban size={12} className="shrink-0" />
+                <span>{blocked ? 'ブロック中' : `${pAvatarInfo.username}さんをブロック`}</span>
+              </button>
+            )}
+            {!isSelfPost && <div className="border-t border-gray-800 my-1" />}
+            {!isSelfPost && (
+              <button role="menuitem" onClick={handleMenuReport} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
+                <Flag size={12} className="shrink-0" />
+                <span>ポストを通報</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showEditModal && (
+        <EditPostModal
+          initialContent={post.content}
+          onClose={() => setShowEditModal(false)}
+          onSave={handleSaveEdit}
+          imageSrc={post.imageSrc}
+          onEditImage={() => {
+            onEditImage?.(post);
+            setShowEditModal(false);
+          }}
+          onEditMml={() => {
+            onEditMml?.(post);
+            setShowEditModal(false);
+          }}
+          hasGame={post.hasGame}
+          gameTitle={post.gameTitle}
+          onEditGame={() => {
+            openGame?.(post.gameId, post.id);
+            setShowEditModal(false);
+          }}
+        />
+      )}
+      {showDeleteModal && (
+        <DeletePostModal
+          onClose={() => setShowDeleteModal(false)}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
+      {showOriginModal && (
+        <OriginTypeModal
+          value={post.originType}
+          onClose={() => setShowOriginModal(false)}
+          onSelect={handleSelectOriginType}
+        />
+      )}
+      {showReportModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3 font-sans text-gray-200 shadow-2xl">
+            <h4 className="text-sm font-bold text-gray-100 flex items-center gap-1.5">
+              <span>🚨</span> 投稿の通報
+            </h4>
+            <p className="text-xs text-gray-400">通報理由を入力してください（任意）</p>
+            <textarea
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              placeholder="理由の詳細…"
+              rows={3}
+              className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs text-gray-200 outline-none focus:border-red-500 resize-none"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => { setShowReportModal(false); setReportReason(''); }}
+                className="px-3.5 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded-lg transition"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={submitReport}
+                className="px-3.5 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-500 rounded-lg transition"
+              >
+                送信
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 const tabs = [
@@ -51,7 +370,7 @@ const tabs = [
   { id: 'media', label: 'メディア', icon: Image },
 ];
 
-export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, onProfileUpdate, onEditImage, onEditMml }: ProfileViewProps) {
+export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, openGame, onProfileUpdate, onEditImage, onEditMml, onEditPost, onModerationChange }: ProfileViewProps) {
   const router = useRouter();
   const currentUser = useCurrentUser();
   const cleanUserId = useMemo(() => {
@@ -95,6 +414,14 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
   const [followListTab, setFollowListTab] = useState<FollowListTab | null>(null);
   /** 投稿画像のタップで開く拡大表示（フィードと同じ ImagePreview を共用） */
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
+  /** ポスト三点メニューからの楽観的削除 */
+  const [deletedPostIds, setDeletedPostIds] = useState<Set<string>>(new Set());
+  const handleOptimisticDelete = useCallback((postId: string) => {
+    setDeletedPostIds(prev => { const next = new Set(prev); next.add(postId); return next; });
+  }, []);
+  const handleUndoDelete = useCallback((postId: string) => {
+    setDeletedPostIds(prev => { const next = new Set(prev); next.delete(postId); return next; });
+  }, []);
 
   const isSelf = useMemo(() => {
     if (!userId) return false;
@@ -641,7 +968,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
         {loading ? (
           <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
         ) : filteredPosts.length > 0 ? (
-          filteredPosts.map(p => {
+          filteredPosts.filter(p => !deletedPostIds.has(p.id)).map(p => {
             const pAvatarInfo = getAvatarInfo(p.displayName);
             return (
               <div key={p.id} className="flex relative transition-all hover:bg-gray-100/5">
@@ -675,8 +1002,29 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                     <div className="flex justify-between items-baseline mb-0.5">
                       <div className="flex items-baseline space-x-1.5">
                         <span className="font-bold text-xs text-gray-200">{pAvatarInfo.username}</span>
-                        <span className="text-gray-500 text-[10px] font-medium">{p.time}</span>
+                        {(() => {
+                          const opt = ORIGIN_TYPE_OPTIONS.find(o => o.value === p.originType);
+                          return opt ? (
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${opt.badgeClass}`}>{opt.label}</span>
+                          ) : null;
+                        })()}
+                        <span className="text-gray-500 text-[10px] font-medium">
+                          {p.time}
+                          {p.isEdited && <span className="ml-1 text-[9px] text-gray-500/70">(編集済み)</span>}
+                        </span>
                       </div>
+                      <ProfilePostMenu
+                        post={p}
+                        currentUserSlug={viewerSlug}
+                        currentUserDisplayName={viewerId}
+                        onModerationChange={onModerationChange}
+                        onEditPost={onEditPost}
+                        onEditImage={onEditImage}
+                        onEditMml={onEditMml}
+                        openGame={openGame}
+                        onOptimisticDelete={handleOptimisticDelete}
+                        onUndoDelete={handleUndoDelete}
+                      />
                     </div>
 
                   {/* break-words が無いと長いURLが折り返せず、プロフィールが横に伸びて
