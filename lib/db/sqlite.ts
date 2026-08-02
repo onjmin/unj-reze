@@ -482,20 +482,32 @@ export const sqliteStore: DataStore = {
     if (before) params.push(before);
 
     if (options.hasMml !== undefined) {
-      filterClause += ` AND p.has_mml = ?`;
-      params.push(options.hasMml ? 1 : 0);
+      if (options.hasMml) {
+        filterClause += ` AND EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mml = 1)`;
+      } else {
+        filterClause += ` AND NOT EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mml = 1)`;
+      }
     }
     if (options.hasImage !== undefined) {
-      filterClause += ` AND p.has_image = ?`;
-      params.push(options.hasImage ? 1 : 0);
+      if (options.hasImage) {
+        filterClause += ` AND EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_image = 1)`;
+      } else {
+        filterClause += ` AND NOT EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_image = 1)`;
+      }
     }
     if (options.hasGame !== undefined) {
-      filterClause += ` AND p.has_game = ?`;
-      params.push(options.hasGame ? 1 : 0);
+      if (options.hasGame) {
+        filterClause += ` AND EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_game = 1)`;
+      } else {
+        filterClause += ` AND NOT EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_game = 1)`;
+      }
     }
     if (options.hasMv !== undefined) {
-      filterClause += ` AND p.has_mv = ?`;
-      params.push(options.hasMv ? 1 : 0);
+      if (options.hasMv) {
+        filterClause += ` AND EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mv = 1)`;
+      } else {
+        filterClause += ` AND NOT EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mv = 1)`;
+      }
     }
 
     let rows;
@@ -1104,13 +1116,26 @@ export const sqliteStore: DataStore = {
       d,
       `${UNVOTED_SELECT}
       WHERE p.thread_id = p.id
-        AND (p.content LIKE ? OR p.display_name LIKE ? OR (au.display_name IS NOT NULL AND au.display_name LIKE ?))
+        AND EXISTS (
+          SELECT 1 FROM posts p2
+          LEFT JOIN anonymous_users au2 ON p2.slug = au2.slug
+          WHERE p2.thread_id = p.id
+            AND (p2.content LIKE ? OR p2.display_name LIKE ? OR (au2.display_name IS NOT NULL AND au2.display_name LIKE ?))
+        )
         AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), 0) = 0
       ORDER BY p.id DESC LIMIT ${safeLimit}`,
       [`%${query}%`, `%${query}%`, `%${query}%`]
     );
+    if (rows.length === 0) return [];
+    rows.forEach(r => applyVoteRow(r, userId));
+
+    const threadIds = rows.map(r => r.id);
+    const repliesMap = await getThreadRepliesSqlite(d, threadIds);
     const hidden = getHiddenSlugsSqlite(d, userId);
-    return rows.map(rowToPost).filter(p => !hidden.has(p.slug ?? ''));
+    return rows.map(r => ({
+      ...rowToPost(r),
+      replies: (repliesMap.get(r.id) || []).filter(rep => !hidden.has(rep.slug ?? '')),
+    })).filter(p => !hidden.has(p.slug ?? ''));
   },
 
   async getPostsByHashtag(tag: string, userId?: string, limit?: number) {

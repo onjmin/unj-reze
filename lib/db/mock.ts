@@ -10,8 +10,8 @@ const gameStore = new Map<number, DbGameRecord>();
 const mvStore = new Map<number, DbMvRecord>();
 
 export const mockStore: DataStore = {
-  async getPosts(userId?: string, limit?: number, beforeId?: number) {
-    return mockDb.getPosts(userId, limit, beforeId);
+  async getPosts(userId?: string, limitOrOptions?: number | import('./interface').GetPostsOptions, beforeId?: number, optionsArg?: import('./interface').GetPostsOptions) {
+    return mockDb.getPosts(userId, limitOrOptions, beforeId, optionsArg);
   },
 
   async getPost(id: number, userId?: string) {

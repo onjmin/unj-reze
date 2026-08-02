@@ -186,10 +186,10 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number, b
       LEFT JOIN post_votes pv ON pv.post_id = p.id AND pv.user_id = $1
       WHERE p.thread_id = p.id
         AND ($2::bigint IS NULL OR p.id < $2::bigint)
-        AND ($3::boolean IS NULL OR p.has_mml = $3::boolean)
-        AND ($4::boolean IS NULL OR p.has_image = $4::boolean)
-        AND ($5::boolean IS NULL OR p.has_game = $5::boolean)
-        AND ($6::boolean IS NULL OR p.has_mv = $6::boolean)
+        AND ($3::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mml = true) = $3::boolean)
+        AND ($4::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_image = true) = $4::boolean)
+        AND ($5::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_game = true) = $5::boolean)
+        AND ($6::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mv = true) = $6::boolean)
       ORDER BY p.id DESC${limitClause}
     `, [userId, cursor, hasMml, hasImage, hasGame, hasMv]);
   } else {
@@ -203,10 +203,10 @@ async function getPostsWithVotes(client: any, userId?: string, limit?: number, b
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE p.thread_id = p.id
         AND ($1::bigint IS NULL OR p.id < $1::bigint)
-        AND ($2::boolean IS NULL OR p.has_mml = $2::boolean)
-        AND ($3::boolean IS NULL OR p.has_image = $3::boolean)
-        AND ($4::boolean IS NULL OR p.has_game = $4::boolean)
-        AND ($5::boolean IS NULL OR p.has_mv = $5::boolean)
+        AND ($2::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mml = true) = $2::boolean)
+        AND ($3::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_image = true) = $3::boolean)
+        AND ($4::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_game = true) = $4::boolean)
+        AND ($5::boolean IS NULL OR EXISTS (SELECT 1 FROM posts p2 WHERE p2.thread_id = p.id AND p2.has_mv = true) = $5::boolean)
       ORDER BY p.id DESC${limitClause}
     `, [cursor, hasMml, hasImage, hasGame, hasMv]);
   }
@@ -1194,13 +1194,24 @@ export const pgStore: DataStore = {
         FROM posts p
         LEFT JOIN anonymous_users au ON p.slug = au.slug
         WHERE p.thread_id = p.id
-          AND (p.content ILIKE $1 OR p.display_name ILIKE $1 OR au.display_name ILIKE $1)
+          AND EXISTS (
+            SELECT 1 FROM posts p2
+            LEFT JOIN anonymous_users au2 ON p2.slug = au2.slug
+            WHERE p2.thread_id = p.id
+              AND (p2.content ILIKE $1 OR p2.display_name ILIKE $1 OR au2.display_name ILIKE $1)
+          )
           AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), false) = false
         ORDER BY p.id DESC
         LIMIT ${safeLimit}
       `, [`%${query}%`]);
+      if (result.rows.length === 0) return [];
+      const threadIds = result.rows.map((r: any) => r.id);
+      const repliesMap = await getThreadReplies(client, threadIds);
       const [posts, hidden] = await Promise.all([
-        Promise.all(result.rows.map(rowToPost)),
+        Promise.all(result.rows.map(async (r: any) => ({
+          ...(await rowToPost(r)),
+          replies: repliesMap.get(r.id) || [],
+        }))),
         getHiddenSlugs(client, userId)
       ]);
       return hidden.size === 0 ? posts : posts.filter(p => !hidden.has(p.slug ?? ''));

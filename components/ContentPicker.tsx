@@ -327,7 +327,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
         for (const r of p.replies) {
           if (r && !seen.has(r.id) && r.hasImage && r.imageSrc) {
             seen.add(r.id);
-            if (!q || r.content?.toLowerCase().includes(q) || r.displayName?.toLowerCase().includes(r.displayName)) {
+            if (!q || r.content?.toLowerCase().includes(q) || r.displayName?.toLowerCase().includes(q)) {
               list.push(r);
             }
           }

@@ -289,10 +289,14 @@ class MockDB {
       .filter(p => p.id === p.threadId)
       // キーセットページング: カーソルより古いスレッドだけ返す
       .filter(p => !before || p.id < before)
-      .filter(p => options.hasMml === undefined || !!p.hasMml === options.hasMml)
-      .filter(p => options.hasImage === undefined || !!p.hasImage === options.hasImage)
-      .filter(p => options.hasGame === undefined || !!p.hasGame === options.hasGame)
-      .filter(p => options.hasMv === undefined || !!p.hasMv === options.hasMv)
+      .filter(p => {
+        const threadPosts = [p, ...(p.replies || [])];
+        if (options.hasMml !== undefined && threadPosts.some(tp => !!tp.hasMml) !== options.hasMml) return false;
+        if (options.hasImage !== undefined && threadPosts.some(tp => !!tp.hasImage) !== options.hasImage) return false;
+        if (options.hasGame !== undefined && threadPosts.some(tp => !!tp.hasGame) !== options.hasGame) return false;
+        if (options.hasMv !== undefined && threadPosts.some(tp => !!tp.hasMv) !== options.hasMv) return false;
+        return true;
+      })
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => this.canViewAuthor(p.slug ?? '', p.displayName, userId))
       .sort((a, b) => b.id - a.id)
@@ -657,7 +661,13 @@ class MockDB {
       .filter(p => p.id === p.threadId)
       .filter(p => !hidden.has(p.slug ?? ''))
       .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
-      .filter(p => p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))
+      .filter(p => {
+        const threadPosts = [p, ...(p.replies || [])];
+        return threadPosts.some(tp =>
+          tp.content.toLowerCase().includes(q) ||
+          tp.displayName.toLowerCase().includes(q)
+        );
+      })
       .map(p => this.applyUserState({ ...p, replies: [...p.replies] }, userId));
     return limit && limit > 0 ? res.slice(0, limit) : res;
   }
