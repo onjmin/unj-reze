@@ -6,7 +6,7 @@
 // 「キーに対する度数で色相を決める」やり方。
 
 import type { MvManifest } from '@/lib/mv-config';
-import { BUILTIN_WALK, cloneManifest, DQ_CAST, type MvPresetEntry } from './shared';
+import { cloneManifest, DQ_CAST, type MvPresetEntry } from './shared';
 
 const MML = [
   '#volume=50',
@@ -63,7 +63,6 @@ const MANIFEST: MvManifest = {
       id: `cast${i}`,
       ref: `url:${DQ_CAST[i % DQ_CAST.length]}`,
       url: DQ_CAST[i % DQ_CAST.length],
-      walk: { ...BUILTIN_WALK, fps: 3 },
       x,
       y: 250,
       scale: 3,

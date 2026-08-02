@@ -7,7 +7,7 @@
 // 歌詞はMMLの歌詞トラック（@@0）から自動同期する。改行がそのまま行の区切りになる。
 
 import type { MvManifest } from '@/lib/mv-config';
-import { BUILTIN_WALK, BUILTIN_WALK_URL, cloneManifest, type MvPresetEntry } from './shared';
+import { DEFAULT_IMAGE_URL, cloneManifest, type MvPresetEntry } from './shared';
 
 const MML = `#volume=50
 @0 t128 q80 v100 o4 l4 e g a b a g e d e g a b >c< b a g e g a b a g e d c d e g a4;
@@ -41,9 +41,8 @@ const MANIFEST: MvManifest = {
     {
       kind: 'image',
       id: 'window',
-      ref: `url:${BUILTIN_WALK_URL}`,
-      url: BUILTIN_WALK_URL,
-      walk: BUILTIN_WALK,
+      ref: `url:${DEFAULT_IMAGE_URL}`,
+      url: DEFAULT_IMAGE_URL,
       x: 232,
       y: 68,
       scale: 5,
@@ -83,9 +82,8 @@ const MANIFEST: MvManifest = {
     {
       kind: 'image',
       id: 'drifter',
-      ref: `url:${BUILTIN_WALK_URL}`,
-      url: BUILTIN_WALK_URL,
-      walk: { ...BUILTIN_WALK, dir: 'd' },
+      ref: `url:${DEFAULT_IMAGE_URL}`,
+      url: DEFAULT_IMAGE_URL,
       x: 0,
       y: 150,
       scale: 8,
@@ -99,9 +97,8 @@ const MANIFEST: MvManifest = {
     {
       kind: 'image',
       id: 'stage-chara',
-      ref: `url:${BUILTIN_WALK_URL}`,
-      url: BUILTIN_WALK_URL,
-      walk: BUILTIN_WALK,
+      ref: `url:${DEFAULT_IMAGE_URL}`,
+      url: DEFAULT_IMAGE_URL,
       x: 200,
       y: 352,
       scale: 6,

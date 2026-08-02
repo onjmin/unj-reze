@@ -11,17 +11,16 @@ export interface MvPresetEntry {
   build: () => MvManifest;
 }
 
-/** 内蔵のRPGEN歩行グラ（16px・2フレーム×4方向）。プリセットの仮キャラに使う。 */
-export const BUILTIN_WALK_URL = '/assets/rpgen/char/00-hero.png';
-export const BUILTIN_WALK = { stdId: 'rpgen', dir: 's' as const, fps: 4 };
+/** 内蔵のプリセット用画像。静止画をデフォルトとする。 */
+export const DEFAULT_IMAGE_URL = '/icon-192.png';
 
-/** 横一列に並べる用の内蔵キャラ。lib/local-assets.ts の DQ_CHARACTERS と同じ実体。 */
+/** 横一列に並べる用の内蔵キャラ。 */
 export const DQ_CAST = [
-  '/assets/rpgen/char/00-hero.png',
-  '/assets/rpgen/char/09-woman-a.png',
-  '/assets/rpgen/char/04-child.png',
-  '/assets/rpgen/char/02-merchant.png',
-  '/assets/rpgen/char/11-woman-b.png',
+  '/icon-192.png',
+  '/icon-192.png',
+  '/icon-192.png',
+  '/icon-192.png',
+  '/icon-192.png',
 ];
 
 export function cloneManifest(m: MvManifest): MvManifest {

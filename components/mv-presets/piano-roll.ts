@@ -6,7 +6,7 @@
 // 曲のノートがそのまま絵になるので、素材を1枚も足さなくても成立する（背景・キャラは差し替え推奨）。
 
 import type { MvManifest } from '@/lib/mv-config';
-import { BUILTIN_WALK, BUILTIN_WALK_URL, cloneManifest, type MvPresetEntry } from './shared';
+import { DEFAULT_IMAGE_URL, cloneManifest, type MvPresetEntry } from './shared';
 
 // 各トラックとも「1小節=4拍」で正確に16小節そろえてある。
 // 長さが揃っていないと後半の画面からノートが消えて、本編がスカスカに見えてしまう。
@@ -84,9 +84,8 @@ const MANIFEST: MvManifest = {
     {
       kind: 'image',
       id: 'chara',
-      ref: `url:${BUILTIN_WALK_URL}`,
-      url: BUILTIN_WALK_URL,
-      walk: BUILTIN_WALK,
+      ref: `url:${DEFAULT_IMAGE_URL}`,
+      url: DEFAULT_IMAGE_URL,
       x: 540,
       y: 352,
       scale: 9,

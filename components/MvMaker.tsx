@@ -90,17 +90,13 @@ function StringNumInput({ value, onChange, className, placeholder }: {
   placeholder?: string;
 }) {
   const [text, setText] = useState(value === undefined ? '' : String(value));
+  const [focused, setFocused] = useState(false);
+
   useEffect(() => {
-    if (value === undefined) {
-      if (text !== '' && text !== '-' && !text.endsWith('.')) setText('');
-    } else {
-      const parsed = Number(text);
-      if (parsed !== value && text !== '-' && !text.endsWith('.')) {
-        if (text.trim() === '' && value === 0) return;
-        setText(String(value));
-      }
+    if (!focused) {
+      setText(value === undefined ? '' : String(value));
     }
-  }, [value, text]);
+  }, [value, focused]);
 
   return (
     <input
@@ -108,13 +104,21 @@ function StringNumInput({ value, onChange, className, placeholder }: {
       inputMode="decimal"
       value={text}
       placeholder={placeholder}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        if (text.trim() === '') {
+          onChange(0);
+          setText('0');
+        } else {
+          const n = Number(text);
+          if (!Number.isNaN(n)) onChange(n);
+        }
+      }}
       onChange={e => {
         setText(e.target.value);
         const val = e.target.value;
-        if (val.trim() === '') {
-          onChange(0);
-          return;
-        }
+        if (val === '-' || val.trim() === '' || val.endsWith('.')) return;
         const n = Number(val);
         if (!Number.isNaN(n)) onChange(n);
       }}
@@ -469,7 +473,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const addImageLayer = () => {
     const layer: MvImageLayer = {
       kind: 'image', id: mvUid('img'), ref: '', x: MV_W / 2, y: MV_H / 2,
-      scale: 4, anchor: 'center', motion: 'none', pixelated: true, z: 20,
+      scale: 1, anchor: 'center', motion: 'none', pixelated: true, z: 20,
     };
     update(m => ({ ...m, layers: [...m.layers, layer] }));
     setSelectedLayerId(layer.id);
@@ -561,7 +565,29 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
 
   const removeLayer = (id: string) => {
     update(m => ({ ...m, layers: m.layers.filter(l => l.id !== id) }));
-    setSelectedLayerId(prev => (prev === id ? null : prev));
+    if (selectedLayerId === id) setSelectedLayerId(null);
+  };
+
+  const moveLayerUp = (index: number) => {
+    if (index === 0) return;
+    update(m => {
+      const layers = [...m.layers];
+      const temp = layers[index - 1];
+      layers[index - 1] = layers[index];
+      layers[index] = temp;
+      return { ...m, layers };
+    });
+  };
+
+  const moveLayerDown = (index: number) => {
+    if (index === manifest.layers.length - 1) return;
+    update(m => {
+      const layers = [...m.layers];
+      const temp = layers[index + 1];
+      layers[index + 1] = layers[index];
+      layers[index] = temp;
+      return { ...m, layers };
+    });
   };
 
   const imageLayers = manifest.layers.filter((l): l is MvImageLayer => l.kind === 'image');
@@ -656,22 +682,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
         )}
       </div>
 
-      <div className={SECTION_CLASS}>
-        <SectionTitle>📝 タイトル</SectionTitle>
-        <input
-          value={manifest.title}
-          onChange={e => update(m => ({ ...m, title: e.target.value }))}
-          placeholder="MVのタイトル"
-          className={INPUT_CLASS}
-        />
-        <input
-          value={manifest.credit ?? ''}
-          onChange={e => update(m => ({ ...m, credit: e.target.value }))}
-          placeholder="クレジット（任意）"
-          className={INPUT_CLASS}
-        />
-        <Hint>タイムラインに出る名前です。画面の中に出る文字とは別物です。</Hint>
-      </div>
+
     </div>
   );
 
@@ -1160,7 +1171,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
       <div className={SECTION_CLASS}>
         <SectionTitle><Layers size={12} className="mr-1 inline" />レイヤー</SectionTitle>
         {manifest.layers.length === 0 && <p className="text-[10px] text-gray-500">レイヤーがありません。</p>}
-        {manifest.layers.map(layer => {
+        {manifest.layers.map((layer, index) => {
           const Icon = LAYER_ICON[layer.kind];
           const active = layer.id === selectedLayerId;
           return (
@@ -1175,6 +1186,10 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                     </span>
                   )}
                 </button>
+                <div className="flex flex-col gap-0.5">
+                  <button disabled={index === 0} onClick={() => moveLayerUp(index)} className="grid h-4 w-6 place-items-center rounded bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"><ChevronUp size={12}/></button>
+                  <button disabled={index === manifest.layers.length - 1} onClick={() => moveLayerDown(index)} className="grid h-4 w-6 place-items-center rounded bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"><ChevronDown size={12}/></button>
+                </div>
                 <button onClick={() => removeLayer(layer.id)} className={DEL_BTN_CLASS}><Trash2 size={16} /></button>
               </div>
               
