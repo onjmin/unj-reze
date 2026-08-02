@@ -5,6 +5,7 @@ import { PlaySquare } from 'lucide-react';
 import GamePreview from './GamePreview';
 import { PLAY_W, PLAY_H } from './game-presets/shared';
 import { useAudioFocus } from '@/lib/audio-focus-context';
+import type { OriginType } from '@/lib/types';
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
@@ -17,10 +18,12 @@ interface GameBoxProps {
   gamePlays?: number;
   gameClears?: number;
   userId?: string;
+  /** 元ポストの権利表記。改変NG・無断使用禁止なら「改造する」を出さない */
+  originType?: OriginType;
   className?: string;
 }
 
-export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, gamePlays = 0, gameClears = 0, userId, className }: GameBoxProps) {
+export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, gamePlays = 0, gameClears = 0, userId, originType, className }: GameBoxProps) {
   const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed');
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -133,6 +136,7 @@ export default function GameBox({ gameId, postId, gameTitle, gameThumbnail, game
             postId={postId}
             userId={userId}
             onClose={handleClose}
+            originType={originType}
             inline
           />
         </div>

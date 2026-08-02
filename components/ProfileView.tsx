@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Post, OshiItem, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS } from '@/lib/types';
+import { Post, OshiItem, AnonymousUser, OriginType, ORIGIN_TYPE_OPTIONS, isCollabAllowed } from '@/lib/types';
 import { MessageCircle, Heart, ThumbsUp, ThumbsDown, Image, FileText, Repeat, Mail, PlaySquare, Clapperboard, Edit3, X, Loader2, Music2, Pencil, Play, Pause, MoreHorizontal, Copy, UserPlus, Ban, Flag, VolumeX, Trash2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -1079,7 +1079,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                           target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
                         }}
                       />
-                      {p.hasCollabButton && (
+                      {p.hasCollabButton && isCollabAllowed(p.originType) && (
                         <button
                           onClick={(e) => { e.stopPropagation(); openCollab?.(p); }}
                           className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"

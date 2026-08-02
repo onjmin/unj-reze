@@ -11,6 +11,7 @@ import { buildGameShareText } from '@/lib/share-text';
 import { startRemix } from '@/lib/remix';
 import { ensureSessionId } from '@/lib/session';
 import { api } from '@/lib/api';
+import { isCollabAllowed, type OriginType } from '@/lib/types';
 
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
 
@@ -25,6 +26,8 @@ interface Props {
   bestScore: number;
   bestScoreBy?: string;
   postId?: string;
+  /** 紐づくポストの権利表記。改変NG・無断使用禁止なら改造の導線を出さない */
+  originType?: OriginType;
 }
 
 /**
@@ -32,8 +35,9 @@ interface Props {
  * 遊んだあとに共有・改造・コメントへ進めるようにしている。
  */
 export default function GameLandingView({
-  gameId, title, manifest, preset, creatorSlug, plays, clears, bestScore, bestScoreBy, postId,
+  gameId, title, manifest, preset, creatorSlug, plays, clears, bestScore, bestScoreBy, postId, originType,
 }: Props) {
+  const remixAllowed = isCollabAllowed(originType);
   const [started, setStarted] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
 
@@ -89,7 +93,7 @@ export default function GameLandingView({
               fixedControls
               postId={postId}
               gameId={gameId}
-              onRemix={handleRemix}
+              onRemix={remixAllowed ? handleRemix : undefined}
             />
           </div>
         ) : (
@@ -115,12 +119,14 @@ export default function GameLandingView({
             <MessageCircle size={13} /> コメントを見る
           </Link>
         )}
-        <button
-          onClick={() => startRemix({ manifest, title: `${title}（改造）`, preset, sourceGameId: gameId, sourceTitle: title })}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
-        >
-          <Pencil size={13} /> 改造して投稿
-        </button>
+        {remixAllowed && (
+          <button
+            onClick={() => startRemix({ manifest, title: `${title}（改造）`, preset, sourceGameId: gameId, sourceTitle: title })}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"
+          >
+            <Pencil size={13} /> 改造して投稿
+          </button>
+        )}
       </div>
     </div>
   );

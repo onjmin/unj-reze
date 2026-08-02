@@ -5,6 +5,7 @@ import { Clapperboard, Loader2, Pencil } from 'lucide-react';
 import MvPlayer from './MvPlayer';
 import { MV_H, MV_PRESET_LABELS, MV_W, type MvManifest, type MvPresetKind } from '@/lib/mv-config';
 import { startMvRemix } from '@/lib/remix';
+import { isCollabAllowed, type OriginType } from '@/lib/types';
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
@@ -16,6 +17,8 @@ interface MvBoxProps {
   mvThumbnail?: string;
   mvPreset?: MvPresetKind;
   mvPlays?: number;
+  /** 元ポストの権利表記。改変NG・無断使用禁止なら「改造する」を出さない */
+  originType?: OriginType;
   className?: string;
 }
 
@@ -25,7 +28,7 @@ interface MvBoxProps {
  * manifest はサムネの時点では持たない（フィードの転送量を増やさないため。docs/NEON_EGRESS.md）。
  * 展開したときにはじめて /api/mvs/[id] から取りにいく。
  */
-export default function MvBox({ mvId, postId, mvTitle, mvThumbnail, mvPreset, mvPlays = 0, className }: MvBoxProps) {
+export default function MvBox({ mvId, postId, mvTitle, mvThumbnail, mvPreset, mvPlays = 0, originType, className }: MvBoxProps) {
   const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed');
   const [measuredWidth, setMeasuredWidth] = useState(0);
   const [manifest, setManifest] = useState<MvManifest | null>(null);
@@ -152,7 +155,7 @@ export default function MvBox({ mvId, postId, mvTitle, mvThumbnail, mvPreset, mv
             </div>
           )}
           <div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
-            {manifest && (
+            {manifest && isCollabAllowed(originType) && (
               <button
                 onClick={() => startMvRemix({ manifest, title: `${mvTitle}（改造）`, preset: mvPreset || 'pianoRoll', sourceMvId: mvId, sourceTitle: mvTitle })}
                 className="flex items-center gap-1 rounded-full bg-cyan-600/80 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur transition-colors hover:bg-cyan-500/90"

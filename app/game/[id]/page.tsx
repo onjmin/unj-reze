@@ -72,6 +72,8 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
   }
 
   const postId = await db.getPostIdByGameId(game.id);
+  // 改造の可否は紐づくポストの権利表記で決まるので、ここだけは投稿本体も引く
+  const post = postId ? await db.getPost(postId) : null;
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -101,6 +103,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         bestScore={game.bestScore ?? 0}
         bestScoreBy={game.bestScoreBy}
         postId={postId ? encodeId(postId) : undefined}
+        originType={post?.originType}
       />
     </div>
   );

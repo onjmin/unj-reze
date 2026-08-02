@@ -6,7 +6,7 @@ import {
   MessageCircle, Repeat, Mail, Heart, Edit3, Copy, UserPlus, Ban, Flag, VolumeX, Pencil, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES } from '@/lib/types';
+import { Post, OriginType, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, isCollabAllowed } from '@/lib/types';
 import { api } from '@/lib/api';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
@@ -449,7 +449,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
                   target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
                 }}
               />
-              {post.hasCollabButton && (
+              {post.hasCollabButton && isCollabAllowed(post.originType) && (
                 <button
                   onClick={(e) => { e.stopPropagation(); openCollab(post); }}
                   className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
@@ -469,6 +469,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               mvThumbnail={post.mvThumbnail}
               mvPreset={post.mvPreset}
               mvPlays={post.mvPlays}
+              originType={post.originType}
               className="mb-3"
             />
           )}
@@ -482,6 +483,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               gamePlays={post.gamePlays}
               gameClears={post.gameClears}
               userId={userId}
+              originType={post.originType}
               className="mb-3"
             />
           )}
@@ -492,7 +494,7 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
               return (
                 <div onClick={e => e.stopPropagation()} className="relative">
                   <MmlPlayer mml={mmlCode} />
-                  {post.hasCollabButton && (
+                  {post.hasCollabButton && isCollabAllowed(post.originType) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openCollab(post); }}
                       className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-pink-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all z-10"

@@ -8,6 +8,7 @@ import ShareButton from './ShareButton';
 import { gameShareUrl } from '@/lib/share';
 import { buildGameShareText } from '@/lib/share-text';
 import { startRemix } from '@/lib/remix';
+import { isCollabAllowed, type OriginType } from '@/lib/types';
 
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
 
@@ -16,11 +17,13 @@ interface GamePreviewProps {
   postId?: string;
   userId: string;
   onClose: () => void;
+  /** 元ポストの権利表記。改変NG・無断使用禁止なら改造の導線を一切出さない */
+  originType?: OriginType;
   /** フィード上でその場再生する（フルスクリーンの固定オーバーレイにしない） */
   inline?: boolean;
 }
 
-export default function GamePreview({ gameId, postId, userId, onClose, inline }: GamePreviewProps) {
+export default function GamePreview({ gameId, postId, userId, onClose, originType, inline }: GamePreviewProps) {
   const [manifest, setManifest] = useState<GameManifestDraft | null>(null);
   const [title, setTitle] = useState('');
   const [preset, setPreset] = useState('action');
@@ -60,6 +63,9 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
     startRemix({ manifest: remixed, title: meta.title, preset: meta.preset, sourceGameId: gameId, sourceTitle: title });
   }, [gameId, title]);
 
+  // 権利表記が改変を許していないなら、クリア画面の「改造する」（GameMaker 側）ごと塞ぐ
+  const remixAllowed = isCollabAllowed(originType);
+
   const wrapClass = inline
     ? "relative w-full h-full rounded-xl overflow-hidden border border-gray-800"
     : "fixed inset-0 z-[60]";
@@ -88,12 +94,14 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
         <span className="text-xs font-bold text-white truncate">{title || 'ゲーム'}</span>
         <div className="flex items-center gap-1 shrink-0 text-gray-400">
           {/* MvBox と同じく、遊んでいる最中はいつでも改造（コラボ）に入れるようにする */}
-          <button
-            onClick={() => startRemix({ manifest, title: `${title || 'ゲーム'}（改造）`, preset, sourceGameId: gameId, sourceTitle: title })}
-            className="flex items-center gap-1 rounded-full bg-red-600/80 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-red-500/90"
-          >
-            <Pencil size={10} /> 改造する
-          </button>
+          {remixAllowed && (
+            <button
+              onClick={() => startRemix({ manifest, title: `${title || 'ゲーム'}（改造）`, preset, sourceGameId: gameId, sourceTitle: title })}
+              className="flex items-center gap-1 rounded-full bg-red-600/80 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-red-500/90"
+            >
+              <Pencil size={10} /> 改造する
+            </button>
+          )}
           <ShareButton url={gameShareUrl(gameId)} text={buildGameShareText(title)} size={14} className="p-1.5 rounded hover:bg-gray-100/10" />
           <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100/10 rounded transition-colors">
             <X size={16} />
@@ -110,7 +118,7 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
           fixedControls={inline}
           postId={postId}
           gameId={gameId}
-          onRemix={handleRemix}
+          onRemix={remixAllowed ? handleRemix : undefined}
         />
       </div>
     </div>

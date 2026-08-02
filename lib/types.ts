@@ -22,6 +22,17 @@ export const ORIGIN_TYPE_OPTIONS: { value: OriginType; label: string; badgeClass
   { value: 'others_no_unauthorized_use', label: 'not自作 & 無断使用禁止', badgeClass: 'bg-pink-500/20 text-pink-400 border-pink-500/40' },
 ];
 
+/**
+ * 権利表記がコラボ・改造を許しているか。
+ *
+ * 通すのは「申告なし（undefined）」と「改変OK」だけ。
+ * 改変NG・無断使用禁止のポストには、画像・ドット絵・MML・MV・ゲームの
+ * どれであっても導線そのものを出さない（押せてしまう時点で事故になるため）。
+ */
+export function isCollabAllowed(originType?: OriginType): boolean {
+  return !originType || originType === 'own_modify_ok' || originType === 'others_modify_ok';
+}
+
 export interface Post {
   id: string;
   displayName: string;

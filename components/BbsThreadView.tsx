@@ -22,7 +22,7 @@ import MvBox from './MvBox';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
-import { OriginType } from '@/lib/types';
+import { OriginType, isCollabAllowed } from '@/lib/types';
 import { showToast } from '@/lib/toast';
 import dynamic from 'next/dynamic';
 import type { GameManifestDraft } from './GameMaker';
@@ -353,22 +353,22 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
                 <div
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (post.imageSrc) setPreviewImage({ src: post.imageSrc, alt: post.imageAlt || 'ユーザーアート' });
+                    if (p.imageSrc) setPreviewImage({ src: p.imageSrc, alt: p.imageAlt || 'ユーザーアート' });
                   }}
                   className="relative rounded-xl overflow-hidden border border-gray-800 mb-2.5 bg-[#1a1b26] cursor-pointer gimp-checkered-background-white"
                 >
                   <img
-                    src={post.imageSrc}
-                    alt={post.imageAlt || "ユーザーアート"}
+                    src={p.imageSrc}
+                    alt={p.imageAlt || "ユーザーアート"}
                     className="max-w-full h-auto max-h-55 block mx-auto"
                     onError={(e) => {
                       const target = e.currentTarget;
                       target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
                     }}
                   />
-                  {post.hasCollabButton && (
+                  {p.hasCollabButton && isCollabAllowed(p.originType) && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); openCollab(post); }}
+                      onClick={(e) => { e.stopPropagation(); openCollab(p); }}
                       className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-[#a3e635] flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all"
                     >
                       <Edit3 size={11} />
@@ -388,6 +388,7 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
                     mvThumbnail={p.mvThumbnail}
                     mvPreset={p.mvPreset}
                     mvPlays={p.mvPlays}
+                    originType={p.originType}
                   />
                 </div>
               )}
@@ -403,6 +404,7 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
                     gamePlays={p.gamePlays}
                     gameClears={p.gameClears}
                     userId={userId}
+                    originType={p.originType}
                   />
                 </div>
               )}

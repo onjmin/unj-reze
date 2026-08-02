@@ -5,7 +5,7 @@ import BbsThreadView from './BbsThreadView';
 import { ArrowLeft, ThumbsUp, ThumbsDown, MessageCircle, Repeat, Mail, Heart, MoreHorizontal, Copy, UserPlus, Ban, Flag, Pencil, Trash2, VolumeX, User as UserIcon, Edit3 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType } from '@/lib/types';
+import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType, isCollabAllowed } from '@/lib/types';
 import { api } from '@/lib/api';
 import { ensureSessionId } from '@/lib/session';
 import { showToast } from '@/lib/toast';
@@ -402,6 +402,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleOpenCollab = useCallback(async (p: Post) => {
+    // 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
+    if (!isCollabAllowed(p.originType)) return;
     if (p.hasGame && p.gameId) {
       try {
         const res = await fetch(`/api/games/${p.gameId}`);
@@ -730,7 +732,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                     <span>ポストを削除</span>
                   </button>
                 )}
-                {!isSelf && post.hasMv && (!post.originType || post.originType === 'own_modify_ok' || post.originType === 'others_modify_ok') && (
+                {!isSelf && post.hasMv && isCollabAllowed(post.originType) && (
                   <button role="menuitem" onClick={handleRemixMv} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Pencil size={12} className="shrink-0" />
                     <span>MVを改造する</span>
@@ -869,7 +871,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
                 }}
               />
-              {post.hasCollabButton && (
+              {post.hasCollabButton && isCollabAllowed(post.originType) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -892,6 +894,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               mvThumbnail={post.mvThumbnail}
               mvPreset={post.mvPreset}
               mvPlays={post.mvPlays}
+              originType={post.originType}
               className="mb-2.5"
             />
           )}
@@ -905,6 +908,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               gamePlays={post.gamePlays}
               gameClears={post.gameClears}
               userId={userId}
+              originType={post.originType}
               className="mb-2.5"
             />
           )}
@@ -914,7 +918,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
               return (
                 <div className="relative">
                   <MmlPlayer mml={mmlCode} />
-                  {post.hasCollabButton && (
+                  {post.hasCollabButton && isCollabAllowed(post.originType) && (
                     <button
                       onClick={() => handleOpenCollab(post)}
                       className="absolute bottom-2.5 right-2.5 bg-black/75 hover:bg-black/90 px-2.5 py-1 rounded-full text-[10px] text-pink-400 flex items-center space-x-1 border border-gray-800 font-bold active:scale-95 transition-all z-10"
@@ -1457,7 +1461,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
                   target.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180"><rect width="100%" height="100%" fill="%231a1b26"/><rect x="12" y="12" width="296" height="156" rx="8" fill="none" stroke="%23374151" stroke-width="1.5" stroke-dasharray="6,6"/><text x="160" y="85" fill="%23ef4444" font-weight="900" text-anchor="middle" font-size="28" font-family="sans-serif">404</text><text x="160" y="115" fill="%239ca3af" font-weight="bold" text-anchor="middle" font-size="14" font-family="sans-serif">NOT FOUND</text></svg>`;
                 }}
               />
-              {localPost.hasCollabButton && (
+              {localPost.hasCollabButton && isCollabAllowed(localPost.originType) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1480,6 +1484,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
               mvThumbnail={localPost.mvThumbnail}
               mvPreset={localPost.mvPreset}
               mvPlays={localPost.mvPlays}
+              originType={localPost.originType}
               className="mb-2.5"
             />
           )}
@@ -1493,6 +1498,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
               gamePlays={localPost.gamePlays}
               gameClears={localPost.gameClears}
               userId={userId}
+              originType={localPost.originType}
               className="mb-2.5"
             />
           )}

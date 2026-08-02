@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { Post, AnonymousUser, OriginType } from '@/lib/types';
+import { Post, AnonymousUser, OriginType, isCollabAllowed } from '@/lib/types';
 import { api } from '@/lib/api';
 import { usePostActions } from '@/lib/hooks/usePostActions';
 import { useRealtimeSubscription, pollInterval } from '@/lib/hooks/useRealtime';
@@ -120,7 +120,7 @@ export default function App() {
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
   const [mvDraft, setMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
-  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string; gameId?: string; creatorSlug?: string } | null>(null);
+  const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string; gameId?: string; creatorSlug?: string; originType?: OriginType } | null>(null);
   const [playingMv, setPlayingMv] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind; postId?: string; mvId?: string; creatorSlug?: string } | null>(null);
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
@@ -646,6 +646,8 @@ export default function App() {
   }, []);
 
   const handleOpenCollab = useCallback((post: Post) => {
+    // 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
+    if (!isCollabAllowed(post.originType)) return;
     clearEditingContext();
     const postMml = extractMmlFromContent(post.content);
     if (!post.hasImage && postMml) {
@@ -759,9 +761,18 @@ export default function App() {
       const res = await fetch(`/api/games/${gameId}`);
       if (!res.ok) return;
       const game = await res.json();
+      // 改造の可否は紐づくポストの権利表記で決まる。フィードに載っていればそれを使い、
+      // 直リンクなどで手元に無いときだけポストを引き直す。
+      const known = postId ? postsRef.current.find(p => p.id === postId) : undefined;
+      let originType = known?.originType;
+      if (postId && !known) {
+        try {
+          originType = (await api.posts.get(postId, userId)).originType;
+        } catch { /* 取れなければ申告なし扱い */ }
+      }
       setPostGameDanmaku([]);
       postGameLastIdRef.current = 0;
-      setPlayingGame({ manifest: game.manifest, title: game.title, postId, gameId, creatorSlug: game.creatorSlug });
+      setPlayingGame({ manifest: game.manifest, title: game.title, postId, gameId, creatorSlug: game.creatorSlug, originType });
       openScreen('postgame');
     } catch {}
   };
@@ -1021,13 +1032,13 @@ export default function App() {
           onSave={editingPost && !!currentUser?.slug && playingGame.creatorSlug === currentUser.slug ? handleSaveEditedGame : undefined}
           postId={playingGame.postId}
           gameId={playingGame.gameId}
-          onRemix={(manifest, meta) => handleRemixDraft({
+          onRemix={isCollabAllowed(playingGame.originType) ? (manifest, meta) => handleRemixDraft({
             manifest,
             title: meta.title,
             preset: meta.preset,
             sourceGameId: playingGame.gameId,
             sourceTitle: playingGame.title,
-          })}
+          }) : undefined}
           danmakuComments={postGameDanmaku}
           onComment={async (text, displayName) => {
             if (!playingGame.postId) return;
