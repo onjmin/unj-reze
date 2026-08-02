@@ -917,7 +917,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           setOriginType={setReplyOriginType}
           onClose={handleComposerClose}
           onSubmit={handleCreateReplyFromComposer}
-          onOpenDrawing={() => { setCollabImageUrl(undefined); handleOpenCollab(post); }}
+          onOpenDrawing={() => { setCollabImageUrl(undefined); handleCollabSelectDrawing(); }}
           onOpenDotDrawing={() => { setCollabImageUrl(undefined); handleCollabSelectDotDrawing(); }}
           onOpenMml={() => openScreen('mml')}
           onOpenGameMaker={() => openScreen('gamemaker')}
