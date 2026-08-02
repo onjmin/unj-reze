@@ -38,7 +38,7 @@ export default function Header({
   }, []);
 
   return (
-    <header className="flex flex-col border-b border-gray-800 px-3 py-2 shrink-0 bg-[#0b0e14]/90 backdrop-blur z-20">
+    <header className="flex flex-col border-b border-gray-800 px-3 py-2 shrink-0 bg-[#0b0e14]/90 backdrop-blur z-50">
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-2">
           <span className="text-[#a3e635] font-bold text-xl tracking-tight">うんｊレゼ</span>
@@ -46,11 +46,10 @@ export default function Header({
         <div className="flex items-center space-x-2">
           <button
             onClick={onToggleBbsMode}
-            className={`px-3 py-0.5 rounded-full text-[11px] font-bold border transition-colors ${
-              bbsMode === '掲示板モード'
-                ? 'bg-[#a3e635]/15 text-[#a3e635] border-[#a3e635]/55 hover:bg-[#a3e635]/25'
-                : 'bg-blue-500/10 text-blue-400 border-blue-500/35 hover:bg-blue-500/20'
-            }`}
+            className={`px-3 py-0.5 rounded-full text-[11px] font-bold border transition-colors ${bbsMode === '掲示板モード'
+              ? 'bg-[#a3e635]/15 text-[#a3e635] border-[#a3e635]/55 hover:bg-[#a3e635]/25'
+              : 'bg-blue-500/10 text-blue-400 border-blue-500/35 hover:bg-blue-500/20'
+              }`}
           >
             {bbsMode}
           </button>
