@@ -236,10 +236,10 @@ const staticApi = {
     create: async (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) => { mockDbInstance.reportContent({ ...data, reason: data.reason || '' }); return { success: true }; },
   },
   mvs: {
-    edit: async (_id: string, _userSlug: string, _title: string, _manifest: unknown) => { return { success: true }; }
+    edit: async (_id: string, _params: { userSlug: string; title: string; manifest: unknown }) => { return { success: true }; }
   },
   games: {
-    edit: async (_id: string, _userSlug: string, _title: string, _manifest: unknown) => { return { success: true }; }
+    edit: async (_id: string, _params: { userSlug: string; title: string; manifest: unknown }) => { return { success: true }; }
   }
 };
 
@@ -401,13 +401,19 @@ const liveApi = {
     create: (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) =>
       fetcher<{ success: boolean }>('/report', { method: 'POST', body: JSON.stringify(data) }),
   },
+  /**
+   * 作者判定は slug で行う（displayName ではない）。
+   * 位置引数だと userId(displayName) と userSlug がどちらも string で取り違えても
+   * 型検査を通ってしまい、実際に返信側から編集すると必ず403になっていた。
+   * 呼び出し側に `userSlug:` と書かせるため名前付きで受け取る。
+   */
   mvs: {
-    edit: (id: string, userSlug: string, title: string, manifest: unknown) =>
-      fetcher<unknown>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
+    edit: (id: string, params: { userSlug: string; title: string; manifest: unknown }) =>
+      fetcher<unknown>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(params) }),
   },
   games: {
-    edit: (id: string, userSlug: string, title: string, manifest: unknown) =>
-      fetcher<unknown>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
+    edit: (id: string, params: { userSlug: string; title: string; manifest: unknown }) =>
+      fetcher<unknown>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(params) }),
   },
 };
 
