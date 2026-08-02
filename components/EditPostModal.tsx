@@ -21,6 +21,7 @@ interface EditPostModalProps {
   onRemoveGame?: () => void;
   hasMv?: boolean;
   mvTitle?: string;
+  onEditMv?: () => void;
 }
 
 /** content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す */
@@ -49,7 +50,8 @@ export default function EditPostModal({
   onEditGame,
   onRemoveGame,
   hasMv,
-  mvTitle
+  mvTitle,
+  onEditMv
 }: EditPostModalProps) {
   const { mmlLine: initialMml, textOnly: initialText } = splitMml(initialContent);
 
@@ -203,7 +205,7 @@ export default function EditPostModal({
           </div>
         )}
 
-        {/* MV添付（投稿後の差し替えは未対応なので表示のみ） */}
+        {/* MV添付 */}
         {hasMv && (
           <div className="relative flex items-center gap-2.5 rounded-lg border border-cyan-700/50 bg-cyan-500/10 px-3 py-2 max-w-[280px] self-start w-full">
             <Clapperboard size={16} className="text-cyan-400 shrink-0" />
@@ -211,6 +213,16 @@ export default function EditPostModal({
               <p className="text-xs font-bold text-cyan-200 truncate">{mvTitle || 'MV'}</p>
               <p className="text-[10px] text-cyan-400/70">MVを添付中</p>
             </div>
+            {onEditMv && (
+              <div className="flex items-center gap-1.5 ml-auto">
+                <button
+                  onClick={onEditMv}
+                  className="text-cyan-300 hover:text-cyan-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-cyan-700/40 hover:bg-cyan-500/25 active:scale-95 transition-all"
+                >
+                  編集
+                </button>
+              </div>
+            )}
           </div>
         )}
 

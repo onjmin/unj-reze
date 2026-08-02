@@ -1125,6 +1125,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           }}
           hasGame={post.hasGame}
           gameTitle={post.gameTitle}
+          hasMv={post.hasMv}
+          mvTitle={post.mvTitle}
+          onEditMv={() => {
+            handleEditMv();
+            setShowEditModal(false);
+          }}
         />
       )}
       {showDeleteModal && (

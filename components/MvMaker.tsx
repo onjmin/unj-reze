@@ -91,12 +91,12 @@ function StringNumInput({ value, onChange, className, placeholder }: {
 }) {
   const [text, setText] = useState(value === undefined ? '' : String(value));
   const [focused, setFocused] = useState(false);
+  const [prevValue, setPrevValue] = useState(value);
 
-  useEffect(() => {
-    if (!focused) {
-      setText(value === undefined ? '' : String(value));
-    }
-  }, [value, focused]);
+  if (!focused && value !== prevValue) {
+    setPrevValue(value);
+    setText(value === undefined ? '' : String(value));
+  }
 
   return (
     <input
@@ -470,10 +470,12 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const canSave = !!manifest.mml.trim();
 
   // ── レイヤー追加 ───────────────────────────────────────
+  const getNextZ = () => Math.max(10, ...manifest.layers.map(l => l.z ?? 0)) + 10;
+
   const addImageLayer = () => {
     const layer: MvImageLayer = {
       kind: 'image', id: mvUid('img'), ref: '', x: MV_W / 2, y: MV_H / 2,
-      scale: 1, anchor: 'center', motion: 'none', pixelated: true, z: 20,
+      scale: 1, anchor: 'center', motion: 'none', pixelated: true, z: getNextZ(),
     };
     update(m => ({ ...m, layers: [...m.layers, layer] }));
     setSelectedLayerId(layer.id);
@@ -483,7 +485,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const addTextLayer = () => {
     const layer: MvTextLayer = {
       kind: 'text', id: mvUid('txt'), text: 'テキスト', x: 24, y: 24, size: 18,
-      color: '#f8fafc', anchor: 'topLeft', vertical: false, motion: 'none', shadow: true, z: 30,
+      color: '#f8fafc', anchor: 'topLeft', vertical: false, motion: 'none', shadow: true, z: getNextZ(),
     };
     update(m => ({ ...m, layers: [...m.layers, layer] }));
     setSelectedLayerId(layer.id);
@@ -492,7 +494,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const addVisualizerLayer = () => {
     const layer: MvVisualizerLayer = {
       kind: 'visualizer', id: mvUid('vis'), style: 'bars',
-      rect: { x: 0, y: MV_H - 90, w: MV_W, h: 90 }, amount: 16, thickness: 2, z: 10,
+      rect: { x: 0, y: MV_H - 90, w: MV_W, h: 90 }, amount: 16, thickness: 2, z: getNextZ(),
     };
     update(m => ({ ...m, layers: [...m.layers, layer] }));
     setSelectedLayerId(layer.id);
@@ -534,7 +536,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
       x: MV_W / 2, y: MV_H / 2, size: 48, rotation: 0,
       color: manifest.stage.palette[0] ?? '#ffffff',
       filled: false, thickness: 2, count: 1, spread: 0, spin: 0,
-      blend: 'normal', z: 15,
+      blend: 'normal', z: getNextZ(),
       // 最初から音に反応させる。ここへ演算を足していくのが図形レイヤーの使い方。
       modulators: [{ source: 'beat', target: 'size', op: 'add', amount: 20 }],
     };
@@ -548,7 +550,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
       rect: { x: 0, y: MV_H - 22, w: MV_W, h: 22 },
       chords: [{ bar: 0, label: 'C' }, { bar: 1, label: 'Am7' }, { bar: 2, label: 'F' }, { bar: 3, label: 'G7' }],
       key: 'C', colorMode: 'degree', color: '#1f2937',
-      activeColor: '#3f6212', textColor: '#e5e7eb', size: 9, z: 60,
+      activeColor: '#3f6212', textColor: '#e5e7eb', size: 9, z: getNextZ(),
     };
     update(m => ({ ...m, layers: [...m.layers, layer] }));
     setSelectedLayerId(layer.id);
@@ -568,26 +570,37 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
     if (selectedLayerId === id) setSelectedLayerId(null);
   };
 
-  const moveLayerUp = (index: number) => {
-    if (index === 0) return;
+  const swapLayers = (i: number, j: number) => {
     update(m => {
       const layers = [...m.layers];
-      const temp = layers[index - 1];
-      layers[index - 1] = layers[index];
-      layers[index] = temp;
+      // Ensure all layers have a distinct z value before swapping
+      layers.forEach((l, idx) => {
+        if (l.z === undefined) l.z = (idx + 1) * 10;
+      });
+      const tempZ = layers[i].z;
+      layers[i].z = layers[j].z;
+      layers[j].z = tempZ;
+
+      if (layers[i].z === layers[j].z) {
+        layers[i].z = (i + 1) * 10;
+        layers[j].z = (j + 1) * 10;
+      }
+
+      const temp = layers[i];
+      layers[i] = layers[j];
+      layers[j] = temp;
       return { ...m, layers };
     });
   };
 
+  const moveLayerUp = (index: number) => {
+    if (index === 0) return;
+    swapLayers(index, index - 1);
+  };
+
   const moveLayerDown = (index: number) => {
     if (index === manifest.layers.length - 1) return;
-    update(m => {
-      const layers = [...m.layers];
-      const temp = layers[index + 1];
-      layers[index + 1] = layers[index];
-      layers[index] = temp;
-      return { ...m, layers };
-    });
+    swapLayers(index, index + 1);
   };
 
   const imageLayers = manifest.layers.filter((l): l is MvImageLayer => l.kind === 'image');

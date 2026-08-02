@@ -671,6 +671,8 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
             openGame(post.gameId, post.id);
             setShowEditModal(false);
           }}
+          hasMv={post.hasMv}
+          mvTitle={post.mvTitle}
         />
       )}
       {showDeleteModal && (

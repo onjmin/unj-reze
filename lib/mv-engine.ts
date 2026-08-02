@@ -434,7 +434,9 @@ export function drawMvFrame(
   const effects = visible.filter((l): l is MvEffectLayer => l.kind === 'effect');
   const drawables = visible
     .filter(l => l.kind !== 'effect')
-    .sort((a, b) => (a.z ?? 0) - (b.z ?? 0));
+    .map((l, idx) => ({ l, idx }))
+    .sort((a, b) => (a.l.z ?? a.idx * 10) - (b.l.z ?? b.idx * 10) || a.idx - b.idx)
+    .map(item => item.l);
 
   ctx.save();
   ctx.clearRect(0, 0, MV_W, MV_H);
