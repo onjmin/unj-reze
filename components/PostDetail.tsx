@@ -76,7 +76,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
   const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
-  const [editMvDraft, setEditMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
+  // mvId を持たせるのは、返信のMVも同じ画面で編集するため（トップレベルの post.mvId 固定にしない）
+  const [editMvDraft, setEditMvDraft] = useState<{ mvId: string; manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
   const [editGameDraft, setEditGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
   const [showCollabSelector, setShowCollabSelector] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt?: string } | null>(null);
@@ -534,18 +535,23 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setActiveScreen('edit-mml');
   };
 
-  const handleEditMv = async () => {
-    setMenuOpen(false);
-    if (!post.mvId) return;
+  /** 指定ポストのMVを編集画面で開く。トップレベル投稿と返信の両方がここを通る。 */
+  const handleEditMvFor = useCallback(async (target: Post) => {
+    if (!target.mvId) return;
     try {
-      const res = await fetch(`/api/mvs/${post.mvId}`);
+      const res = await fetch(`/api/mvs/${target.mvId}`);
       if (!res.ok) throw new Error();
       const mv = await res.json();
-      setEditMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'pianoRoll' });
+      setEditMvDraft({ mvId: target.mvId, manifest: mv.manifest, title: mv.title, preset: mv.preset || 'pianoRoll' });
       setActiveScreen('edit-mv');
     } catch {
       showToast('error', 'MVの読み込みに失敗しました');
     }
+  }, []);
+
+  const handleEditMv = async () => {
+    setMenuOpen(false);
+    await handleEditMvFor(post);
   };
 
   const handleRemixMv = async () => {
@@ -582,9 +588,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   };
 
   const handleSaveEditedMv = async (data: { manifest: MvManifest; title: string; preset: MvPresetKind }) => {
+    const mvId = editMvDraft?.mvId;
     setActiveScreen(null);
+    if (!mvId) return;
     try {
-      await api.mvs.edit(post.mvId!, userId, data.title, data.manifest);
+      await api.mvs.edit(mvId, userId, data.title, data.manifest);
       showToast('success', 'MVを更新しました');
       router.refresh();
     } catch {
@@ -980,7 +988,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           <div className="border-t border-gray-800 px-3 py-3 space-y-2">
             <span className="text-[11px] text-gray-500 font-bold">返信</span>
             {roots.map(reply => (
-              <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={openComposer} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} onPreviewImage={(src, alt) => setPreviewImage({ src, alt })} onOpenCollab={handleOpenCollab} />
+              <ReplyTreeItem key={reply.id} post={reply} replies={post.replies} depth={0} onReply={openComposer} userId={userId} userSlug={userSlug} onEdit={handleEditReply} onDelete={handleDeleteReply} onAvatarClick={handleAvatarClick} onPreviewImage={(src, alt) => setPreviewImage({ src, alt })} onOpenCollab={handleOpenCollab} onEditMv={handleEditMvFor} />
             ))}
           </div>
         );
@@ -1168,7 +1176,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick, onPreviewImage, onOpenCollab }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void; onPreviewImage?: (src: string, alt?: string) => void; onOpenCollab?: (post: Post) => void }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick, onPreviewImage, onOpenCollab, onEditMv }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void; onPreviewImage?: (src: string, alt?: string) => void; onOpenCollab?: (post: Post) => void; onEditMv?: (post: Post) => void }) {
   const router = useRouter();
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
@@ -1556,7 +1564,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
       {!collapsed && children.length > 0 && (
         <div>
           {children.map(child => (
-            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} onAvatarClick={onAvatarClick} onPreviewImage={onPreviewImage} onOpenCollab={onOpenCollab} />
+            <ReplyTreeItem key={child.id} post={child} replies={replies} depth={depth + 1} onReply={onReply} userId={userId} userSlug={userSlug} onEdit={onEdit} onDelete={onDelete} onAvatarClick={onAvatarClick} onPreviewImage={onPreviewImage} onOpenCollab={onOpenCollab} onEditMv={onEditMv} />
           ))}
         </div>
       )}
@@ -1568,6 +1576,10 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           onSave={handleSaveEdit}
           hasMv={localPost.hasMv}
           mvTitle={localPost.mvTitle}
+          onEditMv={onEditMv && localPost.mvId ? () => {
+            onEditMv(localPost);
+            setShowEditModal(false);
+          } : undefined}
         />
       )}
       {showDeleteModal && (
