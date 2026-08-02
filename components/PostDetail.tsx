@@ -1354,11 +1354,28 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           )}
 
           {localPost.hasMv && localPost.mvId && (
-            <MvBox mvId={localPost.mvId} postId={localPost.id} userId={userId} className="mb-2.5" />
+            <MvBox
+              mvId={localPost.mvId}
+              postId={localPost.id}
+              mvTitle={localPost.mvTitle || 'MV'}
+              mvThumbnail={localPost.mvThumbnail}
+              mvPreset={localPost.mvPreset}
+              mvPlays={localPost.mvPlays}
+              className="mb-2.5"
+            />
           )}
 
           {localPost.hasGame && userId && (
-            <GameBox gameId={localPost.gameId!} postId={localPost.id} userId={userId} className="mb-2.5" />
+            <GameBox
+              gameId={localPost.gameId!}
+              postId={localPost.id}
+              gameTitle={localPost.gameTitle || 'Game'}
+              gameThumbnail={localPost.gameThumbnail}
+              gamePlays={localPost.gamePlays}
+              gameClears={localPost.gameClears}
+              userId={userId}
+              className="mb-2.5"
+            />
           )}
 
           {(() => {
