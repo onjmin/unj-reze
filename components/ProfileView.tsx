@@ -45,6 +45,7 @@ interface ProfileViewProps {
   onProfileUpdate?: (displayName: string, avatarUrl?: string) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditMv?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
   onModerationChange?: () => void;
 }
@@ -58,6 +59,7 @@ function ProfilePostMenu({
   onEditPost,
   onEditImage,
   onEditMml,
+  onEditMv,
   openGame,
   onOptimisticDelete,
   onUndoDelete,
@@ -69,6 +71,7 @@ function ProfilePostMenu({
   onEditPost?: (post: Post) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditMv?: (post: Post) => void;
   openGame?: (gameId?: string, postId?: string) => void;
   onOptimisticDelete?: (postId: string) => void;
   onUndoDelete?: (postId: string) => void;
@@ -297,20 +300,26 @@ function ProfilePostMenu({
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
           imageSrc={post.imageSrc}
-          onEditImage={() => {
-            onEditImage?.(post);
+          onEditImage={onEditImage ? () => {
+            onEditImage(post);
             setShowEditModal(false);
-          }}
-          onEditMml={() => {
-            onEditMml?.(post);
+          } : undefined}
+          onEditMml={onEditMml ? () => {
+            onEditMml(post);
             setShowEditModal(false);
-          }}
+          } : undefined}
           hasGame={post.hasGame}
           gameTitle={post.gameTitle}
-          onEditGame={() => {
-            openGame?.(post.gameId, post.id);
+          onEditGame={openGame ? () => {
+            openGame(post.gameId, post.id);
             setShowEditModal(false);
-          }}
+          } : undefined}
+          hasMv={post.hasMv}
+          mvTitle={post.mvTitle}
+          onEditMv={onEditMv ? () => {
+            onEditMv(post);
+            setShowEditModal(false);
+          } : undefined}
         />
       )}
       {showDeleteModal && (
@@ -370,7 +379,7 @@ const tabs = [
   { id: 'media', label: 'メディア', icon: Image },
 ];
 
-export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, openGame, onProfileUpdate, onEditImage, onEditMml, onEditPost, onModerationChange }: ProfileViewProps) {
+export default function ProfileView({ userId, displayName, currentUserId, currentUserSlug, onLike, onDislike, onHeart, onAddReply, onRepost, openCollab, openGame, onProfileUpdate, onEditImage, onEditMml, onEditMv, onEditPost, onModerationChange }: ProfileViewProps) {
   const router = useRouter();
   const currentUser = useCurrentUser();
   const cleanUserId = useMemo(() => {
@@ -1021,6 +1030,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                         onEditPost={onEditPost}
                         onEditImage={onEditImage}
                         onEditMml={onEditMml}
+                        onEditMv={onEditMv}
                         openGame={openGame}
                         onOptimisticDelete={handleOptimisticDelete}
                         onUndoDelete={handleUndoDelete}

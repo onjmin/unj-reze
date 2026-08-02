@@ -33,6 +33,7 @@ interface FeedListProps {
   onReplyClick?: (post: Post) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditMv?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
   userId?: string;
   /** 続きの読み込み。未指定なら「すべて表示されました」で終わる。 */
@@ -41,7 +42,7 @@ interface FeedListProps {
   loadingMore?: boolean;
 }
 
-export default function FeedList({ posts, activeTab, feedSubMode = 'threads', rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditPost, userId, onLoadMore, hasMore, loadingMore }: FeedListProps) {
+export default function FeedList({ posts, activeTab, feedSubMode = 'threads', rankCategory, bbsMode, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, loading, onReplyClick, onEditImage, onEditMml, onEditMv, onEditPost, userId, onLoadMore, hasMore, loadingMore }: FeedListProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
   const hasMoreRef = useRef(hasMore);
@@ -173,6 +174,7 @@ export default function FeedList({ posts, activeTab, feedSubMode = 'threads', ra
               onReplyClick={onReplyClick}
               onEditImage={onEditImage}
               onEditMml={onEditMml}
+              onEditMv={onEditMv}
               onEditPost={onEditPost}
               userId={userId}
             />
@@ -241,6 +243,7 @@ export default function FeedList({ posts, activeTab, feedSubMode = 'threads', ra
               onReplyClick={onReplyClick}
               onEditImage={onEditImage}
               onEditMml={onEditMml}
+              onEditMv={onEditMv}
               onEditPost={onEditPost}
               userId={userId}
             />

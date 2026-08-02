@@ -52,13 +52,14 @@ interface PostContainerProps {
   onReplyClick?: (post: Post) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditMv?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
   userId?: string;
   /** 「最新レス」タブ用: 返信元の元スレ投稿を引用カードとして本文の下に表示する */
   quotedPost?: Post;
 }
 
-export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditPost, userId, quotedPost }: PostContainerProps) {
+export default function PostContainer({ post, isRankingMode, rankIndex, rankCategory, onLike, onDislike, onRepost, onHeart, onAddReply, onQuickPost, openGame, openCollab, openMml, currentUserSlug, currentUserDisplayName, onModerationChange, onReplyClick, onEditImage, onEditMml, onEditMv, onEditPost, userId, quotedPost }: PostContainerProps) {
   const router = useRouter();
   const avatarInfo = getAvatarInfo(post.displayName);
   const [showReplyInput, setShowReplyInput] = useState(false);
@@ -657,22 +658,26 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
           imageSrc={post.imageSrc}
-          onEditImage={() => {
-            onEditImage?.(post);
+          onEditImage={onEditImage ? () => {
+            onEditImage(post);
             setShowEditModal(false);
-          }}
-          onEditMml={() => {
-            onEditMml?.(post);
+          } : undefined}
+          onEditMml={onEditMml ? () => {
+            onEditMml(post);
             setShowEditModal(false);
-          }}
+          } : undefined}
           hasGame={post.hasGame}
           gameTitle={post.gameTitle}
-          onEditGame={() => {
+          onEditGame={openGame ? () => {
             openGame(post.gameId, post.id);
             setShowEditModal(false);
-          }}
+          } : undefined}
           hasMv={post.hasMv}
           mvTitle={post.mvTitle}
+          onEditMv={onEditMv ? () => {
+            onEditMv(post);
+            setShowEditModal(false);
+          } : undefined}
         />
       )}
       {showDeleteModal && (

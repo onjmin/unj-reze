@@ -121,6 +121,7 @@ export default function App() {
   const [gameDraft, setGameDraft] = useState<{ manifest: GameManifestDraft; title: string; preset: string } | null>(null);
   const [mvDraft, setMvDraft] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
   const [playingGame, setPlayingGame] = useState<{ manifest: GameManifestDraft; title: string; postId?: string; gameId?: string; creatorSlug?: string } | null>(null);
+  const [playingMv, setPlayingMv] = useState<{ manifest: MvManifest; title: string; preset: MvPresetKind; postId?: string; mvId?: string; creatorSlug?: string } | null>(null);
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
   const [discardModalConfig, setDiscardModalConfig] = useState<{
@@ -453,6 +454,10 @@ export default function App() {
       threadId: postId, parentPostId: postId,
       hasImage: !!attachedImage,
       imageSrc: attachedImage ?? undefined,
+      hasMv: !!mvDraft,
+      mvTitle: mvDraft?.title,
+      hasGame: !!gameDraft,
+      gameTitle: gameDraft?.title,
       originType,
     };
     setPosts(prev => {
@@ -558,6 +563,10 @@ export default function App() {
       threadId: tempId, parentPostId: undefined,
       hasImage: !!attachedImage,
       imageSrc: attachedImage ?? undefined,
+      hasMv: !!mvDraft,
+      mvTitle: mvDraft?.title,
+      hasGame: !!gameDraft,
+      gameTitle: gameDraft?.title,
       originType,
     };
     setPosts(prev => { const next = [optimisticPost, ...prev]; postsRef.current = next; return next; });
@@ -674,6 +683,21 @@ export default function App() {
     openScreen('mml');
   };
 
+  const handleEditPostMv = async (post: Post) => {
+    setEditingPost(post);
+    setOriginalPostContent(prev => prev || post.content);
+    setShowGlobalEditModal(false);
+    if (post.mvId) {
+      try {
+        const res = await fetch(`/api/mvs/${post.mvId}`);
+        if (!res.ok) return;
+        const mv = await res.json();
+        setPlayingMv({ manifest: mv.manifest, title: mv.title, preset: mv.preset, postId: post.id, mvId: post.mvId, creatorSlug: mv.creatorSlug });
+        openScreen('mvmaker');
+      } catch {}
+    }
+  };
+
   const handleSaveDrawing = async (canvasData: string) => {
     if (editingPost) {
       setEditingPost(prev => prev ? { ...prev, imageSrc: canvasData } : null);
@@ -766,6 +790,22 @@ export default function App() {
     closeScreen();
     setPlayingGame(null);
     setPostGameDanmaku([]);
+    if (editingPost) {
+      setShowGlobalEditModal(true);
+    }
+  };
+
+  const handleSaveEditedMv = async (data: { manifest: MvManifest; title: string; preset: MvPresetKind }) => {
+    if (!playingMv?.mvId) return;
+    try {
+      await fetch(`/api/mvs/${playingMv.mvId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: data.title, manifest: data.manifest, userSlug: currentUser?.slug }),
+      });
+    } catch {}
+    closeScreen();
+    setPlayingMv(null);
     if (editingPost) {
       setShowGlobalEditModal(true);
     }
@@ -864,6 +904,19 @@ export default function App() {
         setDiscardModalConfig({ discardType: 'mml', targetScreen: screenType });
         return;
       }
+    } else if (screenType === 'mvmaker') {
+      if (hasImage) {
+        setDiscardModalConfig({ discardType: 'image', targetScreen: screenType });
+        return;
+      }
+      if (hasMml) {
+        setDiscardModalConfig({ discardType: 'mml', targetScreen: screenType });
+        return;
+      }
+      if (hasGame) {
+        setDiscardModalConfig({ discardType: 'game', targetScreen: screenType });
+        return;
+      }
     }
 
     // 返信コンポーザから来た場合は、保存/キャンセル後にコンポーザ（＝返信先）へ戻す
@@ -906,11 +959,15 @@ export default function App() {
       )}
       {activeScreen === 'mvmaker' && (
         <MvMaker
-          onClose={closeScreen}
+          onClose={() => {
+            closeScreen();
+            setPlayingMv(null);
+            if (editingPost) setShowGlobalEditModal(true);
+          }}
           userId={userId}
-          onSave={handleSaveMv}
-          initialManifest={mvDraft?.manifest}
-          isEditing={!!mvDraft}
+          onSave={editingPost && !!currentUser?.slug && playingMv?.creatorSlug === currentUser.slug ? handleSaveEditedMv : handleSaveMv}
+          initialManifest={playingMv?.manifest || mvDraft?.manifest}
+          isEditing={!!playingMv || !!mvDraft}
         />
       )}
       {activeScreen === 'postgame' && playingGame && (
@@ -1100,6 +1157,7 @@ export default function App() {
                     }}
                     onEditImage={handleEditPostImage}
                     onEditMml={handleEditPostMml}
+                    onEditMv={handleEditPostMv}
                     onEditPost={handleEditPost}
                     userId={userId}
                   />

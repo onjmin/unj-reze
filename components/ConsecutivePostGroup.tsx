@@ -24,6 +24,7 @@ interface ConsecutivePostGroupProps {
   onReplyClick?: (post: Post) => void;
   onEditImage?: (post: Post) => void;
   onEditMml?: (post: Post) => void;
+  onEditMv?: (post: Post) => void;
   onEditPost?: (post: Post) => void;
   userId?: string;
   startIndex: number;
@@ -48,6 +49,7 @@ export default function ConsecutivePostGroup({
   onReplyClick,
   onEditImage,
   onEditMml,
+  onEditMv,
   onEditPost,
   userId,
   startIndex,
@@ -76,6 +78,7 @@ export default function ConsecutivePostGroup({
         onReplyClick={onReplyClick}
         onEditImage={onEditImage}
         onEditMml={onEditMml}
+        onEditMv={onEditMv}
         onEditPost={onEditPost}
         userId={userId}
       />
@@ -108,6 +111,7 @@ export default function ConsecutivePostGroup({
           onReplyClick={onReplyClick}
           onEditImage={onEditImage}
           onEditMml={onEditMml}
+          onEditMv={onEditMv}
           onEditPost={onEditPost}
           userId={userId}
         />
