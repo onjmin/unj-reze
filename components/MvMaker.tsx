@@ -15,12 +15,14 @@ import { refLabel } from '@/lib/asset-ref';
 import { parseChords, detectProgression } from '@onjmin/chord-parser';
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from '@/lib/history';
 import {
-  DEFAULT_MV_RING, DEFAULT_MV_VIEW,
+  DEFAULT_MV_ENTRANCE, DEFAULT_MV_RING, DEFAULT_MV_VIEW,
   MV_AUDIO_MODE_HINTS, MV_AUDIO_MODE_LABELS, MV_BLEND_LABELS, MV_CHORD_COLOR_MODE_LABELS, MV_EFFECT_STYLE_LABELS,
+  MV_ENTER_FROM_LABELS,
   MV_H, MV_MOD_OP_LABELS, MV_MOD_SOURCE_LABELS, MV_MOD_TARGET_LABELS, MV_MOTION_LABELS,
   MV_PROJECTION_LABELS, MV_ROOT_TO_PITCH, MV_SHAPE_FORM_LABELS, MV_TRIGGER_LABELS,
-  MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, mvAudioMode, mvUid,
+  MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, isMvEntranceInert, mvAudioMode, mvEntranceDistance, mvUid,
   type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvChordColorMode, type MvChordStep, type MvEffectLayer, type MvEffectStyle,
+  type MvEnterFrom, type MvEntrance,
   type MvImageLayer, type MvLayer, type MvLyricsLayer, type MvManifest,
   type MvModOp, type MvModSource, type MvModTarget, type MvModulator,
   type MvMotion, type MvPresetKind, type MvProjection, type MvSection,
@@ -220,6 +222,7 @@ function Details({ label, children }: { label: string; children: React.ReactNode
 }
 
 const MOTION_OPTIONS = (Object.keys(MV_MOTION_LABELS) as MvMotion[]).map(m => ({ value: m, label: MV_MOTION_LABELS[m] }));
+const ENTER_FROM_OPTIONS = (Object.keys(MV_ENTER_FROM_LABELS) as MvEnterFrom[]).map(f => ({ value: f, label: MV_ENTER_FROM_LABELS[f] }));
 const VISUALIZER_OPTIONS = (Object.keys(MV_VISUALIZER_LABELS) as MvVisualizerStyle[]).map(s => ({ value: s, label: MV_VISUALIZER_LABELS[s] }));
 
 const PROJECTION_OPTIONS = (Object.keys(MV_PROJECTION_LABELS) as MvProjection[]).map(p => ({ value: p, label: MV_PROJECTION_LABELS[p] }));
@@ -500,6 +503,18 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
     setSelectedLayerId(layer.id);
   };
 
+  /**
+   * 登場演出の更新。向きも無し・フェードも無しに戻したら entrance ごと消して、
+   * 「瞬時に出現」＝未設定、という素直な状態に畳む。
+   */
+  const updateEntrance = (id: string, patch: Partial<MvEntrance>) => {
+    updateLayer(id, l => {
+      if (l.kind !== 'image') return l;
+      const next: MvEntrance = { ...DEFAULT_MV_ENTRANCE, ...l.entrance, ...patch };
+      return { ...l, entrance: next.from === 'none' && !next.fade ? undefined : next };
+    });
+  };
+
   const updateRepeat = (id: string, patch: Partial<NonNullable<MvImageLayer['repeat']>>) => {
     updateLayer(id, l => (l.kind === 'image' && l.repeat ? { ...l, repeat: { ...l.repeat, ...patch } } : l));
   };
@@ -764,6 +779,14 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               <div className="px-1 py-1 space-y-2">
                 <SliderField label="大きさ" value={l.scale} min={0.1} max={5} step={0.1} onChange={v => update(m => ({ ...m, layers: m.layers.map(layer => layer.id === l.id ? { ...layer, scale: v } : layer) }))} />
                 <CheckField label="ふわふわ揺らす" checked={l.motion === 'bob'} onChange={v => update(m => ({ ...m, layers: m.layers.map(layer => layer.id === l.id ? { ...layer, motion: v ? 'bob' : 'none' } : layer) }))} />
+                <CheckField label="左右反転（鏡像）" checked={!!l.flipH}
+                  onChange={v => updateLayer(l.id, layer => ({ ...layer, flipH: v || undefined } as MvLayer))} />
+                <CheckField label="上下反転（逆さま）" checked={!!l.flipV}
+                  onChange={v => updateLayer(l.id, layer => ({ ...layer, flipV: v || undefined } as MvLayer))} />
+                <SelectField label="出てくる向き" value={l.entrance?.from ?? 'none'} options={ENTER_FROM_OPTIONS}
+                  onChange={v => updateEntrance(l.id, { from: v })} />
+                <CheckField label="透明から現れる（フェードイン）" checked={!!l.entrance?.fade}
+                  onChange={v => updateEntrance(l.id, { fade: v })} />
               </div>
             </div>
           ))}
@@ -844,6 +867,40 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               <NumField label="拡大率" value={layer.scale} min={0.1} step={0.5} onChange={v => updateLayer(layer.id, l => ({ ...l, scale: v } as MvLayer))} />
               <CheckField label="ドット絵として粗く表示" checked={!!layer.pixelated}
                 onChange={v => updateLayer(layer.id, l => ({ ...l, pixelated: v } as MvLayer))} />
+              <CheckField label="左右反転（鏡像）" checked={!!layer.flipH}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, flipH: v || undefined } as MvLayer))} />
+              <CheckField label="上下反転（逆さま）" checked={!!layer.flipV}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, flipV: v || undefined } as MvLayer))} />
+
+              <div className="space-y-2 rounded border border-gray-800 bg-gray-950/30 p-2">
+                <p className="text-[10px] font-bold text-gray-400">✨ 登場のしかた</p>
+                <Hint>
+                  この絵が出てくる場面に入った瞬間の演出です。向きが「その場」でフェードインも無しなら、
+                  いままでどおり瞬時に出ます。
+                </Hint>
+                <SelectField
+                  label="出てくる向き"
+                  value={layer.entrance?.from ?? 'none'}
+                  options={ENTER_FROM_OPTIONS}
+                  onChange={v => updateEntrance(layer.id, { from: v })}
+                />
+                <CheckField
+                  label="透明から現れる（フェードイン）"
+                  checked={!!layer.entrance?.fade}
+                  onChange={v => updateEntrance(layer.id, { fade: v })}
+                />
+                {!isMvEntranceInert(layer.entrance) && layer.entrance && (
+                  <>
+                    <NumField label="かける長さ（拍）" value={layer.entrance.beats} min={0} step={0.5}
+                      onChange={v => updateEntrance(layer.id, { beats: v })} />
+                    {layer.entrance.from !== 'none' && (
+                      <NumField label="動く距離（px）" value={mvEntranceDistance(layer.entrance)} step={10}
+                        onChange={v => updateEntrance(layer.id, { distance: v })} />
+                    )}
+                  </>
+                )}
+              </div>
+
               <CheckField label="歩行グラとしてアニメさせる" checked={!!layer.walk}
                 onChange={v => updateLayer(layer.id, l => ({ ...l, walk: v ? { stdId: 'auto', dir: 's', fps: 4 } : undefined } as MvLayer))} />
               <CheckField

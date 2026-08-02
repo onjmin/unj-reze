@@ -66,6 +66,50 @@ export type MvMotion =
   /** 拍の頭で膨らんで戻る */
   | 'beatScale';
 
+/**
+ * 登場のときにどこから入ってくるか。'none' は移動せずその場に出る。
+ * 「上下左右からスライドしてくる」を数値キーフレーム無しで指定するための enum。
+ */
+export type MvEnterFrom = 'none' | 'left' | 'right' | 'top' | 'bottom';
+
+export const MV_ENTER_FROM_LABELS: Record<MvEnterFrom, string> = {
+  none: 'その場（動かさない）',
+  left: '左から',
+  right: '右から',
+  top: '上から',
+  bottom: '下から',
+};
+
+/**
+ * レイヤーの登場演出。未指定なら「瞬時に出現」（従来の挙動）。
+ * 起点は「そのレイヤーが出てきた場面の頭」で、`beats` 拍かけて定位置・不透明へ寄っていく。
+ * `from` と `fade` は独立なので、スライドのみ／フェードのみ／左からフェードイン、が全部作れる。
+ */
+export interface MvEntrance {
+  from: MvEnterFrom;
+  /** 透明から現れるか */
+  fade: boolean;
+  /** 演出にかける長さ（拍）。0以下なら瞬時に出る */
+  beats: number;
+  /** スライドの距離（論理px）。未指定なら横=画面幅の半分／縦=画面高さの半分。 */
+  distance?: number;
+}
+
+export const DEFAULT_MV_ENTRANCE: MvEntrance = { from: 'none', fade: true, beats: 2 };
+
+/** 登場演出のスライド距離（論理px）。未指定時の既定を解決する。 */
+export function mvEntranceDistance(entrance: MvEntrance): number {
+  if (entrance.distance !== undefined) return entrance.distance;
+  return entrance.from === 'top' || entrance.from === 'bottom' ? MV_H / 2 : MV_W / 2;
+}
+
+/** 何も起きない（＝瞬時に出現と同じ）登場演出か。 */
+export function isMvEntranceInert(entrance: MvEntrance | undefined): boolean {
+  if (!entrance) return true;
+  if (entrance.beats <= 0) return true;
+  return entrance.from === 'none' && !entrance.fade;
+}
+
 export type MvAnchor =
   | 'topLeft' | 'top' | 'topRight'
   | 'left' | 'center' | 'right'
@@ -299,6 +343,12 @@ export interface MvImageLayer extends MvLayerBase {
   frame?: { color: string; width: number; padding: number };
   /** ドット絵を補間せず描く。 */
   pixelated?: boolean;
+  /** 左右反転して描く（歩行グラの向きを変える、鏡像を並べる等）。 */
+  flipH?: boolean;
+  /** 上下反転して描く。 */
+  flipV?: boolean;
+  /** 登場演出（スライドイン／フェードイン）。未指定＝瞬時に出現。 */
+  entrance?: MvEntrance;
   /**
    * 同じ画像を並べる（x0o0x_ のように小さいキャラが何体も散らばる絵を1レイヤーで作る）。
    * 1体ごとに位置・大きさ・濃さを少しずつずらす。
@@ -731,6 +781,22 @@ export function isLayerVisible(layer: MvLayer, sectionId: string | null): boolea
   if (!layer.sections || layer.sections.length === 0) return true;
   if (!sectionId) return true;
   return layer.sections.includes(sectionId);
+}
+
+/**
+ * そのレイヤーが「出てきた」小節。登場演出の起点に使う。
+ * 場面指定が無ければ曲頭(0)。
+ * 連続する場面にまたがって表示されるときは、その連続の先頭を返す
+ * ——場面が変わるたびに登場演出をやり直すと、出っぱなしの絵が何度も飛び込んでくるため。
+ */
+export function layerAppearBar(layer: MvLayer, sections: MvSection[], sectionId: string | null): number {
+  if (!layer.sections || layer.sections.length === 0) return 0;
+  if (!sectionId) return 0;
+  const sorted = [...sections].sort((a, b) => a.startBar - b.startBar);
+  let idx = sorted.findIndex(s => s.id === sectionId);
+  if (idx < 0) return 0;
+  while (idx > 0 && layer.sections.includes(sorted[idx - 1].id)) idx--;
+  return sorted[idx].startBar;
 }
 
 export function mvAudioMode(manifest: MvManifest): MvAudioMode {

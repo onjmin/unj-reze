@@ -16,8 +16,12 @@ import {
   MV_STEPS_PER_BEAT,
   MV_W,
   isLayerVisible,
+  isMvEntranceInert,
+  layerAppearBar,
+  mvEntranceDistance,
   sectionAtBar,
   type MvAnchor,
+  type MvEntrance,
   type MvChordBarLayer,
   type MvEffectLayer,
   type MvImageLayer,
@@ -775,6 +779,45 @@ function applyMotion(d: DrawCtx, motion: MvMotion, amount: number, width: number
   }
 }
 
+// ───────────────── 登場演出 ─────────────────
+
+interface EntranceResult { dx: number; dy: number; alpha: number; }
+
+const ENTRANCE_DONE: EntranceResult = { dx: 0, dy: 0, alpha: 1 };
+
+/**
+ * 登場演出のずらし量と濃さ。
+ * 起点は layerAppearBar（＝そのレイヤーが出てきた場面の頭）で、そこから beats 拍かけて
+ * 定位置・不透明へ寄せる。演出が終わったあとは毎フレーム ENTRANCE_DONE を返すだけなので、
+ * 通常再生中のコストはほぼ無い。
+ */
+function entranceState(d: DrawCtx, layer: MvLayer, entrance: MvEntrance | undefined): EntranceResult {
+  if (isMvEntranceInert(entrance) || !entrance) return ENTRANCE_DONE;
+
+  const startStep = layerAppearBar(layer, d.manifest.sections, d.sectionId) * MV_STEPS_PER_BAR;
+  const durSteps = entrance.beats * MV_STEPS_PER_BEAT;
+  const age = d.step - startStep;
+  if (age >= durSteps) return ENTRANCE_DONE;
+
+  // easeOutCubic: 勢いよく入ってきて静かに止まる（等速だと機械的に見える）
+  const t = clamp01(age / durSteps);
+  const eased = 1 - (1 - t) ** 3;
+  const rest = 1 - eased;
+  const dist = mvEntranceDistance(entrance) * rest;
+
+  let dx = 0;
+  let dy = 0;
+  switch (entrance.from) {
+    case 'left': dx = -dist; break;
+    case 'right': dx = dist; break;
+    case 'top': dy = -dist; break;
+    case 'bottom': dy = dist; break;
+    default: break;
+  }
+
+  return { dx, dy, alpha: entrance.fade ? eased : 1 };
+}
+
 function anchorOffset(anchor: MvAnchor, w: number, h: number): [number, number] {
   const map: Record<MvAnchor, [number, number]> = {
     topLeft: [0, 0],
@@ -822,6 +865,8 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
 
   const scale = layer.scale || 1;
   const motion = applyMotion(d, layer.motion, layer.motionAmount ?? 0, src.sw * scale);
+  const enter = entranceState(d, layer, layer.entrance);
+  if (enter.alpha <= 0.004) return;
   const rep = layer.repeat;
   const copies = Math.max(1, Math.min(64, Math.round(rep?.count ?? 1)));
   const baseAlpha = ctx.globalAlpha;
@@ -849,10 +894,10 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
     const w = frameSrc.sw * copyScale * motion.scale;
     const h = frameSrc.sh * copyScale * motion.scale;
     const [ax, ay] = anchorOffset(layer.anchor, w, h);
-    const x = layer.x + ax + motion.dx + (rep?.dx ?? 0) * i;
-    const y = layer.y + ay + motion.dy + (rep?.dy ?? 0) * i;
+    const x = layer.x + ax + motion.dx + enter.dx + (rep?.dx ?? 0) * i;
+    const y = layer.y + ay + motion.dy + enter.dy + (rep?.dy ?? 0) * i;
 
-    const alpha = baseAlpha + (rep?.alphaStep ?? 0) * i;
+    const alpha = (baseAlpha + (rep?.alphaStep ?? 0) * i) * enter.alpha;
     if (alpha <= 0.004) continue;
     ctx.globalAlpha = clamp01(alpha);
 
@@ -868,7 +913,16 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
       );
     }
 
-    ctx.drawImage(img, frameSrc.sx, frameSrc.sy, frameSrc.sw, frameSrc.sh, x, y, w, h);
+    if (layer.flipH || layer.flipV) {
+      // 反転しても占める場所は変えたくないので、描画矩形の中心で鏡にする（枠は反転しない）
+      ctx.save();
+      ctx.translate(x + w / 2, y + h / 2);
+      ctx.scale(layer.flipH ? -1 : 1, layer.flipV ? -1 : 1);
+      ctx.drawImage(img, frameSrc.sx, frameSrc.sy, frameSrc.sw, frameSrc.sh, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, frameSrc.sx, frameSrc.sy, frameSrc.sw, frameSrc.sh, x, y, w, h);
+    }
   }
 
   ctx.globalAlpha = baseAlpha;
