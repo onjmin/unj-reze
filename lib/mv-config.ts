@@ -375,6 +375,8 @@ export interface MvLyricsLayer extends MvLayerBase {
   afterimage: number;
   /** 1行を何小節出しておくか。 */
   holdBars?: number;
+  /** 1文字ずつタイピング表示するかどうか。 */
+  typing?: boolean;
 }
 
 /** 図形の形。 */

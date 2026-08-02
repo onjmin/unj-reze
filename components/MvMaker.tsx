@@ -1263,6 +1263,11 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             <ColorField label="文字色" value={lyricsLayer.color} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, color: v } as MvLayer))} />
             <CheckField label="縦書き" checked={lyricsLayer.vertical} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, vertical: v } as MvLayer))} />
             <NumField label="残像の数" value={lyricsLayer.afterimage} min={0} max={5} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, afterimage: v } as MvLayer))} />
+            <label className="flex items-center gap-1.5 py-1">
+              <input type="checkbox" checked={!!lyricsLayer.typing}
+                onChange={e => updateLayer(lyricsLayer.id, l => ({ ...l, typing: e.target.checked } as MvLayer))} className="accent-blue-500" />
+              <span className={FIELD_LABEL_CLASS}>1文字ずつタイピング表示</span>
+            </label>
             <NumField label="表示の長さ" value={lyricsLayer.holdBars ?? 2} min={0.25} step={0.25} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, holdBars: v } as MvLayer))} />
             <button onClick={() => removeLayer(lyricsLayer.id)} className="w-full rounded border border-gray-700 py-1.5 text-[10px] text-gray-400 hover:text-red-400">
               歌詞レイヤーを削除

@@ -103,6 +103,7 @@ const MANIFEST: MvManifest = {
       vertical: false,
       afterimage: 0,
       holdBars: 2,
+      typing: true,
       z: 55,
     },
 

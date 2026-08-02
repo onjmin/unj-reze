@@ -46,8 +46,8 @@ const MANIFEST: MvManifest = {
       glow: true,
       z: 10,
       opacity: 0.95,
-      // 平面のまま。レイヤー設定で「立体（3D）」「円形」に切り替えられる。
-      projection: 'flat',
+      // 東方アレンジ動画風の「奥から手前に迫る3Dトンネル型」
+      projection: 'perspective',
       // sections未指定＝全場面で表示。イントロから本編までロールはずっと流れ続ける。
     },
     // 「本編」に入った瞬間に一度だけ光る。sections で本編だけに絞らないと、

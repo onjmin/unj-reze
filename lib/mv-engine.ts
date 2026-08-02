@@ -953,19 +953,25 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
     ctx.shadowBlur = size * 0.4;
 
     if (layer.vertical) {
-      const h = line.text.length * size * 1.08;
+      const textToDraw = layer.typing && depth === 0
+        ? line.text.slice(0, Math.floor(Math.max(0, age) / 0.04) + 1)
+        : line.text;
+      const h = textToDraw.length * size * 1.08;
       const [ax, ay] = anchorOffset(layer.anchor, size, h);
       // 新しい行が左、古い行が右へ流れていく（日本語縦書きの並び）
       const x = layer.x + ax + depth * size * 1.7;
       let y = layer.y + ay;
-      for (const ch of line.text) {
+      for (const ch of textToDraw) {
         ctx.fillText(ch, x, y);
         y += size * 1.08;
       }
     } else {
-      const w = ctx.measureText(line.text).width;
+      const textToDraw = layer.typing && depth === 0
+        ? line.text.slice(0, Math.floor(Math.max(0, age) / 0.04) + 1)
+        : line.text;
+      const w = ctx.measureText(textToDraw).width;
       const [ax, ay] = anchorOffset(layer.anchor, w, size);
-      ctx.fillText(line.text, layer.x + ax, layer.y + ay - depth * size * 1.35);
+      ctx.fillText(textToDraw, layer.x + ax, layer.y + ay - depth * size * 1.35);
     }
   });
 
@@ -1222,11 +1228,8 @@ function project3d(p: Vec3, view: MvView, rect: MvRect, camDist: number): Projec
 }
 
 /**
- * MIDITrail 風の立体ピアノロール。
- *
- * 時間を横（右が未来）、音の高さを縦、トラックを奥行きのレーンに割り当てる。
- * ノートは厚みのある板として右から左へ流れ、鳴った瞬間に波紋（glow 時）が出る。
- * 旧実装（時間を奥行きに取るトンネル型）は参考動画のようには見えなかったため置き換えた。
+ * 3Dトンネルピアノロール（東方アレンジ動画風）。
+ * 時間を奥行き（Z）、音の高さを横（X）に取り、奥から手前へノートが迫ってくる。
  */
 function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
   const { ctx, song } = d;
@@ -1234,123 +1237,86 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
   const view = { ...DEFAULT_MV_VIEW, ...(layer.view ?? {}) };
   const windowBars = layer.amount ?? 4;
   const windowSteps = windowBars * MV_STEPS_PER_BAR;
-  // 再生位置は帯の左から30%。通り過ぎた音も少し残って左へ抜けていく
-  const playheadRatio = 0.3;
-  const from = d.step - windowSteps * playheadRatio;
-  const to = from + windowSteps;
+  // 手前にも少し見せて、通り過ぎた音がカメラの背後へ抜けるようにする
+  const from = d.step - windowSteps * 0.15;
+  const to = d.step + windowSteps;
 
   const pitchRange = Math.max(1, song.pitchMax - song.pitchMin);
-  const boardW = rect.w * 1.15;
-  const boardH = rect.h * 0.82;
-  const noteH = Math.max(1.5, boardH / (pitchRange + 1));
-
-  // トラックごとに奥行きレーンへ分ける（MIDITrail の「トラックが層になって見える」骨格）
-  const usedTracks = layer.tracks && layer.tracks.length > 0 ? layer.tracks : song.tracks;
-  const laneCount = Math.max(1, usedTracks.length);
-  const laneGap = laneCount > 1 ? view.depth / (laneCount - 1) : 0;
-  const laneZOf = (track: number) => {
-    const idx = usedTracks.indexOf(track);
-    return (idx < 0 ? 0 : idx) * laneGap - view.depth / 2;
-  };
+  const laneW = (rect.w * 1.5) / (pitchRange + 1);
+  const totalW = laneW * pitchRange;
 
   const f = (rect.h / 2) / Math.tan(Math.max(5, view.fov) * 0.5 * DEG);
-  const camDist = f * 1.1 + view.depth / 2;
+  const camDist = f * 1.1 + view.depth * 0.1;
 
-  const stepToX = (s: number) => ((s - from) / windowSteps - 0.5) * boardW;
-  const pitchToY = (pitch: number) => ((pitch - song.pitchMin) / pitchRange - 0.5) * boardH;
-  const halfT = Math.max(0.5, view.thickness) / 2;
+  const stepToZ = (s: number) => ((s - d.step) / windowSteps) * view.depth;
+  const pitchToX = (pitch: number) => ((pitch - song.pitchMin) / pitchRange - 0.5) * totalW;
 
   const notes = notesForLayer(d, layer).filter(n => {
     const end = n.startStep + n.durationSteps;
     return end >= from && n.startStep <= to;
   });
 
-  // 画家のアルゴリズム: 奥のレーンから手前のレーンへ
-  notes.sort((a, b) => laneZOf(b.track) - laneZOf(a.track));
+  // 画家のアルゴリズム: Z（開始時間）が奥のものほど先に描く
+  notes.sort((a, b) => b.startStep - a.startStep);
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
 
-  // レーンごとの再生位置ライン（奥ほど薄い）
-  const xNow = stepToX(d.step);
-  for (let i = laneCount - 1; i >= 0; i--) {
-    const z = i * laneGap - view.depth / 2;
-    const a = project3d({ x: xNow, y: -boardH / 2, z }, view, rect, camDist);
-    const b = project3d({ x: xNow, y: boardH / 2, z }, view, rect, camDist);
-    if (!a || !b) continue;
-    ctx.globalAlpha = 0.14 + 0.22 * (1 - (z + view.depth / 2) / Math.max(1, view.depth));
+  // 「いま」の線（判定ライン）
+  const nowZ = 0;
+  const nowL = project3d({ x: -totalW / 2, y: 0, z: nowZ }, view, rect, camDist);
+  const nowR = project3d({ x: totalW / 2, y: 0, z: nowZ }, view, rect, camDist);
+  if (nowL && nowR) {
+    ctx.globalAlpha = 0.4;
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = layer.thickness ?? 1.2;
+    ctx.lineWidth = layer.thickness ?? 1.5;
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(nowL.x, nowL.y);
+    ctx.lineTo(nowR.x, nowR.y);
     ctx.stroke();
   }
 
-  const quad = (pts: (Projected | null)[], fill: string) => {
-    if (pts.some(p => p === null)) return false;
-    ctx.fillStyle = fill;
-    ctx.beginPath();
-    ctx.moveTo(pts[0]!.x, pts[0]!.y);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
-    ctx.closePath();
-    ctx.fill();
-    return true;
-  };
-
   for (const n of notes) {
-    const x0 = stepToX(n.startStep);
-    const x1 = Math.max(x0 + 2, stepToX(n.startStep + n.durationSteps));
-    const yC = pitchToY(n.pitch);
-    const y0 = yC - noteH * 0.44;
-    const y1 = yC + noteH * 0.44;
-    const laneZ = laneZOf(n.track);
-    const zF = laneZ - halfT;
-    const zB = laneZ + halfT;
+    const xC = pitchToX(n.pitch);
+    const x0 = xC - laneW * 0.4;
+    const x1 = xC + laneW * 0.4;
+    const zB = stepToZ(n.startStep + n.durationSteps); // 奥（未来）
+    const zF = stepToZ(n.startStep); // 手前（いま〜過去）
+    
+    // トラックごとにY（高さ）を少しズラして重なりを見せる
+    const trkIdx = layer.tracks ? layer.tracks.indexOf(n.track) : n.track;
+    const yC = (trkIdx >= 0 ? trkIdx : 0) * (view.thickness || 0);
 
     const sounding = n.startStep <= d.step && n.startStep + n.durationSteps > d.step;
     const color = trackColor(d, n.track);
-    // 奥のレーンほど薄くして層の重なりを見せる
-    const depthFade = 1 - 0.4 * ((laneZ + view.depth / 2) / Math.max(1, view.depth));
-    ctx.globalAlpha = sounding ? 1 : 0.72 * depthFade;
 
-    const fTL = project3d({ x: x0, y: y1, z: zF }, view, rect, camDist);
-    const fTR = project3d({ x: x1, y: y1, z: zF }, view, rect, camDist);
-    const fBR = project3d({ x: x1, y: y0, z: zF }, view, rect, camDist);
-    const fBL = project3d({ x: x0, y: y0, z: zF }, view, rect, camDist);
-    const bTL = project3d({ x: x0, y: y1, z: zB }, view, rect, camDist);
-    const bTR = project3d({ x: x1, y: y1, z: zB }, view, rect, camDist);
+    // 遠いほどフェードアウト
+    const depthFade = clamp01(1 - Math.max(0, zF) / view.depth);
+    if (depthFade <= 0.01) continue;
 
-    // 奥面 → 上面（厚み） → 手前面 の順で描くと箱に見える
-    quad([bTL, bTR, project3d({ x: x1, y: y0, z: zB }, view, rect, camDist), project3d({ x: x0, y: y0, z: zB }, view, rect, camDist)], shade(color, 0.4));
-    quad([fTL, fTR, bTR, bTL], shade(color, 0.72));
-    if (sounding && layer.glow) {
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
-    }
-    quad([fTL, fTR, fBR, fBL], sounding ? shade(color, 1.35) : color);
-    ctx.shadowBlur = 0;
+    ctx.globalAlpha = sounding ? 1 : 0.65 * depthFade;
 
-    // 鳴った瞬間の波紋（参考動画で音の頭に出る輪）
-    if (layer.glow) {
-      const age = (d.step - n.startStep) / MV_STEPS_PER_BEAT;
-      if (age >= 0 && age < 1) {
-        const c = project3d({ x: x0, y: yC, z: zF }, view, rect, camDist);
-        const edge = project3d({ x: x0 + noteH * (1 + age * 5), y: yC, z: zF }, view, rect, camDist);
-        if (c && edge) {
-          const r = Math.hypot(edge.x - c.x, edge.y - c.y);
-          if (r > 0.5) {
-            ctx.globalAlpha = (1 - age) * 0.6;
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
-            ctx.stroke();
-          }
-        }
+    const pTL = project3d({ x: x0, y: yC, z: zB }, view, rect, camDist);
+    const pTR = project3d({ x: x1, y: yC, z: zB }, view, rect, camDist);
+    const pBL = project3d({ x: x0, y: yC, z: zF }, view, rect, camDist);
+    const pBR = project3d({ x: x1, y: yC, z: zF }, view, rect, camDist);
+
+    if (pTL && pTR && pBL && pBR) {
+      if (sounding && layer.glow) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 15;
       }
+      ctx.fillStyle = sounding ? shade(color, 1.4) : color;
+      ctx.beginPath();
+      ctx.moveTo(pTL.x, pTL.y);
+      ctx.lineTo(pTR.x, pTR.y);
+      ctx.lineTo(pBR.x, pBR.y);
+      ctx.lineTo(pBL.x, pBL.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
     }
   }
 
@@ -1483,12 +1449,12 @@ function drawRings(d: DrawCtx, layer: MvVisualizerLayer): void {
   const { x, y, w, h } = layer.rect;
   const cx = x + w / 2;
   const cy = y + h / 2;
-  const maxR = Math.max(w, h) * 0.62;
-  const lifeSteps = MV_STEPS_PER_BAR * 1.5;
-  const maxRings = layer.amount ?? 6;
+  const maxR = Math.max(w, h) * 0.7;
+  const lifeSteps = MV_STEPS_PER_BAR * 2.0;
+  const maxRings = layer.amount ?? 12;
   const notes = notesForLayer(d, layer);
 
-  // 直近に鳴ったノートだけを見る（曲頭から全部走査しない）
+  // 直近に鳴ったノートの波紋を描画
   const recent: MvNote[] = [];
   for (let i = notes.length - 1; i >= 0; i--) {
     const n = notes[i];
@@ -1498,24 +1464,54 @@ function drawRings(d: DrawCtx, layer: MvVisualizerLayer): void {
     if (recent.length >= maxRings) break;
   }
 
-  ctx.lineWidth = layer.thickness ?? 1.5;
+  ctx.save();
   for (const n of recent) {
     const age = (d.step - n.startStep) / lifeSteps;
-    const r = maxR * Math.pow(age, 0.65);
-    const alpha = (1 - age) * 0.75;
-    if (r <= 0.5 || alpha <= 0.01) continue;
-    ctx.strokeStyle = withAlpha(trackColor(d, n.track), alpha);
+    // 初速が速く、だんだんゆっくり広がるイージング
+    const r = maxR * (1 - Math.pow(1 - age, 3));
+    const alpha = (1 - age) * (1 - age);
+    if (r <= 2 || alpha <= 0.01) continue;
+
+    const color = trackColor(d, n.track);
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = (layer.thickness ?? 2) * (1 - age * 0.5);
+
+    if (layer.glow) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 15 * alpha;
+    }
+
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.shadowBlur = 0;
   }
 
-  // 中心の芯（鳴っている間だけ膨らむ）
-  const core = 4 + 10 * d.beatEnv;
-  ctx.fillStyle = withAlpha('#ffffff', 0.25 + 0.6 * d.beatEnv);
+  // 中心で拍に合わせて脈打つコア
+  // 曲全体のエネルギー（beatEnv）で基本サイズが決まり、ノート発音の瞬間に強く光る
+  let activeLevel = 0;
+  for (const n of recent) {
+    if (n.startStep <= d.step && n.startStep + n.durationSteps > d.step) {
+      activeLevel = 1;
+      break;
+    }
+  }
+  
+  const coreBase = 12 + 18 * d.beatEnv;
+  const corePulse = coreBase + activeLevel * 8;
+  
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ffffff';
+  if (layer.glow) {
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 20 * d.beatEnv + activeLevel * 15;
+  }
   ctx.beginPath();
-  ctx.arc(cx, cy, core, 0, Math.PI * 2);
+  ctx.arc(cx, cy, corePulse, 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.restore();
 }
 
 /** 音域を amount 本の帯に割り、鳴っているノートの強さを高さにする。 */
