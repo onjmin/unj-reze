@@ -72,12 +72,15 @@ export async function startMvPlayback(
   // soundfontKoe: 楽器（SoundFont）と歌声（koe）を同じ AudioContext 上で重ねる。
   // ライブラリ側の studio.playSingingMML に全て委譲し、同一スケジューラで再生します。
   try {
-    const playback = await studio.playSingingMML(mml, { volume, startStep, onTick, onStop });
+    // 歌声側は内部で (metaVolume/100 * options.volume) を行うが、
+    // 楽器側は options.volume を無視してしまうため、予めスケール済みのMML(scaled)を渡し、
+    // 歌声が二重に小さくならないように options.volume は100で固定する。
+    const playback = await studio.playSingingMML(scaled, { volume: 100, startStep, onTick, onStop });
     return handleOf([{ playback, scaleWithMml: true }], mml);
   } catch (e) {
     // 歌声モデルの読み込み等に失敗した場合は、楽器のみでフォールバック再生する
     console.error('[mv-audio] singing playback failed; falling back to instruments only', e);
-    const instruments = studio.play(scaled, { volume, startStep, onTick, onStop });
+    const instruments = studio.play(scaled, { volume: 100, startStep, onTick, onStop });
     return handleOf([{ playback: instruments, scaleWithMml: true }], mml);
   }
 }
