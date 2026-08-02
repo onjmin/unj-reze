@@ -813,7 +813,12 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           {layer.kind === 'visualizer' && (
             <>
               <SelectField label="種類" value={layer.style} options={VISUALIZER_OPTIONS}
-                onChange={v => updateLayer(layer.id, l => ({ ...l, style: v } as MvLayer))} />
+                onChange={v => updateLayer(layer.id, l => {
+                  // ピアノロールは3D表示が既定（見せ方が未設定のときだけ立体を入れる）
+                  const next = { ...l, style: v } as MvLayer;
+                  if (v === 'pianoRoll' && next.kind === 'visualizer' && !next.projection) next.projection = 'perspective';
+                  return next;
+                })} />
               <NumField label="X" value={layer.rect.x} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
               <NumField label="Y" value={layer.rect.y} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, y: v } } : l))} />
               <NumField label="幅" value={layer.rect.w} min={8} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, w: v } } : l))} />

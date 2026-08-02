@@ -1,18 +1,19 @@
 // 「シーケンサ」プリセット。
 // 参考動画: 次日朝夢(再現).mp4 / x0o0x_.mp4
-//   真っ黒な画面の上部に大きなステップ格子が置かれ、拍ごとにマスが点灯する。
-//   歌詞は縦書きで右から左へ積み上がっていき、古い行も薄く残る。
-//   下部には細い線の飾りが並び、音に合わせて端から順に伸び縮みする。
+//   真っ黒な画面。上部に装飾枠つきの大きなステップ格子（2段）が置かれ、拍ごとにマスが点灯する。
+//   イントロは格子だけ。歌が入ると縦書き歌詞が右から左へ「列」として積み上がり、古い列は薄く残る。
+//   小節の頭では画面の左右端に白い縦帯が一瞬立つ。それ以外の飾りは何も無い（黒がいちばんの飾り）。
+//   ドット絵キャラや下部の飾り線は参考動画には存在しないので置かない。
 
 import type { MvManifest } from '@/lib/mv-config';
-import { BUILTIN_WALK, BUILTIN_WALK_URL, cloneManifest, type MvPresetEntry } from './shared';
+import { cloneManifest, type MvPresetEntry } from './shared';
 
 const MML = `#volume=50
-@0 t140 q80 v100 o4 l4 a >c< b a g a e d a >c< b >d< a g e d a >c< b a g a e g a b >c< d e2;
-@1 t140 q70 v70 o5 l8 r1 r1 a g e d e g a4 r4 r1 r1 e d <b >d e g a4 r4;
-@2 t140 q60 v80 o2 l2 a a f f c c g g a a f f d d e e;
-@3 t140 q50 v50 o3 l2 [o3ao4co4e]2 [o3ao4co4e]2 [o3fo3ao4c]2 [o3fo3ao4c]2 [o3co3eo3g]2 [o3co3eo3g]2 [o3go3bo4d]2 [o3go3bo4d]2;
-@@0 klatt v150 とおいあさのゆめ
+@0 t140 q60 v85 o3 l8 c r c c r c r r c c r c r c r r c r c c r c c r c r r c r c r r c r c c r c r r c c r c r c r r c r c c r c c r c c r c r c c r c r c c r c r r c c r c r c r r c r c c r c c r c r r c r c r r c r c c r c r r c c r c r c r r c r c c r c c r c c r c r c c r;
+@1 t140 q50 v70 o3 l8 r r e r r r e r r e r r e r r r r r e r r e r r e r r r e r r e r r e r r r e r r e r r e r r r r r e r r e r r e r e r r e r r r r e r r r e r r e r r e r r r r r e r r e r r e r r r e r r e r r e r r r e r r e r r e r r r r r e r r e r r e r e r r e r r;
+@2 t140 q80 v90 o2 l1 a r f r c r g r a r f r d r e r;
+@3 t140 q70 v85 o4 l4 r1 r1 r1 r1 a b >c< b a g e r1 r4 g a b a g e r1 r2 a a b >c< b a g e r1 g e d e g a a r1 r4;
+@@3 klatt v150 とおいあさのゆめ
 まだきえない
 かさなるあしおと
 ひかりのなかへ`;
@@ -31,104 +32,72 @@ const MANIFEST: MvManifest = {
   },
   sections: [
     { id: 'intro', label: 'イントロ', startBar: 0 },
-    { id: 'main', label: '本編', startBar: 8 },
+    { id: 'main', label: '本編', startBar: 4 },
   ],
   layers: [
-    // ── 上部の大きなステップ格子（2段） ─────────────────────
+    // ── 上部の大きなステップ格子（2段）。@0/@1 が2つの段を受け持つ ──
     {
       kind: 'visualizer',
       id: 'grid',
       style: 'stepGrid',
-      rect: { x: 40, y: 40, w: 560, h: 96 },
+      rect: { x: 40, y: 40, w: 560, h: 112 },
+      tracks: [0, 1],
       amount: 8,
       thickness: 2,
       z: 10,
     },
 
-    // ── 縦書き歌詞。残像を多めにして右へ積み上げる ──────────────
+    // ── 縦書き歌詞。@@3（ボーカル）だけを出し、古い列を右へ薄く残す ──
     {
       kind: 'lyrics',
       id: 'lyrics',
       source: 'mml',
-      // 歌詞トラックは1本だけ出す（複数あっても画面が埋まらない）
-      trackId: 0,
-      x: 300,
-      y: 168,
+      trackId: 3,
+      x: 440,
+      y: 176,
       anchor: 'topLeft',
       size: 14,
       color: '#f3f4f6',
       vertical: true,
-      afterimage: 4,
-      holdBars: 6,
+      afterimage: 6,
+      holdBars: 10,
       z: 40,
     },
 
-    // ── 下部の線の飾り。stagger で端から順に反応が伝わる ──────────
+    // ── 小節頭に画面の左右端で一瞬立つ白い縦帯 ──────────────────
     {
       kind: 'shape',
-      id: 'lines',
+      id: 'edge-l',
       form: 'bar',
-      x: 60,
-      y: 330,
-      size: 26,
-      rotation: 0,
-      color: '#e5e7eb',
+      x: 8,
+      y: 180,
+      size: 180,
+      barAspect: 0.02,
+      rotation: 90,
+      color: '#ffffff',
       filled: true,
       thickness: 1,
-      count: 14,
-      offsetX: 0,
-      offsetY: -5,
-      spread: -1.2,
-      stagger: 12,
-      opacity: 0.75,
-      z: 20,
+      z: 30,
       modulators: [
-        { source: 'trackEnergy', track: 2, target: 'size', op: 'add', amount: 46 },
-        { source: 'beat', target: 'opacity', op: 'mul', amount: 1.2 },
+        { source: 'trackOnset', track: 2, target: 'opacity', op: 'mul', amount: 1.2 },
       ],
     },
-
-    // ── 本編でだけ出るドット絵の群れ（repeat で1レイヤーのまま増やす） ──
     {
-      kind: 'image',
-      id: 'crowd',
-      ref: `url:${BUILTIN_WALK_URL}`,
-      url: BUILTIN_WALK_URL,
-      walk: { ...BUILTIN_WALK, fps: 3 },
-      x: 60,
-      y: 300,
-      scale: 2.5,
-      anchor: 'bottom',
-      motion: 'none',
-      pixelated: true,
-      sections: ['main'],
+      kind: 'shape',
+      id: 'edge-r',
+      form: 'bar',
+      x: 632,
+      y: 180,
+      size: 180,
+      barAspect: 0.02,
+      rotation: 90,
+      color: '#ffffff',
+      filled: true,
+      thickness: 1,
       z: 30,
-      repeat: { count: 6, dx: 34, dy: 0, scaleStep: 0, alphaStep: -0.09, phase: 0.31 },
-    },
-
-    // ── 小節頭でわずかに画面が揺れる ────────────────────────
-    {
-      kind: 'effect',
-      id: 'kick',
-      style: 'shake',
-      trigger: 'note',
-      tracks: [2],
-      amount: 0.22,
-      decayBeats: 0.3,
-    },
-
-    {
-      kind: 'text',
-      id: 'title',
-      text: '無題のシーケンス',
-      x: 40,
-      y: 16,
-      size: 11,
-      color: '#6b7280',
-      anchor: 'topLeft',
-      vertical: false,
-      motion: 'none',
-      z: 50,
+      modulators: [
+        { source: 'trackOnset', track: 2, target: 'opacity', op: 'mul', amount: 1.2 },
+      ],
     },
   ],
 };
@@ -136,7 +105,7 @@ const MANIFEST: MvManifest = {
 export const SEQUENCER_PRESET: MvPresetEntry = {
   kind: 'pixelStage',
   name: 'シーケンサ',
-  description: '黒地に大きなステップ格子。縦書き歌詞が右から積み上がり、下の線が音に合わせて伸び縮みする。',
-  swapHint: '歌詞タブでどのトラックを出すか選べます。ドット絵は「同じ画像を並べる」で人数を増やせます。',
+  description: '黒地に装飾枠つきの大きなステップ格子。歌が入ると縦書き歌詞が右から列で積み上がり、小節頭に画面端の白帯が瞬く。',
+  swapHint: '歌詞はMMLの歌詞トラック（@@n）から自動で同期します。格子の段数は「対象トラック」で増やせます。',
   build: () => cloneManifest(MANIFEST),
 };

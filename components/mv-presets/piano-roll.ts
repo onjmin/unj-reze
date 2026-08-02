@@ -8,12 +8,28 @@
 import type { MvManifest } from '@/lib/mv-config';
 import { BUILTIN_WALK, BUILTIN_WALK_URL, cloneManifest, type MvPresetEntry } from './shared';
 
+// 各トラックとも「1小節=4拍」で正確に16小節そろえてある。
+// 長さが揃っていないと後半の画面からノートが消えて、本編がスカスカに見えてしまう。
 const MML = [
   '#volume=50',
-  '@0 t150 q80 v100 o5 l8 a b >c< b a g a4 r4 e f g a g e d4 r4 a b >c< b a g a4 r4 e g b >c<4 a4 r4;',
-  '@1 t150 q70 v70 o4 l8 r4 e f e c d e4 r4 r4 c d c <a b >c4 r4 r4 e f e c d e4 r4 r4 g a g e f g4 r4;',
-  '@2 t150 q60 v82 o2 l4 a a e e f f c c a a e e g g e e;',
-  '@3 t150 q50 v58 o3 l2 [o3ao4co4e]2 [o3ao4co4e]2 [o3fo3ao4c]2 [o3fo3ao4c]2 [o3ao4co4e]2 [o3ao4co4e]2 [o3eo3go3b]2 [o3eo3go3b]2;',
+  '@0 t150 q80 v100 o5 l8 ' +
+    'a b >c< b a g a4 e f g a g e d4 a b >c< b a g a4 e g b >c< a4 r4 ' +
+    'g a b a g e g4 f g a g f d f4 e f g f e c e4 d e f e d4 r4 ' +
+    'a b >c< b a g a4 e f g a g e d4 a b >c< b a g a4 e g b >c< a4 r4 ' +
+    'a b >c d c< b a4 g a b >c< b g g4 a g e g a b a4 e4 g4 a2;',
+  '@1 t150 q70 v70 o4 l8 ' +
+    'r1 r4 e f e4 c4 r4 c d c4 d4 r4 e f g4 e4 ' +
+    'r4 d e f4 d4 r4 c d e4 c4 r4 e d c4 d4 r2 e4 d4 ' +
+    'r4 e f e4 c4 r4 c d c4 d4 r4 e f g4 e4 r4 d e f4 d4 ' +
+    'r4 e f a4 f4 r4 d e g4 e4 r4 c d e4 g4 e2 c2;',
+  '@2 t150 q60 v82 o2 l2 ' +
+    'a a e e f f c c a a e e g g e e ' +
+    'f f c c g g d d a a f f g g a e;',
+  '@3 t150 q50 v58 o3 l2 ' +
+    '[o3ao4co4e]2 [o3ao4co4e]2 [o3fo3ao4c]2 [o3fo3ao4c]2 [o3ao4co4e]2 [o3ao4co4e]2 [o3eo3go3b]2 [o3eo3go3b]2 ' +
+    '[o3fo3ao4c]2 [o3fo3ao4c]2 [o3co3eo3g]2 [o3co3eo3g]2 [o3ao4co4e]2 [o3ao4co4e]2 [o3eo3go3b]2 [o3eo3go3b]2 ' +
+    '[o3ao4co4e]2 [o3ao4co4e]2 [o3fo3ao4c]2 [o3fo3ao4c]2 [o3ao4co4e]2 [o3ao4co4e]2 [o3eo3go3b]2 [o3eo3go3b]2 ' +
+    '[o3fo3ao4c]2 [o3fo3ao4c]2 [o3go3bo4d]2 [o3go3bo4d]2 [o3ao4co4e]2 [o3ao4co4e]2 [o3eo3go3b]2 [o3ao4co4e]2;',
 ].join('');
 
 const MANIFEST: MvManifest = {
@@ -41,12 +57,13 @@ const MANIFEST: MvManifest = {
       kind: 'visualizer',
       id: 'roll',
       style: 'pianoRoll',
-      rect: { x: 0, y: 104, w: 640, h: 168 },
+      // 参考動画はロールが画面全体を覆う。帯状に狭めると空白だらけの画面になる。
+      rect: { x: 0, y: 20, w: 640, h: 320 },
       amount: 4,
       glow: true,
       z: 10,
       opacity: 0.95,
-      // 東方アレンジ動画風の「奥から手前に迫る3Dトンネル型」
+      // 3Dピアノロール（MIDITrail風）が既定。見る角度は「レイヤー」タブで調整できる。
       projection: 'perspective',
       // sections未指定＝全場面で表示。イントロから本編までロールはずっと流れ続ける。
     },

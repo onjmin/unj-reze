@@ -1,8 +1,9 @@
 // 「ジオメトリック」プリセット。
 // 参考動画: C.mp4
-//   暗いラジアルグラデが拍で呼吸し、音符ごとに同心円の波紋が広がる。
-//   中央では単純な図形に四則演算のモジュレータを重ねがけして、複雑な脈動を作る。
-//   トラックごとに反応する図形を分けてあるので、曲の各パートが別々の形として見える。
+//   暗いティール一色＋周辺減光の静かな画面の中央に、白い図形が「1種類だけ」置かれる。
+//   図形は音が鳴った瞬間だけ濃く・太くなり、鳴っていない間は消え入りそうな薄さで残る。
+//   曲が進むと場面ごとにモチーフが変わる: 点 → 細い輪 → 二重の輪＋芯 → ひし形と四角。
+//   常時回転・波紋の連発・加算グローの類は一切使わない（動きは音の瞬間だけ）。
 // 画像を1枚も使わないので、MMLだけ用意すれば完成する（＝いちばん手前の入口）。
 
 import type { MvManifest } from '@/lib/mv-config';
@@ -10,9 +11,9 @@ import { cloneManifest, type MvPresetEntry } from './shared';
 
 const MML = [
   '#volume=45',
-  '@0 t92 q90 v88 o5 l2 e a >c< b a e g a e a >c< b a e d e;',
-  '@1 t92 q90 v58 o3 l1 a f c g a f d e;',
-  '@2 t92 q40 v40 o4 l4 r1 [o4ao4co5e]4 r1 [o4fo4ao5c]4 r1 [o4co4eo4g]4 r1 [o4eo4go4b]4;',
+  '@0 t92 q90 v88 o5 l2 e a >c< b a e g a e a >c< b a e d e g b >d c< b g a b e a >c< b a g e d;',
+  '@1 t92 q90 v58 o3 l1 a f c g a f d e f c g d a f e a;',
+  '@2 t92 q30 v50 o6 l1 r r r r e r r c r r g r e r c e;',
 ].join('');
 
 const MANIFEST: MvManifest = {
@@ -22,125 +23,169 @@ const MANIFEST: MvManifest = {
   mml: MML,
   audio: { mode: 'soundfontKoe' },
   stage: {
-    bgColor: '#03181c',
+    bgColor: '#0e423c',
     bgFit: 'cover',
-    pulse: 'breathe',
-    palette: ['#5eead4', '#2dd4bf', '#99f6e4', '#67e8f9'],
+    // 背景は静止。呼吸させると全編が同じ律動になってしまう（参考動画は無音部で完全に静止する）
+    pulse: 'none',
+    palette: ['#f5fffd', '#e0f5f1', '#cdeae5', '#b7ded7'],
   },
-  sections: [{ id: 'main', label: '本編', startBar: 0 }],
+  // 場面ごとに中央のモチーフを掛け替える。単調ループにしないための骨格。
+  sections: [
+    { id: 'intro', label: '点', startBar: 0 },
+    { id: 'a', label: '輪', startBar: 4 },
+    { id: 'b', label: '二重丸', startBar: 8 },
+    { id: 'c', label: 'ひし形', startBar: 12 },
+  ],
   layers: [
+    // ── 全編: 周辺減光。参考動画の「四隅が沈んだ暗い画面」 ──────────
     {
-      kind: 'visualizer',
-      id: 'ripple',
-      style: 'rings',
-      rect: { x: 0, y: 0, w: 640, h: 360 },
-      amount: 7,
-      thickness: 1.5,
-      z: 10,
+      kind: 'effect',
+      id: 'vignette',
+      style: 'vignette',
+      trigger: 'always',
+      amount: 0.55,
+      color: '#031512',
     },
 
-    // ── 中央の芯: メロディ(@0)の鳴りで膨らみ、拍で締まる ──────────
-    // 「トラックの鳴り × 大きさ」→「拍 ÷ 大きさ」の順に掛けることで、
-    // 単に脈打つのではなく、拍の頭で一度きゅっと縮んでから開く動きになる。
+    // ── 場面1: 中央の小さな点。メロディでわずかに膨らむだけ ──────────
     {
       kind: 'shape',
-      id: 'core',
+      id: 'dot',
       form: 'circle',
       x: 320,
       y: 180,
-      size: 10,
+      size: 3,
       rotation: 0,
-      color: '#f0fdfa',
+      color: '#f5fffd',
       filled: true,
       thickness: 1,
-      blend: 'add',
       z: 20,
+      sections: ['intro'],
       modulators: [
-        { source: 'trackEnergy', track: 0, target: 'size', op: 'add', amount: 26 },
-        // 拍の頭でいったん縮んでから開く。割り算ではなく引き算にしているのは、
-        // 0へ近づく値で割ると図形が発散してしまうため。
-        { source: 'beat', target: 'size', op: 'sub', amount: 12 },
-        { source: 'trackOnset', track: 0, target: 'opacity', op: 'mul', amount: 1.4 },
+        { source: 'trackEnergy', track: 0, target: 'size', op: 'add', amount: 4 },
       ],
     },
 
-    // ── ベース(@1)に反応する四角。回転と大きさを別々の演算で動かす ──
+    // ── 場面2: 細い輪。音が鳴った瞬間だけ濃く太くなる ────────────────
+    // 「×トラックの打点」で普段は消し、「＋定数」で薄い輪郭だけ残すのが肝。
     {
       kind: 'shape',
-      id: 'frame',
+      id: 'ring-a',
+      form: 'ring',
+      x: 320,
+      y: 180,
+      size: 44,
+      rotation: 0,
+      color: '#f5fffd',
+      filled: false,
+      thickness: 1.2,
+      z: 20,
+      sections: ['a'],
+      modulators: [
+        { source: 'trackOnset', track: 0, target: 'opacity', op: 'mul', amount: 1 },
+        { source: 'constant', target: 'opacity', op: 'add', amount: 0.16 },
+        { source: 'trackOnset', track: 0, target: 'thickness', op: 'add', amount: 2.4 },
+        { source: 'trackEnergy', track: 0, target: 'size', op: 'add', amount: 6 },
+      ],
+    },
+
+    // ── 場面3: 二重の輪＋ベースで灯る芯（的のかたち） ────────────────
+    {
+      kind: 'shape',
+      id: 'ring-b',
+      form: 'ring',
+      x: 320,
+      y: 180,
+      size: 26,
+      rotation: 0,
+      color: '#f5fffd',
+      filled: false,
+      thickness: 1.4,
+      count: 2,
+      spread: 22,
+      z: 20,
+      sections: ['b'],
+      modulators: [
+        { source: 'trackOnset', track: 0, target: 'opacity', op: 'mul', amount: 1 },
+        { source: 'constant', target: 'opacity', op: 'add', amount: 0.15 },
+        { source: 'trackOnset', track: 0, target: 'thickness', op: 'add', amount: 3 },
+      ],
+    },
+    {
+      kind: 'shape',
+      id: 'core-b',
+      form: 'circle',
+      x: 320,
+      y: 180,
+      size: 12,
+      rotation: 0,
+      color: '#f5fffd',
+      filled: true,
+      thickness: 1,
+      z: 21,
+      sections: ['b'],
+      modulators: [
+        { source: 'trackOnset', track: 1, target: 'opacity', op: 'mul', amount: 1.1 },
+        { source: 'constant', target: 'opacity', op: 'add', amount: 0.05 },
+        { source: 'trackOnset', track: 1, target: 'size', op: 'add', amount: 4 },
+      ],
+    },
+
+    // ── 場面4: 細い四角の枠＋ベースで満ちるひし形 ───────────────────
+    {
+      kind: 'shape',
+      id: 'frame-c',
+      form: 'square',
+      x: 320,
+      y: 180,
+      size: 34,
+      rotation: 0,
+      color: '#f5fffd',
+      filled: false,
+      thickness: 1,
+      z: 20,
+      sections: ['c'],
+      modulators: [
+        { source: 'trackOnset', track: 0, target: 'opacity', op: 'mul', amount: 1 },
+        { source: 'constant', target: 'opacity', op: 'add', amount: 0.15 },
+      ],
+    },
+    {
+      kind: 'shape',
+      id: 'diamond-c',
       form: 'diamond',
       x: 320,
       y: 180,
-      size: 54,
+      size: 30,
       rotation: 0,
-      color: '#5eead4',
-      filled: false,
-      thickness: 1.4,
-      count: 3,
-      spread: 26,
-      spin: 14,
-      stagger: 24,
-      blend: 'add',
-      z: 18,
+      color: '#f5fffd',
+      filled: true,
+      thickness: 1,
+      z: 21,
+      sections: ['c'],
       modulators: [
-        { source: 'trackEnergy', track: 1, target: 'size', op: 'add', amount: 34 },
-        { source: 'time', target: 'rotation', op: 'add', amount: 90 },
-        { source: 'trackOnset', track: 1, target: 'thickness', op: 'add', amount: 2 },
-        { source: 'bar', target: 'opacity', op: 'mul', amount: 1.1 },
+        { source: 'trackOnset', track: 1, target: 'opacity', op: 'mul', amount: 1.2 },
+        { source: 'constant', target: 'opacity', op: 'add', amount: 0.04 },
       ],
     },
 
-    // ── 伴奏(@2)は薄い多角形。差の絶対値で重ねて、交差部が抜けて見える ──
+    // ── 全編: 高音の合図でだけ現れる太い輪（アクセント） ─────────────
     {
       kind: 'shape',
-      id: 'halo',
-      form: 'polygon',
+      id: 'accent',
+      form: 'ring',
       x: 320,
       y: 180,
-      size: 96,
+      size: 46,
       rotation: 0,
-      color: '#67e8f9',
+      color: '#f5fffd',
       filled: false,
-      thickness: 1,
-      sides: 6,
-      count: 2,
-      spread: 34,
-      spin: 30,
-      blend: 'difference',
-      opacity: 0.85,
-      z: 16,
+      thickness: 3.5,
+      z: 22,
       modulators: [
-        { source: 'trackEnergy', track: 2, target: 'size', op: 'add', amount: 40 },
-        { source: 'trackPitch', track: 0, target: 'sides', op: 'add', amount: 5 },
-        { source: 'time', target: 'rotation', op: 'sub', amount: 60 },
+        { source: 'trackOnset', track: 2, target: 'opacity', op: 'mul', amount: 1.4 },
+        { source: 'trackOnset', track: 2, target: 'size', op: 'add', amount: 10 },
       ],
-    },
-
-    // ── メロディの音で画面がわずかに光る ──────────────────────
-    {
-      kind: 'effect',
-      id: 'pulse-flash',
-      style: 'flash',
-      trigger: 'note',
-      tracks: [0],
-      amount: 0.12,
-      decayBeats: 0.4,
-      color: '#ccfbf1',
-    },
-
-    {
-      kind: 'text',
-      id: 'title',
-      text: '無題のトラック',
-      x: 320,
-      y: 330,
-      size: 12,
-      color: '#a7f3d0',
-      anchor: 'center',
-      vertical: false,
-      motion: 'none',
-      opacity: 0.6,
-      z: 30,
     },
   ],
 };
@@ -148,7 +193,7 @@ const MANIFEST: MvManifest = {
 export const GEOMETRIC_PRESET: MvPresetEntry = {
   kind: 'geometric',
   name: 'ジオメトリック',
-  description: '暗い画面が拍で呼吸し、図形が音に反応して脈打つ。画像を用意しなくても成立する。',
-  swapHint: '図形レイヤーの「音との連動」を足したり引いたりすると、動きの複雑さを変えられます。',
+  description: '暗い画面の中央にひとつだけ置かれた白い図形が、音の瞬間だけ濃くなる。場面ごとに点→輪→二重丸→ひし形と姿を変える。',
+  swapHint: '「場面」タブで区切りを増やし、図形レイヤーの表示場面を割り当てると、モチーフの掛け替えを自由に組めます。',
   build: () => cloneManifest(MANIFEST),
 };

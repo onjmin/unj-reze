@@ -1228,8 +1228,10 @@ function project3d(p: Vec3, view: MvView, rect: MvRect, camDist: number): Projec
 }
 
 /**
- * 3Dトンネルピアノロール（東方アレンジ動画風）。
- * 時間を奥行き（Z）、音の高さを横（X）に取り、奥から手前へノートが迫ってくる。
+ * 立体ピアノロール（MIDITrail 準拠）。
+ * x = 時間（右が未来、再生位置は左寄り25%に固定）、y = 音の高さ、z = トラックのレーン。
+ * ノートは厚み（view.thickness）を持つ板として描き、鳴った瞬間に明るく光る。
+ * 旧トンネル型（時間を奥行きに取る）はレーン概念が消えて画面の大半が空いてしまうので使わない。
  */
 function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
   const { ctx, song } = d;
@@ -1237,91 +1239,117 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
   const view = { ...DEFAULT_MV_VIEW, ...(layer.view ?? {}) };
   const windowBars = layer.amount ?? 4;
   const windowSteps = windowBars * MV_STEPS_PER_BAR;
-  // 手前にも少し見せて、通り過ぎた音がカメラの背後へ抜けるようにする
-  const from = d.step - windowSteps * 0.15;
-  const to = d.step + windowSteps;
+
+  // 論理x幅。rectより広めに取って、画面端までノートが流れ続けて見えるようにする
+  const spanX = rect.w * 1.7;
+  const playheadX = -spanX * 0.25; // 再生位置を左寄りに置く（未来が右に長く見える）
+  const stepToX = (s: number) => playheadX + ((s - d.step) / windowSteps) * spanX;
+  const from = d.step - windowSteps * 0.35;
+  const to = d.step + windowSteps * 0.85;
 
   const pitchRange = Math.max(1, song.pitchMax - song.pitchMin);
-  const laneW = (rect.w * 1.5) / (pitchRange + 1);
-  const totalW = laneW * pitchRange;
+  const rollH = rect.h * 1.1;
+  const noteH = Math.max(2.5, (rollH / (pitchRange + 1)) * 0.85);
+  const pitchToY = (pitch: number) => ((pitch - song.pitchMin) / pitchRange - 0.5) * rollH;
+
+  // トラック → 奥行きレーン。手前(負z)ほどパレット先頭のトラック
+  const laneTracks = layer.tracks && layer.tracks.length > 0 ? layer.tracks : song.tracks;
+  const laneCount = Math.max(1, laneTracks.length);
+  const laneZ = (track: number) => {
+    const idx = laneTracks.indexOf(track);
+    if (idx < 0 || laneCount === 1) return 0;
+    return (idx / (laneCount - 1) - 0.5) * view.depth;
+  };
+  const half = Math.max(0, view.thickness) / 2;
 
   const f = (rect.h / 2) / Math.tan(Math.max(5, view.fov) * 0.5 * DEG);
-  const camDist = f * 1.1 + view.depth * 0.1;
-
-  const stepToZ = (s: number) => ((s - d.step) / windowSteps) * view.depth;
-  const pitchToX = (pitch: number) => ((pitch - song.pitchMin) / pitchRange - 0.5) * totalW;
+  // 回転後もすべての頂点がカメラの前(zc>1)に残るよう、視距離は広めに取る
+  const camDist = f * 1.15 + view.depth * 0.6 + spanX * 0.35 * Math.abs(Math.sin(view.yaw * DEG));
 
   const notes = notesForLayer(d, layer).filter(n => {
     const end = n.startStep + n.durationSteps;
     return end >= from && n.startStep <= to;
   });
 
-  // 画家のアルゴリズム: Z（開始時間）が奥のものほど先に描く
-  notes.sort((a, b) => b.startStep - a.startStep);
+  // 画家のアルゴリズム: 奥のレーンから描く
+  notes.sort((a, b) => laneZ(b.track) - laneZ(a.track) || a.startStep - b.startStep);
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
 
-  // 地面（基準面）を下げるためのオフセット。
-  // Yが負（世界座標で下）だと画面上で下側に描画され、床のようになる
-  const baseY = -rect.h * 0.15;
-
-  // 「いま」の線（判定ライン）
-  const nowZ = 0;
-  const nowL = project3d({ x: -totalW / 2, y: baseY, z: nowZ }, view, rect, camDist);
-  const nowR = project3d({ x: totalW / 2, y: baseY, z: nowZ }, view, rect, camDist);
-  if (nowL && nowR) {
-    ctx.globalAlpha = 0.4;
+  // 「いま」の判定ライン（音域の上下いっぱいの縦線）
+  const nowT = project3d({ x: playheadX, y: rollH * 0.52, z: 0 }, view, rect, camDist);
+  const nowB = project3d({ x: playheadX, y: -rollH * 0.52, z: 0 }, view, rect, camDist);
+  if (nowT && nowB) {
+    ctx.globalAlpha = 0.3;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = layer.thickness ?? 1.5;
     ctx.beginPath();
-    ctx.moveTo(nowL.x, nowL.y);
-    ctx.lineTo(nowR.x, nowR.y);
+    ctx.moveTo(nowT.x, nowT.y);
+    ctx.lineTo(nowB.x, nowB.y);
     ctx.stroke();
   }
 
   for (const n of notes) {
-    const xC = pitchToX(n.pitch);
-    const x0 = xC - laneW * 0.4;
-    const x1 = xC + laneW * 0.4;
-    const zB = stepToZ(n.startStep + n.durationSteps); // 奥（未来）
-    const zF = stepToZ(n.startStep); // 手前（いま〜過去）
-    
-    // トラックごとにY（高さ）を少しズラして重なりを見せる
-    const trkIdx = layer.tracks ? layer.tracks.indexOf(n.track) : n.track;
-    const yC = baseY + (trkIdx >= 0 ? trkIdx : 0) * (view.thickness || 0);
+    const x0 = stepToX(Math.max(n.startStep, from));
+    const x1 = stepToX(Math.min(n.startStep + n.durationSteps, to));
+    if (x1 - x0 < 1) continue;
+    const yC = pitchToY(n.pitch);
+    const y0 = yC - noteH / 2;
+    const y1 = yC + noteH / 2;
+    const zC = laneZ(n.track);
 
     const sounding = n.startStep <= d.step && n.startStep + n.durationSteps > d.step;
     const color = trackColor(d, n.track);
 
-    // 遠いほどフェードアウト
-    const depthFade = clamp01(1 - Math.max(0, zF) / view.depth);
-    if (depthFade <= 0.01) continue;
-
-    ctx.globalAlpha = sounding ? 1 : 0.65 * depthFade;
-
-    const pTL = project3d({ x: x0, y: yC, z: zB }, view, rect, camDist);
-    const pTR = project3d({ x: x1, y: yC, z: zB }, view, rect, camDist);
-    const pBL = project3d({ x: x0, y: yC, z: zF }, view, rect, camDist);
-    const pBR = project3d({ x: x1, y: yC, z: zF }, view, rect, camDist);
-
-    if (pTL && pTR && pBL && pBR) {
-      if (sounding && layer.glow) {
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 15;
-      }
-      ctx.fillStyle = sounding ? shade(color, 1.4) : color;
-      ctx.beginPath();
-      ctx.moveTo(pTL.x, pTL.y);
-      ctx.lineTo(pTR.x, pTR.y);
-      ctx.lineTo(pBR.x, pBR.y);
-      ctx.lineTo(pBL.x, pBL.y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.shadowBlur = 0;
+    // 通り過ぎた音は左端に向かってフェードアウト
+    let alpha = sounding ? 1 : 0.8;
+    const endX = stepToX(n.startStep + n.durationSteps);
+    if (!sounding && endX < playheadX) {
+      alpha *= clamp01(1 - (playheadX - endX) / (spanX * 0.24));
     }
+    if (alpha <= 0.02) continue;
+
+    // 手前面（z-）の四隅
+    const pTL = project3d({ x: x0, y: y1, z: zC - half }, view, rect, camDist);
+    const pTR = project3d({ x: x1, y: y1, z: zC - half }, view, rect, camDist);
+    const pBL = project3d({ x: x0, y: y0, z: zC - half }, view, rect, camDist);
+    const pBR = project3d({ x: x1, y: y0, z: zC - half }, view, rect, camDist);
+    if (!pTL || !pTR || !pBL || !pBR) continue;
+
+    ctx.globalAlpha = alpha;
+
+    // 厚みの見える上面。奥側の辺（z+）とつないだ平行四辺形で箱らしさを出す
+    if (half > 0) {
+      const qTL = project3d({ x: x0, y: y1, z: zC + half }, view, rect, camDist);
+      const qTR = project3d({ x: x1, y: y1, z: zC + half }, view, rect, camDist);
+      if (qTL && qTR) {
+        ctx.fillStyle = shade(color, sounding ? 1.1 : 0.7);
+        ctx.beginPath();
+        ctx.moveTo(pTL.x, pTL.y);
+        ctx.lineTo(pTR.x, pTR.y);
+        ctx.lineTo(qTR.x, qTR.y);
+        ctx.lineTo(qTL.x, qTL.y);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    if (sounding && layer.glow) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 12;
+    }
+    ctx.fillStyle = sounding ? shade(color, 1.45) : color;
+    ctx.beginPath();
+    ctx.moveTo(pTL.x, pTL.y);
+    ctx.lineTo(pTR.x, pTR.y);
+    ctx.lineTo(pBR.x, pBR.y);
+    ctx.lineTo(pBL.x, pBL.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
   }
 
   ctx.globalAlpha = 1;
@@ -1419,21 +1447,33 @@ function drawStepGrid(d: DrawCtx, layer: MvVisualizerLayer): void {
       const idx = lastIndexAtOrBefore(list, colStart + stepsPerCol - 0.001);
       const hit = idx >= 0 && list[idx].startStep >= colStart;
 
-      // 空きマスの罫線
-      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+      // 空きマスの罫線。二重線にして、参考動画の装飾枠つきタイルの気配を出す
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
       ctx.lineWidth = 1;
       ctx.strokeRect(Math.round(cx) + 0.5, Math.round(cy) + 0.5, Math.round(cellW - gap), Math.round(cellH - gap));
+      const inner = Math.max(2, Math.min(cellW, cellH) * 0.1);
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.strokeRect(
+        Math.round(cx + inner) + 0.5,
+        Math.round(cy + inner) + 0.5,
+        Math.round(cellW - gap - inner * 2),
+        Math.round(cellH - gap - inner * 2),
+      );
 
       if (hit) {
         const active = c === currentCol;
-        ctx.globalAlpha = active ? 1 : 0.55;
+        // 参考動画は点灯マスがほぼ真っ白のまま並ぶ。通過中の列だけ満点にする
+        ctx.globalAlpha = active ? 1 : 0.78;
         ctx.fillStyle = color;
         ctx.fillRect(cx + gap, cy + gap, cellW - gap * 2, cellH - gap * 2);
-        // 点灯マスの中に抜きの四角を入れて、サンプル動画のアイコン感を出す
+        // 点灯マスの中心に小さな抜き模様を入れ子で入れる（白い面が主役、模様は控えめ）
         ctx.globalAlpha = active ? 0.9 : 0.5;
-        ctx.fillStyle = 'rgba(0,0,0,0.65)';
-        const inset = Math.min(cellW, cellH) * 0.28;
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        const inset = Math.min(cellW, cellH) * 0.32;
         ctx.fillRect(cx + inset, cy + inset, cellW - inset * 2, cellH - inset * 2);
+        ctx.fillStyle = color;
+        const inset2 = Math.min(cellW, cellH) * 0.42;
+        ctx.fillRect(cx + inset2, cy + inset2, cellW - inset2 * 2, cellH - inset2 * 2);
         ctx.globalAlpha = 1;
       }
     }
