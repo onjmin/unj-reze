@@ -83,6 +83,18 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] leading-relaxed text-gray-500">{children}</p>;
 }
 
+function SliderField({ label, value, min = 0, max = 100, step = 1, onChange }: { label: string, value: number, min?: number, max?: number, step?: number, onChange: (v: number) => void }) {
+  return (
+    <div className="space-y-1 rounded bg-gray-950/30 p-2 border border-gray-800">
+      <div className="flex items-center justify-between">
+        <span className={FIELD_LABEL_CLASS}>{label}</span>
+        <input type="number" value={value} min={min} max={max} step={step} onChange={e => onChange(Number(e.target.value) || 0)} className="w-14 bg-transparent text-right text-[11px] text-gray-300 outline-none" />
+      </div>
+      <input type="range" value={value} min={min} max={max} step={step} onChange={e => onChange(Number(e.target.value) || 0)} className="w-full accent-blue-500" />
+    </div>
+  );
+}
+
 function NumField({ label, value, onChange, min, max, step = 1 }: {
   label: string; value: number; onChange: (v: number) => void;
   min?: number; max?: number; step?: number;
@@ -739,144 +751,111 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
 
   const selectedLayer = manifest.layers.find(l => l.id === selectedLayerId) ?? null;
 
-  const layersTab = (
-    <div className="space-y-2">
-      <div className={SECTION_CLASS}>
-        <SectionTitle><Layers size={12} className="mr-1 inline" />レイヤー</SectionTitle>
-        {manifest.layers.length === 0 && <p className="text-[10px] text-gray-500">レイヤーがありません。</p>}
-        {manifest.layers.map(layer => {
-          const Icon = LAYER_ICON[layer.kind];
-          const active = layer.id === selectedLayerId;
-          return (
-            <div key={layer.id} className={`flex items-center gap-2 rounded border px-2 py-1.5 ${active ? 'border-blue-500/70 bg-blue-500/10' : 'border-gray-700 bg-gray-800'}`}>
-              <Icon size={13} className="shrink-0 text-gray-400" />
-              <button onClick={() => setSelectedLayerId(active ? null : layer.id)} className="min-h-10 min-w-0 flex-1 py-1 text-left">
-                <span className="block truncate text-[11px] text-gray-200">{layerLabel(layer)}</span>
-                {layer.sections && layer.sections.length > 0 && (
-                  <span className="block truncate text-[9px] text-gray-500">
-                    {layer.sections.map(id => manifest.sections.find(s => s.id === id)?.label ?? id).join(' / ')} のみ
-                  </span>
-                )}
-              </button>
-              <button onClick={() => removeLayer(layer.id)} className={DEL_BTN_CLASS}><Trash2 size={16} /></button>
-            </div>
-          );
-        })}
-        <div className="grid grid-cols-3 gap-1.5">
-          <button onClick={addImageLayer} className={ADD_BTN_CLASS}><Plus size={12} />画像</button>
-          <button onClick={addTextLayer} className={ADD_BTN_CLASS}><Plus size={12} />文字</button>
-          <button onClick={addVisualizerLayer} className={ADD_BTN_CLASS}><Plus size={12} />ビジュアライザ</button>
-          <button onClick={addShapeLayer} className={ADD_BTN_CLASS}><Plus size={12} />図形</button>
-          <button onClick={addEffectLayer} className={ADD_BTN_CLASS}><Plus size={12} />演出</button>
-          <button onClick={addChordBarLayer} className={ADD_BTN_CLASS}><Plus size={12} />コード進行</button>
-        </div>
-      </div>
-
-      {selectedLayer && (
-        <div className={SECTION_CLASS}>
-          <SectionTitle>⚙️ {layerLabel(selectedLayer)} の設定</SectionTitle>
-
-          {selectedLayer.kind === 'image' && (
+  
+  const renderLayerSettings = (layer: MvLayer) => (
+    <div className="space-y-4 pt-1">
+      {layer.kind === 'image' && (
             <>
-              <button onClick={() => setPicker({ mode: 'image', target: { layerId: selectedLayer.id } })} className={REF_BTN_CLASS}>
+              <button onClick={() => setPicker({ mode: 'image', target: { layerId: layer.id } })} className={REF_BTN_CLASS}>
                 <ImageIcon size={12} />画像を参照
               </button>
-              {selectedLayer.url && <img src={selectedLayer.url} alt="" className="h-12 w-12 rounded border border-gray-700 object-contain" />}
-              <NumField label="X" value={selectedLayer.x} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, x: v } as MvLayer))} />
-              <NumField label="Y" value={selectedLayer.y} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, y: v } as MvLayer))} />
-              <NumField label="拡大率" value={selectedLayer.scale} min={0.1} step={0.5} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, scale: v } as MvLayer))} />
-              <CheckField label="ドット絵として粗く表示" checked={!!selectedLayer.pixelated}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, pixelated: v } as MvLayer))} />
-              <CheckField label="歩行グラとしてアニメさせる" checked={!!selectedLayer.walk}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, walk: v ? { stdId: 'auto', dir: 's', fps: 4 } : undefined } as MvLayer))} />
+              {layer.url && <img src={layer.url} alt="" className="h-12 w-12 rounded border border-gray-700 object-contain" />}
+              <NumField label="X" value={layer.x} onChange={v => updateLayer(layer.id, l => ({ ...l, x: v } as MvLayer))} />
+              <NumField label="Y" value={layer.y} onChange={v => updateLayer(layer.id, l => ({ ...l, y: v } as MvLayer))} />
+              <NumField label="拡大率" value={layer.scale} min={0.1} step={0.5} onChange={v => updateLayer(layer.id, l => ({ ...l, scale: v } as MvLayer))} />
+              <CheckField label="ドット絵として粗く表示" checked={!!layer.pixelated}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, pixelated: v } as MvLayer))} />
+              <CheckField label="歩行グラとしてアニメさせる" checked={!!layer.walk}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, walk: v ? { stdId: 'auto', dir: 's', fps: 4 } : undefined } as MvLayer))} />
               <CheckField
                 label="同じ画像を並べる"
-                checked={!!selectedLayer.repeat}
-                onChange={v => updateLayer(selectedLayer.id, l => ({
+                checked={!!layer.repeat}
+                onChange={v => updateLayer(layer.id, l => ({
                   ...l,
                   repeat: v ? { count: 5, dx: 42, dy: 0, scaleStep: 0, alphaStep: -0.12, phase: 0.25 } : undefined,
                 } as MvLayer))}
               />
-              {selectedLayer.repeat && (
+              {layer.repeat && (
                 <Details label="並べ方を調整する">
-                  <NumField label="個数" value={selectedLayer.repeat.count} min={1} max={64}
-                    onChange={v => updateRepeat(selectedLayer.id, { count: v })} />
-                  <NumField label="横のずれ" value={selectedLayer.repeat.dx}
-                    onChange={v => updateRepeat(selectedLayer.id, { dx: v })} />
-                  <NumField label="縦のずれ" value={selectedLayer.repeat.dy}
-                    onChange={v => updateRepeat(selectedLayer.id, { dy: v })} />
-                  <NumField label="拡大の変化" value={selectedLayer.repeat.scaleStep ?? 0} step={0.1}
-                    onChange={v => updateRepeat(selectedLayer.id, { scaleStep: v })} />
-                  <NumField label="濃さの変化" value={selectedLayer.repeat.alphaStep ?? 0} step={0.05}
-                    onChange={v => updateRepeat(selectedLayer.id, { alphaStep: v })} />
-                  <NumField label="足踏みのずれ" value={selectedLayer.repeat.phase ?? 0} step={0.05}
-                    onChange={v => updateRepeat(selectedLayer.id, { phase: v })} />
+                  <NumField label="個数" value={layer.repeat.count} min={1} max={64}
+                    onChange={v => updateRepeat(layer.id, { count: v })} />
+                  <NumField label="横のずれ" value={layer.repeat.dx}
+                    onChange={v => updateRepeat(layer.id, { dx: v })} />
+                  <NumField label="縦のずれ" value={layer.repeat.dy}
+                    onChange={v => updateRepeat(layer.id, { dy: v })} />
+                  <NumField label="拡大の変化" value={layer.repeat.scaleStep ?? 0} step={0.1}
+                    onChange={v => updateRepeat(layer.id, { scaleStep: v })} />
+                  <NumField label="濃さの変化" value={layer.repeat.alphaStep ?? 0} step={0.05}
+                    onChange={v => updateRepeat(layer.id, { alphaStep: v })} />
+                  <NumField label="足踏みのずれ" value={layer.repeat.phase ?? 0} step={0.05}
+                    onChange={v => updateRepeat(layer.id, { phase: v })} />
                 </Details>
               )}
             </>
           )}
 
-          {selectedLayer.kind === 'text' && (
+          {layer.kind === 'text' && (
             <>
               <textarea
-                value={selectedLayer.text}
-                onChange={e => updateLayer(selectedLayer.id, l => ({ ...l, text: e.target.value } as MvLayer))}
+                value={layer.text}
+                onChange={e => updateLayer(layer.id, l => ({ ...l, text: e.target.value } as MvLayer))}
                 className={`${INPUT_CLASS} h-16 resize-none`}
               />
-              <NumField label="X" value={selectedLayer.x} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, x: v } as MvLayer))} />
-              <NumField label="Y" value={selectedLayer.y} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, y: v } as MvLayer))} />
-              <NumField label="文字サイズ" value={selectedLayer.size} min={6} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, size: v } as MvLayer))} />
-              <ColorField label="文字色" value={selectedLayer.color} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
-              <CheckField label="縦書き" checked={selectedLayer.vertical} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, vertical: v } as MvLayer))} />
-              <CheckField label="太字" checked={!!selectedLayer.bold} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, bold: v } as MvLayer))} />
+              <NumField label="X" value={layer.x} onChange={v => updateLayer(layer.id, l => ({ ...l, x: v } as MvLayer))} />
+              <NumField label="Y" value={layer.y} onChange={v => updateLayer(layer.id, l => ({ ...l, y: v } as MvLayer))} />
+              <NumField label="文字サイズ" value={layer.size} min={6} onChange={v => updateLayer(layer.id, l => ({ ...l, size: v } as MvLayer))} />
+              <ColorField label="文字色" value={layer.color} onChange={v => updateLayer(layer.id, l => ({ ...l, color: v } as MvLayer))} />
+              <CheckField label="縦書き" checked={layer.vertical} onChange={v => updateLayer(layer.id, l => ({ ...l, vertical: v } as MvLayer))} />
+              <CheckField label="太字" checked={!!layer.bold} onChange={v => updateLayer(layer.id, l => ({ ...l, bold: v } as MvLayer))} />
             </>
           )}
 
-          {selectedLayer.kind === 'visualizer' && (
+          {layer.kind === 'visualizer' && (
             <>
-              <SelectField label="種類" value={selectedLayer.style} options={VISUALIZER_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, style: v } as MvLayer))} />
-              <NumField label="X" value={selectedLayer.rect.x} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
-              <NumField label="Y" value={selectedLayer.rect.y} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, y: v } } : l))} />
-              <NumField label="幅" value={selectedLayer.rect.w} min={8} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, w: v } } : l))} />
-              <NumField label="高さ" value={selectedLayer.rect.h} min={8} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, h: v } } : l))} />
-              <NumField label="細かさ" value={selectedLayer.amount ?? 16} min={1} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, amount: v } as MvLayer))} />
+              <SelectField label="種類" value={layer.style} options={VISUALIZER_OPTIONS}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, style: v } as MvLayer))} />
+              <NumField label="X" value={layer.rect.x} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
+              <NumField label="Y" value={layer.rect.y} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, y: v } } : l))} />
+              <NumField label="幅" value={layer.rect.w} min={8} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, w: v } } : l))} />
+              <NumField label="高さ" value={layer.rect.h} min={8} onChange={v => updateLayer(layer.id, l => (l.kind === 'visualizer' ? { ...l, rect: { ...l.rect, h: v } } : l))} />
+              <NumField label="細かさ" value={layer.amount ?? 16} min={1} onChange={v => updateLayer(layer.id, l => ({ ...l, amount: v } as MvLayer))} />
               <p className="text-[10px] leading-relaxed text-gray-500">
                 「細かさ」はピアノロールなら画面に映る小節数、ステップ格子なら1小節の分割数、
                 波紋なら同時に出る輪の数、スペアナなら棒の本数です。
               </p>
-              <CheckField label="光らせる" checked={!!selectedLayer.glow} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, glow: v } as MvLayer))} />
+              <CheckField label="光らせる" checked={!!layer.glow} onChange={v => updateLayer(layer.id, l => ({ ...l, glow: v } as MvLayer))} />
 
-              {selectedLayer.style === 'pianoRoll' && (
+              {layer.style === 'pianoRoll' && (
                 <>
-                  <SelectField label="見せ方" value={selectedLayer.projection ?? 'flat'} options={PROJECTION_OPTIONS}
-                    onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, projection: v } as MvLayer))} />
-                  {(selectedLayer.projection ?? 'flat') === 'perspective' && (
+                  <SelectField label="見せ方" value={layer.projection ?? 'flat'} options={PROJECTION_OPTIONS}
+                    onChange={v => updateLayer(layer.id, l => ({ ...l, projection: v } as MvLayer))} />
+                  {(layer.projection ?? 'flat') === 'perspective' && (
                     <Details label="見る角度を調整する">
+                      <Hint>スライダーを動かすと、リアルタイムで3Dの視点が回転・移動します。</Hint>
                       <Hint>MIDITrail のように、ノートの板を好きな角度から見られます。</Hint>
-                      <NumField label="見下ろし" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).pitch} min={-89} max={89}
-                        onChange={v => updateView(selectedLayer.id, { pitch: v })} />
-                      <NumField label="回り込み" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).yaw} min={-89} max={89}
-                        onChange={v => updateView(selectedLayer.id, { yaw: v })} />
-                      <NumField label="傾き" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).roll} min={-180} max={180}
-                        onChange={v => updateView(selectedLayer.id, { roll: v })} />
-                      <NumField label="画角" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).fov} min={10} max={120}
-                        onChange={v => updateView(selectedLayer.id, { fov: v })} />
-                      <NumField label="奥行き" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).depth} min={100} step={50}
-                        onChange={v => updateView(selectedLayer.id, { depth: v })} />
-                      <NumField label="ノートの厚み" value={(selectedLayer.view ?? DEFAULT_MV_VIEW).thickness} min={0} step={1}
-                        onChange={v => updateView(selectedLayer.id, { thickness: v })} />
+                      <NumField label="見下ろし" value={(layer.view ?? DEFAULT_MV_VIEW).pitch} min={-89} max={89}
+                        onChange={v => updateView(layer.id, { pitch: v })} />
+                      <NumField label="回り込み" value={(layer.view ?? DEFAULT_MV_VIEW).yaw} min={-89} max={89}
+                        onChange={v => updateView(layer.id, { yaw: v })} />
+                      <NumField label="傾き" value={(layer.view ?? DEFAULT_MV_VIEW).roll} min={-180} max={180}
+                        onChange={v => updateView(layer.id, { roll: v })} />
+                      <NumField label="画角" value={(layer.view ?? DEFAULT_MV_VIEW).fov} min={10} max={120}
+                        onChange={v => updateView(layer.id, { fov: v })} />
+                      <NumField label="奥行き" value={(layer.view ?? DEFAULT_MV_VIEW).depth} min={100} step={50}
+                        onChange={v => updateView(layer.id, { depth: v })} />
+                      <NumField label="ノートの厚み" value={(layer.view ?? DEFAULT_MV_VIEW).thickness} min={0} step={1}
+                        onChange={v => updateView(layer.id, { thickness: v })} />
                     </Details>
                   )}
-                  {selectedLayer.projection === 'circular' && (
+                  {layer.projection === 'circular' && (
                     <Details label="円の形を調整する">
                       <Hint>音の高さを円周に、時間を外側へ向かって並べます。</Hint>
-                      <NumField label="内側の半径" value={(selectedLayer.ring ?? DEFAULT_MV_RING).innerRadius} min={0}
-                        onChange={v => updateRing(selectedLayer.id, { innerRadius: v })} />
-                      <NumField label="円弧の角度" value={(selectedLayer.ring ?? DEFAULT_MV_RING).sweep} min={30} max={360}
-                        onChange={v => updateRing(selectedLayer.id, { sweep: v })} />
-                      <NumField label="回転" value={(selectedLayer.ring ?? DEFAULT_MV_RING).rotate} min={-360} max={360}
-                        onChange={v => updateRing(selectedLayer.id, { rotate: v })} />
+                      <NumField label="内側の半径" value={(layer.ring ?? DEFAULT_MV_RING).innerRadius} min={0}
+                        onChange={v => updateRing(layer.id, { innerRadius: v })} />
+                      <NumField label="円弧の角度" value={(layer.ring ?? DEFAULT_MV_RING).sweep} min={30} max={360}
+                        onChange={v => updateRing(layer.id, { sweep: v })} />
+                      <NumField label="回転" value={(layer.ring ?? DEFAULT_MV_RING).rotate} min={-360} max={360}
+                        onChange={v => updateRing(layer.id, { rotate: v })} />
                     </Details>
                   )}
                 </>
@@ -884,31 +863,31 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             </>
           )}
 
-          {selectedLayer.kind === 'shape' && (
+          {layer.kind === 'shape' && (
             <>
-              <SelectField label="形" value={selectedLayer.form} options={SHAPE_FORM_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, form: v } as MvLayer))} />
-              <NumField label="X" value={selectedLayer.x} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, x: v } as MvLayer))} />
-              <NumField label="Y" value={selectedLayer.y} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, y: v } as MvLayer))} />
-              <NumField label="大きさ" value={selectedLayer.size} min={1} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, size: v } as MvLayer))} />
-              <NumField label="回転" value={selectedLayer.rotation} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, rotation: v } as MvLayer))} />
-              <ColorField label="色" value={selectedLayer.color} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
-              <CheckField label="塗りつぶす" checked={selectedLayer.filled} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, filled: v } as MvLayer))} />
-              <NumField label="線の太さ" value={selectedLayer.thickness} min={0.2} step={0.5} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, thickness: v } as MvLayer))} />
-              {selectedLayer.form === 'polygon' && (
-                <NumField label="角の数" value={selectedLayer.sides ?? 6} min={3} max={24} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, sides: v } as MvLayer))} />
+              <SelectField label="形" value={layer.form} options={SHAPE_FORM_OPTIONS}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, form: v } as MvLayer))} />
+              <NumField label="X" value={layer.x} onChange={v => updateLayer(layer.id, l => ({ ...l, x: v } as MvLayer))} />
+              <NumField label="Y" value={layer.y} onChange={v => updateLayer(layer.id, l => ({ ...l, y: v } as MvLayer))} />
+              <NumField label="大きさ" value={layer.size} min={1} onChange={v => updateLayer(layer.id, l => ({ ...l, size: v } as MvLayer))} />
+              <NumField label="回転" value={layer.rotation} onChange={v => updateLayer(layer.id, l => ({ ...l, rotation: v } as MvLayer))} />
+              <ColorField label="色" value={layer.color} onChange={v => updateLayer(layer.id, l => ({ ...l, color: v } as MvLayer))} />
+              <CheckField label="塗りつぶす" checked={layer.filled} onChange={v => updateLayer(layer.id, l => ({ ...l, filled: v } as MvLayer))} />
+              <NumField label="線の太さ" value={layer.thickness} min={0.2} step={0.5} onChange={v => updateLayer(layer.id, l => ({ ...l, thickness: v } as MvLayer))} />
+              {layer.form === 'polygon' && (
+                <NumField label="角の数" value={layer.sides ?? 6} min={3} max={24} onChange={v => updateLayer(layer.id, l => ({ ...l, sides: v } as MvLayer))} />
               )}
-              {selectedLayer.form === 'path' && (
+              {layer.form === 'path' && (
                 <>
                   <label className="block space-y-0.5">
                     <span className={FIELD_LABEL_CLASS}>形のデータ（SVGを丸ごと貼り付けてもOK）</span>
                     <textarea
-                      value={selectedLayer.path ?? ''}
+                      value={layer.path ?? ''}
                       placeholder='M50 5 L95 50 L50 95 L5 50 Z　または <svg …>…</svg>'
                       onChange={e => {
                         const text = e.target.value;
                         const extracted = extractSvgPaths(text);
-                        updateLayer(selectedLayer.id, l => (l.kind === 'shape'
+                        updateLayer(layer.id, l => (l.kind === 'shape'
                           ? {
                               ...l,
                               path: extracted ? extracted.d : text,
@@ -925,66 +904,66 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                   </Hint>
                   <NumField
                     label="設計サイズ（viewBoxの幅。自動取り込み時は触らなくてOK）"
-                    value={selectedLayer.pathBox?.[2] ?? 100}
+                    value={layer.pathBox?.[2] ?? 100}
                     min={1}
-                    onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'shape'
+                    onChange={v => updateLayer(layer.id, l => (l.kind === 'shape'
                       ? { ...l, pathBox: [0, 0, v, v] }
                       : l))}
                   />
                 </>
               )}
-              <NumField label="個数" value={selectedLayer.count ?? 1} min={1} max={64} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, count: v } as MvLayer))} />
-              {(selectedLayer.count ?? 1) > 1 && (
+              <NumField label="個数" value={layer.count ?? 1} min={1} max={64} onChange={v => updateLayer(layer.id, l => ({ ...l, count: v } as MvLayer))} />
+              {(layer.count ?? 1) > 1 && (
                 <Details label="1個ごとのずらし方">
-                  <NumField label="大きさの差" value={selectedLayer.spread ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, spread: v } as MvLayer))} />
-                  <NumField label="回転の差" value={selectedLayer.spin ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, spin: v } as MvLayer))} />
-                  <NumField label="横のずれ" value={selectedLayer.offsetX ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, offsetX: v } as MvLayer))} />
-                  <NumField label="縦のずれ" value={selectedLayer.offsetY ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, offsetY: v } as MvLayer))} />
-                  <NumField label="反応の遅れ" value={selectedLayer.stagger ?? 0} min={0} step={4} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, stagger: v } as MvLayer))} />
+                  <NumField label="大きさの差" value={layer.spread ?? 0} onChange={v => updateLayer(layer.id, l => ({ ...l, spread: v } as MvLayer))} />
+                  <NumField label="回転の差" value={layer.spin ?? 0} onChange={v => updateLayer(layer.id, l => ({ ...l, spin: v } as MvLayer))} />
+                  <NumField label="横のずれ" value={layer.offsetX ?? 0} onChange={v => updateLayer(layer.id, l => ({ ...l, offsetX: v } as MvLayer))} />
+                  <NumField label="縦のずれ" value={layer.offsetY ?? 0} onChange={v => updateLayer(layer.id, l => ({ ...l, offsetY: v } as MvLayer))} />
+                  <NumField label="反応の遅れ" value={layer.stagger ?? 0} min={0} step={4} onChange={v => updateLayer(layer.id, l => ({ ...l, stagger: v } as MvLayer))} />
                   <Hint>「反応の遅れ」を入れると、端から順に反応が伝わる波のような動きになります。</Hint>
                 </Details>
               )}
-              <SelectField label="重ね方" value={selectedLayer.blend ?? 'normal'} options={BLEND_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, blend: v } as MvLayer))} />
+              <SelectField label="重ね方" value={layer.blend ?? 'normal'} options={BLEND_OPTIONS}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, blend: v } as MvLayer))} />
 
-              <Details label={`音との連動（${selectedLayer.modulators.length}件）`}>
+              <Details label={`音との連動（${layer.modulators.length}件）`}>
                 <Hint>
                   「曲のどこが」「形のどこに」「どう効くか」を1行ずつ足していきます。
                   上から順に計算するので、足し算のあとに掛け算を重ねる…といった組み方ができます。
                   むずかしければ触らなくて大丈夫です。
                 </Hint>
-                {selectedLayer.modulators.map((mod, i) => (
+                {layer.modulators.map((mod, i) => (
                   <ModulatorRow
                     key={i}
                     mod={mod}
                     tracks={song.tracks}
-                    onChange={next => updateMod(selectedLayer.id, i, next)}
-                    onRemove={() => removeMod(selectedLayer.id, i)}
+                    onChange={next => updateMod(layer.id, i, next)}
+                    onRemove={() => removeMod(layer.id, i)}
                   />
                 ))}
-                <button onClick={() => addMod(selectedLayer.id)} className={ADD_BTN_CLASS}>
+                <button onClick={() => addMod(layer.id)} className={ADD_BTN_CLASS}>
                   <Plus size={13} />連動を追加
                 </button>
               </Details>
             </>
           )}
 
-          {selectedLayer.kind === 'effect' && (
+          {layer.kind === 'effect' && (
             <>
-              <SelectField label="演出" value={selectedLayer.style} options={EFFECT_STYLE_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, style: v } as MvLayer))} />
-              <SelectField label="タイミング" value={selectedLayer.trigger} options={TRIGGER_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, trigger: v } as MvLayer))} />
-              {selectedLayer.trigger === 'bars' && (
+              <SelectField label="演出" value={layer.style} options={EFFECT_STYLE_OPTIONS}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, style: v } as MvLayer))} />
+              <SelectField label="タイミング" value={layer.trigger} options={TRIGGER_OPTIONS}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, trigger: v } as MvLayer))} />
+              {layer.trigger === 'bars' && (
                 <label className="block space-y-0.5">
                   <span className={FIELD_LABEL_CLASS}>発火する小節（カンマ区切り。0始まり、小数も可）</span>
                   <input
-                    key={selectedLayer.id}
-                    defaultValue={(selectedLayer.bars ?? []).join(', ')}
+                    key={layer.id}
+                    defaultValue={(layer.bars ?? []).join(', ')}
                     placeholder="例: 8, 16, 24.5"
                     onChange={e => {
                       const bars = parseBarList(e.target.value);
-                      updateLayer(selectedLayer.id, l => (l.kind === 'effect'
+                      updateLayer(layer.id, l => (l.kind === 'effect'
                         ? { ...l, bars: bars.length > 0 ? bars : undefined }
                         : l));
                     }}
@@ -993,15 +972,15 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                   <Hint>書いた小節の頭でだけ発火します。サビ頭など「決めの瞬間」に使ってください。</Hint>
                 </label>
               )}
-              {selectedLayer.trigger === 'note' && (
+              {layer.trigger === 'note' && (
                 <div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
                   <p className="text-[10px] text-gray-400">どのトラックの音で光らせるか（未選択なら全部）</p>
                   {song.tracks.map(t => (
                     <CheckField
                       key={t}
                       label={`トラック @${t}`}
-                      checked={!!selectedLayer.tracks?.includes(t)}
-                      onChange={v => updateLayer(selectedLayer.id, l => {
+                      checked={!!layer.tracks?.includes(t)}
+                      onChange={v => updateLayer(layer.id, l => {
                         if (l.kind !== 'effect') return l;
                         const cur = l.tracks ?? [];
                         const next = v ? [...cur, t] : cur.filter(x => x !== t);
@@ -1011,51 +990,51 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                   ))}
                 </div>
               )}
-              <NumField label="強さ" value={selectedLayer.amount} min={0} max={1} step={0.05}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, amount: v } as MvLayer))} />
-              <NumField label="長さ（拍）" value={selectedLayer.decayBeats ?? 1} min={0.05} step={0.05}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, decayBeats: v } as MvLayer))} />
-              {selectedLayer.style !== 'invert' && (
-                <ColorField label="色" value={selectedLayer.color ?? '#ffffff'}
-                  onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
+              <NumField label="強さ" value={layer.amount} min={0} max={1} step={0.05}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, amount: v } as MvLayer))} />
+              <NumField label="長さ（拍）" value={layer.decayBeats ?? 1} min={0.05} step={0.05}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, decayBeats: v } as MvLayer))} />
+              {layer.style !== 'invert' && (
+                <ColorField label="色" value={layer.color ?? '#ffffff'}
+                  onChange={v => updateLayer(layer.id, l => ({ ...l, color: v } as MvLayer))} />
               )}
             </>
           )}
 
-          {selectedLayer.kind === 'chordBar' && (
+          {layer.kind === 'chordBar' && (
             <>
-              <NumField label="X" value={selectedLayer.rect.x} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
-              <NumField label="Y" value={selectedLayer.rect.y} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, y: v } } : l))} />
-              <NumField label="幅" value={selectedLayer.rect.w} min={8} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, w: v } } : l))} />
-              <NumField label="高さ" value={selectedLayer.rect.h} min={8} onChange={v => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, h: v } } : l))} />
-              <NumField label="文字サイズ" value={selectedLayer.size} min={5} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, size: v } as MvLayer))} />
-              <SelectField label="キー" value={selectedLayer.key}
+              <NumField label="X" value={layer.rect.x} onChange={v => updateLayer(layer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
+              <NumField label="Y" value={layer.rect.y} onChange={v => updateLayer(layer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, y: v } } : l))} />
+              <NumField label="幅" value={layer.rect.w} min={8} onChange={v => updateLayer(layer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, w: v } } : l))} />
+              <NumField label="高さ" value={layer.rect.h} min={8} onChange={v => updateLayer(layer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, h: v } } : l))} />
+              <NumField label="文字サイズ" value={layer.size} min={5} onChange={v => updateLayer(layer.id, l => ({ ...l, size: v } as MvLayer))} />
+              <SelectField label="キー" value={layer.key}
                 options={Object.keys(MV_ROOT_TO_PITCH).map(k => ({ value: k, label: k }))}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, key: v } as MvLayer))} />
-              <SelectField label="色分け" value={selectedLayer.colorMode}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, key: v } as MvLayer))} />
+              <SelectField label="色分け" value={layer.colorMode}
                 options={[
                   { value: 'degree' as const, label: '度数で色分け' },
                   { value: 'fixed' as const, label: '全部同じ色' },
                 ]}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, colorMode: v } as MvLayer))} />
-              {selectedLayer.colorMode === 'fixed' && (
-                <ColorField label="ブロック色" value={selectedLayer.color} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, color: v } as MvLayer))} />
+                onChange={v => updateLayer(layer.id, l => ({ ...l, colorMode: v } as MvLayer))} />
+              {layer.colorMode === 'fixed' && (
+                <ColorField label="ブロック色" value={layer.color} onChange={v => updateLayer(layer.id, l => ({ ...l, color: v } as MvLayer))} />
               )}
-              <ColorField label="いまの色" value={selectedLayer.activeColor} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, activeColor: v } as MvLayer))} />
-              <ColorField label="文字色" value={selectedLayer.textColor} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, textColor: v } as MvLayer))} />
+              <ColorField label="いまの色" value={layer.activeColor} onChange={v => updateLayer(layer.id, l => ({ ...l, activeColor: v } as MvLayer))} />
+              <ColorField label="文字色" value={layer.textColor} onChange={v => updateLayer(layer.id, l => ({ ...l, textColor: v } as MvLayer))} />
 
               <p className="pt-1 text-[10px] font-bold text-gray-400">コード進行</p>
               <p className="text-[10px] leading-relaxed text-gray-500">
                 小節番号とコード名を並べます。次のコードが始まるまでが1ブロックの長さです。
               </p>
-              {selectedLayer.chords.map((c, i) => (
+              {layer.chords.map((c, i) => (
                 <div key={i} className="flex items-center gap-1.5">
                   <input
                     type="number"
                     value={c.bar}
                     step={0.25}
                     min={0}
-                    onChange={e => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                    onChange={e => updateLayer(layer.id, l => (l.kind === 'chordBar'
                       ? { ...l, chords: l.chords.map((x, j) => (j === i ? { ...x, bar: Number(e.target.value) || 0 } : x)) }
                       : l))}
                     className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
@@ -1063,13 +1042,13 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                   <input
                     value={c.label}
                     placeholder="F#m7"
-                    onChange={e => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                    onChange={e => updateLayer(layer.id, l => (l.kind === 'chordBar'
                       ? { ...l, chords: l.chords.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }
                       : l))}
                     className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
                   />
                   <button
-                    onClick={() => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                    onClick={() => updateLayer(layer.id, l => (l.kind === 'chordBar'
                       ? { ...l, chords: l.chords.filter((_, j) => j !== i) }
                       : l))}
                     className={DEL_BTN_CLASS}
@@ -1079,7 +1058,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                 </div>
               ))}
               <button
-                onClick={() => updateLayer(selectedLayer.id, l => (l.kind === 'chordBar'
+                onClick={() => updateLayer(layer.id, l => (l.kind === 'chordBar'
                   ? { ...l, chords: [...l.chords, { bar: l.chords.length, label: 'C' }] }
                   : l))}
                 className={ADD_BTN_CLASS}
@@ -1089,18 +1068,18 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             </>
           )}
 
-          {(selectedLayer.kind === 'image' || selectedLayer.kind === 'text') && (
+          {(layer.kind === 'image' || layer.kind === 'text') && (
             <>
-              <SelectField label="動き" value={selectedLayer.motion} options={MOTION_OPTIONS}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, motion: v } as MvLayer))} />
-              <NumField label="動きの強さ" value={selectedLayer.motionAmount ?? 0} step={1}
-                onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, motionAmount: v } as MvLayer))} />
+              <SelectField label="動き" value={layer.motion} options={MOTION_OPTIONS}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, motion: v } as MvLayer))} />
+              <NumField label="動きの強さ" value={layer.motionAmount ?? 0} step={1}
+                onChange={v => updateLayer(layer.id, l => ({ ...l, motionAmount: v } as MvLayer))} />
             </>
           )}
 
-          <NumField label="重なり順" value={selectedLayer.z ?? 0} onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, z: v } as MvLayer))} />
-          <NumField label="不透明度" value={selectedLayer.opacity ?? 1} min={0} max={1} step={0.05}
-            onChange={v => updateLayer(selectedLayer.id, l => ({ ...l, opacity: v } as MvLayer))} />
+          <NumField label="重なり順" value={layer.z ?? 0} onChange={v => updateLayer(layer.id, l => ({ ...l, z: v } as MvLayer))} />
+          <NumField label="不透明度" value={layer.opacity ?? 1} min={0} max={1} step={0.05}
+            onChange={v => updateLayer(layer.id, l => ({ ...l, opacity: v } as MvLayer))} />
 
           <p className="pt-1 text-[10px] font-bold text-gray-400">出す場面</p>
           <p className="text-[10px] text-gray-500">どれも選ばなければ、全部の場面で出ます。</p>
@@ -1108,16 +1087,59 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             <CheckField
               key={s.id}
               label={s.label}
-              checked={!!selectedLayer.sections?.includes(s.id)}
-              onChange={v => updateLayer(selectedLayer.id, l => {
+              checked={!!layer.sections?.includes(s.id)}
+              onChange={v => updateLayer(layer.id, l => {
                 const cur = l.sections ?? [];
                 const next = v ? [...cur, s.id] : cur.filter(x => x !== s.id);
                 return { ...l, sections: next.length > 0 ? next : undefined };
               })}
             />
           ))}
+    </div>
+  );
+
+  const layersTab = (
+    <div className="space-y-2">
+      <div className={SECTION_CLASS}>
+        <SectionTitle><Layers size={12} className="mr-1 inline" />レイヤー</SectionTitle>
+        {manifest.layers.length === 0 && <p className="text-[10px] text-gray-500">レイヤーがありません。</p>}
+        {manifest.layers.map(layer => {
+          const Icon = LAYER_ICON[layer.kind];
+          const active = layer.id === selectedLayerId;
+          return (
+            <div key={layer.id} className={`rounded border overflow-hidden ${active ? 'border-blue-500/70 bg-blue-500/10' : 'border-gray-700 bg-gray-800'}`}>
+              <div className="flex items-center gap-2 px-2 py-1.5">
+                <Icon size={13} className="shrink-0 text-gray-400" />
+                <button onClick={() => setSelectedLayerId(active ? null : layer.id)} className="min-h-10 min-w-0 flex-1 py-1 text-left outline-none">
+                  <span className="block truncate text-[11px] text-gray-200">{layerLabel(layer)}</span>
+                  {layer.sections && layer.sections.length > 0 && (
+                    <span className="block truncate text-[9px] text-gray-500">
+                      {layer.sections.map(id => manifest.sections.find(s => s.id === id)?.label ?? id).join(' / ')} のみ
+                    </span>
+                  )}
+                </button>
+                <button onClick={() => removeLayer(layer.id)} className={DEL_BTN_CLASS}><Trash2 size={16} /></button>
+              </div>
+              
+              {active && (
+                <div className="border-t border-blue-500/30 bg-gray-900/60 p-3">
+                  {renderLayerSettings(layer)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div className="grid grid-cols-3 gap-1.5">
+          <button onClick={addImageLayer} className={ADD_BTN_CLASS}><Plus size={12} />画像</button>
+          <button onClick={addTextLayer} className={ADD_BTN_CLASS}><Plus size={12} />文字</button>
+          <button onClick={addVisualizerLayer} className={ADD_BTN_CLASS}><Plus size={12} />ビジュアライザ</button>
+          <button onClick={addShapeLayer} className={ADD_BTN_CLASS}><Plus size={12} />図形</button>
+          <button onClick={addEffectLayer} className={ADD_BTN_CLASS}><Plus size={12} />演出</button>
+          <button onClick={addChordBarLayer} className={ADD_BTN_CLASS}><Plus size={12} />コード進行</button>
         </div>
-      )}
+      </div>
+
+      
     </div>
   );
 

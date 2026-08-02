@@ -1264,10 +1264,14 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
   ctx.rect(rect.x, rect.y, rect.w, rect.h);
   ctx.clip();
 
+  // 地面（基準面）を下げるためのオフセット。
+  // Yが負（世界座標で下）だと画面上で下側に描画され、床のようになる
+  const baseY = -rect.h * 0.15;
+
   // 「いま」の線（判定ライン）
   const nowZ = 0;
-  const nowL = project3d({ x: -totalW / 2, y: 0, z: nowZ }, view, rect, camDist);
-  const nowR = project3d({ x: totalW / 2, y: 0, z: nowZ }, view, rect, camDist);
+  const nowL = project3d({ x: -totalW / 2, y: baseY, z: nowZ }, view, rect, camDist);
+  const nowR = project3d({ x: totalW / 2, y: baseY, z: nowZ }, view, rect, camDist);
   if (nowL && nowR) {
     ctx.globalAlpha = 0.4;
     ctx.strokeStyle = '#ffffff';
@@ -1287,7 +1291,7 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
     
     // トラックごとにY（高さ）を少しズラして重なりを見せる
     const trkIdx = layer.tracks ? layer.tracks.indexOf(n.track) : n.track;
-    const yC = (trkIdx >= 0 ? trkIdx : 0) * (view.thickness || 0);
+    const yC = baseY + (trkIdx >= 0 ? trkIdx : 0) * (view.thickness || 0);
 
     const sounding = n.startStep <= d.step && n.startStep + n.durationSteps > d.step;
     const color = trackColor(d, n.track);
