@@ -125,8 +125,8 @@ export default function App() {
   const [postGameDanmaku, setPostGameDanmaku] = useState<string[]>([]);
   const postGameLastIdRef = useRef(0);
   const [discardModalConfig, setDiscardModalConfig] = useState<{
-    discardType: 'image' | 'mml' | 'game';
-    targetScreen: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker';
+    discardType: 'image' | 'mml' | 'game' | 'mv';
+    targetScreen: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker' | 'mvmaker';
   } | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [originalPostContent, setOriginalPostContent] = useState<string>('');
@@ -876,6 +876,7 @@ export default function App() {
     const hasImage = !!attachedImage;
     const hasMml = !!attachedMml;
     const hasGame = !!gameDraft;
+    const hasMv = !!mvDraft;
 
     if (screenType === 'drawing' || screenType === 'dotdrawing') {
       if (hasMml) {
@@ -884,6 +885,10 @@ export default function App() {
       }
       if (hasGame) {
         setDiscardModalConfig({ discardType: 'game', targetScreen: screenType });
+        return;
+      }
+      if (hasMv) {
+        setDiscardModalConfig({ discardType: 'mv', targetScreen: screenType });
         return;
       }
     } else if (screenType === 'mml') {
@@ -895,6 +900,10 @@ export default function App() {
         setDiscardModalConfig({ discardType: 'game', targetScreen: screenType });
         return;
       }
+      if (hasMv) {
+        setDiscardModalConfig({ discardType: 'mv', targetScreen: screenType });
+        return;
+      }
     } else if (screenType === 'gamemaker') {
       if (hasImage) {
         setDiscardModalConfig({ discardType: 'image', targetScreen: screenType });
@@ -902,6 +911,10 @@ export default function App() {
       }
       if (hasMml) {
         setDiscardModalConfig({ discardType: 'mml', targetScreen: screenType });
+        return;
+      }
+      if (hasMv) {
+        setDiscardModalConfig({ discardType: 'mv', targetScreen: screenType });
         return;
       }
     } else if (screenType === 'mvmaker') {
@@ -930,6 +943,7 @@ export default function App() {
     if (discardType === 'image') setAttachedImage(null);
     if (discardType === 'mml') setAttachedMml(null);
     if (discardType === 'game') setGameDraft(null);
+    if (discardType === 'mv') setMvDraft(null);
 
     openScreen(targetScreen, composerOpen);
     setDiscardModalConfig(null);
