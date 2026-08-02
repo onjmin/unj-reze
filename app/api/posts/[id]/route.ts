@@ -98,6 +98,7 @@ export async function PATCH(
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }
+  await attachEmbedInfo(result);
   return NextResponse.json(encodePost(result));
 }
 
