@@ -632,7 +632,21 @@ export default function App() {
     }
   };
 
+  /**
+   * コラボ・改造は「新しいポストを作る」導線なので、編集中の状態を必ず捨てる。
+   *
+   * editingPost は各エディタの保存ハンドラが見ている編集モードのフラグで、
+   * closeScreen() では消えない。残ったままコラボに入ると保存が編集扱いになり、
+   * 自分のポストをコラボしたときに元ポストを上書きしてしまう。
+   */
+  const clearEditingContext = useCallback(() => {
+    setEditingPost(null);
+    setOriginalPostContent('');
+    setShowGlobalEditModal(false);
+  }, []);
+
   const handleOpenCollab = useCallback((post: Post) => {
+    clearEditingContext();
     const postMml = extractMmlFromContent(post.content);
     if (!post.hasImage && postMml) {
       setAttachedMml(postMml);
@@ -641,7 +655,7 @@ export default function App() {
     }
     setCollabImageUrl(post.imageSrc);
     setShowCollabSelector(true);
-  }, [openScreen]);
+  }, [openScreen, clearEditingContext]);
 
   const handleCollabSelectDrawing = useCallback(() => {
     setShowCollabSelector(false);
@@ -829,6 +843,7 @@ export default function App() {
    * 元ネタは自作ではないので権利表記は「not自作 & 改変OK」を初期値にしておく。
    */
   const handleRemixDraft = useCallback((draft: RemixDraft) => {
+    clearEditingContext();
     setPlayingGame(null);
     setPostGameDanmaku([]);
     setGameDraft({ manifest: draft.manifest, title: draft.title, preset: draft.preset });
@@ -840,9 +855,10 @@ export default function App() {
     setComposerOpen(false);
     setActiveScreen('gamemaker');
     showToast('success', '下書きに取り込んだよ。好きに改造してね');
-  }, []);
+  }, [clearEditingContext]);
 
   const handleMvRemixDraft = useCallback((draft: MvRemixDraft) => {
+    clearEditingContext();
     setMvDraft({ manifest: draft.manifest, title: draft.title, preset: draft.preset });
     setOriginType('others_modify_ok');
     setInputText(prev => prev.trim()
@@ -852,7 +868,7 @@ export default function App() {
     setComposerOpen(false);
     setActiveScreen('mvmaker');
     showToast('success', '下書きに取り込んだよ。好きに改造してね');
-  }, []);
+  }, [clearEditingContext]);
 
   useEffect(() => {
     const disposeGame = setRemixHandler(handleRemixDraft);

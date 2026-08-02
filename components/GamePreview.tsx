@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X } from 'lucide-react';
+import { Pencil, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { GameManifestDraft } from './GameMaker';
 import ShareButton from './ShareButton';
@@ -23,6 +23,7 @@ interface GamePreviewProps {
 export default function GamePreview({ gameId, postId, userId, onClose, inline }: GamePreviewProps) {
   const [manifest, setManifest] = useState<GameManifestDraft | null>(null);
   const [title, setTitle] = useState('');
+  const [preset, setPreset] = useState('action');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -41,6 +42,7 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
         if (!cancelled) {
           setManifest(game.manifest);
           setTitle(game.title);
+          if (game.preset) setPreset(game.preset);
           setLoading(false);
         }
       } catch {
@@ -85,6 +87,13 @@ export default function GamePreview({ gameId, postId, userId, onClose, inline }:
       <div className="flex items-center justify-between px-3 py-2 bg-[#0f0f11] border-b border-gray-800 shrink-0">
         <span className="text-xs font-bold text-white truncate">{title || 'ゲーム'}</span>
         <div className="flex items-center gap-1 shrink-0 text-gray-400">
+          {/* MvBox と同じく、遊んでいる最中はいつでも改造（コラボ）に入れるようにする */}
+          <button
+            onClick={() => startRemix({ manifest, title: `${title || 'ゲーム'}（改造）`, preset, sourceGameId: gameId, sourceTitle: title })}
+            className="flex items-center gap-1 rounded-full bg-red-600/80 px-2.5 py-1 text-[10px] font-bold text-white transition-colors hover:bg-red-500/90"
+          >
+            <Pencil size={10} /> 改造する
+          </button>
           <ShareButton url={gameShareUrl(gameId)} text={buildGameShareText(title)} size={14} className="p-1.5 rounded hover:bg-gray-100/10" />
           <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100/10 rounded transition-colors">
             <X size={16} />
