@@ -236,10 +236,10 @@ const staticApi = {
     create: async (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) => { mockDbInstance.reportContent({ ...data, reason: data.reason || '' }); return { success: true }; },
   },
   mvs: {
-    edit: async (id: string, userSlug: string, title: string, manifest: any) => { return { success: true }; }
+    edit: async (_id: string, _userSlug: string, _title: string, _manifest: unknown) => { return { success: true }; }
   },
   games: {
-    edit: async (id: string, userSlug: string, title: string, manifest: any) => { return { success: true }; }
+    edit: async (_id: string, _userSlug: string, _title: string, _manifest: unknown) => { return { success: true }; }
   }
 };
 
@@ -402,12 +402,12 @@ const liveApi = {
       fetcher<{ success: boolean }>('/report', { method: 'POST', body: JSON.stringify(data) }),
   },
   mvs: {
-    edit: (id: string, userSlug: string, title: string, manifest: any) =>
-      fetcher<any>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
+    edit: (id: string, userSlug: string, title: string, manifest: unknown) =>
+      fetcher<unknown>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
   },
   games: {
-    edit: (id: string, userSlug: string, title: string, manifest: any) =>
-      fetcher<any>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
+    edit: (id: string, userSlug: string, title: string, manifest: unknown) =>
+      fetcher<unknown>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title, manifest, userSlug }) }),
   },
 };
 

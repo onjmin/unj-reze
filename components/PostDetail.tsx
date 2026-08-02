@@ -26,6 +26,7 @@ import type { MvManifest, MvPresetKind } from '@/lib/mv-config';
 import ShareButton from './ShareButton';
 import { postShareUrl } from '@/lib/share';
 import { buildPostShareText } from '@/lib/share-text';
+import { startMvRemix } from '@/lib/remix';
 import ImagePreview from './ImagePreview';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
@@ -417,7 +418,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         const res = await fetch(`/api/mvs/${p.mvId}`);
         if (!res.ok) throw new Error();
         const mv = await res.json();
-        setReplyMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'piano-roll' });
+        setReplyMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'pianoRoll' });
         setActiveScreen('mvmaker');
         return;
       } catch {
@@ -538,8 +539,27 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       const res = await fetch(`/api/mvs/${post.mvId}`);
       if (!res.ok) throw new Error();
       const mv = await res.json();
-      setEditMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'piano-roll' });
+      setEditMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'pianoRoll' });
       setActiveScreen('edit-mv');
+    } catch {
+      showToast('error', 'MVの読み込みに失敗しました');
+    }
+  };
+
+  const handleRemixMv = async () => {
+    setMenuOpen(false);
+    if (!post.mvId) return;
+    try {
+      const res = await fetch(`/api/mvs/${post.mvId}`);
+      if (!res.ok) throw new Error();
+      const mv = await res.json();
+      startMvRemix({
+        manifest: mv.manifest,
+        title: `${mv.title || post.mvTitle || 'MV'}（改造）`,
+        preset: mv.preset || post.mvPreset || 'pianoRoll',
+        sourceMvId: post.mvId,
+        sourceTitle: mv.title || post.mvTitle || 'MV',
+      });
     } catch {
       showToast('error', 'MVの読み込みに失敗しました');
     }
@@ -708,6 +728,12 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                   <button role="menuitem" onClick={handleMenuDelete} className="flex items-center gap-2.5 w-full px-3 py-2 text-red-400 hover:bg-gray-100/10 text-left transition-colors">
                     <Trash2 size={12} className="shrink-0" />
                     <span>ポストを削除</span>
+                  </button>
+                )}
+                {!isSelf && post.hasMv && (!post.originType || post.originType === 'own_modify_ok' || post.originType === 'others_modify_ok') && (
+                  <button role="menuitem" onClick={handleRemixMv} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
+                    <Pencil size={12} className="shrink-0" />
+                    <span>MVを改造する</span>
                   </button>
                 )}
                 {!isSelf && (

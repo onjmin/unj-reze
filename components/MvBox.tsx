@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Clapperboard, Loader2 } from 'lucide-react';
+import { Clapperboard, Loader2, Pencil } from 'lucide-react';
 import MvPlayer from './MvPlayer';
 import { MV_H, MV_PRESET_LABELS, MV_W, type MvManifest, type MvPresetKind } from '@/lib/mv-config';
+import { startMvRemix } from '@/lib/remix';
 
 const THUMBNAIL_HEIGHT = 120;
 const ANIMATION_MS = 400;
@@ -150,12 +151,22 @@ export default function MvBox({ mvId, postId, mvTitle, mvThumbnail, mvPreset, mv
               {error ?? (loading ? '読み込み中…' : '')}
             </div>
           )}
-          <button
-            onClick={handleClose}
-            className="absolute right-2 top-2 rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-bold text-gray-200 backdrop-blur transition-colors hover:bg-black/90"
-          >
-            閉じる
-          </button>
+          <div className="absolute right-2 top-2 z-20 flex items-center gap-1.5">
+            {manifest && (
+              <button
+                onClick={() => startMvRemix({ manifest, title: `${mvTitle}（改造）`, preset: mvPreset || 'pianoRoll', sourceMvId: mvId, sourceTitle: mvTitle })}
+                className="flex items-center gap-1 rounded-full bg-cyan-600/80 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur transition-colors hover:bg-cyan-500/90"
+              >
+                <Pencil size={10} /> 改造する
+              </button>
+            )}
+            <button
+              onClick={handleClose}
+              className="rounded-full bg-black/70 px-2.5 py-1 text-[10px] font-bold text-gray-200 backdrop-blur transition-colors hover:bg-black/90"
+            >
+              閉じる
+            </button>
+          </div>
         </div>
       )}
     </div>

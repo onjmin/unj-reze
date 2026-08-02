@@ -31,7 +31,7 @@ import AttachmentDiscardModal from '@/components/AttachmentDiscardModal';
 import ToastContainer from '@/components/ToastContainer';
 import HeartBurst from '@/components/HeartBurst';
 import { showToast, triggerHeartBurst } from '@/lib/toast';
-import { setRemixHandler, takeStashedRemix, type RemixDraft } from '@/lib/remix';
+import { setRemixHandler, takeStashedRemix, setMvRemixHandler, takeStashedMvRemix, type RemixDraft, type MvRemixDraft } from '@/lib/remix';
 import { countUnreadMessages, MESSAGES_READ_EVENT, NOTIFICATIONS_READ_EVENT } from '@/lib/read-state';
 import type { MvManifest, MvPresetKind } from '@/lib/mv-config';
 
@@ -802,17 +802,35 @@ export default function App() {
     showToast('success', '下書きに取り込んだよ。好きに改造してね');
   }, []);
 
+  const handleMvRemixDraft = useCallback((draft: MvRemixDraft) => {
+    setMvDraft({ manifest: draft.manifest, title: draft.title, preset: draft.preset });
+    setOriginType('others_modify_ok');
+    setInputText(prev => prev.trim()
+      ? prev
+      : `#MV 「${draft.sourceTitle || '元MV'}」を改造したよ！`);
+    composerReturnRef.current = false;
+    setComposerOpen(false);
+    setActiveScreen('mvmaker');
+    showToast('success', '下書きに取り込んだよ。好きに改造してね');
+  }, []);
+
   useEffect(() => {
-    const dispose = setRemixHandler(handleRemixDraft);
-    // 投稿詳細やゲーム単独ページから飛ばされてきた場合はここで受け取る。
-    // エフェクト内で同期的に state を書くとカスケードレンダリングになるので次のタスクへ回す。
-    const stashed = takeStashedRemix();
-    const timer = stashed ? setTimeout(() => handleRemixDraft(stashed), 0) : null;
+    const disposeGame = setRemixHandler(handleRemixDraft);
+    const disposeMv = setMvRemixHandler(handleMvRemixDraft);
+
+    const stashedGame = takeStashedRemix();
+    const stashedMv = takeStashedMvRemix();
+
+    const timerGame = stashedGame ? setTimeout(() => handleRemixDraft(stashedGame), 0) : null;
+    const timerMv = stashedMv ? setTimeout(() => handleMvRemixDraft(stashedMv), 0) : null;
+
     return () => {
-      if (timer) clearTimeout(timer);
-      dispose();
+      if (timerGame) clearTimeout(timerGame);
+      if (timerMv) clearTimeout(timerMv);
+      disposeGame();
+      disposeMv();
     };
-  }, [handleRemixDraft]);
+  }, [handleRemixDraft, handleMvRemixDraft]);
 
   const handleOpenEditor = (screenType: 'drawing' | 'dotdrawing' | 'mml' | 'gamemaker' | 'mvmaker') => {
     const hasImage = !!attachedImage;

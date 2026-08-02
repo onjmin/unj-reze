@@ -1,4 +1,5 @@
 import type { GameManifestDraft } from '@/components/GameMaker';
+import type { MvManifest, MvPresetKind } from './mv-config';
 import { BASE_PATH } from './site';
 
 export interface RemixDraft {
@@ -48,6 +49,57 @@ export function takeStashedRemix(): RemixDraft | null {
     if (!raw) return null;
     sessionStorage.removeItem(STASH_KEY);
     return JSON.parse(raw) as RemixDraft;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MV リミックス（改造）
+// ---------------------------------------------------------------------------
+
+export interface MvRemixDraft {
+  manifest: MvManifest;
+  title: string;
+  preset: MvPresetKind;
+  /** 元MVのID（改造元へのリンクに使う） */
+  sourceMvId?: string;
+  /** 元MVのタイトル（本文のひな形に使う） */
+  sourceTitle?: string;
+}
+
+const MV_STASH_KEY = 'unj_pending_mv_remix';
+
+type MvRemixHandler = (draft: MvRemixDraft) => void;
+let mvHandler: MvRemixHandler | null = null;
+
+export function setMvRemixHandler(fn: MvRemixHandler) {
+  mvHandler = fn;
+  return () => {
+    if (mvHandler === fn) mvHandler = null;
+  };
+}
+
+export function startMvRemix(draft: MvRemixDraft) {
+  if (mvHandler) {
+    mvHandler(draft);
+    return;
+  }
+  try {
+    sessionStorage.setItem(MV_STASH_KEY, JSON.stringify(draft));
+  } catch {
+    // 容量オーバー等で預けられない場合は諦めてホームへ戻すだけにする
+  }
+  window.location.href = `${BASE_PATH}/`;
+}
+
+/** 預けられたMV改造データを取り出す（取り出したら消す） */
+export function takeStashedMvRemix(): MvRemixDraft | null {
+  try {
+    const raw = sessionStorage.getItem(MV_STASH_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(MV_STASH_KEY);
+    return JSON.parse(raw) as MvRemixDraft;
   } catch {
     return null;
   }
