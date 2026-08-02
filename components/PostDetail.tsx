@@ -1560,6 +1560,8 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           initialContent={localPost.content}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
+          hasMv={localPost.hasMv}
+          mvTitle={localPost.mvTitle}
         />
       )}
       {showDeleteModal && (
