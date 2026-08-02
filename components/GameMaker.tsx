@@ -13123,7 +13123,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   };
 
   return (
-    <div className={embedded ? "relative flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "absolute inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}
+    <div className={embedded ? "relative flex flex-col h-full bg-[#07080b] text-gray-100 overflow-hidden" : "fixed inset-0 z-50 flex flex-col bg-[#07080b] text-gray-100 overflow-hidden"}
       onContextMenu={(e) => { const t = e.target as HTMLElement; if (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA' && t.tagName !== 'SELECT' && !t.isContentEditable) e.preventDefault(); }}>
       {/* Header：スマホでは通常隠しておき（描画エリアを圧迫しない）、
           上端のハンドルを下スワイプ／タップで引き出す。md以上は従来どおり常時表示。 */}

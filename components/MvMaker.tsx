@@ -1421,7 +1421,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   );
 
   return (
-    <div className="absolute inset-0 z-50 flex select-none flex-col bg-[#0b0e14]">
+    <div className="fixed inset-0 z-50 flex select-none flex-col bg-[#0b0e14]">
       {/* ヘッダー */}
       <div className="flex shrink-0 items-center border-b border-gray-800 bg-[#0b0e14] px-3.5 py-2.5">
         <button onClick={onClose} className="mr-2 rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100/10">

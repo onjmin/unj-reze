@@ -241,7 +241,7 @@ export default function MmlEditor({ onClose, onSave, initialMml, isEditing }: Mm
   }, [onSave, storageKey, syncAuthoredVolume]);
 
   return (
-    <div className="absolute inset-0 bg-[#0b0e14] z-50 flex flex-col select-none">
+    <div className="fixed inset-0 bg-[#0b0e14] z-50 flex flex-col select-none">
       <div className="flex items-center px-3.5 py-2.5 border-b border-gray-800 shrink-0 bg-[#0b0e14]">
         <button onClick={onClose} className="mr-2 text-gray-400 hover:bg-gray-100/10 p-1.5 rounded transition-colors">
           <X size={20} />
