@@ -83,12 +83,52 @@ function Hint({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] leading-relaxed text-gray-500">{children}</p>;
 }
 
+function StringNumInput({ value, onChange, className, placeholder }: {
+  value: number | undefined;
+  onChange: (v: number) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const [text, setText] = useState(value === undefined ? '' : String(value));
+  useEffect(() => {
+    if (value === undefined) {
+      if (text !== '' && text !== '-' && !text.endsWith('.')) setText('');
+    } else {
+      const parsed = Number(text);
+      if (parsed !== value && text !== '-' && !text.endsWith('.')) {
+        if (text.trim() === '' && value === 0) return;
+        setText(String(value));
+      }
+    }
+  }, [value, text]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      placeholder={placeholder}
+      onChange={e => {
+        setText(e.target.value);
+        const val = e.target.value;
+        if (val.trim() === '') {
+          onChange(0);
+          return;
+        }
+        const n = Number(val);
+        if (!Number.isNaN(n)) onChange(n);
+      }}
+      className={className}
+    />
+  );
+}
+
 function SliderField({ label, value, min = 0, max = 100, step = 1, onChange }: { label: string, value: number, min?: number, max?: number, step?: number, onChange: (v: number) => void }) {
   return (
     <div className="space-y-1 rounded bg-gray-950/30 p-2 border border-gray-800">
       <div className="flex items-center justify-between">
         <span className={FIELD_LABEL_CLASS}>{label}</span>
-        <input type="number" value={value} min={min} max={max} step={step} onChange={e => onChange(Number(e.target.value) || 0)} className="w-14 bg-transparent text-right text-[11px] text-gray-300 outline-none" />
+        <StringNumInput value={value} onChange={onChange} className="w-14 bg-transparent text-right text-[11px] text-gray-300 outline-none" />
       </div>
       <input type="range" value={value} min={min} max={max} step={step} onChange={e => onChange(Number(e.target.value) || 0)} className="w-full accent-blue-500" />
     </div>
@@ -96,23 +136,15 @@ function SliderField({ label, value, min = 0, max = 100, step = 1, onChange }: {
 }
 
 function NumField({ label, value, onChange, min, max, step = 1 }: {
-  label: string; value: number; onChange: (v: number) => void;
+  label: string; value: number | undefined; onChange: (v: number) => void;
   min?: number; max?: number; step?: number;
 }) {
   return (
     <label className="block space-y-0.5">
       <span className={FIELD_LABEL_CLASS}>{label}</span>
-      <input
-        type="number"
-        inputMode="decimal"
+      <StringNumInput
         value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={e => {
-          const n = Number(e.target.value);
-          if (!Number.isNaN(n)) onChange(n);
-        }}
+        onChange={onChange}
         className={FIELD_INPUT_CLASS}
       />
     </label>
@@ -242,14 +274,9 @@ function ModulatorRow({ mod, tracks, onChange, onRemove }: {
         <select value={mod.op} onChange={e => onChange({ op: e.target.value as MvModOp })} className="min-h-9 w-24 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none">
           {MOD_OP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <input
-          type="number"
+        <StringNumInput
           value={mod.amount}
-          step={0.5}
-          onChange={e => {
-            const n = Number(e.target.value);
-            if (!Number.isNaN(n)) onChange({ amount: n });
-          }}
+          onChange={n => onChange({ amount: n })}
           className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
         />
       </div>
@@ -1062,13 +1089,10 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               </p>
               {layer.chords.map((c, i) => (
                 <div key={i} className="flex items-center gap-1.5">
-                  <input
-                    type="number"
+                  <StringNumInput
                     value={c.bar}
-                    step={0.25}
-                    min={0}
-                    onChange={e => updateLayer(layer.id, l => (l.kind === 'chordBar'
-                      ? { ...l, chords: l.chords.map((x, j) => (j === i ? { ...x, bar: Number(e.target.value) || 0 } : x)) }
+                    onChange={n => updateLayer(layer.id, l => (l.kind === 'chordBar'
+                      ? { ...l, chords: l.chords.map((x, j) => (j === i ? { ...x, bar: n } : x)) }
                       : l))}
                     className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
                   />
@@ -1273,13 +1297,10 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               <>
                 {(lyricsLayer.lines ?? []).map((line, i) => (
                   <div key={i} className="flex items-center gap-1.5">
-                    <input
-                      type="number"
+                    <StringNumInput
                       value={line.bar}
-                      step={0.25}
-                      min={0}
-                      onChange={e => updateLayer(lyricsLayer.id, l => (l.kind === 'lyrics'
-                        ? { ...l, lines: (l.lines ?? []).map((x, j) => (j === i ? { ...x, bar: Number(e.target.value) || 0 } : x)) }
+                      onChange={n => updateLayer(lyricsLayer.id, l => (l.kind === 'lyrics'
+                        ? { ...l, lines: (l.lines ?? []).map((x, j) => (j === i ? { ...x, bar: n } : x)) }
                         : l))}
                       className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
                     />
@@ -1347,11 +1368,9 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
               onChange={e => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }))}
               className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
             />
-            <input
-              type="number"
+            <StringNumInput
               value={s.startBar}
-              min={0}
-              onChange={e => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, startBar: Math.max(0, Number(e.target.value) || 0) } : x)) }))}
+              onChange={n => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, startBar: Math.max(0, n) } : x)) }))}
               className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
             />
             <span className="shrink-0 text-[10px] text-gray-500">小節</span>

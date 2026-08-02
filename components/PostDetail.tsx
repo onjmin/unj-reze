@@ -297,6 +297,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       hasImage: !!replyImage,
       imageSrc: replyImage ?? undefined,
       originType: replyOriginType,
+      hasGame: !!replyGameDraft,
+      hasMv: !!replyMvDraft,
     };
     setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
 
@@ -1348,10 +1350,18 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
             </div>
           )}
 
+          {localPost.hasMv && localPost.mvId && (
+            <MvBox mvId={localPost.mvId} postId={localPost.id} userId={userId} className="mb-2.5" />
+          )}
+
+          {localPost.hasGame && userId && (
+            <GameBox gameId={localPost.gameId!} postId={localPost.id} userId={userId} className="mb-2.5" />
+          )}
+
           {(() => {
             if (mmlCode) return <MmlPlayer mml={mmlCode} />;
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
-            if (localPost.hasImage || localPost.hasGame) return null;
+            if (localPost.hasImage || localPost.hasGame || localPost.hasMv) return null;
             const embed = extractFirstEmbed(localPost.content);
             return embed ? <EmbedPart embed={embed} /> : null;
           })()}

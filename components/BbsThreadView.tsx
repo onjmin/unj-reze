@@ -138,6 +138,8 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
       hasImage: !!replyImage,
       imageSrc: replyImage ?? undefined,
       originType: replyOriginType,
+      hasGame: !!replyGameDraft,
+      hasMv: !!replyMvDraft,
     };
     setPost(p => ({ ...p, replies: [...p.replies, optimisticReply], repliesCount: p.repliesCount + 1 }));
     const capturedImage = replyImage;
