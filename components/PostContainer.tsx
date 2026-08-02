@@ -50,9 +50,13 @@ interface PostContainerProps {
   currentUserDisplayName?: string;
   onModerationChange?: () => void;
   onReplyClick?: (post: Post) => void;
-  onEditImage?: (post: Post) => void;
-  onEditMml?: (post: Post) => void;
-  onEditMv?: (post: Post) => void;
+  /**
+   * 添付の編集導線。任意propsにすると「非対応」と「渡し忘れ」が区別できず、
+   * 実際に検索画面だけMV編集が落ちていた。非対応なら null を明示すること。
+   */
+  onEditImage: ((post: Post) => void) | null;
+  onEditMml: ((post: Post) => void) | null;
+  onEditMv: ((post: Post) => void) | null;
   onEditPost?: (post: Post) => void;
   userId?: string;
   /** 「最新レス」タブ用: 返信元の元スレ投稿を引用カードとして本文の下に表示する */
@@ -656,30 +660,29 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
 
       {showEditModal && (
         <EditPostModal
-          initialContent={post.content}
+          post={post}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
-          imageSrc={post.imageSrc}
-          onEditImage={onEditImage ? () => {
-            onEditImage(post);
-            setShowEditModal(false);
-          } : undefined}
-          onEditMml={onEditMml ? () => {
-            onEditMml(post);
-            setShowEditModal(false);
-          } : undefined}
-          hasGame={post.hasGame}
-          gameTitle={post.gameTitle}
-          onEditGame={openGame ? () => {
-            openGame(post.gameId, post.id);
-            setShowEditModal(false);
-          } : undefined}
-          hasMv={post.hasMv}
-          mvTitle={post.mvTitle}
-          onEditMv={onEditMv ? () => {
-            onEditMv(post);
-            setShowEditModal(false);
-          } : undefined}
+          capabilities={{
+            editImage: onEditImage ? () => {
+              onEditImage(post);
+              setShowEditModal(false);
+            } : null,
+            canRemoveImage: true,
+            editMml: onEditMml ? () => {
+              onEditMml(post);
+              setShowEditModal(false);
+            } : null,
+            editGame: openGame ? () => {
+              openGame(post.gameId, post.id);
+              setShowEditModal(false);
+            } : null,
+            removeGame: null,
+            editMv: onEditMv ? () => {
+              onEditMv(post);
+              setShowEditModal(false);
+            } : null,
+          }}
         />
       )}
       {showDeleteModal && (

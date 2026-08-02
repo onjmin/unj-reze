@@ -31,9 +31,9 @@ interface FeedListProps {
   onModerationChange?: () => void;
   loading?: boolean;
   onReplyClick?: (post: Post) => void;
-  onEditImage?: (post: Post) => void;
-  onEditMml?: (post: Post) => void;
-  onEditMv?: (post: Post) => void;
+  onEditImage: ((post: Post) => void) | null;
+  onEditMml: ((post: Post) => void) | null;
+  onEditMv: ((post: Post) => void) | null;
   onEditPost?: (post: Post) => void;
   userId?: string;
   /** 続きの読み込み。未指定なら「すべて表示されました」で終わる。 */

@@ -99,6 +99,10 @@ export default function HashtagView({ tag }: HashtagViewProps) {
                 currentUserSlug={currentUser?.slug}
                 currentUserDisplayName={currentUser?.displayName}
                 onModerationChange={fetchPosts}
+                // ハッシュタグ一覧は各種エディタを載せていないので編集導線は非対応
+                onEditImage={null}
+                onEditMml={null}
+                onEditMv={null}
               />
             </VirtualizedItem>
           ))

@@ -296,30 +296,29 @@ function ProfilePostMenu({
 
       {showEditModal && (
         <EditPostModal
-          initialContent={post.content}
+          post={post}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
-          imageSrc={post.imageSrc}
-          onEditImage={onEditImage ? () => {
-            onEditImage(post);
-            setShowEditModal(false);
-          } : undefined}
-          onEditMml={onEditMml ? () => {
-            onEditMml(post);
-            setShowEditModal(false);
-          } : undefined}
-          hasGame={post.hasGame}
-          gameTitle={post.gameTitle}
-          onEditGame={openGame ? () => {
-            openGame(post.gameId, post.id);
-            setShowEditModal(false);
-          } : undefined}
-          hasMv={post.hasMv}
-          mvTitle={post.mvTitle}
-          onEditMv={onEditMv ? () => {
-            onEditMv(post);
-            setShowEditModal(false);
-          } : undefined}
+          capabilities={{
+            editImage: onEditImage ? () => {
+              onEditImage(post);
+              setShowEditModal(false);
+            } : null,
+            canRemoveImage: true,
+            editMml: onEditMml ? () => {
+              onEditMml(post);
+              setShowEditModal(false);
+            } : null,
+            editGame: openGame ? () => {
+              openGame(post.gameId, post.id);
+              setShowEditModal(false);
+            } : null,
+            removeGame: null,
+            editMv: onEditMv ? () => {
+              onEditMv(post);
+              setShowEditModal(false);
+            } : null,
+          }}
         />
       )}
       {showDeleteModal && (

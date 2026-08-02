@@ -23,6 +23,10 @@ function SearchPageContent() {
       openGame={() => {}}
       openCollab={() => {}}
       openMml={() => {}}
+      // 検索ページは各種エディタを載せていないので編集導線は非対応
+      onEditImage={null}
+      onEditMml={null}
+      onEditMv={null}
     />
   );
 }

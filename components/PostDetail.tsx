@@ -364,17 +364,24 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     if (uiSessionRef.current === session) setReplyTo(null);
   };
 
-  const handleEditReply = async (replyId: string, content: string, originType?: OriginType) => {
+  const handleEditReply = async (replyId: string, content: string, originType?: OriginType, imageSrc?: string | null) => {
     const prevReply = post.replies.find(r => r.id === replyId);
     setPost(p => ({
       ...p,
-      replies: p.replies.map(r => r.id === replyId ? { ...r, content, originType, isEdited: true } : r)
+      replies: p.replies.map(r => r.id === replyId ? {
+        ...r,
+        content,
+        originType,
+        imageSrc: imageSrc === null ? undefined : (imageSrc ?? r.imageSrc),
+        hasImage: imageSrc === null ? false : (imageSrc ? true : r.hasImage),
+        isEdited: true,
+      } : r)
     }));
     try {
-      const updated = await api.posts.edit(replyId, userId, content, originType);
+      const updated = await api.posts.edit(replyId, userId, content, originType, imageSrc === null ? '' : imageSrc);
       setPost(p => ({
         ...p,
-        replies: p.replies.map(r => r.id === replyId ? { ...r, content: updated.content, originType: updated.originType, isEdited: true } : r)
+        replies: p.replies.map(r => r.id === replyId ? { ...r, content: updated.content, originType: updated.originType, imageSrc: updated.imageSrc, hasImage: updated.hasImage, isEdited: true } : r)
       }));
     } catch {
       if (prevReply) {
@@ -1123,25 +1130,28 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
       {showEditModal && (
         <EditPostModal
-          initialContent={post.content}
+          post={post}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
-          imageSrc={post.imageSrc}
-          onEditImage={() => {
-            handleEditArt();
-            setShowEditModal(false);
-          }}
-          onEditMml={() => {
-            handleEditMusic();
-            setShowEditModal(false);
-          }}
-          hasGame={post.hasGame}
-          gameTitle={post.gameTitle}
-          hasMv={post.hasMv}
-          mvTitle={post.mvTitle}
-          onEditMv={() => {
-            handleEditMv();
-            setShowEditModal(false);
+          capabilities={{
+            editImage: () => {
+              handleEditArt();
+              setShowEditModal(false);
+            },
+            canRemoveImage: true,
+            editMml: () => {
+              handleEditMusic();
+              setShowEditModal(false);
+            },
+            editGame: () => {
+              handleEditGame();
+              setShowEditModal(false);
+            },
+            removeGame: null,
+            editMv: () => {
+              handleEditMv();
+              setShowEditModal(false);
+            },
           }}
         />
       )}
@@ -1176,7 +1186,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   );
 }
 
-function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick, onPreviewImage, onOpenCollab, onEditMv }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void; onPreviewImage?: (src: string, alt?: string) => void; onOpenCollab?: (post: Post) => void; onEditMv?: (post: Post) => void }) {
+function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit, onDelete, onAvatarClick, onPreviewImage, onOpenCollab, onEditMv }: { post: Post; replies: Post[]; depth: number; onReply: (post: Post) => void; userId: string; userSlug?: string; onEdit: (replyId: string, content: string, originType?: OriginType, imageSrc?: string | null) => Promise<void>; onDelete: (replyId: string) => Promise<void>; onAvatarClick: (user: { displayName: string; slug?: string }, pos: { x: number; y: number }) => void; onPreviewImage?: (src: string, alt?: string) => void; onOpenCollab?: (post: Post) => void; onEditMv?: (post: Post) => void }) {
   const router = useRouter();
   const children = replies.filter(r => r.parentPostId === post.id);
   const [collapsed, setCollapsed] = useState<boolean>(false);
@@ -1265,7 +1275,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
   // ローカルだけ新しい内容のまま残り、編集内容が反映されない／戻らない状態になる。
   const handleSaveEdit = async (newContent: string, nextImageSrc?: string | null) => {
     setShowEditModal(false);
-    await onEdit(localPost.id, newContent, localPost.originType);
+    await onEdit(localPost.id, newContent, localPost.originType, nextImageSrc);
   };
 
   const handleSelectOriginType = async (ot: OriginType | undefined) => {
@@ -1571,15 +1581,22 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
 
       {showEditModal && (
         <EditPostModal
-          initialContent={localPost.content}
+          post={localPost}
           onClose={() => setShowEditModal(false)}
           onSave={handleSaveEdit}
-          hasMv={localPost.hasMv}
-          mvTitle={localPost.mvTitle}
-          onEditMv={onEditMv && localPost.mvId ? () => {
-            onEditMv(localPost);
-            setShowEditModal(false);
-          } : undefined}
+          capabilities={{
+            // 返信ツリーには画像/MML/ゲームのエディタを持ち込んでいないので明示的に非対応。
+            // 「渡し忘れ」ではなく「未対応」であることを型の上で言い切っておく。
+            editImage: null,
+            canRemoveImage: true,
+            editMml: null,
+            editGame: null,
+            removeGame: null,
+            editMv: onEditMv && localPost.mvId ? () => {
+              onEditMv(localPost);
+              setShowEditModal(false);
+            } : null,
+          }}
         />
       )}
       {showDeleteModal && (

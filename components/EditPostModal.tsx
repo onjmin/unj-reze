@@ -2,26 +2,55 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { X, Music, ChevronDown, Gamepad2, Clapperboard } from 'lucide-react';
-import { extractMmlFromContent, getDisplayContent, MML_MARKERS } from '@/lib/mml';
+import { MML_MARKERS } from '@/lib/mml';
+import type { Post } from '@/lib/types';
 import dynamic from 'next/dynamic';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
+/**
+ * 添付ごとに「このホストは何ができるか」を宣言する。
+ *
+ * **すべて必須プロパティにしてあるのが肝心**。任意プロパティにすると
+ * 「このホストは非対応」と「単なる渡し忘れ」を型が区別できず、
+ * 実際にMV編集・ゲーム編集のボタンが複数のホストで静かに消えていた。
+ * 対応しない操作は null を明示すること。
+ *
+ * 添付種別を増やすときはここに足せば、対応を書くまで全ホストが
+ * コンパイルエラーになる ＝ 渡し忘れが再発しない。
+ */
+export interface PostEditCapabilities {
+  /** 画像エディタを開く。非対応なら null */
+  editImage: (() => void) | null;
+  /**
+   * ✕ で画像を外せるか。
+   * 画像の削除は onSave の第2引数で運ぶので、それを保存するホストだけ true。
+   */
+  canRemoveImage: boolean;
+  /** MMLエディタを開く。非対応なら null */
+  editMml: (() => void) | null;
+  /** ゲームエディタを開く。非対応なら null */
+  editGame: (() => void) | null;
+  /**
+   * ゲームを外す。onSave にゲームを運ぶ経路が無いので、
+   * 外す処理そのものをホストが持つ（持てないなら null にして ✕ を出さない）。
+   */
+  removeGame: (() => void) | null;
+  /** MVエディタを開く。非対応なら null */
+  editMv: (() => void) | null;
+}
+
 interface EditPostModalProps {
-  initialContent: string;
+  /**
+   * 編集対象。添付の表示情報（画像・ゲーム・MV）はすべてここから引く。
+   * 個別のpropsに割ると渡し忘れ・取り違えが起きるため、必ずポストごと渡す。
+   */
+  post: Post;
+  /** エディタを往復しても「元の本文」と比べられるように、初回の本文を保持したい場合に渡す */
   originalContent?: string;
+  capabilities: PostEditCapabilities;
   onClose: () => void;
   onSave: (content: string, imageSrc?: string | null) => void;
-  imageSrc?: string | null;
-  onEditImage?: () => void;
-  onEditMml?: () => void;
-  hasGame?: boolean;
-  gameTitle?: string;
-  onEditGame?: () => void;
-  onRemoveGame?: () => void;
-  hasMv?: boolean;
-  mvTitle?: string;
-  onEditMv?: () => void;
 }
 
 /** content からMML行を抽出し、{ mmlLine: "#mml ...", textOnly: "本文" } を返す */
@@ -38,27 +67,19 @@ function splitMml(content: string): { mmlLine: string | null; textOnly: string }
 }
 
 export default function EditPostModal({
-  initialContent,
+  post,
   originalContent,
+  capabilities,
   onClose,
   onSave,
-  imageSrc,
-  onEditImage,
-  onEditMml,
-  hasGame,
-  gameTitle,
-  onEditGame,
-  onRemoveGame,
-  hasMv,
-  mvTitle,
-  onEditMv
 }: EditPostModalProps) {
+  const initialContent = post.content;
   const { mmlLine: initialMml, textOnly: initialText } = splitMml(initialContent);
 
   const [text, setText] = useState(initialText);
   const [mmlLine, setMmlLine] = useState<string | null>(initialMml);
-  const [currentImageSrc, setCurrentImageSrc] = useState<string | null | undefined>(imageSrc);
-  const [currentHasGame, setCurrentHasGame] = useState(hasGame);
+  const [currentImageSrc, setCurrentImageSrc] = useState<string | null | undefined>(post.imageSrc);
+  const [currentHasGame, setCurrentHasGame] = useState(post.hasGame);
   const [expanded, setExpanded] = useState(false); // プレビュー展開
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -101,8 +122,8 @@ export default function EditPostModal({
     if (mmlLine) parts.push(mmlLine);
     const compareBase = originalContent ?? initialContent;
     const textOrMmlChanged = parts.join('\n') !== compareBase;
-    const imageChanged = currentImageSrc !== imageSrc;
-    const gameChanged = currentHasGame !== hasGame;
+    const imageChanged = currentImageSrc !== post.imageSrc;
+    const gameChanged = currentHasGame !== post.hasGame;
     return textOrMmlChanged || imageChanged || gameChanged;
   })();
 
@@ -132,22 +153,24 @@ export default function EditPostModal({
           <div className="gimp-checkered-background-white relative rounded-lg overflow-hidden border border-gray-800 max-w-[180px] md:max-w-[260px] self-start group">
             <img src={currentImageSrc} alt="添付画像" className="w-full h-auto" />
             <div className="absolute top-1.5 right-1.5 flex items-center gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
-              {onEditImage && (
+              {capabilities.editImage && (
                 <button
-                  onClick={onEditImage}
+                  onClick={capabilities.editImage}
                   className="bg-black/85 px-2 py-0.5 rounded-full text-blue-400 hover:bg-blue-600 hover:text-white text-[10px] font-bold active:scale-95 transition-all shadow-md"
                   title="画像を編集"
                 >
                   編集
                 </button>
               )}
-              <button
-                onClick={() => setCurrentImageSrc(null)}
-                className="bg-black/85 p-1 rounded-full text-white hover:bg-red-500 active:scale-95 transition-all shadow-md"
-                title="画像を削除"
-              >
-                <X size={14} />
-              </button>
+              {capabilities.canRemoveImage && (
+                <button
+                  onClick={() => setCurrentImageSrc(null)}
+                  className="bg-black/85 p-1 rounded-full text-white hover:bg-red-500 active:scale-95 transition-all shadow-md"
+                  title="画像を削除"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -161,9 +184,9 @@ export default function EditPostModal({
                 MML添付
               </span>
               <div className="flex items-center gap-1">
-                {onEditMml && (
+                {capabilities.editMml && (
                   <button
-                    onClick={onEditMml}
+                    onClick={capabilities.editMml}
                     className="text-[10px] text-pink-400/70 hover:text-pink-300 px-2 py-0.5 rounded border border-pink-700/40 hover:bg-pink-500/25 transition-all active:scale-95 font-bold"
                   >
                     編集
@@ -206,17 +229,17 @@ export default function EditPostModal({
         )}
 
         {/* MV添付 */}
-        {hasMv && (
+        {post.hasMv && (
           <div className="relative flex items-center gap-2.5 rounded-lg border border-cyan-700/50 bg-cyan-500/10 px-3 py-2 max-w-[280px] self-start w-full">
             <Clapperboard size={16} className="text-cyan-400 shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-cyan-200 truncate">{mvTitle || 'MV'}</p>
+              <p className="text-xs font-bold text-cyan-200 truncate">{post.mvTitle || 'MV'}</p>
               <p className="text-[10px] text-cyan-400/70">MVを添付中</p>
             </div>
-            {onEditMv && (
+            {capabilities.editMv && (
               <div className="flex items-center gap-1.5 ml-auto">
                 <button
-                  onClick={onEditMv}
+                  onClick={capabilities.editMv}
                   className="text-cyan-300 hover:text-cyan-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-cyan-700/40 hover:bg-cyan-500/25 active:scale-95 transition-all"
                 >
                   編集
@@ -231,28 +254,30 @@ export default function EditPostModal({
           <div className="relative flex items-center gap-2.5 rounded-lg border border-yellow-700/50 bg-yellow-500/10 px-3 py-2 max-w-[280px] self-start w-full">
             <Gamepad2 size={16} className="text-yellow-400 shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold text-yellow-200 truncate">{gameTitle || 'ゲーム'}</p>
+              <p className="text-xs font-bold text-yellow-200 truncate">{post.gameTitle || 'ゲーム'}</p>
               <p className="text-[10px] text-yellow-400/70">ゲームを添付中</p>
             </div>
             <div className="flex items-center gap-1.5 ml-auto">
-              {onEditGame && (
+              {capabilities.editGame && (
                 <button
-                  onClick={onEditGame}
+                  onClick={capabilities.editGame}
                   className="text-yellow-300 hover:text-yellow-100 text-[10px] font-bold px-1.5 py-0.5 rounded border border-yellow-700/40 hover:bg-yellow-500/25 active:scale-95 transition-all"
                 >
                   編集
                 </button>
               )}
-              <button
-                onClick={() => {
-                  setCurrentHasGame(false);
-                  onRemoveGame?.();
-                }}
-                className="text-yellow-300/75 hover:text-red-400 shrink-0"
-                title="ゲームを外す"
-              >
-                <X size={14} />
-              </button>
+              {capabilities.removeGame && (
+                <button
+                  onClick={() => {
+                    setCurrentHasGame(false);
+                    capabilities.removeGame?.();
+                  }}
+                  className="text-yellow-300/75 hover:text-red-400 shrink-0"
+                  title="ゲームを外す"
+                >
+                  <X size={14} />
+                </button>
+              )}
             </div>
           </div>
         )}

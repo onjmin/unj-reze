@@ -1263,7 +1263,7 @@ export default function App() {
 
         {showGlobalEditModal && editingPost && (
           <EditPostModal
-            initialContent={editingPost.content}
+            post={editingPost}
             originalContent={originalPostContent || editingPost.content}
             onClose={() => {
               setShowGlobalEditModal(false);
@@ -1292,15 +1292,14 @@ export default function App() {
                 showToast('error', '編集の保存に失敗しました');
               }
             }}
-            imageSrc={editingPost.imageSrc}
-            onEditImage={() => handleEditPostImage(editingPost)}
-            onEditMml={() => handleEditPostMml(editingPost)}
-            hasGame={editingPost.hasGame}
-            gameTitle={editingPost.gameTitle}
-            onEditGame={() => handleOpenPostGame(editingPost.gameId || '', editingPost.id)}
-            hasMv={editingPost.hasMv}
-            mvTitle={editingPost.mvTitle}
-            onEditMv={() => handleEditPostMv(editingPost)}
+            capabilities={{
+              editImage: () => handleEditPostImage(editingPost),
+              canRemoveImage: true,
+              editMml: () => handleEditPostMml(editingPost),
+              editGame: () => handleOpenPostGame(editingPost.gameId || '', editingPost.id),
+              removeGame: null,
+              editMv: () => handleEditPostMv(editingPost),
+            }}
           />
         )}
         </div>

@@ -22,9 +22,9 @@ interface ConsecutivePostGroupProps {
   currentUserDisplayName?: string;
   onModerationChange?: () => void;
   onReplyClick?: (post: Post) => void;
-  onEditImage?: (post: Post) => void;
-  onEditMml?: (post: Post) => void;
-  onEditMv?: (post: Post) => void;
+  onEditImage: ((post: Post) => void) | null;
+  onEditMml: ((post: Post) => void) | null;
+  onEditMv: ((post: Post) => void) | null;
   onEditPost?: (post: Post) => void;
   userId?: string;
   startIndex: number;

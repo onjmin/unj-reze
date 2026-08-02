@@ -22,8 +22,9 @@ interface SearchViewProps {
   openMml: () => void;
   currentUserSlug?: string;
   currentUserDisplayName?: string;
-  onEditImage?: (post: Post) => void;
-  onEditMml?: (post: Post) => void;
+  onEditImage: ((post: Post) => void) | null;
+  onEditMml: ((post: Post) => void) | null;
+  onEditMv: ((post: Post) => void) | null;
   onEditPost?: (post: Post) => void;
   initialQuery?: string;
 }
@@ -143,6 +144,7 @@ export default function SearchView(props: SearchViewProps) {
                 currentUserDisplayName={props.currentUserDisplayName}
                 onEditImage={props.onEditImage}
                 onEditMml={props.onEditMml}
+                onEditMv={props.onEditMv}
                 onEditPost={props.onEditPost}
               />
             </VirtualizedItem>
