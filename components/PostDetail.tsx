@@ -310,6 +310,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setReplyOriginType(undefined);
     setComposerOpen(false);
 
+    const toastId = showToast('info', '送信中...', { duration: 0 });
+
     try {
       let imageSrc: string | undefined;
       if (replyImage) {
@@ -357,13 +359,14 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         ...p,
         replies: p.replies.map(r => r.id === tempId ? reply : r)
       }));
+      showToast('success', '送信完了！', { id: toastId });
     } catch {
       setPost(p => ({
         ...p,
         replies: p.replies.filter(r => r.id !== tempId),
         repliesCount: Math.max(0, p.repliesCount - 1),
       }));
-      showToast('error', '返信の送信に失敗しました');
+      showToast('error', '返信の送信に失敗しました', { id: toastId });
     } finally {
       replySubmittingRef.current = false;
     }

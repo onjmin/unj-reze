@@ -154,6 +154,8 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
     setReplyOriginType(undefined);
     setReplyTo(null);
 
+    const toastId = showToast('info', '送信中...', { duration: 0 });
+
     try {
       // dataURLのまま送るとDBに巨大な文字列が入ってしまうため、必ずアップロードしてURL化する
       let imageSrc: string | undefined;
@@ -201,13 +203,14 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
         ...p,
         replies: p.replies.map(r => r.id === tempId ? reply : r),
       }));
+      showToast('success', '送信完了！', { id: toastId });
     } catch {
       setPost(p => ({
         ...p,
         replies: p.replies.filter(r => r.id !== tempId),
         repliesCount: Math.max(0, p.repliesCount - 1),
       }));
-      showToast('error', '書き込みに失敗しました');
+      showToast('error', '書き込みに失敗しました', { id: toastId });
     } finally {
       setSubmitting(false);
     }

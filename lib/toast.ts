@@ -4,6 +4,7 @@ export interface ToastMessage {
   id: string;
   type: ToastType;
   message: string;
+  duration?: number;
 }
 
 type ToastListener = (toast: ToastMessage) => void;
@@ -14,13 +15,16 @@ export function subscribeToast(listener: ToastListener) {
   return () => { toastListeners.delete(listener); };
 }
 
-export function showToast(type: ToastType, message: string) {
+export function showToast(type: ToastType, message: string, options?: { id?: string; duration?: number }) {
+  const toastId = options?.id || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const toast: ToastMessage = {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: toastId,
     type,
     message,
+    duration: options?.duration,
   };
   toastListeners.forEach(listener => listener(toast));
+  return toastId;
 }
 
 type HeartBurstListener = () => void;

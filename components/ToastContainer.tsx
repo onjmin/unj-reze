@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { CheckCircle2, XCircle, Info } from 'lucide-react';
 import { subscribeToast, ToastMessage } from '@/lib/toast';
 
@@ -8,13 +8,31 @@ const AUTO_DISMISS_MS = 4000;
 
 export default function ToastContainer() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const timeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     return subscribeToast((toast) => {
-      setToasts(prev => [...prev, toast]);
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== toast.id));
-      }, AUTO_DISMISS_MS);
+      setToasts(prev => {
+        const idx = prev.findIndex(t => t.id === toast.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = toast;
+          return next;
+        }
+        return [...prev, toast];
+      });
+
+      if (timeoutsRef.current.has(toast.id)) {
+        clearTimeout(timeoutsRef.current.get(toast.id)!);
+      }
+
+      if (toast.duration !== 0) {
+        const timeout = setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== toast.id));
+          timeoutsRef.current.delete(toast.id);
+        }, toast.duration ?? AUTO_DISMISS_MS);
+        timeoutsRef.current.set(toast.id, timeout);
+      }
     });
   }, []);
 
