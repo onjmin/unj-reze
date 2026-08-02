@@ -699,17 +699,22 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           <SectionTitle>🎭 出てくる絵</SectionTitle>
           <Hint>タップすると、あなたの描いたドット絵や画像に差し替えられます。</Hint>
           {imageLayers.map(l => (
-            <button
-              key={l.id}
-              onClick={() => setPicker({ mode: 'image', target: { layerId: l.id } })}
-              className="flex min-h-11 w-full items-center gap-2 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-left hover:bg-gray-100/5"
-            >
-              {l.url
-                ? <img src={l.url} alt="" className="h-8 w-8 shrink-0 rounded border border-gray-700 object-contain" />
-                : <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-dashed border-gray-600"><ImageIcon size={13} className="text-gray-500" /></div>}
-              <span className="min-w-0 flex-1 truncate text-[11px] text-gray-200">{refLabel(l.ref) || '画像を選ぶ'}</span>
-              <span className="shrink-0 text-[10px] text-blue-300">差し替え</span>
-            </button>
+            <div key={l.id} className="flex flex-col gap-1.5 rounded border border-gray-700 bg-gray-800 p-1.5">
+              <button
+                onClick={() => setPicker({ mode: 'image', target: { layerId: l.id } })}
+                className="flex min-h-10 w-full items-center gap-2 rounded bg-gray-900 px-2 py-1 text-left hover:bg-gray-100/5"
+              >
+                {l.url
+                  ? <img src={l.url} alt="" className="h-8 w-8 shrink-0 rounded border border-gray-700 object-contain" />
+                  : <div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-dashed border-gray-600"><ImageIcon size={13} className="text-gray-500" /></div>}
+                <span className="min-w-0 flex-1 truncate text-[11px] text-gray-200">{refLabel(l.ref) || '画像を選ぶ'}</span>
+                <span className="shrink-0 text-[10px] text-blue-300">差し替え</span>
+              </button>
+              <div className="px-1 py-1 space-y-2">
+                <SliderField label="大きさ" value={l.scale} min={0.1} max={5} step={0.1} onChange={v => update(m => ({ ...m, layers: m.layers.map(layer => layer.id === l.id ? { ...layer, scale: v } : layer) }))} />
+                <CheckField label="ふわふわ揺らす" checked={l.motion === 'bob'} onChange={v => update(m => ({ ...m, layers: m.layers.map(layer => layer.id === l.id ? { ...layer, motion: v ? 'bob' : 'none' } : layer) }))} />
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -741,6 +746,27 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             <Plus size={15} />
           </button>
         </div>
+      </div>
+
+      <div className={SECTION_CLASS}>
+        <SectionTitle>🔤 フォント</SectionTitle>
+        <SelectField
+          label="フォント"
+          value={manifest.stage.fontFamily ?? '""'}
+          options={[
+            { value: '""', label: '標準（ドット字）' },
+            { value: '"Hiragino Sans", "Yu Gothic", "MS PGothic", sans-serif', label: 'ゴシック' },
+            { value: '"Hiragino Mincho ProN", "Yu Mincho", "MS PMincho", serif', label: '明朝' },
+            { value: '"美咲ゴシック", monospace', label: '美咲ゴシック' },
+            { value: "'Noto Sans JP', sans-serif", label: 'Noto Sans JP' },
+            { value: "'Kaisei Decol', serif", label: 'Kaisei Decol' },
+            { value: "'DotGothic16', sans-serif", label: 'DotGothic16' },
+            { value: "'Dela Gothic One', cursive", label: 'Dela Gothic One' },
+            { value: "'Potta One', cursive", label: 'Potta One' },
+            { value: "'Hachi Maru Pop', cursive", label: 'Hachi Maru Pop' }
+          ]}
+          onChange={v => update(m => ({ ...m, stage: { ...m.stage, fontFamily: v === '""' ? undefined : v } }))}
+        />
       </div>
 
       {editMode === 'easy' && (

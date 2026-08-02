@@ -875,7 +875,8 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
 
 // ───────────────── テキストレイヤー ─────────────────
 
-export function getMvFontStack(): string {
+export function getMvFontStack(manifest?: MvManifest): string {
+  if (manifest?.stage?.fontFamily) return manifest.stage.fontFamily;
   if (typeof document !== 'undefined') {
     const raw = getComputedStyle(document.documentElement).getPropertyValue('--font-pixel').trim();
     if (raw) return `${raw}, "DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif`;
@@ -883,13 +884,11 @@ export function getMvFontStack(): string {
   return '"DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif';
 }
 
-const FONT_STACK = 'var(--font-pixel), "DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif';
-
 function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
   const { ctx } = d;
   const motion = applyMotion(d, layer.motion, layer.motionAmount ?? 0, layer.size);
   const size = layer.size * motion.scale;
-  ctx.font = `${layer.bold ? 'bold ' : ''}${size}px ${FONT_STACK}`;
+  ctx.font = `${layer.bold ? 'bold ' : ''}${size}px ${getMvFontStack(d.manifest)}`;
   ctx.fillStyle = layer.color;
   ctx.textBaseline = 'top';
 
@@ -954,8 +953,8 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
   const shown = activeIdx.slice(-(layer.afterimage + 1)).reverse();
   const size = layer.size;
 
-  ctx.textBaseline = 'top';
-  ctx.font = `bold ${size}px ${FONT_STACK}`;
+  ctx.textBaseline = 'middle';
+  ctx.font = `bold ${size}px ${getMvFontStack(d.manifest)}`;
 
   shown.forEach((idx, depth) => {
     const line = lines[idx];

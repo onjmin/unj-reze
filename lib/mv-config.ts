@@ -253,6 +253,8 @@ export interface MvStage {
   fadeIn?: boolean;
   /** 終了時に黒へフェードアウトするか */
   fadeOut?: boolean;
+  /** 動画全体のフォント（未指定時はドット字） */
+  fontFamily?: string;
 }
 
 // ───────────────── レイヤー ─────────────────

@@ -96,6 +96,9 @@ export default function RootLayout({
         <link rel="icon" href={assetPath('/icon-192.png')} type="image/png" sizes="192x192" />
         <link rel="icon" href={assetPath('/icon-512.png')} type="image/png" sizes="512x512" />
         <link rel="apple-touch-icon" href={assetPath('/apple-icon.png')} sizes="180x180" />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Hachi+Maru+Pop&family=Kaisei+Decol&family=Noto+Sans+JP:wght@400;700&family=Potta+One&display=swap" rel="stylesheet" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
