@@ -551,13 +551,35 @@ export interface MvVisualizerLayer extends MvLayerBase {
   ring?: MvRing;
 }
 
+/**
+ * 行の中の一部を色つきの下地で塗る指定。
+ * 参考動画（運び屋さん）は「つき」「かぜ」「はな」といった語だけ、
+ * **文字色ではなく背後の矩形**が色で塗られる（マーカーで引いたような見え方）。
+ */
+export interface MvLyricMark {
+  /** 塗り始める文字位置（0始まり） */
+  from: number;
+  /** 塗り終わる文字位置（この文字は含まない） */
+  to: number;
+  color: string;
+}
+
 export interface MvLyricLine {
   /** 表示を始める小節（0始まり、小数可） */
   bar: number;
   text: string;
   /** どの歌詞トラック(@@n)由来か。手入力なら undefined。 */
   trackId?: number;
+  /** 行の一部を色つきの下地で塗る。手入力の歌詞でだけ指定できる。 */
+  marks?: MvLyricMark[];
 }
+
+/**
+ * 縦書き歌詞の積み上がる向き。
+ * - rightToLeft : 右端を固定して、新しい行が左へ足されていく（参考動画3本ともこれ）
+ * - leftToRight : `x` に最新行を置き、古い行が右へ流れていく
+ */
+export type MvLyricStack = 'rightToLeft' | 'leftToRight';
 
 export interface MvLyricsLayer extends MvLayerBase {
   kind: 'lyrics';
@@ -576,6 +598,11 @@ export interface MvLyricsLayer extends MvLayerBase {
   size: number;
   color: string;
   vertical: boolean;
+  /**
+   * 縦書きのとき、行がどちら向きに積み上がるか。未指定は rightToLeft
+   * （参考動画はどれも右端が固定で、新しい行が左へ足されていく）。
+   */
+  stack?: MvLyricStack;
   /** 過去の行を薄く残す段数（0で残像なし）。 */
   afterimage: number;
   /** 1行を何小節出しておくか。 */
@@ -651,7 +678,7 @@ export interface MvShapeLayer extends MvLayerBase {
 }
 
 /** 画面全体にかかる演出。 */
-export type MvEffectStyle = 'flash' | 'invert' | 'shake' | 'zoomPunch' | 'strobe' | 'vignette';
+export type MvEffectStyle = 'flash' | 'invert' | 'shake' | 'zoomPunch' | 'strobe' | 'vignette' | 'tint';
 
 export const MV_EFFECT_STYLE_LABELS: Record<MvEffectStyle, string> = {
   flash: 'フラッシュ（白く光る）',
@@ -660,6 +687,9 @@ export const MV_EFFECT_STYLE_LABELS: Record<MvEffectStyle, string> = {
   zoomPunch: 'ズームパンチ',
   strobe: 'ストロボ',
   vignette: '周辺減光',
+  // 参考動画（運び屋さん）は終盤で画面全体が夕焼け色へ切り替わる。
+  // 明るさは残したまま色味だけ差し替えたいので、塗りつぶしではなく色の合成で作る。
+  tint: '色を染める（画面全体）',
 };
 
 /** 演出の発火タイミング。 */
@@ -770,6 +800,12 @@ export interface MvDegreeLayer extends MvLayerBase {
   key: string;
   /** 参照するコード進行バーのレイヤーID。未指定なら最初に見つかった chordBar。 */
   chordLayerId?: string;
+  /**
+   * 自前のコード進行。バーを画面に出さずに数字だけ出したいときに使う
+   * （参考動画にはコード進行バーが無く、頭の上の数字だけがある）。
+   * 指定するとこちらが優先される。
+   */
+  chords?: MvChordStep[];
   /** 音が切れても直前の数字を出し続ける。false なら鳴っている間だけ出る。 */
   hold?: boolean;
 }

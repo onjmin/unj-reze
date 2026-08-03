@@ -289,8 +289,10 @@ const LAYERS: MvLayer[] = [
     id: 'lyrics',
     source: 'mml',
     trackId: 3,
-    x: 392,
+    // 右端固定・左へ伸びる積み方（参考動画と同じ）
+    x: 612,
     y: 32,
+    stack: 'rightToLeft',
     anchor: 'topLeft',
     size: 12,
     color: '#f4f4f5',

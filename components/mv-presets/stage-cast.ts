@@ -266,7 +266,8 @@ const LAYERS: MvLayer[] = [
     activeColor: '#3f6212',
     textColor: '#e5e7eb',
     size: 9,
-    windowBars: 4,
+    // 参考動画は1画面に2小節ぶんだけ。ブロックが横に長く、次のコードが読める幅になる。
+    windowBars: 2,
     z: 60,
     chords: CHORD_STEPS,
   },

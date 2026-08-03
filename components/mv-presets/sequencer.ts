@@ -155,8 +155,11 @@ const LAYERS: MvLayer[] = [
     id: 'lyrics',
     source: 'mml',
     trackId: 3,
-    x: 292,
+    // 右端を固定して新しい列が左へ足されていく積み方（参考動画と同じ）。
+    // 既に出ている列は動かないので、文字の壁が横滑りしない。
+    x: 604,
     y: 32,
+    stack: 'rightToLeft',
     anchor: 'topLeft',
     size: 13,
     color: '#f3f4f6',

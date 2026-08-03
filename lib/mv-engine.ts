@@ -616,6 +616,15 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
         }
         break;
       }
+      case 'tint': {
+        // 'color' 合成は「元の明るさを保ったまま色味だけ差し替える」。
+        // 単色で塗りつぶすと絵が潰れるので、夕焼けへの切り替えはこちらで作る。
+        ctx.globalCompositeOperation = 'color';
+        ctx.globalAlpha = env;
+        ctx.fillStyle = fx.color ?? '#f7b82c';
+        ctx.fillRect(0, 0, MV_W, MV_H);
+        break;
+      }
       case 'vignette': {
         const g = ctx.createRadialGradient(MV_W / 2, MV_H / 2, MV_H * 0.25, MV_W / 2, MV_H / 2, MV_H * 0.78);
         g.addColorStop(0, withAlpha(fx.color ?? '#000000', 0));
@@ -893,6 +902,12 @@ function drawDegree(d: DrawCtx, layer: MvDegreeLayer): void {
 /** 度数を数える基準の音（0-11）。コード基準なら進行から、調基準なら主音から。 */
 function degreeRootPitch(d: DrawCtx, layer: MvDegreeLayer): number | null {
   if (layer.basis === 'key') return MV_ROOT_TO_PITCH[layer.key] ?? 0;
+
+  // 自前の進行があればそれを使う（コード進行バーを画面に出さない作りのため）
+  if (layer.chords && layer.chords.length > 0) {
+    const own = chordAtBar(layer.chords, d.bar);
+    if (own) return MV_ROOT_TO_PITCH[chordRootName(own.label)] ?? 0;
+  }
 
   const bar = d.manifest.layers.find(
     (l): l is MvChordBarLayer => l.kind === 'chordBar' && (!layer.chordLayerId || l.id === layer.chordLayerId),
@@ -1224,8 +1239,13 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
         : line.text;
       const h = textToDraw.length * size * 1.08;
       const [ax, ay] = anchorOffset(layer.anchor, size, h);
-      // 新しい行が左、古い行が右へ流れていく（日本語縦書きの並び）
-      const x = layer.x + ax + depth * size * 1.7;
+      const step = size * 1.7;
+      // rightToLeft: 右端(layer.x)を固定して、新しい行ほど左へ置く。
+      // 参考動画（次日朝夢 / x0o0x_ / _）はどれもこの積み方で、
+      // 行が増えても既に出ている列は動かない。
+      const x = (layer.stack ?? 'rightToLeft') === 'rightToLeft'
+        ? layer.x + ax - (shown.length - 1 - depth) * step
+        : layer.x + ax + depth * step;
       let y = layer.y + ay;
       for (const ch of textToDraw) {
         ctx.fillText(ch, x, y);
@@ -1237,12 +1257,48 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
         : line.text;
       const w = ctx.measureText(textToDraw).width;
       const [ax, ay] = anchorOffset(layer.anchor, w, size);
-      ctx.fillText(textToDraw, layer.x + ax, layer.y + ay - depth * size * 1.35);
+      const lx = layer.x + ax;
+      const ly = layer.y + ay - depth * size * 1.35;
+      drawLyricMarks(d, line, textToDraw, lx, ly, size, alpha);
+      ctx.fillStyle = layer.color;
+      ctx.fillText(textToDraw, lx, ly);
     }
   });
 
   ctx.globalAlpha = 1;
   ctx.shadowBlur = 0;
+}
+
+/**
+ * 行の一部に敷く色つきの下地（マーカー）。
+ * 参考動画（運び屋さん）は「つき」「かぜ」「はな」の**背後だけ**が塗られていて、
+ * 文字そのものは白のまま。だから文字色を変えるのではなく矩形を先に塗る。
+ */
+function drawLyricMarks(
+  d: DrawCtx,
+  line: MvLyricLine,
+  shownText: string,
+  x: number,
+  y: number,
+  size: number,
+  alpha: number,
+): void {
+  if (!line.marks || line.marks.length === 0) return;
+  const { ctx } = d;
+  const prevShadow = ctx.shadowBlur;
+  ctx.shadowBlur = 0;
+  const pad = size * 0.12;
+  for (const m of line.marks) {
+    const from = Math.max(0, Math.min(shownText.length, m.from));
+    const to = Math.max(from, Math.min(shownText.length, m.to));
+    if (to <= from) continue;
+    const x0 = ctx.measureText(shownText.slice(0, from)).width;
+    const x1 = ctx.measureText(shownText.slice(0, to)).width;
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = m.color;
+    ctx.fillRect(x + x0 - pad, y - size * 0.62, x1 - x0 + pad * 2, size * 1.24);
+  }
+  ctx.shadowBlur = prevShadow;
 }
 
 // ───────────────── 図形レイヤー ─────────────────
