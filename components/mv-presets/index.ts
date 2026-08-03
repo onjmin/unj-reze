@@ -1,4 +1,5 @@
 import type { MvManifest, MvPresetKind } from '@/lib/mv-config';
+import { COURIER_PRESET } from './courier';
 import { GEOMETRIC_PRESET } from './geometric';
 import { LANTERN_PRESET } from './lantern';
 import { PIANO_ROLL_PRESET } from './piano-roll';
@@ -25,6 +26,7 @@ export const MV_PRESETS: MvPresetEntry[] = [
   WINDOW_FRAME_PRESET,
   PIXEL_STAGE_PRESET,
   STAGE_CAST_PRESET,
+  COURIER_PRESET,
 ];
 
 /** プリセット名から引く（同じ kind のプリセットが複数あるため名前で識別する）。 */
