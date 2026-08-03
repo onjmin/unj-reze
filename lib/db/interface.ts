@@ -1,5 +1,5 @@
 import { AnonymousUser, FollowUser, GhostPlayer, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
-import { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem } from '../types-db';
+import { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem, DbMediaSearchPost } from '../types-db';
 import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
 import type { MvManifest, MvPresetKind } from '../mv-config';
@@ -124,6 +124,11 @@ export interface DataStore {
   addMessage(data: MessageParams): Promise<Message>;
   getTrends(): Promise<Trend[]>;
   searchPosts(query: string, userId?: string, limit?: number): Promise<DbPost[]>;
+  /**
+   * ゲーム/MVエディタの素材ピッカー専用の軽量検索。`kind` で `has_image` / `has_mml` を絞り込み、
+   * スレッド構造・投票数・返信は一切引かない（docs/NEON_EGRESS.md）。
+   */
+  searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number): Promise<DbMediaSearchPost[]>;
   getPostsByHashtag(tag: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
   /**

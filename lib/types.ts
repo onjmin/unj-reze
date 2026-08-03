@@ -83,6 +83,18 @@ export interface Post {
 
 export type Reply = Post;
 
+/**
+ * ゲーム/MVエディタの素材ピッカー（画像/MML検索）専用の軽量な投稿表現。
+ * スレッド構造・投票数・ハート数などは持たない。
+ */
+export interface MediaSearchPost {
+  id: string;
+  displayName: string;
+  content: string;
+  imageSrc?: string;
+  imageAlt?: string;
+}
+
 export interface GameRecord {
   id: string;
   preset: string;

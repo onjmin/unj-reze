@@ -1138,6 +1138,39 @@ export const sqliteStore: DataStore = {
     })).filter(p => !hidden.has(p.slug ?? ''));
   },
 
+  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number) {
+    const d = await getDb();
+    const safeLimit = Math.max(1, Math.min(limit || 50, 50));
+    const col = kind === 'image' ? 'p.has_image' : 'p.has_mml';
+    const trimmed = query.trim();
+    const params: any[] = [];
+    let where = `${col} = 1 AND COALESCE((SELECT au2.hide_from_search FROM anonymous_users au2 WHERE au2.slug = p.slug LIMIT 1), 0) = 0`;
+    if (trimmed) {
+      params.push(`%${trimmed}%`, `%${trimmed}%`);
+      where += ` AND (p.content LIKE ? OR COALESCE(au.display_name, p.display_name) LIKE ?)`;
+    }
+    const rows = rowsToObjects(
+      d,
+      `SELECT p.id, p.slug, p.content, p.image_src, p.image_alt,
+        COALESCE(au.display_name, p.display_name) as display_name
+      FROM posts p
+      LEFT JOIN anonymous_users au ON p.slug = au.slug
+      WHERE ${where}
+      ORDER BY p.id DESC LIMIT ${safeLimit}`,
+      params
+    );
+    const hidden = getHiddenSlugsSqlite(d, userId);
+    return rows
+      .filter(r => !hidden.has(r.slug ?? ''))
+      .map(r => ({
+        id: r.id,
+        displayName: r.display_name ?? '名無し',
+        content: r.content,
+        imageSrc: r.image_src ?? undefined,
+        imageAlt: r.image_alt ?? undefined,
+      }));
+  },
+
   async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const d = await getDb();

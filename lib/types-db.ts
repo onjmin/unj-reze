@@ -2,6 +2,18 @@ import type { GameManifestDraft } from '@/components/GameMaker';
 import type { MvManifest, MvPresetKind } from './mv-config';
 import type { OriginType, OshiItemKind } from './types';
 
+/**
+ * ゲーム/MVエディタの素材ピッカー（画像/MML検索）専用の軽量な行。
+ * スレッド構造・投票数・ハート数などは持たない（docs/NEON_EGRESS.md）。
+ */
+export interface DbMediaSearchPost {
+  id: number;
+  displayName: string;
+  content: string;
+  imageSrc?: string;
+  imageAlt?: string;
+}
+
 export interface DbPost {
   id: number;
   displayName: string;

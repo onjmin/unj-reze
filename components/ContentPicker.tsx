@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
-import type { Post } from '@/lib/types';
+import type { MediaSearchPost } from '@/lib/types';
 import { extractMmlFromContent, effectiveMmlVolume, withMmlVolume } from '@/lib/mml';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, colorToDataUrl } from '@/lib/asset-ref';
@@ -67,7 +67,7 @@ function formatTime(sec: number) {
 }
 
 export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], currentRef, onPick, onClose }: ContentPickerProps) {
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<MediaSearchPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [selectedColor, setSelectedColor] = useState('#000000');
@@ -262,10 +262,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     const isImagePost = mode === 'image' && imageTab === 'posts';
     if (isMmlPost || isImagePost) {
       Promise.resolve().then(() => { if (alive) setLoading(true); });
-      const trimmedQ = query.trim();
-      const req = trimmedQ
-        ? api.search.posts(trimmedQ, userId)
-        : api.posts.list(userId, { hasMml: isMmlPost ? true : undefined, hasImage: isImagePost ? true : undefined, limit: 50 });
+      const req = api.search.media(isMmlPost ? 'mml' : 'image', query, userId);
 
       req
         .then(data => {
@@ -282,60 +279,17 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     return () => { alive = false; };
   }, [mode, bgmTab, imageTab, userId, query]);
 
-  const q = query.trim().toLowerCase();
-  // BGM欄の「MML投稿」タブ用。親投稿だけでなくスレッド返信(replies)に含まれるMML投稿も網羅する。
-  const mmlPosts = useMemo(() => {
-    const list: Post[] = [];
-    const seen = new Set<string>();
-    for (const p of posts) {
-      if (!p) continue;
-      if (!seen.has(p.id)) {
-        seen.add(p.id);
-        const mml = extractMmlFromContent(p.content);
-        if (mml && (!q || p.content?.toLowerCase().includes(q))) {
-          list.push(p);
-        }
-      }
-      if (p.replies && Array.isArray(p.replies)) {
-        for (const r of p.replies) {
-          if (r && !seen.has(r.id)) {
-            seen.add(r.id);
-            const mml = extractMmlFromContent(r.content);
-            if (mml && (!q || r.content?.toLowerCase().includes(q))) {
-              list.push(r);
-            }
-          }
-        }
-      }
-    }
-    return list;
-  }, [posts, q]);
+  // BGM欄の「MML投稿」タブ用。サーバー側で hasMml 絞り込み・クエリ検索済みなのでそのまま使う。
+  const mmlPosts = useMemo(
+    () => posts.filter(p => p && extractMmlFromContent(p.content)),
+    [posts]
+  );
 
-  // 画像欄の「投稿画像」タブ用。親投稿およびスレッド返信(replies)に含まれる添付画像を網羅する。
-  const imagePosts = useMemo(() => {
-    const list: Post[] = [];
-    const seen = new Set<string>();
-    for (const p of posts) {
-      if (!p) continue;
-      if (!seen.has(p.id) && p.hasImage && p.imageSrc) {
-        seen.add(p.id);
-        if (!q || p.content?.toLowerCase().includes(q) || p.displayName?.toLowerCase().includes(q)) {
-          list.push(p);
-        }
-      }
-      if (p.replies && Array.isArray(p.replies)) {
-        for (const r of p.replies) {
-          if (r && !seen.has(r.id) && r.hasImage && r.imageSrc) {
-            seen.add(r.id);
-            if (!q || r.content?.toLowerCase().includes(q) || r.displayName?.toLowerCase().includes(q)) {
-              list.push(r);
-            }
-          }
-        }
-      }
-    }
-    return list;
-  }, [posts, q]);
+  // 画像欄の「投稿画像」タブ用。サーバー側で hasImage 絞り込み・クエリ検索済みなのでそのまま使う。
+  const imagePosts = useMemo(
+    () => posts.filter(p => p && p.imageSrc),
+    [posts]
+  );
 
   const pickYoutube = () => {
     const v = urlInput.trim();
@@ -355,7 +309,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     onPick({ ref: soundcloudRefFromUrl(v), url: v, label: 'SoundCloud BGM' });
   };
 
-  const pickMmlPost = (p: Post) => {
+  const pickMmlPost = (p: MediaSearchPost) => {
     stopAllPreviews();
     const mml = extractMmlFromContent(p.content) || '';
     onPick({ ref: `mml:post:${p.id}`, rawMml: mml, label: `MML投稿 #${p.id}` });

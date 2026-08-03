@@ -1,4 +1,4 @@
-import { Post, AnonymousUser, FollowUser, OriginType, Notification, OshiItem, OshiItemKind } from './types';
+import { Post, AnonymousUser, FollowUser, OriginType, Notification, OshiItem, OshiItemKind, MediaSearchPost } from './types';
 import { db as mockDbInstance } from './mock-db';
 import type { Message, Trend } from './mock-db';
 import { decodeIdOrThrow, encodePost, encodeNotification, encodeId, encodeOshiItem } from './sqids';
@@ -184,6 +184,10 @@ const staticApi = {
       const posts = await mockDbInstance.searchPosts(query, userId);
       return posts.map(encodePost);
     },
+    media: async (kind: 'image' | 'mml', query: string, userId?: string, limit?: number) => {
+      const rows = await mockDbInstance.searchMedia(kind, query, userId, limit);
+      return rows.map(r => ({ ...r, id: encodeId(r.id) }));
+    },
   },
   hashtag: {
     posts: async (tag: string, userId?: string) => {
@@ -363,6 +367,13 @@ const liveApi = {
       const params = new URLSearchParams({ q: query });
       if (userId) params.set('userId', userId);
       return fetcher<Post[]>(`/search?${params.toString()}`);
+    },
+    media: (kind: 'image' | 'mml', query: string, userId?: string, limit?: number) => {
+      const params = new URLSearchParams({ kind });
+      if (query.trim()) params.set('q', query.trim());
+      if (userId) params.set('userId', userId);
+      if (limit) params.set('limit', String(limit));
+      return fetcher<MediaSearchPost[]>(`/media-search?${params.toString()}`);
     },
   },
   hashtag: {

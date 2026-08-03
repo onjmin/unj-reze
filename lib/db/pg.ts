@@ -1220,6 +1220,43 @@ export const pgStore: DataStore = {
     }
   },
 
+  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number) {
+    const client = await getPool().connect();
+    try {
+      const safeLimit = Math.max(1, Math.min(limit || 50, 50));
+      const col = kind === 'image' ? 'p.has_image' : 'p.has_mml';
+      const trimmed = query.trim();
+      const params: any[] = [];
+      let where = `${col} = true AND COALESCE(au.hide_from_search, false) = false`;
+      if (trimmed) {
+        params.push(`%${trimmed}%`);
+        where += ` AND (p.content ILIKE $${params.length} OR COALESCE(au.display_name, p.display_name) ILIKE $${params.length})`;
+      }
+      params.push(safeLimit);
+      const result = await client.query(`
+        SELECT p.id, p.slug, p.content, p.image_src, p.image_alt,
+          COALESCE(au.display_name, p.display_name) as display_name
+        FROM posts p
+        LEFT JOIN anonymous_users au ON p.slug = au.slug
+        WHERE ${where}
+        ORDER BY p.id DESC
+        LIMIT $${params.length}
+      `, params);
+      const hidden = await getHiddenSlugs(client, userId);
+      return result.rows
+        .filter((r: any) => hidden.size === 0 || !hidden.has(r.slug ?? ''))
+        .map((r: any) => ({
+          id: r.id,
+          displayName: r.display_name ?? '名無し',
+          content: r.content,
+          imageSrc: r.image_src ?? undefined,
+          imageAlt: r.image_alt ?? undefined,
+        }));
+    } finally {
+      client.release();
+    }
+  },
+
   async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const client = await getPool().connect();

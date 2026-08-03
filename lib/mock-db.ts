@@ -685,6 +685,20 @@ class MockDB {
     return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
+  searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number): { id: number; displayName: string; content: string; imageSrc?: string; imageAlt?: string }[] {
+    const q = query.trim().toLowerCase();
+    const hidden = this.getHiddenSlugs(userId);
+    const all = this.posts.flatMap(p => [p, ...p.replies]);
+    const res = all
+      .filter(p => (kind === 'image' ? p.hasImage : p.hasMml))
+      .filter(p => !hidden.has(p.slug ?? ''))
+      .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
+      .filter(p => !q || p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))
+      .sort((a, b) => Number(b.id) - Number(a.id))
+      .map(p => ({ id: p.id, displayName: p.displayName, content: p.content, imageSrc: p.imageSrc, imageAlt: p.imageAlt }));
+    return limit && limit > 0 ? res.slice(0, limit) : res.slice(0, 50);
+  }
+
   getPostsByHashtag(tag: string, userId?: string, limit?: number): Post[] {
     const normalized = tag.startsWith('#') ? tag : `#${tag}`;
     const hidden = this.getHiddenSlugs(userId);
