@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
   BarChart3, ChevronDown, ChevronUp, Clapperboard, Hash, History, Image as ImageIcon,
-  Layers, ListMusic, Music, Plus, Shapes, Sparkles, Trash2, Type, X,
+  Layers, ListMusic, Music, Plus, Shapes, SlidersHorizontal, Sparkles, Trash2, Type, X,
 } from 'lucide-react';
 import ContentPicker, { type PickResult } from './ContentPicker';
 import HistoryModal from './HistoryModal';
@@ -930,7 +930,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
 
       {editMode === 'easy' && (
         <Hint>
-          もっと細かく作り込みたいときは、右上の「くわしい」を押すとレイヤー・歌詞・場面のタブが増えます。
+          もっと細かく作り込みたいときは、右上のつまみアイコン（くわしい）を押すとレイヤー・歌詞・場面のタブが増えます。
         </Hint>
       )}
     </div>
@@ -1719,43 +1719,58 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
 
   return (
     <div className="fixed inset-0 z-50 flex select-none flex-col bg-[#0b0e14]">
-      {/* ヘッダー */}
-      <div className="flex shrink-0 items-center border-b border-gray-800 bg-[#0b0e14] px-3.5 py-2.5">
-        <button onClick={onClose} className="mr-2 rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100/10">
-          <X size={20} />
+      {/* ヘッダー
+          狭い画面ではボタンのラベル（日本語）が1文字ずつ折り返してヘッダーが2〜3段に膨らんでいた。
+          GameMaker のヘッダーと同じく、ラベルは title / aria-label に逃がしてアイコンだけを並べる。 */}
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-gray-800 bg-[#0b0e14] px-2.5 py-2">
+        <button
+          onClick={onClose}
+          aria-label="キャンセル"
+          title="キャンセル"
+          className="shrink-0 rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100/10"
+        >
+          <X size={18} />
         </button>
-        <span className="text-xs font-bold text-gray-300">キャンセル</span>
-        <span className="mx-1.5 text-[10px] text-gray-600">›</span>
-        <span className="text-xs text-gray-400">MV作成</span>
-        <div className="flex-1" />
+        {/* いま何を編集中かだけをテキストで残す（折り返さず、狭ければ省略記号にする） */}
+        <span className="min-w-0 flex-1 truncate text-[11px] text-gray-400">MV作成</span>
         {/* 編集モードは常に見える位置に置く（タブ行に入れると狭い画面で流れて押せなくなる） */}
-        <div className="mr-2 flex shrink-0 items-center rounded-full bg-gray-800 p-0.5">
+        <div className="flex shrink-0 items-center rounded-full bg-gray-800 p-0.5">
           <button
             onClick={() => changeEditMode('easy')}
-            className={`min-h-8 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${editMode === 'easy' ? 'bg-gray-200 text-gray-900' : 'text-gray-400'}`}
+            aria-label="かんたん"
+            aria-pressed={editMode === 'easy'}
+            title="かんたん（見本・曲・見た目だけ）"
+            className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${editMode === 'easy' ? 'bg-gray-200 text-gray-900' : 'text-gray-400'}`}
           >
-            かんたん
+            <Sparkles size={14} />
           </button>
           <button
             onClick={() => changeEditMode('detail')}
-            className={`min-h-8 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${editMode === 'detail' ? 'bg-gray-200 text-gray-900' : 'text-gray-400'}`}
+            aria-label="くわしい"
+            aria-pressed={editMode === 'detail'}
+            title="くわしい（レイヤー・歌詞・場面も編集）"
+            className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${editMode === 'detail' ? 'bg-gray-200 text-gray-900' : 'text-gray-400'}`}
           >
-            くわしい
+            <SlidersHorizontal size={14} />
           </button>
         </div>
-        <div className="mr-2"><VolumeControl /></div>
+        <div className="shrink-0"><VolumeControl /></div>
         <button
           onClick={() => setShowHistory(true)}
-          className="mr-2 flex items-center space-x-1 rounded-lg bg-gray-800 px-3 py-1.5 text-[11px] font-bold text-gray-300 transition-colors hover:bg-gray-700"
+          aria-label="履歴"
+          title="履歴・スナップショット"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700"
         >
-          <History size={13} /> <span>履歴</span>
+          <History size={14} />
         </button>
         <button
           onClick={handleSave}
           disabled={!canSave}
-          className="flex items-center space-x-1.5 rounded-lg bg-blue-600 px-3.5 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
+          aria-label={isEditing ? '再編集' : '投稿'}
+          title={isEditing ? '再編集' : '投稿'}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:opacity-50"
         >
-          <Clapperboard size={13} /> <span>{isEditing ? '再編集' : '投稿'}</span>
+          <Clapperboard size={14} />
         </button>
       </div>
 
