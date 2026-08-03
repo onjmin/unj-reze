@@ -3,14 +3,34 @@ import { db as mockDbInstance } from './mock-db';
 import type { Message, Trend } from './mock-db';
 import { decodeIdOrThrow, encodePost, encodeNotification, encodeId, encodeOshiItem } from './sqids';
 import { rejectDmReason, type DmGate } from './dm-rules';
+import { ensureSessionId } from './session';
 
 const BASE = '/api';
 const useStaticMockData = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' || process.env.GITHUB_ACTIONS === 'true';
 
+/**
+ * 書き込み系リクエストのJSON本文へセッションIDを必ず載せる。
+ *
+ * 本人確認はサーバー側で必ずセッションから行う（body の userId / slug は公開情報なので
+ * 身元の根拠にできない）。通常はCookieで届くが、サードパーティCookie制限などで
+ * 落ちる環境があるため、localStorage 由来のIDを本文にも積んで確実に届かせる。
+ */
+function withSessionId(init?: RequestInit): RequestInit | undefined {
+  if (!init?.body || typeof init.body !== 'string') return init;
+  try {
+    const parsed = JSON.parse(init.body);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return init;
+    if (parsed.sessionId) return init;
+    return { ...init, body: JSON.stringify({ ...parsed, sessionId: ensureSessionId() }) };
+  } catch {
+    return init;
+  }
+}
+
 async function fetcher<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${url}`, {
     headers: { 'Content-Type': 'application/json' },
-    ...init,
+    ...withSessionId(init),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error' }));
@@ -24,15 +44,16 @@ const staticApi = {
     anonymous: async (sessionId: string, _ipAddress?: string) => {
       return mockDbInstance.getOrCreateAnonymousUser(sessionId, _ipAddress || '127.0.0.1');
     },
-    updateProfile: async (userId: string, changes: { displayName?: string; avatarUrl?: string; bio?: string }) => {
-      mockDbInstance.updateUserDisplayName(userId, changes.displayName, changes.avatarUrl, changes.bio);
+    updateProfile: async (changes: { displayName?: string; avatarUrl?: string; bio?: string }) => {
+      mockDbInstance.updateUserDisplayName(mockDbInstance.getOrCreateAnonymousUser(ensureSessionId(), '127.0.0.1').id, changes.displayName, changes.avatarUrl, changes.bio);
     },
     getSettings: async (slug: string) => mockDbInstance.getUserSettings(slug),
-    updateSettings: async (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) => {
+    updateSettings: async (settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) => {
+      const slug = mockDbInstance.getOrCreateAnonymousUser(ensureSessionId(), '127.0.0.1').slug;
       mockDbInstance.updateUserSettings(slug, settings);
       return mockDbInstance.getUserSettings(slug);
     },
-    issueMigrationToken: async (userId: string) => ({ token: mockDbInstance.issueMigrationToken(userId) }),
+    issueMigrationToken: async () => ({ token: mockDbInstance.issueMigrationToken(mockDbInstance.getOrCreateAnonymousUser(ensureSessionId(), '127.0.0.1').id) }),
     redeemMigrationToken: async (token: string, sessionId: string) => {
       const user = mockDbInstance.redeemMigrationToken(token, sessionId);
       if (!user) throw new Error('invalid or expired token');
@@ -236,10 +257,10 @@ const staticApi = {
     create: async (data: { reporterSlug: string; targetType: string; targetId: string; reason?: string }) => { mockDbInstance.reportContent({ ...data, reason: data.reason || '' }); return { success: true }; },
   },
   mvs: {
-    edit: async (_id: string, _params: { userSlug: string; title: string; manifest: unknown }) => { return { success: true }; }
+    edit: async (_id: string, _params: { title: string; manifest: unknown }) => { return { success: true }; }
   },
   games: {
-    edit: async (_id: string, _params: { userSlug: string; title: string; manifest: unknown }) => { return { success: true }; }
+    edit: async (_id: string, _params: { title: string; manifest: unknown }) => { return { success: true }; }
   }
 };
 
@@ -253,12 +274,12 @@ const liveApi = {
      * プロフィール更新。`displayName` は省略可（アイコン/自己紹介だけ更新するときは渡さない）。
      * 画面表示用のラベルをここへ渡すと、それが本名として保存され slug まで変わるので注意。
      */
-    updateProfile: (userId: string, changes: { displayName?: string; avatarUrl?: string; bio?: string }) =>
-      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, ...changes }) }),
+    updateProfile: (changes: { displayName?: string; avatarUrl?: string; bio?: string }) =>
+      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ ...changes, sessionId: ensureSessionId() }) }),
     getSettings: (slug: string) => fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>(`/auth/settings?slug=${encodeURIComponent(slug)}`),
-    updateSettings: (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) =>
-      fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>('/auth/settings', { method: 'PUT', body: JSON.stringify({ slug, settings }) }),
-    issueMigrationToken: (userId: string) => fetcher<{ token: string }>('/auth/migrate', { method: 'POST', body: JSON.stringify({ userId }) }),
+    updateSettings: (settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) =>
+      fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>('/auth/settings', { method: 'PUT', body: JSON.stringify({ settings, sessionId: ensureSessionId() }) }),
+    issueMigrationToken: () => fetcher<{ token: string }>('/auth/migrate', { method: 'POST', body: JSON.stringify({ sessionId: ensureSessionId() }) }),
     redeemMigrationToken: (token: string, sessionId: string) => fetcher<AnonymousUser>('/auth/migrate', { method: 'PUT', body: JSON.stringify({ token, sessionId }) }),
   },
   upload: {
@@ -289,8 +310,9 @@ const liveApi = {
     dislike: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
     heart: (id: string, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
     repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
-    edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc }) }),
-    remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId }) }),
+    // userId は互換のため残しているがサーバーは見ない（所有者判定はセッション）
+    edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc, sessionId: ensureSessionId() }) }),
+    remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId, sessionId: ensureSessionId() }) }),
     replies: {
       list: (postId: string, userId?: string) => {
         const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
@@ -411,12 +433,13 @@ const liveApi = {
    * 型検査を通ってしまい、実際に返信側から編集すると必ず403になっていた。
    * 呼び出し側に `userSlug:` と書かせるため名前付きで受け取る。
    */
+  // 作者判定はサーバーがセッションから行うので、呼び出し側は身元を渡さない
   mvs: {
-    edit: (id: string, params: { userSlug: string; title: string; manifest: unknown }) =>
+    edit: (id: string, params: { title: string; manifest: unknown }) =>
       fetcher<unknown>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(params) }),
   },
   games: {
-    edit: (id: string, params: { userSlug: string; title: string; manifest: unknown }) =>
+    edit: (id: string, params: { title: string; manifest: unknown }) =>
       fetcher<unknown>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(params) }),
   },
 };

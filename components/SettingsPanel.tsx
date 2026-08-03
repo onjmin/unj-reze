@@ -51,7 +51,7 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
     const next = { ...privacy, [key]: !privacy[key] };
     setPrivacy(next);
     try {
-      await api.auth.updateSettings(currentUser.slug, { [key]: next[key] });
+      await api.auth.updateSettings({ [key]: next[key] });
     } catch {
       setPrivacy(privacy); // 失敗時ロールバック
     }
@@ -60,7 +60,7 @@ export default function SettingsPanel({ userId, bbsMode, setBbsMode, currentUser
   const handleIssueToken = async () => {
     if (!currentUser?.id) return;
     try {
-      const { token } = await api.auth.issueMigrationToken(currentUser.id);
+      const { token } = await api.auth.issueMigrationToken();
       setMigrationToken(token);
     } catch { /* noop */ }
   };

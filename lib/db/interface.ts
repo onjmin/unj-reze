@@ -125,6 +125,11 @@ export interface DataStore {
   getPostsByHashtag(tag: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
   /**
+   * セッションIDから本人を引く。**作成はしない**（未知のセッションは null）。
+   * 書き込み系APIの本人確認に使うので、ここで作ってしまうと「名乗れば通る」に戻る。
+   */
+  getAnonymousUserBySession(sessionId: string): Promise<AnonymousUser | null>;
+  /**
    * プロフィールを更新する。`displayName` を省略すればアイコン/自己紹介だけを更新できる。
    * slug は所有者キーなので、このメソッドでは**絶対に**書き換えない。
    */

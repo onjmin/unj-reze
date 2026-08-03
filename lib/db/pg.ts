@@ -1249,6 +1249,30 @@ export const pgStore: DataStore = {
     }
   },
 
+  async getAnonymousUserBySession(sessionId: string): Promise<AnonymousUser | null> {
+    const client = await getPool().connect();
+    try {
+      const r = await client.query(
+        'SELECT id, display_name, slug, avatar_color, avatar_url, bio, created_at FROM anonymous_users WHERE session_id = $1 LIMIT 1',
+        [sessionId]
+      );
+      const row = r.rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        displayName: row.display_name,
+        slug: row.slug,
+        avatarColor: row.avatar_color,
+        avatarUrl: row.avatar_url ?? undefined,
+        bio: row.bio ?? undefined,
+        createdAt: typeof row.created_at === 'object' && row.created_at?.toISOString
+          ? row.created_at.toISOString() : String(row.created_at),
+      } as AnonymousUser;
+    } finally {
+      client.release();
+    }
+  },
+
   async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
     const client = await getPool().connect();
     try {

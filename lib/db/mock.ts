@@ -130,6 +130,10 @@ export const mockStore: DataStore = {
     return mockDb.getOrCreateAnonymousUser(sessionId, ipAddress);
   },
 
+  async getAnonymousUserBySession(sessionId: string) {
+    return mockDb.getAnonymousUserBySession(sessionId);
+  },
+
   async updateUserDisplayName(userId: string, displayName?: string, avatarUrl?: string, bio?: string) {
     // slug は不変なので mvStore / gameStore の creatorSlug を追随させる必要はない
     return mockDb.updateUserDisplayName(userId, displayName, avatarUrl, bio);

@@ -184,6 +184,15 @@ class MockDB {
     this.oshiItems = this.oshiItems.filter(o => !(o.id === id && o.userSlug === userSlug));
   }
 
+  /** セッションIDから本人を引く。作成はしない（本人確認用） */
+  getAnonymousUserBySession(sessionId: string): AnonymousUser | null {
+    const id = this.sessionToUser.get(sessionId);
+    if (!id) return null;
+    const stored = this.anonUserData.get(id);
+    if (!stored) return null;
+    return { id: stored.id, displayName: stored.displayName, slug: stored.slug, avatarColor: stored.avatarColor, avatarUrl: stored.avatarUrl, bio: stored.bio, createdAt: stored.createdAt };
+  }
+
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): AnonymousUser {
     const existingBySession = this.sessionToUser.get(sessionId);
     if (existingBySession) {

@@ -598,13 +598,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     const mvId = editMvDraft?.mvId;
     setActiveScreen(null);
     if (!mvId) return;
-    // 作者判定はサーバー側で slug を突き合わせる。displayName を送ると必ず403になる
-    if (!userSlug) {
-      showToast('error', 'MVの更新に失敗しました');
-      return;
-    }
     try {
-      await api.mvs.edit(mvId, { userSlug, title: data.title, manifest: data.manifest });
+      await api.mvs.edit(mvId, { title: data.title, manifest: data.manifest });
       showToast('success', 'MVを更新しました');
       router.refresh();
     } catch {
@@ -614,12 +609,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const handleSaveEditedGame = async (manifest: GameManifestDraft, meta: { title: string; preset: string }) => {
     setActiveScreen(null);
-    if (!userSlug) {
-      showToast('error', 'ゲームの更新に失敗しました');
-      return;
-    }
     try {
-      await api.games.edit(post.gameId!, { userSlug, title: meta.title, manifest });
+      await api.games.edit(post.gameId!, { title: meta.title, manifest });
       showToast('success', 'ゲームを更新しました');
       router.refresh();
     } catch {

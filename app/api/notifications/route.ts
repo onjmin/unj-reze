@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodeNotification } from '@/lib/sqids';
 import { withEdgeCache } from '@/lib/edge-cache';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -21,17 +22,19 @@ export async function GET(request: NextRequest) {
   );
 }
 
+// 既読化・削除の対象は必ずセッション本人の通知（body の userId は受け付けない）
 export async function PATCH(request: NextRequest) {
-  const { id, userId, all } = await request.json();
-  if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+  const { id, all, sessionId } = await request.json();
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   if (all) {
-    await db.markAllNotificationsRead(userId);
+    await db.markAllNotificationsRead(user.displayName);
   } else if (id != null) {
     const decodedId = decodeId(id);
     if (decodedId === null) {
       return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
     }
-    await db.markNotificationRead(decodedId, userId);
+    await db.markNotificationRead(decodedId, user.displayName);
   } else {
     return NextResponse.json({ error: 'id or all is required' }, { status: 400 });
   }
@@ -39,12 +42,14 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { id, userId } = await request.json();
-  if (id == null || !userId) return NextResponse.json({ error: 'id and userId are required' }, { status: 400 });
+  const { id, sessionId } = await request.json();
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  if (id == null) return NextResponse.json({ error: 'id is required' }, { status: 400 });
   const decodedId = decodeId(id);
   if (decodedId === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
-  await db.deleteNotification(decodedId, userId);
+  await db.deleteNotification(decodedId, user.displayName);
   return NextResponse.json({ success: true });
 }

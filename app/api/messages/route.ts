@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { publishRealtime } from '@/lib/realtime/publish';
 import { chUser } from '@/lib/realtime/channels';
 import { rejectDmReason } from '@/lib/dm-rules';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -24,11 +25,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { sender, text, recipient } = body;
+  const { text, recipient, sessionId } = body;
 
-  if (!sender || !text || !recipient) {
+  // 送信者は必ずセッション本人。body の sender を信じると、
+  // 表示名も slug も公開情報なので他人になりすましてDMを送れてしまう。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  const sender = user.displayName;
+
+  if (!text || !recipient) {
     return NextResponse.json(
-      { error: 'sender, recipient, and text are required' },
+      { error: 'recipient and text are required' },
       { status: 400 }
     );
   }
@@ -62,11 +71,15 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const { id, userId } = await request.json();
-  if (id == null || !userId) {
-    return NextResponse.json({ error: 'id and userId are required' }, { status: 400 });
+  const { id, sessionId } = await request.json();
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const ok = await db.deleteMessage(Number(id), userId);
+  if (id == null) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+  const ok = await db.deleteMessage(Number(id), user.displayName);
   if (!ok) return NextResponse.json({ error: 'Message not found or not owned' }, { status: 404 });
   return NextResponse.json({ success: true });
 }

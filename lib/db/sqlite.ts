@@ -1161,6 +1161,22 @@ export const sqliteStore: DataStore = {
       .filter(p => !hidden.has(p.slug ?? ''));
   },
 
+  async getAnonymousUserBySession(sessionId: string): Promise<AnonymousUser | null> {
+    const d = await getDb();
+    const rows = rowsToObjects(d, 'SELECT * FROM anonymous_users WHERE session_id = ? LIMIT 1', [sessionId]);
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      displayName: row.display_name,
+      slug: row.slug,
+      avatarColor: row.avatar_color,
+      avatarUrl: row.avatar_url ?? undefined,
+      bio: row.bio ?? undefined,
+      createdAt: row.created_at,
+    } as AnonymousUser;
+  },
+
   async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
     const d = await getDb();
 

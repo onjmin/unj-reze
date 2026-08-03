@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodeMv } from '@/lib/sqids';
 import { withEdgeCache } from '@/lib/edge-cache';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 import type { MvManifest } from '@/lib/mv-config';
 
 function isMvManifest(m: unknown): m is MvManifest {
@@ -35,7 +36,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { title, manifest, userSlug } = body as { title?: string; manifest?: unknown; userSlug?: string };
+  const { title, manifest, sessionId } = body as { title?: string; manifest?: unknown; sessionId?: string };
   if (!title || !manifest) {
     return NextResponse.json({ error: 'title and manifest are required' }, { status: 400 });
   }
@@ -43,9 +44,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: 'invalid manifest' }, { status: 400 });
   }
 
+  // 作者判定はセッション本人の slug で行う。body の userSlug を信じると
+  // slug は公開情報なので、誰でも他人のMVを上書きできてしまう。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+
   const mv = await db.getMv(decodedId);
   if (!mv) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  if (!mv.creatorSlug || mv.creatorSlug !== userSlug) {
+  if (!mv.creatorSlug || mv.creatorSlug !== user.slug) {
     return NextResponse.json({ error: 'Only the creator can edit this MV' }, { status: 403 });
   }
 

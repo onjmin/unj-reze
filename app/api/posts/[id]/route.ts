@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachEmbedInfo } from '@/lib/post-embeds';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 export async function GET(
   _request: NextRequest,
@@ -90,11 +91,17 @@ export async function PATCH(
   if (decodedId === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
-  const { userId, content, originType, imageSrc } = await request.json();
-  if (!userId || typeof content !== 'string') {
-    return NextResponse.json({ error: 'userId and content are required' }, { status: 400 });
+  const { content, originType, imageSrc, sessionId } = await request.json();
+  // 所有者判定に使う身元は必ずセッションから取る。body の userId を信じると
+  // display_name / slug はどちらも公開情報なので、他人の投稿を編集できてしまう。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const result = await db.editPost(decodedId, userId, content, originType, imageSrc);
+  if (typeof content !== 'string') {
+    return NextResponse.json({ error: 'content is required' }, { status: 400 });
+  }
+  const result = await db.editPost(decodedId, user.displayName, content, originType, imageSrc);
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }
@@ -111,13 +118,13 @@ export async function DELETE(
   if (decodedId === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
-  const { userId } = await request.json().catch(() => ({}));
-  const url = new URL(request.url);
-  const uid = userId || url.searchParams.get('userId');
-  if (!uid) {
-    return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+  const { sessionId } = await request.json().catch(() => ({}));
+  // 削除も同様にセッション本人のみ。body/クエリの userId は受け付けない。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const ok = await db.deletePost(decodedId, uid);
+  const ok = await db.deletePost(decodedId, user.displayName);
   if (!ok) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }

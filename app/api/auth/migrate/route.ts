@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 // 移行トークンの発行(過去の匿名アカウントを新セッションへ引き継ぐため)
+//
+// 引き換え側(PUT)は session_id を丸ごと差し替えるため、発行はアカウント乗っ取りと
+// 同じ重みを持つ。誰の分を発行するかは絶対に body で指定させず、セッション本人に限る。
 export async function POST(request: NextRequest) {
-  const { userId } = await request.json();
-  if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 });
-  const token = await db.issueMigrationToken(userId);
+  const { sessionId } = await request.json().catch(() => ({}));
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  const token = await db.issueMigrationToken(user.id);
   return NextResponse.json({ token });
 }
 
