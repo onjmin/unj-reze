@@ -52,8 +52,8 @@ export const DEFAULT_MV_AUDIO_MODE: MvAudioMode = 'soundfontKoe';
  * 1周を `loopBeats` 拍ぴったりで送ると曲に対して足取りが重く見えるため、
  * 既定値は2倍（半拍ごとにコマが進む）。ユーザーがMV単位で変更できる。
  */
-export const DEFAULT_MV_WALK_SPEED = 2;
-export const MV_WALK_SPEED_OPTIONS = [0.5, 1, 1.5, 2, 3] as const;
+export const DEFAULT_MV_WALK_SPEED = 4;
+export const MV_WALK_SPEED_OPTIONS = [0.5, 1, 1.5, 2, 4] as const;
 
 // ───────────────── 動き・見た目の共通enum ─────────────────
 
