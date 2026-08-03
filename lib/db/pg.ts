@@ -576,7 +576,7 @@ export const pgStore: DataStore = {
       await client.query('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + $2 WHERE id = $1', [id, n]);
 
       const author = postResult.rows[0];
-      await insertNotificationPg(client, { recipientId: author.slug ?? author.display_name, actor: userId, type: 'heart', postId: id });
+      await insertNotificationPg(client, { recipientId: author.slug, actor: userId, type: 'heart', postId: id });
       return await getPostWithVotes(client, id, undefined, false);
     } finally {
       client.release();
@@ -642,8 +642,8 @@ export const pgStore: DataStore = {
         'UPDATE posts SET replies_count = replies_count + 1 WHERE id = $1',
         [postId]
       );
-      const parentRes = await client.query('SELECT display_name, slug FROM posts WHERE id = $1', [parentPostId]);
-      const parentAuthor = parentRes.rows[0]?.slug ?? parentRes.rows[0]?.display_name;
+      const parentRes = await client.query('SELECT slug FROM posts WHERE id = $1', [parentPostId]);
+      const parentAuthor = parentRes.rows[0]?.slug;
       if (parentAuthor) {
         await insertNotificationPg(client, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: result.rows[0].id });
       }
@@ -656,8 +656,8 @@ export const pgStore: DataStore = {
           if (seen.has(slug)) continue;
           seen.add(slug);
           mentionPromises.push((async () => {
-            const mres = await client.query('SELECT display_name, slug FROM posts WHERE slug = $1 LIMIT 1', [slug]);
-            const mname = mres.rows[0]?.slug ?? mres.rows[0]?.display_name;
+            const mres = await client.query('SELECT slug FROM posts WHERE slug = $1 LIMIT 1', [slug]);
+            const mname = mres.rows[0]?.slug;
             if (mname && mname !== parentAuthor) {
               await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', postId: result.rows[0].id });
             }
