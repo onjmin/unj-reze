@@ -33,7 +33,8 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const sender = user.displayName;
+  // displayName は改名で変わるので送信者キーには使わない（votes と同じ理由）。
+  const sender = user.slug;
 
   if (!text || !recipient) {
     return NextResponse.json(
@@ -79,7 +80,7 @@ export async function DELETE(request: NextRequest) {
   if (id == null) {
     return NextResponse.json({ error: 'id is required' }, { status: 400 });
   }
-  const ok = await db.deleteMessage(Number(id), user.displayName);
+  const ok = await db.deleteMessage(Number(id), user.slug);
   if (!ok) return NextResponse.json({ error: 'Message not found or not owned' }, { status: 404 });
   return NextResponse.json({ success: true });
 }

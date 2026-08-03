@@ -624,7 +624,7 @@ export const pgStore: DataStore = {
       await client.query('BEGIN');
       // 同時投稿によるID重複(採番の競合)を防ぐため、ID採番からINSERTまでをアドバイザリロックで直列化する。
       await client.query('SELECT pg_advisory_xact_lock(42)');
-      const slug = data.slug || deriveSlugPg(data.displayName);
+      const authorSlug = data.slug || deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const hasMml = extractMmlFromContent(data.content) !== null;
       const result = await client.query(
@@ -632,7 +632,7 @@ export const pgStore: DataStore = {
          VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          RETURNING *`,
         [
-          postId, parentPostId, data.displayName, slug, data.content,
+          postId, parentPostId, data.displayName, authorSlug, data.content,
           data.avatarColor || 'from-blue-500 to-indigo-600',
           data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
           !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, hasMml, data.originType ?? null
@@ -645,21 +645,21 @@ export const pgStore: DataStore = {
       const parentRes = await client.query('SELECT slug FROM posts WHERE id = $1', [parentPostId]);
       const parentAuthor = parentRes.rows[0]?.slug;
       if (parentAuthor) {
-        await insertNotificationPg(client, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: result.rows[0].id });
+        await insertNotificationPg(client, { recipientId: parentAuthor, actor: authorSlug, type: 'reply', postId: result.rows[0].id });
       }
       const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
       if (mentions) {
         const seen = new Set<string>();
         const mentionPromises = [];
         for (const m of mentions) {
-          const slug = m.slice(1);
-          if (seen.has(slug)) continue;
-          seen.add(slug);
+          const targetSlug = m.slice(1);
+          if (seen.has(targetSlug)) continue;
+          seen.add(targetSlug);
           mentionPromises.push((async () => {
-            const mres = await client.query('SELECT slug FROM posts WHERE slug = $1 LIMIT 1', [slug]);
+            const mres = await client.query('SELECT slug FROM posts WHERE slug = $1 LIMIT 1', [targetSlug]);
             const mname = mres.rows[0]?.slug;
             if (mname && mname !== parentAuthor) {
-              await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', postId: result.rows[0].id });
+              await insertNotificationPg(client, { recipientId: mname, actor: authorSlug, type: 'mention', postId: result.rows[0].id });
             }
           })());
         }

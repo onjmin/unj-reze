@@ -723,7 +723,7 @@ export const sqliteStore: DataStore = {
     const parentRows = rowsToObjects(d, 'SELECT slug FROM posts WHERE id = ?', [parentPostId]);
     const parentAuthor = parentRows[0]?.slug;
     if (parentAuthor) {
-      insertNotificationSqlite(d, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: id });
+      insertNotificationSqlite(d, { recipientId: parentAuthor, actor: slug, type: 'reply', postId: id });
     }
     const mentions = data.content.match(/@([A-Za-z0-9]+)/g);
     if (mentions) {
@@ -735,7 +735,7 @@ export const sqliteStore: DataStore = {
         const mrows = rowsToObjects(d, 'SELECT slug FROM posts WHERE slug = ? LIMIT 1', [mslug]);
         const mname = mrows[0]?.slug;
         if (mname && mname !== parentAuthor) {
-          insertNotificationSqlite(d, { recipientId: mname, actor: data.displayName, type: 'mention', postId: id });
+          insertNotificationSqlite(d, { recipientId: mname, actor: slug, type: 'mention', postId: id });
         }
       }
     }

@@ -42,7 +42,10 @@ export async function PUT(
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const actorId = user.displayName;
+  // displayName はいつでも変更できるので投票の同一性キーには使わない。
+  // slug は作成時に決まって以後変わらない（lib/db/pg.ts の updateUserDisplayName 参照）ので、
+  // 改名後も同一ユーザーとして重複投票判定・通知解決ができる。
+  const actorId = user.slug;
 
   let result;
 
@@ -84,8 +87,9 @@ export async function POST(
   const { count = 1, sessionId } = body;
 
   // ハートもセッション本人から。未認証の場合は空文字で続行（後方互換）。
+  // slug を使う理由は上の PUT ハンドラと同じ（displayName は改名で変わる）。
   const user = await resolveSessionUser(request, sessionId);
-  const actorId = user?.displayName ?? '';
+  const actorId = user?.slug ?? '';
 
   const result = await db.heartPost(decodedId, actorId, count);
   if (!result) {
