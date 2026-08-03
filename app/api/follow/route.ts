@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -31,19 +32,29 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { followerId, followedId } = await request.json();
-  if (!followerId || !followedId) {
-    return NextResponse.json({ error: 'Missing followerId or followedId' }, { status: 400 });
+  const { followedId, sessionId } = await request.json();
+  if (!followedId) {
+    return NextResponse.json({ error: 'Missing followedId' }, { status: 400 });
   }
-  await db.followUser(followerId, followedId);
+  // フォローする側は必ずセッション本人。body の followerId は公開情報なので信用できない。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user?.slug) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  await db.followUser(user.slug, followedId);
   return NextResponse.json({ success: true });
 }
 
 export async function DELETE(request: NextRequest) {
-  const { followerId, followedId } = await request.json();
-  if (!followerId || !followedId) {
-    return NextResponse.json({ error: 'Missing followerId or followedId' }, { status: 400 });
+  const { followedId, sessionId } = await request.json();
+  if (!followedId) {
+    return NextResponse.json({ error: 'Missing followedId' }, { status: 400 });
   }
-  await db.unfollowUser(followerId, followedId);
+  // アンフォローする側も同様にセッション本人。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user?.slug) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  await db.unfollowUser(user.slug, followedId);
   return NextResponse.json({ success: true });
 }

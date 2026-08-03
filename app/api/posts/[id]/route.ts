@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachEmbedInfo } from '@/lib/post-embeds';
 import { resolveSessionUser } from '@/lib/auth/session-server';
+import type { OriginType } from '@/lib/types';
 
 export async function GET(
   _request: NextRequest,
@@ -33,16 +34,24 @@ export async function PUT(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { action, userId } = body;
+  const { action, sessionId } = body;
+
+  // 投票者は必ずセッション本人。body の userId を信じると
+  // 公開情報である slug / displayName で他人になりすまして投票できてしまう。
+  const user = await resolveSessionUser(request, sessionId);
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  const actorId = user.displayName;
 
   let result;
 
   switch (action) {
     case 'like':
-      result = await db.likePost(decodedId, userId || '');
+      result = await db.likePost(decodedId, actorId);
       break;
     case 'dislike':
-      result = await db.dislikePost(decodedId, userId || '');
+      result = await db.dislikePost(decodedId, actorId);
       break;
     case 'repost':
       result = await db.repostPost(decodedId);
@@ -72,9 +81,13 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { userId, count = 1 } = body;
+  const { count = 1, sessionId } = body;
 
-  const result = await db.heartPost(decodedId, userId || '', count);
+  // ハートもセッション本人から。未認証の場合は空文字で続行（後方互換）。
+  const user = await resolveSessionUser(request, sessionId);
+  const actorId = user?.displayName ?? '';
+
+  const result = await db.heartPost(decodedId, actorId, count);
   if (!result) {
     return NextResponse.json({ error: 'Post not found' }, { status: 404 });
   }
@@ -91,7 +104,9 @@ export async function PATCH(
   if (decodedId === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
-  const { content, originType, imageSrc, sessionId } = await request.json();
+  const { content, originType, imageSrc, sessionId } = await request.json() as {
+    content?: string; originType?: OriginType | null; imageSrc?: string; sessionId?: string;
+  };
   // 所有者判定に使う身元は必ずセッションから取る。body の userId を信じると
   // display_name / slug はどちらも公開情報なので、他人の投稿を編集できてしまう。
   const user = await resolveSessionUser(request, sessionId);

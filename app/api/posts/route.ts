@@ -11,6 +11,7 @@ import { verifyTurnstileToken } from '@/lib/security/turnstile';
 import { scoreRequest } from '@/lib/security/scoring';
 import { readTlsSignalsFromHeaders } from '@/lib/security/tls';
 import type { FingerprintSignals } from '@/lib/security/types';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 export async function GET(request: NextRequest) {
   try {
@@ -59,20 +60,27 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const {
-      displayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, mvId, originType,
-      turnstileToken, fingerprint,
+      displayName: bodyDisplayName, content, hasImage, imageSrc, imageAlt, avatarColor, gameId, mvId, originType,
+      turnstileToken, fingerprint, sessionId: bodySessionId,
     }: {
       displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string;
       avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType;
       turnstileToken?: string | null; fingerprint?: FingerprintSignals | null;
+      sessionId?: string;
     } = body;
 
-    if (!displayName || (!content && !hasImage)) {
+    if (!bodyDisplayName || (!content && !hasImage)) {
       return NextResponse.json(
         { error: 'displayName and content are required' },
         { status: 400 }
       );
     }
+
+    // セッションが確認できた場合はセッション本人の identity を使う。
+    // 投稿はログイン不要なので、セッション不明の場合は body の displayName にフォールバックする。
+    const sessionUser = await resolveSessionUser(request, bodySessionId);
+    const displayName = sessionUser?.displayName ?? bodyDisplayName;
+    const authorSlug = sessionUser?.slug ?? undefined;
 
     // 参考実装: 多層不正検知（Turnstile + 指紋 + IP/セッション相関）。
     // fingerprint がクライアントから送られてきた場合のみ評価する後方互換設計 —
@@ -112,6 +120,7 @@ export async function POST(request: NextRequest) {
 
     const post = await db.createPost({
       displayName, content, hasImage, imageSrc, imageAlt, avatarColor,
+      slug: authorSlug,
       gameId: decodedGameId === null ? undefined : decodedGameId,
       mvId: decodedMvId === null ? undefined : decodedMvId,
       originType,

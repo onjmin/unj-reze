@@ -466,7 +466,7 @@ export const pgStore: DataStore = {
       await client.query('BEGIN');
       // 行ロックと通知スニペットのためだけなので全列は引かない。
       const postResult = await client.query(
-        'SELECT id, display_name, LEFT(content, 20) AS snippet FROM posts WHERE id = $1 FOR UPDATE',
+        'SELECT id, display_name, slug, LEFT(content, 20) AS snippet FROM posts WHERE id = $1 FOR UPDATE',
         [id]
       );
       if (postResult.rows.length === 0) {
@@ -496,7 +496,7 @@ export const pgStore: DataStore = {
         );
         await client.query('UPDATE posts SET likes = likes + 1 WHERE id = $1', [id]);
         const author = postResult.rows[0];
-        await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'like', postId: id });
+        await insertNotificationPg(client, { recipientId: author.slug, actor: userId, type: 'like', postId: id });
       }
 
       await client.query('COMMIT');
@@ -559,7 +559,7 @@ export const pgStore: DataStore = {
     try {
       // 通知スニペットにしか使わないので content 全文は引かない（LEFT で20文字だけ）。
       const postResult = await client.query(
-        'SELECT id, display_name, LEFT(content, 20) AS snippet FROM posts WHERE id = $1',
+        'SELECT id, display_name, slug, LEFT(content, 20) AS snippet FROM posts WHERE id = $1',
         [id]
       );
       if (postResult.rows.length === 0) return null;
@@ -576,7 +576,7 @@ export const pgStore: DataStore = {
       await client.query('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + $2 WHERE id = $1', [id, n]);
 
       const author = postResult.rows[0];
-      await insertNotificationPg(client, { recipientId: author.display_name, actor: userId, type: 'heart', postId: id });
+      await insertNotificationPg(client, { recipientId: author.slug ?? author.display_name, actor: userId, type: 'heart', postId: id });
       return await getPostWithVotes(client, id, undefined, false);
     } finally {
       client.release();
@@ -624,7 +624,7 @@ export const pgStore: DataStore = {
       await client.query('BEGIN');
       // 同時投稿によるID重複(採番の競合)を防ぐため、ID採番からINSERTまでをアドバイザリロックで直列化する。
       await client.query('SELECT pg_advisory_xact_lock(42)');
-      const slug = deriveSlugPg(data.displayName);
+      const slug = data.slug || deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       const hasMml = extractMmlFromContent(data.content) !== null;
       const result = await client.query(
@@ -642,8 +642,8 @@ export const pgStore: DataStore = {
         'UPDATE posts SET replies_count = replies_count + 1 WHERE id = $1',
         [postId]
       );
-      const parentRes = await client.query('SELECT display_name FROM posts WHERE id = $1', [parentPostId]);
-      const parentAuthor = parentRes.rows[0]?.display_name;
+      const parentRes = await client.query('SELECT display_name, slug FROM posts WHERE id = $1', [parentPostId]);
+      const parentAuthor = parentRes.rows[0]?.slug ?? parentRes.rows[0]?.display_name;
       if (parentAuthor) {
         await insertNotificationPg(client, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: result.rows[0].id });
       }
@@ -656,8 +656,8 @@ export const pgStore: DataStore = {
           if (seen.has(slug)) continue;
           seen.add(slug);
           mentionPromises.push((async () => {
-            const mres = await client.query('SELECT display_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
-            const mname = mres.rows[0]?.display_name;
+            const mres = await client.query('SELECT display_name, slug FROM posts WHERE slug = $1 LIMIT 1', [slug]);
+            const mname = mres.rows[0]?.slug ?? mres.rows[0]?.display_name;
             if (mname && mname !== parentAuthor) {
               await insertNotificationPg(client, { recipientId: mname, actor: data.displayName, type: 'mention', postId: result.rows[0].id });
             }
@@ -684,7 +684,7 @@ export const pgStore: DataStore = {
       ]);
       if (postResult.rows.length === 0) return null;
       const row = postResult.rows[0];
-      if (row.display_name !== userId && row.slug !== viewerSlug) return null;
+      if (row.slug !== viewerSlug) return null;
 
       const hasContentChanged = row.content !== content;
       const hasOriginTypeChanged = originType !== undefined && (row.origin_type !== (originType ?? null));
@@ -721,7 +721,7 @@ export const pgStore: DataStore = {
       if (postResult.rows.length === 0) return false;
       const post = postResult.rows[0];
       const viewerSlug = await resolveViewerSlug(client, userId);
-      if (post.display_name !== userId && post.slug !== viewerSlug) return false;
+      if (post.slug !== viewerSlug) return false;
 
       const isReply = post.parent_post_id != null && post.thread_id !== post.id;
       const childCount = await client.query('SELECT COUNT(*) AS cnt FROM posts WHERE thread_id = $1 AND id != thread_id', [id]);
@@ -751,7 +751,7 @@ export const pgStore: DataStore = {
       if (msgResult.rows.length === 0) return false;
       const sender = msgResult.rows[0].sender;
       const viewerSlug = await resolveViewerSlug(client, userId);
-      if (sender !== userId && deriveSlugPg(sender) !== viewerSlug) return false;
+      if (deriveSlugPg(sender) !== viewerSlug) return false;
       await client.query('DELETE FROM messages WHERE id = $1', [id]);
       return true;
     } finally {

@@ -57,6 +57,8 @@ export interface CreatePostParams {
 
 export interface ReplyParams {
   displayName: string;
+  /** セッションから解決済みのスラッグ。省略時は displayName から導出する。 */
+  slug?: string;
   content: string;
   parentPostId?: number;
   hasImage?: boolean;

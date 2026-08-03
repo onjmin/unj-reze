@@ -618,9 +618,9 @@ export const sqliteStore: DataStore = {
     } else {
       d.run('INSERT INTO post_votes (post_id, user_id, vote_type) VALUES (?, ?, ?)', [id, userId, 'like']);
       d.run('UPDATE posts SET likes = likes + 1 WHERE id = ?', [id]);
-      const authorRows = rowsToObjects(d, 'SELECT display_name, content FROM posts WHERE id = ?', [id]);
+      const authorRows = rowsToObjects(d, 'SELECT display_name, slug, content FROM posts WHERE id = ?', [id]);
       if (authorRows.length > 0) {
-        insertNotificationSqlite(d, { recipientId: authorRows[0].display_name, actor: userId, type: 'like', postId: id });
+        insertNotificationSqlite(d, { recipientId: authorRows[0].slug ?? authorRows[0].display_name, actor: userId, type: 'like', postId: id });
       }
     }
     saveDb();
@@ -664,9 +664,9 @@ export const sqliteStore: DataStore = {
       d.run('INSERT INTO post_hearts (post_id, user_id) VALUES (?, ?)', [id, userId]);
     }
     d.run('UPDATE posts SET hearts_total = COALESCE(hearts_total, 0) + ? WHERE id = ?', [n, id]);
-    const heartAuthor = rowsToObjects(d, 'SELECT display_name, substr(content, 1, 20) AS snippet FROM posts WHERE id = ?', [id]);
+    const heartAuthor = rowsToObjects(d, 'SELECT display_name, slug, substr(content, 1, 20) AS snippet FROM posts WHERE id = ?', [id]);
     if (heartAuthor.length > 0) {
-      insertNotificationSqlite(d, { recipientId: heartAuthor[0].display_name, actor: userId, type: 'heart', postId: id });
+      insertNotificationSqlite(d, { recipientId: heartAuthor[0].slug ?? heartAuthor[0].display_name, actor: userId, type: 'heart', postId: id });
     }
     saveDb();
 
@@ -707,7 +707,7 @@ export const sqliteStore: DataStore = {
 
   async addReply(postId: number, data: ReplyParams) {
     const d = await getDb();
-    const slug = deriveSlugSqlite(data.displayName);
+    const slug = data.slug || deriveSlugSqlite(data.displayName);
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     const parentPostId = data.parentPostId ?? postId;
@@ -720,8 +720,8 @@ export const sqliteStore: DataStore = {
        data.mvId ? 1 : 0, data.mvId || null, hasMml, data.originType || null]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
-    const parentRows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE id = ?', [parentPostId]);
-    const parentAuthor = parentRows[0]?.display_name;
+    const parentRows = rowsToObjects(d, 'SELECT display_name, slug FROM posts WHERE id = ?', [parentPostId]);
+    const parentAuthor = parentRows[0]?.slug ?? parentRows[0]?.display_name;
     if (parentAuthor) {
       insertNotificationSqlite(d, { recipientId: parentAuthor, actor: data.displayName, type: 'reply', postId: id });
     }
@@ -732,8 +732,8 @@ export const sqliteStore: DataStore = {
         const mslug = m.slice(1);
         if (seen.has(mslug)) continue;
         seen.add(mslug);
-        const mrows = rowsToObjects(d, 'SELECT display_name FROM posts WHERE slug = ? LIMIT 1', [mslug]);
-        const mname = mrows[0]?.display_name;
+        const mrows = rowsToObjects(d, 'SELECT display_name, slug FROM posts WHERE slug = ? LIMIT 1', [mslug]);
+        const mname = mrows[0]?.slug ?? mrows[0]?.display_name;
         if (mname && mname !== parentAuthor) {
           insertNotificationSqlite(d, { recipientId: mname, actor: data.displayName, type: 'mention', postId: id });
         }
@@ -763,7 +763,7 @@ export const sqliteStore: DataStore = {
     const rows = rowsToObjects(d, 'SELECT slug, display_name, content, origin_type FROM posts WHERE id = ?', [id]);
     if (rows.length === 0) return null;
     const viewerSlug = resolveViewerSlugSqlite(d, userId);
-    if (rows[0].display_name !== userId && rows[0].slug !== viewerSlug) return null;
+    if (rows[0].slug !== viewerSlug) return null;
 
     const hasContentChanged = rows[0].content !== content;
     const hasOriginTypeChanged = originType !== undefined && (rows[0].origin_type !== (originType ?? null));
@@ -796,7 +796,7 @@ export const sqliteStore: DataStore = {
     if (rows.length === 0) return false;
     const post = rows[0];
     const viewerSlug = resolveViewerSlugSqlite(d, userId);
-    if (post.display_name !== userId && post.slug !== viewerSlug) return false;
+    if (post.slug !== viewerSlug) return false;
 
     const isReply = post.parent_post_id != null && post.thread_id !== post.id;
     const childRows = rowsToObjects(d, 'SELECT COUNT(*) AS cnt FROM posts WHERE thread_id = ? AND id != thread_id', [id]);
@@ -818,7 +818,7 @@ export const sqliteStore: DataStore = {
     if (rows.length === 0) return false;
     const sender = rows[0].sender;
     const viewerSlug = resolveViewerSlugSqlite(d, userId);
-    if (sender !== userId && deriveSlugSqlite(sender) !== viewerSlug) return false;
+    if (deriveSlugSqlite(sender) !== viewerSlug) return false;
     d.run('DELETE FROM messages WHERE id = ?', [id]);
     saveDb();
     return true;

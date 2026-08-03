@@ -5,6 +5,7 @@ import { attachEmbedInfo } from '@/lib/post-embeds';
 import { withEdgeCache } from '@/lib/edge-cache';
 import { publishRealtime } from '@/lib/realtime/publish';
 import { CH_FEED, chThread } from '@/lib/realtime/channels';
+import { resolveSessionUser } from '@/lib/auth/session-server';
 
 export async function GET(
   _request: NextRequest,
@@ -37,9 +38,9 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
   const body = await request.json();
-  const { displayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, mvId, originType } = body;
+  const { displayName: bodyDisplayName, content, parentPostId, hasImage, imageSrc, imageAlt, avatarColor, gameId, mvId, originType, sessionId } = body;
 
-  if (!displayName) {
+  if (!bodyDisplayName) {
     return NextResponse.json(
       { error: 'displayName is required' },
       { status: 400 }
@@ -53,6 +54,12 @@ export async function POST(
     );
   }
 
+  // セッションが確認できた場合はセッション本人の identity を使う。
+  // 返信もログイン不要なので、セッション不明の場合は body の displayName にフォールバックする。
+  const sessionUser = await resolveSessionUser(request, sessionId);
+  const displayName = sessionUser?.displayName ?? bodyDisplayName;
+  const authorSlug = sessionUser?.slug ?? undefined;
+
   const decodedParentPostId = parentPostId ? decodeId(parentPostId) : undefined;
   if (parentPostId && decodedParentPostId === null) {
     return NextResponse.json({ error: 'Invalid parentPostId' }, { status: 400 });
@@ -60,6 +67,7 @@ export async function POST(
 
   const reply = await db.addReply(decodedId, {
     displayName,
+    slug: authorSlug,
     content: content || '',
     parentPostId: decodedParentPostId === null ? undefined : decodedParentPostId,
     hasImage,

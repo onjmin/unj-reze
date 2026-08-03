@@ -305,11 +305,11 @@ const liveApi = {
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
     create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType }) =>
-      fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify(data) }),
-    like: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', userId }) }),
-    dislike: (id: string, userId?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', userId }) }),
-    heart: (id: string, userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ userId, count }) }),
-    repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost' }) }),
+      fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify({ ...data, sessionId: ensureSessionId() }) }),
+    like: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', sessionId: ensureSessionId() }) }),
+    dislike: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', sessionId: ensureSessionId() }) }),
+    heart: (id: string, _userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ count, sessionId: ensureSessionId() }) }),
+    repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost', sessionId: ensureSessionId() }) }),
     // userId は互換のため残しているがサーバーは見ない（所有者判定はセッション）
     edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc, sessionId: ensureSessionId() }) }),
     remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId, sessionId: ensureSessionId() }) }),
@@ -330,7 +330,7 @@ const liveApi = {
         mvId?: string | number;
         originType?: OriginType;
       }) =>
-        fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify(data) }),
+        fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify({ ...data, sessionId: ensureSessionId() }) }),
     },
   },
   notifications: {
@@ -410,8 +410,8 @@ const liveApi = {
     getFollowing: (userId: string, viewerId?: string) =>
       fetcher<{ users: FollowUser[] }>(`/follow?list=following&userId=${encodeURIComponent(userId)}${viewerId ? `&viewerId=${encodeURIComponent(viewerId)}` : ''}`),
     isFollowing: (followerId: string, followedId: string) => fetcher<{ isFollowing: boolean }>(`/follow?followerId=${encodeURIComponent(followerId)}&followedId=${encodeURIComponent(followedId)}`),
-    follow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'POST', body: JSON.stringify({ followerId, followedId }) }),
-    unfollow: (followerId: string, followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'DELETE', body: JSON.stringify({ followerId, followedId }) }),
+    follow: (followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'POST', body: JSON.stringify({ followedId, sessionId: ensureSessionId() }) }),
+    unfollow: (followedId: string) => fetcher<{ success: boolean }>('/follow', { method: 'DELETE', body: JSON.stringify({ followedId, sessionId: ensureSessionId() }) }),
   },
   block: {
     list: (blockerSlug: string) => fetcher<{ blocked: string[] }>(`/block?blockerSlug=${encodeURIComponent(blockerSlug)}`),
