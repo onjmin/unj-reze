@@ -17,11 +17,14 @@ import {
   MV_W,
   isLayerVisible,
   isMvEntranceInert,
+  isMvTransitionInert,
   layerAppearBar,
   mvEntranceDistance,
+  resolveSceneStage,
   sectionAtBar,
   type MvAnchor,
   type MvEntrance,
+  type MvStage,
   type MvChordBarLayer,
   type MvEffectLayer,
   type MvImageLayer,
@@ -229,11 +232,21 @@ function lyricLinesFromTrack(
 export function collectMvImageUrls(manifest: MvManifest): string[] {
   const urls: string[] = [];
   const push = (u?: string | null) => { if (u) urls.push(u); };
-  push(manifest.stage.bgUrl ?? (manifest.stage.bgRef ? imageRefToUrl(manifest.stage.bgRef) : null));
+  push(stageBgUrl(manifest.stage));
+  // 場面ごとに差し替わる背景も先に読んでおく。場面へ入ってから読み始めると
+  // 切り替わった直後の数フレームだけ背景が抜ける。
+  for (const section of manifest.sections) {
+    if (section.stage) push(stageBgUrl(section.stage));
+  }
   for (const layer of manifest.layers) {
     if (layer.kind === 'image') push(layerImageUrl(layer));
   }
   return [...new Set(urls)];
+}
+
+/** 背景の表示URL。`bgRef: ''`（背景なしの明示）は null。 */
+function stageBgUrl(stage: { bgUrl?: string; bgRef?: string }): string | null {
+  return stage.bgUrl ?? (stage.bgRef ? imageRefToUrl(stage.bgRef) : null);
 }
 
 /** manifest の画像を全部読み込む。失敗した画像は無視して他を待つ。 */
@@ -257,6 +270,8 @@ export interface MvFrameState {
 interface DrawCtx {
   ctx: CanvasRenderingContext2D;
   manifest: MvManifest;
+  /** いまの場面ぶんの上書きを反映した背景設定。背景・パレットはこちらを見る。 */
+  stage: MvStage;
   song: MvSong;
   step: number;
   timeSec: number;
@@ -424,6 +439,7 @@ export function drawMvFrame(
   const d: DrawCtx = {
     ctx,
     manifest,
+    stage: resolveSceneStage(manifest.stage, section),
     song,
     step,
     timeSec: frame.timeSec,
@@ -466,6 +482,9 @@ export function drawMvFrame(
 
   // フラッシュ・色反転などは全部の上に重ねる（変形の影響を受けない）
   drawOverlayEffects(d, effects);
+
+  // 場面の切り替わり。演出より上・曲頭/曲尾のフェードより下に重ねる
+  drawTransition(d);
 
   // フェードイン/アウト
   if (manifest.stage.fadeIn || manifest.stage.fadeOut) {
@@ -597,11 +616,61 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
   }
 }
 
+// ───────────────── 場面の切り替わり ─────────────────
+
+/**
+ * 場面へ入った瞬間から `beats` 拍かけて覆いが晴れていく演出。
+ *
+ * 2画面ぶんを合成するクロスフェードにはしていない。1フレームに2回描くコストを払わずに
+ * 「画が入れ替わった」と分かればよく、参考動画の場面転換も実際は黒か白を1拍またぐだけ。
+ */
+function drawTransition(d: DrawCtx): void {
+  const t = d.section?.transition;
+  if (!d.section || isMvTransitionInert(t) || !t) return;
+
+  const durSteps = t.beats * MV_STEPS_PER_BEAT;
+  const age = d.step - d.section.startBar * MV_STEPS_PER_BAR;
+  if (age < 0 || age >= durSteps) return;
+  const rest = clamp01(1 - age / durSteps);
+
+  const { ctx } = d;
+  ctx.save();
+  switch (t.style) {
+    case 'flash':
+      // 光は一瞬で落ちるほうが「切り替わった」に見える
+      ctx.fillStyle = withAlpha(t.color ?? '#ffffff', rest * rest);
+      ctx.fillRect(0, 0, MV_W, MV_H);
+      break;
+    case 'wipeLeft':
+      ctx.fillStyle = t.color ?? '#000000';
+      ctx.fillRect(0, 0, MV_W * rest, MV_H);
+      break;
+    case 'wipeRight':
+      ctx.fillStyle = t.color ?? '#000000';
+      ctx.fillRect(MV_W * (1 - rest), 0, MV_W * rest, MV_H);
+      break;
+    case 'wipeUp':
+      ctx.fillStyle = t.color ?? '#000000';
+      ctx.fillRect(0, 0, MV_W, MV_H * rest);
+      break;
+    case 'wipeDown':
+      ctx.fillStyle = t.color ?? '#000000';
+      ctx.fillRect(0, MV_H * (1 - rest), MV_W, MV_H * rest);
+      break;
+    case 'fade':
+    default:
+      ctx.fillStyle = withAlpha(t.color ?? '#000000', Math.pow(rest, 1.6));
+      ctx.fillRect(0, 0, MV_W, MV_H);
+      break;
+  }
+  ctx.restore();
+}
+
 // ───────────────── 背景 ─────────────────
 
 function drawStage(d: DrawCtx): void {
-  const { ctx, manifest } = d;
-  const stage = manifest.stage;
+  const { ctx } = d;
+  const stage = d.stage;
 
   ctx.fillStyle = stage.bgColor || '#000000';
   ctx.fillRect(0, 0, MV_W, MV_H);
@@ -619,7 +688,7 @@ function drawStage(d: DrawCtx): void {
     ctx.fillRect(0, 0, MV_W, MV_H);
   }
 
-  const bgUrl = stage.bgUrl ?? (stage.bgRef ? imageRefToUrl(stage.bgRef) : null);
+  const bgUrl = stageBgUrl(stage);
   const img = bgUrl ? peekImage(bgUrl) : undefined;
   if (img && img.naturalWidth > 0) {
     drawFitted(ctx, img, stage.bgFit);
@@ -1018,7 +1087,9 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
     // 出だしは 1/8 小節でフェードイン、終わりぎわは 1/2 小節でフェードアウト
     const fadeIn = clamp01(age / 0.125);
     const fadeOut = clamp01((hold - age) / 0.5);
-    const depthFade = depth === 0 ? 1 : 0.28 / depth;
+    // 古い列は「読めないが確かにある」濃さで残す。1/depth だと3列目で消えてしまい、
+    // 参考動画のように10列ぶん積み上がった壁にならないので、等比で緩やかに落とす。
+    const depthFade = depth === 0 ? 1 : 0.42 * Math.pow(0.84, depth - 1);
     const alpha = fadeIn * fadeOut * depthFade;
     if (alpha <= 0.01) return;
 
@@ -1194,7 +1265,7 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 // ───────────────── ビジュアライザ ─────────────────
 
 function trackColor(d: DrawCtx, track: number): string {
-  const palette = d.manifest.stage.palette;
+  const palette = d.stage.palette;
   if (palette.length === 0) return '#ffffff';
   const idx = d.song.tracks.indexOf(track);
   return palette[(idx >= 0 ? idx : track) % palette.length];
@@ -1655,7 +1726,7 @@ function drawBars(d: DrawCtx, layer: MvVisualizerLayer): void {
     const level = levels[i];
     if (level <= 0.01) continue;
     const bh = h * level;
-    ctx.fillStyle = d.manifest.stage.palette[i % Math.max(1, d.manifest.stage.palette.length)] ?? '#ffffff';
+    ctx.fillStyle = d.stage.palette[i % Math.max(1, d.stage.palette.length)] ?? '#ffffff';
     ctx.fillRect(x + i * barW + gap / 2, y + h - bh, barW - gap, bh);
   }
 }

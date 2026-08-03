@@ -301,6 +301,58 @@ export interface MvStage {
   fontFamily?: string;
 }
 
+/**
+ * 場面ごとに差し替えたい背景まわり。指定した項目だけが `MvStage` を上書きする。
+ *
+ * 参考動画は「黒地のスプライト窓」と「全画面の夜景イラスト」のように、
+ * 場面が変わると**画面ごと別物になる**。背景がMV全体で1枚しか持てないと、
+ * この切り替えをレイヤーの出し分けだけで作ることになり、
+ * 全画面の1枚絵を image レイヤーで無理やり敷くしかなくなる（cover相当が効かない）。
+ */
+export interface MvSceneStage {
+  bgColor?: string;
+  bgRef?: string;
+  bgUrl?: string;
+  bgFit?: MvBgFit;
+  bgDim?: number;
+  pulse?: MvStagePulse;
+  /** トラック色。場面ごとに配色を変えると同じロールでも別の絵に見える。 */
+  palette?: string[];
+}
+
+/**
+ * 場面の切り替わり方。
+ * `cut` 以外は「新しい場面に入った瞬間から beats 拍かけて、覆いが晴れていく」演出。
+ * 2画面ぶんを合成するクロスフェードではなく**単色からの明け**にしてあるのは、
+ * 毎フレーム2回描くコストを払わずに「切り替わった」と分かる画にするため。
+ */
+export type MvTransitionStyle = 'cut' | 'fade' | 'flash' | 'wipeLeft' | 'wipeRight' | 'wipeUp' | 'wipeDown';
+
+export const MV_TRANSITION_LABELS: Record<MvTransitionStyle, string> = {
+  cut: 'そのまま切り替わる',
+  fade: '暗転から明ける',
+  flash: '光ってから現れる',
+  wipeLeft: '左へ払う',
+  wipeRight: '右へ払う',
+  wipeUp: '上へ払う',
+  wipeDown: '下へ払う',
+};
+
+export interface MvTransition {
+  style: MvTransitionStyle;
+  /** 演出にかける長さ（拍）。0以下ならカットと同じ。 */
+  beats: number;
+  /** 覆いの色。fade は既定 #000000、flash は #ffffff。 */
+  color?: string;
+}
+
+export const DEFAULT_MV_TRANSITION: MvTransition = { style: 'fade', beats: 1 };
+
+/** 何も起きない転換か。 */
+export function isMvTransitionInert(t: MvTransition | undefined): boolean {
+  return !t || t.style === 'cut' || t.beats <= 0;
+}
+
 // ───────────────── レイヤー ─────────────────
 
 interface MvLayerBase {
@@ -706,12 +758,22 @@ export function getChordThemeColor(
   }
 }
 
-/** 場面の切替点。キーフレームではなく「ここから別の絵になる」という区切りだけを持つ。 */
+/**
+ * 場面の切替点。キーフレームではなく「ここから別の絵になる」という区切りだけを持つ。
+ *
+ * レイヤーの出し分け（`MvLayer.sections`）に加えて、**場面そのものが背景と転換を持つ**。
+ * 参考動画はどれも 4/8/16小節の周期でまるごと画が変わるので、
+ * 「この小節から、この背景で、こう切り替わる」を1行で書けないと長尺で持たない。
+ */
 export interface MvSection {
   id: string;
   label: string;
   /** 0始まりの小節番号 */
   startBar: number;
+  /** この場面のあいだだけ `MvStage` を上書きする項目。未指定の項目は全体の設定のまま。 */
+  stage?: MvSceneStage;
+  /** この場面へ入るときの切り替え方。未指定＝カット。 */
+  transition?: MvTransition;
 }
 
 export interface MvManifest {
@@ -774,6 +836,29 @@ export function sectionAtBar(sections: MvSection[], bar: number): MvSection | nu
     else break;
   }
   return current;
+}
+
+/**
+ * いまの場面で実際に使う背景設定。場面の指定が無い項目は全体設定のまま。
+ *
+ * `bgRef`/`bgUrl` は対にして扱う——場面側が背景画像を指定したとき、
+ * 全体側の解決済みURLが残っていると別の絵が出てしまうため、両方まとめて差し替える。
+ * `bgRef: ''`（空文字）は「この場面は背景画像なし」の意味で、全体の背景画像を打ち消す。
+ */
+export function resolveSceneStage(stage: MvStage, section: MvSection | null): MvStage {
+  const s = section?.stage;
+  if (!s) return stage;
+  const merged: MvStage = { ...stage };
+  if (s.bgColor !== undefined) merged.bgColor = s.bgColor;
+  if (s.bgFit !== undefined) merged.bgFit = s.bgFit;
+  if (s.bgDim !== undefined) merged.bgDim = s.bgDim;
+  if (s.pulse !== undefined) merged.pulse = s.pulse;
+  if (s.palette !== undefined && s.palette.length > 0) merged.palette = s.palette;
+  if (s.bgRef !== undefined || s.bgUrl !== undefined) {
+    merged.bgRef = s.bgRef;
+    merged.bgUrl = s.bgUrl;
+  }
+  return merged;
 }
 
 /** レイヤーが、いまのセクションで表示対象かどうか。 */

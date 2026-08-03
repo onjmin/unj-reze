@@ -15,18 +15,18 @@ import { refLabel } from '@/lib/asset-ref';
 import { parseChords, detectProgression } from '@onjmin/chord-parser';
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from '@/lib/history';
 import {
-  DEFAULT_MV_ENTRANCE, DEFAULT_MV_RING, DEFAULT_MV_VIEW,
+  DEFAULT_MV_ENTRANCE, DEFAULT_MV_RING, DEFAULT_MV_TRANSITION, DEFAULT_MV_VIEW,
   MV_AUDIO_MODE_HINTS, MV_AUDIO_MODE_LABELS, MV_BLEND_LABELS, MV_CHORD_COLOR_MODE_LABELS, MV_EFFECT_STYLE_LABELS,
   MV_ENTER_FROM_LABELS,
   MV_H, MV_MOD_OP_LABELS, MV_MOD_SOURCE_LABELS, MV_MOD_TARGET_LABELS, MV_MOTION_LABELS,
-  MV_PROJECTION_LABELS, MV_ROOT_TO_PITCH, MV_SHAPE_FORM_LABELS, MV_TRIGGER_LABELS,
+  MV_PROJECTION_LABELS, MV_ROOT_TO_PITCH, MV_SHAPE_FORM_LABELS, MV_TRANSITION_LABELS, MV_TRIGGER_LABELS,
   MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, isMvEntranceInert, mvAudioMode, mvEntranceDistance, mvUid,
   type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvChordColorMode, type MvChordStep, type MvEffectLayer, type MvEffectStyle,
   type MvEnterFrom, type MvEntrance,
   type MvImageLayer, type MvLayer, type MvLyricsLayer, type MvManifest,
   type MvModOp, type MvModSource, type MvModTarget, type MvModulator,
-  type MvMotion, type MvPresetKind, type MvProjection, type MvSection,
-  type MvShapeForm, type MvShapeLayer, type MvTextLayer, type MvTrigger,
+  type MvMotion, type MvPresetKind, type MvProjection, type MvSceneStage, type MvSection,
+  type MvShapeForm, type MvShapeLayer, type MvTextLayer, type MvTransitionStyle, type MvTrigger,
   type MvVisualizerLayer, type MvVisualizerStyle,
 } from '@/lib/mv-config';
 import { parseMvSong, resolveLyricLines, EMPTY_SONG, type MvSong } from '@/lib/mv-engine';
@@ -347,7 +347,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const [tab, setTab] = useState<Tab>(initialManifest ? 'song' : 'preset');
   const [editMode, setEditMode] = useState<EditMode>('easy');
   const [presetName, setPresetName] = useState<string | null>(null);
-  const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: 'stageBg' | { layerId: string } } | null>(null);
+  const [picker, setPicker] = useState<{ mode: 'image' | 'bgm'; target: 'stageBg' | { layerId: string } | { sectionId: string } } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [song, setSong] = useState<MvSong>(EMPTY_SONG);
@@ -381,6 +381,24 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
   const updateLayer = useCallback((id: string, patch: (l: MvLayer) => MvLayer) => {
     update(m => ({ ...m, layers: m.layers.map(l => (l.id === id ? patch(l) : l)) }));
   }, [update]);
+
+  const updateSection = useCallback((id: string, patch: (s: MvSection) => MvSection) => {
+    update(m => ({ ...m, sections: m.sections.map(s => (s.id === id ? patch(s) : s)) }));
+  }, [update]);
+
+  /**
+   * 場面ごとの背景の上書き。値が全部消えたら `stage` ごと落として
+   * 「この場面は全体の設定のまま」に戻す（空オブジェクトが残ると上書きの有無が読めなくなる）。
+   */
+  const updateSectionStage = useCallback((id: string, patch: Partial<MvSceneStage>) => {
+    updateSection(id, s => {
+      const next: MvSceneStage = { ...s.stage, ...patch };
+      for (const k of Object.keys(next) as (keyof MvSceneStage)[]) {
+        if (next[k] === undefined) delete next[k];
+      }
+      return Object.keys(next).length > 0 ? { ...s, stage: next } : { ...s, stage: undefined };
+    });
+  }, [updateSection]);
 
   const handleParseBulkChords = useCallback((rawText: string, layerId: string) => {
     if (!rawText.trim()) return;
@@ -456,6 +474,9 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
       if (result.rawMml) update(m => ({ ...m, mml: result.rawMml! }));
     } else if (picker.target === 'stageBg') {
       update(m => ({ ...m, stage: { ...m.stage, bgRef: result.ref, bgUrl: result.url } }));
+    } else if ('sectionId' in picker.target) {
+      const sectionId = picker.target.sectionId;
+      updateSectionStage(sectionId, { bgRef: result.ref, bgUrl: result.url });
     } else {
       const layerId = picker.target.layerId;
       updateLayer(layerId, l => (l.kind === 'image' ? { ...l, ref: result.ref, url: result.url } : l));
@@ -1423,7 +1444,8 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             <NumField label="文字サイズ" value={lyricsLayer.size} min={8} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, size: v } as MvLayer))} />
             <ColorField label="文字色" value={lyricsLayer.color} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, color: v } as MvLayer))} />
             <CheckField label="縦書き" checked={lyricsLayer.vertical} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, vertical: v } as MvLayer))} />
-            <NumField label="残像の数" value={lyricsLayer.afterimage} min={0} max={5} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, afterimage: v } as MvLayer))} />
+            {/* 参考動画は10列ぶん積み上がるので、目安は0〜12 */}
+            <NumField label="残像の数（0〜12）" value={lyricsLayer.afterimage} min={0} max={12} onChange={v => updateLayer(lyricsLayer.id, l => ({ ...l, afterimage: v } as MvLayer))} />
             <label className="flex items-center gap-1.5 py-1">
               <input type="checkbox" checked={!!lyricsLayer.typing}
                 onChange={e => updateLayer(lyricsLayer.id, l => ({ ...l, typing: e.target.checked } as MvLayer))} className="accent-blue-500" />
@@ -1445,32 +1467,101 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
         <SectionTitle>🎬 場面</SectionTitle>
         <p className="text-[10px] leading-relaxed text-gray-400">
           小節番号で場面を区切ります。レイヤータブで「出す場面」を選ぶと、イントロとサビで絵を切り替えられます。
+          場面ごとに背景と切り替え方も持てるので、画面ごと別物にできます。
         </p>
+        <Hint>
+          長い曲ほど場面の数が効きます。目安は8小節ごと（見本はどれも8〜16場面あります）。
+          曲は全部で {song.totalBars || '—'} 小節です。
+        </Hint>
         {manifest.sections.map((s, i) => (
-          <div key={s.id} className="flex items-center gap-1.5">
-            <input
-              value={s.label}
-              onChange={e => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) }))}
-              className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-            />
-            <StringNumInput
-              value={s.startBar}
-              onChange={n => update(m => ({ ...m, sections: m.sections.map((x, j) => (j === i ? { ...x, startBar: Math.max(0, n) } : x)) }))}
-              className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-            />
-            <span className="shrink-0 text-[10px] text-gray-500">小節</span>
-            {manifest.sections.length > 1 && (
-              <button
-                onClick={() => update(m => ({
-                  ...m,
-                  sections: m.sections.filter((_, j) => j !== i),
-                  layers: m.layers.map(l => (l.sections ? { ...l, sections: l.sections.filter(x => x !== s.id) } : l)),
+          <div key={s.id} className="space-y-1.5 rounded border border-gray-700/70 bg-gray-900/60 p-2">
+            <div className="flex items-center gap-1.5">
+              <input
+                value={s.label}
+                onChange={e => updateSection(s.id, x => ({ ...x, label: e.target.value }))}
+                className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+              />
+              <StringNumInput
+                value={s.startBar}
+                onChange={n => updateSection(s.id, x => ({ ...x, startBar: Math.max(0, n) }))}
+                className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+              />
+              <span className="shrink-0 text-[10px] text-gray-500">小節</span>
+              {manifest.sections.length > 1 && (
+                <button
+                  onClick={() => update(m => ({
+                    ...m,
+                    sections: m.sections.filter((_, j) => j !== i),
+                    layers: m.layers.map(l => (l.sections ? { ...l, sections: l.sections.filter(x => x !== s.id) } : l)),
+                  }))}
+                  className={DEL_BTN_CLASS}
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
+
+            <Details label="この場面の背景と切り替え方">
+              <SelectField
+                label="切り替え方"
+                value={s.transition?.style ?? 'cut'}
+                options={(Object.keys(MV_TRANSITION_LABELS) as MvTransitionStyle[]).map(v => ({ value: v, label: MV_TRANSITION_LABELS[v] }))}
+                onChange={v => updateSection(s.id, x => ({
+                  ...x,
+                  transition: v === 'cut' ? undefined : { ...(x.transition ?? DEFAULT_MV_TRANSITION), style: v },
                 }))}
-                className={DEL_BTN_CLASS}
-              >
-                <Trash2 size={16} />
+              />
+              {s.transition && (
+                <>
+                  <NumField label="切り替えの長さ（拍）" value={s.transition.beats} min={0.25} max={8} step={0.25}
+                    onChange={v => updateSection(s.id, x => (x.transition ? { ...x, transition: { ...x.transition, beats: v } } : x))} />
+                  <ColorField label="覆いの色" value={s.transition.color ?? (s.transition.style === 'flash' ? '#ffffff' : '#000000')}
+                    onChange={v => updateSection(s.id, x => (x.transition ? { ...x, transition: { ...x.transition, color: v } } : x))} />
+                </>
+              )}
+
+              <p className="pt-1 text-[10px] font-bold text-gray-400">背景の差し替え</p>
+              <Hint>入れなかった項目は「見た目」タブの設定がそのまま使われます。</Hint>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => updateSectionStage(s.id, { bgColor: s.stage?.bgColor ?? manifest.stage.bgColor })}
+                  disabled={s.stage?.bgColor !== undefined}
+                  className={`${REF_BTN_CLASS} disabled:opacity-40`}
+                >
+                  この場面の地の色を決める
+                </button>
+                {s.stage?.bgColor !== undefined && (
+                  <button onClick={() => updateSectionStage(s.id, { bgColor: undefined })} className={DEL_BTN_CLASS}>
+                    <Trash2 size={16} />
+                  </button>
+                )}
+              </div>
+              {s.stage?.bgColor !== undefined && (
+                <ColorField label="地の色" value={s.stage.bgColor} onChange={v => updateSectionStage(s.id, { bgColor: v })} />
+              )}
+              <button onClick={() => setPicker({ mode: 'image', target: { sectionId: s.id } })} className={REF_BTN_CLASS}>
+                <ImageIcon size={12} />この場面の背景画像を参照
               </button>
-            )}
+              {s.stage?.bgRef !== undefined && (
+                <div className="flex items-center gap-2 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[9px] text-gray-400">
+                  {s.stage.bgUrl && <img src={s.stage.bgUrl} alt="" className="h-7 w-7 shrink-0 rounded object-cover" />}
+                  <span className="flex-1 truncate">{s.stage.bgRef ? refLabel(s.stage.bgRef) : '背景画像なし（全体の背景を消す）'}</span>
+                  <button onClick={() => updateSectionStage(s.id, { bgRef: undefined, bgUrl: undefined })} className={DEL_BTN_CLASS}>
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              )}
+              {s.stage?.bgRef === undefined && manifest.stage.bgRef && (
+                <button
+                  onClick={() => updateSectionStage(s.id, { bgRef: '', bgUrl: undefined })}
+                  className={REF_BTN_CLASS}
+                >
+                  この場面だけ背景画像を消す
+                </button>
+              )}
+              <NumField label="暗くする（未指定なら全体の設定）" value={s.stage?.bgDim ?? manifest.stage.bgDim ?? 0} min={0} max={1} step={0.05}
+                onChange={v => updateSectionStage(s.id, { bgDim: v })} />
+            </Details>
           </div>
         ))}
         <button
