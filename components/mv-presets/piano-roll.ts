@@ -10,7 +10,7 @@
 // 曲のノートがそのまま絵になるので、素材を1枚も足さなくても成立する（背景・キャラは差し替え推奨）。
 
 import type { MvLayer, MvManifest, MvSection, MvView, MvVisualizerLayer } from '@/lib/mv-config';
-import { BUILTIN_CHARS, charRef, charUrl, charWalk, cloneManifest, mvTrack, type MvPresetEntry } from './shared';
+import { cloneManifest, mvTrack, rozePose, rozeRef, rozeUrl, type MvPresetEntry } from './shared';
 
 const BARS = 64;
 
@@ -132,7 +132,7 @@ const SECTIONS: MvSection[] = [
   { id: 'end', label: 'アウトロ（平面）', startBar: 56, stage: { bgColor: '#0b1017' }, transition: { style: 'wipeRight', beats: 1.5 } },
 ];
 
-const CHARA = BUILTIN_CHARS[2];
+const CHARA = 'pose-a';
 
 const LAYERS: MvLayer[] = [
   // ── 場面ごとのロール ───────────────────────────────────
@@ -149,8 +149,14 @@ const LAYERS: MvLayer[] = [
     amount: 6,
   }),
   roll('roll-a2', ['a2'], { pitch: 18, yaw: 30, depth: 250 }),
-  // アウトロは真横から。譜面がそのまま流れて終わる
-  roll('roll-end', ['end'], {}, { projection: 'flat', amount: 6, opacity: 0.8 }),
+  // アウトロは真横から。譜面がそのまま流れて終わる。
+  // 平面ロールの既定は「普段は薄く・鳴った瞬間だけ白く」なので、
+  // ここは主役として見せるぶん dim を上げて、余韻だけ効かせる。
+  roll('roll-end', ['end'], {}, {
+    projection: 'flat',
+    amount: 6,
+    light: { dim: 0.5, fadeOut: false, echo: { beats: 0.6, spread: 8, thickness: 1.5 } },
+  }),
 
   // ── 「本編」に入った瞬間に一度だけ光る ─────────────────────
   // sections で本編だけに絞らないと、イントロの開始（0小節目）でも startBar=0 として誤発火する。
@@ -179,12 +185,13 @@ const LAYERS: MvLayer[] = [
   {
     kind: 'image',
     id: 'chara',
-    ref: charRef(CHARA),
-    url: charUrl(CHARA),
-    walk: charWalk('s', 3),
+    ref: rozeRef(CHARA),
+    url: rozeUrl(CHARA),
+    // 6コマを2小節で1周。曲が速くなればアニメも速くなる。
+    walk: rozePose('a', 8),
     x: 552,
-    y: 350,
-    scale: 6,
+    y: 356,
+    scale: 0.62,
     anchor: 'bottom',
     motion: 'bob',
     motionAmount: 3,

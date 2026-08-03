@@ -193,6 +193,66 @@ export const DEFAULT_MV_VIEW: MvView = {
   thickness: 10,
 };
 
+/**
+ * ピアノロールの流し方。
+ * - scroll : 再生位置に合わせて右から左へ流れる
+ * - page   : 位置を固定し、`amount` 小節ぶんの譜面を丸ごと差し替える
+ *
+ * 参考動画（チョウチン少女）のロールは **横に一切動かない**。
+ * 1ピクセル幅のスリットを時間方向に積む（x-t画像）と、斜めの筋が1本も出ず縦線しか出ない。
+ * 譜面は4小節ぶんが固定位置に並び、4小節経つとページごと差し替わる。
+ */
+export type MvRollFlow = 'scroll' | 'page';
+
+export const MV_ROLL_FLOW_LABELS: Record<MvRollFlow, string> = {
+  scroll: '流れる（右から左へ）',
+  page: '固定（小節ごとに譜面を差し替え）',
+};
+
+/**
+ * 鳴った音がノート矩形から広がりながら消えていく輪郭＝**映像のリバーブ**。
+ *
+ * 参考動画をコマ送りすると、音の頭でノートが白く塗りつぶされ、
+ * そのあと矩形の外へ白い枠が広がっていき、中身が暗くなっても枠だけが薄れながら残る。
+ * これが無いと譜面がただの静止テクスチャに見える。
+ */
+export interface MvNoteEcho {
+  /** 広がりきって消えるまでの長さ（拍）。0で余韻なし。 */
+  beats: number;
+  /** ノート矩形から何px外まで広がるか。 */
+  spread: number;
+  /** 輪郭の太さ。 */
+  thickness: number;
+}
+
+/**
+ * ノート1つの光り方。
+ *
+ * 参考動画の実測（地の色33 / 未発音47 / 発音242）では、
+ * **まだ鳴っていない音は地の色+7%しかない**。全部を濃く描くと「音が鳴っている」情報が消える。
+ */
+export interface MvNoteLight {
+  /** まだ鳴っていない音の濃さ 0..1。 */
+  dim: number;
+  /** 鳴り終わった音を消すか。false なら dim の濃さで残る（流れるロール向け）。 */
+  fadeOut: boolean;
+  /** 音の頭から広がって消える輪郭。 */
+  echo?: MvNoteEcho;
+}
+
+/** 平面ロールの既定。参考動画に寄せて「普段は薄く・鳴った瞬間だけ白く・余韻が広がる」。 */
+export const DEFAULT_MV_NOTE_LIGHT: MvNoteLight = {
+  dim: 0.2,
+  fadeOut: false,
+  echo: { beats: 0.5, spread: 7, thickness: 1.5 },
+};
+
+/**
+ * 立体・円形ロールの既定。こちらは MIDITrail 準拠で、鳴っていない音も色のまま見せる
+ * （板の並びそのものが絵になっているので、薄くすると何も見えなくなる）。
+ */
+export const DEFAULT_MV_NOTE_LIGHT_3D: MvNoteLight = { dim: 0.8, fadeOut: false };
+
 /** 円形ピアノロールの形。 */
 export interface MvRing {
   /** 内側の半径（論理px）。ここが「いま」の位置。 */
@@ -326,7 +386,8 @@ export interface MvSceneStage {
  * 2画面ぶんを合成するクロスフェードではなく**単色からの明け**にしてあるのは、
  * 毎フレーム2回描くコストを払わずに「切り替わった」と分かる画にするため。
  */
-export type MvTransitionStyle = 'cut' | 'fade' | 'flash' | 'wipeLeft' | 'wipeRight' | 'wipeUp' | 'wipeDown';
+export type MvTransitionStyle =
+  | 'cut' | 'fade' | 'flash' | 'wipeLeft' | 'wipeRight' | 'wipeUp' | 'wipeDown' | 'dissolve';
 
 export const MV_TRANSITION_LABELS: Record<MvTransitionStyle, string> = {
   cut: 'そのまま切り替わる',
@@ -336,7 +397,18 @@ export const MV_TRANSITION_LABELS: Record<MvTransitionStyle, string> = {
   wipeRight: '右へ払う',
   wipeUp: '上へ払う',
   wipeDown: '下へ払う',
+  dissolve: '粒子がほどけて現れる',
 };
+
+/**
+ * `dissolve` が使う粒子シート。白い点が敷き詰まった状態からほどけていく14コマ。
+ * 黒地の上に加算合成で重ねる前提なので、黒い部分は何も足さない＝そのまま透ける。
+ */
+export const MV_PARTICLE_REVEAL_URL = '/assets/mv/particle-reveal.png';
+export const MV_PARTICLE_REVEAL_FRAMES = 14;
+/** 逆再生（画面を粒子で覆っていく15コマ）。画像レイヤーとして使える。 */
+export const MV_PARTICLE_COVER_URL = '/assets/mv/particle-cover.png';
+export const MV_PARTICLE_COVER_FRAMES = 15;
 
 export interface MvTransition {
   style: MvTransitionStyle;
@@ -365,8 +437,15 @@ interface MvLayerBase {
   opacity?: number;
 }
 
+/**
+ * スプライトの動かし方。
+ *
+ * - 歩行グラ規格（`stdId` が 'rpgen' や 'rmmv' など）は「行＝方向・列＝足踏み」なので `dir` で向きを選ぶ。
+ * - MV向けのシートは「1行＝1つのアニメーション」で向きの概念が無い。この場合は
+ *   `stdId: 'row_anim'` にして `crop` でその行だけを切り出し、`frames` 列ぶんを順に送る。
+ */
 export interface MvWalkSetting {
-  /** lib/walk-sprite.ts の WalkStandard.id（'auto' 可） */
+  /** lib/walk-sprite.ts の WalkStandard.id（'auto' / 'row_anim' 可） */
   stdId: string;
   crop?: [number, number, number, number];
   frames?: number;
@@ -374,6 +453,14 @@ export interface MvWalkSetting {
   dir?: WayKey;
   /** 足踏みのコマ/秒 */
   fps?: number;
+  /** stdId==='row_anim' のときの再生のしかた。未指定は loop。 */
+  playMode?: 'loop' | 'pingpong' | 'once';
+  /**
+   * 1周を何拍で回すか。指定すると `fps` より優先され、**曲のテンポに合わせて**コマが送られる。
+   * 4コマのループに `loopBeats: 4` を入れれば1小節で1周する。
+   * 秒で指定する `fps` だとテンポを変えた瞬間に絵と音がずれるので、拍で持てるようにしてある。
+   */
+  loopBeats?: number;
 }
 
 export interface MvImageLayer extends MvLayerBase {
@@ -448,6 +535,16 @@ export interface MvVisualizerLayer extends MvLayerBase {
   glow?: boolean;
   /** pianoRoll のみ。平面／立体／円形の切り替え。未指定は flat。 */
   projection?: MvProjection;
+  /** pianoRoll(flat) のみ。流れるか、位置を固定してページで差し替えるか。未指定は scroll。 */
+  flow?: MvRollFlow;
+  /** ノートの明暗と余韻。未指定は projection ごとの既定（平面は薄め、立体は濃いまま）。 */
+  light?: MvNoteLight;
+  /**
+   * 縦に映す音域 [低い音, 高い音]（MIDIノート番号）。未指定なら曲全体の音域。
+   * 曲全体を1枚に収めるとノート1枚が数pxになるので、**拡大表示したいときはここを狭める**。
+   * 参考動画の中央にある大きな四角は、狭い音域を大きく映したロール。
+   */
+  pitchRange?: [number, number];
   /** projection==='perspective' のときの視点。 */
   view?: MvView;
   /** projection==='circular' のときの形。 */
@@ -644,6 +741,39 @@ export interface MvChordBarLayer extends MvLayerBase {
   windowBars?: number;
 }
 
+/**
+ * キャラの頭の上に出る「度数」。
+ *
+ * 参考動画（運び屋さん）を拡大すると `9` `♭7` `5` と書かれている。
+ * `2` ではなく `9`、`7` ではなく `♭7` という書き方なので、これは調に対する音階度数ではなく
+ * **いま鳴っているコードの根音から数えたコードトーン名**。
+ * 同じ音を伸ばしたままでもコードが変わると数字が変わる。
+ */
+export interface MvDegreeLayer extends MvLayerBase {
+  kind: 'degree';
+  /** 数字の元になるトラック(@n)。そのトラックでいま鳴っている音を読む。 */
+  track: number;
+  x: number;
+  y: number;
+  anchor: MvAnchor;
+  size: number;
+  color: string;
+  bold?: boolean;
+  shadow?: boolean;
+  /**
+   * 度数の数え方。
+   * - chord : コード進行バーの、いまの小節のコードの根音から数える（参考動画はこれ）
+   * - key   : `key` で指定した調の主音から数える
+   */
+  basis: 'chord' | 'key';
+  /** basis==='key' のとき、および参照先にコードが無い区間の基準。 */
+  key: string;
+  /** 参照するコード進行バーのレイヤーID。未指定なら最初に見つかった chordBar。 */
+  chordLayerId?: string;
+  /** 音が切れても直前の数字を出し続ける。false なら鳴っている間だけ出る。 */
+  hold?: boolean;
+}
+
 export type MvLayer =
   | MvImageLayer
   | MvTextLayer
@@ -651,7 +781,20 @@ export type MvLayer =
   | MvLyricsLayer
   | MvShapeLayer
   | MvEffectLayer
-  | MvChordBarLayer;
+  | MvChordBarLayer
+  | MvDegreeLayer;
+
+/**
+ * 根音からの半音差 → コードトーン名。
+ * 2半音を「2」ではなく「9」と書くのが参考動画の流儀（テンション表記）。
+ */
+export const MV_CHORD_TONE_NAMES = [
+  '1', '♭9', '9', '♭3', '3', '11', '♯11', '5', '♯5', '13', '♭7', '7',
+] as const;
+
+export function chordToneLabel(semitonesFromRoot: number): string {
+  return MV_CHORD_TONE_NAMES[((semitonesFromRoot % 12) + 12) % 12];
+}
 
 /** 音名 → 半音（0-11）。 */
 export const MV_ROOT_TO_PITCH: Record<string, number> = {
@@ -822,6 +965,7 @@ export const MV_LAYER_KIND_LABELS: Record<MvLayer['kind'], string> = {
   shape: '図形',
   effect: '演出',
   chordBar: 'コード進行バー',
+  degree: '度数（頭の上の数字）',
 };
 
 // ───────────────── ヘルパ ─────────────────

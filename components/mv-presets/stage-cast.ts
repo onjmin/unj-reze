@@ -7,7 +7,7 @@
 // 「キーに対する度数で色相を決める」やり方。
 
 import type { MvChordStep, MvLayer, MvManifest, MvSection } from '@/lib/mv-config';
-import { BUILTIN_CHARS, charRef, charUrl, charWalk, cloneManifest, mvTrack, rest, type MvPresetEntry } from './shared';
+import { cloneManifest, cookieRef, cookieUrl, cookieWalk, mvTrack, rest, type CookieKey, type MvPresetEntry } from './shared';
 
 const BARS = 64;
 
@@ -122,15 +122,19 @@ const ALL = SECTIONS.map(s => s.id);
 /** i 番目のキャラが並びに加わる場面から最後まで。 */
 const fromSection = (idx: number) => ALL.slice(idx);
 
-/** 横一列の立ち位置。参考動画と同じで、真ん中から外へ広がるように増える。 */
-const CAST: { char: string; x: number; joinAt: number; scale: number }[] = [
-  { char: BUILTIN_CHARS[0], x: 246, joinAt: 0, scale: 3 },
-  { char: BUILTIN_CHARS[2], x: 320, joinAt: 0, scale: 3 },
-  { char: BUILTIN_CHARS[3], x: 394, joinAt: 0, scale: 3 },
-  { char: BUILTIN_CHARS[1], x: 172, joinAt: 1, scale: 3 },
-  { char: BUILTIN_CHARS[7], x: 468, joinAt: 2, scale: 3 },
-  { char: BUILTIN_CHARS[4], x: 100, joinAt: 3, scale: 3 },
-  { char: BUILTIN_CHARS[5], x: 540, joinAt: 5, scale: 3 },
+/**
+ * 横一列の立ち位置。参考動画と同じで、真ん中から外へ広がるように増える。
+ * 1コマ160×240の素材を高さ56px前後に落とすので scale は 0.23 前後。
+ * ループの拍数を1体ずつずらしてあり、全員が同じ動きで揃わないようにしてある。
+ */
+const CAST: { char: CookieKey; x: number; joinAt: number; scale: number; loopBeats: number }[] = [
+  { char: 'nyn-a', x: 246, joinAt: 0, scale: 0.24, loopBeats: 2 },
+  { char: 'mgr-a', x: 320, joinAt: 0, scale: 0.24, loopBeats: 4 },
+  { char: 'mot-a', x: 394, joinAt: 0, scale: 0.24, loopBeats: 2 },
+  { char: 'nyn-b', x: 172, joinAt: 1, scale: 0.23, loopBeats: 4 },
+  { char: 'mot-b', x: 468, joinAt: 2, scale: 0.23, loopBeats: 2 },
+  { char: 'mgr-b', x: 100, joinAt: 3, scale: 0.22, loopBeats: 4 },
+  { char: 'nyn-c', x: 540, joinAt: 5, scale: 0.22, loopBeats: 2 },
 ];
 
 const LAYERS: MvLayer[] = [
@@ -171,9 +175,9 @@ const LAYERS: MvLayer[] = [
   ...CAST.map((c, i) => ({
     kind: 'image' as const,
     id: `cast${i}`,
-    ref: charRef(c.char),
-    url: charUrl(c.char),
-    walk: charWalk('s', 3),
+    ref: cookieRef(c.char),
+    url: cookieUrl(c.char),
+    walk: cookieWalk(c.char, c.loopBeats),
     x: c.x,
     y: 276,
     scale: c.scale,
@@ -189,6 +193,33 @@ const LAYERS: MvLayer[] = [
       }
       : {}),
   })),
+
+  // ── キャラの頭の上に出る度数 ────────────────────────────
+  // 参考動画（運び屋さん）と同じで、いま鳴っているコードの根音から数えたコードトーン名。
+  // 旋律・低音・和音の3トラックをそれぞれ別のキャラの頭上に割り当てている。
+  ...([
+    { id: 'deg-mel', track: 0, x: 320, joinAt: 0 },
+    { id: 'deg-bass', track: 1, x: 246, joinAt: 0 },
+    { id: 'deg-chord', track: 2, x: 394, joinAt: 0 },
+    { id: 'deg-vox', track: 3, x: 172, joinAt: 1 },
+  ].map(dg => ({
+    kind: 'degree' as const,
+    id: dg.id,
+    track: dg.track,
+    x: dg.x,
+    y: 208,
+    anchor: 'top' as const,
+    size: 12,
+    color: '#f8fafc',
+    bold: true,
+    shadow: true,
+    basis: 'chord' as const,
+    key: 'E',
+    chordLayerId: 'chords',
+    hold: true,
+    z: 40,
+    ...(dg.joinAt > 0 ? { sections: fromSection(dg.joinAt) } : {}),
+  }))),
 
   // ── 歌詞の帯（横書き・画面下）──────────────────────────
   {

@@ -1,20 +1,28 @@
 // 「灯りのステージ」プリセット。
 // 参考動画: チョウチン少女.mp4
-//   ほぼ黒い舞台の左右に「小道具」がひとつずつ置かれ、そのあいだで中央のモチーフだけが替わり続ける。
-//   計測すると **約6.8秒＝4小節ごと** にモチーフが入れ替わっていて、
-//   枠だけ → 枠と点 → 太い括弧 → 破線の段 → 縦棒の束 → 小さな四角 … と巡る。
-//   画面の下半分には、うっすらとした横線（＝低い不透明度のピアノロール）が流れ続ける。
-//   歌詞は左右の端に縦書きで出て、場面によって出る側が入れ替わる。
 //
-// 小道具（提灯・立て看板）は画像ではなく図形（SVGパス）で組んである。
+// コマ送りとスリットスキャン（1px幅の縦スリットを時間方向に積んだx-t画像）で分かった構造:
+//
+//   1. 画面に出ているのは **位置が固定されたピアノロール** で、横に一切動かない。
+//      x-t画像に斜めの筋が1本も出ず、縦線しか出ない＝スクロールしていない。
+//      譜面は4小節ぶんが固定位置に並び、4小節経つとページごと差し替わる
+//      （＝以前「4小節ごとの場面転換」に見えていたものの正体はページ送り）。
+//   2. ノートは **まだ鳴っていないあいだは地の色+7%** しかない（実測 地33 / 未発音47 / 発音242）。
+//      鳴った瞬間だけ白く塗りつぶされる。全部を濃く描くと「今どれが鳴っているか」が画から消える。
+//   3. 音の頭で、ノート矩形の外へ **白い輪郭が広がりながら薄れていく**。
+//      中身が暗くなったあとも枠だけが残って消える——これが映像側のリバーブ。
+//   4. 中央の大きな図形は静的なモチーフではなく、**1小節ぶんを拡大表示したロール**。
+//      拍ごとに別の形に見えていたのは、そのとき鳴っている音が変わっていただけ。
+//
+// 小道具（提灯・立て看板）は画像ではなく図形で組んである。
 // 素材ゼロで成立させつつ、ユーザーが画像レイヤーに置き換えられるようにするため。
 
-import type { MvLayer, MvManifest, MvSection, MvShapeLayer } from '@/lib/mv-config';
-import { BUILTIN_CHARS, charRef, charUrl, charWalk, cloneManifest, mvTrack, rep, rest, type MvPresetEntry } from './shared';
+import type { MvLayer, MvManifest, MvSection } from '@/lib/mv-config';
+import { cloneManifest, mvTrack, rep, rest, rozeBeat, rozeRef, rozeUrl, type MvPresetEntry } from './shared';
 
 const BARS = 64;
-/** モチーフが入れ替わる周期。参考動画の実測（約6.8秒＝4小節）に合わせてある。 */
-const SCENE_BARS = 4;
+/** 場面の周期。参考動画のページ送り（4小節）と同じ刻みで小道具と歌詞を動かす。 */
+const SCENE_BARS = 8;
 
 // ── 旋律（l8）──
 const N1 = 'e r g r a r b r';
@@ -124,64 +132,57 @@ const SIGN = 'M50,14 L84,90 L16,90 Z';
 /** 看板の「！」。 */
 const SIGN_MARK = 'M46,42 L54,42 L52,68 L48,68 Z M47,74 L53,74 L53,82 L47,82 Z';
 
-const SCENES = 16;
+const SCENES = BARS / SCENE_BARS;
 const scene = (i: number) => `s${String(i).padStart(2, '0')}`;
 
 /**
- * 4小節ごとの場面。参考動画と同じでほとんどが**カット**（覆いを挟まずに切り替わる）。
+ * 場面。譜面そのものは4小節ごとにページが変わるので、場面は小道具と歌詞の出し分けだけを担当する。
+ * 参考動画と同じでほとんどが**カット**（覆いを挟まずに切り替わる）。
  * 曲の折り返しにあたる32小節目だけ白く抜けて、後半に入ったことが分かるようにしてある。
  */
 const SECTIONS: MvSection[] = Array.from({ length: SCENES }, (_, i) => ({
   id: scene(i),
   label: `${i * SCENE_BARS}小節〜`,
   startBar: i * SCENE_BARS,
-  ...(i === 8 ? { transition: { style: 'flash' as const, beats: 1 } } : {}),
+  ...(i === 4 ? { transition: { style: 'flash' as const, beats: 1 } } : {}),
 }));
 
-const INK = '#f4f4f5';
-
-/** 中央のモチーフの共通形。音の打点で少しだけ濃くなる。 */
-function motif(over: Partial<MvShapeLayer> & { id: string; sections: string[] }): MvShapeLayer {
-  return {
-    kind: 'shape',
-    form: 'square',
-    x: 320,
-    y: 172,
-    size: 34,
-    rotation: 0,
-    color: INK,
-    filled: false,
-    thickness: 2,
-    z: 20,
-    modulators: [
-      { source: 'trackOnset', track: 0, target: 'opacity', op: 'mul', amount: 1 },
-      { source: 'constant', target: 'opacity', op: 'add', amount: 0.55 },
-    ],
-    ...over,
-  };
-}
-
-// モチーフの巡り。7種を16場面へ配り、前半と後半で同じ形が戻ってくる。
-const SC_FRAME = [scene(0), scene(8)];
-const SC_FRAME_DOTS = [scene(1), scene(9)];
-const SC_BRACKET = [scene(2), scene(10)];
-const SC_DASH = [scene(3), scene(7), scene(11), scene(15)];
-const SC_PIPES = [scene(4), scene(12)];
-const SC_DOTS = [scene(5), scene(13)];
-const SC_SOLID = [scene(6), scene(14)];
-
 const LAYERS: MvLayer[] = [
-  // ══ 画面下のうっすらした横線（低い不透明度のロール）══════════
+  // ══ 背景の譜面。画面いっぱいに4小節ぶんを固定表示する ═══════════
+  // opacity では下げない。全体を薄くすると「未発音」と「発音」の差まで潰れて
+  // 全部が同じくらい光って見えてしまう（差は light.dim でつける）。
   {
     kind: 'visualizer',
-    id: 'haze',
+    id: 'score',
     style: 'pianoRoll',
     projection: 'flat',
-    rect: { x: -20, y: 250, w: 680, h: 96 },
-    amount: 8,
+    flow: 'page',
+    rect: { x: -10, y: 24, w: 660, h: 320 },
+    amount: 4,
     thickness: 1,
-    opacity: 0.16,
+    light: { dim: 0.09, fadeOut: true, echo: { beats: 0.45, spread: 6, thickness: 1 } },
     z: 4,
+  },
+
+  // ══ 中央。同じ譜面を1小節ぶんだけ拡大して見せる ════════════════
+  // 参考動画で「4小節ごとに形が変わるモチーフ」に見えていたものの正体がこれ。
+  // 拍ごとに別の形に見えるのは、そのとき鳴っている音が変わっているだけ。
+  {
+    kind: 'visualizer',
+    id: 'zoom',
+    style: 'pianoRoll',
+    projection: 'flat',
+    flow: 'page',
+    rect: { x: 236, y: 120, w: 168, h: 104 },
+    // トラックは絞らない。旋律だけにすると休符の小節で中身が空になる
+    // （参考動画の中央は常に何かが映っている）。
+    amount: 1,
+    thickness: 1,
+    // 狭い音域を大きく映す。曲全体の音域を収めるとノートが3pxに潰れて、
+    // 参考動画の「大きな四角がひとつ」にならない。窓の外の音はオクターブで畳み込まれる。
+    pitchRange: [60, 66],
+    light: { dim: 0.22, fadeOut: true, echo: { beats: 0.6, spread: 14, thickness: 2 } },
+    z: 20,
   },
 
   // ══ 左の提灯 ═══════════════════════════════════════════
@@ -224,73 +225,30 @@ const LAYERS: MvLayer[] = [
     modulators: [],
   },
 
-  // ══ 中央のモチーフ（4小節ごとに掛け替わる）══════════════════
-  // 枠だけ
-  motif({ id: 'm-frame', sections: SC_FRAME, size: 40 }),
-  // 枠＋中の点
-  motif({ id: 'm-frame2', sections: SC_FRAME_DOTS, size: 40 }),
-  motif({
-    id: 'm-frame2-dots', sections: SC_FRAME_DOTS, form: 'square', size: 5, filled: true,
-    count: 2, offsetX: 44, x: 298, z: 21,
-  }),
-  // 太い括弧（左右に寄せた厚い塊）
-  motif({
-    id: 'm-bracket', sections: SC_BRACKET, form: 'bar', size: 14, barAspect: 1.6, filled: true,
-    count: 2, offsetX: 52, x: 294,
-  }),
-  motif({
-    id: 'm-bracket-in', sections: SC_BRACKET, form: 'bar', size: 6, barAspect: 2.2, filled: true,
-    count: 2, offsetX: 28, x: 306, z: 21,
-  }),
-  // 破線の段（左右2群）
-  motif({
-    id: 'm-dash-l', sections: SC_DASH, form: 'bar', size: 13, barAspect: 0.14, filled: true,
-    count: 3, offsetY: 12, x: 250, y: 158,
-  }),
-  motif({
-    id: 'm-dash-r', sections: SC_DASH, form: 'bar', size: 13, barAspect: 0.14, filled: true,
-    count: 3, offsetY: 12, x: 390, y: 158,
-  }),
-  // 縦棒の束（左右2群）
-  motif({
-    id: 'm-pipe-l', sections: SC_PIPES, form: 'bar', size: 16, barAspect: 0.16, rotation: 90, filled: true,
-    count: 4, offsetX: 9, x: 250,
-  }),
-  motif({
-    id: 'm-pipe-r', sections: SC_PIPES, form: 'bar', size: 16, barAspect: 0.16, rotation: 90, filled: true,
-    count: 4, offsetX: 9, x: 386,
-  }),
-  // 小さな四角が2つ
-  motif({
-    id: 'm-dots', sections: SC_DOTS, form: 'square', size: 9, filled: true,
-    count: 2, offsetX: 66, x: 288,
-  }),
-  // 塗りつぶしの灰色
-  motif({
-    id: 'm-solid', sections: SC_SOLID, form: 'square', size: 17, filled: true, color: '#9ca3af',
-  }),
-
-  // ══ 上のちいさな白い箱（たまに出る）══════════════════════
-  motif({
-    id: 'chip', sections: [scene(3), scene(9), scene(12)], form: 'bar', size: 13, barAspect: 0.5,
-    filled: true, x: 392, y: 44, z: 25,
-  }),
+  // ══ 中央の譜面を囲う枠。参考動画の「白い1本枠」 ═════════════════
+  // bar の高さは size*2*barAspect なので、拡大ロールの rect（168×104）にぴったり合わせる。
+  {
+    kind: 'shape', id: 'zoom-frame', form: 'bar',
+    x: 320, y: 172, size: 84, barAspect: 0.619, rotation: 0,
+    color: '#f4f4f5', filled: false, thickness: 1.6, z: 19,
+    modulators: [],
+  },
 
   // ══ 下に現れる小さな影 ══════════════════════════════════
   {
     kind: 'image',
     id: 'visitor',
-    ref: charRef(BUILTIN_CHARS[1]),
-    url: charUrl(BUILTIN_CHARS[1]),
-    walk: charWalk('s', 3),
+    ref: rozeRef('beat-a'),
+    url: rozeUrl('beat-a'),
+    // 4コマを1小節で1周。テンポを変えても拍に乗ったまま。
+    walk: rozeBeat('a', 4),
     x: 320,
-    y: 300,
-    scale: 3,
+    y: 322,
+    scale: 0.42,
     anchor: 'bottom',
-    motion: 'bob',
-    motionAmount: 1.2,
+    motion: 'none',
     pixelated: true,
-    sections: [scene(5), scene(6), scene(13), scene(14)],
+    sections: [scene(2), scene(3), scene(6), scene(7)],
     entrance: { from: 'bottom', fade: true, beats: 2, distance: 30 },
     z: 26,
   },
@@ -324,7 +282,7 @@ const LAYERS: MvLayer[] = [
     vertical: true,
     afterimage: 1,
     holdBars: 4,
-    sections: [scene(4), scene(5), scene(6), scene(7), scene(12), scene(13), scene(14), scene(15)],
+    sections: [scene(2), scene(3), scene(6), scene(7)],
     z: 40,
   },
 

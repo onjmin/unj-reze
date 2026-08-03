@@ -92,6 +92,77 @@ export function localTileUrl(sheet: LocalTileSheet, col: number, row: number): s
   return `${sheet.url}#${col * sheet.tile},${row * sheet.tile},${sheet.tile},${sheet.tile}`;
 }
 
+// ───────────────── MV用の内蔵アニメ素材 ─────────────────
+//
+// public/assets/mv/。RPG用の歩行グラ（行＝方向・列＝足踏み）と違い、
+// **1行＝1つのアニメーション**（walk-sprite の `row_anim` 規格）。向きの概念が無い。
+// GIFのままだと再生位置をこちらで決められず音と合わないので、横ストリップのPNGへ展開してある。
+
+export interface LocalMvSprite {
+  id: string;
+  name: string;
+  group: string;
+  url: string;
+  /** 1行あたりのコマ数 */
+  frames: number;
+  /** 1コマの幅・高さ */
+  cellW: number;
+  cellH: number;
+  /** 行数（1行＝1アニメーション）。省略時は1。 */
+  rows?: number;
+  /** 1周にかける拍数の既定値。 */
+  loopBeats?: number;
+}
+
+const roze = (id: string, name: string, frames: number, cell: number, loopBeats = 4): LocalMvSprite =>
+  ({ id, name, group: '束音ロゼ', url: `/assets/mv/roze/${id}.png`, frames, cellW: cell, cellH: cell, loopBeats });
+
+const cookie = (id: string, name: string, frames: number): LocalMvSprite =>
+  ({ id, name, group: 'クッキー☆', url: `/assets/mv/cookie/${id}.png`, frames, cellW: 160, cellH: 240, loopBeats: 4 });
+
+export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
+  // 束音ロゼ（1コマ384px・拍に合わせるループ）
+  roze('beat-a', 'ロゼ 拍A', 4, 384),
+  roze('beat-b', 'ロゼ 拍B', 4, 384),
+  roze('beat-c', 'ロゼ 拍C', 4, 384),
+  roze('beat-d', 'ロゼ 拍D', 4, 384),
+  roze('beat-e', 'ロゼ 拍E', 4, 384),
+  roze('beat-f', 'ロゼ 長A', 14, 384, 8),
+  roze('beat-g', 'ロゼ 長B', 14, 384, 8),
+  // 束音ロゼ（1コマ320pxの立ち絵）
+  roze('pose-a', 'ロゼ 立ちA', 6, 320, 8),
+  roze('pose-b', 'ロゼ 立ちB', 4, 320),
+  roze('pose-c', 'ロゼ 立ちC', 4, 320),
+  // 束音ロゼ（64pxセルのシート。行ごとに別のアニメーション）
+  { id: 'sheet-a', name: 'ロゼ シートA', group: '束音ロゼ', url: '/assets/mv/roze/sheet-a.png', frames: 4, cellW: 64, cellH: 64, rows: 8, loopBeats: 4 },
+  { id: 'sheet-b', name: 'ロゼ シートB', group: '束音ロゼ', url: '/assets/mv/roze/sheet-b.png', frames: 4, cellW: 64, cellH: 64, rows: 4, loopBeats: 4 },
+  // クッキー☆声優キャラ（1コマ160×240）
+  cookie('mgr-a', 'MGR A', 4),
+  cookie('mgr-b', 'MGR B', 2),
+  cookie('mgr-c', 'MGR C', 2),
+  cookie('mot-a', 'MOT A', 4),
+  cookie('mot-b', 'MOT B', 4),
+  cookie('mot-c', 'MOT C', 4),
+  cookie('nyn-a', 'NYN A', 3),
+  cookie('nyn-b', 'NYN B', 3),
+  cookie('nyn-c', 'NYN C', 3),
+  cookie('nyn-d', 'NYN D', 3),
+  // 背景・演出
+  { id: 'beach-night', name: '夜の海辺', group: '背景・演出', url: '/assets/mv/beach-night.png', frames: 4, cellW: 256, cellH: 192, loopBeats: 8 },
+  { id: 'particle-reveal', name: '粒子（ほどける）', group: '背景・演出', url: '/assets/mv/particle-reveal.png', frames: 14, cellW: 384, cellH: 384, loopBeats: 4 },
+  { id: 'particle-cover', name: '粒子（覆う）', group: '背景・演出', url: '/assets/mv/particle-cover.png', frames: 15, cellW: 384, cellH: 384, loopBeats: 4 },
+];
+
+/**
+ * MV素材の walk 参照。クロップ・コマ数・行を参照文字列に焼き込むので、
+ * 選んだ結果をそのまま `MvImageLayer.ref` に入れれば動く。
+ * 形式は parseWalkRef と同じ `#sx,sy,sw,sh,frames,offsetY,scale,row,playMode,fps`。
+ */
+export function mvSpriteRef(s: LocalMvSprite, row = 0): string {
+  const crop = `0,${row * s.cellH},${s.cellW * s.frames},${s.cellH}`;
+  return `walk:row_anim:u:${s.url}#${crop},${s.frames},0,1,0,loop,6`;
+}
+
 export interface LocalWalkChar {
   surface: number;
   name: string;

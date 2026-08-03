@@ -9,7 +9,7 @@
 // 「窓」は画像の枠ではなく図形として置いてある。中身が空の場面でも枠だけ残すため。
 
 import type { MvImageLayer, MvLayer, MvManifest, MvSection } from '@/lib/mv-config';
-import { BUILTIN_CHARS, charRef, charUrl, charWalk, cloneManifest, mvTrack, rep, rest, type MvPresetEntry } from './shared';
+import { cloneManifest, mvTrack, rep, rest, rozeBeat, rozeRef, rozeSheetRow, rozeUrl, type MvPresetEntry } from './shared';
 
 const BARS = 64;
 
@@ -122,24 +122,19 @@ const SECTIONS: MvSection[] = [
 const OCCUPIED = ['a', 'a2', 'sabi', 'a3'];
 const CAST_SECTIONS = ['a', 'a2', 'sabi', 'a3'];
 
-const RESIDENT = BUILTIN_CHARS[7];
-const LIGHT = BUILTIN_CHARS[5];
-const CHORUS = BUILTIN_CHARS[1];
-
 /** 窓の中に納まる住人。窓の中央に置き、枠は図形側が持つ。 */
-function occupant(id: string, char: string, sections: string[], scale: number): MvImageLayer {
+function occupant(id: string, key: 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g', sections: string[], scale: number): MvImageLayer {
   return {
     kind: 'image',
     id,
-    ref: charRef(char),
-    url: charUrl(char),
-    walk: charWalk('s', 3),
+    ref: rozeRef(`beat-${key}`),
+    url: rozeUrl(`beat-${key}`),
+    walk: rozeBeat(key, 4),
     x: 320,
     y: 150,
     scale,
     anchor: 'center',
-    motion: 'bob',
-    motionAmount: 1.5,
+    motion: 'none',
     pixelated: true,
     sections,
     entrance: { from: 'none', fade: true, beats: 2 },
@@ -147,17 +142,41 @@ function occupant(id: string, char: string, sections: string[], scale: number): 
   };
 }
 
+/** 窓のまわりに並ぶ影。64pxシートの行違いで、同じ子が別の動きをする。 */
+function chorus(id: string, row: number, over: Partial<MvImageLayer>): MvImageLayer {
+  return {
+    kind: 'image',
+    id,
+    ref: rozeRef('sheet-a'),
+    url: rozeUrl('sheet-a'),
+    walk: rozeSheetRow(row, 4),
+    x: 78,
+    y: 236,
+    scale: 0.85,
+    anchor: 'bottom',
+    motion: 'none',
+    pixelated: true,
+    entrance: { from: 'none', fade: true, beats: 2 },
+    z: 12,
+    ...over,
+  };
+}
+
 const LAYERS: MvLayer[] = [
   // ══ 背後のうっすらした横線 ══════════════════════════════
+  // 参考動画の譜面は横に動かないので `page`（位置を固定して小節ごとに差し替え）。
+  // 薄さは layer.opacity ではなく light.dim で作る——全体を薄くすると
+  // 「鳴っていない音」と「鳴っている音」の差まで潰れて、全部が同じに光って見える。
   {
     kind: 'visualizer',
     id: 'haze',
     style: 'pianoRoll',
     projection: 'flat',
+    flow: 'page',
     rect: { x: 60, y: 232, w: 520, h: 76 },
-    amount: 6,
+    amount: 2,
     thickness: 1,
-    opacity: 0.2,
+    light: { dim: 0.12, fadeOut: true, echo: { beats: 0.5, spread: 5, thickness: 1 } },
     sections: ['a', 'a2', 'sabi', 'inter', 'a3'],
     z: 6,
   },
@@ -180,8 +199,8 @@ const LAYERS: MvLayer[] = [
 
   // ══ 窓の中身。場面ごとに入れ替わる ══════════════════════════
   // 枠（半径58＝116px四方）に収まるよう、16pxのコマは4倍まで
-  occupant('resident', RESIDENT, OCCUPIED, 4),
-  occupant('light', LIGHT, ['inter'], 4),
+  occupant('resident', 'c', OCCUPIED, 0.3),
+  occupant('light', 'g', ['inter'], 0.3),
   // アウトロは小さな石だけが残る
   {
     kind: 'shape',
@@ -222,70 +241,38 @@ const LAYERS: MvLayer[] = [
 
   // ══ 窓を囲む影たち ═════════════════════════════════════
   // 左右に1体ずつ（repeat で1レイヤーのまま2体）
-  {
-    kind: 'image',
-    id: 'chorus-side',
-    ref: charRef(CHORUS),
-    url: charUrl(CHORUS),
-    walk: charWalk('s', 3),
+  chorus('chorus-side', 1, {
     x: 78,
     y: 236,
-    scale: 3,
-    anchor: 'bottom',
-    motion: 'bob',
-    motionAmount: 1,
-    pixelated: true,
     repeat: { count: 2, dx: 484, dy: 0, phase: 0.4 },
     sections: CAST_SECTIONS,
-    entrance: { from: 'none', fade: true, beats: 2 },
-    z: 12,
-  },
+  }),
   // 窓の真下にもう1体。サビだけ左右がさらに増える
-  {
-    kind: 'image',
-    id: 'chorus-front',
-    ref: charRef(CHORUS),
-    url: charUrl(CHORUS),
-    walk: charWalk('s', 3),
+  chorus('chorus-front', 3, {
     x: 320,
-    y: 300,
-    scale: 3,
-    anchor: 'bottom',
-    motion: 'bob',
-    motionAmount: 1,
-    pixelated: true,
+    y: 302,
     sections: ['a2', 'sabi', 'a3'],
     entrance: { from: 'bottom', fade: true, beats: 2, distance: 40 },
     z: 14,
-  },
-  {
-    kind: 'image',
-    id: 'chorus-extra',
-    ref: charRef(CHORUS),
-    url: charUrl(CHORUS),
-    walk: charWalk('s', 3),
+  }),
+  chorus('chorus-extra', 5, {
     x: 168,
     y: 268,
-    scale: 3,
-    anchor: 'bottom',
-    motion: 'bob',
-    motionAmount: 1,
-    pixelated: true,
     repeat: { count: 2, dx: 304, dy: 0, phase: 0.7 },
     sections: ['sabi'],
     entrance: { from: 'none', fade: true, beats: 1 },
     z: 13,
-  },
+  }),
   // 左端に立つ灯り
   {
     kind: 'image',
     id: 'torch',
-    ref: charRef(LIGHT),
-    url: charUrl(LIGHT),
-    walk: charWalk('s', 2),
+    ref: rozeRef('beat-e'),
+    url: rozeUrl('beat-e'),
+    walk: rozeBeat('e', 4),
     x: 60,
-    y: 240,
-    scale: 3,
+    y: 246,
+    scale: 0.4,
     anchor: 'bottom',
     motion: 'bob',
     motionAmount: 1.2,

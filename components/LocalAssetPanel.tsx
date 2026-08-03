@@ -6,7 +6,8 @@ import { loadImage } from '@/lib/walk-sprite';
 import { buildWalkRef } from '@/lib/asset-ref';
 import {
   LOCAL_TILE_SHEETS, localTileUrl, DQ_CHARACTERS,
-  type LocalTileSheet,
+  MV_LOCAL_SPRITES, mvSpriteRef,
+  type LocalMvSprite, type LocalTileSheet,
 } from '@/lib/local-assets';
 import WalkSpritePreview from './WalkSpritePreview';
 import type { PickResult } from './ContentPicker';
@@ -35,12 +36,15 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-1.5">
         <button className={secBtn(section === 'chars')} onClick={() => setSection('chars')}>🚶 キャラ</button>
+        <button className={secBtn(section === 'mv')} onClick={() => setSection('mv')}>🎬 MV素材</button>
         {LOCAL_TILE_SHEETS.map((s) => (
           <button key={s.id} className={secBtn(section === s.id)} onClick={() => setSection(s.id)}>{s.name}</button>
         ))}
       </div>
 
-      {section === 'chars' ? (
+      {section === 'mv' ? (
+        <MvSpriteGrid onPick={onPick} />
+      ) : section === 'chars' ? (
         <>
           <p className="text-[10px] text-gray-600 px-0.5">DQ風キャラ（RPGEN 16px・2フレーム×4方向）</p>
           <div className="grid grid-cols-6 gap-1.5">
@@ -64,6 +68,63 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * MV用アニメ素材の一覧。1行＝1アニメーションのシートは行ごとに1つのコマとして並べる。
+ * サムネはストリップの先頭コマを CSS で切り出して出す（Canvas を使わないので軽い）。
+ */
+function MvSpriteGrid({ onPick }: { onPick: (res: PickResult) => void }) {
+  const groups = [...new Set(MV_LOCAL_SPRITES.map(s => s.group))];
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="px-0.5 text-[10px] text-gray-600">
+        MV用のアニメ素材（1行＝1つの動き）。コマ送りは曲のテンポに合わせて回ります。
+      </p>
+      {groups.map(g => (
+        <div key={g} className="flex flex-col gap-1.5">
+          <p className="px-0.5 text-[10px] font-bold text-gray-500">{g}</p>
+          <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6">
+            {MV_LOCAL_SPRITES.filter(s => s.group === g).flatMap(s =>
+              Array.from({ length: s.rows ?? 1 }, (_, row) => (
+                <MvSpriteButton key={`${s.id}-${row}`} sprite={s} row={row} onPick={onPick} />
+              )),
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MvSpriteButton({ sprite, row, onPick }: { sprite: LocalMvSprite; row: number; onPick: (res: PickResult) => void }) {
+  const label = (sprite.rows ?? 1) > 1 ? `${sprite.name} ${row + 1}` : sprite.name;
+  const box = 48;
+  const zoom = box / Math.max(sprite.cellW, sprite.cellH);
+  return (
+    <button
+      onClick={() => onPick({ ref: mvSpriteRef(sprite, row), url: sprite.url, label })}
+      className="pixel-select-hover group flex flex-col items-center gap-1 rounded-lg border border-gray-800 bg-[#11131a] p-1.5 hover:border-blue-500"
+    >
+      <span
+        className="block shrink-0 overflow-hidden"
+        style={{ width: box, height: box }}
+      >
+        <span
+          className="block"
+          style={{
+            width: sprite.cellW * sprite.frames * zoom,
+            height: sprite.cellH * (sprite.rows ?? 1) * zoom,
+            backgroundImage: `url(${sprite.url})`,
+            backgroundSize: '100% 100%',
+            imageRendering: 'pixelated',
+            transform: `translate(0px, ${-row * sprite.cellH * zoom}px)`,
+          }}
+        />
+      </span>
+      <span className="w-full truncate text-center text-[9px] font-bold text-gray-400 group-hover:text-blue-400">{label}</span>
+    </button>
   );
 }
 

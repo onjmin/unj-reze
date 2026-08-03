@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
-  BarChart3, ChevronDown, ChevronUp, Clapperboard, History, Image as ImageIcon,
+  BarChart3, ChevronDown, ChevronUp, Clapperboard, Hash, History, Image as ImageIcon,
   Layers, ListMusic, Music, Plus, Shapes, Sparkles, Trash2, Type, X,
 } from 'lucide-react';
 import ContentPicker, { type PickResult } from './ContentPicker';
@@ -11,11 +11,13 @@ import HistoryModal from './HistoryModal';
 import MvPlayer from './MvPlayer';
 import VolumeControl from './VolumeControl';
 import { MV_PRESETS, buildMvPreset } from './mv-presets';
-import { refLabel } from '@/lib/asset-ref';
+import { parseWalkRef, refLabel } from '@/lib/asset-ref';
 import { parseChords, detectProgression } from '@onjmin/chord-parser';
 import { clearAutosave, getAutosave, getStorageKey, saveAutosave, saveHistory } from '@/lib/history';
 import {
-  DEFAULT_MV_ENTRANCE, DEFAULT_MV_RING, DEFAULT_MV_TRANSITION, DEFAULT_MV_VIEW,
+  DEFAULT_MV_ENTRANCE, DEFAULT_MV_NOTE_LIGHT, DEFAULT_MV_NOTE_LIGHT_3D,
+  DEFAULT_MV_RING, DEFAULT_MV_TRANSITION, DEFAULT_MV_VIEW,
+  MV_ROLL_FLOW_LABELS,
   MV_AUDIO_MODE_HINTS, MV_AUDIO_MODE_LABELS, MV_BLEND_LABELS, MV_CHORD_COLOR_MODE_LABELS, MV_EFFECT_STYLE_LABELS,
   MV_ENTER_FROM_LABELS,
   MV_H, MV_MOD_OP_LABELS, MV_MOD_SOURCE_LABELS, MV_MOD_TARGET_LABELS, MV_MOTION_LABELS,
@@ -23,9 +25,11 @@ import {
   MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, isMvEntranceInert, mvAudioMode, mvEntranceDistance, mvUid,
   type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvChordColorMode, type MvChordStep, type MvEffectLayer, type MvEffectStyle,
   type MvEnterFrom, type MvEntrance,
+  type MvDegreeLayer,
   type MvImageLayer, type MvLayer, type MvLyricsLayer, type MvManifest,
   type MvModOp, type MvModSource, type MvModTarget, type MvModulator,
-  type MvMotion, type MvPresetKind, type MvProjection, type MvSceneStage, type MvSection,
+  type MvMotion, type MvNoteEcho, type MvNoteLight, type MvPresetKind, type MvProjection,
+  type MvRollFlow, type MvSceneStage, type MvSection, type MvWalkSetting,
   type MvShapeForm, type MvShapeLayer, type MvTextLayer, type MvTransitionStyle, type MvTrigger,
   type MvVisualizerLayer, type MvVisualizerStyle,
 } from '@/lib/mv-config';
@@ -226,6 +230,32 @@ const ENTER_FROM_OPTIONS = (Object.keys(MV_ENTER_FROM_LABELS) as MvEnterFrom[]).
 const VISUALIZER_OPTIONS = (Object.keys(MV_VISUALIZER_LABELS) as MvVisualizerStyle[]).map(s => ({ value: s, label: MV_VISUALIZER_LABELS[s] }));
 
 const PROJECTION_OPTIONS = (Object.keys(MV_PROJECTION_LABELS) as MvProjection[]).map(p => ({ value: p, label: MV_PROJECTION_LABELS[p] }));
+const ROLL_FLOW_OPTIONS = (Object.keys(MV_ROLL_FLOW_LABELS) as MvRollFlow[]).map(f => ({ value: f, label: MV_ROLL_FLOW_LABELS[f] }));
+
+/**
+ * `walk:` 参照から `MvWalkSetting` を起こす。参照が持っていない情報は補わない
+ * （＝歩行グラは規格の既定、MV素材は参照に焼き込まれたクロップ・コマ数をそのまま使う）。
+ * walk 参照でなければ undefined を返し、レイヤーからコマ割りを外す。
+ */
+function walkSettingFromRef(ref: string): MvWalkSetting | undefined {
+  const wr = parseWalkRef(ref);
+  if (!wr) return undefined;
+  const setting: MvWalkSetting = { stdId: wr.stdId };
+  if (wr.crop) setting.crop = wr.crop;
+  if (wr.frames) setting.frames = wr.frames;
+  if (wr.row !== undefined) setting.row = wr.row;
+  if (wr.playMode) setting.playMode = wr.playMode;
+  if (wr.fps) setting.fps = wr.fps;
+  // MV素材は「1周＝1小節」を既定にする。秒で送ると曲のテンポを変えた瞬間にずれる。
+  if (wr.stdId === 'row_anim') setting.loopBeats = 4;
+  return setting;
+}
+
+/** そのロールが実際に使う光り方（未設定なら見せ方ごとの既定）。 */
+function noteLight(layer: MvVisualizerLayer): MvNoteLight {
+  if (layer.light) return layer.light;
+  return (layer.projection ?? 'flat') === 'flat' ? DEFAULT_MV_NOTE_LIGHT : DEFAULT_MV_NOTE_LIGHT_3D;
+}
 const SHAPE_FORM_OPTIONS = (Object.keys(MV_SHAPE_FORM_LABELS) as MvShapeForm[]).map(f => ({ value: f, label: MV_SHAPE_FORM_LABELS[f] }));
 const BLEND_OPTIONS = (Object.keys(MV_BLEND_LABELS) as MvBlend[]).map(b => ({ value: b, label: MV_BLEND_LABELS[b] }));
 const EFFECT_STYLE_OPTIONS = (Object.keys(MV_EFFECT_STYLE_LABELS) as MvEffectStyle[]).map(s => ({ value: s, label: MV_EFFECT_STYLE_LABELS[s] }));
@@ -243,6 +273,7 @@ const LAYER_ICON = {
   shape: Shapes,
   effect: Sparkles,
   chordBar: ListMusic,
+  degree: Hash,
 } as const;
 
 /** 図形の「音との連動」1行ぶんの編集UI。 */
@@ -331,6 +362,7 @@ function layerLabel(layer: MvLayer): string {
     case 'shape': return MV_SHAPE_FORM_LABELS[layer.form];
     case 'effect': return MV_EFFECT_STYLE_LABELS[layer.style];
     case 'chordBar': return 'コード進行バー';
+    case 'degree': return `度数 @${layer.track}`;
   }
 }
 
@@ -479,7 +511,12 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
       updateSectionStage(sectionId, { bgRef: result.ref, bgUrl: result.url });
     } else {
       const layerId = picker.target.layerId;
-      updateLayer(layerId, l => (l.kind === 'image' ? { ...l, ref: result.ref, url: result.url } : l));
+      // walk: 参照はコマ割り（クロップ・コマ数・行）を参照文字列に持っている。
+      // ここで MvWalkSetting へ写しておかないと、選んだ素材が1コマ目のまま止まる。
+      const walk = walkSettingFromRef(result.ref);
+      updateLayer(layerId, l => (l.kind === 'image'
+        ? { ...l, ref: result.ref, url: result.url, walk }
+        : l));
     }
     setPicker(null);
   };
@@ -548,6 +585,18 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
     updateLayer(id, l => (l.kind === 'visualizer' ? { ...l, ring: { ...DEFAULT_MV_RING, ...l.ring, ...patch } } : l));
   };
 
+  const updateLight = (id: string, patch: Partial<MvNoteLight>) => {
+    updateLayer(id, l => (l.kind === 'visualizer' ? { ...l, light: { ...noteLight(l), ...patch } } : l));
+  };
+
+  const updateEcho = (id: string, patch: Partial<MvNoteEcho>) => {
+    updateLayer(id, l => {
+      if (l.kind !== 'visualizer') return l;
+      const cur = noteLight(l);
+      return { ...l, light: { ...cur, echo: { ...(cur.echo ?? { beats: 0.5, spread: 7, thickness: 1.5 }), ...patch } } };
+    });
+  };
+
   const addMod = (id: string) => {
     updateLayer(id, l => (l.kind === 'shape'
       ? { ...l, modulators: [...l.modulators, { source: 'trackEnergy', target: 'size', op: 'add', amount: 20 } as MvModulator] }
@@ -587,6 +636,21 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
       chords: [{ bar: 0, label: 'C' }, { bar: 1, label: 'Am7' }, { bar: 2, label: 'F' }, { bar: 3, label: 'G7' }],
       key: 'C', colorMode: 'degree', color: '#1f2937',
       activeColor: '#3f6212', textColor: '#e5e7eb', size: 9, z: getNextZ(),
+    };
+    update(m => ({ ...m, layers: [...m.layers, layer] }));
+    setSelectedLayerId(layer.id);
+  };
+
+  /** 頭の上の数字。コード進行バーが無いと数える基準が無いので、無ければ一緒に足す。 */
+  const addDegreeLayer = () => {
+    const chordBar = manifestRef.current.layers.find(l => l.kind === 'chordBar');
+    if (!chordBar) addChordBarLayer();
+    const layer: MvDegreeLayer = {
+      kind: 'degree', id: mvUid('deg'),
+      track: song.tracks[0] ?? 0,
+      x: MV_W / 2, y: MV_H / 2 - 40,
+      anchor: 'top', size: 14, color: '#f8fafc', bold: true, shadow: true,
+      basis: 'chord', key: 'C', hold: true, z: getNextZ(),
     };
     update(m => ({ ...m, layers: [...m.layers, layer] }));
     setSelectedLayerId(layer.id);
@@ -991,6 +1055,41 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
                 <>
                   <SelectField label="見せ方" value={layer.projection ?? 'flat'} options={PROJECTION_OPTIONS}
                     onChange={v => updateLayer(layer.id, l => ({ ...l, projection: v } as MvLayer))} />
+                  {(layer.projection ?? 'flat') === 'flat' && (
+                    <>
+                      <SelectField label="譜面の動き" value={layer.flow ?? 'scroll'} options={ROLL_FLOW_OPTIONS}
+                        onChange={v => updateLayer(layer.id, l => ({ ...l, flow: v } as MvLayer))} />
+                      <Hint>
+                        「固定」は譜面が横に動かず、上の小節数ぶんを並べたまま、その小節が終わると
+                        次の譜面へ丸ごと差し替わります。
+                      </Hint>
+                    </>
+                  )}
+                  <Details label="音の光り方と余韻">
+                    <Hint>
+                      まだ鳴っていない音をどれくらい薄く置いておくかと、鳴った音がどう消えるかです。
+                      薄さを上げすぎると、どれが今鳴っている音なのか画から読めなくなります。
+                    </Hint>
+                    <NumField label="鳴っていない音の濃さ（0〜1）" value={noteLight(layer).dim} min={0} max={1} step={0.02}
+                      onChange={v => updateLight(layer.id, { dim: Math.max(0, Math.min(1, v)) })} />
+                    <CheckField label="鳴り終わった音を消す" checked={noteLight(layer).fadeOut}
+                      onChange={v => updateLight(layer.id, { fadeOut: v })} />
+                    <CheckField
+                      label="余韻を出す（音の頭から輪郭が広がって消える）"
+                      checked={!!noteLight(layer).echo}
+                      onChange={v => updateLight(layer.id, { echo: v ? { beats: 0.5, spread: 7, thickness: 1.5 } : undefined })}
+                    />
+                    {noteLight(layer).echo && (
+                      <>
+                        <NumField label="余韻の長さ（拍）" value={noteLight(layer).echo?.beats} min={0.1} max={4} step={0.1}
+                          onChange={v => updateEcho(layer.id, { beats: v })} />
+                        <NumField label="広がる大きさ" value={noteLight(layer).echo?.spread} min={0} max={60}
+                          onChange={v => updateEcho(layer.id, { spread: v })} />
+                        <NumField label="輪郭の太さ" value={noteLight(layer).echo?.thickness} min={0.5} max={8} step={0.5}
+                          onChange={v => updateEcho(layer.id, { thickness: v })} />
+                      </>
+                    )}
+                  </Details>
                   {(layer.projection ?? 'flat') === 'perspective' && (
                     <Details label="見る角度を調整する">
                       <Hint>スライダーを動かすと、リアルタイムで3Dの視点が回転・移動します。</Hint>
@@ -1163,6 +1262,42 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
             </>
           )}
 
+          {layer.kind === 'degree' && (
+            <>
+              <Hint>
+                そのトラックでいま鳴っている音が、コードの根音から何番目かを数字で出します。
+                キャラの頭の上に置くと、誰がどの音を出しているのかが見えるようになります。
+              </Hint>
+              <SelectField
+                label="どのトラックの音か"
+                value={String(layer.track)}
+                options={(song.tracks.length > 0 ? song.tracks : [0]).map(t => ({ value: String(t), label: `@${t}` }))}
+                onChange={v => updateLayer(layer.id, l => (l.kind === 'degree' ? { ...l, track: Number(v) } : l))}
+              />
+              <SelectField
+                label="何から数えるか"
+                value={layer.basis}
+                options={[
+                  { value: 'chord' as const, label: 'いまのコードの根音（参考動画と同じ）' },
+                  { value: 'key' as const, label: '曲のキーの主音' },
+                ]}
+                onChange={v => updateLayer(layer.id, l => (l.kind === 'degree' ? { ...l, basis: v } : l))}
+              />
+              <SelectField
+                label="キー"
+                value={layer.key}
+                options={Object.keys(MV_ROOT_TO_PITCH).map(k => ({ value: k, label: k }))}
+                onChange={v => updateLayer(layer.id, l => (l.kind === 'degree' ? { ...l, key: v } : l))}
+              />
+              <NumField label="X" value={layer.x} onChange={v => updateLayer(layer.id, l => ({ ...l, x: v } as MvLayer))} />
+              <NumField label="Y" value={layer.y} onChange={v => updateLayer(layer.id, l => ({ ...l, y: v } as MvLayer))} />
+              <NumField label="文字サイズ" value={layer.size} min={6} onChange={v => updateLayer(layer.id, l => ({ ...l, size: v } as MvLayer))} />
+              <ColorField label="文字色" value={layer.color} onChange={v => updateLayer(layer.id, l => ({ ...l, color: v } as MvLayer))} />
+              <CheckField label="音が切れても数字を残す" checked={!!layer.hold}
+                onChange={v => updateLayer(layer.id, l => (l.kind === 'degree' ? { ...l, hold: v } : l))} />
+            </>
+          )}
+
           {layer.kind === 'chordBar' && (
             <>
               <NumField label="X" value={layer.rect.x} onChange={v => updateLayer(layer.id, l => (l.kind === 'chordBar' ? { ...l, rect: { ...l.rect, x: v } } : l))} />
@@ -1299,6 +1434,7 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
           <button onClick={addShapeLayer} className={ADD_BTN_CLASS}><Plus size={12} />図形</button>
           <button onClick={addEffectLayer} className={ADD_BTN_CLASS}><Plus size={12} />演出</button>
           <button onClick={addChordBarLayer} className={ADD_BTN_CLASS}><Plus size={12} />コード進行</button>
+          <button onClick={addDegreeLayer} className={ADD_BTN_CLASS}><Plus size={12} />度数の数字</button>
         </div>
       </div>
 

@@ -10,7 +10,10 @@
 // 月（図形）とスカイライン（スペアナ）で仮の夜景を組んである。
 
 import type { MvImageLayer, MvLayer, MvManifest, MvSection } from '@/lib/mv-config';
-import { BUILTIN_CHARS, charRef, charUrl, charWalk, cloneManifest, mvTrack, rest, type MvPresetEntry } from './shared';
+import {
+  BEACH_NIGHT, beachWalk, cloneManifest, mvTrack, rest,
+  rozeBeat, rozeRef, rozeSheetRow, rozeUrl, type MvPresetEntry,
+} from './shared';
 
 const BARS = 64;
 
@@ -112,17 +115,14 @@ const MML = [
   `@@3 klatt v150 ${LYRICS}`,
 ].join('\n');
 
-const HERO = BUILTIN_CHARS[0];
-const CHILD = BUILTIN_CHARS[1];
-
 /** 枠付きのスプライト窓。参考動画の「白い1本枠に囲われたドット絵」。 */
-function window_(id: string, sections: string[], x: number, y: number, scale: number, char: string, flipH = false): MvImageLayer {
+function window_(id: string, sections: string[], x: number, y: number, scale: number, row: number, flipH = false): MvImageLayer {
   return {
     kind: 'image',
     id,
-    ref: charRef(char),
-    url: charUrl(char),
-    walk: charWalk('s', 3),
+    ref: rozeRef('sheet-a'),
+    url: rozeUrl('sheet-a'),
+    walk: rozeSheetRow(row, 4),
     x,
     y,
     scale,
@@ -158,9 +158,9 @@ const NIGHT_SECTIONS = ['night', 'sabi', 'sabi2'];
 
 const LAYERS: MvLayer[] = [
   // ══ 黒の場面 ═══════════════════════════════════════════
-  window_('window', ['intro', 'a', 'inter', 'a3'], 320, 136, 5, HERO),
-  window_('window-l', ['a2'], 236, 136, 4, HERO),
-  window_('window-r', ['a2'], 404, 136, 4, CHILD, true),
+  window_('window', ['intro', 'a', 'inter', 'a3'], 320, 136, 1.3, 0),
+  window_('window-l', ['a2'], 236, 136, 1, 2),
+  window_('window-r', ['a2'], 404, 136, 1, 5, true),
   {
     kind: 'visualizer',
     id: 'grid',
@@ -221,47 +221,24 @@ const LAYERS: MvLayer[] = [
       { source: 'trackOnset', track: 1, target: 'size', op: 'add', amount: 3 },
     ],
   },
-  // 地面。ここが無いと下のスペアナが宙に浮いた棒に見えてしまう
+  // 夜の海辺。4コマのアニメが2小節で1周する（波が拍に乗って寄せる）。
+  // 背景そのもの（MvStage.bgUrl）は静止画しか敷けないので、画像レイヤーとして全画面に置く。
   {
-    kind: 'shape',
-    id: 'ground',
-    form: 'bar',
+    kind: 'image',
+    id: 'beach',
+    ref: `walk:row_anim:u:${BEACH_NIGHT.url}`,
+    url: BEACH_NIGHT.url,
+    walk: beachWalk(8),
     x: 320,
-    y: 328,
-    size: 340,
-    barAspect: 0.094,
-    rotation: 0,
-    color: '#0b1024',
-    filled: true,
-    thickness: 1,
+    y: 180,
+    // 256×192 を画面(640×360)いっぱいに。max(640/256, 360/192) = 2.5
+    scale: 2.5,
+    anchor: 'center',
+    motion: 'none',
+    pixelated: true,
     sections: NIGHT_SECTIONS,
-    z: 4,
-    modulators: [],
+    z: 2,
   },
-  // 街並みの影。スペアナだけに任せると「鳴っている音域の棒」しか立たず、
-  // 建物が消えたり生えたりしてしまうので、輪郭は図形で固定して置く。
-  ...([
-    { id: 'bldg-a', x: 58, y: 330, size: 26, aspect: 2.3, count: 2, offsetX: 470 },
-    { id: 'bldg-b', x: 168, y: 346, size: 22, aspect: 1.5, count: 3, offsetX: 102 },
-    { id: 'bldg-c', x: 442, y: 322, size: 17, aspect: 3.1, count: 2, offsetX: 82 },
-  ].map(b => ({
-    kind: 'shape' as const,
-    id: b.id,
-    form: 'bar' as const,
-    x: b.x,
-    y: b.y,
-    size: b.size,
-    barAspect: b.aspect,
-    rotation: 0,
-    color: '#0a0f26',
-    filled: true,
-    thickness: 1,
-    count: b.count,
-    offsetX: b.offsetX,
-    sections: NIGHT_SECTIONS,
-    z: 5,
-    modulators: [],
-  }))),
   // 建物の窓。鳴っている音域だけがぽつぽつ灯る
   {
     kind: 'visualizer',
@@ -270,7 +247,7 @@ const LAYERS: MvLayer[] = [
     rect: { x: 0, y: 250, w: 640, h: 80 },
     amount: 22,
     thickness: 6,
-    opacity: 0.32,
+    opacity: 0.28,
     sections: NIGHT_SECTIONS,
     z: 7,
   },
@@ -278,12 +255,12 @@ const LAYERS: MvLayer[] = [
   {
     kind: 'image',
     id: 'drifter',
-    ref: charRef(BUILTIN_CHARS[5]),
-    url: charUrl(BUILTIN_CHARS[5]),
-    walk: charWalk('e', 4),
+    ref: rozeRef('sheet-b'),
+    url: rozeUrl('sheet-b'),
+    walk: rozeSheetRow(1, 4),
     x: 0,
     y: 110,
-    scale: 5,
+    scale: 1.1,
     anchor: 'center',
     motion: 'drift',
     motionAmount: 38,
@@ -295,12 +272,13 @@ const LAYERS: MvLayer[] = [
   {
     kind: 'image',
     id: 'foreground',
-    ref: charRef(HERO),
-    url: charUrl(HERO),
-    walk: charWalk('s', 2),
+    ref: rozeRef('beat-f'),
+    url: rozeUrl('beat-f'),
+    // 14コマを2小節で1周。ゆっくりした揺れになる。
+    walk: rozeBeat('f', 8),
     x: 150,
-    y: 356,
-    scale: 7,
+    y: 362,
+    scale: 0.68,
     anchor: 'bottom',
     motion: 'parallax',
     motionAmount: 5,

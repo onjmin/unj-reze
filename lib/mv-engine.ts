@@ -7,10 +7,17 @@
 // 実装を二重化しない）。
 
 import {
+  DEFAULT_MV_NOTE_LIGHT,
+  DEFAULT_MV_NOTE_LIGHT_3D,
   DEFAULT_MV_RING,
   DEFAULT_MV_VIEW,
   MV_BLEND_COMPOSITE,
   MV_H,
+  MV_PARTICLE_REVEAL_FRAMES,
+  MV_PARTICLE_REVEAL_URL,
+  MV_ROOT_TO_PITCH,
+  chordRootName,
+  chordToneLabel,
   getChordThemeColor,
   MV_STEPS_PER_BAR,
   MV_STEPS_PER_BEAT,
@@ -26,6 +33,8 @@ import {
   type MvEntrance,
   type MvStage,
   type MvChordBarLayer,
+  type MvChordStep,
+  type MvDegreeLayer,
   type MvEffectLayer,
   type MvImageLayer,
   type MvLayer,
@@ -36,6 +45,7 @@ import {
   type MvModTarget,
   type MvModulator,
   type MvMotion,
+  type MvNoteLight,
   type MvRect,
   type MvRing,
   type MvSection,
@@ -50,6 +60,7 @@ import {
   detectStandard,
   loadImage,
   peekImage,
+  rowAnimCellInRect,
   standardById,
   type SpriteRect,
   type WalkStandard,
@@ -237,6 +248,8 @@ export function collectMvImageUrls(manifest: MvManifest): string[] {
   // 切り替わった直後の数フレームだけ背景が抜ける。
   for (const section of manifest.sections) {
     if (section.stage) push(stageBgUrl(section.stage));
+    // 粒子の転換はシート画像で描くので、こちらも先に読んでおく
+    if (section.transition?.style === 'dissolve') push(MV_PARTICLE_REVEAL_URL);
   }
   for (const layer of manifest.layers) {
     if (layer.kind === 'image') push(layerImageUrl(layer));
@@ -657,6 +670,23 @@ function drawTransition(d: DrawCtx): void {
       ctx.fillStyle = t.color ?? '#000000';
       ctx.fillRect(0, MV_H * (1 - rest), MV_W, MV_H * rest);
       break;
+    case 'dissolve': {
+      // 白い粒子が敷き詰まった状態からほどけていくシート。黒地に加算で重ねるので、
+      // シートの黒い部分は何も足さない＝そのまま透ける。
+      const img = peekImage(MV_PARTICLE_REVEAL_URL);
+      if (img && img.naturalWidth > 0) {
+        const cell = img.naturalHeight;
+        const idx = Math.min(MV_PARTICLE_REVEAL_FRAMES - 1, Math.floor((1 - rest) * MV_PARTICLE_REVEAL_FRAMES));
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, idx * cell, 0, cell, cell, 0, 0, MV_W, MV_H);
+      } else {
+        // シートがまだ読めていないあいだは暗転で代用する（一瞬でも素通しにしない）
+        ctx.fillStyle = withAlpha('#000000', rest);
+        ctx.fillRect(0, 0, MV_W, MV_H);
+      }
+      break;
+    }
     case 'fade':
     default:
       ctx.fillStyle = withAlpha(t.color ?? '#000000', Math.pow(rest, 1.6));
@@ -738,6 +768,7 @@ function drawLayer(d: DrawCtx, layer: MvLayer): void {
     case 'lyrics': drawLyrics(d, layer); break;
     case 'shape': drawShapeLayer(d, layer); break;
     case 'chordBar': drawChordBar(d, layer); break;
+    case 'degree': drawDegree(d, layer); break;
     case 'effect': break; // エフェクトは drawMvFrame 側で別扱い
   }
 }
@@ -821,6 +852,64 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
   }
 
   ctx.restore();
+}
+
+// ───────────────── 度数（頭の上の数字） ─────────────────
+
+/**
+ * そのトラックでいま鳴っている音を、いまのコードの根音から数えて数字にする。
+ *
+ * 参考動画（運び屋さん）の数字は `9` `♭7` `5`。`2` ではなく `9` と書くので、
+ * 調に対する音階度数ではなく **コードの根音からのコードトーン名**。
+ * だから同じ音を伸ばしていてもコードが変わると数字が変わる。
+ */
+function drawDegree(d: DrawCtx, layer: MvDegreeLayer): void {
+  const { ctx } = d;
+  const list = trackNotes(d.song, layer.track);
+  const idx = lastIndexAtOrBefore(list, d.step);
+  if (idx < 0) return;
+  const note = list[idx];
+  const sounding = note.startStep + note.durationSteps > d.step;
+  if (!sounding && !layer.hold) return;
+
+  const rootPitch = degreeRootPitch(d, layer);
+  if (rootPitch === null) return;
+
+  const label = chordToneLabel(note.pitch - rootPitch);
+  const size = layer.size;
+  ctx.font = `${layer.bold ? 'bold ' : ''}${size}px ${getMvFontStack(d.manifest)}`;
+  ctx.textBaseline = 'top';
+  if (layer.shadow) {
+    ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    ctx.shadowBlur = Math.max(2, size * 0.3);
+  }
+  ctx.fillStyle = layer.color;
+  const w = ctx.measureText(label).width;
+  const [ax, ay] = anchorOffset(layer.anchor, w, size);
+  ctx.fillText(label, layer.x + ax, layer.y + ay);
+  ctx.shadowBlur = 0;
+}
+
+/** 度数を数える基準の音（0-11）。コード基準なら進行から、調基準なら主音から。 */
+function degreeRootPitch(d: DrawCtx, layer: MvDegreeLayer): number | null {
+  if (layer.basis === 'key') return MV_ROOT_TO_PITCH[layer.key] ?? 0;
+
+  const bar = d.manifest.layers.find(
+    (l): l is MvChordBarLayer => l.kind === 'chordBar' && (!layer.chordLayerId || l.id === layer.chordLayerId),
+  );
+  const chord = bar ? chordAtBar(bar.chords, d.bar) : null;
+  // コードが置かれていない区間は調の主音へ落とす（数字が消えるより読める）
+  if (!chord) return MV_ROOT_TO_PITCH[layer.key] ?? 0;
+  return MV_ROOT_TO_PITCH[chordRootName(chord.label)] ?? 0;
+}
+
+/** その小節で鳴っているコード。 */
+function chordAtBar(chords: MvChordStep[], bar: number): MvChordStep | null {
+  let found: MvChordStep | null = null;
+  for (const c of chords) {
+    if (c.bar <= bar && (!found || c.bar >= found.bar)) found = c;
+  }
+  return found;
 }
 
 // ───────────────── 動き ─────────────────
@@ -910,6 +999,51 @@ function walkStandardFor(walk: NonNullable<MvImageLayer['walk']>, w: number, h: 
   return std;
 }
 
+/**
+ * スプライト1コマの切り出し矩形。
+ *
+ * `row_anim` は「1行＝1つのアニメーション」のシート用で、向きの概念が無い。
+ * 歩行グラ規格（行＝方向）と同じ経路に通すと `ways.length` ぶん行がずれて別のコマが出る。
+ */
+function spriteFrameRect(
+  walk: NonNullable<MvImageLayer['walk']>,
+  crop: [number, number, number, number],
+  timeSec: number,
+  bpm: number,
+): SpriteRect {
+  const fps = spriteFps(walk, bpm);
+  if (walk.stdId === 'row_anim') {
+    return rowAnimCellInRect(crop, {
+      frames: walk.frames ?? 4,
+      row: walk.row ?? 0,
+      playMode: walk.playMode ?? 'loop',
+      fps,
+      timeSec,
+    });
+  }
+  const std = walkStandardFor(walk, crop[2], crop[3]);
+  return animatedCellInRect(std, crop, {
+    dir: walk.dir ?? 's',
+    moving: true,
+    timeSec,
+    fps,
+    row: walk.row,
+  });
+}
+
+/**
+ * コマ送りの速さ。`loopBeats` があれば曲のテンポから逆算する。
+ * `timeSec` は再生ステップ由来なので、これで絵が拍にロックされる。
+ */
+function spriteFps(walk: NonNullable<MvImageLayer['walk']>, bpm: number): number {
+  if (walk.loopBeats && walk.loopBeats > 0) {
+    const frames = Math.max(1, walk.frames ?? 4);
+    const secPerBeat = 60 / (bpm || 120);
+    return frames / (walk.loopBeats * secPerBeat);
+  }
+  return walk.fps ?? 6;
+}
+
 function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
   const url = layerImageUrl(layer);
   if (!url) return;
@@ -922,14 +1056,7 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
   let src: SpriteRect = { sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight };
   if (layer.walk) {
     const crop = layer.walk.crop ?? [0, 0, img.naturalWidth, img.naturalHeight];
-    const std = walkStandardFor(layer.walk, crop[2], crop[3]);
-    src = animatedCellInRect(std, crop, {
-      dir: layer.walk.dir ?? 's',
-      moving: true,
-      timeSec: d.timeSec,
-      fps: layer.walk.fps ?? 6,
-      row: layer.walk.row,
-    });
+    src = spriteFrameRect(layer.walk, crop, d.timeSec, d.song.bpm);
   }
 
   const scale = layer.scale || 1;
@@ -948,14 +1075,7 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
     let frameSrc = src;
     if (layer.walk && rep?.phase) {
       const crop = layer.walk.crop ?? [0, 0, img.naturalWidth, img.naturalHeight];
-      const std = walkStandardFor(layer.walk, crop[2], crop[3]);
-      frameSrc = animatedCellInRect(std, crop, {
-        dir: layer.walk.dir ?? 's',
-        moving: true,
-        timeSec: d.timeSec + rep.phase * i,
-        fps: layer.walk.fps ?? 6,
-        row: layer.walk.row,
-      });
+      frameSrc = spriteFrameRect(layer.walk, crop, d.timeSec + rep.phase * i, d.song.bpm);
     }
 
     const copyScale = scale + (rep?.scaleStep ?? 0) * i;
@@ -1292,44 +1412,102 @@ function drawVisualizer(d: DrawCtx, layer: MvVisualizerLayer): void {
   }
 }
 
-/** 横スクロールのピアノロール。再生位置は帯の左から25%に固定し、右から左へ流れる。 */
+/**
+ * 平面のピアノロール。`flow` で2通り。
+ *
+ * - scroll : 再生位置を帯の左から25%に固定し、譜面が右から左へ流れる
+ * - page   : 譜面は動かず、`amount` 小節ぶんを固定位置に並べる。小節窓が進むとページごと差し替わる
+ *
+ * ノートの見え方は `MvNoteLight`:
+ *   まだ鳴っていない音は `dim` の薄さ → 音の頭で満点の白 → `echo` の輪郭が外へ広がって消える。
+ * 「鳴っていない音も濃く塗る」と、どれが今の音なのか画から読めなくなる。
+ */
 function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
   const { ctx, song } = d;
   const { x, y, w, h } = layer.rect;
-  const windowBars = layer.amount ?? 4;
+  const light = layer.light ?? DEFAULT_MV_NOTE_LIGHT;
+  const paged = (layer.flow ?? 'scroll') === 'page';
+  const windowBars = Math.max(0.25, layer.amount ?? 4);
   const windowSteps = windowBars * MV_STEPS_PER_BAR;
-  const playheadRatio = 0.25;
-  const from = d.step - windowSteps * playheadRatio;
+
+  // page はいま居るページの頭を原点にする。scroll は再生位置基準で毎フレーム動く。
+  const from = paged
+    ? Math.floor(d.step / windowSteps) * windowSteps
+    : d.step - windowSteps * 0.25;
   const to = from + windowSteps;
 
-  const pitchRange = Math.max(1, song.pitchMax - song.pitchMin);
+  // 音域はレイヤー指定があればそれを使う。曲全体を1枚に収めるとノートが数pxに潰れるので、
+  // 拡大したいレイヤーは狭い窓を持たせる。
+  const pitchLo = layer.pitchRange ? layer.pitchRange[0] : song.pitchMin;
+  const pitchHi = layer.pitchRange ? layer.pitchRange[1] : song.pitchMax;
+  const pitchRange = Math.max(1, pitchHi - pitchLo);
   const noteH = Math.max(1.5, h / (pitchRange + 1));
   const notes = notesForLayer(d, layer);
+  const echo = light.echo && light.echo.beats > 0 ? light.echo : null;
+  const echoSteps = echo ? echo.beats * MV_STEPS_PER_BEAT : 0;
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();
 
+  const baseAlpha = ctx.globalAlpha;
+
   for (const n of notes) {
     const end = n.startStep + n.durationSteps;
-    if (end < from || n.startStep > to) continue;
+    // page は「この小節窓に頭がある音」だけを載せる（またぐ音は切らずに窓の端で止める）
+    if (paged ? n.startStep < from || n.startStep >= to : end < from || n.startStep > to) continue;
+
     const nx = x + ((n.startStep - from) / windowSteps) * w;
-    const nw = Math.max(2, (n.durationSteps / windowSteps) * w);
-    const ny = y + h - ((n.pitch - song.pitchMin) / pitchRange) * (h - noteH) - noteH;
+    const nw = Math.max(2, ((Math.min(end, to) - n.startStep) / windowSteps) * w);
+    // 窓の外の音は折り返さず、そのオクターブぶんだけ寄せて窓の中に入れる
+    // （切り捨てると、狭い窓では画面がほとんど空になる）
+    let pitch = n.pitch;
+    while (pitch < pitchLo) pitch += 12;
+    while (pitch > pitchHi) pitch -= 12;
+    const ny = y + h - ((pitch - pitchLo) / pitchRange) * (h - noteH) - noteH;
+
     const sounding = n.startStep <= d.step && end > d.step;
-    ctx.globalAlpha = sounding ? 1 : 0.72;
-    ctx.fillStyle = trackColor(d, n.track);
-    if (sounding && layer.glow) {
-      ctx.shadowColor = ctx.fillStyle;
-      ctx.shadowBlur = 8;
+    const color = trackColor(d, n.track);
+    const level = noteLevel(d, n, light);
+
+    if (level > 0.004) {
+      ctx.globalAlpha = baseAlpha * level;
+      ctx.fillStyle = color;
+      if (sounding && layer.glow) {
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 8;
+      }
+      ctx.fillRect(nx, ny, nw, noteH);
+      ctx.shadowBlur = 0;
     }
-    ctx.fillRect(nx, ny, nw, noteH);
-    ctx.shadowBlur = 0;
+
+    // ── 余韻。音の頭から外へ広がる輪郭が、中身が暗くなったあとも残って薄れる ──
+    if (echo) {
+      const age = d.step - n.startStep;
+      if (age >= 0 && age < echoSteps) {
+        const t = age / echoSteps;
+        const grow = echo.spread * t;
+        ctx.globalAlpha = baseAlpha * (1 - t);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = echo.thickness;
+        ctx.strokeRect(nx - grow, ny - grow, nw + grow * 2, noteH + grow * 2);
+      }
+    }
   }
 
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = baseAlpha;
   ctx.restore();
+}
+
+/**
+ * ノート1つの濃さ 0..1。
+ * まだ鳴っていない＝`dim` / 鳴っている＝1 / 鳴り終わった＝`fadeOut` なら消す、でなければ `dim`。
+ */
+function noteLevel(d: DrawCtx, n: MvNote, light: MvNoteLight): number {
+  if (d.step < n.startStep) return light.dim;
+  if (d.step < n.startStep + n.durationSteps) return 1;
+  return light.fadeOut ? 0 : light.dim;
 }
 
 // ── 立体ピアノロール（MIDITrail 風） ─────────────────────
@@ -1383,6 +1561,7 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
   const { ctx, song } = d;
   const rect = layer.rect;
   const view = { ...DEFAULT_MV_VIEW, ...(layer.view ?? {}) };
+  const light = layer.light ?? DEFAULT_MV_NOTE_LIGHT_3D;
   const windowBars = layer.amount ?? 4;
   const windowSteps = windowBars * MV_STEPS_PER_BAR;
 
@@ -1451,7 +1630,7 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
     const color = trackColor(d, n.track);
 
     // 通り過ぎた音は左端に向かってフェードアウト
-    let alpha = sounding ? 1 : 0.8;
+    let alpha = sounding ? 1 : light.dim;
     const endX = stepToX(n.startStep + n.durationSteps);
     if (!sounding && endX < playheadX) {
       alpha *= clamp01(1 - (playheadX - endX) / (spanX * 0.24));
@@ -1507,6 +1686,7 @@ function drawPianoRollCircular(d: DrawCtx, layer: MvVisualizerLayer): void {
   const { ctx, song } = d;
   const rect = layer.rect;
   const ring: MvRing = { ...DEFAULT_MV_RING, ...(layer.ring ?? {}) };
+  const light = layer.light ?? DEFAULT_MV_NOTE_LIGHT_3D;
   const windowBars = layer.amount ?? 4;
   const windowSteps = windowBars * MV_STEPS_PER_BAR;
   const from = d.step;
@@ -1537,7 +1717,7 @@ function drawPianoRollCircular(d: DrawCtx, layer: MvVisualizerLayer): void {
     if (r1 <= r0) continue;
 
     const sounding = n.startStep <= d.step && n.startStep + n.durationSteps > d.step;
-    ctx.globalAlpha = sounding ? 1 : 0.65;
+    ctx.globalAlpha = sounding ? 1 : light.dim * 0.82;
     ctx.fillStyle = sounding ? shade(trackColor(d, n.track), 1.3) : trackColor(d, n.track);
     if (sounding && layer.glow) {
       ctx.shadowColor = ctx.fillStyle;
