@@ -208,7 +208,12 @@ class MockDB {
     return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt };
   }
 
-  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string): void {
+  /**
+   * プロフィールを更新する。`displayName` を省略すればアイコン/自己紹介だけ更新できる。
+   * slug は所有者キーなので作成時のまま固定し、ここでは絶対に書き換えない
+   * （pg.ts / sqlite.ts と同じ規約。表示名から derive し直すと所有権が切れる）。
+   */
+  updateUserDisplayName(userId: string, displayName?: string, avatarUrl?: string, bio?: string): void {
     let stored = this.anonUserData.get(userId);
     if (!stored) {
       for (const u of this.anonUserData.values()) {
@@ -219,9 +224,10 @@ class MockDB {
       }
     }
     if (stored) {
-      const oldSlug = stored.slug;
-      stored.displayName = displayName;
-      stored.slug = generateSlug(displayName);
+      const slug = stored.slug;
+      if (displayName !== undefined) {
+        stored.displayName = displayName;
+      }
       if (avatarUrl !== undefined) {
         stored.avatarUrl = avatarUrl;
       }
@@ -229,19 +235,17 @@ class MockDB {
         stored.bio = bio;
       }
 
-      // Propagate changes to posts written by this user in memory
-      if (oldSlug) {
+      // 表示名とアイコンは posts に非正規化されているので追随させる（slug は不変）
+      if (slug) {
         for (const post of this.posts) {
-          if (post.slug === oldSlug) {
+          if (post.slug === slug) {
             post.displayName = stored.displayName;
-            post.slug = stored.slug;
             post.avatarUrl = stored.avatarUrl;
           }
           if (post.replies) {
             for (const r of post.replies) {
-              if (r.slug === oldSlug) {
+              if (r.slug === slug) {
                 r.displayName = stored.displayName;
-                r.slug = stored.slug;
                 r.avatarUrl = stored.avatarUrl;
               }
             }

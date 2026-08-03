@@ -486,7 +486,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     try {
       const res = await api.upload.image({ image: dataUrl });
       const targetUserId = currentUser?.id || currentUserId || userId;
-      await api.auth.updateDisplayName(targetUserId, avatarInfo.username, res.url);
+      // 表示名は送らない。avatarInfo.username は画面表示用のラベルなので、
+      // これを保存すると本名として書き込まれ slug（所有者キー）まで変わってしまう。
+      await api.auth.updateProfile(targetUserId, { avatarUrl: res.url });
       setAvatarUrl(res.url);
       onProfileUpdate?.(avatarInfo.username, res.url);
 
@@ -521,7 +523,7 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
     setEditError(null);
     try {
       const targetUserId = currentUser?.id || currentUserId || userId;
-      await api.auth.updateDisplayName(targetUserId, avatarInfo.username, undefined, editBio.trim());
+      await api.auth.updateProfile(targetUserId, { bio: editBio.trim() });
       setBio(editBio.trim());
       setIsEditModalOpen(false);
     } catch (err) {

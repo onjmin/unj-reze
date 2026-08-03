@@ -1205,7 +1205,7 @@ export const sqliteStore: DataStore = {
     return { id, displayName, slug, avatarColor, avatarUrl: undefined, createdAt: now } as AnonymousUser;
   },
 
-  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
+  async updateUserDisplayName(userId: string, displayName?: string, avatarUrl?: string, bio?: string) {
     const d = await getDb();
     let userRows = rowsToObjects(d, 'SELECT id, slug FROM anonymous_users WHERE id = ?', [userId]);
     if (userRows.length === 0) {
@@ -1218,11 +1218,15 @@ export const sqliteStore: DataStore = {
       return;
     }
     const realId = userRows[0].id;
-    const oldSlug = userRows[0].slug;
+    const slug = userRows[0].slug;
 
-    const slug = deriveSlugSqlite(displayName);
-    const sets: string[] = ['display_name = ?', 'slug = ?'];
-    const values: (string | number)[] = [displayName, slug];
+    // slug は所有者キーなので作成時のまま固定する（pg.ts と同じ理由。表示名からは derive し直さない）
+    const sets: string[] = [];
+    const values: (string | number)[] = [];
+    if (displayName !== undefined) {
+      sets.push('display_name = ?');
+      values.push(displayName);
+    }
     if (avatarUrl !== undefined) {
       sets.push('avatar_url = ?');
       values.push(avatarUrl);
@@ -1231,14 +1235,12 @@ export const sqliteStore: DataStore = {
       sets.push('bio = ?');
       values.push(bio);
     }
+    if (sets.length === 0) return;
     values.push(realId);
     d.run(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = ?`, values);
 
-    if (oldSlug) {
-      d.run(
-        'UPDATE posts SET display_name = ?, slug = ? WHERE slug = ?',
-        [displayName, slug, oldSlug]
-      );
+    if (displayName !== undefined && slug) {
+      d.run('UPDATE posts SET display_name = ? WHERE slug = ?', [displayName, slug]);
     }
     saveDb();
   },

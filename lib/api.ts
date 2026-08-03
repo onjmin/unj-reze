@@ -24,8 +24,8 @@ const staticApi = {
     anonymous: async (sessionId: string, _ipAddress?: string) => {
       return mockDbInstance.getOrCreateAnonymousUser(sessionId, _ipAddress || '127.0.0.1');
     },
-    updateDisplayName: async (userId: string, displayName: string, avatarUrl?: string, bio?: string) => {
-      mockDbInstance.updateUserDisplayName(userId, displayName, avatarUrl, bio);
+    updateProfile: async (userId: string, changes: { displayName?: string; avatarUrl?: string; bio?: string }) => {
+      mockDbInstance.updateUserDisplayName(userId, changes.displayName, changes.avatarUrl, changes.bio);
     },
     getSettings: async (slug: string) => mockDbInstance.getUserSettings(slug),
     updateSettings: async (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) => {
@@ -249,8 +249,12 @@ const liveApi = {
       const qs = `?sessionId=${encodeURIComponent(sessionId)}`;
       return fetcher<AnonymousUser>(`/auth/anonymous${qs}`);
     },
-    updateDisplayName: (userId: string, displayName: string, avatarUrl?: string, bio?: string) =>
-      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, displayName, avatarUrl, bio }) }),
+    /**
+     * プロフィール更新。`displayName` は省略可（アイコン/自己紹介だけ更新するときは渡さない）。
+     * 画面表示用のラベルをここへ渡すと、それが本名として保存され slug まで変わるので注意。
+     */
+    updateProfile: (userId: string, changes: { displayName?: string; avatarUrl?: string; bio?: string }) =>
+      fetcher<{ success: boolean }>('/auth/anonymous', { method: 'PUT', body: JSON.stringify({ userId, ...changes }) }),
     getSettings: (slug: string) => fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>(`/auth/settings?slug=${encodeURIComponent(slug)}`),
     updateSettings: (slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) =>
       fetcher<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>('/auth/settings', { method: 'PUT', body: JSON.stringify({ slug, settings }) }),

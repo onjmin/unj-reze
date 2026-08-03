@@ -30,8 +30,13 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const { userId, displayName, avatarUrl, bio } = body;
 
-  if (!userId || !displayName) {
-    return NextResponse.json({ error: 'userId and displayName are required' }, { status: 400 });
+  // displayName は任意。アイコンや自己紹介だけの更新で表示名を送らせると、
+  // 画面表示用のラベル（例: 名無しWSG）がそのまま保存され、slug ごと変わってしまう。
+  if (!userId) {
+    return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+  }
+  if (displayName === undefined && avatarUrl === undefined && bio === undefined) {
+    return NextResponse.json({ error: 'nothing to update' }, { status: 400 });
   }
 
   await db.updateUserDisplayName(userId, displayName, avatarUrl, bio);

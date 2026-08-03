@@ -1304,7 +1304,7 @@ export const pgStore: DataStore = {
     }
   },
 
-  async updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string) {
+  async updateUserDisplayName(userId: string, displayName?: string, avatarUrl?: string, bio?: string) {
     const client = await getPool().connect();
     try {
       let userRes = await client.query('SELECT id, slug FROM anonymous_users WHERE id = $1', [userId]);
@@ -1318,11 +1318,17 @@ export const pgStore: DataStore = {
         return;
       }
       const realId = userRes.rows[0].id;
-      const oldSlug = userRes.rows[0].slug;
+      const slug = userRes.rows[0].slug;
 
-      const slug = deriveSlugPg(displayName);
-      const sets = ['display_name = $1', 'slug = $2'];
-      const values: unknown[] = [displayName, slug];
+      // slug は所有者キー（mvs.creator_slug など）なので、アカウント作成時に決めたら二度と変えない。
+      // 以前はここで表示名から derive し直していたため、アイコンや自己紹介を保存しただけで
+      // slug が変わり、MV・ゲームの所有権が切れて本人が編集できなくなっていた（403）。
+      const sets: string[] = [];
+      const values: unknown[] = [];
+      if (displayName !== undefined) {
+        sets.push(`display_name = $${values.length + 1}`);
+        values.push(displayName);
+      }
       if (avatarUrl !== undefined) {
         sets.push(`avatar_url = $${values.length + 1}`);
         values.push(avatarUrl);
@@ -1331,14 +1337,21 @@ export const pgStore: DataStore = {
         sets.push(`bio = $${values.length + 1}`);
         values.push(bio);
       }
+      if (sets.length === 0) return;
       values.push(realId);
-      await client.query(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = $${values.length}`, values);
 
-      if (oldSlug) {
-        await client.query(
-          'UPDATE posts SET display_name = $1, slug = $2 WHERE slug = $3',
-          [displayName, slug, oldSlug]
-        );
+      await client.query('BEGIN');
+      try {
+        await client.query(`UPDATE anonymous_users SET ${sets.join(', ')} WHERE id = $${values.length}`, values);
+
+        // 表示名だけは posts にも非正規化されているので追随させる（slug は触らない）
+        if (displayName !== undefined && slug) {
+          await client.query('UPDATE posts SET display_name = $1 WHERE slug = $2', [displayName, slug]);
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
       }
     } finally {
       client.release();
@@ -1887,6 +1900,7 @@ function deriveSlugPg(fullName: string): string {
   const match = fullName.match(/[a-zA-Z0-9]+$/);
   return match ? match[0] : fullName;
 }
+
 
 const AVATAR_GRADIENTS_PG = [
   'from-blue-500 to-indigo-600',

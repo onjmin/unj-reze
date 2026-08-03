@@ -124,7 +124,11 @@ export interface DataStore {
   searchPosts(query: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getPostsByHashtag(tag: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
-  updateUserDisplayName(userId: string, displayName: string, avatarUrl?: string, bio?: string): Promise<void>;
+  /**
+   * プロフィールを更新する。`displayName` を省略すればアイコン/自己紹介だけを更新できる。
+   * slug は所有者キーなので、このメソッドでは**絶対に**書き換えない。
+   */
+  updateUserDisplayName(userId: string, displayName?: string, avatarUrl?: string, bio?: string): Promise<void>;
   getUserAvatarUrl(slug: string): Promise<string | undefined>;
   getUserBio(slug: string): Promise<string | undefined>;
   listOshiItems(userSlug: string): Promise<DbOshiItem[]>;
