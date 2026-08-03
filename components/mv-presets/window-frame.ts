@@ -242,9 +242,9 @@ const LAYERS: MvLayer[] = [
   // ══ 窓を囲む影たち ═════════════════════════════════════
   // 左右に1体ずつ（repeat で1レイヤーのまま2体）
   chorus('chorus-side', 1, {
-    x: 78,
+    x: 96,
     y: 236,
-    repeat: { count: 2, dx: 484, dy: 0, phase: 0.4 },
+    repeat: { count: 2, dx: 452, dy: 0, phase: 0.4 },
     sections: CAST_SECTIONS,
   }),
   // 窓の真下にもう1体。サビだけ左右がさらに増える
@@ -270,9 +270,11 @@ const LAYERS: MvLayer[] = [
     ref: rozeRef('beat-e'),
     url: rozeUrl('beat-e'),
     walk: rozeBeat('e', 4),
-    x: 60,
+    x: 26,
     y: 246,
-    scale: 0.4,
+    // 参考動画の左端の灯りは窓の住人よりずっと小さい小道具
+    scale: 0.16,
+    // 左端の影と重ならない位置へ
     anchor: 'bottom',
     motion: 'bob',
     motionAmount: 1.2,
@@ -315,7 +317,7 @@ const MANIFEST: MvManifest = {
     pulse: 'none',
     fadeIn: true,
     fadeOut: true,
-    palette: ['#c7d2fe', '#818cf8', '#a5b4fc', '#e0e7ff'],
+    palette: ['#e5e7eb', '#c7cbd1', '#9aa0a6', '#f4f4f5'],
   },
   sections: SECTIONS,
   layers: LAYERS,

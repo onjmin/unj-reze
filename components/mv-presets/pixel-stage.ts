@@ -6,8 +6,9 @@
 //   参考動画の切り替わりは 45秒 / 103秒 / 145秒 …と、どれも小節の頭にきっちり乗っている。
 //   ここでは 8小節ごとに黒⇄夜を往復させ、夜へ入るときは白で抜け、黒へ戻るときは暗転する。
 //
-// 夜の場面の背景はユーザーが1枚絵を入れる前提だが、素材ゼロでも成立するよう
-// 月（図形）とスカイライン（スペアナ）で仮の夜景を組んである。
+// 夜の場面の背景は内蔵の「夜の海辺」（4コマ・拍にロックして波が寄せる）。
+// 静止画の `MvStage.bgUrl` ではアニメが持てないので、画像レイヤーとして全画面に敷いている。
+// 参考動画は路地の1枚絵なので、そこは差し替え前提。
 
 import type { MvImageLayer, MvLayer, MvManifest, MvSection } from '@/lib/mv-config';
 import {
@@ -239,18 +240,6 @@ const LAYERS: MvLayer[] = [
     sections: NIGHT_SECTIONS,
     z: 2,
   },
-  // 建物の窓。鳴っている音域だけがぽつぽつ灯る
-  {
-    kind: 'visualizer',
-    id: 'windows',
-    style: 'bars',
-    rect: { x: 0, y: 250, w: 640, h: 80 },
-    amount: 22,
-    thickness: 6,
-    opacity: 0.28,
-    sections: NIGHT_SECTIONS,
-    z: 7,
-  },
   // 空をゆっくり横切る影
   {
     kind: 'image',
@@ -277,8 +266,9 @@ const LAYERS: MvLayer[] = [
     // 14コマを2小節で1周。ゆっくりした揺れになる。
     walk: rozeBeat('f', 8),
     x: 150,
-    y: 362,
-    scale: 0.68,
+    y: 366,
+    // 画面の1/3に収まる大きさ。参考動画の手前の影は画面を覆わない
+    scale: 0.45,
     anchor: 'bottom',
     motion: 'parallax',
     motionAmount: 5,
