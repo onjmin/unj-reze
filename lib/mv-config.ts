@@ -47,6 +47,14 @@ export const MV_AUDIO_MODE_HINTS: Record<MvAudioMode, string> = {
 
 export const DEFAULT_MV_AUDIO_MODE: MvAudioMode = 'soundfontKoe';
 
+/**
+ * 歩行グラ（`loopBeats` 指定）のコマ送り速度に一律で掛ける倍率。
+ * 1周を `loopBeats` 拍ぴったりで送ると曲に対して足取りが重く見えるため、
+ * 既定値は2倍（半拍ごとにコマが進む）。ユーザーがMV単位で変更できる。
+ */
+export const DEFAULT_MV_WALK_SPEED = 2;
+export const MV_WALK_SPEED_OPTIONS = [0.5, 1, 1.5, 2, 3] as const;
+
 // ───────────────── 動き・見た目の共通enum ─────────────────
 
 /**
@@ -964,6 +972,8 @@ export interface MvManifest {
   mml: string;
   /** 音の出し方。未指定なら DEFAULT_MV_AUDIO_MODE。 */
   audio?: { mode: MvAudioMode };
+  /** 歩行グラのコマ送り速度倍率。未指定なら DEFAULT_MV_WALK_SPEED。 */
+  walkSpeed?: number;
   stage: MvStage;
   layers: MvLayer[];
   sections: MvSection[];
@@ -1066,6 +1076,10 @@ export function layerAppearBar(layer: MvLayer, sections: MvSection[], sectionId:
 
 export function mvAudioMode(manifest: MvManifest): MvAudioMode {
   return manifest.audio?.mode ?? DEFAULT_MV_AUDIO_MODE;
+}
+
+export function mvWalkSpeed(manifest: MvManifest): number {
+  return manifest.walkSpeed ?? DEFAULT_MV_WALK_SPEED;
 }
 
 let uidCounter = 0;

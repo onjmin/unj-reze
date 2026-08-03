@@ -27,6 +27,7 @@ import {
   isMvTransitionInert,
   layerAppearBar,
   mvEntranceDistance,
+  mvWalkSpeed,
   resolveSceneStage,
   sectionAtBar,
   type MvAnchor,
@@ -1025,8 +1026,9 @@ function spriteFrameRect(
   crop: [number, number, number, number],
   timeSec: number,
   bpm: number,
+  speedMultiplier: number,
 ): SpriteRect {
-  const fps = spriteFps(walk, bpm);
+  const fps = spriteFps(walk, bpm, speedMultiplier);
   if (walk.stdId === 'row_anim') {
     return rowAnimCellInRect(crop, {
       frames: walk.frames ?? 4,
@@ -1049,12 +1051,14 @@ function spriteFrameRect(
 /**
  * コマ送りの速さ。`loopBeats` があれば曲のテンポから逆算する。
  * `timeSec` は再生ステップ由来なので、これで絵が拍にロックされる。
+ * `speedMultiplier` は `manifest.walkSpeed`（既定 DEFAULT_MV_WALK_SPEED）由来で、
+ * ユーザーがMV単位で足取りの速さを調整できる。
  */
-function spriteFps(walk: NonNullable<MvImageLayer['walk']>, bpm: number): number {
+function spriteFps(walk: NonNullable<MvImageLayer['walk']>, bpm: number, speedMultiplier: number): number {
   if (walk.loopBeats && walk.loopBeats > 0) {
     const frames = Math.max(1, walk.frames ?? 4);
     const secPerBeat = 60 / (bpm || 120);
-    return frames / (walk.loopBeats * secPerBeat);
+    return (frames / (walk.loopBeats * secPerBeat)) * speedMultiplier;
   }
   return walk.fps ?? 6;
 }
@@ -1069,9 +1073,10 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
 
   // 切り出し矩形（歩行グラならコマ送り、それ以外は画像全体）
   let src: SpriteRect = { sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight };
+  const walkSpeed = mvWalkSpeed(d.manifest);
   if (layer.walk) {
     const crop = layer.walk.crop ?? [0, 0, img.naturalWidth, img.naturalHeight];
-    src = spriteFrameRect(layer.walk, crop, d.timeSec, d.song.bpm);
+    src = spriteFrameRect(layer.walk, crop, d.timeSec, d.song.bpm, walkSpeed);
   }
 
   const scale = layer.scale || 1;
@@ -1090,7 +1095,7 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
     let frameSrc = src;
     if (layer.walk && rep?.phase) {
       const crop = layer.walk.crop ?? [0, 0, img.naturalWidth, img.naturalHeight];
-      frameSrc = spriteFrameRect(layer.walk, crop, d.timeSec + rep.phase * i, d.song.bpm);
+      frameSrc = spriteFrameRect(layer.walk, crop, d.timeSec + rep.phase * i, d.song.bpm, walkSpeed);
     }
 
     const copyScale = scale + (rep?.scaleStep ?? 0) * i;
