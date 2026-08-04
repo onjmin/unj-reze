@@ -4,12 +4,17 @@ import { useState } from 'react';
 
 const PROD_URL = 'https://unj-reze.onjmin.workers.dev/';
 const DISMISS_KEY = 'unj_demo_notice_dismissed';
+const DISMISS_DURATION_MS = 10 * 60 * 1000; // 10 minutes
 
 // 一度閉じた人に毎回出すと、デモを触るたびに邪魔になるだけなので覚えておく
 function shouldShowNotice(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    return localStorage.getItem(DISMISS_KEY) !== '1';
+    const stored = localStorage.getItem(DISMISS_KEY);
+    if (!stored) return true;
+    const dismissedAt = Number(stored);
+    if (Number.isNaN(dismissedAt)) return true;
+    return Date.now() - dismissedAt >= DISMISS_DURATION_MS;
   } catch {
     return true;
   }
@@ -20,7 +25,7 @@ export default function DemoNoticeModal() {
 
   const dismiss = () => {
     try {
-      localStorage.setItem(DISMISS_KEY, '1');
+      localStorage.setItem(DISMISS_KEY, String(Date.now()));
     } catch {}
     setVisible(false);
   };
