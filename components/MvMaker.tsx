@@ -22,7 +22,7 @@ import {
   MV_ENTER_FROM_LABELS,
   MV_H, MV_MOD_OP_LABELS, MV_MOD_SOURCE_LABELS, MV_MOD_TARGET_LABELS, MV_MOTION_LABELS,
   MV_PROJECTION_LABELS, MV_ROOT_TO_PITCH, MV_SHAPE_FORM_LABELS, MV_TRANSITION_LABELS, MV_TRIGGER_LABELS,
-  MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, MV_WALK_SPEED_OPTIONS, isMvEntranceInert, mvAudioMode, mvEntranceDistance, mvUid, mvWalkSpeed,
+  MV_STEPS_PER_BAR, MV_VISUALIZER_LABELS, MV_W, isMvEntranceInert, mvAudioMode, mvEntranceDistance, mvUid, mvWalkSpeed,
   type MvAudioMode, type MvBlend, type MvChordBarLayer, type MvChordColorMode, type MvChordStep, type MvEffectLayer, type MvEffectStyle,
   type MvEnterFrom, type MvEntrance,
   type MvDegreeLayer,
@@ -799,24 +799,15 @@ export default function MvMaker({ onClose, onSave, userId, initialManifest, isEd
         <SectionTitle>🚶 歩行グラの速さ</SectionTitle>
         <Hint>
           歩行グラ素材のコマ送りの速さ（曲のテンポに対する倍率）。1倍だと拍にぴったり合わせたコマ送りで、
-          数値を上げるほど足取りが速く・軽快に見えます。
+          数値を上げるほど足取りが速く・軽快に見えます（小数可）。
         </Hint>
-        <div className="flex gap-1.5">
-          {MV_WALK_SPEED_OPTIONS.map(opt => {
-            const active = mvWalkSpeed(manifest) === opt;
-            return (
-              <button
-                key={opt}
-                onClick={() => update(m => ({ ...m, walkSpeed: opt }))}
-                className={`flex-1 rounded-lg border py-1.5 text-center text-[11px] font-bold transition-colors ${active
-                  ? 'border-blue-500/70 bg-blue-500/10 text-gray-100'
-                  : 'border-gray-700 bg-gray-800 text-gray-400 hover:bg-gray-100/5'}`}
-              >
-                {opt}倍
-              </button>
-            );
-          })}
-        </div>
+        <NumField
+          label="速度倍率"
+          value={mvWalkSpeed(manifest)}
+          min={0.1}
+          step={0.1}
+          onChange={v => update(m => ({ ...m, walkSpeed: Math.max(0.1, v) }))}
+        />
       </div>
 
     </div>
