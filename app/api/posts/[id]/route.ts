@@ -144,7 +144,7 @@ export async function PATCH(
   if (!mmlRef) {
     return NextResponse.json({ error: 'Invalid mmlUrl' }, { status: 400 });
   }
-  const result = await db.editPost(decodedId, user.displayName, content, originType, imageSrc, mmlRef);
+  const result = await db.editPost(decodedId, user.slug, content, originType, imageSrc, mmlRef);
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }
@@ -167,7 +167,7 @@ export async function DELETE(
   if (!user) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
-  const ok = await db.deletePost(decodedId, user.displayName);
+  const ok = await db.deletePost(decodedId, user.slug);
   if (!ok) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }
