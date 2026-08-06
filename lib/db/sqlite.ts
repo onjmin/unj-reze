@@ -6,6 +6,7 @@ import type { Message, Trend } from '../mock-db';
 import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions, MmlRef } from './interface';
 import { formatRelativeTime } from '../time';
 import { cleanContentForTrends, isValidTrendKeyword, extractMmlFromContent } from '../mml';
+import { isThreadFull, RES_LIMIT } from '../thread-limits';
 import { publishRealtime } from '../realtime/publish';
 import { chUser } from '../realtime/channels';
 
@@ -767,6 +768,15 @@ export const sqliteStore: DataStore = {
 
   async addReply(postId: number, data: ReplyParams) {
     const d = await getDb();
+
+    // レス数上限。unj とのDB統合時に posts を threads/res へ写すので、
+    // unj の `res.num SMALLINT` / `threads.res_limit` を超えさせない
+    const threadRows = rowsToObjects(d, 'SELECT replies_count FROM posts WHERE id = ?', [postId]);
+    if (threadRows.length === 0) return null;
+    if (isThreadFull(Number(threadRows[0].replies_count ?? 0))) {
+      throw new Error(`このスレッドは上限（${RES_LIMIT}レス）に達しています`);
+    }
+
     const slug = data.slug || deriveSlugSqlite(data.displayName);
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();

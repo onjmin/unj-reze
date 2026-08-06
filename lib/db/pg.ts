@@ -7,6 +7,7 @@ import { formatRelativeTime } from '../time';
 import { publishRealtime } from '../realtime/publish';
 import { chUser } from '../realtime/channels';
 import { extractMmlFromContent } from '../mml';
+import { isThreadFull, RES_LIMIT } from '../thread-limits';
 
 // Worker環境で Fetch API を明示的に使用するように設定
 neonConfig.fetchConnectionCache = true;
@@ -671,6 +672,23 @@ export const pgStore: DataStore = {
       await client.query('BEGIN');
       // 同時投稿によるID重複(採番の競合)を防ぐため、ID採番からINSERTまでをアドバイザリロックで直列化する。
       await client.query('SELECT pg_advisory_xact_lock(42)');
+
+      // レス数上限。unj とのDB統合時に posts を threads/res へ写すので、
+      // unj の `res.num SMALLINT` / `threads.res_limit` を超えさせない。
+      // ロックの内側で数えないと、同時投稿で上限を突き抜ける。
+      const countRes = await client.query(
+        'SELECT replies_count FROM posts WHERE id = $1',
+        [postId]
+      );
+      if (countRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (isThreadFull(Number(countRes.rows[0].replies_count ?? 0))) {
+        await client.query('ROLLBACK');
+        throw new Error(`このスレッドは上限（${RES_LIMIT}レス）に達しています`);
+      }
+
       const authorSlug = data.slug || deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
       // MML本文は content に埋め込まれなくなったので、有無はURLの有無で決まる

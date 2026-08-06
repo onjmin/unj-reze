@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseMmlRef } from '@/lib/manifest-ref';
+import { tryVote, tryHeart } from '@/lib/vote-guard';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachEmbedInfo } from '@/lib/post-embeds';
@@ -52,10 +53,18 @@ export async function PUT(
 
   switch (action) {
     case 'like':
-      result = await db.likePost(decodedId, actorId);
-      break;
     case 'dislike':
-      result = await db.dislikePost(decodedId, actorId);
+      // 重複投票の判定はインメモリ（unj の like.ts と同じ方式）。
+      // DBに投票行を持たないので、再投票済みなら現状の投稿をそのまま返す。
+      if (!tryVote(actorId, decodedId)) {
+        const current = await db.getPost(decodedId, actorId);
+        if (!current) return NextResponse.json({ error: 'Post not found' }, { status: 404 });
+        await attachEmbedInfo(current);
+        return NextResponse.json(encodePost(current));
+      }
+      result = action === 'like'
+        ? await db.likePost(decodedId, actorId)
+        : await db.dislikePost(decodedId, actorId);
       break;
     case 'repost':
       result = await db.repostPost(decodedId);
@@ -91,6 +100,14 @@ export async function POST(
   // slug を使う理由は上の PUT ハンドラと同じ（displayName は改名で変わる）。
   const user = await resolveSessionUser(request, sessionId);
   const actorId = user?.slug ?? '';
+
+  // ハートも1投稿1回まで（インメモリ判定）
+  if (!tryHeart(actorId, decodedId)) {
+    const current = await db.getPost(decodedId, actorId);
+    if (!current) return NextResponse.json({ error: 'Post not found' }, { status: 404 });
+    await attachEmbedInfo(current);
+    return NextResponse.json(encodePost(current));
+  }
 
   const result = await db.heartPost(decodedId, actorId, count);
   if (!result) {
