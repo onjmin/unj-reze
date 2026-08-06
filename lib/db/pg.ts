@@ -115,7 +115,11 @@ interface DisplayContent {
 function deriveDisplay(row: any): DisplayContent {
   const t = Number(row.content_type);
   const text: string = row.content_text ?? '';
-  if (t === CT.Image) {
+  if (t === CT.Image || t === CT.Oekaki) {
+    // お絵描き(1024)は表示時点では単なる画像。unjの専用UIで描かれた投稿も
+    // board_id=1 を共有するreze側では「画像投稿」として同じ枠(gimp-checkered
+    // 背景つき)で描く。ここで弾くと本文へURLが畳み込まれ、汎用embed
+    // （白背景なし）扱いになってしまう。
     return { content: text, hasImage: true, imageSrc: row.content_url || undefined };
   }
   if (t === CT.Dtm) {
