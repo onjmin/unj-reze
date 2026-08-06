@@ -118,6 +118,9 @@ export default function RootLayout({
             `,
           }}
         />
+        {process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && (
+          <meta httpEquiv="refresh" content="0; url=https://unj-reze.onjmin.workers.dev/" />
+        )}
       </head>
       <body className="min-h-full flex flex-col" suppressHydrationWarning><AudioFocusProvider>{children}</AudioFocusProvider><PwaRegister />{process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' && <DemoNoticeModal />}</body>
     </html>
