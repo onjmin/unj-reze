@@ -6,8 +6,9 @@ import type { DbMvRecord, DbPost } from './types-db';
  * 内蔵アセット参照キーはクライアント側のハイドレーションが要るのでサーバーでは解決できない。
  */
 function thumbnailFromMv(mv: DbMvRecord): string | undefined {
-  const bgUrl = mv.manifest?.stage?.bgUrl;
-  return bgUrl?.startsWith('http') ? bgUrl : undefined;
+  // bgUrl は stage.bgUrl の非正規化列。manifest がR2に出たので、
+  // 保存時に書き込み側が写しておいた値をそのまま読む。
+  return mv.bgUrl?.startsWith('http') ? mv.bgUrl : undefined;
 }
 
 /**

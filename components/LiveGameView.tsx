@@ -9,6 +9,7 @@ import { getAvatarInfo } from '@/lib/avatar';
 import { useRealtimeSubscription, realtimeConfigured } from '@/lib/hooks/useRealtime';
 import { getRealtimeClient } from '@/lib/realtime/client';
 import { chGame, chThread } from '@/lib/realtime/channels';
+import { useRemoteJson } from '@/lib/use-remote-payload';
 
 interface LiveInfo {
   gameId: string | null;
@@ -16,7 +17,8 @@ interface LiveInfo {
   gamePreset: string;
   hourSlot: string;
   postId: string | null;
-  manifest: GameManifestDraft | null;
+  /** manifest 本体の保存先URL（R2）。実体はブラウザが直接引く */
+  manifestUrl: string | null;
   nextCandidates: GameVoteCandidate[];
   myVote: number | null;
 }
@@ -30,6 +32,9 @@ const PRESET_EMOJI: Record<string, string> = { dq: '🐉', mario: '🍄', touhou
 
 export default function LiveGameView({ userId, sessionId }: Props) {
   const [info, setInfo] = useState<LiveInfo | null>(null);
+  // manifest 本体はDBに無いので、URLが決まった時点でR2から引く。
+  // 実況の枠自体は manifest を待たずに描ける
+  const { data: liveManifest } = useRemoteJson<GameManifestDraft>(info?.manifestUrl ?? undefined);
   const [ghostPlayers, setGhostPlayers] = useState<GhostPlayer[]>([]);
   const [myVote, setMyVote] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState('');
@@ -226,11 +231,11 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 
       {/* ゲームエリア */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        {info?.manifest ? (
+        {liveManifest && info ? (
           <GameMaker
             onClose={() => {}}
             userId={userId}
-            initialManifest={info.manifest}
+            initialManifest={liveManifest}
             playOnly
             embedded
             ghostPlayers={ghostPlayers}
@@ -255,7 +260,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
               } catch {}
             }}
           />
-        ) : info && !info.manifest ? (
+        ) : info && !info.manifestUrl ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500 text-sm gap-2">
             <span className="text-3xl">🎮</span>
             <p>まだゲームが投稿されていません</p>

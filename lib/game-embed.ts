@@ -2,10 +2,11 @@ import { db } from './db';
 import type { DbGameRecord, DbPost } from './types-db';
 
 function thumbnailFromGame(game: DbGameRecord): string | undefined {
-  // titleScreen.bgRef は保存時解決済みURLのみ通す（内蔵アセット参照キーは
-  // クライアント側ハイドレーションが必要なためサーバーでは解決できない）。
-  const bgRef = game.manifest?.titleScreen?.bgRef;
-  return bgRef?.startsWith('http') ? bgRef : undefined;
+  // bgRef は titleScreen.bgRef の非正規化列。manifest がR2に出たので、
+  // 保存時に書き込み側が写しておいた値をそのまま読む。
+  // 解決済みURLのみ通す（内蔵アセット参照キーはクライアント側の
+  // ハイドレーションが要るのでサーバーでは解決できない）。
+  return game.bgRef?.startsWith('http') ? game.bgRef : undefined;
 }
 
 /** 投稿(および返信)にひもづくゲームの title/サムネイルを埋め込む。破壊的に post を更新する。 */

@@ -421,6 +421,83 @@ const migrations = [
       WHERE has_mml = FALSE
         AND (content LIKE '%#mml%' OR content LIKE '%#MML作曲%');
     `
+  },
+  {
+    // ------------------------------------------------------------------
+    // manifest と MML本文をDBからR2へ追い出す（STEP 1: 列を足すだけ）
+    //
+    // 実データの移送は scripts/migrate-to-uploader.mjs が行う。
+    // HTTPアップロードが要るのでSQLでは書けない。
+    // 旧列の削除は 23_drop_inline_payloads で、移送完了を確認してから。
+    // ------------------------------------------------------------------
+    name: '22_externalize_payloads_to_r2',
+    sql: `
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS manifest_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS manifest_delete_id TEXT;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS manifest_delete_hash TEXT;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS bg_ref TEXT;
+      ALTER TABLE games ADD COLUMN IF NOT EXISTS creator_slug TEXT;
+
+      ALTER TABLE mvs ADD COLUMN IF NOT EXISTS manifest_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE mvs ADD COLUMN IF NOT EXISTS manifest_delete_id TEXT;
+      ALTER TABLE mvs ADD COLUMN IF NOT EXISTS manifest_delete_hash TEXT;
+      ALTER TABLE mvs ADD COLUMN IF NOT EXISTS bg_url TEXT;
+
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS mml_url TEXT;
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS mml_delete_id TEXT;
+      ALTER TABLE posts ADD COLUMN IF NOT EXISTS mml_delete_hash TEXT;
+
+      -- サムネ用の bg_ref / bg_url を、manifest がまだ手元にあるうちに埋めておく。
+      -- 一覧表示は移送スクリプトの完了を待たずに新方式へ切り替えられる。
+      -- POSIX正規表現で \\s ではなく [[:space:]] を使うのは従来どおりの理由による。
+      UPDATE games
+      SET bg_ref = substring(manifest::text from '"bgRef"[[:space:]]*:[[:space:]]*"(https?://[^"]+)"')
+      WHERE bg_ref IS NULL;
+
+      UPDATE mvs
+      SET bg_url = substring(manifest::text from '"bgUrl"[[:space:]]*:[[:space:]]*"(https?://[^"]+)"')
+      WHERE bg_url IS NULL;
+
+      -- 移送スクリプトが未処理の行を引くための部分インデックス（STEP 3 で落とす）
+      CREATE INDEX IF NOT EXISTS idx_games_migrating ON games(id) WHERE manifest_url = '';
+      CREATE INDEX IF NOT EXISTS idx_mvs_migrating ON mvs(id) WHERE manifest_url = '';
+      CREATE INDEX IF NOT EXISTS idx_posts_migrating_mml ON posts(id) WHERE has_mml = TRUE AND mml_url IS NULL;
+    `
+  },
+  {
+    // ------------------------------------------------------------------
+    // STEP 3: 旧列を落とす。
+    // scripts/migrate-to-uploader.mjs が全件成功してから流すこと。
+    // 取りこぼしたまま流すと本文が消えるので、残件があれば例外で止める。
+    // ------------------------------------------------------------------
+    name: '23_drop_inline_payloads',
+    sql: `
+      DO $$
+      DECLARE
+        remaining INTEGER;
+      BEGIN
+        SELECT
+          (SELECT COUNT(*) FROM games WHERE manifest_url = '')
+        + (SELECT COUNT(*) FROM mvs WHERE manifest_url = '')
+        + (SELECT COUNT(*) FROM posts WHERE has_mml = TRUE AND mml_url IS NULL)
+        INTO remaining;
+
+        IF remaining > 0 THEN
+          RAISE EXCEPTION
+            'R2への移送が未完了です（残り % 件）。scripts/migrate-to-uploader.mjs を先に完走させてください', remaining;
+        END IF;
+      END $$;
+
+      DROP INDEX IF EXISTS idx_games_migrating;
+      DROP INDEX IF EXISTS idx_mvs_migrating;
+      DROP INDEX IF EXISTS idx_posts_migrating_mml;
+
+      ALTER TABLE games DROP COLUMN IF EXISTS manifest;
+      ALTER TABLE mvs DROP COLUMN IF EXISTS manifest;
+
+      ALTER TABLE games ALTER COLUMN manifest_url DROP DEFAULT;
+      ALTER TABLE mvs ALTER COLUMN manifest_url DROP DEFAULT;
+    `
   }
 ];
 

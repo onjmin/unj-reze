@@ -10,8 +10,11 @@ import GameLandingView from '@/components/GameLandingView';
 const getCachedGame = cache(async (id: number) => db.getGame(id));
 
 /** タイトル画面の背景がURLで保存されていればOGP画像に使う（内蔵アセット参照はサーバーで解決できない） */
-function thumbnailOf(manifest: { titleScreen?: { bgRef?: string } } | undefined): string | undefined {
-  const bgRef = manifest?.titleScreen?.bgRef;
+/**
+ * OGP画像。manifest がR2に出たのでサーバーでは開けない。
+ * 保存時に写しておいた非正規化列 bg_ref をそのまま使う。
+ */
+function thumbnailOf(bgRef: string | undefined): string | undefined {
   return typeof bgRef === 'string' && bgRef.startsWith('http') ? bgRef : undefined;
 }
 
@@ -33,7 +36,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     ? `${plays}回あそばれています。登録なしでそのまま遊べます。`
     : 'ブラウザでそのまま遊べます。登録は要りません。';
   const url = `${SITE_URL}/game/${id}`;
-  const image = thumbnailOf(game.manifest);
+  const image = thumbnailOf(game.bgRef);
 
   return {
     title,
@@ -95,7 +98,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
       <GameLandingView
         gameId={encodeId(game.id)}
         title={game.title}
-        manifest={game.manifest}
+        manifestUrl={game.manifestUrl}
         preset={game.preset}
         creatorSlug={game.creatorSlug}
         plays={game.plays ?? 0}

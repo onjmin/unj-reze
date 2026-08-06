@@ -245,8 +245,9 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                     </div>
                   );
                 }
-                const mmlCode = extractMmlFromContent(post.content);
-                if (mmlCode) {
+                // アイコンを出すだけなので本文は要らない。has_mml で足りる。
+                // ここで本文を取りにいくと一覧の全件で往復が発生する
+                if (post.hasMml || extractMmlFromContent(post.content)) {
                   return (
                     <div className="shrink-0 w-11 h-11 rounded bg-blue-600/20 border border-blue-600/40 flex items-center justify-center">
                       <Music size={18} className="text-blue-400" />

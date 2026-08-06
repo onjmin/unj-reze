@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
         id: encodeId(g.id),
         preset: g.preset,
         title: g.title,
+        manifestUrl: g.manifestUrl,
         createdAt: g.createdAt,
         creatorSlug: g.creatorSlug,
         plays: g.plays ?? 0,

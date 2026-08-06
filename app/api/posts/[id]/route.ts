@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parseMmlRef } from '@/lib/manifest-ref';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachEmbedInfo } from '@/lib/post-embeds';
@@ -108,9 +109,10 @@ export async function PATCH(
   if (decodedId === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
-  const { content, originType, imageSrc, sessionId } = await request.json() as {
+  const body = await request.json() as {
     content?: string; originType?: OriginType | null; imageSrc?: string; sessionId?: string;
   };
+  const { content, originType, imageSrc, sessionId } = body;
   // 所有者判定に使う身元は必ずセッションから取る。body の userId を信じると
   // display_name / slug はどちらも公開情報なので、他人の投稿を編集できてしまう。
   const user = await resolveSessionUser(request, sessionId);
@@ -120,7 +122,12 @@ export async function PATCH(
   if (typeof content !== 'string') {
     return NextResponse.json({ error: 'content is required' }, { status: 400 });
   }
-  const result = await db.editPost(decodedId, user.displayName, content, originType, imageSrc);
+  // 編集でMMLを差し替えたときは新しいURLが来る。未指定なら既存のMMLを触らない
+  const mmlRef = parseMmlRef(body);
+  if (!mmlRef) {
+    return NextResponse.json({ error: 'Invalid mmlUrl' }, { status: 400 });
+  }
+  const result = await db.editPost(decodedId, user.displayName, content, originType, imageSrc, mmlRef);
   if (!result) {
     return NextResponse.json({ error: 'Post not found or not owned' }, { status: 404 });
   }

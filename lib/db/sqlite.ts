@@ -1,9 +1,9 @@
 import type { Database as SqlJsDatabase } from 'sql.js';
 import { INIT_SQL } from './init-sql';
 import { AnonymousUser, FollowUser, OriginType } from '../types';
-import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
+import { DbPost as Post, DbNotification as Notification, DbOshiItem, DbGameRecord, DbMvRecord } from '../types-db';
 import type { Message, Trend } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions, MmlRef } from './interface';
 import { formatRelativeTime } from '../time';
 import { cleanContentForTrends, isValidTrendKeyword, extractMmlFromContent } from '../mml';
 import { publishRealtime } from '../realtime/publish';
@@ -105,6 +105,22 @@ function ensureTableMigrations(d: SqlJsDatabase) {
   if (!gameColNames.includes('best_score')) {
     d.run("ALTER TABLE games ADD COLUMN best_score INTEGER NOT NULL DEFAULT 0");
   }
+  // manifest 本体をR2へ出した（data/migrations/007）。bg_ref はサムネ用の非正規化列
+  if (!gameColNames.includes('manifest_url')) {
+    d.run("ALTER TABLE games ADD COLUMN manifest_url TEXT NOT NULL DEFAULT ''");
+    d.run("ALTER TABLE games ADD COLUMN manifest_delete_id TEXT");
+    d.run("ALTER TABLE games ADD COLUMN manifest_delete_hash TEXT");
+    d.run("ALTER TABLE games ADD COLUMN bg_ref TEXT");
+  }
+  // mvs は INIT_SQL 側で作られる。既存DBには列が無いので同じく後付けする
+  const mvCols = d.exec("PRAGMA table_info(mvs)");
+  const mvColNames = mvCols.length > 0 ? mvCols[0].values.map((v: any) => v[1]) : [];
+  if (mvColNames.length > 0 && !mvColNames.includes('manifest_url')) {
+    d.run("ALTER TABLE mvs ADD COLUMN manifest_url TEXT NOT NULL DEFAULT ''");
+    d.run("ALTER TABLE mvs ADD COLUMN manifest_delete_id TEXT");
+    d.run("ALTER TABLE mvs ADD COLUMN manifest_delete_hash TEXT");
+    d.run("ALTER TABLE mvs ADD COLUMN bg_url TEXT");
+  }
   if (!gameColNames.includes('best_score_by')) {
     d.run("ALTER TABLE games ADD COLUMN best_score_by TEXT");
   }
@@ -152,6 +168,12 @@ function ensureTableMigrations(d: SqlJsDatabase) {
     d.run("ALTER TABLE posts ADD COLUMN has_mml INTEGER NOT NULL DEFAULT 0");
     d.run("CREATE INDEX IF NOT EXISTS idx_posts_has_mml ON posts(id DESC) WHERE has_mml = 1");
     d.run("UPDATE posts SET has_mml = 1 WHERE content LIKE '%#mml%' OR content LIKE '%#MML作曲%'");
+  }
+  // MML本文の保存先。content 埋め込みをやめてR2へ出した（data/migrations/007）
+  if (!postColNames.includes('mml_url')) {
+    d.run("ALTER TABLE posts ADD COLUMN mml_url TEXT");
+    d.run("ALTER TABLE posts ADD COLUMN mml_delete_id TEXT");
+    d.run("ALTER TABLE posts ADD COLUMN mml_delete_hash TEXT");
   }
   d.run(`CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_slug TEXT NOT NULL,
@@ -397,6 +419,41 @@ function gameStatsFromRow(row: any) {
   };
 }
 
+/**
+ * games 行 -> DbGameRecord。pg.ts の同名関数と揃えてある。
+ * manifest 本体はDBに無いので、返るのは manifest_url と、サムネ用の bg_ref だけ。
+ */
+function rowToGame(r: any): DbGameRecord {
+  return {
+    id: Number(r.id),
+    preset: r.preset,
+    title: r.title,
+    manifestUrl: r.manifest_url ?? '',
+    manifestDeleteId: r.manifest_delete_id ?? undefined,
+    manifestDeleteHash: r.manifest_delete_hash ?? undefined,
+    bgRef: r.bg_ref ?? undefined,
+    createdAt: r.created_at,
+    creatorSlug: r.creator_slug ?? undefined,
+    ...gameStatsFromRow(r),
+  };
+}
+
+/** mvs 行 -> DbMvRecord。rowToGame と同じ方針 */
+function rowToMv(r: any): DbMvRecord {
+  return {
+    id: Number(r.id),
+    preset: r.preset,
+    title: r.title,
+    manifestUrl: r.manifest_url ?? '',
+    manifestDeleteId: r.manifest_delete_id ?? undefined,
+    manifestDeleteHash: r.manifest_delete_hash ?? undefined,
+    bgUrl: r.bg_url ?? undefined,
+    createdAt: r.created_at,
+    creatorSlug: r.creator_slug ?? undefined,
+    plays: Number(r.plays ?? 0),
+  };
+}
+
 function rowsToObjects(d: SqlJsDatabase, sql: string, params: any[] = []): any[] {
   const result = d.exec(sql, params);
   if (result.length === 0 || result[0].values.length === 0) return [];
@@ -576,13 +633,16 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     const originTypeVal = data.originType ?? null;
-    const hasMml = extractMmlFromContent(data.content) !== null ? 1 : 0;
+    // MML本文は content に埋め込まれなくなったので、有無はURLの有無で決まる
+    const hasMml = data.mmlUrl ? 1 : 0;
     d.run(
-      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, has_mml, mml_url, mml_delete_id, mml_delete_hash, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, id, data.displayName, slug, now, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null,
-       data.gameId ? 1 : 0, data.gameId || null, data.mvId ? 1 : 0, data.mvId || null, hasMml, originTypeVal]
+       data.gameId ? 1 : 0, data.gameId || null, data.mvId ? 1 : 0, data.mvId || null,
+       hasMml, data.mmlUrl || null, data.mmlDeleteId || null, data.mmlDeleteHash || null,
+       originTypeVal]
     );
     saveDb();
     return {
@@ -597,7 +657,7 @@ export const sqliteStore: DataStore = {
         has_collab_button: 1, hearts_total: 0, has_game: data.gameId ? 1 : 0,
         game_id: data.gameId || null,
         has_mv: data.mvId ? 1 : 0, mv_id: data.mvId || null,
-        has_mml: hasMml,
+        has_mml: hasMml, mml_url: data.mmlUrl || null,
         origin_type: originTypeVal,
       }),
       replies: []
@@ -711,13 +771,16 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     const parentPostId = data.parentPostId ?? postId;
-    const hasMml = extractMmlFromContent(data.content) !== null ? 1 : 0;
+    // MML本文は content に埋め込まれなくなったので、有無はURLの有無で決まる
+    const hasMml = data.mmlUrl ? 1 : 0;
     d.run(
-      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, has_mml, mml_url, mml_delete_id, mml_delete_hash, origin_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, postId, parentPostId, data.displayName, slug, data.content, now, data.avatarColor || 'from-blue-500 to-indigo-600',
        data.hasImage ? 1 : 0, data.imageSrc || null, data.imageAlt || null, data.gameId ? 1 : 0, data.gameId || null,
-       data.mvId ? 1 : 0, data.mvId || null, hasMml, data.originType || null]
+       data.mvId ? 1 : 0, data.mvId || null,
+       hasMml, data.mmlUrl || null, data.mmlDeleteId || null, data.mmlDeleteHash || null,
+       data.originType || null]
     );
     d.run('UPDATE posts SET replies_count = replies_count + 1 WHERE id = ?', [postId]);
     const parentRows = rowsToObjects(d, 'SELECT slug FROM posts WHERE id = ?', [parentPostId]);
@@ -751,14 +814,14 @@ export const sqliteStore: DataStore = {
         has_collab_button: 0, hearts_total: 0, has_game: data.gameId ? 1 : 0,
         game_id: data.gameId || null,
         has_mv: data.mvId ? 1 : 0, mv_id: data.mvId || null,
-        has_mml: hasMml,
+        has_mml: hasMml, mml_url: data.mmlUrl || null,
         origin_type: data.originType || null,
       }),
       replies: [],
     };
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, mml?: MmlRef) {
     const d = await getDb();
     const rows = rowsToObjects(d, 'SELECT slug, display_name, content, origin_type FROM posts WHERE id = ?', [id]);
     if (rows.length === 0) return null;
@@ -767,11 +830,20 @@ export const sqliteStore: DataStore = {
 
     const hasContentChanged = rows[0].content !== content;
     const hasOriginTypeChanged = originType !== undefined && (rows[0].origin_type !== (originType ?? null));
-    const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined;
-    const hasMml = extractMmlFromContent(content) !== null ? 1 : 0;
+    const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined || mml !== undefined;
 
-    const sets: string[] = ['content = ?', 'has_mml = ?'];
-    const values: (string | number)[] = [content, hasMml];
+    const sets: string[] = ['content = ?'];
+    const values: (string | number | null)[] = [content];
+    // mml が未指定なら既存のMMLはそのまま。指定されたときだけ差し替える
+    if (mml !== undefined) {
+      sets.push('has_mml = ?', 'mml_url = ?', 'mml_delete_id = ?', 'mml_delete_hash = ?');
+      values.push(
+        mml.mmlUrl ? 1 : 0,
+        mml.mmlUrl ?? null,
+        mml.mmlDeleteId ?? null,
+        mml.mmlDeleteHash ?? null,
+      );
+    }
     if (originType !== undefined) {
       sets.push('origin_type = ?');
       values.push(originType as string);
@@ -1446,57 +1518,56 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO mvs (id, preset, title, manifest, created_at, creator_slug) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, data.preset, data.title, JSON.stringify(data.manifest), now, data.creatorSlug || null]
+      `INSERT INTO mvs (id, preset, title, manifest_url, manifest_delete_id, manifest_delete_hash, bg_url, created_at, creator_slug)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, data.preset, data.title,
+        data.manifestUrl, data.manifestDeleteId || null, data.manifestDeleteHash || null,
+        data.bgUrl || null, now, data.creatorSlug || null,
+      ]
     );
     saveDb();
-    return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug, plays: 0 };
+    return {
+      id, preset: data.preset, title: data.title,
+      manifestUrl: data.manifestUrl,
+      manifestDeleteId: data.manifestDeleteId,
+      manifestDeleteHash: data.manifestDeleteHash,
+      bgUrl: data.bgUrl,
+      createdAt: now, creatorSlug: data.creatorSlug, plays: 0,
+    };
   },
 
   async getMv(id) {
     const d = await getDb();
+    // manifest 本体はもうDBに無い。返すのはURLだけで、実体はブラウザがR2から直接引く
     const rows = rowsToObjects(d, 'SELECT * FROM mvs WHERE id = ?', [id]);
     if (rows.length === 0) return null;
-    const r = rows[0];
-    return {
-      id: r.id,
-      preset: r.preset,
-      title: r.title,
-      manifest: JSON.parse(r.manifest),
-      createdAt: r.created_at,
-      creatorSlug: r.creator_slug ?? undefined,
-      plays: Number(r.plays ?? 0),
-    };
+    return rowToMv(rows[0]);
   },
 
   async getMvsByIds(ids) {
     if (!ids || ids.length === 0) return [];
     const d = await getDb();
     const placeholders = ids.map(() => '?').join(',');
-    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest, created_at, creator_slug, plays FROM mvs WHERE id IN (${placeholders})`, ids);
-    return rows.map(r => {
-      // pg 版と同じく、サムネに使う背景URLだけを抜いた不完全な manifest を返す。
-      // 再生用には getMv() で取り直すこと。
-      let manifest: any = {};
-      if (typeof r.manifest === 'string') {
-        const match = r.manifest.match(/"bgUrl"\s*:\s*"(https?:\/\/[^"]+)"/);
-        manifest = match ? { stage: { bgUrl: match[1] } } : {};
-      }
-      return {
-        id: r.id,
-        preset: r.preset,
-        title: r.title,
-        manifest,
-        createdAt: r.created_at,
-        creatorSlug: r.creator_slug ?? undefined,
-        plays: Number(r.plays ?? 0),
-      };
-    });
+    // サムネ用の bg_url は非正規化列になったので、manifest から正規表現で抜く必要がなくなった
+    const rows = rowsToObjects(
+      d,
+      `SELECT id, preset, title, manifest_url, bg_url, created_at, creator_slug, plays FROM mvs WHERE id IN (${placeholders})`,
+      ids,
+    );
+    return rows.map(rowToMv);
   },
 
   async updateMv(id, data) {
     const d = await getDb();
-    d.run('UPDATE mvs SET title = ?, manifest = ? WHERE id = ?', [data.title, JSON.stringify(data.manifest), id]);
+    // 編集は毎回新しいキーへ上げ直す（R2は immutable で配るので上書きできない）
+    d.run(
+      `UPDATE mvs SET title = ?, manifest_url = ?, manifest_delete_id = ?, manifest_delete_hash = ?, bg_url = ? WHERE id = ?`,
+      [
+        data.title, data.manifestUrl, data.manifestDeleteId || null,
+        data.manifestDeleteHash || null, data.bgUrl || null, id,
+      ]
+    );
     saveDb();
     return this.getMv(id);
   },
@@ -1512,19 +1583,31 @@ export const sqliteStore: DataStore = {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     const now = new Date().toISOString();
     d.run(
-      `INSERT INTO games (id, preset, title, manifest, created_at, creator_slug) VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, data.preset, data.title, JSON.stringify(data.manifest), now, data.creatorSlug || null]
+      `INSERT INTO games (id, preset, title, manifest_url, manifest_delete_id, manifest_delete_hash, bg_ref, created_at, creator_slug)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, data.preset, data.title,
+        data.manifestUrl, data.manifestDeleteId || null, data.manifestDeleteHash || null,
+        data.bgRef || null, now, data.creatorSlug || null,
+      ]
     );
     saveDb();
-    return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug };
+    return {
+      id, preset: data.preset, title: data.title,
+      manifestUrl: data.manifestUrl,
+      manifestDeleteId: data.manifestDeleteId,
+      manifestDeleteHash: data.manifestDeleteHash,
+      bgRef: data.bgRef,
+      createdAt: now, creatorSlug: data.creatorSlug,
+    };
   },
 
   async getGame(id) {
     const d = await getDb();
+    // manifest 本体はもうDBに無い。返すのはURLだけで、実体はブラウザがR2から直接引く
     const rows = rowsToObjects(d, 'SELECT * FROM games WHERE id = ?', [id]);
     if (rows.length === 0) return null;
-    const r = rows[0];
-    return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
+    return rowToGame(rows[0]);
   },
 
   async recordGamePlay(id, data) {
@@ -1546,17 +1629,17 @@ export const sqliteStore: DataStore = {
   async listTopGames(limit?: number) {
     const d = await getDb();
     const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+    // ランキング表示にサムネは要らないので bg_ref も引かない
     const rows = rowsToObjects(d, `
-      SELECT g.id, g.preset, g.title, g.created_at, g.creator_slug, g.plays, g.clears, g.best_score, g.best_score_by,
+      SELECT g.id, g.preset, g.title, g.manifest_url, g.created_at, g.creator_slug,
+             g.plays, g.clears, g.best_score, g.best_score_by,
              (SELECT p.id FROM posts p WHERE p.game_id = g.id ORDER BY p.id ASC LIMIT 1) AS post_id
         FROM games g
        ORDER BY COALESCE(g.plays, 0) DESC, g.id DESC
        LIMIT ${safeLimit}`, []);
     return rows.map(r => ({
-      id: r.id, preset: r.preset, title: r.title, manifest: {} as any, createdAt: r.created_at,
-      creatorSlug: r.creator_slug ?? undefined,
+      ...rowToGame(r),
       postId: r.post_id ?? undefined,
-      ...gameStatsFromRow(r),
     }));
   },
 
@@ -1570,22 +1653,21 @@ export const sqliteStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const d = await getDb();
     const placeholders = ids.map(() => '?').join(',');
-    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest, created_at, creator_slug, plays, clears, best_score, best_score_by FROM games WHERE id IN (${placeholders})`, ids);
-    return rows.map(r => {
-      let manifest: any = {};
-      if (typeof r.manifest === 'string') {
-        const match = r.manifest.match(/"bgRef"\s*:\s*"(https?:\/\/[^"]+)"/);
-        manifest = match ? { titleScreen: { bgRef: match[1] } } : {};
-      } else if (r.manifest && typeof r.manifest === 'object') {
-        manifest = r.manifest;
-      }
-      return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt: r.created_at, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
-    });
+    // サムネ用の bg_ref は非正規化列になったので、manifest から正規表現で抜く必要がなくなった
+    const rows = rowsToObjects(d, `SELECT id, preset, title, manifest_url, bg_ref, created_at, creator_slug, plays, clears, best_score, best_score_by FROM games WHERE id IN (${placeholders})`, ids);
+    return rows.map(rowToGame);
   },
 
   async updateGame(id, data) {
     const d = await getDb();
-    d.run('UPDATE games SET title = ?, manifest = ? WHERE id = ?', [data.title, JSON.stringify(data.manifest), id]);
+    // 編集は毎回新しいキーへ上げ直す（R2は immutable で配るので上書きできない）
+    d.run(
+      'UPDATE games SET title = ?, manifest_url = ?, manifest_delete_id = ?, manifest_delete_hash = ?, bg_ref = ? WHERE id = ?',
+      [
+        data.title, data.manifestUrl, data.manifestDeleteId || null,
+        data.manifestDeleteHash || null, data.bgRef || null, id,
+      ]
+    );
     saveDb();
     return this.getGame(id);
   },
@@ -1594,7 +1676,7 @@ export const sqliteStore: DataStore = {
     const d = await getDb();
     const safeLimit = Math.max(1, Math.min(limit || 30, 50));
     const rows = rowsToObjects(d, `SELECT * FROM games ORDER BY id DESC LIMIT ${safeLimit}`, []);
-    return rows.map(r => ({ id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt: r.created_at, ...gameStatsFromRow(r) }));
+    return rows.map(rowToGame);
   },
 
   async getLiveGameInfo(ipAddress: string) {

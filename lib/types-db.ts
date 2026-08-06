@@ -51,6 +51,14 @@ export interface DbPost {
   /** MVの累計再生数 */
   mvPlays?: number;
   hasMml?: boolean;
+  /**
+   * MML本文の保存先URL（R2）。content にはマーカー（`#mml`）だけが残る。
+   * 本文は再生・編集のときだけブラウザから直接このURLを fetch する。
+   */
+  mmlUrl?: string;
+  /** 差し替え時に旧オブジェクトを消すためのトークン */
+  mmlDeleteId?: string;
+  mmlDeleteHash?: string;
   originType?: OriginType;
   isFalseDeclaration?: boolean;
   isEdited?: boolean;
@@ -63,7 +71,20 @@ export interface DbGameRecord {
   id: number;
   preset: string;
   title: string;
-  manifest: GameManifestDraft;
+  /**
+   * manifest 本体の保存先URL（R2）。DBは本体を持たない。
+   * 再生に必要な manifest は、ユーザーが実際に展開したときだけ
+   * ブラウザから直接このURLを fetch する（unj-reze のサーバーは通らない）。
+   */
+  manifestUrl: string;
+  /** 差し替え時に旧オブジェクトを消すためのトークン。無いと二度と消せない */
+  manifestDeleteId?: string;
+  manifestDeleteHash?: string;
+  /**
+   * サムネイル用の背景参照。manifest.titleScreen.bgRef の非正規化。
+   * 一覧クエリで manifest を引かずにサムネを出すために持つ。
+   */
+  bgRef?: string;
   createdAt: string;
   creatorSlug?: string;
   /** 累計プレイ回数 */
@@ -82,7 +103,12 @@ export interface DbMvRecord {
   id: number;
   preset: MvPresetKind;
   title: string;
-  manifest: MvManifest;
+  /** manifest 本体の保存先URL（R2）。DbGameRecord.manifestUrl と同じ扱い */
+  manifestUrl: string;
+  manifestDeleteId?: string;
+  manifestDeleteHash?: string;
+  /** サムネイル用。manifest.stage.bgUrl の非正規化 */
+  bgUrl?: string;
   createdAt: string;
   creatorSlug?: string;
   /** 累計再生回数 */

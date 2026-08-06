@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { parseMmlRef } from '@/lib/manifest-ref';
 import { db } from '@/lib/db';
 import { decodeId, encodePost } from '@/lib/sqids';
 import { attachEmbedInfo } from '@/lib/post-embeds';
@@ -118,11 +119,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid mvId' }, { status: 400 });
     }
 
+    // MML本文はブラウザが uploader-worker へ直接上げ済み。ここに来るのはURLだけ。
+    // 公開ボディ由来なので保存先ホストを必ず検証する
+    const mmlRef = parseMmlRef(body);
+    if (!mmlRef) {
+      return NextResponse.json({ error: 'Invalid mmlUrl' }, { status: 400 });
+    }
+
     const post = await db.createPost({
       displayName, content, hasImage, imageSrc, imageAlt, avatarColor,
       slug: authorSlug,
       gameId: decodedGameId === null ? undefined : decodedGameId,
       mvId: decodedMvId === null ? undefined : decodedMvId,
+      ...mmlRef,
       originType,
     });
     await attachEmbedInfo(post);

@@ -1,4 +1,5 @@
 'use client';
+import { loadGame } from '@/lib/game-mv-client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { Pencil, X } from 'lucide-react';
@@ -34,18 +35,18 @@ export default function GamePreview({ gameId, postId, userId, onClose, originTyp
     let cancelled = false;
     const load = async (attempt: number): Promise<void> => {
       try {
-        const res = await fetch(`/api/games/${gameId}`);
+        // manifest はDBに無い。loadGame が /api/games/[id] とR2の両方を解決する
+        const loaded = await loadGame(gameId);
         if (cancelled) return;
-        if (!res.ok) {
-          if (res.status >= 500 && attempt < 2) { await new Promise(r => setTimeout(r, 400)); return load(attempt + 1); }
+        if (!loaded) {
+          if (attempt < 2) { await new Promise(r => setTimeout(r, 400)); return load(attempt + 1); }
           setError(true);
           return;
         }
-        const game = await res.json();
         if (!cancelled) {
-          setManifest(game.manifest);
-          setTitle(game.title);
-          if (game.preset) setPreset(game.preset);
+          setManifest(loaded.manifest);
+          setTitle(loaded.record.title);
+          if (loaded.record.preset) setPreset(loaded.record.preset);
           setLoading(false);
         }
       } catch {

@@ -1,4 +1,5 @@
 'use client';
+import { loadMv } from '@/lib/game-mv-client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Clapperboard, Loader2, Pencil } from 'lucide-react';
@@ -63,9 +64,12 @@ export default function MvBox({ mvId, postId, mvTitle, mvThumbnail, mvPreset, mv
     if (manifest || loading) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/mvs/${mvId}`)
-      .then(res => (res.ok ? res.json() : Promise.reject(new Error('not found'))))
-      .then(mv => setManifest(mv.manifest as MvManifest))
+    // manifest 本体はR2。展開したときにはじめて1往復する
+    loadMv(mvId)
+      .then(loaded => {
+        if (!loaded) throw new Error('not found');
+        setManifest(loaded.manifest);
+      })
       .catch(() => setError('MVを読み込めませんでした'))
       .finally(() => setLoading(false));
 

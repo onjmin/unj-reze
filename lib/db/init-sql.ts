@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS posts (
   has_mv INTEGER NOT NULL DEFAULT 0,
   mv_id INTEGER,
   has_mml INTEGER NOT NULL DEFAULT 0,
+  -- MML本文の保存先URL（R2）。以前は content に #mml マーカー付きで直接埋め込んでいたが、
+  -- 11トラックの曲で生45000文字に達し、フィード再取得のたびに全文が流れていた。
+  -- content にはマーカーだけを残し、本文はここから取りにいく。
+  mml_url TEXT,
+  mml_delete_id TEXT,
+  mml_delete_hash TEXT,
   origin_type TEXT,
   is_false_declaration INTEGER NOT NULL DEFAULT 0,
   is_edited INTEGER NOT NULL DEFAULT 0
@@ -67,11 +73,18 @@ CREATE INDEX IF NOT EXISTS idx_posts_has_mml ON posts(id DESC) WHERE has_mml = 1
 CREATE INDEX IF NOT EXISTS idx_posts_has_image ON posts(id DESC) WHERE has_image = 1;
 
 -- ゲームテーブル
+-- manifest 本体はDBに置かず、uploader-worker 経由でR2に上げてURLだけを持つ。
+-- ゲーム1本の manifest はスプライトやマップ込みで実測25万文字を超える。
+-- サムネ用の bgRef は manifest から抜けなくなったので bg_ref を非正規化列で持ち、
+-- 書き込み側（createGame / updateGame）が更新の責任を持つ。
 CREATE TABLE IF NOT EXISTS games (
   id INTEGER PRIMARY KEY,
   preset TEXT NOT NULL,
   title TEXT NOT NULL,
-  manifest TEXT NOT NULL,
+  manifest_url TEXT NOT NULL,
+  manifest_delete_id TEXT,
+  manifest_delete_hash TEXT,
+  bg_ref TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   creator_slug TEXT,
   plays INTEGER NOT NULL DEFAULT 0,
@@ -82,11 +95,15 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE INDEX IF NOT EXISTS idx_games_plays ON games(plays DESC);
 
 -- MV（ミュージックビデオ）テーブル
+-- games と同じ扱い。サムネ用は bg_url を非正規化列で持つ。
 CREATE TABLE IF NOT EXISTS mvs (
   id INTEGER PRIMARY KEY,
   preset TEXT NOT NULL,
   title TEXT NOT NULL,
-  manifest TEXT NOT NULL,
+  manifest_url TEXT NOT NULL,
+  manifest_delete_id TEXT,
+  manifest_delete_hash TEXT,
+  bg_url TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   creator_slug TEXT,
   plays INTEGER NOT NULL DEFAULT 0

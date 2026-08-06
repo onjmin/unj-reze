@@ -64,6 +64,11 @@ export interface Post {
   gameClears?: number;
   hasMv?: boolean;
   hasMml?: boolean;
+  /**
+   * MML本文の保存先URL（R2）。content にはマーカーだけが残る。
+   * 実際に鳴らす/描く段になってはじめてブラウザが直接取りにいく。
+   */
+  mmlUrl?: string;
   mvId?: string;
   mvTitle?: string;
   /** MVのサムネイル（背景画像URL。無ければプリセットの色で描く） */
@@ -99,7 +104,16 @@ export interface GameRecord {
   id: string;
   preset: string;
   title: string;
-  manifest: GameManifestDraft;
+  /**
+   * manifest 本体の保存先URL（R2）。APIが返すのはこのURLだけで、実体は
+   * GamePlayer / GameMaker がブラウザから直接 fetch する。
+   */
+  manifestUrl: string;
+  /** 差し替え時に旧オブジェクトを消すためのトークン */
+  manifestDeleteId?: string;
+  manifestDeleteHash?: string;
+  /** サムネイル用。manifest.titleScreen.bgRef の非正規化 */
+  bgRef?: string;
   createdAt: string;
   creatorSlug?: string;
   /** 累計プレイ回数 */
@@ -116,15 +130,20 @@ export interface MvRecord {
   id: string;
   preset: MvPresetKind;
   title: string;
-  manifest: MvManifest;
+  /** manifest 本体の保存先URL（R2）。GameRecord.manifestUrl と同じ扱い */
+  manifestUrl: string;
+  manifestDeleteId?: string;
+  manifestDeleteHash?: string;
+  /** サムネイル用。manifest.stage.bgUrl の非正規化 */
+  bgUrl?: string;
   createdAt: string;
   creatorSlug?: string;
   /** 累計再生回数 */
   plays?: number;
 }
 
-/** ゲームランキング1件。一覧表示に manifest は要らないので落としてある。 */
-export interface GameRankingEntry extends Omit<GameRecord, 'manifest'> {
+/** ゲームランキング1件。ランキング表示にはサムネも要らないので落としてある。 */
+export interface GameRankingEntry extends Omit<GameRecord, 'bgRef'> {
   /** ひもづく投稿（コメントへの導線）。ない場合もある。 */
   postId?: string;
 }

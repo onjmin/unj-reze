@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post, ORIGIN_TYPE_OPTIONS, POST_BODY_COLLAPSE_LINES, OriginType, isCollabAllowed } from '@/lib/types';
 import { api } from '@/lib/api';
+import { createGame, createMv, loadGame, loadMv } from '@/lib/game-mv-client';
 import { ensureSessionId } from '@/lib/session';
 import { showToast } from '@/lib/toast';
 import { getAvatarInfo } from '@/lib/avatar';
@@ -309,30 +310,25 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         const result = await api.upload.image({ image: replyImage });
         imageSrc = result.url;
       }
-      let gameId: number | undefined;
+      // manifest はR2へ上げてからURLだけをAPIに渡す（createGame/createMvが面倒を見る）
+      let gameId: string | undefined;
       if (replyGameDraft) {
-        const res = await fetch('/api/games', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preset: replyGameDraft.preset, title: replyGameDraft.title, manifest: replyGameDraft.manifest, creatorSlug: userSlug }),
+        const saved = await createGame({
+          preset: replyGameDraft.preset,
+          title: replyGameDraft.title,
+          manifest: replyGameDraft.manifest,
         });
-        if (res.ok) {
-          const savedGame = await res.json();
-          gameId = savedGame.id;
-        }
+        gameId = saved.id;
       }
 
-      let mvId: number | undefined;
+      let mvId: string | undefined;
       if (replyMvDraft) {
-        const res = await fetch('/api/mvs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preset: replyMvDraft.preset, title: replyMvDraft.title, manifest: replyMvDraft.manifest, creatorSlug: userSlug }),
+        const saved = await createMv({
+          preset: replyMvDraft.preset,
+          title: replyMvDraft.title,
+          manifest: replyMvDraft.manifest,
         });
-        if (res.ok) {
-          const savedMv = await res.json();
-          mvId = savedMv.id;
-        }
+        mvId = saved.id;
       }
 
       const reply = await api.posts.replies.create(post.id, {
@@ -414,10 +410,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     if (!isCollabAllowed(p.originType)) return;
     if (p.hasGame && p.gameId) {
       try {
-        const res = await fetch(`/api/games/${p.gameId}`);
-        if (!res.ok) throw new Error();
-        const game = await res.json();
-        setReplyGameDraft({ manifest: game.manifest, title: game.title, preset: 'action' });
+        // manifest はDBに無いのでR2から。loadGame が両方まとめて解決する
+        const loaded = await loadGame(p.gameId);
+        if (!loaded) throw new Error();
+        setReplyGameDraft({ manifest: loaded.manifest, title: loaded.record.title, preset: 'action' });
         setActiveScreen('gamemaker');
         return;
       } catch {
@@ -425,10 +421,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
     if (p.hasMv && p.mvId) {
       try {
-        const res = await fetch(`/api/mvs/${p.mvId}`);
-        if (!res.ok) throw new Error();
-        const mv = await res.json();
-        setReplyMvDraft({ manifest: mv.manifest, title: mv.title, preset: mv.preset || 'pianoRoll' });
+        const loaded = await loadMv(p.mvId);
+        if (!loaded) throw new Error();
+        setReplyMvDraft({ manifest: loaded.manifest, title: loaded.record.title, preset: loaded.record.preset || 'pianoRoll' });
         setActiveScreen('mvmaker');
         return;
       } catch {
@@ -546,10 +541,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const handleEditMvFor = useCallback(async (target: Post) => {
     if (!target.mvId) return;
     try {
-      const res = await fetch(`/api/mvs/${target.mvId}`);
-      if (!res.ok) throw new Error();
-      const mv = await res.json();
-      setEditMvDraft({ mvId: target.mvId, manifest: mv.manifest, title: mv.title, preset: mv.preset || 'pianoRoll' });
+      const loaded = await loadMv(target.mvId);
+      if (!loaded) throw new Error();
+      setEditMvDraft({ mvId: target.mvId, manifest: loaded.manifest, title: loaded.record.title, preset: loaded.record.preset || 'pianoRoll' });
       setActiveScreen('edit-mv');
     } catch {
       showToast('error', 'MVの読み込みに失敗しました');
@@ -565,11 +559,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setMenuOpen(false);
     if (!post.mvId) return;
     try {
-      const res = await fetch(`/api/mvs/${post.mvId}`);
-      if (!res.ok) throw new Error();
-      const mv = await res.json();
+      const loaded = await loadMv(post.mvId);
+      if (!loaded) throw new Error();
+      const mv = loaded.record;
       startMvRemix({
-        manifest: mv.manifest,
+        manifest: loaded.manifest,
         title: `${mv.title || post.mvTitle || 'MV'}（改造）`,
         preset: mv.preset || post.mvPreset || 'pianoRoll',
         sourceMvId: post.mvId,
@@ -584,10 +578,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     setMenuOpen(false);
     if (!post.gameId) return;
     try {
-      const res = await fetch(`/api/games/${post.gameId}`);
-      if (!res.ok) throw new Error();
-      const game = await res.json();
-      setEditGameDraft({ manifest: game.manifest, title: game.title, preset: 'action' });
+      const loaded = await loadGame(post.gameId);
+      if (!loaded) throw new Error();
+      setEditGameDraft({ manifest: loaded.manifest, title: loaded.record.title, preset: 'action' });
       setActiveScreen('edit-game');
     } catch {
       showToast('error', 'ゲームの読み込みに失敗しました');

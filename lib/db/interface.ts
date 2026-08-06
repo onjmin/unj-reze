@@ -4,18 +4,39 @@ import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
 import type { MvManifest, MvPresetKind } from '../mv-config';
 
-export interface CreateGameParams {
+/**
+ * manifest 本体はブラウザが uploader-worker へ直接上げ、DBにはURLだけが渡る。
+ * サーバーは manifest を一度も受け取らない（docs/NEON_EGRESS.md）。
+ * bgRef / bgUrl はサムネイル用の非正規化値で、manifest を引かずに一覧を出すために持つ。
+ */
+export interface ManifestRef {
+  manifestUrl: string;
+  manifestDeleteId?: string;
+  manifestDeleteHash?: string;
+}
+
+export interface CreateGameParams extends ManifestRef {
   preset: string;
   title: string;
-  manifest: GameManifestDraft;
+  bgRef?: string;
   creatorSlug?: string;
 }
 
-export interface CreateMvParams {
+export interface CreateMvParams extends ManifestRef {
   preset: MvPresetKind;
   title: string;
-  manifest: MvManifest;
+  bgUrl?: string;
   creatorSlug?: string;
+}
+
+export interface UpdateGameParams extends ManifestRef {
+  title: string;
+  bgRef?: string;
+}
+
+export interface UpdateMvParams extends ManifestRef {
+  title: string;
+  bgUrl?: string;
 }
 
 export interface RecordGamePlayParams {
@@ -41,7 +62,17 @@ export interface AddOshiItemParams {
   previewUrl?: string;
 }
 
-export interface CreatePostParams {
+/**
+ * MML本文の保存先。ブラウザが uploader-worker へ直接上げ、DBにはURLだけが渡る。
+ * content 側にはマーカー（`#mml`）だけが残り、本文は入らない。
+ */
+export interface MmlRef {
+  mmlUrl?: string;
+  mmlDeleteId?: string;
+  mmlDeleteHash?: string;
+}
+
+export interface CreatePostParams extends MmlRef {
   displayName: string;
   content: string;
   hasImage?: boolean;
@@ -55,7 +86,7 @@ export interface CreatePostParams {
   originType?: OriginType;
 }
 
-export interface ReplyParams {
+export interface ReplyParams extends MmlRef {
   displayName: string;
   /** セッションから解決済みのスラッグ。省略時は displayName から導出する。 */
   slug?: string;
@@ -103,7 +134,7 @@ export interface DataStore {
   repostPost(id: number): Promise<DbPost | null>;
   getReplies(postId: number, userId?: string): Promise<DbPost[]>;
   addReply(postId: number, data: ReplyParams): Promise<DbPost | null>;
-  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string): Promise<DbPost | null>;
+  editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, mml?: MmlRef): Promise<DbPost | null>;
   deletePost(id: number, userId: string): Promise<boolean>;
   deleteMessage(id: number, userId: string): Promise<boolean>;
   getUserPostsBySlug(slug: string, userId?: string, limit?: number): Promise<DbPost[]>;
@@ -169,17 +200,16 @@ export interface DataStore {
   createGame(data: CreateGameParams): Promise<DbGameRecord>;
   getGame(id: number): Promise<DbGameRecord | null>;
   getGamesByIds(ids: number[]): Promise<DbGameRecord[]>;
-  updateGame(id: number, data: { title: string; manifest: GameManifestDraft }): Promise<DbGameRecord | null>;
+  updateGame(id: number, data: UpdateGameParams): Promise<DbGameRecord | null>;
   listAllGames(limit?: number): Promise<DbGameRecord[]>;
   createMv(data: CreateMvParams): Promise<DbMvRecord>;
   getMv(id: number): Promise<DbMvRecord | null>;
   /**
    * 投稿一覧に埋めるMV情報をまとめて引く。
-   * 転送量の都合で manifest 本体は返さず、サムネに使う背景URLだけを含む形にすること
-   * （docs/NEON_EGRESS.md）。
+   * manifest 本体はもうDBに無いので、返るのは manifestUrl と bgUrl だけ。
    */
   getMvsByIds(ids: number[]): Promise<DbMvRecord[]>;
-  updateMv(id: number, data: { title: string; manifest: MvManifest }): Promise<DbMvRecord | null>;
+  updateMv(id: number, data: UpdateMvParams): Promise<DbMvRecord | null>;
   /** MVの再生数を1加算する。 */
   recordMvPlay(id: number): Promise<void>;
   /** プレイ結果を記録する。plays/clears を加算し、スコアが上回っていればハイスコアを更新する。 */

@@ -1,8 +1,8 @@
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { AnonymousUser, FollowUser, OriginType } from '../types';
-import { DbPost as Post, DbNotification as Notification, DbOshiItem } from '../types-db';
+import { DbPost as Post, DbNotification as Notification, DbOshiItem, DbGameRecord, DbMvRecord } from '../types-db';
 import type { Message, Trend } from '../mock-db';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, ReportParams, GetPostsOptions, MmlRef } from './interface';
 import { formatRelativeTime } from '../time';
 import { publishRealtime } from '../realtime/publish';
 import { chUser } from '../realtime/channels';
@@ -63,6 +63,9 @@ const POST_COLUMNS = [
   'p.likes', 'p.dislikes', 'p.replies_count', 'p.reposts', 'p.reposted',
   'p.has_image', 'p.image_src', 'p.image_alt', 'p.avatar_color', 'p.has_collab_button',
   'p.hearts_total', 'p.has_game', 'p.game_id', 'p.has_mv', 'p.mv_id', 'p.has_mml', 'p.origin_type',
+  // mml_url はURL1本（100バイト前後）なので一覧に含めてよい。本文はR2にあり、
+  // 実際に再生するときだけブラウザが直接取りにいく。
+  'p.mml_url',
   'p.is_false_declaration', 'p.is_edited',
 ].join(', ');
 
@@ -108,6 +111,7 @@ async function rowToPost(row: any): Promise<Post> {
     hasMv: row.has_mv ?? false,
     mvId: row.mv_id ?? undefined,
     hasMml: row.has_mml ?? false,
+    mmlUrl: row.mml_url ?? undefined,
     originType: row.origin_type ?? undefined,
     isFalseDeclaration: row.is_false_declaration ?? false,
     isEdited: row.is_edited ?? false,
@@ -124,6 +128,46 @@ function gameStatsFromRow(row: any) {
     clears: Number(row.clears ?? 0),
     bestScore: Number(row.best_score ?? 0),
     bestScoreBy: row.best_score_by ?? undefined,
+  };
+}
+
+function toIsoString(value: any): string {
+  return typeof value === 'object' && value !== null ? value.toISOString() : String(value);
+}
+
+/**
+ * games 行 -> DbGameRecord。
+ * manifest 本体はDBに無いので、返るのは manifest_url と、サムネ用の bg_ref だけ。
+ * 実体が要る場面（GamePlayer / GameMaker）はブラウザが manifestUrl を直接 fetch する。
+ */
+function rowToGame(r: any): DbGameRecord {
+  return {
+    id: Number(r.id),
+    preset: r.preset,
+    title: r.title,
+    manifestUrl: r.manifest_url ?? '',
+    manifestDeleteId: r.manifest_delete_id ?? undefined,
+    manifestDeleteHash: r.manifest_delete_hash ?? undefined,
+    bgRef: r.bg_ref ?? undefined,
+    createdAt: toIsoString(r.created_at),
+    creatorSlug: r.creator_slug ?? undefined,
+    ...gameStatsFromRow(r),
+  };
+}
+
+/** mvs 行 -> DbMvRecord。rowToGame と同じ方針 */
+function rowToMv(r: any): DbMvRecord {
+  return {
+    id: Number(r.id),
+    preset: r.preset,
+    title: r.title,
+    manifestUrl: r.manifest_url ?? '',
+    manifestDeleteId: r.manifest_delete_id ?? undefined,
+    manifestDeleteHash: r.manifest_delete_hash ?? undefined,
+    bgUrl: r.bg_url ?? undefined,
+    createdAt: toIsoString(r.created_at),
+    creatorSlug: r.creator_slug ?? undefined,
+    plays: Number(r.plays ?? 0),
   };
 }
 
@@ -445,14 +489,17 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       const slug = data.slug || deriveSlugPg(data.displayName);
-      const hasMml = extractMmlFromContent(data.content) !== null;
+      // MML本文は content に埋め込まれなくなったので、有無はURLの有無で決まる
+      const hasMml = !!data.mmlUrl;
       const insertResult = await client.query(
-        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO posts (id, thread_id, display_name, slug, created_at, content, avatar_color, has_image, image_src, image_alt, has_collab_button, has_game, game_id, has_mv, mv_id, has_mml, mml_url, mml_delete_id, mml_delete_hash, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), (SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, NOW(), $3, $4, $5, $6, $7, true, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING *`,
         [data.displayName, slug, data.content, data.avatarColor || 'from-blue-500 to-indigo-600',
          data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-         !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, hasMml, data.originType ?? null]
+         !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null,
+         hasMml, data.mmlUrl || null, data.mmlDeleteId || null, data.mmlDeleteHash || null,
+         data.originType ?? null]
       );
       return { ...(await rowToPost(insertResult.rows[0])), replies: [] };
     } finally {
@@ -626,16 +673,19 @@ export const pgStore: DataStore = {
       await client.query('SELECT pg_advisory_xact_lock(42)');
       const authorSlug = data.slug || deriveSlugPg(data.displayName);
       const parentPostId = data.parentPostId ?? postId;
-      const hasMml = extractMmlFromContent(data.content) !== null;
+      // MML本文は content に埋め込まれなくなったので、有無はURLの有無で決まる
+      const hasMml = !!data.mmlUrl;
       const result = await client.query(
-        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, has_mml, origin_type)
-         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        `INSERT INTO posts (id, thread_id, parent_post_id, display_name, slug, content, created_at, avatar_color, has_image, image_src, image_alt, has_game, game_id, has_mv, mv_id, has_mml, mml_url, mml_delete_id, mml_delete_hash, origin_type)
+         VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM posts), $1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
          RETURNING *`,
         [
           postId, parentPostId, data.displayName, authorSlug, data.content,
           data.avatarColor || 'from-blue-500 to-indigo-600',
           data.hasImage || false, data.imageSrc || null, data.imageAlt || null,
-          !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null, hasMml, data.originType ?? null
+          !!data.gameId, data.gameId || null, !!data.mvId, data.mvId || null,
+          hasMml, data.mmlUrl || null, data.mmlDeleteId || null, data.mmlDeleteHash || null,
+          data.originType ?? null
         ]
       );
       await client.query(
@@ -675,7 +725,7 @@ export const pgStore: DataStore = {
     }
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, mml?: MmlRef) {
     const client = await getPool().connect();
     try {
       const [postResult, viewerSlug] = await Promise.all([
@@ -688,11 +738,22 @@ export const pgStore: DataStore = {
 
       const hasContentChanged = row.content !== content;
       const hasOriginTypeChanged = originType !== undefined && (row.origin_type !== (originType ?? null));
-      const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined;
-      const hasMml = extractMmlFromContent(content) !== null;
+      const shouldMarkEdited = hasContentChanged || hasOriginTypeChanged || imageSrc !== undefined || mml !== undefined;
 
-      const sets: string[] = ['content = $1', 'has_mml = $2'];
-      const values: unknown[] = [content, hasMml];
+      const sets: string[] = ['content = $1'];
+      const values: unknown[] = [content];
+      // mml が未指定なら既存のMMLはそのまま。指定されたときだけ差し替える。
+      // 差し替え後の旧オブジェクト削除は、このUPDATEが成功したあとに呼び出し側が行う。
+      if (mml !== undefined) {
+        sets.push(`has_mml = $${values.length + 1}`);
+        values.push(!!mml.mmlUrl);
+        sets.push(`mml_url = $${values.length + 1}`);
+        values.push(mml.mmlUrl ?? null);
+        sets.push(`mml_delete_id = $${values.length + 1}`);
+        values.push(mml.mmlDeleteId ?? null);
+        sets.push(`mml_delete_hash = $${values.length + 1}`);
+        values.push(mml.mmlDeleteHash ?? null);
+      }
       if (originType !== undefined) {
         sets.push(`origin_type = $${values.length + 1}`);
         values.push(originType);
@@ -1637,10 +1698,22 @@ export const pgStore: DataStore = {
       const id = Date.now() + Math.floor(Math.random() * 1000);
       const now = new Date().toISOString();
       await client.query(
-        `INSERT INTO mvs (id, preset, title, manifest, created_at, creator_slug) VALUES ($1, $2, $3, $4, NOW(), $5)`,
-        [id, data.preset, data.title, JSON.stringify(data.manifest), data.creatorSlug || null]
+        `INSERT INTO mvs (id, preset, title, manifest_url, manifest_delete_id, manifest_delete_hash, bg_url, created_at, creator_slug)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+        [
+          id, data.preset, data.title,
+          data.manifestUrl, data.manifestDeleteId || null, data.manifestDeleteHash || null,
+          data.bgUrl || null, data.creatorSlug || null,
+        ]
       );
-      return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug, plays: 0 };
+      return {
+        id, preset: data.preset, title: data.title,
+        manifestUrl: data.manifestUrl,
+        manifestDeleteId: data.manifestDeleteId,
+        manifestDeleteHash: data.manifestDeleteHash,
+        bgUrl: data.bgUrl,
+        createdAt: now, creatorSlug: data.creatorSlug, plays: 0,
+      };
     } finally {
       client.release();
     }
@@ -1649,19 +1722,10 @@ export const pgStore: DataStore = {
   async getMv(id) {
     const client = await getPool().connect();
     try {
+      // manifest 本体はもうDBに無い。返すのはURLだけで、実体はブラウザがR2から直接引く
       const result = await client.query('SELECT * FROM mvs WHERE id = $1', [id]);
       if (result.rows.length === 0) return null;
-      const r = result.rows[0];
-      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-      return {
-        id: r.id,
-        preset: r.preset,
-        title: r.title,
-        manifest: JSON.parse(r.manifest),
-        createdAt,
-        creatorSlug: r.creator_slug ?? undefined,
-        plays: Number(r.plays ?? 0),
-      };
+      return rowToMv(result.rows[0]);
     } finally {
       client.release();
     }
@@ -1671,30 +1735,14 @@ export const pgStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const client = await getPool().connect();
     try {
-      // getGamesByIds と同じ理由で manifest 列は転送しない（docs/NEON_EGRESS.md）。
-      // フィードのサムネに要るのは背景URLだけなので、抽出は DB 側でやる。
-      const BG_URL_SQL = `substring(m.manifest::text from '"bgUrl"[[:space:]]*:[[:space:]]*"(https?://[^"]+)"')`;
+      // サムネに要る bg_url は非正規化列になったので、manifest から substring で
+      // 抜き出す必要がなくなった（そもそも manifest 列が存在しない）。
       const result = await client.query(
-        `SELECT m.id, m.preset, m.title, m.created_at, m.creator_slug, m.plays,
-                ${BG_URL_SQL} AS bg_url
-           FROM mvs m WHERE m.id = ANY($1::bigint[])`,
+        `SELECT id, preset, title, manifest_url, bg_url, created_at, creator_slug, plays
+           FROM mvs WHERE id = ANY($1::bigint[])`,
         [ids]
       );
-      return result.rows.map((r: any) => {
-        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        // manifest は「サムネに必要な最小限」だけを組み立てた不完全な形。
-        // 再生には使えないので、必ず getMv() で取り直すこと。
-        const manifest: any = r.bg_url ? { stage: { bgUrl: r.bg_url } } : {};
-        return {
-          id: r.id,
-          preset: r.preset,
-          title: r.title,
-          manifest,
-          createdAt,
-          creatorSlug: r.creator_slug ?? undefined,
-          plays: Number(r.plays ?? 0),
-        };
-      });
+      return result.rows.map(rowToMv);
     } finally {
       client.release();
     }
@@ -1703,7 +1751,18 @@ export const pgStore: DataStore = {
   async updateMv(id, data) {
     const client = await getPool().connect();
     try {
-      await client.query('UPDATE mvs SET title = $1, manifest = $2 WHERE id = $3', [data.title, JSON.stringify(data.manifest), id]);
+      // 編集は毎回新しいキーへ上げ直す（R2は immutable で配るので上書きできない）。
+      // 旧オブジェクトの削除は、このUPDATEが成功したあとに呼び出し側が行う。
+      // 順序を逆にするとUPDATE失敗時にMVが復旧不能になる。
+      await client.query(
+        `UPDATE mvs SET title = $1, manifest_url = $2, manifest_delete_id = $3,
+                        manifest_delete_hash = $4, bg_url = $5
+          WHERE id = $6`,
+        [
+          data.title, data.manifestUrl, data.manifestDeleteId || null,
+          data.manifestDeleteHash || null, data.bgUrl || null, id,
+        ]
+      );
     } finally {
       client.release();
     }
@@ -1725,10 +1784,22 @@ export const pgStore: DataStore = {
       const id = Date.now() + Math.floor(Math.random() * 1000);
       const now = new Date().toISOString();
       await client.query(
-        `INSERT INTO games (id, preset, title, manifest, created_at, creator_slug) VALUES ($1, $2, $3, $4, NOW(), $5)`,
-        [id, data.preset, data.title, JSON.stringify(data.manifest), data.creatorSlug || null]
+        `INSERT INTO games (id, preset, title, manifest_url, manifest_delete_id, manifest_delete_hash, bg_ref, created_at, creator_slug)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)`,
+        [
+          id, data.preset, data.title,
+          data.manifestUrl, data.manifestDeleteId || null, data.manifestDeleteHash || null,
+          data.bgRef || null, data.creatorSlug || null,
+        ]
       );
-      return { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: now, creatorSlug: data.creatorSlug };
+      return {
+        id, preset: data.preset, title: data.title,
+        manifestUrl: data.manifestUrl,
+        manifestDeleteId: data.manifestDeleteId,
+        manifestDeleteHash: data.manifestDeleteHash,
+        bgRef: data.bgRef,
+        createdAt: now, creatorSlug: data.creatorSlug,
+      };
     } finally {
       client.release();
     }
@@ -1737,11 +1808,10 @@ export const pgStore: DataStore = {
   async getGame(id) {
     const client = await getPool().connect();
     try {
+      // manifest 本体はもうDBに無い。返すのはURLだけで、実体はブラウザがR2から直接引く
       const result = await client.query('SELECT * FROM games WHERE id = $1', [id]);
       if (result.rows.length === 0) return null;
-      const r = result.rows[0];
-      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
+      return rowToGame(result.rows[0]);
     } finally {
       client.release();
     }
@@ -1751,34 +1821,26 @@ export const pgStore: DataStore = {
     if (!ids || ids.length === 0) return [];
     const client = await getPool().connect();
     try {
-      // フィードの主要導線。ここで manifest を丸ごと引くと、ゲーム1本ぶんのデータ
-      // （スプライトやマップを含む数百KB〜）がフィードのポーリングのたびに Neon から流れる。
-      // 実際に使うのは title と titleScreen.bgRef の1本だけなので、
-      // bgRef の抽出は DB 側でやって列自体は転送しない。
-      const BG_REF_SQL = `substring(g.manifest::text from '"bgRef"[[:space:]]*:[[:space:]]*"(https?://[^"]+)"')`;
-      const COLUMNS = `g.id, g.preset, g.title, g.created_at, g.creator_slug,
-                       g.plays, g.clears, g.best_score, g.best_score_by,
-                       ${BG_REF_SQL} AS bg_ref`;
+      // フィードの主要導線。以前は manifest 列から substring で bgRef を抜いていたが、
+      // manifest が R2 に出たので bg_ref を非正規化列として読むだけになった。
+      const COLUMNS = `id, preset, title, manifest_url, bg_ref, created_at, creator_slug,
+                       plays, clears, best_score, best_score_by`;
       let result;
       try {
         result = await client.query(
-          `SELECT ${COLUMNS} FROM games g WHERE g.id = ANY($1::bigint[])`,
+          `SELECT ${COLUMNS} FROM games WHERE id = ANY($1::bigint[])`,
           [ids]
         );
       } catch {
         // プレイ統計（migration 10）が未適用の環境でも投稿一覧ごと 500 にしない。
         // gameStatsFromRow が欠けた列を 0 として扱う。
         result = await client.query(
-          `SELECT g.id, g.preset, g.title, g.created_at, g.creator_slug, ${BG_REF_SQL} AS bg_ref
-             FROM games g WHERE g.id = ANY($1::bigint[])`,
+          `SELECT id, preset, title, manifest_url, bg_ref, created_at, creator_slug
+             FROM games WHERE id = ANY($1::bigint[])`,
           [ids]
         );
       }
-      return result.rows.map((r: any) => {
-        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        const manifest: any = r.bg_ref ? { titleScreen: { bgRef: r.bg_ref } } : {};
-        return { id: r.id, preset: r.preset, title: r.title, manifest, createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
-      });
+      return result.rows.map(rowToGame);
     } finally {
       client.release();
     }
@@ -1800,9 +1862,7 @@ export const pgStore: DataStore = {
         [id, data.countPlay === false ? 0 : 1, data.cleared ? 1 : 0, score, data.displayName || '名無し']
       );
       if (result.rows.length === 0) return null;
-      const r = result.rows[0];
-      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined, ...gameStatsFromRow(r) };
+      return rowToGame(result.rows[0]);
     } finally {
       client.release();
     }
@@ -1812,23 +1872,19 @@ export const pgStore: DataStore = {
     const client = await getPool().connect();
     try {
       const safeLimit = Math.max(1, Math.min(limit || 30, 50));
-      // manifest は重いので取らない（ランキング表示には不要）
+      // ランキング表示にサムネは要らないので bg_ref も引かない
       const result = await client.query(
-        `SELECT g.id, g.preset, g.title, g.created_at, g.creator_slug, g.plays, g.clears, g.best_score, g.best_score_by,
+        `SELECT g.id, g.preset, g.title, g.manifest_url, g.created_at, g.creator_slug,
+                g.plays, g.clears, g.best_score, g.best_score_by,
                 (SELECT p.id FROM posts p WHERE p.game_id = g.id ORDER BY p.id ASC LIMIT 1) AS post_id
            FROM games g
           ORDER BY COALESCE(g.plays, 0) DESC, g.id DESC
           LIMIT ${safeLimit}`
       );
-      return result.rows.map((r: any) => {
-        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        return {
-          id: r.id, preset: r.preset, title: r.title, manifest: {} as any, createdAt,
-          creatorSlug: r.creator_slug ?? undefined,
-          postId: r.post_id ? Number(r.post_id) : undefined,
-          ...gameStatsFromRow(r),
-        };
-      });
+      return result.rows.map((r: any) => ({
+        ...rowToGame(r),
+        postId: r.post_id ? Number(r.post_id) : undefined,
+      }));
     } finally {
       client.release();
     }
@@ -1847,14 +1903,19 @@ export const pgStore: DataStore = {
   async updateGame(id, data) {
     const client = await getPool().connect();
     try {
+      // 編集は毎回新しいキーへ上げ直す（R2は immutable で配るので上書きできない）。
+      // 旧オブジェクトの削除は、このUPDATEが成功したあとに呼び出し側が行う。
       const result = await client.query(
-        `UPDATE games SET title = $1, manifest = $2 WHERE id = $3 RETURNING *`,
-        [data.title, JSON.stringify(data.manifest), id]
+        `UPDATE games SET title = $1, manifest_url = $2, manifest_delete_id = $3,
+                          manifest_delete_hash = $4, bg_ref = $5
+          WHERE id = $6 RETURNING *`,
+        [
+          data.title, data.manifestUrl, data.manifestDeleteId || null,
+          data.manifestDeleteHash || null, data.bgRef || null, id,
+        ]
       );
       if (result.rows.length === 0) return null;
-      const r = result.rows[0];
-      const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-      return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, creatorSlug: r.creator_slug ?? undefined };
+      return rowToGame(result.rows[0]);
     } finally {
       client.release();
     }
@@ -1865,10 +1926,7 @@ export const pgStore: DataStore = {
     try {
       const safeLimit = Math.max(1, Math.min(limit || 30, 50));
       const result = await client.query(`SELECT * FROM games ORDER BY id DESC LIMIT ${safeLimit}`);
-      return result.rows.map((r: any) => {
-        const createdAt = typeof r.created_at === 'object' ? r.created_at.toISOString() : String(r.created_at);
-        return { id: r.id, preset: r.preset, title: r.title, manifest: JSON.parse(r.manifest), createdAt, ...gameStatsFromRow(r) };
-      });
+      return result.rows.map(rowToGame);
     } finally {
       client.release();
     }

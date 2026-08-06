@@ -12,13 +12,18 @@ import { startRemix } from '@/lib/remix';
 import { ensureSessionId } from '@/lib/session';
 import { api } from '@/lib/api';
 import { isCollabAllowed, type OriginType } from '@/lib/types';
+import { useRemoteJson } from '@/lib/use-remote-payload';
 
 const GameMaker = dynamic(() => import('./GameMaker'), { ssr: false });
 
 interface Props {
   gameId: string;
   title: string;
-  manifest: GameManifestDraft;
+  /**
+   * manifest 本体の保存先URL（R2）。DBはURLしか持たないので、
+   * 実体は「あそぶ」を押した時点でブラウザが直接取りにいく。
+   */
+  manifestUrl: string;
   preset: string;
   creatorSlug?: string;
   plays: number;
@@ -35,11 +40,14 @@ interface Props {
  * 遊んだあとに共有・改造・コメントへ進めるようにしている。
  */
 export default function GameLandingView({
-  gameId, title, manifest, preset, creatorSlug, plays, clears, bestScore, bestScoreBy, postId, originType,
+  gameId, title, manifestUrl, preset, creatorSlug, plays, clears, bestScore, bestScoreBy, postId, originType,
 }: Props) {
   const remixAllowed = isCollabAllowed(originType);
   const [started, setStarted] = useState(false);
   const [userId, setUserId] = useState('名無しvFZ');
+  // 「あそぶ」を押すまで manifest は取りに行かない。押さない人には1バイトも運ばない
+  const { data: manifest, loading: manifestLoading, error: manifestError } =
+    useRemoteJson<GameManifestDraft>(started ? manifestUrl : undefined);
 
   useEffect(() => {
     api.auth.anonymous(ensureSessionId())
@@ -84,17 +92,23 @@ export default function GameLandingView({
       <div className="flex-1 flex flex-col">
         {started ? (
           <div className="flex-1 min-h-[60vh]">
-            <GameMaker
-              onClose={() => setStarted(false)}
-              userId={userId}
-              initialManifest={manifest}
-              playOnly
-              embedded
-              fixedControls
-              postId={postId}
-              gameId={gameId}
-              onRemix={remixAllowed ? handleRemix : undefined}
-            />
+            {manifest ? (
+              <GameMaker
+                onClose={() => setStarted(false)}
+                userId={userId}
+                initialManifest={manifest}
+                playOnly
+                embedded
+                fixedControls
+                postId={postId}
+                gameId={gameId}
+                onRemix={remixAllowed ? handleRemix : undefined}
+              />
+            ) : (
+              <div className="flex-1 min-h-[50vh] flex items-center justify-center text-xs text-gray-500">
+                {manifestError ?? (manifestLoading ? '読み込み中…' : 'データがありません')}
+              </div>
+            )}
           </div>
         ) : (
           <button
@@ -119,7 +133,7 @@ export default function GameLandingView({
             <MessageCircle size={13} /> コメントを見る
           </Link>
         )}
-        {remixAllowed && (
+        {remixAllowed && manifest && (
           <button
             onClick={() => startRemix({ manifest, title: `${title}（改造）`, preset, sourceGameId: gameId, sourceTitle: title })}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-colors"

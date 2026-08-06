@@ -81,9 +81,31 @@ export function decodeIdOrThrow(sqid: string, errorMessage = 'Invalid ID'): numb
   return id;
 }
 
+/**
+ * R2の削除トークンは**絶対にAPIレスポンスへ載せない**。
+ *
+ * delete_hash は「そのオブジェクトを消せる」ことと等価で、DELETE_SECRET_PEPPER が
+ * uploader 側にしか無いので他の誰にも再計算できない。逆に言えば、一度でも
+ * レスポンスに混ざると、それを見た全員が他人のMML・manifest を消せるようになる。
+ *
+ * 本人が編集で旧オブジェクトを消す経路では、作者判定を通したうえで
+ * PATCH のレスポンスに `previousManifest` として明示的に載せている。
+ */
+function stripDeleteTokens<T extends Record<string, unknown>>(record: T) {
+  const {
+    manifestDeleteId: _a, manifestDeleteHash: _b,
+    mmlDeleteId: _c, mmlDeleteHash: _d,
+    ...rest
+  } = record as T & {
+    manifestDeleteId?: string; manifestDeleteHash?: string;
+    mmlDeleteId?: string; mmlDeleteHash?: string;
+  };
+  return rest;
+}
+
 export function encodePost(post: DbPost): ApiPost {
   return {
-    ...post,
+    ...stripDeleteTokens(post as unknown as Record<string, unknown>),
     id: encodeId(post.id),
     parentPostId: post.parentPostId ? encodeId(post.parentPostId) : undefined,
     gameId: post.gameId ? encodeId(post.gameId) : undefined,
@@ -95,14 +117,14 @@ export function encodePost(post: DbPost): ApiPost {
 
 export function encodeMv(mv: DbMvRecord): ApiMv {
   return {
-    ...mv,
+    ...stripDeleteTokens(mv as unknown as Record<string, unknown>),
     id: encodeId(mv.id),
   } as ApiMv;
 }
 
 export function encodeGame(game: DbGameRecord): ApiGame {
   return {
-    ...game,
+    ...stripDeleteTokens(game as unknown as Record<string, unknown>),
     id: encodeId(game.id),
   } as ApiGame;
 }

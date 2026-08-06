@@ -1,6 +1,6 @@
 import { db as mockDb } from '../mock-db';
 import { OriginType } from '../types';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, CreateMvParams, ReportParams, RecordGamePlayParams } from './interface';
+import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, CreateMvParams, UpdateGameParams, UpdateMvParams, ReportParams, RecordGamePlayParams, MmlRef } from './interface';
 import type { DbGameRecord, DbMvRecord } from '../types-db';
 import type { MvManifest } from '../mv-config';
 
@@ -46,7 +46,7 @@ export const mockStore: DataStore = {
     return mockDb.addReply(postId, data);
   },
 
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) {
+  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, mml?: MmlRef) {
     return mockDb.editPost(id, userId, content, originType, imageSrc);
   },
 
@@ -233,7 +233,14 @@ export const mockStore: DataStore = {
 
   async createGame(data: CreateGameParams): Promise<DbGameRecord> {
     const id = Date.now() + Math.floor(Math.random() * 1000);
-    const record: DbGameRecord = { id, preset: data.preset, title: data.title, manifest: data.manifest, createdAt: new Date().toISOString(), creatorSlug: data.creatorSlug };
+    const record: DbGameRecord = {
+      id, preset: data.preset, title: data.title,
+      manifestUrl: data.manifestUrl,
+      manifestDeleteId: data.manifestDeleteId,
+      manifestDeleteHash: data.manifestDeleteHash,
+      bgRef: data.bgRef,
+      createdAt: new Date().toISOString(), creatorSlug: data.creatorSlug,
+    };
     gameStore.set(id, record);
     return record;
   },
@@ -248,10 +255,17 @@ export const mockStore: DataStore = {
     return Array.from(gameStore.values()).filter(g => set.has(g.id));
   },
 
-  async updateGame(id: number, data: { title: string; manifest: CreateGameParams['manifest'] }): Promise<DbGameRecord | null> {
+  async updateGame(id: number, data: UpdateGameParams): Promise<DbGameRecord | null> {
     const existing = gameStore.get(id);
     if (!existing) return null;
-    const updated: DbGameRecord = { ...existing, title: data.title, manifest: data.manifest };
+    const updated: DbGameRecord = {
+      ...existing,
+      title: data.title,
+      manifestUrl: data.manifestUrl,
+      manifestDeleteId: data.manifestDeleteId,
+      manifestDeleteHash: data.manifestDeleteHash,
+      bgRef: data.bgRef,
+    };
     gameStore.set(id, updated);
     return updated;
   },
@@ -267,7 +281,10 @@ export const mockStore: DataStore = {
       id,
       preset: data.preset,
       title: data.title,
-      manifest: data.manifest,
+      manifestUrl: data.manifestUrl,
+      manifestDeleteId: data.manifestDeleteId,
+      manifestDeleteHash: data.manifestDeleteHash,
+      bgUrl: data.bgUrl,
       createdAt: new Date().toISOString(),
       creatorSlug: data.creatorSlug,
       plays: 0,
@@ -286,10 +303,17 @@ export const mockStore: DataStore = {
     return Array.from(mvStore.values()).filter(m => set.has(m.id));
   },
 
-  async updateMv(id: number, data: { title: string; manifest: MvManifest }): Promise<DbMvRecord | null> {
+  async updateMv(id: number, data: UpdateMvParams): Promise<DbMvRecord | null> {
     const existing = mvStore.get(id);
     if (!existing) return null;
-    const updated: DbMvRecord = { ...existing, title: data.title, manifest: data.manifest };
+    const updated: DbMvRecord = {
+      ...existing,
+      title: data.title,
+      manifestUrl: data.manifestUrl,
+      manifestDeleteId: data.manifestDeleteId,
+      manifestDeleteHash: data.manifestDeleteHash,
+      bgUrl: data.bgUrl,
+    };
     mvStore.set(id, updated);
     return updated;
   },

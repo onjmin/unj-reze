@@ -4,6 +4,10 @@ import type { Message, Trend } from './mock-db';
 import { decodeIdOrThrow, encodePost, encodeNotification, encodeId, encodeOshiItem } from './sqids';
 import { rejectDmReason, type DmGate } from './dm-rules';
 import { ensureSessionId } from './session';
+import { externalizeMml } from './mml-payload';
+import { updateGame, updateMv } from './game-mv-client';
+import type { MvManifest } from './mv-config';
+import type { GameManifestDraft } from '@/components/GameMaker';
 
 const BASE = '/api';
 const useStaticMockData = process.env.NEXT_PUBLIC_STATIC_EXPORT === 'true' || process.env.GITHUB_ACTIONS === 'true';
@@ -308,14 +312,16 @@ const liveApi = {
       const qs = userId ? `?userId=${encodeURIComponent(userId)}` : '';
       return fetcher<Post>(`/posts/${id}${qs}`);
     },
-    create: (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType }) =>
-      fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify({ ...data, sessionId: ensureSessionId() }) }),
+    // MMLはここでR2へ逃がす。投稿系の入口を1本にしておくと、コンポーザ・返信・編集の
+    // どこから来ても content にMML本文が残らない（docs/NEON_EGRESS.md）
+    create: async (data: { displayName: string; content: string; hasImage?: boolean; imageSrc?: string; imageAlt?: string; avatarColor?: string; gameId?: string; mvId?: string; originType?: OriginType }) =>
+      fetcher<Post>('/posts', { method: 'POST', body: JSON.stringify({ ...data, ...(await externalizeMml(data.content)), sessionId: ensureSessionId() }) }),
     like: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'like', sessionId: ensureSessionId() }) }),
     dislike: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'dislike', sessionId: ensureSessionId() }) }),
     heart: (id: string, _userId?: string, count?: number) => fetcher<Post>(`/posts/${id}`, { method: 'POST', body: JSON.stringify({ count, sessionId: ensureSessionId() }) }),
     repost: (id: string) => fetcher<Post>(`/posts/${id}`, { method: 'PUT', body: JSON.stringify({ action: 'repost', sessionId: ensureSessionId() }) }),
     // userId は互換のため残しているがサーバーは見ない（所有者判定はセッション）
-    edit: (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, content, originType, imageSrc, sessionId: ensureSessionId() }) }),
+    edit: async (id: string, userId: string, content: string, originType?: OriginType | null, imageSrc?: string) => fetcher<Post>(`/posts/${id}`, { method: 'PATCH', body: JSON.stringify({ userId, originType, imageSrc, ...(await externalizeMml(content)), sessionId: ensureSessionId() }) }),
     remove: (id: string, userId: string) => fetcher<{ success: boolean }>(`/posts/${id}`, { method: 'DELETE', body: JSON.stringify({ userId, sessionId: ensureSessionId() }) }),
     replies: {
       list: (postId: string, userId?: string) => {
@@ -334,7 +340,8 @@ const liveApi = {
         mvId?: string | number;
         originType?: OriginType;
       }) =>
-        fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify({ ...data, sessionId: ensureSessionId() }) }),
+        externalizeMml(data.content).then(mml =>
+          fetcher<Post>(`/posts/${postId}/replies`, { method: 'POST', body: JSON.stringify({ ...data, ...mml, sessionId: ensureSessionId() }) })),
     },
   },
   notifications: {
@@ -445,13 +452,13 @@ const liveApi = {
    * 呼び出し側に `userSlug:` と書かせるため名前付きで受け取る。
    */
   // 作者判定はサーバーがセッションから行うので、呼び出し側は身元を渡さない
+  // manifest はR2へ上げてURLだけを送る必要があるので、lib/game-mv-client.ts の
+  // updateMv / updateGame に委譲する。ここで manifest を直接PATCHすると400になる。
   mvs: {
-    edit: (id: string, params: { title: string; manifest: unknown }) =>
-      fetcher<unknown>(`/mvs/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(params) }),
+    edit: (id: string, params: { title: string; manifest: MvManifest }) => updateMv(id, params),
   },
   games: {
-    edit: (id: string, params: { title: string; manifest: unknown }) =>
-      fetcher<unknown>(`/games/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(params) }),
+    edit: (id: string, params: { title: string; manifest: GameManifestDraft }) => updateGame(id, params),
   },
 };
 

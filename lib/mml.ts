@@ -186,6 +186,24 @@ export function extractMmlFromContent(content: string): string | null {
   return line.slice(marker.length).trim();
 }
 
+/**
+ * MML本文をR2へ逃がしたあとの content を作る。
+ *
+ * マーカー行は「本文つき」から「マーカーだけ」に置き換える。行そのものを消さないのは、
+ * getDisplayContent / EMBED_TEXT_MARKERS が「この行を埋め込みに差し替える」目印として
+ * 使っているため。本文は posts.mml_url から取りにいく。
+ */
+export function replaceMmlWithMarker(content: string): string {
+  if (!content || typeof content !== 'string') return content || '';
+  const lines = content.split('\n');
+  const idx = findMmlLineIndex(lines);
+  if (idx === -1) return content;
+  const line = lines[idx].trim();
+  const marker = MML_MARKERS.find(m => line.toLowerCase().startsWith(m.toLowerCase()))!;
+  lines[idx] = marker;
+  return lines.join('\n');
+}
+
 /** MMLマーカー行だけを取り除いたcontentを返す。前後の自由コメント行は維持する。 */
 export function stripMmlLine(content: string): string {
   if (!content || typeof content !== 'string') return content || '';

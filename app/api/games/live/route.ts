@@ -6,7 +6,8 @@ import { getClientIp } from '@/lib/ip';
 export async function GET(request: NextRequest) {
   const ip = getClientIp(request.headers);
   const info = await db.getLiveGameInfo(ip);
-  const manifest = info.gameId ? (await db.getGame(info.gameId))?.manifest ?? null : null;
+  // manifest 本体はもうDBに無い。URLだけ返し、実体はクライアントがR2から直接引く
+  const manifestUrl = info.gameId ? (await db.getGame(info.gameId))?.manifestUrl ?? null : null;
 
   const encodedInfo = {
     ...info,
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
         id: encodeId(c.game.id)
       }
     })),
-    manifest
+    manifestUrl
   };
 
   return NextResponse.json(encodedInfo);

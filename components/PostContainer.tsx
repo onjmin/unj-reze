@@ -14,6 +14,7 @@ import { cachePost } from '@/lib/post-cache';
 import { cacheProfileSeed } from '@/lib/profile-cache';
 import { getThreadDisplayTime } from '@/lib/time';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
+import MmlSource from './MmlSource';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -493,11 +494,11 @@ export default function PostContainer({ post, isRankingMode, rankIndex, rankCate
           )}
 
           {(() => {
-            const mmlCode = extractMmlFromContent(post.content);
-            if (mmlCode) {
+            // MML本文はR2から。プレイヤーの枠とコラボボタンは本文を待たずに出す
+            if (post.hasMml || extractMmlFromContent(post.content)) {
               return (
                 <div onClick={e => e.stopPropagation()} className="relative">
-                  <MmlPlayer mml={mmlCode} />
+                  <MmlSource post={post}>{mml => <MmlPlayer mml={mml} />}</MmlSource>
                   {post.hasCollabButton && isCollabAllowed(post.originType) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); openCollab(post); }}

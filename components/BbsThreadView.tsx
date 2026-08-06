@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Post } from '@/lib/types';
 import { api } from '@/lib/api';
+import { createGame, createMv, loadGame, loadMv } from '@/lib/game-mv-client';
 import { ensureSessionId } from '@/lib/session';
 import { getUserIdLabel } from '@/lib/avatar';
 import { getThreadDisplayTime } from '@/lib/time';
@@ -15,6 +16,7 @@ import MmlPlayer from './MmlPlayer';
 import ChordPlayer from './ChordPlayer';
 import { extractFirstEmbed } from '@/lib/embed';
 import { extractMmlFromContent, getDisplayContent } from '@/lib/mml';
+import MmlSource from './MmlSource';
 import { extractChordsFromContent } from '@/lib/chord';
 import PostComposer from './PostComposer';
 import GameBox from './GameBox';
@@ -163,30 +165,25 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
         const result = await api.upload.image({ image: capturedImage });
         imageSrc = result.url;
       }
-      let gameId: number | undefined;
+      // manifest はR2へ上げてからURLだけをAPIに渡す（createGame/createMvが面倒を見る）
+      let gameId: string | undefined;
       if (capturedGameDraft) {
-        const res = await fetch('/api/games', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preset: capturedGameDraft.preset, title: capturedGameDraft.title, manifest: capturedGameDraft.manifest, creatorSlug: userSlug }),
+        const saved = await createGame({
+          preset: capturedGameDraft.preset,
+          title: capturedGameDraft.title,
+          manifest: capturedGameDraft.manifest,
         });
-        if (res.ok) {
-          const savedGame = await res.json();
-          gameId = savedGame.id;
-        }
+        gameId = saved.id;
       }
 
-      let mvId: number | undefined;
+      let mvId: string | undefined;
       if (capturedMvDraft) {
-        const res = await fetch('/api/mvs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ preset: capturedMvDraft.preset, title: capturedMvDraft.title, manifest: capturedMvDraft.manifest, creatorSlug: userSlug }),
+        const saved = await createMv({
+          preset: capturedMvDraft.preset,
+          title: capturedMvDraft.title,
+          manifest: capturedMvDraft.manifest,
         });
-        if (res.ok) {
-          const savedMv = await res.json();
-          mvId = savedMv.id;
-        }
+        mvId = saved.id;
       }
 
       const reply = await api.posts.replies.create(post.id, {
@@ -340,8 +337,14 @@ export default function BbsThreadView({ post: initial, openCollab }: BbsThreadVi
 
               {/* Embeds (MML / Chord / URL埋め込み) */}
               {(() => {
-                const mmlCode = extractMmlFromContent(p.content);
-                if (mmlCode) return <div className="pl-6 mt-2" onClick={e => e.stopPropagation()}><MmlPlayer mml={mmlCode} /></div>;
+                // MML本文はR2にある。展開済みスレッドの中身なのでここで解決してよい
+                if (p.hasMml || extractMmlFromContent(p.content)) {
+                  return (
+                    <div className="pl-6 mt-2" onClick={e => e.stopPropagation()}>
+                      <MmlSource post={p}>{mml => <MmlPlayer mml={mml} />}</MmlSource>
+                    </div>
+                  );
+                }
                 const chordRes = extractChordsFromContent(p.content);
                 if (chordRes) return <div className="pl-6 mt-2" onClick={e => e.stopPropagation()}><ChordPlayer chords={chordRes.chords} /></div>;
                 const embed = extractFirstEmbed(p.content);

@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { decodeId, encodeMv } from '@/lib/sqids';
 import { withEdgeCache } from '@/lib/edge-cache';
 import { resolveSessionUser } from '@/lib/auth/session-server';
+import { parseManifestRef, parseBgRef } from '@/lib/manifest-ref';
 import type { MvManifest } from '@/lib/mv-config';
 
 function isMvManifest(m: unknown): m is MvManifest {
@@ -37,11 +38,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
   const body = await request.json();
   const { title, manifest, sessionId } = body as { title?: string; manifest?: unknown; sessionId?: string };
-  if (!title || !manifest) {
-    return NextResponse.json({ error: 'title and manifest are required' }, { status: 400 });
+  if (!title) {
+    return NextResponse.json({ error: 'title is required' }, { status: 400 });
   }
-  if (!isMvManifest(manifest)) {
-    return NextResponse.json({ error: 'invalid manifest' }, { status: 400 });
+
+  // 編集は毎回R2の新しいキーへ上げ直したうえで、そのURLが送られてくる。
+  // 同じキーへの上書きは不可（immutable で配っているので古い内容が残り続ける）。
+  const manifestRef = parseManifestRef(body, 'mv');
+  if (!manifestRef) {
+    return NextResponse.json({ error: 'valid manifestUrl is required' }, { status: 400 });
   }
 
   // 作者判定はセッション本人の slug で行う。body の userSlug を信じると
@@ -57,7 +62,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: 'Only the creator can edit this MV' }, { status: 403 });
   }
 
-  const updated = await db.updateMv(decodedId, { title, manifest });
+  const updated = await db.updateMv(decodedId, {
+    title,
+    ...manifestRef,
+    bgUrl: parseBgRef(body.bgUrl),
+  });
   if (!updated) return NextResponse.json({ error: 'not found' }, { status: 404 });
-  return NextResponse.json(encodeMv(updated));
+
+  // 旧オブジェクトの削除トークンを返す。DB更新が成功したあとにクライアントが消す
+  return NextResponse.json({
+    ...encodeMv(updated),
+    previousManifest: mv.manifestDeleteId
+      ? { deleteId: mv.manifestDeleteId, deleteHash: mv.manifestDeleteHash }
+      : undefined,
+  });
 }
