@@ -38,7 +38,7 @@
  * res.num のような手計算が要る値は UNIQUE 制約 + リトライで守る。
  */
 import { neon, neonConfig } from '@neondatabase/serverless';
-import type { AnonymousUser, FollowUser, GhostPlayer, GameVoteCandidate, OriginType } from '../types';
+import type { AnonymousUser, FollowUser, GameVoteCandidate, OriginType } from '../types';
 import type {
   DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem, DbMediaSearchPost,
 } from '../types-db';
@@ -1160,23 +1160,7 @@ export const pgStore: DataStore = {
              ON CONFLICT (ip_address, hour_slot) DO UPDATE SET game_id=$1`, [gameId, ipAddress, slot]);
   },
 
-  async updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string) {
-    await q(
-      `INSERT INTO game_players (session_id, game_id, x, y, emoji, updated_at) VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP)
-       ON CONFLICT (session_id, game_id) DO UPDATE SET x=$3,y=$4,emoji=$5,updated_at=CURRENT_TIMESTAMP`,
-      [sessionId, gameId, x, y, emoji],
-    );
-    if (Math.random() < 0.05) {
-      await q(`DELETE FROM game_players WHERE updated_at < CURRENT_TIMESTAMP - INTERVAL '15 seconds'`);
-    }
-  },
-  async getGamePlayers(gameId: number, excludeSession: string) {
-    const { rows } = await q(
-      `SELECT * FROM game_players WHERE game_id=$1 AND session_id <> $2 AND updated_at > CURRENT_TIMESTAMP - INTERVAL '10 seconds'`,
-      [gameId, excludeSession],
-    );
-    return rows.map((r): GhostPlayer => ({ sessionId: r.session_id, x: r.x, y: r.y, emoji: r.emoji, updatedAt: toIso(r.updated_at) }));
-  },
+  // ゴーストプレイヤーの位置はDBに持たない（lib/db/interface.ts参照）。
 };
 
 // ============================================================================

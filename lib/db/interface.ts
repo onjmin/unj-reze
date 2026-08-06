@@ -1,4 +1,4 @@
-import { AnonymousUser, FollowUser, GhostPlayer, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
+import { AnonymousUser, FollowUser, GameVoteCandidate, OriginType, OshiItemKind } from '../types';
 import { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem, DbMediaSearchPost } from '../types-db';
 import type { Trend, Message } from '../mock-db';
 import type { GameManifestDraft } from '@/components/GameMaker';
@@ -220,6 +220,7 @@ export interface DataStore {
   getPostIdByGameId(gameId: number): Promise<number | null>;
   getLiveGameInfo(ipAddress: string): Promise<{ gameId: number | null; gameTitle: string; gamePreset: string; hourSlot: string; postId: number | null; nextCandidates: GameVoteCandidate[]; myVote: number | null }>;
   voteGame(gameId: number, ipAddress: string): Promise<void>;
-  updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string): Promise<void>;
-  getGamePlayers(gameId: number, excludeSession: string): Promise<GhostPlayer[]>;
+  // ゴーストプレイヤーの位置同期はDBに一切持たない。ハブ（Koyeb）のメモリ上のみで
+  // 完結する仕組みに一本化した（components/LiveGameView.tsx）。ハブ未設定時は
+  // プレゼンス機能自体を出さない。DB書き込みへのフォールバックは意図的に作らない。
 }

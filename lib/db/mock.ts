@@ -368,10 +368,4 @@ export const mockStore: DataStore = {
   },
 
   async voteGame(_gameId: number, _ipAddress: string) {},
-
-  async updatePlayerPosition(_sessionId: string, _gameId: number, _x: number, _y: number, _emoji: string) {},
-
-  async getGamePlayers(_gameId: number, _excludeSession: string) {
-    return [];
-  },
 };

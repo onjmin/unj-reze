@@ -128,31 +128,19 @@ export default function LiveGameView({ userId, sessionId }: Props) {
   );
 
   // ── フォールバック経路（ハブ未設定時のみ） ───────────────────
-  // NEXT_PUBLIC_REALTIME_URL を設定していない環境では従来どおり2秒ポーリングで動く。
+  // プレイヤーの位置・在席人数はここでは同期しない（ゴースト表示なし）。
+  // ハブ無しの環境向けに Postgres へ2秒間隔でupsertするフォールバックを
+  // 持たせていたが、実況ゲームのように多人数が同時に開くと Neon への
+  // 書き込みが人数×秒間隔で積み上がる。プレゼンスは「ハブがあれば動く
+  // おまけ機能」と割り切り、無ければ単に出さない。
+  // コメント（返信）の表示だけは、ハブが無くても通常の投稿APIを
+  // ポーリングすれば得られるので、そこだけ引き続きフォールバックする。
   useEffect(() => {
     if (realtimeConfigured) return;
     if (!info?.gameId) return;
-    const gameId = info.gameId;
     const postId = info.postId;
 
     const sync = async () => {
-      // 自分の位置を送信
-      if (posRef.current.x > 0 || posRef.current.y > 0) {
-        fetch('/api/games/players', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gameId, sessionId, ...posRef.current }),
-        }).catch(() => {});
-      }
-      // 他プレイヤーを取得
-      try {
-        const res = await fetch(`/api/games/players?gameId=${gameId}&sessionId=${encodeURIComponent(sessionId)}`);
-        if (res.ok) {
-          const players: GhostPlayer[] = await res.json();
-          setGhostPlayers(players);
-          setOnlineCount(players.length + 1);
-        }
-      } catch {}
       // コメント（返信）をポーリング
       if (postId) {
         try {

@@ -1739,17 +1739,4 @@ export const sqliteStore: DataStore = {
     saveDb();
   },
 
-  async updatePlayerPosition(sessionId: string, gameId: number, x: number, y: number, emoji: string) {
-    const d = await getDb();
-    const now = new Date().toISOString();
-    d.run('INSERT OR REPLACE INTO game_players (session_id, game_id, x, y, emoji, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [sessionId, gameId, x, y, emoji, now]);
-    d.run("DELETE FROM game_players WHERE datetime(updated_at) < datetime('now', '-15 seconds')");
-    saveDb();
-  },
-
-  async getGamePlayers(gameId: number, excludeSession: string) {
-    const d = await getDb();
-    const rows = rowsToObjects(d, "SELECT * FROM game_players WHERE game_id = ? AND session_id != ? AND datetime(updated_at) > datetime('now', '-10 seconds')", [gameId, excludeSession]);
-    return rows.map((r: any) => ({ sessionId: r.session_id, x: r.x, y: r.y, emoji: r.emoji, updatedAt: r.updated_at }));
-  },
 };
