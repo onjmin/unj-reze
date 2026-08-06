@@ -89,6 +89,20 @@ const CT = {
   Game: 64, Sns: 128, Oekaki: 1024, Dtm: 2048, Encrypt: 4096,
 } as const;
 
+/**
+ * reze発スレッドの threads.cc_bitmask / content_types_bitmask 既定値。
+ * unj の MakeThreadPage.svelte の既定選択と完全一致させる:
+ *   ccBitmask = [1,4,8] = ID + コテハン + アイコン (自演防止ID=2 は含まない)
+ *   contentTypesBitmask = 現在unjに実装済みの11種別を全許可
+ * これを設定しないとDDLのデフォルト(=1、テキストのみ)に落ち、board_id=1を
+ * 共有しているunj純正UIからreze発スレッドへ画像/MML付きで返信すると
+ * 弾かれる（unj側の res.ts がこの値でゲートしているため）。
+ */
+const DEFAULT_CC_BITMASK = 1 + 4 + 8; // 13
+const DEFAULT_CONTENT_TYPES_BITMASK =
+  CT.Text + CT.Url + CT.Image + CT.Gif + CT.Video + CT.Audio +
+  CT.Game + CT.Sns + CT.Oekaki + CT.Dtm + CT.Encrypt; // 7423
+
 interface DisplayContent {
   content: string;
   hasImage?: boolean;
@@ -364,10 +378,12 @@ export const pgStore: DataStore = {
     const { rows } = await q(
       `INSERT INTO threads (
          created_at, ip, res_count, latest_res, latest_res_at, title, board_id, res_limit,
+         cc_bitmask, content_types_bitmask,
          user_id, cc_user_name, cc_user_avatar, avatar_color,
          content_text, content_url, content_type, content_data_url,
          has_collab_button, game_id, mv_id, origin_type
        ) VALUES (CURRENT_TIMESTAMP,'0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,$2,1,${RES_LIMIT},
+                 ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
                  $3,$4,0,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [
@@ -537,15 +553,24 @@ export const pgStore: DataStore = {
     const vals: any[] = [];
     const push = (col: string, v: unknown) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
 
+    // content_type は content_url/content_data_url と必ず連動させる。
+    // text列だけ書き換えてtypeを放置すると、hasImage/hasMml が deriveDisplay で
+    // 導出できなくなる（画像を足したのに反映されない/消したのにhasImageが残る事故）。
     if (mml !== undefined) {
       const c = deriveInsertContent({ content, mmlUrl: mml.mmlUrl, hasImage: !!imageSrc, imageSrc });
       push('content_text', c.contentText);
       push('content_url', c.contentUrl);
       push('content_type', c.contentType);
       push('content_data_url', c.contentDataUrl);
+    } else if (imageSrc !== undefined) {
+      const c = deriveInsertContent({ content, hasImage: !!imageSrc, imageSrc });
+      push('content_text', c.contentText);
+      push('content_url', c.contentUrl);
+      push('content_type', c.contentType);
+      push('content_data_url', c.contentDataUrl);
     } else {
+      // 添付には触れない、本文だけの編集。既存の content_type/URL は保つ
       push('content_text', content);
-      if (imageSrc !== undefined) push('content_url', imageSrc);
     }
     if (originType !== undefined) push('origin_type', originType);
     push('is_edited', true);

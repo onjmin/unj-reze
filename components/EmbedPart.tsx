@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { ExternalLink, X, Play, Music, Gamepad2, Loader2 } from 'lucide-react';
-import { EmbeddedMedia } from '@/lib/embed';
+import { ExternalLink, Gamepad2, Loader2, Music, Play, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useAudioFocus } from '@/lib/audio-focus-context';
-import { getMasterVolume, applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
+import { EmbeddedMedia } from '@/lib/embed';
+import { applyMasterVolume, getMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 
 const ytRegex = /\/embed\/([a-zA-Z0-9_-]{11})/;
 const getYtThumb = (url: string) => {
@@ -162,7 +162,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
           <a href={embed.rawUrl} target="_blank" rel="noopener noreferrer" className="p-1 rounded hover:bg-gray-100/10 transition-colors">
             <ExternalLink size={12} className="text-gray-500" />
           </a>
-          <button onClick={handleClose} className="p-1 rounded hover:bg-gray-100/10 transition-colors">
+          <button type="button" onClick={handleClose} className="p-1 rounded hover:bg-gray-100/10 transition-colors">
             <X size={12} className="text-gray-500" />
           </button>
         </div>
