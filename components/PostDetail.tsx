@@ -15,6 +15,8 @@ import { cachePost } from '@/lib/post-cache';
 import { cacheProfileSeed } from '@/lib/profile-cache';
 import { getThreadDisplayTime } from '@/lib/time';
 import { extractMmlFromContent, getDisplayContent, stripMmlLine } from '@/lib/mml';
+import MmlSource from './MmlSource';
+import { fetchText } from '@/lib/uploader';
 import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
@@ -76,6 +78,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
   const [replyOriginType, setReplyOriginType] = useState<OriginType | undefined>(undefined);
   const [activeScreen, setActiveScreen] = useState<string | null>(null);
   const [collabImageUrl, setCollabImageUrl] = useState<string | undefined>(undefined);
+  const [editMmlText, setEditMmlText] = useState<string | undefined>(undefined);
   const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
   // mvId を持たせるのは、返信のMVも同じ画面で編集するため（トップレベルの post.mvId 固定にしない）
   const [editMvDraft, setEditMvDraft] = useState<{ mvId: string; manifest: MvManifest; title: string; preset: MvPresetKind } | null>(null);
@@ -430,11 +433,21 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
       }
     }
 
-    const pMml = extractMmlFromContent(p.content);
-    if (!p.hasImage && pMml) {
-      setCollabMml(pMml);
-      setActiveScreen('mml');
-      return;
+    // MML本文はR2にある。content にはマーカーしか残っていないので、
+    // hasMml/mmlUrl を経由しないと(inline抽出は常に空文字になる)コラボ編集を開始できない
+    if (!p.hasImage && (p.hasMml || extractMmlFromContent(p.content))) {
+      const inline = extractMmlFromContent(p.content);
+      try {
+        const pMml = inline || (p.mmlUrl ? await fetchText(p.mmlUrl) : '');
+        if (pMml) {
+          setCollabMml(pMml);
+          setActiveScreen('mml');
+          return;
+        }
+      } catch {
+        showToast('error', 'MMLの読み込みに失敗しました');
+        return;
+      }
     }
     setCollabImageUrl(p.imageSrc);
     setShowCollabSelector(true);
@@ -532,9 +545,22 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
     }
   };
 
-  const handleEditMusic = () => {
+  const handleEditMusic = async () => {
     setMenuOpen(false);
-    setActiveScreen('edit-mml');
+    // MML本文はR2にある。content にはマーカーしか残らないので、
+    // 編集画面を開く前に取りに行く必要がある
+    const inline = extractMmlFromContent(post.content);
+    try {
+      const text = inline || (post.mmlUrl ? await fetchText(post.mmlUrl) : '');
+      if (!text) {
+        showToast('error', 'MMLの読み込みに失敗しました');
+        return;
+      }
+      setEditMmlText(text);
+      setActiveScreen('edit-mml');
+    } catch {
+      showToast('error', 'MMLの読み込みに失敗しました');
+    }
   };
 
   /** 指定ポストのMVを編集画面で開く。トップレベル投稿と返信の両方がここを通る。 */
@@ -669,7 +695,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
   const isSelf = !!userSlug && (post.slug || post.displayName) === userSlug;
 
-  const mmlCode = extractMmlFromContent(post.content);
+  // MML本文はR2にある。content にはマーカーだけが残るので、埋め込み表示可否の
+  // 判定は hasMml も見る（inline抽出は常に空文字になる）
+  const hasMmlContent = post.hasMml || !!extractMmlFromContent(post.content);
   const chordRes = extractChordsFromContent(post.content);
 
   if (bbsMode === '掲示板モード') {
@@ -716,7 +744,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
                     <span>作品を編集</span>
                   </button>
                 )}
-                {isSelf && mmlCode && (
+                {isSelf && hasMmlContent && (
                   <button role="menuitem" onClick={handleEditMusic} className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors">
                     <Pencil size={12} className="shrink-0" />
                     <span>曲を編集</span>
@@ -922,10 +950,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
           )}
 
           {(() => {
-            if (mmlCode) {
+            if (hasMmlContent) {
               return (
                 <div className="relative">
-                  <MmlPlayer mml={mmlCode} />
+                  <MmlSource post={post}>{mml => <MmlPlayer mml={mml} />}</MmlSource>
                   {post.hasCollabButton && isCollabAllowed(post.originType) && (
                     <button
                       onClick={() => handleOpenCollab(post)}
@@ -1090,7 +1118,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
         <MmlEditor
           onClose={() => setActiveScreen(null)}
           onSave={handleSaveEditedMusic}
-          initialMml={mmlCode ?? undefined}
+          initialMml={editMmlText}
           isEditing
         />
       )}
@@ -1329,7 +1357,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
     api.posts.heart(id, userId, 1).then(u => setLocalPost(prev => mergePostCounters(prev, u)));
   }, [localPost.id, userId]);
 
-  const mmlCode = extractMmlFromContent(localPost.content);
+  const hasMmlContent = localPost.hasMml || !!extractMmlFromContent(localPost.content);
   const chordRes = extractChordsFromContent(localPost.content);
   const avatarInfo = getAvatarInfo(localPost.displayName);
   const isSelf = !!userSlug && (localPost.slug || localPost.displayName) === userSlug;
@@ -1515,7 +1543,7 @@ function ReplyTreeItem({ post, replies, depth, onReply, userId, userSlug, onEdit
           )}
 
           {(() => {
-            if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+            if (hasMmlContent) return <MmlSource post={localPost}>{mml => <MmlPlayer mml={mml} />}</MmlSource>;
             if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
             if (localPost.hasImage || localPost.hasGame || localPost.hasMv) return null;
             const embed = extractFirstEmbed(localPost.content);

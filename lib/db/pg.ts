@@ -383,17 +383,20 @@ export const pgStore: DataStore = {
       `INSERT INTO threads (
          created_at, ip, res_count, latest_res, latest_res_at, title, board_id, res_limit,
          cc_bitmask, content_types_bitmask,
-         user_id, cc_user_name, cc_user_avatar, avatar_color,
+         user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
          content_text, content_url, content_type, content_data_url,
          has_collab_button, game_id, mv_id, origin_type
        ) VALUES (CURRENT_TIMESTAMP,'0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,$2,1,${RES_LIMIT},
                  ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
-                 $3,$4,0,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                 $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
       [
         (data.content || '').split('\n').find((l) => l.trim())?.slice(0, 64) || '',
         (data.content || '').split('\n').find((l) => l.trim())?.slice(0, 64) || '無題',
-        authorId, data.displayName, data.avatarColor,
+        // cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
+        // 「ID:」として既に表示している値と揃える。post.slug = String(userId) なので
+        // unj固有の日替わりハッシュIDを新規に作らず、そのままここへ入れる。
+        authorId, String(authorId), data.displayName, data.avatarColor,
         c.contentText, c.contentUrl, c.contentType, c.contentDataUrl,
         !!(data.gameId || data.mvId), data.gameId ?? null, data.mvId ?? null,
         data.originType ?? null,
@@ -489,15 +492,16 @@ export const pgStore: DataStore = {
         const { rows } = await q(
           `INSERT INTO res (
              thread_id, num, created_at, ip, is_owner, sage,
-             user_id, cc_user_name, cc_user_avatar, avatar_color,
+             user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
              content_text, content_url, content_type, content_data_url,
              has_collab_button, game_id, mv_id, parent_num, origin_type
            ) VALUES ($1, (SELECT COALESCE(MAX(num),1)+1 FROM res WHERE thread_id=$1),
-                     CURRENT_TIMESTAMP,'0.0.0.0'::inet,$2,FALSE,$3,$4,0,$5,
-                     $6,$7,$8,$9,$10,$11,$12,$13,$14)
+                     CURRENT_TIMESTAMP,'0.0.0.0'::inet,$2,FALSE,$3,$4,$5,0,$6,
+                     $7,$8,$9,$10,$11,$12,$13,$14,$15)
            RETURNING *`,
           [
-            threadId, authorId === Number(thread.user_id), authorId, data.displayName, data.avatarColor,
+            // cc_user_id は createPost と同じく post.slug(=String(userId)) を流用する
+            threadId, authorId === Number(thread.user_id), authorId, String(authorId), data.displayName, data.avatarColor,
             c.contentText, c.contentUrl, c.contentType, c.contentDataUrl,
             !!(data.gameId || data.mvId), data.gameId ?? null, data.mvId ?? null,
             parentNum, data.originType ?? null,
