@@ -56,7 +56,7 @@ export async function PUT(
     case 'dislike':
       // 重複投票の判定はインメモリ（unj の like.ts と同じ方式）。
       // DBに投票行を持たないので、再投票済みなら現状の投稿をそのまま返す。
-      if (!tryVote(actorId, decodedId)) {
+      if (!tryVote(actorId, decodedId, action)) {
         const current = await db.getPost(decodedId, actorId);
         if (!current) return NextResponse.json({ error: 'Post not found' }, { status: 404 });
         await attachEmbedInfo(current);
