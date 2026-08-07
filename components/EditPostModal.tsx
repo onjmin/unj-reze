@@ -5,6 +5,7 @@ import { X, Music, ChevronDown, Gamepad2, Clapperboard } from 'lucide-react';
 import { MML_MARKERS } from '@/lib/mml';
 import type { Post } from '@/lib/types';
 import dynamic from 'next/dynamic';
+import { useMmlSource } from './MmlSource';
 
 const MmlPlayer = dynamic(() => import('./MmlPlayer'), { ssr: false });
 
@@ -78,6 +79,9 @@ export default function EditPostModal({
 
   const [text, setText] = useState(initialText);
   const [mmlLine, setMmlLine] = useState<string | null>(initialMml);
+  // MML本文はR2へ外部化済みだと content にマーカーしか残らない（mmlLine は "#mml" だけの
+  // 空文字扱いになる）。試聴・「展開」で実際のノーテーションを使うには mmlUrl から解決する。
+  const { mml: resolvedMml } = useMmlSource(post);
   const [currentImageSrc, setCurrentImageSrc] = useState<string | null | undefined>(post.imageSrc);
   const [currentHasGame, setCurrentHasGame] = useState(post.hasGame);
   const [expanded, setExpanded] = useState(false); // プレビュー展開
@@ -95,9 +99,15 @@ export default function EditPostModal({
   /** MML文字列をテキストエリアへ展開 */
   const handleExpandMml = () => {
     if (!mmlLine) return;
+    // mmlLine 自体は外部化済みだと "#mml"（本文なし）なので、resolvedMml で
+    // 実際のノーテーションを補って展開する。まだ解決できていなければ何もしない
+    // （そのまま展開すると空マーカーで本文を上書きしてしまう）。
+    if (!resolvedMml) return;
+    const marker = MML_MARKERS.find(m => mmlLine.trim().toLowerCase().startsWith(m.toLowerCase())) || MML_MARKERS[0];
+    const fullLine = `${marker} ${resolvedMml}`;
     setText(prev => {
       const trimmed = prev.trimEnd();
-      return trimmed ? `${trimmed}\n${mmlLine}` : mmlLine;
+      return trimmed ? `${trimmed}\n${fullLine}` : fullLine;
     });
     setMmlLine(null);
     setExpanded(false);
@@ -111,10 +121,11 @@ export default function EditPostModal({
     onSave(final, currentImageSrc);
   };
 
-  const mmlCode = mmlLine ? (() => {
+  // mmlLine の埋め込みテキストは外部化済みだと空になるため、resolvedMml を優先して使う。
+  const mmlCode = mmlLine ? (resolvedMml || (() => {
     const marker = MML_MARKERS.find(m => mmlLine.trim().toLowerCase().startsWith(m.toLowerCase()));
     return marker ? mmlLine.trim().slice(marker.length).trim() : null;
-  })() : null;
+  })()) : null;
 
   const isDirty = (() => {
     const parts: string[] = [];
@@ -192,11 +203,13 @@ export default function EditPostModal({
                     編集
                   </button>
                 )}
-                {/* 展開ボタン（テキストに戻す） */}
+                {/* 展開ボタン（テキストに戻す）。実データ未解決のうちは空マーカーで
+                    上書きしてしまうため無効化する */}
                 <button
                   onClick={handleExpandMml}
+                  disabled={!resolvedMml}
                   title="テキストに展開"
-                  className="text-[10px] text-pink-400/70 hover:text-pink-300 px-2 py-0.5 rounded border border-pink-700/40 hover:border-pink-600/60 transition-colors flex items-center gap-1"
+                  className="text-[10px] text-pink-400/70 hover:text-pink-300 px-2 py-0.5 rounded border border-pink-700/40 hover:border-pink-600/60 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
                 >
                   <ChevronDown size={11} />
                   展開

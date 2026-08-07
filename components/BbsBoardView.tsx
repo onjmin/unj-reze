@@ -17,9 +17,11 @@ interface BbsBoardViewProps {
   rankCategory: string;
   onQuickPost: (text?: string) => void;
   loading?: boolean;
+  /** 続きの読み込み（フィード本体と共有）。無ければ「すべて表示されました」で終わる。 */
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
-
-const PAGE_SIZE = 15;
 
 type SortKey = 'updated' | 'newThread' | 'momentum' | 'newReply' | 'replyCount' | 'oldest';
 
@@ -43,13 +45,54 @@ const momentum = (p: Post) => {
   return p.repliesCount / hours;
 };
 
-export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPost, loading }: BbsBoardViewProps) {
+export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPost, loading, onLoadMore, hasMore, loadingMore }: BbsBoardViewProps) {
   const router = useRouter();
   const [autoUpdate, setAutoUpdate] = useState(true);
-  const [page, setPage] = useState(1);
   const [sortKey, setSortKey] = useState<SortKey>('updated');
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const onLoadMoreRef = useRef(onLoadMore);
+  const hasMoreRef = useRef(hasMore);
+  const loadingMoreRef = useRef(loadingMore);
+
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore;
+    hasMoreRef.current = hasMore;
+    loadingMoreRef.current = loadingMore;
+  });
+
+  // ページ送りではなく無限ページネーション（下端に来たら続きを読み込む）。
+  // FeedList の通常フィードと同じ二段構え: IntersectionObserver 主体 + スクロール監視を保険に。
+  useEffect(() => {
+    if (!sentinelRef.current) return;
+    const sentinel = sentinelRef.current;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMoreRef.current && !loadingMoreRef.current && onLoadMoreRef.current) {
+          onLoadMoreRef.current();
+        }
+      },
+      { rootMargin: '400px 0px 400px 0px', threshold: 0 }
+    );
+    observer.observe(sentinel);
+
+    const scrollContainer = document.getElementById('scrollable-content') || window;
+    const handleScroll = () => {
+      if (!hasMoreRef.current || loadingMoreRef.current || !onLoadMoreRef.current) return;
+      const target = scrollContainer === window ? document.documentElement : (scrollContainer as HTMLElement);
+      if (target.scrollHeight - target.scrollTop - target.clientHeight < 500) {
+        onLoadMoreRef.current();
+      }
+    };
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      observer.disconnect();
+      scrollContainer.removeEventListener('scroll', handleScroll);
+    };
+  }, [posts.length]);
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -77,9 +120,6 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
   }
 
   const currentSort = SORT_OPTIONS.find(o => o.key === sortKey) ?? SORT_OPTIONS[0];
-
-  const totalPages = Math.max(1, Math.ceil(displayPosts.length / PAGE_SIZE));
-  const pagePosts = displayPosts.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const badgeClass = (count: number) => {
     if (count >= 100) return 'bg-red-600 text-white';
@@ -120,7 +160,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
                   key={opt.key}
                   role="menuitemradio"
                   aria-checked={opt.key === sortKey}
-                  onClick={() => { setSortKey(opt.key); setPage(1); setSortOpen(false); }}
+                  onClick={() => { setSortKey(opt.key); setSortOpen(false); }}
                   className={`w-full text-left px-3 py-2 text-[11px] transition-colors hover:bg-gray-100/10 ${opt.key === sortKey ? 'text-[#a3e635] font-bold' : 'text-gray-300'}`}
                 >
                   {opt.icon && <span className="mr-1">{opt.icon}</span>}
@@ -155,22 +195,9 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
         </button>
       </div>
 
-      {/* Count + pagination */}
+      {/* Count（無限ページネーションなのでページ送りUIは無し） */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-800/50 shrink-0">
-        <span className="text-[10px] text-gray-500">全 {displayPosts.length} スレッド</span>
-        <div className="flex items-center gap-1 text-[10px]">
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-gray-400 disabled:opacity-30 hover:bg-gray-700 transition-colors"
-          >{'<'}</button>
-          <button
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="w-5 h-5 flex items-center justify-center rounded bg-gray-800 text-gray-400 disabled:opacity-30 hover:bg-gray-700 transition-colors"
-          >{'>'}</button>
-          <span className="text-gray-500 ml-0.5">{page} / {totalPages}</span>
-        </div>
+        <span className="text-[10px] text-gray-500">全 {displayPosts.length} スレッド{hasMore ? '+' : ''}</span>
       </div>
 
       {/* Thread list */}
@@ -188,7 +215,7 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
             <p className="text-xs text-gray-400 mt-1 font-medium">最初の投稿をしてみましょう！</p>
           </div>
         ) : (
-          pagePosts.map(post => {
+          displayPosts.map(post => {
             const threadTime = getThreadDisplayTime(post);
             return (
               <div
@@ -278,9 +305,16 @@ export default function BbsBoardView({ posts, activeTab, rankCategory, onQuickPo
       </div>
 
       {displayPosts.length > 0 && (
-        <div className="py-8 text-center text-[10px] text-gray-700">
-          すべて表示されました
-        </div>
+        onLoadMore && hasMore ? (
+          <div ref={sentinelRef} className="py-6 flex items-center justify-center gap-2 text-[10px] text-gray-500">
+            <Loader2 size={14} className="animate-spin text-blue-500" />
+            自動読み込み中…
+          </div>
+        ) : (
+          <div className="py-8 text-center text-[10px] text-gray-700">
+            すべて表示されました
+          </div>
+        )
       )}
     </div>
   );

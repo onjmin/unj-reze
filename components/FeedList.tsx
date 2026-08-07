@@ -116,6 +116,9 @@ export default function FeedList({ posts, activeTab, feedSubMode = 'threads', ra
         rankCategory={rankCategory}
         onQuickPost={onQuickPost}
         loading={loading}
+        onLoadMore={onLoadMore}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
       />
     );
   }
