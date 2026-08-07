@@ -213,7 +213,7 @@ export default function SpriteSheetBrowser({
 								<button
 									key={`${m.id}-${i}`}
 									onClick={() => pick(m, open.name)}
-									className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white relative group"
+									className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background relative group"
 									title={`${name ?? m.id} (${m.id})`}
 								>
 									{/* eslint-disable-next-line @next/next/no-img-element */}
@@ -298,7 +298,7 @@ export default function SpriteSheetBrowser({
 									key={`${item.id}-${i}`}
 									onClick={() => pickItem(item)}
 									title={`${item.name || `#${item.no}`} (${item.id})`}
-									className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white relative group"
+									className="aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background relative group"
 								>
 									{/* eslint-disable-next-line @next/next/no-img-element */}
 									<img
@@ -354,7 +354,7 @@ export default function SpriteSheetBrowser({
 										.map((m, i) => (
 											<span
 												key={`${m.id}-${i}`}
-												className="w-7 h-7 rounded-sm bg-[#11131a] gimp-checkered-background-white overflow-hidden shrink-0"
+												className="w-7 h-7 rounded-sm bg-[#11131a] gimp-checkered-background overflow-hidden shrink-0"
 											>
 												{/* eslint-disable-next-line @next/next/no-img-element */}
 												<img

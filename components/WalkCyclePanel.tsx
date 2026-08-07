@@ -104,7 +104,7 @@ export default function WalkCyclePanel({
 										<img
 											src={src}
 											alt=""
-											className="w-full h-full object-contain gimp-checkered-background-white"
+											className="w-full h-full object-contain gimp-checkered-background"
 										/>
 									) : (
 										<div className="w-full h-full bg-[#1a1b26] flex items-center justify-center text-[10px] text-gray-600">

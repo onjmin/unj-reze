@@ -208,7 +208,7 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
 							<button
 								key={animName}
 								onClick={() => handlePick(selectedSprite, animName)}
-								className="flex flex-col items-center gap-1.5 p-2 bg-[#121620] border border-gray-800 hover:border-blue-500/50 rounded-lg text-center transition group active:scale-95 gimp-checkered-background-white"
+								className="flex flex-col items-center gap-1.5 p-2 bg-[#121620] border border-gray-800 hover:border-blue-500/50 rounded-lg text-center transition group active:scale-95 gimp-checkered-background"
 							>
 								<SMCSpritePreview
 									spriteKey={selectedSprite}

@@ -315,7 +315,7 @@ export default function RpgenAssetPanel({
 										key={`${m.id}-${i}`}
 										onClick={() => pickWalk(m, sheet.name)}
 										title={`${name ?? m.id} (${m.id})`}
-										className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background-white"
+										className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
 									>
 										<WalkSpritePreview
 											url={sAnimUrl(m.id)}
@@ -472,7 +472,7 @@ export default function RpgenAssetPanel({
 										key={`${item.id}-${i}`}
 										onClick={() => pickWalkItem(item)}
 										title={`${item.name || `#${item.no}`} (${item.id})`}
-										className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background-white"
+										className="aspect-square rounded-lg overflow-hidden border border-gray-700 hover:border-blue-500 bg-[#11131a] relative flex items-center justify-center gimp-checkered-background"
 									>
 										<WalkSpritePreview
 											url={sAnimUrl(item.id)}
@@ -587,7 +587,7 @@ export default function RpgenAssetPanel({
 												.map((m, i) => (
 													<span
 														key={`${m.id}-${i}`}
-														className="w-8 h-8 rounded-sm bg-[#11131a] gimp-checkered-background-white overflow-hidden shrink-0 flex items-center justify-center"
+														className="w-8 h-8 rounded-sm bg-[#11131a] gimp-checkered-background overflow-hidden shrink-0 flex items-center justify-center"
 													>
 														<WalkSpritePreview
 															url={sAnimUrl(m.id)}

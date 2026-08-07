@@ -84,7 +84,7 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 											label: c.name,
 										})
 									}
-									className="pixel-select-hover flex flex-col items-center gap-1 p-1.5 rounded-lg border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white group"
+									className="pixel-select-hover flex flex-col items-center gap-1 p-1.5 rounded-lg border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background group"
 								>
 									<WalkSpritePreview
 										url={c.url}
@@ -435,7 +435,7 @@ function LocalTileGrid({
 							key={c.idx}
 							onClick={() => pick(c.idx)}
 							title={`(${col},${row})`}
-							className="pixel-select-hover aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white"
+							className="pixel-select-hover aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background"
 						>
 							<div
 								className="w-full h-full overflow-hidden"

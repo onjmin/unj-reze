@@ -114,7 +114,7 @@ export default function UserSheetPanel({
 						title={`${s.name} ・ ${s.cellW}×${s.cellH}px`}
 						className={`shrink-0 whitespace-nowrap flex items-center gap-1 pl-1 pr-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${openId === s.id ? "bg-blue-600 text-white border-blue-500" : "bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800"}`}
 					>
-						<span className="w-5 h-5 rounded overflow-hidden bg-[#11131a] gimp-checkered-background-white shrink-0">
+						<span className="w-5 h-5 rounded overflow-hidden bg-[#11131a] gimp-checkered-background shrink-0">
 							{s.pickRef ? (
 								<AssetThumb refStr={s.pickRef} url={s.url} size={20} />
 							) : (
@@ -347,7 +347,7 @@ function PickRefSheetView({
 				</button>
 			</div>
 			<div className="flex items-center gap-3">
-				<div className="shrink-0 grid place-items-center w-16 h-16 rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background-white overflow-hidden">
+				<div className="shrink-0 grid place-items-center w-16 h-16 rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background overflow-hidden">
 					<AssetThumb refStr={sheet.pickRef!} url={sheet.url} size={56} />
 				</div>
 				<p className="text-[10px] text-gray-500 leading-relaxed flex-1">
@@ -737,7 +737,7 @@ function PostImageGrid({
 								type="button"
 								onClick={() => onSelect(p.imageSrc!, p.id)}
 								title={`#${p.id}`}
-								className={`aspect-square rounded-lg overflow-hidden border bg-gray-900 relative gimp-checkered-background-white ${active ? "border-blue-500 ring-1 ring-blue-500" : "border-gray-700 hover:border-blue-500"}`}
+								className={`aspect-square rounded-lg overflow-hidden border bg-gray-900 relative gimp-checkered-background ${active ? "border-blue-500 ring-1 ring-blue-500" : "border-gray-700 hover:border-blue-500"}`}
 							>
 								{/* eslint-disable-next-line @next/next/no-img-element */}
 								<img
@@ -835,7 +835,7 @@ function SheetPreview({
 	return (
 		<div className="flex flex-col items-center gap-1">
 			<div
-				className={`max-w-full overflow-auto rounded-lg border border-gray-800 bg-[#11131a] p-1 gimp-checkered-background-white ${error ? "hidden" : ""}`}
+				className={`max-w-full overflow-auto rounded-lg border border-gray-800 bg-[#11131a] p-1 gimp-checkered-background ${error ? "hidden" : ""}`}
 			>
 				<canvas
 					ref={canvasRef}
@@ -1281,7 +1281,7 @@ function SheetGrid({
 						</select>
 					</div>
 					<div className="flex items-center gap-3">
-						<div className="shrink-0 grid place-items-center w-16 h-16 rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background-white">
+						<div className="shrink-0 grid place-items-center w-16 h-16 rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background">
 							<WalkSpritePreview url={sheet.url} stdId={walkStd} size={56} />
 						</div>
 						<p className="text-[10px] text-gray-500 leading-relaxed flex-1">
@@ -1330,7 +1330,7 @@ function SheetGrid({
 						}
 						disabled={!onPick}
 						title={`(${c.col},${c.row})`}
-						className="pixel-select-hover aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background-white disabled:hover:border-gray-800"
+						className="pixel-select-hover aspect-square rounded border border-gray-800 hover:border-blue-500 bg-[#11131a] gimp-checkered-background disabled:hover:border-gray-800"
 					>
 						<div
 							className="w-full h-full overflow-hidden"
