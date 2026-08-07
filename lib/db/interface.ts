@@ -159,7 +159,7 @@ export interface DataStore {
    * ゲーム/MVエディタの素材ピッカー専用の軽量検索。`kind` で `has_image` / `has_mml` を絞り込み、
    * スレッド構造・投票数・返信は一切引かない（docs/NEON_EGRESS.md）。
    */
-  searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number): Promise<DbMediaSearchPost[]>;
+  searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number): Promise<DbMediaSearchPost[]>;
   getPostsByHashtag(tag: string, userId?: string, limit?: number): Promise<DbPost[]>;
   getOrCreateAnonymousUser(sessionId: string, ipAddress: string): Promise<AnonymousUser>;
   /**

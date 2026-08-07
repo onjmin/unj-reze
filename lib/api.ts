@@ -188,9 +188,11 @@ const staticApi = {
       const posts = await mockDbInstance.searchPosts(query, userId);
       return posts.map(encodePost);
     },
-    media: async (kind: 'image' | 'mml', query: string, userId?: string, limit?: number) => {
-      const rows = await mockDbInstance.searchMedia(kind, query, userId, limit);
-      return rows.map(r => ({ ...r, id: encodeId(r.id) }));
+    media: async (kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number) => {
+      const safeLimit = limit ?? 50;
+      const rows = await mockDbInstance.searchMedia(kind, query, userId, safeLimit + 1, offset);
+      const hasMore = rows.length > safeLimit;
+      return { posts: rows.slice(0, safeLimit).map(r => ({ ...r, id: encodeId(r.id) })), hasMore };
     },
   },
   hashtag: {
@@ -375,12 +377,13 @@ const liveApi = {
       if (userId) params.set('userId', userId);
       return fetcher<Post[]>(`/search?${params.toString()}`);
     },
-    media: (kind: 'image' | 'mml', query: string, userId?: string, limit?: number) => {
+    media: (kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number) => {
       const params = new URLSearchParams({ kind });
       if (query.trim()) params.set('q', query.trim());
       if (userId) params.set('userId', userId);
       if (limit) params.set('limit', String(limit));
-      return fetcher<MediaSearchPost[]>(`/media-search?${params.toString()}`);
+      if (offset) params.set('offset', String(offset));
+      return fetcher<{ posts: MediaSearchPost[]; hasMore: boolean }>(`/media-search?${params.toString()}`);
     },
   },
   hashtag: {

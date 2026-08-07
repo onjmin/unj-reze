@@ -18,14 +18,18 @@ export async function GET(request: NextRequest) {
   const userId = url.searchParams.get('userId') || undefined;
   const limitParam = url.searchParams.get('limit');
   const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 50) : 50;
+  const offsetParam = url.searchParams.get('offset');
+  const offset = offsetParam ? Math.max(0, parseInt(offsetParam, 10) || 0) : 0;
 
-  const rows = await db.searchMedia(kind, q, userId, limit);
-  const posts: MediaSearchPost[] = rows.map((r) => ({
+  // hasMore 判定のため limit+1 件引いて、末尾の1件を切り落とす。
+  const rows = await db.searchMedia(kind, q, userId, limit + 1, offset);
+  const hasMore = rows.length > limit;
+  const posts: MediaSearchPost[] = rows.slice(0, limit).map((r) => ({
     id: encodeId(r.id),
     displayName: r.displayName,
     content: r.content,
     imageSrc: r.imageSrc,
     imageAlt: r.imageAlt,
   }));
-  return NextResponse.json(posts);
+  return NextResponse.json({ posts, hasMore });
 }

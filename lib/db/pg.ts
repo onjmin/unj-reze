@@ -779,8 +779,12 @@ export const pgStore: DataStore = {
     return posts.map((p) => withViewerVoteState(p, userId));
   },
 
-  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit = 50) {
+  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit = 50, offset = 0) {
     const safeLimit = Math.max(1, Math.min(limit, 50));
+    const safeOffset = Math.max(0, offset);
+    // threads/res をマージしてから offset+limit 件目で切るため、各テーブルからは
+    // 「id降順で offset+limit 件」だけ引けば十分（全件取得は egress を壊す）。
+    const fetchEach = Math.min(safeOffset + safeLimit, 200);
     const contentType = kind === 'image' ? CT.Image : CT.Dtm;
     const trimmed = query.trim();
     const params: any[] = [contentType];
@@ -789,17 +793,17 @@ export const pgStore: DataStore = {
       params.push(`%${trimmed}%`);
       where += ` AND (content_text ILIKE $${params.length} OR COALESCE(u.display_name, cc_user_name) ILIKE $${params.length})`;
     }
-    params.push(safeLimit);
+    params.push(fetchEach);
 
     const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
       q(`SELECT t.id, t.user_id, t.content_text, t.content_url, ${AUTHOR_SELECT}
            FROM threads t LEFT JOIN users u ON u.id=t.user_id
           WHERE t.deleted_at IS NULL AND ${where.replace(/content_type/g, 't.content_type').replace(/content_text/g, 't.content_text').replace(/cc_user_name/g, 't.cc_user_name')}
-          LIMIT $${params.length}`, params),
+          ORDER BY t.id DESC LIMIT $${params.length}`, params),
       q(`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, ${AUTHOR_SELECT}
            FROM res r LEFT JOIN users u ON u.id=r.user_id
           WHERE ${where.replace(/content_type/g, 'r.content_type').replace(/content_text/g, 'r.content_text').replace(/cc_user_name/g, 'r.cc_user_name')}
-          LIMIT $${params.length}`, params),
+          ORDER BY r.id DESC LIMIT $${params.length}`, params),
     ]);
     const out: DbMediaSearchPost[] = [
       ...tRows.map((r): DbMediaSearchPost => ({
@@ -811,7 +815,10 @@ export const pgStore: DataStore = {
         content: r.content_text ?? '', imageSrc: r.content_url || undefined,
       })),
     ];
-    return out.slice(0, safeLimit);
+    // thread と res の id 空間は別なので、ここではソート順は投稿順に近似する程度でよい
+    // （新しい順の目安として大きいID優先）。
+    out.sort((a, b) => Number(b.id) - Number(a.id));
+    return out.slice(safeOffset, safeOffset + safeLimit);
   },
 
   async getPostsByHashtag(tag: string, userId?: string, limit = 20) {

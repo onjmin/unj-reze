@@ -66,9 +66,13 @@ function formatTime(sec: number) {
   return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+const MEDIA_PAGE_SIZE = 30;
+
 export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAssets = [], currentRef, onPick, onClose }: ContentPickerProps) {
   const [posts, setPosts] = useState<MediaSearchPost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedColor, setSelectedColor] = useState('#000000');
   // 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
@@ -262,15 +266,17 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     const isImagePost = mode === 'image' && imageTab === 'posts';
     if (isMmlPost || isImagePost) {
       Promise.resolve().then(() => { if (alive) setLoading(true); });
-      const req = api.search.media(isMmlPost ? 'mml' : 'image', query, userId);
+      const req = api.search.media(isMmlPost ? 'mml' : 'image', query, userId, MEDIA_PAGE_SIZE, 0);
 
       req
         .then(data => {
-          if (alive) setPosts(Array.isArray(data) ? data : []);
+          if (!alive) return;
+          setPosts(Array.isArray(data) ? data : data.posts);
+          setHasMore(Array.isArray(data) ? false : data.hasMore);
         })
         .catch(err => {
           console.error('[ContentPicker] Error loading posts:', err);
-          if (alive) setPosts([]);
+          if (alive) { setPosts([]); setHasMore(false); }
         })
         .finally(() => {
           if (alive) setLoading(false);
@@ -278,6 +284,25 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     }
     return () => { alive = false; };
   }, [mode, bgmTab, imageTab, userId, query]);
+
+  const loadMorePosts = () => {
+    const isMmlPost = mode === 'bgm' && bgmTab === 'mmlPost';
+    const isImagePost = mode === 'image' && imageTab === 'posts';
+    if (!isMmlPost && !isImagePost) return;
+    if (loadingMore || loading || !hasMore) return;
+    setLoadingMore(true);
+    api.search.media(isMmlPost ? 'mml' : 'image', query, userId, MEDIA_PAGE_SIZE, posts.length)
+      .then(data => {
+        const nextPosts = Array.isArray(data) ? [] : data.posts;
+        setPosts(prev => [...prev, ...nextPosts]);
+        setHasMore(Array.isArray(data) ? false : data.hasMore);
+      })
+      .catch(err => {
+        console.error('[ContentPicker] Error loading more posts:', err);
+        setHasMore(false);
+      })
+      .finally(() => setLoadingMore(false));
+  };
 
   // BGM欄の「MML投稿」タブ用。サーバー側で hasMml 絞り込み・クエリ検索済みなのでそのまま使う。
   const mmlPosts = useMemo(
@@ -467,6 +492,16 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                   )}
                 </div>
               )}
+              {!loading && hasMore && (
+                <button
+                  onClick={loadMorePosts}
+                  disabled={loadingMore}
+                  className="w-full py-2 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-300 text-xs font-bold flex items-center justify-center gap-1.5"
+                >
+                  {loadingMore ? <Loader2 size={14} className="animate-spin" /> : null}
+                  もっと見る
+                </button>
+              )}
             </div>
           )}
           {mode === 'image' && imageTab === 'color' && (
@@ -640,6 +675,16 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                     );
                   })}
                   {mmlPosts.length === 0 && <p className="text-center text-[11px] text-gray-600 py-8">MML投稿がありません</p>}
+                  {!loading && hasMore && (
+                    <button
+                      onClick={loadMorePosts}
+                      disabled={loadingMore}
+                      className="w-full py-2 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-300 text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      {loadingMore ? <Loader2 size={14} className="animate-spin" /> : null}
+                      もっと見る
+                    </button>
+                  )}
                 </div>
               )}
             </>

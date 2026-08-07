@@ -122,8 +122,8 @@ export const mockStore: DataStore = {
     return mockDb.searchPosts(query, userId, limit);
   },
 
-  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number) {
-    return mockDb.searchMedia(kind, query, userId, limit);
+  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number) {
+    return mockDb.searchMedia(kind, query, userId, limit, offset);
   },
 
   async getPostsByHashtag(tag: string, userId?: string, limit?: number) {

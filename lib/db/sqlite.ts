@@ -1220,9 +1220,10 @@ export const sqliteStore: DataStore = {
     })).filter(p => !hidden.has(p.slug ?? ''));
   },
 
-  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number) {
+  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number) {
     const d = await getDb();
     const safeLimit = Math.max(1, Math.min(limit || 50, 50));
+    const safeOffset = Math.max(0, offset || 0);
     const col = kind === 'image' ? 'p.has_image' : 'p.has_mml';
     const trimmed = query.trim();
     const params: any[] = [];
@@ -1238,7 +1239,7 @@ export const sqliteStore: DataStore = {
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
       WHERE ${where}
-      ORDER BY p.id DESC LIMIT ${safeLimit}`,
+      ORDER BY p.id DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`,
       params
     );
     const hidden = getHiddenSlugsSqlite(d, userId);
