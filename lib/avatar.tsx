@@ -65,13 +65,14 @@ const AVATAR_ICONS = [
 ];
 
 /** 掲示板モードで出す「ID」表記。
- *  表示名（例: 名無しvFZ）の末尾英数字＝slug が本来のIDなので、
- *  先頭3文字を切り出すと全員 "名無し" になってしまう。slug があればそれを使う。 */
+ *  第2引数には post.bbsId（lib/cc-id.ts:genBbsId によるハッシュ値。日替わりしない）
+ *  を渡すこと。post.slug（= 生の users.id）を直接渡すと連番IDが丸見えになるので禁止。
+ *  bbsId が無い場合は表示名（例: 名無しvFZ）の末尾英数字で代用する。 */
 export function getUserIdLabel(
 	displayName: string | null | undefined,
-	slug?: string | null,
+	bbsId?: string | null,
 ): string {
-	if (slug) return slug;
+	if (bbsId) return bbsId;
 	const match = displayName?.match(/[a-zA-Z0-9]+$/);
 	return match ? match[0] : displayName || "???";
 }

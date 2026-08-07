@@ -38,6 +38,7 @@
  * res.num のような手計算が要る値は UNIQUE 制約 + リトライで守る。
  */
 import { neon, neonConfig } from "@neondatabase/serverless";
+import { genBbsId } from "../cc-id";
 import type { Message, Trend } from "../mock-db";
 import { CH_FEED, chThread, chUser } from "../realtime/channels";
 import { publishRealtime } from "../realtime/publish";
@@ -229,6 +230,7 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		id: postId,
 		displayName: row.author_display_name || row.cc_user_name || "名無し",
 		slug: String(row.user_id),
+		bbsId: row.cc_user_id || undefined,
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
 		content: disp.content,
@@ -268,6 +270,7 @@ function resRowToPost(row: any): DbPost {
 		id: postId,
 		displayName: row.author_display_name || row.cc_user_name || "名無し",
 		slug: String(row.user_id),
+		bbsId: row.cc_user_id || undefined,
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
 		content: disp.content,
@@ -507,10 +510,11 @@ export const pgStore: DataStore = {
 					.find((l) => l.trim())
 					?.slice(0, 64) || "無題",
 				// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
-				// 「ID:」として既に表示している値と揃える。post.slug = String(userId) なので
-				// unj固有の日替わりハッシュIDを新規に作らず、そのままここへ入れる。
+				// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
+				// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
+				// board_id は上のVALUES句と同じく固定で 1。
 				authorId,
-				String(authorId),
+				genBbsId(authorId, 1),
 				data.displayName,
 				data.avatarColor,
 				c.contentText,
@@ -654,11 +658,11 @@ export const pgStore: DataStore = {
                      $7,$8,$9,$10,$11,$12,$13,$14,$15)
            RETURNING *`,
 					[
-						// cc_user_id は createPost と同じく post.slug(=String(userId)) を流用する
+						// cc_user_id は createPost と同じく genBbsId でハッシュ化する（board_id固定1）
 						threadId,
 						authorId === Number(thread.user_id),
 						authorId,
-						String(authorId),
+						genBbsId(authorId, 1),
 						data.displayName,
 						data.avatarColor,
 						c.contentText,

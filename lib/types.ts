@@ -76,6 +76,8 @@ export interface Post {
 	id: string;
 	displayName: string;
 	slug?: string;
+	/** 掲示板モードの「ID:」表示専用の安定ハッシュ値（lib/cc-id.ts:genBbsId）。slugとは別物。 */
+	bbsId?: string;
 	createdAt: string;
 	time: string;
 	content: string;

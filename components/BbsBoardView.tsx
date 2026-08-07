@@ -322,7 +322,7 @@ export default function BbsBoardView({
 									</p>
 									<div className="flex items-center flex-wrap gap-x-1.5 gap-y-0 mt-1 text-[10px] text-gray-500">
 										<span>
-											ID:{getUserIdLabel(post.displayName, post.slug)}
+											ID:{getUserIdLabel(post.displayName, post.bbsId)}
 										</span>
 										<span>{formatDate(threadTime.iso)}</span>
 										<span className="text-gray-600">

@@ -423,7 +423,7 @@ export default function BbsThreadView({
 								>
 									ID:{" "}
 									<span className="text-green-400 font-bold underline decoration-dotted underline-offset-2">
-										{getUserIdLabel(p.displayName, p.slug)}
+										{getUserIdLabel(p.displayName, p.bbsId)}
 									</span>
 								</button>
 								<button
