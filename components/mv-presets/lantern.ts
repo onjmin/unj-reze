@@ -39,12 +39,16 @@ const N2 = "a r g r e r d r";
 const N3 = "b r >c< r b r a r";
 const N4 = "e r e r g r g r";
 const N6 = "a4 g4 e4 d4";
+// 1:33〜1:35（≒26小節目）だけ参考動画は16分音符の速い連打になり、中央のzoomが
+// いつもの四角い枠ではなく小さいドットが十字/放射状に散る形に一瞬変わる。
+// 通常のN1（8分音符+休符）を密なランに差し替えて、その一小節だけ音を増やす。
+const N1_BURST = "l16 e f g a b >c< b a g f e d e f g";
 
 const MELODY = [
 	...rep(2, N4, N1, N4, N2), // 0-7   静かな導入
 	...rep(2, N1, N2, N3, N6), // 8-15
 	...rep(2, N1, N2, N3, N6), // 16-23
-	...rep(2, N3, N6, N1, N2), // 24-31
+	N3, N6, N1_BURST, N2, N3, N6, N1, N2, // 24-31 26小節目だけ密な連打
 	...rep(2, N3, N6, N3, N6), // 32-39 いちばん濃いところ
 	...rep(2, N4, N1, N4, N2), // 40-47
 	...rep(2, N1, N2, N3, N6), // 48-55
@@ -282,13 +286,21 @@ const LAYERS: MvLayer[] = [
 	// ══ 背景の譜面。画面いっぱいに4小節ぶんを固定表示する ═══════════
 	// opacity では下げない。全体を薄くすると「未発音」と「発音」の差まで潰れて
 	// 全部が同じくらい光って見えてしまう（差は light.dim でつける）。
+	// 参考動画は静かな導入（0〜15小節=s00,s01）のあいだ背景に譜面が一切出ない。
+	// 曲が動き出す s02 から出す＝「音が増えてきたら背景も動き出す」という順序を再現する。
+	// コマ送りで見直すと、常時点いているわけではなく **画面下端のごく細い帯**に、
+	// 8分音符のアルペジオ（旋律トラックのr抜き刻み）が来たときだけ短く光る程度。
+	// PAD(和音)やBASSまで映すと全音符が敷き詰まって「常時表示」に見えてしまうので、
+	// 旋律トラックだけに絞り、面積も画面の2/3から下端の帯に縮める。
 	{
 		kind: "visualizer",
 		id: "score",
 		style: "pianoRoll",
 		projection: "flat",
 		flow: "page",
-		rect: { x: -10, y: 24, w: 660, h: 320 },
+		tracks: [0],
+		// 実測（参考動画960x720、縦はcanvas実寸360なので0.5倍換算）: 帯はy≈278〜318。
+		rect: { x: 0, y: 278, w: 640, h: 40 },
 		amount: 4,
 		thickness: 1,
 		light: {
@@ -296,6 +308,7 @@ const LAYERS: MvLayer[] = [
 			fadeOut: true,
 			echo: { beats: 0.45, spread: 6, thickness: 1 },
 		},
+		sections: SECTIONS.slice(2).map((s) => s.id),
 		z: 4,
 	},
 
@@ -308,7 +321,10 @@ const LAYERS: MvLayer[] = [
 		style: "pianoRoll",
 		projection: "flat",
 		flow: "page",
-		rect: { x: 236, y: 120, w: 168, h: 104 },
+		// 実測: 参考動画の中央は「静止した外枠(zoom-frame)」と「その中で入れ替わる
+		// 小さい発光ノート」の二重構造。canvasが640x360(16:9)で参考動画は960x720(4:3)
+		// なので縦横は別倍率（横0.667/縦0.5）で換算のうえ、正方形指定に合わせて平均化。
+		rect: { x: 298, y: 158, w: 44, h: 44 },
 		// トラックは絞らない。旋律だけにすると休符の小節で中身が空になる
 		// （参考動画の中央は常に何かが映っている）。
 		amount: 1,
@@ -331,9 +347,10 @@ const LAYERS: MvLayer[] = [
 		kind: "shape",
 		id: "pole",
 		form: "bar",
-		x: 100,
-		y: 226,
-		size: 62,
+		// 実測: 縦は0.5倍換算。提灯本体の下端〜柄の先の長さに合わせて短縮。
+		x: 145,
+		y: 223,
+		size: 29,
 		barAspect: 0.024,
 		rotation: 100,
 		color: "#6b7280",
@@ -348,9 +365,10 @@ const LAYERS: MvLayer[] = [
 		form: "path",
 		path: LANTERN_BODY,
 		pathBox: [0, 0, 100, 100],
-		x: 94,
-		y: 122,
-		size: 30,
+		// 実測: 中心は画面の22%×44%。横0.667/縦0.5倍換算で142,161。
+		x: 142,
+		y: 161,
+		size: 49,
 		rotation: 0,
 		color: "#c0392b",
 		filled: true,
@@ -373,9 +391,9 @@ const LAYERS: MvLayer[] = [
 		form: "path",
 		path: LANTERN_CAP,
 		pathBox: [0, 0, 100, 100],
-		x: 94,
-		y: 122,
-		size: 30,
+		x: 142,
+		y: 161,
+		size: 49,
 		rotation: 0,
 		color: "#4c0d0d",
 		filled: true,
@@ -389,9 +407,9 @@ const LAYERS: MvLayer[] = [
 		form: "path",
 		path: LANTERN_RIBS,
 		pathBox: [0, 0, 100, 100],
-		x: 94,
-		y: 122,
-		size: 30,
+		x: 142,
+		y: 161,
+		size: 49,
 		rotation: 0,
 		color: "#7f1d1d",
 		filled: false,
@@ -407,9 +425,11 @@ const LAYERS: MvLayer[] = [
 		form: "path",
 		path: SIGN,
 		pathBox: [0, 0, 100, 100],
-		x: 548,
-		y: 172,
-		size: 30,
+		// 実測: 中心は画面の76%×58%。横0.667/縦0.5倍換算で486,208。
+		// 旧位置は上すぎ＆右に寄りすぎていた。
+		x: 486,
+		y: 208,
+		size: 36,
 		rotation: 0,
 		color: "#eab308",
 		filled: true,
@@ -423,9 +443,9 @@ const LAYERS: MvLayer[] = [
 		form: "path",
 		path: SIGN_MARK,
 		pathBox: [0, 0, 100, 100],
-		x: 548,
-		y: 178,
-		size: 30,
+		x: 486,
+		y: 214,
+		size: 36,
 		rotation: 0,
 		color: "#1c1917",
 		filled: true,
@@ -435,15 +455,15 @@ const LAYERS: MvLayer[] = [
 	},
 
 	// ══ 中央の譜面を囲う枠。参考動画の「白い1本枠」 ═════════════════
-	// bar の高さは size*2*barAspect なので、拡大ロールの rect（168×104）にぴったり合わせる。
+	// zoom と中心を揃え、正方形サイズも横0.667/縦0.5倍換算の平均で合わせる。
 	{
 		kind: "shape",
 		id: "zoom-frame",
 		form: "bar",
 		x: 320,
-		y: 172,
-		size: 84,
-		barAspect: 0.619,
+		y: 180,
+		size: 52,
+		barAspect: 1,
 		rotation: 0,
 		color: "#f4f4f5",
 		filled: false,
@@ -459,14 +479,17 @@ const LAYERS: MvLayer[] = [
 		ref: rozeRef("beat-a"),
 		url: rozeUrl("beat-a"),
 		// 4コマを1小節で1周。テンポを変えても拍に乗ったまま。
+		// 実測: 足先が画面の97%あたり。縦0.5倍換算でy≈349、ほぼ最下段。
 		walk: rozeBeat("a", 4),
 		x: 320,
-		y: 322,
+		y: 349,
 		scale: 0.42,
 		anchor: "bottom",
 		motion: "none",
 		pixelated: true,
-		sections: [scene(2), scene(3), scene(6), scene(7)],
+		// 参考動画は曲全体で一度だけ、s02のあいだだけ姿を見せてすぐ消える。
+		// 何度も出し入れすると「常連の小道具」に見えてしまい、一瞬すれ違う影の感じが消える。
+		sections: [scene(2)],
 		entrance: { from: "bottom", fade: true, beats: 2, distance: 30 },
 		z: 26,
 	},
