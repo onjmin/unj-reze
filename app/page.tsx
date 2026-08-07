@@ -103,6 +103,10 @@ export default function App() {
 	const replySubmittingRef = useRef(false);
 	const [userId, setUserId] = useState("");
 	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
+	// 通知/メッセージ/リアルタイムchannelなど「本人識別」用途は必ずこちら（users.id）を使う。
+	// userId state は displayName で、投稿作成の displayName フィールド用に別途残している
+	// （紛らわしいが、これを users.id に変えると自分の投稿の名乗りが変わってしまう）。
+	const viewerSlug = currentUser?.slug || currentUser?.id || "";
 	const [server, setServer] = useState("/main");
 	const [bbsMode, setBbsModeRaw] = useState("SNSモード");
 
@@ -230,16 +234,20 @@ export default function App() {
 				setUserId(user.displayName);
 				setCurrentUser(user);
 				localStorage.setItem("unj_current_user", JSON.stringify(user));
+				// 通知/メッセージAPIは users.id(=slug) を要求する（pg.tsがNumber(userId)で
+				// 整数として使う）。displayNameを渡すと "invalid input syntax for type integer"
+				// で500になる。slug は AnonymousUser.id と同じ値なので常に入っている。
+				const viewerSlug = user.slug || user.id;
 				api.notifications
-					.unreadCount(user.displayName)
+					.unreadCount(viewerSlug)
 					.then(({ count }) => {
 						setNotifCount(count);
 					})
 					.catch(() => {});
 				api.messages
-					.list(user.displayName)
+					.list(viewerSlug)
 					.then((msgs) => {
-						setMessageCount(countUnreadMessages(msgs, user.displayName));
+						setMessageCount(countUnreadMessages(msgs, viewerSlug));
 					})
 					.catch(() => {});
 			})
@@ -472,25 +480,25 @@ export default function App() {
 	}, []);
 
 	useRealtimeSubscription(
-		userId ? [chUser(userId)] : [],
+		viewerSlug ? [chUser(viewerSlug)] : [],
 		useCallback(
 			(msg) => {
 				if (msg.t !== "event" || msg.event !== "notify") return;
-				if (userId) void refreshNotifications(userId);
+				if (viewerSlug) void refreshNotifications(viewerSlug);
 			},
-			[userId, refreshNotifications],
+			[viewerSlug, refreshNotifications],
 		),
-		!!userId,
+		!!viewerSlug,
 	);
 
 	useEffect(() => {
-		if (!userId) return;
+		if (!viewerSlug) return;
 		notifCancelledRef.current = false;
-		Promise.resolve().then(() => refreshNotifications(userId));
+		Promise.resolve().then(() => refreshNotifications(viewerSlug));
 		// ハブ設定時は push が主。ここは取りこぼし用の保険。
 		const id = setInterval(
 			() => {
-				void refreshNotifications(userId);
+				void refreshNotifications(viewerSlug);
 			},
 			pollInterval(20000, 300000),
 		);
@@ -498,7 +506,7 @@ export default function App() {
 			notifCancelledRef.current = true;
 			clearInterval(id);
 		};
-	}, [userId, refreshNotifications]);
+	}, [viewerSlug, refreshNotifications]);
 
 	// メッセージ／通知が既読になったらバッジを即座に落とす。
 	useEffect(() => {
