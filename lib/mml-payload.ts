@@ -1,5 +1,5 @@
-import { extractMmlFromContent, replaceMmlWithMarker } from './mml';
-import { uploadText, isUploaderAvailable } from './uploader';
+import { extractMmlFromContent, replaceMmlWithMarker } from "./mml";
+import { isUploaderAvailable, uploadText } from "./uploader";
 
 /**
  * 投稿本文からMMLを切り出してR2へ逃がす。
@@ -12,29 +12,31 @@ import { uploadText, isUploaderAvailable } from './uploader';
  * コンポーザ・返信・編集のどこから来ても同じ扱いになる。
  */
 export interface MmlPayloadResult {
-  content: string;
-  mmlUrl?: string;
-  mmlDeleteId?: string;
-  mmlDeleteHash?: string;
+	content: string;
+	mmlUrl?: string;
+	mmlDeleteId?: string;
+	mmlDeleteHash?: string;
 }
 
-export async function externalizeMml(content: string): Promise<MmlPayloadResult> {
-  const mml = extractMmlFromContent(content);
-  // MMLが無い投稿、マーカーだけで本文が空の投稿はそのまま通す
-  if (!mml) return { content };
+export async function externalizeMml(
+	content: string,
+): Promise<MmlPayloadResult> {
+	const mml = extractMmlFromContent(content);
+	// MMLが無い投稿、マーカーだけで本文が空の投稿はそのまま通す
+	if (!mml) return { content };
 
-  if (!isUploaderAvailable) {
-    // アップローダ未設定の環境（ローカルのmockなど）では従来どおり content に残す。
-    // has_mml は立たないが、投稿自体は失敗させない。
-    console.warn('[mml] uploader が未設定のため MML を content に残します');
-    return { content };
-  }
+	if (!isUploaderAvailable) {
+		// アップローダ未設定の環境（ローカルのmockなど）では従来どおり content に残す。
+		// has_mml は立たないが、投稿自体は失敗させない。
+		console.warn("[mml] uploader が未設定のため MML を content に残します");
+		return { content };
+	}
 
-  const { link, deleteId, deleteHash } = await uploadText('mml', mml);
-  return {
-    content: replaceMmlWithMarker(content),
-    mmlUrl: link,
-    mmlDeleteId: deleteId,
-    mmlDeleteHash: deleteHash,
-  };
+	const { link, deleteId, deleteHash } = await uploadText("mml", mml);
+	return {
+		content: replaceMmlWithMarker(content),
+		mmlUrl: link,
+		mmlDeleteId: deleteId,
+		mmlDeleteHash: deleteHash,
+	};
 }

@@ -18,10 +18,16 @@ export const RES_LIMIT = 1000;
 export const RES_LIMIT_OWNER_BONUS = 5;
 
 export function isThreadFull(repliesCount: number, isOwner = false): boolean {
-  return repliesCount >= RES_LIMIT + (isOwner ? RES_LIMIT_OWNER_BONUS : 0);
+	return repliesCount >= RES_LIMIT + (isOwner ? RES_LIMIT_OWNER_BONUS : 0);
 }
 
 /** UIに出す残り件数。0 なら埋まっている */
-export function remainingReplies(repliesCount: number, isOwner = false): number {
-  return Math.max(0, RES_LIMIT + (isOwner ? RES_LIMIT_OWNER_BONUS : 0) - repliesCount);
+export function remainingReplies(
+	repliesCount: number,
+	isOwner = false,
+): number {
+	return Math.max(
+		0,
+		RES_LIMIT + (isOwner ? RES_LIMIT_OWNER_BONUS : 0) - repliesCount,
+	);
 }

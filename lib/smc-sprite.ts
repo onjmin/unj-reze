@@ -19,7 +19,10 @@
 export type SmcCrop = [sx: number, sy: number, sw: number, sh: number];
 
 export interface SmcFrameRect {
-  sx: number; sy: number; sw: number; sh: number;
+	sx: number;
+	sy: number;
+	sw: number;
+	sh: number;
 }
 
 /**
@@ -27,10 +30,10 @@ export interface SmcFrameRect {
  * 明示指定（非正方形コマの敵など）があればそれを、無ければ正方形コマ前提で 幅/高さ を採用。
  */
 export function smcFrameCount(crop: SmcCrop, explicit?: number): number {
-  if (explicit && explicit > 0) return Math.max(1, Math.round(explicit));
-  const [, , sw, sh] = crop;
-  if (sh <= 0) return 1;
-  return Math.max(1, Math.round(sw / sh));
+	if (explicit && explicit > 0) return Math.max(1, Math.round(explicit));
+	const [, , sw, sh] = crop;
+	if (sh <= 0) return 1;
+	return Math.max(1, Math.round(sw / sh));
 }
 
 /**
@@ -41,16 +44,23 @@ export function smcFrameCount(crop: SmcCrop, explicit?: number): number {
  * 向きは描画側で扱う（左移動は水平反転）。このモジュールは右向きストリップのコマ位置のみ算出する。
  */
 export function smcFrameRect(
-  crop: SmcCrop,
-  opts: { moving: boolean; timeSec: number; fps?: number; frames?: number; row?: number },
+	crop: SmcCrop,
+	opts: {
+		moving: boolean;
+		timeSec: number;
+		fps?: number;
+		frames?: number;
+		row?: number;
+	},
 ): SmcFrameRect {
-  const [sx, sy, sw, sh] = crop;
-  const frames = smcFrameCount(crop, opts.frames);
-  const frameW = sw / frames;
-  const fps = opts.fps ?? 7;
-  const idx = frames <= 1 || !opts.moving
-    ? 0
-    : ((Math.floor(opts.timeSec * fps) % frames) + frames) % frames;
-  const rowOffsetY = (opts.row ?? 0) * sh;
-  return { sx: sx + idx * frameW, sy: sy + rowOffsetY, sw: frameW, sh };
+	const [sx, sy, sw, sh] = crop;
+	const frames = smcFrameCount(crop, opts.frames);
+	const frameW = sw / frames;
+	const fps = opts.fps ?? 7;
+	const idx =
+		frames <= 1 || !opts.moving
+			? 0
+			: ((Math.floor(opts.timeSec * fps) % frames) + frames) % frames;
+	const rowOffsetY = (opts.row ?? 0) * sh;
+	return { sx: sx + idx * frameW, sy: sy + rowOffsetY, sw: frameW, sh };
 }

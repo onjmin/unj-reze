@@ -6,10 +6,11 @@
  */
 
 /** 新規スレッドの発生。フィード画面が購読する。 */
-export const CH_FEED = 'feed';
+export const CH_FEED = "feed";
 
 /** スレッドへの新着返信。スレッド詳細・実況コメントが購読する。 */
-export const chThread = (encodedThreadId: string) => `thread:${encodedThreadId}`;
+export const chThread = (encodedThreadId: string) =>
+	`thread:${encodedThreadId}`;
 
 /** ゲームルームのゴーストプレイヤー位置。 */
 export const chGame = (encodedGameId: string) => `game:${encodedGameId}`;
@@ -18,27 +19,27 @@ export const chGame = (encodedGameId: string) => `game:${encodedGameId}`;
 export const chUser = (userId: string) => `user:${userId}`;
 
 export type RealtimeEventName =
-  | 'post.created'
-  | 'reply.created'
-  | 'notify'
-  | 'message.created';
+	| "post.created"
+	| "reply.created"
+	| "notify"
+	| "message.created";
 
 export interface RealtimeEvent {
-  channel: string;
-  event: RealtimeEventName;
-  data?: unknown;
+	channel: string;
+	event: RealtimeEventName;
+	data?: unknown;
 }
 
 /** サーバー→クライアントのメッセージ。 */
 export type RealtimeMessage =
-  | { t: 'welcome'; presenceTtlMs: number }
-  | { t: 'pong' }
-  | { t: 'event'; channel: string; event: RealtimeEventName; data: unknown }
-  | { t: 'presence'; game: string; players: RealtimePlayer[] };
+	| { t: "welcome"; presenceTtlMs: number }
+	| { t: "pong" }
+	| { t: "event"; channel: string; event: RealtimeEventName; data: unknown }
+	| { t: "presence"; game: string; players: RealtimePlayer[] };
 
 export interface RealtimePlayer {
-  sessionId: string;
-  x: number;
-  y: number;
-  emoji: string;
+	sessionId: string;
+	x: number;
+	y: number;
+	emoji: string;
 }

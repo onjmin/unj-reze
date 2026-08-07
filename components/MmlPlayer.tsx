@@ -1,78 +1,84 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useId } from 'react';
-import { useAudioFocus } from '@/lib/audio-focus-context';
-import { getStudio } from '@/lib/dtm';
-import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
-import type { MmlPlayerInstance } from '@onjmin/dtm';
+import type { MmlPlayerInstance } from "@onjmin/dtm";
+import { useEffect, useId, useRef } from "react";
+import { useAudioFocus } from "@/lib/audio-focus-context";
+import { getStudio } from "@/lib/dtm";
+import { applyMasterVolume, subscribeMasterVolume } from "@/lib/master-volume";
 
 interface MmlPlayerProps {
-  mml: string;
+	mml: string;
 }
 
 // 再生UIは共有スタジオ経由の mountPlayer で実装する。
 // 楽器プリセット・ドラム・歌声がすべて鳴り、編集UIと音色が一致する。
 // フィードに多数並んでも getStudio() はシングルトンなので AudioContext は1つだけ。
 export default function MmlPlayer({ mml }: MmlPlayerProps) {
-  const id = useId();
-  const { requestFocus, releaseFocus } = useAudioFocus();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const claimedRef = useRef(false);
-  const instRef = useRef<{ setVolume: (v: number) => void } | null>(null);
-  const focusRef = useRef({ requestFocus, releaseFocus });
-  useEffect(() => {
-    focusRef.current = { requestFocus, releaseFocus };
-  }, [requestFocus, releaseFocus]);
+	const id = useId();
+	const { requestFocus, releaseFocus } = useAudioFocus();
+	const containerRef = useRef<HTMLDivElement>(null);
+	const claimedRef = useRef(false);
+	const instRef = useRef<{ setVolume: (v: number) => void } | null>(null);
+	const focusRef = useRef({ requestFocus, releaseFocus });
+	useEffect(() => {
+		focusRef.current = { requestFocus, releaseFocus };
+	}, [requestFocus, releaseFocus]);
 
-  useEffect(() => subscribeMasterVolume(() => instRef.current?.setVolume(applyMasterVolume(50))), []);
+	useEffect(
+		() =>
+			subscribeMasterVolume(() =>
+				instRef.current?.setVolume(applyMasterVolume(50)),
+			),
+		[],
+	);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
 
-    let inst: MmlPlayerInstance | null = null;
-    let disposed = false;
+		let inst: MmlPlayerInstance | null = null;
+		let disposed = false;
 
-    let cleanup: (() => void) | null = null;
+		let cleanup: (() => void) | null = null;
 
-    getStudio().then((studio) => {
-      if (disposed || !el) return;
-      inst = studio.mountPlayer(el, mml, {
-        // volume(trackVolume) はマウント時に固定される値なので常に100(無加工)を渡し、
-        // マスター音量はライブ更新可能な masterVolume 経路に一本化する。
-        // これを volume 側にだけ焼き込むと、その後 setVolume() で masterVolume を
-        // 変更しても trackVolume が古いまま残り、二重スケーリング/音量ズレが起きる。
-        volume: 100,
-        masterVolume: applyMasterVolume(50),
-        onStop: () => {
-          claimedRef.current = false;
-          focusRef.current.releaseFocus(id);
-        },
-      });
-      instRef.current = inst;
+		getStudio().then((studio) => {
+			if (disposed || !el) return;
+			inst = studio.mountPlayer(el, mml, {
+				// volume(trackVolume) はマウント時に固定される値なので常に100(無加工)を渡し、
+				// マスター音量はライブ更新可能な masterVolume 経路に一本化する。
+				// これを volume 側にだけ焼き込むと、その後 setVolume() で masterVolume を
+				// 変更しても trackVolume が古いまま残り、二重スケーリング/音量ズレが起きる。
+				volume: 100,
+				masterVolume: applyMasterVolume(50),
+				onStop: () => {
+					claimedRef.current = false;
+					focusRef.current.releaseFocus(id);
+				},
+			});
+			instRef.current = inst;
 
-      const onClick = () => {
-        requestAnimationFrame(() => {
-          if (inst?.isPlaying() && !claimedRef.current) {
-            claimedRef.current = true;
-            focusRef.current.requestFocus(id, () => inst?.stop());
-          }
-        });
-      };
-      el.addEventListener('click', onClick);
-      cleanup = () => el.removeEventListener('click', onClick);
-    });
+			const onClick = () => {
+				requestAnimationFrame(() => {
+					if (inst?.isPlaying() && !claimedRef.current) {
+						claimedRef.current = true;
+						focusRef.current.requestFocus(id, () => inst?.stop());
+					}
+				});
+			};
+			el.addEventListener("click", onClick);
+			cleanup = () => el.removeEventListener("click", onClick);
+		});
 
-    return () => {
-      disposed = true;
-      cleanup?.();
-      inst?.destroy();
-      instRef.current = null;
-      focusRef.current.releaseFocus(id);
-      claimedRef.current = false;
-      inst = null;
-    };
-  }, [mml, id]);
+		return () => {
+			disposed = true;
+			cleanup?.();
+			inst?.destroy();
+			instRef.current = null;
+			focusRef.current.releaseFocus(id);
+			claimedRef.current = false;
+			inst = null;
+		};
+	}, [mml, id]);
 
-  return <div ref={containerRef} className="mb-2.5" />;
+	return <div ref={containerRef} className="mb-2.5" />;
 }

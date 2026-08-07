@@ -1,10 +1,30 @@
-import { type PresetData, newObject, COLS, ROWS, VIEW_COLS, VIEW_ROWS, VIEW_W, VIEW_H } from './shared';
-import { spriteUrl as sp, sAnimUrl as sa, soundUrl as su } from '@/lib/rpgen-assets';
+import {
+	sAnimUrl as sa,
+	spriteUrl as sp,
+	soundUrl as su,
+} from "@/lib/rpgen-assets";
+import {
+	COLS,
+	newObject,
+	type PresetData,
+	ROWS,
+	VIEW_COLS,
+	VIEW_H,
+	VIEW_ROWS,
+	VIEW_W,
+} from "./shared";
 
 // ── MiniScript テンプレート ────────────────────────────────────────────────
 
 /** 道中 wave 敵共通：上から降下しながら弾を撃ち、下へ退場する */
-const waveMiniScript = (shots: number, fireInterval: number, speed: number, color: number, jitter: number) => `
+const waveMiniScript = (
+	shots: number,
+	fireInterval: number,
+	speed: number,
+	color: number,
+	jitter: number,
+) =>
+	`
 wait(row * 25)
 moveTo(startX, 90, 50)
 wait(10)
@@ -17,7 +37,15 @@ exit()
 `.trim();
 
 /** 道中 wave 敵（spread 弾バージョン） */
-const waveSpreadScript = (shots: number, fireInterval: number, ways: number, spread: number, speed: number, color: number) => `
+const waveSpreadScript = (
+	shots: number,
+	fireInterval: number,
+	ways: number,
+	spread: number,
+	speed: number,
+	color: number,
+) =>
+	`
 wait(row * 25)
 moveTo(startX, 90, 50)
 wait(10)
@@ -31,7 +59,17 @@ exit()
 
 /** 加速弾：初速 initSpeed から毎フレーム accel ずつ速くなり maxSpeed で頭打ち。
  *  vanishTime フレーム後に弾が自動消滅する。 */
-const waveAccelScript = (shots: number, fireInterval: number, initSpeed: number, accel: number, maxSpeed: number, vanishTime: number, color: number, jitter: number) => `
+const waveAccelScript = (
+	shots: number,
+	fireInterval: number,
+	initSpeed: number,
+	accel: number,
+	maxSpeed: number,
+	vanishTime: number,
+	color: number,
+	jitter: number,
+) =>
+	`
 wait(row * 25)
 moveTo(startX, 90, 50)
 wait(10)
@@ -45,7 +83,15 @@ exit()
 
 /** リング＋スタック複合：半径方向に多重リングを速度差をつけて撃つ。
  *  ringCount リング × stackCount 速度レイヤー。 */
-const ringStackScript = (ringCount: number, stackCount: number, baseSpeed: number, speedStep: number, color: number, interval: number) => `
+const ringStackScript = (
+	ringCount: number,
+	stackCount: number,
+	baseSpeed: number,
+	speedStep: number,
+	color: number,
+	interval: number,
+) =>
+	`
 moveTo(${VIEW_W / 2}, 80, 60)
 while true
   for s in range(0, ${stackCount - 1}, 1)
@@ -58,9 +104,9 @@ end while
 `.trim();
 
 // 道中BGM（YouTube）
-const DOCHU_BGM_URL = 'https://www.youtube.com/watch?v=tTEj519jm9k';
+const DOCHU_BGM_URL = "https://www.youtube.com/watch?v=tTEj519jm9k";
 // ボス戦BGM（YouTube）
-const BOSS_BGM_URL  = 'https://www.youtube.com/watch?v=Yf6CIacmFJo';
+const BOSS_BGM_URL = "https://www.youtube.com/watch?v=Yf6CIacmFJo";
 
 /** YouTube URL → ref 文字列 */
 const ytRef = (url: string) => url;
@@ -70,96 +116,233 @@ const walkRef = (id: string) => `walk:auto:u:${sa(id)}`;
 const ir = (id: string) => `url:${sp(id)}`;
 
 export const touhou: PresetData = {
-  id: 'touhou', name: '東方(弾幕)', engine: 'touhou', gravity: 0, friction: 0,
-  player: {
-    emoji: '🎀', color: '#ff0000', speed: 4.5, jumpPower: 0, w: 24, h: 24,
-    start: { x: VIEW_W / 2 - 12, y: VIEW_H - 60 },
-    // 東方Projectシート (sheet no 17) の先頭キャラ
-    spriteRef: walkRef('pqnkMA'),
-    spriteUrl: sa('pqnkMA'),
-    // ボム設定
-    bombCount: 3,
-    bombSpellName: '霊符「夢想天生」',
-    bombCutinCharName: '博麗霊夢',
-    bombCutinImageUrl: 'https://i.imgur.com/4M92pLV.png',
-    bombCutinImageX: 0,
-    bombCutinImageY: -50,
-    bombCutinScale: 1,
-  },
-  tiles: {
-    0: { name: '夜空', color: '#0B0B2A', passable: true,  imageRef: ir('X1lgbYC'), imageUrl: sp('X1lgbYC') },
-    1: { name: '壁',   color: '#1a1a3a', passable: false, imageRef: ir('vcyXmCw'), imageUrl: sp('vcyXmCw') },
-  },
-  map: Array.from({ length: VIEW_ROWS }, () =>
-    Array.from({ length: VIEW_COLS }, (_, x) => (x === 0 || x === VIEW_COLS - 1 ? 1 : 0))
-  ),
+	id: "touhou",
+	name: "東方(弾幕)",
+	engine: "touhou",
+	gravity: 0,
+	friction: 0,
+	player: {
+		emoji: "🎀",
+		color: "#ff0000",
+		speed: 4.5,
+		jumpPower: 0,
+		w: 24,
+		h: 24,
+		start: { x: VIEW_W / 2 - 12, y: VIEW_H - 60 },
+		// 東方Projectシート (sheet no 17) の先頭キャラ
+		spriteRef: walkRef("pqnkMA"),
+		spriteUrl: sa("pqnkMA"),
+		// ボム設定
+		bombCount: 3,
+		bombSpellName: "霊符「夢想天生」",
+		bombCutinCharName: "博麗霊夢",
+		bombCutinImageUrl: "https://i.imgur.com/4M92pLV.png",
+		bombCutinImageX: 0,
+		bombCutinImageY: -50,
+		bombCutinScale: 1,
+	},
+	tiles: {
+		0: {
+			name: "夜空",
+			color: "#0B0B2A",
+			passable: true,
+			imageRef: ir("X1lgbYC"),
+			imageUrl: sp("X1lgbYC"),
+		},
+		1: {
+			name: "壁",
+			color: "#1a1a3a",
+			passable: false,
+			imageRef: ir("vcyXmCw"),
+			imageUrl: sp("vcyXmCw"),
+		},
+	},
+	map: Array.from({ length: VIEW_ROWS }, () =>
+		Array.from({ length: VIEW_COLS }, (_, x) =>
+			x === 0 || x === VIEW_COLS - 1 ? 1 : 0,
+		),
+	),
 
-  // ── BGM ──────────────────────────────────────────────────────────────────
-  bgm:     { ref: ytRef(DOCHU_BGM_URL), src: DOCHU_BGM_URL, type: 'youtube' },
-  bossBgm: { ref: ytRef(BOSS_BGM_URL),  src: BOSS_BGM_URL,  type: 'youtube' },
+	// ── BGM ──────────────────────────────────────────────────────────────────
+	bgm: { ref: ytRef(DOCHU_BGM_URL), src: DOCHU_BGM_URL, type: "youtube" },
+	bossBgm: { ref: ytRef(BOSS_BGM_URL), src: BOSS_BGM_URL, type: "youtube" },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // フェーズ定義
-  //   0: 道中前半  (wave)  - 雑魚敵、会話なし、BGM変わらず
-  //   1: 道中ボス  (boss)  - 中ボス敵、会話なし、BGM変わらず（noBossBgm: true）
-  //   2: 道中後半  (wave)  - 雑魚敵、会話なし、BGM変わらず
-  //   3: ボス戦    (boss)  - 会話あり、BGMをボス戦BGMに切り替え、スペルカードあり
-  // ─────────────────────────────────────────────────────────────────────────
-  phases: [
-    {
-      id: 'wave1', kind: 'wave', label: '道中前半', scoreBonus: 500,
-    },
-    {
-      id: 'midboss', kind: 'boss', label: '中ボス', scoreBonus: 3000,
-      noBossBgm: true,  // 道中BGMのまま
-    },
-    {
-      id: 'wave2', kind: 'wave', label: '道中後半', scoreBonus: 1000,
-    },
-    {
-      id: 'boss', kind: 'boss', label: 'ボス戦', scoreBonus: 10000,
-      // ボス戦開始時の会話
-      dialogue: [
-        { speaker: '霊夢', emoji: '🎀', text: 'いよいよボスか…！気を引き締めなきゃ。',
-          imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-        { speaker: 'チルノ', emoji: '🌸', text: '⑨の力、見せてあげるわ！',
-          imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-        { speaker: '霊夢', emoji: '🎀', text: '受けて立つわ！',
-          imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-      ],
-      // ボス撃破後の会話
-      outroDialogue: [
-        { speaker: 'チルノ', emoji: '🌸', text: 'う…⑨らしくない負け方だったわ…',
-          imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-        { speaker: '霊夢', emoji: '🎀', text: '次からは調子に乗らないことね！',
-          imageSrc: 'https://i.imgur.com/4M92pLV.png', imageX: 0, imageY: -50, imageScale: 1 },
-        { speaker: 'チルノ', emoji: '🌸', text: 'ぜ、絶対リベンジしてやる〜！',
-          imageSrc: 'https://i.imgur.com/lf3x8xR.png', imageX: 350, imageY: 100, imageScale: 0.5 },
-      ],
-    },
-  ],
+	// ─────────────────────────────────────────────────────────────────────────
+	// フェーズ定義
+	//   0: 道中前半  (wave)  - 雑魚敵、会話なし、BGM変わらず
+	//   1: 道中ボス  (boss)  - 中ボス敵、会話なし、BGM変わらず（noBossBgm: true）
+	//   2: 道中後半  (wave)  - 雑魚敵、会話なし、BGM変わらず
+	//   3: ボス戦    (boss)  - 会話あり、BGMをボス戦BGMに切り替え、スペルカードあり
+	// ─────────────────────────────────────────────────────────────────────────
+	phases: [
+		{
+			id: "wave1",
+			kind: "wave",
+			label: "道中前半",
+			scoreBonus: 500,
+		},
+		{
+			id: "midboss",
+			kind: "boss",
+			label: "中ボス",
+			scoreBonus: 3000,
+			noBossBgm: true, // 道中BGMのまま
+		},
+		{
+			id: "wave2",
+			kind: "wave",
+			label: "道中後半",
+			scoreBonus: 1000,
+		},
+		{
+			id: "boss",
+			kind: "boss",
+			label: "ボス戦",
+			scoreBonus: 10000,
+			// ボス戦開始時の会話
+			dialogue: [
+				{
+					speaker: "霊夢",
+					emoji: "🎀",
+					text: "いよいよボスか…！気を引き締めなきゃ。",
+					imageSrc: "https://i.imgur.com/4M92pLV.png",
+					imageX: 0,
+					imageY: -50,
+					imageScale: 1,
+				},
+				{
+					speaker: "チルノ",
+					emoji: "🌸",
+					text: "⑨の力、見せてあげるわ！",
+					imageSrc: "https://i.imgur.com/lf3x8xR.png",
+					imageX: 350,
+					imageY: 100,
+					imageScale: 0.5,
+				},
+				{
+					speaker: "霊夢",
+					emoji: "🎀",
+					text: "受けて立つわ！",
+					imageSrc: "https://i.imgur.com/4M92pLV.png",
+					imageX: 0,
+					imageY: -50,
+					imageScale: 1,
+				},
+			],
+			// ボス撃破後の会話
+			outroDialogue: [
+				{
+					speaker: "チルノ",
+					emoji: "🌸",
+					text: "う…⑨らしくない負け方だったわ…",
+					imageSrc: "https://i.imgur.com/lf3x8xR.png",
+					imageX: 350,
+					imageY: 100,
+					imageScale: 0.5,
+				},
+				{
+					speaker: "霊夢",
+					emoji: "🎀",
+					text: "次からは調子に乗らないことね！",
+					imageSrc: "https://i.imgur.com/4M92pLV.png",
+					imageX: 0,
+					imageY: -50,
+					imageScale: 1,
+				},
+				{
+					speaker: "チルノ",
+					emoji: "🌸",
+					text: "ぜ、絶対リベンジしてやる〜！",
+					imageSrc: "https://i.imgur.com/lf3x8xR.png",
+					imageX: 350,
+					imageY: 100,
+					imageScale: 0.5,
+				},
+			],
+		},
+	],
 
-  objects: [
-    // ── フェーズ 0：道中前半 ──────────────────────────────────────────────
-    // 道中雑魚：妖精系
-    newObject({ emoji: '🧚', col: 4,  row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
-      miniScript: waveMiniScript(3, 75, 2.5, 5, 10), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
-    newObject({ emoji: '🧚', col: 10, row: 0, phase: 0, speed: 1.0, hp: 2, bullet: 'none',
-      miniScript: waveMiniScript(3, 75, 2.5, 5, 10), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
-    newObject({ emoji: '🧚', col: 5,  row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
-      miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8), spriteRef: walkRef('dFy4bF'), spriteUrl: sa('dFy4bF') }),
-    newObject({ emoji: '🧚', col: 9,  row: 1, phase: 0, speed: 0.9, hp: 2, bullet: 'none',
-      miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8), spriteRef: walkRef('dFy4bF'), spriteUrl: sa('dFy4bF') }),
-    newObject({ emoji: '🧚', col: 7,  row: 2, phase: 0, speed: 0.8, hp: 2, bullet: 'none',
-      miniScript: waveMiniScript(4, 70, 2.2, 6, 15), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
+	objects: [
+		// ── フェーズ 0：道中前半 ──────────────────────────────────────────────
+		// 道中雑魚：妖精系
+		newObject({
+			emoji: "🧚",
+			col: 4,
+			row: 0,
+			phase: 0,
+			speed: 1.0,
+			hp: 2,
+			bullet: "none",
+			miniScript: waveMiniScript(3, 75, 2.5, 5, 10),
+			spriteRef: walkRef("qyR3Q0"),
+			spriteUrl: sa("qyR3Q0"),
+		}),
+		newObject({
+			emoji: "🧚",
+			col: 10,
+			row: 0,
+			phase: 0,
+			speed: 1.0,
+			hp: 2,
+			bullet: "none",
+			miniScript: waveMiniScript(3, 75, 2.5, 5, 10),
+			spriteRef: walkRef("qyR3Q0"),
+			spriteUrl: sa("qyR3Q0"),
+		}),
+		newObject({
+			emoji: "🧚",
+			col: 5,
+			row: 1,
+			phase: 0,
+			speed: 0.9,
+			hp: 2,
+			bullet: "none",
+			miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8),
+			spriteRef: walkRef("dFy4bF"),
+			spriteUrl: sa("dFy4bF"),
+		}),
+		newObject({
+			emoji: "🧚",
+			col: 9,
+			row: 1,
+			phase: 0,
+			speed: 0.9,
+			hp: 2,
+			bullet: "none",
+			miniScript: waveSpreadScript(3, 80, 3, 30, 2.0, 8),
+			spriteRef: walkRef("dFy4bF"),
+			spriteUrl: sa("dFy4bF"),
+		}),
+		newObject({
+			emoji: "🧚",
+			col: 7,
+			row: 2,
+			phase: 0,
+			speed: 0.8,
+			hp: 2,
+			bullet: "none",
+			miniScript: waveMiniScript(4, 70, 2.2, 6, 15),
+			spriteRef: walkRef("qyR3Q0"),
+			spriteUrl: sa("qyR3Q0"),
+		}),
 
-    // ── フェーズ 1：道中ボス（ルーミア）────────────────────────────────────
-    // isBoss: true でHPバーを表示。スペルカードは定義しない（ジャブ的存在）。
-    newObject({
-      emoji: '🌙', col: 7, row: 1, phase: 1, hp: 60,
-      bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
-      isBoss: true, name: 'ルーミア', spriteRef: walkRef('iHrDUc'), spriteUrl: sa('iHrDUc'),
-      miniScript: `
+		// ── フェーズ 1：道中ボス（ルーミア）────────────────────────────────────
+		// isBoss: true でHPバーを表示。スペルカードは定義しない（ジャブ的存在）。
+		newObject({
+			emoji: "🌙",
+			col: 7,
+			row: 1,
+			phase: 1,
+			hp: 60,
+			bullet: "none",
+			bulletSpeed: 0,
+			bulletColor: "#fff",
+			fireRate: 999,
+			isBoss: true,
+			name: "ルーミア",
+			spriteRef: walkRef("iHrDUc"),
+			spriteUrl: sa("iHrDUc"),
+			miniScript: `
 moveTo(${VIEW_W / 2}, 90, 70)
 while true
   for i in range(0, 7, 1)
@@ -170,24 +353,72 @@ while true
   wait(40)
 end while
 `.trim(),
-    }),
+		}),
 
-    // ── フェーズ 2：道中後半 ──────────────────────────────────────────────
-    // 通常 aimed 弾
-    newObject({ emoji: '🧚', col: 3,  row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
-      miniScript: waveMiniScript(4, 55, 2.8, 5, 8), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
-    newObject({ emoji: '🧚', col: 11, row: 0, phase: 2, speed: 1.2, hp: 3, bullet: 'none',
-      miniScript: waveMiniScript(4, 55, 2.8, 5, 8), spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0') }),
-    // spread 弾
-    newObject({ emoji: '🧚', col: 7,  row: 1, phase: 2, speed: 1.0, hp: 3, bullet: 'none',
-      miniScript: waveSpreadScript(4, 65, 5, 40, 2.2, 8), spriteRef: walkRef('dFy4bF'), spriteUrl: sa('dFy4bF') }),
-    // 加速弾（初速遅め→急加速、120フレームで消滅）
-    newObject({ emoji: '🧝', col: 4,  row: 2, phase: 2, speed: 0.9, hp: 4, bullet: 'none',
-      miniScript: waveAccelScript(5, 60, 0.8, 0.06, 3.5, 120, 2, 12), spriteRef: walkRef('FZvG3U'), spriteUrl: sa('FZvG3U') }),
-    // リング弾（角度ずらし）
-    newObject({ emoji: '🧝', col: 10, row: 2, speed: 0.9, hp: 4, bullet: 'none', phase: 2,
-      spriteRef: walkRef('FZvG3U'), spriteUrl: sa('FZvG3U'),
-      miniScript: `
+		// ── フェーズ 2：道中後半 ──────────────────────────────────────────────
+		// 通常 aimed 弾
+		newObject({
+			emoji: "🧚",
+			col: 3,
+			row: 0,
+			phase: 2,
+			speed: 1.2,
+			hp: 3,
+			bullet: "none",
+			miniScript: waveMiniScript(4, 55, 2.8, 5, 8),
+			spriteRef: walkRef("qyR3Q0"),
+			spriteUrl: sa("qyR3Q0"),
+		}),
+		newObject({
+			emoji: "🧚",
+			col: 11,
+			row: 0,
+			phase: 2,
+			speed: 1.2,
+			hp: 3,
+			bullet: "none",
+			miniScript: waveMiniScript(4, 55, 2.8, 5, 8),
+			spriteRef: walkRef("qyR3Q0"),
+			spriteUrl: sa("qyR3Q0"),
+		}),
+		// spread 弾
+		newObject({
+			emoji: "🧚",
+			col: 7,
+			row: 1,
+			phase: 2,
+			speed: 1.0,
+			hp: 3,
+			bullet: "none",
+			miniScript: waveSpreadScript(4, 65, 5, 40, 2.2, 8),
+			spriteRef: walkRef("dFy4bF"),
+			spriteUrl: sa("dFy4bF"),
+		}),
+		// 加速弾（初速遅め→急加速、120フレームで消滅）
+		newObject({
+			emoji: "🧝",
+			col: 4,
+			row: 2,
+			phase: 2,
+			speed: 0.9,
+			hp: 4,
+			bullet: "none",
+			miniScript: waveAccelScript(5, 60, 0.8, 0.06, 3.5, 120, 2, 12),
+			spriteRef: walkRef("FZvG3U"),
+			spriteUrl: sa("FZvG3U"),
+		}),
+		// リング弾（角度ずらし）
+		newObject({
+			emoji: "🧝",
+			col: 10,
+			row: 2,
+			speed: 0.9,
+			hp: 4,
+			bullet: "none",
+			phase: 2,
+			spriteRef: walkRef("FZvG3U"),
+			spriteUrl: sa("FZvG3U"),
+			miniScript: `
 wait(row * 25)
 moveTo(startX, 110, 45)
 wait(10)
@@ -200,11 +431,20 @@ for t in range(0, 3, 1)
 end for
 moveTo(startX + rand(-60, 60), ${VIEW_H + 50}, 65)
 exit()
-`.trim() }),
-    // リング＋スタック複合（道中後半ザコ上位）
-    newObject({ emoji: '🧙', col: 7, row: 0, phase: 2, speed: 0.6, hp: 6, bullet: 'none',
-      spriteRef: walkRef('qyR3Q0'), spriteUrl: sa('qyR3Q0'),
-      miniScript: `
+`.trim(),
+		}),
+		// リング＋スタック複合（道中後半ザコ上位）
+		newObject({
+			emoji: "🧙",
+			col: 7,
+			row: 0,
+			phase: 2,
+			speed: 0.6,
+			hp: 6,
+			bullet: "none",
+			spriteRef: walkRef("qyR3Q0"),
+			spriteUrl: sa("qyR3Q0"),
+			miniScript: `
 wait(row * 25)
 moveTo(startX, 130, 55)
 wait(20)
@@ -218,18 +458,27 @@ for t in range(0, 2, 1)
 end for
 moveTo(startX, ${VIEW_H + 50}, 70)
 exit()
-`.trim() }),
+`.trim(),
+		}),
 
-    // ── フェーズ 3：ボス戦（チルノ）────────────────────────────────────────
-    // 通常弾幕 + スペルカード2枚。HPが閾値を下回るとスペルカード発動。
-    newObject({
-      emoji: '🌸', col: 7, row: 1, phase: 3, hp: 200,
-      bullet: 'none', bulletSpeed: 0, bulletColor: '#fff', fireRate: 999,
-      isBoss: true, name: 'チルノ',
-      // スプライト（静止画）チルノ
-      spriteRef: `url:${sp('NM9zuG')}`,
-      spriteUrl: sp('NM9zuG'),
-      miniScript: `
+		// ── フェーズ 3：ボス戦（チルノ）────────────────────────────────────────
+		// 通常弾幕 + スペルカード2枚。HPが閾値を下回るとスペルカード発動。
+		newObject({
+			emoji: "🌸",
+			col: 7,
+			row: 1,
+			phase: 3,
+			hp: 200,
+			bullet: "none",
+			bulletSpeed: 0,
+			bulletColor: "#fff",
+			fireRate: 999,
+			isBoss: true,
+			name: "チルノ",
+			// スプライト（静止画）チルノ
+			spriteRef: `url:${sp("NM9zuG")}`,
+			spriteUrl: sp("NM9zuG"),
+			miniScript: `
 moveTo(${VIEW_W / 2}, 80, 90)
 while true
   for i in range(0, 5, 1)
@@ -239,13 +488,13 @@ while true
   wait(8)
 end while
 `.trim(),
-      spellCards: [
-        {
-          name: '氷符「パーフェクトフリーズ」',
-          triggerHp: 130,
+			spellCards: [
+				{
+					name: "氷符「パーフェクトフリーズ」",
+					triggerHp: 130,
 
-          // 12方向リング + aimed 加速弾の複合
-          miniScript: `
+					// 12方向リング + aimed 加速弾の複合
+					miniScript: `
 moveTo(rand(80, ${VIEW_W - 80}), 80, 40)
 while true
   for i in range(0, 11, 1)
@@ -255,13 +504,13 @@ while true
   wait(5)
 end while
 `.trim(),
-        },
-        {
-          name: '氷符「ブルーフロストオーロラ」',
-          triggerHp: 60,
+				},
+				{
+					name: "氷符「ブルーフロストオーロラ」",
+					triggerHp: 60,
 
-          // 回転リング（frame で角度をずらし続けることで螺旋に見える）＋速度差リングスタック
-          miniScript: `
+					// 回転リング（frame で角度をずらし続けることで螺旋に見える）＋速度差リングスタック
+					miniScript: `
 moveTo(${VIEW_W / 2}, 70, 30)
 while true
   for i in range(0, 15, 1)
@@ -275,13 +524,13 @@ while true
   wait(2)
 end while
 `.trim(),
-        },
-        {
-          name: '凍符「ダイヤモンドブリザード」',
-          triggerHp: 20,
+				},
+				{
+					name: "凍符「ダイヤモンドブリザード」",
+					triggerHp: 20,
 
-          // 加速弾 + spread 複合、180フレームで弾消滅
-          miniScript: `
+					// 加速弾 + spread 複合、180フレームで弾消滅
+					miniScript: `
 moveTo(${VIEW_W / 2}, 65, 25)
 while true
   for i in range(0, 7, 1)
@@ -291,31 +540,46 @@ while true
   wait(4)
 end while
 `.trim(),
-        },
-      ],
-    }),
-  ],
-  // タイトル／エンディング画面はエンジン非依存のオーバーレイなので東方エンジンでも表示される。
-  titleScreen: {
-    enabled: true,
-    heading: '東方弾幕ごっこ',
-    subtitle: '方向キーで移動（弾は自動連射）／ Shift で低速移動 ／ X でボム',
-    textColor: '#ffd0e6',
-    menu: [
-      { kind: 'newGame', label: 'はじめる' },
-    ],
-  },
-  ending: {
-    enabled: true,
-    heading: 'ALL CLEAR',
-    message: '道中もボスも すべて突破した！\nチルノの氷はとけ、幻想郷に静けさが戻った。\n\n——次はもっと上の難易度で会いましょう。',
-    textColor: '#ffd0e6',
-  },
-  sfx: {
-    graze:     { ref: `direct:${su('8x4RbZ')}`, src: su('8x4RbZ'), type: 'direct' as const },
-    damage:    { ref: `direct:${su('EWsh6F')}#vol=25`, src: su('EWsh6F'), type: 'direct' as const },
-    spellcard: { ref: `direct:${su('JrcaUb')}`, src: su('JrcaUb'), type: 'direct' as const },
-    // クリア時のファンファーレ（全フェーズ突破 → エンディング画面）
-    clear:     { ref: `direct:${su('CvnSzp')}`, src: su('CvnSzp'), type: 'direct' as const },
-  },
+				},
+			],
+		}),
+	],
+	// タイトル／エンディング画面はエンジン非依存のオーバーレイなので東方エンジンでも表示される。
+	titleScreen: {
+		enabled: true,
+		heading: "東方弾幕ごっこ",
+		subtitle: "方向キーで移動（弾は自動連射）／ Shift で低速移動 ／ X でボム",
+		textColor: "#ffd0e6",
+		menu: [{ kind: "newGame", label: "はじめる" }],
+	},
+	ending: {
+		enabled: true,
+		heading: "ALL CLEAR",
+		message:
+			"道中もボスも すべて突破した！\nチルノの氷はとけ、幻想郷に静けさが戻った。\n\n——次はもっと上の難易度で会いましょう。",
+		textColor: "#ffd0e6",
+	},
+	sfx: {
+		graze: {
+			ref: `direct:${su("8x4RbZ")}`,
+			src: su("8x4RbZ"),
+			type: "direct" as const,
+		},
+		damage: {
+			ref: `direct:${su("EWsh6F")}#vol=25`,
+			src: su("EWsh6F"),
+			type: "direct" as const,
+		},
+		spellcard: {
+			ref: `direct:${su("JrcaUb")}`,
+			src: su("JrcaUb"),
+			type: "direct" as const,
+		},
+		// クリア時のファンファーレ（全フェーズ突破 → エンディング画面）
+		clear: {
+			ref: `direct:${su("CvnSzp")}`,
+			src: su("CvnSzp"),
+			type: "direct" as const,
+		},
+	},
 };

@@ -1,6 +1,18 @@
-import Sqids from 'sqids';
-import type { Post as ApiPost, GameRecord as ApiGame, MvRecord as ApiMv, Notification as ApiNotification, OshiItem as ApiOshiItem } from './types';
-import type { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem } from './types-db';
+import Sqids from "sqids";
+import type {
+	GameRecord as ApiGame,
+	MvRecord as ApiMv,
+	Notification as ApiNotification,
+	OshiItem as ApiOshiItem,
+	Post as ApiPost,
+} from "./types";
+import type {
+	DbGameRecord,
+	DbMvRecord,
+	DbNotification,
+	DbOshiItem,
+	DbPost,
+} from "./types-db";
 
 /**
  * ID は数値をそのまま文字列にして返す（旧実装は sqids でエンコードしていた）。
@@ -24,33 +36,33 @@ import type { DbPost, DbGameRecord, DbMvRecord, DbNotification, DbOshiItem } fro
 const LEGACY_SQIDS_MIN_LENGTH = 6;
 
 const legacySqids = new Sqids({
-  alphabet: 'FsaJLNPRTVXZbdfhjklnpqrtvwxyz8u64o20mYWGUSQOMKIECAegicBDH31975',
-  minLength: LEGACY_SQIDS_MIN_LENGTH,
+	alphabet: "FsaJLNPRTVXZbdfhjklnpqrtvwxyz8u64o20mYWGUSQOMKIECAegicBDH31975",
+	minLength: LEGACY_SQIDS_MIN_LENGTH,
 });
 
 function getChecksum(id: number): number {
-  return (id * 17 + 5) % 97;
+	return (id * 17 + 5) % 97;
 }
 
 /** 旧 sqids 形式のIDを読む。checksum が合わなければ null。 */
 function decodeLegacySqid(value: string): number | null {
-  try {
-    const numbers = legacySqids.decode(value);
-    if (numbers.length !== 2) return null;
-    const [id, checksum] = numbers;
-    return getChecksum(id) === checksum ? id : null;
-  } catch {
-    return null;
-  }
+	try {
+		const numbers = legacySqids.decode(value);
+		if (numbers.length !== 2) return null;
+		const [id, checksum] = numbers;
+		return getChecksum(id) === checksum ? id : null;
+	} catch {
+		return null;
+	}
 }
 
 function parseRawId(value: string): number | null {
-  const n = Number(value);
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
+	const n = Number(value);
+	return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 export function encodeId(id: number): string {
-  return String(id);
+	return String(id);
 }
 
 /**
@@ -62,23 +74,26 @@ export function encodeId(id: number): string {
  * （既存の投稿IDは連番で当面5桁に収まるため、実際に衝突する余地はほぼ無い。）
  */
 export function decodeId(value: string): number | null {
-  if (!value) return null;
+	if (!value) return null;
 
-  if (/^\d+$/.test(value)) {
-    if (value.length < LEGACY_SQIDS_MIN_LENGTH) return parseRawId(value);
-    return decodeLegacySqid(value) ?? parseRawId(value);
-  }
+	if (/^\d+$/.test(value)) {
+		if (value.length < LEGACY_SQIDS_MIN_LENGTH) return parseRawId(value);
+		return decodeLegacySqid(value) ?? parseRawId(value);
+	}
 
-  // 数字以外を含むものは旧形式か、そもそもIDではない（楽観更新の `temp-...` など）
-  return decodeLegacySqid(value);
+	// 数字以外を含むものは旧形式か、そもそもIDではない（楽観更新の `temp-...` など）
+	return decodeLegacySqid(value);
 }
 
-export function decodeIdOrThrow(sqid: string, errorMessage = 'Invalid ID'): number {
-  const id = decodeId(sqid);
-  if (id === null) {
-    throw new Error(errorMessage);
-  }
-  return id;
+export function decodeIdOrThrow(
+	sqid: string,
+	errorMessage = "Invalid ID",
+): number {
+	const id = decodeId(sqid);
+	if (id === null) {
+		throw new Error(errorMessage);
+	}
+	return id;
 }
 
 /**
@@ -92,63 +107,69 @@ export function decodeIdOrThrow(sqid: string, errorMessage = 'Invalid ID'): numb
  * PATCH のレスポンスに `previousManifest` として明示的に載せている。
  */
 function stripDeleteTokens<T extends Record<string, unknown>>(record: T) {
-  const {
-    manifestDeleteId: _a, manifestDeleteHash: _b,
-    mmlDeleteId: _c, mmlDeleteHash: _d,
-    ...rest
-  } = record as T & {
-    manifestDeleteId?: string; manifestDeleteHash?: string;
-    mmlDeleteId?: string; mmlDeleteHash?: string;
-  };
-  return rest;
+	const {
+		manifestDeleteId: _a,
+		manifestDeleteHash: _b,
+		mmlDeleteId: _c,
+		mmlDeleteHash: _d,
+		...rest
+	} = record as T & {
+		manifestDeleteId?: string;
+		manifestDeleteHash?: string;
+		mmlDeleteId?: string;
+		mmlDeleteHash?: string;
+	};
+	return rest;
 }
 
 export function encodePost(post: DbPost): ApiPost {
-  return {
-    ...stripDeleteTokens(post as unknown as Record<string, unknown>),
-    id: encodeId(post.id),
-    parentPostId: post.parentPostId ? encodeId(post.parentPostId) : undefined,
-    gameId: post.gameId ? encodeId(post.gameId) : undefined,
-    mvId: post.mvId ? encodeId(post.mvId) : undefined,
-    threadId: encodeId(post.threadId),
-    replies: post.replies ? post.replies.map(encodePost) : [],
-  } as ApiPost;
+	return {
+		...stripDeleteTokens(post as unknown as Record<string, unknown>),
+		id: encodeId(post.id),
+		parentPostId: post.parentPostId ? encodeId(post.parentPostId) : undefined,
+		gameId: post.gameId ? encodeId(post.gameId) : undefined,
+		mvId: post.mvId ? encodeId(post.mvId) : undefined,
+		threadId: encodeId(post.threadId),
+		replies: post.replies ? post.replies.map(encodePost) : [],
+	} as ApiPost;
 }
 
 export function encodeMv(mv: DbMvRecord): ApiMv {
-  return {
-    ...stripDeleteTokens(mv as unknown as Record<string, unknown>),
-    id: encodeId(mv.id),
-  } as ApiMv;
+	return {
+		...stripDeleteTokens(mv as unknown as Record<string, unknown>),
+		id: encodeId(mv.id),
+	} as ApiMv;
 }
 
 export function encodeGame(game: DbGameRecord): ApiGame {
-  return {
-    ...stripDeleteTokens(game as unknown as Record<string, unknown>),
-    id: encodeId(game.id),
-  } as ApiGame;
+	return {
+		...stripDeleteTokens(game as unknown as Record<string, unknown>),
+		id: encodeId(game.id),
+	} as ApiGame;
 }
 
 export function encodeOshiItem(item: DbOshiItem): ApiOshiItem {
-  return {
-    id: encodeId(item.id),
-    kind: item.kind,
-    trackId: item.trackId,
-    collectionId: item.collectionId,
-    artistId: item.artistId,
-    title: item.title,
-    subtitle: item.subtitle,
-    artworkUrl: item.artworkUrl,
-    viewUrl: item.viewUrl,
-    previewUrl: item.previewUrl,
-    position: item.position,
-  };
+	return {
+		id: encodeId(item.id),
+		kind: item.kind,
+		trackId: item.trackId,
+		collectionId: item.collectionId,
+		artistId: item.artistId,
+		title: item.title,
+		subtitle: item.subtitle,
+		artworkUrl: item.artworkUrl,
+		viewUrl: item.viewUrl,
+		previewUrl: item.previewUrl,
+		position: item.position,
+	};
 }
 
-export function encodeNotification(notification: DbNotification): ApiNotification {
-  return {
-    ...notification,
-    id: encodeId(notification.id),
-    postId: notification.postId ? encodeId(notification.postId) : undefined,
-  } as ApiNotification;
+export function encodeNotification(
+	notification: DbNotification,
+): ApiNotification {
+	return {
+		...notification,
+		id: encodeId(notification.id),
+		postId: notification.postId ? encodeId(notification.postId) : undefined,
+	} as ApiNotification;
 }

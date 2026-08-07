@@ -1,9 +1,9 @@
-import type { NextRequest } from 'next/server';
-import { db } from '@/lib/db';
-import type { AnonymousUser } from '@/lib/types';
+import type { NextRequest } from "next/server";
+import { db } from "@/lib/db";
+import type { AnonymousUser } from "@/lib/types";
 
 /** lib/session.ts がクライアント側で書くセッションCookieと同名 */
-export const SESSION_COOKIE = 'unj_reze_session';
+export const SESSION_COOKIE = "unj_reze_session";
 
 /**
  * 書き込み系APIの本人確認。
@@ -18,11 +18,13 @@ export const SESSION_COOKIE = 'unj_reze_session';
  * 作ると「名乗れば通る」に逆戻りする）。
  */
 export async function resolveSessionUser(
-  request: NextRequest,
-  bodySessionId?: unknown
+	request: NextRequest,
+	bodySessionId?: unknown,
 ): Promise<AnonymousUser | null> {
-  const fromCookie = request.cookies.get(SESSION_COOKIE)?.value;
-  const sessionId = fromCookie || (typeof bodySessionId === 'string' ? bodySessionId : undefined);
-  if (!sessionId) return null;
-  return await db.getAnonymousUserBySession(sessionId);
+	const fromCookie = request.cookies.get(SESSION_COOKIE)?.value;
+	const sessionId =
+		fromCookie ||
+		(typeof bodySessionId === "string" ? bodySessionId : undefined);
+	if (!sessionId) return null;
+	return await db.getAnonymousUserBySession(sessionId);
 }

@@ -1,371 +1,428 @@
-import { db as mockDb } from '../mock-db';
-import { OriginType } from '../types';
-import type { DataStore, CreatePostParams, ReplyParams, MessageParams, CreateGameParams, CreateMvParams, UpdateGameParams, UpdateMvParams, ReportParams, RecordGamePlayParams, MmlRef } from './interface';
-import type { DbGameRecord, DbMvRecord } from '../types-db';
-import type { MvManifest } from '../mv-config';
-
-
+import { db as mockDb } from "../mock-db";
+import type { MvManifest } from "../mv-config";
+import { OriginType } from "../types";
+import type { DbGameRecord, DbMvRecord } from "../types-db";
+import type {
+	CreateGameParams,
+	CreateMvParams,
+	CreatePostParams,
+	DataStore,
+	MessageParams,
+	MmlRef,
+	RecordGamePlayParams,
+	ReplyParams,
+	ReportParams,
+	UpdateGameParams,
+	UpdateMvParams,
+} from "./interface";
 
 const gameStore = new Map<number, DbGameRecord>();
 const mvStore = new Map<number, DbMvRecord>();
 
 export const mockStore: DataStore = {
-  async getPosts(userId?: string, limitOrOptions?: number | import('./interface').GetPostsOptions, beforeId?: number, optionsArg?: import('./interface').GetPostsOptions) {
-    return mockDb.getPosts(userId, limitOrOptions, beforeId, optionsArg);
-  },
-
-  async getPost(id: number, userId?: string) {
-    return mockDb.getPost(id, userId) ?? null;
-  },
-
-  async createPost(data: CreatePostParams) {
-    return mockDb.createPost(data);
-  },
-
-  async likePost(id: number, userId: string) {
-    return mockDb.likePost(id, userId);
-  },
-
-  async dislikePost(id: number, userId: string) {
-    return mockDb.dislikePost(id, userId);
-  },
-
-  async heartPost(id: number, userId: string, count?: number) {
-    return mockDb.heartPost(id, userId, count);
-  },
-
-  async repostPost(id: number) {
-    return mockDb.repostPost(id);
-  },
-
-  async getReplies(postId: number, userId?: string) {
-    return mockDb.getReplies(postId, userId);
-  },
-
-  async addReply(postId: number, data: ReplyParams) {
-    return mockDb.addReply(postId, data);
-  },
-
-  async editPost(id: number, userId: string, content: string, originType?: OriginType | null, imageSrc?: string, mml?: MmlRef) {
-    return mockDb.editPost(id, userId, content, originType, imageSrc);
-  },
-
-  async deletePost(id: number, userId: string) {
-    return mockDb.deletePost(id, userId);
-  },
-
-  async deleteMessage(id: number, userId: string) {
-    return mockDb.deleteMessage(id, userId);
-  },
-
-  async getUserPostsBySlug(slug: string, userId?: string, limit?: number) {
-    return mockDb.getUserPostsBySlug(slug, userId, limit);
-  },
-
-  async getLikedPosts(userId: string, limit?: number) {
-    return mockDb.getLikedPosts(userId, limit);
-  },
-
-  async getDislikedPosts(userId: string, limit?: number) {
-    return mockDb.getDislikedPosts(userId, limit);
-  },
-
-  async getHeartedPosts(userId: string, limit?: number) {
-    return mockDb.getHeartedPosts(userId, limit);
-  },
-
-  async getUserDisplayName(slug: string) {
-    return mockDb.getUserDisplayName(slug);
-  },
-
-  async getNotifications(userId?: string) {
-    return mockDb.getNotifications(userId);
-  },
-
-  async markNotificationRead(id: number, userId: string) {
-    return mockDb.markNotificationRead(id, userId);
-  },
-
-  async markAllNotificationsRead(userId: string) {
-    return mockDb.markAllNotificationsRead(userId);
-  },
-
-  async deleteNotification(id: number, userId: string) {
-    return mockDb.deleteNotification(id, userId);
-  },
-
-  async getUnreadCount(userId: string) {
-    return mockDb.getUnreadCount(userId);
-  },
-
-  async getMessages(userId?: string) {
-    return mockDb.getMessages(userId);
-  },
-
-  async getConversation(userId: string, partnerId: string, limit?: number) {
-    return mockDb.getConversation(userId, partnerId, limit);
-  },
-
-  async getDmGate(userId: string, partnerId: string) {
-    return mockDb.getDmGate(userId, partnerId);
-  },
-
-  async addMessage(data: MessageParams) {
-    return mockDb.addMessage(data);
-  },
-
-  async getTrends() {
-    return mockDb.getTrends();
-  },
-
-  async searchPosts(query: string, userId?: string, limit?: number) {
-    return mockDb.searchPosts(query, userId, limit);
-  },
-
-  async searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number) {
-    return mockDb.searchMedia(kind, query, userId, limit, offset);
-  },
-
-  async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
-    return mockDb.getPostsByHashtag(tag, userId, limit);
-  },
-
-  async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
-    return mockDb.getOrCreateAnonymousUser(sessionId, ipAddress);
-  },
-
-  async getAnonymousUserBySession(sessionId: string) {
-    return mockDb.getAnonymousUserBySession(sessionId);
-  },
-
-  async updateUserDisplayName(userId: string, displayName?: string, avatarUrl?: string, bio?: string) {
-    // slug は不変なので mvStore / gameStore の creatorSlug を追随させる必要はない
-    return mockDb.updateUserDisplayName(userId, displayName, avatarUrl, bio);
-  },
-
-  async getUserAvatarUrl(slug: string) {
-    return mockDb.getUserAvatarUrl(slug);
-  },
-
-  async getUserBio(slug: string) {
-    return mockDb.getUserBio(slug);
-  },
-
-  async listOshiItems(userSlug: string) {
-    return mockDb.listOshiItems(userSlug);
-  },
-
-  async addOshiItem(userSlug: string, data) {
-    return mockDb.addOshiItem(userSlug, data);
-  },
-
-  async removeOshiItem(userSlug: string, id: number) {
-    return mockDb.removeOshiItem(userSlug, id);
-  },
-
-  async getUserSettings(slug: string) {
-    return mockDb.getUserSettings(slug);
-  },
-
-  async updateUserSettings(slug: string, settings: Partial<{ isPrivate: boolean; hideFromSearch: boolean; hideReactions: boolean }>) {
-    return mockDb.updateUserSettings(slug, settings);
-  },
-
-  async issueMigrationToken(userId: string) {
-    return mockDb.issueMigrationToken(userId);
-  },
-
-  async redeemMigrationToken(token: string, newSessionId: string) {
-    return mockDb.redeemMigrationToken(token, newSessionId);
-  },
-
-  async followUser(followerId: string, followedId: string) {
-    return mockDb.followUser(followerId, followedId);
-  },
-
-  async unfollowUser(followerId: string, followedId: string) {
-    return mockDb.unfollowUser(followerId, followedId);
-  },
-
-  async isFollowing(followerId: string, followedId: string) {
-    return mockDb.isFollowing(followerId, followedId);
-  },
-
-  async getFollowCounts(userId: string) {
-    return mockDb.getFollowCounts(userId);
-  },
-
-  async getFollowers(userId: string, viewerId?: string, limit?: number) {
-    return mockDb.getFollowers(userId, viewerId, limit);
-  },
-
-  async getFollowing(userId: string, viewerId?: string, limit?: number) {
-    return mockDb.getFollowing(userId, viewerId, limit);
-  },
-
-  async blockUser(blockerSlug: string, blockedSlug: string) {
-    return mockDb.blockUser(blockerSlug, blockedSlug);
-  },
-
-  async unblockUser(blockerSlug: string, blockedSlug: string) {
-    return mockDb.unblockUser(blockerSlug, blockedSlug);
-  },
-
-  async getBlockedSlugs(blockerSlug: string) {
-    return mockDb.getBlockedSlugs(blockerSlug);
-  },
-
-  async muteUser(muterSlug: string, mutedSlug: string) {
-    return mockDb.muteUser(muterSlug, mutedSlug);
-  },
-
-  async unmuteUser(muterSlug: string, mutedSlug: string) {
-    return mockDb.unmuteUser(muterSlug, mutedSlug);
-  },
-
-  async getMutedSlugs(muterSlug: string) {
-    return mockDb.getMutedSlugs(muterSlug);
-  },
-
-  async reportContent(data: ReportParams) {
-    return mockDb.reportContent(data);
-  },
-
-  async createGame(data: CreateGameParams): Promise<DbGameRecord> {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    const record: DbGameRecord = {
-      id, preset: data.preset, title: data.title,
-      manifestUrl: data.manifestUrl,
-      manifestDeleteId: data.manifestDeleteId,
-      manifestDeleteHash: data.manifestDeleteHash,
-      bgRef: data.bgRef,
-      createdAt: new Date().toISOString(), creatorSlug: data.creatorSlug,
-    };
-    gameStore.set(id, record);
-    return record;
-  },
-
-  async getGame(id: number): Promise<DbGameRecord | null> {
-    return gameStore.get(id) ?? null;
-  },
-
-  async getGamesByIds(ids: number[]): Promise<DbGameRecord[]> {
-    if (!ids || ids.length === 0) return [];
-    const set = new Set(ids);
-    return Array.from(gameStore.values()).filter(g => set.has(g.id));
-  },
-
-  async updateGame(id: number, data: UpdateGameParams): Promise<DbGameRecord | null> {
-    const existing = gameStore.get(id);
-    if (!existing) return null;
-    const updated: DbGameRecord = {
-      ...existing,
-      title: data.title,
-      manifestUrl: data.manifestUrl,
-      manifestDeleteId: data.manifestDeleteId,
-      manifestDeleteHash: data.manifestDeleteHash,
-      bgRef: data.bgRef,
-    };
-    gameStore.set(id, updated);
-    return updated;
-  },
-
-  async listAllGames(limit?: number) {
-    const list = Array.from(gameStore.values());
-    return limit && limit > 0 ? list.slice(0, limit) : list;
-  },
-
-  async createMv(data: CreateMvParams): Promise<DbMvRecord> {
-    const id = Date.now() + Math.floor(Math.random() * 1000);
-    const record: DbMvRecord = {
-      id,
-      preset: data.preset,
-      title: data.title,
-      manifestUrl: data.manifestUrl,
-      manifestDeleteId: data.manifestDeleteId,
-      manifestDeleteHash: data.manifestDeleteHash,
-      bgUrl: data.bgUrl,
-      createdAt: new Date().toISOString(),
-      creatorSlug: data.creatorSlug,
-      plays: 0,
-    };
-    mvStore.set(id, record);
-    return record;
-  },
-
-  async getMv(id: number): Promise<DbMvRecord | null> {
-    return mvStore.get(id) ?? null;
-  },
-
-  async getMvsByIds(ids: number[]): Promise<DbMvRecord[]> {
-    if (!ids || ids.length === 0) return [];
-    const set = new Set(ids);
-    return Array.from(mvStore.values()).filter(m => set.has(m.id));
-  },
-
-  async updateMv(id: number, data: UpdateMvParams): Promise<DbMvRecord | null> {
-    const existing = mvStore.get(id);
-    if (!existing) return null;
-    const updated: DbMvRecord = {
-      ...existing,
-      title: data.title,
-      manifestUrl: data.manifestUrl,
-      manifestDeleteId: data.manifestDeleteId,
-      manifestDeleteHash: data.manifestDeleteHash,
-      bgUrl: data.bgUrl,
-    };
-    mvStore.set(id, updated);
-    return updated;
-  },
-
-  async recordMvPlay(id: number) {
-    const existing = mvStore.get(id);
-    if (!existing) return;
-    mvStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
-  },
-
-  async recordGamePlay(gameId: number, data: RecordGamePlayParams): Promise<DbGameRecord | null> {
-    const existing = gameStore.get(gameId);
-    if (!existing) return null;
-    const score = Number(data.score) || 0;
-    const updated: DbGameRecord = {
-      ...existing,
-      plays: (existing.plays ?? 0) + (data.countPlay === false ? 0 : 1),
-      clears: (existing.clears ?? 0) + (data.cleared ? 1 : 0),
-    };
-    if (score > (existing.bestScore ?? 0)) {
-      updated.bestScore = score;
-      updated.bestScoreBy = data.displayName || '名無し';
-    }
-    gameStore.set(gameId, updated);
-    return updated;
-  },
-
-  async listTopGames(limit?: number) {
-    const safeLimit = Math.max(1, Math.min(limit || 30, 50));
-    return Array.from(gameStore.values())
-      .sort((a, b) => (b.plays ?? 0) - (a.plays ?? 0) || b.id - a.id)
-      .slice(0, safeLimit);
-  },
-
-  async getPostIdByGameId(_gameId: number) {
-    return null;
-  },
-
-  async getLiveGameInfo(_ipAddress: string) {
-    const games = Array.from(gameStore.values());
-    const slot = new Date().toISOString().slice(0, 13);
-    const game = games[0] ?? null;
-    return {
-      gameId: game?.id ?? null,
-      gameTitle: game?.title ?? '',
-      gamePreset: game?.preset ?? '',
-      hourSlot: slot,
-      postId: null,
-      nextCandidates: games.map(g => ({ game: { id: g.id, preset: g.preset, title: g.title, createdAt: g.createdAt }, votes: 0 })),
-      myVote: null,
-    };
-  },
-
-  async voteGame(_gameId: number, _ipAddress: string) {},
+	async getPosts(
+		userId?: string,
+		limitOrOptions?: number | import("./interface").GetPostsOptions,
+		beforeId?: number,
+		optionsArg?: import("./interface").GetPostsOptions,
+	) {
+		return mockDb.getPosts(userId, limitOrOptions, beforeId, optionsArg);
+	},
+
+	async getPost(id: number, userId?: string) {
+		return mockDb.getPost(id, userId) ?? null;
+	},
+
+	async createPost(data: CreatePostParams) {
+		return mockDb.createPost(data);
+	},
+
+	async likePost(id: number, userId: string) {
+		return mockDb.likePost(id, userId);
+	},
+
+	async dislikePost(id: number, userId: string) {
+		return mockDb.dislikePost(id, userId);
+	},
+
+	async heartPost(id: number, userId: string, count?: number) {
+		return mockDb.heartPost(id, userId, count);
+	},
+
+	async repostPost(id: number) {
+		return mockDb.repostPost(id);
+	},
+
+	async getReplies(postId: number, userId?: string) {
+		return mockDb.getReplies(postId, userId);
+	},
+
+	async addReply(postId: number, data: ReplyParams) {
+		return mockDb.addReply(postId, data);
+	},
+
+	async editPost(
+		id: number,
+		userId: string,
+		content: string,
+		originType?: OriginType | null,
+		imageSrc?: string,
+		mml?: MmlRef,
+	) {
+		return mockDb.editPost(id, userId, content, originType, imageSrc);
+	},
+
+	async deletePost(id: number, userId: string) {
+		return mockDb.deletePost(id, userId);
+	},
+
+	async deleteMessage(id: number, userId: string) {
+		return mockDb.deleteMessage(id, userId);
+	},
+
+	async getUserPostsBySlug(slug: string, userId?: string, limit?: number) {
+		return mockDb.getUserPostsBySlug(slug, userId, limit);
+	},
+
+	async getLikedPosts(userId: string, limit?: number) {
+		return mockDb.getLikedPosts(userId, limit);
+	},
+
+	async getDislikedPosts(userId: string, limit?: number) {
+		return mockDb.getDislikedPosts(userId, limit);
+	},
+
+	async getHeartedPosts(userId: string, limit?: number) {
+		return mockDb.getHeartedPosts(userId, limit);
+	},
+
+	async getUserDisplayName(slug: string) {
+		return mockDb.getUserDisplayName(slug);
+	},
+
+	async getNotifications(userId?: string) {
+		return mockDb.getNotifications(userId);
+	},
+
+	async markNotificationRead(id: number, userId: string) {
+		return mockDb.markNotificationRead(id, userId);
+	},
+
+	async markAllNotificationsRead(userId: string) {
+		return mockDb.markAllNotificationsRead(userId);
+	},
+
+	async deleteNotification(id: number, userId: string) {
+		return mockDb.deleteNotification(id, userId);
+	},
+
+	async getUnreadCount(userId: string) {
+		return mockDb.getUnreadCount(userId);
+	},
+
+	async getMessages(userId?: string) {
+		return mockDb.getMessages(userId);
+	},
+
+	async getConversation(userId: string, partnerId: string, limit?: number) {
+		return mockDb.getConversation(userId, partnerId, limit);
+	},
+
+	async getDmGate(userId: string, partnerId: string) {
+		return mockDb.getDmGate(userId, partnerId);
+	},
+
+	async addMessage(data: MessageParams) {
+		return mockDb.addMessage(data);
+	},
+
+	async getTrends() {
+		return mockDb.getTrends();
+	},
+
+	async searchPosts(query: string, userId?: string, limit?: number) {
+		return mockDb.searchPosts(query, userId, limit);
+	},
+
+	async searchMedia(
+		kind: "image" | "mml",
+		query: string,
+		userId?: string,
+		limit?: number,
+		offset?: number,
+	) {
+		return mockDb.searchMedia(kind, query, userId, limit, offset);
+	},
+
+	async getPostsByHashtag(tag: string, userId?: string, limit?: number) {
+		return mockDb.getPostsByHashtag(tag, userId, limit);
+	},
+
+	async getOrCreateAnonymousUser(sessionId: string, ipAddress: string) {
+		return mockDb.getOrCreateAnonymousUser(sessionId, ipAddress);
+	},
+
+	async getAnonymousUserBySession(sessionId: string) {
+		return mockDb.getAnonymousUserBySession(sessionId);
+	},
+
+	async updateUserDisplayName(
+		userId: string,
+		displayName?: string,
+		avatarUrl?: string,
+		bio?: string,
+	) {
+		// slug は不変なので mvStore / gameStore の creatorSlug を追随させる必要はない
+		return mockDb.updateUserDisplayName(userId, displayName, avatarUrl, bio);
+	},
+
+	async getUserAvatarUrl(slug: string) {
+		return mockDb.getUserAvatarUrl(slug);
+	},
+
+	async getUserBio(slug: string) {
+		return mockDb.getUserBio(slug);
+	},
+
+	async listOshiItems(userSlug: string) {
+		return mockDb.listOshiItems(userSlug);
+	},
+
+	async addOshiItem(userSlug: string, data) {
+		return mockDb.addOshiItem(userSlug, data);
+	},
+
+	async removeOshiItem(userSlug: string, id: number) {
+		return mockDb.removeOshiItem(userSlug, id);
+	},
+
+	async getUserSettings(slug: string) {
+		return mockDb.getUserSettings(slug);
+	},
+
+	async updateUserSettings(
+		slug: string,
+		settings: Partial<{
+			isPrivate: boolean;
+			hideFromSearch: boolean;
+			hideReactions: boolean;
+		}>,
+	) {
+		return mockDb.updateUserSettings(slug, settings);
+	},
+
+	async issueMigrationToken(userId: string) {
+		return mockDb.issueMigrationToken(userId);
+	},
+
+	async redeemMigrationToken(token: string, newSessionId: string) {
+		return mockDb.redeemMigrationToken(token, newSessionId);
+	},
+
+	async followUser(followerId: string, followedId: string) {
+		return mockDb.followUser(followerId, followedId);
+	},
+
+	async unfollowUser(followerId: string, followedId: string) {
+		return mockDb.unfollowUser(followerId, followedId);
+	},
+
+	async isFollowing(followerId: string, followedId: string) {
+		return mockDb.isFollowing(followerId, followedId);
+	},
+
+	async getFollowCounts(userId: string) {
+		return mockDb.getFollowCounts(userId);
+	},
+
+	async getFollowers(userId: string, viewerId?: string, limit?: number) {
+		return mockDb.getFollowers(userId, viewerId, limit);
+	},
+
+	async getFollowing(userId: string, viewerId?: string, limit?: number) {
+		return mockDb.getFollowing(userId, viewerId, limit);
+	},
+
+	async blockUser(blockerSlug: string, blockedSlug: string) {
+		return mockDb.blockUser(blockerSlug, blockedSlug);
+	},
+
+	async unblockUser(blockerSlug: string, blockedSlug: string) {
+		return mockDb.unblockUser(blockerSlug, blockedSlug);
+	},
+
+	async getBlockedSlugs(blockerSlug: string) {
+		return mockDb.getBlockedSlugs(blockerSlug);
+	},
+
+	async muteUser(muterSlug: string, mutedSlug: string) {
+		return mockDb.muteUser(muterSlug, mutedSlug);
+	},
+
+	async unmuteUser(muterSlug: string, mutedSlug: string) {
+		return mockDb.unmuteUser(muterSlug, mutedSlug);
+	},
+
+	async getMutedSlugs(muterSlug: string) {
+		return mockDb.getMutedSlugs(muterSlug);
+	},
+
+	async reportContent(data: ReportParams) {
+		return mockDb.reportContent(data);
+	},
+
+	async createGame(data: CreateGameParams): Promise<DbGameRecord> {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
+		const record: DbGameRecord = {
+			id,
+			preset: data.preset,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgRef: data.bgRef,
+			createdAt: new Date().toISOString(),
+			creatorSlug: data.creatorSlug,
+		};
+		gameStore.set(id, record);
+		return record;
+	},
+
+	async getGame(id: number): Promise<DbGameRecord | null> {
+		return gameStore.get(id) ?? null;
+	},
+
+	async getGamesByIds(ids: number[]): Promise<DbGameRecord[]> {
+		if (!ids || ids.length === 0) return [];
+		const set = new Set(ids);
+		return Array.from(gameStore.values()).filter((g) => set.has(g.id));
+	},
+
+	async updateGame(
+		id: number,
+		data: UpdateGameParams,
+	): Promise<DbGameRecord | null> {
+		const existing = gameStore.get(id);
+		if (!existing) return null;
+		const updated: DbGameRecord = {
+			...existing,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgRef: data.bgRef,
+		};
+		gameStore.set(id, updated);
+		return updated;
+	},
+
+	async listAllGames(limit?: number) {
+		const list = Array.from(gameStore.values());
+		return limit && limit > 0 ? list.slice(0, limit) : list;
+	},
+
+	async createMv(data: CreateMvParams): Promise<DbMvRecord> {
+		const id = Date.now() + Math.floor(Math.random() * 1000);
+		const record: DbMvRecord = {
+			id,
+			preset: data.preset,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgUrl: data.bgUrl,
+			createdAt: new Date().toISOString(),
+			creatorSlug: data.creatorSlug,
+			plays: 0,
+		};
+		mvStore.set(id, record);
+		return record;
+	},
+
+	async getMv(id: number): Promise<DbMvRecord | null> {
+		return mvStore.get(id) ?? null;
+	},
+
+	async getMvsByIds(ids: number[]): Promise<DbMvRecord[]> {
+		if (!ids || ids.length === 0) return [];
+		const set = new Set(ids);
+		return Array.from(mvStore.values()).filter((m) => set.has(m.id));
+	},
+
+	async updateMv(id: number, data: UpdateMvParams): Promise<DbMvRecord | null> {
+		const existing = mvStore.get(id);
+		if (!existing) return null;
+		const updated: DbMvRecord = {
+			...existing,
+			title: data.title,
+			manifestUrl: data.manifestUrl,
+			manifestDeleteId: data.manifestDeleteId,
+			manifestDeleteHash: data.manifestDeleteHash,
+			bgUrl: data.bgUrl,
+		};
+		mvStore.set(id, updated);
+		return updated;
+	},
+
+	async recordMvPlay(id: number) {
+		const existing = mvStore.get(id);
+		if (!existing) return;
+		mvStore.set(id, { ...existing, plays: (existing.plays ?? 0) + 1 });
+	},
+
+	async recordGamePlay(
+		gameId: number,
+		data: RecordGamePlayParams,
+	): Promise<DbGameRecord | null> {
+		const existing = gameStore.get(gameId);
+		if (!existing) return null;
+		const score = Number(data.score) || 0;
+		const updated: DbGameRecord = {
+			...existing,
+			plays: (existing.plays ?? 0) + (data.countPlay === false ? 0 : 1),
+			clears: (existing.clears ?? 0) + (data.cleared ? 1 : 0),
+		};
+		if (score > (existing.bestScore ?? 0)) {
+			updated.bestScore = score;
+			updated.bestScoreBy = data.displayName || "名無し";
+		}
+		gameStore.set(gameId, updated);
+		return updated;
+	},
+
+	async listTopGames(limit?: number) {
+		const safeLimit = Math.max(1, Math.min(limit || 30, 50));
+		return Array.from(gameStore.values())
+			.sort((a, b) => (b.plays ?? 0) - (a.plays ?? 0) || b.id - a.id)
+			.slice(0, safeLimit);
+	},
+
+	async getPostIdByGameId(_gameId: number) {
+		return null;
+	},
+
+	async getLiveGameInfo(_ipAddress: string) {
+		const games = Array.from(gameStore.values());
+		const slot = new Date().toISOString().slice(0, 13);
+		const game = games[0] ?? null;
+		return {
+			gameId: game?.id ?? null,
+			gameTitle: game?.title ?? "",
+			gamePreset: game?.preset ?? "",
+			hourSlot: slot,
+			postId: null,
+			nextCandidates: games.map((g) => ({
+				game: {
+					id: g.id,
+					preset: g.preset,
+					title: g.title,
+					createdAt: g.createdAt,
+				},
+				votes: 0,
+			})),
+			myVote: null,
+		};
+	},
+
+	async voteGame(_gameId: number, _ipAddress: string) {},
 };

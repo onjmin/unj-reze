@@ -1,4 +1,4 @@
-import type { Post } from './types';
+import type { Post } from "./types";
 
 /**
  * カウンタ更新API（いいね／低評価／ハート／リポスト）のレスポンスを既存の投稿へ反映する。
@@ -11,11 +11,11 @@ import type { Post } from './types';
  * 返信が消えるバグになっていた。
  */
 export function mergePostCounters(prev: Post, updated: Post): Post {
-  const keepReplies = !updated.replies || updated.replies.length === 0;
-  return {
-    ...prev,
-    ...updated,
-    replies: keepReplies ? prev.replies : updated.replies,
-    repliesCount: keepReplies ? prev.repliesCount : updated.repliesCount,
-  };
+	const keepReplies = !updated.replies || updated.replies.length === 0;
+	return {
+		...prev,
+		...updated,
+		replies: keepReplies ? prev.replies : updated.replies,
+		repliesCount: keepReplies ? prev.repliesCount : updated.repliesCount,
+	};
 }

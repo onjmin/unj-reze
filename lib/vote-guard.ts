@@ -15,7 +15,7 @@
  * 厳密さが要るようになったら KV（KV_PROVIDER）へ移すこと。
  */
 
-const DELIMITER = '###';
+const DELIMITER = "###";
 
 /** 押下済みの (ユーザー, 投稿) 。プロセス生存中のみ保持する */
 const voted = new Set<string>();
@@ -26,7 +26,7 @@ const hearted = new Set<string>();
  * unj の done Set と同じく「1投稿1票（いいね/わるいねのどちらか）」の前提で、
  * 同じ postId に2種類目が来ることは tryVote が弾くので、上書きにはならない。
  */
-const voteTypeByKey = new Map<string, 'like' | 'dislike'>();
+const voteTypeByKey = new Map<string, "like" | "dislike">();
 
 /**
  * 無制限に太らないよう上限を設ける。超えたら丸ごと捨てる（＝再投票可能に戻る）。
@@ -35,31 +35,35 @@ const voteTypeByKey = new Map<string, 'like' | 'dislike'>();
 const MAX_ENTRIES = 200_000;
 
 function keyOf(actorId: string, postId: number): string {
-  return `${actorId}${DELIMITER}${postId}`;
+	return `${actorId}${DELIMITER}${postId}`;
 }
 
 function mark(set: Set<string>, actorId: string, postId: number): boolean {
-  if (!actorId) return true; // 身元が取れないなら重複判定はできない。通す
-  const key = keyOf(actorId, postId);
-  if (set.has(key)) return false;
-  if (set.size >= MAX_ENTRIES) set.clear();
-  set.add(key);
-  return true;
+	if (!actorId) return true; // 身元が取れないなら重複判定はできない。通す
+	const key = keyOf(actorId, postId);
+	if (set.has(key)) return false;
+	if (set.size >= MAX_ENTRIES) set.clear();
+	set.add(key);
+	return true;
 }
 
 /**
  * いいね／わるいねを受け付けてよいか。
  * `false` なら既に投票済み（呼び出し側はカウンタを触らないこと）。
  */
-export function tryVote(actorId: string, postId: number, type: 'like' | 'dislike'): boolean {
-  const ok = mark(voted, actorId, postId);
-  if (ok && actorId) voteTypeByKey.set(keyOf(actorId, postId), type);
-  return ok;
+export function tryVote(
+	actorId: string,
+	postId: number,
+	type: "like" | "dislike",
+): boolean {
+	const ok = mark(voted, actorId, postId);
+	if (ok && actorId) voteTypeByKey.set(keyOf(actorId, postId), type);
+	return ok;
 }
 
 /** ハートも同じ扱い。1投稿につき1回まで */
 export function tryHeart(actorId: string, postId: number): boolean {
-  return mark(hearted, actorId, postId);
+	return mark(hearted, actorId, postId);
 }
 
 /**
@@ -67,20 +71,23 @@ export function tryHeart(actorId: string, postId: number): boolean {
  * このプロセスが起動してから actorId が postId に投票/ハートしたことがあるかだけを返す
  * （プロセス再起動やスケールアウトで false に戻りうる、既知の割り切り）。
  */
-export function getVoteState(actorId: string, postId: number): { liked: boolean; disliked: boolean } {
-  if (!actorId) return { liked: false, disliked: false };
-  const type = voteTypeByKey.get(keyOf(actorId, postId));
-  return { liked: type === 'like', disliked: type === 'dislike' };
+export function getVoteState(
+	actorId: string,
+	postId: number,
+): { liked: boolean; disliked: boolean } {
+	if (!actorId) return { liked: false, disliked: false };
+	const type = voteTypeByKey.get(keyOf(actorId, postId));
+	return { liked: type === "like", disliked: type === "dislike" };
 }
 
 export function hasHearted(actorId: string, postId: number): boolean {
-  if (!actorId) return false;
-  return hearted.has(keyOf(actorId, postId));
+	if (!actorId) return false;
+	return hearted.has(keyOf(actorId, postId));
 }
 
 /** テスト用。本番では呼ばない */
 export function __resetVoteGuard() {
-  voted.clear();
-  hearted.clear();
-  voteTypeByKey.clear();
+	voted.clear();
+	hearted.clear();
+	voteTypeByKey.clear();
 }

@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useEffect, useRef } from 'react';
-import { getRealtimeClient, realtimeConfigured } from '@/lib/realtime/client';
-import type { RealtimeMessage } from '@/lib/realtime/channels';
+import { useEffect, useRef } from "react";
+import type { RealtimeMessage } from "@/lib/realtime/channels";
+import { getRealtimeClient, realtimeConfigured } from "@/lib/realtime/client";
 
 export { realtimeConfigured };
 
@@ -14,33 +14,33 @@ export { realtimeConfigured };
  * channels は毎回同じ内容でも配列の同一性が変わりがちなので、中身の文字列で比較する。
  */
 export function useRealtimeSubscription(
-  channels: string[],
-  handler: (msg: RealtimeMessage) => void,
-  enabled = true
+	channels: string[],
+	handler: (msg: RealtimeMessage) => void,
+	enabled = true,
 ) {
-  const handlerRef = useRef(handler);
-  // レンダリング中に ref を書き換えない（react-hooks/refs）。ハンドラが呼ばれるのは
-  // WebSocket の受信時＝コミット後なので、ここで差し替えれば間に合う。
-  useEffect(() => {
-    handlerRef.current = handler;
-  });
+	const handlerRef = useRef(handler);
+	// レンダリング中に ref を書き換えない（react-hooks/refs）。ハンドラが呼ばれるのは
+	// WebSocket の受信時＝コミット後なので、ここで差し替えれば間に合う。
+	useEffect(() => {
+		handlerRef.current = handler;
+	});
 
-  const key = channels.join('|');
+	const key = channels.join("|");
 
-  useEffect(() => {
-    if (!enabled) return;
-    const client = getRealtimeClient();
-    if (!client) return;
-    const list = key ? key.split('|') : [];
-    if (list.length === 0) return;
+	useEffect(() => {
+		if (!enabled) return;
+		const client = getRealtimeClient();
+		if (!client) return;
+		const list = key ? key.split("|") : [];
+		if (list.length === 0) return;
 
-    const offHandler = client.addHandler(msg => handlerRef.current(msg));
-    const offChannels = client.subscribe(list);
-    return () => {
-      offChannels();
-      offHandler();
-    };
-  }, [key, enabled]);
+		const offHandler = client.addHandler((msg) => handlerRef.current(msg));
+		const offChannels = client.subscribe(list);
+		return () => {
+			offChannels();
+			offHandler();
+		};
+	}, [key, enabled]);
 }
 
 /**
@@ -49,5 +49,5 @@ export function useRealtimeSubscription(
  * 未設定なら従来どおりの間隔でポーリングする。
  */
 export function pollInterval(withoutHubMs: number, withHubMs: number): number {
-  return realtimeConfigured ? withHubMs : withoutHubMs;
+	return realtimeConfigured ? withHubMs : withoutHubMs;
 }

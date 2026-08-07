@@ -4,89 +4,469 @@
 // Draco / KTX2 など追加デコーダが要るモデルは載せない（GLTFLoader 単体で読める物のみ）。
 
 export interface ModelCatalogEntry {
-  key: string;
-  /** 一覧に出す日本語名 */
-  label: string;
-  /** パレット・2Dエディタで使う絵文字 */
-  emoji: string;
-  /** キーワード検索の対象（日本語・英語を空白区切りで） */
-  tags: string;
-  url: string;
-  source: 'three.js' | 'Khronos';
+	key: string;
+	/** 一覧に出す日本語名 */
+	label: string;
+	/** パレット・2Dエディタで使う絵文字 */
+	emoji: string;
+	/** キーワード検索の対象（日本語・英語を空白区切りで） */
+	tags: string;
+	url: string;
+	source: "three.js" | "Khronos";
 }
 
 // glTF-Sample-Assets は main ブランチ直参照（構成変更が稀なリポジトリ）。
 // three.js はインストール中のバージョンに合わせたタグを固定して参照する。
-const KHR = 'https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models';
-const TJS = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r185/examples/models/gltf';
+const KHR =
+	"https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models";
+const TJS =
+	"https://cdn.jsdelivr.net/gh/mrdoob/three.js@r185/examples/models/gltf";
 
 export const MODEL_CATALOG: ModelCatalogEntry[] = [
-  { key: 'duck', label: 'アヒル', emoji: '🦆', tags: 'duck bird あひる とり 鳥 どうぶつ 動物', url: `${KHR}/Duck/glTF-Binary/Duck.glb`, source: 'Khronos' },
-  { key: 'fox', label: 'キツネ', emoji: '🦊', tags: 'fox きつね 狐 どうぶつ 動物', url: `${KHR}/Fox/glTF-Binary/Fox.glb`, source: 'Khronos' },
-  { key: 'horse', label: 'ウマ', emoji: '🐴', tags: 'horse うま 馬 どうぶつ 動物', url: `${TJS}/Horse.glb`, source: 'three.js' },
-  { key: 'flamingo', label: 'フラミンゴ', emoji: '🦩', tags: 'flamingo bird ふらみんご とり 鳥', url: `${TJS}/Flamingo.glb`, source: 'three.js' },
-  { key: 'parrot', label: 'オウム', emoji: '🦜', tags: 'parrot bird おうむ とり 鳥', url: `${TJS}/Parrot.glb`, source: 'three.js' },
-  { key: 'stork', label: 'コウノトリ', emoji: '🕊️', tags: 'stork bird こうのとり とり 鳥', url: `${TJS}/Stork.glb`, source: 'three.js' },
-  { key: 'fish', label: 'バラマンディ（魚）', emoji: '🐟', tags: 'fish barramundi さかな 魚', url: `${KHR}/BarramundiFish/glTF-Binary/BarramundiFish.glb`, source: 'Khronos' },
-  { key: 'cesium-man', label: 'ヒト（CesiumMan）', emoji: '🧍', tags: 'man human ひと 人 人間', url: `${KHR}/CesiumMan/glTF-Binary/CesiumMan.glb`, source: 'Khronos' },
-  { key: 'soldier', label: '兵士', emoji: '💂', tags: 'soldier human へいし 兵士 人', url: `${TJS}/Soldier.glb`, source: 'three.js' },
-  { key: 'robot-expressive', label: 'ロボット', emoji: '🤖', tags: 'robot ろぼっと ロボット', url: `${TJS}/RobotExpressive/RobotExpressive.glb`, source: 'three.js' },
-  { key: 'robot-brainstem', label: 'ロボット（BrainStem）', emoji: '🦾', tags: 'robot ろぼっと ロボット SF', url: `${KHR}/BrainStem/glTF-Binary/BrainStem.glb`, source: 'Khronos' },
-  { key: 'milk-truck', label: 'ミルクトラック', emoji: '🚚', tags: 'truck car とらっく 車 くるま のりもの 乗り物', url: `${KHR}/CesiumMilkTruck/glTF-Binary/CesiumMilkTruck.glb`, source: 'Khronos' },
-  { key: 'toy-car', label: 'おもちゃの車', emoji: '🚗', tags: 'toy car くるま 車 おもちゃ のりもの 乗り物', url: `${KHR}/ToyCar/glTF-Binary/ToyCar.glb`, source: 'Khronos' },
-  { key: 'avocado', label: 'アボカド', emoji: '🥑', tags: 'avocado food あぼかど たべもの 食べ物 果物', url: `${KHR}/Avocado/glTF-Binary/Avocado.glb`, source: 'Khronos' },
-  { key: 'water-bottle', label: '水筒', emoji: '🍶', tags: 'bottle water すいとう 水筒 ボトル', url: `${KHR}/WaterBottle/glTF-Binary/WaterBottle.glb`, source: 'Khronos' },
-  { key: 'boombox', label: 'ラジカセ', emoji: '📻', tags: 'boombox radio らじかせ 音楽 ラジオ', url: `${KHR}/BoomBox/glTF-Binary/BoomBox.glb`, source: 'Khronos' },
-  { key: 'lantern', label: '街灯ランタン', emoji: '🏮', tags: 'lantern light らんたん あかり 街灯', url: `${KHR}/Lantern/glTF-Binary/Lantern.glb`, source: 'Khronos' },
-  { key: 'antique-camera', label: 'アンティークカメラ', emoji: '📷', tags: 'camera かめら カメラ', url: `${KHR}/AntiqueCamera/glTF-Binary/AntiqueCamera.glb`, source: 'Khronos' },
-  { key: 'damaged-helmet', label: 'ダメージヘルメット', emoji: '🪖', tags: 'helmet SF へるめっと ヘルメット', url: `${KHR}/DamagedHelmet/glTF-Binary/DamagedHelmet.glb`, source: 'Khronos' },
-  { key: 'sheen-chair', label: '椅子', emoji: '🪑', tags: 'chair いす 椅子 家具', url: `${KHR}/SheenChair/glTF-Binary/SheenChair.glb`, source: 'Khronos' },
-  { key: 'corset', label: 'コルセット', emoji: '👗', tags: 'corset こるせっと 服 家具', url: `${KHR}/Corset/glTF-Binary/Corset.glb`, source: 'Khronos' },
-  { key: 'box-textured', label: 'テクスチャ箱', emoji: '📦', tags: 'box はこ 箱', url: `${KHR}/BoxTextured/glTF-Binary/BoxTextured.glb`, source: 'Khronos' },
+	{
+		key: "duck",
+		label: "アヒル",
+		emoji: "🦆",
+		tags: "duck bird あひる とり 鳥 どうぶつ 動物",
+		url: `${KHR}/Duck/glTF-Binary/Duck.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "fox",
+		label: "キツネ",
+		emoji: "🦊",
+		tags: "fox きつね 狐 どうぶつ 動物",
+		url: `${KHR}/Fox/glTF-Binary/Fox.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "horse",
+		label: "ウマ",
+		emoji: "🐴",
+		tags: "horse うま 馬 どうぶつ 動物",
+		url: `${TJS}/Horse.glb`,
+		source: "three.js",
+	},
+	{
+		key: "flamingo",
+		label: "フラミンゴ",
+		emoji: "🦩",
+		tags: "flamingo bird ふらみんご とり 鳥",
+		url: `${TJS}/Flamingo.glb`,
+		source: "three.js",
+	},
+	{
+		key: "parrot",
+		label: "オウム",
+		emoji: "🦜",
+		tags: "parrot bird おうむ とり 鳥",
+		url: `${TJS}/Parrot.glb`,
+		source: "three.js",
+	},
+	{
+		key: "stork",
+		label: "コウノトリ",
+		emoji: "🕊️",
+		tags: "stork bird こうのとり とり 鳥",
+		url: `${TJS}/Stork.glb`,
+		source: "three.js",
+	},
+	{
+		key: "fish",
+		label: "バラマンディ（魚）",
+		emoji: "🐟",
+		tags: "fish barramundi さかな 魚",
+		url: `${KHR}/BarramundiFish/glTF-Binary/BarramundiFish.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "cesium-man",
+		label: "ヒト（CesiumMan）",
+		emoji: "🧍",
+		tags: "man human ひと 人 人間",
+		url: `${KHR}/CesiumMan/glTF-Binary/CesiumMan.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "soldier",
+		label: "兵士",
+		emoji: "💂",
+		tags: "soldier human へいし 兵士 人",
+		url: `${TJS}/Soldier.glb`,
+		source: "three.js",
+	},
+	{
+		key: "robot-expressive",
+		label: "ロボット",
+		emoji: "🤖",
+		tags: "robot ろぼっと ロボット",
+		url: `${TJS}/RobotExpressive/RobotExpressive.glb`,
+		source: "three.js",
+	},
+	{
+		key: "robot-brainstem",
+		label: "ロボット（BrainStem）",
+		emoji: "🦾",
+		tags: "robot ろぼっと ロボット SF",
+		url: `${KHR}/BrainStem/glTF-Binary/BrainStem.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "milk-truck",
+		label: "ミルクトラック",
+		emoji: "🚚",
+		tags: "truck car とらっく 車 くるま のりもの 乗り物",
+		url: `${KHR}/CesiumMilkTruck/glTF-Binary/CesiumMilkTruck.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "toy-car",
+		label: "おもちゃの車",
+		emoji: "🚗",
+		tags: "toy car くるま 車 おもちゃ のりもの 乗り物",
+		url: `${KHR}/ToyCar/glTF-Binary/ToyCar.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "avocado",
+		label: "アボカド",
+		emoji: "🥑",
+		tags: "avocado food あぼかど たべもの 食べ物 果物",
+		url: `${KHR}/Avocado/glTF-Binary/Avocado.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "water-bottle",
+		label: "水筒",
+		emoji: "🍶",
+		tags: "bottle water すいとう 水筒 ボトル",
+		url: `${KHR}/WaterBottle/glTF-Binary/WaterBottle.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "boombox",
+		label: "ラジカセ",
+		emoji: "📻",
+		tags: "boombox radio らじかせ 音楽 ラジオ",
+		url: `${KHR}/BoomBox/glTF-Binary/BoomBox.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "lantern",
+		label: "街灯ランタン",
+		emoji: "🏮",
+		tags: "lantern light らんたん あかり 街灯",
+		url: `${KHR}/Lantern/glTF-Binary/Lantern.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "antique-camera",
+		label: "アンティークカメラ",
+		emoji: "📷",
+		tags: "camera かめら カメラ",
+		url: `${KHR}/AntiqueCamera/glTF-Binary/AntiqueCamera.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "damaged-helmet",
+		label: "ダメージヘルメット",
+		emoji: "🪖",
+		tags: "helmet SF へるめっと ヘルメット",
+		url: `${KHR}/DamagedHelmet/glTF-Binary/DamagedHelmet.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "sheen-chair",
+		label: "椅子",
+		emoji: "🪑",
+		tags: "chair いす 椅子 家具",
+		url: `${KHR}/SheenChair/glTF-Binary/SheenChair.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "corset",
+		label: "コルセット",
+		emoji: "👗",
+		tags: "corset こるせっと 服 家具",
+		url: `${KHR}/Corset/glTF-Binary/Corset.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "box-textured",
+		label: "テクスチャ箱",
+		emoji: "📦",
+		tags: "box はこ 箱",
+		url: `${KHR}/BoxTextured/glTF-Binary/BoxTextured.glb`,
+		source: "Khronos",
+	},
 
-  // Three.js examples additions
-  { key: 'dragon', label: 'ドラゴン', emoji: '🐉', tags: 'dragon monster fantasy creature どらごん 竜 龍 モンスター ファンタジー', url: `${TJS}/DragonAttenuation.glb`, source: 'three.js' },
-  { key: 'flower', label: '花', emoji: '🌸', tags: 'flower plant nature garden はな 花 植物 自然', url: `${TJS}/Flower/Flower.glb`, source: 'three.js' },
-  { key: 'statue-head', label: '彫像（頭部）', emoji: '🗿', tags: 'statue head face bust sculpture human ちょうぞう 頭部 顔 人間 彫刻', url: `${TJS}/LeePerrySmith/LeePerrySmith.glb`, source: 'three.js' },
-  { key: 'michelle', label: '女性（ミシェル）', emoji: '💃', tags: 'woman human character dance michelle じょせい 女性 人 キャラクター ダンス', url: `${TJS}/Michelle.glb`, source: 'three.js' },
-  { key: 'nefertiti', label: 'ネフェルティティの胸像', emoji: '🏺', tags: 'nefertiti bust statue sculpture egypt ねふぇるてぃてぃ 胸像 彫刻 エジプト', url: `${TJS}/Nefertiti/Nefertiti.glb`, source: 'three.js' },
-  { key: 'ion-drive', label: 'イオンエンジン', emoji: '🚀', tags: 'ion drive engine space rocket sf いおん えんじん 宇宙 ロケット 乗り物', url: `${TJS}/PrimaryIonDrive.glb`, source: 'three.js' },
-  { key: 'xbot', label: 'ロボット（Xボット）', emoji: '🤖', tags: 'robot android xbot character ろぼっと ロボット アンドロイド キャラクター', url: `${TJS}/Xbot.glb`, source: 'three.js' },
-  { key: 'coffee-mug', label: 'マグカップ', emoji: '☕', tags: 'coffee mug cup drink kitchen まぐかっぷ コップ 食器 カフェ', url: `${TJS}/coffeeMug.glb`, source: 'three.js' },
-  { key: 'dungeon', label: 'ダンジョン', emoji: '🏰', tags: 'dungeon room castle map stage だんじょん 城 部屋 マップ ステージ', url: `${TJS}/dungeon_warkarma.glb`, source: 'three.js' },
-  { key: 'rpm-avatar', label: 'アバター（ReadyPlayerMe）', emoji: '👤', tags: 'avatar character human rpm あばたー 人物 キャラクター', url: `${TJS}/readyplayer.me.glb`, source: 'three.js' },
-  { key: 'spaceship-hallway', label: '宇宙船の通路', emoji: '🌌', tags: 'spaceship hallway corridor sf room うちゅうせん 通路 部屋', url: `${TJS}/space_ship_hallway.glb`, source: 'three.js' },
-  { key: 'steampunk-camera', label: 'スチームパンクカメラ', emoji: '🎥', tags: 'steampunk camera antique machine すちーむぱんく カメラ 機械', url: `${TJS}/steampunk_camera.glb`, source: 'three.js' },
+	// Three.js examples additions
+	{
+		key: "dragon",
+		label: "ドラゴン",
+		emoji: "🐉",
+		tags: "dragon monster fantasy creature どらごん 竜 龍 モンスター ファンタジー",
+		url: `${TJS}/DragonAttenuation.glb`,
+		source: "three.js",
+	},
+	{
+		key: "flower",
+		label: "花",
+		emoji: "🌸",
+		tags: "flower plant nature garden はな 花 植物 自然",
+		url: `${TJS}/Flower/Flower.glb`,
+		source: "three.js",
+	},
+	{
+		key: "statue-head",
+		label: "彫像（頭部）",
+		emoji: "🗿",
+		tags: "statue head face bust sculpture human ちょうぞう 頭部 顔 人間 彫刻",
+		url: `${TJS}/LeePerrySmith/LeePerrySmith.glb`,
+		source: "three.js",
+	},
+	{
+		key: "michelle",
+		label: "女性（ミシェル）",
+		emoji: "💃",
+		tags: "woman human character dance michelle じょせい 女性 人 キャラクター ダンス",
+		url: `${TJS}/Michelle.glb`,
+		source: "three.js",
+	},
+	{
+		key: "nefertiti",
+		label: "ネフェルティティの胸像",
+		emoji: "🏺",
+		tags: "nefertiti bust statue sculpture egypt ねふぇるてぃてぃ 胸像 彫刻 エジプト",
+		url: `${TJS}/Nefertiti/Nefertiti.glb`,
+		source: "three.js",
+	},
+	{
+		key: "ion-drive",
+		label: "イオンエンジン",
+		emoji: "🚀",
+		tags: "ion drive engine space rocket sf いおん えんじん 宇宙 ロケット 乗り物",
+		url: `${TJS}/PrimaryIonDrive.glb`,
+		source: "three.js",
+	},
+	{
+		key: "xbot",
+		label: "ロボット（Xボット）",
+		emoji: "🤖",
+		tags: "robot android xbot character ろぼっと ロボット アンドロイド キャラクター",
+		url: `${TJS}/Xbot.glb`,
+		source: "three.js",
+	},
+	{
+		key: "coffee-mug",
+		label: "マグカップ",
+		emoji: "☕",
+		tags: "coffee mug cup drink kitchen まぐかっぷ コップ 食器 カフェ",
+		url: `${TJS}/coffeeMug.glb`,
+		source: "three.js",
+	},
+	{
+		key: "dungeon",
+		label: "ダンジョン",
+		emoji: "🏰",
+		tags: "dungeon room castle map stage だんじょん 城 部屋 マップ ステージ",
+		url: `${TJS}/dungeon_warkarma.glb`,
+		source: "three.js",
+	},
+	{
+		key: "rpm-avatar",
+		label: "アバター（ReadyPlayerMe）",
+		emoji: "👤",
+		tags: "avatar character human rpm あばたー 人物 キャラクター",
+		url: `${TJS}/readyplayer.me.glb`,
+		source: "three.js",
+	},
+	{
+		key: "spaceship-hallway",
+		label: "宇宙船の通路",
+		emoji: "🌌",
+		tags: "spaceship hallway corridor sf room うちゅうせん 通路 部屋",
+		url: `${TJS}/space_ship_hallway.glb`,
+		source: "three.js",
+	},
+	{
+		key: "steampunk-camera",
+		label: "スチームパンクカメラ",
+		emoji: "🎥",
+		tags: "steampunk camera antique machine すちーむぱんく カメラ 機械",
+		url: `${TJS}/steampunk_camera.glb`,
+		source: "three.js",
+	},
 
-  // Khronos glTF-Sample-Assets additions
-  { key: 'chess-game', label: 'チェス', emoji: '♟️', tags: 'chess board game play play board ちぇす ゲーム 盤面 遊び', url: `${KHR}/ABeautifulGame/glTF-Binary/ABeautifulGame.glb`, source: 'Khronos' },
-  { key: 'car-concept', label: 'コンセプトカー', emoji: '🏎️', tags: 'car vehicle sports concept race かー 車 乗り物 レース', url: `${KHR}/CarConcept/glTF-Binary/CarConcept.glb`, source: 'Khronos' },
-  { key: 'chair-luxury', label: '豪華な椅子', emoji: '🪑', tags: 'chair luxury furniture gold royal いす 椅子 家具 ゴールド', url: `${KHR}/ChairDamaskPurplegold/glTF-Binary/ChairDamaskPurplegold.glb`, source: 'Khronos' },
-  { key: 'chronograph-watch', label: '腕時計', emoji: '⌚', tags: 'watch clock chronograph luxury gold うでどけい 時計 アクセサリー', url: `${KHR}/ChronographWatch/glTF-Binary/ChronographWatch.glb`, source: 'Khronos' },
-  { key: 'commercial-refrigerator', label: '業務用冷蔵庫', emoji: '🧊', tags: 'refrigerator fridge shop store appliance れいぞうこ 冷蔵庫 店舗 家電', url: `${KHR}/CommercialRefrigerator/glTF-Binary/CommercialRefrigerator.glb`, source: 'Khronos' },
-  { key: 'potted-plant', label: '観葉植物', emoji: '🪴', tags: 'plant pot green leaf houseplant しょくぶつ 植物 鉢植え 植木', url: `${KHR}/DiffuseTransmissionPlant/glTF-Binary/DiffuseTransmissionPlant.glb`, source: 'Khronos' },
-  { key: 'teacup', label: 'ティーカップ', emoji: '🍵', tags: 'tea cup glass drink teacup 紅茶 コップ カフェ ティータイム', url: `${KHR}/DiffuseTransmissionTeacup/glTF-Binary/DiffuseTransmissionTeacup.glb`, source: 'Khronos' },
-  { key: 'sofa-velvet', label: 'ベルベットソファ', emoji: '🛋️', tags: 'sofa couch chair furniture velvet そふぁ ソファー 家具', url: `${KHR}/GlamVelvetSofa/glTF-Binary/GlamVelvetSofa.glb`, source: 'Khronos' },
-  { key: 'candle-holder', label: 'キャンドルホルダー', emoji: '🕯️', tags: 'candle holder light glass candle ろうそく 蝋燭 キャンドル', url: `${KHR}/GlassHurricaneCandleHolder/glTF-Binary/GlassHurricaneCandleHolder.glb`, source: 'Khronos' },
-  { key: 'vase-flowers', label: '花瓶の花', emoji: '💐', tags: 'vase flower glass plants garden かびん 花 花瓶 植物', url: `${KHR}/GlassVaseFlowers/glTF-Binary/GlassVaseFlowers.glb`, source: 'Khronos' },
-  { key: 'olives-dish', label: 'オリーブの皿', emoji: '🫒', tags: 'olive dish plate food table おりーぶ 皿 たべもの 食べ物', url: `${KHR}/IridescentDishWithOlives/glTF-Binary/IridescentDishWithOlives.glb`, source: 'Khronos' },
-  { key: 'sneaker', label: 'スニーカー', emoji: '👟', tags: 'shoe sneaker fashion wear sports すにーかー 靴 服飾 スポーツ', url: `${KHR}/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb`, source: 'Khronos' },
-  { key: 'mosquito-amber', label: '琥珀の中の蚊', emoji: '💎', tags: 'mosquito amber fossil bug insect dinosaur こはく 琥珀 虫 化石', url: `${KHR}/MosquitoInAmber/glTF-Binary/MosquitoInAmber.glb`, source: 'Khronos' },
-  { key: 'pot-coals', label: '炭火の鉢', emoji: '🔥', tags: 'pot coal fire charcoal heater camp すみび 炭火 火 鉢 キャンプ', url: `${KHR}/PotOfCoals/glTF-Binary/PotOfCoals.glb`, source: 'Khronos' },
-  { key: 'mannequin', label: 'マネキン', emoji: '🧍', tags: 'mannequin figure human posture dummy まねきん 人形 素体', url: `${KHR}/RiggedFigure/glTF-Binary/RiggedFigure.glb`, source: 'Khronos' },
-  { key: 'skull', label: 'ドクロ（頭蓋骨）', emoji: '💀', tags: 'skull bone death head zombie horror がいこつ 骸骨 骨 ホラー', url: `${KHR}/ScatteringSkull/glTF-Binary/ScatteringSkull.glb`, source: 'Khronos' },
-  { key: 'sofa-leather', label: 'レザーソファ', emoji: '🛋️', tags: 'sofa leather furniture chair couch そふぁ ソファー 家具', url: `${KHR}/SheenWoodLeatherSofa/glTF-Binary/SheenWoodLeatherSofa.glb`, source: 'Khronos' },
-  { key: 'silk-cushion', label: 'シルクのクッション', emoji: '🪘', tags: 'pouf cushion silk furniture seat くっしょん クッション 家具', url: `${KHR}/SpecularSilkPouf/glTF-Binary/SpecularSilkPouf.glb`, source: 'Khronos' },
-  { key: 'sunglasses', label: 'サングラス', emoji: '🕶️', tags: 'sunglasses glasses fashion wear eye さんぐらす 眼鏡 メガネ', url: `${KHR}/SunglassesKhronos/glTF-Binary/SunglassesKhronos.glb`, source: 'Khronos' },
-  { key: 'virtual-city', label: 'バーチャルシティ', emoji: '🏙️', tags: 'city town map virtual miniature landscape まち 街 都市 マップ', url: `${KHR}/VirtualCity/glTF-Binary/VirtualCity.glb`, source: 'Khronos' },
+	// Khronos glTF-Sample-Assets additions
+	{
+		key: "chess-game",
+		label: "チェス",
+		emoji: "♟️",
+		tags: "chess board game play play board ちぇす ゲーム 盤面 遊び",
+		url: `${KHR}/ABeautifulGame/glTF-Binary/ABeautifulGame.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "car-concept",
+		label: "コンセプトカー",
+		emoji: "🏎️",
+		tags: "car vehicle sports concept race かー 車 乗り物 レース",
+		url: `${KHR}/CarConcept/glTF-Binary/CarConcept.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "chair-luxury",
+		label: "豪華な椅子",
+		emoji: "🪑",
+		tags: "chair luxury furniture gold royal いす 椅子 家具 ゴールド",
+		url: `${KHR}/ChairDamaskPurplegold/glTF-Binary/ChairDamaskPurplegold.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "chronograph-watch",
+		label: "腕時計",
+		emoji: "⌚",
+		tags: "watch clock chronograph luxury gold うでどけい 時計 アクセサリー",
+		url: `${KHR}/ChronographWatch/glTF-Binary/ChronographWatch.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "commercial-refrigerator",
+		label: "業務用冷蔵庫",
+		emoji: "🧊",
+		tags: "refrigerator fridge shop store appliance れいぞうこ 冷蔵庫 店舗 家電",
+		url: `${KHR}/CommercialRefrigerator/glTF-Binary/CommercialRefrigerator.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "potted-plant",
+		label: "観葉植物",
+		emoji: "🪴",
+		tags: "plant pot green leaf houseplant しょくぶつ 植物 鉢植え 植木",
+		url: `${KHR}/DiffuseTransmissionPlant/glTF-Binary/DiffuseTransmissionPlant.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "teacup",
+		label: "ティーカップ",
+		emoji: "🍵",
+		tags: "tea cup glass drink teacup 紅茶 コップ カフェ ティータイム",
+		url: `${KHR}/DiffuseTransmissionTeacup/glTF-Binary/DiffuseTransmissionTeacup.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "sofa-velvet",
+		label: "ベルベットソファ",
+		emoji: "🛋️",
+		tags: "sofa couch chair furniture velvet そふぁ ソファー 家具",
+		url: `${KHR}/GlamVelvetSofa/glTF-Binary/GlamVelvetSofa.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "candle-holder",
+		label: "キャンドルホルダー",
+		emoji: "🕯️",
+		tags: "candle holder light glass candle ろうそく 蝋燭 キャンドル",
+		url: `${KHR}/GlassHurricaneCandleHolder/glTF-Binary/GlassHurricaneCandleHolder.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "vase-flowers",
+		label: "花瓶の花",
+		emoji: "💐",
+		tags: "vase flower glass plants garden かびん 花 花瓶 植物",
+		url: `${KHR}/GlassVaseFlowers/glTF-Binary/GlassVaseFlowers.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "olives-dish",
+		label: "オリーブの皿",
+		emoji: "🫒",
+		tags: "olive dish plate food table おりーぶ 皿 たべもの 食べ物",
+		url: `${KHR}/IridescentDishWithOlives/glTF-Binary/IridescentDishWithOlives.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "sneaker",
+		label: "スニーカー",
+		emoji: "👟",
+		tags: "shoe sneaker fashion wear sports すにーかー 靴 服飾 スポーツ",
+		url: `${KHR}/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "mosquito-amber",
+		label: "琥珀の中の蚊",
+		emoji: "💎",
+		tags: "mosquito amber fossil bug insect dinosaur こはく 琥珀 虫 化石",
+		url: `${KHR}/MosquitoInAmber/glTF-Binary/MosquitoInAmber.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "pot-coals",
+		label: "炭火の鉢",
+		emoji: "🔥",
+		tags: "pot coal fire charcoal heater camp すみび 炭火 火 鉢 キャンプ",
+		url: `${KHR}/PotOfCoals/glTF-Binary/PotOfCoals.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "mannequin",
+		label: "マネキン",
+		emoji: "🧍",
+		tags: "mannequin figure human posture dummy まねきん 人形 素体",
+		url: `${KHR}/RiggedFigure/glTF-Binary/RiggedFigure.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "skull",
+		label: "ドクロ（頭蓋骨）",
+		emoji: "💀",
+		tags: "skull bone death head zombie horror がいこつ 骸骨 骨 ホラー",
+		url: `${KHR}/ScatteringSkull/glTF-Binary/ScatteringSkull.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "sofa-leather",
+		label: "レザーソファ",
+		emoji: "🛋️",
+		tags: "sofa leather furniture chair couch そふぁ ソファー 家具",
+		url: `${KHR}/SheenWoodLeatherSofa/glTF-Binary/SheenWoodLeatherSofa.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "silk-cushion",
+		label: "シルクのクッション",
+		emoji: "🪘",
+		tags: "pouf cushion silk furniture seat くっしょん クッション 家具",
+		url: `${KHR}/SpecularSilkPouf/glTF-Binary/SpecularSilkPouf.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "sunglasses",
+		label: "サングラス",
+		emoji: "🕶️",
+		tags: "sunglasses glasses fashion wear eye さんぐらす 眼鏡 メガネ",
+		url: `${KHR}/SunglassesKhronos/glTF-Binary/SunglassesKhronos.glb`,
+		source: "Khronos",
+	},
+	{
+		key: "virtual-city",
+		label: "バーチャルシティ",
+		emoji: "🏙️",
+		tags: "city town map virtual miniature landscape まち 街 都市 マップ",
+		url: `${KHR}/VirtualCity/glTF-Binary/VirtualCity.glb`,
+		source: "Khronos",
+	},
 ];
 
 /** キーワード検索：空白区切りの全トークンが label/tags/key のどれかに含まれる物を返す。 */
 export const searchModels = (query: string): ModelCatalogEntry[] => {
-  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (!tokens.length) return MODEL_CATALOG;
-  return MODEL_CATALOG.filter(m => {
-    const hay = `${m.label} ${m.tags} ${m.key}`.toLowerCase();
-    return tokens.every(t => hay.includes(t));
-  });
+	const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+	if (!tokens.length) return MODEL_CATALOG;
+	return MODEL_CATALOG.filter((m) => {
+		const hay = `${m.label} ${m.tags} ${m.key}`.toLowerCase();
+		return tokens.every((t) => hay.includes(t));
+	});
 };

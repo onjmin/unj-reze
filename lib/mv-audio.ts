@@ -6,24 +6,24 @@
 //
 // どのモードでも onTick（＝音声スケジューラのステップ）を返すので、描画側の同期方法は変わらない。
 
-import type { MmlPlayback } from '@onjmin/dtm';
-import { getStudio } from './dtm';
-import { effectiveMmlVolume, withMmlVolume } from './mml';
-import type { MvAudioMode } from './mv-config';
+import type { MmlPlayback } from "@onjmin/dtm";
+import { getStudio } from "./dtm";
+import { effectiveMmlVolume, withMmlVolume } from "./mml";
+import type { MvAudioMode } from "./mv-config";
 
 export interface MvPlaybackOptions {
-  mode: MvAudioMode;
-  /** サイトのマスター音量 0-100（applyMasterVolume(100) の値をそのまま渡す）。 */
-  volume: number;
-  startStep?: number;
-  onTick: (step: number) => void;
-  onStop: () => void;
+	mode: MvAudioMode;
+	/** サイトのマスター音量 0-100（applyMasterVolume(100) の値をそのまま渡す）。 */
+	volume: number;
+	startStep?: number;
+	onTick: (step: number) => void;
+	onStop: () => void;
 }
 
 export interface MvPlaybackHandle {
-  stop: () => void;
-  /** サイトのマスター音量 0-100 を渡す。MML側の #volume= との合成は内部で面倒を見る。 */
-  setVolume: (v: number) => void;
+	stop: () => void;
+	/** サイトのマスター音量 0-100 を渡す。MML側の #volume= との合成は内部で面倒を見る。 */
+	setVolume: (v: number) => void;
 }
 
 /**
@@ -48,67 +48,99 @@ export interface MvPlaybackHandle {
  * （ブラウザの自動再生ポリシーのため）。
  */
 export async function startMvPlayback(
-  mml: string,
-  lyricTrackIds: number[],
-  options: MvPlaybackOptions,
+	mml: string,
+	lyricTrackIds: number[],
+	options: MvPlaybackOptions,
 ): Promise<MvPlaybackHandle> {
-  const { mode, volume, startStep, onTick, onStop } = options;
-  // 楽器側は `#volume=` が options.volume を上書きしてしまうので、MML自体を書き換えて渡す
-  const scaled = withMmlVolume(mml, effectiveMmlVolume(mml, volume));
+	const { mode, volume, startStep, onTick, onStop } = options;
+	// 楽器側は `#volume=` が options.volume を上書きしてしまうので、MML自体を書き換えて渡す
+	const scaled = withMmlVolume(mml, effectiveMmlVolume(mml, volume));
 
-  if (mode === 'light') {
-    const { playMML } = await import('@onjmin/dtm');
-    const playback = playMML(scaled, { volume, startStep, synth: true, onTick, onStop });
-    return handleOf([{ playback, scaleWithMml: true }], mml);
-  }
+	if (mode === "light") {
+		const { playMML } = await import("@onjmin/dtm");
+		const playback = playMML(scaled, {
+			volume,
+			startStep,
+			synth: true,
+			onTick,
+			onStop,
+		});
+		return handleOf([{ playback, scaleWithMml: true }], mml);
+	}
 
-  const studio = await getStudio();
+	const studio = await getStudio();
 
-  if (mode === 'soundfont') {
-    const playback = studio.play(scaled, { volume, startStep, onTick, onStop });
-    return handleOf([{ playback, scaleWithMml: true }], mml);
-  }
+	if (mode === "soundfont") {
+		const playback = studio.play(scaled, { volume, startStep, onTick, onStop });
+		return handleOf([{ playback, scaleWithMml: true }], mml);
+	}
 
-  // soundfontKoe: 楽器（SoundFont）と歌声（koe）を同じ AudioContext 上で重ねる。
-  // ライブラリ側の studio.playSingingMML に全て委譲し、同一スケジューラで再生します。
-  try {
-    // 歌声側は内部で (metaVolume/100 * options.volume) を行うが、
-    // 楽器側は options.volume を無視してしまうため、予めスケール済みのMML(scaled)を渡し、
-    // 歌声が二重に小さくならないように options.volume は100で固定する。
-    const playback = await studio.playSingingMML(scaled, { volume: 100, startStep, onTick, onStop });
-    return handleOf([{ playback, scaleWithMml: true }], mml);
-  } catch (e) {
-    // 歌声モデルの読み込み等に失敗した場合は、楽器のみでフォールバック再生する
-    console.error('[mv-audio] singing playback failed; falling back to instruments only', e);
-    const instruments = studio.play(scaled, { volume: 100, startStep, onTick, onStop });
-    return handleOf([{ playback: instruments, scaleWithMml: true }], mml);
-  }
+	// soundfontKoe: 楽器（SoundFont）と歌声（koe）を同じ AudioContext 上で重ねる。
+	// ライブラリ側の studio.playSingingMML に全て委譲し、同一スケジューラで再生します。
+	try {
+		// 歌声側は内部で (metaVolume/100 * options.volume) を行うが、
+		// 楽器側は options.volume を無視してしまうため、予めスケール済みのMML(scaled)を渡し、
+		// 歌声が二重に小さくならないように options.volume は100で固定する。
+		const playback = await studio.playSingingMML(scaled, {
+			volume: 100,
+			startStep,
+			onTick,
+			onStop,
+		});
+		return handleOf([{ playback, scaleWithMml: true }], mml);
+	} catch (e) {
+		// 歌声モデルの読み込み等に失敗した場合は、楽器のみでフォールバック再生する
+		console.error(
+			"[mv-audio] singing playback failed; falling back to instruments only",
+			e,
+		);
+		const instruments = studio.play(scaled, {
+			volume: 100,
+			startStep,
+			onTick,
+			onStop,
+		});
+		return handleOf([{ playback: instruments, scaleWithMml: true }], mml);
+	}
 }
 
 interface TrackedPlayback {
-  playback: MmlPlayback;
-  /**
-   * true  … setVolume には「MML音量 × サイト音量」を渡す（絶対値で上書きされる経路）
-   * false … setVolume にはサイト音量をそのまま渡す（内部で MML音量 と掛け算される経路）
-   */
-  scaleWithMml: boolean;
+	playback: MmlPlayback;
+	/**
+	 * true  … setVolume には「MML音量 × サイト音量」を渡す（絶対値で上書きされる経路）
+	 * false … setVolume にはサイト音量をそのまま渡す（内部で MML音量 と掛け算される経路）
+	 */
+	scaleWithMml: boolean;
 }
 
-function handleOf(playbacks: TrackedPlayback[], sourceMml: string): MvPlaybackHandle {
-  let stopped = false;
-  return {
-    stop: () => {
-      if (stopped) return;
-      stopped = true;
-      for (const { playback } of playbacks) {
-        try { playback.destroy(); } catch { /* すでに閉じている場合は無視 */ }
-      }
-    },
-    setVolume: (siteVolume: number) => {
-      for (const { playback, scaleWithMml } of playbacks) {
-        const v = scaleWithMml ? effectiveMmlVolume(sourceMml, siteVolume) : siteVolume;
-        try { playback.setVolume(v); } catch { /* 停止済みなら無視 */ }
-      }
-    },
-  };
+function handleOf(
+	playbacks: TrackedPlayback[],
+	sourceMml: string,
+): MvPlaybackHandle {
+	let stopped = false;
+	return {
+		stop: () => {
+			if (stopped) return;
+			stopped = true;
+			for (const { playback } of playbacks) {
+				try {
+					playback.destroy();
+				} catch {
+					/* すでに閉じている場合は無視 */
+				}
+			}
+		},
+		setVolume: (siteVolume: number) => {
+			for (const { playback, scaleWithMml } of playbacks) {
+				const v = scaleWithMml
+					? effectiveMmlVolume(sourceMml, siteVolume)
+					: siteVolume;
+				try {
+					playback.setVolume(v);
+				} catch {
+					/* 停止済みなら無視 */
+				}
+			}
+		},
+	};
 }

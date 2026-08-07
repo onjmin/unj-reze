@@ -1,118 +1,191 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Hash } from 'lucide-react';
-import { Post, AnonymousUser } from '@/lib/types';
-import { api } from '@/lib/api';
-import { ensureSessionId } from '@/lib/session';
-import PostContainer from './PostContainer';
-import VirtualizedItem from './VirtualizedItem';
-import PageHeader from './PageHeader';
-import { mergePostCounters } from '@/lib/post-merge';
+import { Hash } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api";
+import { mergePostCounters } from "@/lib/post-merge";
+import { ensureSessionId } from "@/lib/session";
+import { AnonymousUser, Post } from "@/lib/types";
+import PageHeader from "./PageHeader";
+import PostContainer from "./PostContainer";
+import VirtualizedItem from "./VirtualizedItem";
 
 interface HashtagViewProps {
-  tag: string;
+	tag: string;
 }
 
 export default function HashtagView({ tag }: HashtagViewProps) {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState('');
-  const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
-  const inited = useRef(false);
+	const [posts, setPosts] = useState<Post[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [userId, setUserId] = useState("");
+	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
+	const inited = useRef(false);
 
-  const normalized = tag.startsWith('#') ? tag : `#${tag}`;
+	const normalized = tag.startsWith("#") ? tag : `#${tag}`;
 
-  // Keep a ref so fetchPosts can read the latest userId without depending on it —
-  // avoids re-creating the callback (and triggering a second fetch) when the
-  // session cookie resolves and userId updates.
-  const userIdRef = useRef(userId);
-  useEffect(() => { userIdRef.current = userId; }, [userId]);
+	// Keep a ref so fetchPosts can read the latest userId without depending on it —
+	// avoids re-creating the callback (and triggering a second fetch) when the
+	// session cookie resolves and userId updates.
+	const userIdRef = useRef(userId);
+	useEffect(() => {
+		userIdRef.current = userId;
+	}, [userId]);
 
-  useEffect(() => {
-    if (inited.current) return;
-    inited.current = true;
-    const sessionId = ensureSessionId();
-    api.auth.anonymous(sessionId).then(u => {
-      setUserId(u.displayName);
-      setCurrentUser(u);
-    }).catch(() => {});
-  }, []);
+	useEffect(() => {
+		if (inited.current) return;
+		inited.current = true;
+		const sessionId = ensureSessionId();
+		api.auth
+			.anonymous(sessionId)
+			.then((u) => {
+				setUserId(u.displayName);
+				setCurrentUser(u);
+			})
+			.catch(() => {});
+	}, []);
 
-  const fetchPosts = useCallback(() => {
-    setLoading(true);
-    api.hashtag.posts(normalized, userIdRef.current || undefined)
-      .then(setPosts)
-      .catch(() => setPosts([]))
-      .finally(() => setLoading(false));
-  }, [normalized]); // userId deliberately omitted — read via ref to prevent double-fetch
+	const fetchPosts = useCallback(() => {
+		setLoading(true);
+		api.hashtag
+			.posts(normalized, userIdRef.current || undefined)
+			.then(setPosts)
+			.catch(() => setPosts([]))
+			.finally(() => setLoading(false));
+	}, [normalized]); // userId deliberately omitted — read via ref to prevent double-fetch
 
-  useEffect(() => { Promise.resolve().then(() => fetchPosts()); }, [fetchPosts]);
+	useEffect(() => {
+		Promise.resolve().then(() => fetchPosts());
+	}, [fetchPosts]);
 
-  const handleLike = async (id: string) => {
-    setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, liked: !p.liked, likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1) }));
-    try { const u = await api.posts.like(id, userId); setPosts(prev => prev.map(p => p.id === id ? mergePostCounters(p, u) : p)); } catch {}
-  };
-  const handleDislike = async (id: string) => {
-    setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, disliked: !p.disliked, dislikes: Math.max(0, p.disliked ? p.dislikes - 1 : p.dislikes + 1) }));
-    try { const u = await api.posts.dislike(id, userId); setPosts(prev => prev.map(p => p.id === id ? mergePostCounters(p, u) : p)); } catch {}
-  };
-  const handleRepost = async (id: string) => {
-    try { const u = await api.posts.repost(id); setPosts(prev => prev.map(p => p.id === id ? mergePostCounters(p, u) : p)); } catch {}
-  };
-  const handleHeart = async (id: string) => {
-    setPosts(prev => prev.map(p => p.id !== id ? p : { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 }));
-    try { await api.posts.heart(id, userId, 1); } catch {}
-  };
-  const handleAddReply = async (id: string, text: string) => {
-    if (!text.trim()) return;
-    try {
-      const reply = await api.posts.replies.create(id, { displayName: userId, content: text, parentPostId: id });
-      setPosts(prev => prev.map(p => p.id === id ? { ...p, repliesCount: p.repliesCount + 1, replies: [...p.replies, reply] } : p));
-    } catch {}
-  };
+	const handleLike = async (id: string) => {
+		setPosts((prev) =>
+			prev.map((p) =>
+				p.id !== id
+					? p
+					: {
+							...p,
+							liked: !p.liked,
+							likes: Math.max(0, p.liked ? p.likes - 1 : p.likes + 1),
+						},
+			),
+		);
+		try {
+			const u = await api.posts.like(id, userId);
+			setPosts((prev) =>
+				prev.map((p) => (p.id === id ? mergePostCounters(p, u) : p)),
+			);
+		} catch {}
+	};
+	const handleDislike = async (id: string) => {
+		setPosts((prev) =>
+			prev.map((p) =>
+				p.id !== id
+					? p
+					: {
+							...p,
+							disliked: !p.disliked,
+							dislikes: Math.max(
+								0,
+								p.disliked ? p.dislikes - 1 : p.dislikes + 1,
+							),
+						},
+			),
+		);
+		try {
+			const u = await api.posts.dislike(id, userId);
+			setPosts((prev) =>
+				prev.map((p) => (p.id === id ? mergePostCounters(p, u) : p)),
+			);
+		} catch {}
+	};
+	const handleRepost = async (id: string) => {
+		try {
+			const u = await api.posts.repost(id);
+			setPosts((prev) =>
+				prev.map((p) => (p.id === id ? mergePostCounters(p, u) : p)),
+			);
+		} catch {}
+	};
+	const handleHeart = async (id: string) => {
+		setPosts((prev) =>
+			prev.map((p) =>
+				p.id !== id
+					? p
+					: { ...p, heartsTotal: (Number(p.heartsTotal) || 0) + 1 },
+			),
+		);
+		try {
+			await api.posts.heart(id, userId, 1);
+		} catch {}
+	};
+	const handleAddReply = async (id: string, text: string) => {
+		if (!text.trim()) return;
+		try {
+			const reply = await api.posts.replies.create(id, {
+				displayName: userId,
+				content: text,
+				parentPostId: id,
+			});
+			setPosts((prev) =>
+				prev.map((p) =>
+					p.id === id
+						? {
+								...p,
+								repliesCount: p.repliesCount + 1,
+								replies: [...p.replies, reply],
+							}
+						: p,
+				),
+			);
+		} catch {}
+	};
 
-  return (
-    <div className="flex-1 flex flex-col">
-      <PageHeader title={normalized.slice(1)} icon={<Hash size={15} className="text-blue-400" />} />
+	return (
+		<div className="flex-1 flex flex-col">
+			<PageHeader
+				title={normalized.slice(1)}
+				icon={<Hash size={15} className="text-blue-400" />}
+			/>
 
-      <div className="flex-1 divide-y divide-gray-800/80 pb-20">
-        {loading ? (
-          <div className="p-8 text-center text-xs text-gray-600">読み込み中...</div>
-        ) : posts.length > 0 ? (
-          posts.map((post, index) => (
-            <VirtualizedItem key={post.id} initialVisible={index < 8}>
-              <PostContainer
-                post={post}
-                isRankingMode={false}
-                rankIndex={index + 1}
-                rankCategory=""
-                onLike={handleLike}
-                onDislike={handleDislike}
-                onRepost={handleRepost}
-                onHeart={handleHeart}
-                onAddReply={handleAddReply}
-                onQuickPost={() => {}}
-                openGame={() => {}}
-                openCollab={() => {}}
-                openMml={() => {}}
-                currentUserSlug={currentUser?.slug}
-                currentUserDisplayName={currentUser?.displayName}
-                onModerationChange={fetchPosts}
-                // ハッシュタグ一覧は各種エディタを載せていないので編集導線は非対応
-                onEditImage={null}
-                onEditMml={null}
-                onEditMv={null}
-              />
-            </VirtualizedItem>
-          ))
-        ) : (
-          <div className="p-12 text-center text-xs text-gray-600 flex flex-col items-center gap-2">
-            <Hash size={24} className="text-gray-700" />
-            <span>「{normalized}」の投稿はまだありません</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+			<div className="flex-1 divide-y divide-gray-800/80 pb-20">
+				{loading ? (
+					<div className="p-8 text-center text-xs text-gray-600">
+						読み込み中...
+					</div>
+				) : posts.length > 0 ? (
+					posts.map((post, index) => (
+						<VirtualizedItem key={post.id} initialVisible={index < 8}>
+							<PostContainer
+								post={post}
+								isRankingMode={false}
+								rankIndex={index + 1}
+								rankCategory=""
+								onLike={handleLike}
+								onDislike={handleDislike}
+								onRepost={handleRepost}
+								onHeart={handleHeart}
+								onAddReply={handleAddReply}
+								onQuickPost={() => {}}
+								openGame={() => {}}
+								openCollab={() => {}}
+								openMml={() => {}}
+								currentUserSlug={currentUser?.slug}
+								currentUserDisplayName={currentUser?.displayName}
+								onModerationChange={fetchPosts}
+								// ハッシュタグ一覧は各種エディタを載せていないので編集導線は非対応
+								onEditImage={null}
+								onEditMml={null}
+								onEditMv={null}
+							/>
+						</VirtualizedItem>
+					))
+				) : (
+					<div className="p-12 text-center text-xs text-gray-600 flex flex-col items-center gap-2">
+						<Hash size={24} className="text-gray-700" />
+						<span>「{normalized}」の投稿はまだありません</span>
+					</div>
+				)}
+			</div>
+		</div>
+	);
 }

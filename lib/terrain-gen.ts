@@ -2,265 +2,417 @@
 // 標高・湿度マップを作り、内蔵RPGENマップチップ（/assets/rpgen/map.png）の地形タイルへ塗り分ける。
 // 2Dエンジン用の generateTopDownTerrain / generateSideViewTerrain はここ、
 // yume25d 用の generateYumeTerrain は lib/yume25d-macros.ts（マクロ置き場）にある。
-import { type TileDef, localSysTileUrl } from '@/components/game-presets/shared';
+import {
+	localSysTileUrl,
+	type TileDef,
+} from "@/components/game-presets/shared";
 
 /** 水の量（海面の高さ）。生成UIの「少なめ/ふつう/多め」に対応する。 */
-export type TerrainWater = 'low' | 'mid' | 'high';
-export const SEA_LEVEL: Record<TerrainWater, number> = { low: 0.38, mid: 0.47, high: 0.56 };
+export type TerrainWater = "low" | "mid" | "high";
+export const SEA_LEVEL: Record<TerrainWater, number> = {
+	low: 0.38,
+	mid: 0.47,
+	high: 0.56,
+};
 
 /** シード付き乱数（mulberry32）。同じシードなら同じ地形になる。 */
 export const seededRandom = (seed: number) => {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+	let a = seed >>> 0;
+	return () => {
+		a |= 0;
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
 };
 
 const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 /** 格子点ハッシュから8方向の勾配ベクトルとの内積を返す（古典パーリンノイズの grad） */
 const grad = (h: number, x: number, y: number) => {
-  switch (h & 7) {
-    case 0: return x + y; case 1: return -x + y; case 2: return x - y; case 3: return -x - y;
-    case 4: return x; case 5: return -x; case 6: return y; default: return -y;
-  }
+	switch (h & 7) {
+		case 0:
+			return x + y;
+		case 1:
+			return -x + y;
+		case 2:
+			return x - y;
+		case 3:
+			return -x - y;
+		case 4:
+			return x;
+		case 5:
+			return -x;
+		case 6:
+			return y;
+		default:
+			return -y;
+	}
 };
 
 /** 古典パーリンノイズ（2D勾配ノイズ）。戻り値はおよそ [-1, 1]。 */
 const createPerlin2D = (seed: number) => {
-  const rand = seededRandom(seed);
-  const base = Array.from({ length: 256 }, (_, i) => i);
-  for (let i = 255; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [base[i], base[j]] = [base[j], base[i]];
-  }
-  const p = new Uint8Array(512);
-  for (let i = 0; i < 512; i++) p[i] = base[i & 255];
-  return (x: number, y: number): number => {
-    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-    x -= Math.floor(x); y -= Math.floor(y);
-    const u = fade(x), v = fade(y);
-    const aa = p[p[X] + Y], ab = p[p[X] + Y + 1], ba = p[p[X + 1] + Y], bb = p[p[X + 1] + Y + 1];
-    return lerp(
-      lerp(grad(aa, x, y), grad(ba, x - 1, y), u),
-      lerp(grad(ab, x, y - 1), grad(bb, x - 1, y - 1), u),
-      v,
-    );
-  };
+	const rand = seededRandom(seed);
+	const base = Array.from({ length: 256 }, (_, i) => i);
+	for (let i = 255; i > 0; i--) {
+		const j = Math.floor(rand() * (i + 1));
+		[base[i], base[j]] = [base[j], base[i]];
+	}
+	const p = new Uint8Array(512);
+	for (let i = 0; i < 512; i++) p[i] = base[i & 255];
+	return (x: number, y: number): number => {
+		const X = Math.floor(x) & 255,
+			Y = Math.floor(y) & 255;
+		x -= Math.floor(x);
+		y -= Math.floor(y);
+		const u = fade(x),
+			v = fade(y);
+		const aa = p[p[X] + Y],
+			ab = p[p[X] + Y + 1],
+			ba = p[p[X + 1] + Y],
+			bb = p[p[X + 1] + Y + 1];
+		return lerp(
+			lerp(grad(aa, x, y), grad(ba, x - 1, y), u),
+			lerp(grad(ab, x, y - 1), grad(bb, x - 1, y - 1), u),
+			v,
+		);
+	};
 };
 
 /** fBm：周波数を倍々・振幅を半々にしたノイズを重ねる（マイクラのオクターブ合成）。0〜1 に正規化して返す。 */
 export const createFbm01 = (seed: number, octaves = 4) => {
-  const noise = createPerlin2D(seed);
-  return (x: number, y: number): number => {
-    let sum = 0, amp = 1, freq = 1, norm = 0;
-    for (let o = 0; o < octaves; o++) {
-      sum += amp * noise(x * freq, y * freq);
-      norm += amp; amp *= 0.5; freq *= 2;
-    }
-    // パーリンノイズの実効レンジ（±0.7程度）で割って 0〜1 へ
-    const v = sum / norm / 0.7;
-    return Math.min(1, Math.max(0, (v + 1) / 2));
-  };
+	const noise = createPerlin2D(seed);
+	return (x: number, y: number): number => {
+		let sum = 0,
+			amp = 1,
+			freq = 1,
+			norm = 0;
+		for (let o = 0; o < octaves; o++) {
+			sum += amp * noise(x * freq, y * freq);
+			norm += amp;
+			amp *= 0.5;
+			freq *= 2;
+		}
+		// パーリンノイズの実効レンジ（±0.7程度）で割って 0〜1 へ
+		const v = sum / norm / 0.7;
+		return Math.min(1, Math.max(0, (v + 1) / 2));
+	};
 };
 
 /** 標高＋湿度の2枚のノイズマップ。elev01 が海/陸/山、moist01 が森の分布を決める。 */
 export const createTerrainSampler = (seed: number) => ({
-  elev01: createFbm01(seed),
-  moist01: createFbm01((seed ^ 0x9e3779b9) >>> 0),
+	elev01: createFbm01(seed),
+	moist01: createFbm01((seed ^ 0x9e3779b9) >>> 0),
 });
 
 // ── 3Dパーリンノイズ（洞窟くり抜き用） ─────────────────────────────────
 /** 格子点ハッシュから12方向（立方体の辺の中点）の勾配との内積（Ken Perlin の grad3）。 */
 const grad3 = (h: number, x: number, y: number, z: number) => {
-  switch (h & 15) {
-    case 0: return x + y; case 1: return -x + y; case 2: return x - y; case 3: return -x - y;
-    case 4: return x + z; case 5: return -x + z; case 6: return x - z; case 7: return -x - z;
-    case 8: return y + z; case 9: return -y + z; case 10: return y - z; case 11: return -y - z;
-    case 12: return x + y; case 13: return -y + z; case 14: return -x + y; default: return -y - z;
-  }
+	switch (h & 15) {
+		case 0:
+			return x + y;
+		case 1:
+			return -x + y;
+		case 2:
+			return x - y;
+		case 3:
+			return -x - y;
+		case 4:
+			return x + z;
+		case 5:
+			return -x + z;
+		case 6:
+			return x - z;
+		case 7:
+			return -x - z;
+		case 8:
+			return y + z;
+		case 9:
+			return -y + z;
+		case 10:
+			return y - z;
+		case 11:
+			return -y - z;
+		case 12:
+			return x + y;
+		case 13:
+			return -y + z;
+		case 14:
+			return -x + y;
+		default:
+			return -y - z;
+	}
 };
 
 /** 古典パーリンノイズ（3D）。戻り値はおよそ [-1, 1]（実効レンジは±0.7程度）。 */
 export const createPerlin3D = (seed: number) => {
-  const rand = seededRandom(seed);
-  const base = Array.from({ length: 256 }, (_, i) => i);
-  for (let i = 255; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [base[i], base[j]] = [base[j], base[i]];
-  }
-  const p = new Uint8Array(512);
-  for (let i = 0; i < 512; i++) p[i] = base[i & 255];
-  return (x: number, y: number, z: number): number => {
-    const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
-    x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
-    const u = fade(x), v = fade(y), w = fade(z);
-    const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
-    const B = p[X + 1] + Y, BA = p[B] + Z, BB = p[B + 1] + Z;
-    return lerp(
-      lerp(
-        lerp(grad3(p[AA], x, y, z), grad3(p[BA], x - 1, y, z), u),
-        lerp(grad3(p[AB], x, y - 1, z), grad3(p[BB], x - 1, y - 1, z), u), v),
-      lerp(
-        lerp(grad3(p[AA + 1], x, y, z - 1), grad3(p[BA + 1], x - 1, y, z - 1), u),
-        lerp(grad3(p[AB + 1], x, y - 1, z - 1), grad3(p[BB + 1], x - 1, y - 1, z - 1), u), v),
-      w);
-  };
+	const rand = seededRandom(seed);
+	const base = Array.from({ length: 256 }, (_, i) => i);
+	for (let i = 255; i > 0; i--) {
+		const j = Math.floor(rand() * (i + 1));
+		[base[i], base[j]] = [base[j], base[i]];
+	}
+	const p = new Uint8Array(512);
+	for (let i = 0; i < 512; i++) p[i] = base[i & 255];
+	return (x: number, y: number, z: number): number => {
+		const X = Math.floor(x) & 255,
+			Y = Math.floor(y) & 255,
+			Z = Math.floor(z) & 255;
+		x -= Math.floor(x);
+		y -= Math.floor(y);
+		z -= Math.floor(z);
+		const u = fade(x),
+			v = fade(y),
+			w = fade(z);
+		const A = p[X] + Y,
+			AA = p[A] + Z,
+			AB = p[A + 1] + Z;
+		const B = p[X + 1] + Y,
+			BA = p[B] + Z,
+			BB = p[B + 1] + Z;
+		return lerp(
+			lerp(
+				lerp(grad3(p[AA], x, y, z), grad3(p[BA], x - 1, y, z), u),
+				lerp(grad3(p[AB], x, y - 1, z), grad3(p[BB], x - 1, y - 1, z), u),
+				v,
+			),
+			lerp(
+				lerp(
+					grad3(p[AA + 1], x, y, z - 1),
+					grad3(p[BA + 1], x - 1, y, z - 1),
+					u,
+				),
+				lerp(
+					grad3(p[AB + 1], x, y - 1, z - 1),
+					grad3(p[BB + 1], x - 1, y - 1, z - 1),
+					u,
+				),
+				v,
+			),
+			w,
+		);
+	};
 };
 
 /** マイクラ式スパゲッティ洞窟：2本の3Dノイズがどちらも0付近になる場所＝チューブ状のトンネル。
  *  戻り値 true のマスをくり抜く。座標は呼び出し側で周波数を掛けて渡す。 */
 export const createCaveSampler = (seed: number) => {
-  const n1 = createPerlin3D((seed ^ 0x51ab3c7d) >>> 0);
-  const n2 = createPerlin3D((seed ^ 0x9e3779b9) >>> 0);
-  return (x: number, y: number, z: number): boolean =>
-    Math.abs(n1(x, y, z)) < 0.12 && Math.abs(n2(x, y, z)) < 0.12;
+	const n1 = createPerlin3D((seed ^ 0x51ab3c7d) >>> 0);
+	const n2 = createPerlin3D((seed ^ 0x9e3779b9) >>> 0);
+	return (x: number, y: number, z: number): boolean =>
+		Math.abs(n1(x, y, z)) < 0.12 && Math.abs(n2(x, y, z)) < 0.12;
 };
 
 // ── 標高の生成手法（yume25d の地形タイプ） ─────────────────────────────
 /** 地形タイプ。hills=fBm丘陵（標準）/ island=島（放射フォールオフ）/ ridged=山岳（尾根が尖る
  *  リッジドマルチフラクタル）/ terrace=段々台地（テラス量子化）/ warp=ゆがみ（ドメインワープ）。 */
-export type TerrainStyle = 'hills' | 'island' | 'ridged' | 'terrace' | 'warp';
+export type TerrainStyle = "hills" | "island" | "ridged" | "terrace" | "warp";
 export const TERRAIN_STYLE_LABELS: Record<TerrainStyle, string> = {
-  hills: '丘陵（標準）', island: '島', ridged: '山岳（尾根）', terrace: '段々台地', warp: 'ゆがみ（夢風）',
+	hills: "丘陵（標準）",
+	island: "島",
+	ridged: "山岳（尾根）",
+	terrace: "段々台地",
+	warp: "ゆがみ（夢風）",
 };
 
 /** リッジドマルチフラクタル：1-|noise| で谷を尾根に折り返すと山脈らしい鋭い稜線になる。0〜1。 */
 export const createRidged01 = (seed: number, octaves = 4) => {
-  const noise = createPerlin2D(seed);
-  return (x: number, y: number): number => {
-    let sum = 0, amp = 1, freq = 1, norm = 0;
-    for (let o = 0; o < octaves; o++) {
-      const n = Math.max(0, 1 - Math.abs(noise(x * freq, y * freq)) / 0.7);
-      sum += amp * n * n;
-      norm += amp; amp *= 0.5; freq *= 2;
-    }
-    return Math.min(1, sum / norm);
-  };
+	const noise = createPerlin2D(seed);
+	return (x: number, y: number): number => {
+		let sum = 0,
+			amp = 1,
+			freq = 1,
+			norm = 0;
+		for (let o = 0; o < octaves; o++) {
+			const n = Math.max(0, 1 - Math.abs(noise(x * freq, y * freq)) / 0.7);
+			sum += amp * n * n;
+			norm += amp;
+			amp *= 0.5;
+			freq *= 2;
+		}
+		return Math.min(1, sum / norm);
+	};
 };
 
 /** テラス化：標高を steps 段に量子化しつつ、段差の肩だけ smoothstep で斜面にする（棚田/メサ地形）。 */
 const terrace = (e: number, steps: number): number => {
-  const t = e * steps, i = Math.floor(t), f = t - i;
-  const s = f < 0.6 ? 0 : (f - 0.6) / 0.4;
-  return (i + s * s * (3 - 2 * s)) / steps;
+	const t = e * steps,
+		i = Math.floor(t),
+		f = t - i;
+	const s = f < 0.6 ? 0 : (f - 0.6) / 0.4;
+	return (i + s * s * (3 - 2 * s)) / steps;
 };
 
 /** 地形タイプ別の標高サンプラー。(x, y)=ノイズ座標、(u, v)=マップ内の正規化位置（0〜1、島の
  *  フォールオフ用）。戻り値 0〜1。 */
 export const createStyledElevation = (seed: number, style: TerrainStyle) => {
-  const base = createFbm01(seed, style === 'terrace' ? 2 : 4);
-  const ridged = style === 'ridged' ? createRidged01(seed) : null;
-  const warpX = style === 'warp' ? createFbm01((seed ^ 0x00abcdef) >>> 0, 3) : null;
-  const warpY = style === 'warp' ? createFbm01((seed ^ 0x00123457) >>> 0, 3) : null;
-  return (x: number, y: number, u: number, v: number): number => {
-    if (ridged) return ridged(x, y) ** 1.4;
-    if (warpX && warpY) {
-      // ドメインワープ：座標自体を別ノイズで歪ませてから標高を引く（うねる夢地形）
-      const dx = (warpX(x, y) * 2 - 1) * 1.6, dy = (warpY(x, y) * 2 - 1) * 1.6;
-      return base(x + dx, y + dy);
-    }
-    let e = base(x, y);
-    if (style === 'terrace') e = terrace(e, 5);
-    else if (style === 'island') {
-      // 中心からの距離で標高を減衰させ、周囲が必ず海になる島を作る
-      const d = Math.hypot(u - 0.5, v - 0.5) * 2;
-      e = Math.min(1, (e * 0.85 + 0.3) * Math.max(0, 1 - d * d * 1.4));
-    }
-    return e;
-  };
+	const base = createFbm01(seed, style === "terrace" ? 2 : 4);
+	const ridged = style === "ridged" ? createRidged01(seed) : null;
+	const warpX =
+		style === "warp" ? createFbm01((seed ^ 0x00abcdef) >>> 0, 3) : null;
+	const warpY =
+		style === "warp" ? createFbm01((seed ^ 0x00123457) >>> 0, 3) : null;
+	return (x: number, y: number, u: number, v: number): number => {
+		if (ridged) return ridged(x, y) ** 1.4;
+		if (warpX && warpY) {
+			// ドメインワープ：座標自体を別ノイズで歪ませてから標高を引く（うねる夢地形）
+			const dx = (warpX(x, y) * 2 - 1) * 1.6,
+				dy = (warpY(x, y) * 2 - 1) * 1.6;
+			return base(x + dx, y + dy);
+		}
+		let e = base(x, y);
+		if (style === "terrace") e = terrace(e, 5);
+		else if (style === "island") {
+			// 中心からの距離で標高を減衰させ、周囲が必ず海になる島を作る
+			const d = Math.hypot(u - 0.5, v - 0.5) * 2;
+			e = Math.min(1, (e * 0.85 + 0.3) * Math.max(0, 1 - d * d * 1.4));
+		}
+		return e;
+	};
 };
 
 /** ノイズの1単位＝何マスか（地形の起伏の大きさ）。 */
 export const TERRAIN_SCALE = 8;
 
 // ── 内蔵RPGENマップチップの地形タイル ──────────────────────────────────
-export interface TerrainChip { label: string; color: string; url: string; passable: boolean; }
-const chip = (label: string, color: string, col: number, row: number, passable: boolean): TerrainChip =>
-  ({ label, color, url: localSysTileUrl(col, row), passable });
+export interface TerrainChip {
+	label: string;
+	color: string;
+	url: string;
+	passable: boolean;
+}
+const chip = (
+	label: string,
+	color: string,
+	col: number,
+	row: number,
+	passable: boolean,
+): TerrainChip => ({ label, color, url: localSysTileUrl(col, row), passable });
 
 /** バイオーム別のデフォルト素材。すべて /assets/rpgen/map.png の16pxグリッドから切り出す。 */
 export const TERRAIN_CHIPS = {
-  deep: chip('深い海', '#1b4e78', 0, 7, false),
-  water: chip('海', '#3f9fdc', 4, 3, false),
-  sand: chip('砂浜', '#e9d8a6', 9, 1, true),
-  grass: chip('草原', '#8fd14f', 7, 0, true),
-  forest: chip('森', '#3e9b3e', 15, 2, true),
-  mountain: chip('山', '#8d8d8d', 6, 8, false),
-  snow: chip('雪', '#eef4f0', 13, 9, true),
-  // 横視点（action）用の地中ブロック。ぜんぶ足場（通行不可＝壁）として使う
-  grassBlock: chip('草ブロック', '#8fd14f', 7, 0, false),
-  dirt: chip('土', '#b5652d', 5, 12, false),
-  stone: chip('岩盤', '#7f8a94', 12, 11, false),
+	deep: chip("深い海", "#1b4e78", 0, 7, false),
+	water: chip("海", "#3f9fdc", 4, 3, false),
+	sand: chip("砂浜", "#e9d8a6", 9, 1, true),
+	grass: chip("草原", "#8fd14f", 7, 0, true),
+	forest: chip("森", "#3e9b3e", 15, 2, true),
+	mountain: chip("山", "#8d8d8d", 6, 8, false),
+	snow: chip("雪", "#eef4f0", 13, 9, true),
+	// 横視点（action）用の地中ブロック。ぜんぶ足場（通行不可＝壁）として使う
+	grassBlock: chip("草ブロック", "#8fd14f", 7, 0, false),
+	dirt: chip("土", "#b5652d", 5, 12, false),
+	stone: chip("岩盤", "#7f8a94", 12, 11, false),
 } as const;
 export type TerrainKind = keyof typeof TERRAIN_CHIPS;
 
 /** 地形タイルを tiles に確保する。同じ切り出しURL＋通行設定のタイルが既にあれば再利用し、
  *  無ければ新規追加する（再生成してもタイルが増殖しない）。 */
-const ensureTerrainTiles = (tiles: Record<number, TileDef>, kinds: TerrainKind[]) => {
-  const out = { ...tiles };
-  let nextId = Math.max(0, ...Object.keys(out).map(Number)) + 1;
-  const ids = {} as Record<TerrainKind, number>;
-  for (const k of kinds) {
-    const c = TERRAIN_CHIPS[k];
-    const found = Object.entries(out).find(([, t]) =>
-      !t.special && t.imageRef === `url:${c.url}` && t.passable === c.passable);
-    if (found) ids[k] = Number(found[0]);
-    else {
-      out[nextId] = { name: c.label, color: c.color, passable: c.passable, imageRef: `url:${c.url}`, imageUrl: c.url };
-      ids[k] = nextId++;
-    }
-  }
-  return { tiles: out, ids };
+const ensureTerrainTiles = (
+	tiles: Record<number, TileDef>,
+	kinds: TerrainKind[],
+) => {
+	const out = { ...tiles };
+	let nextId = Math.max(0, ...Object.keys(out).map(Number)) + 1;
+	const ids = {} as Record<TerrainKind, number>;
+	for (const k of kinds) {
+		const c = TERRAIN_CHIPS[k];
+		const found = Object.entries(out).find(
+			([, t]) =>
+				!t.special &&
+				t.imageRef === `url:${c.url}` &&
+				t.passable === c.passable,
+		);
+		if (found) ids[k] = Number(found[0]);
+		else {
+			out[nextId] = {
+				name: c.label,
+				color: c.color,
+				passable: c.passable,
+				imageRef: `url:${c.url}`,
+				imageUrl: c.url,
+			};
+			ids[k] = nextId++;
+		}
+	}
+	return { tiles: out, ids };
 };
 
 /** 見下ろし型（rpg / onjReze）の地形生成。標高で 深い海→海→砂浜→草原→山、湿度で森を塗り分ける。
  *  下層(地面)レイヤーだけを丸ごと描き替え、スタート周辺3×3は草原に均す。 */
 export const generateTopDownTerrain = (
-  map: number[][], tiles: Record<number, TileDef>,
-  startCol: number, startRow: number, seed: number, water: TerrainWater,
+	map: number[][],
+	tiles: Record<number, TileDef>,
+	startCol: number,
+	startRow: number,
+	seed: number,
+	water: TerrainWater,
 ): { map: number[][]; tiles: Record<number, TileDef> } => {
-  const rows = map.length, cols = map[0]?.length ?? 0;
-  const { tiles: newTiles, ids } = ensureTerrainTiles(tiles, ['deep', 'water', 'sand', 'grass', 'forest', 'mountain']);
-  const { elev01, moist01 } = createTerrainSampler(seed);
-  const sea = SEA_LEVEL[water];
-  const newMap = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => {
-    if (Math.abs(c - startCol) <= 1 && Math.abs(r - startRow) <= 1) return ids.grass;
-    const e = elev01(c / TERRAIN_SCALE, r / TERRAIN_SCALE);
-    if (e < sea - 0.1) return ids.deep;
-    if (e < sea) return ids.water;
-    if (e < sea + 0.05) return ids.sand;
-    if (e > 0.8) return ids.mountain;
-    return moist01(c / TERRAIN_SCALE, r / TERRAIN_SCALE) > 0.62 ? ids.forest : ids.grass;
-  }));
-  return { map: newMap, tiles: newTiles };
+	const rows = map.length,
+		cols = map[0]?.length ?? 0;
+	const { tiles: newTiles, ids } = ensureTerrainTiles(tiles, [
+		"deep",
+		"water",
+		"sand",
+		"grass",
+		"forest",
+		"mountain",
+	]);
+	const { elev01, moist01 } = createTerrainSampler(seed);
+	const sea = SEA_LEVEL[water];
+	const newMap = Array.from({ length: rows }, (_, r) =>
+		Array.from({ length: cols }, (_, c) => {
+			if (Math.abs(c - startCol) <= 1 && Math.abs(r - startRow) <= 1)
+				return ids.grass;
+			const e = elev01(c / TERRAIN_SCALE, r / TERRAIN_SCALE);
+			if (e < sea - 0.1) return ids.deep;
+			if (e < sea) return ids.water;
+			if (e < sea + 0.05) return ids.sand;
+			if (e > 0.8) return ids.mountain;
+			return moist01(c / TERRAIN_SCALE, r / TERRAIN_SCALE) > 0.62
+				? ids.forest
+				: ids.grass;
+		}),
+	);
+	return { map: newMap, tiles: newTiles };
 };
 
 /** 横視点（action）の地形生成。列ごとの地表の高さを1Dノイズで決め、
  *  地表＝草ブロック・その下2段＝土・さらに下＝岩盤で埋める（テラリア/マイクラ断面風）。
  *  スタート地点の足元は地表が来るよう均し、上空はそのまま空（タイル0）になる。 */
 export const generateSideViewTerrain = (
-  map: number[][], tiles: Record<number, TileDef>,
-  startCol: number, startRow: number, seed: number,
+	map: number[][],
+	tiles: Record<number, TileDef>,
+	startCol: number,
+	startRow: number,
+	seed: number,
 ): { map: number[][]; tiles: Record<number, TileDef> } => {
-  const rows = map.length, cols = map[0]?.length ?? 0;
-  const { tiles: newTiles, ids } = ensureTerrainTiles(tiles, ['grassBlock', 'dirt', 'stone']);
-  const { elev01 } = createTerrainSampler(seed);
-  // 地表の行番号（0.35〜0.85 の帯で起伏）。スタート列±1 は足元＝startRow+1 に固定する
-  const tops = Array.from({ length: cols }, (_, c) => {
-    const top = Math.round(rows * (0.35 + 0.5 * elev01(c / 10, 7.7)));
-    return Math.min(rows - 1, Math.max(2, top));
-  });
-  for (let c = Math.max(0, startCol - 1); c <= Math.min(cols - 1, startCol + 1); c++) {
-    tops[c] = Math.min(rows - 1, Math.max(2, startRow + 1));
-  }
-  const newMap = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => {
-    if (r < tops[c]) return 0;
-    if (r === tops[c]) return ids.grassBlock;
-    return r <= tops[c] + 2 ? ids.dirt : ids.stone;
-  }));
-  return { map: newMap, tiles: newTiles };
+	const rows = map.length,
+		cols = map[0]?.length ?? 0;
+	const { tiles: newTiles, ids } = ensureTerrainTiles(tiles, [
+		"grassBlock",
+		"dirt",
+		"stone",
+	]);
+	const { elev01 } = createTerrainSampler(seed);
+	// 地表の行番号（0.35〜0.85 の帯で起伏）。スタート列±1 は足元＝startRow+1 に固定する
+	const tops = Array.from({ length: cols }, (_, c) => {
+		const top = Math.round(rows * (0.35 + 0.5 * elev01(c / 10, 7.7)));
+		return Math.min(rows - 1, Math.max(2, top));
+	});
+	for (
+		let c = Math.max(0, startCol - 1);
+		c <= Math.min(cols - 1, startCol + 1);
+		c++
+	) {
+		tops[c] = Math.min(rows - 1, Math.max(2, startRow + 1));
+	}
+	const newMap = Array.from({ length: rows }, (_, r) =>
+		Array.from({ length: cols }, (_, c) => {
+			if (r < tops[c]) return 0;
+			if (r === tops[c]) return ids.grassBlock;
+			return r <= tops[c] + 2 ? ids.dirt : ids.stone;
+		}),
+	);
+	return { map: newMap, tiles: newTiles };
 };

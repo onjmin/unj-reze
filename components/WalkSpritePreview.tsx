@@ -1,116 +1,148 @@
-'use client';
+"use client";
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 import {
-  type WayKey, type WalkStandard,
-  standardById, detectStandard, animatedCell, rowAnimCellInRect, loadImage,
-} from '@/lib/walk-sprite';
+	animatedCell,
+	detectStandard,
+	loadImage,
+	rowAnimCellInRect,
+	standardById,
+	type WalkStandard,
+	type WayKey,
+} from "@/lib/walk-sprite";
 
 interface WalkSpritePreviewProps {
-  /** 歩行グラのシート画像URL */
-  url: string;
-  /** 規格id（'auto' で実寸から自動推定）。既定 'auto' */
-  stdId?: string;
-  /** 表示サイズ(px, 正方枠)。既定 64 */
-  size?: number;
-  /** 固定の向き。未指定なら一定間隔で4方向を巡回（ショーケース） */
-  dir?: WayKey;
-  /** 足踏みするか（停止時は待機ポーズ）。既定 true */
-  walking?: boolean;
-  /** 足踏みfps。既定 6 */
-  fps?: number;
-  className?: string;
-  /** 簡易アニメ用 コマ数 */
-  frames?: number;
-  /** 簡易アニメ用 再生モード */
-  playMode?: 'loop' | 'pingpong' | 'once';
-  /** 簡易アニメ用 対象行 */
-  row?: number;
-  onError?: () => void;
+	/** 歩行グラのシート画像URL */
+	url: string;
+	/** 規格id（'auto' で実寸から自動推定）。既定 'auto' */
+	stdId?: string;
+	/** 表示サイズ(px, 正方枠)。既定 64 */
+	size?: number;
+	/** 固定の向き。未指定なら一定間隔で4方向を巡回（ショーケース） */
+	dir?: WayKey;
+	/** 足踏みするか（停止時は待機ポーズ）。既定 true */
+	walking?: boolean;
+	/** 足踏みfps。既定 6 */
+	fps?: number;
+	className?: string;
+	/** 簡易アニメ用 コマ数 */
+	frames?: number;
+	/** 簡易アニメ用 再生モード */
+	playMode?: "loop" | "pingpong" | "once";
+	/** 簡易アニメ用 対象行 */
+	row?: number;
+	onError?: () => void;
 }
 
-const SHOWCASE_DIRS: WayKey[] = ['s', 'a', 'd', 'w'];
+const SHOWCASE_DIRS: WayKey[] = ["s", "a", "d", "w"];
 
 // 1枚のシート歩行グラを canvas でアニメーション表示する。
 // AssetBrowser やエディタのプレビューで使う（モバイル・ドット絵想定で pixelated 描画）。
 export default function WalkSpritePreview({
-  url, stdId = 'auto', size = 64, dir, walking = true, fps = 6, className, frames, playMode, row, onError,
+	url,
+	stdId = "auto",
+	size = 64,
+	dir,
+	walking = true,
+	fps = 6,
+	className,
+	frames,
+	playMode,
+	row,
+	onError,
 }: WalkSpritePreviewProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [error, setError] = useState(false);
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const [error, setError] = useState(false);
 
-  useEffect(() => {
-    let raf = 0;
-    let img: HTMLImageElement | null = null;
-    let std: WalkStandard | null = null;
-    let cancelled = false;
-    Promise.resolve().then(() => setError(false));
+	useEffect(() => {
+		let raf = 0;
+		let img: HTMLImageElement | null = null;
+		let std: WalkStandard | null = null;
+		let cancelled = false;
+		Promise.resolve().then(() => setError(false));
 
-    loadImage(url).then((loaded) => {
-      if (cancelled) return;
-      img = loaded;
-      std = stdId === 'auto' ? detectStandard(loaded.naturalWidth, loaded.naturalHeight) : standardById(stdId);
-      raf = requestAnimationFrame(render);
-    }).catch(() => {
-      if (!cancelled) {
-        setError(true);
-        onError?.();
-      }
-    });
+		loadImage(url)
+			.then((loaded) => {
+				if (cancelled) return;
+				img = loaded;
+				std =
+					stdId === "auto"
+						? detectStandard(loaded.naturalWidth, loaded.naturalHeight)
+						: standardById(stdId);
+				raf = requestAnimationFrame(render);
+			})
+			.catch(() => {
+				if (!cancelled) {
+					setError(true);
+					onError?.();
+				}
+			});
 
-    const render = (t: DOMHighResTimeStamp) => {
-      raf = requestAnimationFrame(render);
-      const canvas = canvasRef.current;
-      if (!canvas || !img || !std) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
+		const render = (t: DOMHighResTimeStamp) => {
+			raf = requestAnimationFrame(render);
+			const canvas = canvasRef.current;
+			if (!canvas || !img || !std) return;
+			const ctx = canvas.getContext("2d");
+			if (!ctx) return;
 
-      const timeSec = t / 1000;
-      let cell;
-      if (std.id === 'row_anim') {
-        cell = rowAnimCellInRect([0, 0, img.naturalWidth, img.naturalHeight], {
-          frames: frames ?? std.frames ?? 4,
-          row: row ?? 0,
-          playMode: playMode ?? 'loop',
-          fps,
-          timeSec,
-        });
-      } else {
-        const curDir = dir ?? SHOWCASE_DIRS[Math.floor(timeSec / 0.9) % SHOWCASE_DIRS.length];
-        cell = animatedCell(std, img.naturalWidth, img.naturalHeight, {
-          dir: curDir, moving: walking, timeSec, fps, row,
-        });
-      }
+			const timeSec = t / 1000;
+			let cell;
+			if (std.id === "row_anim") {
+				cell = rowAnimCellInRect([0, 0, img.naturalWidth, img.naturalHeight], {
+					frames: frames ?? std.frames ?? 4,
+					row: row ?? 0,
+					playMode: playMode ?? "loop",
+					fps,
+					timeSec,
+				});
+			} else {
+				const curDir =
+					dir ??
+					SHOWCASE_DIRS[Math.floor(timeSec / 0.9) % SHOWCASE_DIRS.length];
+				cell = animatedCell(std, img.naturalWidth, img.naturalHeight, {
+					dir: curDir,
+					moving: walking,
+					timeSec,
+					fps,
+					row,
+				});
+			}
 
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      if (canvas.width !== size * dpr) { canvas.width = size * dpr; canvas.height = size * dpr; }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, size, size);
-      ctx.imageSmoothingEnabled = false;
+			const dpr = Math.min(window.devicePixelRatio || 1, 2);
+			if (canvas.width !== size * dpr) {
+				canvas.width = size * dpr;
+				canvas.height = size * dpr;
+			}
+			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+			ctx.clearRect(0, 0, size, size);
+			ctx.imageSmoothingEnabled = false;
 
-      // セルのアスペクト比を保ったまま枠にフィット
-      const scale = Math.min(size / cell.sw, size / cell.sh);
-      const dw = cell.sw * scale;
-      const dh = cell.sh * scale;
-      const dx = (size - dw) / 2;
-      const dy = (size - dh) / 2;
-      ctx.drawImage(img, cell.sx, cell.sy, cell.sw, cell.sh, dx, dy, dw, dh);
-    };
+			// セルのアスペクト比を保ったまま枠にフィット
+			const scale = Math.min(size / cell.sw, size / cell.sh);
+			const dw = cell.sw * scale;
+			const dh = cell.sh * scale;
+			const dx = (size - dw) / 2;
+			const dy = (size - dh) / 2;
+			ctx.drawImage(img, cell.sx, cell.sy, cell.sw, cell.sh, dx, dy, dw, dh);
+		};
 
-    return () => { cancelled = true; cancelAnimationFrame(raf); };
-  }, [url, stdId, size, dir, walking, fps, frames, playMode, row, onError]);
+		return () => {
+			cancelled = true;
+			cancelAnimationFrame(raf);
+		};
+	}, [url, stdId, size, dir, walking, fps, frames, playMode, row, onError]);
 
-  if (error) {
-    return null;
-  }
+	if (error) {
+		return null;
+	}
 
-  return (
-    <canvas
-      ref={canvasRef}
-      width={size}
-      height={size}
-      style={{ width: size, height: size, imageRendering: 'pixelated' }}
-      className={className}
-    />
-  );
+	return (
+		<canvas
+			ref={canvasRef}
+			width={size}
+			height={size}
+			style={{ width: size, height: size, imageRendering: "pixelated" }}
+			className={className}
+		/>
+	);
 }
