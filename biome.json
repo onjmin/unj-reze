@@ -21,6 +21,9 @@
 			"_force-ignore:dist"
 		]
 	},
+	"linter": {
+		"enabled": false
+	},
 	"formatter": {
 		"enabled": true,
 		"indentStyle": "tab"
