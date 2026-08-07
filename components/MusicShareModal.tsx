@@ -83,7 +83,7 @@ function resultToItem(
 		artistId: r.artistId,
 		title: r.artistName || "",
 		subtitle: "アーティスト",
-		artworkUrl: r.artworkUrl100,
+		// Apple MusicのartistレスポンスにartworkUrl100は含まれない
 		viewUrl: r.artistViewUrl,
 	};
 }
@@ -282,27 +282,29 @@ export default function MusicShareModal({
 									key={`${key}-${i}`}
 									className="flex items-center gap-2.5 px-1.5 py-2 rounded-lg hover:bg-gray-100/5 transition-colors"
 								>
-									<div className="relative w-11 h-11 rounded-lg overflow-hidden bg-gray-800 shrink-0">
-										{artwork && (
-											<img
-												src={artwork}
-												alt={title || ""}
-												className="w-full h-full object-cover"
-											/>
-										)}
-										{activeTab !== "artist" && r.previewUrl && (
-											<button
-												onClick={() => togglePreview(r.previewUrl)}
-												className="absolute inset-0 bg-black/40 flex items-center justify-center text-white hover:bg-black/60 transition-colors"
-											>
-												{playingUrl === r.previewUrl ? (
-													<Pause size={14} />
-												) : (
-													<Play size={14} />
-												)}
-											</button>
-										)}
-									</div>
+									{activeTab !== "artist" && (
+										<div className="relative w-11 h-11 rounded-lg overflow-hidden bg-gray-800 shrink-0">
+											{artwork && (
+												<img
+													src={artwork}
+													alt={title || ""}
+													className="w-full h-full object-cover"
+												/>
+											)}
+											{r.previewUrl && (
+												<button
+													onClick={() => togglePreview(r.previewUrl)}
+													className="absolute inset-0 bg-black/40 flex items-center justify-center text-white hover:bg-black/60 transition-colors"
+												>
+													{playingUrl === r.previewUrl ? (
+														<Pause size={14} />
+													) : (
+														<Play size={14} />
+													)}
+												</button>
+											)}
+										</div>
+									)}
 									<div className="flex-1 min-w-0">
 										<div className="text-xs text-gray-200 font-bold truncate">
 											{title}
