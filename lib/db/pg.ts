@@ -38,6 +38,7 @@
  * res.num のような手計算が要る値は UNIQUE 制約 + リトライで守る。
  */
 import { neon, neonConfig } from "@neondatabase/serverless";
+import type { Pool } from "pg";
 import { genBbsId } from "../cc-id";
 import type { Message, Trend } from "../mock-db";
 import { CH_FEED, chThread, chUser } from "../realtime/channels";
@@ -65,7 +66,6 @@ import type {
 	CreateMvParams,
 	CreatePostParams,
 	DataStore,
-	GetPostsOptions,
 	MessageParams,
 	MmlRef,
 	RecordGamePlayParams,
@@ -102,11 +102,12 @@ function isLocalDatabaseUrl(): boolean {
 	return /\/\/[^@]*@?(localhost|127\.0\.0\.1)([:/]|$)/i.test(url);
 }
 
-let localPoolPromise: Promise<import("pg").Pool> | null = null;
-function getLocalPool(): Promise<import("pg").Pool> {
+let localPoolPromise: Promise<Pool> | null = null;
+function getLocalPool(): Promise<Pool> {
 	if (!localPoolPromise) {
-		localPoolPromise = import("pg").then(
-			({ Pool }) => new Pool({ connectionString: getConnectionString() }),
+		const pkgName = "pg";
+		localPoolPromise = import(/* webpackIgnore: true */ pkgName).then(
+			(m) => new (m.Pool || m.default?.Pool)({ connectionString: getConnectionString() }),
 		);
 	}
 	return localPoolPromise;
