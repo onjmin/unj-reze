@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
     content: r.content,
     imageSrc: r.imageSrc,
     imageAlt: r.imageAlt,
+    mmlUrl: r.mmlUrl,
   }));
   return NextResponse.json({ posts, hasMore });
 }

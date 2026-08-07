@@ -13,6 +13,7 @@ import { extractChordsFromContent } from '@/lib/chord';
 import { extractFirstEmbed } from '@/lib/embed';
 import dynamic from 'next/dynamic';
 import ChordPlayer from './ChordPlayer';
+import MmlSource from './MmlSource';
 import EmbedPart from './EmbedPart';
 import UserActionMenu from './UserActionMenu';
 import ImagePreview from './ImagePreview';
@@ -731,7 +732,9 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
 
   const threads = useMemo(() => myPosts.filter(p => p.id === p.threadId), [myPosts]);
   const replies = useMemo(() => myPosts.filter(p => p.id !== p.threadId), [myPosts]);
-  const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage || p.hasGame || p.hasMv || !!extractMmlFromContent(p.content) || !!extractChordsFromContent(p.content)), [myPosts]);
+  // MML本文はR2へ外部化済みだと content にマーカーしか残らない（inline抽出は常に空文字になる）ため、
+  // hasMml フラグも見る。コード進行(#コード進行)は外部化されないので inline 抽出のままでよい。
+  const mediaPosts = useMemo(() => myPosts.filter(p => p.hasImage || p.hasGame || p.hasMv || p.hasMml || !!extractMmlFromContent(p.content) || !!extractChordsFromContent(p.content)), [myPosts]);
 
   const totalHearts = useMemo(() => myPosts.reduce((s, p) => s + Number(p.heartsTotal), 0), [myPosts]);
   const totalLikes = useMemo(() => myPosts.reduce((s, p) => s + Number(p.likes), 0), [myPosts]);
@@ -1130,8 +1133,11 @@ export default function ProfileView({ userId, displayName, currentUserId, curren
                   )}
 
                   {(() => {
-                    const mmlCode = extractMmlFromContent(p.content);
-                    if (mmlCode) return <MmlPlayer mml={mmlCode} />;
+                    // MML本文はR2へ外部化済みだと content にマーカーしか残らない（inline抽出は
+                    // 常に空文字になる）ため、hasMml も見て MmlSource 経由で mmlUrl を解決する。
+                    if (p.hasMml || extractMmlFromContent(p.content)) {
+                      return <MmlSource post={p}>{mml => <MmlPlayer mml={mml} />}</MmlSource>;
+                    }
                     const chordRes = extractChordsFromContent(p.content);
                     if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
                     if (p.hasImage || p.hasGame || p.hasMv) return null;

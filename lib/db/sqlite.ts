@@ -1234,7 +1234,7 @@ export const sqliteStore: DataStore = {
     }
     const rows = rowsToObjects(
       d,
-      `SELECT p.id, p.slug, p.content, p.image_src, p.image_alt,
+      `SELECT p.id, p.slug, p.content, p.image_src, p.image_alt, p.mml_url,
         COALESCE(au.display_name, p.display_name) as display_name
       FROM posts p
       LEFT JOIN anonymous_users au ON p.slug = au.slug
@@ -1251,6 +1251,7 @@ export const sqliteStore: DataStore = {
         content: r.content,
         imageSrc: r.image_src ?? undefined,
         imageAlt: r.image_alt ?? undefined,
+        mmlUrl: kind === 'mml' ? (r.mml_url ?? undefined) : undefined,
       }));
   },
 

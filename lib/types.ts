@@ -137,6 +137,8 @@ export interface MediaSearchPost {
 	content: string;
 	imageSrc?: string;
 	imageAlt?: string;
+	/** MML本文の保存先URL（R2）。外部化済みの投稿は content にマーカーしか残らないため必要。 */
+	mmlUrl?: string;
 }
 
 export interface GameRecord {

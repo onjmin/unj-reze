@@ -796,11 +796,11 @@ export const pgStore: DataStore = {
     params.push(fetchEach);
 
     const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
-      q(`SELECT t.id, t.user_id, t.content_text, t.content_url, ${AUTHOR_SELECT}
+      q(`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, ${AUTHOR_SELECT}
            FROM threads t LEFT JOIN users u ON u.id=t.user_id
           WHERE t.deleted_at IS NULL AND ${where.replace(/content_type/g, 't.content_type').replace(/content_text/g, 't.content_text').replace(/cc_user_name/g, 't.cc_user_name')}
           ORDER BY t.id DESC LIMIT $${params.length}`, params),
-      q(`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, ${AUTHOR_SELECT}
+      q(`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, ${AUTHOR_SELECT}
            FROM res r LEFT JOIN users u ON u.id=r.user_id
           WHERE ${where.replace(/content_type/g, 'r.content_type').replace(/content_text/g, 'r.content_text').replace(/cc_user_name/g, 'r.cc_user_name')}
           ORDER BY r.id DESC LIMIT $${params.length}`, params),
@@ -809,10 +809,12 @@ export const pgStore: DataStore = {
       ...tRows.map((r): DbMediaSearchPost => ({
         id: threadToPostId(Number(r.id)), displayName: r.author_display_name || '名無し',
         content: r.content_text ?? '', imageSrc: r.content_url || undefined,
+        mmlUrl: kind === 'mml' ? (r.content_data_url || undefined) : undefined,
       })),
       ...rRows.map((r): DbMediaSearchPost => ({
         id: resToPostId(Number(r.id)), displayName: r.author_display_name || '名無し',
         content: r.content_text ?? '', imageSrc: r.content_url || undefined,
+        mmlUrl: kind === 'mml' ? (r.content_data_url || undefined) : undefined,
       })),
     ];
     // thread と res の id 空間は別なので、ここではソート順は投稿順に近似する程度でよい

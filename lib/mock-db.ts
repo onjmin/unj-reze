@@ -685,7 +685,7 @@ class MockDB {
     return limit && limit > 0 ? res.slice(0, limit) : res;
   }
 
-  searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number): { id: number; displayName: string; content: string; imageSrc?: string; imageAlt?: string }[] {
+  searchMedia(kind: 'image' | 'mml', query: string, userId?: string, limit?: number, offset?: number): { id: number; displayName: string; content: string; imageSrc?: string; imageAlt?: string; mmlUrl?: string }[] {
     const q = query.trim().toLowerCase();
     const hidden = this.getHiddenSlugs(userId);
     const all = this.posts.flatMap(p => [p, ...p.replies]);
@@ -695,7 +695,7 @@ class MockDB {
       .filter(p => !this.hiddenFromSearchSlugs.has(p.slug ?? ''))
       .filter(p => !q || p.content.toLowerCase().includes(q) || p.displayName.toLowerCase().includes(q))
       .sort((a, b) => Number(b.id) - Number(a.id))
-      .map(p => ({ id: p.id, displayName: p.displayName, content: p.content, imageSrc: p.imageSrc, imageAlt: p.imageAlt }));
+      .map(p => ({ id: p.id, displayName: p.displayName, content: p.content, imageSrc: p.imageSrc, imageAlt: p.imageAlt, mmlUrl: kind === 'mml' ? p.mmlUrl : undefined }));
     const start = offset && offset > 0 ? offset : 0;
     const safeLimit = limit && limit > 0 ? limit : 50;
     return res.slice(start, start + safeLimit);

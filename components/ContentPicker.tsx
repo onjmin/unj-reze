@@ -5,6 +5,7 @@ import { X, Music, Video, Search, Loader2, Play, Square } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { MediaSearchPost } from '@/lib/types';
 import { extractMmlFromContent, effectiveMmlVolume, withMmlVolume } from '@/lib/mml';
+import { fetchText } from '@/lib/uploader';
 import { applyMasterVolume, subscribeMasterVolume } from '@/lib/master-volume';
 import { youtubeRefFromUrl, toYoutubeWatchUrl, nicovideoRefFromUrl, soundcloudRefFromUrl, colorToDataUrl } from '@/lib/asset-ref';
 import type { ParsedMML, MmlPlayback } from '@onjmin/dtm';
@@ -117,6 +118,8 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   const scrollRef = useRef<HTMLDivElement>(null);
   const [failedRefs, setFailedRefs] = useState<Set<string>>(new Set());
   const [failedPostIds, setFailedPostIds] = useState<Set<string>>(new Set());
+  const [mmlLoadingIds, setMmlLoadingIds] = useState<Set<string>>(new Set());
+  const mmlTextCacheRef = useRef<Map<string, string>>(new Map());
 
   const currentTab = mode === 'image' ? imageTab : bgmTab;
 
@@ -305,8 +308,10 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
   };
 
   // BGM欄の「MML投稿」タブ用。サーバー側で hasMml 絞り込み・クエリ検索済みなのでそのまま使う。
+  // MML本文はR2へ外部化済みだと content にマーカーしか残らない（mmlUrl側にある）ため、
+  // 双方どちらか一方でも持っていれば対象として扱う（そうしないと外部化後の投稿が全滅する）。
   const mmlPosts = useMemo(
-    () => posts.filter(p => p && extractMmlFromContent(p.content)),
+    () => posts.filter(p => p && (extractMmlFromContent(p.content) || p.mmlUrl)),
     [posts]
   );
 
@@ -334,9 +339,31 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
     onPick({ ref: soundcloudRefFromUrl(v), url: v, label: 'SoundCloud BGM' });
   };
 
-  const pickMmlPost = (p: MediaSearchPost) => {
+  // MML本文はR2へ外部化済みだと content にマーカーしか残らず、post.mmlUrl から
+  // 取りに行く必要がある（MmlSource / useMmlSource と同じ考え方）。R2はimmutableなので
+  // 一度取れたらモジュール内キャッシュで使い回す。
+  const resolveMmlText = async (p: MediaSearchPost): Promise<string> => {
+    const inline = extractMmlFromContent(p.content);
+    if (inline) return inline;
+    if (!p.mmlUrl) return '';
+    const cached = mmlTextCacheRef.current.get(p.mmlUrl);
+    if (cached !== undefined) return cached;
+    setMmlLoadingIds(prev => new Set(prev).add(p.id));
+    try {
+      const text = await fetchText(p.mmlUrl);
+      mmlTextCacheRef.current.set(p.mmlUrl, text);
+      return text;
+    } catch (e) {
+      console.error('[ContentPicker] Failed to fetch MML body:', e);
+      return '';
+    } finally {
+      setMmlLoadingIds(prev => { const next = new Set(prev); next.delete(p.id); return next; });
+    }
+  };
+
+  const pickMmlPost = async (p: MediaSearchPost) => {
     stopAllPreviews();
-    const mml = extractMmlFromContent(p.content) || '';
+    const mml = await resolveMmlText(p);
     onPick({ ref: `mml:post:${p.id}`, rawMml: mml, label: `MML投稿 #${p.id}` });
   };
 
@@ -633,27 +660,35 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
               ) : (
                 <div className="space-y-1.5">
                   {mmlPosts.map(p => {
-                    const mml = extractMmlFromContent(p.content) || '';
+                    // 本文がR2へ外部化済みだと inline mml は取れない（一覧表示ではフェッチしない）。
+                    // 試聴/選択された時点で resolveMmlText が mmlUrl から取りに行く。
+                    const inlineMml = extractMmlFromContent(p.content) || '';
                     const key = `post-${p.id}`;
                     const isPrev = previewKey === key;
+                    const isMmlLoading = mmlLoadingIds.has(p.id);
                     const currentStep = isPrev ? (mmlStepInfo?.currentStep ?? 0) : 0;
                     const totalSteps = isPrev ? (mmlStepInfo?.totalSteps ?? 1) : 1;
                     return (
                       <div key={p.id} className="flex flex-col gap-1.5 p-2 rounded-lg border border-gray-700 hover:border-blue-500 bg-gray-900">
                         <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => previewMml(key, mml)}
-                            className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
+                            onClick={async () => {
+                              if (isPrev) { previewMml(key, inlineMml); return; }
+                              const mml = await resolveMmlText(p);
+                              if (mml) previewMml(key, mml);
+                            }}
+                            disabled={isMmlLoading}
+                            className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 disabled:opacity-40 ${isPrev ? 'bg-red-600/20 text-red-400' : 'bg-[#a3e635]/20 text-[#a3e635]'}`}
                             title={isPrev ? '停止' : '試聴'}
                           >
-                            {isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
+                            {isMmlLoading ? <Loader2 size={11} className="animate-spin" /> : isPrev ? <Square size={11} /> : <Play size={11} className="ml-0.5" />}
                           </button>
                           <button onClick={() => pickMmlPost(p)} className="flex-1 min-w-0 text-left">
                             <div className="flex items-center gap-1.5 mb-0.5">
                               <Music size={11} className="text-pink-400 shrink-0" />
                               <span className="text-[11px] text-gray-300 font-bold truncate">{getAvatarInfo(p.displayName).username} #{p.id}</span>
                             </div>
-                            <p className="text-[10px] text-gray-500 font-mono truncate">{mml}</p>
+                            <p className="text-[10px] text-gray-500 font-mono truncate">{inlineMml || p.content || 'MML'}</p>
                           </button>
                         </div>
                         {isPrev && (
@@ -663,7 +698,7 @@ export default function ContentPicker({ mode, bgmKind = 'bgm', userId, usedAsset
                               min={0}
                               max={totalSteps}
                               value={Math.min(currentStep, totalSteps)}
-                              onChange={(e) => seekMml(key, mml, Number(e.target.value))}
+                              onChange={(e) => seekMml(key, inlineMml || (p.mmlUrl ? mmlTextCacheRef.current.get(p.mmlUrl) : undefined) || '', Number(e.target.value))}
                               className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-[#a3e635]"
                             />
                             <span className="text-[9px] text-gray-400 font-mono shrink-0">

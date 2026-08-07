@@ -11,6 +11,7 @@ import { CH_FEED, chThread, chUser } from '@/lib/realtime/channels';
 import { ensureSessionId } from '@/lib/session';
 import { decodeId } from '@/lib/sqids';
 import { stripMmlLine, extractMmlFromContent } from '@/lib/mml';
+import { fetchText } from '@/lib/uploader';
 import Header from '@/components/Header';
 import EditPostModal from '@/components/EditPostModal';
 import TopTabs, { type FeedSubMode } from '@/components/TopTabs';
@@ -645,15 +646,20 @@ export default function App() {
     setShowGlobalEditModal(false);
   }, []);
 
-  const handleOpenCollab = useCallback((post: Post) => {
+  const handleOpenCollab = useCallback(async (post: Post) => {
     // 導線側でも弾いているが、権利表記を最終的に守るのはこの入り口
     if (!isCollabAllowed(post.originType)) return;
     clearEditingContext();
-    const postMml = extractMmlFromContent(post.content);
-    if (!post.hasImage && postMml) {
-      setAttachedMml(postMml);
-      openScreen('mml');
-      return;
+    // MML本文はR2にある。content にはマーカーしか残っていないので、
+    // hasMml/mmlUrl を経由しないと(inline抽出は常に空文字になる)コラボ編集を開始できない
+    if (!post.hasImage && (post.hasMml || extractMmlFromContent(post.content))) {
+      const inline = extractMmlFromContent(post.content);
+      const postMml = inline || (post.mmlUrl ? await fetchText(post.mmlUrl).catch(() => '') : '');
+      if (postMml) {
+        setAttachedMml(postMml);
+        openScreen('mml');
+        return;
+      }
     }
     setCollabImageUrl(post.imageSrc);
     setShowCollabSelector(true);
