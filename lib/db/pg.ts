@@ -77,16 +77,50 @@ import type {
 
 neonConfig.fetchConnectionCache = true;
 
+function getConnectionString() {
+	return process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || "";
+}
+
 function getDb() {
-	const connectionString =
-		process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || "";
-	return neon(connectionString, { fullResults: true });
+	return neon(getConnectionString(), { fullResults: true });
+}
+
+/**
+ * ローカル開発用DB接続の判定と生成。
+ *
+ * @neondatabase/serverless の neon() はNeon独自の `POST /sql` HTTPプロトコルを
+ * 話す前提で、docker-compose の素のPostgres(db-neon)には直接繋げない
+ * （wsproxyはPostgresワイヤプロトコルのWebSocketトンネルであってこのHTTP APIは実装していない）。
+ * 一方 pg(node-postgres) は普通の Postgres ワイヤプロトコルで繋がるので、
+ * DATABASE_URL が localhost を指しているときだけ pg.Pool にフォールバックする。
+ * 本番(Cloudflare Workers)では DATABASE_URL が localhost になることはないので、
+ * このコードパスは実行されない。next.config.ts の serverExternalPackages と
+ * 合わせて、pg は本番バンドルへ巻き込まれない。
+ */
+function isLocalDatabaseUrl(): boolean {
+	const url = getConnectionString();
+	return /\/\/[^@]*@?(localhost|127\.0\.0\.1)([:/]|$)/i.test(url);
+}
+
+let localPoolPromise: Promise<import("pg").Pool> | null = null;
+function getLocalPool(): Promise<import("pg").Pool> {
+	if (!localPoolPromise) {
+		localPoolPromise = import("pg").then(
+			({ Pool }) => new Pool({ connectionString: getConnectionString() }),
+		);
+	}
+	return localPoolPromise;
 }
 
 async function q<T = any>(
 	text: string,
 	params: any[] = [],
 ): Promise<{ rows: T[]; rowCount?: number }> {
+	if (isLocalDatabaseUrl()) {
+		const pool = await getLocalPool();
+		const res = await pool.query(text, params);
+		return { rows: res.rows as T[], rowCount: res.rowCount ?? undefined };
+	}
 	const sql = getDb();
 	const res = await sql.query(text, params, { fullResults: true });
 	return res as { rows: T[]; rowCount?: number };

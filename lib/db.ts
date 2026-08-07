@@ -14,11 +14,6 @@ async function getStore(): Promise<DataStore> {
 			store = mod.pgStore;
 			break;
 		}
-		case "d1": {
-			const mod = await import("./db/sqlite");
-			store = mod.sqliteStore;
-			break;
-		}
 		case "mock":
 		default:
 			store = mockStore;

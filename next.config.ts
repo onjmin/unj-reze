@@ -21,6 +21,11 @@ const getLocalIp = (): string => {
 };
 
 const nextConfig: NextConfig = {
+  // ローカル開発時のみ lib/db/pg.ts が動的importする `pg`(node-postgres) をバンドルさせない。
+  // 本番(Cloudflare Workers)では常に @neondatabase/serverless の neon() 経由でHTTPアクセスするため
+  // このコードパスは実行されないが、esbuildにバンドルさせないことで node:net 等の
+  // Workers非互換依存を巻き込むリスクごと切り離す。
+  serverExternalPackages: ["pg"],
   ...(isGhPages && {
     output: "export",
     basePath: "/unj-reze",

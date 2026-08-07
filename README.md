@@ -117,24 +117,21 @@ npx netlify deploy --prod
 ## ローカル開発
 
 ```sh
+docker compose up -d      # db-neon(Postgres) + minio(R2互換) を起動
 cp .env.example .env
 pnpm install
 pnpm dev
 ```
 
-`.env` の `DATABASE_PROVIDER` で接続先を切り替えられます：
+`.env.example` のデフォルト値は上の docker-compose に向いているので、Neon/R2 の契約が
+無くてもこのまま動きます。DB・ストレージそれぞれ独立して本物のサービスに切り替え可能：
 
-| 値 | 説明 | 追加設定 |
+| 変数 | docker（デフォルト） | 本物のサービスに切り替える場合 |
 |---|---|---|
-| `mock`（デフォルト） | インメモリのモックデータ。外部サービス不要 | なし |
-| `neon` | Docker で立ち上げた PostgreSQL または Neon 本番 | `DATABASE_URL=postgresql://neon:neon@localhost:5432/unj_reze` |
-| `d1` | SQLite ファイル（Cloudflare D1 互換） | `D1_DATABASE_PATH=./data/d1.sqlite` |
+| `DATABASE_PROVIDER=neon` + `DATABASE_URL` | `postgresql://neon:neon@localhost:5432/unj_reze` | Neonダッシュボードの接続文字列に差し替えるだけ（`lib/db/pg.ts` がホスト名で自動判別） |
+| `STORAGE_PROVIDER=r2` + `R2_*` | `R2_ENDPOINT=http://localhost:9000`（minio） | `R2_ENDPOINT` を空にして `R2_ACCOUNT_ID` を設定するだけ（`lib/storage/r2.ts` が `R2_ENDPOINT` の有無で自動判別） |
 
-**neon モードで Docker を使う場合：**
-
-```sh
-docker compose up -d db-neon
-```
+`DATABASE_PROVIDER=mock` にすれば docker-compose すら不要（インメモリのモックデータのみ）。
 
 ---
 

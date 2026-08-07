@@ -355,7 +355,7 @@ class MockDB {
 	/**
 	 * プロフィールを更新する。`displayName` を省略すればアイコン/自己紹介だけ更新できる。
 	 * slug は所有者キーなので作成時のまま固定し、ここでは絶対に書き換えない
-	 * （pg.ts / sqlite.ts と同じ規約。表示名から derive し直すと所有権が切れる）。
+	 * （pg.ts と同じ規約。表示名から derive し直すと所有権が切れる）。
 	 */
 	updateUserDisplayName(
 		userId: string,

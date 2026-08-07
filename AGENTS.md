@@ -42,15 +42,21 @@ external services. Do not hard-code a provider.
 
 | Concern | Env var | Values (default first) | Code |
 |---|---|---|---|
-| Database | `DATABASE_PROVIDER` | `mock` / `neon` (Postgres, **production**) / `d1` (SQLite file) | `lib/db.ts`, `lib/db/{mock,pg,sqlite}.ts` |
+| Database | `DATABASE_PROVIDER` | `mock` / `neon` (Postgres, **production**) | `lib/db.ts`, `lib/db/{mock,pg}.ts` |
 | KV | `KV_PROVIDER` | `mock` (in-memory Map) / `cloudflare` (KV REST API) | `lib/kv/` |
 | Object storage | `STORAGE_PROVIDER` | `local` / `r2` (Cloudflare R2) | `lib/storage/` |
 | Realtime push | `REALTIME_URL` + `NEXT_PUBLIC_REALTIME_URL` + `REALTIME_PUBLISH_SECRET` | unset (polling fallback) / a Koyeb-hosted hub | `lib/realtime/`, `services/realtime/` |
 
-- All stores implement `DataStore` (`lib/db/interface.ts`); adding a query means editing **all
-  three** of `mock.ts`, `pg.ts`, `sqlite.ts`. `lib/db.ts` wraps the store in a Proxy that
-  **auto-falls back to `mockStore`** on connection errors, so a "working" local run may silently
-  be on mock data.
+- All stores implement `DataStore` (`lib/db/interface.ts`); adding a query means editing **both**
+  `mock.ts` and `pg.ts` (there is no `d1`/SQLite provider — it was never wired to a Cloudflare
+  binding and has been removed). `lib/db.ts` wraps the store in a Proxy that **auto-falls back to
+  `mockStore`** on connection errors, so a "working" local run may silently be on mock data.
+- `lib/db/pg.ts` talks to Postgres two ways depending on `DATABASE_URL`: the real
+  `@neondatabase/serverless` `neon()` HTTP client normally, or — only when the host is
+  `localhost`/`127.0.0.1` (i.e. `docker compose up -d db-neon` local dev) — `pg` (node-postgres)
+  connected directly, since `neon()`'s Neon-specific `POST /sql` protocol has no local equivalent.
+  `pg` is dynamically imported and listed in `next.config.ts`'s `serverExternalPackages` so it
+  never gets bundled into the Cloudflare Workers production build.
 - `lib/storage/s3.ts` is the **local filesystem** provider (`./public/uploads`) despite its name; only `lib/storage/r2.ts` uses `@aws-sdk/client-s3`.
 - Schema lives in `data/schema.sql`, which is **gitignored** — not in the repo. Migrations are
   applied manually (see `README.md`).
@@ -141,7 +147,7 @@ Before modifying the event engine, DB schemas, or API endpoints:
   - `cmds` and `index` (active instruction stream)
   - `forcedPagesRef` (multi-key phase overrides by `id`, `col,row`, and `objId`)
   - `lastTouchTimeMapRef` (object-id + cell-coordinate touch cooldowns)
-- When touching `DataStore`, update `mock.ts` / `pg.ts` / `sqlite.ts` together.
+- When touching `DataStore`, update `mock.ts` / `pg.ts` together.
 
 Verify that no execution-context leaks, state desynchronizations, or deadlocks are introduced,
 then run `pnpm typecheck` and `pnpm lint`.

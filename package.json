@@ -26,7 +26,6 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sqids": "0.3.0",
-    "sql.js": "1.14.1",
     "three": "0.185.1",
     "tiny-segmenter": "0.2.0"
   },
@@ -38,7 +37,6 @@
     "@types/pg": "8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/sql.js": "1.4.11",
     "@types/three": "0.185.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",

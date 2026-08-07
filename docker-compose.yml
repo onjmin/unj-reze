@@ -19,6 +19,10 @@ services:
       retries: 5
 
   # Neon用 WebSocket プロキシ (公式 wsproxy: https://github.com/neondatabase/wsproxy)
+  # next dev（Node実行）は lib/db/pg.ts の localhost分岐で pg(node-postgres) から
+  # db-neon に直結するので、通常のローカル開発ではこのプロキシは不要。
+  # `wrangler dev`（Workers本番相当のneon() HTTPクライアント）でローカルDBを
+  # 使いたい場合にのみ利用する。
   web-proxy:
     image: ghcr.io/neondatabase/wsproxy:latest
     ports:
@@ -31,20 +35,41 @@ services:
       db-neon:
         condition: service_healthy
 
-  # MinIO (Cloudflare R2代替) - 本番構成用
-  # 開発時は public/uploads/ にファイル保存するため不要
-  # 有効化するには .env に S3_* の設定も必要
-  # minio:
-  #   image: minio/minio:latest
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin
-  #   volumes:
-  #     - miniodata:/data
-  #   command: server /data --console-address ":9001"
+  # MinIO (Cloudflare R2代替)
+  # 使用時: STORAGE_PROVIDER=r2, R2_ENDPOINT=http://localhost:9000,
+  #         R2_ACCESS_KEY_ID=minioadmin, R2_SECRET_ACCESS_KEY=minioadmin,
+  #         R2_BUCKET=unj-reze, R2_PUBLIC_URL=http://localhost:9000/unj-reze
+  # lib/storage/r2.ts が R2_ENDPOINT を見て forcePathStyle 付きでMinIOに繋ぐ。
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - miniodata:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 初回起動時に R2_BUCKET 相当のバケットを作成し、匿名読み取り(public download)を許可する。
+  # 一度作られれば冪等（mc mb --ignore-existing）なので毎回実行して問題ない。
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/unj-reze &&
+      mc anonymous set download local/unj-reze
+      "
 
   # Redis (Cloudflare KV代替) - 本番構成用
   # 開発時はインメモリKVで代用するため不要
@@ -58,5 +83,5 @@ services:
 
 volumes:
   pgdata:
-  # miniodata:    # MinIO 有効化時にコメント解除
+  miniodata:
   # redisdata:    # Redis 有効化時にコメント解除
