@@ -968,6 +968,7 @@ class MockDB {
 		imageSrc?: string;
 		imageAlt?: string;
 		mmlUrl?: string;
+		originType?: OriginType;
 	}[] {
 		const q = query.trim().toLowerCase();
 		const hidden = this.getHiddenSlugs(userId);
@@ -990,6 +991,7 @@ class MockDB {
 				imageSrc: p.imageSrc,
 				imageAlt: p.imageAlt,
 				mmlUrl: kind === "mml" ? p.mmlUrl : undefined,
+				originType: p.originType,
 			}));
 		const start = offset && offset > 0 ? offset : 0;
 		const safeLimit = limit && limit > 0 ? limit : 50;

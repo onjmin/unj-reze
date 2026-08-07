@@ -1105,7 +1105,7 @@ export const pgStore: DataStore = {
 
 		const [{ rows: tRows }, { rows: rRows }] = await Promise.all([
 			q(
-				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, ${AUTHOR_SELECT}
+				`SELECT t.id, t.user_id, t.content_text, t.content_url, t.content_data_url, t.origin_type, ${AUTHOR_SELECT}
            FROM threads t LEFT JOIN users u ON u.id=t.user_id
           WHERE t.deleted_at IS NULL AND ${where
 						.replace(/content_type/g, "t.content_type")
@@ -1115,7 +1115,7 @@ export const pgStore: DataStore = {
 				params,
 			),
 			q(
-				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, ${AUTHOR_SELECT}
+				`SELECT r.id, r.thread_id, r.user_id, r.content_text, r.content_url, r.content_data_url, r.origin_type, ${AUTHOR_SELECT}
            FROM res r LEFT JOIN users u ON u.id=r.user_id
           WHERE ${where
 						.replace(/content_type/g, "r.content_type")
@@ -1133,6 +1133,7 @@ export const pgStore: DataStore = {
 					content: r.content_text ?? "",
 					imageSrc: r.content_url || undefined,
 					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
+					originType: r.origin_type || undefined,
 				}),
 			),
 			...rRows.map(
@@ -1142,6 +1143,7 @@ export const pgStore: DataStore = {
 					content: r.content_text ?? "",
 					imageSrc: r.content_url || undefined,
 					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
+					originType: r.origin_type || undefined,
 				}),
 			),
 		];

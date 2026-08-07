@@ -18,8 +18,12 @@ import {
 	extractMmlFromContent,
 	withMmlVolume,
 } from "@/lib/mml";
-import type { MediaSearchPost } from "@/lib/types";
-import { fetchText } from "@/lib/uploader";
+import {
+	isCollabAllowed,
+	type MediaSearchPost,
+	ORIGIN_TYPE_OPTIONS,
+} from "@/lib/types";
+import { fetchSize, fetchText } from "@/lib/uploader";
 import AssetThumb from "./AssetThumb";
 import BuiltinGameSoundPanel from "./BuiltinGameSoundPanel";
 import LocalAssetPanel from "./LocalAssetPanel";
@@ -105,6 +109,21 @@ function formatTime(sec: number) {
 	const m = Math.floor(sec / 60);
 	const s = Math.floor(sec % 60);
 	return `${m}:${s < 10 ? "0" : ""}${s}`;
+}
+
+function formatSize(bytes: number) {
+	if (bytes < 1024) return `${bytes}B`;
+	return `${(bytes / 1024).toFixed(1)}KB`;
+}
+
+// 「自作 & 改変OK」(own_modify_ok) と未申告(undefined)はデフォルト扱いで、参照ピッカーでは
+// バッジを出さない（毎行に付くとうるさいだけで情報量が無い）。それ以外の許可された権利表記
+// （not自作/FALライセンス等、選ぶ側が知っておくべきもの）だけ小さく出す。
+function originBadge(
+	originType?: (typeof ORIGIN_TYPE_OPTIONS)[number]["value"],
+) {
+	if (!originType || originType === "own_modify_ok") return null;
+	return ORIGIN_TYPE_OPTIONS.find((o) => o.value === originType) ?? null;
 }
 
 const MEDIA_PAGE_SIZE = 30;
@@ -210,6 +229,10 @@ export default function ContentPicker({
 	const [failedPostIds, setFailedPostIds] = useState<Set<string>>(new Set());
 	const [mmlLoadingIds, setMmlLoadingIds] = useState<Set<string>>(new Set());
 	const mmlTextCacheRef = useRef<Map<string, string>>(new Map());
+	// MML投稿タブでの「サイズ表示」用。インラインはその場でバイト数計算、R2外部化分は
+	// 本文をダウンロードせずHEADでContent-Lengthだけ取る（キーはmmlUrl、投稿間で使い回す）。
+	const [mmlSizes, setMmlSizes] = useState<Map<string, number>>(new Map());
+	const mmlSizeInFlightRef = useRef<Set<string>>(new Set());
 
 	const currentTab = mode === "image" ? imageTab : bgmTab;
 
@@ -466,15 +489,49 @@ export default function ContentPicker({
 	// BGM欄の「MML投稿」タブ用。サーバー側で hasMml 絞り込み・クエリ検索済みなのでそのまま使う。
 	// MML本文はR2へ外部化済みだと content にマーカーしか残らない（mmlUrl側にある）ため、
 	// 双方どちらか一方でも持っていれば対象として扱う（そうしないと外部化後の投稿が全滅する）。
+	// 改変NG・無断使用禁止の投稿は導線そのものを出さない（lib/types.ts の isCollabAllowed 参照）。
 	const mmlPosts = useMemo(
 		() =>
-			posts.filter((p) => p && (extractMmlFromContent(p.content) || p.mmlUrl)),
+			posts.filter(
+				(p) =>
+					p &&
+					(extractMmlFromContent(p.content) || p.mmlUrl) &&
+					isCollabAllowed(p.originType),
+			),
 		[posts],
 	);
 
+	// mmlPosts が増えるたび（初回表示・もっと見る）に未取得分のサイズを埋める。
+	// インラインはfetch不要、外部化分だけHEADを投げる。
+	useEffect(() => {
+		if (mode !== "bgm" || bgmTab !== "mmlPost") return;
+		let alive = true;
+		for (const p of mmlPosts) {
+			const inline = extractMmlFromContent(p.content);
+			const sizeKey = inline ? `post:${p.id}` : p.mmlUrl;
+			if (!sizeKey || mmlSizes.has(sizeKey)) continue;
+			if (inline) {
+				const bytes = new TextEncoder().encode(inline).length;
+				setMmlSizes((prev) => new Map(prev).set(sizeKey, bytes));
+				continue;
+			}
+			if (mmlSizeInFlightRef.current.has(sizeKey)) continue;
+			mmlSizeInFlightRef.current.add(sizeKey);
+			fetchSize(sizeKey).then((bytes) => {
+				mmlSizeInFlightRef.current.delete(sizeKey);
+				if (!alive || bytes === null) return;
+				setMmlSizes((prev) => new Map(prev).set(sizeKey, bytes));
+			});
+		}
+		return () => {
+			alive = false;
+		};
+	}, [mode, bgmTab, mmlPosts, mmlSizes]);
+
 	// 画像欄の「投稿画像」タブ用。サーバー側で hasImage 絞り込み・クエリ検索済みなのでそのまま使う。
+	// 改変NG・無断使用禁止の投稿は導線そのものを出さない（lib/types.ts の isCollabAllowed 参照）。
 	const imagePosts = useMemo(
-		() => posts.filter((p) => p && p.imageSrc),
+		() => posts.filter((p) => p && p.imageSrc && isCollabAllowed(p.originType)),
 		[posts],
 	);
 
@@ -809,6 +866,17 @@ export default function ContentPicker({
 													className="w-full h-full object-cover"
 													style={{ imageRendering: "pixelated" }}
 												/>
+												{(() => {
+													const badge = originBadge(p.originType);
+													if (!badge) return null;
+													return (
+														<span
+															className={`absolute top-1 right-1 text-[8px] font-bold px-1 rounded border ${badge.badgeClass}`}
+														>
+															{badge.label}
+														</span>
+													);
+												})()}
 												<div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-1.5 pt-4">
 													<p className="text-[10px] font-bold text-gray-200 truncate">
 														{p.displayName || "名無し"}
@@ -1030,6 +1098,11 @@ export default function ContentPicker({
 										const key = `post-${p.id}`;
 										const isPrev = previewKey === key;
 										const isMmlLoading = mmlLoadingIds.has(p.id);
+										const sizeKey = inlineMml ? `post:${p.id}` : p.mmlUrl;
+										const sizeBytes = sizeKey
+											? mmlSizes.get(sizeKey)
+											: undefined;
+										const badge = originBadge(p.originType);
 										const currentStep = isPrev
 											? (mmlStepInfo?.currentStep ?? 0)
 											: 0;
@@ -1075,6 +1148,18 @@ export default function ContentPicker({
 															<span className="text-[11px] text-gray-300 font-bold truncate">
 																{getAvatarInfo(p.displayName).username} #{p.id}
 															</span>
+															<span className="text-[9px] text-gray-500 font-mono shrink-0">
+																{sizeBytes !== undefined
+																	? formatSize(sizeBytes)
+																	: "…"}
+															</span>
+															{badge && (
+																<span
+																	className={`text-[9px] font-bold px-1 rounded border shrink-0 ${badge.badgeClass}`}
+																>
+																	{badge.label}
+																</span>
+															)}
 														</div>
 														<p className="text-[10px] text-gray-500 font-mono truncate">
 															{inlineMml || p.content || "MML"}

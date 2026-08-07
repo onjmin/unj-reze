@@ -14,6 +14,8 @@ export interface DbMediaSearchPost {
 	imageAlt?: string;
 	/** MML本文の保存先URL（R2）。外部化済みの投稿は content にマーカーしか残らないため必要。 */
 	mmlUrl?: string;
+	/** 自己申告の権利表記。参照ピッカーで改変NG/無断使用禁止の導線を出さないために使う。 */
+	originType?: OriginType;
 }
 
 export interface DbPost {

@@ -131,6 +131,24 @@ export async function fetchJson<T>(url: string): Promise<T> {
 }
 
 /**
+ * R2に置いたオブジェクトのサイズだけをHEADで取る（本文はダウンロードしない）。
+ * gzip配信の場合、Content-Length は転送量＝gzip後サイズを返す（展開後サイズではない）。
+ * 取得できない・失敗した場合は null。
+ */
+export async function fetchSize(url: string): Promise<number | null> {
+	try {
+		const res = await fetch(url, { method: "HEAD" });
+		if (!res.ok) return null;
+		const len = res.headers.get("Content-Length");
+		if (!len) return null;
+		const n = Number(len);
+		return Number.isFinite(n) ? n : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * R2のオブジェクトを消す。
  *
  * 編集は「同じキーへの上書き」ができない（immutable で配っているので、エッジと

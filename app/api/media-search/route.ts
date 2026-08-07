@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
 		imageSrc: r.imageSrc,
 		imageAlt: r.imageAlt,
 		mmlUrl: r.mmlUrl,
+		originType: r.originType,
 	}));
 	return NextResponse.json({ posts, hasMore });
 }
