@@ -490,13 +490,14 @@ export default function ContentPicker({
 	// MML本文はR2へ外部化済みだと content にマーカーしか残らない（mmlUrl側にある）ため、
 	// 双方どちらか一方でも持っていれば対象として扱う（そうしないと外部化後の投稿が全滅する）。
 	// 改変NG・無断使用禁止の投稿は導線そのものを出さない（lib/types.ts の isCollabAllowed 参照）。
+	// ただし自分の投稿は権利表記に関わらず使える（isOwnerはサーバー側で判定済み）。
 	const mmlPosts = useMemo(
 		() =>
 			posts.filter(
 				(p) =>
 					p &&
 					(extractMmlFromContent(p.content) || p.mmlUrl) &&
-					isCollabAllowed(p.originType),
+					(isCollabAllowed(p.originType) || p.isOwner),
 			),
 		[posts],
 	);
@@ -530,8 +531,12 @@ export default function ContentPicker({
 
 	// 画像欄の「投稿画像」タブ用。サーバー側で hasImage 絞り込み・クエリ検索済みなのでそのまま使う。
 	// 改変NG・無断使用禁止の投稿は導線そのものを出さない（lib/types.ts の isCollabAllowed 参照）。
+	// ただし自分の投稿は権利表記に関わらず使える（isOwnerはサーバー側で判定済み）。
 	const imagePosts = useMemo(
-		() => posts.filter((p) => p && p.imageSrc && isCollabAllowed(p.originType)),
+		() =>
+			posts.filter(
+				(p) => p && p.imageSrc && (isCollabAllowed(p.originType) || p.isOwner),
+			),
 		[posts],
 	);
 

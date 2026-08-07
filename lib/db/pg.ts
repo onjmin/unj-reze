@@ -107,7 +107,10 @@ function getLocalPool(): Promise<Pool> {
 	if (!localPoolPromise) {
 		const pkgName = "pg";
 		localPoolPromise = import(/* webpackIgnore: true */ pkgName).then(
-			(m) => new (m.Pool || m.default?.Pool)({ connectionString: getConnectionString() }),
+			(m) =>
+				new (m.Pool || m.default?.Pool)({
+					connectionString: getConnectionString(),
+				}),
 		);
 	}
 	return localPoolPromise;
@@ -1135,6 +1138,7 @@ export const pgStore: DataStore = {
 					imageSrc: r.content_url || undefined,
 					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
 					originType: r.origin_type || undefined,
+					isOwner: userId ? r.user_id === userId : false,
 				}),
 			),
 			...rRows.map(
@@ -1145,6 +1149,7 @@ export const pgStore: DataStore = {
 					imageSrc: r.content_url || undefined,
 					mmlUrl: kind === "mml" ? r.content_data_url || undefined : undefined,
 					originType: r.origin_type || undefined,
+					isOwner: userId ? r.user_id === userId : false,
 				}),
 			),
 		];

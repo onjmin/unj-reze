@@ -16,6 +16,11 @@ export interface DbMediaSearchPost {
 	mmlUrl?: string;
 	/** 自己申告の権利表記。参照ピッカーで改変NG/無断使用禁止の導線を出さないために使う。 */
 	originType?: OriginType;
+	/**
+	 * 検索を呼んだuserId本人の投稿か（サーバー側で判定済み）。
+	 * 本人の投稿は権利表記に関わらず使える。生のuser_id/slugはクライアントへ渡さない。
+	 */
+	isOwner?: boolean;
 }
 
 export interface DbPost {

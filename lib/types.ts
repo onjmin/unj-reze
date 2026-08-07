@@ -143,6 +143,8 @@ export interface MediaSearchPost {
 	mmlUrl?: string;
 	/** 自己申告の権利表記。参照ピッカーで改変NG/無断使用禁止の導線を出さないために使う。 */
 	originType?: OriginType;
+	/** 検索を呼んだuserId本人の投稿か。本人の投稿は権利表記に関わらず使える。 */
+	isOwner?: boolean;
 }
 
 export interface GameRecord {

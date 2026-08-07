@@ -969,9 +969,11 @@ class MockDB {
 		imageAlt?: string;
 		mmlUrl?: string;
 		originType?: OriginType;
+		isOwner?: boolean;
 	}[] {
 		const q = query.trim().toLowerCase();
 		const hidden = this.getHiddenSlugs(userId);
+		const mySlug = userId ? this.slugForUser(userId) : undefined;
 		const all = this.posts.flatMap((p) => [p, ...p.replies]);
 		const res = all
 			.filter((p) => (kind === "image" ? p.hasImage : p.hasMml))
@@ -992,6 +994,7 @@ class MockDB {
 				imageAlt: p.imageAlt,
 				mmlUrl: kind === "mml" ? p.mmlUrl : undefined,
 				originType: p.originType,
+				isOwner: mySlug !== undefined && p.slug === mySlug,
 			}));
 		const start = offset && offset > 0 ? offset : 0;
 		const safeLimit = limit && limit > 0 ? limit : 50;

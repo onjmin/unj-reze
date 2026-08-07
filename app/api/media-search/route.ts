@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
 		imageAlt: r.imageAlt,
 		mmlUrl: r.mmlUrl,
 		originType: r.originType,
+		isOwner: r.isOwner,
 	}));
 	return NextResponse.json({ posts, hasMore });
 }
