@@ -40,6 +40,7 @@
 import { neon, neonConfig } from "@neondatabase/serverless";
 import type { Pool } from "pg";
 import { genBbsId } from "../cc-id";
+import { extractChordsFromContent } from "../chord";
 import type { Message, Trend } from "../mock-db";
 import { CH_FEED, chThread, chUser } from "../realtime/channels";
 import { publishRealtime } from "../realtime/publish";
@@ -157,6 +158,7 @@ const CT = {
 	Audio: 32,
 	Game: 64,
 	Sns: 128,
+	Chord: 512,
 	Oekaki: 1024,
 	Dtm: 2048,
 	Encrypt: 4096,
@@ -181,9 +183,10 @@ const DEFAULT_CONTENT_TYPES_BITMASK =
 	CT.Audio +
 	CT.Game +
 	CT.Sns +
+	CT.Chord +
 	CT.Oekaki +
 	CT.Dtm +
-	CT.Encrypt; // 7423
+	CT.Encrypt; // 7935
 
 interface DisplayContent {
 	content: string;
@@ -215,7 +218,7 @@ function deriveDisplay(row: any): DisplayContent {
 			mmlUrl: row.content_data_url || undefined,
 		};
 	}
-	if (t === CT.Text) {
+	if (t === CT.Text || t === CT.Chord) {
 		return { content: text };
 	}
 	// reze にネイティブな表現が無い種別(Url/Gif/Video/Audio/Game/Sns/Oekaki/Encrypt等)。
@@ -247,6 +250,17 @@ function deriveInsertContent(data: {
 			contentType: CT.Image,
 			contentText: content,
 			contentUrl: data.imageSrc,
+			contentDataUrl: "",
+		};
+	}
+	// コード進行(#コード進行)はMMLと違ってR2へ外部化されず、本文にそのまま残る
+	// （lib/mml-payload.ts の externalizeMml は #mml/#MML作曲 行しか見ない）。
+	// そのため mmlUrl/imageSrc のどちらでもない場合でも本文を見て判定する。
+	if (extractChordsFromContent(content)) {
+		return {
+			contentType: CT.Chord,
+			contentText: content,
+			contentUrl: "",
 			contentDataUrl: "",
 		};
 	}

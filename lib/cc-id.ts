@@ -16,5 +16,5 @@ export function genBbsId(userId: number, boardId: number): string {
 	return createHash("sha256")
 		.update([userId, boardId, "reze"].join("###"))
 		.digest("hex")
-		.slice(0, 8);
+		.slice(0, 4);
 }
