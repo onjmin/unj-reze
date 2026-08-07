@@ -184,8 +184,6 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 	roze("beat-g", "ロゼ 長B", 14, 384, 8),
 	// 束音ロゼ（1コマ320pxの立ち絵）
 	roze("pose-a", "ロゼ 立ちA", 6, 320, 8),
-	roze("pose-b", "ロゼ 立ちB", 4, 320),
-	roze("pose-c", "ロゼ 立ちC", 4, 320),
 	// 束音ロゼ（64pxセルのシート。行ごとに別のアニメーション）
 	{
 		id: "sheet-a",

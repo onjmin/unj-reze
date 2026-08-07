@@ -44,8 +44,6 @@ export const ROZE_BEATS = {
 /** 1コマ320pxの立ち絵アニメ。 */
 export const ROZE_POSES = {
 	a: { file: "pose-a", frames: 6, cell: 320 },
-	b: { file: "pose-b", frames: 4, cell: 320 },
-	c: { file: "pose-c", frames: 4, cell: 320 },
 } as const;
 
 /** 64pxセルのシート。1行＝1アニメーション（4コマ）。a は8行、b は4行。 */
