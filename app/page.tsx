@@ -131,6 +131,10 @@ export default function App() {
   } | null>(null);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [originalPostContent, setOriginalPostContent] = useState<string>('');
+  // MML本文はR2へ外部化済みだと content にマーカーしか残らない（inline抽出は常に空文字になる）。
+  // 「MMLを編集」を開く時点で mmlUrl から解決しておかないと、既存の曲が空のエディタで
+  // 上書きされてしまう（handleEditPostMml 参照）。
+  const [editingMmlText, setEditingMmlText] = useState<string | undefined>(undefined);
   const [showGlobalEditModal, setShowGlobalEditModal] = useState(false);
 
   /** エディタ（お絵描き/ドット絵/MML/ゲーム）を開くためにコンポーザを閉じたか。
@@ -644,6 +648,7 @@ export default function App() {
     setEditingPost(null);
     setOriginalPostContent('');
     setShowGlobalEditModal(false);
+    setEditingMmlText(undefined);
   }, []);
 
   const handleOpenCollab = useCallback(async (post: Post) => {
@@ -698,10 +703,12 @@ export default function App() {
     }
   };
 
-  const handleEditPostMml = (post: Post) => {
+  const handleEditPostMml = async (post: Post) => {
     setEditingPost(post);
     setOriginalPostContent(prev => prev || post.content);
     setShowGlobalEditModal(false);
+    const inline = extractMmlFromContent(post.content);
+    setEditingMmlText(inline || (post.mmlUrl ? await fetchText(post.mmlUrl).catch(() => '') : '') || '');
     openScreen('mml');
   };
 
@@ -1060,7 +1067,7 @@ export default function App() {
             if (editingPost) setShowGlobalEditModal(true);
           }}
           onSave={handleSaveMml}
-          initialMml={(editingPost ? extractMmlFromContent(editingPost.content) : attachedMml) || undefined}
+          initialMml={(editingPost ? editingMmlText : attachedMml) || undefined}
           isEditing={!!editingPost}
         />
       )}
