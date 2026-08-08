@@ -83,7 +83,7 @@ export async function POST(
 
 	// MML本文はブラウザが uploader-worker へ直接上げ済み。ここに来るのはURLだけ
 	const mmlRef = parseMmlRef(body);
-	if (!mmlRef) {
+	if (mmlRef === null) {
 		return NextResponse.json({ error: "Invalid mmlUrl" }, { status: 400 });
 	}
 

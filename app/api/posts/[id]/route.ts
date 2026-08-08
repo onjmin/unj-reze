@@ -150,7 +150,7 @@ export async function PATCH(
 	}
 	// 編集でMMLを差し替えたときは新しいURLが来る。未指定なら既存のMMLを触らない
 	const mmlRef = parseMmlRef(body);
-	if (!mmlRef) {
+	if (mmlRef === null) {
 		return NextResponse.json({ error: "Invalid mmlUrl" }, { status: 400 });
 	}
 	const result = await db.editPost(

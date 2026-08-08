@@ -68,18 +68,25 @@ export function parseManifestRef(
 }
 
 /**
- * 投稿のMML参照。未指定（MMLなしの投稿）は許すので、
+ * 投稿のMML参照。未指定（MMLなしの投稿、または添付に触れない編集）は許すので、
  * 「指定が無い」と「指定が不正」を呼び出し側で区別できるように undefined / null を返し分ける。
+ *
+ * 「指定が無い」で `{}` を返すと、呼び出し側（editPost）が「空のMML参照を明示指定された」
+ * と区別できず、権利表記だけの編集などで既存の content_data_url を消してしまう事故になる。
+ * 必ず undefined を返すこと。
  */
 export function parseMmlRef(
 	body: any,
-): { mmlUrl?: string; mmlDeleteId?: string; mmlDeleteHash?: string } | null {
+):
+	| { mmlUrl?: string; mmlDeleteId?: string; mmlDeleteHash?: string }
+	| null
+	| undefined {
 	if (
 		body?.mmlUrl === undefined ||
 		body?.mmlUrl === null ||
 		body?.mmlUrl === ""
 	)
-		return {};
+		return undefined;
 	if (!isValidPayloadUrl(body.mmlUrl, "mml")) return null;
 	return {
 		mmlUrl: body.mmlUrl,
