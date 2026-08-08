@@ -332,6 +332,29 @@ const ZOOM_FILL_ICONS = [
 	ZOOM_F7,
 ];
 
+// スクリーンショットでの実機比較で判明: 中身/枠とは別に、正方形の**左右に離れた場所**へ
+// 3段の破線クラスタが出る瞬間があり、これは中身(zoom-fill)や枠(zoom-frame)の
+// どのコマにも含めていなかった——中央のことしか見ておらず、フランキングする別要素の
+// 存在を見落としていた。別レイヤーとして、8コマ中の一部だけに出す。
+/** 破線クラスタ（3段、段ごとに切れ目の位置をずらしてピアノキーっぽくする）。 */
+const ZOOM_DASH_CLUSTER =
+	"M10,30 L25,30 L25,34 L10,34 Z M30,30 L38,30 L38,34 L30,34 Z M42,30 L60,30 L60,34 L42,34 Z" +
+	" M8,46 L20,46 L20,50 L8,50 Z M24,46 L45,46 L45,50 L24,50 Z M50,46 L60,46 L60,50 L50,50 Z" +
+	" M10,62 L25,62 L25,66 L10,66 Z M30,62 L38,62 L38,66 L30,66 Z M42,62 L60,62 L60,66 L42,66 Z";
+/** 見えない状態（実機比較の対応フレームで破線が消えている拍）。 */
+const ZOOM_DASH_EMPTY = "M49.5,49.5 L50.5,49.5 L50.5,50.5 L49.5,50.5 Z";
+// 実機比較で破線が出ていたのは中身が薄い(F1/F3相当)瞬間だったので、そこに合わせる。
+const ZOOM_DASH_ICONS = [
+	ZOOM_DASH_EMPTY,
+	ZOOM_DASH_CLUSTER,
+	ZOOM_DASH_EMPTY,
+	ZOOM_DASH_CLUSTER,
+	ZOOM_DASH_EMPTY,
+	ZOOM_DASH_EMPTY,
+	ZOOM_DASH_EMPTY,
+	ZOOM_DASH_EMPTY,
+];
+
 const SCENES = BARS / SCENE_BARS;
 const scene = (i: number) => `s${String(i).padStart(2, "0")}`;
 
@@ -387,16 +410,22 @@ const LAYERS: MvLayer[] = [
 	// ══ 中央。アイコン差し替えで実測どおりの「離散的な形の切り替わり」を描く ═══════
 	// 旧実装はpianoRoll(音の高さ→縦位置に敷き詰める)だったが、これは参考動画を見ての
 	// 想像で、実測(8〜28秒・60fps・24x24二値化差分)は否定している——変化は
-	// 「鳴っている音の並び」ではなく、拍(0.4225s=t142の四分音符)に一定間隔で
-	// 図形そのものが8コマ差し替わるアニメーションだった。lib/mv-engine.ts に
-	// 追加した `iconCycle`（拍ロックで path を差し替える）でそれを直接描く。
+	// 「鳴っている音の並び」ではなく、図形そのものが差し替わるアニメーションだった。
+	//
+	// 最初は「拍(0.4225s=t142の四分音符)に一定間隔」だと判断したが、これも誤りだった。
+	// 93.7秒あたり(MMLの26小節目=N1_BURSTで16分音符の速い連打になる箇所)を同じ手法で
+	// 測り直すと、静かな箇所の4倍近い速さでコマが切り替わっていた。拍ロックなら
+	// テンポが変わらない限り速さも変わらないはずなので説明がつかない——実際は
+	// **旋律トラックの発音回数**にロックしていて、音が増えるほど速く進む
+	// （8〜28秒の窓がたまたま「1拍1音」の旋律だったせいで、拍ロックと見分けが
+	// つかなかっただけ）。`iconCycle`に発音ロック(`advance:"onset"`)を追加して直す。
 	{
 		kind: "shape",
 		id: "zoom-fill",
 		form: "path",
 		path: ZOOM_FILL_ICONS[0],
 		pathBox: [0, 0, 100, 100],
-		iconCycle: { paths: ZOOM_FILL_ICONS, beats: 1 },
+		iconCycle: { paths: ZOOM_FILL_ICONS, advance: "onset", track: 0 },
 		x: 320,
 		y: 180,
 		size: 46,
@@ -405,6 +434,42 @@ const LAYERS: MvLayer[] = [
 		filled: true,
 		thickness: 1,
 		z: 20,
+		modulators: [],
+	},
+	// ══ 中央の左右に離れて出る破線クラスタ ══════════════════════════
+	// zoom-fill/zoom-frameとは別要素。中身が薄いコマのときだけ左右に現れる。
+	{
+		kind: "shape",
+		id: "zoom-dash-l",
+		form: "path",
+		path: ZOOM_DASH_ICONS[0],
+		pathBox: [0, 0, 100, 100],
+		iconCycle: { paths: ZOOM_DASH_ICONS, advance: "onset", track: 0 },
+		x: 248,
+		y: 180,
+		size: 20,
+		rotation: 0,
+		color: "#e4e4e7",
+		filled: true,
+		thickness: 1,
+		z: 18,
+		modulators: [],
+	},
+	{
+		kind: "shape",
+		id: "zoom-dash-r",
+		form: "path",
+		path: ZOOM_DASH_ICONS[0],
+		pathBox: [0, 0, 100, 100],
+		iconCycle: { paths: ZOOM_DASH_ICONS, advance: "onset", track: 0 },
+		x: 392,
+		y: 180,
+		size: 20,
+		rotation: 0,
+		color: "#e4e4e7",
+		filled: true,
+		thickness: 1,
+		z: 18,
 		modulators: [],
 	},
 
@@ -521,19 +586,19 @@ const LAYERS: MvLayer[] = [
 	// 実測(8〜28秒・60fps・24x24二値化サムネイルの差分でズーム領域を毎フレーム比較):
 	// 「onpix=0」の瞬間（内容が最も少なくなる差し替わりの合間）が
 	//   8.616 / 9.033 / 9.467 / 9.883 / 10.300 / 10.733 / 11.150 / 11.567 / 12.000s …
-	// と、間隔0.416〜0.434s（平均約0.423s）でほぼ一定に繰り返す。
-	// このMMLのテンポ t142 の四分音符 = 60/142 = 0.4225s と実測値がほぼ一致する
-	// ＝ 鳴っている音（trackOnset）ではなく、拍そのもの（beat）に同期して
-	// 一定間隔で切り替わっている。単純な静止した枠でもサイズの脈動でもなく、
-	// ブラケット⇄正方形⇄横線だけ、と枠の**形そのもの**が拍ロックで差し替わって
-	// いたので、zoom-fillと同じ `iconCycle` で近似する。
+	// と、間隔0.416〜0.434s（平均約0.423s）で、このMMLのテンポ t142 の四分音符
+	// (60/142=0.4225s)にほぼ一致していた。ここから「拍ロック」と判断したが、
+	// 93.7秒(16分音符の連打=26小節目)を同じ手法で測り直すと4倍近く速く切り替わって
+	// おり、拍ロックでは説明できない。8〜28秒の窓は「1拍1音」の旋律だったせいで
+	// 拍ロックと発音ロックが区別できなかっただけ——実際は zoom-fill と同じく
+	// 旋律トラックの発音回数にロックしていた。
 	{
 		kind: "shape",
 		id: "zoom-frame",
 		form: "path",
 		path: ZOOM_OUTLINE_ICONS[0],
 		pathBox: [0, 0, 100, 100],
-		iconCycle: { paths: ZOOM_OUTLINE_ICONS, beats: 1 },
+		iconCycle: { paths: ZOOM_OUTLINE_ICONS, advance: "onset", track: 0 },
 		x: 320,
 		y: 180,
 		size: 36,

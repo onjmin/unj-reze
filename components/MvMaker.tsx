@@ -2278,7 +2278,7 @@ export default function MvMaker({
 							/>
 
 							<CheckField
-								label="拍ロックで形を差し替える（コマ送りアニメ）"
+								label="形を差し替える（コマ送りアニメ）"
 								checked={!!layer.iconCycle}
 								onChange={(v) =>
 									updateLayer(layer.id, (l) => {
@@ -2303,21 +2303,81 @@ export default function MvMaker({
 								>
 									<Hint>
 										上から順に1周ぶんのコマです。上の「形のデータ」欄は使われなくなり、
-										ここに並べたコマだけが拍に合わせて等間隔で切り替わります。
+										ここに並べたコマだけが切り替わります。
 									</Hint>
-									<NumField
-										label="何拍で1周するか"
-										value={layer.iconCycle.beats}
-										min={0.1}
-										step={0.1}
+									<SelectField
+										label="進み方"
+										value={"advance" in layer.iconCycle ? "onset" : "beats"}
+										options={[
+											{ value: "beats" as const, label: "拍ロック（一定間隔）" },
+											{
+												value: "onset" as const,
+												label: "発音ロック（音が鳴るたびに1コマ進む）",
+											},
+										]}
 										onChange={(v) =>
-											updateLayer(layer.id, (l) =>
-												l.kind === "shape" && l.iconCycle
-													? { ...l, iconCycle: { ...l.iconCycle, beats: v } }
-													: l,
-											)
+											updateLayer(layer.id, (l) => {
+												if (l.kind !== "shape" || !l.iconCycle) return l;
+												const paths = l.iconCycle.paths;
+												return {
+													...l,
+													iconCycle:
+														v === "onset"
+															? { paths, advance: "onset" as const }
+															: { paths, beats: 1 },
+												};
+											})
 										}
 									/>
+									<Hint>
+										参考動画のコマ送り実測(93.7秒あたりの16分音符連打)では、静かな箇所の
+										4倍近い速さで形が切り替わっていた——拍ではなく発音回数に連動していた。
+										迷ったら「発音ロック」を選ぶ。
+									</Hint>
+									{"advance" in layer.iconCycle ? (
+										<SelectField
+											label="どのトラックの発音で進めるか"
+											value={String(layer.iconCycle.track ?? "all")}
+											options={[
+												{ value: "all", label: "全トラック合算" },
+												...song.tracks.map((t) => ({
+													value: String(t),
+													label: `トラック @${t}`,
+												})),
+											]}
+											onChange={(v) =>
+												updateLayer(layer.id, (l) =>
+													l.kind === "shape" &&
+													l.iconCycle &&
+													"advance" in l.iconCycle
+														? {
+																...l,
+																iconCycle: {
+																	...l.iconCycle,
+																	track: v === "all" ? undefined : Number(v),
+																},
+															}
+														: l,
+												)
+											}
+										/>
+									) : (
+										<NumField
+											label="何拍で1周するか"
+											value={layer.iconCycle.beats}
+											min={0.1}
+											step={0.1}
+											onChange={(v) =>
+												updateLayer(layer.id, (l) =>
+													l.kind === "shape" &&
+													l.iconCycle &&
+													!("advance" in l.iconCycle)
+														? { ...l, iconCycle: { ...l.iconCycle, beats: v } }
+														: l,
+												)
+											}
+										/>
+									)}
 									{layer.iconCycle.paths.map((p, i) => (
 										<div key={i} className="flex items-start gap-1.5">
 											<span className="mt-2 w-5 shrink-0 text-center text-[10px] text-gray-500">

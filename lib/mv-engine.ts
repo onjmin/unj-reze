@@ -1605,6 +1605,28 @@ function getPath2D(dstr: string): Path2D {
 	return p;
 }
 
+/**
+ * `iconCycle` の今フレームでのコマ番号。
+ * `beats` 指定は拍ロック(一定間隔)、`advance:"onset"` は指定トラックの発音回数ぶん
+ * 進む——実測(参考動画93.7秒あたりの16分音符連打で、静かな箇所の4倍近い速さで
+ * 図形が切り替わっていた)から、拍ではなく発音回数に連動していると分かったための分岐。
+ */
+function iconCycleIndex(
+	d: DrawCtx,
+	cycle: NonNullable<MvShapeLayer["iconCycle"]>,
+): number {
+	const n = cycle.paths.length;
+	if ("advance" in cycle) {
+		const list = trackNotes(d.song, cycle.track);
+		const idx = lastIndexAtOrBefore(list, d.step);
+		return (((idx + 1) % n) + n) % n;
+	}
+	return Math.min(
+		n - 1,
+		Math.floor(((d.step / (cycle.beats * MV_STEPS_PER_BEAT)) % 1) * n),
+	);
+}
+
 function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 	const { ctx } = d;
 	const mods = layer.modulators;
@@ -1651,16 +1673,7 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 		ctx.translate(x + offsetX * i, y + offsetY * i);
 		ctx.rotate((rotation + spin * i) * DEG);
 		const cyclePath = layer.iconCycle
-			? layer.iconCycle.paths[
-					Math.min(
-						layer.iconCycle.paths.length - 1,
-						Math.floor(
-							((d.step / (layer.iconCycle.beats * MV_STEPS_PER_BEAT)) %
-								1) *
-								layer.iconCycle.paths.length,
-						),
-					)
-				]
+			? layer.iconCycle.paths[iconCycleIndex(d, layer.iconCycle)]
 			: undefined;
 		const activePath = cyclePath ?? layer.path;
 		if (layer.form === "path" && activePath) {

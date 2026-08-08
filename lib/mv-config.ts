@@ -828,12 +828,21 @@ export interface MvShapeLayer extends MvLayerBase {
 	blend?: MvBlend;
 	modulators: MvModulator[];
 	/**
-	 * form==='path' のとき、`path` の代わりに複数の形を拍にロックして順番に切り替える。
+	 * form==='path' のとき、`path` の代わりに複数の形を順番に切り替える。
 	 * 参考動画のコマ送り実測で見つかった「なめらかに動くのではなく、離散的な形が
-	 * 一定間隔で差し替わる」動きを再現するためのもの（灯りのステージ プリセットの
-	 * 中央モチーフなど）。`beats` ぶんの時間で `paths` を一周する（等間隔で1コマずつ進む）。
+	 * 差し替わる」動きを再現するためのもの（灯りのステージ プリセットの中央モチーフなど）。
+	 *
+	 * 進み方は2種類:
+	 * - `{ beats }` : 一定間隔（拍ロック）で1コマずつ進む。曲全体で一定のリズムを刻む
+	 *   小道具向け。
+	 * - `{ advance: "onset", track }` : 指定トラックの**発音のたびに**1コマ進む。
+	 *   参考動画は静かな箇所で1拍1コマ、16分音符の連打(実測: 93.7秒あたり)では
+	 *   ほぼ毎フレーム変わるほど速く進む——これは拍ではなく「音が鳴った回数」に
+	 *   ロックしていないと説明がつかない。`track`未指定は全トラック合算。
 	 */
-	iconCycle?: { paths: string[]; beats: number };
+	iconCycle?:
+		| { paths: string[]; beats: number }
+		| { paths: string[]; advance: "onset"; track?: number };
 }
 
 /** 画面全体にかかる演出。 */
