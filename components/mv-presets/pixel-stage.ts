@@ -1,10 +1,13 @@
 // 「ドット絵ステージ」プリセット。
-// 参考動画: _.mp4
-//   ひとつの曲の中で **画面ごと別物になる2つの世界** が交互に来る。
-//     黒の場面 = 黒地に枠付きのスプライト窓＋ステップ格子＋縦書き歌詞（残像つき）
-//     夜の場面 = 全画面のイラストへ切り替わり、空を大きな影がゆっくり横切る
-//   参考動画の切り替わりは 45秒 / 103秒 / 145秒 …と、どれも小節の頭にきっちり乗っている。
-//   ここでは 8小節ごとに黒⇄夜を往復させ、夜へ入るときは白で抜け、黒へ戻るときは暗転する。
+// 参考動画: _.mp4（コマ送り＋秒指定シークで実測、以前の版は誤読していた）
+//
+//   曲全体を通して **場面転換はただ1回**。黒地の窓場面（0:00〜0:46、全体の約1/4）から
+//   夜の路地へハードカットし、以降は最後まで夜のまま——黒へ戻ることも、再度切り替わる
+//   こともない。「8小節ごとに黒⇄夜を往復」「窓が2つ並ぶ場面」「サビで沈み込む」は
+//   すべて以前の版が作り出していた、参考動画に存在しない場面だった。
+//   カットの直前0.5拍だけ窓の上に粒子がほどけて散る前触れが入るので、転換は
+//   dissolve で近似する。夜の中身（鯨のような影が1〜3体、赤い月をよぎる）は
+//   場面が変わっているのではなく同一場面内の連続アニメ。
 //
 // 夜の場面の背景は内蔵の「夜の海辺」（4コマ・拍にロックして波が寄せる）。
 // 静止画の `MvStage.bgUrl` ではアニメが持てないので、画像レイヤーとして全画面に敷いている。
@@ -336,72 +339,40 @@ function window_(
 	};
 }
 
-// 黒の場面と夜の場面が8小節ごとに入れ替わる。
-// 夜の場面だけ `stage` で地の色を差し替えているので、背景を1枚絵にするならここに入れる。
+// コマ送りで確認した参考動画の実際の構造:
+//   窓は常に1つだけ（「窓が2つ並ぶ場面」は参考動画に存在しない・過去の誤読）。
+//   場面転換は曲中ただ1回。黒の窓場面（0:00〜0:46、全体の約1/4）から夜の路地へ
+//   ハードカットで切り替わり、以降は最後まで夜のまま——黒へ戻る／再度切り替わることはない。
+//   カット直前（切り替わりの0.5拍前）だけ窓の上に粒子がほどけて散る演出が入る
+//   （dissolveの逆再生ではなく先触れ）ので、転換は dissolve で近似する。
+//   夜の中身（鯨のような影が1〜3体、月をよぎる）は場面が変わっているのではなく
+//   同一場面内の連続アニメ——ここを別セクションに割ると存在しないカットが生まれる。
 const NIGHT = { bgColor: "#141a33", bgDim: 0.1 };
 const BLACK = { bgColor: "#000000", bgRef: "" };
 
 const SECTIONS: MvSection[] = [
-	{ id: "intro", label: "イントロ（黒）", startBar: 0, stage: BLACK },
-	{
-		id: "a",
-		label: "A（黒）",
-		startBar: 8,
-		stage: BLACK,
-		transition: { style: "fade", beats: 0.5 },
-	},
-	{
-		id: "a2",
-		label: "A′（黒・窓が2つ）",
-		startBar: 16,
-		stage: BLACK,
-		transition: { style: "fade", beats: 0.5 },
-	},
+	{ id: "black", label: "黒（窓）", startBar: 0, stage: BLACK },
 	{
 		id: "night",
 		label: "夜（全画面）",
-		startBar: 24,
+		startBar: 16,
 		stage: NIGHT,
-		transition: { style: "flash", beats: 1.5 },
-	},
-	{
-		id: "sabi",
-		label: "サビ（夜）",
-		startBar: 32,
-		stage: NIGHT,
-		transition: { style: "wipeUp", beats: 1 },
-	},
-	{
-		id: "inter",
-		label: "間奏（黒へ戻る）",
-		startBar: 40,
-		stage: BLACK,
-		transition: { style: "fade", beats: 2 },
-	},
-	{
-		id: "a3",
-		label: "A″（黒）",
-		startBar: 48,
-		stage: BLACK,
-		transition: { style: "fade", beats: 0.5 },
-	},
-	{
-		id: "sabi2",
-		label: "サビ2（夜）",
-		startBar: 56,
-		stage: NIGHT,
-		transition: { style: "flash", beats: 1.5 },
+		transition: { style: "dissolve", beats: 0.5 },
 	},
 ];
 
-const BLACK_SECTIONS = ["intro", "a", "a2", "inter", "a3"];
-const NIGHT_SECTIONS = ["night", "sabi", "sabi2"];
+const BLACK_SECTIONS = ["black"];
+const NIGHT_SECTIONS = ["night"];
+
+// 全キャラ共通の等倍率。sheet-a/sheet-b は同じ64pxセルの素材なので同じ scale を使う限り
+// ドットの物理サイズは揃う——場面ごとに別の値を割り振ると「ドットの粗さが場面で変わる」
+// 状態になり、参考動画（終始一定のドット密度）から外れる。
+const DOT_SCALE = 1.3;
 
 const LAYERS: MvLayer[] = [
 	// ══ 黒の場面 ═══════════════════════════════════════════
-	window_("window", ["intro", "a", "inter", "a3"], 320, 136, 1.3, 0),
-	window_("window-l", ["a2"], 236, 136, 1, 2),
-	window_("window-r", ["a2"], 404, 136, 1, 5, true),
+	// 参考動画に窓が2つ並ぶ場面は無い（コマ送りで確認）。窓は常に中央に1つだけ。
+	window_("window", BLACK_SECTIONS, 320, 136, DOT_SCALE, 0),
 	{
 		kind: "visualizer",
 		id: "grid",
@@ -438,7 +409,7 @@ const LAYERS: MvLayer[] = [
 		anchor: "topLeft",
 		vertical: false,
 		motion: "none",
-		sections: ["intro"],
+		sections: BLACK_SECTIONS,
 		z: 30,
 	},
 
@@ -489,7 +460,8 @@ const LAYERS: MvLayer[] = [
 		walk: rozeSheetRow(1, 4),
 		x: 0,
 		y: 110,
-		scale: 1.1,
+		// sheet-b も64pxセル＝windowと同じ素材密度なので DOT_SCALE を揃える。
+		scale: DOT_SCALE,
 		anchor: "center",
 		motion: "drift",
 		motionAmount: 38,
@@ -497,7 +469,7 @@ const LAYERS: MvLayer[] = [
 		sections: NIGHT_SECTIONS,
 		z: 12,
 	},
-	// 手前に立つ影。サビだけ現れて、下からせり上がる
+	// 手前に立つ影
 	{
 		kind: "image",
 		id: "foreground",
@@ -507,13 +479,15 @@ const LAYERS: MvLayer[] = [
 		walk: rozeBeat("f", 8),
 		x: 150,
 		y: 366,
-		// 画面の1/3に収まる大きさ。参考動画の手前の影は画面を覆わない
-		scale: 0.45,
+		// beat-f は1コマ384px（sheet-*の64pxセルの6倍の解像度）で描かれた素材なので、
+		// DOT_SCALE をそのまま使うとドットが6倍粗くなる。同じ物理ドットサイズに
+		// 揃えるため、解像度比ぶん割り引く（384/64=6）。
+		scale: (DOT_SCALE * 64) / 384,
 		anchor: "bottom",
 		motion: "parallax",
 		motionAmount: 5,
 		pixelated: true,
-		sections: ["sabi", "sabi2"],
+		sections: NIGHT_SECTIONS,
 		entrance: { from: "bottom", fade: true, beats: 3, distance: 90 },
 		z: 22,
 	},
@@ -565,16 +539,6 @@ const LAYERS: MvLayer[] = [
 		color: "#050914",
 		sections: NIGHT_SECTIONS,
 	},
-	// サビ頭だけ画面が沈み込む
-	{
-		kind: "effect",
-		id: "sabi-punch",
-		style: "zoomPunch",
-		trigger: "bars",
-		bars: [32, 56],
-		amount: 0.7,
-		decayBeats: 2,
-	},
 ];
 
 const MANIFEST: MvManifest = {
@@ -599,8 +563,8 @@ export const PIXEL_STAGE_PRESET: MvPresetEntry = {
 	kind: "pixelStage",
 	name: "ドット絵ステージ",
 	description:
-		"黒地のスプライト窓と格子の場面と、全画面の夜景の場面が8小節ごとに入れ替わる。歌詞の位置も場面ごと左右に移る64小節構成。",
+		"黒地のスプライト窓と格子の場面から、曲の1/4地点で夜景の場面へただ一度だけハードカットする64小節構成。歌詞の位置も場面と一緒に左右へ移る。",
 	swapHint:
-		"「場面」タブで夜の場面（夜／サビ／サビ2）の背景に1枚絵を入れ、窓のドット絵をあなたのキャラに差し替えると参考動画そのものになります。",
+		"「場面」タブで夜の場面の背景に1枚絵を入れ、窓のドット絵をあなたのキャラに差し替えると参考動画そのものになります。",
 	build: () => cloneManifest(MANIFEST),
 };
