@@ -2362,21 +2362,48 @@ export default function MvMaker({
 											}
 										/>
 									) : (
-										<NumField
-											label="何拍で1周するか"
-											value={layer.iconCycle.beats}
-											min={0.1}
-											step={0.1}
-											onChange={(v) =>
-												updateLayer(layer.id, (l) =>
-													l.kind === "shape" &&
-													l.iconCycle &&
-													!("advance" in l.iconCycle)
-														? { ...l, iconCycle: { ...l.iconCycle, beats: v } }
-														: l,
-												)
-											}
-										/>
+										<>
+											<NumField
+												label="何拍で1周するか"
+												value={layer.iconCycle.beats}
+												min={0.1}
+												step={0.1}
+												onChange={(v) =>
+													updateLayer(layer.id, (l) =>
+														l.kind === "shape" &&
+														l.iconCycle &&
+														!("advance" in l.iconCycle)
+															? { ...l, iconCycle: { ...l.iconCycle, beats: v } }
+															: l,
+													)
+												}
+											/>
+											<NumField
+												label="何小節ごとに1コマ目(頭の形)へ戻すか（0で戻さない）"
+												value={layer.iconCycle.resetEveryBars ?? 0}
+												min={0}
+												step={1}
+												onChange={(v) =>
+													updateLayer(layer.id, (l) =>
+														l.kind === "shape" &&
+														l.iconCycle &&
+														!("advance" in l.iconCycle)
+															? {
+																	...l,
+																	iconCycle: {
+																		...l.iconCycle,
+																		resetEveryBars: v > 0 ? v : undefined,
+																	},
+																}
+															: l,
+													)
+												}
+											/>
+											<Hint>
+												場面が8小節ごとに切り替わる曲なら8を指定すると、場面の頭で1コマ目
+												(シンプルな形)に戻り、残りの小節でコマ2以降を順にめぐるループになります。
+											</Hint>
+										</>
 									)}
 									{layer.iconCycle.paths.map((p, i) => (
 										<div key={i} className="flex items-start gap-1.5">

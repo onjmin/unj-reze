@@ -1607,9 +1607,10 @@ function getPath2D(dstr: string): Path2D {
 
 /**
  * `iconCycle` の今フレームでのコマ番号。
- * `beats` 指定は拍ロック(一定間隔)、`advance:"onset"` は指定トラックの発音回数ぶん
- * 進む——実測(参考動画93.7秒あたりの16分音符連打で、静かな箇所の4倍近い速さで
- * 図形が切り替わっていた)から、拍ではなく発音回数に連動していると分かったための分岐。
+ * `advance:"onset"` は指定トラックの発音回数ぶん進む。
+ * `beats` は拍ロック(一定間隔)。`resetEveryBars` があれば、その小節数の境目で
+ * 1コマ目(小節の頭)に戻り、残りの小節でコマ2以降を順にめぐる
+ * （目視確認: 8小節ごとに単純な形へ戻り、残りの小節でループする構造だったため）。
  */
 function iconCycleIndex(
 	d: DrawCtx,
@@ -1620,6 +1621,12 @@ function iconCycleIndex(
 		const list = trackNotes(d.song, cycle.track);
 		const idx = lastIndexAtOrBefore(list, d.step);
 		return (((idx + 1) % n) + n) % n;
+	}
+	if (cycle.resetEveryBars) {
+		const windowSteps = cycle.resetEveryBars * MV_STEPS_PER_BAR;
+		const windowStart = Math.floor(d.step / windowSteps) * windowSteps;
+		const localStep = d.step - windowStart;
+		return Math.min(n - 1, Math.floor((localStep / windowSteps) * n));
 	}
 	return Math.min(
 		n - 1,
