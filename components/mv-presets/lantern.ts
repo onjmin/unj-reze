@@ -598,7 +598,7 @@ const MANIFEST: MvManifest = {
 
 export const LANTERN_PRESET: MvPresetEntry = {
 	kind: "geometric",
-	name: "灯りのステージ",
+	name: "ドット絵PV",
 	description:
 		"黒い舞台の左右に提灯と立て看板が立ち、そのあいだで中央のモチーフが4小節ごとに16回入れ替わる。足元にはうっすらとロールが流れる。",
 	swapHint:

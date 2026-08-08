@@ -30,6 +30,14 @@ import {
 	preloadMvImages,
 } from "@/lib/mv-engine";
 
+/** シークバーの再生済み区間を塗る（YouTubeのコントロールバーと同じ見た目）。 */
+function updateSeekFill(el: HTMLInputElement): void {
+	const min = Number(el.min) || 0;
+	const max = Number(el.max) || 1;
+	const pct = Math.min(100, Math.max(0, ((Number(el.value) - min) / (max - min || 1)) * 100));
+	el.style.background = `linear-gradient(to right, #3b82f6 ${pct}%, rgba(255,255,255,0.3) ${pct}%)`;
+}
+
 export interface MvPlayerHandle {
 	play: () => void;
 	stop: () => void;
@@ -138,6 +146,11 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 		if (!playbackRef.current) paintPoster();
 	}, [manifest, paintPoster]);
 
+	// ready が変わると seekBar の max（曲の長さ）も変わるので、塗りを引き直す
+	useEffect(() => {
+		if (seekBarRef.current) updateSeekFill(seekBarRef.current);
+	}, [ready]);
+
 	// ── キャンバスの実サイズ合わせ ───────────────────────────
 	useEffect(() => {
 		const canvas = canvasRef.current;
@@ -174,7 +187,10 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 
 			if (reset === true) {
 				tickRef.current = { step: 0, atMs: 0 };
-				if (seekBarRef.current) seekBarRef.current.value = "0";
+				if (seekBarRef.current) {
+					seekBarRef.current.value = "0";
+					updateSeekFill(seekBarRef.current);
+				}
 				if (timeDisplayRef.current) timeDisplayRef.current.textContent = "0:00";
 				paintPoster();
 			}
@@ -240,6 +256,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 
 						if (seekBarRef.current) {
 							seekBarRef.current.value = String(step);
+							updateSeekFill(seekBarRef.current);
 						}
 						if (timeDisplayRef.current) {
 							const mm = Math.floor(timeSec / 60);
@@ -339,6 +356,7 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 
 			tickRef.current = { step, atMs: performance.now() };
 			paint(step, timeSec);
+			updateSeekFill(e.target);
 
 			if (timeDisplayRef.current) {
 				const mm = Math.floor(timeSec / 60);
@@ -409,7 +427,11 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 							}
 						}}
 						onChange={handleSeek}
-						className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/30 accent-blue-500 hover:h-2 transition-all focus:outline-none"
+						style={{
+							background:
+								"linear-gradient(to right, #3b82f6 0%, rgba(255,255,255,0.3) 0%)",
+						}}
+						className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full accent-blue-500 hover:h-2 transition-all focus:outline-none"
 					/>
 
 					<span

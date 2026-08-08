@@ -583,7 +583,7 @@ const MANIFEST: MvManifest = {
 
 export const PIANO_ROLL_PRESET: MvPresetEntry = {
 	kind: "pianoRoll",
-	name: "ピアノロール",
+	name: "音ゲー風演奏",
 	description:
 		"イントロはロールだけ、8小節目でフラッシュしてタイトルとキャラ絵が現れる。以降は場面ごとに視点が変わり、間奏で円形・アウトロで平面になる64小節構成。",
 	swapHint:

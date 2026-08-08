@@ -7,7 +7,8 @@ import type { MvPresetEntry } from "./shared";
 export type { MvPresetEntry } from "./shared";
 
 /**
- * 表示順。素材ゼロで完成するものを先頭に置き、用意する素材が多いものほど後ろへ。
+ * 表示順は指定どおり: 音ゲー風演奏(旧ピアノロール) → ドット絵PV(旧灯りのステージ)
+ * → 音ハメサークル(旧ジオメトリック)。先頭がプリセット選択のdefaultになる。
  * `kind` は保存時の分類（3種）で、プリセット自体はそれより細かい単位で並ぶ。
  *
  * どのプリセットも 64小節ぶんの曲と 8〜16 の場面を持つ。
@@ -19,9 +20,9 @@ export type { MvPresetEntry } from "./shared";
  * pixel-stage,stage-cast,courier}.ts）から。
  */
 export const MV_PRESETS: MvPresetEntry[] = [
-	GEOMETRIC_PRESET,
-	LANTERN_PRESET,
 	PIANO_ROLL_PRESET,
+	LANTERN_PRESET,
+	GEOMETRIC_PRESET,
 ];
 
 /** プリセット名から引く（同じ kind のプリセットが複数あるため名前で識別する）。 */

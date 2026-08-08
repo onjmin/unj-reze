@@ -595,7 +595,7 @@ const MANIFEST: MvManifest = {
 
 export const GEOMETRIC_PRESET: MvPresetEntry = {
 	kind: "geometric",
-	name: "ジオメトリック",
+	name: "音ハメサークル",
 	description:
 		"暗い画面の中央にひとつだけ置かれた白い図形が、音の瞬間だけ濃くなる。8小節ごとに点→輪→二重丸→十字→同心円…と姿を変える64小節構成。",
 	swapHint:
