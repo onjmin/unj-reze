@@ -406,11 +406,32 @@ function trackPitchNorm(
 function modSourceValue(d: DrawCtx, m: MvModulator): number {
 	switch (m.source) {
 		case "beat":
-			return d.beatEnv;
+			return m.curve === undefined
+				? d.beatEnv
+				: envelope(d.step, MV_STEPS_PER_BEAT, m.curve);
 		case "bar":
-			return d.barEnv;
+			return m.curve === undefined
+				? d.barEnv
+				: envelope(d.step, MV_STEPS_PER_BAR, m.curve);
+		case "phrase": {
+			// フレーズ(既定8小節)の頭で1、終わりへ向かってなめらかに0へ。
+			// op:"sub" で使うと逆向き＝終わりに向かって育つカーブになる。
+			const period = Math.max(1, m.bars ?? 8) * MV_STEPS_PER_BAR;
+			const curve = m.curve ?? 2;
+			if (!m.symmetric) return envelope(d.step, period, curve);
+			// symmetric: いちばん近い境目からの距離で山を作る（境目=1、中央=0）。
+			// 減衰のみだと境目の手前で0のままになり、実測にある「境目へ向かう
+			// 立ち上がり」が出せずカクッと不連続になる。
+			const phase = ((d.step % period) + period) % period;
+			const dist = Math.min(phase, period - phase) / (period / 2);
+			return clamp01(Math.pow(1 - dist, curve));
+		}
 		case "time":
 			return d.timeSec % 1;
+		case "spin":
+			// 巻き戻らない経過秒数。rotationにop:"mul"で使うと途切れず回り続ける
+			// （"time"は1秒ごとに0→1へ戻るので、回転に使うと毎秒ガクッと戻ってしまう）。
+			return d.timeSec;
 		case "trackEnergy":
 			return trackEnergy(d.song, d.step, m.track);
 		case "trackOnset":

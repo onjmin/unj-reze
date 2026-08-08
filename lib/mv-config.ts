@@ -316,7 +316,9 @@ export const DEFAULT_MV_RING: MvRing = {
 export type MvModSource =
 	| "beat"
 	| "bar"
+	| "phrase"
 	| "time"
+	| "spin"
 	| "trackEnergy"
 	| "trackOnset"
 	| "trackPitch"
@@ -339,7 +341,14 @@ export type MvModOp = "add" | "sub" | "mul" | "div";
 export const MV_MOD_SOURCE_LABELS: Record<MvModSource, string> = {
 	beat: "拍",
 	bar: "小節",
-	time: "時間（連続）",
+	// `bars` 小節ぶんを1フレーズとして、その頭で1→終わりで0へなめらかに減衰する。
+	// 「8小節ごとに図形が現れて、残りの小節で引いていく」構造をカーブで表すためのもの。
+	// op:"sub" で使えば逆向き（フレーズの終わりに向かって育つ＝サビ直前の盛り上がり）になる。
+	phrase: "フレーズ（数小節を1周期）",
+	// `time` は1秒ごとに0→1へ戻る鋸波。回転にそのまま使うと1秒ごとに角度が
+	// ガクッと巻き戻り、滑らかに見えない。連続回転には `spin`(巻き戻らない経過秒数)を使う。
+	time: "時間（1秒ごとに0→1、鋸波）",
+	spin: "経過時間（巻き戻らない・連続回転向け）",
 	trackEnergy: "トラックの鳴り",
 	trackOnset: "トラックの打点",
 	trackPitch: "トラックの音の高さ",
@@ -373,6 +382,20 @@ export interface MvModulator {
 	source: MvModSource;
 	/** source が track系 のときの対象トラック(@n)。未指定なら全トラックの合計。 */
 	track?: number;
+	/** source==='phrase' のときの1フレーズの長さ（小節）。未指定は8。 */
+	bars?: number;
+	/**
+	 * source==='phrase' のとき、フレーズの頭からの減衰ではなく
+	 * **いちばん近い境目からの距離**で山を作る（境目で1、フレーズ中央で0）。
+	 * 参考動画の実測で、中央ブロックが「4小節の境目の前後だけ出て、中盤は消える」
+	 * 山型だったため。減衰のみだと境目の手前で立ち上がれず不連続になる。
+	 */
+	symmetric?: boolean;
+	/**
+	 * カーブの鋭さ。大きいほど「頭で一気に効いてすぐ収まる」効きになる（既定2）。
+	 * beat/bar/phrase のような減衰カーブにだけ効く。
+	 */
+	curve?: number;
 	target: MvModTarget;
 	op: MvModOp;
 	/** source(0..1) に掛けてから op を適用する係数。負の値も可。 */

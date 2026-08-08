@@ -32,6 +32,13 @@ import {
 const BARS = 64;
 /** 場面の周期。参考動画のページ送り（4小節）と同じ刻みで小道具と歌詞を動かす。 */
 const SCENE_BARS = 8;
+/**
+ * 中央モチーフの周期。参考動画を全編4632フレーム走査した実測値。
+ * 中央ブロックの出現率は 小節0=84.5% / 0.5=34% / 0.75〜3.0=10〜16% /
+ * 3.5=57% / 3.75=85% となり、小節0〜3.75のパターンが小節4〜7.75で
+ * 寸分違わず繰り返される＝**4小節周期**。場面(SCENE_BARS=8)とは別物。
+ */
+const MOTIF_BARS = 4;
 
 // ── 旋律（l8）──
 const N1 = "e r g r a r b r";
@@ -267,95 +274,54 @@ const SIGN = "M50,14 L84,90 L16,90 Z";
 /** 看板の「！」。 */
 const SIGN_MARK = "M46,42 L54,42 L52,68 L48,68 Z M47,74 L53,74 L53,82 L47,82 Z";
 
-// ── 中央モチーフのアイコン差し替え（100×100の箱で設計）───────────
+// ── 中央モチーフ（100×100の箱で設計）─────────────────────────
 // 目視確認（コマ送りではなく通しで見た構造）: 8小節ごとに真ん中の単純な四角へ戻り、
 // 残りの小節は図形がループするエフェクトになる。サビへ入る直前は複雑な図形になる
-// （サビ自体も2番も同じ8小節周期のパターンを繰り返す）。以前の版は8〜28秒だけを
-// フレーム単位で計測して「拍ロック」「発音ロック」と結論づけていたが、目視では
-// 音の有無と図形の切り替わりが一致しない場面があり、いずれも誤りだった。
-// `iconCycle`の`resetEveryBars:SCENE_BARS`で「場面の頭=1コマ目、残り7小節で
-// コマ2〜8を順にめぐり、最後(8小節目)がいちばん複雑な図形になる」構造にする。
-/** 枠0: 場面の頭。単純な正方形の輪郭。 */
-const ZOOM_O0 = "M14,14 L86,14 L86,86 L14,86 Z";
-/** 枠1: 小さい四隅ブラケット。 */
-const ZOOM_O1 =
-	"M40,40 L46,40 M40,40 L40,46 M54,40 L60,40 M60,40 L60,46 M40,54 L40,60 M40,60 L46,60 M54,60 L60,60 M60,54 L60,60";
-/** 枠2: 通常サイズの四隅ブラケット。 */
-const ZOOM_O2 =
-	"M14,14 L34,14 M14,14 L14,34 M66,14 L86,14 M86,14 L86,34 M14,66 L14,86 M14,86 L34,86 M66,86 L86,86 M86,66 L86,86";
-/** 枠3: ブラケット＋左右の小さい中空四角。 */
-const ZOOM_O3 = `${ZOOM_O2} M30,44 L30,56 L42,56 L42,44 Z M58,44 L58,56 L70,56 L70,44 Z`;
-/** 枠4: 上下の横線だけ。 */
-const ZOOM_O4 = "M14,14 L86,14 M14,86 L86,86";
-/** 枠5: ほぼ見えない、いちど静まる瞬間。 */
-const ZOOM_O5 = "M49,49 L51,49 L51,51 L49,51 Z";
-/** 枠6: 対角の角だけ。 */
-const ZOOM_O6 = "M14,14 L34,14 M14,14 L14,34 M66,86 L86,86 M86,66 L86,86";
-/** 枠7: 場面の最後（サビ直前など）。画面いっぱいに開いた太いブラケット＝いちばん複雑。 */
-const ZOOM_O7 =
-	"M10,10 L36,10 M10,10 L10,36 M64,10 L90,10 M90,10 L90,36 M10,64 L10,90 M10,90 L36,90 M64,90 L90,90 M90,64 L90,90";
-const ZOOM_OUTLINE_ICONS = [
-	ZOOM_O0,
-	ZOOM_O1,
-	ZOOM_O2,
-	ZOOM_O3,
-	ZOOM_O4,
-	ZOOM_O5,
-	ZOOM_O6,
-	ZOOM_O7,
-];
+// （サビ自体も2番も同じ8小節周期のパターンを繰り返す）。
+//
+// 以前はこれを「離散的な図形をコマ送りで差し替える」(iconCycle)実装にしていたが、
+// 速度をいくら上げても原理的にジャンプカットにしかならず(パスの補間=モーフィングは
+// このエンジンに無い)、「滑らかでない」「コマが飛んでいる」と繰り返し指摘された。
+// 図形差し替えというモデル自体が誤りで、実際に必要なのは**連続的なモジュレータ**
+// による滑らか(かつイージングの効いた)な動き。`envelope()`(拍/小節ソース)は
+// 毎フレーム計算し直す減衰カーブなので、離散ジャンプではなく滑らかに変化する。
+// ただし「滑らかにする」ために回転する輪や星形へ置き換えたのも誤りだった。参考動画の
+// 中央に出るのは終始 **太い・軸に沿った・回転しない** 図形（四隅ブラケット／塗り四角／
+// 上下のタブ／左右の小さい中空四角／3段の破線列）で、回転する図形は1コマも出てこない。
+//
+// 正解は「図形を差し替える」でも「別の図形に置き換える」でもなく、
+// **観察した図形要素を1つずつ別レイヤーに分解し、位置・大きさ・濃さを連続カーブで動かす**こと。
+// 見た目の語彙は参考動画のまま、変化は全部トゥイーンになる（コマ飛びしない）。
+//
+// 構造は`phrase`ソース(8小節=SCENE_BARSを1周期として、頭で1→終わりで0へ減衰)で表し、
+//   ・中央の四角      : `add`  → 8小節の頭でいちばん大きく、滑らかに引く
+//   ・ブラケット/タブ : `sub`  → 四角と入れ替わりに開いてくる＝ループ図形エフェクト
+//   ・破線列          : `sub`＋ゆるいcurve → 終盤にだけ急に育つ＝サビ直前の複雑さ
+// と当て分ける。小節ごとの開閉は`bar`で付けるので、ループ部分は1小節周期で呼吸する。
 
-/** 中身0: 場面の頭。単純な中央四角。 */
-const ZOOM_F0 = "M36,36 L64,36 L64,64 L36,64 Z";
-/** 中身1: 小さい中央四角。 */
-const ZOOM_F1 = "M42,42 L58,42 L58,58 L42,58 Z";
-/** 中身2: 中央四角＋四隅の小さい点。 */
-const ZOOM_F2 =
-	"M42,42 L58,42 L58,58 L42,58 Z M36,36 L40,36 L40,40 L36,40 Z M60,36 L64,36 L64,40 L60,40 Z M36,60 L40,60 L40,64 L36,64 Z M60,60 L64,60 L64,64 L60,64 Z";
-/** 中身3: 左右に離れた2つの小さい塗りつぶし四角。 */
-const ZOOM_F3 = "M30,44 L30,56 L42,56 L42,44 Z M58,44 L58,56 L70,56 L70,44 Z";
-/** 中身4: 細い横棒1本。 */
-const ZOOM_F4 = "M30,48 L70,48 L70,52 L30,52 Z";
-/** 中身5: ほぼ何も無い、いちど静まる瞬間。 */
-const ZOOM_F5 = "M49.5,49.5 L50.5,49.5 L50.5,50.5 L49.5,50.5 Z";
-/** 中身6: 中くらいの2つの四角。 */
-const ZOOM_F6 = "M28,42 L28,58 L44,58 L44,42 Z M56,42 L56,58 L72,58 L72,42 Z";
-/** 中身7: 場面の最後（サビ直前など）。上下の太い帯＋中央四角＝いちばん複雑。 */
-const ZOOM_F7 =
-	"M20,14 L80,14 L80,26 L20,26 Z M20,74 L80,74 L80,86 L20,86 Z M42,42 L58,42 L58,58 L42,58 Z";
-const ZOOM_FILL_ICONS = [
-	ZOOM_F0,
-	ZOOM_F1,
-	ZOOM_F2,
-	ZOOM_F3,
-	ZOOM_F4,
-	ZOOM_F5,
-	ZOOM_F6,
-	ZOOM_F7,
-];
-
-// スクリーンショットでの実機比較で判明: 中身/枠とは別に、正方形の**左右に離れた場所**へ
-// 3段の破線クラスタが出る瞬間があり、これは中身(zoom-fill)や枠(zoom-frame)の
-// どのコマにも含めていなかった——中央のことしか見ておらず、フランキングする別要素の
-// 存在を見落としていた。別レイヤーとして、場面の頭(0)と最後(7)には出さず、
-// ループ中間の何コマかにだけ出す。
-/** 破線クラスタ（3段、段ごとに切れ目の位置をずらしてピアノキーっぽくする）。 */
+// 寸法は全編1390フレームを走査して実測した（推測ではない）:
+//   ・モチーフ全体   : 動画x 300〜660 ＝ canvas640換算で **幅240px**（±120）
+//   ・中央のグレー四角: 約48px（size 24）。大きさは終始ほぼ一定
+//   ・外枠           : 約120px（size 60）の細い線。以前は52pxで半分以下だった
+//   ・枠の切れ目の小四角: 中心から±46px、約24px（size 12）
+//   ・遠いフランキング : 中心から±88px、約56px（size 28）
+/** 外枠。ほぼ閉じた大きな正方形だが、左右の辺の中央に切れ目があり小四角がはまる。 */
+const ZOOM_FRAME =
+	"M10,10 L90,10 M90,10 L90,38 M90,62 L90,90 M90,90 L10,90 M10,90 L10,62 M10,38 L10,10";
+/** 上下のタブ。太い横棒（「⊏⊐」状態のときだけ出る）。 */
+const ZOOM_TAB = "M8,38 L92,38 L92,62 L8,62 Z";
+/** 左右に付く小さい中空四角。枠の切れ目にはまる。 */
+const ZOOM_SIDE_BOX = "M22,22 L78,22 L78,78 L22,78 Z";
+/** 遠いフランキングその2: 縦棒入りの箱（鍵盤風）。上下に横線が付く。 */
+const ZOOM_KEYBOX =
+	"M6,26 L94,26 L94,30 L6,30 Z M6,70 L94,70 L94,74 L6,74 Z" +
+	" M14,34 L26,34 L26,66 L14,66 Z M36,34 L48,34 L48,66 L36,66 Z" +
+	" M58,34 L70,34 L70,66 L58,66 Z M78,34 L90,34 L90,66 L78,66 Z";
+/** 3段の破線列（ピアノの鍵盤のように切れ目をずらす）。 */
 const ZOOM_DASH_CLUSTER =
 	"M10,30 L25,30 L25,34 L10,34 Z M30,30 L38,30 L38,34 L30,34 Z M42,30 L60,30 L60,34 L42,34 Z" +
 	" M8,46 L20,46 L20,50 L8,50 Z M24,46 L45,46 L45,50 L24,50 Z M50,46 L60,46 L60,50 L50,50 Z" +
 	" M10,62 L25,62 L25,66 L10,66 Z M30,62 L38,62 L38,66 L30,66 Z M42,62 L60,62 L60,66 L42,66 Z";
-/** 見えない状態。 */
-const ZOOM_DASH_EMPTY = "M49.5,49.5 L50.5,49.5 L50.5,50.5 L49.5,50.5 Z";
-const ZOOM_DASH_ICONS = [
-	ZOOM_DASH_EMPTY,
-	ZOOM_DASH_EMPTY,
-	ZOOM_DASH_CLUSTER,
-	ZOOM_DASH_EMPTY,
-	ZOOM_DASH_CLUSTER,
-	ZOOM_DASH_EMPTY,
-	ZOOM_DASH_EMPTY,
-	ZOOM_DASH_EMPTY,
-];
 
 const SCENES = BARS / SCENE_BARS;
 const scene = (i: number) => `s${String(i).padStart(2, "0")}`;
@@ -371,6 +337,13 @@ const SECTIONS: MvSection[] = Array.from({ length: SCENES }, (_, i) => ({
 	startBar: i * SCENE_BARS,
 	...(i === 4 ? { transition: { style: "flash" as const, beats: 1 } } : {}),
 }));
+
+/**
+ * サビ直前の場面。ここだけ複雑な図形が終盤へ向けて育ち、次の場面(サビ)へ雪崩れ込む。
+ * s04 が1番のサビ（32小節目・唯一フラッシュで抜ける折り返し）なので直前は s03。
+ * 2番も同じ形で繰り返すため、後半のサビ(s07)の直前 s06 にも同じ盛り上がりを置く。
+ */
+const PRE_CHORUS = [scene(3), scene(6)];
 
 const LAYERS: MvLayer[] = [
 	// ══ 背景の譜面。画面いっぱいに4小節ぶんを固定表示する ═══════════
@@ -409,69 +382,291 @@ const LAYERS: MvLayer[] = [
 		z: 4,
 	},
 
-	// ══ 中央。8小節ごとに単純な四角へ戻り、残りの小節で図形がループする ═══════
-	// 旧実装はpianoRoll(音の高さ→縦位置に敷き詰める)だったが、これは参考動画を見ての
-	// 想像で、コマ送り実測は否定している——変化は「鳴っている音の並び」ではなく、
-	// 図形そのものが差し替わるアニメーションだった。
-	//
-	// そこから「拍に一定間隔」「発音回数にロック」の2つを順に試したが、どちらも
-	// 一部の窓だけを見て一般化した早合点で、通しで見た指摘により撤回した。実際は
-	// **小節位置**そのものにロックしている: 8小節(SCENE_BARS)の頭で1コマ目(単純な四角)
-	// に戻り、残り7小節でコマ2〜8を順にめぐる。最後(8小節目)がいちばん複雑な図形になり、
-	// サビ直前(s03→s04)やサビ中・2番でも同じ8小節周期が繰り返される。
-	// `iconCycle`の`resetEveryBars:SCENE_BARS`でこれを直接表す。
+	// ══ 中央モチーフ。全編1390フレームの走査で得た実測寸法で組む ══════════
+	// ① 8小節の頭 → 中央のグレー四角＋上下の太いタブ（「⊏⊐」状態）
+	// ② そのあと   → タブが引き、大きな外枠と切れ目の小四角が開いてくる
+	// ③ 小節ごと   → 遠い左右の要素が「破線列」と「鍵盤箱」で交互に入れ替わる
+	// 全部 phrase(8小節) と bar(1小節) の連続カーブなので、変化はすべてトゥイーン。
 	{
 		kind: "shape",
-		id: "zoom-fill",
-		form: "path",
-		path: ZOOM_FILL_ICONS[0],
-		pathBox: [0, 0, 100, 100],
-		iconCycle: { paths: ZOOM_FILL_ICONS, beats: 1, resetEveryBars: SCENE_BARS },
+		id: "zoom-square",
+		form: "square",
 		x: 320,
 		y: 180,
-		size: 46,
+		// 実測: 約48px（size 24）。参考動画では大きさがほぼ一定なので変動も小さくする。
+		size: 22,
 		rotation: 0,
-		color: "#d4d4d8",
+		// 実測: 白い枠に対してはっきり暗いグレー。明るすぎると枠と同化する。
+		color: "#8b8b90",
 		filled: true,
 		thickness: 1,
 		z: 20,
+		modulators: [
+			// 実測: 中央ブロックはインク分布が二値的（0付近が64%、濃い側が20%）で、
+			// 4小節のうち約1.5小節しか出ていない。常時表示だったのが最大の乖離だった。
+			// symmetric で「境目=1・フレーズ中央=0」の山にし、curve4 で
+			// 実測カーブ(0.25小節→61%, 0.5→34%, 0.75→13%)に合わせる。
+			{
+				source: "phrase",
+				bars: MOTIF_BARS,
+				symmetric: true,
+				curve: 4,
+				target: "opacity",
+				op: "mul",
+				amount: 1,
+			},
+			// 実測の下限（中盤でも12%前後は残る）
+			{ source: "constant", target: "opacity", op: "add", amount: 0.12 },
+			{
+				source: "phrase",
+				bars: MOTIF_BARS,
+				symmetric: true,
+				curve: 4,
+				target: "size",
+				op: "add",
+				amount: 4,
+			},
+		],
+	},
+	// 外枠。実測120px幅（size 60）。以前は52pxで半分以下だった。
+	// 8小節の頭では畳まれ、四角が引くのと入れ替わりに開く＝ループ図形エフェクトの主役。
+	{
+		kind: "shape",
+		id: "zoom-frame",
+		form: "path",
+		path: ZOOM_FRAME,
+		pathBox: [0, 0, 100, 100],
+		x: 320,
+		y: 180,
+		size: 60,
+		rotation: 0,
+		color: "#f4f4f5",
+		filled: false,
+		thickness: 3,
+		z: 19,
+		modulators: [
+			// 実測: モチーフ全幅は1小節内で202〜230px(video)とほぼ一定＝枠は常時出ている。
+			// 以前の phrase ゲートは「8小節の頭で消える」誤った動きを作っていた。
+			{ source: "bar", target: "size", op: "add", amount: 5 },
+		],
+	},
+	// 枠の左右の切れ目にはまる小四角。実測 ±46px・約24px（size 12）。
+	{
+		kind: "shape",
+		id: "zoom-side-l",
+		form: "path",
+		path: ZOOM_SIDE_BOX,
+		pathBox: [0, 0, 100, 100],
+		x: 274,
+		y: 180,
+		size: 12,
+		rotation: 0,
+		color: "#f4f4f5",
+		filled: false,
+		thickness: 3,
+		z: 20,
+		// 枠と一体の部品なので枠と同じく常時表示。
 		modulators: [],
 	},
-	// ══ 中央の左右に離れて出る破線クラスタ ══════════════════════════
-	// zoom-fill/zoom-frameとは別要素。中身が薄いコマのときだけ左右に現れる。
+	{
+		kind: "shape",
+		id: "zoom-side-r",
+		form: "path",
+		path: ZOOM_SIDE_BOX,
+		pathBox: [0, 0, 100, 100],
+		x: 366,
+		y: 180,
+		size: 12,
+		rotation: 0,
+		color: "#f4f4f5",
+		filled: false,
+		thickness: 3,
+		z: 20,
+		// 枠と一体の部品なので枠と同じく常時表示。
+		modulators: [],
+	},
+	// 上下の太いタブ。8小節の頭でだけ出る「⊏⊐」状態。
+	{
+		kind: "shape",
+		id: "zoom-tab-top",
+		form: "path",
+		path: ZOOM_TAB,
+		pathBox: [0, 0, 100, 100],
+		x: 320,
+		y: 146,
+		size: 34,
+		rotation: 0,
+		color: "#f4f4f5",
+		filled: true,
+		thickness: 1,
+		z: 18,
+		modulators: [
+			{
+				source: "phrase",
+				bars: MOTIF_BARS,
+				symmetric: true,
+				curve: 4,
+				target: "opacity",
+				op: "mul",
+				amount: 1,
+			},
+			{ source: "bar", target: "y", op: "sub", amount: 5 },
+		],
+	},
+	{
+		kind: "shape",
+		id: "zoom-tab-bottom",
+		form: "path",
+		path: ZOOM_TAB,
+		pathBox: [0, 0, 100, 100],
+		x: 320,
+		y: 214,
+		size: 34,
+		rotation: 0,
+		color: "#f4f4f5",
+		filled: true,
+		thickness: 1,
+		z: 18,
+		modulators: [
+			{
+				source: "phrase",
+				bars: MOTIF_BARS,
+				symmetric: true,
+				curve: 4,
+				target: "opacity",
+				op: "mul",
+				amount: 1,
+			},
+			{ source: "bar", target: "y", op: "add", amount: 5 },
+		],
+	},
+	// 遠いフランキング。実測 中心から±88px・約56px幅（size 28）。
+	// 破線列と鍵盤箱を`bar`の表裏で当て、1小節ごとに交互へ入れ替わるようにする。
 	{
 		kind: "shape",
 		id: "zoom-dash-l",
 		form: "path",
-		path: ZOOM_DASH_ICONS[0],
+		path: ZOOM_DASH_CLUSTER,
 		pathBox: [0, 0, 100, 100],
-		iconCycle: { paths: ZOOM_DASH_ICONS, beats: 1, resetEveryBars: SCENE_BARS },
-		x: 248,
+		x: 240,
 		y: 180,
-		size: 20,
+		size: 34,
 		rotation: 0,
 		color: "#e4e4e7",
 		filled: true,
 		thickness: 1,
-		z: 18,
-		modulators: [],
+		z: 21,
+		modulators: [
+			{ source: "bar", target: "opacity", op: "sub", amount: 0.85 },
+		],
 	},
 	{
 		kind: "shape",
 		id: "zoom-dash-r",
 		form: "path",
-		path: ZOOM_DASH_ICONS[0],
+		path: ZOOM_DASH_CLUSTER,
 		pathBox: [0, 0, 100, 100],
-		iconCycle: { paths: ZOOM_DASH_ICONS, beats: 1, resetEveryBars: SCENE_BARS },
-		x: 392,
+		x: 400,
 		y: 180,
-		size: 20,
+		size: 34,
 		rotation: 0,
 		color: "#e4e4e7",
 		filled: true,
 		thickness: 1,
-		z: 18,
-		modulators: [],
+		z: 21,
+		modulators: [
+			{ source: "bar", target: "opacity", op: "sub", amount: 0.85 },
+		],
+	},
+	{
+		kind: "shape",
+		id: "zoom-key-l",
+		form: "path",
+		path: ZOOM_KEYBOX,
+		pathBox: [0, 0, 100, 100],
+		x: 240,
+		y: 180,
+		size: 34,
+		rotation: 0,
+		color: "#e4e4e7",
+		filled: true,
+		thickness: 1,
+		z: 21,
+		modulators: [
+			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
+		],
+	},
+	{
+		kind: "shape",
+		id: "zoom-key-r",
+		form: "path",
+		path: ZOOM_KEYBOX,
+		pathBox: [0, 0, 100, 100],
+		x: 400,
+		y: 180,
+		size: 34,
+		rotation: 0,
+		color: "#e4e4e7",
+		filled: true,
+		thickness: 1,
+		z: 21,
+		modulators: [
+			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
+		],
+	},
+	// サビ直前の場面だけ、モチーフの外端（実測 ±120px）にもう一列足して密度を上げる。
+	// curveをゆるく(0.4)すると序盤はほとんど出ず、終わり際に一気に育つ＝サビへの助走。
+	{
+		kind: "shape",
+		id: "zoom-outer-l",
+		form: "path",
+		path: ZOOM_DASH_CLUSTER,
+		pathBox: [0, 0, 100, 100],
+		x: 190,
+		y: 180,
+		size: 24,
+		rotation: 0,
+		color: "#e4e4e7",
+		filled: true,
+		thickness: 1,
+		sections: PRE_CHORUS,
+		z: 21,
+		modulators: [
+			{
+				source: "phrase",
+				bars: SCENE_BARS,
+				curve: 0.4,
+				target: "opacity",
+				op: "sub",
+				amount: 1,
+			},
+		],
+	},
+	{
+		kind: "shape",
+		id: "zoom-outer-r",
+		form: "path",
+		path: ZOOM_DASH_CLUSTER,
+		pathBox: [0, 0, 100, 100],
+		x: 450,
+		y: 180,
+		size: 24,
+		rotation: 0,
+		color: "#e4e4e7",
+		filled: true,
+		thickness: 1,
+		sections: PRE_CHORUS,
+		z: 21,
+		modulators: [
+			{
+				source: "phrase",
+				bars: SCENE_BARS,
+				curve: 0.4,
+				target: "opacity",
+				op: "sub",
+				amount: 1,
+			},
+		],
 	},
 
 	// ══ 左の提灯 ═══════════════════════════════════════════
@@ -581,36 +776,6 @@ const LAYERS: MvLayer[] = [
 		modulators: [],
 	},
 
-	// ══ 中央の枠。参考動画の「白い1本枠」 ═══════════════════════════
-	// zoom-fill と中心を揃える。
-	//
-	// 実測(8〜28秒・60fps・24x24二値化サムネイルの差分でズーム領域を毎フレーム比較):
-	// 「onpix=0」の瞬間（内容が最も少なくなる差し替わりの合間）が
-	//   8.616 / 9.033 / 9.467 / 9.883 / 10.300 / 10.733 / 11.150 / 11.567 / 12.000s …
-	// と、間隔0.416〜0.434s（平均約0.423s）で、このMMLのテンポ t142 の四分音符
-	// (60/142=0.4225s)にほぼ一致していた。ここから「拍ロック」と判断したが、
-	// 93.7秒(16分音符の連打=26小節目)を同じ手法で測り直すと4倍近く速く切り替わって
-	// おり、拍ロックでは説明できない。8〜28秒の窓は「1拍1音」の旋律だったせいで
-	// 拍ロックと発音ロックが区別できなかっただけ——実際は zoom-fill と同じく
-	// 旋律トラックの発音回数にロックしていた。
-	{
-		kind: "shape",
-		id: "zoom-frame",
-		form: "path",
-		path: ZOOM_OUTLINE_ICONS[0],
-		pathBox: [0, 0, 100, 100],
-		iconCycle: { paths: ZOOM_OUTLINE_ICONS, beats: 1, resetEveryBars: SCENE_BARS },
-		x: 320,
-		y: 180,
-		size: 36,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: false,
-		thickness: 1.6,
-		z: 19,
-		modulators: [],
-	},
-
 	// ══ 下に現れる小さな影 ══════════════════════════════════
 	{
 		kind: "image",
@@ -707,7 +872,7 @@ export const LANTERN_PRESET: MvPresetEntry = {
 	kind: "pixelStage",
 	name: "ドット絵PV",
 	description:
-		"黒い舞台の左右に提灯と立て看板が立ち、そのあいだで中央のモチーフが4小節ごとに16回入れ替わる。足元にはうっすらとロールが流れる。",
+		"黒い舞台の左右に提灯と立て看板が立ち、そのあいだで中央の四角と輪が8小節ごとに膨らみ直しながら回り続ける。足元にはうっすらとロールが流れる。",
 	swapHint:
 		"素材は要りません。左右の小道具は図形（SVGパス）なので、画像レイヤーに置き換えるとあなたの世界になります。",
 	build: () => cloneManifest(MANIFEST),
