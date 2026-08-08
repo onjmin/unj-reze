@@ -96,6 +96,7 @@ import {
 	mvEntranceDistance,
 	mvUid,
 	mvWalkSpeed,
+	parseLyricsBulkGroups,
 } from "@/lib/mv-config";
 import {
 	EMPTY_SONG,
@@ -640,11 +641,12 @@ export default function MvMaker({
 	isEditing,
 }: MvMakerProps) {
 	const [manifest, setManifest] = useState<MvManifest>(
-		() => initialManifest ?? buildMvPreset("geometric"),
+		() => initialManifest ?? buildMvPreset("pianoRoll"),
 	);
 	const [tab, setTab] = useState<Tab>(initialManifest ? "song" : "preset");
 	const [editMode, setEditMode] = useState<EditMode>("easy");
 	const [presetName, setPresetName] = useState<string | null>(null);
+	const [lyricsBulkText, setLyricsBulkText] = useState("");
 	const [picker, setPicker] = useState<{
 		mode: "image" | "bgm";
 		target: "stageBg" | { layerId: string } | { sectionId: string };
@@ -887,6 +889,26 @@ export default function MvMaker({
 			vertical: false,
 			motion: "none",
 			shadow: true,
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		setSelectedLayerId(layer.id);
+	};
+
+	const addLyricsLayer = () => {
+		const layer: MvLyricsLayer = {
+			kind: "lyrics",
+			id: mvUid("lyr"),
+			source: song.lyricLines.length > 0 ? "mml" : "manual",
+			lines: [],
+			x: MV_W - 48,
+			y: 44,
+			anchor: "topLeft",
+			size: 16,
+			color: "#f3f4f6",
+			vertical: true,
+			afterimage: 2,
+			holdBars: 2,
 			z: getNextZ(),
 		};
 		update((m) => ({ ...m, layers: [...m.layers, layer] }));
@@ -1943,6 +1965,31 @@ export default function MvMaker({
 						}
 					/>
 
+					<div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
+						<p className="text-[10px] text-gray-400">
+							どのトラックを映すか（未選択なら全トラック合算——複数選ぶと同時に複数の音が
+							別々の位置に描かれます）
+						</p>
+						{song.tracks.map((t) => (
+							<CheckField
+								key={t}
+								label={`トラック @${t}`}
+								checked={!!layer.tracks?.includes(t)}
+								onChange={(v) =>
+									updateLayer(layer.id, (l) => {
+										if (l.kind !== "visualizer") return l;
+										const cur = l.tracks ?? [];
+										const next = v ? [...cur, t] : cur.filter((x) => x !== t);
+										return {
+											...l,
+											tracks: next.length > 0 ? next : undefined,
+										};
+									})
+								}
+							/>
+						))}
+					</div>
+
 					{layer.style === "pianoRoll" && (
 						<>
 							<SelectField
@@ -2229,6 +2276,123 @@ export default function MvMaker({
 									)
 								}
 							/>
+
+							<CheckField
+								label="拍ロックで形を差し替える（コマ送りアニメ）"
+								checked={!!layer.iconCycle}
+								onChange={(v) =>
+									updateLayer(layer.id, (l) => {
+										if (l.kind !== "shape") return l;
+										if (!v) {
+											const { iconCycle: _drop, ...rest } = l;
+											return rest;
+										}
+										return {
+											...l,
+											iconCycle: l.iconCycle ?? {
+												beats: 1,
+												paths: [l.path ?? "M50,50 L60,50 L60,60 L50,60 Z"],
+											},
+										};
+									})
+								}
+							/>
+							{layer.iconCycle && (
+								<Details
+									label={`差し替えコマ（${layer.iconCycle.paths.length}枚）`}
+								>
+									<Hint>
+										上から順に1周ぶんのコマです。上の「形のデータ」欄は使われなくなり、
+										ここに並べたコマだけが拍に合わせて等間隔で切り替わります。
+									</Hint>
+									<NumField
+										label="何拍で1周するか"
+										value={layer.iconCycle.beats}
+										min={0.1}
+										step={0.1}
+										onChange={(v) =>
+											updateLayer(layer.id, (l) =>
+												l.kind === "shape" && l.iconCycle
+													? { ...l, iconCycle: { ...l.iconCycle, beats: v } }
+													: l,
+											)
+										}
+									/>
+									{layer.iconCycle.paths.map((p, i) => (
+										<div key={i} className="flex items-start gap-1.5">
+											<span className="mt-2 w-5 shrink-0 text-center text-[10px] text-gray-500">
+												{i + 1}
+											</span>
+											<textarea
+												value={p}
+												placeholder="M50 5 L95 50 L50 95 L5 50 Z"
+												onChange={(e) => {
+													const text = e.target.value;
+													updateLayer(layer.id, (l) =>
+														l.kind === "shape" && l.iconCycle
+															? {
+																	...l,
+																	iconCycle: {
+																		...l.iconCycle,
+																		paths: l.iconCycle.paths.map((x, j) =>
+																			j === i ? text : x,
+																		),
+																	},
+																}
+															: l,
+													);
+												}}
+												className={`${INPUT_CLASS} h-12 min-w-0 flex-1 resize-none font-mono text-[10px]`}
+											/>
+											<button
+												onClick={() =>
+													updateLayer(layer.id, (l) =>
+														l.kind === "shape" && l.iconCycle
+															? {
+																	...l,
+																	iconCycle: {
+																		...l.iconCycle,
+																		paths: l.iconCycle.paths.filter(
+																			(_, j) => j !== i,
+																		),
+																	},
+																}
+															: l,
+													)
+												}
+												disabled={(layer.iconCycle?.paths.length ?? 0) <= 1}
+												className={`${DEL_BTN_CLASS} mt-0.5 disabled:opacity-30`}
+											>
+												<Trash2 size={16} />
+											</button>
+										</div>
+									))}
+									<button
+										onClick={() =>
+											updateLayer(layer.id, (l) =>
+												l.kind === "shape" && l.iconCycle
+													? {
+															...l,
+															iconCycle: {
+																...l.iconCycle,
+																paths: [
+																	...l.iconCycle.paths,
+																	l.iconCycle.paths[
+																		l.iconCycle.paths.length - 1
+																	] ?? "M50,50 L60,50 L60,60 L50,60 Z",
+																],
+															},
+														}
+													: l,
+											)
+										}
+										className={ADD_BTN_CLASS}
+									>
+										<Plus size={13} />
+										コマを追加
+									</button>
+								</Details>
+							)}
 						</>
 					)}
 					<NumField
@@ -2836,6 +3000,10 @@ export default function MvMaker({
 						<Plus size={12} />
 						図形
 					</button>
+					<button onClick={addLyricsLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						歌詞
+					</button>
 					<button onClick={addEffectLayer} className={ADD_BTN_CLASS}>
 						<Plus size={12} />
 						演出
@@ -3053,6 +3221,72 @@ export default function MvMaker({
 									<Plus size={13} />
 									行を追加
 								</button>
+
+								<Details label="一括貼り付けで取り込む">
+									<Hint>
+										{"E[00:11.70]セリフ"}のように「記号＋[分:秒]＋歌詞」を1行ずつ並べて貼ると、
+										まとめて取り込めます。{"#"}
+										で始まる行（場面見出しや演出メモ）は無視されるので、資料をそのまま貼ってOKです。
+										記号は質感の合図として下地の色になります（E緑/L水色/W黄/P白/Fピンク/M紫）。
+									</Hint>
+									<textarea
+										value={lyricsBulkText}
+										onChange={(e) => setLyricsBulkText(e.target.value)}
+										placeholder={
+											"L[00:19.70]ノイズまみれの世界で\nL[00:22]冷たい雨のミュートが"
+										}
+										className={`${INPUT_CLASS} h-24 resize-none font-mono text-[10px]`}
+									/>
+									{(() => {
+										const groups = parseLyricsBulkGroups(
+											lyricsBulkText,
+											song.bpm || 120,
+										);
+										const total = groups.reduce(
+											(n, g) => n + g.lines.length,
+											0,
+										);
+										if (total === 0) return null;
+										return (
+											<>
+												<p className="text-[10px] text-gray-400">
+													{groups.length > 1
+														? `${groups.map((g) => g.label || "(見出しなし)").join(" / ")} の${groups.length}場面・${total}行を検出`
+														: `${total}行を検出`}
+												</p>
+												<button
+													onClick={() => {
+														updateLayer(lyricsLayer.id, (l) =>
+															l.kind === "lyrics"
+																? {
+																		...l,
+																		lines: [
+																			...(l.lines ?? []),
+																			...groups.flatMap((g) => g.lines),
+																		],
+																	}
+																: l,
+														);
+														setLyricsBulkText("");
+													}}
+													className={ADD_BTN_CLASS}
+												>
+													<Plus size={13} />
+													この{total}行を取り込む
+												</button>
+												{groups.length > 1 && (
+													<Hint>
+														見出し({groups.map((g) => g.label).join("・")}
+														)が複数あります。場面ごとに表示位置や縦横を変えたい場合は、
+														「レイヤー」タブの「歌詞」ボタンで歌詞レイヤーをもう1つ追加し、
+														そちらへ残りの見出しぶんを貼り付けたうえで、下の「出す場面」欄で
+														絞り込んでください（1レイヤー＝1つの見た目）。
+													</Hint>
+												)}
+											</>
+										);
+									})()}
+								</Details>
 							</>
 						)}
 

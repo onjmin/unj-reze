@@ -629,6 +629,95 @@ export interface MvLyricLine {
 }
 
 /**
+ * `一括貼り付け` で受け付ける行フォーマット。1行 =
+ *   `<記号>[分:秒(.小数)]歌詞`   例: `L[00:19.70]ノイズまみれの世界で`
+ * `#`で始まる行（場面見出し・演出メモ）は無視する。空行も無視する。
+ * 先頭の記号は「その行をどんな質感で出すか」の合図——`MV_LYRIC_TAG_COLORS`
+ * の色をその行まるごとの下地(marks)にする。曲のBPMから秒→小節に換算する。
+ */
+export const MV_LYRIC_TAG_COLORS: Record<string, string> = {
+	// E: デジタル・バグ・ノイズ（ドット/バグ質感）
+	E: "#4ade80",
+	// L: 有機的なノイズ・波形（素の歌詞行にも使う既定）
+	L: "#67e8f9",
+	// W: キーボード・システムログ（タイピング質感）
+	W: "#fbbf24",
+	// P: 極太・フラッシュ（サビの最高潮）
+	P: "#f4f4f5",
+	// F: ブレる画面（グリッチ質感）
+	F: "#f87171",
+	// M: 立体・グラフィカル（エモい質感）
+	M: "#c4b5fd",
+};
+
+const LYRIC_BULK_LINE_RE =
+	/^([A-Za-z])\[(\d{1,2}):(\d{1,2}(?:\.\d+)?)\](.+)$/;
+
+/** `mm:ss.cc` 表記1行ぶんをパースして秒に直す。 */
+function parseLyricTimestampSec(mm: string, ss: string): number {
+	return Number(mm) * 60 + Number(ss);
+}
+
+/** `#【Aメロ】（テーマ：…）` のような場面見出し行から見出し文字列を取り出す。 */
+const LYRIC_SECTION_HEADER_RE = /^#\s*【(.+?)】/;
+
+/**
+ * 一括貼り付けテキストを `MvLyricLine[]` に変換する（場面見出しは無視してひとまとめにする）。
+ * bpmは4/4固定（`MV_BEATS_PER_BAR`）で小節に換算するのに使う。
+ * 記号が `MV_LYRIC_TAG_COLORS` に無い場合は色を付けずそのまま取り込む。
+ */
+export function parseLyricsBulkText(text: string, bpm: number): MvLyricLine[] {
+	return parseLyricsBulkGroups(text, bpm).flatMap((g) => g.lines);
+}
+
+/**
+ * 一括貼り付けテキストを `#【Aメロ】` のような場面見出しごとにグループ分けする。
+ * Aメロ/Bメロ/サビで歌詞の出す位置や見た目（縦横・色・出す側）を変えたい場合、
+ * 見出しごとに別々の歌詞レイヤーとして取り込めるようにするための下ごしらえ。
+ * 見出しが1つも無ければ、全行が空見出し("")の1グループにまとまる。
+ */
+export function parseLyricsBulkGroups(
+	text: string,
+	bpm: number,
+): { label: string; lines: MvLyricLine[] }[] {
+	const secondsPerBar = (60 / Math.max(1, bpm)) * MV_BEATS_PER_BAR;
+	const groups: { label: string; lines: MvLyricLine[] }[] = [];
+	let current: { label: string; lines: MvLyricLine[] } | null = null;
+
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (!line) continue;
+		const header = line.match(LYRIC_SECTION_HEADER_RE);
+		if (header) {
+			current = { label: header[1], lines: [] };
+			groups.push(current);
+			continue;
+		}
+		if (line.startsWith("#")) continue; // 演出メモなどのただのコメント
+
+		const m = line.match(LYRIC_BULK_LINE_RE);
+		if (!m) continue;
+		const [, tag, mm, ss, body] = m;
+		const sec = parseLyricTimestampSec(mm, ss);
+		const bar = sec / secondsPerBar;
+		const color = MV_LYRIC_TAG_COLORS[tag.toUpperCase()];
+		const parsedLine: MvLyricLine = {
+			bar: Math.round(bar * 1000) / 1000,
+			text: body,
+			...(color ? { marks: [{ from: 0, to: body.length, color }] } : {}),
+		};
+		if (!current) {
+			current = { label: "", lines: [] };
+			groups.push(current);
+		}
+		current.lines.push(parsedLine);
+	}
+
+	for (const g of groups) g.lines.sort((a, b) => a.bar - b.bar);
+	return groups.filter((g) => g.lines.length > 0);
+}
+
+/**
  * 縦書き歌詞の積み上がる向き。
  * - rightToLeft : 右端を固定して、新しい行が左へ足されていく（参考動画3本ともこれ）
  * - leftToRight : `x` に最新行を置き、古い行が右へ流れていく
