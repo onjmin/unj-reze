@@ -1650,7 +1650,20 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 		ctx.save();
 		ctx.translate(x + offsetX * i, y + offsetY * i);
 		ctx.rotate((rotation + spin * i) * DEG);
-		if (layer.form === "path" && layer.path) {
+		const cyclePath = layer.iconCycle
+			? layer.iconCycle.paths[
+					Math.min(
+						layer.iconCycle.paths.length - 1,
+						Math.floor(
+							((d.step / (layer.iconCycle.beats * MV_STEPS_PER_BEAT)) %
+								1) *
+								layer.iconCycle.paths.length,
+						),
+					)
+				]
+			: undefined;
+		const activePath = cyclePath ?? layer.path;
+		if (layer.form === "path" && activePath) {
 			// 設計座標系（pathBox）の中心を原点に、長辺が size×2 になるよう拡縮して描く
 			const box = layer.pathBox ?? [0, 0, 100, 100];
 			const bw = Math.max(1e-3, box[2]);
@@ -1659,7 +1672,7 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 			ctx.scale(s, s);
 			ctx.translate(-(box[0] + bw / 2), -(box[1] + bh / 2));
 			try {
-				const p = getPath2D(layer.path);
+				const p = getPath2D(activePath);
 				// evenodd にしておくと、重なったサブパスが穴として抜ける（ドーナツ形などが作れる）
 				if (layer.filled) ctx.fill(p, "evenodd");
 				else {

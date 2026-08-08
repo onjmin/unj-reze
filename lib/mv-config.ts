@@ -738,6 +738,13 @@ export interface MvShapeLayer extends MvLayerBase {
 	stagger?: number;
 	blend?: MvBlend;
 	modulators: MvModulator[];
+	/**
+	 * form==='path' のとき、`path` の代わりに複数の形を拍にロックして順番に切り替える。
+	 * 参考動画のコマ送り実測で見つかった「なめらかに動くのではなく、離散的な形が
+	 * 一定間隔で差し替わる」動きを再現するためのもの（灯りのステージ プリセットの
+	 * 中央モチーフなど）。`beats` ぶんの時間で `paths` を一周する（等間隔で1コマずつ進む）。
+	 */
+	iconCycle?: { paths: string[]; beats: number };
 }
 
 /** 画面全体にかかる演出。 */
