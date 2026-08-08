@@ -311,6 +311,45 @@ const LAYERS: MvLayer[] = [
 		sections: SECTIONS.slice(2).map((s) => s.id),
 		z: 4,
 	},
+	// 帯は曲を通して同じ太さではない。s02の1行から、曲が濃くなる後半にかけて
+	// 低音・和音トラックぶんの行が重なって太く/密になっていく（コマ送りで確認）。
+	// 1レイヤーの `tracks` は場面ごとに変えられないので、重なる帯を段階的に追加する形で近似する。
+	{
+		kind: "visualizer",
+		id: "score-build",
+		style: "pianoRoll",
+		projection: "flat",
+		flow: "page",
+		tracks: [0, 1],
+		rect: { x: 0, y: 270, w: 640, h: 56 },
+		amount: 4,
+		thickness: 1,
+		light: {
+			dim: 0.08,
+			fadeOut: true,
+			echo: { beats: 0.45, spread: 6, thickness: 1 },
+		},
+		sections: SECTIONS.slice(4).map((s) => s.id),
+		z: 4,
+	},
+	{
+		kind: "visualizer",
+		id: "score-thick",
+		style: "pianoRoll",
+		projection: "flat",
+		flow: "page",
+		tracks: [0, 1, 2],
+		rect: { x: 0, y: 262, w: 640, h: 72 },
+		amount: 4,
+		thickness: 1,
+		light: {
+			dim: 0.07,
+			fadeOut: true,
+			echo: { beats: 0.45, spread: 6, thickness: 1 },
+		},
+		sections: SECTIONS.slice(6).map((s) => s.id),
+		z: 4,
+	},
 
 	// ══ 中央。同じ譜面を1小節ぶんだけ拡大して見せる ════════════════
 	// 参考動画で「4小節ごとに形が変わるモチーフ」に見えていたものの正体がこれ。
@@ -456,6 +495,9 @@ const LAYERS: MvLayer[] = [
 
 	// ══ 中央の譜面を囲う枠。参考動画の「白い1本枠」 ═════════════════
 	// zoom と中心を揃え、正方形サイズも横0.667/縦0.5倍換算の平均で合わせる。
+	// コマ送りで見直すと、この枠は静止した箱ではなく発音のたびに一瞬だけ膨らんで戻る
+	// （中身が別カットに切り替わって見えたのは枠自体の形替わりではなく中の描画差）。
+	// この形状システムには「枠が割れて開く」ような差し替えは無いので、脈打つ動きで近似する。
 	{
 		kind: "shape",
 		id: "zoom-frame",
@@ -469,7 +511,15 @@ const LAYERS: MvLayer[] = [
 		filled: false,
 		thickness: 1.6,
 		z: 19,
-		modulators: [],
+		modulators: [
+			{
+				source: "trackOnset",
+				track: 0,
+				target: "size",
+				op: "add",
+				amount: 6,
+			},
+		],
 	},
 
 	// ══ 下に現れる小さな影 ══════════════════════════════════
@@ -495,6 +545,9 @@ const LAYERS: MvLayer[] = [
 	},
 
 	// ══ 歌詞。場面によって出る側が入れ替わる ════════════════════
+	// コマ送りで確認: 右と左は同時には出ない（以前の版は右を常時＋一部の場面だけ
+	// 左も重ねていたが、参考動画は排他）。冒頭(s00)と中盤の折り返し直後(s05)だけ
+	// 右、それ以外はずっと左——右→左→右→左と1曲で2回だけ入れ替わる。
 	{
 		kind: "lyrics",
 		id: "lyrics-right",
@@ -509,6 +562,7 @@ const LAYERS: MvLayer[] = [
 		vertical: true,
 		afterimage: 3,
 		holdBars: 8,
+		sections: [scene(0), scene(5)],
 		z: 40,
 	},
 	{
@@ -524,7 +578,7 @@ const LAYERS: MvLayer[] = [
 		vertical: true,
 		afterimage: 1,
 		holdBars: 4,
-		sections: [scene(2), scene(3), scene(6), scene(7)],
+		sections: [scene(1), scene(2), scene(3), scene(4), scene(6), scene(7)],
 		z: 40,
 	},
 

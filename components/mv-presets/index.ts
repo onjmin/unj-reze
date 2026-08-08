@@ -1,13 +1,8 @@
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
-import { COURIER_PRESET } from "./courier";
 import { GEOMETRIC_PRESET } from "./geometric";
 import { LANTERN_PRESET } from "./lantern";
 import { PIANO_ROLL_PRESET } from "./piano-roll";
-import { PIXEL_STAGE_PRESET } from "./pixel-stage";
-import { SEQUENCER_PRESET } from "./sequencer";
 import type { MvPresetEntry } from "./shared";
-import { STAGE_CAST_PRESET } from "./stage-cast";
-import { WINDOW_FRAME_PRESET } from "./window-frame";
 
 export type { MvPresetEntry } from "./shared";
 
@@ -17,16 +12,16 @@ export type { MvPresetEntry } from "./shared";
  *
  * どのプリセットも 64小節ぶんの曲と 8〜16 の場面を持つ。
  * 場面が2つしか無いと、2分の曲でも同じ画がずっと映っているだけになるため。
+ *
+ * シーケンサ／窓のステージ／ドット絵ステージ／ステージ整列／運び屋の5つは
+ * 参考動画との再現率が低く（コマ送り検証未実施のまま作られたAI slop）撤去した。
+ * 復元する場合は git 履歴（components/mv-presets/{sequencer,window-frame,
+ * pixel-stage,stage-cast,courier}.ts）から。
  */
 export const MV_PRESETS: MvPresetEntry[] = [
 	GEOMETRIC_PRESET,
 	LANTERN_PRESET,
-	SEQUENCER_PRESET,
 	PIANO_ROLL_PRESET,
-	WINDOW_FRAME_PRESET,
-	PIXEL_STAGE_PRESET,
-	STAGE_CAST_PRESET,
-	COURIER_PRESET,
 ];
 
 /** プリセット名から引く（同じ kind のプリセットが複数あるため名前で識別する）。 */
