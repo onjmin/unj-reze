@@ -1752,10 +1752,13 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const notes = notesForLayer(d, layer);
 	const echo = light.echo && light.echo.beats > 0 ? light.echo : null;
 	const echoSteps = echo ? echo.beats * MV_STEPS_PER_BEAT : 0;
+	// echo は音符の外へ echo.spread ぶん輪郭が広がる。クリップをノート矩形ぴったりにすると
+	// 広がった分がまるごと切り取られて「枠の外に何も出ない」ことになる（zoomレイヤーで顕著）。
+	const clipMargin = echo ? echo.spread : 0;
 
 	ctx.save();
 	ctx.beginPath();
-	ctx.rect(x, y, w, h);
+	ctx.rect(x - clipMargin, y - clipMargin, w + clipMargin * 2, h + clipMargin * 2);
 	ctx.clip();
 
 	const baseAlpha = ctx.globalAlpha;
