@@ -179,7 +179,7 @@ export function withMmlVolume(mml: string, volume: number): string {
 	const v = Math.max(0, Math.min(100, Math.round(volume)));
 	if (/#volume=\d+/.test(mml))
 		return mml.replace(/#volume=\d+/, `#volume=${v}`);
-	return `#volume=${v}\n${mml}`;
+	return `#volume=${v} ${mml}`;
 }
 
 export const MML_MARKERS = ["#mml", "#MML作曲"];

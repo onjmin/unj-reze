@@ -78,5 +78,13 @@ export async function ensureMmlExternalized(
 	// クライアントが外部化できなかった場合のフォールバック。マーカー行が無ければ
 	// そもそもMML投稿ではないので何もしない。
 	if (extractMmlFromContent(content) === null) return { content };
-	return externalizeMml(content);
+	try {
+		return await externalizeMml(content);
+	} catch (e) {
+		console.warn(
+			"[mml] ensureMmlExternalized failed (possibly 1042 on Worker). Falling back to inline.",
+			e,
+		);
+		return { content };
+	}
 }

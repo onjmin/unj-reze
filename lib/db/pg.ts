@@ -42,6 +42,7 @@ import type { Pool } from "pg";
 import { genBbsId } from "../cc-id";
 import { extractChordsFromContent } from "../chord";
 import type { Message, Trend } from "../mock-db";
+import { extractMmlFromContent } from "../mml";
 import { ensureMmlExternalized } from "../mml-payload";
 import { CH_FEED, chThread, chUser } from "../realtime/channels";
 import { publishRealtime } from "../realtime/publish";
@@ -238,12 +239,12 @@ function deriveInsertContent(data: {
 	mmlUrl?: string;
 }) {
 	const content = data.content ?? "";
-	if (data.mmlUrl) {
+	if (data.mmlUrl || extractMmlFromContent(content)) {
 		return {
 			contentType: CT.Dtm,
 			contentText: content,
 			contentUrl: "",
-			contentDataUrl: data.mmlUrl,
+			contentDataUrl: data.mmlUrl || null,
 		};
 	}
 	if (data.hasImage && data.imageSrc) {
@@ -833,7 +834,8 @@ export const pgStore: DataStore = {
 		// content_type/content_data_url を修復する。
 		const mmlResolved = await ensureMmlExternalized(content, mml);
 		const needsMmlRewrite = !!mmlResolved.mmlUrl;
-		if (mml !== undefined || needsMmlRewrite) {
+		const hasInlineMml = extractMmlFromContent(content) !== null;
+		if (mml !== undefined || needsMmlRewrite || hasInlineMml) {
 			const c = deriveInsertContent({
 				content: mmlResolved.content,
 				mmlUrl: mmlResolved.mmlUrl,
