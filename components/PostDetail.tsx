@@ -25,11 +25,12 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
+import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
 import {
 	extractMmlFromContent,
+	findMmlMarker,
 	getDisplayContent,
 	stripMmlLine,
 } from "@/lib/mml";
@@ -1284,6 +1285,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						if (hasMmlContent) {
 							return (
 								<div className="relative">
+									<div className="text-red-500 font-bold mb-1 text-[13px]">
+										{findMmlMarker(post.content) ?? "#mml"}
+									</div>
 									<MmlSource post={post}>
 										{(mml) => <MmlPlayer mml={mml} />}
 									</MmlSource>
@@ -1303,7 +1307,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							return (
 								<div>
 									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										{CHORD_MARKER}
+										♪コード進行
 									</div>
 									<ChordPlayer chords={chordRes.chords} />
 								</div>
@@ -2112,15 +2116,20 @@ function ReplyTreeItem({
 					{(() => {
 						if (hasMmlContent)
 							return (
-								<MmlSource post={localPost}>
-									{(mml) => <MmlPlayer mml={mml} />}
-								</MmlSource>
+								<div>
+									<div className="text-red-500 font-bold mb-1 text-[13px]">
+										{findMmlMarker(localPost.content) ?? "#mml"}
+									</div>
+									<MmlSource post={localPost}>
+										{(mml) => <MmlPlayer mml={mml} />}
+									</MmlSource>
+								</div>
 							);
 						if (chordRes)
 							return (
 								<div>
 									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										{CHORD_MARKER}
+										♪コード進行
 									</div>
 									<ChordPlayer chords={chordRes.chords} />
 								</div>

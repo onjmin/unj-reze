@@ -194,6 +194,24 @@ function findMmlLineIndex(lines: string[]): number {
 	});
 }
 
+/**
+ * contentの中で実際にヒットしたMMLマーカーの文字列そのものを返す（`#mml` / `#MML作曲`）。
+ * 埋め込み(MmlPlayer)の直前に表示するラベル用。決め打ちの表記をここで新たに作らず、
+ * MML_MARKERS で定義されている実際のマーカーをそのまま返すことで、表記ゆれ
+ * （#mml投稿 等）を生まないようにする。
+ */
+export function findMmlMarker(content: string): string | null {
+	if (!content || typeof content !== "string") return null;
+	const lines = content.split("\n");
+	const idx = findMmlLineIndex(lines);
+	if (idx === -1) return null;
+	const line = lines[idx].trim();
+	return (
+		MML_MARKERS.find((m) => line.toLowerCase().startsWith(m.toLowerCase())) ??
+		null
+	);
+}
+
 // MML行は他の行と混在しうる（1行下に自由コメントが入る等）ため、
 // マーカーが現れた行だけを対象に抽出・除去する。マーカー以降を全部飲み込まない。
 export function extractMmlFromContent(content: string): string | null {

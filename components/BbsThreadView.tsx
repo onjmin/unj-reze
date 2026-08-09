@@ -7,10 +7,14 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getUserIdLabel } from "@/lib/avatar";
-import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
+import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
-import { extractMmlFromContent, getDisplayContent } from "@/lib/mml";
+import {
+	extractMmlFromContent,
+	findMmlMarker,
+	getDisplayContent,
+} from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
@@ -454,6 +458,9 @@ export default function BbsThreadView({
 											className="pl-6 mt-2"
 											onClick={(e) => e.stopPropagation()}
 										>
+											<div className="text-red-500 font-bold mb-1 text-[13px]">
+												{findMmlMarker(p.content) ?? "#mml"}
+											</div>
 											<MmlSource post={p}>
 												{(mml) => <MmlPlayer mml={mml} />}
 											</MmlSource>
@@ -468,7 +475,7 @@ export default function BbsThreadView({
 											onClick={(e) => e.stopPropagation()}
 										>
 											<div className="text-red-500 font-bold mb-1 text-[13px]">
-												{CHORD_MARKER}
+												♪コード進行
 											</div>
 											<ChordPlayer chords={chordRes.chords} />
 										</div>

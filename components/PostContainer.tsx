@@ -23,9 +23,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
+import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
-import { extractMmlFromContent, getDisplayContent } from "@/lib/mml";
+import {
+	extractMmlFromContent,
+	findMmlMarker,
+	getDisplayContent,
+} from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
 import { cacheProfileSeed } from "@/lib/profile-cache";
 import { postShareUrl } from "@/lib/share";
@@ -733,6 +737,9 @@ export default function PostContainer({
 						if (post.hasMml || extractMmlFromContent(post.content)) {
 							return (
 								<div onClick={(e) => e.stopPropagation()} className="relative">
+									<div className="text-red-500 font-bold mb-1 text-[13px]">
+										{findMmlMarker(post.content) ?? "#mml"}
+									</div>
 									<MmlSource post={post}>
 										{(mml) => <MmlPlayer mml={mml} />}
 									</MmlSource>
@@ -756,7 +763,7 @@ export default function PostContainer({
 							return (
 								<div onClick={(e) => e.stopPropagation()}>
 									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										{CHORD_MARKER}
+										♪コード進行
 									</div>
 									<ChordPlayer chords={chordRes.chords} />
 								</div>

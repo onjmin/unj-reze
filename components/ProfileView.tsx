@@ -31,14 +31,18 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
+import { extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import {
 	applyMasterVolume,
 	subscribeMasterVolume,
 	subscribeMuted,
 } from "@/lib/master-volume";
-import { extractMmlFromContent, getDisplayContent } from "@/lib/mml";
+import {
+	extractMmlFromContent,
+	findMmlMarker,
+	getDisplayContent,
+} from "@/lib/mml";
 import { ensureSessionId } from "@/lib/session";
 import { showToast } from "@/lib/toast";
 import {
@@ -1564,9 +1568,14 @@ export default function ProfileView({
 												// 常に空文字になる）ため、hasMml も見て MmlSource 経由で mmlUrl を解決する。
 												if (p.hasMml || extractMmlFromContent(p.content)) {
 													return (
-														<MmlSource post={p}>
-															{(mml) => <MmlPlayer mml={mml} />}
-														</MmlSource>
+														<div>
+															<div className="text-red-500 font-bold mb-1 text-[13px]">
+																{findMmlMarker(p.content) ?? "#mml"}
+															</div>
+															<MmlSource post={p}>
+																{(mml) => <MmlPlayer mml={mml} />}
+															</MmlSource>
+														</div>
 													);
 												}
 												const chordRes = extractChordsFromContent(p.content);
@@ -1574,7 +1583,7 @@ export default function ProfileView({
 													return (
 														<div>
 															<div className="text-red-500 font-bold mb-1 text-[13px]">
-																{CHORD_MARKER}
+																♪コード進行
 															</div>
 															<ChordPlayer chords={chordRes.chords} />
 														</div>
