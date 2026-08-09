@@ -2313,6 +2313,15 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, rotation: v }) as MvLayer)
 						}
 					/>
+					<NumField
+						label="縦横比（1で正比率。0.5なら縦半分、2なら縦2倍）"
+						value={layer.aspect ?? 1}
+						min={0.05}
+						step={0.05}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, aspect: v }) as MvLayer)
+						}
+					/>
 					<ColorField
 						label="色"
 						value={layer.color}
@@ -2348,7 +2357,13 @@ export default function MvMaker({
 							onClick={() =>
 								setMotionTarget({
 									layerId: layer.id,
-									sectionId: manifest.sections[0]?.id ?? "__all__",
+									// この図形が実際に出ている場面を優先する。常に先頭の場面（sections[0]）
+									// を選ぶと、その図形がそこに出ていない場合は動きを設定しても
+									// 「表示されている場面」には反映されず、設定が効かないように見えるバグになる。
+									sectionId:
+										layer.sections?.[0] ??
+										manifest.sections[0]?.id ??
+										"__all__",
 								})
 							}
 							className="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-500 shadow-sm transition-colors"
@@ -2622,7 +2637,7 @@ export default function MvMaker({
 						</>
 					)}
 					<NumField
-						label="個数"
+						label="複製する数（同じ形を重ねて並べる個数。1なら複製なし）"
 						value={layer.count ?? 1}
 						min={1}
 						max={64}
@@ -4425,6 +4440,7 @@ export default function MvMaker({
 							baseLayer={baseLayer}
 							sections={[section]}
 							sceneBars={() => Math.max(1, sceneBars)}
+							bpm={song.bpm}
 							onApply={(perScene) => {
 								const cfg = perScene[section.id];
 								if (!cfg) return;

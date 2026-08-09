@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { MV_H, MV_W, type MvManifest, type MvSection, type MvShapeLayer } from "@/lib/mv-config";
+import {
+	MV_H,
+	MV_STEPS_PER_BEAT,
+	MV_W,
+	type MvManifest,
+	type MvSection,
+	type MvShapeLayer,
+} from "@/lib/mv-config";
 import { EMPTY_SONG, drawMvFrame, type MvFrameState } from "@/lib/mv-engine";
 import {
 	type MvMotionCustomToggle,
@@ -25,9 +32,12 @@ function PresetIcon({ path }: { path: string }) {
 function MotionLivePreview({
 	baseLayer,
 	modulators,
+	bpm,
 }: {
 	baseLayer: MvShapeLayer;
 	modulators: ReturnType<typeof resolveSceneModulators>;
+	/** 実際の曲のBPM。省略時はEMPTY_SONGの既定値。 */
+	bpm?: number;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -54,8 +64,10 @@ function MotionLivePreview({
 			sections: [],
 			layers: [{ ...baseLayer, id: "preview", modulators }],
 		};
-		const song = { ...EMPTY_SONG, bpm: 120 };
-		const stepsPerSec = (song.bpm / 60) * 48;
+		// 実際の曲のBPMで動かさないと、ビート同期プリセットの体感速度が
+		// 本編と食い違って見える（以前は120固定でズレていた）。
+		const song = { ...EMPTY_SONG, bpm: bpm && bpm > 0 ? bpm : EMPTY_SONG.bpm };
+		const stepsPerSec = (song.bpm / 60) * MV_STEPS_PER_BEAT;
 		let raf = 0;
 		const start = performance.now();
 		const loop = () => {
@@ -66,7 +78,7 @@ function MotionLivePreview({
 		};
 		raf = requestAnimationFrame(loop);
 		return () => cancelAnimationFrame(raf);
-	}, [baseLayer, modulators]);
+	}, [baseLayer, modulators, bpm]);
 
 	return (
 		<canvas
@@ -84,6 +96,8 @@ interface MvShapeMotionModalProps {
 	sections: MvSection[];
 	/** その場面が何小節あるか（`速さ`のフレーズ長をこの範囲内に収めるため）。 */
 	sceneBars: (sectionId: string) => number;
+	/** 実際の曲のBPM。プレビューの体感速度を本編と合わせるために使う。 */
+	bpm?: number;
 	initial?: Record<string, MvSceneMotionConfig>;
 	onApply: (perScene: Record<string, MvSceneMotionConfig>) => void;
 	onClose: () => void;
@@ -100,6 +114,7 @@ export default function MvShapeMotionModal({
 	baseLayer,
 	sections,
 	sceneBars,
+	bpm,
 	initial,
 	onApply,
 	onClose,
@@ -138,14 +153,24 @@ export default function MvShapeMotionModal({
 					</button>
 				</div>
 
-				<div className="flex-1 space-y-4 overflow-y-auto p-3">
-					<MotionLivePreview baseLayer={baseLayer} modulators={modulators} />
-
+				{/*
+					プレビューはスクロールしないと見えないと使い物にならない
+					（プリセットを押すたびに毎回スクロールして戻ることになる）ので、
+					スクロール領域の外＝常に画面内に固定して出す。
+				*/}
+				<div className="shrink-0 space-y-2 border-b border-gray-800 p-3">
+					<MotionLivePreview
+						baseLayer={baseLayer}
+						modulators={modulators}
+						bpm={bpm}
+					/>
 					<div className="rounded border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-gray-300 leading-relaxed">
 						画面中央の図形（四角・円・十字など）が曲の拍や場面に合わせて動くアニメーション効果です。
 						上のプレビューで動きを確認しながら設定できます。
 					</div>
+				</div>
 
+				<div className="flex-1 space-y-4 overflow-y-auto p-3">
 					{/* 場面選択タブ */}
 					<div>
 						<p className="mb-1 text-[10px] font-bold text-gray-300">設定対象の場面</p>

@@ -294,10 +294,20 @@ if / while / for によるループ制御と、下記の関数呼び出しだけ
 - shotLaser(角度, 太さ, 予告フレーム, 持続フレーム, 色, 長さ省略可)
                                             まず細い予告線を表示し、予告フレーム経過後に
                                             当たり判定のある太いレーザーへ変化、持続フレーム後に消滅
+- shotReflect(角度, 速度, 反射回数, 色, 形状)  画面端に着くたびに跳ね返る弾。反射回数を使い切ると
+                                            そのまま通常弾として画面外へ飛び去る
+- shotSplit(角度, 速度, 分裂までのフレーム, 分裂方向数, 色, 形状)
+                                            指定フレーム後、その場で分裂方向数だけ全方位に
+                                            再発射して自身は消滅する（分裂ギミック）
 
 【弾の形状（shape 引数）】
 - BALL（省略時のデフォルト・ダイヤモンド型）/ RICE（米粒弾）/ KUNAI（クナイ弾）/ STAR（星弾）
 - 例: shot(90, 3, 2, RICE)  // 下方向に米弾を1発
+
+【演出・サウンド】
+- playSound(トリガー名)         プリセットのSE設定を鳴らす（"shot"/"damage"/"spellcard"等、
+                                任意のファイル名は不可・ゲーム設定のSEスロット名を渡す）
+- shakeScreen(強さ, フレーム)    画面を揺らす（スペルカード発動演出等）
 
 【自機情報】
 - getPlayerAngle()             自分から見た自機の方向（度）
@@ -690,6 +700,12 @@ interface EnemyBullet {
   shape?: string;
   /** カーブ弾：毎フレーム vx/vy をこの角度(度/フレーム)だけ回転させる */
   angularVel?: number;
+  /** 反射弾：画面端に到達するたびに反射し、残り回数を消費する（0で通常弾として飛び去る） */
+  reflectLeft?: number;
+  /** 分裂弾：splitIn フレーム後、その場で splitWays 方向に分裂して消える */
+  splitIn?: number;
+  splitWays?: number;
+  splitSpeed?: number;
   /** レーザー（予告線→実体）。true の間は通常弾と別の更新・当たり判定・描画パスを通る */
   laser?: boolean;
   laserAngle?: number;
@@ -820,7 +836,7 @@ const DEG_TO_RAD = Math.PI / 180;
 function runEntityScript(
   src: string,
   entity: Entity,
-  eng: { enemyBullets: EnemyBullet[] },
+  eng: { enemyBullets: EnemyBullet[]; fx?: GameEngine['fx'] },
   getPlayer: () => { x: number; y: number },
 ): void {
   const ctx = { cancelled: false };
@@ -916,6 +932,34 @@ function runEntityScript(
         angularVel: +(angularVel as number),
       });
     },
+    /** 反射弾：画面端に着くたびに跳ね返り、reflectCount 回反射したら通常弾として飛び去る */
+    shotReflect: (angle: unknown, speed: unknown, reflectCount: unknown, color: unknown = 0, shape: unknown = undefined) => {
+      if (ctx.cancelled) return;
+      const r = +(angle as number) * DEG_TO_RAD;
+      const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+      eng.enemyBullets.push({
+        x: cx, y: cy,
+        vx: Math.cos(r) * +(speed as number), vy: Math.sin(r) * +(speed as number),
+        r: 5, color: SPELL_PALETTE[(((color as number) | 0) + 9) % 9],
+        shape: (shape as string | undefined) ?? entity.def.bulletShape ?? 'circle',
+        reflectLeft: Math.max(0, (reflectCount as number) | 0),
+      });
+    },
+    /** 分裂弾：splitFrames フレーム経過後、その場で splitWays 方向へ再発射して消える */
+    shotSplit: (angle: unknown, speed: unknown, splitFrames: unknown, splitWays: unknown, color: unknown = 0, shape: unknown = undefined) => {
+      if (ctx.cancelled) return;
+      const r = +(angle as number) * DEG_TO_RAD;
+      const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+      eng.enemyBullets.push({
+        x: cx, y: cy,
+        vx: Math.cos(r) * +(speed as number), vy: Math.sin(r) * +(speed as number),
+        r: 5, color: SPELL_PALETTE[(((color as number) | 0) + 9) % 9],
+        shape: (shape as string | undefined) ?? entity.def.bulletShape ?? 'circle',
+        splitIn: Math.max(1, (splitFrames as number) | 0),
+        splitWays: Math.max(1, (splitWays as number) | 0),
+        splitSpeed: +(speed as number),
+      });
+    },
     /** 予告線付きレーザー：telegraphFrames の間は当たり判定のない細い予告線を表示し、
      *  その後 durationFrames の間だけ当たり判定のある太いレーザーとして存在する。 */
     shotLaser: (angle: unknown, width: unknown, telegraphFrames: unknown, durationFrames: unknown, color: unknown = 0, length: unknown = 640) => {
@@ -966,6 +1010,13 @@ function runEntityScript(
 
     // ボス用
     setSpellName: (name: unknown) => { if (entity.def.name !== undefined) entity.def.name = String(name); },
+
+    // 演出・サウンド
+    /** playSound(トリガー名)：プリセットのSE設定（jump/shot/damage/spellcard等）を鳴らす。
+     *  任意の効果音ファイル名は指定不可 — ゲーム設定のSEスロット名を渡す。 */
+    playSound: (trigger: unknown) => { eng.fx?.playSound(String(trigger)); },
+    /** shakeScreen(強さ, フレーム)：画面を揺らす。スペルカード発動や大技の演出用。 */
+    shakeScreen: (strength: unknown, frames: unknown) => { eng.fx?.shake(+(strength as number), +(frames as number)); },
 
     // 数学
     abs: Math.abs, floor: Math.floor, ceil: Math.ceil,
@@ -1019,6 +1070,12 @@ interface GameEngine {
   entities: Entity[];
   shotTimer: number;
   animId: number;
+  /** MiniScript の playSound / shakeScreen から演出系フックへアクセスするための橋渡し。
+   *  runEntityScript は component 外の関数なので、component 生成後に engineRef へアタッチする。 */
+  fx?: {
+    playSound: (trigger: string) => void;
+    shake: (strength: number, frames: number) => void;
+  };
 }
 
 /** ObjectDef からエンティティを生成（フェーズ一斉配置・wave スクリプト共通）。 */
@@ -2492,6 +2549,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const encounterNextRef = useRef(0);
   /** 画面シェイク残フレーム数（0=なし）。ヒット・爆発・ゲームオーバー時にセット。 */
   const shakeRef = useRef(0);
+  // MiniScript（弾幕スクリプト）の playSound / shakeScreen から演出フックを叩けるようにする。
+  engineRef.current.fx = {
+    playSound: (trigger: string) => { playSfx(sfxRef.current?.[trigger as keyof PresetData['sfx']]); },
+    shake: (strength: number, frames: number) => {
+      shakeRef.current = Math.max(shakeRef.current, Math.min(60, Math.max(strength, frames)));
+    },
+  };
   // ── シーン切り替え ────────────────────────────────────────────────────────
   /** ゲームデータに紐付くシーン一覧（プレイ中はこちらを参照）。 */
   const scenesRef = useRef<SceneDef[]>([]);
@@ -9855,6 +9919,29 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               }
             }
             eb.x += eb.vx; eb.y += eb.vy;
+            // 反射弾：画面端に到達するたびに跳ね返り、残り回数を消費する
+            if (eb.reflectLeft !== undefined && eb.reflectLeft > 0) {
+              let bounced = false;
+              if (eb.x < eb.r && eb.vx < 0) { eb.x = eb.r; eb.vx = -eb.vx; bounced = true; }
+              else if (eb.x > worldW - eb.r && eb.vx > 0) { eb.x = worldW - eb.r; eb.vx = -eb.vx; bounced = true; }
+              if (eb.y < eb.r && eb.vy < 0) { eb.y = eb.r; eb.vy = -eb.vy; bounced = true; }
+              else if (eb.y > worldH - eb.r && eb.vy > 0) { eb.y = worldH - eb.r; eb.vy = -eb.vy; bounced = true; }
+              if (bounced) eb.reflectLeft--;
+            }
+            // 分裂弾：カウントダウンが0になったら、その場で splitWays 方向に再発射して消滅
+            if (eb.splitIn !== undefined) {
+              eb.splitIn--;
+              if (eb.splitIn <= 0) {
+                const n = eb.splitWays ?? 4;
+                const spd = eb.splitSpeed ?? (Math.hypot(eb.vx, eb.vy) || 2);
+                for (let k = 0; k < n; k++) {
+                  const a = k * (360 / n) * DEG_TO_RAD;
+                  eng.enemyBullets.push({ x: eb.x, y: eb.y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: eb.r, color: eb.color, shape: eb.shape });
+                }
+                eng.enemyBullets.splice(i, 1);
+                continue;
+              }
+            }
             // 消滅タイマー
             if (eb.vanishIn !== undefined) {
               eb.vanishIn--;

@@ -180,7 +180,9 @@ export interface MvSceneMotionConfig {
 }
 
 export const DEFAULT_SCENE_MOTION: MvSceneMotionConfig = {
-	presetId: "static",
+	// 何も選ばず開いたときに図形が完全に静止しているとアニメーション機能に
+	// 気づきにくいので、既定はビート同期（拍ごとに脈動）にしておく。
+	presetId: "beatSync",
 	custom: DEFAULT_MOTION_CUSTOM,
 };
 

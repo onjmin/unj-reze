@@ -880,6 +880,12 @@ export interface MvShapeLayer extends MvLayerBase {
 	/** 塗るか、線だけか。 */
 	filled: boolean;
 	thickness: number;
+	/**
+	 * 縦横比（縦÷横）。1なら正方形/正円のまま、0.5なら縦半分に潰れ、2なら縦に2倍伸びる。
+	 * barAspectとは別物——barAspectは'bar'専用の帯の太さ、こちらは全formに効く縦方向の拡縮。
+	 * 未指定は1（そのまま）。
+	 */
+	aspect?: number;
 	/** form==='polygon' のときの角数。 */
 	sides?: number;
 	/**

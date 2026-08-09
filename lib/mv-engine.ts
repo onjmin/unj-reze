@@ -1805,6 +1805,8 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 		ctx.save();
 		ctx.translate(x + offsetX * i, y + offsetY * i);
 		ctx.rotate((rotation + spin * i) * DEG);
+		const aspect = layer.aspect ?? 1;
+		if (aspect !== 1) ctx.scale(1, aspect);
 		const cyclePath = layer.iconCycle
 			? layer.iconCycle.paths[iconCycleIndex(d, layer.iconCycle)]
 			: undefined;
