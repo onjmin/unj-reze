@@ -951,6 +951,9 @@ export default function App() {
 	};
 
 	const handleSaveDrawing = async (canvasData: string) => {
+		// コラボ経由か（#コード進行 / #mml と同じく、実際の投稿にもハッシュタグ風の
+		// マーカーとして残す。誰かの絵を土台にしたことが本文だけ見ても分かるように）
+		const wasCollab = !!collabImageUrl;
 		if (editingPost) {
 			setEditingPost((prev) =>
 				prev ? { ...prev, imageSrc: canvasData } : null,
@@ -963,10 +966,15 @@ export default function App() {
 		setAttachedImage(canvasData);
 		closeScreen();
 		setCollabImageUrl(undefined);
-		setInputText("#お絵描き 自作イラスト完成！");
+		setInputText(
+			wasCollab
+				? "#お絵描きコラボ 参加しました！"
+				: "#お絵描き 自作イラスト完成！",
+		);
 	};
 
 	const handleSaveDotDrawing = async (canvasData: string) => {
+		const wasCollab = !!collabImageUrl;
 		if (editingPost) {
 			setEditingPost((prev) =>
 				prev ? { ...prev, imageSrc: canvasData } : null,
@@ -979,7 +987,11 @@ export default function App() {
 		setAttachedImage(canvasData);
 		closeScreen();
 		setCollabImageUrl(undefined);
-		setInputText("#ドット絵 自作ドット絵完成！");
+		setInputText(
+			wasCollab
+				? "#ドット絵コラボ 参加しました！"
+				: "#ドット絵 自作ドット絵完成！",
+		);
 	};
 
 	const handleSaveMml = async (mml: string) => {
