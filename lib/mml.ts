@@ -269,6 +269,17 @@ export function getDisplayContent(content: string): string {
 	return sliced.trimEnd();
 }
 
+/**
+ * SNSモード表示用: 先頭の `>>N` 安価行を隠す。
+ * BBSモード(BbsThreadView)やDB共有先の他クライアント(unj/ResPart.svelte)向けに
+ * content には残したまま保存するが、SNSモードでは「返信先: 表示名」を別のUIで
+ * 出しているため、生の `>>N` 行は冗長なので表示だけ隠す。
+ */
+export function stripAnkaPrefixForSnsDisplay(content: string): string {
+	if (!content || typeof content !== "string") return "";
+	return content.replace(/^>>\d+\n?/, "");
+}
+
 function parseSingleTrack(body: string): GridNote[] {
 	const result: GridNote[] = [];
 	let curOct = 4;

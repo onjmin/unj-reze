@@ -33,6 +33,10 @@ export const mockStore: DataStore = {
 		return mockDb.getPost(id, userId) ?? null;
 	},
 
+	async getPostByDatKey(datKey: number, userId?: string) {
+		return mockDb.getPostByDatKey(datKey, userId) ?? null;
+	},
+
 	async createPost(data: CreatePostParams) {
 		return mockDb.createPost(data);
 	},

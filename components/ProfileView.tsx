@@ -42,6 +42,7 @@ import {
 	extractMmlFromContent,
 	findMmlMarker,
 	getDisplayContent,
+	stripAnkaPrefixForSnsDisplay,
 } from "@/lib/mml";
 import { ensureSessionId } from "@/lib/session";
 import { showToast } from "@/lib/toast";
@@ -1437,7 +1438,9 @@ export default function ProfileView({
 												onClick={() => handlePostClick(p)}
 											>
 												{(() => {
-													const displayText = getDisplayContent(p.content);
+													const displayText = stripAnkaPrefixForSnsDisplay(
+														getDisplayContent(p.content),
+													);
 													const lines = displayText
 														? displayText.split("\n")
 														: [];

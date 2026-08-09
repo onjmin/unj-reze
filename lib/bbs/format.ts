@@ -49,13 +49,18 @@ export function formatDatLine(
 	return `${name}<>${mail}<>${info}<>${comment}<>${titleField}\n`;
 }
 
-/** subject.txt の1行 (末尾 `\n` 込み)。threadId は dat のファイル名(数値)。 */
+/** subject.txt の1行 (末尾 `\n` 込み)。datKey は dat のファイル名(Unixエポック秒、DbPost.datKey)。 */
 export function formatSubjectLine(
-	threadId: number,
+	datKey: number,
 	title: string,
 	resCount: number,
 ): string {
-	return `${threadId}.dat<>${escapeDatField(title || "無題")} (${resCount})\n`;
+	return `${datKey}.dat<>${escapeDatField(title || "無題")} (${resCount})\n`;
+}
+
+/** DbPost.datKey が未設定(旧データ)でも createdAt から都度算出してdatファイル名を出す。 */
+export function datKeyOf(post: { datKey?: number; createdAt: string }): number {
+	return post.datKey ?? Math.floor(new Date(post.createdAt).getTime() / 1000);
 }
 
 /** タイトルは本文の1行目のみ(datのTITLE仕様どおり)。 */

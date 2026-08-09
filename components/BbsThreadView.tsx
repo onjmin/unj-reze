@@ -184,12 +184,11 @@ export default function BbsThreadView({
 			return;
 		if (submitting) return;
 		setSubmitting(true);
-		const replyNum = replyTo !== null ? `>>${replyTo}\n` : "";
-		// MMLは本文の行として保存する（他の投稿経路と同じ書式）
+		// >>レス番号 は返信ボタン押下時に content-text 側へ既に挿入済みなのでここでは足さない
 		const parts: string[] = [];
 		if (replyText.trim()) parts.push(replyText.trim());
 		if (replyMml) parts.push(`#mml ${replyMml}`);
-		const content = replyNum + parts.join("\n");
+		const content = parts.join("\n");
 
 		const tempId = `temp-${Date.now()}`;
 		const optimisticReply: Post = {
@@ -443,7 +442,16 @@ export default function BbsThreadView({
 									</span>
 								</button>
 								<button
-									onClick={() => setReplyTo(num)}
+									onClick={() => {
+										setReplyTo(num);
+										setReplyText((prev) => {
+											const withoutPrefix = prev.replace(
+												/^>>\d+\n/,
+												"",
+											);
+											return `>>${num}\n${withoutPrefix}`;
+										});
+									}}
 									className="ml-auto text-gray-600 hover:text-blue-400 transition-colors tabular-nums"
 									title={`>>${num} に返信`}
 								>
@@ -621,7 +629,10 @@ export default function BbsThreadView({
 					<div className="flex items-center justify-between px-3 pt-2 text-[10px] text-gray-500">
 						<span className="text-green-400">&gt;&gt;{replyTo} に返信中</span>
 						<button
-							onClick={() => setReplyTo(null)}
+							onClick={() => {
+								setReplyTo(null);
+								setReplyText((prev) => prev.replace(/^>>\d+\n/, ""));
+							}}
 							className="text-gray-600 hover:text-gray-400 transition-colors"
 						>
 							取消

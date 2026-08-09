@@ -2284,35 +2284,42 @@ export default function MvMaker({
 							<span className="shrink-0 text-[10px] text-blue-300">変更</span>
 						</button>
 					</label>
-					<NumField
-						label="X"
-						value={layer.x}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
-						}
-					/>
-					<NumField
-						label="Y"
-						value={layer.y}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
-						}
-					/>
-					<NumField
-						label="大きさ"
-						value={layer.size}
-						min={1}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
-						}
-					/>
-					<NumField
-						label="回転"
-						value={layer.rotation}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, rotation: v }) as MvLayer)
-						}
-					/>
+					{/*
+						1項目ずつ縦に並べると、広い画面では数値欄1つのために横幅が丸ごと
+						余ってもったいない。X/Y、大きさ/回転のような小さい数値欄はペアで
+						詰めて並べる（縦横比だけ説明文が長いので単独）。
+					*/}
+					<div className="grid grid-cols-2 gap-2">
+						<NumField
+							label="X"
+							value={layer.x}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+							}
+						/>
+						<NumField
+							label="Y"
+							value={layer.y}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+							}
+						/>
+						<NumField
+							label="大きさ"
+							value={layer.size}
+							min={1}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
+							}
+						/>
+						<NumField
+							label="回転"
+							value={layer.rotation}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, rotation: v }) as MvLayer)
+							}
+						/>
+					</div>
 					<NumField
 						label="縦横比（1で正比率。0.5なら縦半分、2なら縦2倍）"
 						value={layer.aspect ?? 1}
@@ -3149,6 +3156,60 @@ export default function MvMaker({
 					}
 				/>
 			))}
+
+			{/*
+				場面（scenes）は単位が「場面まるごと」なので、「この場面の中でも
+				この数小節だけ」のような細かい出し分けができなかった。小節番号で
+				直接絞り込む欄を別に用意する（場面の指定と併用可、両方ANDで効く）。
+			*/}
+			<label className="flex items-center gap-1.5 py-1 pt-2">
+				<input
+					type="checkbox"
+					checked={!!layer.barRange}
+					onChange={(e) =>
+						updateLayer(layer.id, (l) => ({
+							...l,
+							barRange: e.target.checked
+								? [0, (l.barRange?.[1] ?? 4) as number]
+								: undefined,
+						}))
+					}
+					className="accent-blue-500"
+				/>
+				<span className={FIELD_LABEL_CLASS}>
+					小節を指定してこの範囲だけ出す
+				</span>
+			</label>
+			{layer.barRange && (
+				<div className="flex items-center gap-1.5 pl-1">
+					<StringNumInput
+						value={layer.barRange[0]}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.barRange
+									? { ...l, barRange: [v, l.barRange[1]] }
+									: l,
+							)
+						}
+						className="min-h-9 w-20 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+					/>
+					<span className="shrink-0 text-[10px] text-gray-400">
+						小節 〜（この小節を含まない）
+					</span>
+					<StringNumInput
+						value={layer.barRange[1]}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.barRange
+									? { ...l, barRange: [l.barRange[0], v] }
+									: l,
+							)
+						}
+						className="min-h-9 w-20 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+					/>
+					<span className="shrink-0 text-[10px] text-gray-400">小節</span>
+				</div>
+			)}
 		</div>
 	);
 
@@ -3418,6 +3479,11 @@ export default function MvMaker({
 														const secPerBar = (60 / bpm) * 4;
 														const startSec = line.bar * secPerBar;
 														const endSec = (line.bar + hold) * secPerBar;
+														const barKey = Math.round(line.bar * 100) / 100;
+														const resetBars = lyricsLayer.resetBars ?? [];
+														const isReset = resetBars.some(
+															(b) => Math.abs(b - line.bar) < 0.01,
+														);
 														return (
 															<li
 																key={i}
@@ -3429,6 +3495,33 @@ export default function MvMaker({
 																	</span>
 																	<span className="truncate text-[11px] font-medium">{line.text}</span>
 																</div>
+																<label
+																	title="この行で一旦全部消してから出し直す"
+																	className="flex shrink-0 items-center gap-1 text-[9px] text-gray-400"
+																>
+																	<input
+																		type="checkbox"
+																		checked={isReset}
+																		onChange={(e) =>
+																			updateLayer(lyricsLayer.id, (l) =>
+																				l.kind === "lyrics"
+																					? {
+																							...l,
+																							resetBars: e.target.checked
+																								? [...resetBars, barKey]
+																								: resetBars.filter(
+																										(b) =>
+																											Math.abs(b - line.bar) >=
+																											0.01,
+																									),
+																						}
+																					: l,
+																			)
+																		}
+																		className="accent-blue-500"
+																	/>
+																	リセット
+																</label>
 																<button
 																	onClick={() => playerRef.current?.seekToBar(line.bar)}
 																	className="flex shrink-0 items-center gap-1 rounded bg-gray-700 px-1.5 py-0.5 text-[9px] text-gray-200 hover:bg-gray-600"
@@ -3440,6 +3533,10 @@ export default function MvMaker({
 														);
 													})}
 												</ul>
+												<Hint>
+													「リセット」を付けた行から、それまでに積み上がった行を全部消して出し直します。
+													曲のどこで区切るかは行ごとに自由に選べます（未指定なら全曲通してずっと積み上がります）。
+												</Hint>
 											</div>
 											{shownLyricLines.length > 0 && (
 												<>
@@ -3731,16 +3828,25 @@ export default function MvMaker({
 										)
 									}
 								/>
-								{/* 参考動画は10列ぶん積み上がるので、目安は0〜12 */}
+								{/*
+									内部値は「今の行を除いた残像の段数」(afterimage)だが、
+									ユーザーには「同時に何行まで見えるか」(afterimage+1)で見せたほうが
+									直感的（"1行だけ" "4行まで" のような指定がそのまま入力できる）。
+									参考動画は10列ぶん積み上がるので、目安は1〜13。
+								*/}
 								<NumField
-									label="残像の数（0〜12）"
-									value={lyricsLayer.afterimage}
-									min={0}
-									max={12}
+									label="同時に表示する行数（1なら常に1行だけ、4なら4行まで積み上がる）"
+									value={lyricsLayer.afterimage + 1}
+									min={1}
+									max={13}
 									onChange={(v) =>
 										updateLayer(
 											lyricsLayer.id,
-											(l) => ({ ...l, afterimage: v }) as MvLayer,
+											(l) =>
+												({
+													...l,
+													afterimage: Math.max(0, Math.round(v) - 1),
+												}) as MvLayer,
 										)
 									}
 								/>
@@ -4441,6 +4547,14 @@ export default function MvMaker({
 							sections={[section]}
 							sceneBars={() => Math.max(1, sceneBars)}
 							bpm={song.bpm}
+							// モーダルを開き直したとき前回の選択（プリセット/速さ/手動調整）を
+							// 復元する。これが無いと毎回既定値から始まり、「設定したのに
+							// 保存されていない」ように見えるバグになる。
+							initial={
+								baseLayer.motionPreset
+									? { [section.id]: baseLayer.motionPreset }
+									: undefined
+							}
 							onApply={(perScene) => {
 								const cfg = perScene[section.id];
 								if (!cfg) return;
@@ -4454,9 +4568,14 @@ export default function MvMaker({
 										...l,
 										sections: [section.id],
 										modulators: mods,
+										motionPreset: cfg,
 									}));
 								} else {
-									// 他の場面でも使われている図形＝この場面だけ複製して動きを変える
+									// 他の場面でも使われている図形＝この場面だけ複製して動きを変える。
+									// 複製後は複製のほうを選択状態にしておく——じゃないと、元のレイヤーを
+									// 選んだまま「動きを編集する」を開き直したときに、今設定した場面とは
+									// 別の場面（元のsections[0]）が開いてしまい、「設定が保存されていない」
+									// ように見えてしまう。
 									updateLayer(baseLayer.id, (l) => ({
 										...l,
 										sections: otherSections,
@@ -4466,8 +4585,10 @@ export default function MvMaker({
 										id: mvUid("shp"),
 										sections: [section.id],
 										modulators: mods,
+										motionPreset: cfg,
 									};
 									update((m) => ({ ...m, layers: [...m.layers, clone] }));
+									setSelectedLayerId(clone.id);
 								}
 							}}
 							onClose={() => setMotionTarget(null)}

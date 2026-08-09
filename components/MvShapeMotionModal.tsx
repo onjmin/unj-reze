@@ -15,6 +15,7 @@ import {
 	type MvMotionCustomToggle,
 	type MvSceneMotionConfig,
 	DEFAULT_SCENE_MOTION,
+	MV_BEAT_SYNC_SPEED_OPTIONS,
 	MV_MOTION_PRESETS,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
@@ -210,6 +211,30 @@ export default function MvShapeMotionModal({
 								</button>
 							))}
 						</div>
+						{cfg.presetId === "beatSync" && (
+							<div className="mt-2 rounded bg-gray-900/60 p-2">
+								<p className="mb-1 text-[10px] text-gray-400">
+									ビート同期の周期の速さ
+								</p>
+								<div className="flex flex-wrap gap-1.5">
+									{MV_BEAT_SYNC_SPEED_OPTIONS.map((opt) => (
+										<button
+											key={opt.value}
+											onClick={() =>
+												setCfg({ ...cfg, beatSyncSpeed: opt.value })
+											}
+											className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
+												(cfg.beatSyncSpeed ?? 1) === opt.value
+													? "bg-blue-600 text-white font-bold"
+													: "bg-gray-800 text-gray-300 hover:bg-gray-700"
+											}`}
+										>
+											{opt.label}
+										</button>
+									))}
+								</div>
+							</div>
+						)}
 					</div>
 
 					{/* 独自の動きを組み合わせる */}

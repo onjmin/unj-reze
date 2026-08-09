@@ -29,6 +29,7 @@ import {
 	extractMmlFromContent,
 	findMmlMarker,
 	getDisplayContent,
+	stripAnkaPrefixForSnsDisplay,
 } from "@/lib/mml";
 import { cachePost } from "@/lib/post-cache";
 import { cacheProfileSeed } from "@/lib/profile-cache";
@@ -612,7 +613,9 @@ export default function PostContainer({
 						className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5 cursor-pointer hover:text-white transition-colors"
 					>
 						{(() => {
-							const displayText = getDisplayContent(post.content);
+							const displayText = stripAnkaPrefixForSnsDisplay(
+								getDisplayContent(post.content),
+							);
 							const allLines = displayText ? displayText.split("\n") : [];
 							const isOverflowing = allLines.length > POST_BODY_COLLAPSE_LINES;
 							const lines =
@@ -853,7 +856,9 @@ export default function PostContainer({
 										</span>
 									</div>
 									<p className="text-[11px] text-gray-400 line-clamp-2 whitespace-pre-wrap">
-										{getDisplayContent(quotedPost.content)}
+										{stripAnkaPrefixForSnsDisplay(
+											getDisplayContent(quotedPost.content),
+										)}
 									</p>
 									{quotedPost.hasImage && quotedPost.imageSrc && (
 										<img

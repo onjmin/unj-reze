@@ -396,6 +396,12 @@ export interface MvModulator {
 	 * beat/bar/phrase のような減衰カーブにだけ効く。
 	 */
 	curve?: number;
+	/**
+	 * source==='beat' のとき、1周期を何拍分にするか（既定1＝1拍ごと）。
+	 * 0.5なら2倍速（半拍ごとに脈動）、0.25なら4倍速、2なら半分の速さ、というように
+	 * 数値が小さいほど速くなる。
+	 */
+	periodBeats?: number;
 	target: MvModTarget;
 	op: MvModOp;
 	/** source(0..1) に掛けてから op を適用する係数。負の値も可。 */
@@ -513,6 +519,12 @@ interface MvLayerBase {
 	name?: string;
 	/** 表示するセクションID。未指定＝全セクションで表示。 */
 	sections?: string[];
+	/**
+	 * さらに小節単位で絞り込む [開始小節, 終了小節)。未指定＝絞り込みなし。
+	 * `sections` は場面まるごとの出し分けだが、「この場面の中でもこの数小節だけ」
+	 * のような細かい指定はできない。両方指定した場合はAND（両方満たす間だけ表示）。
+	 */
+	barRange?: [number, number];
 	/** 描画順。小さいほど奥。 */
 	z?: number;
 	/** 0..1 */
@@ -786,12 +798,19 @@ export interface MvLyricsLayer extends MvLayerBase {
 	 * （参考動画はどれも右端が固定で、新しい行が左へ足されていく）。
 	 */
 	stack?: MvLyricStack;
-	/** 過去の行を薄く残す段数（0で残像なし）。 */
+	/** 過去の行を薄く残す段数（0で残像なし）。同時に見える行数は afterimage+1。 */
 	afterimage: number;
 	/** 1行を何小節出しておくか。 */
 	holdBars?: number;
 	/** 1文字ずつタイピング表示するかどうか。 */
 	typing?: boolean;
+	/**
+	 * ここに挙げた小節（以上）に来た最初の行から、それまでの積み上げを全部消して出し直す。
+	 * `MvLyricLine.resetBefore`（手入力の行に直接付けるフラグ）と同じ効果を、
+	 * source==='mml' のように行を直接編集できない歌詞にも掛けられるようにするための入り口。
+	 * 手入力でも併用可（両方の指定がOR条件で効く）。
+	 */
+	resetBars?: number[];
 }
 
 /** 図形の形。 */
@@ -936,6 +955,29 @@ export interface MvShapeLayer extends MvLayerBase {
 	iconCycle?:
 		| { paths: string[]; beats: number; resetEveryBars?: number }
 		| { paths: string[]; advance: "onset"; track?: number };
+	/**
+	 * 「図形の動き方設定」モーダルで選んだ設定そのもの（プリセットID＋手動調整）。
+	 * `modulators` は↑から導出した結果（実際に描画で読まれる値）で、こちらは
+	 * モーダルを開き直したときに前回の選択を復元するための"入力側"の記録。
+	 * これが無いと、保存されているのは常に modulators という結果だけになり、
+	 * モーダルは毎回既定値から始まってしまう（＝前回の設定が消えたように見えるバグ）。
+	 */
+	motionPreset?: MvShapeMotionPreset;
+}
+
+/** 「図形の動き方設定」モーダルの選択内容そのもの（1場面ぶん）。 */
+export interface MvShapeMotionPreset {
+	presetId: string;
+	/** presetId==='beatSync' のときの周期の速さ（拍数/周期）。既定1。0.5で2倍速、0.25で4倍速。 */
+	beatSyncSpeed?: number;
+	custom: {
+		move: boolean;
+		moveSpeedBars: number;
+		rotate: boolean;
+		rotateSpeed: number;
+		scale: boolean;
+		scaleSpeedBars: number;
+	};
 }
 
 /** 画面全体にかかる演出。 */
@@ -1378,10 +1420,16 @@ export function resolveSceneStage(
 export function isLayerVisible(
 	layer: MvLayer,
 	sectionId: string | null,
+	bar?: number,
 ): boolean {
-	if (!layer.sections || layer.sections.length === 0) return true;
-	if (!sectionId) return true;
-	return layer.sections.includes(sectionId);
+	if (layer.sections && layer.sections.length > 0 && sectionId) {
+		if (!layer.sections.includes(sectionId)) return false;
+	}
+	if (layer.barRange && bar !== undefined) {
+		const [from, to] = layer.barRange;
+		if (bar < from || bar >= to) return false;
+	}
+	return true;
 }
 
 /**

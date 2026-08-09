@@ -109,6 +109,12 @@ CREATE INDEX idx_mvs_creator_user_id ON mvs (creator_user_id);
 CREATE TABLE threads (
     id SERIAL PRIMARY KEY,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- 専ブラ向け.dat/subject.txtのファイル名（Unixエポック秒）。
+    -- threads.id をそのまま使うと極端に小さい数値（例:591）になり、専ブラが
+    -- エポック秒として誤読して「1970年」表示になる（実質56年前）。作成時に
+    -- created_atのエポック秒 or 直前値+1の大きい方で採番し、UNIQUEで秒重複を防ぐ
+    -- （lib/db/pg.ts createPost 参照）。
+    dat_key BIGINT,
     deleted_at TIMESTAMP, -- 論理削除の予定日時（!timer用）
     ip INET NOT NULL DEFAULT '0.0.0.0',
     res_count SMALLINT NOT NULL DEFAULT 1, -- count()よりも軽量。レス投稿後に発行されるIDが真の値。
@@ -161,6 +167,8 @@ CREATE INDEX idx_threads_board_deleted ON threads (board_id, deleted_at);
 CREATE INDEX idx_threads_created_at ON threads (created_at DESC);
 CREATE UNIQUE INDEX unq_threads_reze_origin_post_id
     ON threads (reze_origin_post_id) WHERE reze_origin_post_id IS NOT NULL;
+CREATE UNIQUE INDEX unq_threads_dat_key
+    ON threads (dat_key) WHERE dat_key IS NOT NULL;
 
 -- ========== res テーブル ==========
 CREATE TABLE res (

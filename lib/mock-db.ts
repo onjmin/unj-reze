@@ -568,6 +568,34 @@ class MockDB {
 		return this.applyUserState({ ...post, replies: [...post.replies] }, userId);
 	}
 
+	/** 専ブラ向け。dat/subject.txt の datKey（Unixエポック秒）からOPを引く。 */
+	getPostByDatKey(datKey: number, userId?: string): Post | undefined {
+		const post = this.posts.find(
+			(p) => p.id === p.threadId && this.datKeyOf(p) === datKey,
+		);
+		if (!post) return undefined;
+		if (!this.canViewAuthor(post.slug ?? "", post.displayName, userId))
+			return undefined;
+		return this.applyUserState({ ...post, replies: [...post.replies] }, userId);
+	}
+
+	/** post.datKey があればそれを、無ければ createdAt から都度算出する（秒精度）。 */
+	private datKeyOf(post: Post): number {
+		return post.datKey ?? Math.floor(new Date(post.createdAt).getTime() / 1000);
+	}
+
+	/**
+	 * 新規スレのdatKey採番。同じ秒に複数スレが立っても衝突しないよう、
+	 * 既存の最大値+1と現在秒の大きい方を使う（lib/db/pg.ts createPost と同じ方式）。
+	 */
+	private nextDatKey(): number {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const maxExisting = this.posts
+			.filter((p) => p.id === p.threadId)
+			.reduce((max, p) => Math.max(max, this.datKeyOf(p)), 0);
+		return Math.max(nowSec, maxExisting + 1);
+	}
+
 	createPost(data: {
 		displayName: string;
 		content: string;
@@ -583,6 +611,7 @@ class MockDB {
 		const createdAt = this.now();
 		const post: Post = {
 			id: this.genId(),
+			datKey: this.nextDatKey(),
 			displayName: data.displayName,
 			slug: data.slug || deriveSlug(data.displayName),
 			createdAt,

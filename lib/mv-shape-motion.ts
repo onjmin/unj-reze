@@ -1,4 +1,8 @@
-import type { MvModulator, MvShapeLayer } from "./mv-config";
+import type {
+	MvModulator,
+	MvShapeLayer,
+	MvShapeMotionPreset,
+} from "./mv-config";
 
 /**
  * 「図形の動き方」設定モーダル用のプリセット。エフェクトテンプレート(mv-effect-templates.ts)
@@ -62,6 +66,8 @@ export const MV_MOTION_PRESETS: MvMotionPreset[] = [
 		id: "beatSync",
 		name: "ビート同期",
 		icon: "M4,12 L8,12 L10,4 L14,20 L16,12 L20,12",
+		// 速さ(periodBeats)はプリセット自体には持たせず、resolveSceneModulatorsで
+		// cfg.beatSyncSpeed から後付けする（既定1＝1拍ごと）。
 		build: () => [{ source: "beat", target: "size", op: "add", amount: 10 }],
 	},
 	{
@@ -125,14 +131,7 @@ export function findMvMotionPreset(id: string): MvMotionPreset | undefined {
 }
 
 /** 「独自の動きを組み合わせる」パネルのチェック状態。 */
-export interface MvMotionCustomToggle {
-	move: boolean;
-	moveSpeedBars: number;
-	rotate: boolean;
-	rotateSpeed: number;
-	scale: boolean;
-	scaleSpeedBars: number;
-}
+export type MvMotionCustomToggle = MvShapeMotionPreset["custom"];
 
 export const DEFAULT_MOTION_CUSTOM: MvMotionCustomToggle = {
 	move: false,
@@ -174,24 +173,39 @@ export function buildCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
 }
 
 /** 1つの場面(小節範囲)に対する動きの設定一式。 */
-export interface MvSceneMotionConfig {
-	presetId: string;
-	custom: MvMotionCustomToggle;
-}
+export type MvSceneMotionConfig = MvShapeMotionPreset;
 
 export const DEFAULT_SCENE_MOTION: MvSceneMotionConfig = {
 	// 何も選ばず開いたときに図形が完全に静止しているとアニメーション機能に
 	// 気づきにくいので、既定はビート同期（拍ごとに脈動）にしておく。
 	presetId: "beatSync",
+	beatSyncSpeed: 1,
 	custom: DEFAULT_MOTION_CUSTOM,
 };
+
+/** ビート同期の速さの選択肢。数値は「1周期が何拍分か」＝小さいほど速い。 */
+export const MV_BEAT_SYNC_SPEED_OPTIONS: { value: number; label: string }[] = [
+	{ value: 4, label: "1/4倍速（4拍で1周期）" },
+	{ value: 2, label: "1/2倍速（2拍で1周期）" },
+	{ value: 1, label: "標準（1拍ごと）" },
+	{ value: 0.5, label: "2倍速（半拍ごと）" },
+	{ value: 0.25, label: "4倍速（1/4拍ごと）" },
+];
 
 export function resolveSceneModulators(
 	cfg: MvSceneMotionConfig,
 	bars: number,
 ): MvModulator[] {
 	const preset = findMvMotionPreset(cfg.presetId);
-	return [...(preset ? preset.build(bars) : []), ...buildCustomModulators(cfg.custom)];
+	const base = preset ? preset.build(bars) : [];
+	// beatSyncのときだけ、source==='beat'の周期を選んだ速さへ差し替える。
+	const withSpeed =
+		cfg.presetId === "beatSync" && cfg.beatSyncSpeed && cfg.beatSyncSpeed !== 1
+			? base.map((m) =>
+					m.source === "beat" ? { ...m, periodBeats: cfg.beatSyncSpeed } : m,
+				)
+			: base;
+	return [...withSpeed, ...buildCustomModulators(cfg.custom)];
 }
 
 /**

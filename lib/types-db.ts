@@ -30,6 +30,12 @@ export interface DbPost {
 	/** 掲示板モードの「ID:」表示専用。slug(=生のuser_id)とは別に、日替わりしない
 	 *  安定ハッシュ値（lib/cc-id.ts:genBbsId）。無ければ getUserIdLabel が displayName から補う。 */
 	bbsId?: string;
+	/**
+	 * 専ブラ向け.dat/subject.txtのファイル名に使うUnixエポック秒(BIGINT)。
+	 * threads.dat_key（lib/db/pg.ts createPost参照）。返信(res)には無い＝OPのみ。
+	 * 未設定(旧データ等)ならdat/subject.txtルート側でcreatedAtから都度算出する。
+	 */
+	datKey?: number;
 	createdAt: string;
 	time: string;
 	content: string;

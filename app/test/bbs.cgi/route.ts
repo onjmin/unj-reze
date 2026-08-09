@@ -16,7 +16,8 @@ import { encodePost } from "@/lib/sqids";
 //   mail    メール欄(sage等。今回は無視して良い)
 //   MESSAGE 本文
 //   subject 新規スレ立て時のみ、スレタイ
-//   key     レス投稿時のみ、スレ番号(=dat/subject.txtで使っているDBの生ID)
+//   key     レス投稿時のみ、スレ番号(=dat/subject.txtのファイル名=DbPost.datKey。
+//           DBの連番id(threadId*2等)ではない点に注意)
 //
 // 不正対策: fingerprint/Turnstile は専ブラからは送れないため使わない。
 // IPレート制限は middleware.ts の matcher が全パスに掛かっているのでここでも効く。
@@ -80,12 +81,18 @@ export async function POST(request: NextRequest) {
 			return okPage("新しいスレッドを立てました。");
 		}
 
-		const threadId = Number(key);
-		if (!Number.isFinite(threadId) || threadId <= 0) {
+		const datKey = Number(key);
+		if (!Number.isFinite(datKey) || datKey <= 0) {
 			return errorPage("不正なスレッド番号です。");
 		}
 
-		const reply = await db.addReply(threadId, {
+		// key はdatファイル名(datKey)であってDBの生idではないので、まず実IDへ解決する。
+		const op = await db.getPostByDatKey(datKey);
+		if (!op) {
+			return errorPage("スレッドが見つかりません。");
+		}
+
+		const reply = await db.addReply(op.id, {
 			displayName,
 			slug: authorSlug,
 			content: message,
@@ -96,7 +103,7 @@ export async function POST(request: NextRequest) {
 		const encoded = encodePost(reply);
 		publishRealtime([
 			{
-				channel: chThread(String(threadId)),
+				channel: chThread(String(op.id)),
 				event: "reply.created",
 				data: encoded,
 			},

@@ -145,6 +145,12 @@ export interface DataStore {
 		options?: GetPostsOptions,
 	): Promise<DbPost[]>;
 	getPost(id: number, userId?: string): Promise<DbPost | null>;
+	/**
+	 * 専ブラ向け。dat/bbs.cgi の `key`（=dat ファイル名の数値、DbPost.datKey）から
+	 * スレッド(OP)を引く。内部DBの連番id（threadId*2等）とは別の採番空間なので
+	 * getPost(id) では引けない。
+	 */
+	getPostByDatKey(datKey: number, userId?: string): Promise<DbPost | null>;
 	createPost(data: CreatePostParams): Promise<DbPost>;
 	likePost(id: number, userId: string): Promise<DbPost | null>;
 	dislikePost(id: number, userId: string): Promise<DbPost | null>;

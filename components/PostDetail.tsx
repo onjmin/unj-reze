@@ -32,6 +32,7 @@ import {
 	extractMmlFromContent,
 	findMmlMarker,
 	getDisplayContent,
+	stripAnkaPrefixForSnsDisplay,
 	stripMmlLine,
 } from "@/lib/mml";
 import type { MvManifest, MvPresetKind } from "@/lib/mv-config";
@@ -220,8 +221,20 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 			beginUiSession();
 			setReplyTo(target);
 			setComposerOpen(true);
+			// BBSモードへ切り替えても誰への返信か分かるよう、レス番号(>>N)を
+			// content-text に直接埋め込む。番号はBbsThreadViewと同じ
+			// [post, ...post.replies] の並び順で採番する。
+			if (target) {
+				const allPosts: Post[] = [post, ...post.replies];
+				const num = allPosts.findIndex((p) => p.id === target.id) + 1;
+				if (num > 0) {
+					setReplyText((prev) => `>>${num}\n${prev.replace(/^>>\d+\n/, "")}`);
+				}
+			} else {
+				setReplyText((prev) => prev.replace(/^>>\d+\n/, ""));
+			}
 		},
-		[beginUiSession],
+		[beginUiSession, post],
 	);
 	const openScreen = useCallback(
 		(screen: string) => {
@@ -235,6 +248,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		beginUiSession();
 		setComposerOpen(false);
 		setReplyTo(null);
+		setReplyText((prev) => prev.replace(/^>>\d+\n/, ""));
 	};
 	const heartQueue = useRef(0);
 	const heartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1192,7 +1206,9 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 
 					<div className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
 						{(() => {
-							const displayText = getDisplayContent(post.content);
+							const displayText = stripAnkaPrefixForSnsDisplay(
+								getDisplayContent(post.content),
+							);
 							const allLines = displayText ? displayText.split("\n") : [];
 							const isOverflowing = allLines.length > POST_BODY_COLLAPSE_LINES;
 							const lines =
@@ -2084,7 +2100,9 @@ function ReplyTreeItem({
 
 					<p className="text-[13px] text-gray-200 whitespace-pre-wrap break-words leading-relaxed mb-2.5">
 						{(() => {
-							const displayText = getDisplayContent(localPost.content);
+							const displayText = stripAnkaPrefixForSnsDisplay(
+								getDisplayContent(localPost.content),
+							);
 							const lines = displayText ? displayText.split("\n") : [];
 							return lines.map((line, lIdx) => (
 								<span key={lIdx} className="block">

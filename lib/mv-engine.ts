@@ -405,10 +405,20 @@ function trackPitchNorm(
 
 function modSourceValue(d: DrawCtx, m: MvModulator): number {
 	switch (m.source) {
-		case "beat":
-			return m.curve === undefined
-				? d.beatEnv
-				: envelope(d.step, MV_STEPS_PER_BEAT, m.curve);
+		case "beat": {
+			// periodBeats未指定/1なら従来どおり1拍周期。指定時は周期を伸縮する
+			// （0.5で2倍速、2で半分の速さ、というように小さいほど速い）。
+			const beatPeriod = Math.max(
+				1,
+				MV_STEPS_PER_BEAT * (m.periodBeats ?? 1),
+			);
+			if (m.periodBeats === undefined || m.periodBeats === 1) {
+				return m.curve === undefined
+					? d.beatEnv
+					: envelope(d.step, beatPeriod, m.curve);
+			}
+			return envelope(d.step, beatPeriod, m.curve ?? 2);
+		}
 		case "bar":
 			return m.curve === undefined
 				? d.barEnv
@@ -542,7 +552,9 @@ export function drawMvFrame(
 		section,
 	};
 
-	const visible = manifest.layers.filter((l) => isLayerVisible(l, d.sectionId));
+	const visible = manifest.layers.filter((l) =>
+		isLayerVisible(l, d.sectionId, d.bar),
+	);
 	const effects = visible.filter(
 		(l): l is MvEffectLayer => l.kind === "effect",
 	);
@@ -1510,13 +1522,38 @@ export function resolveLyricLines(
 	layer: MvLyricsLayer,
 	song: MvSong,
 ): MvLyricLine[] {
-	if (layer.source === "manual")
-		return [...(layer.lines ?? [])].sort((a, b) => a.bar - b.bar);
-	if (layer.trackId === "all") return song.lyricLines;
-	const target =
-		typeof layer.trackId === "number" ? layer.trackId : song.lyricTrackIds[0];
-	if (target === undefined) return [];
-	return song.lyricLines.filter((l) => l.trackId === target);
+	const lines = ((): MvLyricLine[] => {
+		if (layer.source === "manual")
+			return [...(layer.lines ?? [])].sort((a, b) => a.bar - b.bar);
+		if (layer.trackId === "all") return song.lyricLines;
+		const target =
+			typeof layer.trackId === "number"
+				? layer.trackId
+				: song.lyricTrackIds[0];
+		if (target === undefined) return [];
+		return song.lyricLines.filter((l) => l.trackId === target);
+	})();
+	return applyLyricResetBars(lines, layer.resetBars);
+}
+
+/**
+ * `layer.resetBars` に挙げた小節「以降で最初に出る行」へ resetBefore を立てる。
+ * MML由来の行は自動生成で1行ごとの編集ができないので、行を直接いじれない
+ * source==='mml' でも積み上げのリセット位置を指定できるようにするための後付け。
+ * 手入力の行が既に resetBefore=true を持っていればそのまま尊重する（上書きしない）。
+ */
+function applyLyricResetBars(
+	lines: MvLyricLine[],
+	resetBars: number[] | undefined,
+): MvLyricLine[] {
+	if (!resetBars || resetBars.length === 0) return lines;
+	const marks = new Set<number>();
+	for (const rb of resetBars) {
+		const idx = lines.findIndex((l) => l.bar >= rb);
+		if (idx >= 0) marks.add(idx);
+	}
+	if (marks.size === 0) return lines;
+	return lines.map((l, i) => (marks.has(i) ? { ...l, resetBefore: true } : l));
 }
 
 function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {

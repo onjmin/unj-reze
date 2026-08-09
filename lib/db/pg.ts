@@ -285,6 +285,10 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 		displayName: row.author_display_name || row.cc_user_name || "名無し",
 		slug: String(row.user_id),
 		bbsId: row.cc_user_id || undefined,
+		datKey:
+			row.dat_key != null
+				? Number(row.dat_key)
+				: Math.floor(new Date(toIso(row.created_at)).getTime() / 1000),
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
 		content: disp.content,
@@ -372,6 +376,16 @@ function withViewerVoteState(
 }
 
 const AUTHOR_SELECT = `u.display_name AS author_display_name, u.avatar_url AS author_avatar_url, u.hide_from_search AS author_hide_from_search`;
+
+/**
+ * dat_key(専ブラ向け.datファイル名)のフォールバック計算。
+ * `t.*` の dat_key(NULL方向)を後段のこの式で上書きするため、必ず `t.*` の後に置く。
+ * 注意: JS側(new Date(row.created_at))で代わりに計算しないこと。node-pgが
+ * `timestamp without time zone` を非ISO文字列として素朴にDateへ渡す関係で、
+ * 実行環境のprocess.env.TZ次第でずれる(開発機がJSTだと-9h)。SQL側は常に
+ * セッションTimeZone基準で一貫するので、必ずここで計算して行に含める。
+ */
+const DAT_KEY_SELECT = `COALESCE(t.dat_key, FLOOR(EXTRACT(EPOCH FROM t.created_at))::BIGINT) AS dat_key`;
 
 // ============================================================================
 // ブロック/ミュート（隠す判定）。unj方式のカウンタと同じく強い一貫性は要らないので
@@ -485,7 +499,7 @@ export const pgStore: DataStore = {
 		params.push(limit);
 
 		const { rows } = await q(
-			`SELECT t.*, ${AUTHOR_SELECT} FROM threads t
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t
        LEFT JOIN users u ON u.id = t.user_id
        WHERE ${where.join(" AND ")}
        ORDER BY t.id DESC LIMIT $${params.length}`,
@@ -526,10 +540,25 @@ export const pgStore: DataStore = {
 
 		const threadId = postIdToThreadId(id);
 		const { rows } = await q(
-			`SELECT t.*, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = $1 AND t.deleted_at IS NULL`,
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id WHERE t.id = $1 AND t.deleted_at IS NULL`,
 			[threadId],
 		);
 		if (rows.length === 0) return null;
+		const post = threadRowToPost(rows[0]);
+		await attachRepliesToThreads([post], [threadId]);
+		return withViewerVoteState(post, userId);
+	},
+
+	async getPostByDatKey(datKey: number, userId?: string) {
+		// 旧データ(dat_key未採番)も引けるよう、NULLならcreated_atから都度算出して比較する。
+		const { rows } = await q(
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
+         WHERE t.deleted_at IS NULL
+           AND COALESCE(t.dat_key, FLOOR(EXTRACT(EPOCH FROM t.created_at))::BIGINT) = $1`,
+			[datKey],
+		);
+		if (rows.length === 0) return null;
+		const threadId = Number(rows[0].id);
 		const post = threadRowToPost(rows[0]);
 		await attachRepliesToThreads([post], [threadId]);
 		return withViewerVoteState(post, userId);
@@ -546,48 +575,63 @@ export const pgStore: DataStore = {
 				"createPost には解決済みの投稿者(slug=users.id)が必要です",
 			);
 		}
-		const { rows } = await q(
-			`INSERT INTO threads (
-         created_at, ip, res_count, latest_res, latest_res_at, title, board_id, res_limit,
-         cc_bitmask, content_types_bitmask,
-         user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
-         content_text, content_url, content_type, content_data_url,
-         has_collab_button, game_id, mv_id, origin_type
-       ) VALUES (CURRENT_TIMESTAMP,'0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,$2,1,${RES_LIMIT},
-                 ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
-                 $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       RETURNING *`,
-			[
-				(mmlResolved.content || "")
-					.split("\n")
-					.find((l) => l.trim())
-					?.slice(0, 64) || "",
-				(mmlResolved.content || "")
-					.split("\n")
-					.find((l) => l.trim())
-					?.slice(0, 64) || "無題",
-				// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
-				// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
-				// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
-				// board_id は上のVALUES句と同じく固定で 1。
-				authorId,
-				genBbsId(authorId, 1),
-				data.displayName,
-				data.avatarColor,
-				c.contentText,
-				c.contentUrl,
-				c.contentType,
-				c.contentDataUrl,
-				// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
-				// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
-				// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
-				!!(data.gameId || data.mvId || (data.hasImage && data.imageSrc)),
-				data.gameId ?? null,
-				data.mvId ?? null,
-				data.originType ?? null,
-			],
-		);
-		const row = rows[0];
+		// dat_key は手計算(UNIQUE)なので、同一秒の同時スレ立てで衝突したらリトライする
+		// （lib/db/pg.ts addReply の num 採番と同じ方式）。
+		let row: any = null;
+		for (let attempt = 0; attempt < 5 && !row; attempt++) {
+			try {
+				const { rows } = await q(
+					`INSERT INTO threads (
+             created_at, dat_key, ip, res_count, latest_res, latest_res_at, title, board_id, res_limit,
+             cc_bitmask, content_types_bitmask,
+             user_id, cc_user_id, cc_user_name, cc_user_avatar, avatar_color,
+             content_text, content_url, content_type, content_data_url,
+             has_collab_button, game_id, mv_id, origin_type
+           ) VALUES (
+             CURRENT_TIMESTAMP,
+             GREATEST(
+               FLOOR(EXTRACT(EPOCH FROM CURRENT_TIMESTAMP))::BIGINT,
+               (SELECT COALESCE(MAX(dat_key), 0) + 1 FROM threads)
+             ),
+             '0.0.0.0'::inet,1,$1,CURRENT_TIMESTAMP,$2,1,${RES_LIMIT},
+                     ${DEFAULT_CC_BITMASK},${DEFAULT_CONTENT_TYPES_BITMASK},
+                     $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           RETURNING *`,
+					[
+						(mmlResolved.content || "")
+							.split("\n")
+							.find((l) => l.trim())
+							?.slice(0, 64) || "",
+						(mmlResolved.content || "")
+							.split("\n")
+							.find((l) => l.trim())
+							?.slice(0, 64) || "無題",
+						// cc_user_id は reze の掲示板モード（lib/avatar.tsx:getUserIdLabel）が
+						// 「ID:」として表示する値。生の users.id (=String(authorId)) をそのまま
+						// 入れると連番が丸見えになるため genBbsId でハッシュ化する。
+						// board_id は上のVALUES句と同じく固定で 1。
+						authorId,
+						genBbsId(authorId, 1),
+						data.displayName,
+						data.avatarColor,
+						c.contentText,
+						c.contentUrl,
+						c.contentType,
+						c.contentDataUrl,
+						// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
+						// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
+						// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
+						!!(data.gameId || data.mvId || (data.hasImage && data.imageSrc)),
+						data.gameId ?? null,
+						data.mvId ?? null,
+						data.originType ?? null,
+					],
+				);
+				row = rows[0];
+			} catch (e: any) {
+				if (e?.code !== "23505" || attempt === 4) throw e;
+			}
+		}
 		const { rows: userRows } = await q(
 			`SELECT display_name, avatar_url FROM users WHERE id = $1`,
 			[authorId],
@@ -917,7 +961,7 @@ export const pgStore: DataStore = {
 		if (!Number.isFinite(uid)) return [];
 		const safeLimit = Math.max(1, Math.min(limit, 50));
 		const { rows: tRows } = await q(
-			`SELECT t.*, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
        WHERE t.user_id = $1 AND t.deleted_at IS NULL ORDER BY t.id DESC LIMIT $2`,
 			[uid, safeLimit],
 		);
@@ -1106,7 +1150,7 @@ export const pgStore: DataStore = {
 		const like = `%${query.trim()}%`;
 		const hidden = await getHiddenUserIds(userId);
 		const { rows: tRows } = await q(
-			`SELECT t.*, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id = t.user_id
        WHERE t.board_id=1 AND t.deleted_at IS NULL
          AND (t.content_text ILIKE $1 OR COALESCE(u.display_name,t.cc_user_name) ILIKE $1)
        ORDER BY t.id DESC LIMIT $2`,
@@ -1211,7 +1255,7 @@ export const pgStore: DataStore = {
 		const safeLimit = Math.max(1, Math.min(limit, 50));
 		const hidden = await getHiddenUserIds(userId);
 		const { rows } = await q(
-			`SELECT t.*, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id=t.user_id
+			`SELECT t.*, ${DAT_KEY_SELECT}, ${AUTHOR_SELECT} FROM threads t LEFT JOIN users u ON u.id=t.user_id
        WHERE t.board_id=1 AND t.deleted_at IS NULL
          AND t.content_text ~ ('(^|[[:space:]])' || $1 || '([[:space:]]|$)')
        ORDER BY t.id DESC LIMIT $2`,

@@ -6,11 +6,13 @@ import { db } from "@/lib/db";
 // 専ブラ対応: GET /bbs/dat/スレ番.dat
 // 仕様: https://scrapbox.io/2chtypebbs/dat
 // フォルダ名は [id] だがURLは `123.dat` の1セグメントなので id には ".dat" が付いたまま来る。
+// ファイル名(数値)はDBの連番id(threadId*2等)ではなくDbPost.datKey(Unixエポック秒)。
+// 生のidを使うと極端に小さい数値になり、専ブラがエポック秒として誤読して「1970年」表示になる。
 // Range / Last-Modified による差分取得に対応(推奨事項。専ブラの安定性に直結)。
 
 export const dynamic = "force-dynamic";
 
-function threadIdFromParam(raw: string): number | null {
+function datKeyFromParam(raw: string): number | null {
 	const m = /^(\d+)\.dat$/.exec(raw);
 	if (!m) return null;
 	const n = Number(m[1]);
@@ -22,16 +24,16 @@ export async function GET(
 	{ params }: { params: Promise<{ id: string }> },
 ) {
 	const { id: rawId } = await params;
-	const threadId = threadIdFromParam(rawId);
-	if (threadId === null) {
+	const datKey = datKeyFromParam(rawId);
+	if (datKey === null) {
 		return new NextResponse("Not Found", { status: 404 });
 	}
 
-	const op = await db.getPost(threadId);
+	const op = await db.getPostByDatKey(datKey);
 	if (!op) {
 		return new NextResponse("Not Found", { status: 404 });
 	}
-	const replies = await db.getReplies(threadId);
+	const replies = await db.getReplies(op.id);
 
 	// 最終更新 = 最新レスの投稿日時(レス無しならスレ立て日時)。
 	const lastMs = replies.reduce(

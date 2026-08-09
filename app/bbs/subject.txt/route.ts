@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { firstLineTitle, formatSubjectLine } from "@/lib/bbs/format";
+import { datKeyOf, firstLineTitle, formatSubjectLine } from "@/lib/bbs/format";
 import { sjisTextResponse } from "@/lib/bbs/sjis";
 import { db } from "@/lib/db";
 import { withEdgeCache } from "@/lib/edge-cache";
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 			const body = posts
 				.map((p) =>
 					formatSubjectLine(
-						p.id,
+						datKeyOf(p),
 						firstLineTitle(p.content),
 						p.repliesCount + 1,
 					),

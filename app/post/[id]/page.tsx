@@ -3,7 +3,7 @@ import Link from "next/link";
 import { cache } from "react";
 import PostDetail from "@/components/PostDetail";
 import { db } from "@/lib/db";
-import { getDisplayContent } from "@/lib/mml";
+import { getDisplayContent, stripAnkaPrefixForSnsDisplay } from "@/lib/mml";
 import { db as mockDb } from "@/lib/mock-db";
 import { attachEmbedInfo } from "@/lib/post-embeds";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
@@ -41,8 +41,10 @@ export async function generateMetadata({
 			? post.gameTitle
 			: `${post.displayName}の投稿`;
 	const description =
-		getDisplayContent(post.content).slice(0, 100) ||
-		`${post.displayName}による投稿です。`;
+		stripAnkaPrefixForSnsDisplay(getDisplayContent(post.content)).slice(
+			0,
+			100,
+		) || `${post.displayName}による投稿です。`;
 	const image = post.hasGame
 		? post.gameThumbnail
 		: post.hasImage
