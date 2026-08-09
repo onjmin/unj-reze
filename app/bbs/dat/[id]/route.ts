@@ -3,23 +3,12 @@ import { NextResponse } from "next/server";
 import { firstLineTitle, formatDatLine } from "@/lib/bbs/format";
 import { utf8ToSjisBytes } from "@/lib/bbs/sjis";
 import { db } from "@/lib/db";
-import { db as mockDb } from "@/lib/mock-db";
-
 // 専ブラ対応: GET /bbs/dat/スレ番.dat
 // 仕様: https://scrapbox.io/2chtypebbs/dat
 // フォルダ名は [id] だがURLは `123.dat` の1セグメントなので id には ".dat" が付いたまま来る。
 // Range / Last-Modified による差分取得に対応(推奨事項。専ブラの安定性に直結)。
 
-// output: export (GitHub Pages) は動的セグメントに generateStaticParams か
-// force-static/revalidate を要求する。このルート自体はリクエストヘッダ(Range/If-Modified-Since)
-// に依存する動的処理なので静的出力では意味を成さないが、ビルドを通すためのスタブ。
-export const dynamic = "force-static";
-
-export function generateStaticParams() {
-	if (process.env.NEXT_PUBLIC_STATIC_EXPORT !== "true") return [];
-	const params = mockDb.getPosts().map((post) => ({ id: `${post.id}.dat` }));
-	return params.length > 0 ? params : [{ id: "1.dat" }];
-}
+export const dynamic = "force-dynamic";
 
 function threadIdFromParam(raw: string): number | null {
 	const m = /^(\d+)\.dat$/.exec(raw);

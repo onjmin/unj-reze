@@ -9,6 +9,8 @@ import { withEdgeCache } from "@/lib/edge-cache";
 // 行数が極端に多いと落ちる専ブラがある(twinkle等)ので上限を切る。
 const MAX_THREADS = 300;
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
 	return await withEdgeCache(
 		request,

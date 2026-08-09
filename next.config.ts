@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 import os from "os";
 
-const isGhPages = process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" || process.env.GITHUB_ACTIONS === "true";
+const isGhPages = process.env.NEXT_PUBLIC_STATIC_EXPORT === "true" || process.env.GITHUB_PAGES === "true";
 
 // ローカルIPアドレスを自動取得する関数
 const getLocalIp = (): string => {
