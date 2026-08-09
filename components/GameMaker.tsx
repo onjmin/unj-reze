@@ -281,14 +281,23 @@ if / while / for によるループ制御と、下記の関数呼び出しだけ
 - moveBoss(x, y, frames)       moveTo のボス用エイリアス（同じ挙動）
 
 【弾幕（弾を撃つ）】
-- shot(角度, 速度, 色)                       角度(度, 0=右・90=下)・速度・色番号(0-8)で1発発射
-- shotN(方向数, 基準角度, 開き角, 速度, 色)     扇状に複数発射（例: 5方向を36度の扇で）
-- shotPlayer(速度, 色, ぶれ角度)              自機を狙って1発（ぶれ角度でランダムにばらす）
-- shotSpiral(方向数, 基準角度, 速度, 色)       全方位に均等な数だけ発射（基準角度から等間隔）
-- shotRing(方向数, 速度, 色)                  shotSpiral と同様の全方位リング弾
+- shot(角度, 速度, 色, 形状)                  角度(度, 0=右・90=下)・速度・色番号(0-8)で1発発射。形状は省略可
+- shotN(方向数, 基準角度, 開き角, 速度, 色, 形状) 扇状に複数発射（例: 5方向を36度の扇で）
+- shotPlayer(速度, 色, ぶれ角度, 形状)         自機を狙って1発（ぶれ角度でランダムにばらす）
+- shotSpiral(方向数, 基準角度, 速度, 色, 形状)  全方位に均等な数だけ発射（基準角度から等間隔）
+- shotRing(方向数, 速度, 色, 形状)             shotSpiral と同様の全方位リング弾
 - shotPlayerAccel(初速, 加速度, 最大速度, 消滅フレーム, 色, ぶれ角度)
                                             自機狙いで発射後に加速し、最大速度で頭打ち。
                                             指定フレーム後に自動消滅する加速弾
+- shotCurve(角度, 速度, 角速度, 色, 形状)      撃った後、毎フレーム「角速度」度ずつ進行方向が
+                                            曲がり続ける弾（渦巻き/ワインダー弾幕用）
+- shotLaser(角度, 太さ, 予告フレーム, 持続フレーム, 色, 長さ省略可)
+                                            まず細い予告線を表示し、予告フレーム経過後に
+                                            当たり判定のある太いレーザーへ変化、持続フレーム後に消滅
+
+【弾の形状（shape 引数）】
+- BALL（省略時のデフォルト・ダイヤモンド型）/ RICE（米粒弾）/ KUNAI（クナイ弾）/ STAR（星弾）
+- 例: shot(90, 3, 2, RICE)  // 下方向に米弾を1発
 
 【自機情報】
 - getPlayerAngle()             自分から見た自機の方向（度）
@@ -675,7 +684,24 @@ const SHELL_SPEED = 7;
 const SHELL_KICK_GRACE = 12;
 
 interface Bullet { x: number; y: number; w: number; h: number; vy: number; vx?: number; color?: string; bounce?: boolean; }
-interface EnemyBullet { x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean; accel?: number; maxSpeed?: number; vanishIn?: number; }
+interface EnemyBullet {
+  x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean;
+  accel?: number; maxSpeed?: number; vanishIn?: number;
+  shape?: string;
+  /** カーブ弾：毎フレーム vx/vy をこの角度(度/フレーム)だけ回転させる */
+  angularVel?: number;
+  /** レーザー（予告線→実体）。true の間は通常弾と別の更新・当たり判定・描画パスを通る */
+  laser?: boolean;
+  laserAngle?: number;
+  laserLen?: number;
+  laserWidth?: number;
+  /** 予告フレーム残り（>0 の間は当たり判定なし・細い予告線を描画） */
+  telegraphLeft?: number;
+  /** レーザー実体の持続フレーム残り（0 で消滅） */
+  durationLeft?: number;
+  originX?: number;
+  originY?: number;
+}
 
 // ── 空間グリッド（弾幕当たり判定高速化）────────────────────────────────────
 // セルサイズを最大弾半径の2倍以上に設定することで漏れなし保証。
@@ -817,7 +843,7 @@ function runEntityScript(
       requestAnimationFrame(check);
     });
 
-  const pushBullet = (angle: number, speed: number, colorIdx: number) => {
+  const pushBullet = (angle: number, speed: number, colorIdx: number, shape?: string) => {
     if (ctx.cancelled) return;
     const r = angle * DEG_TO_RAD;
     const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
@@ -825,7 +851,7 @@ function runEntityScript(
       x: cx, y: cy,
       vx: Math.cos(r) * speed, vy: Math.sin(r) * speed,
       r: 5, color: SPELL_PALETTE[((colorIdx | 0) + 9) % 9],
-      shape: entity.def.bulletShape ?? 'circle',
+      shape: shape ?? entity.def.bulletShape ?? 'circle',
     } as typeof eng.enemyBullets[0]);
   };
 
@@ -853,28 +879,59 @@ function runEntityScript(
       (env.moveTo as (x: unknown, y: unknown, f: unknown) => Promise<void>)(x, y, frames),
 
     // 弾幕
-    shot: (angle: unknown, speed: unknown, color: unknown = 0) =>
-      pushBullet(+(angle as number), +(speed as number), (color as number) | 0),
-    shotN: (ways: unknown, baseAngle: unknown, spread: unknown, speed: unknown, color: unknown = 0) => {
+    shot: (angle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) =>
+      pushBullet(+(angle as number), +(speed as number), (color as number) | 0, shape as string | undefined),
+    shotN: (ways: unknown, baseAngle: unknown, spread: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) => {
       const n = (ways as number) | 0;
       for (let i = 0; i < n; i++) {
         const a = +(baseAngle as number) + (n > 1 ? (i / (n - 1) - 0.5) * +(spread as number) : 0);
-        pushBullet(a, +(speed as number), (color as number) | 0);
+        pushBullet(a, +(speed as number), (color as number) | 0, shape as string | undefined);
       }
     },
-    shotPlayer: (speed: unknown, color: unknown = 0, jitter: unknown = 0) => {
+    shotPlayer: (speed: unknown, color: unknown = 0, jitter: unknown = 0, shape: unknown = undefined) => {
       const p = getPlayer();
       const angle = Math.atan2(p.y - (entity.y + TILE_SIZE / 2), p.x - (entity.x + TILE_SIZE / 2)) / DEG_TO_RAD;
-      pushBullet(angle + (Math.random() * 2 - 1) * +(jitter as number), +(speed as number), (color as number) | 0);
+      pushBullet(angle + (Math.random() * 2 - 1) * +(jitter as number), +(speed as number), (color as number) | 0, shape as string | undefined);
     },
-    shotSpiral: (ways: unknown, baseAngle: unknown, speed: unknown, color: unknown = 0) => {
+    shotSpiral: (ways: unknown, baseAngle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) => {
       const n = (ways as number) | 0;
-      for (let i = 0; i < n; i++) pushBullet(+(baseAngle as number) + i * (360 / n), +(speed as number), (color as number) | 0);
+      for (let i = 0; i < n; i++) pushBullet(+(baseAngle as number) + i * (360 / n), +(speed as number), (color as number) | 0, shape as string | undefined);
     },
     /** 全方向均等リング弾 shotRing(ways, speed, color) */
-    shotRing: (ways: unknown, speed: unknown, color: unknown = 0) => {
+    shotRing: (ways: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) => {
       const n = Math.max(1, (ways as number) | 0);
-      for (let i = 0; i < n; i++) pushBullet(i * (360 / n), +(speed as number), (color as number) | 0);
+      for (let i = 0; i < n; i++) pushBullet(i * (360 / n), +(speed as number), (color as number) | 0, shape as string | undefined);
+    },
+    /** カーブ弾：発射後、毎フレーム angularVel 度ずつ進行方向が曲がり続ける（渦巻き弾幕用） */
+    shotCurve: (angle: unknown, speed: unknown, angularVel: unknown, color: unknown = 0, shape: unknown = undefined) => {
+      if (ctx.cancelled) return;
+      const r = +(angle as number) * DEG_TO_RAD;
+      const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+      const spd = +(speed as number);
+      eng.enemyBullets.push({
+        x: cx, y: cy,
+        vx: Math.cos(r) * spd, vy: Math.sin(r) * spd,
+        r: 5, color: SPELL_PALETTE[(((color as number) | 0) + 9) % 9],
+        shape: (shape as string | undefined) ?? entity.def.bulletShape ?? 'circle',
+        angularVel: +(angularVel as number),
+      });
+    },
+    /** 予告線付きレーザー：telegraphFrames の間は当たり判定のない細い予告線を表示し、
+     *  その後 durationFrames の間だけ当たり判定のある太いレーザーとして存在する。 */
+    shotLaser: (angle: unknown, width: unknown, telegraphFrames: unknown, durationFrames: unknown, color: unknown = 0, length: unknown = 640) => {
+      if (ctx.cancelled) return;
+      const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+      eng.enemyBullets.push({
+        x: cx, y: cy, vx: 0, vy: 0, r: 0,
+        color: SPELL_PALETTE[(((color as number) | 0) + 9) % 9],
+        laser: true,
+        laserAngle: +(angle as number) * DEG_TO_RAD,
+        laserLen: +(length as number),
+        laserWidth: Math.max(1, +(width as number)),
+        telegraphLeft: Math.max(0, (telegraphFrames as number) | 0),
+        durationLeft: Math.max(1, (durationFrames as number) | 0),
+        originX: cx, originY: cy,
+      });
     },
     /** 加速弾：プレイヤー方向へ初速 initSpeed から accel ずつ加速し maxSpeed で頭打ち。vanishTime フレーム後自動消滅。 */
     shotPlayerAccel: (initSpeed: unknown, accel: unknown, maxSpeed: unknown, vanishTime: unknown, color: unknown = 0, jitter: unknown = 0) => {
@@ -933,6 +990,12 @@ function runEntityScript(
     startY,
     W: VIEW_W,
     H: VIEW_H,
+
+    // 弾の形状定数（shot系関数の shape 引数に渡す）
+    BALL: 'circle',
+    RICE: 'rice',
+    KUNAI: 'kunai',
+    STAR: 'star',
   };
 
   const lines = parseMiniScript(src);
@@ -9764,6 +9827,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           // ── 弾移動・画面外除去 ──
           for (let i = eng.enemyBullets.length - 1; i >= 0; i--) {
             const eb = eng.enemyBullets[i];
+            // レーザー：予告→実体のタイマーのみ進める（座標は発生源に固定）
+            if (eb.laser) {
+              if (eb.telegraphLeft !== undefined && eb.telegraphLeft > 0) {
+                eb.telegraphLeft--;
+              } else if (eb.durationLeft !== undefined) {
+                eb.durationLeft--;
+                if (eb.durationLeft <= 0) { eng.enemyBullets.splice(i, 1); continue; }
+              }
+              continue;
+            }
+            // カーブ弾：進行方向を毎フレーム回転
+            if (eb.angularVel) {
+              const rad = eb.angularVel * DEG_TO_RAD;
+              const cos = Math.cos(rad), sin = Math.sin(rad);
+              const nvx = eb.vx * cos - eb.vy * sin;
+              const nvy = eb.vx * sin + eb.vy * cos;
+              eb.vx = nvx; eb.vy = nvy;
+            }
             // 加速弾処理
             if (eb.accel !== undefined && eb.maxSpeed !== undefined) {
               const spd = Math.hypot(eb.vx, eb.vy);
@@ -9782,10 +9863,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
             if (eb.x < -20 || eb.x > worldW + 20 || eb.y < -20 || eb.y > worldH + 20) eng.enemyBullets.splice(i, 1);
           }
 
-          // ── 空間グリッドに登録 ──
+          // ── 空間グリッドに登録（レーザーは線分なので通常の円形グリッド判定から除外） ──
           const grid = bulletGridRef.current;
           grid.clear();
-          for (const eb of eng.enemyBullets) grid.insert(eb);
+          for (const eb of eng.enemyBullets) { if (!eb.laser) grid.insert(eb); }
+
+          // ── レーザー当たり判定：予告中(telegraphLeft>0)は無害。実体化後、点と線分の距離で判定 ──
+          if (gameData.engine === 'touhou') {
+            for (const eb of eng.enemyBullets) {
+              if (!eb.laser || (eb.telegraphLeft ?? 0) > 0) continue;
+              const ox = eb.originX ?? 0, oy = eb.originY ?? 0;
+              const ang = eb.laserAngle ?? 0;
+              const len = eb.laserLen ?? 640;
+              const dx = Math.cos(ang), dy = Math.sin(ang);
+              const t = Math.max(0, Math.min(len, (pcx - ox) * dx + (pcy - oy) * dy));
+              const cx2 = ox + dx * t, cy2 = oy + dy * t;
+              const dist = Math.hypot(pcx - cx2, pcy - cy2);
+              const halfW = (eb.laserWidth ?? 4) / 2;
+              if (!debugInvincibleRef.current && !isPlayerDeadRef.current && invulnRef.current <= 0 && bombInvulnRef.current <= 0 && dist < halfW + core) {
+                handlePlayerDeath(); dead = true; break;
+              }
+            }
+          }
 
           // ── 当たり判定（グリッドで絞り込んでから距離チェック） ──
           const checkRadius = 24 + core; // グレイズ検出最大距離
@@ -10986,35 +11085,105 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           ctx.globalAlpha = 1;
         }
         if (gameData.engine === 'touhou') {
-          // ── touhou 弾：色グループ別にまとめて描画（fillStyle 切り替えを最小化） ──
+          // ── レーザー（予告線→実体）を先に描画 ──
+          for (const eb of eng.enemyBullets) {
+            if (!eb.laser) continue;
+            const ox = eb.originX ?? 0, oy = eb.originY ?? 0;
+            const ang = eb.laserAngle ?? 0;
+            const len = eb.laserLen ?? 640;
+            const ex = ox + Math.cos(ang) * len, ey = oy + Math.sin(ang) * len;
+            ctx.save();
+            if ((eb.telegraphLeft ?? 0) > 0) {
+              // 予告線：細く半透明、点滅させて視認性を上げる
+              ctx.strokeStyle = eb.color;
+              ctx.globalAlpha = 0.35 + 0.25 * Math.sin(performance.now() / 60);
+              ctx.lineWidth = 1.5;
+            } else {
+              // 実体：太いレーザー本体＋白コア
+              ctx.strokeStyle = eb.color;
+              ctx.globalAlpha = 0.85;
+              ctx.lineWidth = eb.laserWidth ?? 4;
+            }
+            ctx.beginPath();
+            ctx.moveTo(ox, oy);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+            if (!((eb.telegraphLeft ?? 0) > 0)) {
+              ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+              ctx.lineWidth = Math.max(1, (eb.laserWidth ?? 4) * 0.35);
+              ctx.globalAlpha = 0.9;
+              ctx.beginPath();
+              ctx.moveTo(ox, oy);
+              ctx.lineTo(ex, ey);
+              ctx.stroke();
+            }
+            ctx.restore();
+          }
+          // ── touhou 弾：色×形状グループ別にまとめて描画（fillStyle 切り替えを最小化） ──
           const byColor = new Map<string, EnemyBullet[]>();
           for (const eb of eng.enemyBullets) {
-            let arr = byColor.get(eb.color);
-            if (!arr) { arr = []; byColor.set(eb.color, arr); }
+            if (eb.laser) continue;
+            const key = `${eb.color}|${eb.shape ?? 'circle'}`;
+            let arr = byColor.get(key);
+            if (!arr) { arr = []; byColor.set(key, arr); }
             arr.push(eb);
           }
-          // パス1：ダイヤモンド本体（色ごとに一括）
-          for (const [color, bullets] of byColor) {
+          // パス1：本体（色・形状ごとに一括）
+          for (const [key, bullets] of byColor) {
+            const [color, shape] = key.split('|');
             ctx.fillStyle = color;
             ctx.beginPath();
             for (const eb of bullets) {
               const angle = Math.atan2(eb.vy, eb.vx);
               const cos = Math.cos(angle), sin = Math.sin(angle);
-              const s = eb.r * 1.1;
-              const x1 = s * 1.2, y2 = s * 0.85;
-              // 回転済み座標を手動計算（save/restoreなしで高速化）
-              ctx.moveTo(eb.x + cos * x1, eb.y + sin * x1);
-              ctx.lineTo(eb.x + sin * (-y2), eb.y + cos * (-y2));  // (0,-y2) 回転
-              ctx.lineTo(eb.x + cos * (-x1), eb.y + sin * (-x1));
-              ctx.lineTo(eb.x - sin * (-y2), eb.y - cos * (-y2));  // (0,+y2) 回転
-              ctx.closePath();
+              if (shape === 'rice') {
+                // 米弾：進行方向に伸びた細い楕円
+                const s = eb.r * 1.3;
+                for (let k = 0; k <= 8; k++) {
+                  const th = (k / 8) * Math.PI * 2;
+                  const lx = Math.cos(th) * s, ly = Math.sin(th) * s * 0.45;
+                  const rx = eb.x + cos * lx - sin * ly, ry = eb.y + sin * lx + cos * ly;
+                  if (k === 0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
+                }
+                ctx.closePath();
+              } else if (shape === 'kunai') {
+                // クナイ弾：進行方向に尖った細長い三角形
+                const s = eb.r * 1.6;
+                const tip = { x: eb.x + cos * s * 1.6, y: eb.y + sin * s * 1.6 };
+                const backL = { x: eb.x - cos * s * 0.8 - sin * s * 0.5, y: eb.y - sin * s * 0.8 + cos * s * 0.5 };
+                const backR = { x: eb.x - cos * s * 0.8 + sin * s * 0.5, y: eb.y - sin * s * 0.8 - cos * s * 0.5 };
+                ctx.moveTo(tip.x, tip.y);
+                ctx.lineTo(backL.x, backL.y);
+                ctx.lineTo(backR.x, backR.y);
+                ctx.closePath();
+              } else if (shape === 'star') {
+                // 星弾：5点星
+                const outerR = eb.r * 1.4, innerR = eb.r * 0.6;
+                for (let k = 0; k < 10; k++) {
+                  const rr = k % 2 === 0 ? outerR : innerR;
+                  const th = angle + (k / 10) * Math.PI * 2 - Math.PI / 2;
+                  const px = eb.x + Math.cos(th) * rr, py = eb.y + Math.sin(th) * rr;
+                  if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+              } else {
+                // BALL（デフォルト）：ダイヤモンド型
+                const s = eb.r * 1.1;
+                const x1 = s * 1.2, y2 = s * 0.85;
+                ctx.moveTo(eb.x + cos * x1, eb.y + sin * x1);
+                ctx.lineTo(eb.x + sin * (-y2), eb.y + cos * (-y2));
+                ctx.lineTo(eb.x + cos * (-x1), eb.y + sin * (-x1));
+                ctx.lineTo(eb.x - sin * (-y2), eb.y - cos * (-y2));
+                ctx.closePath();
+              }
             }
             ctx.fill();
           }
-          // パス2：白コアをまとめて一括描画
+          // パス2：白コアをまとめて一括描画（レーザーは対象外）
           ctx.fillStyle = 'rgba(255,255,255,0.85)';
           ctx.beginPath();
           for (const eb of eng.enemyBullets) {
+            if (eb.laser) continue;
             ctx.moveTo(eb.x + eb.r * 0.35, eb.y);
             ctx.arc(eb.x, eb.y, eb.r * 0.35, 0, Math.PI * 2);
           }
