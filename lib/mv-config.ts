@@ -506,6 +506,11 @@ export function isMvTransitionInert(t: MvTransition | undefined): boolean {
 
 interface MvLayerBase {
 	id: string;
+	/**
+	 * 「レイヤー」タブでの見出し。未指定なら種類名(例:「ピアノロール」)にフォールバックするが、
+	 * 同じ種類のレイヤーが何枚もあると見分けが付かなくなるので、名付けを強く推奨する。
+	 */
+	name?: string;
 	/** 表示するセクションID。未指定＝全セクションで表示。 */
 	sections?: string[];
 	/** 描画順。小さいほど奥。 */

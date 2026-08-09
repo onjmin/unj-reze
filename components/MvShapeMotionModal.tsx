@@ -1,0 +1,291 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
+import { MV_H, MV_W, type MvManifest, type MvSection, type MvShapeLayer } from "@/lib/mv-config";
+import { EMPTY_SONG, drawMvFrame, type MvFrameState } from "@/lib/mv-engine";
+import {
+	type MvMotionCustomToggle,
+	type MvSceneMotionConfig,
+	DEFAULT_SCENE_MOTION,
+	MV_MOTION_PRESETS,
+	resolveSceneModulators,
+} from "@/lib/mv-shape-motion";
+
+/** アイコン用の小さいSVGプレビュー（静止画。グリッド内で常時再生すると重いので線画だけ）。 */
+function PresetIcon({ path }: { path: string }) {
+	return (
+		<svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">
+			<path d={path} stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" />
+		</svg>
+	);
+}
+
+/** 今選んでいる組み合わせを実際に動かして見せる、モーダル上部のライブプレビュー。 */
+function MotionLivePreview({
+	baseLayer,
+	modulators,
+}: {
+	baseLayer: MvShapeLayer;
+	modulators: ReturnType<typeof resolveSceneModulators>;
+}) {
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		const manifest: MvManifest = {
+			version: 1,
+			preset: "geometric",
+			title: "",
+			mml: "",
+			audio: { mode: "soundfontKoe" },
+			stage: {
+				bgColor: "#111113",
+				bgFit: "cover",
+				pulse: "none",
+				fadeIn: false,
+				fadeOut: false,
+				palette: [],
+			},
+			sections: [],
+			layers: [{ ...baseLayer, id: "preview", modulators }],
+		};
+		const song = { ...EMPTY_SONG, bpm: 120 };
+		const stepsPerSec = (song.bpm / 60) * 48;
+		let raf = 0;
+		const start = performance.now();
+		const loop = () => {
+			const elapsed = (performance.now() - start) / 1000;
+			const frame: MvFrameState = { step: elapsed * stepsPerSec, timeSec: elapsed };
+			drawMvFrame(ctx, manifest, song, frame);
+			raf = requestAnimationFrame(loop);
+		};
+		raf = requestAnimationFrame(loop);
+		return () => cancelAnimationFrame(raf);
+	}, [baseLayer, modulators]);
+
+	return (
+		<canvas
+			ref={canvasRef}
+			width={MV_W}
+			height={MV_H}
+			className="block h-auto w-full rounded bg-black"
+			style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
+		/>
+	);
+}
+
+interface MvShapeMotionModalProps {
+	baseLayer: MvShapeLayer;
+	sections: MvSection[];
+	/** その場面が何小節あるか（`速さ`のフレーズ長をこの範囲内に収めるため）。 */
+	sceneBars: (sectionId: string) => number;
+	initial?: Record<string, MvSceneMotionConfig>;
+	onApply: (perScene: Record<string, MvSceneMotionConfig>) => void;
+	onClose: () => void;
+}
+
+/**
+ * 「真ん中の図形の動き方設定」モーダル。
+ * - 場面タブで切り替えながら、場面ごとに別々の動きを設定できる。
+ * - プリセットはアイコングリッドから選ぶ（モバイルは2列）。
+ * - 上部のライブプレビューが選んだ内容を即座に反映する。
+ * - 「独自の動きを組み合わせる」でプリセットの上に移動/回転/拡大縮小を追加できる。
+ */
+export default function MvShapeMotionModal({
+	baseLayer,
+	sections,
+	sceneBars,
+	initial,
+	onApply,
+	onClose,
+}: MvShapeMotionModalProps) {
+	const sceneList = sections.length > 0 ? sections : [
+		{ id: "__all__", label: "全体", startBar: 0 } as MvSection,
+	];
+	const [activeSceneId, setActiveSceneId] = useState(sceneList[0]?.id ?? "__all__");
+	const [perScene, setPerScene] = useState<Record<string, MvSceneMotionConfig>>(
+		() =>
+			Object.fromEntries(
+				sceneList.map((s) => [s.id, initial?.[s.id] ?? DEFAULT_SCENE_MOTION]),
+			),
+	);
+
+	const cfg = perScene[activeSceneId] ?? DEFAULT_SCENE_MOTION;
+	const setCfg = (next: MvSceneMotionConfig) =>
+		setPerScene((p) => ({ ...p, [activeSceneId]: next }));
+
+	const bars = sceneBars(activeSceneId);
+	const modulators = resolveSceneModulators(cfg, bars);
+
+	const setCustom = (patch: Partial<MvMotionCustomToggle>) =>
+		setCfg({ ...cfg, custom: { ...cfg.custom, ...patch } });
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+			<div className="flex h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-[88vh] sm:rounded-xl">
+				<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+					<span className="text-sm font-bold text-gray-100">図形の動き方設定</span>
+					<button
+						onClick={onClose}
+						className="rounded p-1 text-gray-400 hover:bg-gray-800"
+					>
+						<X size={18} />
+					</button>
+				</div>
+
+				<div className="flex-1 space-y-4 overflow-y-auto p-3">
+					<MotionLivePreview baseLayer={baseLayer} modulators={modulators} />
+
+					{/* 場面選択タブ */}
+					<div>
+						<p className="mb-1 text-[10px] text-gray-400">場面選択</p>
+						<div className="flex gap-1.5 overflow-x-auto pb-1">
+							{sceneList.map((s) => (
+								<button
+									key={s.id}
+									onClick={() => setActiveSceneId(s.id)}
+									className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] whitespace-nowrap ${
+										activeSceneId === s.id
+											? "bg-blue-600 text-white"
+											: "bg-gray-800 text-gray-300"
+									}`}
+								>
+									{s.label}
+								</button>
+							))}
+						</div>
+					</div>
+
+					{/* プリセットグリッド */}
+					<div>
+						<p className="mb-1 text-[10px] text-gray-400">動きのプリセットを選択</p>
+						<div className="grid grid-cols-2 gap-2">
+							{MV_MOTION_PRESETS.map((p) => (
+								<button
+									key={p.id}
+									onClick={() => setCfg({ ...cfg, presetId: p.id })}
+									className={`flex flex-col items-center gap-1 rounded-lg border p-3 ${
+										cfg.presetId === p.id
+											? "border-blue-500 bg-blue-500/10 text-blue-300"
+											: "border-gray-700 bg-gray-800/60 text-gray-300"
+									}`}
+								>
+									<PresetIcon path={p.icon} />
+									<span className="text-[11px]">{p.name}</span>
+								</button>
+							))}
+						</div>
+					</div>
+
+					{/* 独自の動きを組み合わせる */}
+					<div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+						<p className="mb-2 text-[10px] font-bold text-gray-300">
+							独自の動きを組み合わせる
+						</p>
+
+						<label className="flex items-center gap-2 py-1.5">
+							<input
+								type="checkbox"
+								checked={cfg.custom.move}
+								onChange={(e) => setCustom({ move: e.target.checked })}
+								className="h-4 w-4"
+							/>
+							<span className="flex-1 text-[12px] text-gray-200">移動（X/Y）</span>
+						</label>
+						{cfg.custom.move && (
+							<div className="mb-2 ml-6 space-y-1">
+								<span className="text-[10px] text-gray-400">速さ（往復に何小節かける）</span>
+								<input
+									type="range"
+									min={0.5}
+									max={8}
+									step={0.5}
+									value={cfg.custom.moveSpeedBars}
+									onChange={(e) =>
+										setCustom({ moveSpeedBars: Number(e.target.value) })
+									}
+									className="w-full min-h-8"
+								/>
+							</div>
+						)}
+
+						<label className="flex items-center gap-2 py-1.5">
+							<input
+								type="checkbox"
+								checked={cfg.custom.rotate}
+								onChange={(e) => setCustom({ rotate: e.target.checked })}
+								className="h-4 w-4"
+							/>
+							<span className="flex-1 text-[12px] text-gray-200">回転</span>
+						</label>
+						{cfg.custom.rotate && (
+							<div className="mb-2 ml-6 space-y-1">
+								<span className="text-[10px] text-gray-400">速さ（度/秒）</span>
+								<input
+									type="range"
+									min={-180}
+									max={180}
+									step={5}
+									value={cfg.custom.rotateSpeed}
+									onChange={(e) =>
+										setCustom({ rotateSpeed: Number(e.target.value) })
+									}
+									className="w-full min-h-8"
+								/>
+							</div>
+						)}
+
+						<label className="flex items-center gap-2 py-1.5">
+							<input
+								type="checkbox"
+								checked={cfg.custom.scale}
+								onChange={(e) => setCustom({ scale: e.target.checked })}
+								className="h-4 w-4"
+							/>
+							<span className="flex-1 text-[12px] text-gray-200">拡大縮小</span>
+						</label>
+						{cfg.custom.scale && (
+							<div className="ml-6 space-y-1">
+								<span className="text-[10px] text-gray-400">速さ（何小節で1周）</span>
+								<input
+									type="range"
+									min={0.5}
+									max={8}
+									step={0.5}
+									value={cfg.custom.scaleSpeedBars}
+									onChange={(e) =>
+										setCustom({ scaleSpeedBars: Number(e.target.value) })
+									}
+									className="w-full min-h-8"
+								/>
+							</div>
+						)}
+					</div>
+				</div>
+
+				<div className="flex shrink-0 gap-2 border-t border-gray-800 p-3">
+					<button
+						onClick={onClose}
+						className="flex-1 rounded-lg border border-gray-700 py-2.5 text-sm text-gray-300"
+					>
+						キャンセル
+					</button>
+					<button
+						onClick={() => {
+							onApply(perScene);
+							onClose();
+						}}
+						className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white"
+					>
+						適用
+					</button>
+				</div>
+			</div>
+		</div>
+	);
+}

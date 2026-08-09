@@ -535,10 +535,9 @@ const LAYERS: MvLayer[] = [
 		z: 26,
 	},
 
-	// ══ 歌詞。場面によって出る側が入れ替わる ════════════════════
-	// コマ送りで確認: 右と左は同時には出ない（以前の版は右を常時＋一部の場面だけ
-	// 左も重ねていたが、参考動画は排他）。冒頭(s00)と中盤の折り返し直後(s05)だけ
-	// 右、それ以外はずっと左——右→左→右→左と1曲で2回だけ入れ替わる。
+	// ══ 歌詞。表(右)＝メインの歌詞、裏(左)＝残像多めのエコー的な添え書きとして同時表示 ══
+	// 以前は「右と左は同時に出ない」と早合点して場面ごとの排他表示にしていたが、
+	// 90秒地点だけ見て一般化した誤りだった（実際は同時表示される）。撤回して常時同時表示に戻す。
 	{
 		kind: "lyrics",
 		id: "lyrics-right",
@@ -553,7 +552,6 @@ const LAYERS: MvLayer[] = [
 		vertical: true,
 		afterimage: 3,
 		holdBars: 8,
-		sections: [scene(0), scene(5)],
 		z: 40,
 	},
 	{
@@ -569,7 +567,6 @@ const LAYERS: MvLayer[] = [
 		vertical: true,
 		afterimage: 1,
 		holdBars: 4,
-		sections: [scene(1), scene(2), scene(3), scene(4), scene(6), scene(7)],
 		z: 40,
 	},
 

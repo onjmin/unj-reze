@@ -104,6 +104,8 @@ import type {
 	MvEffectTemplateParams,
 } from "@/lib/mv-effect-templates";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
+import MvShapeMotionModal from "./MvShapeMotionModal";
+import { resolveSceneModulators } from "@/lib/mv-shape-motion";
 import {
 	EMPTY_SONG,
 	type MvSong,
@@ -610,7 +612,8 @@ function parseBarList(text: string): number[] {
 		.filter((n) => Number.isFinite(n) && n >= 0);
 }
 
-function layerLabel(layer: MvLayer): string {
+/** 種類ごとの既定ラベル（`name`も分かりやすいidも無いときの最終フォールバック）。 */
+function layerKindLabel(layer: MvLayer): string {
 	switch (layer.kind) {
 		case "image":
 			return refLabel(layer.ref);
@@ -629,6 +632,27 @@ function layerLabel(layer: MvLayer): string {
 		case "degree":
 			return `度数 @${layer.track}`;
 	}
+}
+
+/**
+ * `mvUid()` が振った自動id（例: "shp_m5x2k3g7"）かどうか。ハイフンを含まず、
+ * prefix_英数字 という形をしている。プリセット作者が付けた意味のあるid（例: "roll-intro"）は
+ * ハイフンを含むのでここで弾かれ、そのまま見出しとして使われる。
+ */
+function isAutoLayerId(id: string): boolean {
+	return /^[a-z]+_[0-9a-z]+$/.test(id) && !id.includes("-");
+}
+
+/**
+ * レイヤー一覧の見出し。優先順位: ユーザーが付けた`name` → 意味のあるid（"roll-intro"等、
+ * ハイフンを人が読みやすいよう空白に）→ 種類名。以前は種類名だけだったため、
+ * 「ピアノロール」が5枚並んでも見分けが付かなかった（実際はintro/main/a/b/…と
+ * 役割の異なるレイヤーだった）。
+ */
+function layerLabel(layer: MvLayer): string {
+	if (layer.name?.trim()) return layer.name.trim();
+	if (!isAutoLayerId(layer.id)) return layer.id.replace(/[-_]/g, " ");
+	return layerKindLabel(layer);
 }
 
 // ───────────────── 本体 ─────────────────
@@ -654,6 +678,9 @@ export default function MvMaker({
 	const [presetName, setPresetName] = useState<string | null>(null);
 	const [lyricsBulkText, setLyricsBulkText] = useState("");
 	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+	const [motionTarget, setMotionTarget] = useState<
+		{ layerId: string; sectionId: string } | null
+	>(null);
 	const [picker, setPicker] = useState<{
 		mode: "image" | "bgm";
 		target: "stageBg" | { layerId: string } | { sectionId: string };
@@ -1197,12 +1224,12 @@ export default function MvMaker({
 	const imageLayers = manifest.layers.filter(
 		(l): l is MvImageLayer => l.kind === "image",
 	);
-	const lyricsLayer =
-		manifest.layers.find((l): l is MvLyricsLayer => l.kind === "lyrics") ??
-		null;
-	const shownLyricLines = lyricsLayer
-		? resolveLyricLines(lyricsLayer, song)
-		: [];
+	// 表(先頭)/裏(2枚目)の2つを想定。同時表示が要件なので、両方を並べて編集できるようにする。
+	// 3枚目以降を作りたい場合は「レイヤー」タブから追加すれば同じ仕組みでそのまま動く。
+	const lyricsLayers = manifest.layers.filter(
+		(l): l is MvLyricsLayer => l.kind === "lyrics",
+	);
+	const lyricsLayer = lyricsLayers[0] ?? null;
 
 	const sectionOptions = useMemo(
 		() =>
@@ -1653,6 +1680,23 @@ export default function MvMaker({
 
 	const renderLayerSettings = (layer: MvLayer) => (
 		<div className="space-y-4 pt-1">
+			<label className="block space-y-0.5">
+				<span className={FIELD_LABEL_CLASS}>
+					名前（レイヤー一覧での見出し。空なら自動）
+				</span>
+				<input
+					value={layer.name ?? ""}
+					placeholder={layerKindLabel(layer)}
+					onChange={(e) =>
+						updateLayer(layer.id, (l) => ({
+							...l,
+							name: e.target.value || undefined,
+						}))
+					}
+					className={FIELD_INPUT_CLASS}
+				/>
+			</label>
+
 			{layer.kind === "image" && (
 				<>
 					<button
@@ -2330,7 +2374,10 @@ export default function MvMaker({
 										label="進み方"
 										value={"advance" in layer.iconCycle ? "onset" : "beats"}
 										options={[
-											{ value: "beats" as const, label: "拍ロック（一定間隔）" },
+											{
+												value: "beats" as const,
+												label: "拍ロック（一定間隔）",
+											},
 											{
 												value: "onset" as const,
 												label: "発音ロック（音が鳴るたびに1コマ進む）",
@@ -2394,7 +2441,10 @@ export default function MvMaker({
 														l.kind === "shape" &&
 														l.iconCycle &&
 														!("advance" in l.iconCycle)
-															? { ...l, iconCycle: { ...l.iconCycle, beats: v } }
+															? {
+																	...l,
+																	iconCycle: { ...l.iconCycle, beats: v },
+																}
 															: l,
 													)
 												}
@@ -3043,8 +3093,15 @@ export default function MvMaker({
 									onClick={() => setSelectedLayerId(active ? null : layer.id)}
 									className="min-h-10 min-w-0 flex-1 py-1 text-left outline-none"
 								>
-									<span className="block truncate text-[11px] text-gray-200">
-										{layerLabel(layer)}
+									<span className="flex items-center gap-1.5">
+										<span className="truncate text-[11px] font-medium text-gray-200">
+											{layerLabel(layer)}
+										</span>
+										{(layer.name?.trim() || !isAutoLayerId(layer.id)) && (
+											<span className="shrink-0 rounded bg-gray-700 px-1 py-0.5 text-[9px] text-gray-400">
+												{layerKindLabel(layer)}
+											</span>
+										)}
 									</span>
 									{layer.sections && layer.sections.length > 0 && (
 										<span className="block truncate text-[9px] text-gray-500">
@@ -3138,367 +3195,428 @@ export default function MvMaker({
 
 	const lyricsTab = (
 		<div className="space-y-2">
-			<div className={SECTION_CLASS}>
-				<SectionTitle>🎤 歌詞</SectionTitle>
-				{!lyricsLayer ? (
-					<>
-						<p className="text-[10px] leading-relaxed text-gray-400">
-							歌詞レイヤーがありません。追加すると、画面に歌詞を出せます。
-						</p>
-						<button
-							onClick={() => {
-								const layer: MvLyricsLayer = {
-									kind: "lyrics",
-									id: mvUid("lyr"),
-									source: song.lyricLines.length > 0 ? "mml" : "manual",
-									lines: [],
-									x: MV_W - 48,
-									y: 44,
-									anchor: "topLeft",
-									size: 16,
-									color: "#f3f4f6",
-									vertical: true,
-									afterimage: 2,
-									holdBars: 2,
-									z: 40,
-								};
-								update((m) => ({ ...m, layers: [...m.layers, layer] }));
-							}}
-							className={ADD_BTN_CLASS}
-						>
-							<Plus size={13} />
-							歌詞レイヤーを追加
-						</button>
-					</>
-				) : (
-					<>
-						<SelectField
-							label="出どころ"
-							value={lyricsLayer.source}
-							options={[
-								{ value: "mml" as const, label: "MMLの歌詞トラックから自動" },
-								{ value: "manual" as const, label: "小節を指定して手入力" },
-							]}
-							onChange={(v) =>
-								updateLayer(
-									lyricsLayer.id,
-									(l) => ({ ...l, source: v }) as MvLayer,
-								)
-							}
-						/>
-						{lyricsLayer.source === "mml" &&
-							(song.lyricTrackIds.length > 0 ? (
-								<>
-									<SelectField
-										label="トラック"
-										value={String(lyricsLayer.trackId ?? song.lyricTrackIds[0])}
-										options={[
-											...song.lyricTrackIds.map((t) => ({
-												value: String(t),
-												label: `@@${t} のみ`,
-											})),
-											{ value: "all", label: "全部（画面が埋まりがち）" },
-										]}
-										onChange={(v) =>
-											updateLayer(
-												lyricsLayer.id,
-												(l) =>
-													({
-														...l,
-														trackId: v === "all" ? "all" : Number(v),
-													}) as MvLayer,
-											)
-										}
-									/>
-									<p className="text-[10px] leading-relaxed text-gray-500">
-										歌詞トラックが複数あっても、画面に出すのはふつう1本だけです。
-									</p>
-									<div className="rounded border border-gray-700 bg-gray-800 p-2 text-[10px] text-gray-400">
-										<p className="mb-1">
-											このレイヤーが出す歌詞：{shownLyricLines.length} 行
-										</p>
-										<ul className="max-h-28 space-y-0.5 overflow-y-auto">
-											{shownLyricLines.map((line, i) => (
-												<li key={i} className="truncate text-gray-300">
-													<span className="mr-1.5 text-gray-500">
-														{line.bar.toFixed(2)}小節
-													</span>
-													{line.text}
-												</li>
-											))}
-										</ul>
-									</div>
-									{shownLyricLines.length > 0 && (
+			{[0, 1].map((i) => {
+				const lyricsLayer = lyricsLayers[i] ?? null;
+				if (i === 1 && !lyricsLayers[0]) return null;
+				if (i === 1 && !lyricsLayer) {
+					return (
+						<div key={i} className={SECTION_CLASS}>
+							<SectionTitle>🎤 裏歌詞</SectionTitle>
+							<p className="text-[10px] leading-relaxed text-gray-400">
+								表歌詞と同時に出せるもう1つの歌詞レイヤーです。エコーや副音声、対訳などに。
+							</p>
+							<button
+								onClick={() => {
+									const layer: MvLyricsLayer = {
+										kind: "lyrics",
+										id: mvUid("lyr"),
+										source: song.lyricLines.length > 0 ? "mml" : "manual",
+										lines: [],
+										x: 22,
+										y: 44,
+										anchor: "topLeft",
+										size: 16,
+										color: "#f3f4f6",
+										vertical: true,
+										afterimage: 2,
+										holdBars: 2,
+										z: 40,
+									};
+									update((m) => ({ ...m, layers: [...m.layers, layer] }));
+								}}
+								className={ADD_BTN_CLASS}
+							>
+								<Plus size={13} />
+								裏歌詞レイヤーを追加
+							</button>
+						</div>
+					);
+				}
+				const shownLyricLines = lyricsLayer
+					? resolveLyricLines(lyricsLayer, song)
+					: [];
+				return (
+					<div key={i} className={SECTION_CLASS}>
+						<SectionTitle>🎤 {i === 0 ? "表歌詞" : "裏歌詞"}</SectionTitle>
+						{!lyricsLayer ? (
+							<>
+								<p className="text-[10px] leading-relaxed text-gray-400">
+									歌詞レイヤーがありません。追加すると、画面に歌詞を出せます。
+								</p>
+								<button
+									onClick={() => {
+										const layer: MvLyricsLayer = {
+											kind: "lyrics",
+											id: mvUid("lyr"),
+											source: song.lyricLines.length > 0 ? "mml" : "manual",
+											lines: [],
+											x: MV_W - 48,
+											y: 44,
+											anchor: "topLeft",
+											size: 16,
+											color: "#f3f4f6",
+											vertical: true,
+											afterimage: 2,
+											holdBars: 2,
+											z: 40,
+										};
+										update((m) => ({ ...m, layers: [...m.layers, layer] }));
+									}}
+									className={ADD_BTN_CLASS}
+								>
+									<Plus size={13} />
+									歌詞レイヤーを追加
+								</button>
+							</>
+						) : (
+							<>
+								<SelectField
+									label="出どころ"
+									value={lyricsLayer.source}
+									options={[
+										{
+											value: "mml" as const,
+											label: "MMLの歌詞トラックから自動",
+										},
+										{ value: "manual" as const, label: "小節を指定して手入力" },
+									]}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, source: v }) as MvLayer,
+										)
+									}
+								/>
+								{lyricsLayer.source === "mml" &&
+									(song.lyricTrackIds.length > 0 ? (
 										<>
-											<button
-												onClick={() =>
-													updateLayer(lyricsLayer.id, (l) =>
-														l.kind === "lyrics"
-															? {
-																	...l,
-																	source: "manual",
-																	lines: shownLyricLines.map((x) => ({
-																		bar: Math.round(x.bar * 100) / 100,
-																		text: x.text,
-																	})),
-																}
-															: l,
+											<SelectField
+												label="トラック"
+												value={String(
+													lyricsLayer.trackId ?? song.lyricTrackIds[0],
+												)}
+												options={[
+													...song.lyricTrackIds.map((t) => ({
+														value: String(t),
+														label: `@@${t} のみ`,
+													})),
+													{ value: "all", label: "全部（画面が埋まりがち）" },
+												]}
+												onChange={(v) =>
+													updateLayer(
+														lyricsLayer.id,
+														(l) =>
+															({
+																...l,
+																trackId: v === "all" ? "all" : Number(v),
+															}) as MvLayer,
 													)
 												}
-												className={REF_BTN_CLASS}
-											>
-												この歌詞を手入力にコピーして編集する
-											</button>
-											<Hint>
-												MMLから作った行を手入力へ写します。写したあとは文言もタイミングも自由に直せます
-												（MML側の歌詞を変えても追従しなくなります）。
-											</Hint>
+											/>
+											<p className="text-[10px] leading-relaxed text-gray-500">
+												歌詞トラックが複数あっても、画面に出すのはふつう1本だけです。
+											</p>
+											<div className="rounded border border-gray-700 bg-gray-800 p-2 text-[10px] text-gray-400">
+												<p className="mb-1">
+													このレイヤーが出す歌詞：{shownLyricLines.length} 行
+												</p>
+												<ul className="max-h-28 space-y-0.5 overflow-y-auto">
+													{shownLyricLines.map((line, i) => (
+														<li key={i} className="truncate text-gray-300">
+															<span className="mr-1.5 text-gray-500">
+																{line.bar.toFixed(2)}小節
+															</span>
+															{line.text}
+														</li>
+													))}
+												</ul>
+											</div>
+											{shownLyricLines.length > 0 && (
+												<>
+													<button
+														onClick={() =>
+															updateLayer(lyricsLayer.id, (l) =>
+																l.kind === "lyrics"
+																	? {
+																			...l,
+																			source: "manual",
+																			lines: shownLyricLines.map((x) => ({
+																				bar: Math.round(x.bar * 100) / 100,
+																				text: x.text,
+																			})),
+																		}
+																	: l,
+															)
+														}
+														className={REF_BTN_CLASS}
+													>
+														この歌詞を手入力にコピーして編集する
+													</button>
+													<Hint>
+														MMLから作った行を手入力へ写します。写したあとは文言もタイミングも自由に直せます
+														（MML側の歌詞を変えても追従しなくなります）。
+													</Hint>
+												</>
+											)}
 										</>
-									)}
-								</>
-							) : (
-								<p className="text-[10px] text-amber-400">
-									MMLに歌詞トラック（@@0 klatt
-									…）がありません。MMLエディタで歌詞を付けるか、手入力に切り替えてください。
-								</p>
-							))}
-						{lyricsLayer.source === "manual" && (
-							<>
-								{(lyricsLayer.lines ?? []).map((line, i) => (
-									<div key={i} className="flex items-center gap-1.5">
-										<StringNumInput
-											value={line.bar}
-											onChange={(n) =>
-												updateLayer(lyricsLayer.id, (l) =>
-													l.kind === "lyrics"
-														? {
-																...l,
-																lines: (l.lines ?? []).map((x, j) =>
-																	j === i ? { ...x, bar: n } : x,
-																),
-															}
-														: l,
-												)
-											}
-											className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-										/>
-										<input
-											value={line.text}
-											onChange={(e) =>
-												updateLayer(lyricsLayer.id, (l) =>
-													l.kind === "lyrics"
-														? {
-																...l,
-																lines: (l.lines ?? []).map((x, j) =>
-																	j === i ? { ...x, text: e.target.value } : x,
-																),
-															}
-														: l,
-												)
-											}
-											className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-										/>
+									) : (
+										<p className="text-[10px] text-amber-400">
+											MMLに歌詞トラック（@@0 klatt
+											…）がありません。MMLエディタで歌詞を付けるか、手入力に切り替えてください。
+										</p>
+									))}
+								{lyricsLayer.source === "manual" && (
+									<>
+										{(lyricsLayer.lines ?? []).map((line, i) => (
+											<div key={i} className="flex items-center gap-1.5">
+												<StringNumInput
+													value={line.bar}
+													onChange={(n) =>
+														updateLayer(lyricsLayer.id, (l) =>
+															l.kind === "lyrics"
+																? {
+																		...l,
+																		lines: (l.lines ?? []).map((x, j) =>
+																			j === i ? { ...x, bar: n } : x,
+																		),
+																	}
+																: l,
+														)
+													}
+													className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+												/>
+												<input
+													value={line.text}
+													onChange={(e) =>
+														updateLayer(lyricsLayer.id, (l) =>
+															l.kind === "lyrics"
+																? {
+																		...l,
+																		lines: (l.lines ?? []).map((x, j) =>
+																			j === i
+																				? { ...x, text: e.target.value }
+																				: x,
+																		),
+																	}
+																: l,
+														)
+													}
+													className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+												/>
+												<button
+													onClick={() =>
+														updateLayer(lyricsLayer.id, (l) =>
+															l.kind === "lyrics"
+																? {
+																		...l,
+																		lines: (l.lines ?? []).filter(
+																			(_, j) => j !== i,
+																		),
+																	}
+																: l,
+														)
+													}
+													className={DEL_BTN_CLASS}
+												>
+													<Trash2 size={16} />
+												</button>
+											</div>
+										))}
 										<button
 											onClick={() =>
 												updateLayer(lyricsLayer.id, (l) =>
 													l.kind === "lyrics"
 														? {
 																...l,
-																lines: (l.lines ?? []).filter(
-																	(_, j) => j !== i,
-																),
+																lines: [
+																	...(l.lines ?? []),
+																	{ bar: (l.lines?.length ?? 0) * 2, text: "" },
+																],
 															}
 														: l,
 												)
 											}
-											className={DEL_BTN_CLASS}
+											className={ADD_BTN_CLASS}
 										>
-											<Trash2 size={16} />
+											<Plus size={13} />
+											行を追加
 										</button>
-									</div>
-								))}
-								<button
-									onClick={() =>
-										updateLayer(lyricsLayer.id, (l) =>
-											l.kind === "lyrics"
-												? {
-														...l,
-														lines: [
-															...(l.lines ?? []),
-															{ bar: (l.lines?.length ?? 0) * 2, text: "" },
-														],
-													}
-												: l,
+
+										<Details label="一括貼り付けで取り込む">
+											<Hint>
+												{"E[00:11.70]セリフ"}
+												のように「記号＋[分:秒]＋歌詞」を1行ずつ並べて貼ると、
+												まとめて取り込めます。{"#"}
+												で始まる行（場面見出しや演出メモ）は無視されるので、資料をそのまま貼ってOKです。
+												記号は質感の合図として下地の色になります（E緑/L水色/W黄/P白/Fピンク/M紫）。
+											</Hint>
+											<textarea
+												value={lyricsBulkText}
+												onChange={(e) => setLyricsBulkText(e.target.value)}
+												placeholder={
+													"L[00:19.70]ノイズまみれの世界で\nL[00:22]冷たい雨のミュートが"
+												}
+												className={`${INPUT_CLASS} h-24 resize-none font-mono text-[10px]`}
+											/>
+											{(() => {
+												const groups = parseLyricsBulkGroups(
+													lyricsBulkText,
+													song.bpm || 120,
+												);
+												const total = groups.reduce(
+													(n, g) => n + g.lines.length,
+													0,
+												);
+												if (total === 0) return null;
+												return (
+													<>
+														<p className="text-[10px] text-gray-400">
+															{groups.length > 1
+																? `${groups.map((g) => g.label || "(見出しなし)").join(" / ")} の${groups.length}場面・${total}行を検出`
+																: `${total}行を検出`}
+														</p>
+														<button
+															onClick={() => {
+																updateLayer(lyricsLayer.id, (l) =>
+																	l.kind === "lyrics"
+																		? {
+																				...l,
+																				lines: [
+																					...(l.lines ?? []),
+																					...groups.flatMap((g) => g.lines),
+																				],
+																			}
+																		: l,
+																);
+																setLyricsBulkText("");
+															}}
+															className={ADD_BTN_CLASS}
+														>
+															<Plus size={13} />
+															この{total}行を取り込む
+														</button>
+														{groups.length > 1 && (
+															<Hint>
+																見出し({groups.map((g) => g.label).join("・")}
+																)が複数あります。場面ごとに表示位置や縦横を変えたい場合は、
+																「レイヤー」タブの「歌詞」ボタンで歌詞レイヤーをもう1つ追加し、
+																そちらへ残りの見出しぶんを貼り付けたうえで、下の「出す場面」欄で
+																絞り込んでください（1レイヤー＝1つの見た目）。
+															</Hint>
+														)}
+													</>
+												);
+											})()}
+										</Details>
+									</>
+								)}
+
+								<p className="pt-1 text-[10px] font-bold text-gray-400">
+									見た目
+								</p>
+								<NumField
+									label="X"
+									value={lyricsLayer.x}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, x: v }) as MvLayer,
 										)
 									}
-									className={ADD_BTN_CLASS}
-								>
-									<Plus size={13} />
-									行を追加
-								</button>
-
-								<Details label="一括貼り付けで取り込む">
-									<Hint>
-										{"E[00:11.70]セリフ"}のように「記号＋[分:秒]＋歌詞」を1行ずつ並べて貼ると、
-										まとめて取り込めます。{"#"}
-										で始まる行（場面見出しや演出メモ）は無視されるので、資料をそのまま貼ってOKです。
-										記号は質感の合図として下地の色になります（E緑/L水色/W黄/P白/Fピンク/M紫）。
-									</Hint>
-									<textarea
-										value={lyricsBulkText}
-										onChange={(e) => setLyricsBulkText(e.target.value)}
-										placeholder={
-											"L[00:19.70]ノイズまみれの世界で\nL[00:22]冷たい雨のミュートが"
+								/>
+								<NumField
+									label="Y"
+									value={lyricsLayer.y}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, y: v }) as MvLayer,
+										)
+									}
+								/>
+								<NumField
+									label="文字サイズ"
+									value={lyricsLayer.size}
+									min={8}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, size: v }) as MvLayer,
+										)
+									}
+								/>
+								<ColorField
+									label="文字色"
+									value={lyricsLayer.color}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, color: v }) as MvLayer,
+										)
+									}
+								/>
+								<CheckField
+									label="縦書き"
+									checked={lyricsLayer.vertical}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, vertical: v }) as MvLayer,
+										)
+									}
+								/>
+								{/* 参考動画は10列ぶん積み上がるので、目安は0〜12 */}
+								<NumField
+									label="残像の数（0〜12）"
+									value={lyricsLayer.afterimage}
+									min={0}
+									max={12}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, afterimage: v }) as MvLayer,
+										)
+									}
+								/>
+								<label className="flex items-center gap-1.5 py-1">
+									<input
+										type="checkbox"
+										checked={!!lyricsLayer.typing}
+										onChange={(e) =>
+											updateLayer(
+												lyricsLayer.id,
+												(l) => ({ ...l, typing: e.target.checked }) as MvLayer,
+											)
 										}
-										className={`${INPUT_CLASS} h-24 resize-none font-mono text-[10px]`}
+										className="accent-blue-500"
 									/>
-									{(() => {
-										const groups = parseLyricsBulkGroups(
-											lyricsBulkText,
-											song.bpm || 120,
-										);
-										const total = groups.reduce(
-											(n, g) => n + g.lines.length,
-											0,
-										);
-										if (total === 0) return null;
-										return (
-											<>
-												<p className="text-[10px] text-gray-400">
-													{groups.length > 1
-														? `${groups.map((g) => g.label || "(見出しなし)").join(" / ")} の${groups.length}場面・${total}行を検出`
-														: `${total}行を検出`}
-												</p>
-												<button
-													onClick={() => {
-														updateLayer(lyricsLayer.id, (l) =>
-															l.kind === "lyrics"
-																? {
-																		...l,
-																		lines: [
-																			...(l.lines ?? []),
-																			...groups.flatMap((g) => g.lines),
-																		],
-																	}
-																: l,
-														);
-														setLyricsBulkText("");
-													}}
-													className={ADD_BTN_CLASS}
-												>
-													<Plus size={13} />
-													この{total}行を取り込む
-												</button>
-												{groups.length > 1 && (
-													<Hint>
-														見出し({groups.map((g) => g.label).join("・")}
-														)が複数あります。場面ごとに表示位置や縦横を変えたい場合は、
-														「レイヤー」タブの「歌詞」ボタンで歌詞レイヤーをもう1つ追加し、
-														そちらへ残りの見出しぶんを貼り付けたうえで、下の「出す場面」欄で
-														絞り込んでください（1レイヤー＝1つの見た目）。
-													</Hint>
-												)}
-											</>
-										);
-									})()}
-								</Details>
+									<span className={FIELD_LABEL_CLASS}>
+										1文字ずつタイピング表示
+									</span>
+								</label>
+								<NumField
+									label="表示の長さ"
+									value={lyricsLayer.holdBars ?? 2}
+									min={0.25}
+									step={0.25}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, holdBars: v }) as MvLayer,
+										)
+									}
+								/>
+								<button
+									onClick={() => removeLayer(lyricsLayer.id)}
+									className="w-full rounded border border-gray-700 py-1.5 text-[10px] text-gray-400 hover:text-red-400"
+								>
+									歌詞レイヤーを削除
+								</button>
 							</>
 						)}
-
-						<p className="pt-1 text-[10px] font-bold text-gray-400">見た目</p>
-						<NumField
-							label="X"
-							value={lyricsLayer.x}
-							onChange={(v) =>
-								updateLayer(lyricsLayer.id, (l) => ({ ...l, x: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="Y"
-							value={lyricsLayer.y}
-							onChange={(v) =>
-								updateLayer(lyricsLayer.id, (l) => ({ ...l, y: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="文字サイズ"
-							value={lyricsLayer.size}
-							min={8}
-							onChange={(v) =>
-								updateLayer(
-									lyricsLayer.id,
-									(l) => ({ ...l, size: v }) as MvLayer,
-								)
-							}
-						/>
-						<ColorField
-							label="文字色"
-							value={lyricsLayer.color}
-							onChange={(v) =>
-								updateLayer(
-									lyricsLayer.id,
-									(l) => ({ ...l, color: v }) as MvLayer,
-								)
-							}
-						/>
-						<CheckField
-							label="縦書き"
-							checked={lyricsLayer.vertical}
-							onChange={(v) =>
-								updateLayer(
-									lyricsLayer.id,
-									(l) => ({ ...l, vertical: v }) as MvLayer,
-								)
-							}
-						/>
-						{/* 参考動画は10列ぶん積み上がるので、目安は0〜12 */}
-						<NumField
-							label="残像の数（0〜12）"
-							value={lyricsLayer.afterimage}
-							min={0}
-							max={12}
-							onChange={(v) =>
-								updateLayer(
-									lyricsLayer.id,
-									(l) => ({ ...l, afterimage: v }) as MvLayer,
-								)
-							}
-						/>
-						<label className="flex items-center gap-1.5 py-1">
-							<input
-								type="checkbox"
-								checked={!!lyricsLayer.typing}
-								onChange={(e) =>
-									updateLayer(
-										lyricsLayer.id,
-										(l) => ({ ...l, typing: e.target.checked }) as MvLayer,
-									)
-								}
-								className="accent-blue-500"
-							/>
-							<span className={FIELD_LABEL_CLASS}>1文字ずつタイピング表示</span>
-						</label>
-						<NumField
-							label="表示の長さ"
-							value={lyricsLayer.holdBars ?? 2}
-							min={0.25}
-							step={0.25}
-							onChange={(v) =>
-								updateLayer(
-									lyricsLayer.id,
-									(l) => ({ ...l, holdBars: v }) as MvLayer,
-								)
-							}
-						/>
-						<button
-							onClick={() => removeLayer(lyricsLayer.id)}
-							className="w-full rounded border border-gray-700 py-1.5 text-[10px] text-gray-400 hover:text-red-400"
-						>
-							歌詞レイヤーを削除
-						</button>
-					</>
-				)}
-			</div>
+					</div>
+				);
+			})}
 		</div>
 	);
 
@@ -3706,6 +3824,96 @@ export default function MvMaker({
 								onChange={(v) => updateSectionStage(s.id, { bgDim: v })}
 							/>
 						</Details>
+
+						<Details label={`この場面で何を出すか（${manifest.layers.length}レイヤー）`}>
+							<Hint>
+								場面を起点にレイヤーの出し入れ・図形の動きをまとめて決められます。
+								「レイヤー」タブで1枚ずつ「出す場面」を選ぶのと同じことを、この場面から逆向きにやっています。
+							</Hint>
+							{manifest.layers.map((l) => {
+								const shownHere = l.sections ? l.sections.includes(s.id) : true;
+								return (
+									<div
+										key={l.id}
+										className="flex items-center gap-1.5 rounded border border-gray-700/60 bg-gray-800/40 px-2 py-1.5"
+									>
+										<label className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5">
+											<input
+												type="checkbox"
+												checked={shownHere}
+												onChange={(e) => {
+													const v = e.target.checked;
+													updateLayer(l.id, (layer) => {
+														const all = manifest.sections.map((x) => x.id);
+														const cur = layer.sections ?? all;
+														const next = v
+															? [...new Set([...cur, s.id])]
+															: cur.filter((x) => x !== s.id);
+														// 全場面を選んだ状態＝制限なしと同じなので undefined に戻す
+														return {
+															...layer,
+															sections:
+																next.length === 0 || next.length === all.length
+																	? undefined
+																	: next,
+														};
+													});
+												}}
+												className="h-4 w-4 shrink-0"
+											/>
+											<span className="truncate text-[11px] text-gray-200">
+												{layerLabel(l)}
+											</span>
+											<span className="shrink-0 rounded bg-gray-700 px-1 py-0.5 text-[9px] text-gray-400">
+												{layerKindLabel(l)}
+											</span>
+										</label>
+										{l.kind === "shape" && (
+											<button
+												onClick={() => setMotionTarget({ layerId: l.id, sectionId: s.id })}
+												className="shrink-0 rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-200 hover:bg-gray-600"
+											>
+												動きを設定
+											</button>
+										)}
+										{l.kind === "visualizer" && (
+											<button
+												onClick={() => {
+													setSelectedLayerId(l.id);
+													setTab("layers");
+												}}
+												className="shrink-0 rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-200 hover:bg-gray-600"
+											>
+												設定を開く
+											</button>
+										)}
+									</div>
+								);
+							})}
+							<button
+								onClick={() => {
+									const layer: MvVisualizerLayer = {
+										kind: "visualizer",
+										id: mvUid("vis"),
+										style: "pianoRoll",
+										projection: "flat",
+										flow: "scroll",
+										rect: { x: 0, y: MV_H - 90, w: MV_W, h: 90 },
+										amount: 6,
+										thickness: 2,
+										sections: [s.id],
+										z: getNextZ(),
+									};
+									update((m) => ({ ...m, layers: [...m.layers, layer] }));
+									setSelectedLayerId(layer.id);
+									setTab("layers");
+								}}
+								className={ADD_BTN_CLASS}
+							>
+								<Plus size={13} />
+								この場面にピアノロールを追加
+							</button>
+						</Details>
 					</div>
 				))}
 				<button
@@ -3874,6 +4082,60 @@ export default function MvMaker({
 					onClose={() => setTemplatePickerOpen(false)}
 				/>
 			)}
+
+			{motionTarget &&
+				(() => {
+					const baseLayer = manifest.layers.find(
+						(l): l is MvShapeLayer =>
+							l.kind === "shape" && l.id === motionTarget.layerId,
+					);
+					const section = manifest.sections.find(
+						(s) => s.id === motionTarget.sectionId,
+					);
+					if (!baseLayer || !section) return null;
+					const sceneBars =
+						(manifest.sections.find(
+							(s) => s.startBar > section.startBar,
+						)?.startBar ?? song.totalBars ?? section.startBar + 8) -
+						section.startBar;
+					return (
+						<MvShapeMotionModal
+							baseLayer={baseLayer}
+							sections={[section]}
+							sceneBars={() => Math.max(1, sceneBars)}
+							onApply={(perScene) => {
+								const cfg = perScene[section.id];
+								if (!cfg) return;
+								const mods = resolveSceneModulators(cfg, Math.max(1, sceneBars));
+								const all = manifest.sections.map((s) => s.id);
+								const cur = baseLayer.sections ?? all;
+								const otherSections = cur.filter((id) => id !== section.id);
+								if (otherSections.length === 0) {
+									// この場面にしか出ていない図形＝そのまま動きだけ差し替える
+									updateLayer(baseLayer.id, (l) => ({
+										...l,
+										sections: [section.id],
+										modulators: mods,
+									}));
+								} else {
+									// 他の場面でも使われている図形＝この場面だけ複製して動きを変える
+									updateLayer(baseLayer.id, (l) => ({
+										...l,
+										sections: otherSections,
+									}));
+									const clone: MvShapeLayer = {
+										...baseLayer,
+										id: mvUid("shp"),
+										sections: [section.id],
+										modulators: mods,
+									};
+									update((m) => ({ ...m, layers: [...m.layers, clone] }));
+								}
+							}}
+							onClose={() => setMotionTarget(null)}
+						/>
+					);
+				})()}
 		</div>
 	);
 }
