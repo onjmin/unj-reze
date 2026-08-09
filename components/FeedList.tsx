@@ -32,7 +32,7 @@ interface FeedListProps {
 	loading?: boolean;
 	onReplyClick?: (post: Post) => void;
 	onEditImage: ((post: Post) => void) | null;
-	onEditMml: ((post: Post) => void) | null;
+	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	userId?: string;

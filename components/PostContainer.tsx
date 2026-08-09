@@ -76,7 +76,7 @@ interface PostContainerProps {
 	 * 実際に検索画面だけMV編集が落ちていた。非対応なら null を明示すること。
 	 */
 	onEditImage: ((post: Post) => void) | null;
-	onEditMml: ((post: Post) => void) | null;
+	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
 	userId?: string;
@@ -937,8 +937,8 @@ export default function PostContainer({
 							: null,
 						canRemoveImage: true,
 						editMml: onEditMml
-							? () => {
-									onEditMml(post);
+							? (mml) => {
+									onEditMml(post, mml);
 									setShowEditModal(false);
 								}
 							: null,

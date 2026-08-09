@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Clapperboard, Gamepad2, Music, X } from "lucide-react";
+import { Clapperboard, Gamepad2, Music, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { MML_MARKERS } from "@/lib/mml";
@@ -28,8 +28,8 @@ export interface PostEditCapabilities {
 	 * 画像の削除は onSave の第2引数で運ぶので、それを保存するホストだけ true。
 	 */
 	canRemoveImage: boolean;
-	/** MMLエディタを開く。非対応なら null */
-	editMml: (() => void) | null;
+	/** MMLエディタを開く。解決済みのMML本文を渡す。非対応なら null */
+	editMml: ((mml: string) => void) | null;
 	/** ゲームエディタを開く。非対応なら null */
 	editGame: (() => void) | null;
 	/**
@@ -101,26 +101,6 @@ export default function EditPostModal({
 
 	/** MMLバッジを×で削除 */
 	const handleRemoveMml = () => setMmlLine(null);
-
-	/** MML文字列をテキストエリアへ展開 */
-	const handleExpandMml = () => {
-		if (!mmlLine) return;
-		// mmlLine 自体は外部化済みだと "#mml"（本文なし）なので、resolvedMml で
-		// 実際のノーテーションを補って展開する。まだ解決できていなければ何もしない
-		// （そのまま展開すると空マーカーで本文を上書きしてしまう）。
-		if (!resolvedMml) return;
-		const marker =
-			MML_MARKERS.find((m) =>
-				mmlLine.trim().toLowerCase().startsWith(m.toLowerCase()),
-			) || MML_MARKERS[0];
-		const fullLine = `${marker} ${resolvedMml}`;
-		setText((prev) => {
-			const trimmed = prev.trimEnd();
-			return trimmed ? `${trimmed}\n${fullLine}` : fullLine;
-		});
-		setMmlLine(null);
-		setExpanded(false);
-	};
 
 	const handleSave = () => {
 		const parts: string[] = [];
@@ -223,23 +203,18 @@ export default function EditPostModal({
 							<div className="flex items-center gap-1">
 								{capabilities.editMml && (
 									<button
-										onClick={capabilities.editMml}
-										className="text-[10px] text-pink-400/70 hover:text-pink-300 px-2 py-0.5 rounded border border-pink-700/40 hover:bg-pink-500/25 transition-all active:scale-95 font-bold"
+										onClick={() =>
+											resolvedMml && capabilities.editMml?.(resolvedMml)
+										}
+										disabled={!resolvedMml}
+										title={
+											resolvedMml ? undefined : "MML本文を読み込み中です"
+										}
+										className="text-[10px] text-pink-400/70 hover:text-pink-300 px-2 py-0.5 rounded border border-pink-700/40 hover:bg-pink-500/25 transition-all active:scale-95 font-bold disabled:opacity-40 disabled:pointer-events-none"
 									>
 										編集
 									</button>
 								)}
-								{/* 展開ボタン（テキストに戻す）。実データ未解決のうちは空マーカーで
-                    上書きしてしまうため無効化する */}
-								<button
-									onClick={handleExpandMml}
-									disabled={!resolvedMml}
-									title="テキストに展開"
-									className="text-[10px] text-pink-400/70 hover:text-pink-300 px-2 py-0.5 rounded border border-pink-700/40 hover:border-pink-600/60 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:pointer-events-none"
-								>
-									<ChevronDown size={11} />
-									展開
-								</button>
 								{/* プレビュー切替 */}
 								<button
 									onClick={() => setExpanded((v) => !v)}

@@ -85,7 +85,7 @@ interface ProfileViewProps {
 	openGame?: (gameId?: string, postId?: string) => void;
 	onProfileUpdate?: (displayName: string, avatarUrl?: string) => void;
 	onEditImage?: (post: Post) => void;
-	onEditMml?: (post: Post) => void;
+	onEditMml?: (post: Post, mml: string) => void;
 	onEditMv?: (post: Post) => void;
 	onEditPost?: (post: Post) => void;
 	onModerationChange?: () => void;
@@ -111,7 +111,7 @@ function ProfilePostMenu({
 	onModerationChange?: () => void;
 	onEditPost?: (post: Post) => void;
 	onEditImage?: (post: Post) => void;
-	onEditMml?: (post: Post) => void;
+	onEditMml?: (post: Post, mml: string) => void;
 	onEditMv?: (post: Post) => void;
 	openGame?: (gameId?: string, postId?: string) => void;
 	onOptimisticDelete?: (postId: string) => void;
@@ -447,8 +447,8 @@ function ProfilePostMenu({
 							: null,
 						canRemoveImage: true,
 						editMml: onEditMml
-							? () => {
-									onEditMml(post);
+							? (mml) => {
+									onEditMml(post, mml);
 									setShowEditModal(false);
 								}
 							: null,

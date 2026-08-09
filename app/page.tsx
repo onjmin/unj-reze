@@ -917,16 +917,14 @@ export default function App() {
 		}
 	};
 
-	const handleEditPostMml = async (post: Post) => {
+	// mml はEditPostModal側で既に解決済み（useMmlSource）のものを受け取る。
+	// ここで独自に再フェッチすると、失敗時に空文字へ静かにフォールバックして
+	// 「MMLが空の編集画面に遷移する」バグの温床になっていた。
+	const handleEditPostMml = (post: Post, mml: string) => {
 		setEditingPost(post);
 		setOriginalPostContent((prev) => prev || post.content);
 		setShowGlobalEditModal(false);
-		const inline = extractMmlFromContent(post.content);
-		setEditingMmlText(
-			inline ||
-				(post.mmlUrl ? await fetchText(post.mmlUrl).catch(() => "") : "") ||
-				"",
-		);
+		setEditingMmlText(mml);
 		openScreen("mml");
 	};
 
@@ -1715,7 +1713,7 @@ export default function App() {
 							capabilities={{
 								editImage: () => handleEditPostImage(editingPost),
 								canRemoveImage: true,
-								editMml: () => handleEditPostMml(editingPost),
+								editMml: (mml) => handleEditPostMml(editingPost, mml),
 								editGame: () =>
 									handleOpenPostGame(editingPost.gameId || "", editingPost.id),
 								removeGame: null,

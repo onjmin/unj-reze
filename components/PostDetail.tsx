@@ -56,7 +56,7 @@ import EmbedPart from "./EmbedPart";
 import GameBox from "./GameBox";
 import type { GameManifestDraft } from "./GameMaker";
 import ImagePreview from "./ImagePreview";
-import MmlSource from "./MmlSource";
+import MmlSource, { useMmlSource } from "./MmlSource";
 import MvBox from "./MvBox";
 import ShareButton from "./ShareButton";
 
@@ -95,6 +95,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	const [bbsMode, setBbsMode] = useState(getSavedBbsMode);
 
 	const [post, setPost] = useState<Post>(initial);
+	// MML本文はR2にある（content にはマーカーだけ）。「曲を編集」導線はここで
+	// 解決済みの本文を使い回す。独自に都度フェッチすると失敗時の扱いがずれて
+	// 「編集画面に移行できない」「MMLが空の編集画面に遷移する」の両方の温床になっていた。
+	const { mml: resolvedOwnMml } = useMmlSource(post);
 	const [replyText, setReplyText] = useState("");
 	const [replyTo, setReplyTo] = useState<Post | null>(null);
 	const [menuOpen, setMenuOpen] = useState(false);
@@ -734,22 +738,13 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		}
 	};
 
-	const handleEditMusic = async () => {
+	// mml はEditPostModal側で既に解決済み（useMmlSource）のものを受け取る。
+	// ここで独自に再フェッチすると、失敗時の扱いがずれて「編集画面に移行できない」
+	// 「MMLが空の編集画面に遷移する」の両方の温床になっていた。
+	const handleEditMusic = (mml: string) => {
 		setMenuOpen(false);
-		// MML本文はR2にある。content にはマーカーしか残らないので、
-		// 編集画面を開く前に取りに行く必要がある
-		const inline = extractMmlFromContent(post.content);
-		try {
-			const text = inline || (post.mmlUrl ? await fetchText(post.mmlUrl) : "");
-			if (!text) {
-				showToast("error", "MMLの読み込みに失敗しました");
-				return;
-			}
-			setEditMmlText(text);
-			setActiveScreen("edit-mml");
-		} catch {
-			showToast("error", "MMLの読み込みに失敗しました");
-		}
+		setEditMmlText(mml);
+		setActiveScreen("edit-mml");
 	};
 
 	/** 指定ポストのMVを編集画面で開く。トップレベル投稿と返信の両方がここを通る。 */
@@ -978,8 +973,11 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								{isSelf && hasMmlContent && (
 									<button
 										role="menuitem"
-										onClick={handleEditMusic}
-										className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors"
+										disabled={!resolvedOwnMml}
+										onClick={() =>
+											resolvedOwnMml && handleEditMusic(resolvedOwnMml)
+										}
+										className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors disabled:opacity-40 disabled:pointer-events-none"
 									>
 										<Pencil size={12} className="shrink-0" />
 										<span>曲を編集</span>
@@ -1562,8 +1560,8 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							setShowEditModal(false);
 						},
 						canRemoveImage: true,
-						editMml: () => {
-							handleEditMusic();
+						editMml: (mml) => {
+							handleEditMusic(mml);
 							setShowEditModal(false);
 						},
 						editGame: () => {
