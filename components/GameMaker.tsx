@@ -15818,7 +15818,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       ['armor', '防具'],
                       ['switch', 'スイッチ'], ['sound', 'サウンド'], ['effect', 'エフェクト'], ['sheets', '素材シート'],
                       ...(gameData.engine !== 'touhou' ? [['screen', '画面']] : []),
-                      ...(gameData.engine === 'touhou' ? [['spell', 'フェーズ']] : []),
+                      ...(gameData.engine === 'touhou' ? [['spell', '弾幕・フェーズ']] : []),
                     ] as [EditorTab, string][]).map(([id, label]) => (
                       <option key={id} value={`tab:${id}`}>{label}</option>
                     ))}
@@ -16061,9 +16061,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
                     {/* ── MiniScript エディタ（選択オブジェクト） ── */}
                     {selObj ? (
-                      <>
+                      <div className="space-y-2 border-t border-gray-800 pt-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-green-400 flex items-center gap-1">
+                            🎯 弾幕・行動スクリプト (MiniScript): <span className="text-white">{selObj.emoji} {selObj.name || 'オブジェクト'}</span>
+                          </span>
+                          <button onClick={() => setSelectedObjId(null)} className="text-[10px] text-gray-400 hover:text-gray-200">選択解除</button>
+                        </div>
                         <div className="flex items-center gap-2 text-[10px] text-gray-400">
-                          <span className="font-bold text-white">{selObj.emoji} {selObj.name || 'オブジェクト'}</span>
                           <span>フェーズ:</span>
                           <input type="number" min={0} max={20} value={selObj.phase ?? 0}
                             onChange={e => updObj({ phase: Number(e.target.value) })}
@@ -16085,11 +16090,36 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-2 text-[11px] text-green-300 font-mono resize-y outline-none leading-relaxed"
                           style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}
                         />
-                      </>
+                      </div>
                     ) : (
-                      <div className="text-center py-4 space-y-1">
-                        <SquarePen size={24} className="mx-auto text-gray-500" />
-                        <p className="text-xs text-gray-500">オブジェクトを選択すると MiniScript を編集できます</p>
+                      <div className="border-t border-gray-800 pt-3 space-y-2">
+                        <p className="text-xs font-bold text-yellow-300 flex items-center gap-1.5">
+                          💡 弾幕 (MiniScript) の編集方法
+                        </p>
+                        <div className="bg-gray-800/60 rounded-lg p-2.5 text-[11px] text-gray-300 space-y-2 leading-relaxed">
+                          <p>
+                            敵やボスを選択すると、個別の弾幕パターン（MiniScript）を直接編集できます。
+                          </p>
+                          <div className="pt-1 border-t border-gray-700/60 flex flex-wrap gap-1.5">
+                            <span className="text-[10px] text-gray-400 block w-full">編集するオブジェクトを選択:</span>
+                            {gameData.objects.map(o => (
+                              <button key={o.id} onClick={() => setSelectedObjId(o.id)}
+                                className="px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 active:bg-gray-500 text-white text-[11px] flex items-center gap-1 transition">
+                                {o.emoji} {o.name || (o.isBoss ? 'ボス' : '敵')}
+                              </button>
+                            ))}
+                            {gameData.objects.length === 0 && (
+                              <span className="text-[10px] text-gray-500">（オブジェクト未配置）</span>
+                            )}
+                          </div>
+                          <div className="pt-1.5 border-t border-gray-700/60 flex items-center justify-between">
+                            <span className="text-[10px] text-gray-400">ボスのスペルカード弾幕編集はこちら:</span>
+                            <button onClick={() => { setEditorTab('char'); setCharSubTab('boss'); }}
+                              className="px-2 py-1 bg-red-900/60 hover:bg-red-800 text-red-200 border border-red-700/50 rounded text-[10px] transition">
+                              👉 キャラ→ボス（スペルカード）へ
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
