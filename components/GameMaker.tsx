@@ -16904,12 +16904,20 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     ))}
                                     <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: [...(c.dialogue ?? []), { speaker: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] } : c) })}
                                       className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-purple-400 active:bg-purple-500/10">+ セリフ追加</button>
-                                    <p className="text-[9px] text-gray-500">弾幕スクリプト（MiniScript）</p>
+                                    <div className="flex justify-between items-end mb-0.5 mt-2">
+                                      <span className="block text-[10px] text-gray-400 font-bold">弾幕スクリプト（MiniScript）</span>
+                                      {gameData.engine === 'touhou' && (
+                                        <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while' } : c) })}
+                                          className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
+                                          + 12方向弾幕
+                                        </button>
+                                      )}
+                                    </div>
                                     <textarea value={card.miniScript}
                                       onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })}
                                       placeholder="// MiniScript 記述欄"
-                                      rows={3}
-                                      className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                      rows={5}
+                                      className="w-full bg-gray-950 border border-gray-800 focus:border-green-500 rounded px-1.5 py-1 text-[10px] text-green-300 font-mono outline-none resize-y transition-colors" />
                                     <p className="text-[9px] text-gray-500">カットイン設定</p>
                                     {(() => {
                                       const firePreview = (overrides?: Partial<typeof spellCutinPreview>) => setSpellCutinPreview({
@@ -18075,8 +18083,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                         </div>
                                       ))}
                                       <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: [...(c.dialogue ?? []), { speaker: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] } : c) })} className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-purple-400 active:bg-purple-500/10">+ セリフ追加</button>
-                                      <p className="text-[9px] text-gray-500">弾幕スクリプト（MiniScript）</p>
-                                      <textarea value={card.miniScript} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })} placeholder="// MiniScript 記述欄" rows={3} className="w-full bg-gray-900 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
+                                      <div className="flex justify-between items-end mb-0.5">
+                                        <span className="block text-[10px] text-gray-400 font-bold">弾幕スクリプト（MiniScript）</span>
+                                        {gameData.engine === 'touhou' && (
+                                          <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while' } : c) })}
+                                            className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
+                                            + 12方向弾幕
+                                          </button>
+                                        )}
+                                      </div>
+                                      <textarea value={card.miniScript} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })} placeholder="// MiniScript 記述欄" rows={5} className="w-full bg-gray-950 border border-gray-800 focus:border-green-500 rounded px-1.5 py-1 text-[10px] text-green-300 font-mono outline-none resize-y transition-colors" />
                                       <p className="text-[9px] text-gray-500">カットイン設定</p>
                                       {(() => {
                                         const firePreview = (overrides?: Partial<typeof spellCutinPreview>) => setSpellCutinPreview({
@@ -18249,13 +18265,22 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   <label className="text-[10px] text-gray-400">弾速<input type="text" inputMode="decimal" defaultValue={activeSelObj.bulletSpeed} onChange={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ bulletSpeed: v }); }} className="w-full mt-0.5 bg-gray-800 border border-gray-700 rounded px-1 py-1 text-[11px] text-gray-200 outline-none" /></label>
                                   <label className="text-[10px] text-gray-400 flex items-center gap-1">弾色<input type="color" value={activeSelObj.bulletColor} onChange={e => updObj({ bulletColor: e.target.value })} className="w-9 h-9 rounded-lg border border-gray-700 bg-transparent cursor-pointer" /></label>
                                 </div>
-                                <label className="block text-[10px] text-gray-400">動き・弾幕スクリプト（MiniScript / 任意）
+                                <div className="space-y-1">
+                                  <div className="flex justify-between items-end">
+                                    <span className="block text-[10px] text-gray-400 font-bold">動き・弾幕スクリプト（MiniScript）</span>
+                                    {gameData.engine === 'touhou' && (
+                                      <button onClick={() => updObj({ miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while', bullet: 'none' })}
+                                        className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
+                                        + 12方向弾幕
+                                      </button>
+                                    )}
+                                  </div>
                                   <textarea value={activeSelObj.miniScript ?? ''}
                                     onChange={e => { const v = e.target.value; updObj(v ? { miniScript: v, bullet: 'none' } : { miniScript: undefined }); }}
-                                    rows={4}
+                                    rows={5}
                                     placeholder={'// 例：下へ移動しつつ自機狙い3連射\nmoveTo(getX(), H+40, 200)\nfor t in range(0, 2, 1)\n  shotPlayer(3, 5, 8)\n  wait(40)\nend for'}
-                                    className="w-full mt-0.5 bg-gray-950 border border-gray-800 rounded px-1.5 py-1 text-[9px] text-green-300 font-mono outline-none resize-y" />
-                                </label>
+                                    className="w-full bg-gray-950 border border-gray-800 focus:border-green-500 rounded px-1.5 py-1 text-[10px] text-green-300 font-mono outline-none resize-y transition-colors" />
+                                </div>
                                 <label className="flex items-center gap-1 text-[10px] text-gray-400"><input type="checkbox" checked={activeSelObj.hazard} onChange={e => updObj({ hazard: e.target.checked })} className="accent-red-500" />接触でミス</label>
                               </div>
                             )}

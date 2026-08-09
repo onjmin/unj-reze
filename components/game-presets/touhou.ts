@@ -112,12 +112,13 @@ export const touhou: PresetData = {
 			spriteUrl: sp("NM9zuG"),
 			miniScript: `
 moveTo(${VIEW_W / 2}, 80, 90)
+rot = 0
 while true
-  for i in range(0, 5, 1)
-    shot(i * 72, 2.4, 4)
+  for i in range(0, 11, 1)
+    shot(rot + i * 30, 2.5, 4)
   end for
-  shotPlayer(2.0, 4, 10)
-  wait(30)
+  rot = rot + 7
+  wait(4)
 end while
 `.trim(),
 		}),
