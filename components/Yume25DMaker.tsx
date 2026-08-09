@@ -53,7 +53,7 @@ export const YUME25D_TOOL_LABELS: Record<Yume25DTool, string> = {
 	wall: "壁",
 	sprite: "スプライト",
 	start: "開始",
-	talk: "会話設定",
+	talk: "選択・編集",
 	erase: "消す",
 };
 /** ドラッグ1pxあたりの回転量（ラジアン）。マウス・タッチ共通（Pointer Events）。 */

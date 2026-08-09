@@ -5,7 +5,7 @@
 
 import { Image as ImageIcon, Music, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { MINECRAFT_SKIN_PRESETS, getMinecraftSkinAuthor } from "@/lib/minecraft-model";
+import { getMinecraftSkinAuthor } from "@/lib/minecraft-model";
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from "@/lib/terrain-gen";
 import {
 	drawPlayerIconCanvas,
@@ -29,6 +29,7 @@ import {
 	searchModels,
 } from "./game-presets/model-catalog";
 import {
+	type Billboard25D,
 	type Dir4,
 	type Layout25D,
 	type NpcBehavior,
@@ -127,6 +128,111 @@ function SliderField({
 				</span>
 			</span>
 		</label>
+	);
+}
+
+/** 配置済みビルボード（キャラ/物）1体ぶんのプロパティ編集フォーム。
+ *  「動き（AI行動・当たり判定）」と「会話」は別物なので見出しを分けて出す
+ *  （以前は1つの「会話・AI設定」にまとめていて、AI行動が会話の設定だと誤解されやすかった）。
+ *  「スプライト」タブの配置済み一覧、「選択・編集」ツールの両方から呼ばれる共通部品。 */
+function BillboardEditor({
+	target,
+	onLayoutChange,
+}: {
+	target: Billboard25D;
+	onLayoutChange: (updater: (l: Layout25D) => Layout25D) => void;
+}) {
+	const patch = (over: Partial<Billboard25D>) =>
+		onLayoutChange((l) => ({
+			...l,
+			billboards: l.billboards.map((b) =>
+				b.id === target.id ? { ...b, ...over } : b,
+			),
+		}));
+	return (
+		<div className="flex flex-col gap-2.5 text-[10px] text-gray-300">
+			<div className="flex flex-col gap-1.5">
+				<p className="text-[11px] font-bold text-gray-200">
+					🤖 動き・当たり判定
+				</p>
+				<label className="flex items-center gap-1.5">
+					AI行動
+					<select
+						value={target.behavior ?? "still"}
+						onChange={(e) =>
+							patch({ behavior: e.target.value as NpcBehavior })
+						}
+						className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
+					>
+						<option value="still">静止 (Still)</option>
+						<option value="random">ランダム移動 (Random)</option>
+						<option value="randomDash">ランダムダッシュ (Random Dash)</option>
+						<option value="randomHop">ランダムジャンプ (Random Hop)</option>
+						<option value="chase">追いかける (Chase Player)</option>
+						<option value="flee">逃げる (Flee Player)</option>
+						<option value="patrolH">左右巡回 (Patrol H)</option>
+						<option value="patrolV">前後巡回 (Patrol V)</option>
+					</select>
+				</label>
+				<label className="flex items-center gap-1.5">
+					<input
+						type="checkbox"
+						checked={!!target.collidable}
+						onChange={(e) => patch({ collidable: e.target.checked })}
+					/>
+					当たり判定あり（すり抜け不可）
+				</label>
+				<label className="flex items-center gap-1.5">
+					<input
+						type="checkbox"
+						checked={!!target.through}
+						onChange={(e) =>
+							patch({ through: e.target.checked || undefined })
+						}
+					/>
+					壁をすり抜ける（through）
+				</label>
+			</div>
+			<div className="flex flex-col gap-1.5 pt-1.5 border-t border-gray-800">
+				<p className="text-[11px] font-bold text-gray-200">💬 会話</p>
+				<label className="flex items-center gap-1.5">
+					<input
+						type="checkbox"
+						checked={!!target.interactive}
+						onChange={(e) => patch({ interactive: e.target.checked })}
+					/>
+					はなせる（「はなす」ボタンの対象にする）
+				</label>
+				<label className="flex items-center gap-1.5">
+					メッセージ
+					<input
+						type="text"
+						value={target.message ?? ""}
+						placeholder="……"
+						onChange={(e) => patch({ message: e.target.value })}
+						className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
+					/>
+				</label>
+				<label className="flex items-center gap-1.5">
+					選択肢（カンマ区切り）
+					<input
+						type="text"
+						value={(target.choices ?? []).join(",")}
+						onChange={(e) => {
+							const v = e.target.value;
+							const choices = v.trim()
+								? v
+										.split(",")
+										.map((s) => s.trim())
+										.filter(Boolean)
+								: undefined;
+							patch({ choices });
+						}}
+						className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
+					/>
+				</label>
+			</div>
+		</div>
 	);
 }
 
@@ -231,12 +337,23 @@ export default function Yume25DEditorPanel({
 		onSelFloorChange(id);
 	};
 
+	// スプライトタブ内で配置済みキャラを直接編集するための選択状態（「選択・編集」ツールに切り替えなくてよいように）。
+	const [spriteEditId, setSpriteEditId] = useState<string | null>(null);
+
 	// サンプル3Dモデルの検索モーダル（スプライト検索と同様のキーワード検索）
 	const [modelSearchOpen, setModelSearchOpen] = useState(false);
 	const [modelQuery, setModelQuery] = useState("");
 
-	// マクロ（一括編集）パネル：レイヤー（地形/壁/スプライト/全レイヤー）やスプライトグループをまとめて動かす
-	const [macroOpen, setMacroOpen] = useState(false);
+	// 上部の「マクロ／システム／設定」は排他タブとして扱う（同時に開くと今どの設定を触っているか分からなくなるため）。
+	type SidePanelTab = "macro" | "system" | "settings" | null;
+	const [sidePanelTab, setSidePanelTab] = useState<SidePanelTab>(null);
+	const macroOpen = sidePanelTab === "macro";
+	const systemOpen = sidePanelTab === "system";
+	const toggleSidePanel = (tab: Exclude<SidePanelTab, null>) => {
+		const next = sidePanelTab === tab ? null : tab;
+		setSidePanelTab(next);
+		onSettingsOpenChange(next === "settings");
+	};
 	const [macroTarget, setMacroTarget] = useState<LayerShiftTarget>("all");
 	const [stackTex, setStackTex] = useState<number>(0);
 	const texIds = Object.keys(layout.textures).map(Number);
@@ -290,28 +407,6 @@ export default function Yume25DEditorPanel({
 		onSelSpriteChange(id);
 		setModelSearchOpen(false);
 	};
-
-	/** マイクラスキン（Slim型）のスプライトテクスチャを追加し、スプライトツール＋パレット選択まで済ませる。 */
-	const addMinecraftSkinTex = (name: string, url: string) => {
-		const id = Math.max(0, ...Object.keys(layout.textures).map(Number)) + 1;
-		onLayoutChange((l) => ({
-			...l,
-			textures: {
-				...l.textures,
-				[id]: {
-					id,
-					name,
-					kind: "sprite" as const,
-					color: "#7ec9a2",
-					emoji: "👗",
-					minecraftSkin: url,
-				},
-			},
-		}));
-		onToolChange("sprite");
-		onSelSpriteChange(id);
-	};
-	const [mcSkinUrl, setMcSkinUrl] = useState("");
 
 	/** システムスプライト（ボール・スピーカー）を special 付きスプライトテクスチャとして追加し、
 	 *  スプライトツール＋パレット選択まで済ませる。 */
@@ -367,18 +462,24 @@ export default function Yume25DEditorPanel({
 						</button>
 					))}
 				</div>
-				<button
-					onClick={() => setMacroOpen(!macroOpen)}
-					className={`ml-auto px-2 py-1 text-[11px] font-bold rounded ${macroOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400"}`}
-				>
-					マクロ
-				</button>
-				<button
-					onClick={() => onSettingsOpenChange(!settingsOpen)}
-					className={`px-2 py-1 text-[11px] font-bold rounded ${settingsOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-400"}`}
-				>
-					設定
-				</button>
+				{/* マクロ/システム/設定は排他タブ：開くと他は自動で閉じるので「今どの設定を触っているか」が常に一意になる */}
+				<div className="ml-auto flex overflow-hidden rounded border border-gray-600">
+					{(
+						[
+							["macro", "🔁 マクロ"],
+							["system", "⚙️ システム"],
+							["settings", "🛠️ 設定"],
+						] as const
+					).map(([tab, label]) => (
+						<button
+							key={tab}
+							onClick={() => toggleSidePanel(tab)}
+							className={`px-2 py-1 text-[11px] font-bold ${sidePanelTab === tab ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}
+						>
+							{label}
+						</button>
+					))}
+				</div>
 			</div>
 
 			{/* マクロパネル：マップ一括編集。プロトタイプは「同じ見た目のグループを1マスずつ平行移動」 */}
@@ -769,7 +870,53 @@ export default function Yume25DEditorPanel({
 				</div>
 			)}
 
-			{/* 会話設定：スプライトをタップして選択し、メッセージ/選択肢/はなせるかどうかを編集する */}
+			{/* スプライトタブの配置済み一覧：ここで直接キャラを選んでAI行動・会話を編集できる
+          （以前は別ツール「選択・編集」に切り替えてキャンバス上でタップし直す必要があり気づきにくかった）。 */}
+			{tool === "sprite" && layout.billboards.length > 0 && (
+				<div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2 text-[10px] text-gray-300">
+					<p className="text-[11px] font-bold text-gray-200">
+						🧍 配置済みキャラクター・物（タップで編集）
+					</p>
+					<div className="flex flex-wrap gap-1">
+						{layout.billboards.map((b) => {
+							const tex = layout.textures[b.tex];
+							const active = spriteEditId === b.id;
+							return (
+								<button
+									key={b.id}
+									onClick={() => setSpriteEditId(active ? null : b.id)}
+									title={`(${b.col},${b.row})`}
+									className={`flex items-center gap-1 px-1.5 py-1 rounded border text-[10px] ${active ? "border-blue-500 bg-blue-900/40 text-blue-200" : "border-gray-700 bg-gray-800/60 hover:border-gray-500 text-gray-300"}`}
+								>
+									<span className="shrink-0">{tex?.emoji ?? "🧍"}</span>
+									{tex?.name ?? `#${b.tex}`}
+									<span className="text-gray-500">
+										({b.col},{b.row})
+									</span>
+								</button>
+							);
+						})}
+					</div>
+					{spriteEditId &&
+						(() => {
+							const target = layout.billboards.find(
+								(b) => b.id === spriteEditId,
+							);
+							if (!target) return null;
+							return (
+								<div className="pt-1.5 mt-0.5 border-t border-gray-700/50">
+									<BillboardEditor
+										target={target}
+										onLayoutChange={onLayoutChange}
+									/>
+								</div>
+							);
+						})()}
+				</div>
+			)}
+
+			{/* 選択・編集：スプライトをタップして選択し、動き（AI行動）/会話（メッセージ・選択肢）を編集する。
+          「スプライト」タブの配置済み一覧からも同じ内容を編集できる（上の tool==='sprite' 側）。 */}
 			{tool === "talk" &&
 				(() => {
 					const target = layout.billboards.find((b) => b.id === talkTargetId);
@@ -780,132 +927,8 @@ export default function Yume25DEditorPanel({
 							</p>
 						);
 					return (
-						<div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
-							<p className="text-[12px] font-bold text-gray-200">
-								💬 会話・AI設定
-							</p>
-							<label className="flex items-center gap-1.5">
-								<input
-									type="checkbox"
-									checked={!!target.interactive}
-									onChange={(e) =>
-										onLayoutChange((l) => ({
-											...l,
-											billboards: l.billboards.map((b) =>
-												b.id === target.id
-													? { ...b, interactive: e.target.checked }
-													: b,
-											),
-										}))
-									}
-								/>
-								はなせる（「はなす」ボタンの対象にする）
-							</label>
-							<label className="flex items-center gap-1.5">
-								<input
-									type="checkbox"
-									checked={!!target.collidable}
-									onChange={(e) =>
-										onLayoutChange((l) => ({
-											...l,
-											billboards: l.billboards.map((b) =>
-												b.id === target.id
-													? { ...b, collidable: e.target.checked }
-													: b,
-											),
-										}))
-									}
-								/>
-								当たり判定あり（すり抜け不可）
-							</label>
-							<label className="flex items-center gap-1.5">
-								<input
-									type="checkbox"
-									checked={!!target.through}
-									onChange={(e) =>
-										onLayoutChange((l) => ({
-											...l,
-											billboards: l.billboards.map((b) =>
-												b.id === target.id
-													? { ...b, through: e.target.checked || undefined }
-													: b,
-											),
-										}))
-									}
-								/>
-								壁をすり抜ける（through）
-							</label>
-							<label className="flex items-center gap-1.5">
-								AI行動
-								<select
-									value={target.behavior ?? "still"}
-									onChange={(e) => {
-										const behavior = e.target.value as NpcBehavior;
-										onLayoutChange((l) => ({
-											...l,
-											billboards: l.billboards.map((b) =>
-												b.id === target.id ? { ...b, behavior } : b,
-											),
-										}));
-									}}
-									className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-								>
-									<option value="still">静止 (Still)</option>
-									<option value="random">ランダム移動 (Random)</option>
-									<option value="randomDash">
-										ランダムダッシュ (Random Dash)
-									</option>
-									<option value="randomHop">
-										ランダムジャンプ (Random Hop)
-									</option>
-									<option value="chase">追いかける (Chase Player)</option>
-									<option value="flee">逃げる (Flee Player)</option>
-									<option value="patrolH">左右巡回 (Patrol H)</option>
-									<option value="patrolV">前後巡回 (Patrol V)</option>
-								</select>
-							</label>
-							<label className="flex items-center gap-1.5">
-								メッセージ
-								<input
-									type="text"
-									value={target.message ?? ""}
-									placeholder="……"
-									onChange={(e) =>
-										onLayoutChange((l) => ({
-											...l,
-											billboards: l.billboards.map((b) =>
-												b.id === target.id
-													? { ...b, message: e.target.value }
-													: b,
-											),
-										}))
-									}
-									className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-								/>
-							</label>
-							<label className="flex items-center gap-1.5">
-								選択肢（カンマ区切り）
-								<input
-									type="text"
-									value={(target.choices ?? []).join(",")}
-									onChange={(e) => {
-										const v = e.target.value;
-										const choices = v.trim()
-											? v
-													.split(",")
-													.map((s) => s.trim())
-													.filter(Boolean)
-											: undefined;
-										onLayoutChange((l) => ({
-											...l,
-											billboards: l.billboards.map((b) =>
-												b.id === target.id ? { ...b, choices } : b,
-											),
-										}));
-									}}
-									className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-								/>
-							</label>
+						<div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5">
+							<BillboardEditor target={target} onLayoutChange={onLayoutChange} />
 						</div>
 					);
 				})()}
@@ -1397,7 +1420,9 @@ export default function Yume25DEditorPanel({
 
 			{/* ── システムオブジェクト（ワープ床・どく沼/ダメージ床・つるつる床）──
           2Dエンジンのシステムタイルの yume25d 版。special 付きの床テクスチャとして追加し、
-          床ツールで塗る。ワープはマップ内転送・ダメージは「めがさめる」に読み替える。 */}
+          床ツールで塗る。ワープはマップ内転送・ダメージは「めがさめる」に読み替える。
+          「システム」タブを開いたときだけ表示する（常時表示だと今の操作対象が分かりづらいため）。 */}
+			{systemOpen && (
 			<div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2">
 				<p className="text-[12px] font-bold text-gray-200">
 					⚙️ システムオブジェクト
@@ -1444,81 +1469,22 @@ export default function Yume25DEditorPanel({
 					</button>
 				</div>
 				{/* マイクラスキン：Slim型スキン画像からブロック人形の3Dキャラを組み立てる。
-            プリセット／画像URL／アップロード画像（参照）のどれでも追加できる */}
-				<p className="text-[10px] text-gray-500 pt-1.5 mt-1 border-t border-gray-700/50">
-					マイクラスキン：Minecraft
-					のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作ってスプライトとして配置できます。歩くと手足を振ります。
-				</p>
-				<div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-1.5 p-1 border border-gray-700/60 rounded-lg bg-gray-900/40">
-					{MINECRAFT_SKIN_PRESETS.map((p) => (
-						<button
-							key={p.name}
-							onClick={() => addMinecraftSkinTex(p.name, p.url)}
-							title={p.author ? `著作者: ${p.author}` : undefined}
-							className="flex flex-col items-start gap-0.5 p-1.5 rounded border border-gray-700 bg-gray-800/60 hover:bg-blue-900/30 hover:border-blue-500 text-left transition"
-						>
-							<span className="text-[10px] text-gray-200 flex items-center gap-1 truncate w-full">
-								<Plus size={10} className="shrink-0 text-blue-400" />👗 {p.name}
-							</span>
-							{p.author && (
-								<span className="text-[8px] text-gray-400 truncate w-full pl-3.5">
-									{p.author}
-								</span>
-							)}
-						</button>
-					))}
-				</div>
-				<div className="flex flex-col gap-0.5 text-[9px] text-gray-400 bg-gray-900/80 p-1.5 rounded border border-gray-800">
-					<div className="flex items-center justify-between">
-						<span>正実モブ:</span>
-						<a
-							href="https://x.com/onjmin_"
-							target="_blank"
-							rel="noreferrer"
-							className="text-blue-400 hover:underline"
-						>
-							おんJ民（@onjmin_）さん / X
-						</a>
-					</div>
-					<div className="flex items-center justify-between">
-						<span>東方紅魔郷スキン:</span>
-						<a
-							href="https://setomumcskin.ehoh.net/Koumakyou.html"
-							target="_blank"
-							rel="noreferrer"
-							className="text-blue-400 hover:underline"
-						>
-							setomu@yuly 氏
-						</a>
-					</div>
-				</div>
-				<div className="flex items-center gap-1.5">
-					<input
-						value={mcSkinUrl}
-						onChange={(e) => setMcSkinUrl(e.target.value)}
-						placeholder="スキン画像URL（64×64）"
-						className="flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-[10px] text-white outline-none"
-					/>
-					<button
-						onClick={() => {
-							const u = mcSkinUrl.trim();
-							if (u) {
-								addMinecraftSkinTex("マイクラスキン", u);
-								setMcSkinUrl("");
-							}
-						}}
-						className="px-2 py-1 rounded bg-blue-600 text-white text-[10px] font-bold"
-					>
-						追加
-					</button>
+            プリセット一覧・URL直接指定はどちらも「画像を参照」モーダルの「マイクラスキン」タブに集約した
+            （以前はここに専用のプリセット一覧を常設していたが、他の画像選択と導線が分かれて二重管理になっていた）。 */}
+				<div className="flex items-center justify-between gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
+					<p className="text-[10px] text-gray-500">
+						マイクラスキン：Minecraft
+						のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作ってスプライトとして配置できます。歩くと手足を振ります。プリセットや画像URLは「画像を参照」から選べます。
+					</p>
 					<button
 						onClick={() => onPickImage?.({ t: "yumeMcSkin" })}
-						className="flex items-center gap-1 px-2 py-1 rounded bg-blue-500/10 text-blue-400 hover:text-blue-300 text-[10px]"
+						className="shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-blue-400 hover:bg-gray-100/5"
 					>
-						<ImageIcon size={12} /> 参照
+						<ImageIcon size={12} /> 画像を参照
 					</button>
 				</div>
 			</div>
+			)}
 
 			{/* サンプル3Dモデルの検索モーダル：three.js / glTF-Sample-Assets の公式サンプルをキーワードで絞り込む */}
 			{modelSearchOpen && (

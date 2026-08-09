@@ -13,6 +13,7 @@ import {
 } from "@/lib/asset-ref";
 import { getAvatarInfo } from "@/lib/avatar";
 import { applyMasterVolume, subscribeMasterVolume } from "@/lib/master-volume";
+import { MINECRAFT_SKIN_PRESETS } from "@/lib/minecraft-model";
 import {
 	effectiveMmlVolume,
 	extractMmlFromContent,
@@ -67,7 +68,8 @@ type ImageTab =
 	| "smc"
 	| "local"
 	| "mySheet"
-	| "color";
+	| "color"
+	| "mcSkin";
 type BgmTab =
 	| "youtube"
 	| "nicovideo"
@@ -143,6 +145,7 @@ export default function ContentPicker({
 	const [hasMore, setHasMore] = useState(false);
 	const [query, setQuery] = useState("");
 	const [selectedColor, setSelectedColor] = useState("#000000");
+	const [mcSkinUrlInput, setMcSkinUrlInput] = useState("");
 	// 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
 	// 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
 	const [imageTab, setImageTab] = useState<ImageTab>(
@@ -711,6 +714,12 @@ export default function ContentPicker({
 							>
 								SMC素材
 							</button>
+							<button
+								className={tabBtn(imageTab === "mcSkin")}
+								onClick={() => changeImageTab("mcSkin")}
+							>
+								マイクラスキン
+							</button>
 						</>
 					) : (
 						<>
@@ -836,6 +845,59 @@ export default function ContentPicker({
 					)}
 					{mode === "image" && imageTab === "mySheet" && (
 						<UserSheetPanel onPick={onPick} userId={userId} />
+					)}
+					{mode === "image" && imageTab === "mcSkin" && (
+						<div className="space-y-3">
+							<p className="text-[10px] text-gray-500">
+								Minecraft のスキン画像（Slim型・64×64）。ゆめにっき3D
+								のブロック人形キャラや、主人公のマイクラスキンに使えます。
+							</p>
+							<div className="grid grid-cols-2 gap-1.5">
+								{MINECRAFT_SKIN_PRESETS.map((p) => (
+									<button
+										key={p.url}
+										onClick={() =>
+											onPick({ ref: p.url, url: p.url, label: p.name })
+										}
+										title={p.author ? `著作者: ${p.author}` : undefined}
+										className="flex flex-col items-start gap-0.5 p-1.5 rounded-lg border border-gray-700 bg-gray-900 hover:border-blue-500 text-left transition"
+									>
+										<span className="text-[10px] text-gray-200 flex items-center gap-1 truncate w-full">
+											👗 {p.name}
+										</span>
+										{p.author && (
+											<span className="text-[8px] text-gray-500 truncate w-full pl-4">
+												{p.author}
+											</span>
+										)}
+									</button>
+								))}
+							</div>
+							<div className="pt-2 border-t border-gray-800 space-y-1.5">
+								<label className="block text-[10px] text-gray-500">
+									スキン画像URL（64×64）を直接指定
+								</label>
+								<div className="flex items-center gap-1.5">
+									<input
+										value={mcSkinUrlInput}
+										onChange={(e) => setMcSkinUrlInput(e.target.value)}
+										placeholder="https://example.com/skin.png"
+										className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
+									/>
+									<button
+										onClick={() => {
+											const u = mcSkinUrlInput.trim();
+											if (!u) return;
+											onPick({ ref: u, url: u, label: "マイクラスキン" });
+										}}
+										disabled={!mcSkinUrlInput.trim()}
+										className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold"
+									>
+										使う
+									</button>
+								</div>
+							</div>
+						</div>
 					)}
 					{/* Image: posts（SNSの画像投稿から直接選択） */}
 					{mode === "image" && imageTab === "posts" && (
