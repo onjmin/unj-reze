@@ -321,8 +321,13 @@ if / while / for によるループ制御と、下記の関数呼び出しだけ
 - has(arr, i) / has(d, "key")  存在チェック
 
 【任意座標からの発射・弾の後追い操作】
-- shotFrom(x, y, 角度, 速度, 色, 形状)   ボスの座標ではなく指定した任意の座標から1発発射する。
-                                      花火の破裂点や、事前に計算した座標リストへの弾の配置に使う
+- shotAt(x, y, 角度, 速度, 色, 形状)     ボスの座標ではなく指定した任意の座標から1発発射する（shotFrom は同じ関数の別名）。
+                                      角度・速度に 0 を渡せばその場に静止した「点」を置くだけにも使える。
+                                      正十二面体の頂点座標のような、事前に計算した座標リストへ弾を並べて
+                                      図形を描く用途の中心になる関数
+- setPosition(x, y)                  moveTo と違い待機せず、その場で即座にボス自身の座標を書き換える。
+                                      1フレーム内で何度呼んでも止まらないので、
+                                      「頂点座標を1フレームで渡り歩きながら shotAt で置いていく」使い方もできる
 - shot() 系の関数は発射した弾の「ハンドルID」（数値）を返す。id = shot(0, 3, 4) のように
   変数へ受け取っておくと、発射後も以下の関数で軌道を書き換えられる：
   - getBulletX(id) / getBulletY(id)     現在座標を取得（消えていたら null）
@@ -340,6 +345,48 @@ for i in range(0, 40, 1)
   ang = ang + 3
   setBulletAngle(id, ang, 4)
 end for
+
+【サンプル：正十二面体の頂点20個を配列で保持し、毎フレーム回転させて弾で描画する】
+// Y軸回転させながら頂点座標を2D投影 → 各頂点に静止弾(速度0)を置き直す簡易3Dワイヤーフレーム
+phi = 1.618
+verts = []
+for s1 in range(-1, 1, 2)
+  for s2 in range(-1, 1, 2)
+    for s3 in range(-1, 1, 2)
+      push(verts, [s1, s2, s3])
+    end for
+  end for
+end for
+for s1 in range(-1, 1, 2)
+  for s2 in range(-1, 1, 2)
+    push(verts, [0, s1 / phi, s2 * phi])
+    push(verts, [s1 / phi, s2 * phi, 0])
+    push(verts, [s1 * phi, 0, s2 / phi])
+  end for
+end for
+angY = 0
+ids = []
+for i in range(0, len(verts) - 1, 1)
+  push(ids, -1)
+end for
+while true
+  angY = angY + 2
+  for i in range(0, len(verts) - 1, 1)
+    v = verts[i]
+    // Y軸回転（度数法の sin/cos を利用）
+    rx = v[0] * cos(angY) - v[2] * sin(angY)
+    rz = v[0] * sin(angY) + v[2] * cos(angY)
+    scale = 60 / (4 + rz)   // 簡易パースペクティブ
+    px = W / 2 + rx * scale
+    py = H / 2 + v[1] * scale
+    id = ids[i]
+    if id >= 0 then
+      removeBullet(id)
+    end if
+    ids[i] = shotAt(px, py, 0, 0, i, STAR)
+  end for
+  wait(1)
+end while
 
 【自機情報】
 - getPlayerAngle()             自分から見た自機の方向（度）
@@ -935,12 +982,25 @@ function runEntityScript(
     },
     moveBoss: (x: unknown, y: unknown, frames: unknown) =>
       (env.moveTo as (x: unknown, y: unknown, f: unknown) => Promise<void>)(x, y, frames),
+    /** setPosition(x, y)：待機なしで即座に中心座標へワープする。moveTo と違い Promise を返さないので、
+     *  1フレーム内で何度呼んでも止まらない（頂点座標を渡り歩きながら shot するテクニックに使う）。
+     *  進行中の moveTo アニメーションがあれば打ち切る。 */
+    setPosition: (x: unknown, y: unknown) => {
+      entity.moveTarget = undefined;
+      entity.vx = 0; entity.vy = 0;
+      entity.x = +(x as number) - TILE_SIZE / 2;
+      entity.y = +(y as number) - TILE_SIZE / 2;
+    },
 
     // 弾幕
     /** shot() は発射した弾のハンドルID（数値）を返す。setBulletVel 等で後から操作する場合に使う。 */
     shot: (angle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) =>
       pushBullet(+(angle as number), +(speed as number), (color as number) | 0, shape as string | undefined),
-    /** shotFrom(x, y, 角度, 速度, 色, 形状)：ボスの座標ではなく任意の座標から1発発射する（花火・大文字配置等） */
+    /** shotAt / shotFrom(x, y, 角度, 速度, 色, 形状)：ボスの座標ではなく任意の座標から1発発射する。
+     *  正十二面体の頂点座標のような「計算した座標」に弾を置いて図形を描く用途に使う（花火・大文字も同様）。
+     *  角度・速度に 0 を渡せば、その場に静止した弾として「点」を置くだけにも使える。 */
+    shotAt: (x: unknown, y: unknown, angle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) =>
+      pushBullet(+(angle as number), +(speed as number), (color as number) | 0, shape as string | undefined, +(x as number), +(y as number)),
     shotFrom: (x: unknown, y: unknown, angle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) =>
       pushBullet(+(angle as number), +(speed as number), (color as number) | 0, shape as string | undefined, +(x as number), +(y as number)),
     /** 発射済みの弾（ハンドルID）の座標を取得。存在しなければ null */
