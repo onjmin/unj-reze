@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getUserIdLabel } from "@/lib/avatar";
-import { extractChordsFromContent } from "@/lib/chord";
+import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
 import { extractMmlFromContent, getDisplayContent } from "@/lib/mml";
@@ -467,6 +467,9 @@ export default function BbsThreadView({
 											className="pl-6 mt-2"
 											onClick={(e) => e.stopPropagation()}
 										>
+											<div className="text-red-500 font-bold mb-1 text-[13px]">
+												{CHORD_MARKER}
+											</div>
 											<ChordPlayer chords={chordRes.chords} />
 										</div>
 									);

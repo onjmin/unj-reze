@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { extractChordsFromContent } from "@/lib/chord";
+import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import {
 	applyMasterVolume,
@@ -1571,7 +1571,14 @@ export default function ProfileView({
 												}
 												const chordRes = extractChordsFromContent(p.content);
 												if (chordRes)
-													return <ChordPlayer chords={chordRes.chords} />;
+													return (
+														<div>
+															<div className="text-red-500 font-bold mb-1 text-[13px]">
+																{CHORD_MARKER}
+															</div>
+															<ChordPlayer chords={chordRes.chords} />
+														</div>
+													);
 												if (p.hasImage || p.hasGame || p.hasMv) return null;
 												const embed = extractFirstEmbed(p.content);
 												return embed ? <EmbedPart embed={embed} /> : null;

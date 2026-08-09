@@ -25,7 +25,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { getAvatarInfo } from "@/lib/avatar";
-import { extractChordsFromContent } from "@/lib/chord";
+import { CHORD_MARKER, extractChordsFromContent } from "@/lib/chord";
 import { extractFirstEmbed } from "@/lib/embed";
 import { createGame, createMv, loadGame, loadMv } from "@/lib/game-mv-client";
 import {
@@ -1299,7 +1299,15 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 								</div>
 							);
 						}
-						if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+						if (chordRes)
+							return (
+								<div>
+									<div className="text-red-500 font-bold mb-1 text-[13px]">
+										{CHORD_MARKER}
+									</div>
+									<ChordPlayer chords={chordRes.chords} />
+								</div>
+							);
 						if (post.hasImage || post.hasGame) return null;
 						const embed = extractFirstEmbed(post.content);
 						return embed ? <EmbedPart embed={embed} /> : null;
@@ -2108,7 +2116,15 @@ function ReplyTreeItem({
 									{(mml) => <MmlPlayer mml={mml} />}
 								</MmlSource>
 							);
-						if (chordRes) return <ChordPlayer chords={chordRes.chords} />;
+						if (chordRes)
+							return (
+								<div>
+									<div className="text-red-500 font-bold mb-1 text-[13px]">
+										{CHORD_MARKER}
+									</div>
+									<ChordPlayer chords={chordRes.chords} />
+								</div>
+							);
 						if (localPost.hasImage || localPost.hasGame || localPost.hasMv)
 							return null;
 						const embed = extractFirstEmbed(localPost.content);

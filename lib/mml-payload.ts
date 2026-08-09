@@ -40,3 +40,43 @@ export async function externalizeMml(
 		mmlDeleteHash: deleteHash,
 	};
 }
+
+/**
+ * MML外部化の「サーバ側の最終防衛ライン」。
+ *
+ * 本来ブラウザが投稿前に externalizeMml() を通して mmlUrl を持ってくるはずだが、
+ * クライアントバンドルのビルド時に NEXT_PUBLIC_UPLOADER_URL が空で焼き込まれた・
+ * アップロードが例外で失敗した等の理由で mmlUrl が付かないまま届くことがある。
+ * その場合 content には生のMML本文（`#mml <...>`行）がそのまま残っている。
+ *
+ * これを deriveInsertContent（lib/db/pg.ts, mock.ts）に渡すと、mmlUrl が無い＝
+ * MMLではない、と誤判定されて content_type=Text で保存されてしまう
+ * （生のMML本文がそのまま content_text に漏れて残る事故）。
+ *
+ * ここでは「クライアントが既に mmlUrl を持ってきたか」を信じつつ、持ってきて
+ * いなければ content 自体を見て自前でR2へ外部化し直す。サーバ側は
+ * process.env を毎回ライブに読むので、クライアントバンドルのビルド時埋め込みが
+ * 壊れていてもここは影響を受けない。投稿系API（app/api/posts/**）は必ずこれを
+ * 通してから db.createPost / addReply / editPost に渡すこと。
+ */
+export async function ensureMmlExternalized(
+	content: string,
+	clientRef?: {
+		mmlUrl?: string;
+		mmlDeleteId?: string;
+		mmlDeleteHash?: string;
+	} | null,
+): Promise<MmlPayloadResult> {
+	if (clientRef?.mmlUrl) {
+		return {
+			content,
+			mmlUrl: clientRef.mmlUrl,
+			mmlDeleteId: clientRef.mmlDeleteId,
+			mmlDeleteHash: clientRef.mmlDeleteHash,
+		};
+	}
+	// クライアントが外部化できなかった場合のフォールバック。マーカー行が無ければ
+	// そもそもMML投稿ではないので何もしない。
+	if (extractMmlFromContent(content) === null) return { content };
+	return externalizeMml(content);
+}

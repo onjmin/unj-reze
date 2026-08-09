@@ -42,6 +42,7 @@ import type { Pool } from "pg";
 import { genBbsId } from "../cc-id";
 import { extractChordsFromContent } from "../chord";
 import type { Message, Trend } from "../mock-db";
+import { ensureMmlExternalized } from "../mml-payload";
 import { CH_FEED, chThread, chUser } from "../realtime/channels";
 import { publishRealtime } from "../realtime/publish";
 import { isThreadFull, RES_LIMIT } from "../thread-limits";
@@ -534,7 +535,10 @@ export const pgStore: DataStore = {
 	},
 
 	async createPost(data: CreatePostParams) {
-		const c = deriveInsertContent(data);
+		// クライアントが mmlUrl を付け損ねていても、本文に生MMLマーカーが残っていれば
+		// ここで自前でR2へ外部化し直す（詳細: lib/mml-payload.ts の ensureMmlExternalized）。
+		const mmlResolved = await ensureMmlExternalized(data.content, data);
+		const c = deriveInsertContent({ ...data, ...mmlResolved });
 		const authorId = data.slug ? Number(data.slug) : null;
 		if (authorId == null || !Number.isFinite(authorId)) {
 			throw new Error(
@@ -553,11 +557,11 @@ export const pgStore: DataStore = {
                  $3,$4,$5,0,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
 			[
-				(data.content || "")
+				(mmlResolved.content || "")
 					.split("\n")
 					.find((l) => l.trim())
 					?.slice(0, 64) || "",
-				(data.content || "")
+				(mmlResolved.content || "")
 					.split("\n")
 					.find((l) => l.trim())
 					?.slice(0, 64) || "無題",
@@ -573,7 +577,10 @@ export const pgStore: DataStore = {
 				c.contentUrl,
 				c.contentType,
 				c.contentDataUrl,
-				!!(data.gameId || data.mvId),
+				// お絵描き投稿もコラボの起点になる（CollabSelector→DrawingEditor/DotDrawingEditor）。
+				// ここに hasImage を足し忘れると post.hasImage && post.hasCollabButton が
+				// 常にfalseになり、画像に「コラボ」ボタンが一度も出ないまま導線が死ぬ。
+				!!(data.gameId || data.mvId || (data.hasImage && data.imageSrc)),
 				data.gameId ?? null,
 				data.mvId ?? null,
 				data.originType ?? null,
@@ -694,7 +701,8 @@ export const pgStore: DataStore = {
 			}
 		}
 
-		const c = deriveInsertContent(data);
+		const mmlResolved = await ensureMmlExternalized(data.content, data);
+		const c = deriveInsertContent({ ...data, ...mmlResolved });
 		// num はSERIALではなく手計算(UNIQUE(thread_id,num))なので、競合時はリトライする
 		let inserted: any = null;
 		for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
@@ -721,7 +729,8 @@ export const pgStore: DataStore = {
 						c.contentUrl,
 						c.contentType,
 						c.contentDataUrl,
-						!!(data.gameId || data.mvId),
+						// createPost と同じ理由でhasImageも起点にする
+						!!(data.gameId || data.mvId || (data.hasImage && data.imageSrc)),
 						data.gameId ?? null,
 						data.mvId ?? null,
 						parentNum,
@@ -816,10 +825,18 @@ export const pgStore: DataStore = {
 		// content_type は content_url/content_data_url と必ず連動させる。
 		// text列だけ書き換えてtypeを放置すると、hasImage/hasMml が deriveDisplay で
 		// 導出できなくなる（画像を足したのに反映されない/消したのにhasImageが残る事故）。
-		if (mml !== undefined) {
+		//
+		// 自動補正: 過去の不具合（クライアントの外部化失敗）で content_text に生の
+		// `#mml` 本文がそのまま残ってしまった投稿は、本文だけの編集（mml未指定）で
+		// 再編集しても content が丸ごと再送されてくるので、ここで毎回マーカーの
+		// 有無を確認し、見つかれば都度SQLを流さなくても再編集のタイミングで
+		// content_type/content_data_url を修復する。
+		const mmlResolved = await ensureMmlExternalized(content, mml);
+		const needsMmlRewrite = !!mmlResolved.mmlUrl;
+		if (mml !== undefined || needsMmlRewrite) {
 			const c = deriveInsertContent({
-				content,
-				mmlUrl: mml.mmlUrl,
+				content: mmlResolved.content,
+				mmlUrl: mmlResolved.mmlUrl,
 				hasImage: !!imageSrc,
 				imageSrc,
 			});
@@ -827,6 +844,7 @@ export const pgStore: DataStore = {
 			push("content_url", c.contentUrl);
 			push("content_type", c.contentType);
 			push("content_data_url", c.contentDataUrl);
+			if (imageSrc) push("has_collab_button", true);
 		} else if (imageSrc !== undefined) {
 			const c = deriveInsertContent({
 				content,
@@ -837,6 +855,9 @@ export const pgStore: DataStore = {
 			push("content_url", c.contentUrl);
 			push("content_type", c.contentType);
 			push("content_data_url", c.contentDataUrl);
+			// 画像を新たに足した／差し替えた編集はコラボの起点にする。createPost/addReply
+			// と同じ理由（お絵描き投稿は自動的にコラボ可能にする設計）。
+			if (imageSrc) push("has_collab_button", true);
 		} else {
 			// 添付には触れない、本文だけの編集。既存の content_type/URL は保つ
 			push("content_text", content);
