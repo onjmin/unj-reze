@@ -483,7 +483,7 @@ export default function BbsThreadView({
 																`/hashtag/${encodeURIComponent(tagClean)}`,
 															);
 														}}
-														className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+														className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 													>
 														{mmlMarker}
 													</a>
@@ -510,7 +510,7 @@ export default function BbsThreadView({
 														`/hashtag/${encodeURIComponent("コード進行")}`,
 													);
 												}}
-												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 											>
 												#コード進行
 											</a>

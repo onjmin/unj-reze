@@ -23,6 +23,7 @@ import {
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseWalkRef, refLabel } from "@/lib/asset-ref";
+import { handleImgError } from "@/lib/cors-proxy";
 import {
 	clearAutosave,
 	getAutosave,
@@ -1359,6 +1360,7 @@ export default function MvMaker({
 						{manifest.stage.bgUrl && (
 							<img
 								src={manifest.stage.bgUrl}
+								onError={handleImgError}
 								alt=""
 								className="h-7 w-7 shrink-0 rounded object-cover"
 							/>
@@ -1452,6 +1454,7 @@ export default function MvMaker({
 								{l.url ? (
 									<img
 										src={l.url}
+										onError={handleImgError}
 										alt=""
 										className="h-8 w-8 shrink-0 rounded border border-gray-700 object-contain"
 									/>
@@ -1647,6 +1650,7 @@ export default function MvMaker({
 					{layer.url && (
 						<img
 							src={layer.url}
+							onError={handleImgError}
 							alt=""
 							className="h-12 w-12 rounded border border-gray-700 object-contain"
 						/>
@@ -3636,6 +3640,7 @@ export default function MvMaker({
 									{s.stage.bgUrl && (
 										<img
 											src={s.stage.bgUrl}
+											onError={handleImgError}
 											alt=""
 											className="h-7 w-7 shrink-0 rounded object-cover"
 										/>

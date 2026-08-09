@@ -19,6 +19,7 @@ import {
 } from "@/components/game-presets/shared";
 import { parseWalkRef, type WalkRef } from "@/lib/asset-ref";
 import { applyMasterVolume } from "@/lib/master-volume";
+import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
 import {
 	buildMinecraftModel,
 	type MinecraftLimbs,
@@ -1999,8 +2000,17 @@ export class Yume25DEngine {
 	private loadMcSkin(url: string): Promise<THREE.Texture | null> {
 		let p = this.mcSkinCache.get(url);
 		if (!p) {
-			p = new THREE.TextureLoader()
+			const loader = new THREE.TextureLoader();
+			p = loader
 				.loadAsync(url)
+				.catch(() => {
+					const proxied = wrapCorsProxyUrl(url);
+					if (proxied !== url) {
+						notifyCorsProxyUsed();
+						return loader.loadAsync(proxied);
+					}
+					throw new Error(`Failed to load ${url}`);
+				})
 				.then((t) => {
 					t.magFilter = THREE.NearestFilter;
 					t.minFilter = THREE.NearestFilter;

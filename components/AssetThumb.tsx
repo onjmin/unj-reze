@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { parseWalkRef } from "@/lib/asset-ref";
+import { handleImgError } from "@/lib/cors-proxy";
 import { loadImage, resolveSpriteRect } from "@/lib/walk-sprite";
 
 /** 素材参照のサムネイル。walk: 参照は正面1コマ目を切り出し、url:#fragment はクロップ矩形を表示する。
@@ -124,7 +125,10 @@ export default function AssetThumb({
 			<img
 				src={url}
 				alt=""
-				onError={() => onError?.()}
+				onError={(e) => {
+					handleImgError(e);
+					onError?.();
+				}}
 				className="w-full h-full object-cover"
 			/>
 		) : (

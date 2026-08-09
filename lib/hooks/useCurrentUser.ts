@@ -17,11 +17,12 @@ function getCachedUser(): AnonymousUser | null {
 }
 
 export function useCurrentUser() {
-	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(
-		getCachedUser,
-	);
+	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
 
 	useEffect(() => {
+		const cached = getCachedUser();
+		if (cached) setCurrentUser(cached);
+
 		const sessionId = ensureSessionId();
 		api.auth
 			.anonymous(sessionId)

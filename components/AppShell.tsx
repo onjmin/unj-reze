@@ -37,24 +37,29 @@ export default function AppShell({ current, children }: AppShellProps) {
 	const messagesClearedRef = useRef(false);
 
 	useEffect(() => {
-		const displayName = currentUser?.displayName;
-		if (!displayName) return;
+		const userSlug = currentUser?.slug;
+		if (!userSlug) return;
 		notifsClearedRef.current = false;
 		messagesClearedRef.current = false;
 		api.notifications
-			.unreadCount(displayName)
+			.unreadCount(userSlug)
 			.then(({ count }) => {
 				if (!notifsClearedRef.current) setNotifCount(count);
 			})
 			.catch(() => {});
 		api.messages
-			.list(displayName)
+			.list(userSlug)
 			.then((msgs) => {
 				if (!messagesClearedRef.current)
-					setMessageCount(countUnreadMessages(msgs, displayName));
+					setMessageCount(
+						countUnreadMessages(
+							msgs,
+							currentUser?.displayName || userSlug,
+						),
+					);
 			})
 			.catch(() => {});
-	}, [currentUser?.displayName]);
+	}, [currentUser?.slug, currentUser?.displayName]);
 
 	// メッセージ／通知が既読になったらバッジを即座に落とす。
 	useEffect(() => {

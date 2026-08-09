@@ -1332,7 +1332,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 														`/hashtag/${encodeURIComponent(tagClean)}`,
 													);
 												}}
-												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 											>
 												{mmlMarker}
 											</a>
@@ -1364,7 +1364,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 												`/hashtag/${encodeURIComponent("コード進行")}`,
 											);
 										}}
-										className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+										className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 									>
 										#コード進行
 									</a>
@@ -2207,7 +2207,7 @@ function ReplyTreeItem({
 														`/hashtag/${encodeURIComponent(tagClean)}`,
 													);
 												}}
-												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 											>
 												{mmlMarker}
 											</a>
@@ -2229,7 +2229,7 @@ function ReplyTreeItem({
 												`/hashtag/${encodeURIComponent("コード進行")}`,
 											);
 										}}
-										className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+										className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 									>
 										#コード進行
 									</a>

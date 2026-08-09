@@ -6,6 +6,7 @@ import { X, Play, Pause, RotateCcw, Smartphone, Image as ImageIcon, Music, Trash
 import { bgmManager } from '@/lib/BgmManager';
 import VolumeControl from '@/components/VolumeControl';
 import { bgmRefToAsset, refLabel, parseWalkRef, imageRefToUrl, isImageRef, colorToDataUrl, parseLoopFromRef, updateRefLoop, getLoopOption, getBgmVolume, parseBgmParams, updateRefBgmParams } from '@/lib/asset-ref';
+import { wrapCorsProxyUrl, notifyCorsProxyUsed, handleImgError } from '@/lib/cors-proxy';
 import { applyMasterVolume } from '@/lib/master-volume';
 import HistoryModal from './HistoryModal';
 import { getStorageKey, getAutosave, saveAutosave, clearAutosave, saveHistory, HistoryItem } from '@/lib/history';
@@ -23,7 +24,7 @@ import { resolveSMCUrl, getSmcMetadata, type SmcMetadata } from '@/lib/smc-helpe
 import { segment } from '@/lib/tiny-segmenter';
 import { parseRpgen } from '@/lib/rpgen-parser';
 import LZString from 'lz-string';
-import { MINECRAFT_SKIN_PRESETS } from '@/lib/minecraft-model';
+import { MINECRAFT_SKIN_PRESETS, getMinecraftSkinAuthor } from '@/lib/minecraft-model';
 import ShareButton from './ShareButton';
 import { gameShareUrl } from '@/lib/share';
 import { buildGameShareText } from '@/lib/share-text';
@@ -1407,7 +1408,20 @@ function DigitReel({ digit, dir, cellH = 16 }: { digit: number; dir: 'up' | 'dow
 const dodgeImgCache: Record<string, HTMLImageElement> = {};
 function getDodgeImg(url: string): HTMLImageElement {
   let img = dodgeImgCache[url];
-  if (!img) { img = new Image(); img.src = url; dodgeImgCache[url] = img; }
+  if (!img) {
+    img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onerror = () => {
+      const proxied = wrapCorsProxyUrl(url);
+      if (proxied !== url && !img.dataset.proxied) {
+        img.dataset.proxied = 'true';
+        notifyCorsProxyUsed();
+        img.src = proxied;
+      }
+    };
+    img.src = url;
+    dodgeImgCache[url] = img;
+  }
   return img;
 }
 
@@ -6046,6 +6060,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     // その枚数ぶん再レンダリングが走る。1フレームぶんに束ねる。
     img.onload = bumpHud;
     img.onerror = () => {
+      const proxied = wrapCorsProxyUrl(baseUrl);
+      if (proxied !== baseUrl && !img.dataset.proxied) {
+        img.dataset.proxied = 'true';
+        notifyCorsProxyUsed();
+        img.src = proxied;
+        return;
+      }
       const currentBg = gameDataRef.current.mapBgUrl;
       const fallbackUrl = 'https://i.imgur.com/xqZTM17.jpg';
       if ((url === currentBg || baseUrl === currentBg) && currentBg !== fallbackUrl) {
@@ -17385,11 +17406,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     {gameData.engine === 'yume25d' && (
                       <div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2 space-y-1.5">
                         <p className="text-[10px] text-gray-500">マイクラスキン：Minecraft のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作って主人公にできます。歩くと手足を振ります。</p>
-                        <div className="grid grid-cols-2 gap-1.5">
+                        <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-1.5 p-1 border border-gray-700/60 rounded-lg bg-gray-900/40">
                           {MINECRAFT_SKIN_PRESETS.map(p => (
                             <button key={p.url} onClick={() => setGameData(prev => ({ ...prev, player: { ...prev.player, minecraftSkin: p.url, spriteRef: undefined, spriteUrl: undefined } }))}
-                              className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5">
-                              🧍 {p.name}
+                              title={p.author ? `著作者: ${p.author}` : undefined}
+                              className={`flex flex-col items-start gap-0.5 p-1.5 rounded border ${gameData.player.minecraftSkin === p.url ? 'border-blue-500 bg-blue-900/40 text-blue-200' : 'border-gray-700 bg-gray-800/60 hover:bg-blue-900/20 hover:border-gray-500 text-gray-300'} text-left transition`}>
+                              <span className="text-[10px] flex items-center gap-1 truncate w-full">🧍 {p.name}</span>
+                              {p.author && <span className="text-[8px] text-gray-400 truncate w-full pl-3.5">{p.author}</span>}
                             </button>
                           ))}
                         </div>
@@ -17401,10 +17424,24 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             <ImageIcon size={12} /> 参照
                           </button>
                         </div>
-                        {gameData.player.minecraftSkin && (
-                          <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: undefined } }))}
-                            className="text-[10px] text-gray-400 hover:text-red-400">マイクラスキンを解除</button>
-                        )}
+                        {gameData.player.minecraftSkin && (() => {
+                          const credit = getMinecraftSkinAuthor(gameData.player.minecraftSkin);
+                          return (
+                            <div className="flex items-center justify-between text-[10px] pt-1 border-t border-gray-800">
+                              {credit ? (
+                                <span className="text-gray-400">
+                                  著作者: {credit.authorUrl ? (
+                                    <a href={credit.authorUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">{credit.author}</a>
+                                  ) : (
+                                    <span className="text-gray-300">{credit.author}</span>
+                                  )}
+                                </span>
+                              ) : <span />}
+                              <button onClick={() => setGameData(p => ({ ...p, player: { ...p.player, minecraftSkin: undefined } }))}
+                                className="text-gray-400 hover:text-red-400">マイクラスキンを解除</button>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                     <label className="flex items-center justify-between text-[11px] text-gray-400">

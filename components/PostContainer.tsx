@@ -751,7 +751,7 @@ export default function PostContainer({
 														`/hashtag/${encodeURIComponent(tagClean)}`,
 													);
 												}}
-												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+												className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 											>
 												{mmlMarker}
 											</a>
@@ -787,7 +787,7 @@ export default function PostContainer({
 												`/hashtag/${encodeURIComponent("コード進行")}`,
 											);
 										}}
-										className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+										className="text-blue-400 hover:underline mb-1 inline-block text-[13px]"
 									>
 										#コード進行
 									</a>

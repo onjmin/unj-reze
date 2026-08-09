@@ -752,8 +752,9 @@ const liveApi = {
 	},
 	hashtag: {
 		posts: (tag: string, userId?: string) => {
+			const tagClean = tag.replace(/^#/, "");
 			const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
-			return fetcher<Post[]>(`/hashtag/${encodeURIComponent(tag)}${qs}`);
+			return fetcher<Post[]>(`/hashtag/${encodeURIComponent(tagClean)}${qs}`);
 		},
 	},
 	users: {

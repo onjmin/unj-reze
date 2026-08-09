@@ -14,7 +14,10 @@ export async function GET(
 	const limit = limitParam
 		? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50)
 		: 20;
-	const decoded = decodeURIComponent(tag);
+	let decoded = tag;
+	try {
+		decoded = decodeURIComponent(tag);
+	} catch {}
 	const posts = await db.getPostsByHashtag(decoded, userId, limit);
 	await attachEmbedInfo(posts);
 	return NextResponse.json(posts.map(encodePost));

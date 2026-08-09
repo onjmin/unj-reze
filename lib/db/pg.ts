@@ -993,26 +993,34 @@ export const pgStore: DataStore = {
 	},
 
 	async markNotificationRead(id: number, userId: string) {
+		const uid = Number(userId);
+		if (isNaN(uid)) return;
 		await q(
 			`UPDATE notifications SET read = TRUE WHERE id = $1 AND target_user_id = $2`,
-			[id, Number(userId)],
+			[id, uid],
 		);
 	},
 	async markAllNotificationsRead(userId: string) {
+		const uid = Number(userId);
+		if (isNaN(uid)) return;
 		await q(`UPDATE notifications SET read = TRUE WHERE target_user_id = $1`, [
-			Number(userId),
+			uid,
 		]);
 	},
 	async deleteNotification(id: number, userId: string) {
+		const uid = Number(userId);
+		if (isNaN(uid)) return;
 		await q(`DELETE FROM notifications WHERE id = $1 AND target_user_id = $2`, [
 			id,
-			Number(userId),
+			uid,
 		]);
 	},
 	async getUnreadCount(userId: string) {
+		const uid = Number(userId);
+		if (isNaN(uid)) return 0;
 		const { rows } = await q(
 			`SELECT COUNT(*) AS cnt FROM notifications WHERE target_user_id = $1 AND read = FALSE`,
-			[Number(userId)],
+			[uid],
 		);
 		return parseInt(rows[0]?.cnt ?? "0", 10);
 	},
@@ -1020,6 +1028,7 @@ export const pgStore: DataStore = {
 	async getMessages(userId?: string) {
 		if (!userId) return [];
 		const uid = Number(userId);
+		if (isNaN(uid)) return [];
 		const { rows } = await q(
 			`SELECT * FROM messages WHERE sender_user_id = $1 OR recipient_user_id = $1 ORDER BY created_at DESC LIMIT 100`,
 			[uid],
@@ -1197,7 +1206,8 @@ export const pgStore: DataStore = {
 	},
 
 	async getPostsByHashtag(tag: string, userId?: string, limit = 20) {
-		const normalized = tag.startsWith("#") ? tag : `#${tag}`;
+		const rawTag = tag.startsWith("#") ? tag : `#${tag}`;
+		const escapedTag = rawTag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const safeLimit = Math.max(1, Math.min(limit, 50));
 		const hidden = await getHiddenUserIds(userId);
 		const { rows } = await q(
@@ -1205,7 +1215,7 @@ export const pgStore: DataStore = {
        WHERE t.board_id=1 AND t.deleted_at IS NULL
          AND t.content_text ~ ('(^|[[:space:]])' || $1 || '([[:space:]]|$)')
        ORDER BY t.id DESC LIMIT $2`,
-			[normalized, safeLimit],
+			[escapedTag, safeLimit],
 		);
 		return rows
 			.filter((r) => !hidden.has(Number(r.user_id)))

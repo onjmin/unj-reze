@@ -5,7 +5,7 @@
 
 import { Image as ImageIcon, Music, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { MINECRAFT_SKIN_PRESETS } from "@/lib/minecraft-model";
+import { MINECRAFT_SKIN_PRESETS, getMinecraftSkinAuthor } from "@/lib/minecraft-model";
 import { TERRAIN_STYLE_LABELS, type TerrainStyle } from "@/lib/terrain-gen";
 import {
 	drawPlayerIconCanvas,
@@ -1167,6 +1167,31 @@ export default function Yume25DEditorPanel({
 									</p>
 								</div>
 							)}
+							{t.minecraftSkin && (() => {
+								const credit = getMinecraftSkinAuthor(t.minecraftSkin);
+								return (
+									<div className="text-[9px] text-gray-400 bg-gray-900/60 p-1.5 rounded border border-gray-800 flex items-center justify-between">
+										<span>Minecraft スキン素材</span>
+										{credit && (
+											<span>
+												著作者:{" "}
+												{credit.authorUrl ? (
+													<a
+														href={credit.authorUrl}
+														target="_blank"
+														rel="noreferrer"
+														className="text-blue-400 hover:underline"
+													>
+														{credit.author}
+													</a>
+												) : (
+													<span className="text-gray-300">{credit.author}</span>
+												)}
+											</span>
+										)}
+									</div>
+								);
+							})()}
 							{t.special === "speaker" && (
 								<div className="flex flex-col gap-1.5">
 									<div className="flex items-center gap-1.5 flex-wrap">
@@ -1424,16 +1449,48 @@ export default function Yume25DEditorPanel({
 					マイクラスキン：Minecraft
 					のスキン画像（Slim型・64×64）からブロック人形の3Dキャラを作ってスプライトとして配置できます。歩くと手足を振ります。
 				</p>
-				<div className="grid grid-cols-2 gap-1.5">
+				<div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-1.5 p-1 border border-gray-700/60 rounded-lg bg-gray-900/40">
 					{MINECRAFT_SKIN_PRESETS.map((p) => (
 						<button
 							key={p.name}
 							onClick={() => addMinecraftSkinTex(p.name, p.url)}
-							className="flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-600 text-[10px] text-gray-400 hover:bg-gray-100/5"
+							title={p.author ? `著作者: ${p.author}` : undefined}
+							className="flex flex-col items-start gap-0.5 p-1.5 rounded border border-gray-700 bg-gray-800/60 hover:bg-blue-900/30 hover:border-blue-500 text-left transition"
 						>
-							<Plus size={11} />👗 {p.name}
+							<span className="text-[10px] text-gray-200 flex items-center gap-1 truncate w-full">
+								<Plus size={10} className="shrink-0 text-blue-400" />👗 {p.name}
+							</span>
+							{p.author && (
+								<span className="text-[8px] text-gray-400 truncate w-full pl-3.5">
+									{p.author}
+								</span>
+							)}
 						</button>
 					))}
+				</div>
+				<div className="flex flex-col gap-0.5 text-[9px] text-gray-400 bg-gray-900/80 p-1.5 rounded border border-gray-800">
+					<div className="flex items-center justify-between">
+						<span>正実モブ:</span>
+						<a
+							href="https://x.com/onjmin_"
+							target="_blank"
+							rel="noreferrer"
+							className="text-blue-400 hover:underline"
+						>
+							おんJ民（@onjmin_）さん / X
+						</a>
+					</div>
+					<div className="flex items-center justify-between">
+						<span>東方紅魔郷スキン:</span>
+						<a
+							href="https://setomumcskin.ehoh.net/Koumakyou.html"
+							target="_blank"
+							rel="noreferrer"
+							className="text-blue-400 hover:underline"
+						>
+							setomu@yuly 氏
+						</a>
+					</div>
 				</div>
 				<div className="flex items-center gap-1.5">
 					<input

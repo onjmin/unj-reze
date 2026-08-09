@@ -5,6 +5,8 @@
 //
 // シート配置: index = frame + way * frames（= anime.ts の toI）。行=方向, 列=フレーム。
 
+import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "./cors-proxy";
+
 export type WayKey = "w" | "a" | "s" | "d" | "q" | "e" | "z" | "c";
 
 export interface Way {
@@ -375,8 +377,26 @@ export function loadImage(url: string): Promise<HTMLImageElement> {
 			resolve(img);
 		};
 		img.onerror = () => {
-			imgPromises.delete(url);
-			reject(new Error(`failed to load ${url}`));
+			const proxied = wrapCorsProxyUrl(url);
+			if (proxied !== url) {
+				notifyCorsProxyUsed();
+				const proxyImg = new Image();
+				proxyImg.crossOrigin = "anonymous";
+				proxyImg.decoding = "async";
+				proxyImg.onload = () => {
+					imgCache.set(url, proxyImg);
+					imgPromises.delete(url);
+					resolve(proxyImg);
+				};
+				proxyImg.onerror = () => {
+					imgPromises.delete(url);
+					reject(new Error(`failed to load ${url}`));
+				};
+				proxyImg.src = proxied;
+			} else {
+				imgPromises.delete(url);
+				reject(new Error(`failed to load ${url}`));
+			}
 		};
 		img.src = url;
 	});

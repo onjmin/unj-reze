@@ -20,7 +20,10 @@ export async function generateMetadata({
 	params: Promise<{ tag: string }>;
 }): Promise<Metadata> {
 	const { tag } = await params;
-	const decodedTag = decodeURIComponent(tag);
+	let decodedTag = tag;
+	try {
+		decodedTag = decodeURIComponent(tag);
+	} catch {}
 	const title = `#${decodedTag}`;
 	const description = `#${decodedTag} のハッシュタグが付いた投稿一覧`;
 	return {
@@ -39,9 +42,13 @@ export default async function HashtagPage({
 	params: Promise<{ tag: string }>;
 }) {
 	const { tag } = await params;
+	let decodedTag = tag;
+	try {
+		decodedTag = decodeURIComponent(tag);
+	} catch {}
 	return (
 		<AppShell current="search">
-			<HashtagView tag={decodeURIComponent(tag)} />
+			<HashtagView tag={decodedTag} />
 		</AppShell>
 	);
 }
