@@ -51,16 +51,21 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
 			});
 			instRef.current = inst;
 
-			const onClick = () => {
-				requestAnimationFrame(() => {
-					if (inst?.isPlaying() && !claimedRef.current) {
-						claimedRef.current = true;
-						focusRef.current.requestFocus(id, () => inst?.stop());
-					}
-				});
-			};
-			el.addEventListener("click", onClick);
-			cleanup = () => el.removeEventListener("click", onClick);
+			// クリック起点のonClick+rAF一発判定だと、AudioContext.resume()等で再生開始が
+			// 1フレームより遅れた場合にisPlaying()がまだfalseで取りこぼす（＝フォーカスを
+			// 取れないまま2曲同時に鳴る）レースコンディションがあった。isPlaying()の
+			// false→true遷移を定期ポーリングで拾う方式にして、クリック以外（内部UIの
+			// 再生ボタン・キーボード操作等）で始まった再生も確実に検知できるようにする。
+			let wasPlaying = false;
+			const poll = window.setInterval(() => {
+				const playing = !!inst?.isPlaying();
+				if (playing && !wasPlaying && !claimedRef.current) {
+					claimedRef.current = true;
+					focusRef.current.requestFocus(id, () => inst?.stop());
+				}
+				wasPlaying = playing;
+			}, 200);
+			cleanup = () => window.clearInterval(poll);
 		});
 
 		return () => {

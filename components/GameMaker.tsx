@@ -230,6 +230,24 @@ const RPGEN_SCREEN_H = 384;
 
 const YT_BGM = 'https://www.youtube.com/watch?v=0_jEpB40aYw';
 
+/**
+ * 正十二面体モチーフの弾幕プリセット（12方向対称）。
+ * 正十二面体は12個の面を持つため、12方向リングを基本単位として使う。
+ * さらに面の対称性を意識し、12方向リングを frame でゆっくり回転させながら
+ * 内側に5方向（五角形の面を想起）の狙い撃ちを重ねる二重構造にしている。
+ */
+const DODECAHEDRON_SPELLCARD_MINISCRIPT = `
+moveTo(${VIEW_W / 2}, 80, 40)
+while true
+  for i in range(0, 11, 1)
+    shot(frame * 2 + i * 30, 2.4, i % 6)
+  end for
+  wait(10)
+  shotN(5, getPlayerAngle(), 36, 2.0, 5)
+  wait(20)
+end while
+`.trim();
+
 /** 全シーンを1枚のワールドマップに合成する。シーン0を原点にBFS展開。
  *  各シーンの実寸（map の行数・列数）を使うので DQ フィールドなどの非標準サイズも正しく扱う。 */
 function buildWorldLayout(scenes: SceneDef[]): {
@@ -6285,24 +6303,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     }
   }, [initialManifest, playOnly, resetGame]);
 
-  // ── 入口ヒーロー：開いた瞬間にデモ再生して「動くゲーム」で迎える ──
-  useEffect(() => {
-    if (introOpen) setIsPlaying(true);
-  }, [introOpen]);
+  // ── 入口ヒーロー：軽量なリスト選択（プリセット名＋説明のみ、ライブデモは回さない）──
+  // 選択後の「あそぶ」「改造する」を押した時点で初めてエンジンを起動する。
 
-  /** ヒーローでプリセットを切り替えてデモを再生し直す（②ギャラリーの予告）。 */
+  /** ヒーローでプリセットを切り替える（デモは再生しない＝軽量）。 */
   const previewPresetInIntro = useCallback((id: PresetId) => {
-    resetGame(id);          // isPlaying=false にリセット
-    setIsPlaying(true);     // 同フレームで再生 → 新プリセットのデモが回る
+    resetGame(id);          // isPlaying=false のまま
   }, [resetGame]);
-
-  const [introAnim, setIntroAnim] = useState<'right' | 'left'>('right');
-  const navigateIntro = useCallback((dir: 1 | -1) => {
-    const idx = PRESET_ORDER.indexOf(presetId);
-    const next = PRESET_ORDER[(idx + dir + PRESET_ORDER.length) % PRESET_ORDER.length];
-    setIntroAnim(dir === 1 ? 'right' : 'left');
-    previewPresetInIntro(next);
-  }, [presetId, previewPresetInIntro]);
 
   /** ヒーローから「あそぶ」。タイトル画面があればそれを、なければ即プレイ。 */
   const enterPlayFromIntro = useCallback(() => {
@@ -13660,81 +13667,38 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               </div>
             )}
 
-            {/* ── 入口ヒーロー：カルーセル式ゲーム選択 ── */}
-            {introOpen && (() => {
-              const PRESET_BOX_GRADIENT: Record<PresetId, string> = {
-                onjReze: 'from-orange-950 via-gray-900 to-gray-950',
-                dq: 'from-blue-950  via-gray-900 to-gray-950',
-                mario: 'from-red-950   via-gray-900 to-gray-950',
-                touhou: 'from-purple-950 via-gray-900 to-gray-950',
-                rockman: 'from-cyan-950  via-gray-900 to-gray-950',
-                undertale: 'from-rose-950 via-gray-950 to-black',
-                deltarune: 'from-purple-950 via-gray-950 to-black',
-                yume: 'from-violet-950 via-gray-950 to-black',
-              };
-              const PRESET_RING: Record<PresetId, string> = {
-                onjReze: 'ring-orange-500/50',
-                dq: 'ring-blue-500/50',
-                mario: 'ring-red-500/50',
-                touhou: 'ring-purple-500/50',
-                rockman: 'ring-cyan-500/50',
-                undertale: 'ring-rose-500/50',
-                deltarune: 'ring-purple-500/50',
-                yume: 'ring-violet-500/50',
-              };
-              return (
-                <div className="absolute inset-0 z-[45] flex flex-col select-none"
-                  style={{ background: 'rgba(7,8,11,0.78)', backdropFilter: 'blur(3px)' }}>
+            {/* ── 入口ヒーロー：軽量リスト式ゲーム選択（大きなプレビュー/ライブデモは表示しない） ── */}
+            {introOpen && (
+              <div className="absolute inset-0 z-[45] flex flex-col select-none"
+                style={{ background: 'rgba(7,8,11,0.9)' }}>
 
-                  {/* ヘッダー */}
-                  <div className="shrink-0 pt-3 pb-1 px-4 text-center">
-                    <span className="text-[9px] font-black tracking-[0.35em] text-white/35">GAME MAKER</span>
-                    <p className="text-[10px] text-white/55 mt-0.5">ゲームを選んで改造しよう</p>
-                  </div>
+                {/* ヘッダー */}
+                <div className="shrink-0 pt-3 pb-1 px-4 text-center">
+                  <span className="text-[9px] font-black tracking-[0.35em] text-white/35">GAME MAKER</span>
+                  <p className="text-[10px] text-white/55 mt-0.5">ゲームを選んで改造しよう</p>
+                </div>
 
-                  {/* カルーセル */}
-                  <div className="flex-1 flex items-center justify-center relative overflow-hidden">
-                    {/* 左矢印 */}
-                    <button onClick={() => navigateIntro(-1)} aria-label="前のゲーム"
-                      className="absolute left-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 active:scale-90 transition">
-                      <ChevronLeft size={28} strokeWidth={1.5} />
-                    </button>
-
-                    {/* ゲームボックス */}
-                    <div key={presetId}
-                      style={{ animation: `${introAnim === 'right' ? 'introCardInRight' : 'introCardInLeft'} 0.22s ease both` }}
-                      className="flex flex-col items-center gap-3 px-12">
-                      {/* パッケージ風カード */}
-                      <div className={`w-28 h-36 bg-gradient-to-b ${PRESET_BOX_GRADIENT[presetId]} ring-2 ${PRESET_RING[presetId]} shadow-2xl flex flex-col items-center justify-center gap-2 relative overflow-hidden`}>
-                        <div className="absolute inset-0 opacity-10"
-                          style={{ backgroundImage: 'repeating-linear-gradient(45deg, #fff 0, #fff 1px, transparent 0, transparent 50%)', backgroundSize: '6px 6px' }} />
-                        <span className="text-5xl leading-none relative z-10">{PRESET_EMOJI[presetId]}</span>
-                        <span className="text-[9px] font-black tracking-wider text-white/50 relative z-10">GAME</span>
-                      </div>
-                      {/* タイトル */}
-                      <div className="text-center">
-                        <div className="font-black text-base text-white leading-tight">{PRESETS[presetId].name}</div>
-                        <div className="text-[10px] text-white/50 mt-0.5">{PRESET_TAGLINE[presetId]}</div>
-                      </div>
-                    </div>
-
-                    {/* 右矢印 */}
-                    <button onClick={() => navigateIntro(1)} aria-label="次のゲーム"
-                      className="absolute right-1 z-10 w-10 h-16 flex items-center justify-center text-white/50 hover:text-white/90 active:scale-90 transition">
-                      <ChevronRight size={28} strokeWidth={1.5} />
-                    </button>
-                  </div>
-
-                  {/* ドットインジケーター */}
-                  <div className="shrink-0 flex justify-center gap-2 pb-3">
+                {/* テキストリスト */}
+                <div className="flex-1 overflow-y-auto px-3 py-2">
+                  <div className="flex flex-col gap-1.5 max-w-sm mx-auto">
                     {PRESET_ORDER.map(id => (
-                      <button key={id} onClick={() => { setIntroAnim('right'); previewPresetInIntro(id); }}
-                        className={` transition-all duration-200 ${id === presetId ? 'w-5 h-2 bg-white' : 'w-2 h-2 bg-white/25 hover:bg-white/50'}`} />
+                      <button key={id} onClick={() => previewPresetInIntro(id)}
+                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-left transition ${id === presetId
+                            ? 'bg-white/15 border-white/40'
+                            : 'bg-white/[0.03] border-white/10 active:bg-white/10'
+                          }`}>
+                        <span className="text-xl leading-none shrink-0">{PRESET_EMOJI[id]}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-bold text-[13px] text-white leading-tight truncate">{PRESETS[id].name}</span>
+                          <span className="block text-[10px] text-white/50 mt-0.5 truncate">{PRESET_TAGLINE[id]}</span>
+                        </span>
+                        {id === presetId && <span className="text-[9px] text-white/70 shrink-0">選択中</span>}
+                      </button>
                     ))}
                   </div>
                 </div>
-              );
-            })()}
+              </div>
+            )}
 
             {/* ニコニコ弾幕レイヤー */}
             {danmakuItems.length > 0 && (
@@ -17004,6 +16968,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                   } as SpellCardDef]
                                 })}
                                   className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-red-400 active:bg-red-500/10">+ スペルカード追加</button>
+                                <button onClick={() => updObj({
+                                  spellCards: [...(selObj.spellCards ?? []), {
+                                    name: `氷符「正十二面体」`,
+                                    triggerHp: Math.floor(selObj.hp * 0.5),
+                                    miniScript: DODECAHEDRON_SPELLCARD_MINISCRIPT,
+                                  } as SpellCardDef]
+                                })}
+                                  title="12方向対称の弾幕パターンをワンクリックで挿入"
+                                  className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-blue-400 active:bg-blue-500/10">🔷 + 正十二面体弾幕</button>
                                 <label className="text-[9px] text-gray-500 flex items-center gap-1 mt-1">
                                   ボムドロップ確率
                                   <input type="text" inputMode="decimal" defaultValue={selObj.bombDrop ?? 0}
@@ -18131,6 +18104,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                     </div>
                                   ))}
                                   <button onClick={() => updObj({ spellCards: [...(curList[0].spellCards ?? []), { name: `スペルカード${(curList[0].spellCards?.length ?? 0) + 1}`, triggerHp: Math.floor(curList[0].hp * 0.5), miniScript: '// 弾幕パターンをMiniScriptで記述\nwait 60\naimed 2.0' } as SpellCardDef] })} className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-red-400 active:bg-red-500/10">+ スペルカード追加</button>
+                                  <button onClick={() => updObj({ spellCards: [...(curList[0].spellCards ?? []), { name: `氷符「正十二面体」`, triggerHp: Math.floor(curList[0].hp * 0.5), miniScript: DODECAHEDRON_SPELLCARD_MINISCRIPT } as SpellCardDef] })} title="12方向対称の弾幕パターンをワンクリックで挿入" className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-blue-400 active:bg-blue-500/10">🔷 + 正十二面体弾幕</button>
                                   <label className="text-[9px] text-gray-500 flex items-center gap-1 mt-1">ボムドロップ確率
                                     <input type="text" inputMode="decimal" defaultValue={curList[0].bombDrop ?? 0} onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updObj({ bombDrop: Math.max(0, Math.min(1, v)) }); }} className="w-14 ml-0.5 bg-gray-800 rounded px-1 py-0.5 text-[9px] text-white outline-none" />
                                     <span className="text-gray-600">（0〜1）</span>

@@ -41,7 +41,6 @@ import { startMvRemix } from "@/lib/remix";
 import { ensureSessionId } from "@/lib/session";
 import { postShareUrl } from "@/lib/share";
 import { buildPostShareText } from "@/lib/share-text";
-import { getThreadDisplayTime } from "@/lib/time";
 import { showToast } from "@/lib/toast";
 import {
 	isCollabAllowed,
@@ -131,6 +130,10 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 		undefined,
 	);
 	const [editMmlText, setEditMmlText] = useState<string | undefined>(undefined);
+	// null=トップ投稿自身を編集中。返信のMMLを編集する場合はその返信を保持する
+	// （返信のMV編集がmvId単体で完結するのと違い、MMLは post.content の marker行を
+	// 書き換えて api.posts.edit に渡す必要があるため、「どのpost/replyか」を持ち回る）。
+	const [editMmlTarget, setEditMmlTarget] = useState<Post | null>(null);
 	const [collabMml, setCollabMml] = useState<string | undefined>(undefined);
 	// mvId を持たせるのは、返信のMVも同じ画面で編集するため（トップレベルの post.mvId 固定にしない）
 	const [editMvDraft, setEditMvDraft] = useState<{
@@ -742,10 +745,19 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	// mml はEditPostModal側で既に解決済み（useMmlSource）のものを受け取る。
 	// ここで独自に再フェッチすると、失敗時の扱いがずれて「編集画面に移行できない」
 	// 「MMLが空の編集画面に遷移する」の両方の温床になっていた。
-	const handleEditMusic = (mml: string) => {
-		setMenuOpen(false);
+	//
+	// target を取るのは、返信ツリー内の返信のMMLもこの同じ画面で編集するため
+	// （handleEditMvFor と同じ理由）。トップ投稿自身なら target===post なので
+	// editMmlTarget は null のままにし、保存時は従来通り setPost で更新する。
+	const handleEditMusicFor = (target: Post, mml: string) => {
+		setEditMmlTarget(target.id === post.id ? null : target);
 		setEditMmlText(mml);
 		setActiveScreen("edit-mml");
+	};
+
+	const handleEditMusic = (mml: string) => {
+		setMenuOpen(false);
+		handleEditMusicFor(post, mml);
 	};
 
 	/** 指定ポストのMVを編集画面で開く。トップレベル投稿と返信の両方がここを通る。 */
@@ -839,23 +851,31 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 	};
 
 	const handleSaveEditedMusic = async (mml: string) => {
-		const prevPost = post;
-		const newContent = `${stripMmlLine(post.content)}\n#mml ${mml}`.trim();
+		const target = editMmlTarget ?? post;
+		const newContent = `${stripMmlLine(target.content)}\n#mml ${mml}`.trim();
 		setActiveScreen(null);
-		setPost((p) => ({ ...p, content: newContent, isEdited: true }));
-		try {
-			const updated = await api.posts.edit(
-				post.id,
-				userId,
-				newContent,
-				post.originType,
-			);
-			setPost(updated);
-			router.refresh();
-		} catch {
-			setPost(prevPost);
-			showToast("error", "楽曲の編集に失敗しました");
+		if (!editMmlTarget) {
+			const prevPost = post;
+			setPost((p) => ({ ...p, content: newContent, isEdited: true }));
+			try {
+				const updated = await api.posts.edit(
+					post.id,
+					userId,
+					newContent,
+					post.originType,
+				);
+				setPost(updated);
+				router.refresh();
+			} catch {
+				setPost(prevPost);
+				showToast("error", "楽曲の編集に失敗しました");
+			}
+		} else {
+			// 返信のMML編集は、返信の本文編集と同じ経路（handleEditReply）に乗せる。
+			// 別経路を作るとロールバック・replies配列の更新ロジックが二重管理になる。
+			await handleEditReply(target.id, newContent, target.originType);
 		}
+		setEditMmlTarget(null);
 	};
 
 	const handleSelectOriginType = async (ot: OriginType | undefined) => {
@@ -1161,7 +1181,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 							</span>
 						)}
 						<span className="text-gray-500 text-[10px] font-medium">
-							{getThreadDisplayTime(post).time}
+							{post.time}
 							{post.isEdited && (
 								<span className="ml-1 text-[9px] text-gray-500/70">
 									(編集済み)
@@ -1401,6 +1421,7 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									onPreviewImage={(src, alt) => setPreviewImage({ src, alt })}
 									onOpenCollab={handleOpenCollab}
 									onEditMv={handleEditMvFor}
+									onEditMml={handleEditMusicFor}
 								/>
 							))}
 						</div>
@@ -1634,6 +1655,7 @@ function ReplyTreeItem({
 	onPreviewImage,
 	onOpenCollab,
 	onEditMv,
+	onEditMml,
 }: {
 	post: Post;
 	replies: Post[];
@@ -1655,6 +1677,7 @@ function ReplyTreeItem({
 	onPreviewImage?: (src: string, alt?: string) => void;
 	onOpenCollab?: (post: Post) => void;
 	onEditMv?: (post: Post) => void;
+	onEditMml?: (post: Post, mml: string) => void;
 }) {
 	const router = useRouter();
 	const children = replies.filter((r) => r.parentPostId === post.id);
@@ -2230,6 +2253,7 @@ function ReplyTreeItem({
 							onPreviewImage={onPreviewImage}
 							onOpenCollab={onOpenCollab}
 							onEditMv={onEditMv}
+							onEditMml={onEditMml}
 						/>
 					))}
 				</div>
@@ -2241,11 +2265,19 @@ function ReplyTreeItem({
 					onClose={() => setShowEditModal(false)}
 					onSave={handleSaveEdit}
 					capabilities={{
-						// 返信ツリーには画像/MML/ゲームのエディタを持ち込んでいないので明示的に非対応。
+						// 返信ツリーには画像/ゲームのエディタを持ち込んでいないので明示的に非対応。
 						// 「渡し忘れ」ではなく「未対応」であることを型の上で言い切っておく。
+						// MMLだけは handleEditMusicFor 経由でトップ投稿と同じ画面を共有できる
+						// （api.mvs.edit のようにID単体で完結せず post.content の書き換えが要るため
+						// onEdit と同じ「対象replyを渡す」形にしてある）。
 						editImage: null,
 						canRemoveImage: true,
-						editMml: null,
+						editMml: onEditMml
+							? (mml) => {
+									onEditMml(localPost, mml);
+									setShowEditModal(false);
+								}
+							: null,
 						editGame: null,
 						removeGame: null,
 						editMv:
