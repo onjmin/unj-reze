@@ -35,6 +35,8 @@ interface FeedListProps {
 	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
+	/** 編集成功後に PATCH レスポンスの更新済ぽストを渡す。該当エントリだけを差し替えるために使う。 */
+	onPostUpdated?: (post: Post) => void;
 	userId?: string;
 	/** 続きの読み込み。未指定なら「すべて表示されました」で終わる。 */
 	onLoadMore?: () => void;
@@ -70,6 +72,7 @@ export default function FeedList({
 	onLoadMore,
 	hasMore,
 	loadingMore,
+	onPostUpdated,
 }: FeedListProps) {
 	const sentinelRef = useRef<HTMLDivElement>(null);
 	const onLoadMoreRef = useRef(onLoadMore);
@@ -305,6 +308,7 @@ export default function FeedList({
 							onEditMml={onEditMml}
 							onEditMv={onEditMv}
 							onEditPost={onEditPost}
+							onPostUpdated={onPostUpdated}
 							userId={userId}
 						/>
 					</VirtualizedItem>

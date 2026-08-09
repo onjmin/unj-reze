@@ -83,6 +83,11 @@ interface PostContainerProps {
 	onEditMml: ((post: Post, mml: string) => void) | null;
 	onEditMv: ((post: Post) => void) | null;
 	onEditPost?: (post: Post) => void;
+	/**
+	 * 編集成功後に API レスポンスの更新済ぽストを渡す。
+	 * フィード全体を再取得する代わりに該当エントリーだけを差し替えるために使う。
+	 */
+	onPostUpdated?: (post: Post) => void;
 	userId?: string;
 	/** 「最新レス」タブ用: 返信元の元スレ投稿を引用カードとして本文の下に表示する */
 	quotedPost?: Post;
@@ -112,6 +117,7 @@ export default function PostContainer({
 	onEditPost,
 	userId,
 	quotedPost,
+	onPostUpdated,
 }: PostContainerProps) {
 	const router = useRouter();
 	const avatarInfo = getAvatarInfo(post.displayName);
@@ -248,17 +254,17 @@ export default function PostContainer({
 			setShowEditModal(false);
 			if (!currentUserDisplayName) return;
 			try {
-				await api.posts.edit(
+				const updated = await api.posts.edit(
 					post.id,
 					currentUserDisplayName,
 					next,
 					post.originType,
 					nextImageSrc === null ? "" : nextImageSrc,
 				);
+				// フィード全再取得（onModerationChange = fetchPosts）はMMLが空で再描画される原因になる。
+				// PATCHレスポンスで該当エントリだけを差し替える。
+				onPostUpdated?.(updated);
 				onModerationChange?.();
-				// /post/[id] はサーバーコンポーネントでDBから直接取得するため、
-				// 編集直後に開いても本文が古いまま残らないようRouterキャッシュを破棄する
-				router.refresh();
 			} catch {
 				showToast("error", "投稿の編集に失敗しました");
 			}
@@ -268,7 +274,7 @@ export default function PostContainer({
 			post.id,
 			post.originType,
 			onModerationChange,
-			router,
+			onPostUpdated,
 		],
 	);
 
