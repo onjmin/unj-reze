@@ -249,6 +249,101 @@ while true
 end while
 `.trim();
 
+/**
+ * 東方プリセットの弾幕スクリプト（MiniScript）解説モーダル用のテキスト。
+ * `runEntityScript`（GameMaker.tsx 内）が公開する env 関数・定数と 1:1 対応させること。
+ * 関数を追加/変更したら、ここも一緒に更新する。
+ */
+const MINISCRIPT_HELP_TEXT = `【MiniScript とは】
+東方プリセットの「敵の行動＋弾幕」を記述する専用のミニ言語です。
+上から順に1行ずつ実行される疑似コード（JavaScript風の簡易構文）で、
+if / while / for によるループ制御と、下記の関数呼び出しだけで弾幕パターンを組み立てます。
+
+【基本構文】
+- 変数代入:        x = 10
+- if文:            if hp < 50 then ... else ... end if
+- whileループ:      while true ... end while
+- forループ:        for i in range(0, 11, 1) ... end for   ※0以上11以下を1刻みで
+- コメント:         // ここはコメント
+- 関数呼び出し:      shot(角度, 速度, 色)
+- 論理演算子:        and / or / not （&& || ! の代わりに使う）
+※ 1行に書けるのは「代入」「if/while/for」「関数呼び出し」のいずれか1つだけです。
+
+【タイミング制御】
+- wait(frames)                 指定フレーム数だけ待つ（60フレーム=約1秒）。moveTo等も待てる
+- exit()                       スクリプトを終了し、この敵/ボスを消す
+
+【移動】
+- getX() / getY()              自分の現在座標（中心）を取得
+- move(vx, vy)                 速度ベクトルで移動し続ける
+- stop()                       移動を止める（速度0）
+- moveTo(x, y, frames)         frames フレームかけて (x, y) へ滑らかに移動（wait同様に待機する）
+- moveBoss(x, y, frames)       moveTo のボス用エイリアス（同じ挙動）
+
+【弾幕（弾を撃つ）】
+- shot(角度, 速度, 色)                       角度(度, 0=右・90=下)・速度・色番号(0-8)で1発発射
+- shotN(方向数, 基準角度, 開き角, 速度, 色)     扇状に複数発射（例: 5方向を36度の扇で）
+- shotPlayer(速度, 色, ぶれ角度)              自機を狙って1発（ぶれ角度でランダムにばらす）
+- shotSpiral(方向数, 基準角度, 速度, 色)       全方位に均等な数だけ発射（基準角度から等間隔）
+- shotRing(方向数, 速度, 色)                  shotSpiral と同様の全方位リング弾
+- shotPlayerAccel(初速, 加速度, 最大速度, 消滅フレーム, 色, ぶれ角度)
+                                            自機狙いで発射後に加速し、最大速度で頭打ち。
+                                            指定フレーム後に自動消滅する加速弾
+
+【自機情報】
+- getPlayerAngle()             自分から見た自機の方向（度）
+- getPlayerX() / getPlayerY()  自機の座標
+
+【ボス演出】
+- setSpellName(name)           スペルカード名を書き換える（カットイン等に反映）
+
+【数学・ループ補助】
+- abs / floor / ceil / round(x, 桁) / sqrt / min / max
+- sin(度) / cos(度)             度数法（0-360）で三角関数
+- pi                            円周率
+- rand(a, b)                   a以上b以下のランダムな整数
+- randF(a, b)                  a以上b未満のランダムな小数
+- range(from, to, step)        for文で使う数列を作る（例: range(0, 11, 1)）
+
+【定数】
+- col / row                    このオブジェクトのマップ上の配置座標（タイル単位）
+- startX / startY               このオブジェクトの初期出現座標（中心）
+- W / H                         画面の論理幅・高さ（東方プリセットは基本 384×448 相当）
+
+【サンプル：12方向弾＋自機狙いを交互に撃つボス】
+moveTo(W/2, 80, 90)
+rot = 0
+while true
+  for i in range(0, 11, 1)
+    shot(rot + i * 30, 2.5, 4)
+  end for
+  rot = rot + 7
+  wait(4)
+end while
+
+【ヒント】
+- while true で無限ループにし、その中で撃って wait するのが基本形。
+- moveTo / wait は Promise を返すので、その行の完了まで次の行に進みません（＝アニメのように待てる）。
+- 敵が倒れる/スペルカードが切り替わると、実行中のスクリプトは自動的に打ち切られます。
+- 色番号は 0〜8 のインデックス（虹色パレット）。省略時は白系になります。`;
+
+/** チャットAI（ChatGPT/Claude等）に弾幕スクリプトを書いてもらうためのコピペ用プロンプト雛形。 */
+const MINISCRIPT_AI_PROMPT = `あなたは弾幕シューティングゲームの弾幕パターンを設計するエキスパートです。
+以下の「MiniScript」という専用ミニ言語で、指定した弾幕パターンのスクリプトを書いてください。
+
+# MiniScript 仕様
+${MINISCRIPT_HELP_TEXT}
+
+# 依頼内容
+- 作りたい弾幕のイメージ:（ここに自由に書いてください。例：「花びらが渦を巻きながら降ってくるような、綺麗だけど避けやすい弾幕」）
+- 難易度の目安:（例：「初心者でも避けられる程度」「上級者向けの高密度」など）
+- 長さ・ループ回数の目安:（例：「while true で無限ループにして」など）
+
+# 出力形式
+- 説明文は不要です。MiniScript のコードブロックのみを出力してください。
+- 上記の仕様にある関数・構文のみを使ってください（存在しない関数を作らないでください）。
+- そのまま東方プリセットの「弾幕スクリプト」欄に貼り付けて使います。`;
+
 /** 全シーンを1枚のワールドマップに合成する。シーン0を原点にBFS展開。
  *  各シーンの実寸（map の行数・列数）を使うので DQ フィールドなどの非標準サイズも正しく扱う。 */
 function buildWorldLayout(scenes: SceneDef[]): {
@@ -2009,6 +2104,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   }
 
   const [showHistory, setShowHistory] = useState(false);
+  const [showMiniScriptHelp, setShowMiniScriptHelp] = useState(false);
+  const [miniScriptCopyFeedback, setMiniScriptCopyFeedback] = useState<string | null>(null);
   const [hasAutosaveEdit, setHasAutosaveEdit] = useState(false);
   const [autosaveEditData, setAutosaveEditData] = useState<GameManifestDraft | null>(null);
   const [hasAutosavePlay, setHasAutosavePlay] = useState(false);
@@ -16066,7 +16163,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                           <span className="text-xs font-bold text-green-400 flex items-center gap-1">
                             🎯 弾幕・行動スクリプト (MiniScript): <span className="text-white">{selObj.emoji} {selObj.name || 'オブジェクト'}</span>
                           </span>
-                          <button onClick={() => setSelectedObjId(null)} className="text-[10px] text-gray-400 hover:text-gray-200">選択解除</button>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => setShowMiniScriptHelp(true)}
+                              className="px-2 py-1 bg-blue-900/50 hover:bg-blue-800 text-blue-300 border border-blue-700/50 rounded text-[10px] transition shrink-0">
+                              使い方を見る
+                            </button>
+                            <button onClick={() => setSelectedObjId(null)} className="text-[10px] text-gray-400 hover:text-gray-200">選択解除</button>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 text-[10px] text-gray-400">
                           <span>フェーズ:</span>
@@ -17123,12 +17226,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                       className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-purple-400 active:bg-purple-500/10">+ セリフ追加</button>
                                     <div className="flex justify-between items-end mb-0.5 mt-2">
                                       <span className="block text-[10px] text-gray-400 font-bold">弾幕スクリプト（MiniScript）</span>
-                                      {gameData.engine === 'touhou' && (
-                                        <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while' } : c) })}
-                                          className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
-                                          + 12方向弾幕
+                                      <div className="flex items-center gap-1.5">
+                                        <button onClick={() => setShowMiniScriptHelp(true)}
+                                          className="px-1.5 py-0.5 bg-blue-900/50 hover:bg-blue-800 text-blue-300 border border-blue-700/50 rounded text-[9px] transition">
+                                          使い方
                                         </button>
-                                      )}
+                                        {gameData.engine === 'touhou' && (
+                                          <button onClick={() => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while' } : c) })}
+                                            className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
+                                            + 12方向弾幕
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                     <textarea value={card.miniScript}
                                       onChange={e => updObj({ spellCards: (selObj.spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })}
@@ -18306,12 +18415,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                       <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, dialogue: [...(c.dialogue ?? []), { speaker: '', text: '', imageX: 0, imageY: 0, imageScale: 1 }] } : c) })} className="inline-flex items-center px-3 py-2 rounded-md text-[11px] text-purple-400 active:bg-purple-500/10">+ セリフ追加</button>
                                       <div className="flex justify-between items-end mb-0.5">
                                         <span className="block text-[10px] text-gray-400 font-bold">弾幕スクリプト（MiniScript）</span>
-                                        {gameData.engine === 'touhou' && (
-                                          <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while' } : c) })}
-                                            className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
-                                            + 12方向弾幕
+                                        <div className="flex items-center gap-1.5">
+                                          <button onClick={() => setShowMiniScriptHelp(true)}
+                                            className="px-1.5 py-0.5 bg-blue-900/50 hover:bg-blue-800 text-blue-300 border border-blue-700/50 rounded text-[9px] transition">
+                                            使い方
                                           </button>
-                                        )}
+                                          {gameData.engine === 'touhou' && (
+                                            <button onClick={() => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while' } : c) })}
+                                              className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
+                                              + 12方向弾幕
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                       <textarea value={card.miniScript} onChange={e => updObj({ spellCards: (curList[0].spellCards ?? []).map((c, j) => j === ci ? { ...c, miniScript: e.target.value } : c) })} placeholder="// MiniScript 記述欄" rows={5} className="w-full bg-gray-950 border border-gray-800 focus:border-green-500 rounded px-1.5 py-1 text-[10px] text-green-300 font-mono outline-none resize-y transition-colors" />
                                       <p className="text-[9px] text-gray-500">カットイン設定</p>
@@ -18489,12 +18604,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <div className="space-y-1">
                                   <div className="flex justify-between items-end">
                                     <span className="block text-[10px] text-gray-400 font-bold">動き・弾幕スクリプト（MiniScript）</span>
-                                    {gameData.engine === 'touhou' && (
-                                      <button onClick={() => updObj({ miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while', bullet: 'none' })}
-                                        className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
-                                        + 12方向弾幕
+                                    <div className="flex items-center gap-1.5">
+                                      <button onClick={() => setShowMiniScriptHelp(true)}
+                                        className="px-1.5 py-0.5 bg-blue-900/50 hover:bg-blue-800 text-blue-300 border border-blue-700/50 rounded text-[9px] transition">
+                                        使い方
                                       </button>
-                                    )}
+                                      {gameData.engine === 'touhou' && (
+                                        <button onClick={() => updObj({ miniScript: 'moveTo(W/2, 80, 90)\nrot = 0\nwhile true\n  for i in range(0, 11, 1)\n    shot(rot + i * 30, 2.5, 4)\n  end for\n  rot = rot + 7\n  wait(4)\nend while', bullet: 'none' })}
+                                          className="px-1.5 py-0.5 bg-green-900/50 hover:bg-green-800 text-green-300 border border-green-700/50 rounded text-[9px] transition">
+                                          + 12方向弾幕
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                   <textarea value={activeSelObj.miniScript ?? ''}
                                     onChange={e => { const v = e.target.value; updObj(v ? { miniScript: v, bullet: 'none' } : { miniScript: undefined }); }}
@@ -19324,6 +19445,58 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         onRestore={handleRestoreHistory}
         getCurrentData={getCurrentDataForHistory}
       />
+      {/* ── 弾幕スクリプト（MiniScript）解説モーダル ── */}
+      {showMiniScriptHelp && (() => {
+        const copyText = (label: string, text: string) => {
+          navigator.clipboard?.writeText(text)
+            .then(() => { setMiniScriptCopyFeedback(label); setTimeout(() => setMiniScriptCopyFeedback(null), 1800); })
+            .catch(() => { setMiniScriptCopyFeedback(`${label}のコピーに失敗しました`); setTimeout(() => setMiniScriptCopyFeedback(null), 1800); });
+        };
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 bg-black/75 backdrop-blur-sm animate-fadeIn select-none font-sans"
+            onClick={() => setShowMiniScriptHelp(false)}>
+            <div className="w-full max-w-lg bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col max-h-[88vh]"
+              onClick={e => e.stopPropagation()}>
+              <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between shrink-0">
+                <h4 className="text-sm font-bold text-gray-100 flex items-center gap-2">弾幕スクリプト（MiniScript）の解説</h4>
+                <button onClick={() => setShowMiniScriptHelp(false)} className="text-gray-500 hover:text-white text-lg leading-none px-1">✕</button>
+              </div>
+              <div className="px-4 py-3 overflow-y-auto space-y-3">
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  東方プリセットの敵・ボスの「弾幕スクリプト」欄に書ける専用ミニ言語の説明です。
+                  下のボタンから全文をコピーできるので、そのままメモやチャットAIへの相談に使えます。
+                </p>
+                <pre className="whitespace-pre-wrap break-words text-[10.5px] leading-relaxed text-green-300 bg-gray-950 border border-gray-800 rounded-lg p-3 font-mono">
+                  {MINISCRIPT_HELP_TEXT}
+                </pre>
+                <div className="border-t border-gray-800 pt-3 space-y-1.5">
+                  <p className="text-[11px] font-bold text-yellow-300">チャットAIに弾幕を作ってもらう</p>
+                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                    下のボタンでコピーできるプロンプトには、この解説全文と依頼欄がまとめてあります。
+                    ChatGPT や Claude などに貼り付けて「作りたい弾幕のイメージ」を書き足すだけで、
+                    そのままこの欄に貼り付けられる MiniScript コードを書いてもらえます。
+                  </p>
+                </div>
+              </div>
+              <div className="px-4 py-3 border-t border-gray-800 shrink-0 space-y-2">
+                {miniScriptCopyFeedback && (
+                  <p className="text-[10px] text-green-400 text-center">{miniScriptCopyFeedback === '解説' || miniScriptCopyFeedback === 'AI依頼プロンプト' ? `${miniScriptCopyFeedback}をコピーしました` : miniScriptCopyFeedback}</p>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => copyText('解説', MINISCRIPT_HELP_TEXT)}
+                    className="flex-1 px-3 py-2 rounded-lg text-[11px] font-bold text-blue-200 bg-blue-900/50 hover:bg-blue-800 border border-blue-700/50 transition">
+                    解説を全文コピー
+                  </button>
+                  <button onClick={() => copyText('AI依頼プロンプト', MINISCRIPT_AI_PROMPT)}
+                    className="flex-1 px-3 py-2 rounded-lg text-[11px] font-bold text-yellow-200 bg-yellow-900/50 hover:bg-yellow-800 border border-yellow-700/50 transition">
+                    AI依頼プロンプトをコピー
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
