@@ -16,11 +16,12 @@ import {
 	Music,
 	Play,
 	Plus,
+	Redo2,
 	Shapes,
-	SlidersHorizontal,
 	Sparkles,
 	Trash2,
 	Type,
+	Undo2,
 	X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -106,18 +107,18 @@ import type {
 	MvEffectTemplateDef,
 	MvEffectTemplateParams,
 } from "@/lib/mv-effect-templates";
-import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
-import MvShapeMotionModal from "./MvShapeMotionModal";
-import { resolveSceneModulators } from "@/lib/mv-shape-motion";
 import {
 	EMPTY_SONG,
 	type MvSong,
 	parseMvSong,
 	resolveLyricLines,
 } from "@/lib/mv-engine";
+import { resolveSceneModulators } from "@/lib/mv-shape-motion";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
+import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
 import MvPlayer, { type MvPlayerHandle } from "./MvPlayer";
+import MvShapeMotionModal from "./MvShapeMotionModal";
 import { buildMvPreset, MV_PRESETS } from "./mv-presets";
 import VolumeControl from "./VolumeControl";
 
@@ -131,17 +132,6 @@ function formatMinSecMs(sec: number): string {
 
 type Tab = "preset" | "song" | "stage" | "layers" | "lyrics" | "sections";
 
-/**
- * 編集モード。
- * かんたん = 「見本を選ぶ → 曲を入れる → 絵を差し替える」だけで完成する3タブ。
- * くわしい = レイヤー・歌詞・場面まで自分で組む。
- * 既定はかんたん。MMLエディタの シンプル/上級者 切替と同じ考え方で、
- * はじめて触る人がいきなり全部の設定に出会わないようにする。
- */
-type EditMode = "easy" | "detail";
-
-const EASY_TABS: Tab[] = ["preset", "song", "stage"];
-
 const TABS: { id: Tab; label: string }[] = [
 	{ id: "preset", label: "見本" },
 	{ id: "song", label: "曲" },
@@ -150,8 +140,6 @@ const TABS: { id: Tab; label: string }[] = [
 	{ id: "lyrics", label: "歌詞" },
 	{ id: "sections", label: "場面" },
 ];
-
-const MODE_STORAGE_KEY = "unj_mvmaker_mode";
 
 interface MvMakerProps {
 	onClose: () => void;
@@ -685,7 +673,6 @@ export default function MvMaker({
 		() => initialManifest ?? buildMvPreset("pianoRoll"),
 	);
 	const [tab, setTab] = useState<Tab>(initialManifest ? "song" : "preset");
-	const [editMode, setEditMode] = useState<EditMode>("easy");
 	const [presetName, setPresetName] = useState<string | null>(null);
 	const [lyricsBulkText, setLyricsBulkText] = useState("");
 	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -725,29 +712,83 @@ export default function MvMaker({
 		manifestRef.current = manifest;
 	}, [manifest]);
 
-	// 前回選んだ編集モードを覚えておく（毎回切り替え直させない）
+	const visibleTabs = TABS;
+
+	// ── 編集の取り消し／やり直し（Undo / Redo）─────────────────────
+	//  manifest を書き換える操作（update）の直前にスナップショットを積む。1回の update = 1操作。
+	const UNDO_LIMIT = 50;
+	const undoStackRef = useRef<MvManifest[]>([]);
+	const redoStackRef = useRef<MvManifest[]>([]);
+	const [undoDepth, setUndoDepth] = useState(0);
+	const [redoDepth, setRedoDepth] = useState(0);
+
+	const pushUndo = useCallback(() => {
+		const stack = undoStackRef.current;
+		stack.push(JSON.parse(JSON.stringify(manifestRef.current)));
+		if (stack.length > UNDO_LIMIT) stack.shift();
+		redoStackRef.current = [];
+		setUndoDepth(stack.length);
+		setRedoDepth(0);
+	}, []);
+
+	/** プリセット差し替えや履歴からの復元など、undo対象にしない大きな置き換えの前に呼ぶ。 */
+	const resetEditHistory = useCallback(() => {
+		undoStackRef.current = [];
+		redoStackRef.current = [];
+		setUndoDepth(0);
+		setRedoDepth(0);
+	}, []);
+
+	const undoEdit = useCallback(() => {
+		const stack = undoStackRef.current;
+		const snap = stack.pop();
+		if (!snap) return;
+		redoStackRef.current.push(JSON.parse(JSON.stringify(manifestRef.current)));
+		manifestRef.current = snap;
+		setManifest(snap);
+		setUndoDepth(stack.length);
+		setRedoDepth(redoStackRef.current.length);
+	}, []);
+
+	const redoEdit = useCallback(() => {
+		const stack = redoStackRef.current;
+		const snap = stack.pop();
+		if (!snap) return;
+		undoStackRef.current.push(JSON.parse(JSON.stringify(manifestRef.current)));
+		manifestRef.current = snap;
+		setManifest(snap);
+		setUndoDepth(undoStackRef.current.length);
+		setRedoDepth(stack.length);
+	}, []);
+
+	// デスクトップ: Ctrl+Z / Ctrl+Y（Ctrl+Shift+Z）。入力欄にフォーカス中は横取りしない。
 	useEffect(() => {
-		const saved =
-			typeof localStorage !== "undefined"
-				? localStorage.getItem(MODE_STORAGE_KEY)
-				: null;
-		if (saved === "detail") Promise.resolve().then(() => setEditMode("detail"));
-	}, []);
+		const onKey = (e: KeyboardEvent) => {
+			const t = e.target as HTMLElement | null;
+			const tag = t?.tagName;
+			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable)
+				return;
+			if (!(e.ctrlKey || e.metaKey)) return;
+			const k = e.key.toLowerCase();
+			if (k === "z" && !e.shiftKey) {
+				e.preventDefault();
+				undoEdit();
+			} else if (k === "y" || (k === "z" && e.shiftKey)) {
+				e.preventDefault();
+				redoEdit();
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [undoEdit, redoEdit]);
 
-	const changeEditMode = (next: EditMode) => {
-		setEditMode(next);
-		if (typeof localStorage !== "undefined")
-			localStorage.setItem(MODE_STORAGE_KEY, next);
-		// かんたんへ戻したとき、詳しい側のタブに居たら見た目タブへ寄せる
-		if (next === "easy" && !EASY_TABS.includes(tab)) setTab("stage");
-	};
-
-	const visibleTabs =
-		editMode === "easy" ? TABS.filter((t) => EASY_TABS.includes(t.id)) : TABS;
-
-	const update = useCallback((patch: (m: MvManifest) => MvManifest) => {
-		setManifest((prev) => patch(prev));
-	}, []);
+	const update = useCallback(
+		(patch: (m: MvManifest) => MvManifest) => {
+			pushUndo();
+			setManifest((prev) => patch(prev));
+		},
+		[pushUndo],
+	);
 
 	const updateLayer = useCallback(
 		(id: string, patch: (l: MvLayer) => MvLayer) => {
@@ -1215,6 +1256,25 @@ export default function MvMaker({
 		if (selectedLayerId === id) setSelectedLayerId(null);
 	};
 
+	/** 選択中レイヤーと同じ設定のまま、その直下（表示順で1つ後ろ）に複製する。 */
+	const duplicateLayer = (id: string) => {
+		const newId = mvUid("layer");
+		update((m) => {
+			const index = m.layers.findIndex((l) => l.id === id);
+			if (index === -1) return m;
+			const src = m.layers[index];
+			const clone: MvLayer = {
+				...src,
+				id: newId,
+				name: src.name ? `${src.name}のコピー` : undefined,
+			};
+			const layers = [...m.layers];
+			layers.splice(index + 1, 0, clone);
+			return { ...m, layers };
+		});
+		setSelectedLayerId(newId);
+	};
+
 	const swapLayers = (i: number, j: number) => {
 		update((m) => {
 			const layers = [...m.layers];
@@ -1288,6 +1348,7 @@ export default function MvMaker({
 								)
 							)
 								return;
+							resetEditHistory();
 							setManifest(p.build());
 							setPresetName(p.name);
 							setSelectedLayerId(null);
@@ -1594,12 +1655,6 @@ export default function MvMaker({
 					}
 				/>
 			</div>
-
-			{editMode === "easy" && (
-				<Hint>
-					もっと細かく作り込みたいときは、右上のつまみアイコン（くわしい）を押すとレイヤー・歌詞・場面のタブが増えます。
-				</Hint>
-			)}
 		</div>
 	);
 
@@ -3179,6 +3234,13 @@ export default function MvMaker({
 									</button>
 								</div>
 								<button
+									onClick={() => duplicateLayer(layer.id)}
+									title="同じ設定で直下に複製"
+									className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gray-700 text-gray-300 transition-colors hover:bg-gray-600"
+								>
+									<Copy size={16} />
+								</button>
+								<button
 									onClick={() => removeLayer(layer.id)}
 									className={DEL_BTN_CLASS}
 								>
@@ -4162,25 +4224,24 @@ export default function MvMaker({
 				<span className="min-w-0 flex-1 truncate text-[11px] text-gray-400">
 					MV作成
 				</span>
-				{/* 編集モードは常に見える位置に置く（タブ行に入れると狭い画面で流れて押せなくなる） */}
-				<div className="flex shrink-0 items-center rounded-full bg-gray-800 p-0.5">
+				<div className="flex shrink-0 items-center gap-1">
 					<button
-						onClick={() => changeEditMode("easy")}
-						aria-label="かんたん"
-						aria-pressed={editMode === "easy"}
-						title="かんたん（見本・曲・見た目だけ）"
-						className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${editMode === "easy" ? "bg-gray-200 text-gray-900" : "text-gray-400"}`}
+						onClick={undoEdit}
+						disabled={undoDepth === 0}
+						aria-label="元に戻す"
+						title={`元に戻す（Ctrl+Z）${undoDepth ? ` ${undoDepth}` : ""}`}
+						className="grid h-8 w-8 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-30"
 					>
-						<Sparkles size={14} />
+						<Undo2 size={14} />
 					</button>
 					<button
-						onClick={() => changeEditMode("detail")}
-						aria-label="くわしい"
-						aria-pressed={editMode === "detail"}
-						title="くわしい（レイヤー・歌詞・場面も編集）"
-						className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${editMode === "detail" ? "bg-gray-200 text-gray-900" : "text-gray-400"}`}
+						onClick={redoEdit}
+						disabled={redoDepth === 0}
+						aria-label="やり直す"
+						title={`やり直す（Ctrl+Y）${redoDepth ? ` ${redoDepth}` : ""}`}
+						className="grid h-8 w-8 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700 disabled:opacity-30"
 					>
-						<SlidersHorizontal size={14} />
+						<Redo2 size={14} />
 					</button>
 				</div>
 				<div className="shrink-0">
@@ -4211,8 +4272,10 @@ export default function MvMaker({
 					<div className="flex gap-2">
 						<button
 							onClick={() => {
-								if (autosaveDataRef.current)
+								if (autosaveDataRef.current) {
+									resetEditHistory();
 									setManifest(autosaveDataRef.current);
+								}
 								setHasAutosave(false);
 								clearAutosave(storageKey);
 							}}
@@ -4286,7 +4349,10 @@ export default function MvMaker({
 				onClose={() => setShowHistory(false)}
 				storageKey={storageKey}
 				type="mv"
-				onRestore={(restored: MvManifest) => setManifest(restored)}
+				onRestore={(restored: MvManifest) => {
+					resetEditHistory();
+					setManifest(restored);
+				}}
 				getCurrentData={() => manifestRef.current}
 			/>
 
