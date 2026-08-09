@@ -20,6 +20,11 @@ import { api } from "@/lib/api";
 import { ensureSessionId } from "@/lib/session";
 import { AnonymousUser } from "@/lib/types";
 
+// 専ブラ(2ch専用ブラウザ)向けの配信URL。app/bbs/subject.txt/route.ts が実体。
+// 本番デプロイ先(Cloudflare Workers)は固定ドメインなので直書きしている。
+const SENBURA_SUBJECT_URL =
+	"https://unj-reze.onjmin.workers.dev/bbs/subject.txt";
+
 interface SettingsPanelProps {
 	userId: string;
 	bbsMode: string;
@@ -185,6 +190,28 @@ export default function SettingsPanel({
 							SNSモード
 						</button>
 					</div>
+					{bbsMode === "掲示板モード" && (
+						<div className="space-y-1.5 bg-gray-100/5 border border-gray-800 rounded-lg px-3 py-2.5">
+							<p className="text-[11px] font-bold text-gray-300">専ブラ用URL</p>
+							<p className="text-[9px] text-gray-500">
+								2ch専用ブラウザにはこのURLを板として登録してください。
+							</p>
+							<div className="flex items-center gap-2">
+								<code className="flex-1 text-[10px] text-gray-300 break-all select-all">
+									{SENBURA_SUBJECT_URL}
+								</code>
+								<button
+									onClick={() =>
+										navigator.clipboard.writeText(SENBURA_SUBJECT_URL)
+									}
+									className="p-1.5 rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:bg-gray-100/5 shrink-0"
+									aria-label="URLをコピー"
+								>
+									<Copy size={12} />
+								</button>
+							</div>
+						</div>
+					)}
 				</div>
 
 				<div className="h-px bg-gray-800" />

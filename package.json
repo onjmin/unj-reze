@@ -20,6 +20,7 @@
     "@onjmin/dtm": "0.1.75",
     "@onjmin/oekaki": "1.0.62",
     "@rpgja/rpgen-map": "1.1.7",
+    "encoding-japanese": "2.2.0",
     "lucide-react": "1.27.0",
     "lz-string": "1.5.0",
     "next": "16.2.7",
