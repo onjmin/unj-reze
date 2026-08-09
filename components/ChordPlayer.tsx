@@ -26,7 +26,7 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
 	useEffect(
 		() =>
 			subscribeMasterVolume(() =>
-				instRef.current?.setVolume(applyMasterVolume(50)),
+				instRef.current?.setVolume(applyMasterVolume(100)),
 			),
 		[],
 	);
@@ -43,7 +43,7 @@ export default function ChordPlayer({ chords }: ChordPlayerProps) {
 		getStudio().then((studio) => {
 			if (disposed || !el) return;
 			inst = studio.mountChordPlayer(el, chords, {
-				volume: applyMasterVolume(50),
+				volume: applyMasterVolume(100),
 				onStop: () => {
 					claimedRef.current = false;
 					focusRef.current.releaseFocus(id);

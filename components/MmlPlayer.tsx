@@ -27,7 +27,7 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
 	useEffect(
 		() =>
 			subscribeMasterVolume(() =>
-				instRef.current?.setVolume(applyMasterVolume(50)),
+				instRef.current?.setVolume(applyMasterVolume(100)),
 			),
 		[],
 	);
@@ -49,7 +49,7 @@ export default function MmlPlayer({ mml }: MmlPlayerProps) {
 				// これを volume 側にだけ焼き込むと、その後 setVolume() で masterVolume を
 				// 変更しても trackVolume が古いまま残り、二重スケーリング/音量ズレが起きる。
 				volume: 100,
-				masterVolume: applyMasterVolume(50),
+				masterVolume: applyMasterVolume(100),
 				onStop: () => {
 					claimedRef.current = false;
 					focusRef.current.releaseFocus(id);
