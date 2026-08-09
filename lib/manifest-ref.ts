@@ -56,14 +56,15 @@ function sanitizeToken(value: unknown): string | undefined {
  * 呼び出し側は null を 400 として返すこと。
  */
 export function parseManifestRef(
-	body: any,
+	body: unknown,
 	kind: "mv" | "game",
 ): ParsedManifestRef | null {
-	if (!isValidPayloadUrl(body?.manifestUrl, kind)) return null;
+	const b = body as Record<string, unknown> | null | undefined;
+	if (!isValidPayloadUrl(b?.manifestUrl, kind)) return null;
 	return {
-		manifestUrl: body.manifestUrl,
-		manifestDeleteId: sanitizeToken(body.manifestDeleteId),
-		manifestDeleteHash: sanitizeToken(body.manifestDeleteHash),
+		manifestUrl: b!.manifestUrl as string,
+		manifestDeleteId: sanitizeToken(b!.manifestDeleteId),
+		manifestDeleteHash: sanitizeToken(b!.manifestDeleteHash),
 	};
 }
 
@@ -76,22 +77,23 @@ export function parseManifestRef(
  * 必ず undefined を返すこと。
  */
 export function parseMmlRef(
-	body: any,
+	body: unknown,
 ):
 	| { mmlUrl?: string; mmlDeleteId?: string; mmlDeleteHash?: string }
 	| null
 	| undefined {
+	const b = body as Record<string, unknown> | null | undefined;
 	if (
-		body?.mmlUrl === undefined ||
-		body?.mmlUrl === null ||
-		body?.mmlUrl === ""
+		b?.mmlUrl === undefined ||
+		b?.mmlUrl === null ||
+		b?.mmlUrl === ""
 	)
 		return undefined;
-	if (!isValidPayloadUrl(body.mmlUrl, "mml")) return null;
+	if (!isValidPayloadUrl(b.mmlUrl, "mml")) return null;
 	return {
-		mmlUrl: body.mmlUrl,
-		mmlDeleteId: sanitizeToken(body.mmlDeleteId),
-		mmlDeleteHash: sanitizeToken(body.mmlDeleteHash),
+		mmlUrl: b!.mmlUrl as string,
+		mmlDeleteId: sanitizeToken(b!.mmlDeleteId),
+		mmlDeleteHash: sanitizeToken(b!.mmlDeleteHash),
 	};
 }
 

@@ -507,13 +507,14 @@ export default function ContentPicker({
 	useEffect(() => {
 		if (mode !== "bgm" || bgmTab !== "mmlPost") return;
 		let alive = true;
+		const syncUpdates = new Map<string, number>();
 		for (const p of mmlPosts) {
 			const inline = extractMmlFromContent(p.content);
 			const sizeKey = inline ? `post:${p.id}` : p.mmlUrl;
 			if (!sizeKey || mmlSizes.has(sizeKey)) continue;
 			if (inline) {
 				const bytes = new TextEncoder().encode(inline).length;
-				setMmlSizes((prev) => new Map(prev).set(sizeKey, bytes));
+				syncUpdates.set(sizeKey, bytes);
 				continue;
 			}
 			if (mmlSizeInFlightRef.current.has(sizeKey)) continue;
@@ -522,6 +523,16 @@ export default function ContentPicker({
 				mmlSizeInFlightRef.current.delete(sizeKey);
 				if (!alive || bytes === null) return;
 				setMmlSizes((prev) => new Map(prev).set(sizeKey, bytes));
+			});
+		}
+		if (syncUpdates.size > 0) {
+			queueMicrotask(() => {
+				if (!alive) return;
+				setMmlSizes((prev) => {
+					const next = new Map(prev);
+					for (const [k, v] of syncUpdates) next.set(k, v);
+					return next;
+				});
 			});
 		}
 		return () => {

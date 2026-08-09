@@ -7,10 +7,16 @@ export const undertale: PresetData = {
 	id: "undertale",
 	name: "アンダー(RPG)",
 	engine: "rpg",
+	gravity: 0,
+	friction: 0,
+	sfx: {},
 	player: {
 		emoji: "😐",
 		color: "#ffea00",
 		speed: 3,
+		jumpPower: 5,
+		w: 32,
+		h: 32,
 		start: { x: 3, y: 3 },
 	},
 	tiles: {

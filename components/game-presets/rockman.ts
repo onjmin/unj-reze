@@ -9,6 +9,7 @@ export const rockman: PresetData = {
 	engine: "action",
 	gravity: 0.25,
 	friction: 0.1,
+	sfx: {},
 	player: {
 		emoji: "👦",
 		color: "#0073F6",

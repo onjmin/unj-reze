@@ -22,6 +22,7 @@ export const mario: PresetData = {
 	engine: "action",
 	gravity: 0.25,
 	friction: 0.1,
+	sfx: {},
 	player: {
 		emoji: "👨🏻",
 		color: "#ff0000",

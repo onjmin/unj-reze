@@ -8,13 +8,19 @@ const MON = {
 };
 
 export const onjReze: PresetData = {
-	id: "onj-reze",
+	id: "onjReze",
 	name: "おんJ(レゼ)",
 	engine: "onjReze",
+	gravity: 0,
+	friction: 0,
+	sfx: {},
 	player: {
 		emoji: "彡",
 		color: "#ffaa00",
 		speed: 3,
+		jumpPower: 5,
+		w: 32,
+		h: 32,
 		start: { x: 3, y: 3 },
 	},
 	tiles: {

@@ -486,7 +486,7 @@ export interface DialogueLine {
 /** ステージのフェーズ定義。phases 配列の順に進行する。 */
 export interface StagePhase {
 	id: string;
-	kind: "wave" | "boss"; // wave=雑魚戦、boss=ボス（HP バー表示）
+	kind: "wave" | "boss" | "rpg" | "stage";
 	label?: string; // HUD 表示名
 	/** このフェーズ開始前に流すセリフ */
 	dialogue?: DialogueLine[];
@@ -581,6 +581,8 @@ export interface ObjectDef {
 	editorSprite?: string;
 	/** オブジェクト種別（エディタで表示項目を切り替え）。未指定=enemy。 */
 	objType?: ObjType;
+	isEnemy?: boolean;
+	rpgEncounter?: boolean | { bgImg?: string; bgType?: string; music?: string };
 	/** ターン制戦闘用ステータス（rpg + battle のとき使用。未指定なら hp から自動算出）。 */
 	name?: string;
 	atk?: number;

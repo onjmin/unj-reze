@@ -11,10 +11,16 @@ export const deltarune: PresetData = {
 	id: "deltarune",
 	name: "デルタ(RPG)",
 	engine: "rpg",
+	gravity: 0,
+	friction: 0,
+	sfx: {},
 	player: {
 		emoji: "👦",
 		color: "#5c94fc",
 		speed: 3,
+		jumpPower: 5,
+		w: 32,
+		h: 32,
 		start: { x: 3, y: 3 },
 	},
 	tiles: {

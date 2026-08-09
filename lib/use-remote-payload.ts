@@ -29,12 +29,8 @@ function useRemote<T>(
 	});
 
 	useEffect(() => {
-		if (!url) {
-			setState({ data: null, loading: false, error: null });
-			return;
-		}
+		if (!url) return;
 		let disposed = false;
-		setState({ data: null, loading: true, error: null });
 		load(url)
 			.then((data) => {
 				if (!disposed) setState({ data, loading: false, error: null });
@@ -55,7 +51,7 @@ function useRemote<T>(
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [url]);
 
-	return state;
+	return url ? state : { data: null, loading: false, error: null };
 }
 
 /** manifest（JSON）を取ってくる */
