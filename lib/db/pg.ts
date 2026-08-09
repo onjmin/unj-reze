@@ -289,6 +289,7 @@ function threadRowToPost(row: any, replies: DbPost[] = []): DbPost {
 			row.dat_key != null
 				? Number(row.dat_key)
 				: Math.floor(new Date(toIso(row.created_at)).getTime() / 1000),
+		title: row.title || undefined,
 		createdAt: toIso(row.created_at),
 		time: formatRelativeTime(toIso(row.created_at)),
 		content: disp.content,

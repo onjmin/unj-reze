@@ -63,8 +63,22 @@ export function datKeyOf(post: { datKey?: number; createdAt: string }): number {
 	return post.datKey ?? Math.floor(new Date(post.createdAt).getTime() / 1000);
 }
 
-/** タイトルは本文の1行目のみ(datのTITLE仕様どおり)。 */
+/**
+ * 本文の1行目をフォールバックのタイトルとして使う(datのTITLE仕様の素朴な近似)。
+ * スレの正式なスレタイは DbPost.title（threads.title列）であり、これはあくまで
+ * title列が空/未設定のとき（reze発の投稿等、body先頭行=タイトルの想定のもの）用。
+ */
 export function firstLineTitle(content: string): string {
 	const line = (content || "").split(/\r\n|\r|\n/)[0].trim();
 	return line || "無題";
+}
+
+/**
+ * スレタイの解決。unj純正UIは本文とは別にスレタイトルを入力できる（threads.title列）ため、
+ * 本文(content_text)の1行目とは食い違いうる。subject.txt/datのTITLE欄は必ずこちらを使う
+ * こと — content から再算出すると、タイトル欄と本文が違う投稿で誤ったスレタイが出る。
+ */
+export function titleOf(post: { title?: string; content: string }): string {
+	const t = (post.title || "").trim();
+	return t || firstLineTitle(post.content);
 }

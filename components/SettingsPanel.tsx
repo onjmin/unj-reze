@@ -20,10 +20,11 @@ import { api } from "@/lib/api";
 import { ensureSessionId } from "@/lib/session";
 import { AnonymousUser } from "@/lib/types";
 
-// 専ブラ(2ch専用ブラウザ)向けの配信URL。app/bbs/subject.txt/route.ts が実体。
+// 専ブラ(2ch専用ブラウザ)向けの配信URL。app/unj/subject.txt/route.ts が実体。
+// "unj"は板ID(board_id:1 うんでも実況J。unjリポジトリのsrc/common/request/board.ts参照)。
 // 本番デプロイ先(Cloudflare Workers)は固定ドメインなので直書きしている。
 const SENBURA_SUBJECT_URL =
-	"https://unj-reze.onjmin.workers.dev/bbs/subject.txt";
+	"https://unj-reze.onjmin.workers.dev/unj/subject.txt";
 
 interface SettingsPanelProps {
 	userId: string;

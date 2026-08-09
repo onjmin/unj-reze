@@ -36,6 +36,12 @@ export interface DbPost {
 	 * 未設定(旧データ等)ならdat/subject.txtルート側でcreatedAtから都度算出する。
 	 */
 	datKey?: number;
+	/**
+	 * スレッドタイトル(threads.title列)。unj純正UIは本文(content)とは別にこれを
+	 * 入力できるため、本文の1行目と食い違いうる。専ブラのTITLE欄は必ずこちらを
+	 * 使うこと（lib/bbs/format.ts:titleOf）。レスには無い＝OPのみ。
+	 */
+	title?: string;
 	createdAt: string;
 	time: string;
 	content: string;

@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { firstLineTitle, formatDatLine } from "@/lib/bbs/format";
+import { formatDatLine, titleOf } from "@/lib/bbs/format";
 import { utf8ToSjisBytes } from "@/lib/bbs/sjis";
 import { db } from "@/lib/db";
-// 専ブラ対応: GET /bbs/dat/スレ番.dat
+// 専ブラ対応: GET /unj/dat/スレ番.dat
+// 板ID("unj" = board_id:1 うんでも実況J。C:\_own\git\_users\onjmin\unj\src\common\request\board.ts 参照)配下に配置。
 // 仕様: https://scrapbox.io/2chtypebbs/dat
 // フォルダ名は [id] だがURLは `123.dat` の1セグメントなので id には ".dat" が付いたまま来る。
 // ファイル名(数値)はDBの連番id(threadId*2等)ではなくDbPost.datKey(Unixエポック秒)。
@@ -53,7 +54,7 @@ export async function GET(
 		}
 	}
 
-	const title = firstLineTitle(op.content);
+	const title = titleOf(op);
 	const lines = [
 		formatDatLine(op, true, title),
 		...replies.map((r) => formatDatLine(r, false, title)),
