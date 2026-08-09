@@ -1525,14 +1525,43 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 	if (lines.length === 0) return;
 
 	const hold = layer.holdBars ?? 2;
-	// いま表示中の行 = 開始小節を過ぎていて、まだ hold 小節以内のもの
-	const activeIdx: number[] = [];
-	for (let i = 0; i < lines.length; i++) {
-		if (lines[i].bar <= d.bar && d.bar - lines[i].bar < hold) activeIdx.push(i);
-	}
-	if (activeIdx.length === 0) return;
 
-	// 最新の行を先頭に、残像段数ぶんだけ古い行を薄く残す
+	// いま何行目まで来ているか（開始小節を過ぎた最後の行）
+	let curIdx = -1;
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].bar <= d.bar) curIdx = i;
+		else break;
+	}
+	if (curIdx < 0) return;
+
+	// `resetBefore` の行は「積み上げを全部消してからここで出し直す」区切り。
+	// 4行なら4行まで積んだあと、次の区切りが来たらまとめて消えて1行目から始まる
+	// ——という積み方をしたいので、直近の区切りから今の行までを1つのまとまりとして扱う。
+	let groupStart = 0;
+	for (let i = curIdx; i >= 0; i--) {
+		if (lines[i].resetBefore) {
+			groupStart = i;
+			break;
+		}
+	}
+	let groupEnd = lines.length;
+	for (let i = curIdx + 1; i < lines.length; i++) {
+		if (lines[i].resetBefore) {
+			groupEnd = i;
+			break;
+		}
+	}
+
+	// まとまり全体が消えるタイミング＝次の区切りの開始小節（次が無ければ最後の行のhold明け）。
+	const groupEndBar =
+		groupEnd < lines.length ? lines[groupEnd].bar : lines[groupEnd - 1].bar + hold;
+	const groupFadeOut = clamp01((groupEndBar - d.bar) / 0.5);
+	if (groupFadeOut <= 0.01) return;
+
+	// まとまりの中で今出ている行ぜんぶ。最新を先頭に、古いほど後ろ（残像段数の深さに使う）。
+	const activeIdx: number[] = [];
+	for (let i = groupStart; i <= curIdx; i++) activeIdx.push(i);
+	if (activeIdx.length === 0) return;
 	const shown = activeIdx.slice(-(layer.afterimage + 1)).reverse();
 	const size = layer.size;
 
@@ -1542,13 +1571,13 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 	shown.forEach((idx, depth) => {
 		const line = lines[idx];
 		const age = d.bar - line.bar;
-		// 出だしは 1/8 小節でフェードイン、終わりぎわは 1/2 小節でフェードアウト
+		// 出だしは 1/8 小節でフェードイン。終わりぎわは行ごとではなく、
+		// まとまり全体が次の区切りで一斉に消える(groupFadeOut)。
 		const fadeIn = clamp01(age / 0.125);
-		const fadeOut = clamp01((hold - age) / 0.5);
 		// 古い列は「読めないが確かにある」濃さで残す。1/depth だと3列目で消えてしまい、
 		// 参考動画のように10列ぶん積み上がった壁にならないので、等比で緩やかに落とす。
 		const depthFade = depth === 0 ? 1 : 0.42 * Math.pow(0.84, depth - 1);
-		const alpha = fadeIn * fadeOut * depthFade;
+		const alpha = fadeIn * groupFadeOut * depthFade;
 		if (alpha <= 0.01) return;
 
 		ctx.globalAlpha = alpha;
@@ -1798,6 +1827,28 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 				}
 			} catch {
 				// 入力途中の壊れたパスは黙って飛ばす
+			}
+		} else if (layer.form === "doubleFrame") {
+			// 内外2本の正方形の枠が小節ごとに軽く息をする（0〜1周期でふわっと拡がって戻る）
+			const barPhase = d.bar - Math.floor(d.bar);
+			const breathe = 1 + 0.06 * Math.sin(barPhase * Math.PI);
+			const outer = radius * breathe;
+			const inner = outer * 0.8;
+			ctx.beginPath();
+			ctx.rect(-outer, -outer, outer * 2, outer * 2);
+			ctx.stroke();
+			ctx.beginPath();
+			ctx.rect(-inner, -inner, inner * 2, inner * 2);
+			ctx.stroke();
+		} else if (layer.form === "ripple") {
+			// 輪が小節の頭から外へ広がって消える。1小節でぴったりループする。
+			const barPhase = d.bar - Math.floor(d.bar);
+			const rippleAlpha = clamp01(1 - barPhase);
+			if (rippleAlpha > 0.004) {
+				ctx.globalAlpha = baseAlpha * opacity * rippleAlpha;
+				ctx.beginPath();
+				ctx.arc(0, 0, Math.max(0.5, radius * barPhase), 0, Math.PI * 2);
+				ctx.stroke();
 			}
 		} else {
 			traceForm(ctx, layer, radius, sides);

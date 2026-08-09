@@ -118,6 +118,9 @@ import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
 import MvPlayer, { type MvPlayerHandle } from "./MvPlayer";
+import MvShapeFormPickerModal, {
+	ShapeFormPreview as ShapeFormThumb,
+} from "./MvShapeFormPickerModal";
 import MvShapeMotionModal from "./MvShapeMotionModal";
 import { buildMvPreset, MV_PRESETS } from "./mv-presets";
 import VolumeControl from "./VolumeControl";
@@ -447,9 +450,6 @@ function noteLight(layer: MvVisualizerLayer): MvNoteLight {
 		? DEFAULT_MV_NOTE_LIGHT
 		: DEFAULT_MV_NOTE_LIGHT_3D;
 }
-const SHAPE_FORM_OPTIONS = (
-	Object.keys(MV_SHAPE_FORM_LABELS) as MvShapeForm[]
-).map((f) => ({ value: f, label: MV_SHAPE_FORM_LABELS[f] }));
 const BLEND_OPTIONS = (Object.keys(MV_BLEND_LABELS) as MvBlend[]).map((b) => ({
 	value: b,
 	label: MV_BLEND_LABELS[b],
@@ -678,6 +678,9 @@ export default function MvMaker({
 	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 	const [motionTarget, setMotionTarget] = useState<
 		{ layerId: string; sectionId: string } | null
+	>(null);
+	const [shapeFormPickerLayerId, setShapeFormPickerLayerId] = useState<
+		string | null
 	>(null);
 	const [picker, setPicker] = useState<{
 		mode: "image" | "bgm";
@@ -1242,7 +1245,7 @@ export default function MvMaker({
 			id: mvUid("fx"),
 			style: "flash",
 			trigger: "bar",
-			amount: 0.5,
+			amount: 0.3,
 			decayBeats: 0.5,
 			color: "#ffffff",
 			z: 100,
@@ -2267,14 +2270,20 @@ export default function MvMaker({
 
 			{layer.kind === "shape" && (
 				<>
-					<SelectField
-						label="形"
-						value={layer.form}
-						options={SHAPE_FORM_OPTIONS}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, form: v }) as MvLayer)
-						}
-					/>
+					<label className="block space-y-0.5">
+						<span className={FIELD_LABEL_CLASS}>形</span>
+						<button
+							type="button"
+							onClick={() => setShapeFormPickerLayerId(layer.id)}
+							className="flex min-h-9 w-full items-center gap-2 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-left text-[11px] text-gray-100 hover:bg-gray-750"
+						>
+							<span className="flex h-6 w-6 shrink-0 items-center justify-center text-gray-300">
+								<ShapeFormThumb form={layer.form} />
+							</span>
+							<span className="flex-1">{MV_SHAPE_FORM_LABELS[layer.form]}</span>
+							<span className="shrink-0 text-[10px] text-blue-300">変更</span>
+						</button>
+					</label>
 					<NumField
 						label="X"
 						value={layer.x}
@@ -3528,6 +3537,33 @@ export default function MvMaker({
 															⏱ 表示レンジ: {line.bar.toFixed(1)}〜{(line.bar + hold).toFixed(1)}小節 [{formatMinSecMs(startSec)} 〜 {formatMinSecMs(endSec)}]
 														</span>
 													</div>
+													<label className="flex items-center gap-1.5 px-1">
+														<input
+															type="checkbox"
+															checked={!!line.resetBefore}
+															onChange={(e) =>
+																updateLayer(lyricsLayer.id, (l) =>
+																	l.kind === "lyrics"
+																		? {
+																				...l,
+																				lines: (l.lines ?? []).map((x, j) =>
+																					j === i
+																						? {
+																								...x,
+																								resetBefore: e.target.checked,
+																							}
+																						: x,
+																				),
+																			}
+																		: l,
+																)
+															}
+															className="accent-blue-500"
+														/>
+														<span className="text-[10px] text-gray-400">
+															この行で一旦全部消してから出し直す（未チェックなら直前の行に積み重ねる）
+														</span>
+													</label>
 												</div>
 											);
 										})}
@@ -3592,7 +3628,13 @@ export default function MvMaker({
 																				...l,
 																				lines: [
 																					...(l.lines ?? []),
-																					...groups.flatMap((g) => g.lines),
+																	...groups.flatMap((g, gi) =>
+																		g.lines.map((line, li) =>
+																			gi > 0 && li === 0
+																				? { ...line, resetBefore: true }
+																				: line,
+																		),
+																	),
 																				],
 																			}
 																		: l,
@@ -4413,6 +4455,26 @@ export default function MvMaker({
 								}
 							}}
 							onClose={() => setMotionTarget(null)}
+						/>
+					);
+				})()}
+
+			{shapeFormPickerLayerId &&
+				(() => {
+					const targetLayer = manifest.layers.find(
+						(l): l is MvShapeLayer =>
+							l.kind === "shape" && l.id === shapeFormPickerLayerId,
+					);
+					if (!targetLayer) return null;
+					return (
+						<MvShapeFormPickerModal
+							value={targetLayer.form}
+							onSelect={(form) =>
+								updateLayer(targetLayer.id, (l) =>
+									l.kind === "shape" ? { ...l, form } : l,
+								)
+							}
+							onClose={() => setShapeFormPickerLayerId(null)}
 						/>
 					);
 				})()}

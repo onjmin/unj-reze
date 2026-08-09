@@ -654,6 +654,12 @@ export interface MvLyricLine {
 	trackId?: number;
 	/** 行の一部を色つきの下地で塗る。手入力の歌詞でだけ指定できる。 */
 	marks?: MvLyricMark[];
+	/**
+	 * この行から新しいまとまりを始める（＝それまでに積み上がった行を全部消してから出す）。
+	 * 未指定/falseなら直前までの行に積み重ねて出す。曲によってどこで区切りたいかは
+	 * ケースバイケースなので、行ごとにUIで切り替えられるようにしている。
+	 */
+	resetBefore?: boolean;
 }
 
 /**
@@ -695,7 +701,13 @@ const LYRIC_SECTION_HEADER_RE = /^#\s*【(.+?)】/;
  * 記号が `MV_LYRIC_TAG_COLORS` に無い場合は色を付けずそのまま取り込む。
  */
 export function parseLyricsBulkText(text: string, bpm: number): MvLyricLine[] {
-	return parseLyricsBulkGroups(text, bpm).flatMap((g) => g.lines);
+	// 場面見出しごとの区切りは、そのまま「積み上げをリセットする」自然な境界として扱う。
+	// 先頭の場面は積むものが無いのでリセット不要（resetBeforeは2つめ以降の見出しにだけ付く）。
+	return parseLyricsBulkGroups(text, bpm).flatMap((g, gi) =>
+		g.lines.map((line, li) =>
+			gi > 0 && li === 0 ? { ...line, resetBefore: true } : line,
+		),
+	);
 }
 
 /**
@@ -792,7 +804,9 @@ export type MvShapeForm =
 	| "polygon"
 	| "cross"
 	| "bar"
-	| "path";
+	| "path"
+	| "doubleFrame"
+	| "ripple";
 
 export const MV_SHAPE_FORM_LABELS: Record<MvShapeForm, string> = {
 	circle: "円（塗り）",
@@ -804,6 +818,50 @@ export const MV_SHAPE_FORM_LABELS: Record<MvShapeForm, string> = {
 	cross: "十字",
 	bar: "棒",
 	path: "自由な形（SVG）",
+	doubleFrame: "二重枠",
+	ripple: "波紋",
+};
+
+/** モーダルの図形ピッカーでの見出しカテゴリ。 */
+export type MvShapeFormCategory = "basic" | "frame" | "wave";
+
+export const MV_SHAPE_FORM_CATEGORY: Record<MvShapeForm, MvShapeFormCategory> =
+	{
+		circle: "basic",
+		ring: "basic",
+		square: "basic",
+		diamond: "basic",
+		triangle: "basic",
+		polygon: "basic",
+		cross: "basic",
+		bar: "basic",
+		path: "basic",
+		doubleFrame: "frame",
+		ripple: "wave",
+	};
+
+export const MV_SHAPE_FORM_CATEGORY_LABELS: Record<
+	MvShapeFormCategory,
+	string
+> = {
+	basic: "基本図形",
+	frame: "枠・フレーム",
+	wave: "波・帯",
+};
+
+/** モーダルの図形ピッカーに出す一言説明。 */
+export const MV_SHAPE_FORM_DESCRIPTIONS: Record<MvShapeForm, string> = {
+	circle: "塗りつぶした円。",
+	ring: "線だけの輪。",
+	square: "正方形。塗り/線どちらも。",
+	diamond: "45度回した四角＝ひし形。",
+	triangle: "正三角形。",
+	polygon: "角の数を指定できる多角形。",
+	cross: "十字の線。",
+	bar: "横に長い帯。スペアナの棒などに。",
+	path: "SVGを貼り付けて取り込む自由形状。",
+	doubleFrame: "内外2本の正方形の枠が小節ごとに軽く息をする。キャラや文字を囲うのに。",
+	ripple: "輪が小節の頭から外へ広がって消える。1小節でぴったりループ。",
 };
 
 /**
