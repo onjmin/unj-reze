@@ -1,10 +1,11 @@
 import { sAnimUrl as sa } from "@/lib/rpgen-assets";
-import { newObject, type PresetData, ROWS, COLS } from "./shared";
+import { newObject, type PresetData, ROWS, COLS, TILE_SIZE } from "./shared";
 
 const wr = (id: string) => `walk:auto:u:${sa(id)}`;
 
 const MON = {
 	slime: "YwpE7Q",
+	reze: "US6LgA", // レゼ（ボス本人）
 };
 
 export const onjReze: PresetData = {
@@ -21,7 +22,7 @@ export const onjReze: PresetData = {
 		jumpPower: 5,
 		w: 32,
 		h: 32,
-		start: { x: 3, y: 3 },
+		start: { x: TILE_SIZE * 3, y: TILE_SIZE * 3 },
 	},
 	tiles: {
 		0: { name: "草", color: "#3a9a4a", passable: true },
@@ -50,6 +51,49 @@ export const onjReze: PresetData = {
 			name: "スライム",
 			spriteRef: wr(MON.slime),
 			spriteUrl: sa(MON.slime),
+		}),
+		// isBoss: true が onjReze エンジンのクリア判定（フィールド上の isBoss を全滅させたら
+		// outroDialogue → エンディング）を発火させる。これが無いとゲームがクリア不能になる。
+		newObject({
+			emoji: "🧨",
+			name: "レゼ",
+			col: 14,
+			row: 10,
+			phase: 0,
+			behavior: "chase",
+			speed: 0.9,
+			hp: 50,
+			atk: 30,
+			def: 18,
+			exp: 60,
+			hazard: true,
+			isEnemy: true,
+			isBoss: true,
+			spriteRef: wr(MON.reze),
+			spriteUrl: sa(MON.reze),
+			outroDialogue: [
+				{
+					speaker: "レゼ",
+					emoji: "🧨",
+					text: "あはっ……　つよいんだね、キミ。",
+				},
+				{
+					speaker: "レゼ",
+					emoji: "🧨",
+					text: "ねえ、いっしょに　いかない？\nここじゃない　どこかへ。",
+				},
+				{
+					speaker: "なんJ民",
+					emoji: "🧑",
+					side: "right",
+					text: "……悪いけど、ワイにはこの街があるんや。",
+				},
+				{
+					speaker: "レゼ",
+					emoji: "🧨",
+					text: "そっか。……ざんねん。\nでも、たのしかったよ。ありがとう。",
+				},
+			],
 		}),
 	],
 };

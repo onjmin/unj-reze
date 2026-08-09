@@ -1,5 +1,5 @@
 import { sAnimUrl as sa } from "@/lib/rpgen-assets";
-import { newObject, type PresetData, ROWS, COLS } from "./shared";
+import { newObject, type PresetData, ROWS, COLS, TILE_SIZE } from "./shared";
 
 const wr = (id: string) => `walk:auto:u:${sa(id)}`;
 
@@ -17,7 +17,7 @@ export const undertale: PresetData = {
 		jumpPower: 5,
 		w: 32,
 		h: 32,
-		start: { x: 3, y: 3 },
+		start: { x: TILE_SIZE * 3, y: TILE_SIZE * 3 },
 	},
 	tiles: {
 		0: { name: "ゆか", color: "#574370", passable: true },

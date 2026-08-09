@@ -14,7 +14,7 @@ export const rockman: PresetData = {
 		emoji: "👦",
 		color: "#0073F6",
 		speed: 3,
-		jumpPower: 5.5,
+		jumpPower: -11,
 		w: 16,
 		h: 16,
 		start: { x: 32, y: 32 },

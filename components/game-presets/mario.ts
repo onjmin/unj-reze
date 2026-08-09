@@ -27,7 +27,7 @@ export const mario: PresetData = {
 		emoji: "👨🏻",
 		color: "#ff0000",
 		speed: 3,
-		jumpPower: 5,
+		jumpPower: -8,
 		w: 16,
 		h: 16,
 		start: { x: 32, y: 32 },

@@ -1,5 +1,5 @@
 import { sAnimUrl as sa, spriteUrl as sp } from "@/lib/rpgen-assets";
-import { newObject, type PresetData, ROWS, COLS } from "./shared";
+import { newObject, type PresetData, ROWS, COLS, TILE_SIZE } from "./shared";
 
 const wr = (id: string) => `walk:auto:u:${sa(id)}`;
 const ir = (id: string) => `url:${sp(id)}`;
@@ -23,7 +23,7 @@ export const dq: PresetData = {
 		jumpPower: 5,
 		w: 32,
 		h: 32,
-		start: { x: 3, y: 3 },
+		start: { x: TILE_SIZE * 3, y: TILE_SIZE * 3 },
 		spriteRef: wr(SPR.hero),
 		spriteUrl: sa(SPR.hero),
 	},
