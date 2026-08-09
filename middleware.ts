@@ -73,12 +73,25 @@ const BLOCKED_HTML = `<!doctype html>
 
 export const runtime = "experimental-edge";
 
+// 専ブラ(2ch専用ブラウザ)向けプロトコルのパス。dat/subject.txt/SETTING.TXTのレスポンスは
+// 専ブラが2ch形式のプレーンテキストとして即座にパースするため、HTMLの451ページを返すと
+// クライアントが数値パースに失敗してクラッシュする(実例: iOS専ブラでの
+// `FormatException: Invalid radix-10 number at character 1` — 451ページの`<!DOCTYPE html>`の
+// `<`を数値としてパースしようとして落ちる)。Apple Private RelayはEU圏のリレー経由になる
+// ことがあり、実際の利用者がEU圏在住でなくても isBlockedCountry が誤って一致しうるため、
+// iOS端末で特に踏みやすい。Cookie・トラッキングを一切持たない匿名テキストプロトコルであり
+// 通常のWebページでもないため、GDPR遮断の対象外として扱う。
+const BBS_PROTOCOL_PREFIXES = ['/unj/', '/test/bbs.cgi'];
+function isBbsProtocolPath(pathname: string): boolean {
+  return BBS_PROTOCOL_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // EU/EEA からのアクセスを 451 で遮断
+  // EU/EEA からのアクセスを 451 で遮断(専ブラ向けプロトコルパスは対象外。上記コメント参照)
   const country = getCountryFromHeaders(request.headers);
-  if (isBlockedCountry(country)) {
+  if (isBlockedCountry(country) && !isBbsProtocolPath(pathname)) {
     return new NextResponse(BLOCKED_HTML, {
       status: 451,
       headers: { 'content-type': 'text/html; charset=utf-8' },
