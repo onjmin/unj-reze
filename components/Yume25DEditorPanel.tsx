@@ -29,10 +29,8 @@ import {
 	searchModels,
 } from "./game-presets/model-catalog";
 import {
-	type Billboard25D,
 	type Dir4,
 	type Layout25D,
-	type NpcBehavior,
 	SYSTEM_SPRITE_TEMPLATES,
 	SYSTEM_TILE_TEMPLATES,
 	type SystemSpriteTemplate,
@@ -131,111 +129,6 @@ function SliderField({
 	);
 }
 
-/** 配置済みビルボード（キャラ/物）1体ぶんのプロパティ編集フォーム。
- *  「動き（AI行動・当たり判定）」と「会話」は別物なので見出しを分けて出す
- *  （以前は1つの「会話・AI設定」にまとめていて、AI行動が会話の設定だと誤解されやすかった）。
- *  「スプライト」タブの配置済み一覧、「選択・編集」ツールの両方から呼ばれる共通部品。 */
-function BillboardEditor({
-	target,
-	onLayoutChange,
-}: {
-	target: Billboard25D;
-	onLayoutChange: (updater: (l: Layout25D) => Layout25D) => void;
-}) {
-	const patch = (over: Partial<Billboard25D>) =>
-		onLayoutChange((l) => ({
-			...l,
-			billboards: l.billboards.map((b) =>
-				b.id === target.id ? { ...b, ...over } : b,
-			),
-		}));
-	return (
-		<div className="flex flex-col gap-2.5 text-[10px] text-gray-300">
-			<div className="flex flex-col gap-1.5">
-				<p className="text-[11px] font-bold text-gray-200">
-					🤖 動き・当たり判定
-				</p>
-				<label className="flex items-center gap-1.5">
-					AI行動
-					<select
-						value={target.behavior ?? "still"}
-						onChange={(e) =>
-							patch({ behavior: e.target.value as NpcBehavior })
-						}
-						className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-					>
-						<option value="still">静止 (Still)</option>
-						<option value="random">ランダム移動 (Random)</option>
-						<option value="randomDash">ランダムダッシュ (Random Dash)</option>
-						<option value="randomHop">ランダムジャンプ (Random Hop)</option>
-						<option value="chase">追いかける (Chase Player)</option>
-						<option value="flee">逃げる (Flee Player)</option>
-						<option value="patrolH">左右巡回 (Patrol H)</option>
-						<option value="patrolV">前後巡回 (Patrol V)</option>
-					</select>
-				</label>
-				<label className="flex items-center gap-1.5">
-					<input
-						type="checkbox"
-						checked={!!target.collidable}
-						onChange={(e) => patch({ collidable: e.target.checked })}
-					/>
-					当たり判定あり（すり抜け不可）
-				</label>
-				<label className="flex items-center gap-1.5">
-					<input
-						type="checkbox"
-						checked={!!target.through}
-						onChange={(e) =>
-							patch({ through: e.target.checked || undefined })
-						}
-					/>
-					壁をすり抜ける（through）
-				</label>
-			</div>
-			<div className="flex flex-col gap-1.5 pt-1.5 border-t border-gray-800">
-				<p className="text-[11px] font-bold text-gray-200">💬 会話</p>
-				<label className="flex items-center gap-1.5">
-					<input
-						type="checkbox"
-						checked={!!target.interactive}
-						onChange={(e) => patch({ interactive: e.target.checked })}
-					/>
-					はなせる（「はなす」ボタンの対象にする）
-				</label>
-				<label className="flex items-center gap-1.5">
-					メッセージ
-					<input
-						type="text"
-						value={target.message ?? ""}
-						placeholder="……"
-						onChange={(e) => patch({ message: e.target.value })}
-						className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-					/>
-				</label>
-				<label className="flex items-center gap-1.5">
-					選択肢（カンマ区切り）
-					<input
-						type="text"
-						value={(target.choices ?? []).join(",")}
-						onChange={(e) => {
-							const v = e.target.value;
-							const choices = v.trim()
-								? v
-										.split(",")
-										.map((s) => s.trim())
-										.filter(Boolean)
-								: undefined;
-							patch({ choices });
-						}}
-						className="flex-1 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 text-white"
-					/>
-				</label>
-			</div>
-		</div>
-	);
-}
-
 /** 方位角（度）を8方位の名前へ。数字だけだとどちらを向いているか分からない。 */
 const COMPASS = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"];
 const compassName = (deg: number) =>
@@ -249,7 +142,8 @@ interface Yume25DEditorPanelProps {
 			| { t: "yumeTex"; id: number }
 			| { t: "yumeSky" }
 			| { t: "yumeTexSound"; id: number }
-			| { t: "yumeMcSkin" },
+			| { t: "yumeMcSkin" }
+			| { t: "yumeNewTex"; kind: "floor" | "wall" | "sprite" },
 	) => void;
 	view: "2d" | "3d";
 	onViewChange: (v: "2d" | "3d") => void;
@@ -266,6 +160,10 @@ interface Yume25DEditorPanelProps {
 	settingsOpen: boolean;
 	onSettingsOpenChange: (v: boolean) => void;
 	talkTargetId: string | null;
+	/** ビルボードを選択する（呼び出し側で「オブジェクト」タブへの自動切替もまとめて行う）。
+	 *  動き/会話/イベントの実際の編集フォーム（EventPageEditor付き）はそちら側の「選択中」パネルにあり、
+	 *  ここでは二重管理を避けるため編集フォームを持たず、選択の入口だけを提供する。 */
+	onTalkTargetChange?: (id: string | null) => void;
 }
 
 export default function Yume25DEditorPanel({
@@ -287,6 +185,7 @@ export default function Yume25DEditorPanel({
 	settingsOpen,
 	onSettingsOpenChange,
 	talkTargetId,
+	onTalkTargetChange,
 }: Yume25DEditorPanelProps) {
 	const paletteKind: Tex25D["kind"] | null =
 		tool === "floor"
@@ -336,9 +235,6 @@ export default function Yume25DEditorPanel({
 		onToolChange("floor");
 		onSelFloorChange(id);
 	};
-
-	// スプライトタブ内で配置済みキャラを直接編集するための選択状態（「選択・編集」ツールに切り替えなくてよいように）。
-	const [spriteEditId, setSpriteEditId] = useState<string | null>(null);
 
 	// サンプル3Dモデルの検索モーダル（スプライト検索と同様のキーワード検索）
 	const [modelSearchOpen, setModelSearchOpen] = useState(false);
@@ -867,24 +763,39 @@ export default function Yume25DEditorPanel({
 							)}
 						</button>
 					))}
+					{/* 「画像を参照」から選んだ画像で新しいテクスチャを追加する。以前は壁・床がプリセット付属の
+              固定テクスチャしか選べず（システムオブジェクトの special 付きテクスチャを除く）、この入口が無かった。 */}
+					<button
+						onClick={() => onPickImage?.({ t: "yumeNewTex", kind: paletteKind })}
+						title="画像を参照して新しいテクスチャを追加"
+						className="w-7 h-7 rounded border-2 border-dashed border-gray-600 text-gray-400 hover:border-blue-500 hover:text-blue-400 flex items-center justify-center"
+					>
+						<Plus size={14} />
+					</button>
 				</div>
 			)}
 
-			{/* スプライトタブの配置済み一覧：ここで直接キャラを選んでAI行動・会話を編集できる
-          （以前は別ツール「選択・編集」に切り替えてキャンバス上でタップし直す必要があり気づきにくかった）。 */}
-			{tool === "sprite" && layout.billboards.length > 0 && (
+			{/* スプライトタブの配置済み一覧：ここで直接キャラを選ぶと「オブジェクト」タブへ切り替わり、
+          動き（AI行動）・会話・イベント（会話の分岐スクリプト）をまとめて編集できる。
+          編集フォーム自体はそちら側の「選択中」パネルにしかない（EventPageEditorを含むため）。
+          以前は「置くもの」を「選択・編集」に切り替えてキャンバス上でタップし直す必要があり、
+          スプライトタブの中だけを見ていると編集の入口自体に気づけなかった。 */}
+			{tool === "sprite" && layout.billboards.length > 0 && onTalkTargetChange && (
 				<div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2 text-[10px] text-gray-300">
 					<p className="text-[11px] font-bold text-gray-200">
-						🧍 配置済みキャラクター・物（タップで編集）
+						🧍 配置済みキャラクター・物
+					</p>
+					<p className="text-[9px] text-gray-500">
+						タップすると選択され、「オブジェクト」タブで動き・会話・イベントを編集できます。
 					</p>
 					<div className="flex flex-wrap gap-1">
 						{layout.billboards.map((b) => {
 							const tex = layout.textures[b.tex];
-							const active = spriteEditId === b.id;
+							const active = talkTargetId === b.id;
 							return (
 								<button
 									key={b.id}
-									onClick={() => setSpriteEditId(active ? null : b.id)}
+									onClick={() => onTalkTargetChange(active ? null : b.id)}
 									title={`(${b.col},${b.row})`}
 									className={`flex items-center gap-1 px-1.5 py-1 rounded border text-[10px] ${active ? "border-blue-500 bg-blue-900/40 text-blue-200" : "border-gray-700 bg-gray-800/60 hover:border-gray-500 text-gray-300"}`}
 								>
@@ -897,47 +808,28 @@ export default function Yume25DEditorPanel({
 							);
 						})}
 					</div>
-					{spriteEditId &&
-						(() => {
-							const target = layout.billboards.find(
-								(b) => b.id === spriteEditId,
-							);
-							if (!target) return null;
-							return (
-								<div className="pt-1.5 mt-0.5 border-t border-gray-700/50">
-									<BillboardEditor
-										target={target}
-										onLayoutChange={onLayoutChange}
-									/>
-								</div>
-							);
-						})()}
 				</div>
 			)}
 
-			{/* 選択・編集：スプライトをタップして選択し、動き（AI行動）/会話（メッセージ・選択肢）を編集する。
-          「スプライト」タブの配置済み一覧からも同じ内容を編集できる（上の tool==='sprite' 側）。 */}
-			{tool === "talk" &&
-				(() => {
-					const target = layout.billboards.find((b) => b.id === talkTargetId);
-					if (!target)
-						return (
-							<p className="text-[10px] text-gray-500 px-1">
-								スプライトをタップして選択してください
-							</p>
-						);
-					return (
-						<div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5">
-							<BillboardEditor target={target} onLayoutChange={onLayoutChange} />
-						</div>
-					);
-				})()}
+			{/* 選択・編集：スプライトをタップして選ぶと「オブジェクト」タブへ切り替わり、
+          動き（AI行動）・会話・イベントをまとめて編集できる（そちら側の「選択中」パネル、EventPageEditor付き）。
+          ここに編集フォームは置かない：以前は同じ内容を簡略版としてここにも表示しており、
+          「選択中」パネルにしか無いイベント編集との間で二重管理になっていた。 */}
+			{tool === "talk" && (
+				<p className="text-[10px] text-gray-500 px-1">
+					スプライトをタップして選択してください（「オブジェクト」タブで編集します）
+				</p>
+			)}
 
 			{/* テクスチャ個別設定 */}
 			{paletteSel !== 0 &&
 				(() => {
 					const t = layout.textures[paletteSel];
 					if (!t) return null;
+					// special==='ball' は色のみ3D描画に使われる（単色球体）。3Dモデル/マイクラスキンは
+					// 見た目が別の仕組み（glTF・スキン画像）で決まるため、色も画像も3D描画には効かない。
+					const imageAffects3d =
+						!t.modelUrl && !t.minecraftSkin && t.special !== "ball";
 					return (
 						<div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
 							<div className="flex items-center justify-between">
@@ -1313,6 +1205,18 @@ export default function Yume25DEditorPanel({
 									</p>
 								</div>
 							)}
+							{/* ball/3Dモデル/マイクラスキンは見た目が別の仕組み（単色シェーディング・glTF・スキンテクスチャ）で
+                  決まり、imageUrl/imageRef は3D描画に反映されない（2Dエディタのパレット表示のみ影響）。
+                  「画像を参照」を出しっぱなしにすると設定できそうに見えて実際は効かない項目になるため、隠す。 */}
+							{!imageAffects3d && (
+								<p className="text-[9px] text-amber-500/80 -mt-0.5">
+									{t.special === "ball"
+										? "⚽ ボールは模様なしの単色球体として描画されます（画像は反映されません）。"
+										: t.modelUrl
+											? "🗿 3Dモデルの見た目はモデル本体の素材で決まります（画像は反映されません）。"
+											: "🧍 マイクラスキンの見た目はスキン画像で決まります（ここでの画像設定は反映されません）。"}
+								</p>
+							)}
 							<div className="flex items-center gap-2 flex-wrap">
 								<label className="flex items-center gap-1">
 									名前:
@@ -1354,27 +1258,30 @@ export default function Yume25DEditorPanel({
 										/>
 									</label>
 								)}
-								<label className="flex items-center gap-1">
-									色:
-									<input
-										type="color"
-										value={t.color}
-										onChange={(e) =>
-											onLayoutChange((l) => ({
-												...l,
-												textures: {
-													...l.textures,
-													[t.id]: {
-														...l.textures[t.id],
-														color: e.target.value,
+								{!t.modelUrl && !t.minecraftSkin && (
+									<label className="flex items-center gap-1">
+										色:
+										<input
+											type="color"
+											value={t.color}
+											onChange={(e) =>
+												onLayoutChange((l) => ({
+													...l,
+													textures: {
+														...l.textures,
+														[t.id]: {
+															...l.textures[t.id],
+															color: e.target.value,
+														},
 													},
-												},
-											}))
-										}
-										className="w-6 h-4 bg-transparent cursor-pointer"
-									/>
-								</label>
+												}))
+											}
+											className="w-6 h-4 bg-transparent cursor-pointer"
+										/>
+									</label>
+								)}
 
+								{imageAffects3d && (
 								<div className="flex items-center gap-1.5 ml-auto">
 									{t.imageUrl || t.imageRef ? (
 										<div className="relative shrink-0 w-8 h-8 rounded border border-gray-700 bg-black/40 overflow-hidden flex items-center justify-center">
@@ -1413,6 +1320,7 @@ export default function Yume25DEditorPanel({
 										{t.imageRef ? "画像を変更" : "画像を参照"}
 									</button>
 								</div>
+								)}
 							</div>
 						</div>
 					);

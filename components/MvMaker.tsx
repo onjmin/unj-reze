@@ -99,6 +99,11 @@ import {
 	mvWalkSpeed,
 	parseLyricsBulkGroups,
 } from "@/lib/mv-config";
+import type {
+	MvEffectTemplateDef,
+	MvEffectTemplateParams,
+} from "@/lib/mv-effect-templates";
+import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
 import {
 	EMPTY_SONG,
 	type MvSong,
@@ -648,6 +653,7 @@ export default function MvMaker({
 	const [editMode, setEditMode] = useState<EditMode>("easy");
 	const [presetName, setPresetName] = useState<string | null>(null);
 	const [lyricsBulkText, setLyricsBulkText] = useState("");
+	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 	const [picker, setPicker] = useState<{
 		mode: "image" | "bgm";
 		target: "stageBg" | { layerId: string } | { sectionId: string };
@@ -1073,6 +1079,17 @@ export default function MvMaker({
 		};
 		update((m) => ({ ...m, layers: [...m.layers, layer] }));
 		setSelectedLayerId(layer.id);
+	};
+
+	const addTemplateLayers = (
+		template: MvEffectTemplateDef,
+		params: MvEffectTemplateParams,
+	) => {
+		const newLayers = template.build(params);
+		const baseZ = getNextZ();
+		const zed = newLayers.map((l, i) => ({ ...l, z: baseZ + i }));
+		update((m) => ({ ...m, layers: [...m.layers, ...zed] }));
+		if (zed[0]) setSelectedLayerId(zed[0].id);
 	};
 
 	const addChordBarLayer = () => {
@@ -3091,6 +3108,13 @@ export default function MvMaker({
 						<Plus size={12} />
 						図形
 					</button>
+					<button
+						onClick={() => setTemplatePickerOpen(true)}
+						className={ADD_BTN_CLASS}
+					>
+						<Plus size={12} />
+						エフェクト定型
+					</button>
 					<button onClick={addLyricsLayer} className={ADD_BTN_CLASS}>
 						<Plus size={12} />
 						歌詞
@@ -3843,6 +3867,13 @@ export default function MvMaker({
 				onRestore={(restored: MvManifest) => setManifest(restored)}
 				getCurrentData={() => manifestRef.current}
 			/>
+
+			{templatePickerOpen && (
+				<MvEffectTemplatePicker
+					onPick={addTemplateLayers}
+					onClose={() => setTemplatePickerOpen(false)}
+				/>
+			)}
 		</div>
 	);
 }

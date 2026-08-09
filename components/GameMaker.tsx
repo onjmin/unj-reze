@@ -1035,6 +1035,7 @@ type PickTarget =
   | { t: 'yumeSky' }
   | { t: 'yumeTexSound'; id: number }
   | { t: 'yumeMcSkin' }
+  | { t: 'yumeNewTex'; kind: 'floor' | 'wall' | 'sprite' }
   | { t: 'playerMcSkin' }
   | { t: 'effectImage'; id: string }
   | { t: 'effectSfx'; id: string }
@@ -1610,6 +1611,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [yume25dSelSprite, setYume25dSelSprite] = useState(() => yume25dTexList(gameData.layout25d, 'sprite')[0]?.id ?? 0);
   const [yume25dSettingsOpen, setYume25dSettingsOpen] = useState(false);
   const [yume25dTalkTargetId, setYume25dTalkTargetId] = useState<string | null>(null);
+  /** yume25dビルボードの選択。2Dエンジンのオブジェクト配置/選択が自動で「オブジェクト」タブへ切り替わる
+   *  （PLACE_TAB経由）のに対し、yume25dのビルボード選択だけそれが無く、動き/会話/イベント編集の本体
+   *  （「選択中」パネル、EventPageEditorつき。editorTab==='object' 側にある）が別タブに隠れたままだった。
+   *  Yume25DMaker（キャンバスのタップ）・Yume25DEditorPanel（スプライトタブの配置済み一覧）の両方から使う。 */
+  const handleYume25dTalkTargetChange = (id: string | null) => {
+    setYume25dTalkTargetId(id);
+    if (id) setEditorTab('object');
+  };
   /** 浮遊（ホバー）モード：ボタンは移動・設置モードパネル側に置くが、上昇/下降の実処理は engineRef を持つ Yume25DMaker に委譲する。 */
   const [yume25dHoverMode, setYume25dHoverMode] = useState(false);
   const yume25dMakerRef = useRef<Yume25DMakerHandle>(null);
@@ -12143,6 +12152,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     else if (target.t === 'yumeSky') {
       setGameData(p => p.layout25d ? { ...p, layout25d: { ...p.layout25d, skyRef: res.ref, skyUrl: res.url } } : p);
     }
+    else if (target.t === 'yumeNewTex') {
+      // 「画像を参照」から選んだ画像でテクスチャを新規追加する。以前は壁/床がプリセット付属の固定テクスチャ
+      // しか選べず（システムオブジェクトの special 付きテクスチャを除く）、この入口が無かった。
+      const lay = gameData.layout25d;
+      if (lay) {
+        const id = Math.max(0, ...Object.keys(lay.textures).map(Number)) + 1;
+        const defaultName = target.kind === 'floor' ? 'ゆか' : target.kind === 'wall' ? '壁' : 'スプライト';
+        setGameData(p => p.layout25d ? {
+          ...p,
+          layout25d: {
+            ...p.layout25d,
+            textures: {
+              ...p.layout25d.textures,
+              [id]: { id, name: res.label || defaultName, kind: target.kind, color: '#8a8a92', imageRef: res.ref, imageUrl: res.url },
+            },
+          },
+        } : p);
+        if (target.kind === 'floor') { setYume25dTool('floor'); setYume25dSelFloor(id); }
+        else if (target.kind === 'wall') { setYume25dTool('wall'); setYume25dSelWall(id); }
+        else { setYume25dTool('sprite'); setYume25dSelSprite(id); }
+      }
+    }
     else if (target.t === 'yumeMcSkin') {
       // マイクラスキン：選んだ画像（アップロード画像や素材URL）からブロック人形スプライトを新規追加する
       const lay = gameData.layout25d;
@@ -13504,7 +13535,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 selWall={yume25dSelWall}
                 selSprite={yume25dSelSprite}
                 talkTargetId={yume25dTalkTargetId}
-                onTalkTargetChange={setYume25dTalkTargetId}
+                onTalkTargetChange={handleYume25dTalkTargetChange}
                 hoverMode={yume25dHoverMode}
                 onHoverModeChange={setYume25dHoverMode}
                 onDeath={() => {
@@ -15950,6 +15981,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     settingsOpen={yume25dSettingsOpen}
                     onSettingsOpenChange={setYume25dSettingsOpen}
                     talkTargetId={yume25dTalkTargetId}
+                    onTalkTargetChange={handleYume25dTalkTargetChange}
                   />
                 )}
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && (

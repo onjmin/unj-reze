@@ -1,4 +1,21 @@
-import { newObject, type PresetData, ROWS, COLS } from "./shared";
+import {
+	newObject,
+	normalizeWall25D,
+	type PresetData,
+	ROWS,
+	COLS,
+	type Wall25D,
+} from "./shared";
+
+// 外周の壁（1マスずつ薄板を積む）。yume25d は 2D の map/tiles とは別のレイヤー（layout25d）を使うため、
+// 2D側の外周1マス壁だけでは何も起きない。
+const walls: Wall25D[] = [];
+for (let c = 0; c < COLS; c++) {
+	walls.push(normalizeWall25D(c, 0, 0, 1), normalizeWall25D(c, ROWS - 1, 2, 1));
+}
+for (let r = 0; r < ROWS; r++) {
+	walls.push(normalizeWall25D(0, r, 3, 1), normalizeWall25D(COLS - 1, r, 1, 1));
+}
 
 export const yume: PresetData = {
 	id: "yume",
@@ -28,13 +45,17 @@ export const yume: PresetData = {
     layout25d: {
         cols: COLS,
         rows: ROWS,
-        floor: Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => 1)),
+        // 以前は床グリッドが壁テクスチャ(id:1, kind:'wall')を指しており、床用テクスチャが1つも
+        // 登録されていなかった（「床」ツールのパレットが常に空になるバグ）。床(id:2, kind:'floor')を
+        // 別途用意して指す。また walls が空で外周の壁も実際には存在していなかったので生成する。
+        floor: Array.from({ length: ROWS }, () => Array.from({ length: COLS }, () => 2)),
         ceiling: false,
         ceilingTex: 0,
-        walls: [],
+        walls,
         billboards: [],
         textures: {
             1: { id: 1, name: "壁", kind: "wall", color: "#8B4513", imageUrl: "/assets/yume-textures/wall.png" },
+            2: { id: 2, name: "ゆか", kind: "floor", color: "#5c94fc" },
         },
         wallHeight: 1,
         skyColor: "#000000",

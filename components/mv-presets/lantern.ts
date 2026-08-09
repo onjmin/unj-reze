@@ -19,6 +19,10 @@
 
 import type { MvLayer, MvManifest, MvSection } from "@/lib/mv-config";
 import {
+	DEFAULT_TEMPLATE_PARAMS,
+	findMvEffectTemplate,
+} from "@/lib/mv-effect-templates";
+import {
 	cloneManifest,
 	type MvPresetEntry,
 	mvTrack,
@@ -274,53 +278,11 @@ const SIGN = "M50,14 L84,90 L16,90 Z";
 /** 看板の「！」。 */
 const SIGN_MARK = "M46,42 L54,42 L52,68 L48,68 Z M47,74 L53,74 L53,82 L47,82 Z";
 
-// ── 中央モチーフ（100×100の箱で設計）─────────────────────────
-// 目視確認（コマ送りではなく通しで見た構造）: 8小節ごとに真ん中の単純な四角へ戻り、
-// 残りの小節は図形がループするエフェクトになる。サビへ入る直前は複雑な図形になる
-// （サビ自体も2番も同じ8小節周期のパターンを繰り返す）。
-//
-// 以前はこれを「離散的な図形をコマ送りで差し替える」(iconCycle)実装にしていたが、
-// 速度をいくら上げても原理的にジャンプカットにしかならず(パスの補間=モーフィングは
-// このエンジンに無い)、「滑らかでない」「コマが飛んでいる」と繰り返し指摘された。
-// 図形差し替えというモデル自体が誤りで、実際に必要なのは**連続的なモジュレータ**
-// による滑らか(かつイージングの効いた)な動き。`envelope()`(拍/小節ソース)は
-// 毎フレーム計算し直す減衰カーブなので、離散ジャンプではなく滑らかに変化する。
-// ただし「滑らかにする」ために回転する輪や星形へ置き換えたのも誤りだった。参考動画の
-// 中央に出るのは終始 **太い・軸に沿った・回転しない** 図形（四隅ブラケット／塗り四角／
-// 上下のタブ／左右の小さい中空四角／3段の破線列）で、回転する図形は1コマも出てこない。
-//
-// 正解は「図形を差し替える」でも「別の図形に置き換える」でもなく、
-// **観察した図形要素を1つずつ別レイヤーに分解し、位置・大きさ・濃さを連続カーブで動かす**こと。
-// 見た目の語彙は参考動画のまま、変化は全部トゥイーンになる（コマ飛びしない）。
-//
-// 構造は`phrase`ソース(8小節=SCENE_BARSを1周期として、頭で1→終わりで0へ減衰)で表し、
-//   ・中央の四角      : `add`  → 8小節の頭でいちばん大きく、滑らかに引く
-//   ・ブラケット/タブ : `sub`  → 四角と入れ替わりに開いてくる＝ループ図形エフェクト
-//   ・破線列          : `sub`＋ゆるいcurve → 終盤にだけ急に育つ＝サビ直前の複雑さ
-// と当て分ける。小節ごとの開閉は`bar`で付けるので、ループ部分は1小節周期で呼吸する。
-
-// 寸法は全編1390フレームを走査して実測した（推測ではない）:
-//   ・モチーフ全体   : 動画x 300〜660 ＝ canvas640換算で **幅240px**（±120）
-//   ・中央のグレー四角: 約48px（size 24）。大きさは終始ほぼ一定
-//   ・外枠           : 約120px（size 60）の細い線。以前は52pxで半分以下だった
-//   ・枠の切れ目の小四角: 中心から±46px、約24px（size 12）
-//   ・遠いフランキング : 中心から±88px、約56px（size 28）
-/** 外枠。ほぼ閉じた大きな正方形だが、左右の辺の中央に切れ目があり小四角がはまる。 */
-const ZOOM_FRAME =
-	"M10,10 L90,10 M90,10 L90,38 M90,62 L90,90 M90,90 L10,90 M10,90 L10,62 M10,38 L10,10";
-/** 上下のタブ。太い横棒（「⊏⊐」状態のときだけ出る）。 */
-const ZOOM_TAB = "M8,38 L92,38 L92,62 L8,62 Z";
-/** 左右に付く小さい中空四角。枠の切れ目にはまる。 */
-const ZOOM_SIDE_BOX = "M22,22 L78,22 L78,78 L22,78 Z";
-// 参考動画の左右要素は「細い線画」ではなく **太いベタ塗りの面**。
-// 以前は鍵盤風の縦棒や3段の破線といった細かいテクスチャで描いていたが、
-// 参考動画は白い面の比率が高く「重い・はっきりした」シルエットになっている。
-// 線ではなく面で構成し直す。
-/** 左右の巨大な白い縦長ボックス（ベタ塗り）。中央が消えている間の主役。 */
-const ZOOM_BLOCK = "M18,4 L82,4 L82,96 L18,96 Z";
-/** 太い二本の水平線（ベタ塗りの帯）。ボックスと交代で出る。 */
-const ZOOM_TWOBAR =
-	"M2,20 L98,20 L98,40 L2,40 Z M2,60 L98,60 L98,80 L2,80 Z";
+// ── 中央モチーフ ─────────────────────────────────────────
+// 「参考動画を再現する」のをやめ、汎用のエフェクトテンプレート(lib/mv-effect-templates.ts)を
+// 組み合わせる方式にした。各テンプレートは `phrase`/`bar` ソースだけで組んであるので
+// 指定した小節数でぴったりループする。ここでは中央に「二重枠」、その左右に
+// 「粒子リング」を配置し、8小節に1回サビ前だけ「放射スイープ」を重ねる。
 
 const SCENES = BARS / SCENE_BARS;
 const scene = (i: number) => `s${String(i).padStart(2, "0")}`;
@@ -343,6 +305,13 @@ const SECTIONS: MvSection[] = Array.from({ length: SCENES }, (_, i) => ({
  * 2番も同じ形で繰り返すため、後半のサビ(s07)の直前 s06 にも同じ盛り上がりを置く。
  */
 const PRE_CHORUS = [scene(3), scene(6)];
+
+/** テンプレート未登録なら気づけるようthrowする（存在しないidを打ったときの事故防止）。 */
+function FIND(id: string) {
+	const t = findMvEffectTemplate(id);
+	if (!t) throw new Error(`unknown effect template: ${id}`);
+	return t;
+}
 
 const LAYERS: MvLayer[] = [
 	// ══ 背景の譜面。画面いっぱいに4小節ぶんを固定表示する ═══════════
@@ -380,313 +349,62 @@ const LAYERS: MvLayer[] = [
 		sections: SECTIONS.slice(2).map((s) => s.id),
 		z: 4,
 	},
+	// score帯(実データ連動)はそのまま活かしつつ、サビ直前だけ「点滅バー列」テンプレートを
+	// 薄く重ねて賑やかさを足す（テンプレートは装飾用途、実データはscoreのまま）。
+	...FIND("pulseBarRows").build({
+		...DEFAULT_TEMPLATE_PARAMS,
+		x: 320,
+		y: 300,
+		size: 90,
+		color: "#d4d4d8",
+		opacity: 0.35,
+		barsPerLoop: 1,
+		count: 4,
+	}).map((l) => ({ ...l, sections: PRE_CHORUS, z: 3 })),
 
-	// ══ 中央モチーフ。全編1390フレームの走査で得た実測寸法で組む ══════════
-	// ① 8小節の頭 → 中央のグレー四角＋上下の太いタブ（「⊏⊐」状態）
-	// ② そのあと   → タブが引き、大きな外枠と切れ目の小四角が開いてくる
-	// ③ 小節ごと   → 遠い左右の要素が「破線列」と「鍵盤箱」で交互に入れ替わる
-	// 全部 phrase(8小節) と bar(1小節) の連続カーブなので、変化はすべてトゥイーン。
-	{
-		kind: "shape",
-		id: "zoom-square",
-		form: "square",
-		x: 320,
-		y: 180,
-		// 実測: 約48px（size 24）。参考動画では大きさがほぼ一定なので変動も小さくする。
-		size: 22,
-		rotation: 0,
-		// 実測: 白い枠に対してはっきり暗いグレー。明るすぎると枠と同化する。
-		color: "#8b8b90",
-		filled: true,
-		thickness: 1,
-		z: 20,
-		modulators: [
-			// 実測: 中央ブロックはインク分布が二値的（0付近が64%、濃い側が20%）で、
-			// 4小節のうち約1.5小節しか出ていない。常時表示だったのが最大の乖離だった。
-			// symmetric で「境目=1・フレーズ中央=0」の山にし、curve4 で
-			// 実測カーブ(0.25小節→61%, 0.5→34%, 0.75→13%)に合わせる。
-			{
-				source: "phrase",
-				bars: MOTIF_BARS,
-				symmetric: true,
-				curve: 4,
-				target: "opacity",
-				op: "mul",
-				amount: 1,
-			},
-			// 実測の下限（中盤でも12%前後は残る）
-			{ source: "constant", target: "opacity", op: "add", amount: 0.12 },
-			{
-				source: "phrase",
-				bars: MOTIF_BARS,
-				symmetric: true,
-				curve: 4,
-				target: "size",
-				op: "add",
-				amount: 4,
-			},
-		],
-	},
-	// 外枠。実測120px幅（size 60）。以前は52pxで半分以下だった。
-	// 8小節の頭では畳まれ、四角が引くのと入れ替わりに開く＝ループ図形エフェクトの主役。
-	{
-		kind: "shape",
-		id: "zoom-frame",
-		form: "path",
-		path: ZOOM_FRAME,
-		pathBox: [0, 0, 100, 100],
-		x: 320,
-		y: 180,
-		size: 60,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: false,
-		thickness: 3,
-		z: 19,
-		modulators: [
-			// 実測: モチーフ全幅は1小節内で202〜230px(video)とほぼ一定＝枠は常時出ている。
-			// 以前の phrase ゲートは「8小節の頭で消える」誤った動きを作っていた。
-			{ source: "bar", target: "size", op: "add", amount: 5 },
-		],
-	},
-	// 枠の左右の切れ目にはまる小四角。実測 ±46px・約24px（size 12）。
-	{
-		kind: "shape",
-		id: "zoom-side-l",
-		form: "path",
-		path: ZOOM_SIDE_BOX,
-		pathBox: [0, 0, 100, 100],
-		x: 274,
-		y: 180,
-		size: 12,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: false,
-		thickness: 3,
-		z: 20,
-		// 枠と一体の部品なので枠と同じく常時表示。
-		modulators: [],
-	},
-	{
-		kind: "shape",
-		id: "zoom-side-r",
-		form: "path",
-		path: ZOOM_SIDE_BOX,
-		pathBox: [0, 0, 100, 100],
-		x: 366,
-		y: 180,
-		size: 12,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: false,
-		thickness: 3,
-		z: 20,
-		// 枠と一体の部品なので枠と同じく常時表示。
-		modulators: [],
-	},
-	// 上下の太いタブ。8小節の頭でだけ出る「⊏⊐」状態。
-	{
-		kind: "shape",
-		id: "zoom-tab-top",
-		form: "path",
-		path: ZOOM_TAB,
-		pathBox: [0, 0, 100, 100],
-		x: 320,
-		y: 146,
-		size: 34,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		z: 18,
-		modulators: [
-			{
-				source: "phrase",
-				bars: MOTIF_BARS,
-				symmetric: true,
-				curve: 4,
-				target: "opacity",
-				op: "mul",
-				amount: 1,
-			},
-			{ source: "bar", target: "y", op: "sub", amount: 5 },
-		],
-	},
-	{
-		kind: "shape",
-		id: "zoom-tab-bottom",
-		form: "path",
-		path: ZOOM_TAB,
-		pathBox: [0, 0, 100, 100],
-		x: 320,
-		y: 214,
-		size: 34,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		z: 18,
-		modulators: [
-			{
-				source: "phrase",
-				bars: MOTIF_BARS,
-				symmetric: true,
-				curve: 4,
-				target: "opacity",
-				op: "mul",
-				amount: 1,
-			},
-			{ source: "bar", target: "y", op: "add", amount: 5 },
-		],
-	},
-	// 遠いフランキング。実測 中心から±88px・約56px幅（size 28）。
-	// 破線列と鍵盤箱を`bar`の表裏で当て、1小節ごとに交互へ入れ替わるようにする。
-	{
-		kind: "shape",
-		id: "zoom-dash-l",
-		form: "path",
-		path: ZOOM_TWOBAR,
-		pathBox: [0, 0, 100, 100],
-		x: 244,
-		y: 180,
-		size: 40,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		z: 21,
-		modulators: [
-			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
-		],
-	},
-	{
-		kind: "shape",
-		id: "zoom-dash-r",
-		form: "path",
-		path: ZOOM_TWOBAR,
-		pathBox: [0, 0, 100, 100],
-		x: 396,
-		y: 180,
-		size: 40,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		z: 21,
-		modulators: [
-			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
-		],
-	},
-	{
-		kind: "shape",
-		id: "zoom-key-l",
-		form: "path",
-		path: ZOOM_BLOCK,
-		pathBox: [0, 0, 100, 100],
-		x: 244,
-		y: 180,
-		size: 40,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		z: 21,
-		modulators: [
-			// 中央ブロックの山の**逆**。中央が消えている間だけ現れることで、
-			// 「中央の四角」⇄「左右の巨大な白ボックス」とメインモチーフ自体が入れ替わる。
-			{
-				source: "phrase",
-				bars: MOTIF_BARS,
-				symmetric: true,
-				curve: 4,
-				target: "opacity",
-				op: "sub",
-				amount: 0.95,
-			},
-		],
-	},
-	{
-		kind: "shape",
-		id: "zoom-key-r",
-		form: "path",
-		path: ZOOM_BLOCK,
-		pathBox: [0, 0, 100, 100],
-		x: 396,
-		y: 180,
-		size: 40,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		z: 21,
-		modulators: [
-			// 中央ブロックの山の**逆**。中央が消えている間だけ現れることで、
-			// 「中央の四角」⇄「左右の巨大な白ボックス」とメインモチーフ自体が入れ替わる。
-			{
-				source: "phrase",
-				bars: MOTIF_BARS,
-				symmetric: true,
-				curve: 4,
-				target: "opacity",
-				op: "sub",
-				amount: 0.95,
-			},
-		],
-	},
-	// サビ直前の場面だけ、モチーフの外端（実測 ±120px）にもう一列足して密度を上げる。
-	// curveをゆるく(0.4)すると序盤はほとんど出ず、終わり際に一気に育つ＝サビへの助走。
-	{
-		kind: "shape",
-		id: "zoom-outer-l",
-		form: "path",
-		path: ZOOM_TWOBAR,
-		pathBox: [0, 0, 100, 100],
-		x: 190,
-		y: 180,
-		size: 24,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		sections: PRE_CHORUS,
-		z: 21,
-		modulators: [
-			{
-				source: "phrase",
-				bars: SCENE_BARS,
-				curve: 0.4,
-				target: "opacity",
-				op: "sub",
-				amount: 1,
-			},
-		],
-	},
-	{
-		kind: "shape",
-		id: "zoom-outer-r",
-		form: "path",
-		path: ZOOM_TWOBAR,
-		pathBox: [0, 0, 100, 100],
-		x: 450,
-		y: 180,
-		size: 24,
-		rotation: 0,
-		color: "#f4f4f5",
-		filled: true,
-		thickness: 1,
-		sections: PRE_CHORUS,
-		z: 21,
-		modulators: [
-			{
-				source: "phrase",
-				bars: SCENE_BARS,
-				curve: 0.4,
-				target: "opacity",
-				op: "sub",
-				amount: 1,
-			},
-		],
-	},
+	// ══ 中央。エフェクトテンプレートの組み合わせ ══════════════════════
+	...(() => {
+		const layers = [
+			...FIND("doubleFrame").build({
+				...DEFAULT_TEMPLATE_PARAMS,
+				x: 320,
+				y: 180,
+				size: 64,
+				color: "#f4f4f5",
+				barsPerLoop: MOTIF_BARS,
+			}),
+			...FIND("particleOrbit").build({
+				...DEFAULT_TEMPLATE_PARAMS,
+				x: 232,
+				y: 180,
+				size: 30,
+				color: "#e4e4e7",
+				barsPerLoop: MOTIF_BARS,
+				count: 8,
+			}),
+			...FIND("particleOrbit").build({
+				...DEFAULT_TEMPLATE_PARAMS,
+				x: 408,
+				y: 180,
+				size: 30,
+				color: "#e4e4e7",
+				barsPerLoop: MOTIF_BARS,
+				count: 8,
+			}),
+		].map((l, i) => ({ ...l, z: 19 + i }));
+		const burst = FIND("sunburstSweep").build({
+			...DEFAULT_TEMPLATE_PARAMS,
+			x: 320,
+			y: 180,
+			size: 70,
+			color: "#f4f4f5",
+			barsPerLoop: SCENE_BARS,
+			count: 8,
+		}).map((l) => ({ ...l, sections: PRE_CHORUS, z: 25 }));
+		return [...layers, ...burst];
+	})(),
+
+
 
 	// ══ 左の提灯 ═══════════════════════════════════════════
 	// 提灯の下から伸びる細い柄。bar を傾けて1本の棒にする
