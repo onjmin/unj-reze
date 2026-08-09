@@ -89,7 +89,6 @@ import {
 	type MvRollFlow,
 	type MvSceneStage,
 	type MvSection,
-	type MvShapeForm,
 	type MvShapeLayer,
 	type MvTextLayer,
 	type MvTransitionStyle,
@@ -113,7 +112,10 @@ import {
 	parseMvSong,
 	resolveLyricLines,
 } from "@/lib/mv-engine";
-import { resolveSceneModulators } from "@/lib/mv-shape-motion";
+import {
+	DEFAULT_SCENE_MOTION,
+	resolveSceneModulators,
+} from "@/lib/mv-shape-motion";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
@@ -1173,7 +1175,10 @@ export default function MvMaker({
 			blend: "normal",
 			z: getNextZ(),
 			// 最初から音に反応させる。ここへ演算を足していくのが図形レイヤーの使い方。
-			modulators: [{ source: "beat", target: "size", op: "add", amount: 20 }],
+			// 「図形の動き方設定」モーダルの既定値(DEFAULT_SCENE_MOTION=ビート同期)と
+			// 必ず一致させる——別々に定義すると、モーダルを開いたときに「ビート同期が
+			// 選ばれている」のに実際の動きは別物、という食い違いが起きる。
+			modulators: resolveSceneModulators(DEFAULT_SCENE_MOTION, 4),
 		};
 		update((m) => ({ ...m, layers: [...m.layers, layer] }));
 		setSelectedLayerId(layer.id);
@@ -4532,64 +4537,61 @@ export default function MvMaker({
 						(l): l is MvShapeLayer =>
 							l.kind === "shape" && l.id === motionTarget.layerId,
 					);
-					const section = manifest.sections.find(
-						(s) => s.id === motionTarget.sectionId,
-					);
-					if (!baseLayer || !section) return null;
-					const sceneBars =
-						(manifest.sections.find(
+					if (!baseLayer) return null;
+					// 図形が実際に出ている場面ぜんぶ（未指定＝全場面）を対象にする。
+					// 以前は「今開いた1場面だけ」を別レイヤーへ複製する方式だったため、
+					// 複製後に見た目(x/y/color/formなど)を直しても片方の場面にしか
+					// 反映されなくなるバグがあった。図形そのものは1つのレイヤーのまま共有し、
+					// 動き(modulators)だけを場面ごとに持たせる。
+					const layerSections =
+						baseLayer.sections && baseLayer.sections.length > 0
+							? manifest.sections.filter((s) =>
+									baseLayer.sections?.includes(s.id),
+								)
+							: manifest.sections;
+					if (layerSections.length === 0) return null;
+					const sceneBarsFor = (sectionId: string) => {
+						const section = manifest.sections.find(
+							(s) => s.id === sectionId,
+						);
+						if (!section) return 4;
+						const next = manifest.sections.find(
 							(s) => s.startBar > section.startBar,
-						)?.startBar ?? song.totalBars ?? section.startBar + 8) -
-						section.startBar;
+						);
+						return Math.max(
+							1,
+							(next?.startBar ?? song.totalBars ?? section.startBar + 8) -
+								section.startBar,
+						);
+					};
 					return (
 						<MvShapeMotionModal
 							baseLayer={baseLayer}
-							sections={[section]}
-							sceneBars={() => Math.max(1, sceneBars)}
+							sections={layerSections}
+							sceneBars={sceneBarsFor}
 							bpm={song.bpm}
 							// モーダルを開き直したとき前回の選択（プリセット/速さ/手動調整）を
-							// 復元する。これが無いと毎回既定値から始まり、「設定したのに
-							// 保存されていない」ように見えるバグになる。
-							initial={
-								baseLayer.motionPreset
-									? { [section.id]: baseLayer.motionPreset }
-									: undefined
-							}
+							// 場面ごとに復元する。
+							initial={baseLayer.motionPresetByScene}
+							initialSceneId={motionTarget.sectionId}
 							onApply={(perScene) => {
-								const cfg = perScene[section.id];
-								if (!cfg) return;
-								const mods = resolveSceneModulators(cfg, Math.max(1, sceneBars));
-								const all = manifest.sections.map((s) => s.id);
-								const cur = baseLayer.sections ?? all;
-								const otherSections = cur.filter((id) => id !== section.id);
-								if (otherSections.length === 0) {
-									// この場面にしか出ていない図形＝そのまま動きだけ差し替える
-									updateLayer(baseLayer.id, (l) => ({
-										...l,
-										sections: [section.id],
-										modulators: mods,
-										motionPreset: cfg,
-									}));
-								} else {
-									// 他の場面でも使われている図形＝この場面だけ複製して動きを変える。
-									// 複製後は複製のほうを選択状態にしておく——じゃないと、元のレイヤーを
-									// 選んだまま「動きを編集する」を開き直したときに、今設定した場面とは
-									// 別の場面（元のsections[0]）が開いてしまい、「設定が保存されていない」
-									// ように見えてしまう。
-									updateLayer(baseLayer.id, (l) => ({
-										...l,
-										sections: otherSections,
-									}));
-									const clone: MvShapeLayer = {
-										...baseLayer,
-										id: mvUid("shp"),
-										sections: [section.id],
-										modulators: mods,
-										motionPreset: cfg,
+								updateLayer(baseLayer.id, (l) => {
+									if (l.kind !== "shape") return l;
+									const modulatorsByScene = {
+										...(l.modulatorsByScene ?? {}),
 									};
-									update((m) => ({ ...m, layers: [...m.layers, clone] }));
-									setSelectedLayerId(clone.id);
-								}
+									const motionPresetByScene = {
+										...(l.motionPresetByScene ?? {}),
+									};
+									for (const [sceneId, cfg] of Object.entries(perScene)) {
+										modulatorsByScene[sceneId] = resolveSceneModulators(
+											cfg,
+											sceneBarsFor(sceneId),
+										);
+										motionPresetByScene[sceneId] = cfg;
+									}
+									return { ...l, modulatorsByScene, motionPresetByScene };
+								});
 							}}
 							onClose={() => setMotionTarget(null)}
 						/>

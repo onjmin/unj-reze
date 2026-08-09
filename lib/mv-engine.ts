@@ -1799,7 +1799,11 @@ function iconCycleIndex(
 
 function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 	const { ctx } = d;
-	const mods = layer.modulators;
+	// 場面ごとの動きの上書きがあればそちらを使う（見た目(x/y/color/formなど)は
+	// レイヤー本体を共有したまま、動きだけを場面ごとに差し替えられるようにするため）。
+	const mods =
+		(d.sectionId ? layer.modulatorsByScene?.[d.sectionId] : undefined) ??
+		layer.modulators;
 	const stagger = layer.stagger ?? 0;
 
 	// 個数だけは先に確定させる（1個ごとの遅延を掛ける前の値で数える）

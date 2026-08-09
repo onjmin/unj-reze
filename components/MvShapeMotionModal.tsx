@@ -100,6 +100,8 @@ interface MvShapeMotionModalProps {
 	/** 実際の曲のBPM。プレビューの体感速度を本編と合わせるために使う。 */
 	bpm?: number;
 	initial?: Record<string, MvSceneMotionConfig>;
+	/** 開いた直後に選んでおく場面タブ。省略時は sections の先頭。 */
+	initialSceneId?: string;
 	onApply: (perScene: Record<string, MvSceneMotionConfig>) => void;
 	onClose: () => void;
 }
@@ -117,13 +119,18 @@ export default function MvShapeMotionModal({
 	sceneBars,
 	bpm,
 	initial,
+	initialSceneId,
 	onApply,
 	onClose,
 }: MvShapeMotionModalProps) {
 	const sceneList = sections.length > 0 ? sections : [
 		{ id: "__all__", label: "全体", startBar: 0 } as MvSection,
 	];
-	const [activeSceneId, setActiveSceneId] = useState(sceneList[0]?.id ?? "__all__");
+	const [activeSceneId, setActiveSceneId] = useState(
+		(initialSceneId && sceneList.some((s) => s.id === initialSceneId)
+			? initialSceneId
+			: sceneList[0]?.id) ?? "__all__",
+	);
 	const [perScene, setPerScene] = useState<Record<string, MvSceneMotionConfig>>(
 		() =>
 			Object.fromEntries(
@@ -131,9 +138,18 @@ export default function MvShapeMotionModal({
 			),
 	);
 
+	// 実際に触った場面だけを保存対象にする。sceneList全件ぶんの既定値を
+	// 常に適用してしまうと、「この場面だけ変えたい」つもりで開いても、
+	// 一度もタブを開いていない他の場面まで DEFAULT_SCENE_MOTION（ビート同期）で
+	// 上書きしてしまい、既存の動きが消える事故になる。
+	const [touchedScenes, setTouchedScenes] = useState<Set<string>>(
+		() => new Set(Object.keys(initial ?? {})),
+	);
 	const cfg = perScene[activeSceneId] ?? DEFAULT_SCENE_MOTION;
-	const setCfg = (next: MvSceneMotionConfig) =>
+	const setCfg = (next: MvSceneMotionConfig) => {
 		setPerScene((p) => ({ ...p, [activeSceneId]: next }));
+		setTouchedScenes((s) => new Set(s).add(activeSceneId));
+	};
 
 	const bars = sceneBars(activeSceneId);
 	const modulators = resolveSceneModulators(cfg, bars);
@@ -341,7 +357,12 @@ export default function MvShapeMotionModal({
 					</button>
 					<button
 						onClick={() => {
-							onApply(perScene);
+							const touched = Object.fromEntries(
+								Object.entries(perScene).filter(([id]) =>
+									touchedScenes.has(id),
+								),
+							);
+							onApply(touched);
 							onClose();
 						}}
 						className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white"

@@ -956,13 +956,19 @@ export interface MvShapeLayer extends MvLayerBase {
 		| { paths: string[]; beats: number; resetEveryBars?: number }
 		| { paths: string[]; advance: "onset"; track?: number };
 	/**
-	 * 「図形の動き方設定」モーダルで選んだ設定そのもの（プリセットID＋手動調整）。
-	 * `modulators` は↑から導出した結果（実際に描画で読まれる値）で、こちらは
-	 * モーダルを開き直したときに前回の選択を復元するための"入力側"の記録。
-	 * これが無いと、保存されているのは常に modulators という結果だけになり、
-	 * モーダルは毎回既定値から始まってしまう（＝前回の設定が消えたように見えるバグ）。
+	 * 場面ごとに動きだけを変えたいときの上書き（キーは MvSection.id）。
+	 * 図形そのもの(x/y/size/color/formなど)は場面をまたいでも常に同じ1つのレイヤーで、
+	 * 動き(modulators)だけを場面ごとに差し替える。
+	 *
+	 * 以前は「動き方設定」を適用するたびに場面ごと別レイヤーへ複製していたが、
+	 * そうすると x/y/color のような見た目の編集が複製後の片方にしか効かなくなり、
+	 * 「同じ図形のはずなのに一部の場面にだけ反映されない」バグになっていた。
+	 * ここに場面idキーで動きだけ持たせることで、レイヤー自体は複製しない。
+	 * 該当場面のキーが無ければ `modulators`（既定の動き）がそのまま使われる。
 	 */
-	motionPreset?: MvShapeMotionPreset;
+	modulatorsByScene?: Record<string, MvModulator[]>;
+	/** motionByScene の"入力側"版（モーダル復元用）。キーは modulatorsByScene と同じ。 */
+	motionPresetByScene?: Record<string, MvShapeMotionPreset>;
 }
 
 /** 「図形の動き方設定」モーダルの選択内容そのもの（1場面ぶん）。 */
