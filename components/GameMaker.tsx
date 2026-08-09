@@ -12144,7 +12144,11 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
         if (!p.layout25d) return p;
         const textures = { ...p.layout25d.textures };
         if (textures[target.id]) {
-          textures[target.id] = { ...textures[target.id], imageRef: res.ref, imageUrl: res.url };
+          // 「マイクラスキン」タブから選んだ場合はそのテクスチャをブロック人形（minecraftSkin）に切り替える。
+          // 平たい画像のまま差し替えると3D表示でスキン画像がベタ貼りになる。
+          textures[target.id] = res.skin && textures[target.id].kind === 'sprite'
+            ? { ...textures[target.id], name: 'マイクラスキン', color: '#7ec9a2', emoji: '👗', minecraftSkin: res.url, imageRef: undefined, imageUrl: undefined }
+            : { ...textures[target.id], imageRef: res.ref, imageUrl: res.url };
         }
         return { ...p, layout25d: { ...p.layout25d, textures } };
       });
@@ -12155,23 +12159,28 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     else if (target.t === 'yumeNewTex') {
       // 「画像を参照」から選んだ画像でテクスチャを新規追加する。以前は壁/床がプリセット付属の固定テクスチャ
       // しか選べず（システムオブジェクトの special 付きテクスチャを除く）、この入口が無かった。
+      // 「マイクラスキン」タブからの選択は3Dブロック人形テクスチャ（minecraftSkin）として解釈する。
+      // 平たい1枚画像テクスチャのまま追加すると3D表示でスキン画像がベタ貼りになってしまう。
       const lay = gameData.layout25d;
       if (lay) {
         const id = Math.max(0, ...Object.keys(lay.textures).map(Number)) + 1;
-        const defaultName = target.kind === 'floor' ? 'ゆか' : target.kind === 'wall' ? '壁' : 'スプライト';
+        const isSkin = !!res.skin;
+        const defaultName = isSkin ? 'マイクラスキン' : target.kind === 'floor' ? 'ゆか' : target.kind === 'wall' ? '壁' : 'スプライト';
         setGameData(p => p.layout25d ? {
           ...p,
           layout25d: {
             ...p.layout25d,
             textures: {
               ...p.layout25d.textures,
-              [id]: { id, name: res.label || defaultName, kind: target.kind, color: '#8a8a92', imageRef: res.ref, imageUrl: res.url },
+              [id]: isSkin
+                ? { id, name: 'マイクラスキン', kind: 'sprite' as const, color: '#7ec9a2', emoji: '👗', minecraftSkin: res.url }
+                : { id, name: res.label || defaultName, kind: target.kind, color: '#8a8a92', imageRef: res.ref, imageUrl: res.url },
             },
           },
         } : p);
-        if (target.kind === 'floor') { setYume25dTool('floor'); setYume25dSelFloor(id); }
-        else if (target.kind === 'wall') { setYume25dTool('wall'); setYume25dSelWall(id); }
-        else { setYume25dTool('sprite'); setYume25dSelSprite(id); }
+        if (isSkin || target.kind === 'sprite') { setYume25dTool('sprite'); setYume25dSelSprite(id); }
+        else if (target.kind === 'floor') { setYume25dTool('floor'); setYume25dSelFloor(id); }
+        else { setYume25dTool('wall'); setYume25dSelWall(id); }
       }
     }
     else if (target.t === 'yumeMcSkin') {

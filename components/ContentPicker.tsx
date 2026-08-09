@@ -38,6 +38,10 @@ export interface PickResult {
 	url?: string;
 	rawMml?: string;
 	label: string;
+	/** 「マイクラスキン」タブからの選択。呼び出し側で3Dブロック人形テクスチャ（minecraftSkin）として
+	 *  解釈できるようにするため、タブごとに立てるフラグ（汎用の「画像を参照」経路でスキンを選んでも
+	 *  平たい1枚画像テクスチャにならないようにする）。 */
+	skin?: boolean;
 }
 
 interface ContentPickerProps {
@@ -857,7 +861,12 @@ export default function ContentPicker({
 									<button
 										key={p.url}
 										onClick={() =>
-											onPick({ ref: p.url, url: p.url, label: p.name })
+											onPick({
+												ref: p.url,
+												url: p.url,
+												label: p.name,
+												skin: true,
+											})
 										}
 										title={p.author ? `著作者: ${p.author}` : undefined}
 										className="flex flex-col items-start gap-0.5 p-1.5 rounded-lg border border-gray-700 bg-gray-900 hover:border-blue-500 text-left transition"
@@ -888,7 +897,12 @@ export default function ContentPicker({
 										onClick={() => {
 											const u = mcSkinUrlInput.trim();
 											if (!u) return;
-											onPick({ ref: u, url: u, label: "マイクラスキン" });
+											onPick({
+												ref: u,
+												url: u,
+												label: "マイクラスキン",
+												skin: true,
+											});
 										}}
 										disabled={!mcSkinUrlInput.trim()}
 										className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold"
