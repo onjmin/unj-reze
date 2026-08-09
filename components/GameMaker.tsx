@@ -1563,6 +1563,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     message: string;
     confirmText?: string;
     cancelText?: string;
+    /** true のとき確認ボタンを赤（危険な操作）にする。 */
+    danger?: boolean;
     onConfirm: () => void;
   } | null>(null);
 
@@ -1575,8 +1577,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     setNoticeModal({ message, title });
   }, []);
 
-  const customConfirm = useCallback((message: string, onConfirm: () => void, title?: string) => {
-    setConfirmModal({ message, onConfirm, title });
+  const customConfirm = useCallback((message: string, onConfirm: () => void, title?: string, opts?: { confirmText?: string; cancelText?: string; danger?: boolean }) => {
+    setConfirmModal({ message, onConfirm, title, ...opts });
   }, []);
 
   const [showTitle, setShowTitle] = useState(false);
@@ -2796,6 +2798,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
 
   // ── 設定パネル ──
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** ゲーム切り替え・まっさらにする 専用パネル。設定メニューから開く。 */
+  const [gameSwitchOpen, setGameSwitchOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!settingsOpen) return;
@@ -6274,6 +6278,63 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
       data.player.start = conv.startPx;
     }
     applyPresetData(id, data, title);
+  };
+
+  /** 「まっさらにする」用：エンジンは維持したまま、マップ・タイル・オブジェクト・イベント・
+   *  戦闘・BGM など編集中のコンテンツをすべて消した空データを作る。
+   *  横スクロール（action）系だけは落下しっぱなしにならないよう最下段へ地面タイルを敷き、
+   *  立つ場所とペイント用に「土」タイルを1つだけ残す（他は一切なし）。 */
+  const createBlankGameData = (id: PresetId, titleStr: string): PresetData => {
+    const data = clone(PRESETS[id]);
+    const cols = data.scroll?.worldCols ?? COLS;
+    const rows = data.scroll?.worldRows ?? ROWS;
+    const blankGrid = () => Array.from({ length: rows }, () => Array(cols).fill(0));
+    const map = blankGrid();
+    if (data.engine === 'action') {
+      for (let r = Math.max(0, rows - 2); r < rows; r++) {
+        for (let c = 0; c < cols; c++) map[r][c] = 1;
+      }
+    }
+    data.map = map;
+    data.overlayMap = blankGrid();
+    data.overheadMap = blankGrid();
+    data.tiles = { 1: { name: '土', color: '#8a5a2b', passable: true } };
+    data.objects = [];
+    data.scenes = undefined;
+    data.battle = undefined;
+    data.switches = [];
+    data.items = [];
+    data.weapons = [];
+    data.armors = [];
+    data.effects = [];
+    data.phases = undefined;
+    data.bgm = undefined;
+    data.battleBgm = undefined;
+    data.bossBgm = undefined;
+    data.sfx = {};
+    data.mapBgRef = undefined;
+    data.mapBgUrl = undefined;
+    data.titleScreen = defaultTitleScreen(titleStr?.trim() || data.name);
+    data.ending = undefined;
+    if (data.engine === 'yume25d' && data.layout25d) {
+      const layout = data.layout25d;
+      const firstFloor = Object.values(layout.textures).find(t => t.kind === 'floor');
+      // 床テクスチャは残しつつ配置物（壁・ビルボード）は空に。床は既定テクスチャで全面敷く（全面0=奈落だと落下して始められない）。
+      data.layout25d = {
+        ...layout,
+        floor: Array.from({ length: layout.rows }, () => Array(layout.cols).fill(firstFloor?.id ?? 1)),
+        walls: [],
+        billboards: [],
+      };
+      data.deathScreen = defaultDeathScreen();
+    }
+    return data;
+  };
+
+  /** 設定パネルの「まっさらにする」：現在のエンジンを維持したまま編集内容を空にする。 */
+  const resetToBlank = () => {
+    const data = createBlankGameData(presetId, title);
+    applyPresetData(presetId, data, title);
   };
 
   const restart = useCallback(() => {
@@ -12759,10 +12820,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const applyEditSnapshot = useCallback((snap: PresetData) => {
     setGameData(snap);
     gameDataRef.current = snap;
+    // プリセット切り替え／まっさらにする を undo したときはプリセットIDも戻す
+    if (snap.id !== presetId) setPresetId(snap.id);
     engineRef.current.map = JSON.parse(JSON.stringify(snap.map));
+    engineRef.current.overlayMap = snap.overlayMap ? JSON.parse(JSON.stringify(snap.overlayMap)) : undefined;
+    engineRef.current.overheadMap = snap.overheadMap ? JSON.parse(JSON.stringify(snap.overheadMap)) : undefined;
+    const sp = snap.player?.start;
+    if (sp) engineRef.current.player = { ...sp, vx: 0, vy: 0, isGrounded: false };
     setSelectedObjId(prev => (prev && snap.objects.some(o => o.id === prev) ? prev : null));
     setBatchIds(new Set());
-  }, []);
+  }, [presetId]);
 
   const undoEdit = useCallback(() => {
     const stack = undoStackRef.current;
@@ -13310,76 +13377,17 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                   >
                     <Upload size={13} />RPGENをインポート (テキスト)
                   </button>
-                  {/* ゲーム（プリセット）切り替え：ヘッダーの select から移設。
-                    エンジン変更と違い、編集中の内容は引き継がずプリセットを丸ごと読み直す。 */}
-                  {/* プリセット初期化 & エンジン変換 */}
+                  {/* ゲーム切り替え・まっさらにする：プリセット初期ロード / エンジン変換 / まっさら化 は
+                     専用パネル（gameSwitchOpen）へ移設。ドロップダウンは入口ボタンだけにする。 */}
                   {!playOnly && !isPlaying && (
                     <>
                       <div className="border-t border-gray-700 my-1" />
-                      <div className="px-3 py-2 space-y-2.5">
-                        <div className="text-[10px] font-bold text-gray-400 flex items-center gap-1">
-                          <Gamepad2 size={11} />ゲーム切り替え・エンジン変換
-                        </div>
-
-                        {/* 1. プリセット初期ロード */}
-                        <div className="space-y-1">
-                          <div className="text-[9px] font-bold text-gray-300">① プリセットを初期ロード（編集内容破棄）</div>
-                          <select
-                            value={presetId}
-                            onChange={e => {
-                              const id = e.target.value as PresetId;
-                              if (id === presetId) return;
-                              customConfirm(
-                                `「${PRESETS[id].name}」を初期データで読み込みますか？\n※編集中の内容は破棄されます`,
-                                () => {
-                                  resetGame(id);
-                                  setSettingsOpen(false);
-                                },
-                                'ゲーム切り替えの確認'
-                              );
-                            }}
-                            className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none rounded"
-                          >
-                            {PRESET_ORDER.map(pid => (
-                              <option key={pid} value={pid}>
-                                {PRESETS[pid].name}{pid === presetId ? '（現在選択中）' : ''}
-                              </option>
-                            ))}
-                          </select>
-                          <p className="text-[9px] text-gray-500 leading-tight">選んだゲームの初期状態をロードします</p>
-                        </div>
-
-                        {/* 2. 現データ引継ぎエンジン変換 */}
-                        <div className="pt-2 border-t border-gray-800 space-y-1">
-                          <div className="text-[9px] font-bold text-amber-300 flex items-center gap-1">
-                            <Wrench size={10} />② 編集中のゲームを別エンジンへ変換
-                          </div>
-                          <select
-                            value=""
-                            onChange={e => {
-                              const id = e.target.value as PresetId;
-                              if (!id || id === presetId) return;
-                              customConfirm(
-                                `「${PRESETS[id].name}」エンジンへ変換しますか？\nタイトル・見た目・BGM・マップを引き継ぎます（2D⇄3D変換は一部が近似変換されます）`,
-                                () => {
-                                  switchEngine(id);
-                                  setSettingsOpen(false);
-                                },
-                                'エンジン変換の確認'
-                              );
-                            }}
-                            className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-amber-200 outline-none rounded font-medium"
-                          >
-                            <option value="" disabled>-- 変換先のエンジンを選択 --</option>
-                            {PRESET_ORDER.filter(pid => pid !== presetId).map(pid => (
-                              <option key={pid} value={pid}>
-                                ➡️ {PRESETS[pid].name} エンジンへ変換
-                              </option>
-                            ))}
-                          </select>
-                          <p className="text-[9px] text-gray-500 leading-tight">現在のマップやグラフィックを維持したまま別のゲーム種別へ変換します</p>
-                        </div>
-                      </div>
+                      <button
+                        onClick={() => { setGameSwitchOpen(true); setSettingsOpen(false); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition"
+                      >
+                        <Gamepad2 size={13} />ゲーム切り替え・まっさらにする
+                      </button>
                     </>
                   )}
                   {/* SMC素材クレジット（マリオプリセット使用時） */}
@@ -13681,6 +13689,123 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                       }
                     }}
                       className="px-4 py-2 bg-white/15 hover:bg-white/25 border-2 border-white/40 font-pixel text-sm">とじる</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── ゲーム切り替え・まっさらにする 専用パネル ── */}
+            {gameSwitchOpen && (
+              <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+                <div className="bg-gray-900 border border-gray-700 rounded p-4 w-full max-w-md flex flex-col shadow-2xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-gray-200 flex items-center gap-1.5">
+                      <Gamepad2 size={15} />ゲーム切り替え・まっさらにする
+                    </h3>
+                    <button onClick={() => setGameSwitchOpen(false)} className="p-1 text-gray-400 hover:text-white" title="とじる">
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    {/* まっさらにする */}
+                    <div className="bg-red-950/40 border border-red-800/60 rounded p-3 space-y-2">
+                      <div className="font-bold text-red-300 flex items-center gap-1.5">
+                        <Trash2 size={13} />まっさらにする（現在：{PRESETS[presetId].name}）
+                      </div>
+                      <p className="text-[10px] text-gray-400 leading-relaxed">
+                        エンジンはそのまま、マップ・タイル・オブジェクト・イベント・戦闘・BGMをすべて消して空の状態から作り直します。プリセットの初期データには戻りません。
+                      </p>
+                      <button
+                        onClick={() => {
+                          customConfirm(
+                            `現在の「${PRESETS[presetId].name}」の編集内容（マップ・タイル・オブジェクト・イベント・戦闘・BGM）をすべて消して、まっさらにしますか？\n\nCtrl+Z（元に戻す）で直前の状態へ戻せますが、確実に戻せる保証はないため、大切なデータは先にエクスポートしてください。`,
+                            () => {
+                              pushUndo();
+                              resetToBlank();
+                              setGameSwitchOpen(false);
+                            },
+                            'まっさらにする（危険な操作）',
+                            { confirmText: '消去してまっさらにする', danger: true }
+                          );
+                        }}
+                        className="w-full px-3 py-2 rounded text-xs font-bold text-white bg-red-600 hover:bg-red-500 transition"
+                      >
+                        編集内容をすべて消してまっさらにする
+                      </button>
+                    </div>
+
+                    {/* プリセットを初期ロード */}
+                    <div className="space-y-1.5">
+                      <div className="font-bold text-gray-300 flex items-center gap-1.5">
+                        <Download size={13} />プリセットを初期ロード
+                      </div>
+                      <select
+                        value={presetId}
+                        onChange={e => {
+                          const id = e.target.value as PresetId;
+                          if (id === presetId) return;
+                          customConfirm(
+                            `「${PRESETS[id].name}」を初期データで読み込みますか？\n※編集中の内容は破棄されます`,
+                            () => {
+                              pushUndo();
+                              resetGame(id);
+                              setGameSwitchOpen(false);
+                            },
+                            'ゲーム切り替えの確認'
+                          );
+                        }}
+                        className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-gray-200 outline-none rounded"
+                      >
+                        {PRESET_ORDER.map(pid => (
+                          <option key={pid} value={pid}>
+                            {PRESETS[pid].name}{pid === presetId ? '（現在選択中）' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-gray-500 leading-tight">選んだゲームの初期状態に丸ごと置き換えます</p>
+                    </div>
+
+                    {/* 現データ引継ぎエンジン変換 */}
+                    <div className="space-y-1.5">
+                      <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                        <Wrench size={13} />編集中のゲームを別エンジンへ変換
+                      </div>
+                      <select
+                        value=""
+                        onChange={e => {
+                          const id = e.target.value as PresetId;
+                          if (!id || id === presetId) return;
+                          customConfirm(
+                            `「${PRESETS[id].name}」エンジンへ変換しますか？\nタイトル・見た目・BGM・マップを引き継ぎます（2D⇄3D変換は一部が近似変換されます）`,
+                            () => {
+                              pushUndo();
+                              switchEngine(id);
+                              setGameSwitchOpen(false);
+                            },
+                            'エンジン変換の確認'
+                          );
+                        }}
+                        className="w-full bg-gray-800 border border-gray-700 px-2 py-1.5 text-[11px] text-amber-200 outline-none rounded font-medium"
+                      >
+                        <option value="" disabled>-- 変換先のエンジンを選択 --</option>
+                        {PRESET_ORDER.filter(pid => pid !== presetId).map(pid => (
+                          <option key={pid} value={pid}>
+                            ➡️ {PRESETS[pid].name} エンジンへ変換
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[10px] text-gray-500 leading-tight">現在のマップやグラフィックを維持したまま別のゲーム種別へ変換します</p>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end mt-4">
+                    <button
+                      onClick={() => setGameSwitchOpen(false)}
+                      className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 rounded transition"
+                    >
+                      とじる
+                    </button>
                   </div>
                 </div>
               </div>
@@ -14064,7 +14189,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                         setConfirmModal(null);
                         cb();
                       }}
-                      className="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 transition shadow"
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition shadow ${confirmModal.danger ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'}`}
                     >
                       {confirmModal.confirmText ?? '実行する'}
                     </button>

@@ -519,6 +519,10 @@ export function drawMvFrame(
 	manifest: MvManifest,
 	song: MvSong,
 	frame: MvFrameState,
+	options?: {
+		selectedLayerId?: string | null;
+		hoveredLayerId?: string | null;
+	},
 ): void {
 	const step = Math.max(0, frame.step);
 	const bar = step / MV_STEPS_PER_BAR;
@@ -601,6 +605,78 @@ export function drawMvFrame(
 			ctx.restore();
 		}
 	}
+
+	// 編集用：ホバー・選択レイヤーのアタリ枠表示
+	if (options?.hoveredLayerId && options.hoveredLayerId !== options.selectedLayerId) {
+		const target = manifest.layers.find((l) => l.id === options.hoveredLayerId);
+		if (target) {
+			drawLayerHighlight(ctx, target, "#eab308", `[ホバー: ${target.name || target.kind}]`);
+		}
+	}
+	if (options?.selectedLayerId) {
+		const target = manifest.layers.find((l) => l.id === options.selectedLayerId);
+		if (target) {
+			drawLayerHighlight(ctx, target, "#3b82f6", `[選択中: ${target.name || target.kind}]`);
+		}
+	}
+}
+
+function drawLayerHighlight(
+	ctx: CanvasRenderingContext2D,
+	layer: MvLayer,
+	color: string,
+	label: string,
+): void {
+	let x = 0,
+		y = 0,
+		w = 60,
+		h = 60;
+	if (layer.kind === "visualizer") {
+		x = layer.rect.x;
+		y = layer.rect.y;
+		w = layer.rect.w;
+		h = layer.rect.h;
+	} else if (layer.kind === "image") {
+		const s = (layer.scale ?? 1) * 80;
+		x = layer.x - s / 2;
+		y = layer.y - s / 2;
+		w = s;
+		h = s;
+	} else if (layer.kind === "text" || layer.kind === "lyrics") {
+		const sz = layer.size ?? 16;
+		x = layer.x - 10;
+		y = layer.y - sz / 2 - 4;
+		w = 160;
+		h = sz + 12;
+	} else if (layer.kind === "shape") {
+		const sz = (layer.size ?? 1) * 60;
+		x = layer.x - sz / 2;
+		y = layer.y - sz / 2;
+		w = sz;
+		h = sz;
+	} else {
+		x = 10;
+		y = 10;
+		w = MV_W - 20;
+		h = MV_H - 20;
+	}
+
+	ctx.save();
+	ctx.strokeStyle = color;
+	ctx.lineWidth = 2;
+	ctx.setLineDash([5, 5]);
+	ctx.strokeRect(x, y, w, h);
+
+	// タグバッジ
+	ctx.setLineDash([]);
+	ctx.fillStyle = color;
+	ctx.font = "bold 11px sans-serif";
+	const textWidth = ctx.measureText(label).width;
+	const tagY = Math.max(0, y - 20);
+	ctx.fillRect(x, tagY, textWidth + 10, 20);
+	ctx.fillStyle = "#ffffff";
+	ctx.fillText(label, x + 5, tagY + 14);
+	ctx.restore();
 }
 
 // ───────────────── 画面エフェクト ─────────────────

@@ -6,12 +6,15 @@ import {
 	ChevronDown,
 	ChevronUp,
 	Clapperboard,
+	Clipboard,
+	Copy,
 	Hash,
 	History,
 	Image as ImageIcon,
 	Layers,
 	ListMusic,
 	Music,
+	Play,
 	Plus,
 	Shapes,
 	SlidersHorizontal,
@@ -114,9 +117,17 @@ import {
 } from "@/lib/mv-engine";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
-import MvPlayer from "./MvPlayer";
+import MvPlayer, { type MvPlayerHandle } from "./MvPlayer";
 import { buildMvPreset, MV_PRESETS } from "./mv-presets";
 import VolumeControl from "./VolumeControl";
+
+function formatMinSecMs(sec: number): string {
+	if (!sec || isNaN(sec) || sec < 0) return "0:00.0";
+	const mm = Math.floor(sec / 60);
+	const ss = Math.floor(sec % 60);
+	const ms = Math.floor((sec % 1) * 10);
+	return `${mm}:${ss.toString().padStart(2, "0")}.${ms}`;
+}
 
 type Tab = "preset" | "song" | "stage" | "layers" | "lyrics" | "sections";
 
@@ -685,9 +696,25 @@ export default function MvMaker({
 		mode: "image" | "bgm";
 		target: "stageBg" | { layerId: string } | { sectionId: string };
 	} | null>(null);
+	const playerRef = useRef<MvPlayerHandle>(null);
+	const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
+	const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+	const [copiedSectionData, setCopiedSectionData] = useState<{
+		stage?: MvManifest["stage"];
+		transition?: MvManifest["sections"][0]["transition"];
+		layerSections: Record<string, boolean>;
+	} | null>(null);
 	const [showHistory, setShowHistory] = useState(false);
 	const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
 	const [song, setSong] = useState<MvSong>(EMPTY_SONG);
+
+	const trackNoteCounts = useMemo(() => {
+		const map: Record<number, number> = {};
+		song.notes.forEach((n) => {
+			map[n.track] = (map[n.track] ?? 0) + 1;
+		});
+		return map;
+	}, [song.notes]);
 	const [hasAutosave, setHasAutosave] = useState(false);
 	const [bulkChordInput, setBulkChordInput] = useState("");
 	const autosaveDataRef = useRef<MvManifest | null>(null);
@@ -1361,23 +1388,6 @@ export default function MvMaker({
 						</p>
 					)}
 			</div>
-
-			<div className={SECTION_CLASS}>
-				<SectionTitle>🚶 歩行グラの速さ</SectionTitle>
-				<Hint>
-					歩行グラ素材のコマ送りの速さ（曲のテンポに対する倍率）。1倍だと拍にぴったり合わせたコマ送りで、
-					数値を上げるほど足取りが速く・軽快に見えます（小数可）。
-				</Hint>
-				<NumField
-					label="速度倍率"
-					value={mvWalkSpeed(manifest)}
-					min={0.1}
-					step={0.1}
-					onChange={(v) =>
-						update((m) => ({ ...m, walkSpeed: Math.max(0.1, v) }))
-					}
-				/>
-			</div>
 		</div>
 	);
 
@@ -1477,148 +1487,66 @@ export default function MvMaker({
 				</Details>
 			</div>
 
-			{/* かんたんモードでも絵を差し替えられるように、画像レイヤーだけここに出す */}
-			{imageLayers.length > 0 && (
-				<div className={SECTION_CLASS}>
-					<SectionTitle>🎭 出てくる絵</SectionTitle>
-					<Hint>
-						タップすると、あなたの描いたドット絵や画像に差し替えられます。
-					</Hint>
-					{imageLayers.map((l) => (
-						<div
-							key={l.id}
-							className="flex flex-col gap-1.5 rounded border border-gray-700 bg-gray-800 p-1.5"
-						>
-							<button
-								onClick={() =>
-									setPicker({ mode: "image", target: { layerId: l.id } })
-								}
-								className="flex min-h-10 w-full items-center gap-2 rounded bg-gray-900 px-2 py-1 text-left hover:bg-gray-100/5"
-							>
-								{l.url ? (
-									<img
-										src={l.url}
-										onError={handleImgError}
-										alt=""
-										className="h-8 w-8 shrink-0 rounded border border-gray-700 object-contain"
-									/>
-								) : (
-									<div className="grid h-8 w-8 shrink-0 place-items-center rounded border border-dashed border-gray-600">
-										<ImageIcon size={13} className="text-gray-500" />
-									</div>
-								)}
-								<span className="min-w-0 flex-1 truncate text-[11px] text-gray-200">
-									{refLabel(l.ref) || "画像を選ぶ"}
-								</span>
-								<span className="shrink-0 text-[10px] text-blue-300">
-									差し替え
-								</span>
-							</button>
-							<div className="px-1 py-1 space-y-2">
-								<SliderField
-									label="大きさ"
-									value={l.scale}
-									min={0.1}
-									max={5}
-									step={0.1}
-									onChange={(v) =>
-										update((m) => ({
-											...m,
-											layers: m.layers.map((layer) =>
-												layer.id === l.id ? { ...layer, scale: v } : layer,
-											),
-										}))
-									}
-								/>
-								<CheckField
-									label="ふわふわ揺らす"
-									checked={l.motion === "bob"}
-									onChange={(v) =>
-										update((m) => ({
-											...m,
-											layers: m.layers.map((layer) =>
-												layer.id === l.id
-													? { ...layer, motion: v ? "bob" : "none" }
-													: layer,
-											),
-										}))
-									}
-								/>
-								<CheckField
-									label="左右反転（鏡像）"
-									checked={!!l.flipH}
-									onChange={(v) =>
-										updateLayer(
-											l.id,
-											(layer) =>
-												({ ...layer, flipH: v || undefined }) as MvLayer,
-										)
-									}
-								/>
-								<CheckField
-									label="上下反転（逆さま）"
-									checked={!!l.flipV}
-									onChange={(v) =>
-										updateLayer(
-											l.id,
-											(layer) =>
-												({ ...layer, flipV: v || undefined }) as MvLayer,
-										)
-									}
-								/>
-								<SelectField
-									label="出てくる向き"
-									value={l.entrance?.from ?? "none"}
-									options={ENTER_FROM_OPTIONS}
-									onChange={(v) => updateEntrance(l.id, { from: v })}
-								/>
-								<CheckField
-									label="透明から現れる（フェードイン）"
-									checked={!!l.entrance?.fade}
-									onChange={(v) => updateEntrance(l.id, { fade: v })}
-								/>
-							</div>
-						</div>
-					))}
-				</div>
-			)}
+			<div className={SECTION_CLASS}>
+				<SectionTitle>🖼 素材・レイヤーの編集</SectionTitle>
+				<Hint>
+					画面に表示する画像・テキスト・ビジュアライザ・図形の個別設定は「レイヤー」タブおよび「場面」タブで行えます。複数の画像や場面ごとの切り替えにも対応しています。
+				</Hint>
+				<button
+					onClick={() => setTab("layers")}
+					className="flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
+				>
+					<Layers size={14} />
+					レイヤータブで画像・素材を編集する
+				</button>
+			</div>
 
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🎨 色</SectionTitle>
-				<Hint>曲のパートごとに、この順番で色が使われます。</Hint>
-				<div className="flex flex-wrap gap-1.5">
+				<SectionTitle>🎨 テーマカラー（パレット）</SectionTitle>
+				<Hint>
+					ビジュアライザ（音符・棒・図形）や背景演出が、曲のパートやトラック切り替え時に順番に使用するカラーテーマです。
+				</Hint>
+				<div className="flex flex-wrap gap-2 pt-1">
 					{manifest.stage.palette.map((c, i) => (
-						<div key={i} className="flex items-center gap-1">
-							<input
-								type="color"
-								value={c}
-								onChange={(e) =>
-									update((m) => ({
-										...m,
-										stage: {
-											...m.stage,
-											palette: m.stage.palette.map((p, j) =>
-												j === i ? e.target.value : p,
-											),
-										},
-									}))
-								}
-								className="h-10 w-10 cursor-pointer rounded-lg border border-gray-700 bg-transparent"
-							/>
-							<button
-								onClick={() =>
-									update((m) => ({
-										...m,
-										stage: {
-											...m.stage,
-											palette: m.stage.palette.filter((_, j) => j !== i),
-										},
-									}))
-								}
-								className="grid h-8 w-8 place-items-center rounded text-gray-500 hover:text-red-400"
-							>
-								<X size={13} />
-							</button>
+						<div
+							key={i}
+							className="flex flex-col items-center gap-1 rounded border border-gray-700 bg-gray-800 p-1.5"
+						>
+							<div className="flex items-center gap-1">
+								<input
+									type="color"
+									value={c}
+									onChange={(e) =>
+										update((m) => ({
+											...m,
+											stage: {
+												...m.stage,
+												palette: m.stage.palette.map((p, j) =>
+													j === i ? e.target.value : p,
+												),
+											},
+										}))
+									}
+									className="h-8 w-8 cursor-pointer rounded border border-gray-700 bg-transparent"
+								/>
+								<button
+									onClick={() =>
+										update((m) => ({
+											...m,
+											stage: {
+												...m.stage,
+												palette: m.stage.palette.filter((_, j) => j !== i),
+											},
+										}))
+									}
+									className="grid h-6 w-6 place-items-center rounded text-gray-500 hover:text-red-400"
+								>
+									<X size={12} />
+								</button>
+							</div>
+							<span className="text-[9px] text-gray-400">
+								{i === 0 ? "色 1 (メイン)" : `色 ${i + 1}`}
+							</span>
 						</div>
 					))}
 					<button
@@ -1628,7 +1556,7 @@ export default function MvMaker({
 								stage: { ...m.stage, palette: [...m.stage.palette, "#ffffff"] },
 							}))
 						}
-						className="grid h-10 w-10 shrink-0 place-items-center rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5"
+						className="grid h-14 w-12 shrink-0 place-items-center rounded border-2 border-dashed border-gray-600 text-gray-400 hover:bg-gray-100/5"
 					>
 						<Plus size={15} />
 					</button>
@@ -1737,6 +1665,15 @@ export default function MvMaker({
 						step={0.5}
 						onChange={(v) =>
 							updateLayer(layer.id, (l) => ({ ...l, scale: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="🚶 歩行グラのコマ送り速度倍率"
+						value={mvWalkSpeed(manifest)}
+						min={0.1}
+						step={0.1}
+						onChange={(v) =>
+							update((m) => ({ ...m, walkSpeed: Math.max(0.1, v) }))
 						}
 					/>
 					<CheckField
@@ -2030,29 +1967,74 @@ export default function MvMaker({
 						}
 					/>
 
-					<div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
-						<p className="text-[10px] text-gray-400">
-							どのトラックを映すか（未選択なら全トラック合算——複数選ぶと同時に複数の音が
-							別々の位置に描かれます）
+					<div className="space-y-2 rounded-lg border border-blue-500/40 bg-blue-500/10 p-2.5">
+						<p className="text-[11px] font-bold text-blue-200">
+							🎹 光る・反応するMMLトラックの選択
 						</p>
-						{song.tracks.map((t) => (
-							<CheckField
-								key={t}
-								label={`トラック @${t}`}
-								checked={!!layer.tracks?.includes(t)}
-								onChange={(v) =>
-									updateLayer(layer.id, (l) => {
-										if (l.kind !== "visualizer") return l;
-										const cur = l.tracks ?? [];
-										const next = v ? [...cur, t] : cur.filter((x) => x !== t);
-										return {
-											...l,
-											tracks: next.length > 0 ? next : undefined,
-										};
-									})
+						<p className="text-[10px] leading-relaxed text-gray-300">
+							画面下部のピアノロール（音符）で、どのトラックの音を光らせるかを選択します。未選択時は全トラックの音で光ります。
+						</p>
+						<div className="flex flex-wrap gap-1.5 pb-0.5">
+							<button
+								type="button"
+								onClick={() =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "visualizer" ? { ...l, tracks: [...song.tracks] } : l,
+									)
 								}
-							/>
-						))}
+								className="rounded bg-gray-700 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-600"
+							>
+								全選択
+							</button>
+							<button
+								type="button"
+								onClick={() =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "visualizer" ? { ...l, tracks: undefined } : l,
+									)
+								}
+								className="rounded bg-gray-700 px-2 py-0.5 text-[10px] text-gray-200 hover:bg-gray-600"
+							>
+								全解除 (全音表示)
+							</button>
+						</div>
+						<div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-0.5">
+							{song.tracks.map((t) => {
+								const count = trackNoteCounts[t] ?? 0;
+								const checked = !!layer.tracks?.includes(t);
+								return (
+									<label
+										key={t}
+										className={`flex items-center gap-1.5 rounded px-2 py-1.5 text-[10px] cursor-pointer border transition-colors ${
+											checked
+												? "border-blue-500 bg-blue-600/30 text-blue-100 font-bold"
+												: "border-gray-700 bg-gray-900/80 text-gray-300 hover:bg-gray-800"
+										}`}
+									>
+										<input
+											type="checkbox"
+											checked={checked}
+											onChange={(e) => {
+												const v = e.target.checked;
+												updateLayer(layer.id, (l) => {
+													if (l.kind !== "visualizer") return l;
+													const cur = l.tracks ?? [];
+													const next = v ? [...cur, t] : cur.filter((x) => x !== t);
+													return {
+														...l,
+														tracks: next.length > 0 ? next : undefined,
+													};
+												});
+											}}
+											className="h-3.5 w-3.5 shrink-0 rounded border-gray-600 text-blue-600 accent-blue-500"
+										/>
+										<span className="truncate">
+											トラック @{t} ({count}音)
+										</span>
+									</label>
+								);
+							})}
+						</div>
 					</div>
 
 					{layer.style === "pianoRoll" && (
@@ -2290,6 +2272,28 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, thickness: v }) as MvLayer)
 						}
 					/>
+					<div className="rounded-lg border border-blue-500/40 bg-blue-500/10 p-2.5 space-y-1.5">
+						<p className="text-[11px] font-bold text-blue-200">
+							🎬 図形の動き（アニメーション）設定
+						</p>
+						<p className="text-[10px] text-gray-300 leading-relaxed">
+							真ん中の図形が曲の拍やパートに合わせて回転・脈動拡大・左右移動する動きを設定します。
+						</p>
+						<button
+							type="button"
+							onClick={() =>
+								setMotionTarget({
+									layerId: layer.id,
+									sectionId: manifest.sections[0]?.id ?? "__all__",
+								})
+							}
+							className="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-500 shadow-sm transition-colors"
+						>
+							<Clapperboard size={14} />
+							図形の動き（アニメーション）を編集する
+						</button>
+					</div>
+
 					{layer.form === "polygon" && (
 						<NumField
 							label="角の数"
@@ -3076,6 +3080,47 @@ export default function MvMaker({
 					<Layers size={12} className="mr-1 inline" />
 					レイヤー
 				</SectionTitle>
+				<div className="grid grid-cols-3 gap-1.5 pb-2">
+					<button onClick={addImageLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						画像
+					</button>
+					<button onClick={addTextLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						文字
+					</button>
+					<button onClick={addVisualizerLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						ビジュアライザ
+					</button>
+					<button onClick={addShapeLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						図形
+					</button>
+					<button
+						onClick={() => setTemplatePickerOpen(true)}
+						className={ADD_BTN_CLASS}
+					>
+						<Plus size={12} />
+						エフェクト定型
+					</button>
+					<button onClick={addLyricsLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						歌詞
+					</button>
+					<button onClick={addEffectLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						演出
+					</button>
+					<button onClick={addChordBarLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						コード進行
+					</button>
+					<button onClick={addDegreeLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						度数の数字
+					</button>
+				</div>
 				{manifest.layers.length === 0 && (
 					<p className="text-[10px] text-gray-500">レイヤーがありません。</p>
 				)}
@@ -3085,26 +3130,27 @@ export default function MvMaker({
 					return (
 						<div
 							key={layer.id}
-							className={`rounded border overflow-hidden ${active ? "border-blue-500/70 bg-blue-500/10" : "border-gray-700 bg-gray-800"}`}
+							onMouseEnter={() => setHoveredLayerId(layer.id)}
+							onMouseLeave={() => setHoveredLayerId(null)}
+							className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"}`}
 						>
 							<div className="flex items-center gap-2 px-2 py-1.5">
-								<Icon size={13} className="shrink-0 text-gray-400" />
+								<Icon size={13} className="shrink-0 text-blue-400" />
 								<button
 									onClick={() => setSelectedLayerId(active ? null : layer.id)}
 									className="min-h-10 min-w-0 flex-1 py-1 text-left outline-none"
 								>
-									<span className="flex items-center gap-1.5">
-										<span className="truncate text-[11px] font-medium text-gray-200">
+									<span className="flex items-center gap-1.5 flex-wrap">
+										<span className="truncate text-[11px] font-medium text-gray-100">
 											{layerLabel(layer)}
 										</span>
-										{(layer.name?.trim() || !isAutoLayerId(layer.id)) && (
-											<span className="shrink-0 rounded bg-gray-700 px-1 py-0.5 text-[9px] text-gray-400">
-												{layerKindLabel(layer)}
-											</span>
-										)}
+										<span className="shrink-0 rounded bg-gray-700/80 px-1 py-0.5 text-[9px] text-gray-300">
+											{layerKindLabel(layer)}
+										</span>
 									</span>
 									{layer.sections && layer.sections.length > 0 && (
-										<span className="block truncate text-[9px] text-gray-500">
+										<span className="block truncate text-[9px] text-blue-300">
+											場面:{" "}
 											{layer.sections
 												.map(
 													(id) =>
@@ -3148,47 +3194,6 @@ export default function MvMaker({
 						</div>
 					);
 				})}
-				<div className="grid grid-cols-3 gap-1.5">
-					<button onClick={addImageLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						画像
-					</button>
-					<button onClick={addTextLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						文字
-					</button>
-					<button onClick={addVisualizerLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						ビジュアライザ
-					</button>
-					<button onClick={addShapeLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						図形
-					</button>
-					<button
-						onClick={() => setTemplatePickerOpen(true)}
-						className={ADD_BTN_CLASS}
-					>
-						<Plus size={12} />
-						エフェクト定型
-					</button>
-					<button onClick={addLyricsLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						歌詞
-					</button>
-					<button onClick={addEffectLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						演出
-					</button>
-					<button onClick={addChordBarLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						コード進行
-					</button>
-					<button onClick={addDegreeLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						度数の数字
-					</button>
-				</div>
 			</div>
 		</div>
 	);
@@ -3317,18 +3322,37 @@ export default function MvMaker({
 												歌詞トラックが複数あっても、画面に出すのはふつう1本だけです。
 											</p>
 											<div className="rounded border border-gray-700 bg-gray-800 p-2 text-[10px] text-gray-400">
-												<p className="mb-1">
-													このレイヤーが出す歌詞：{shownLyricLines.length} 行
+												<p className="mb-1.5 font-bold text-gray-300">
+													このレイヤーが出す歌詞（{shownLyricLines.length} 行）
 												</p>
-												<ul className="max-h-28 space-y-0.5 overflow-y-auto">
-													{shownLyricLines.map((line, i) => (
-														<li key={i} className="truncate text-gray-300">
-															<span className="mr-1.5 text-gray-500">
-																{line.bar.toFixed(2)}小節
-															</span>
-															{line.text}
-														</li>
-													))}
+												<ul className="max-h-44 space-y-1 overflow-y-auto">
+													{shownLyricLines.map((line, i) => {
+														const hold = lyricsLayer.holdBars ?? 2;
+														const bpm = song.bpm || 120;
+														const secPerBar = (60 / bpm) * 4;
+														const startSec = line.bar * secPerBar;
+														const endSec = (line.bar + hold) * secPerBar;
+														return (
+															<li
+																key={i}
+																className="flex items-center justify-between gap-1.5 rounded border border-gray-700/60 bg-gray-900/80 p-1.5 text-gray-200"
+															>
+																<div className="flex min-w-0 flex-1 items-center gap-1.5">
+																	<span className="shrink-0 rounded bg-blue-950 px-1.5 py-0.5 font-mono text-[9px] text-blue-300 border border-blue-800/60">
+																		{line.bar.toFixed(1)}〜{(line.bar + hold).toFixed(1)}小節 [{formatMinSecMs(startSec)}〜{formatMinSecMs(endSec)}]
+																	</span>
+																	<span className="truncate text-[11px] font-medium">{line.text}</span>
+																</div>
+																<button
+																	onClick={() => playerRef.current?.seekToBar(line.bar)}
+																	className="flex shrink-0 items-center gap-1 rounded bg-gray-700 px-1.5 py-0.5 text-[9px] text-gray-200 hover:bg-gray-600"
+																>
+																	<Play size={10} />
+																	確認
+																</button>
+															</li>
+														);
+													})}
 												</ul>
 											</div>
 											{shownLyricLines.length > 0 && (
@@ -3367,61 +3391,84 @@ export default function MvMaker({
 									))}
 								{lyricsLayer.source === "manual" && (
 									<>
-										{(lyricsLayer.lines ?? []).map((line, i) => (
-											<div key={i} className="flex items-center gap-1.5">
-												<StringNumInput
-													value={line.bar}
-													onChange={(n) =>
-														updateLayer(lyricsLayer.id, (l) =>
-															l.kind === "lyrics"
-																? {
-																		...l,
-																		lines: (l.lines ?? []).map((x, j) =>
-																			j === i ? { ...x, bar: n } : x,
-																		),
-																	}
-																: l,
-														)
-													}
-													className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-												/>
-												<input
-													value={line.text}
-													onChange={(e) =>
-														updateLayer(lyricsLayer.id, (l) =>
-															l.kind === "lyrics"
-																? {
-																		...l,
-																		lines: (l.lines ?? []).map((x, j) =>
-																			j === i
-																				? { ...x, text: e.target.value }
-																				: x,
-																		),
-																	}
-																: l,
-														)
-													}
-													className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-												/>
-												<button
-													onClick={() =>
-														updateLayer(lyricsLayer.id, (l) =>
-															l.kind === "lyrics"
-																? {
-																		...l,
-																		lines: (l.lines ?? []).filter(
-																			(_, j) => j !== i,
-																		),
-																	}
-																: l,
-														)
-													}
-													className={DEL_BTN_CLASS}
-												>
-													<Trash2 size={16} />
-												</button>
-											</div>
-										))}
+										{(lyricsLayer.lines ?? []).map((line, i) => {
+											const hold = lyricsLayer.holdBars ?? 2;
+											const bpm = song.bpm || 120;
+											const secPerBar = (60 / bpm) * 4;
+											const startSec = line.bar * secPerBar;
+											const endSec = (line.bar + hold) * secPerBar;
+											return (
+												<div key={i} className="flex flex-col gap-1.5 rounded border border-gray-700/80 bg-gray-800/60 p-2">
+													<div className="flex items-center gap-1.5">
+														<StringNumInput
+															value={line.bar}
+															onChange={(n) =>
+																updateLayer(lyricsLayer.id, (l) =>
+																	l.kind === "lyrics"
+																		? {
+																				...l,
+																				lines: (l.lines ?? []).map((x, j) =>
+																					j === i ? { ...x, bar: n } : x,
+																				),
+																			}
+																		: l,
+																)
+															}
+															className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+														/>
+														<span className="shrink-0 text-[10px] text-gray-400">小節</span>
+														<input
+															value={line.text}
+															onChange={(e) =>
+																updateLayer(lyricsLayer.id, (l) =>
+																	l.kind === "lyrics"
+																		? {
+																				...l,
+																				lines: (l.lines ?? []).map((x, j) =>
+																					j === i
+																						? { ...x, text: e.target.value }
+																						: x,
+																				),
+																			}
+																		: l,
+																)
+															}
+															className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+														/>
+														<button
+															onClick={() => playerRef.current?.seekToBar(line.bar)}
+															title="この位置へ再生をシーク"
+															className="flex h-9 shrink-0 items-center gap-1 rounded bg-blue-600/30 border border-blue-500/40 px-2 text-[10px] font-bold text-blue-200 hover:bg-blue-600/40"
+														>
+															<Play size={11} />
+															シーク
+														</button>
+														<button
+															onClick={() =>
+																updateLayer(lyricsLayer.id, (l) =>
+																	l.kind === "lyrics"
+																		? {
+																				...l,
+																				lines: (l.lines ?? []).filter(
+																					(_, j) => j !== i,
+																				),
+																			}
+																		: l,
+																)
+															}
+															className={DEL_BTN_CLASS}
+														>
+															<Trash2 size={16} />
+														</button>
+													</div>
+													<div className="flex items-center gap-2 px-1 text-[10px] text-gray-400">
+														<span className="font-mono text-blue-300">
+															⏱ 表示レンジ: {line.bar.toFixed(1)}〜{(line.bar + hold).toFixed(1)}小節 [{formatMinSecMs(startSec)} 〜 {formatMinSecMs(endSec)}]
+														</span>
+													</div>
+												</div>
+											);
+										})}
 										<button
 											onClick={() =>
 												updateLayer(lyricsLayer.id, (l) =>
@@ -3620,302 +3667,464 @@ export default function MvMaker({
 		</div>
 	);
 
+	const handleCopySection = (sec: MvSection) => {
+		const layerSections: Record<string, boolean> = {};
+		manifest.layers.forEach((l) => {
+			layerSections[l.id] = l.sections ? l.sections.includes(sec.id) : true;
+		});
+		setCopiedSectionData({
+			stage: sec.stage ? JSON.parse(JSON.stringify(sec.stage)) : undefined,
+			transition: sec.transition
+				? JSON.parse(JSON.stringify(sec.transition))
+				: undefined,
+			layerSections,
+		});
+	};
+
+	const handlePasteSection = (targetSecId: string) => {
+		if (!copiedSectionData) return;
+		updateSection(targetSecId, (sec) => ({
+			...sec,
+			stage: copiedSectionData.stage
+				? JSON.parse(JSON.stringify(copiedSectionData.stage))
+				: undefined,
+			transition: copiedSectionData.transition
+				? JSON.parse(JSON.stringify(copiedSectionData.transition))
+				: undefined,
+		}));
+		update((m) => ({
+			...m,
+			layers: m.layers.map((l) => {
+				const shouldShow = copiedSectionData.layerSections[l.id] ?? true;
+				const allSectionIds = m.sections.map((s) => s.id);
+				const curSections = l.sections ?? allSectionIds;
+				const nextSections = shouldShow
+					? [...new Set([...curSections, targetSecId])]
+					: curSections.filter((id) => id !== targetSecId);
+				return {
+					...l,
+					sections:
+						nextSections.length === 0 ||
+						nextSections.length === allSectionIds.length
+							? undefined
+							: nextSections,
+				};
+			}),
+		}));
+	};
+
+	const handleDuplicateSection = (sourceIndex: number) => {
+		const source = manifest.sections[sourceIndex];
+		if (!source) return;
+		const newSecId = mvUid("sec");
+		const newSec: MvSection = {
+			id: newSecId,
+			label: `${source.label} (コピー)`,
+			startBar: source.startBar + 8,
+			stage: source.stage ? JSON.parse(JSON.stringify(source.stage)) : undefined,
+			transition: source.transition
+				? JSON.parse(JSON.stringify(source.transition))
+				: undefined,
+		};
+		const newSections = [
+			...manifest.sections.slice(0, sourceIndex + 1),
+			newSec,
+			...manifest.sections.slice(sourceIndex + 1),
+		];
+		update((m) => ({
+			...m,
+			sections: newSections,
+			layers: m.layers.map((l) => {
+				const isShownInSource = l.sections
+					? l.sections.includes(source.id)
+					: true;
+				if (!isShownInSource) return l;
+				const curSections = l.sections ?? manifest.sections.map((s) => s.id);
+				const nextSections = [...curSections, newSecId];
+				return {
+					...l,
+					sections:
+						nextSections.length === newSections.length
+							? undefined
+							: nextSections,
+				};
+			}),
+		}));
+	};
+
+	const displayedSections = activeSectionId
+		? manifest.sections.filter((s) => s.id === activeSectionId)
+		: manifest.sections;
+
 	const sectionsTab = (
-		<div className="space-y-2">
+		<div className="space-y-3">
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🎬 場面</SectionTitle>
+				<SectionTitle>🎬 場面（シーン管理）</SectionTitle>
 				<p className="text-[10px] leading-relaxed text-gray-400">
-					小節番号で場面を区切ります。レイヤータブで「出す場面」を選ぶと、イントロとサビで絵を切り替えられます。
-					場面ごとに背景と切り替え方も持てるので、画面ごと別物にできます。
+					小節番号で曲をカット分け（イントロ・Aメロ・サビ等）します。場面ごとに背景・画面効果・表示するレイヤーを完全に切り替えられます。
 				</p>
-				<Hint>
-					長い曲ほど場面の数が効きます。目安は8小節ごと（見本はどれも8〜16場面あります）。
-					曲は全部で {song.totalBars || "—"} 小節です。
-				</Hint>
-				{manifest.sections.map((s, i) => (
-					<div
-						key={s.id}
-						className="space-y-1.5 rounded border border-gray-700/70 bg-gray-900/60 p-2"
+
+				{/* 場面クイック切り替え・フィルタータグ */}
+				<div className="flex flex-wrap items-center gap-1.5 pt-2 pb-1 border-b border-gray-800">
+					<button
+						onClick={() => setActiveSectionId(null)}
+						className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${
+							activeSectionId === null
+								? "bg-blue-600 text-white"
+								: "bg-gray-800 text-gray-400 hover:bg-gray-700"
+						}`}
 					>
-						<div className="flex items-center gap-1.5">
-							<input
-								value={s.label}
-								onChange={(e) =>
-									updateSection(s.id, (x) => ({ ...x, label: e.target.value }))
-								}
-								className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<StringNumInput
-								value={s.startBar}
-								onChange={(n) =>
-									updateSection(s.id, (x) => ({
-										...x,
-										startBar: Math.max(0, n),
-									}))
-								}
-								className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<span className="shrink-0 text-[10px] text-gray-500">小節</span>
-							{manifest.sections.length > 1 && (
-								<button
-									onClick={() =>
-										update((m) => ({
-											...m,
-											sections: m.sections.filter((_, j) => j !== i),
-											layers: m.layers.map((l) =>
-												l.sections
-													? {
-															...l,
-															sections: l.sections.filter((x) => x !== s.id),
-														}
-													: l,
-											),
-										}))
-									}
-									className={DEL_BTN_CLASS}
-								>
-									<Trash2 size={16} />
-								</button>
-							)}
-						</div>
+						すべての場面 ({manifest.sections.length})
+					</button>
+					{manifest.sections.map((sec, idx) => (
+						<button
+							key={sec.id}
+							onClick={() => setActiveSectionId(sec.id)}
+							className={`rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${
+								activeSectionId === sec.id
+									? "bg-blue-600 text-white"
+									: "bg-gray-800 text-gray-400 hover:bg-gray-700"
+							}`}
+						>
+							場面 {idx + 1}: {sec.label} ({sec.startBar}小節〜)
+						</button>
+					))}
+				</div>
 
-						<Details label="この場面の背景と切り替え方">
-							<SelectField
-								label="切り替え方"
-								value={s.transition?.style ?? "cut"}
-								options={(
-									Object.keys(MV_TRANSITION_LABELS) as MvTransitionStyle[]
-								).map((v) => ({ value: v, label: MV_TRANSITION_LABELS[v] }))}
-								onChange={(v) =>
-									updateSection(s.id, (x) => ({
-										...x,
-										transition:
-											v === "cut"
-												? undefined
-												: {
-														...(x.transition ?? DEFAULT_MV_TRANSITION),
-														style: v,
-													},
-									}))
-								}
-							/>
-							{s.transition && (
-								<>
-									<NumField
-										label="切り替えの長さ（拍）"
-										value={s.transition.beats}
-										min={0.25}
-										max={8}
-										step={0.25}
-										onChange={(v) =>
-											updateSection(s.id, (x) =>
-												x.transition
-													? { ...x, transition: { ...x.transition, beats: v } }
-													: x,
-											)
-										}
-									/>
-									<ColorField
-										label="覆いの色"
-										value={
-											s.transition.color ??
-											(s.transition.style === "flash" ? "#ffffff" : "#000000")
-										}
-										onChange={(v) =>
-											updateSection(s.id, (x) =>
-												x.transition
-													? { ...x, transition: { ...x.transition, color: v } }
-													: x,
-											)
-										}
-									/>
-								</>
-							)}
-
-							<p className="pt-1 text-[10px] font-bold text-gray-400">
-								背景の差し替え
-							</p>
-							<Hint>
-								入れなかった項目は「見た目」タブの設定がそのまま使われます。
-							</Hint>
-							<div className="flex items-center gap-2">
-								<button
-									onClick={() =>
-										updateSectionStage(s.id, {
-											bgColor: s.stage?.bgColor ?? manifest.stage.bgColor,
-										})
-									}
-									disabled={s.stage?.bgColor !== undefined}
-									className={`${REF_BTN_CLASS} disabled:opacity-40`}
-								>
-									この場面の地の色を決める
-								</button>
-								{s.stage?.bgColor !== undefined && (
-									<button
-										onClick={() =>
-											updateSectionStage(s.id, { bgColor: undefined })
-										}
-										className={DEL_BTN_CLASS}
-									>
-										<Trash2 size={16} />
-									</button>
-								)}
-							</div>
-							{s.stage?.bgColor !== undefined && (
-								<ColorField
-									label="地の色"
-									value={s.stage.bgColor}
-									onChange={(v) => updateSectionStage(s.id, { bgColor: v })}
-								/>
-							)}
-							<button
-								onClick={() =>
-									setPicker({ mode: "image", target: { sectionId: s.id } })
-								}
-								className={REF_BTN_CLASS}
+				{/* 場面カードリスト */}
+				<div className="space-y-3 pt-2">
+					{displayedSections.map((s) => {
+						const originalIndex = manifest.sections.findIndex((x) => x.id === s.id);
+						const bpm = song.bpm || 120;
+						const secPerBar = (60 / bpm) * 4;
+						const startSec = s.startBar * secPerBar;
+						return (
+							<div
+								key={s.id}
+								className="rounded-lg border border-gray-700 bg-gray-900/90 shadow-md overflow-hidden"
 							>
-								<ImageIcon size={12} />
-								この場面の背景画像を参照
-							</button>
-							{s.stage?.bgRef !== undefined && (
-								<div className="flex items-center gap-2 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[9px] text-gray-400">
-									{s.stage.bgUrl && (
-										<img
-											src={s.stage.bgUrl}
-											onError={handleImgError}
-											alt=""
-											className="h-7 w-7 shrink-0 rounded object-cover"
+								{/* 場面ヘッダー */}
+								<div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 bg-gradient-to-r from-gray-800 to-gray-900 px-3 py-2">
+									<div className="flex items-center gap-2 min-w-0 flex-1">
+										<span className="shrink-0 rounded bg-blue-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+											場面 {originalIndex + 1}
+										</span>
+										<input
+											value={s.label}
+											onChange={(e) =>
+												updateSection(s.id, (x) => ({ ...x, label: e.target.value }))
+											}
+											placeholder="場面名（イントロ、サビなど）"
+											className="min-h-8 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] font-medium text-gray-100 outline-none focus:border-blue-500"
 										/>
-									)}
-									<span className="flex-1 truncate">
-										{s.stage.bgRef
-											? refLabel(s.stage.bgRef)
-											: "背景画像なし（全体の背景を消す）"}
-									</span>
-									<button
-										onClick={() =>
-											updateSectionStage(s.id, {
-												bgRef: undefined,
-												bgUrl: undefined,
-											})
-										}
-										className={DEL_BTN_CLASS}
-									>
-										<Trash2 size={16} />
-									</button>
-								</div>
-							)}
-							{s.stage?.bgRef === undefined && manifest.stage.bgRef && (
-								<button
-									onClick={() =>
-										updateSectionStage(s.id, { bgRef: "", bgUrl: undefined })
-									}
-									className={REF_BTN_CLASS}
-								>
-									この場面だけ背景画像を消す
-								</button>
-							)}
-							<NumField
-								label="暗くする（未指定なら全体の設定）"
-								value={s.stage?.bgDim ?? manifest.stage.bgDim ?? 0}
-								min={0}
-								max={1}
-								step={0.05}
-								onChange={(v) => updateSectionStage(s.id, { bgDim: v })}
-							/>
-						</Details>
-
-						<Details label={`この場面で何を出すか（${manifest.layers.length}レイヤー）`}>
-							<Hint>
-								場面を起点にレイヤーの出し入れ・図形の動きをまとめて決められます。
-								「レイヤー」タブで1枚ずつ「出す場面」を選ぶのと同じことを、この場面から逆向きにやっています。
-							</Hint>
-							{manifest.layers.map((l) => {
-								const shownHere = l.sections ? l.sections.includes(s.id) : true;
-								return (
-									<div
-										key={l.id}
-										className="flex items-center gap-1.5 rounded border border-gray-700/60 bg-gray-800/40 px-2 py-1.5"
-									>
-										<label className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5">
-											<input
-												type="checkbox"
-												checked={shownHere}
-												onChange={(e) => {
-													const v = e.target.checked;
-													updateLayer(l.id, (layer) => {
-														const all = manifest.sections.map((x) => x.id);
-														const cur = layer.sections ?? all;
-														const next = v
-															? [...new Set([...cur, s.id])]
-															: cur.filter((x) => x !== s.id);
-														// 全場面を選んだ状態＝制限なしと同じなので undefined に戻す
-														return {
-															...layer,
-															sections:
-																next.length === 0 || next.length === all.length
-																	? undefined
-																	: next,
-														};
-													});
-												}}
-												className="h-4 w-4 shrink-0"
+										<div className="flex shrink-0 items-center gap-1">
+											<StringNumInput
+												value={s.startBar}
+												onChange={(n) =>
+													updateSection(s.id, (x) => ({
+														...x,
+														startBar: Math.max(0, n),
+													}))
+												}
+												className="min-h-8 w-14 rounded border border-gray-700 bg-gray-800 px-1 py-1 text-[11px] text-gray-100 outline-none text-center"
 											/>
-											<span className="truncate text-[11px] text-gray-200">
-												{layerLabel(l)}
+											<span className="text-[10px] text-gray-400">小節〜</span>
+											<span className="ml-1 rounded bg-gray-800 px-1.5 py-0.5 font-mono text-[9px] text-blue-300 border border-gray-700">
+												[{formatMinSecMs(startSec)}]
 											</span>
-											<span className="shrink-0 rounded bg-gray-700 px-1 py-0.5 text-[9px] text-gray-400">
-												{layerKindLabel(l)}
-											</span>
-										</label>
-										{l.kind === "shape" && (
+										</div>
+									</div>
+
+									{/* 場面アクション（コピー/ペースト/複製/削除） */}
+									<div className="flex items-center gap-1 shrink-0">
+										<button
+											onClick={() => handleCopySection(s)}
+											title="この場面の設定をコピー"
+											className="flex items-center gap-1 rounded bg-gray-800 px-2 py-1 text-[10px] font-medium text-gray-300 hover:bg-gray-700 border border-gray-700"
+										>
+											<Copy size={11} />
+											コピー
+										</button>
+										<button
+											onClick={() => handlePasteSection(s.id)}
+											disabled={!copiedSectionData}
+											title="コピーした設定をこの場面に貼り付け"
+											className="flex items-center gap-1 rounded bg-gray-800 px-2 py-1 text-[10px] font-medium text-gray-300 disabled:opacity-40 hover:bg-gray-700 border border-gray-700"
+										>
+											<Clipboard size={11} />
+											貼り付け
+										</button>
+										<button
+											onClick={() => handleDuplicateSection(originalIndex)}
+											title="この場面をそのまま後ろに複製"
+											className="flex items-center gap-1 rounded bg-blue-600/30 border border-blue-500/40 px-2 py-1 text-[10px] font-medium text-blue-200 hover:bg-blue-600/40"
+										>
+											<Plus size={11} />
+											複製
+										</button>
+										{manifest.sections.length > 1 && (
 											<button
-												onClick={() => setMotionTarget({ layerId: l.id, sectionId: s.id })}
-												className="shrink-0 rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-200 hover:bg-gray-600"
+												onClick={() =>
+													update((m) => ({
+														...m,
+														sections: m.sections.filter((_, j) => j !== originalIndex),
+														layers: m.layers.map((l) =>
+															l.sections
+																? {
+																		...l,
+																		sections: l.sections.filter((x) => x !== s.id),
+																	}
+																: l,
+														),
+													}))
+												}
+												className={DEL_BTN_CLASS}
 											>
-												動きを設定
-											</button>
-										)}
-										{l.kind === "visualizer" && (
-											<button
-												onClick={() => {
-													setSelectedLayerId(l.id);
-													setTab("layers");
-												}}
-												className="shrink-0 rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-200 hover:bg-gray-600"
-											>
-												設定を開く
+												<Trash2 size={15} />
 											</button>
 										)}
 									</div>
-								);
-							})}
-							<button
-								onClick={() => {
-									const layer: MvVisualizerLayer = {
-										kind: "visualizer",
-										id: mvUid("vis"),
-										style: "pianoRoll",
-										projection: "flat",
-										flow: "scroll",
-										rect: { x: 0, y: MV_H - 90, w: MV_W, h: 90 },
-										amount: 6,
-										thickness: 2,
-										sections: [s.id],
-										z: getNextZ(),
-									};
-									update((m) => ({ ...m, layers: [...m.layers, layer] }));
-									setSelectedLayerId(layer.id);
-									setTab("layers");
-								}}
-								className={ADD_BTN_CLASS}
-							>
-								<Plus size={13} />
-								この場面にピアノロールを追加
-							</button>
-						</Details>
-					</div>
-				))}
+								</div>
+
+								{/* 場面設定本体 */}
+								<div className="p-3 space-y-3">
+									<Details label="🎬 背景と画面切替の設定">
+										<SelectField
+											label="切り替え方"
+											value={s.transition?.style ?? "cut"}
+											options={(
+												Object.keys(MV_TRANSITION_LABELS) as MvTransitionStyle[]
+											).map((v) => ({ value: v, label: MV_TRANSITION_LABELS[v] }))}
+											onChange={(v) =>
+												updateSection(s.id, (x) => ({
+													...x,
+													transition:
+														v === "cut"
+															? undefined
+															: {
+																	...(x.transition ?? DEFAULT_MV_TRANSITION),
+																	style: v,
+																},
+												}))
+											}
+										/>
+										{s.transition && (
+											<>
+												<NumField
+													label="切り替えの長さ（拍）"
+													value={s.transition.beats}
+													min={0.25}
+													max={8}
+													step={0.25}
+													onChange={(v) =>
+														updateSection(s.id, (x) =>
+															x.transition
+																? { ...x, transition: { ...x.transition, beats: v } }
+																: x,
+														)
+													}
+												/>
+												<ColorField
+													label="覆いの色"
+													value={
+														s.transition.color ??
+														(s.transition.style === "flash" ? "#ffffff" : "#000000")
+													}
+													onChange={(v) =>
+														updateSection(s.id, (x) =>
+															x.transition
+																? { ...x, transition: { ...x.transition, color: v } }
+																: x,
+														)
+													}
+												/>
+											</>
+										)}
+
+										<p className="pt-1 text-[10px] font-bold text-gray-300">
+											この場面の背景画像・色の差し替え
+										</p>
+										<Hint>
+											未指定の場合、「見た目」タブの全体背景設定がそのまま使用されます。
+										</Hint>
+										<div className="flex items-center gap-2">
+											<button
+												onClick={() =>
+													updateSectionStage(s.id, {
+														bgColor: s.stage?.bgColor ?? manifest.stage.bgColor,
+													})
+												}
+												disabled={s.stage?.bgColor !== undefined}
+												className={`${REF_BTN_CLASS} disabled:opacity-40`}
+											>
+												この場面の背景色を個別に指定
+											</button>
+											{s.stage?.bgColor !== undefined && (
+												<button
+													onClick={() =>
+														updateSectionStage(s.id, { bgColor: undefined })
+													}
+													className={DEL_BTN_CLASS}
+												>
+													<Trash2 size={15} />
+												</button>
+											)}
+										</div>
+										{s.stage?.bgColor !== undefined && (
+											<ColorField
+												label="背景色"
+												value={s.stage.bgColor}
+												onChange={(v) => updateSectionStage(s.id, { bgColor: v })}
+											/>
+										)}
+										<button
+											onClick={() =>
+												setPicker({ mode: "image", target: { sectionId: s.id } })
+											}
+											className={REF_BTN_CLASS}
+										>
+											<ImageIcon size={12} />
+											この場面の背景画像を指定
+										</button>
+										{s.stage?.bgRef !== undefined && (
+											<div className="flex items-center gap-2 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[9px] text-gray-400">
+												{s.stage.bgUrl && (
+													<img
+														src={s.stage.bgUrl}
+														onError={handleImgError}
+														alt=""
+														className="h-7 w-7 shrink-0 rounded object-cover"
+													/>
+												)}
+												<span className="flex-1 truncate">
+													{s.stage.bgRef
+														? refLabel(s.stage.bgRef)
+														: "背景画像なし（背景消去）"}
+												</span>
+												<button
+													onClick={() =>
+														updateSectionStage(s.id, {
+															bgRef: undefined,
+															bgUrl: undefined,
+														})
+													}
+													className={DEL_BTN_CLASS}
+												>
+													<Trash2 size={15} />
+												</button>
+											</div>
+										)}
+										<NumField
+											label="背景の暗さ（0:普通 〜 1:真っ黒）"
+											value={s.stage?.bgDim ?? manifest.stage.bgDim ?? 0}
+											min={0}
+											max={1}
+											step={0.05}
+											onChange={(v) => updateSectionStage(s.id, { bgDim: v })}
+										/>
+									</Details>
+
+									<Details label={`🎭 この場面で表示するレイヤーと動き (${manifest.layers.length}枚)`}>
+										<Hint>
+											チェックを入れたレイヤーがこの場面で画面に表示されます。「動きを編集」で場面ごとの移動アニメーションを設定できます。
+										</Hint>
+										<div className="space-y-1.5 pt-1">
+											{manifest.layers.map((l) => {
+												const Icon = LAYER_ICON[l.kind];
+												const shownHere = l.sections ? l.sections.includes(s.id) : true;
+												return (
+													<div
+														key={l.id}
+														className={`flex items-center justify-between gap-2 rounded border p-2 transition-colors ${
+															shownHere
+																? "border-gray-700 bg-gray-800/90 text-gray-100"
+																: "border-gray-800/60 bg-gray-950/40 text-gray-500 opacity-60"
+														}`}
+													>
+														<label className="flex min-h-8 min-w-0 flex-1 items-center gap-2 cursor-pointer">
+															<input
+																type="checkbox"
+																checked={shownHere}
+																onChange={(e) => {
+																	const v = e.target.checked;
+																	updateLayer(l.id, (layer) => {
+																		const all = manifest.sections.map((x) => x.id);
+																		const cur = layer.sections ?? all;
+																		const next = v
+																			? [...new Set([...cur, s.id])]
+																			: cur.filter((x) => x !== s.id);
+																		return {
+																			...layer,
+																			sections:
+																				next.length === 0 || next.length === all.length
+																					? undefined
+																					: next,
+																		};
+																	});
+																}}
+																className="h-4 w-4 shrink-0 rounded border-gray-700 text-blue-600"
+															/>
+															<Icon size={13} className="shrink-0 text-blue-400" />
+															<span className="truncate text-[11px] font-medium">
+																{layerLabel(l)}
+															</span>
+															<span className="shrink-0 rounded bg-gray-700/70 px-1 py-0.5 text-[9px] text-gray-300">
+																{layerKindLabel(l)}
+															</span>
+														</label>
+														<div className="flex items-center gap-1 shrink-0">
+															{l.kind === "shape" && (
+																<button
+																	onClick={() => setMotionTarget({ layerId: l.id, sectionId: s.id })}
+																	className="rounded bg-blue-600/30 border border-blue-500/40 px-2 py-1 text-[10px] font-medium text-blue-200 hover:bg-blue-600/40"
+																>
+																	🎬 動きを編集
+																</button>
+															)}
+															<button
+																onClick={() => {
+																	setSelectedLayerId(l.id);
+																	setTab("layers");
+																}}
+																className="rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-300 hover:bg-gray-600"
+															>
+																⚙️ 詳細設定
+															</button>
+														</div>
+													</div>
+												);
+											})}
+										</div>
+										<button
+											onClick={() => {
+												const layer: MvVisualizerLayer = {
+													kind: "visualizer",
+													id: mvUid("vis"),
+													style: "pianoRoll",
+													projection: "flat",
+													flow: "scroll",
+													rect: { x: 0, y: MV_H - 90, w: MV_W, h: 90 },
+													amount: 6,
+													thickness: 2,
+													sections: [s.id],
+													z: getNextZ(),
+												};
+												update((m) => ({ ...m, layers: [...m.layers, layer] }));
+												setSelectedLayerId(layer.id);
+												setTab("layers");
+											}}
+											className={`${ADD_BTN_CLASS} mt-2`}
+										>
+											<Plus size={13} />
+											この場面にピアノロールを追加
+										</button>
+									</Details>
+								</div>
+							</div>
+						);
+					})}
+				</div>
+
 				<button
 					onClick={() => {
 						const next: MvSection = {
@@ -3926,10 +4135,10 @@ export default function MvMaker({
 						};
 						update((m) => ({ ...m, sections: [...m.sections, next] }));
 					}}
-					className={ADD_BTN_CLASS}
+					className={`${ADD_BTN_CLASS} mt-3`}
 				>
 					<Plus size={13} />
-					場面を追加
+					新しい場面を追加
 				</button>
 			</div>
 		</div>
@@ -4027,7 +4236,12 @@ export default function MvMaker({
 			{/* プレビュー */}
 			<div className="shrink-0 border-b border-gray-800 bg-[#0a0c12] p-3">
 				<div className="mx-auto" style={{ maxWidth: MV_W }}>
-					<MvPlayer manifest={manifest} />
+					<MvPlayer
+						ref={playerRef}
+						manifest={manifest}
+						selectedLayerId={selectedLayerId}
+						hoveredLayerId={hoveredLayerId}
+					/>
 				</div>
 			</div>
 

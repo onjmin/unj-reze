@@ -39,9 +39,10 @@ function updateSeekFill(el: HTMLInputElement): void {
 }
 
 export interface MvPlayerHandle {
-	play: () => void;
+	play: (startStep?: number) => void;
 	stop: () => void;
 	isPlaying: () => boolean;
+	seekToBar: (bar: number) => void;
 }
 
 interface MvPlayerProps {
@@ -52,6 +53,8 @@ interface MvPlayerProps {
 	autoPlay?: boolean;
 	className?: string;
 	onEnded?: () => void;
+	selectedLayerId?: string | null;
+	hoveredLayerId?: string | null;
 }
 
 /**
@@ -64,7 +67,15 @@ interface MvPlayerProps {
  * 実際の再生経路と音量の合成は lib/mv-audio.ts が面倒を見る。
  */
 const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
-	{ manifest, controls = true, autoPlay = false, className, onEnded },
+	{
+		manifest,
+		controls = true,
+		autoPlay = false,
+		className,
+		onEnded,
+		selectedLayerId,
+		hoveredLayerId,
+	},
 	ref,
 ) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -94,15 +105,8 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 	const { requestFocus, releaseFocus } = useAudioFocus();
 	const focusRef = useRef({ requestFocus, releaseFocus });
 
-	useEffect(() => {
-		manifestRef.current = manifest;
-	}, [manifest]);
-	useEffect(() => {
-		onEndedRef.current = onEnded;
-	}, [onEnded]);
-	useEffect(() => {
-		focusRef.current = { requestFocus, releaseFocus };
-	}, [requestFocus, releaseFocus]);
+	const selectedLayerIdRef = useRef(selectedLayerId);
+	const hoveredLayerIdRef = useRef(hoveredLayerId);
 
 	// ── 描画 ────────────────────────────────────────────────
 	const paint = useCallback((step: number, timeSec: number) => {
@@ -113,9 +117,23 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 		const dpr = canvas.width / MV_W;
 		ctx.save();
 		ctx.scale(dpr, dpr);
-		drawMvFrame(ctx, manifestRef.current, songRef.current, { step, timeSec });
+		drawMvFrame(ctx, manifestRef.current, songRef.current, { step, timeSec }, {
+			selectedLayerId: selectedLayerIdRef.current,
+			hoveredLayerId: hoveredLayerIdRef.current,
+		});
 		ctx.restore();
 	}, []);
+
+	useEffect(() => {
+		selectedLayerIdRef.current = selectedLayerId;
+		hoveredLayerIdRef.current = hoveredLayerId;
+		if (!playbackRef.current) {
+			const currentStep = seekBarRef.current ? Number(seekBarRef.current.value) : 0;
+			const stepsPerSec = ((songRef.current.bpm || 120) / 60) * MV_STEPS_PER_BEAT;
+			const timeSec = currentStep / (stepsPerSec || 1);
+			paint(currentStep, timeSec);
+		}
+	}, [selectedLayerId, hoveredLayerId, paint]);
 
 	/** 停止中の静止画（1コマ目）を描く。 */
 	const paintPoster = useCallback(() => paint(0, 0), [paint]);
@@ -279,6 +297,27 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 		},
 		[instanceId, paint, stop],
 	);
+	const seekToBar = useCallback(
+		(bar: number) => {
+			const step = Math.round(bar * MV_STEPS_PER_BAR);
+			const stepsPerSec = ((songRef.current.bpm || 120) / 60) * MV_STEPS_PER_BEAT;
+			const timeSec = step / (stepsPerSec || 1);
+			tickRef.current = { step, atMs: performance.now() };
+			if (seekBarRef.current) {
+				seekBarRef.current.value = String(step);
+				updateSeekFill(seekBarRef.current);
+			}
+			paint(step, timeSec);
+			if (timeDisplayRef.current) {
+				const mm = Math.floor(timeSec / 60);
+				const ss = Math.floor(timeSec % 60)
+					.toString()
+					.padStart(2, "0");
+				timeDisplayRef.current.textContent = `${mm}:${ss}`;
+			}
+		},
+		[paint],
+	);
 
 	useImperativeHandle(
 		ref,
@@ -286,8 +325,9 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 			play,
 			stop,
 			isPlaying: () => !!playbackRef.current,
+			seekToBar,
 		}),
-		[play, stop],
+		[play, stop, seekToBar],
 	);
 
 	// 検証用デバッグハンドル（yume25d の __yume25d と同じ位置づけ）。
