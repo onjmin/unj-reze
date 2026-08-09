@@ -255,7 +255,11 @@ export const yume: PresetData = {
 	map: Array.from({ length: ROWS }, () => Array(COLS).fill(0)),
 	objects: [],
 	// 「謎の曲(ループ対応)」。direct 音源はループ再生される。
-	bgm: { ref: `direct:${su("B3rjnX")}`, src: su("B3rjnX"), type: "direct" },
+	bgm: {
+		ref: "https://www.youtube.com/watch?v=DXSlbNAOQO0",
+		src: "https://www.youtube.com/watch?v=DXSlbNAOQO0",
+		type: "youtube",
+	},
 	// yume25d は効果音を自前の定数（足音・食事・システム床）で鳴らすため preset.sfx は参照しない。
 	// ここに書いても鳴らないので空のままにしておく。
 	sfx: {},
