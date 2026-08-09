@@ -312,16 +312,15 @@ const ZOOM_FRAME =
 const ZOOM_TAB = "M8,38 L92,38 L92,62 L8,62 Z";
 /** 左右に付く小さい中空四角。枠の切れ目にはまる。 */
 const ZOOM_SIDE_BOX = "M22,22 L78,22 L78,78 L22,78 Z";
-/** 遠いフランキングその2: 縦棒入りの箱（鍵盤風）。上下に横線が付く。 */
-const ZOOM_KEYBOX =
-	"M6,26 L94,26 L94,30 L6,30 Z M6,70 L94,70 L94,74 L6,74 Z" +
-	" M14,34 L26,34 L26,66 L14,66 Z M36,34 L48,34 L48,66 L36,66 Z" +
-	" M58,34 L70,34 L70,66 L58,66 Z M78,34 L90,34 L90,66 L78,66 Z";
-/** 3段の破線列（ピアノの鍵盤のように切れ目をずらす）。 */
-const ZOOM_DASH_CLUSTER =
-	"M10,30 L25,30 L25,34 L10,34 Z M30,30 L38,30 L38,34 L30,34 Z M42,30 L60,30 L60,34 L42,34 Z" +
-	" M8,46 L20,46 L20,50 L8,50 Z M24,46 L45,46 L45,50 L24,50 Z M50,46 L60,46 L60,50 L50,50 Z" +
-	" M10,62 L25,62 L25,66 L10,66 Z M30,62 L38,62 L38,66 L30,66 Z M42,62 L60,62 L60,66 L42,66 Z";
+// 参考動画の左右要素は「細い線画」ではなく **太いベタ塗りの面**。
+// 以前は鍵盤風の縦棒や3段の破線といった細かいテクスチャで描いていたが、
+// 参考動画は白い面の比率が高く「重い・はっきりした」シルエットになっている。
+// 線ではなく面で構成し直す。
+/** 左右の巨大な白い縦長ボックス（ベタ塗り）。中央が消えている間の主役。 */
+const ZOOM_BLOCK = "M18,4 L82,4 L82,96 L18,96 Z";
+/** 太い二本の水平線（ベタ塗りの帯）。ボックスと交代で出る。 */
+const ZOOM_TWOBAR =
+	"M2,20 L98,20 L98,40 L2,40 Z M2,60 L98,60 L98,80 L2,80 Z";
 
 const SCENES = BARS / SCENE_BARS;
 const scene = (i: number) => `s${String(i).padStart(2, "0")}`;
@@ -546,72 +545,92 @@ const LAYERS: MvLayer[] = [
 		kind: "shape",
 		id: "zoom-dash-l",
 		form: "path",
-		path: ZOOM_DASH_CLUSTER,
+		path: ZOOM_TWOBAR,
 		pathBox: [0, 0, 100, 100],
-		x: 240,
+		x: 244,
 		y: 180,
-		size: 34,
+		size: 40,
 		rotation: 0,
-		color: "#e4e4e7",
+		color: "#f4f4f5",
 		filled: true,
 		thickness: 1,
 		z: 21,
 		modulators: [
-			{ source: "bar", target: "opacity", op: "sub", amount: 0.85 },
+			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
 		],
 	},
 	{
 		kind: "shape",
 		id: "zoom-dash-r",
 		form: "path",
-		path: ZOOM_DASH_CLUSTER,
+		path: ZOOM_TWOBAR,
 		pathBox: [0, 0, 100, 100],
-		x: 400,
+		x: 396,
 		y: 180,
-		size: 34,
+		size: 40,
 		rotation: 0,
-		color: "#e4e4e7",
+		color: "#f4f4f5",
 		filled: true,
 		thickness: 1,
 		z: 21,
 		modulators: [
-			{ source: "bar", target: "opacity", op: "sub", amount: 0.85 },
+			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
 		],
 	},
 	{
 		kind: "shape",
 		id: "zoom-key-l",
 		form: "path",
-		path: ZOOM_KEYBOX,
+		path: ZOOM_BLOCK,
 		pathBox: [0, 0, 100, 100],
-		x: 240,
+		x: 244,
 		y: 180,
-		size: 34,
+		size: 40,
 		rotation: 0,
-		color: "#e4e4e7",
+		color: "#f4f4f5",
 		filled: true,
 		thickness: 1,
 		z: 21,
 		modulators: [
-			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
+			// 中央ブロックの山の**逆**。中央が消えている間だけ現れることで、
+			// 「中央の四角」⇄「左右の巨大な白ボックス」とメインモチーフ自体が入れ替わる。
+			{
+				source: "phrase",
+				bars: MOTIF_BARS,
+				symmetric: true,
+				curve: 4,
+				target: "opacity",
+				op: "sub",
+				amount: 0.95,
+			},
 		],
 	},
 	{
 		kind: "shape",
 		id: "zoom-key-r",
 		form: "path",
-		path: ZOOM_KEYBOX,
+		path: ZOOM_BLOCK,
 		pathBox: [0, 0, 100, 100],
-		x: 400,
+		x: 396,
 		y: 180,
-		size: 34,
+		size: 40,
 		rotation: 0,
-		color: "#e4e4e7",
+		color: "#f4f4f5",
 		filled: true,
 		thickness: 1,
 		z: 21,
 		modulators: [
-			{ source: "bar", target: "opacity", op: "mul", amount: 1 },
+			// 中央ブロックの山の**逆**。中央が消えている間だけ現れることで、
+			// 「中央の四角」⇄「左右の巨大な白ボックス」とメインモチーフ自体が入れ替わる。
+			{
+				source: "phrase",
+				bars: MOTIF_BARS,
+				symmetric: true,
+				curve: 4,
+				target: "opacity",
+				op: "sub",
+				amount: 0.95,
+			},
 		],
 	},
 	// サビ直前の場面だけ、モチーフの外端（実測 ±120px）にもう一列足して密度を上げる。
@@ -620,13 +639,13 @@ const LAYERS: MvLayer[] = [
 		kind: "shape",
 		id: "zoom-outer-l",
 		form: "path",
-		path: ZOOM_DASH_CLUSTER,
+		path: ZOOM_TWOBAR,
 		pathBox: [0, 0, 100, 100],
 		x: 190,
 		y: 180,
 		size: 24,
 		rotation: 0,
-		color: "#e4e4e7",
+		color: "#f4f4f5",
 		filled: true,
 		thickness: 1,
 		sections: PRE_CHORUS,
@@ -646,13 +665,13 @@ const LAYERS: MvLayer[] = [
 		kind: "shape",
 		id: "zoom-outer-r",
 		form: "path",
-		path: ZOOM_DASH_CLUSTER,
+		path: ZOOM_TWOBAR,
 		pathBox: [0, 0, 100, 100],
 		x: 450,
 		y: 180,
 		size: 24,
 		rotation: 0,
-		color: "#e4e4e7",
+		color: "#f4f4f5",
 		filled: true,
 		thickness: 1,
 		sections: PRE_CHORUS,
