@@ -309,6 +309,38 @@ if / while / for によるループ制御と、下記の関数呼び出しだけ
                                 任意のファイル名は不可・ゲーム設定のSEスロット名を渡す）
 - shakeScreen(強さ, フレーム)    画面を揺らす（スペルカード発動演出等）
 
+【配列・辞書】
+- arr = []                     空配列を作る／arr = [1, 2, 3] のようにリテラルも可
+- push(arr, 値)                配列末尾に追加（in-place・戻り値は配列自身）
+- pop(arr)                     配列末尾を取り出して削除
+- len(arr または dict)          要素数
+- arr[i] = 値                  添字への代入（0始まり）／ arr[i] は通常の式として読み取り可
+- d = {}                       空の辞書（オブジェクト）を作る／d.hp = 10 のようにプロパティ代入可
+- keys(d) / values(d)          辞書のキー一覧・値一覧を配列で取得
+- del(arr, i) / del(d, "key")  要素・プロパティを削除
+- has(arr, i) / has(d, "key")  存在チェック
+
+【任意座標からの発射・弾の後追い操作】
+- shotFrom(x, y, 角度, 速度, 色, 形状)   ボスの座標ではなく指定した任意の座標から1発発射する。
+                                      花火の破裂点や、事前に計算した座標リストへの弾の配置に使う
+- shot() 系の関数は発射した弾の「ハンドルID」（数値）を返す。id = shot(0, 3, 4) のように
+  変数へ受け取っておくと、発射後も以下の関数で軌道を書き換えられる：
+  - getBulletX(id) / getBulletY(id)     現在座標を取得（消えていたら null）
+  - setBulletVel(id, vx, vy)            速度ベクトルを直接書き換える
+  - setBulletAngle(id, 角度, 速度省略可)  進行角度（度数法）で書き換える
+  - removeBullet(id)                    強制的に消す
+  - listBullets()                       現在の全弾を [{id,x,y,vx,vy}, ...] の配列で取得
+    （弾同士がお互いの位置を見て動く「群れ」のような弾幕を組める）
+
+【サンプル：wait(1)ループで軌道を後から曲げる「へにょりレーザー」的な弾】
+id = shotPlayer(4, 2)
+ang = getPlayerAngle()
+for i in range(0, 40, 1)
+  wait(1)
+  ang = ang + 3
+  setBulletAngle(id, ang, 4)
+end for
+
 【自機情報】
 - getPlayerAngle()             自分から見た自機の方向（度）
 - getPlayerX() / getPlayerY()  自機の座標
@@ -698,6 +730,8 @@ interface EnemyBullet {
   x: number; y: number; vx: number; vy: number; r: number; color: string; grazed?: boolean;
   accel?: number; maxSpeed?: number; vanishIn?: number;
   shape?: string;
+  /** MiniScript からハンドルとして参照するID（shot系関数の戻り値）。getBulletX/setBulletVel等で使う */
+  id?: number;
   /** カーブ弾：毎フレーム vx/vy をこの角度(度/フレーム)だけ回転させる */
   angularVel?: number;
   /** 反射弾：画面端に到達するたびに反射し、残り回数を消費する（0で通常弾として飛び去る） */
@@ -831,6 +865,8 @@ function stepSpell(
 }
 
 const DEG_TO_RAD = Math.PI / 180;
+/** 弾のハンドルID採番（MiniScript から shot 系の戻り値として渡し、後から setBulletVel 等で参照する） */
+let bulletIdSeq = 1;
 
 /** MiniScript を非同期実行し、エンティティの動き・弾幕を制御する */
 function runEntityScript(
@@ -859,17 +895,23 @@ function runEntityScript(
       requestAnimationFrame(check);
     });
 
-  const pushBullet = (angle: number, speed: number, colorIdx: number, shape?: string) => {
-    if (ctx.cancelled) return;
+  const pushBullet = (angle: number, speed: number, colorIdx: number, shape?: string, originX?: number, originY?: number): number => {
+    if (ctx.cancelled) return -1;
     const r = angle * DEG_TO_RAD;
-    const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+    const cx = originX ?? (entity.x + TILE_SIZE / 2), cy = originY ?? (entity.y + TILE_SIZE / 2);
+    const id = bulletIdSeq++;
     eng.enemyBullets.push({
       x: cx, y: cy,
       vx: Math.cos(r) * speed, vy: Math.sin(r) * speed,
       r: 5, color: SPELL_PALETTE[((colorIdx | 0) + 9) % 9],
       shape: shape ?? entity.def.bulletShape ?? 'circle',
+      id,
     } as typeof eng.enemyBullets[0]);
+    return id;
   };
+
+  /** ハンドルIDから弾オブジェクトを検索（発射後に軌道を書き換えるスクリプト用） */
+  const findBullet = (id: unknown) => eng.enemyBullets.find((b) => b.id === (id as number));
 
   const env: MiniEnv = {
     // タイミング
@@ -895,8 +937,36 @@ function runEntityScript(
       (env.moveTo as (x: unknown, y: unknown, f: unknown) => Promise<void>)(x, y, frames),
 
     // 弾幕
+    /** shot() は発射した弾のハンドルID（数値）を返す。setBulletVel 等で後から操作する場合に使う。 */
     shot: (angle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) =>
       pushBullet(+(angle as number), +(speed as number), (color as number) | 0, shape as string | undefined),
+    /** shotFrom(x, y, 角度, 速度, 色, 形状)：ボスの座標ではなく任意の座標から1発発射する（花火・大文字配置等） */
+    shotFrom: (x: unknown, y: unknown, angle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) =>
+      pushBullet(+(angle as number), +(speed as number), (color as number) | 0, shape as string | undefined, +(x as number), +(y as number)),
+    /** 発射済みの弾（ハンドルID）の座標を取得。存在しなければ null */
+    getBulletX: (id: unknown) => findBullet(id)?.x ?? null,
+    getBulletY: (id: unknown) => findBullet(id)?.y ?? null,
+    /** 発射済みの弾の速度ベクトルを書き換える（へにょりレーザーやスイミー的な相互作用の実装に使う） */
+    setBulletVel: (id: unknown, vx: unknown, vy: unknown) => {
+      const b = findBullet(id);
+      if (b) { b.vx = +(vx as number); b.vy = +(vy as number); }
+    },
+    /** 発射済みの弾を進行角度・速度で書き換える（度数法） */
+    setBulletAngle: (id: unknown, angle: unknown, speed: unknown) => {
+      const b = findBullet(id);
+      if (!b) return;
+      const spd = speed === undefined ? Math.hypot(b.vx, b.vy) : +(speed as number);
+      const r = +(angle as number) * DEG_TO_RAD;
+      b.vx = Math.cos(r) * spd; b.vy = Math.sin(r) * spd;
+    },
+    /** 発射済みの弾を強制的に消す */
+    removeBullet: (id: unknown) => {
+      const i = eng.enemyBullets.findIndex((b) => b.id === (id as number));
+      if (i >= 0) eng.enemyBullets.splice(i, 1);
+    },
+    /** 現在の全弾（自分が撃ったものに限らない）を [{id,x,y,vx,vy}, ...] の配列で取得。
+     *  弾同士が互いの位置を見て動く「スイミー」的な弾幕をスクリプト側で組むのに使う。 */
+    listBullets: () => eng.enemyBullets.filter((b) => !b.laser && b.id !== undefined).map((b) => ({ id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy })),
     shotN: (ways: unknown, baseAngle: unknown, spread: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) => {
       const n = (ways as number) | 0;
       for (let i = 0; i < n; i++) {
@@ -907,7 +977,7 @@ function runEntityScript(
     shotPlayer: (speed: unknown, color: unknown = 0, jitter: unknown = 0, shape: unknown = undefined) => {
       const p = getPlayer();
       const angle = Math.atan2(p.y - (entity.y + TILE_SIZE / 2), p.x - (entity.x + TILE_SIZE / 2)) / DEG_TO_RAD;
-      pushBullet(angle + (Math.random() * 2 - 1) * +(jitter as number), +(speed as number), (color as number) | 0, shape as string | undefined);
+      return pushBullet(angle + (Math.random() * 2 - 1) * +(jitter as number), +(speed as number), (color as number) | 0, shape as string | undefined);
     },
     shotSpiral: (ways: unknown, baseAngle: unknown, speed: unknown, color: unknown = 0, shape: unknown = undefined) => {
       const n = (ways as number) | 0;
@@ -920,30 +990,36 @@ function runEntityScript(
     },
     /** カーブ弾：発射後、毎フレーム angularVel 度ずつ進行方向が曲がり続ける（渦巻き弾幕用） */
     shotCurve: (angle: unknown, speed: unknown, angularVel: unknown, color: unknown = 0, shape: unknown = undefined) => {
-      if (ctx.cancelled) return;
+      if (ctx.cancelled) return -1;
       const r = +(angle as number) * DEG_TO_RAD;
       const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
       const spd = +(speed as number);
+      const id = bulletIdSeq++;
       eng.enemyBullets.push({
         x: cx, y: cy,
         vx: Math.cos(r) * spd, vy: Math.sin(r) * spd,
         r: 5, color: SPELL_PALETTE[(((color as number) | 0) + 9) % 9],
         shape: (shape as string | undefined) ?? entity.def.bulletShape ?? 'circle',
         angularVel: +(angularVel as number),
+        id,
       });
+      return id;
     },
     /** 反射弾：画面端に着くたびに跳ね返り、reflectCount 回反射したら通常弾として飛び去る */
     shotReflect: (angle: unknown, speed: unknown, reflectCount: unknown, color: unknown = 0, shape: unknown = undefined) => {
-      if (ctx.cancelled) return;
+      if (ctx.cancelled) return -1;
       const r = +(angle as number) * DEG_TO_RAD;
       const cx = entity.x + TILE_SIZE / 2, cy = entity.y + TILE_SIZE / 2;
+      const id = bulletIdSeq++;
       eng.enemyBullets.push({
         x: cx, y: cy,
         vx: Math.cos(r) * +(speed as number), vy: Math.sin(r) * +(speed as number),
         r: 5, color: SPELL_PALETTE[(((color as number) | 0) + 9) % 9],
         shape: (shape as string | undefined) ?? entity.def.bulletShape ?? 'circle',
         reflectLeft: Math.max(0, (reflectCount as number) | 0),
+        id,
       });
+      return id;
     },
     /** 分裂弾：splitFrames フレーム経過後、その場で splitWays 方向へ再発射して消える */
     shotSplit: (angle: unknown, speed: unknown, splitFrames: unknown, splitWays: unknown, color: unknown = 0, shape: unknown = undefined) => {

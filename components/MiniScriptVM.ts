@@ -44,44 +44,57 @@ function splitArgs(s: string): string[] {
 	return args;
 }
 
-function evalExpr(src: string, scope: MiniScope, env: MiniEnv): unknown {
-	const safe = src.replace(/\/\/.*$/, "").trim();
+const RESERVED_WORDS = new Set([
+	"true",
+	"false",
+	"null",
+	"undefined",
+	"NaN",
+	"Infinity",
+	"if",
+	"else",
+	"for",
+	"while",
+	"return",
+	"function",
+	"end",
+	"then",
+	"and",
+	"or",
+	"not",
+]);
+
+/** ソース断片から識別子トークンを抽出し、env組み込み関数は const 参照、それ以外は
+ *  scope からの let 束縛として宣言する行を作る（配列/辞書のプロパティ名等も無害に紛れ込むが、
+ *  そのまま未使用のローカル変数になるだけで実害はない）。 */
+function buildGetters(code: string, env: MiniEnv): string[] {
 	const allow = /[A-Za-z_][A-Za-z0-9_]*/g;
 	const tokens = new Set<string>();
-	(safe.match(allow) || []).forEach((t) => tokens.add(t));
+	(code.match(allow) || []).forEach((t) => tokens.add(t));
 	const builtins = new Set(Object.keys(env));
-	const reserved = new Set([
-		"true",
-		"false",
-		"null",
-		"undefined",
-		"NaN",
-		"Infinity",
-		"if",
-		"else",
-		"for",
-		"while",
-		"return",
-		"function",
-		"end",
-		"then",
-		"and",
-		"or",
-		"not",
-	]);
-	const code = safe
-		.replace(/\band\b/g, "&&")
-		.replace(/\bor\b/g, "||")
-		.replace(/\bnot\b/g, "!");
 	const getters: string[] = [];
 	tokens.forEach((t) => {
-		if (reserved.has(t) || /^\d/.test(t)) return;
+		if (RESERVED_WORDS.has(t) || /^\d/.test(t)) return;
 		if (builtins.has(t)) {
 			getters.push(`const ${t} = __env["${t}"];`);
 			return;
 		}
 		getters.push(`let ${t} = __scope["${t}"];`);
 	});
+	return getters;
+}
+
+function normalizeOps(src: string): string {
+	return src
+		.replace(/\band\b/g, "&&")
+		.replace(/\bor\b/g, "||")
+		.replace(/\bnot\b/g, "!");
+}
+
+function evalExpr(src: string, scope: MiniScope, env: MiniEnv): unknown {
+	const safe = src.replace(/\/\/.*$/, "").trim();
+	const code = normalizeOps(safe);
+	const getters = buildGetters(code, env);
 	const js = `(function(__env,__scope){ ${getters.join("\n")} return (${code}); })`;
 	try {
 		return Function(`return ${js}`)()(env, scope);
@@ -89,6 +102,44 @@ function evalExpr(src: string, scope: MiniScope, env: MiniEnv): unknown {
 		throw new Error(`ExprError in \`${src}\`: ${(e as Error).message}`);
 	}
 }
+
+/** 配列要素・辞書プロパティへの代入（arr[i] = x / dict.key = x / dict["key"] = x）。
+ *  配列・オブジェクトは参照型なので、scope 上のベースを書き換えれば元の変数に反映される。 */
+function execMemberAssign(lhs: string, rhs: string, scope: MiniScope, env: MiniEnv): void {
+	const rhsCode = normalizeOps(rhs.replace(/\/\/.*$/, "").trim());
+	const combined = `${lhs.trim()} = (${rhsCode});`;
+	const getters = buildGetters(`${lhs} ${rhsCode}`, env);
+	const js = `(function(__env,__scope){ ${getters.join("\n")} ${combined} })`;
+	try {
+		Function(`return ${js}`)()(env, scope);
+	} catch (e) {
+		throw new Error(`AssignError in \`${lhs} = ${rhs}\`: ${(e as Error).message}`);
+	}
+}
+
+/** MiniScript から使える配列/辞書の組み込み関数。参照型の in-place 操作が中心。 */
+const CORE_BUILTINS: MiniEnv = {
+	push: (arr: unknown, v: unknown) => {
+		if (Array.isArray(arr)) arr.push(v);
+		return arr;
+	},
+	pop: (arr: unknown) => (Array.isArray(arr) ? arr.pop() : undefined),
+	len: (v: unknown) =>
+		Array.isArray(v) ? v.length : v && typeof v === "object" ? Object.keys(v).length : 0,
+	keys: (v: unknown) => (v && typeof v === "object" ? Object.keys(v) : []),
+	values: (v: unknown) => (v && typeof v === "object" ? Object.values(v) : []),
+	del: (v: unknown, key: unknown) => {
+		if (Array.isArray(v)) {
+			const i = (key as number) | 0;
+			if (i >= 0 && i < v.length) v.splice(i, 1);
+		} else if (v && typeof v === "object") {
+			delete (v as Record<string, unknown>)[String(key)];
+		}
+		return v;
+	},
+	has: (v: unknown, key: unknown) =>
+		Array.isArray(v) ? (key as number) < v.length : !!v && typeof v === "object" && String(key) in (v as object),
+};
 
 function getBlockEnd(lines: string[], start: number, kind: string): number {
 	let depth = 0;
@@ -133,6 +184,10 @@ export async function runMiniScript(
 	env: MiniEnv,
 	initScope: MiniScope = {},
 ): Promise<void> {
+	// CORE_BUILTINS（push/pop/len/keys/values/del/has）はどの呼び出し元でも使えるよう先に敷き、
+	// 呼び出し側の env で同名関数を渡された場合はそちらを優先する。
+	const mergedEnv: MiniEnv = { ...CORE_BUILTINS, ...env };
+	env = mergedEnv;
 	async function run(stmts: string[], sc: MiniScope): Promise<void> {
 		let ip = 0;
 		while (ip < stmts.length) {
@@ -225,6 +280,18 @@ export async function runMiniScript(
 				const lhs = line.slice(0, eqIdx).trim();
 				const rhs = line.slice(eqIdx + 1).trim();
 				sc[lhs] = evalExpr(rhs, sc, env);
+				ip++;
+				continue;
+			}
+
+			// member assignment: arr[i] = expr / dict.key = expr / dict["key"] = expr
+			if (
+				/^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]+\]|\.[A-Za-z_][A-Za-z0-9_]*)+\s*=[^=]/.test(line)
+			) {
+				const eqIdx = line.indexOf("=");
+				const lhs = line.slice(0, eqIdx).trim();
+				const rhs = line.slice(eqIdx + 1).trim();
+				execMemberAssign(lhs, rhs, sc, env);
 				ip++;
 				continue;
 			}
