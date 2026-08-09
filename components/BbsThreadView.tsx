@@ -79,6 +79,18 @@ function parseContent(text: string, replyMap: Map<string, number>) {
 							</a>
 						);
 					}
+					if (/^#[^\s#]+$/.test(part)) {
+						const tagClean = part.slice(1);
+						return (
+							<a
+								key={pi}
+								href={`/hashtag/${encodeURIComponent(tagClean)}`}
+								className="text-blue-400 hover:underline"
+							>
+								{part}
+							</a>
+						);
+					}
 					if (/^https?:\/\//.test(part)) {
 						return (
 							<a
@@ -458,9 +470,25 @@ export default function BbsThreadView({
 											className="pl-6 mt-2"
 											onClick={(e) => e.stopPropagation()}
 										>
-											<div className="text-red-500 font-bold mb-1 text-[13px]">
-												{findMmlMarker(p.content) ?? "#mml"}
-											</div>
+											{(() => {
+												const mmlMarker =
+													findMmlMarker(p.content) ?? "#mml";
+												const tagClean = mmlMarker.replace(/^#/, "");
+												return (
+													<a
+														href={`/hashtag/${encodeURIComponent(tagClean)}`}
+														onClick={(e) => {
+															e.stopPropagation();
+															router.push(
+																`/hashtag/${encodeURIComponent(tagClean)}`,
+															);
+														}}
+														className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+													>
+														{mmlMarker}
+													</a>
+												);
+											})()}
 											<MmlSource post={p}>
 												{(mml) => <MmlPlayer mml={mml} />}
 											</MmlSource>
@@ -474,9 +502,18 @@ export default function BbsThreadView({
 											className="pl-6 mt-2"
 											onClick={(e) => e.stopPropagation()}
 										>
-											<div className="text-red-500 font-bold mb-1 text-[13px]">
-												♪コード進行
-											</div>
+											<a
+												href={`/hashtag/${encodeURIComponent("コード進行")}`}
+												onClick={(e) => {
+													e.stopPropagation();
+													router.push(
+														`/hashtag/${encodeURIComponent("コード進行")}`,
+													);
+												}}
+												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+											>
+												#コード進行
+											</a>
 											<ChordPlayer chords={chordRes.chords} />
 										</div>
 									);

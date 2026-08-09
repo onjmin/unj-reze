@@ -617,19 +617,21 @@ export default function PostContainer({
 								<span key={lIdx} className="block">
 									{line.split(" ").map((word, wIdx) => {
 										if (word.startsWith("#") && word.length > 1) {
+											const tagClean = word.slice(1);
 											return (
-												<span
+												<a
 													key={wIdx}
-													className="text-blue-400 mr-1 cursor-pointer hover:underline"
+													href={`/hashtag/${encodeURIComponent(tagClean)}`}
+													className="text-blue-400 hover:underline mr-1"
 													onClick={(e) => {
 														e.stopPropagation();
 														router.push(
-															`/hashtag/${encodeURIComponent(word.slice(1))}`,
+															`/hashtag/${encodeURIComponent(tagClean)}`,
 														);
 													}}
 												>
 													{word}
-												</span>
+												</a>
 											);
 										}
 										if (/^https?:\/\//.test(word)) {
@@ -737,9 +739,24 @@ export default function PostContainer({
 						if (post.hasMml || extractMmlFromContent(post.content)) {
 							return (
 								<div onClick={(e) => e.stopPropagation()} className="relative">
-									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										{findMmlMarker(post.content) ?? "#mml"}
-									</div>
+									{(() => {
+										const mmlMarker = findMmlMarker(post.content) ?? "#mml";
+										const tagClean = mmlMarker.replace(/^#/, "");
+										return (
+											<a
+												href={`/hashtag/${encodeURIComponent(tagClean)}`}
+												onClick={(e) => {
+													e.stopPropagation();
+													router.push(
+														`/hashtag/${encodeURIComponent(tagClean)}`,
+													);
+												}}
+												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+											>
+												{mmlMarker}
+											</a>
+										);
+									})()}
 									<MmlSource post={post}>
 										{(mml) => <MmlPlayer mml={mml} />}
 									</MmlSource>
@@ -762,9 +779,18 @@ export default function PostContainer({
 						if (chordRes)
 							return (
 								<div onClick={(e) => e.stopPropagation()}>
-									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										♪コード進行
-									</div>
+									<a
+										href={`/hashtag/${encodeURIComponent("コード進行")}`}
+										onClick={(e) => {
+											e.stopPropagation();
+											router.push(
+												`/hashtag/${encodeURIComponent("コード進行")}`,
+											);
+										}}
+										className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+									>
+										#コード進行
+									</a>
 									<ChordPlayer chords={chordRes.chords} />
 								</div>
 							);

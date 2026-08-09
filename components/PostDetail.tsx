@@ -1201,25 +1201,40 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 									: allLines;
 							return lines.map((line, lIdx) => (
 								<span key={lIdx} className="block">
-									{line.split(" ").map((word, wIdx) =>
-										word.startsWith("#") ? (
-											<span key={wIdx} className="text-blue-400 mr-1">
-												{word}
-											</span>
-										) : /^https?:\/\//.test(word) ? (
-											<a
-												key={wIdx}
-												href={word}
-												target="_blank"
-												rel="noopener noreferrer"
-												className="text-blue-400 hover:underline mr-1"
-											>
-												{word}
-											</a>
-										) : (
-											<span key={wIdx}>{word} </span>
-										),
-									)}
+									{line.split(" ").map((word, wIdx) => {
+										if (word.startsWith("#") && word.length > 1) {
+											const tagClean = word.slice(1);
+											return (
+												<a
+													key={wIdx}
+													href={`/hashtag/${encodeURIComponent(tagClean)}`}
+													className="text-blue-400 hover:underline mr-1"
+													onClick={(e) => {
+														e.stopPropagation();
+														router.push(
+															`/hashtag/${encodeURIComponent(tagClean)}`,
+														);
+													}}
+												>
+													{word}
+												</a>
+											);
+										}
+										if (/^https?:\/\//.test(word)) {
+											return (
+												<a
+													key={wIdx}
+													href={word}
+													target="_blank"
+													rel="noopener noreferrer"
+													className="text-blue-400 hover:underline mr-1"
+												>
+													{word}
+												</a>
+											);
+										}
+										return <span key={wIdx}>{word} </span>;
+									})}
 								</span>
 							));
 						})()}
@@ -1305,9 +1320,24 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						if (hasMmlContent) {
 							return (
 								<div className="relative">
-									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										{findMmlMarker(post.content) ?? "#mml"}
-									</div>
+									{(() => {
+										const mmlMarker = findMmlMarker(post.content) ?? "#mml";
+										const tagClean = mmlMarker.replace(/^#/, "");
+										return (
+											<a
+												href={`/hashtag/${encodeURIComponent(tagClean)}`}
+												onClick={(e) => {
+													e.stopPropagation();
+													router.push(
+														`/hashtag/${encodeURIComponent(tagClean)}`,
+													);
+												}}
+												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+											>
+												{mmlMarker}
+											</a>
+										);
+									})()}
 									<MmlSource post={post}>
 										{(mml) => <MmlPlayer mml={mml} />}
 									</MmlSource>
@@ -1326,9 +1356,18 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 						if (chordRes)
 							return (
 								<div>
-									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										♪コード進行
-									</div>
+									<a
+										href={`/hashtag/${encodeURIComponent("コード進行")}`}
+										onClick={(e) => {
+											e.stopPropagation();
+											router.push(
+												`/hashtag/${encodeURIComponent("コード進行")}`,
+											);
+										}}
+										className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+									>
+										#コード進行
+									</a>
 									<ChordPlayer chords={chordRes.chords} />
 								</div>
 							);
@@ -2049,25 +2088,40 @@ function ReplyTreeItem({
 							const lines = displayText ? displayText.split("\n") : [];
 							return lines.map((line, lIdx) => (
 								<span key={lIdx} className="block">
-									{line.split(" ").map((word, wIdx) =>
-										word.startsWith("#") ? (
-											<span key={wIdx} className="text-blue-400 mr-1">
-												{word}
-											</span>
-										) : /^https?:\/\//.test(word) ? (
-											<a
-												key={wIdx}
-												href={word}
-												target="_blank"
-												rel="noopener noreferrer"
-												className="text-blue-400 hover:underline mr-1"
-											>
-												{word}
-											</a>
-										) : (
-											<span key={wIdx}>{word} </span>
-										),
-									)}
+									{line.split(" ").map((word, wIdx) => {
+										if (word.startsWith("#") && word.length > 1) {
+											const tagClean = word.slice(1);
+											return (
+												<a
+													key={wIdx}
+													href={`/hashtag/${encodeURIComponent(tagClean)}`}
+													className="text-blue-400 hover:underline mr-1"
+													onClick={(e) => {
+														e.stopPropagation();
+														router.push(
+															`/hashtag/${encodeURIComponent(tagClean)}`,
+														);
+													}}
+												>
+													{word}
+												</a>
+											);
+										}
+										if (/^https?:\/\//.test(word)) {
+											return (
+												<a
+													key={wIdx}
+													href={word}
+													target="_blank"
+													rel="noopener noreferrer"
+													className="text-blue-400 hover:underline mr-1"
+												>
+													{word}
+												</a>
+											);
+										}
+										return <span key={wIdx}>{word} </span>;
+									})}
 								</span>
 							));
 						})()}
@@ -2140,9 +2194,25 @@ function ReplyTreeItem({
 						if (hasMmlContent)
 							return (
 								<div>
-									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										{findMmlMarker(localPost.content) ?? "#mml"}
-									</div>
+									{(() => {
+										const mmlMarker =
+											findMmlMarker(localPost.content) ?? "#mml";
+										const tagClean = mmlMarker.replace(/^#/, "");
+										return (
+											<a
+												href={`/hashtag/${encodeURIComponent(tagClean)}`}
+												onClick={(e) => {
+													e.stopPropagation();
+													router.push(
+														`/hashtag/${encodeURIComponent(tagClean)}`,
+													);
+												}}
+												className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+											>
+												{mmlMarker}
+											</a>
+										);
+									})()}
 									<MmlSource post={localPost}>
 										{(mml) => <MmlPlayer mml={mml} />}
 									</MmlSource>
@@ -2151,9 +2221,18 @@ function ReplyTreeItem({
 						if (chordRes)
 							return (
 								<div>
-									<div className="text-red-500 font-bold mb-1 text-[13px]">
-										♪コード進行
-									</div>
+									<a
+										href={`/hashtag/${encodeURIComponent("コード進行")}`}
+										onClick={(e) => {
+											e.stopPropagation();
+											router.push(
+												`/hashtag/${encodeURIComponent("コード進行")}`,
+											);
+										}}
+										className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+									>
+										#コード進行
+									</a>
 									<ChordPlayer chords={chordRes.chords} />
 								</div>
 							);

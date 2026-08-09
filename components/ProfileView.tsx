@@ -1444,14 +1444,22 @@ export default function ProfileView({
 													return lines.map((line, lIdx) => (
 														<span key={lIdx} className="block">
 															{line.split(" ").map((word, wIdx) => {
-																if (word.startsWith("#")) {
+																if (word.startsWith("#") && word.length > 1) {
+																	const tagClean = word.slice(1);
 																	return (
-																		<span
+																		<a
 																			key={wIdx}
-																			className="text-blue-400 mr-1 cursor-pointer hover:underline"
+																			href={`/hashtag/${encodeURIComponent(tagClean)}`}
+																			className="text-blue-400 hover:underline mr-1"
+																			onClick={(e) => {
+																				e.stopPropagation();
+																				router.push(
+																					`/hashtag/${encodeURIComponent(tagClean)}`,
+																				);
+																			}}
 																		>
 																			{word}
-																		</span>
+																		</a>
 																	);
 																}
 																if (/^https?:\/\//.test(word)) {
@@ -1569,9 +1577,25 @@ export default function ProfileView({
 												if (p.hasMml || extractMmlFromContent(p.content)) {
 													return (
 														<div>
-															<div className="text-red-500 font-bold mb-1 text-[13px]">
-																{findMmlMarker(p.content) ?? "#mml"}
-															</div>
+															{(() => {
+																const mmlMarker =
+																	findMmlMarker(p.content) ?? "#mml";
+																const tagClean = mmlMarker.replace(/^#/, "");
+																return (
+																	<a
+																		href={`/hashtag/${encodeURIComponent(tagClean)}`}
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			router.push(
+																				`/hashtag/${encodeURIComponent(tagClean)}`,
+																			);
+																		}}
+																		className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+																	>
+																		{mmlMarker}
+																	</a>
+																);
+															})()}
 															<MmlSource post={p}>
 																{(mml) => <MmlPlayer mml={mml} />}
 															</MmlSource>
@@ -1582,9 +1606,18 @@ export default function ProfileView({
 												if (chordRes)
 													return (
 														<div>
-															<div className="text-red-500 font-bold mb-1 text-[13px]">
-																♪コード進行
-															</div>
+															<a
+																href={`/hashtag/${encodeURIComponent("コード進行")}`}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	router.push(
+																		`/hashtag/${encodeURIComponent("コード進行")}`,
+																	);
+																}}
+																className="text-blue-400 hover:underline font-bold mb-1 inline-block text-[13px]"
+															>
+																#コード進行
+															</a>
 															<ChordPlayer chords={chordRes.chords} />
 														</div>
 													);
