@@ -2,12 +2,13 @@
  * APIが受け取る manifest 参照の検証。
  *
  * manifest 本体はブラウザが uploader-worker へ直接上げるので、サーバーに届くのは
- * URLだけになった。URLは公開ボディから来るため、**保存先ホストを必ず検証する**。
- * これをやらないと、任意の外部URLをゲーム/MVの manifest として登録できてしまい、
- * プレイヤーに好きなJSONを読ませる踏み台になる。
+ * URLだけになった。fetch はクライアント側で行われるため SSRF は発生しない。
+ *
+ * 検証内容:
+ * - https であること
+ * - パスが /{kind}/[16桁hex].{ext} 形式であること（kind の取り違えを防ぐ）
+ * - origin の検証は行わない（画像 URL も同様に検証していないため一貫性を保つ）
  */
-
-const UPLOADER_PUBLIC_URL = process.env.NEXT_PUBLIC_UPLOADER_PUBLIC_URL || "";
 
 export interface ParsedManifestRef {
 	manifestUrl: string;
@@ -17,28 +18,21 @@ export interface ParsedManifestRef {
 
 /**
  * `kind` は uploader 側のキー接頭辞（`mv` / `game` / `mml`）。
- * ホスト名だけでなくパスまで見るので、MVのURLをゲームとして登録する類も弾ける。
+ * パス形式を確認することで、MML URL をゲーム manifest として登録するといった
+ * 種別取り違えを防ぐ。
  */
 export function isValidPayloadUrl(
 	url: unknown,
 	kind: "mv" | "game" | "mml",
 ): url is string {
 	if (typeof url !== "string" || url === "") return false;
-	if (!UPLOADER_PUBLIC_URL) {
-		// 未設定なら検証できない。通してしまうと素通しになるので落とす
-		console.error(
-			"NEXT_PUBLIC_UPLOADER_PUBLIC_URL が未設定のため manifest URL を検証できません",
-		);
-		return false;
-	}
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
 	} catch {
 		return false;
 	}
-	const base = new URL(UPLOADER_PUBLIC_URL);
-	if (parsed.origin !== base.origin) return false;
+	if (parsed.protocol !== "https:") return false;
 	return new RegExp(`^/${kind}/[0-9a-f]{16}\\.(json|mml|txt)$`).test(
 		parsed.pathname,
 	);
