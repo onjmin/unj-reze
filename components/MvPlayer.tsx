@@ -125,6 +125,18 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 	}, []);
 
 	useEffect(() => {
+		manifestRef.current = manifest;
+	}, [manifest]);
+
+	useEffect(() => {
+		onEndedRef.current = onEnded;
+	}, [onEnded]);
+
+	useEffect(() => {
+		focusRef.current = { requestFocus, releaseFocus };
+	}, [requestFocus, releaseFocus]);
+
+	useEffect(() => {
 		selectedLayerIdRef.current = selectedLayerId;
 		hoveredLayerIdRef.current = hoveredLayerId;
 		if (!playbackRef.current) {
@@ -147,8 +159,8 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 		let disposed = false;
 		setReady(false);
 		(async () => {
-			const song = await parseMvSong(manifestRef.current.mml);
-			await preloadMvImages(manifestRef.current);
+			const song = await parseMvSong(manifest.mml);
+			await preloadMvImages(manifest);
 			if (disposed) return;
 			songRef.current = song;
 			setReady(true);
@@ -161,8 +173,13 @@ const MvPlayer = forwardRef<MvPlayerHandle, MvPlayerProps>(function MvPlayer(
 
 	// 停止中は manifest の編集をそのまま静止画へ反映する
 	useEffect(() => {
-		if (!playbackRef.current) paintPoster();
-	}, [manifest, paintPoster]);
+		if (!playbackRef.current) {
+			const currentStep = seekBarRef.current ? Number(seekBarRef.current.value) : 0;
+			const stepsPerSec = ((songRef.current.bpm || 120) / 60) * MV_STEPS_PER_BEAT;
+			const timeSec = currentStep / (stepsPerSec || 1);
+			paint(currentStep, timeSec);
+		}
+	}, [manifest, paint]);
 
 	// ready が変わると seekBar の max（曲の長さ）も変わるので、塗りを引き直す
 	useEffect(() => {
