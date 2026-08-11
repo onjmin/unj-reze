@@ -100,9 +100,12 @@ export class Mmo3dBabylonEngine {
 		});
 
 		// デバッグ用インスペクタは開発環境でのみ動的import（本番バンドルに含めない）。
-		if (process.env.NODE_ENV !== "production") {
-			import("babylonjs-inspector").catch(() => {});
-		}
+		// ※文字列で import() すると、Cloudflare Workersのデプロイ時（esbuild）に
+		// devDependenciesであっても静的解析されて巨大なファイルが混入してしまうためコメントアウト。
+		// 必要な場合のみローカルでコメントを外して使用してください。
+		// if (process.env.NODE_ENV !== "production") {
+		// 	import("babylonjs-inspector").catch(() => {});
+		// }
 	}
 
 	/** MMD(PMX)モデルをURLから読み込み、シーンへ追加する。ローダーは初回呼び出し時に1回だけ登録する。CORS失敗時は lib/cors-proxy.ts 経由で1回だけ再試行する。 */
