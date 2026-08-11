@@ -1436,7 +1436,9 @@ export default function Yume25DEditorPanel({
 									<span className="text-[8px] text-gray-500">
 										{m.source === "three.js"
 											? "three.js examples"
-											: "glTF-Sample-Assets"}
+											: m.source === "MMD"
+												? `MMD (${m.format?.toUpperCase() ?? "PMX"})`
+												: "glTF-Sample-Assets"}
 									</span>
 								</button>
 							))}

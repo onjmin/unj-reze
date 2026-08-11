@@ -1262,6 +1262,10 @@ export interface PresetData {
 		/** 掲示板として参照する本SNSの投稿ID。ゲーム作者が編集画面で個別指定する将来のUIまでは
 		 *  未指定時に埋め込み先の投稿(postId)を暫定で使う（GameMaker.tsx参照）。 */
 		boardPostId?: string;
+		/** MMD(PMX/PMD)モデルのURL（renderer==='babylon'で使用）。未指定時は標準カプセル。 */
+		pmxUrl?: string;
+		/** MMD(VMD)モーションのURL（renderer==='babylon'で使用）。未指定時はモーションなし。 */
+		vmdUrl?: string;
 	};
 	/** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
 	titleScreen?: TitleScreenConfig;

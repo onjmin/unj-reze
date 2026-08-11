@@ -54,7 +54,7 @@ const eslintConfig = defineConfig([
     }
   },
   {
-    files: ["components/GameMaker.tsx"],
+    files: ["components/GameMaker.tsx", "components/MvMaker.tsx"],
     rules: reactCompilerRulesOff
   }
 ]);

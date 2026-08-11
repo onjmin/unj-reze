@@ -12,7 +12,13 @@ export interface ModelCatalogEntry {
 	/** キーワード検索の対象（日本語・英語を空白区切りで） */
 	tags: string;
 	url: string;
-	source: "three.js" | "Khronos";
+	source: "three.js" | "Khronos" | "MMD";
+	/** モデル/モーションのフォーマット */
+	format?: "glb" | "gltf" | "pmx" | "pmd" | "vmd";
+	/** PMX/PMDモデル推奨のデフォルトVMDモーションURL */
+	defaultMotionUrl?: string;
+	/** アセットの種類 */
+	category?: "model" | "motion";
 }
 
 // glTF-Sample-Assets は main ブランチ直参照（構成変更が稀なリポジトリ）。
@@ -21,8 +27,71 @@ const KHR =
 	"https://cdn.jsdelivr.net/gh/KhronosGroup/glTF-Sample-Assets@main/Models";
 const TJS =
 	"https://cdn.jsdelivr.net/gh/mrdoob/three.js@r185/examples/models/gltf";
+const TJS_MMD =
+	"https://cdn.jsdelivr.net/gh/mrdoob/three.js@r171/examples/models/mmd";
+const TAKAHIROX_MMD =
+	"https://cdn.jsdelivr.net/gh/takahirox/MMDLoader-app@master";
+
+export const MMD_MODEL_CATALOG: ModelCatalogEntry[] = [
+	{
+		key: "mmd-miku-v2",
+		label: "初音ミク (v2)",
+		emoji: "🎤",
+		tags: "mmd miku hatsune vocaloid はつねみく ミク 初音ミク PMD pmd",
+		url: `${TJS_MMD}/miku/miku_v2.pmd`,
+		source: "MMD",
+		format: "pmd",
+		defaultMotionUrl: `${TJS_MMD}/vmds/wavefile_v2.vmd`,
+		category: "model",
+	},
+	{
+		key: "mmd-kizuna-ai",
+		label: "キズナアイ",
+		emoji: "🎀",
+		tags: "mmd kizuna ai vtuber きずなあい キズナアイ PMX pmx",
+		url: `${TAKAHIROX_MMD}/models/kizunaai/kizunaai.pmx`,
+		source: "MMD",
+		format: "pmx",
+		defaultMotionUrl: `${TAKAHIROX_MMD}/vmds/gokurakujodo.vmd`,
+		category: "model",
+	},
+];
+
+export const MMD_MOTION_CATALOG: ModelCatalogEntry[] = [
+	{
+		key: "vmd-wavefile-dance",
+		label: "Wavefile (ダンス)",
+		emoji: "💃",
+		tags: "vmd wavefile dance motion モーション ダンス",
+		url: `${TJS_MMD}/vmds/wavefile_v2.vmd`,
+		source: "MMD",
+		format: "vmd",
+		category: "motion",
+	},
+	{
+		key: "vmd-wavefile-camera",
+		label: "Wavefile (カメラ)",
+		emoji: "🎥",
+		tags: "vmd wavefile camera motion カメラ 演出",
+		url: `${TJS_MMD}/vmds/wavefile_camera.vmd`,
+		source: "MMD",
+		format: "vmd",
+		category: "motion",
+	},
+	{
+		key: "vmd-gokurakujodo-dance",
+		label: "極楽浄土 (ダンス)",
+		emoji: "✨",
+		tags: "vmd gokurakujodo dance motion 極楽浄土 ダンス モーション",
+		url: `${TAKAHIROX_MMD}/vmds/gokurakujodo.vmd`,
+		source: "MMD",
+		format: "vmd",
+		category: "motion",
+	},
+];
 
 export const MODEL_CATALOG: ModelCatalogEntry[] = [
+	...MMD_MODEL_CATALOG,
 	{
 		key: "duck",
 		label: "アヒル",

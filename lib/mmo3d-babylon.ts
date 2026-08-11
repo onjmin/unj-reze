@@ -42,7 +42,9 @@ export class Mmo3dBabylonEngine {
 	private disposed = false;
 	private mmdRuntime: MmdRuntime | null = null;
 
-	constructor(canvas: HTMLCanvasElement) {
+	private placeholderPlayer: AbstractMesh | null = null;
+
+	constructor(canvas: HTMLCanvasElement, pmxUrl?: string, vmdUrl?: string) {
 		this.engine = new Engine(canvas, true, { stencil: true });
 		this.scene = new Scene(this.engine);
 
@@ -82,6 +84,15 @@ export class Mmo3dBabylonEngine {
 		const playerMat = new StandardMaterial("playerMat", this.scene);
 		playerMat.diffuseColor = new Color3(1, 0.7, 0);
 		player.material = playerMat;
+		this.placeholderPlayer = player;
+
+		if (pmxUrl) {
+			player.isVisible = false;
+			this.loadMmdModelAndPlay(pmxUrl, vmdUrl).catch((err) => {
+				console.warn("Failed to load initial MMD model, falling back to placeholder:", err);
+				player.isVisible = true;
+			});
+		}
 
 		this.engine.runRenderLoop(() => {
 			if (this.disposed) return;

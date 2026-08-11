@@ -32,6 +32,8 @@ export default function Mmo3dMaker({
 	gameId,
 	sessionId,
 	boardPostId,
+	pmxUrl,
+	vmdUrl,
 }: {
 	renderer?: Mmo3dRenderer;
 	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three版のみ対応）。 */
@@ -39,6 +41,10 @@ export default function Mmo3dMaker({
 	sessionId?: string;
 	/** 指定するとワールドに掲示板を設置し、近づいてEキーで本SNSの該当スレッドを開ける（three版のみ）。 */
 	boardPostId?: string;
+	/** MMD(PMX/PMD)モデルURL（babylon版のみ） */
+	pmxUrl?: string;
+	/** MMD(VMD)モーションURL（babylon版のみ） */
+	vmdUrl?: string;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const engineRef = useRef<Mmo3dEngine | null>(null);
@@ -52,7 +58,7 @@ export default function Mmo3dMaker({
 		if (!canvas) return;
 
 		if (renderer === "babylon") {
-			const engine = new Mmo3dBabylonEngine(canvas);
+			const engine = new Mmo3dBabylonEngine(canvas, pmxUrl, vmdUrl);
 			const ro = new ResizeObserver(() => engine.resize());
 			ro.observe(canvas);
 			return () => {
@@ -121,7 +127,7 @@ export default function Mmo3dMaker({
 			engine.dispose();
 			engineRef.current = null;
 		};
-	}, [renderer]);
+	}, [renderer, boardPostId, pmxUrl, vmdUrl]);
 
 	// ── 掲示板への近接検知（three版のみ）。開いている間はEでの再トグルより閉じるボタン優先。 ──
 	useEffect(() => {

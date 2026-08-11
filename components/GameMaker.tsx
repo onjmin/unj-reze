@@ -14056,6 +14056,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 gameId={gameId}
                 sessionId={mmo3dSessionIdRef.current}
                 boardPostId={gameData.mmo3dConfig?.boardPostId ?? postId}
+                pmxUrl={gameData.mmo3dConfig?.pmxUrl}
+                vmdUrl={gameData.mmo3dConfig?.vmdUrl}
               />
             ) : gameData.engine === 'yume25d' ? (
               <Yume25DMaker
@@ -16691,9 +16693,13 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 {editorTab === 'map' && gameData.engine === 'mmo3d' && (
                   <Mmo3dEditorPanel
                     renderer={gameData.mmo3dConfig?.renderer ?? 'three'}
-                    onRendererChange={(renderer) => setGameData(prev => ({ ...prev, mmo3dConfig: { ...prev.mmo3dConfig, renderer } }))}
+                    onRendererChange={(renderer) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer, boardPostId: prev.mmo3dConfig?.boardPostId, pmxUrl: prev.mmo3dConfig?.pmxUrl, vmdUrl: prev.mmo3dConfig?.vmdUrl } }))}
                     boardPostId={gameData.mmo3dConfig?.boardPostId ?? ''}
-                    onBoardPostIdChange={(boardPostId) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', boardPostId: boardPostId || undefined } }))}
+                    onBoardPostIdChange={(boardPostId) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boardPostId: boardPostId || undefined } }))}
+                    pmxUrl={gameData.mmo3dConfig?.pmxUrl ?? ''}
+                    onPmxUrlChange={(pmxUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, pmxUrl: pmxUrl || undefined } }))}
+                    vmdUrl={gameData.mmo3dConfig?.vmdUrl ?? ''}
+                    onVmdUrlChange={(vmdUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdUrl: vmdUrl || undefined } }))}
                   />
                 )}
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && gameData.engine !== 'mmo3d' && (

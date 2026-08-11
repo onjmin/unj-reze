@@ -1304,6 +1304,7 @@ export default function MvMaker({
 			y: 24,
 			size: 18,
 			color: "#f8fafc",
+			highlightColor: "#ff4444",
 			anchor: "topLeft",
 			vertical: false,
 			motion: "none",
@@ -1325,6 +1326,7 @@ export default function MvMaker({
 			anchor: "topLeft",
 			size: 16,
 			color: "#f3f4f6",
+			highlightColor: "#ff4444",
 			vertical: true,
 			afterimage: 2,
 			holdBars: 2,
@@ -2296,6 +2298,19 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
 						}
 					/>
+					<ColorField
+						label="強調文字色"
+						value={layer.highlightColor || "#ff4444"}
+						onChange={(v) =>
+							updateLayer(
+								layer.id,
+								(l) => ({ ...l, highlightColor: v }) as MvLayer,
+							)
+						}
+					/>
+					<Hint>
+						[単語] で文字の一部を強調色にできます（例: [犬]が転んだ）。\[ \] でエスケープ可能。
+					</Hint>
 					<CheckField
 						label="縦書き"
 						checked={layer.vertical}
@@ -4474,6 +4489,19 @@ export default function MvMaker({
 										)
 									}
 								/>
+								<ColorField
+									label="強調文字色"
+									value={lyricsLayer.highlightColor || "#ff4444"}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, highlightColor: v }) as MvLayer,
+										)
+									}
+								/>
+								<Hint>
+									[単語] で文字の一部を強調色にできます（例: [犬]が転んだ）。\[ \] でエスケープ可能。
+								</Hint>
 								<CheckField
 									label="縦書き"
 									checked={lyricsLayer.vertical}

@@ -788,6 +788,8 @@ export interface MvTextLayer extends MvLayerBase {
 	y: number;
 	size: number;
 	color: string;
+	/** 特定単語([単語])の文字色。未指定時は #ff4444 */
+	highlightColor?: string;
 	anchor: MvAnchor;
 	/** 縦書き（1文字ずつ縦に積む） */
 	vertical: boolean;
@@ -862,6 +864,97 @@ export interface MvLyricLine {
  * 先頭の記号は「その行をどんな質感で出すか」の合図——`MV_LYRIC_TAG_COLORS`
  * の色をその行まるごとの下地(marks)にする。曲のBPMから秒→小節に換算する。
  */
+export interface TextSegment {
+	text: string;
+	isHighlight: boolean;
+}
+
+/**
+ * [単語] のように括弧で囲まれた部分を強調セグメント(isHighlight: true)に分割し、
+ * \[ や \] のエスケープ文字を処理する。
+ *
+ * 例: "[犬]が転んだ" -> [{ text: "犬", isHighlight: true }, { text: "が転んだ", isHighlight: false }]
+ * 例: "\[犬\]が転んだ" -> [{ text: "[犬]が転んだ", isHighlight: false }]
+ */
+export function parseHighlightedText(input: string): TextSegment[] {
+	if (!input) return [];
+	const segments: TextSegment[] = [];
+	let currentText = "";
+	let isHighlight = false;
+	let inEscape = false;
+
+	for (let i = 0; i < input.length; i++) {
+		const char = input[i];
+
+		if (inEscape) {
+			currentText += char;
+			inEscape = false;
+			continue;
+		}
+
+		if (char === "\\") {
+			inEscape = true;
+			continue;
+		}
+
+		if (char === "[" && !isHighlight) {
+			if (currentText.length > 0) {
+				segments.push({ text: currentText, isHighlight: false });
+				currentText = "";
+			}
+			isHighlight = true;
+			continue;
+		}
+
+		if (char === "]" && isHighlight) {
+			if (currentText.length > 0) {
+				segments.push({ text: currentText, isHighlight: true });
+				currentText = "";
+			}
+			isHighlight = false;
+			continue;
+		}
+
+		currentText += char;
+	}
+
+	if (inEscape) {
+		currentText += "\\";
+	}
+
+	if (currentText.length > 0) {
+		segments.push({ text: currentText, isHighlight });
+	}
+
+	return segments;
+}
+
+/**
+ * タイピング表示用に、分割された TextSegment 配列を指定した文字数(表示文字数)までにスライスする。
+ */
+export function sliceSegments(
+	segments: TextSegment[],
+	count: number,
+): TextSegment[] {
+	if (count <= 0) return [];
+	let remaining = count;
+	const result: TextSegment[] = [];
+	for (const seg of segments) {
+		if (remaining <= 0) break;
+		if (seg.text.length <= remaining) {
+			result.push(seg);
+			remaining -= seg.text.length;
+		} else {
+			result.push({
+				text: seg.text.slice(0, remaining),
+				isHighlight: seg.isHighlight,
+			});
+			remaining = 0;
+		}
+	}
+	return result;
+}
+
 export const MV_LYRIC_TAG_COLORS: Record<string, string> = {
 	// E: デジタル・バグ・ノイズ（ドット/バグ質感）
 	E: "#4ade80",
@@ -998,6 +1091,8 @@ export interface MvLyricsLayer extends MvLayerBase {
 	anchor: MvAnchor;
 	size: number;
 	color: string;
+	/** 特定単語([単語])の文字色。未指定時は #ff4444 */
+	highlightColor?: string;
 	vertical: boolean;
 	/**
 	 * 縦書きのとき、行がどちら向きに積み上がるか。未指定は rightToLeft

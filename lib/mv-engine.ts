@@ -21,6 +21,8 @@ import {
 	isMvTransitionInert,
 	layerAppearBar,
 	layerDisappearBar,
+	parseHighlightedText,
+	sliceSegments,
 	MV_BLEND_COMPOSITE,
 	MV_EFFECT_POST_STYLES,
 	MV_H,
@@ -2377,7 +2379,6 @@ function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
 	);
 	const size = layer.size * motion.scale;
 	ctx.font = `${layer.bold ? "bold " : ""}${size}px ${getMvFontStack(d.manifest)}`;
-	ctx.fillStyle = layer.color;
 	ctx.textBaseline = "top";
 
 	if (layer.shadow) {
@@ -2385,28 +2386,43 @@ function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
 		ctx.shadowBlur = Math.max(2, size * 0.25);
 	}
 
-	const lines = layer.text.split("\n");
+	const mainColor = layer.color;
+	const highlightColor = layer.highlightColor || "#ff4444";
+	const rawLines = layer.text.split("\n");
+	const parsedLines = rawLines.map((line) => parseHighlightedText(line));
+
 	if (layer.vertical) {
-		lines.forEach((line, li) => {
-			const h = line.length * size * 1.05;
+		parsedLines.forEach((segments, li) => {
+			const totalChars = segments.reduce((sum, s) => sum + s.text.length, 0);
+			const h = totalChars * size * 1.05;
 			const [ax, ay] = anchorOffset(layer.anchor, size, h);
 			const x = layer.x + ax + motion.dx - li * size * 1.6;
 			let y = layer.y + ay + motion.dy;
-			for (const ch of line) {
-				ctx.fillText(ch, x, y);
-				y += size * 1.05;
+			for (const seg of segments) {
+				ctx.fillStyle = seg.isHighlight ? highlightColor : mainColor;
+				for (const ch of seg.text) {
+					ctx.fillText(ch, x, y);
+					y += size * 1.05;
+				}
 			}
 		});
 	} else {
-		const w = Math.max(...lines.map((l) => ctx.measureText(l).width));
-		const h = lines.length * size * 1.25;
+		const lineWidths = parsedLines.map((segments) => {
+			const fullText = segments.map((s) => s.text).join("");
+			return ctx.measureText(fullText).width;
+		});
+		const w = Math.max(...lineWidths, 0);
+		const h = parsedLines.length * size * 1.25;
 		const [ax, ay] = anchorOffset(layer.anchor, w, h);
-		lines.forEach((line, li) => {
-			ctx.fillText(
-				line,
-				layer.x + ax + motion.dx,
-				layer.y + ay + motion.dy + li * size * 1.25,
-			);
+
+		parsedLines.forEach((segments, li) => {
+			let curX = layer.x + ax + motion.dx;
+			const ly = layer.y + ay + motion.dy + li * size * 1.25;
+			for (const seg of segments) {
+				ctx.fillStyle = seg.isHighlight ? highlightColor : mainColor;
+				ctx.fillText(seg.text, curX, ly);
+				curX += ctx.measureText(seg.text).width;
+			}
 		});
 	}
 	ctx.shadowBlur = 0;
@@ -2548,39 +2564,56 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 		// このサイクルの何行目か（0＝1行目）。行が増えても depth と shown.length が
 		// 一緒に増えるので、いちど置いた行はその場から動かない。
 		const order = shown.length - 1 - depth;
+		const lyricMainColor = layer.color;
+		const lyricHighlightColor = layer.highlightColor || "#ff4444";
 
 		if (layer.vertical) {
-			const textToDraw =
+			const rawSegments = parseHighlightedText(line.text);
+			const activeSegments =
 				layer.typing && depth === 0
-					? line.text.slice(0, Math.floor(Math.max(0, age) / 0.04) + 1)
-					: line.text;
-			const h = textToDraw.length * size * 1.08;
+					? sliceSegments(
+							rawSegments,
+							Math.floor(Math.max(0, age) / 0.04) + 1,
+						)
+					: rawSegments;
+			const totalChars = activeSegments.reduce(
+				(sum, s) => sum + s.text.length,
+				0,
+			);
+			const h = totalChars * size * 1.08;
 			const [ax, ay] = anchorOffset(layer.anchor, size, h);
 			const step = size * 1.7;
-			// 1行目を開始位置(layer.x)に置き、2行目以降を指定の向きへ足していく。
-			// 参考動画（次日朝夢 / x0o0x_ / _）はどれも左へ伸ばす積み方。
-			// 画面の左寄りに置くなら 'right' にしないと画面外へ出ていく。
 			const x = layer.x + ax + (stack === "left" ? -order : order) * step;
 			let y = layer.y + ay;
-			for (const ch of textToDraw) {
-				ctx.fillText(ch, x, y);
-				y += size * 1.08;
+			for (const seg of activeSegments) {
+				ctx.fillStyle = seg.isHighlight ? lyricHighlightColor : lyricMainColor;
+				for (const ch of seg.text) {
+					ctx.fillText(ch, x, y);
+					y += size * 1.08;
+				}
 			}
 		} else {
-			const textToDraw =
+			const rawSegments = parseHighlightedText(line.text);
+			const activeSegments =
 				layer.typing && depth === 0
-					? line.text.slice(0, Math.floor(Math.max(0, age) / 0.04) + 1)
-					: line.text;
-			const w = ctx.measureText(textToDraw).width;
+					? sliceSegments(
+							rawSegments,
+							Math.floor(Math.max(0, age) / 0.04) + 1,
+						)
+					: rawSegments;
+			const fullText = activeSegments.map((s) => s.text).join("");
+			const w = ctx.measureText(fullText).width;
 			const [ax, ay] = anchorOffset(layer.anchor, w, size);
 			const lineH = size * 1.35;
 			const lx = layer.x + ax;
-			// 横書きも同じ考え方。上へ積むと画面上端から出るので、
-			// 上寄りに置くなら 'down' を選べるようにしてある。
 			const ly = layer.y + ay + (stack === "up" ? -order : order) * lineH;
-			drawLyricMarks(d, line, textToDraw, lx, ly, size, alpha);
-			ctx.fillStyle = layer.color;
-			ctx.fillText(textToDraw, lx, ly);
+			drawLyricMarks(d, line, fullText, lx, ly, size, alpha);
+			let curX = lx;
+			for (const seg of activeSegments) {
+				ctx.fillStyle = seg.isHighlight ? lyricHighlightColor : lyricMainColor;
+				ctx.fillText(seg.text, curX, ly);
+				curX += ctx.measureText(seg.text).width;
+			}
 		}
 	});
 
