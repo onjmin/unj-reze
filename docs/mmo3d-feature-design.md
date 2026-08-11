@@ -81,6 +81,24 @@ three.js は r150前後で `MMDLoader`/`MMDAnimationHelper` を examples から�
 MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLoader.ImportMeshAsync`）は
 未着手（#7継続）。エンジン初期化（地面+プレースホルダーキャラ）まではthree版と対で完成。
 
+### フェーズ7完了メモ（MMDローダー実配線）
+
+- `lib/mmo3d-babylon.ts`に`loadMmdModel(url)`を追加。`babylon-mmd/esm/Loader/pmxLoader`の
+  `RegisterPmxLoader()`を初回呼び出し時に1回だけ実行し、`@babylonjs/core`の
+  `ImportMeshAsync(url, scene)`でPMXファイルを読み込む。直リンク失敗時は
+  `lib/cors-proxy.ts`経由で1回だけ再試行する（three版`loadModel`と同じフェイルオープン方式）。
+- **既定モデルは同梱していない**: `MMO3D_BUILTIN_MODELS`（three版カタログ）と異なり、
+  babylon側にライセンス未確認のMMDモデルを既定登録することはしていない。呼び出し側が
+  URLを渡す形のみ提供する（版元不明素材を巡るユーザーとのやり取りの結論をコードにも反映）。
+- VMDモーション再生（`MmdRuntime`経由の`.vmd`読み込み・再生）は未着手。現状は静止メッシュの
+  読み込みまで。
+
+**検証**: 実在しないPMX URLに対して`loadMmdModel()`を呼び出し、(1)直リンクで失敗
+→(2)`cors-proxy.onjmin.workers.dev`経由のURLへ自動フォールバック→(3)それも失敗して例外が
+投げられる、という一連の経路をブラウザで実行して確認（エラーメッセージにプロキシ済みURLが
+含まれることを確認）。`RegisterPmxLoader()`自体はエラー無く完了。実在するライセンスクリアな
+PMXファイルでの読み込み成功確認は、対象URLが用意でき次第行う。
+
 ### フェーズ3完了メモ（三人称スケルタルアニメ基盤）
 
 `lib/mmo3d.ts` に実装:
@@ -161,6 +179,36 @@ export interface RealtimePlayer {
 
 ---
 
+### フェーズ6完了メモ（DB永続化・投稿埋め込み・release準備）
+
+- `PresetId`/`EngineKind`に`'mmo3d'`を追加し、`components/game-presets/mmo3d.ts`を新設
+  （`components/game-presets/index.ts`の`PRESETS`/`PRESET_ORDER`/`PRESET_EMOJI`/`PRESET_TAGLINE`
+  にも登録）。
+- `GameManifestDraft`/`PresetData`に`mmo3dConfig?: { renderer: Mmo3dRenderer }`を追加。
+- `GameMaker.tsx`のcanvasレンダー分岐を3分岐に拡張:
+  `gameData.engine === 'mmo3d'` → `Mmo3dMaker`（`gameId`/`ensureSessionId()`をそのまま渡す）
+  → `yume25d` → 通常canvas、の優先順位。新規propは増やさず、既存の`gameId`propと
+  `lib/session.ts`の`ensureSessionId()`をrefで1回だけ読む方式にした（GameMakerProps・
+  呼び出し元は無改造）。
+- **DB永続化は追加コード不要だった**: `games.manifest`はJSONとして丸ごと保存/復元される
+  既存経路のみで、APIルート側は`engine`の値でバリデーションしていない（opaque JSON）ため、
+  `'mmo3d'`もそのまま保存・復元できる。設計ドキュメント冒頭の方針（新規カラム/クエリ不要）通り。
+- 投稿への埋め込みは`GameBox`→`GamePreview`→`GameMaker`という既存パイプラインをそのまま通る
+  ため、追加配線なしで機能する（`LiveGameView`のリアルタイム実況経路も同様）。
+
+**検証**: `GameMaker`に`initialManifest={PRESETS.mmo3d}`を渡してブラウザで実描画を確認
+（canvas中央のピクセルが地面の緑色になっている＝mmo3dシーンが実際にレンダリングされている）。
+typecheck / lint（新規warning・errorゼロ、既存の`MvMaker.tsx`の未関連エラー1件のみ）通過。
+
+**既知の制限（release前に要対応）**:
+- タイトル画面（`titleScreen.enabled`）は現状mmo3dでは表示されない
+  （canvas系エンジン向けの描画経路のため）。mmo3dは常時プレイ中扱いになる。
+- エディタ側のUI（マップ配置・武器/ダミー配置の編集画面）はまだ無く、`mmo3dConfig.renderer`
+  の切替もコード上のデフォルト値（'three'）しか無い。現状は「決め打ちのワールドで遊べる」
+  段階で、RPGENタイル配置のような自由編集はできない。
+
+---
+
 ## フェーズ計画
 
 1. 設計ドキュメント（本書）
@@ -195,3 +243,25 @@ export interface RealtimePlayer {
   外部送信・自動投稿の懸念は生じない（既存のレート制限/abuse scoringがそのまま効く）。
 
 この機能はmmo3d本体のフェーズ1〜6とは独立して並行開発できる（2D/3D両対応の横断機能のため）。
+
+### フェーズ8完了メモ（ゲーム内BBS・mmo3d向け実装）
+
+- [components/GameThreadBoard.tsx](../components/GameThreadBoard.tsx): 汎用オーバーレイ。
+  `postId`を受け取り既存の`GET /api/posts/[id]`・`GET/POST /api/posts/[id]/replies`だけで
+  閲覧・返信する（外部サイトへは一切接続しない）。2D/3D共通で使える設計。
+  `useCurrentUser()`で表示名を取得。
+- `lib/mmo3d.ts`: `enableBoard()`でワールド上(0, 1.2, 4)に掲示板メッシュを設置、
+  `isNearBoard()`で対話範囲(2.5m)判定。
+- `Mmo3dMaker.tsx`: `boardPostId`propを追加。近接時に「Eキーで掲示板を開く」ヒント表示、
+  Eキーで`GameThreadBoard`をトグル。
+- `GameMaker.tsx`: `mmo3dConfig.boardPostId`が未指定なら埋め込み先の`postId`を暫定で使う
+  （作者が個別に別スレッドを指定するエディタUIは未着手）。
+
+**検証**: (1)`Mmo3dEngine`単体でプレイヤーを板の近く/遠くへ移動させ`isNearBoard()`が
+true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単体を実在の投稿ID(`18`)で
+マウントし、実際の投稿内容（`"test"`）が表示されること、レス投稿→一覧への即時反映までを
+ブラウザで実機確認済み。
+
+**未着手（残スコープ）**: 2Dエンジン側（`map.png`のタイル配置で掲示板を置く方式）は今回は
+実装していない。作者が掲示板の位置・対象スレッドを個別に編集するUIも無く、現状は
+「埋め込み先の投稿を指すボードが1つ、固定位置に置かれる」段階。

@@ -19,7 +19,8 @@ export type PresetId =
 	| "onjReze"
 	| "undertale"
 	| "deltarune"
-	| "yume";
+	| "yume"
+	| "mmo3d";
 export type EngineKind =
 	| "action"
 	| "rpg"
@@ -1251,6 +1252,13 @@ export interface PresetData {
 	phases?: StagePhase[];
 	/** 2.5Dエンジン（yume25d）のレイアウト。engine==='yume25d' のとき必須。 */
 	layout25d?: Layout25D;
+	/** 3D MMOエンジン（mmo3d）の設定。engine==='mmo3d' のとき使用（renderer未指定時は'three'）。 */
+	mmo3dConfig?: {
+		renderer: Mmo3dRenderer;
+		/** 掲示板として参照する本SNSの投稿ID。ゲーム作者が編集画面で個別指定する将来のUIまでは
+		 *  未指定時に埋め込み先の投稿(postId)を暫定で使う（GameMaker.tsx参照）。 */
+		boardPostId?: string;
+	};
 	/** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
 	titleScreen?: TitleScreenConfig;
 	/** エンディング画面（東方以外）。enabled=true でクリア時に表示。 */

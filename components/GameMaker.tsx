@@ -64,6 +64,9 @@ import Yume25DMaker, { type Yume25DMakerHandle, type Yume25DTool, yume25dTexList
 import Yume25DEditorPanel from './Yume25DEditorPanel';
 import UserSheetPanel from './UserSheetPanel';
 import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
+import Mmo3dMaker from './Mmo3dMaker';
+import type { Mmo3dRenderer } from './game-presets/shared';
+import { ensureSessionId } from '@/lib/session';
 
 export type { PresetId };
 
@@ -211,6 +214,8 @@ export interface GameManifestDraft {
   deathScreen?: DeathScreenConfig;
   /** 2.5Dエンジン（yume25d）のレイアウト。 */
   layout25d?: Layout25D;
+  /** 3D MMOエンジン（mmo3d）の設定。renderer未指定時は'three'。 */
+  mmo3dConfig?: { renderer: Mmo3dRenderer };
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
   scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
   battle?: BattleConfig;
@@ -1779,6 +1784,11 @@ function getDodgeImg(url: string): HTMLImageElement {
 
 export default function GameMaker({ onClose, userId, onSave, initialManifest, playOnly, embedded, fixedControls, ghostPlayers, onPositionChange, postId, gameId, onRemix, danmakuComments, onComment }: GameMakerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // mmo3d専用: リアルタイムハブでの自分の識別子。ensureSessionId()はCookie/localStorage
+  // 由来で安定しているため、レンダーごとに再生成しないようrefへ1回だけ入れる（SSR中はundefined）。
+  const mmo3dSessionIdRef = useRef<string | undefined>(
+    typeof window !== 'undefined' ? ensureSessionId() : undefined,
+  );
   // canvas エリア（親フレックス）の実測サイズを ResizeObserver で追いかけ、PLAY_W:PLAY_H を保った
   // まま contain フィットさせる。CSS の aspect-ratio + width:auto;height:auto だけに頼ると、親の高さが
   // 子（このボックス）に依存し子の高さが親に依存する循環になり、ブラウザ/構成によって 0px に潰れる
@@ -14024,7 +14034,14 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               const scale = Math.min(w / PLAY_W, h / PLAY_H, 1);
               return { width: `${PLAY_W * scale}px`, height: `${PLAY_H * scale}px` };
             })()}>
-            {gameData.engine === 'yume25d' ? (
+            {gameData.engine === 'mmo3d' ? (
+              <Mmo3dMaker
+                renderer={gameData.mmo3dConfig?.renderer ?? 'three'}
+                gameId={gameId}
+                sessionId={mmo3dSessionIdRef.current}
+                boardPostId={gameData.mmo3dConfig?.boardPostId ?? postId}
+              />
+            ) : gameData.engine === 'yume25d' ? (
               <Yume25DMaker
                 ref={yume25dMakerRef}
                 layout={gameData.layout25d!}

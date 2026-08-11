@@ -39,6 +39,8 @@ const ATTACK_DAMAGE = 20;
 const PLAYER_MAX_HP = 100;
 const DUMMY_MAX_HP = 60;
 const DUMMY_RESPAWN_SEC = 3;
+const BOARD_INTERACT_RANGE = 2.5; // m
+const BOARD_POS = new THREE.Vector3(0, 1.2, 4);
 
 interface Dummy {
 	mesh: THREE.Mesh;
@@ -90,6 +92,11 @@ export class Mmo3dEngine {
 	private dummies: Dummy[] = [];
 	private onPlayerDamaged: ((hp: number, max: number) => void) | null = null;
 	private onDummyDamaged: ((index: number, hp: number, max: number) => void) | null = null;
+
+	// ── ゲーム内掲示板（フェーズ8）。本SNSの投稿を参照するだけで、外部サイトへは繋がない。 ──
+	private boardGeo: THREE.BoxGeometry | null = null;
+	private boardMat: THREE.MeshStandardMaterial | null = null;
+	private boardMesh: THREE.Mesh | null = null;
 
 	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
 	private input: Mmo3dInputState = {
@@ -174,6 +181,23 @@ export class Mmo3dEngine {
 	/** キーボード/仮想パッドから移動入力を渡す。呼び出し側（Mmo3dMaker）が随時更新する。 */
 	setInput(next: Partial<Mmo3dInputState>) {
 		Object.assign(this.input, next);
+	}
+
+	/** 掲示板の目印（📋の看板）をワールドに設置する。postIdそのものは持たない
+	 *  （本SNSのデータ参照はMmo3dMaker側の責務。エンジンは「近づいたら教える」だけ）。 */
+	enableBoard() {
+		if (this.boardMesh) return;
+		this.boardGeo = new THREE.BoxGeometry(1, 1.4, 0.1);
+		this.boardMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63 });
+		this.boardMesh = new THREE.Mesh(this.boardGeo, this.boardMat);
+		this.boardMesh.position.copy(BOARD_POS);
+		this.scene.add(this.boardMesh);
+	}
+
+	/** プレイヤーが掲示板の対話範囲内にいるか。掲示板が無ければ常にfalse。 */
+	isNearBoard(): boolean {
+		if (!this.boardMesh) return false;
+		return this.player.position.distanceTo(this.boardMesh.position) <= BOARD_INTERACT_RANGE;
 	}
 
 	/** リアルタイムハブへ送る自分の位置/向き/アニメ状態。呼び出し側が定期的に読んで publish する。
@@ -447,6 +471,8 @@ export class Mmo3dEngine {
 		this.dummyGeo.dispose();
 		this.dummyMat.dispose();
 		for (const d of this.dummies) (d.mesh.material as THREE.Material).dispose();
+		this.boardGeo?.dispose();
+		this.boardMat?.dispose();
 		this.renderer.dispose();
 	}
 }

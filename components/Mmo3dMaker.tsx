@@ -5,7 +5,9 @@
 // フェーズ4: gameId/sessionId が渡されればリアルタイムハブ経由で位置/向き/アニメ状態を
 // 同期する（DBには一切書かない、既存の chGame/LiveGameView と同じ経路の使い回し）。
 // フェーズ5: Space/クリックで近接攻撃。HPをHUDに表示する。
-// GameMaker.tsx への正式配線（virtualKeys等との統合）はデータ形状が固まるフェーズ6で行う。
+// フェーズ8: boardPostId を渡すとワールドに掲示板を設置し、近づいてEキーで本SNSの
+// 該当スレッド（GameThreadBoard）を開ける。外部サイトへは繋がず、既存の投稿/返信APIを使う。
+// GameMaker.tsx への正式配線（virtualKeys等との統合）はデータ形状が固まるフェーズ6で行った。
 // 参考: docs/mmo3d-feature-design.md
 //
 // レンダラーは three（yume25dと共有基盤・three-stdlibでFBX等を追加読込可）と
@@ -19,24 +21,31 @@ import { Mmo3dEngine } from "@/lib/mmo3d";
 import { Mmo3dBabylonEngine } from "@/lib/mmo3d-babylon";
 import { chGame } from "@/lib/realtime/channels";
 import { getRealtimeClient } from "@/lib/realtime/client";
+import GameThreadBoard from "./GameThreadBoard";
 import type { Mmo3dRenderer } from "./game-presets/shared";
 
 const SYNC_INTERVAL_MS = 200; // 位置/アニメの送信間隔（既存2Dの2000msより短い。動きが速いため）
+const BOARD_PROXIMITY_POLL_MS = 200;
 
 export default function Mmo3dMaker({
 	renderer = "three",
 	gameId,
 	sessionId,
+	boardPostId,
 }: {
 	renderer?: Mmo3dRenderer;
 	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three版のみ対応）。 */
 	gameId?: string;
 	sessionId?: string;
+	/** 指定するとワールドに掲示板を設置し、近づいてEキーで本SNSの該当スレッドを開ける（three版のみ）。 */
+	boardPostId?: string;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const engineRef = useRef<Mmo3dEngine | null>(null);
 	const [hp, setHp] = useState({ hp: 100, max: 100 });
 	const [dummyHp, setDummyHp] = useState<Record<number, { hp: number; max: number }>>({});
+	const [nearBoard, setNearBoard] = useState(false);
+	const [boardOpen, setBoardOpen] = useState(false);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
@@ -60,6 +69,7 @@ export default function Mmo3dMaker({
 			onDummyDamaged: (index, hpVal, max) =>
 				setDummyHp((prev) => ({ ...prev, [index]: { hp: hpVal, max } })),
 		});
+		if (boardPostId) engine.enableBoard();
 		engine.start();
 
 		const ro = new ResizeObserver(([entry]) => {
@@ -88,6 +98,9 @@ export default function Mmo3dMaker({
 				e.preventDefault();
 				engine.triggerAttack();
 			}
+			if (e.code === "KeyE" && boardPostId && engine.isNearBoard()) {
+				setBoardOpen((prev) => !prev);
+			}
 		};
 		const onKeyUp = (e: KeyboardEvent) => {
 			const field = keyToInput[e.code];
@@ -109,6 +122,15 @@ export default function Mmo3dMaker({
 			engineRef.current = null;
 		};
 	}, [renderer]);
+
+	// ── 掲示板への近接検知（three版のみ）。開いている間はEでの再トグルより閉じるボタン優先。 ──
+	useEffect(() => {
+		if (renderer !== "three" || !boardPostId) return;
+		const id = setInterval(() => {
+			setNearBoard(engineRef.current?.isNearBoard() ?? false);
+		}, BOARD_PROXIMITY_POLL_MS);
+		return () => clearInterval(id);
+	}, [renderer, boardPostId]);
 
 	// ── リアルタイム同期（three版のみ、gameId/sessionIdがある時だけ）。DBには書かない。 ──
 	useEffect(() => {
@@ -162,6 +184,14 @@ export default function Mmo3dMaker({
 						/>
 					))}
 				</div>
+			)}
+			{renderer === "three" && nearBoard && !boardOpen && (
+				<div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/70 text-white text-xs pointer-events-none">
+					Eキーで掲示板を開く
+				</div>
+			)}
+			{boardOpen && boardPostId && (
+				<GameThreadBoard postId={boardPostId} onClose={() => setBoardOpen(false)} />
 			)}
 		</div>
 	);

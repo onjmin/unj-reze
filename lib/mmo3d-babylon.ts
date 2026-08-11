@@ -2,9 +2,11 @@
 // three-stdlib と babylon-mmd は同じ<canvas>のWebGLコンテキストを共有できないため、
 // ゲームごとに `Mmo3dRenderer`（components/game-presets/shared.ts）でどちらか片方だけを選ぶ。
 //
-// フェーズ2時点では three版と同じく「地面 + プレースホルダーキャラクター」のみ。
-// MMD(PMX)モデルの読み込みは babylon-mmd の SDEF/PMX ローダーを副作用importで登録してから
-// SceneLoader.ImportMeshAsync するフローになる想定（未着手・#7継続）。
+// フェーズ2: 地面 + プレースホルダーキャラクター。
+// フェーズ7: babylon-mmd の PmxLoader を登録し、MMD(PMX)モデルをCORSプロキシ経由リトライ付きで
+// 読み込めるようにした（loadMmdModel）。既定カタログにはライセンス未確認の版元不明モデルを
+// 一切含めない（docs/mmo3d-feature-design.md参照）ため、呼び出し側がURLを渡す形のみ提供する。
+// VMDモーション再生（MmdRuntime経由）は今後の課題。
 // 参考: docs/mmo3d-feature-design.md
 
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
@@ -17,6 +19,18 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Vector3 } from "@babylonjs/core/Maths/math";
 import "@babylonjs/core/Meshes/meshBuilder";
+import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
+import { RegisterPmxLoader } from "babylon-mmd/esm/Loader/pmxLoader";
+import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
+
+let pmxLoaderRegistered = false;
+/** 副作用importは呼ぶたびに再登録されないよう1回だけ実行する。 */
+function ensurePmxLoaderRegistered() {
+	if (pmxLoaderRegistered) return;
+	RegisterPmxLoader();
+	pmxLoaderRegistered = true;
+}
 
 export class Mmo3dBabylonEngine {
 	private engine: Engine;
@@ -68,6 +82,23 @@ export class Mmo3dBabylonEngine {
 		// デバッグ用インスペクタは開発環境でのみ動的import（本番バンドルに含めない）。
 		if (process.env.NODE_ENV !== "production") {
 			import("babylonjs-inspector").catch(() => {});
+		}
+	}
+
+	/** MMD(PMX)モデルをURLから読み込み、シーンへ追加する。ローダーは初回呼び出し時に1回だけ登録する。
+	 *  版元不明モデルの既定同梱はしない方針のため、URLは常に呼び出し側が渡す
+	 *  （docs/mmo3d-feature-design.md参照）。CORS失敗時は lib/cors-proxy.ts 経由で1回だけ再試行する。 */
+	async loadMmdModel(url: string): Promise<AbstractMesh[]> {
+		ensurePmxLoaderRegistered();
+		try {
+			const result = await ImportMeshAsync(url, this.scene);
+			return result.meshes;
+		} catch (err) {
+			const proxied = wrapCorsProxyUrl(url);
+			if (proxied === url) throw err;
+			notifyCorsProxyUsed();
+			const result = await ImportMeshAsync(proxied, this.scene);
+			return result.meshes;
 		}
 	}
 

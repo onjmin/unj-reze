@@ -1,6 +1,7 @@
 import { deltarune } from "./deltarune";
 import { dq } from "./dq";
 import { mario } from "./mario";
+import { mmo3d } from "./mmo3d";
 import { onjReze } from "./onj-reze";
 import { rockman } from "./rockman";
 import { type PresetData, type PresetId } from "./shared";
@@ -19,6 +20,7 @@ export const PRESETS: Record<PresetId, PresetData> = {
 	undertale,
 	deltarune,
 	yume,
+	mmo3d,
 };
 export const PRESET_ORDER: PresetId[] = [
 	"onjReze",
@@ -29,6 +31,7 @@ export const PRESET_ORDER: PresetId[] = [
 	"undertale",
 	"deltarune",
 	"yume",
+	"mmo3d",
 ];
 export const PRESET_EMOJI: Record<PresetId, string> = {
 	dq: "🐉",
@@ -39,6 +42,7 @@ export const PRESET_EMOJI: Record<PresetId, string> = {
 	undertale: "❤️",
 	deltarune: "🖤",
 	yume: "🌙",
+	mmo3d: "🗡️",
 };
 
 /** ギャラリーで各プリセットの中身を一言で伝えるキャッチコピー。 */
@@ -51,4 +55,5 @@ export const PRESET_TAGLINE: Record<PresetId, string> = {
 	undertale: "ころさなくてもいいRPG",
 	deltarune: "くらやみの世界をめぐる不殺RPG",
 	yume: "さまよう2.5Dの夢の世界",
+	mmo3d: "三人称視点の3D MMO",
 };
