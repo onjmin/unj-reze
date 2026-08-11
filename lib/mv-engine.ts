@@ -502,9 +502,20 @@ function modulate(
 	let v = base;
 	for (const m of mods) {
 		if (m.target !== target) continue;
-		v = applyOp(v, modSourceValue(dd, m) * m.amount, m.op);
+		v = applyOp(v, modSourceValue(dd, m) * m.amount, modOp(m));
 	}
 	return v;
+}
+
+/**
+ * 'spin' は「経過秒数」なので、掛けるのではなく足すのが唯一の正しい使い方。
+ * 掛けると元の値が0の図形（追加した直後はすべてそう）で 0×経過=0 になって
+ * 永久に動かず、0でなくても回転速度が元の角度に比例して際限なく加速してしまう。
+ * 保存済みのデータに op:'mul' が焼き込まれているので、読む側でも直す。
+ */
+function modOp(m: MvModulator): MvModOp {
+	if (m.source === "spin" && m.op === "mul") return "add";
+	return m.op;
 }
 
 /** 評価時刻だけずらした DrawCtx を作る（描画には使わない、モジュレータ評価専用）。 */

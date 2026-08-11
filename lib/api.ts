@@ -845,12 +845,17 @@ const liveApi = {
 			fetcher<{ isFollowing: boolean }>(
 				`/follow?followerId=${encodeURIComponent(followerId)}&followedId=${encodeURIComponent(followedId)}`,
 			),
-		follow: (followedId: string) =>
+		// followerId は受け取るが送らない：フォローする側は必ずセッション本人
+		// （app/api/follow/route.ts が body を無視して resolveSessionUser で決める）。
+		// 引数だけ block/mute/mock と揃えておかないと、呼び出し側が2引数で書いた際に
+		// 1引数関数へ位置渡しされて「自分のidがfollowedIdとして送られる」事故になる
+		// （実際にそうなっていた: UserActionMenu/ProfileView 双方が2引数で呼んでいた）。
+		follow: (_followerId: string, followedId: string) =>
 			fetcher<{ success: boolean }>("/follow", {
 				method: "POST",
 				body: JSON.stringify({ followedId, sessionId: ensureSessionId() }),
 			}),
-		unfollow: (followedId: string) =>
+		unfollow: (_followerId: string, followedId: string) =>
 			fetcher<{ success: boolean }>("/follow", {
 				method: "DELETE",
 				body: JSON.stringify({ followedId, sessionId: ensureSessionId() }),

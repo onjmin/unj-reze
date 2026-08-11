@@ -145,6 +145,17 @@ export default function MvShapeMotionModal({
 	const [touchedScenes, setTouchedScenes] = useState<Set<string>>(
 		() => new Set(Object.keys(initial ?? {})),
 	);
+
+	/**
+	 * 「触った場面だけ保存」だけだと、ふつうに動きを付けたいだけの人が
+	 * 開いた1場面ぶんしか設定できず、「特定の小節でしか動かない」状態になる。
+	 * 適用範囲を明示的に選ばせて、既定は状況で振り分ける:
+	 * - まだ場面ごとの動きを持っていない（初めて設定する）→ 全場面。ふつうはこれが期待される。
+	 * - すでに場面ごとに作り込んでいる → この場面だけ。作った動きを消さない。
+	 */
+	const [applyAll, setApplyAll] = useState(
+		() => Object.keys(initial ?? {}).length === 0,
+	);
 	const cfg = perScene[activeSceneId] ?? DEFAULT_SCENE_MOTION;
 	const setCfg = (next: MvSceneMotionConfig) => {
 		setPerScene((p) => ({ ...p, [activeSceneId]: next }));
@@ -188,9 +199,43 @@ export default function MvShapeMotionModal({
 				</div>
 
 				<div className="flex-1 space-y-4 overflow-y-auto p-3">
+					{/* 適用範囲。ここを選ばせないと「開いた場面でしか動かない」事故になる */}
+					<div>
+						<p className="mb-1 text-[10px] font-bold text-gray-300">どこに適用するか</p>
+						<div className="grid grid-cols-2 gap-1.5">
+							<button
+								onClick={() => setApplyAll(true)}
+								className={`rounded-lg border px-2 py-2 text-[11px] ${
+									applyAll
+										? "border-blue-500 bg-blue-500/20 font-bold text-blue-200"
+										: "border-gray-700 bg-gray-800/60 text-gray-300 hover:bg-gray-800"
+								}`}
+							>
+								曲の最初から最後まで
+							</button>
+							<button
+								onClick={() => setApplyAll(false)}
+								className={`rounded-lg border px-2 py-2 text-[11px] ${
+									applyAll
+										? "border-gray-700 bg-gray-800/60 text-gray-300 hover:bg-gray-800"
+										: "border-blue-500 bg-blue-500/20 font-bold text-blue-200"
+								}`}
+							>
+								選んだ場面だけ
+							</button>
+						</div>
+						<p className="mt-1 text-[10px] leading-relaxed text-gray-500">
+							{applyAll
+								? "いま選んでいる動きを、この図形が出るすべての場面に同じように適用します。"
+								: "下のタブで選んだ場面だけに適用します。他の場面の動きはそのまま残ります。"}
+						</p>
+					</div>
+
 					{/* 場面選択タブ */}
 					<div>
-						<p className="mb-1 text-[10px] font-bold text-gray-300">設定対象の場面</p>
+						<p className="mb-1 text-[10px] font-bold text-gray-300">
+							{applyAll ? "動きを確認する場面" : "設定対象の場面"}
+						</p>
 						<div className="flex gap-1.5 overflow-x-auto pb-1">
 							{sceneList.map((s) => (
 								<button
@@ -357,12 +402,17 @@ export default function MvShapeMotionModal({
 					</button>
 					<button
 						onClick={() => {
-							const touched = Object.fromEntries(
-								Object.entries(perScene).filter(([id]) =>
-									touchedScenes.has(id),
-								),
-							);
-							onApply(touched);
+							// 全場面へ適用するときは、いま選んでいる場面の設定を全場面へ配る。
+							// 「触った場面だけ」を配ると他の場面は既定値のまま残り、
+							// 結局その場面でしか動かないという元のバグに戻ってしまう。
+							const next = applyAll
+								? Object.fromEntries(sceneList.map((s) => [s.id, cfg]))
+								: Object.fromEntries(
+										Object.entries(perScene).filter(([id]) =>
+											touchedScenes.has(id),
+										),
+									);
+							onApply(next);
 							onClose();
 						}}
 						className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white"

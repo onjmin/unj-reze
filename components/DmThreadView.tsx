@@ -80,7 +80,9 @@ export default function DmThreadView({ partnerSlug }: DmThreadViewProps) {
 		() => false,
 	);
 
-	const myId = me?.slug || me?.displayName;
+	// フォロー判定/会話取得は users.id が要る。displayName へフォールバックすると
+	// pg 側で整数化できず空扱いになる（実際 follow/messages で起きていた）。
+	const myId = me?.slug;
 
 	/** サーバーの応答は slug と displayName が混在するので、どちらでも本人判定できるようにする。 */
 	const myIdentifiers = useMemo(

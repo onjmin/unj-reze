@@ -850,12 +850,14 @@ export default function ProfileView({
 	// Separate effect: only checks follow status, and only when we know isSelf.
 	// Runs independently so it never triggers a reload of the main data.
 	useEffect(() => {
-		if (!viewerId || isSelf) return;
+		// フォロー判定は users.id が要る。viewerId は displayName にフォールバックしうる
+		// （下の定義コメント参照）ので、識別用途には viewerSlug を使う。
+		if (!viewerSlug || isSelf) return;
 		api.follow
-			.isFollowing(viewerId, userId)
+			.isFollowing(viewerSlug, userId)
 			.then((r) => setIsFollow(r.isFollowing))
 			.catch(() => {});
-	}, [viewerId, userId, isSelf]);
+	}, [viewerSlug, userId, isSelf]);
 
 	useEffect(
 		() => () => {
@@ -914,13 +916,13 @@ export default function ProfileView({
 	};
 
 	const handleFollow = async () => {
-		if (!viewerId) return;
+		if (!viewerSlug) return;
 		const wasFollowing = isFollow;
 		if (wasFollowing) {
 			setIsFollow(false);
 			setFollowers((f: number) => Math.max(0, f - 1));
 			try {
-				await api.follow.unfollow(viewerId, userId);
+				await api.follow.unfollow(viewerSlug, userId);
 				const counts = await api.follow.getCounts(userId);
 				setFollowers(counts.followers);
 				setFollowing(counts.following);
@@ -932,7 +934,7 @@ export default function ProfileView({
 			setIsFollow(true);
 			setFollowers((f: number) => f + 1);
 			try {
-				await api.follow.follow(viewerId, userId);
+				await api.follow.follow(viewerSlug, userId);
 				const counts = await api.follow.getCounts(userId);
 				setFollowers(counts.followers);
 				setFollowing(counts.following);
@@ -1205,7 +1207,7 @@ export default function ProfileView({
 						<>
 							<button
 								onClick={handleFollow}
-								disabled={!viewerId}
+								disabled={!viewerSlug}
 								className={`flex-1 py-2 rounded-full text-xs font-bold transition-colors disabled:opacity-50 ${
 									isFollow
 										? "border border-gray-700 text-gray-200 hover:border-red-500 hover:text-red-400"
@@ -1216,7 +1218,7 @@ export default function ProfileView({
 							</button>
 							<button
 								onClick={handleOpenDm}
-								disabled={!viewerId}
+								disabled={!viewerSlug}
 								className="flex-1 py-2 rounded-full text-xs font-bold border border-gray-700 text-gray-200 hover:border-white hover:text-white transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
 							>
 								<Mail size={13} />
@@ -1855,7 +1857,7 @@ export default function ProfileView({
 					initialTab={followListTab}
 					followersCount={followers}
 					followingCount={following}
-					viewerId={viewerId}
+					viewerId={viewerSlug}
 					onClose={() => setFollowListTab(null)}
 					onFollowChange={handleListFollowChange}
 				/>

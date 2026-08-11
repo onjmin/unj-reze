@@ -25,7 +25,8 @@ interface UserActionMenuProps {
 	onClose: () => void;
 	targetUserDisplayName: string;
 	targetUserSlug?: string;
-	currentUserId?: string; // currentUserDisplayName
+	/** 表示専用（isSelf判定・アバター等）。フォロー/DMなどAPI呼び出しには currentUserSlug を使う。 */
+	currentUserId?: string;
 	currentUserSlug?: string;
 	onMention: (username: string) => void;
 	position?: { x: number; y: number } | null;
@@ -102,9 +103,11 @@ export default function UserActionMenu({
 			setReported(false);
 		});
 
-		if (currentUserId && !isSelf) {
+		// フォロー判定・操作は本人識別＝users.id が要る。currentUserId は
+		// displayName（呼び出し元コメント参照）なので使わない。currentUserSlug を使う。
+		if (currentUserSlug && !isSelf) {
 			api.follow
-				.isFollowing(currentUserId, targetUserDisplayName)
+				.isFollowing(currentUserSlug, targetIdOrSlug)
 				.then((r) => setIsFollowingTarget(r.isFollowing))
 				.catch(() => {});
 		}
@@ -119,29 +122,22 @@ export default function UserActionMenu({
 				.then((r) => setBlocked(r.blocked.includes(targetIdOrSlug)))
 				.catch(() => {});
 		}
-	}, [
-		isOpen,
-		targetUserDisplayName,
-		currentUserId,
-		currentUserSlug,
-		targetIdOrSlug,
-		isSelf,
-	]);
+	}, [isOpen, currentUserSlug, targetIdOrSlug, isSelf]);
 
 	if (!isOpen || !mounted) return null;
 
 	const handleFollowToggle = async () => {
-		if (!currentUserId || isSelf) return;
+		if (!currentUserSlug || isSelf) return;
 		const wasFollowing = isFollowingTarget;
 		setIsFollowingTarget(!wasFollowing);
 		try {
 			if (wasFollowing) {
-				await api.follow.unfollow(currentUserId, targetUserDisplayName);
+				await api.follow.unfollow(currentUserSlug, targetIdOrSlug);
 			} else {
-				await api.follow.follow(currentUserId, targetUserDisplayName);
+				await api.follow.follow(currentUserSlug, targetIdOrSlug);
 			}
 			api.follow
-				.getCounts(targetUserDisplayName)
+				.getCounts(targetIdOrSlug)
 				.then((c) => {
 					updateCache({ followers: c.followers, following: c.following });
 				})
@@ -201,13 +197,16 @@ export default function UserActionMenu({
 	};
 
 	const handleSendDm = async () => {
-		if (!dmText.trim() || !currentUserId || isSelf) return;
+		if (!dmText.trim() || !currentUserSlug || isSelf) return;
 		setSendingDm(true);
 		try {
+			// sender は POST /api/messages がセッションから決めるので実質無視されるが、
+			// recipient は body をそのまま users.id として使う。displayName を渡すと
+			// pg.addMessage の toUid() で解決できず 500 になる（実際そうなっていた）。
 			await api.messages.send({
-				sender: currentUserId,
+				sender: currentUserSlug,
 				text: dmText.trim(),
-				recipient: targetUserDisplayName,
+				recipient: targetIdOrSlug,
 			});
 			setDmSuccess(true);
 			setDmText("");
@@ -271,7 +270,7 @@ export default function UserActionMenu({
 					<span>プロフページ</span>
 				</button>
 
-				{!isSelf && currentUserId && (
+				{!isSelf && currentUserSlug && (
 					<button
 						onClick={handleFollowToggle}
 						className="flex items-center gap-2.5 w-full px-3 py-2 text-gray-300 hover:bg-gray-100/10 text-left transition-colors font-semibold"
@@ -290,7 +289,7 @@ export default function UserActionMenu({
 					</button>
 				)}
 
-				{!isSelf && currentUserId && !hideDm && (
+				{!isSelf && currentUserSlug && !hideDm && (
 					<>
 						{showDmInput ? (
 							<div className="px-3 py-2 border-t border-gray-800/80 bg-gray-950/20 flex flex-col gap-1.5">

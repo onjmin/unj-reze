@@ -28,7 +28,9 @@ export const MV_MOTION_PRESETS: MvMotionPreset[] = [
 		id: "rotateOnly",
 		name: "回転のみ",
 		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12",
-		build: () => [{ source: "spin", target: "rotation", op: "mul", amount: 60 }],
+		// 角度は「元の向きに経過ぶんを足す」。掛け算にすると元の向きが0の図形
+		// （＝追加した直後の図形はすべてこれ）で 0×経過=0 になり、永久に回らない。
+		build: () => [{ source: "spin", target: "rotation", op: "add", amount: 60 }],
 	},
 	{
 		id: "moveX",
@@ -100,7 +102,7 @@ export const MV_MOTION_PRESETS: MvMotionPreset[] = [
 		name: "回転＋拡大縮小",
 		icon: "M12,4 A8,8 0 1 1 4,12 M12,12 L12,7 M12,12 L16,12",
 		build: (bars) => [
-			{ source: "spin", target: "rotation", op: "mul", amount: 40 },
+			{ source: "spin", target: "rotation", op: "add", amount: 40 },
 			{
 				source: "phrase",
 				bars,
@@ -156,7 +158,7 @@ export function buildCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
 		});
 	}
 	if (c.rotate) {
-		mods.push({ source: "spin", target: "rotation", op: "mul", amount: c.rotateSpeed });
+		mods.push({ source: "spin", target: "rotation", op: "add", amount: c.rotateSpeed });
 	}
 	if (c.scale) {
 		mods.push({
