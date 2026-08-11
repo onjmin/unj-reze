@@ -143,6 +143,7 @@ export interface LocalMvSprite {
 	rows?: number;
 	/** 1周にかける拍数の既定値。 */
 	loopBeats?: number;
+	scale?: number;
 }
 
 const roze = (
@@ -160,6 +161,7 @@ const roze = (
 	cellW: cell,
 	cellH: cell,
 	loopBeats,
+	scale: 0.42,
 });
 
 const cookie = (id: string, name: string, frames: number): LocalMvSprite => ({
@@ -171,6 +173,7 @@ const cookie = (id: string, name: string, frames: number): LocalMvSprite => ({
 	cellW: 160,
 	cellH: 240,
 	loopBeats: 4,
+	scale: 0.6,
 });
 
 export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
@@ -195,6 +198,7 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 		cellH: 64,
 		rows: 8,
 		loopBeats: 4,
+		scale: 2.5,
 	},
 	{
 		id: "sheet-b",
@@ -206,6 +210,7 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 		cellH: 64,
 		rows: 4,
 		loopBeats: 4,
+		scale: 2.5,
 	},
 	// クッキー☆声優キャラ（1コマ160×240）
 	cookie("mgr-a", "口開", 4),

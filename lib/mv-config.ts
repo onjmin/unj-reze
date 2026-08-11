@@ -637,6 +637,8 @@ export interface MvWalkSetting {
 	 * 秒で指定する `fps` だとテンポを変えた瞬間に絵と音がずれるので、拍で持てるようにしてある。
 	 */
 	loopBeats?: number;
+	/** 素材ごとのコマ送り速度倍率（既定 1.0）。 */
+	speed?: number;
 }
 
 export interface MvImageLayer extends MvLayerBase {

@@ -24,10 +24,9 @@ const TILES_PER_CHUNK = 160;
 
 // パネル自体はモーダルの閉じ→開き直しで毎回アンマウントされるため、選んでいたサブタブを
 // モジュール変数で覚えておき、再度開いたときも同じサブタブ（キャラ/各シート）を表示する。
-let lastLocalSection = "chars";
+let lastLocalSection = "mv";
 
-// 内蔵素材タブ: リポジトリ同梱のスプライトシート（DQ風キャラ + 16pxタイルセット）。
-// キャラは RPGEN 歩行規格へスライス済みシートを walk: 参照、タイルは url:#crop 参照で選ぶ。
+// 内蔵素材タブ: リポジトリ同梱のスプライトシート（MV素材 + DQ風キャラ + 16pxタイルセット）。
 export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 	const [section, setSectionState] = useState<string>(lastLocalSection);
 	const [failedChars, setFailedChars] = useState<Set<number>>(new Set());
@@ -43,16 +42,16 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 		<div className="flex flex-col gap-2">
 			<div className="flex flex-wrap gap-1.5">
 				<button
-					className={secBtn(section === "chars")}
-					onClick={() => setSection("chars")}
-				>
-					🚶 キャラ
-				</button>
-				<button
 					className={secBtn(section === "mv")}
 					onClick={() => setSection("mv")}
 				>
 					🎬 MV素材
+				</button>
+				<button
+					className={secBtn(section === "chars")}
+					onClick={() => setSection("chars")}
+				>
+					🚶 キャラ
 				</button>
 				{LOCAL_TILE_SHEETS.map((s) => (
 					<button

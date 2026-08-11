@@ -28,6 +28,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseWalkRef, refLabel } from "@/lib/asset-ref";
 import { handleImgError } from "@/lib/cors-proxy";
+import { MV_LOCAL_SPRITES } from "@/lib/local-assets";
 import {
 	clearAutosave,
 	getAutosave,
@@ -80,7 +81,6 @@ import {
 	type MvEffectCurve,
 	type MvEffectLayer,
 	type MvEffectStyle,
-	type MvEnterFrom,
 	type MvImageLayer,
 	type MvLayer,
 	type MvLyricStack,
@@ -997,9 +997,16 @@ export default function MvMaker({
 			// walk: 参照はコマ割り（クロップ・コマ数・行）を参照文字列に持っている。
 			// ここで MvWalkSetting へ写しておかないと、選んだ素材が1コマ目のまま止まる。
 			const walk = walkSettingFromRef(result.ref);
+			const mvSprite = MV_LOCAL_SPRITES.find((s) => s.url === result.url);
 			updateLayer(layerId, (l) =>
 				l.kind === "image"
-					? { ...l, ref: result.ref, url: result.url, walk }
+					? {
+							...l,
+							ref: result.ref,
+							url: result.url,
+							walk,
+							scale: mvSprite?.scale ?? l.scale ?? 1,
+						}
 					: l,
 			);
 		}
@@ -1771,15 +1778,6 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, scale: v }) as MvLayer)
 						}
 					/>
-					<NumField
-						label="🚶 歩行グラのコマ送り速度倍率"
-						value={mvWalkSpeed(manifest)}
-						min={0.1}
-						step={0.1}
-						onChange={(v) =>
-							update((m) => ({ ...m, walkSpeed: Math.max(0.1, v) }))
-						}
-					/>
 					<CheckField
 						label="ドット絵として粗く表示"
 						checked={!!layer.pixelated}
@@ -1877,11 +1875,40 @@ export default function MvMaker({
 								(l) =>
 									({
 										...l,
-										walk: v ? { stdId: "auto", dir: "s", fps: 4 } : undefined,
+										walk: v
+											? (l.kind === "image" && l.ref
+													? walkSettingFromRef(l.ref)
+													: undefined) ?? {
+													stdId: "auto",
+													dir: "s",
+													fps: 4,
+												}
+											: undefined,
 									}) as MvLayer,
 							)
 						}
 					/>
+					{layer.walk && (
+						<NumField
+							label="🚶 コマ送り速度倍率"
+							value={layer.walk.speed ?? 1}
+							min={0.1}
+							step={0.1}
+							onChange={(v) =>
+								updateLayer(
+									layer.id,
+									(l) =>
+										({
+											...l,
+											walk:
+												l.kind === "image" && l.walk
+													? { ...l.walk, speed: Math.max(0.1, v) }
+													: undefined,
+										}) as MvLayer,
+								)
+							}
+						/>
+					)}
 					<CheckField
 						label="同じ画像を並べる"
 						checked={!!layer.repeat}
@@ -3222,7 +3249,7 @@ export default function MvMaker({
 			)}
 
 			{(layer.kind === "image" || layer.kind === "text") && (
-				<>
+				<Details label="常時の動きを調整する (上下ゆれ・drift等)">
 					<SelectField
 						label="動き"
 						value={layer.motion}
@@ -3231,18 +3258,20 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, motion: v }) as MvLayer)
 						}
 					/>
-					<NumField
-						label="動きの強さ"
-						value={layer.motionAmount ?? 0}
-						step={1}
-						onChange={(v) =>
-							updateLayer(
-								layer.id,
-								(l) => ({ ...l, motionAmount: v }) as MvLayer,
-							)
-						}
-					/>
-				</>
+					{layer.motion !== "none" && (
+						<NumField
+							label="動きの強さ"
+							value={layer.motionAmount ?? 0}
+							step={1}
+							onChange={(v) =>
+								updateLayer(
+									layer.id,
+									(l) => ({ ...l, motionAmount: v }) as MvLayer,
+								)
+							}
+						/>
+					)}
+				</Details>
 			)}
 
 			<NumField

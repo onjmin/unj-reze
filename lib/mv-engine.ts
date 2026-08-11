@@ -2093,17 +2093,23 @@ function spriteFrameRect(
 	speedMultiplier: number,
 ): SpriteRect {
 	const fps = spriteFps(walk, bpm, speedMultiplier);
+	const safeCrop: [number, number, number, number] = [
+		crop[0] || 0,
+		crop[1] || 0,
+		Math.max(1, crop[2] || 1),
+		Math.max(1, crop[3] || 1),
+	];
 	if (walk.stdId === "row_anim") {
-		return rowAnimCellInRect(crop, {
-			frames: walk.frames ?? 4,
+		return rowAnimCellInRect(safeCrop, {
+			frames: Math.max(1, walk.frames ?? 4),
 			row: walk.row ?? 0,
 			playMode: walk.playMode ?? "loop",
 			fps,
 			timeSec,
 		});
 	}
-	const std = walkStandardFor(walk, crop[2], crop[3]);
-	return animatedCellInRect(std, crop, {
+	const std = walkStandardFor(walk, safeCrop[2], safeCrop[3]);
+	return animatedCellInRect(std, safeCrop, {
 		dir: walk.dir ?? "s",
 		moving: true,
 		timeSec,
@@ -2114,21 +2120,20 @@ function spriteFrameRect(
 
 /**
  * コマ送りの速さ。`loopBeats` があれば曲のテンポから逆算する。
- * `timeSec` は再生ステップ由来なので、これで絵が拍にロックされる。
- * `speedMultiplier` は `manifest.walkSpeed`（既定 DEFAULT_MV_WALK_SPEED）由来で、
- * ユーザーがMV単位で足取りの速さを調整できる。
+ * `walk.speed` が指定されていればレイヤーごとの倍率を適用する。
  */
 function spriteFps(
 	walk: NonNullable<MvImageLayer["walk"]>,
 	bpm: number,
 	speedMultiplier: number,
 ): number {
+	const mult = walk.speed ?? speedMultiplier ?? 1;
 	if (walk.loopBeats && walk.loopBeats > 0) {
 		const frames = Math.max(1, walk.frames ?? 4);
 		const secPerBeat = 60 / (bpm || 120);
-		return (frames / (walk.loopBeats * secPerBeat)) * speedMultiplier;
+		return (frames / (walk.loopBeats * secPerBeat)) * mult;
 	}
-	return walk.fps ?? 6;
+	return (walk.fps ?? 6) * mult;
 }
 
 function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
