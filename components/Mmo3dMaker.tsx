@@ -1,7 +1,8 @@
 "use client";
 
 // 3D MMOエンジン（mmo3d）専用のプレイビュー雛形。
-// フェーズ2時点では GameMaker.tsx にはまだ配線しない（データ形状が固まるフェーズ3で配線）。
+// フェーズ3: WASD/矢印キー移動 + Shiftダッシュ + idle/walk/run のスケルタルアニメ。
+// GameMaker.tsx への正式配線（virtualKeys等との統合）はデータ形状が固まるフェーズ6で行う。
 // 参考: docs/mmo3d-feature-design.md
 //
 // レンダラーは three（yume25dと共有基盤・three-stdlibでFBX等を追加読込可）と
@@ -38,12 +39,42 @@ export default function Mmo3dMaker({
 		const { clientWidth: w, clientHeight: h } = canvas;
 		const engine = new Mmo3dEngine(canvas, w || 640, h || 480);
 		engine.start();
+
 		const ro = new ResizeObserver(([entry]) => {
 			const { width, height } = entry.contentRect;
 			if (width > 0 && height > 0) engine.resize(width, height);
 		});
 		ro.observe(canvas);
+
+		// WASD/矢印キー + Shift。フェーズ6で仮想パッド（タッチ）にも対応する。
+		const keyToInput: Record<string, "forward" | "back" | "left" | "right"> = {
+			KeyW: "forward",
+			ArrowUp: "forward",
+			KeyS: "back",
+			ArrowDown: "back",
+			KeyA: "left",
+			ArrowLeft: "left",
+			KeyD: "right",
+			ArrowRight: "right",
+		};
+		const onKeyDown = (e: KeyboardEvent) => {
+			const field = keyToInput[e.code];
+			if (field) engine.setInput({ [field]: true });
+			if (e.code === "ShiftLeft" || e.code === "ShiftRight")
+				engine.setInput({ run: true });
+		};
+		const onKeyUp = (e: KeyboardEvent) => {
+			const field = keyToInput[e.code];
+			if (field) engine.setInput({ [field]: false });
+			if (e.code === "ShiftLeft" || e.code === "ShiftRight")
+				engine.setInput({ run: false });
+		};
+		window.addEventListener("keydown", onKeyDown);
+		window.addEventListener("keyup", onKeyUp);
+
 		return () => {
+			window.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("keyup", onKeyUp);
 			ro.disconnect();
 			engine.dispose();
 		};
@@ -52,8 +83,9 @@ export default function Mmo3dMaker({
 	return (
 		<canvas
 			ref={canvasRef}
-			className="block w-full h-full"
-			aria-label="mmo3d プレイビュー（雛形）"
+			className="block w-full h-full outline-none"
+			tabIndex={0}
+			aria-label="mmo3d プレイビュー"
 		/>
 	);
 }

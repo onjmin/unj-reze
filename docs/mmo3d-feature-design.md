@@ -81,6 +81,21 @@ three.js は r150前後で `MMDLoader`/`MMDAnimationHelper` を examples から�
 MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLoader.ImportMeshAsync`）は
 未着手（#7継続）。エンジン初期化（地面+プレースホルダーキャラ）まではthree版と対で完成。
 
+### フェーズ3完了メモ（三人称スケルタルアニメ基盤）
+
+`lib/mmo3d.ts` に実装:
+- WASD/矢印キー移動 + Shiftダッシュ（`setInput()`経由、`Mmo3dMaker.tsx`がキーイベントを中継）
+- 最短角度補間による向き変更、プレイヤー背後追従カメラ
+- idle/walk/run のクロスフェード切替（`AnimationMixer`）
+
+**既知の制限**: Khronos公式配布の`Fox.glb`はCDN配信バリアントによって「Survey/Walk/Run」の
+3クリップ名で来る場合と、単一の結合クリップ（`animation_0`）1つだけになる場合がある
+（原因未特定、jsdelivrのキャッシュ差分の可能性）。`loadPlayerModel()`は名前一致→本数一致
+（3つ以上を順番でidle/walk/run割当）→単一クリップ使い回し、の順でフォールバックする。
+実際に見た目のアニメが3種切り替わることを保証したい場合は、専用に用意した
+（クリップ名がCLIP_NAMESと一致する）モデルへの差し替えを推奨。移動/回転/カメラ追従/状態
+遷移そのものはクリップ本数によらず正しく動作することを確認済み。
+
 ---
 
 ## データモデル
