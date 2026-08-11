@@ -1720,7 +1720,7 @@ export default function MvMaker({
 	const songTab = (
 		<div className="space-y-2">
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🎵 曲をえらぶ</SectionTitle>
+				<SectionTitle>曲をえらぶ</SectionTitle>
 				<Hint>
 					映像は曲に合わせて自動で動きます。拍・光り方・歌詞の出るタイミングは全部この曲から計算されるので、
 					あなたがタイミングを合わせる必要はありません。
@@ -1756,7 +1756,7 @@ export default function MvMaker({
 			</div>
 
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🔊 音の出し方</SectionTitle>
+				<SectionTitle>音の出し方</SectionTitle>
 				{AUDIO_MODE_OPTIONS.map((opt) => {
 					const active = mvAudioMode(manifest) === opt.value;
 					return (
@@ -1794,7 +1794,7 @@ export default function MvMaker({
 	const stageTab = (
 		<div className="space-y-2">
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🖼 背景</SectionTitle>
+				<SectionTitle>背景</SectionTitle>
 				<ColorField
 					label="背景色"
 					value={manifest.stage.bgColor}
@@ -1888,7 +1888,7 @@ export default function MvMaker({
 			</div>
 
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🖼 素材・レイヤーの編集</SectionTitle>
+				<SectionTitle>素材・レイヤーの編集</SectionTitle>
 				<Hint>
 					画面に表示する画像・テキスト・ビジュアライザ・図形の個別設定は「レイヤー」タブおよび「場面」タブで行えます。複数の画像や場面ごとの切り替えにも対応しています。
 				</Hint>
@@ -1902,7 +1902,7 @@ export default function MvMaker({
 			</div>
 
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🎨 テーマカラー（パレット）</SectionTitle>
+				<SectionTitle>テーマカラー（パレット）</SectionTitle>
 				<Hint>
 					ビジュアライザ（音符・棒・図形）や背景演出が、曲のパートやトラック切り替え時に順番に使用するカラーテーマです。
 				</Hint>
@@ -1964,7 +1964,7 @@ export default function MvMaker({
 			</div>
 
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🔤 フォント</SectionTitle>
+				<SectionTitle>フォント</SectionTitle>
 				<SelectField
 					label="フォント"
 					value={manifest.stage.fontFamily ?? '""'}
@@ -2173,7 +2173,7 @@ export default function MvMaker({
 					/>
 					{layer.walk && (
 						<NumField
-							label="🚶 コマ送り速度倍率"
+							label="コマ送り速度倍率"
 							value={layer.walk.speed ?? 1}
 							min={0.1}
 							step={0.1}
@@ -2416,7 +2416,7 @@ export default function MvMaker({
 
 					<div className="space-y-2 rounded-lg border border-blue-500/40 bg-blue-500/10 p-2.5">
 						<p className="text-[11px] font-bold text-blue-200">
-							🎹 光る・反応するMMLトラックの選択
+							光る・反応するMMLトラックの選択
 						</p>
 						<p className="text-[10px] leading-relaxed text-gray-300">
 							画面下部のピアノロール（音符）で、どのトラックの音を光らせるかを選択します。未選択時は全トラックの音で光ります。
@@ -2785,7 +2785,7 @@ export default function MvMaker({
 					/>
 					<div className="rounded-lg border border-blue-500/40 bg-blue-500/10 p-2.5 space-y-1.5">
 						<p className="text-[11px] font-bold text-blue-200">
-							🎬 図形の動き（アニメーション）設定
+							図形の動き（アニメーション）設定
 						</p>
 						<p className="text-[10px] text-gray-300 leading-relaxed">
 							この図形が曲の拍に合わせて回転・脈動拡大・左右移動する動きを設定します。
@@ -3999,7 +3999,7 @@ export default function MvMaker({
 				if (i === 1 && !lyricsLayer) {
 					return (
 						<div key={i} className={SECTION_CLASS}>
-							<SectionTitle>🎤 裏歌詞</SectionTitle>
+							<SectionTitle>裏歌詞</SectionTitle>
 							<p className="text-[10px] leading-relaxed text-gray-400">
 								表歌詞と同時に出せるもう1つの歌詞レイヤーです。エコーや副音声、対訳などに。
 							</p>
@@ -4035,7 +4035,7 @@ export default function MvMaker({
 					: [];
 				return (
 					<div key={i} className={SECTION_CLASS}>
-						<SectionTitle>🎤 {i === 0 ? "表歌詞" : "裏歌詞"}</SectionTitle>
+						<SectionTitle>{i === 0 ? "表歌詞" : "裏歌詞"}</SectionTitle>
 						{!lyricsLayer ? (
 							<>
 								<p className="text-[10px] leading-relaxed text-gray-400">
@@ -4694,7 +4694,7 @@ export default function MvMaker({
 	const sectionsTab = (
 		<div className="space-y-3">
 			<div className={SECTION_CLASS}>
-				<SectionTitle>🎬 場面（シーン管理）</SectionTitle>
+				<SectionTitle>場面（シーン管理）</SectionTitle>
 				<p className="text-[10px] leading-relaxed text-gray-400">
 					小節番号で曲をカット分け（イントロ・Aメロ・サビ等）します。場面ごとに背景・画面効果・表示するレイヤーを完全に切り替えられます。
 				</p>
@@ -4823,7 +4823,7 @@ export default function MvMaker({
 
 								{/* 場面設定本体 */}
 								<div className="p-3 space-y-3">
-									<Details label="🎬 背景と画面切替の設定">
+									<Details label="背景と画面切替の設定">
 										<SelectField
 											label="切り替え方"
 											value={s.transition?.style ?? "cut"}
@@ -4959,7 +4959,7 @@ export default function MvMaker({
 										/>
 									</Details>
 
-									<Details label={`🎭 この場面で表示するレイヤーと動き (${manifest.layers.length}枚)`}>
+									<Details label={`この場面で表示するレイヤーと動き (${manifest.layers.length}枚)`}>
 										<Hint>
 											チェックを入れたレイヤーがこの場面で画面に表示されます。「動きを編集」の動きは曲全体に効きます（場面ごとには変わりません）。
 										</Hint>
@@ -5013,7 +5013,7 @@ export default function MvMaker({
 																	onClick={() => setMotionTarget({ layerId: l.id })}
 																	className="rounded bg-blue-600/30 border border-blue-500/40 px-2 py-1 text-[10px] font-medium text-blue-200 hover:bg-blue-600/40"
 																>
-																	🎬 動きを編集
+																	動きを編集
 																</button>
 															)}
 															<button
@@ -5023,7 +5023,7 @@ export default function MvMaker({
 																}}
 																className="rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-300 hover:bg-gray-600"
 															>
-																⚙️ 詳細設定
+																詳細設定
 															</button>
 														</div>
 													</div>

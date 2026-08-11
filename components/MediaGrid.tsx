@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageCircle, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Image as ImageIcon, MessageCircle, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { cachePost } from "@/lib/post-cache";
@@ -38,7 +38,7 @@ export default function MediaGrid({ items }: MediaGridProps) {
 		return (
 			<div className="flex flex-col items-center justify-center p-12 text-center py-20 bg-gray-900/5">
 				<div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 flex items-center justify-center mb-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
-					<span className="text-2xl">🖼️</span>
+					<ImageIcon className="w-7 h-7 text-blue-400" />
 				</div>
 				<p className="text-sm font-bold text-gray-200">
 					メディア付き投稿はまだありません。

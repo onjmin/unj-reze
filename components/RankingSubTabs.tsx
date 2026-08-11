@@ -18,7 +18,7 @@ export default function RankingSubTabs({
 		"返信",
 		"スレ",
 		"グルチャ",
-		"🥺",
+		"その他",
 	];
 
 	return (

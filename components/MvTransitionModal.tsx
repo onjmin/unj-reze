@@ -132,7 +132,7 @@ function TransitionLivePreview({
 				style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
 			/>
 			<div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-[10px] font-bold text-gray-300 backdrop-blur-sm">
-				{target === "entrance" ? "✨ 登場プレビュー" : "✨ 退場プレビュー"}
+				{target === "entrance" ? "登場プレビュー" : "退場プレビュー"}
 			</div>
 		</div>
 	);

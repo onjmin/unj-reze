@@ -861,13 +861,13 @@ function SliceEditor({
 							className={btn(outKind === "sprite")}
 							onClick={() => setOutKind("sprite")}
 						>
-							🖼️ スプライト（静止画）
+							スプライト（静止画）
 						</button>
 						<button
 							className={btn(outKind === "walk")}
 							onClick={() => setOutKind("walk")}
 						>
-							🚶 歩行グラ / 簡易アニメ
+							歩行グラ / 簡易アニメ
 						</button>
 					</div>
 
@@ -878,7 +878,7 @@ function SliceEditor({
 									className={btn(!gridMode)}
 									onClick={() => setGridMode(false)}
 								>
-									✂️ 自由選択
+									自由選択
 								</button>
 								<button
 									className={btn(gridMode)}

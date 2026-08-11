@@ -14409,7 +14409,6 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                             ? 'bg-white/15 border-white/40'
                             : 'bg-white/[0.03] border-white/10 active:bg-white/10'
                           }`}>
-                        <span className="text-xl leading-none shrink-0">{PRESET_EMOJI[id]}</span>
                         <span className="min-w-0 flex-1">
                           <span className="block font-bold text-[13px] text-white leading-tight truncate">{PRESETS[id].name}</span>
                           <span className="block text-[10px] text-white/50 mt-0.5 truncate">{PRESET_TAGLINE[id]}</span>

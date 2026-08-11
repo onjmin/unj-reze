@@ -67,7 +67,7 @@ export default function Mmo3dEditorPanel({
 				<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-3 border border-purple-900/40">
 					<div className="flex items-center justify-between">
 						<p className="text-[11px] font-bold text-purple-300 flex items-center gap-1">
-							💃 MMD素材（PMXモデル / VMDモーション）
+							MMD素材（PMXモデル / VMDモーション）
 						</p>
 						<span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800">
 							babylon-mmd
@@ -109,7 +109,6 @@ export default function Mmo3dEditorPanel({
 									}`}
 									title={m.label}
 								>
-									<span>{m.emoji}</span>
 									<span className="truncate">{m.label}</span>
 								</button>
 							))}
@@ -149,7 +148,6 @@ export default function Mmo3dEditorPanel({
 									}`}
 									title={m.label}
 								>
-									<span>{m.emoji}</span>
 									<span className="truncate">{m.label}</span>
 								</button>
 							))}
@@ -165,7 +163,7 @@ export default function Mmo3dEditorPanel({
 			)}
 
 			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
-				<p className="text-[11px] font-bold text-gray-300">📋 掲示板（本SNSの投稿を参照）</p>
+				<p className="text-[11px] font-bold text-gray-300">掲示板（本SNSの投稿を参照）</p>
 				<p className="text-[10px] text-gray-500 leading-tight">
 					指定した投稿IDのスレッドを、ワールド上の掲示板から閲覧・返信できるようにします（three版のみ）。空欄なら埋め込み先の投稿を自動で使います。
 				</p>

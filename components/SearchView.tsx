@@ -158,7 +158,7 @@ export default function SearchView(props: SearchViewProps) {
 						</VirtualizedItem>
 					))}
 					<div className="p-8 text-center text-xs text-gray-600 bg-gray-900/10">
-						すべて表示されました 🌱
+						すべて表示されました
 					</div>
 				</div>
 			)}

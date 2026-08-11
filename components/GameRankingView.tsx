@@ -5,19 +5,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { GameRankingEntry } from "@/lib/types";
 
-// game-presets/index からの import はプリセット本体（数百KB）を巻き込むので、
-// LiveGameView と同じく表示用の絵文字だけをここに持つ。
-const PRESET_EMOJI: Record<string, string> = {
-	dq: "🐉",
-	mario: "🍄",
-	touhou: "🎀",
-	rockman: "🤖",
-	onjReze: "💣",
-	undertale: "❤️",
-	deltarune: "🖤",
-	yume: "🌙",
-};
-
 const RANK_COLORS = ["text-yellow-300", "text-gray-300", "text-amber-600"];
 
 /** プレイ数順のゲームランキング。ランキングタブの「ゲーム」カテゴリで表示する。 */
@@ -51,7 +38,7 @@ export default function GameRankingView() {
 		return (
 			<div className="flex flex-col items-center justify-center p-12 text-center py-20 bg-gray-900/5">
 				<div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500/10 to-indigo-500/10 flex items-center justify-center mb-4 border border-blue-500/20">
-					<span className="text-2xl">🎮</span>
+					<Trophy className="w-8 h-8 text-blue-400" />
 				</div>
 				<p className="text-sm font-bold text-gray-200">
 					まだ遊ばれたゲームがありません。
@@ -75,9 +62,6 @@ export default function GameRankingView() {
 							className={`w-6 shrink-0 text-center text-sm font-bold ${RANK_COLORS[index] ?? "text-gray-600"}`}
 						>
 							{index + 1}
-						</span>
-						<span className="text-xl shrink-0" aria-hidden>
-							{PRESET_EMOJI[game.preset] ?? "🎮"}
 						</span>
 						<div className="min-w-0 flex-1">
 							<Link

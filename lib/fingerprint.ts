@@ -21,9 +21,9 @@ function collectCanvasSignal(): string {
 		ctx.fillStyle = "#f60";
 		ctx.fillRect(0, 0, 62, 20);
 		ctx.fillStyle = "#069";
-		ctx.fillText("unj-reze fp 🎮 あいう", 2, 15);
+		ctx.fillText("unj-reze fp あいう", 2, 15);
 		ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
-		ctx.fillText("unj-reze fp 🎮 あいう", 4, 17);
+		ctx.fillText("unj-reze fp あいう", 4, 17);
 
 		return canvas.toDataURL();
 	} catch {

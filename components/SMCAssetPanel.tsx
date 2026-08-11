@@ -265,7 +265,7 @@ export default function SMCAssetPanel({ onPick }: SMCAssetPanelProps) {
 								onClick={() => setSelectedSprite(name)}
 								className="px-2.5 py-2 text-left bg-gray-900 hover:bg-gray-800 border border-gray-800 hover:border-gray-700 rounded-lg text-xs font-bold text-gray-300 transition"
 							>
-								🎮 {name}
+								{name}
 							</button>
 						))}
 						{filteredSpriteNames.length === 0 && (

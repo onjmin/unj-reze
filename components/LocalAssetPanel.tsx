@@ -45,13 +45,13 @@ export default function LocalAssetPanel({ onPick }: LocalAssetPanelProps) {
 					className={secBtn(section === "mv")}
 					onClick={() => setSection("mv")}
 				>
-					🎬 MV素材
+					MV素材
 				</button>
 				<button
 					className={secBtn(section === "chars")}
 					onClick={() => setSection("chars")}
 				>
-					🚶 キャラ
+					キャラ
 				</button>
 				{LOCAL_TILE_SHEETS.map((s) => (
 					<button

@@ -34,15 +34,15 @@ export const PRESET_ORDER: PresetId[] = [
 	"mmo3d",
 ];
 export const PRESET_EMOJI: Record<PresetId, string> = {
-	dq: "🐉",
-	mario: "🍄",
-	touhou: "🎀",
-	rockman: "🤖",
-	onjReze: "💣",
-	undertale: "❤️",
-	deltarune: "🖤",
-	yume: "🌙",
-	mmo3d: "🗡️",
+	dq: "",
+	mario: "",
+	touhou: "",
+	rockman: "",
+	onjReze: "",
+	undertale: "",
+	deltarune: "",
+	yume: "",
+	mmo3d: "",
 };
 
 /** ギャラリーで各プリセットの中身を一言で伝えるキャッチコピー。 */

@@ -87,7 +87,7 @@ export default function GameThreadBoard({
 			<div className="w-full max-w-md max-h-[80%] flex flex-col rounded-lg border border-gray-700 bg-[#0f0f11] text-gray-100 shadow-xl">
 				<div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 shrink-0">
 					<span className="text-xs font-bold text-gray-300">
-						📋 {threadTitle ? threadTitle.slice(0, 40) : "掲示板"}
+						{threadTitle ? threadTitle.slice(0, 40) : "掲示板"}
 					</span>
 					<button
 						type="button"

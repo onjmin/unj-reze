@@ -13,11 +13,11 @@ const META: Record<
 	SpellBlockKind,
 	{ label: string; icon: string; clr: string; dim: string }
 > = {
-	wait: { label: "待つ", icon: "⏱", clr: "#9ca3af", dim: "#1f2937" },
+	wait: { label: "待つ", icon: "•", clr: "#9ca3af", dim: "#1f2937" },
 	nway: { label: "N方向", icon: "✦", clr: "#f97316", dim: "#431407" },
-	aimed: { label: "狙い弾", icon: "🎯", clr: "#ef4444", dim: "#450a0a" },
-	spiral: { label: "渦巻き", icon: "🌀", clr: "#a855f7", dim: "#2e1065" },
-	repeat: { label: "繰返し", icon: "🔁", clr: "#f59e0b", dim: "#451a03" },
+	aimed: { label: "狙い弾", icon: "◎", clr: "#ef4444", dim: "#450a0a" },
+	spiral: { label: "渦巻き", icon: "◈", clr: "#a855f7", dim: "#2e1065" },
+	repeat: { label: "繰返し", icon: "↻", clr: "#f59e0b", dim: "#451a03" },
 };
 const PALETTE_KINDS: SpellBlockKind[] = [
 	"wait",

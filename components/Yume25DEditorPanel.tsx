@@ -362,9 +362,9 @@ export default function Yume25DEditorPanel({
 				<div className="ml-auto flex overflow-hidden rounded border border-gray-600">
 					{(
 						[
-							["macro", "🔁 マクロ"],
-							["system", "⚙️ システム"],
-							["settings", "🛠️ 設定"],
+							["macro", "マクロ"],
+							["system", "システム"],
+							["settings", "設定"],
 						] as const
 					).map(([tab, label]) => (
 						<button
@@ -382,11 +382,11 @@ export default function Yume25DEditorPanel({
 			{macroOpen && (
 				<div className="flex flex-col gap-1.5 rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 text-[10px] text-gray-300">
 					<p className="text-[12px] font-bold text-gray-200">
-						🔁 マクロ（一括編集）
+						マクロ（一括編集）
 					</p>
 
 					{/* 地形自動生成：パーリンノイズの高さマップでブロック地形（海底〜山・洞窟）を丸ごと作る */}
-					<p className="font-bold text-gray-400">🌍 地形の自動生成</p>
+					<p className="font-bold text-gray-400">地形の自動生成</p>
 					<div className="flex items-center gap-2 flex-wrap">
 						<label
 							className="flex items-center gap-1"
@@ -505,10 +505,10 @@ export default function Yume25DEditorPanel({
 						</span>
 						<div className="flex items-center gap-1 flex-wrap">
 							{[
-								{ id: "all", label: "🌐 全体" },
-								{ id: "floor", label: "🗺️ 地形" },
-								{ id: "wall", label: "🧱 壁" },
-								{ id: "billboard", label: "🧍 スプライト" },
+								{ id: "all", label: "全体" },
+								{ id: "floor", label: "地形" },
+								{ id: "wall", label: "壁" },
+								{ id: "billboard", label: "スプライト" },
 							].map((item) => (
 								<button
 									key={item.id}
@@ -1459,10 +1459,10 @@ export default function Yume25DEditorPanel({
 			{/* 設定パネル：他タブのセクションと同じ「見出し＋グループ」構成で並べる */}
 			{settingsOpen && (
 				<div className="rounded-lg border border-gray-700 bg-gray-900/60 p-2.5 space-y-2 text-[10px] text-gray-300">
-					<p className="text-[12px] font-bold text-gray-200">⚙️ ワールド設定</p>
+					<p className="text-[12px] font-bold text-gray-200">ワールド設定</p>
 
 					{/* マップ：広さ・壁・天井・ジャンプ */}
-					<p className="font-bold text-gray-400">🗺️ マップ</p>
+					<p className="font-bold text-gray-400">マップ</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<label className="flex items-center justify-between gap-1">
 							広さ(列)
@@ -1569,7 +1569,7 @@ export default function Yume25DEditorPanel({
 
 					{/* 視点 */}
 					<p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">
-						👁️ 視点
+						視点
 					</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<label className="flex items-center justify-between gap-1 col-span-2">
@@ -1616,7 +1616,7 @@ export default function Yume25DEditorPanel({
 
 					{/* グラフィック：シェーダーMod プリセットと時間帯。以降は見た目まわりの設定が続く */}
 					<p className="font-bold text-yellow-400 pt-1.5 mt-1 border-t border-gray-700/50">
-						✨ グラフィック（Minecraft Shader Mods）
+						グラフィック（Minecraft Shader Mods）
 					</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<WideField label="シェーダープリセット">
@@ -1635,16 +1635,16 @@ export default function Yume25DEditorPanel({
 								className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-white"
 							>
 								<option value="bsl">
-									🌅 BSL Shaders（夕焼け・温かな太陽光）
+									BSL Shaders（夕焼け・温かな太陽光）
 								</option>
 								<option value="seus">
-									🌌 SEUS Shaders（月光・ドラマチック）
+									SEUS Shaders（月光・ドラマチック）
 								</option>
 								<option value="complementary">
-									⚡ Complementary（鮮やか・高コントラスト）
+									Complementary（鮮やか・高コントラスト）
 								</option>
 								<option value="vanilla">
-									🧱 Vanilla（クラシック・補正なし）
+									Vanilla（クラシック・補正なし）
 								</option>
 							</select>
 						</WideField>
@@ -1659,9 +1659,9 @@ export default function Yume25DEditorPanel({
 								}
 								className="w-full bg-gray-800 border border-gray-600 rounded px-1.5 py-1 text-white"
 							>
-								<option value="sunset">🌆 夕焼け（Golden Hour）</option>
-								<option value="day">☀️ 昼（Daylight）</option>
-								<option value="night">🌙 夜（Midnight）</option>
+								<option value="sunset">夕焼け（Golden Hour）</option>
+								<option value="day">昼（Daylight）</option>
+								<option value="night">夜（Midnight）</option>
 							</select>
 						</WideField>
 						<label className="flex items-center justify-between gap-1">
@@ -1751,7 +1751,7 @@ export default function Yume25DEditorPanel({
 
 					{/* 照明：環境光の明るさ（1=テクスチャそのままのフルブライト）とランタン */}
 					<p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">
-						💡 照明
+						照明
 					</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<label className="flex items-center justify-between gap-1">
@@ -1867,7 +1867,7 @@ export default function Yume25DEditorPanel({
 
 					{/* 空と霧：空の色・霧・背景パノラマ */}
 					<p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">
-						🌫️ 空と霧
+						空と霧
 					</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<label className="flex items-center justify-between gap-1">
@@ -1942,7 +1942,7 @@ export default function Yume25DEditorPanel({
 
 					{/* 海：この高さから下がすべて水（溶岩）になる（0=なし）。プレイヤーは泳げる */}
 					<p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">
-						🌊 海
+						海
 					</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<label className="flex items-center justify-between gap-1">
@@ -2072,7 +2072,7 @@ export default function Yume25DEditorPanel({
 
 					{/* サバイバル：空腹ゲージ（Minecraft風）。「食べ物」スプライト（オブジェタブ）で回復する */}
 					<p className="font-bold text-gray-400 pt-1.5 mt-1 border-t border-gray-700/50">
-						🍖 サバイバル
+						サバイバル
 					</p>
 					<div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
 						<label className="flex items-center justify-between gap-1 col-span-2">

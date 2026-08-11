@@ -31,15 +31,6 @@ interface Props {
 	sessionId: string;
 }
 
-const PRESET_EMOJI: Record<string, string> = {
-	dq: "🐉",
-	mario: "🍄",
-	touhou: "🎀",
-	rockman: "🤖",
-	onjReze: "💣",
-	undertale: "❤️",
-};
-
 export default function LiveGameView({ userId, sessionId }: Props) {
 	const [info, setInfo] = useState<LiveInfo | null>(null);
 	// manifest 本体はDBに無いので、URLが決まった時点でR2から引く。
@@ -260,10 +251,10 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 			{/* 情報バー */}
 			<div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-[#0f0f11] border-b border-gray-800">
 				<div className="flex items-center gap-2 text-xs">
-					<span className="font-bold text-white">🎮 ライブゲーム</span>
+					<span className="font-bold text-white">ライブゲーム</span>
 					{info && (
 						<span className="text-gray-400">
-							{PRESET_EMOJI[info.gamePreset] ?? "🎮"} {info.gameTitle}
+							{info.gameTitle}
 						</span>
 					)}
 				</div>
@@ -322,7 +313,7 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 					/>
 				) : info && !info.manifestUrl ? (
 					<div className="flex flex-col items-center justify-center h-full text-gray-500 text-sm gap-2">
-						<span className="text-3xl">🎮</span>
+						<Trophy size={32} className="text-gray-600" />
 						<p>まだゲームが投稿されていません</p>
 						<p className="text-xs text-gray-600">
 							投稿フォームからゲームを添付して投稿しよう！
@@ -360,9 +351,6 @@ export default function LiveGameView({ userId, sessionId }: Props) {
 											: "border-gray-700/60 bg-gray-800/40 text-gray-300 hover:border-gray-600 active:bg-gray-700/40"
 									}`}
 								>
-									<span className="shrink-0">
-										{PRESET_EMOJI[c.game.preset] ?? "🎮"}
-									</span>
 									<span className="flex-1 font-medium truncate">
 										{c.game.title}
 									</span>

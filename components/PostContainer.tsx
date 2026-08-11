@@ -1045,7 +1045,7 @@ export default function PostContainer({
 				>
 					<div className="w-full max-w-sm bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3 font-sans text-gray-200 shadow-2xl">
 						<h4 className="text-sm font-bold text-gray-100 flex items-center gap-1.5">
-							<span>🚨</span> 投稿の通報
+							投稿の通報
 						</h4>
 						<p className="text-xs text-gray-400">
 							通報理由を入力してください（任意）

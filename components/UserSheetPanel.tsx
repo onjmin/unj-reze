@@ -1025,8 +1025,8 @@ function SheetGrid({
 		<div className="flex gap-1 px-0.5">
 			{(
 				[
-					["cell", "🔲 マス（1コマ）"],
-					["walk", "🚶 歩行グラ（アニメ）"],
+					["cell", "マス（1コマ）"],
+					["walk", "歩行グラ（アニメ）"],
 				] as const
 			).map(([m, label]) => (
 				<button
