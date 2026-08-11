@@ -3003,6 +3003,12 @@ export class Yume25DEngine {
 	private loadModel(
 		url: string,
 	): Promise<{ scene: THREE.Group; animations: THREE.AnimationClip[] } | null> {
+		// MMD形式（PMD/PMX/VMD）はGLTFLoaderでは読めない。babylon-mmd専用なので弾く。
+		const ext = url.split("?")[0].split(".").pop()?.toLowerCase();
+		if (ext === "pmd" || ext === "pmx" || ext === "vmd") {
+			console.warn("yume25d: MMD形式(.%s)はこのエンジンでは非対応です:", ext, url);
+			return Promise.resolve(null);
+		}
 		let p = this.modelCache.get(url);
 		if (!p) {
 			this.modelLoader ??= new GLTFLoader();

@@ -464,7 +464,8 @@ export const MMD_MOTION_CATALOG: ModelCatalogEntry[] = [
 ];
 
 export const MODEL_CATALOG: ModelCatalogEntry[] = [
-	...MMD_MODEL_CATALOG,
+	// MMD_MODEL_CATALOG はここに含めない（PMD/PMXはGLTFLoaderで読めないため、
+	// mmo3dのbabylon-mmd専用。Mmo3dEditorPanel.tsxが直接参照する）。
 	{
 		key: "duck",
 		label: "アヒル",
