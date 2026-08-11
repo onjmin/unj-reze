@@ -1020,10 +1020,16 @@ export function resolveShapeModulators(
 
 /** 「図形の動き方設定」モーダルの選択内容そのもの。 */
 export interface MvShapeMotionPreset {
+	/** MV_MOTION_PRESETS のid。すべて拍(beat)に同期する動きで、周期は beatSyncSpeed で変える。 */
 	presetId: string;
-	/** presetId==='beatSync' のときの周期の速さ（拍数/周期）。既定1。0.5で2倍速、0.25で4倍速。 */
+	/** 動きの周期の速さ（拍数/周期）。既定1。0.5で2倍速、0.25で4倍速。 */
 	beatSyncSpeed?: number;
-	custom: {
+	/**
+	 * @deprecated 「独自の動きを組み合わせる」パネル（拍に同期しない自由な移動/回転/拡縮）は
+	 * 廃止した。動きは拍周期のプリセットだけに統一している。
+	 * 保存済みデータを読むためだけに残してあり、新規には書き込まない。
+	 */
+	custom?: {
 		move: boolean;
 		moveSpeedBars: number;
 		rotate: boolean;

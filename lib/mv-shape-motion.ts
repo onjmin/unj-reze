@@ -1,160 +1,172 @@
-import type {
-	MvModulator,
-	MvShapeLayer,
-	MvShapeMotionPreset,
-} from "./mv-config";
-
-/**
- * 動きの1周期の長さ（小節）。
- *
- * 以前は「開いていた場面の小節数」を周期にしていたので、同じプリセットでも
- * どの場面から設定したかで速さが変わってしまった。動きは曲全体で1つになったので、
- * 周期も曲の作りに依らない固定の4小節（＝1フレーズ）にする。
- * 速さを変えたいときは「独自の動きを組み合わせる」で小節数を直接指定する。
- */
-export const MV_MOTION_PHRASE_BARS = 4;
+import type { MvModulator, MvShapeMotionPreset } from "./mv-config";
 
 /**
  * 「図形の動き方」設定モーダル用のプリセット。エフェクトテンプレート(mv-effect-templates.ts)
  * とは別物——こちらは**既存1個の図形の modulators だけ**を組み立てる。
- * 新しいレイヤーを増やさず、その図形の動き方だけを変える。
+ *
+ * すべて `source: "beat"` の拍周期の動きだけにしてある（以前あった「回転しっぱなし」
+ * 「往復移動」のような拍と無関係な動きは削除した）。曲のテンポと絶対に合う・
+ * 音ゲー的な「拍ごとに何かが起きる」動きだけに絞り、その分だけ効かせ方の種類を増やす方針。
+ * 周期の速さは全プリセット共通の `beatSyncSpeed`（モーダルの速さ選択）で変える。
  */
 export interface MvMotionPreset {
 	id: string;
 	name: string;
+	/** グリッドの見出し分け。 */
+	category: MvMotionCategory;
 	/** グリッドに置くミニアイコン用のSVGパス（0..24の正方形で設計）。 */
 	icon: string;
-	build: (bars: number) => MvModulator[];
+	build: () => MvModulator[];
 }
+
+export type MvMotionCategory = "size" | "opacity" | "bounce" | "rotate" | "combo";
+
+export const MV_MOTION_CATEGORY_LABELS: Record<MvMotionCategory, string> = {
+	size: "大きさ・太さ",
+	opacity: "現れる・消える",
+	bounce: "はねる",
+	rotate: "回転",
+	combo: "複合",
+};
 
 export const MV_MOTION_PRESETS: MvMotionPreset[] = [
 	{
-		id: "static",
-		name: "静止",
-		icon: "M6,6 L18,6 L18,18 L6,18 Z",
-		build: () => [],
-	},
-	{
-		id: "rotateOnly",
-		name: "回転のみ",
-		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12",
-		// 角度は「元の向きに経過ぶんを足す」。掛け算にすると元の向きが0の図形
-		// （＝追加した直後の図形はすべてこれ）で 0×経過=0 になり、永久に回らない。
-		build: () => [{ source: "spin", target: "rotation", op: "add", amount: 60 }],
-	},
-	{
-		id: "moveX",
-		name: "横移動",
-		icon: "M3,12 L21,12 M16,7 L21,12 L16,17 M8,7 L3,12 L8,17",
-		build: (bars) => [
-			{
-				source: "phrase",
-				bars,
-				symmetric: true,
-				curve: 1,
-				target: "x",
-				op: "add",
-				amount: 40,
-			},
-		],
-	},
-	{
-		id: "moveY",
-		name: "縦移動",
-		icon: "M12,3 L12,21 M7,8 L12,3 L17,8 M7,16 L12,21 L17,16",
-		build: (bars) => [
-			{
-				source: "phrase",
-				bars,
-				symmetric: true,
-				curve: 1,
-				target: "y",
-				op: "add",
-				amount: 24,
-			},
-		],
-	},
-	{
 		id: "beatSync",
-		name: "ビート同期",
-		icon: "M4,12 L8,12 L10,4 L14,20 L16,12 L20,12",
-		// 速さ(periodBeats)はプリセット自体には持たせず、resolveSceneModulatorsで
-		// cfg.beatSyncSpeed から後付けする（既定1＝1拍ごと）。
+		name: "拍ごとに脈動（大きさ）",
+		category: "size",
+		icon: "M4,12 A8,8 0 1,1 20,12 A8,8 0 1,1 4,12 M9,12 A3,3 0 1,1 15,12 A3,3 0 1,1 9,12",
 		build: () => [{ source: "beat", target: "size", op: "add", amount: 10 }],
 	},
 	{
-		id: "scaleMove",
-		name: "拡大縮小と移動",
-		icon: "M4,4 L10,4 L10,10 L4,10 Z M14,14 L20,14 L20,20 L14,20 Z",
-		build: (bars) => [
-			{
-				source: "phrase",
-				bars,
-				symmetric: true,
-				curve: 2,
-				target: "size",
-				op: "add",
-				amount: 14,
-			},
-			{
-				source: "phrase",
-				bars,
-				symmetric: true,
-				curve: 1,
-				target: "x",
-				op: "add",
-				amount: 20,
-			},
+		id: "beatPunch",
+		name: "拍ごとに一瞬ポップ（強め）",
+		category: "size",
+		icon: "M12,2 L12,7 M12,17 L12,22 M2,12 L7,12 M17,12 L22,12 M5.6,5.6 L8.4,8.4 M15.6,15.6 L18.4,18.4 M5.6,18.4 L8.4,15.6 M15.6,8.4 L18.4,5.6",
+		// curveを高くすると「頭で一気に効いてすぐ収まる」効きになる。beatSyncより鋭い。
+		build: () => [
+			{ source: "beat", target: "size", op: "add", amount: 22, curve: 5 },
 		],
 	},
 	{
-		id: "rotateScale",
-		name: "回転＋拡大縮小",
-		icon: "M12,4 A8,8 0 1 1 4,12 M12,12 L12,7 M12,12 L16,12",
-		build: (bars) => [
-			{ source: "spin", target: "rotation", op: "add", amount: 40 },
-			{
-				source: "phrase",
-				bars,
-				symmetric: true,
-				curve: 2,
-				target: "size",
-				op: "add",
-				amount: 10,
-			},
+		id: "beatThicken",
+		name: "拍ごとに輪郭が太くなる",
+		category: "size",
+		icon: "M12,3 A9,9 0 1,1 3,12 A9,9 0 1,1 12,3 M12,7 A5,5 0 1,1 7,12 A5,5 0 1,1 12,7",
+		build: () => [
+			{ source: "beat", target: "thickness", op: "add", amount: 4, curve: 3 },
 		],
 	},
 	{
-		id: "random",
-		name: "ランダム",
-		icon: "M5,5 L19,19 M19,5 L5,19 M12,4 L12,7 M12,17 L12,20",
-		build: (bars) => {
-			const pool = MV_MOTION_PRESETS.filter(
-				(p) => p.id !== "random" && p.id !== "static",
-			);
-			const pick = pool[Math.floor(Math.random() * pool.length)];
-			return pick ? pick.build(bars) : [];
-		},
+		id: "beatFade",
+		name: "拍ごとにフェード（現れて消える）",
+		category: "opacity",
+		icon: "M4,12 A8,8 0 1,1 20,12",
+		// 濃さの基準値は1なので op:'mul' で 0..1 の範囲に収まる（足し算だと上限を超えて破綻する）。
+		build: () => [
+			{ source: "beat", target: "opacity", op: "mul", amount: 1, curve: 1.4 },
+		],
+	},
+	{
+		id: "beatFlicker",
+		name: "拍ごとに明滅（強め・ストロボ風）",
+		category: "opacity",
+		icon: "M13,2 L6,13 L11,13 L9,22 L18,10 L13,10 Z",
+		build: () => [
+			{ source: "beat", target: "opacity", op: "mul", amount: 1, curve: 7 },
+		],
+	},
+	{
+		id: "beatSpinKick",
+		name: "拍ごとに回転がはねる",
+		category: "rotate",
+		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12",
+		build: () => [
+			{ source: "beat", target: "rotation", op: "add", amount: 55, curve: 3 },
+		],
+	},
+	{
+		id: "beatBounceX",
+		name: "拍ごとに横へ弾む",
+		category: "bounce",
+		icon: "M3,12 L21,12 M16,7 L21,12 L16,17 M8,7 L3,12 L8,17",
+		build: () => [
+			{ source: "beat", target: "x", op: "add", amount: 26, curve: 3 },
+		],
+	},
+	{
+		id: "beatBounceY",
+		name: "拍ごとに縦へ弾む（バウンド）",
+		category: "bounce",
+		icon: "M12,3 L12,21 M7,8 L12,3 L17,8 M7,16 L12,21 L17,16",
+		// 上下反転：叩かれて上へ跳ねてから重力で戻る、というボールのバウンドに寄せる。
+		build: () => [
+			{ source: "beat", target: "y", op: "add", amount: -24, curve: 3 },
+		],
+	},
+	{
+		id: "beatCountPulse",
+		name: "拍ごとに個数が増減（複数表示のときだけ効果あり）",
+		category: "bounce",
+		icon: "M6,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M11,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M16,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0",
+		build: () => [
+			{ source: "beat", target: "count", op: "add", amount: 2, curve: 2 },
+		],
+	},
+	{
+		id: "beatBurst",
+		name: "拍ごとに膨らんで消える（バースト）",
+		category: "combo",
+		icon: "M12,12 L12,4 M12,12 L12,20 M12,12 L4,12 M12,12 L20,12 M12,12 L6.3,6.3 M12,12 L17.7,17.7 M12,12 L6.3,17.7 M12,12 L17.7,6.3",
+		build: () => [
+			{ source: "beat", target: "size", op: "add", amount: 20, curve: 2.4 },
+			{ source: "beat", target: "opacity", op: "mul", amount: 1, curve: 1.6 },
+		],
+	},
+	{
+		id: "beatSpinFade",
+		name: "拍ごとに回転しながら明滅",
+		category: "combo",
+		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12 M15,15 L19,19 M19,15 L15,19",
+		build: () => [
+			{ source: "beat", target: "rotation", op: "add", amount: 40, curve: 2.5 },
+			{ source: "beat", target: "opacity", op: "mul", amount: 0.85, curve: 2 },
+		],
 	},
 ];
 
-export function findMvMotionPreset(id: string): MvMotionPreset | undefined {
-	return MV_MOTION_PRESETS.find((p) => p.id === id);
-}
-
-/** 「独自の動きを組み合わせる」パネルのチェック状態。 */
-export type MvMotionCustomToggle = MvShapeMotionPreset["custom"];
-
-export const DEFAULT_MOTION_CUSTOM: MvMotionCustomToggle = {
-	move: false,
-	moveSpeedBars: 2,
-	rotate: false,
-	rotateSpeed: 40,
-	scale: false,
-	scaleSpeedBars: 2,
+/**
+ * 廃止したプリセットIDを近い新プリセットへ読み替える。
+ *
+ * 「独自の動きを組み合わせる」廃止に合わせて、拍と無関係だった旧プリセット
+ * （回転しっぱなし・往復移動・ランダム等）も削除した。過去に作られたMVがこれらの
+ * presetIdを保存済みなので、読み込んだ瞬間に動きが消えて見えないよう、近い新プリセットへ
+ * 固定的に読み替える（読み込むたびに変わると分かりにくいので "random" も1つに固定）。
+ * 'static'（元から動きなし）は読み替え先が無いのが正しいので、undefined を返す。
+ */
+const LEGACY_PRESET_ALIAS: Record<string, string> = {
+	rotateOnly: "beatSpinKick",
+	moveX: "beatBounceX",
+	moveY: "beatBounceY",
+	scaleMove: "beatPunch",
+	rotateScale: "beatSpinFade",
+	random: "beatBurst",
 };
 
-export function buildCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
+export function findMvMotionPreset(id: string): MvMotionPreset | undefined {
+	const direct = MV_MOTION_PRESETS.find((p) => p.id === id);
+	if (direct) return direct;
+	const alias = LEGACY_PRESET_ALIAS[id];
+	return alias ? MV_MOTION_PRESETS.find((p) => p.id === alias) : undefined;
+}
+
+/**
+ * @deprecated 「独自の動きを組み合わせる」パネル（拍と無関係な自由な移動/回転/拡縮）は
+ * 廃止した。この関数は過去に保存された `MvShapeMotionPreset.custom` を読むためだけに残してある
+ * （resolveSceneModulators が呼ぶ。新規のUIからはもう作られない）。
+ */
+export type MvMotionCustomToggle = NonNullable<MvShapeMotionPreset["custom"]>;
+
+function buildLegacyCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
 	const mods: MvModulator[] = [];
 	if (c.move) {
 		mods.push({
@@ -168,7 +180,12 @@ export function buildCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
 		});
 	}
 	if (c.rotate) {
-		mods.push({ source: "spin", target: "rotation", op: "add", amount: c.rotateSpeed });
+		mods.push({
+			source: "spin",
+			target: "rotation",
+			op: "add",
+			amount: c.rotateSpeed,
+		});
 	}
 	if (c.scale) {
 		mods.push({
@@ -184,7 +201,7 @@ export function buildCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
 	return mods;
 }
 
-/** 1つの場面(小節範囲)に対する動きの設定一式。 */
+/** 1つの図形に対する動きの設定一式（曲全体で1つ）。 */
 export type MvSceneMotionConfig = MvShapeMotionPreset;
 
 export const DEFAULT_SCENE_MOTION: MvSceneMotionConfig = {
@@ -192,11 +209,10 @@ export const DEFAULT_SCENE_MOTION: MvSceneMotionConfig = {
 	// 気づきにくいので、既定はビート同期（拍ごとに脈動）にしておく。
 	presetId: "beatSync",
 	beatSyncSpeed: 1,
-	custom: DEFAULT_MOTION_CUSTOM,
 };
 
-/** ビート同期の速さの選択肢。数値は「1周期が何拍分か」＝小さいほど速い。 */
-export const MV_BEAT_SYNC_SPEED_OPTIONS: { value: number; label: string }[] = [
+/** 動きの周期の速さの選択肢。数値は「1周期が何拍分か」＝小さいほど速い。全プリセット共通。 */
+export const MV_MOTION_SPEED_OPTIONS: { value: number; label: string }[] = [
 	{ value: 4, label: "1/4倍速（4拍で1周期）" },
 	{ value: 2, label: "1/2倍速（2拍で1周期）" },
 	{ value: 1, label: "標準（1拍ごと）" },
@@ -204,42 +220,21 @@ export const MV_BEAT_SYNC_SPEED_OPTIONS: { value: number; label: string }[] = [
 	{ value: 0.25, label: "4倍速（1/4拍ごと）" },
 ];
 
-export function resolveSceneModulators(
-	cfg: MvSceneMotionConfig,
-	bars: number,
-): MvModulator[] {
+export function resolveSceneModulators(cfg: MvSceneMotionConfig): MvModulator[] {
 	const preset = findMvMotionPreset(cfg.presetId);
-	const base = preset ? preset.build(bars) : [];
-	// beatSyncのときだけ、source==='beat'の周期を選んだ速さへ差し替える。
+	const base = preset ? preset.build() : [];
+	// 速さは全プリセット共通。source:'beat' の周期だけを選んだ速さへ差し替える
+	// （プリセットによって size/opacity/rotation など対象は違っても、速さの概念は1つ）。
+	const speed = cfg.beatSyncSpeed;
 	const withSpeed =
-		cfg.presetId === "beatSync" && cfg.beatSyncSpeed && cfg.beatSyncSpeed !== 1
+		speed && speed !== 1
 			? base.map((m) =>
-					m.source === "beat" ? { ...m, periodBeats: cfg.beatSyncSpeed } : m,
+					m.source === "beat" ? { ...m, periodBeats: speed } : m,
 				)
 			: base;
-	return [...withSpeed, ...buildCustomModulators(cfg.custom)];
-}
-
-/**
- * ベースの図形レイヤーと「場面id→動き設定」から、場面ごとのレイヤー一式を作る。
- * 同じ見た目(form/x/y/size/色など)を複製し、modulatorsとsectionsだけ場面ごとに変える。
- * idは `${baseId}__motion__${sceneId}` で統一し、呼び出し側はこのプレフィックスを持つ
- * レイヤーを丸ごと入れ替えれば再適用できる。
- */
-export function buildMotionLayers(
-	base: MvShapeLayer,
-	perScene: Record<string, MvSceneMotionConfig>,
-	sceneBarsMap: Record<string, number>,
-): MvShapeLayer[] {
-	const groupPrefix = `${base.id}__motion__`;
-	return Object.entries(perScene).map(([sceneId, cfg]) => ({
-		...base,
-		id: `${groupPrefix}${sceneId}`,
-		sections: [sceneId],
-		modulators: resolveSceneModulators(cfg, sceneBarsMap[sceneId] ?? 4),
-	}));
-}
-
-export function motionGroupPrefix(baseId: string): string {
-	return `${baseId}__motion__`;
+	// 旧「独自の動きを組み合わせる」の名残。UIはもう無いが、過去の保存データに
+	// custom が付いていれば動きが消えないよう読み続ける。
+	return cfg.custom
+		? [...withSpeed, ...buildLegacyCustomModulators(cfg.custom)]
+		: withSpeed;
 }

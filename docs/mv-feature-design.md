@@ -94,6 +94,24 @@ MVの時間はすべて `@onjmin/dtm` の再生ステップ（1小節=192ステ�
 出す小節を絞りたいときは `barRange` を使う。旧データは `resolveShapeModulators()` が
 最初の1つを曲全体の動きとして拾う。
 
+### 図形の動きプリセット（`lib/mv-shape-motion.ts`）は拍周期だけ
+
+「図形の動き方設定」モーダルのプリセットは**すべて `source: "beat"`**（拍に同期する動き）
+だけで構成されている。以前あった「回転しっぱなし」「往復移動」のような拍と無関係な動きと、
+それらを手で組み合わせる「独自の動きを組み合わせる」パネルは廃止した。その代わりに、
+拍周期の効かせ方（大きさ・濃さ・位置・回転・複合）のバリエーションを増やしてある
+（`MV_MOTION_PRESETS`、カテゴリは `MvMotionCategory`）。
+
+- 周期の速さ（`beatSyncSpeed` → `MvModulator.periodBeats`）は**選んだプリセットに関わらず共通**。
+  以前は presetId==='beatSync' のときだけ効いたが、全プリセットが拍ベースになったので
+  `resolveSceneModulators` が `source==='beat'` の modulator すべてに一様に適用する。
+- 廃止したプリセットID（`static`/`rotateOnly`/`moveX`/`moveY`/`scaleMove`/`rotateScale`/`random`）を
+  保存済みのMVが持っていても、読み込んだ瞬間に動きが消えないよう `findMvMotionPreset` が
+  近い新プリセットへ固定的に読み替える（`LEGACY_PRESET_ALIAS`）。`static` だけは
+  「元から動きなし」が正しいので読み替えず `modulators: []` のまま。
+- 廃止した「独自の動きを組み合わせる」(`MvShapeMotionPreset.custom`) も型は残してあり、
+  過去の保存データに付いていれば `resolveSceneModulators` が読み続ける（新規UIからは作られない）。
+
 ### 画像の登場のしかた（`MvEntrance`）と反転
 
 `image` レイヤーは既定では「セクションに入った瞬間パッと出る」。`MvImageLayer.entrance` を付けると、

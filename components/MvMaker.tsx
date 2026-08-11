@@ -125,18 +125,17 @@ import {
 } from "@/lib/mv-engine";
 import {
 	DEFAULT_SCENE_MOTION,
-	MV_MOTION_PHRASE_BARS,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
 import MvPlayer, { type MvPlayerHandle } from "./MvPlayer";
-import MvTimeline from "./MvTimeline";
 import MvShapeFormPickerModal, {
 	ShapeFormPreview as ShapeFormThumb,
 } from "./MvShapeFormPickerModal";
 import MvShapeMotionModal from "./MvShapeMotionModal";
+import MvTimeline from "./MvTimeline";
 import { buildMvPreset, MV_PRESETS } from "./mv-presets";
 import VolumeControl from "./VolumeControl";
 
@@ -1237,7 +1236,7 @@ export default function MvMaker({
 			// 「図形の動き方設定」モーダルの既定値(DEFAULT_SCENE_MOTION=ビート同期)と
 			// 必ず一致させる——別々に定義すると、モーダルを開いたときに「ビート同期が
 			// 選ばれている」のに実際の動きは別物、という食い違いが起きる。
-			modulators: resolveSceneModulators(DEFAULT_SCENE_MOTION, 4),
+			modulators: resolveSceneModulators(DEFAULT_SCENE_MOTION),
 		};
 		update((m) => ({ ...m, layers: [...m.layers, layer] }));
 		setSelectedLayerId(layer.id);
@@ -4736,7 +4735,7 @@ export default function MvMaker({
 						<MvShapeMotionModal
 							baseLayer={baseLayer}
 							bpm={song.bpm}
-							// 開き直したとき前回の選択（プリセット/速さ/手動調整）を復元する。
+							// 開き直したとき前回の選択（プリセット/速さ）を復元する。
 							// 場面別だった頃のデータしか無ければ、その最初の1つを引き継ぐ。
 							initial={
 								baseLayer.motionPreset ??
@@ -4747,10 +4746,7 @@ export default function MvMaker({
 									if (l.kind !== "shape") return l;
 									return {
 										...l,
-										modulators: resolveSceneModulators(
-											cfg,
-											MV_MOTION_PHRASE_BARS,
-										),
+										modulators: resolveSceneModulators(cfg),
 										motionPreset: cfg,
 										// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
 										// engine 側の旧データ救済に拾われて上書きされてしまう。

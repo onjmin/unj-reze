@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
 	MV_H,
 	MV_STEPS_PER_BEAT,
@@ -9,14 +9,14 @@ import {
 	type MvManifest,
 	type MvShapeLayer,
 } from "@/lib/mv-config";
-import { EMPTY_SONG, drawMvFrame, type MvFrameState } from "@/lib/mv-engine";
+import { drawMvFrame, EMPTY_SONG, type MvFrameState } from "@/lib/mv-engine";
 import {
-	type MvMotionCustomToggle,
-	type MvSceneMotionConfig,
 	DEFAULT_SCENE_MOTION,
-	MV_BEAT_SYNC_SPEED_OPTIONS,
-	MV_MOTION_PHRASE_BARS,
+	MV_MOTION_CATEGORY_LABELS,
 	MV_MOTION_PRESETS,
+	MV_MOTION_SPEED_OPTIONS,
+	type MvMotionCategory,
+	type MvSceneMotionConfig,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
 
@@ -101,6 +101,15 @@ interface MvShapeMotionModalProps {
 	onClose: () => void;
 }
 
+/** グリッドをカテゴリ見出しで区切って並べる順番。 */
+const MOTION_CATEGORY_ORDER: MvMotionCategory[] = [
+	"size",
+	"opacity",
+	"bounce",
+	"rotate",
+	"combo",
+];
+
 /**
  * 「真ん中の図形の動き方設定」モーダル。
  *
@@ -108,9 +117,13 @@ interface MvShapeMotionModalProps {
  * 「設定したのに一部の小節でしか効かない」ようにしか見えず、作る側にも
  * 見る側にも分かりにくかったのでやめた。
  *
- * - プリセットはアイコングリッドから選ぶ（モバイルは2列）。
+ * プリセットは**すべて拍(beat)に同期する動き**だけに絞ってある。拍と無関係な
+ * 「回転しっぱなし」「往復移動」や、それらを手で組み合わせる「独自の動き」パネルは
+ * 廃止し、その分だけ拍周期の効かせ方（大きさ／濃さ／位置／回転／複合）を増やした。
+ * 速さ（何拍で1周期か）は選んだプリセットに関わらず共通で1つ選ぶ。
+ *
+ * - プリセットはカテゴリ見出し付きのアイコングリッドから選ぶ（モバイルは2列）。
  * - 上部のライブプレビューが選んだ内容を即座に反映する。
- * - 「独自の動きを組み合わせる」でプリセットの上に移動/回転/拡大縮小を追加できる。
  */
 export default function MvShapeMotionModal({
 	baseLayer,
@@ -123,10 +136,7 @@ export default function MvShapeMotionModal({
 		() => initial ?? DEFAULT_SCENE_MOTION,
 	);
 
-	const modulators = resolveSceneModulators(cfg, MV_MOTION_PHRASE_BARS);
-
-	const setCustom = (patch: Partial<MvMotionCustomToggle>) =>
-		setCfg({ ...cfg, custom: { ...cfg.custom, ...patch } });
+	const modulators = resolveSceneModulators(cfg);
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
@@ -160,144 +170,54 @@ export default function MvShapeMotionModal({
 				</div>
 
 				<div className="flex-1 space-y-4 overflow-y-auto p-3">
-					{/* プリセットグリッド */}
+					{/* 速さ。全プリセット共通の「1周期が何拍か」なので、種類の選択より先に出す。 */}
 					<div>
-						<p className="mb-1 text-[10px] font-bold text-gray-300">動きのプリセットを選択</p>
-						<div className="grid grid-cols-2 gap-2">
-							{MV_MOTION_PRESETS.map((p) => (
+						<p className="mb-1 text-[10px] font-bold text-gray-300">周期の速さ</p>
+						<div className="flex flex-wrap gap-1.5">
+							{MV_MOTION_SPEED_OPTIONS.map((opt) => (
 								<button
-									key={p.id}
-									onClick={() => setCfg({ ...cfg, presetId: p.id })}
-									className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 transition-colors ${
-										cfg.presetId === p.id
-											? "border-blue-500 bg-blue-500/20 text-blue-200 font-bold"
-											: "border-gray-700 bg-gray-800/60 text-gray-300 hover:bg-gray-800"
+									key={opt.value}
+									onClick={() => setCfg({ ...cfg, beatSyncSpeed: opt.value })}
+									className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
+										(cfg.beatSyncSpeed ?? 1) === opt.value
+											? "bg-blue-600 text-white font-bold"
+											: "bg-gray-800 text-gray-300 hover:bg-gray-700"
 									}`}
 								>
-									<PresetIcon path={p.icon} />
-									<span className="text-[11px]">{p.name}</span>
+									{opt.label}
 								</button>
 							))}
 						</div>
-						{cfg.presetId === "beatSync" && (
-							<div className="mt-2 rounded bg-gray-900/60 p-2">
-								<p className="mb-1 text-[10px] text-gray-400">
-									ビート同期の周期の速さ
+					</div>
+
+					{/* プリセットグリッド。カテゴリごとに見出しを分ける（種類が多いので平置きだと探しにくい）。 */}
+					{MOTION_CATEGORY_ORDER.map((cat) => {
+						const presets = MV_MOTION_PRESETS.filter((p) => p.category === cat);
+						if (presets.length === 0) return null;
+						return (
+							<div key={cat}>
+								<p className="mb-1 text-[10px] font-bold text-gray-300">
+									{MV_MOTION_CATEGORY_LABELS[cat]}
 								</p>
-								<div className="flex flex-wrap gap-1.5">
-									{MV_BEAT_SYNC_SPEED_OPTIONS.map((opt) => (
+								<div className="grid grid-cols-2 gap-2">
+									{presets.map((p) => (
 										<button
-											key={opt.value}
-											onClick={() =>
-												setCfg({ ...cfg, beatSyncSpeed: opt.value })
-											}
-											className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
-												(cfg.beatSyncSpeed ?? 1) === opt.value
-													? "bg-blue-600 text-white font-bold"
-													: "bg-gray-800 text-gray-300 hover:bg-gray-700"
+											key={p.id}
+											onClick={() => setCfg({ ...cfg, presetId: p.id })}
+											className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 text-center transition-colors ${
+												cfg.presetId === p.id
+													? "border-blue-500 bg-blue-500/20 text-blue-200 font-bold"
+													: "border-gray-700 bg-gray-800/60 text-gray-300 hover:bg-gray-800"
 											}`}
 										>
-											{opt.label}
+											<PresetIcon path={p.icon} />
+											<span className="text-[11px] leading-tight">{p.name}</span>
 										</button>
 									))}
 								</div>
 							</div>
-						)}
-					</div>
-
-					{/* 独自の動きを組み合わせる */}
-					<div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3 space-y-2">
-						<p className="text-[11px] font-bold text-gray-200">
-							独自の動きを組み合わせる（手動調整）
-						</p>
-
-						<label className="flex items-center gap-2 py-1 cursor-pointer">
-							<input
-								type="checkbox"
-								checked={cfg.custom.move}
-								onChange={(e) => setCustom({ move: e.target.checked })}
-								className="h-4 w-4 accent-blue-500"
-							/>
-							<span className="flex-1 text-[12px] text-gray-200 font-medium">移動（X/Y 往復揺れ）</span>
-						</label>
-						{cfg.custom.move && (
-							<div className="mb-2 ml-6 space-y-1 rounded bg-gray-900/60 p-2">
-								<div className="flex justify-between text-[10px]">
-									<span className="text-gray-400">往復の速度</span>
-									<span className="font-mono text-blue-300">{cfg.custom.moveSpeedBars} 小節で1往復</span>
-								</div>
-								<input
-									type="range"
-									min={0.5}
-									max={8}
-									step={0.5}
-									value={cfg.custom.moveSpeedBars}
-									onChange={(e) =>
-										setCustom({ moveSpeedBars: Number(e.target.value) })
-									}
-									className="w-full min-h-8 accent-blue-500"
-								/>
-							</div>
-						)}
-
-						<label className="flex items-center gap-2 py-1 cursor-pointer">
-							<input
-								type="checkbox"
-								checked={cfg.custom.rotate}
-								onChange={(e) => setCustom({ rotate: e.target.checked })}
-								className="h-4 w-4 accent-blue-500"
-							/>
-							<span className="flex-1 text-[12px] text-gray-200 font-medium">回転（くるくる回転）</span>
-						</label>
-						{cfg.custom.rotate && (
-							<div className="mb-2 ml-6 space-y-1 rounded bg-gray-900/60 p-2">
-								<div className="flex justify-between text-[10px]">
-									<span className="text-gray-400">回転速度</span>
-									<span className="font-mono text-blue-300">{cfg.custom.rotateSpeed}度 / 秒</span>
-								</div>
-								<input
-									type="range"
-									min={-180}
-									max={180}
-									step={5}
-									value={cfg.custom.rotateSpeed}
-									onChange={(e) =>
-										setCustom({ rotateSpeed: Number(e.target.value) })
-									}
-									className="w-full min-h-8 accent-blue-500"
-								/>
-							</div>
-						)}
-
-						<label className="flex items-center gap-2 py-1 cursor-pointer">
-							<input
-								type="checkbox"
-								checked={cfg.custom.scale}
-								onChange={(e) => setCustom({ scale: e.target.checked })}
-								className="h-4 w-4 accent-blue-500"
-							/>
-							<span className="flex-1 text-[12px] text-gray-200 font-medium">拡大縮小（伸び縮み）</span>
-						</label>
-						{cfg.custom.scale && (
-							<div className="ml-6 space-y-1 rounded bg-gray-900/60 p-2">
-								<div className="flex justify-between text-[10px]">
-									<span className="text-gray-400">伸び縮みの周期</span>
-									<span className="font-mono text-blue-300">{cfg.custom.scaleSpeedBars} 小節で1周期</span>
-								</div>
-								<input
-									type="range"
-									min={0.5}
-									max={8}
-									step={0.5}
-									value={cfg.custom.scaleSpeedBars}
-									onChange={(e) =>
-										setCustom({ scaleSpeedBars: Number(e.target.value) })
-									}
-									className="w-full min-h-8 accent-blue-500"
-								/>
-							</div>
-						)}
-					</div>
+						);
+					})}
 				</div>
 
 				<div className="flex shrink-0 gap-2 border-t border-gray-800 p-3">
