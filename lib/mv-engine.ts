@@ -17,11 +17,15 @@ import {
 	getChordThemeColor,
 	isLayerVisible,
 	isMvEntranceInert,
+	isMvExitInert,
 	isMvTransitionInert,
 	layerAppearBar,
+	layerDisappearBar,
 	MV_BLEND_COMPOSITE,
 	MV_EFFECT_POST_STYLES,
 	MV_H,
+	MV_PARTICLE_COVER_FRAMES,
+	MV_PARTICLE_COVER_URL,
 	MV_PARTICLE_REVEAL_FRAMES,
 	MV_PARTICLE_REVEAL_URL,
 	MV_ROOT_TO_PITCH,
@@ -35,7 +39,11 @@ import {
 	type MvEffectCurve,
 	type MvEffectLayer,
 	type MvEffectStyle,
+	type MvEnterFrom,
 	type MvEntrance,
+	type MvEntranceStyle,
+	type MvExitStyle,
+	type MvExitTo,
 	type MvImageLayer,
 	type MvLayer,
 	type MvLyricLine,
@@ -55,6 +63,7 @@ import {
 	type MvView,
 	type MvVisualizerLayer,
 	mvEntranceDistance,
+	mvExitDistance,
 	mvWalkSpeed,
 	resolveLyricStack,
 	resolveSceneStage,
@@ -276,6 +285,13 @@ export function collectMvImageUrls(manifest: MvManifest): string[] {
 	}
 	for (const layer of manifest.layers) {
 		if (layer.kind === "image") push(layerImageUrl(layer));
+		if (
+			layer.entrance?.style === "particle" ||
+			layer.exit?.style === "particle"
+		) {
+			push(MV_PARTICLE_REVEAL_URL);
+			push(MV_PARTICLE_COVER_URL);
+		}
 	}
 	return [...new Set(urls)];
 }
@@ -413,10 +429,7 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 		case "beat": {
 			// periodBeats未指定/1なら従来どおり1拍周期。指定時は周期を伸縮する
 			// （0.5で2倍速、2で半分の速さ、というように小さいほど速い）。
-			const beatPeriod = Math.max(
-				1,
-				MV_STEPS_PER_BEAT * (m.periodBeats ?? 1),
-			);
+			const beatPeriod = Math.max(1, MV_STEPS_PER_BEAT * (m.periodBeats ?? 1));
 			if (m.periodBeats === undefined || m.periodBeats === 1) {
 				return m.curve === undefined
 					? d.beatEnv
@@ -599,7 +612,7 @@ export function drawMvFrame(
 	for (const layer of drawables) {
 		ctx.save();
 		ctx.globalAlpha = layer.opacity ?? 1;
-		drawLayer(d, layer);
+		drawLayerWithTransitions(d, layer);
 		ctx.restore();
 	}
 
@@ -640,16 +653,31 @@ export function drawMvFrame(
 	}
 
 	// 編集用：ホバー・選択レイヤーのアタリ枠表示
-	if (options?.hoveredLayerId && options.hoveredLayerId !== options.selectedLayerId) {
+	if (
+		options?.hoveredLayerId &&
+		options.hoveredLayerId !== options.selectedLayerId
+	) {
 		const target = manifest.layers.find((l) => l.id === options.hoveredLayerId);
 		if (target) {
-			drawLayerHighlight(ctx, target, "#eab308", `[ホバー: ${target.name || target.kind}]`);
+			drawLayerHighlight(
+				ctx,
+				target,
+				"#eab308",
+				`[ホバー: ${target.name || target.kind}]`,
+			);
 		}
 	}
 	if (options?.selectedLayerId) {
-		const target = manifest.layers.find((l) => l.id === options.selectedLayerId);
+		const target = manifest.layers.find(
+			(l) => l.id === options.selectedLayerId,
+		);
 		if (target) {
-			drawLayerHighlight(ctx, target, "#3b82f6", `[選択中: ${target.name || target.kind}]`);
+			drawLayerHighlight(
+				ctx,
+				target,
+				"#3b82f6",
+				`[選択中: ${target.name || target.kind}]`,
+			);
 		}
 	}
 }
@@ -878,8 +906,14 @@ function frameTransform(
  * 毎フレーム作ると GC でカクつくため、モジュールに2枚だけ持って使い回す。
  * A＝フレームの取り込み、B＝チャンネル抽出やモザイクなどの中間結果。
  */
-const scratchA = { canvas: null as HTMLCanvasElement | null, ctx: null as CanvasRenderingContext2D | null };
-const scratchB = { canvas: null as HTMLCanvasElement | null, ctx: null as CanvasRenderingContext2D | null };
+const scratchA = {
+	canvas: null as HTMLCanvasElement | null,
+	ctx: null as CanvasRenderingContext2D | null,
+};
+const scratchB = {
+	canvas: null as HTMLCanvasElement | null,
+	ctx: null as CanvasRenderingContext2D | null,
+};
 
 function scratchCtx(
 	slot: typeof scratchA,
@@ -1003,10 +1037,7 @@ function getGrainTiles(): HTMLCanvasElement[] | null {
 }
 
 /** 取り込んだ画から1チャンネルだけ抜いた版を作る（色ズレ用）。 */
-function channelCopy(
-	snap: FrameSnap,
-	rgb: string,
-): HTMLCanvasElement | null {
+function channelCopy(snap: FrameSnap, rgb: string): HTMLCanvasElement | null {
 	const b = scratchCtx(scratchB, snap.dw, snap.dh);
 	if (!b) return null;
 	b.drawImage(snap.src, 0, 0);
@@ -1052,13 +1083,7 @@ function drawPostEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 				for (const [rgb, dx] of parts) {
 					const layerCanvas = channelCopy(snap, rgb);
 					if (!layerCanvas) break;
-					ctx.drawImage(
-						layerCanvas,
-						dx + (MV_W - w) / 2,
-						(MV_H - h) / 2,
-						w,
-						h,
-					);
+					ctx.drawImage(layerCanvas, dx + (MV_W - w) / 2, (MV_H - h) / 2, w, h);
 				}
 				break;
 			}
@@ -1110,13 +1135,7 @@ function drawPostEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 					const s = 1 + (maxZoom * i) / passes;
 					const w = MV_W * s;
 					const h = MV_H * s;
-					ctx.drawImage(
-						snap.src,
-						(MV_W - w) / 2,
-						(MV_H - h) / 2,
-						w,
-						h,
-					);
+					ctx.drawImage(snap.src, (MV_W - w) / 2, (MV_H - h) / 2, w, h);
 				}
 				break;
 			}
@@ -1727,53 +1746,304 @@ interface EntranceResult {
 	alpha: number;
 }
 
+interface LayerTransitionResult {
+	dx: number;
+	dy: number;
+	scale: number;
+	alpha: number;
+	particle?: {
+		type: "cover" | "reveal";
+		progress: number;
+	};
+	afterimages?: Array<{ dx: number; dy: number; alpha: number }>;
+	pixelateSize?: number;
+	flashAlpha?: number;
+	wipe?: {
+		from: MvEnterFrom | MvExitTo;
+		progress: number;
+	};
+}
+
+function easeOutBack(x: number): number {
+	const c1 = 1.70158;
+	const c3 = c1 + 1;
+	return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+}
+
+function easeInBack(x: number): number {
+	const c1 = 1.70158;
+	const c3 = c1 + 1;
+	return c3 * x * x * x - c1 * x * x;
+}
+
+export function layerTransitionState(
+	d: DrawCtx,
+	layer: MvLayer,
+): LayerTransitionResult {
+	let dx = 0;
+	let dy = 0;
+	let scale = 1;
+	let alpha = 1;
+	let particle: LayerTransitionResult["particle"] = undefined;
+	let afterimages: LayerTransitionResult["afterimages"] = undefined;
+	let pixelateSize: number | undefined = undefined;
+	let flashAlpha: number | undefined = undefined;
+	let wipe: LayerTransitionResult["wipe"] = undefined;
+
+	// 登場演出 (Entrance)
+	if (layer.entrance && !isMvEntranceInert(layer.entrance)) {
+		const startStep =
+			layerAppearBar(layer, d.manifest.sections, d.sectionId) *
+			MV_STEPS_PER_BAR;
+		const durSteps = layer.entrance.beats * MV_STEPS_PER_BEAT;
+		const age = d.step - startStep;
+		if (age >= 0 && age < durSteps && durSteps > 0) {
+			const t = clamp01(age / durSteps);
+			const style: MvEntranceStyle =
+				layer.entrance.style ??
+				(layer.entrance.from !== "none"
+					? "slide"
+					: layer.entrance.fade
+						? "fade"
+						: "none");
+
+			const eased = 1 - Math.pow(1 - t, 3);
+
+			switch (style) {
+				case "fade":
+					if (layer.entrance.fade) alpha *= eased;
+					break;
+				case "slide": {
+					const dist = mvEntranceDistance(layer.entrance) * (1 - eased);
+					if (layer.entrance.from === "left") dx -= dist;
+					else if (layer.entrance.from === "right") dx += dist;
+					else if (layer.entrance.from === "top") dy -= dist;
+					else if (layer.entrance.from === "bottom") dy += dist;
+					if (layer.entrance.fade) alpha *= eased;
+					break;
+				}
+				case "zoom":
+					scale *= Math.max(0.01, eased);
+					if (layer.entrance.fade) alpha *= eased;
+					break;
+				case "zoomBounce": {
+					const p = easeOutBack(t);
+					scale *= Math.max(0.01, p);
+					if (layer.entrance.fade) alpha *= clamp01(t * 1.5);
+					break;
+				}
+				case "particle":
+					if (layer.entrance.fade) alpha *= eased;
+					particle = { type: "cover", progress: t };
+					break;
+				case "afterimage":
+					if (layer.entrance.fade) alpha *= eased;
+					afterimages = [
+						{ dx: (1 - eased) * -40, dy: 0, alpha: 0.35 * eased },
+						{ dx: (1 - eased) * -80, dy: 0, alpha: 0.18 * eased },
+					];
+					break;
+				case "pixelate":
+					if (layer.entrance.fade) alpha *= eased;
+					pixelateSize = Math.round(1 + (1 - t) * 15);
+					break;
+				case "flash":
+					if (layer.entrance.fade) alpha *= eased;
+					flashAlpha = clamp01((1 - t) * 1.5);
+					break;
+				case "wipe":
+					wipe = {
+						from: layer.entrance.from !== "none" ? layer.entrance.from : "left",
+						progress: t,
+					};
+					break;
+			}
+		}
+	}
+
+	// 退場演出 (Exit)
+	if (layer.exit && !isMvExitInert(layer.exit)) {
+		const totalBars = d.song.totalBars || 64;
+		const endBar = layerDisappearBar(
+			layer,
+			d.manifest.sections,
+			d.sectionId,
+			totalBars,
+		);
+		const endStep = endBar * MV_STEPS_PER_BAR;
+		const durSteps = layer.exit.beats * MV_STEPS_PER_BEAT;
+		const remainingSteps = endStep - d.step;
+
+		if (remainingSteps >= 0 && remainingSteps < durSteps && durSteps > 0) {
+			const t = clamp01(1 - remainingSteps / durSteps);
+			const style: MvExitStyle =
+				layer.exit.style ??
+				(layer.exit.to !== "none"
+					? "slide"
+					: layer.exit.fade
+						? "fade"
+						: "none");
+
+			const eased = Math.pow(t, 3);
+
+			switch (style) {
+				case "fade":
+					if (layer.exit.fade) alpha *= 1 - eased;
+					break;
+				case "slide": {
+					const dist = mvExitDistance(layer.exit) * eased;
+					if (layer.exit.to === "left") dx -= dist;
+					else if (layer.exit.to === "right") dx += dist;
+					else if (layer.exit.to === "top") dy -= dist;
+					else if (layer.exit.to === "bottom") dy += dist;
+					if (layer.exit.fade) alpha *= 1 - eased;
+					break;
+				}
+				case "zoom":
+					scale *= Math.max(0.01, 1 - eased);
+					if (layer.exit.fade) alpha *= 1 - eased;
+					break;
+				case "zoomBounce": {
+					const p = easeInBack(t);
+					scale *= Math.max(0.01, 1 - p);
+					if (layer.exit.fade) alpha *= clamp01(1 - t);
+					break;
+				}
+				case "particle":
+					if (layer.exit.fade) alpha *= 1 - eased;
+					particle = { type: "reveal", progress: t };
+					break;
+				case "afterimage":
+					if (layer.exit.fade) alpha *= 1 - eased;
+					afterimages = [
+						{ dx: eased * 40, dy: 0, alpha: 0.35 * (1 - eased) },
+						{ dx: eased * 80, dy: 0, alpha: 0.18 * (1 - eased) },
+					];
+					break;
+				case "pixelate":
+					if (layer.exit.fade) alpha *= 1 - eased;
+					pixelateSize = Math.round(1 + t * 15);
+					break;
+				case "flash":
+					if (layer.exit.fade) alpha *= 1 - eased;
+					flashAlpha = clamp01(t * 1.5);
+					break;
+				case "wipe":
+					wipe = {
+						from: layer.exit.to !== "none" ? layer.exit.to : "right",
+						progress: 1 - t,
+					};
+					break;
+			}
+		}
+	}
+
+	return {
+		dx,
+		dy,
+		scale,
+		alpha,
+		particle,
+		afterimages,
+		pixelateSize,
+		flashAlpha,
+		wipe,
+	};
+}
+
+function drawParticleOverlay(
+	ctx: CanvasRenderingContext2D,
+	type: "cover" | "reveal",
+	progress: number,
+) {
+	const url = type === "cover" ? MV_PARTICLE_COVER_URL : MV_PARTICLE_REVEAL_URL;
+	const totalFrames =
+		type === "cover" ? MV_PARTICLE_COVER_FRAMES : MV_PARTICLE_REVEAL_FRAMES;
+	const img = peekImage(url);
+	if (!img || img.naturalWidth <= 0) return;
+	const cellH = img.naturalHeight;
+	const idx = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
+	ctx.save();
+	ctx.globalCompositeOperation = "lighter";
+	ctx.imageSmoothingEnabled = false;
+	ctx.drawImage(img, idx * cellH, 0, cellH, cellH, 0, 0, MV_W, MV_H);
+	ctx.restore();
+}
+
+function drawLayerWithTransitions(d: DrawCtx, layer: MvLayer): void {
+	const trans = layerTransitionState(d, layer);
+	if (trans.alpha <= 0.002) return;
+
+	const { ctx } = d;
+	ctx.save();
+	ctx.globalAlpha *= trans.alpha;
+
+	if (trans.dx !== 0 || trans.dy !== 0 || trans.scale !== 1) {
+		ctx.translate(MV_W / 2 + trans.dx, MV_H / 2 + trans.dy);
+		ctx.scale(trans.scale, trans.scale);
+		ctx.translate(-MV_W / 2, -MV_H / 2);
+	}
+
+	if (trans.wipe) {
+		const p = trans.wipe.progress;
+		ctx.beginPath();
+		switch (trans.wipe.from) {
+			case "left":
+				ctx.rect(0, 0, MV_W * p, MV_H);
+				break;
+			case "right":
+				ctx.rect(MV_W * (1 - p), 0, MV_W * p, MV_H);
+				break;
+			case "top":
+				ctx.rect(0, 0, MV_W, MV_H * p);
+				break;
+			case "bottom":
+				ctx.rect(0, MV_H * (1 - p), MV_W, MV_H * p);
+				break;
+			default:
+				ctx.rect(0, 0, MV_W * p, MV_H);
+				break;
+		}
+		ctx.clip();
+	}
+
+	if (trans.afterimages && trans.afterimages.length > 0) {
+		for (const ghost of trans.afterimages) {
+			ctx.save();
+			ctx.globalAlpha *= ghost.alpha;
+			ctx.translate(ghost.dx, ghost.dy);
+			drawLayer(d, layer);
+			ctx.restore();
+		}
+	}
+
+	drawLayer(d, layer);
+
+	if (trans.flashAlpha && trans.flashAlpha > 0.01) {
+		ctx.save();
+		ctx.globalCompositeOperation = "lighter";
+		ctx.fillStyle = `rgba(255, 255, 255, ${trans.flashAlpha * 0.8})`;
+		ctx.fillRect(0, 0, MV_W, MV_H);
+		ctx.restore();
+	}
+
+	if (trans.particle) {
+		drawParticleOverlay(ctx, trans.particle.type, trans.particle.progress);
+	}
+
+	ctx.restore();
+}
+
 const ENTRANCE_DONE: EntranceResult = { dx: 0, dy: 0, alpha: 1 };
 
-/**
- * 登場演出のずらし量と濃さ。
- * 起点は layerAppearBar（＝そのレイヤーが出てきた場面の頭）で、そこから beats 拍かけて
- * 定位置・不透明へ寄せる。演出が終わったあとは毎フレーム ENTRANCE_DONE を返すだけなので、
- * 通常再生中のコストはほぼ無い。
- */
 function entranceState(
 	d: DrawCtx,
 	layer: MvLayer,
 	entrance: MvEntrance | undefined,
 ): EntranceResult {
 	if (isMvEntranceInert(entrance) || !entrance) return ENTRANCE_DONE;
-
-	const startStep =
-		layerAppearBar(layer, d.manifest.sections, d.sectionId) * MV_STEPS_PER_BAR;
-	const durSteps = entrance.beats * MV_STEPS_PER_BEAT;
-	const age = d.step - startStep;
-	if (age >= durSteps) return ENTRANCE_DONE;
-
-	// easeOutCubic: 勢いよく入ってきて静かに止まる（等速だと機械的に見える）
-	const t = clamp01(age / durSteps);
-	const eased = 1 - (1 - t) ** 3;
-	const rest = 1 - eased;
-	const dist = mvEntranceDistance(entrance) * rest;
-
-	let dx = 0;
-	let dy = 0;
-	switch (entrance.from) {
-		case "left":
-			dx = -dist;
-			break;
-		case "right":
-			dx = dist;
-			break;
-		case "top":
-			dy = -dist;
-			break;
-		case "bottom":
-			dy = dist;
-			break;
-		default:
-			break;
-	}
-
-	return { dx, dy, alpha: entrance.fade ? eased : 1 };
+	const trans = layerTransitionState(d, layer);
+	return { dx: trans.dx, dy: trans.dy, alpha: trans.alpha };
 }
 
 function anchorOffset(
@@ -2127,7 +2397,9 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 
 	// まとまり全体が消えるタイミング＝次の区切りの開始小節（次が無ければ最後の行のhold明け）。
 	const groupEndBar =
-		groupEnd < lines.length ? lines[groupEnd].bar : lines[groupEnd - 1].bar + hold;
+		groupEnd < lines.length
+			? lines[groupEnd].bar
+			: lines[groupEnd - 1].bar + hold;
 	const groupFadeOut = clamp01((groupEndBar - d.bar) / 0.5);
 	if (groupFadeOut <= 0.01) return;
 
@@ -2529,7 +2801,12 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 
 	ctx.save();
 	ctx.beginPath();
-	ctx.rect(x - clipMargin, y - clipMargin, w + clipMargin * 2, h + clipMargin * 2);
+	ctx.rect(
+		x - clipMargin,
+		y - clipMargin,
+		w + clipMargin * 2,
+		h + clipMargin * 2,
+	);
 	ctx.clip();
 
 	const baseAlpha = ctx.globalAlpha;

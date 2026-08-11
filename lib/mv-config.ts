@@ -90,12 +90,49 @@ export const MV_ENTER_FROM_LABELS: Record<MvEnterFrom, string> = {
 	bottom: "下から",
 };
 
+export type MvExitTo = "none" | "left" | "right" | "top" | "bottom";
+
+export const MV_EXIT_TO_LABELS: Record<MvExitTo, string> = {
+	none: "その場（動かさない）",
+	left: "左へ",
+	right: "右へ",
+	top: "上へ",
+	bottom: "下へ",
+};
+
+export type MvEntranceStyle =
+	| "none"
+	| "fade"
+	| "slide"
+	| "zoom"
+	| "zoomBounce"
+	| "particle"
+	| "afterimage"
+	| "pixelate"
+	| "flash"
+	| "wipe";
+
+export type MvExitStyle = MvEntranceStyle;
+
+export const MV_TRANSITION_STYLE_LABELS: Record<MvEntranceStyle, string> = {
+	none: "瞬時（演出なし）",
+	fade: "フェード（不透明度）",
+	slide: "スライド（移動）",
+	zoom: "ズーム（拡大・縮小）",
+	zoomBounce: "ポップ（バウンス）",
+	particle: "粒子 (ドット分解・カバー)",
+	afterimage: "残像 (軌跡・分散)",
+	pixelate: "ドット分解 (モザイク)",
+	flash: "フラッシュ (白発光)",
+	wipe: "ワイプ (画面端からカット)",
+};
+
 /**
  * レイヤーの登場演出。未指定なら「瞬時に出現」（従来の挙動）。
  * 起点は「そのレイヤーが出てきた場面の頭」で、`beats` 拍かけて定位置・不透明へ寄っていく。
- * `from` と `fade` は独立なので、スライドのみ／フェードのみ／左からフェードイン、が全部作れる。
  */
 export interface MvEntrance {
+	style?: MvEntranceStyle;
 	from: MvEnterFrom;
 	/** 透明から現れるか */
 	fade: boolean;
@@ -105,8 +142,31 @@ export interface MvEntrance {
 	distance?: number;
 }
 
+/**
+ * レイヤーの退場演出。未指定なら「瞬時に消える」。
+ * 終点は「そのレイヤーが消える場面の頭 / 表示終了小節」で、`beats` 拍かけて消えていく。
+ */
+export interface MvExit {
+	style?: MvExitStyle;
+	to: MvExitTo;
+	/** 透明へ消えるか */
+	fade: boolean;
+	/** 演出にかける長さ（拍）。0以下なら瞬時に消える */
+	beats: number;
+	/** スライドの距離（論理px）。 */
+	distance?: number;
+}
+
 export const DEFAULT_MV_ENTRANCE: MvEntrance = {
+	style: "fade",
 	from: "none",
+	fade: true,
+	beats: 2,
+};
+
+export const DEFAULT_MV_EXIT: MvExit = {
+	style: "fade",
+	to: "none",
 	fade: true,
 	beats: 2,
 };
@@ -119,11 +179,29 @@ export function mvEntranceDistance(entrance: MvEntrance): number {
 		: MV_W / 2;
 }
 
+/** 退場演出のスライド距離（論理px）。未指定時の既定を解決する。 */
+export function mvExitDistance(exit: MvExit): number {
+	if (exit.distance !== undefined) return exit.distance;
+	return exit.to === "top" || exit.to === "bottom" ? MV_H / 2 : MV_W / 2;
+}
+
 /** 何も起きない（＝瞬時に出現と同じ）登場演出か。 */
 export function isMvEntranceInert(entrance: MvEntrance | undefined): boolean {
 	if (!entrance) return true;
 	if (entrance.beats <= 0) return true;
-	return entrance.from === "none" && !entrance.fade;
+	const style =
+		entrance.style ??
+		(entrance.from !== "none" ? "slide" : entrance.fade ? "fade" : "none");
+	return style === "none";
+}
+
+/** 何も起きない（＝瞬時に消えるのと同じ）退場演出か。 */
+export function isMvExitInert(exit: MvExit | undefined): boolean {
+	if (!exit) return true;
+	if (exit.beats <= 0) return true;
+	const style =
+		exit.style ?? (exit.to !== "none" ? "slide" : exit.fade ? "fade" : "none");
+	return style === "none";
 }
 
 export type MvAnchor =
@@ -529,6 +607,10 @@ interface MvLayerBase {
 	z?: number;
 	/** 0..1 */
 	opacity?: number;
+	/** 登場演出（スライドイン／フェードイン等）。未指定＝瞬時に出現。 */
+	entrance?: MvEntrance;
+	/** 退場演出（スライドアウト／フェードアウト等）。未指定＝瞬時に消える。 */
+	exit?: MvExit;
 }
 
 /**
@@ -696,8 +778,7 @@ export const MV_LYRIC_TAG_COLORS: Record<string, string> = {
 	M: "#c4b5fd",
 };
 
-const LYRIC_BULK_LINE_RE =
-	/^([A-Za-z])\[(\d{1,2}):(\d{1,2}(?:\.\d+)?)\](.+)$/;
+const LYRIC_BULK_LINE_RE = /^([A-Za-z])\[(\d{1,2}):(\d{1,2}(?:\.\d+)?)\](.+)$/;
 
 /** `mm:ss.cc` 表記1行ぶんをパースして秒に直す。 */
 function parseLyricTimestampSec(mm: string, ss: string): number {
@@ -905,7 +986,8 @@ export const MV_SHAPE_FORM_DESCRIPTIONS: Record<MvShapeForm, string> = {
 	cross: "十字の線。",
 	bar: "横に長い帯。スペアナの棒などに。",
 	path: "SVGを貼り付けて取り込む自由形状。",
-	doubleFrame: "内外2本の正方形の枠が小節ごとに軽く息をする。キャラや文字を囲うのに。",
+	doubleFrame:
+		"内外2本の正方形の枠が小節ごとに軽く息をする。キャラや文字を囲うのに。",
 	ripple: "輪が小節の頭から外へ広がって消える。1小節でぴったりループ。",
 };
 
@@ -1163,15 +1245,16 @@ export const MV_EFFECT_CURVE_LABELS: Record<MvEffectCurve, string> = {
 };
 
 /** 色の指定が効く演出。効かない演出で色欄を出すと「変えたのに何も起きない」になる。 */
-export const MV_EFFECT_USES_COLOR: ReadonlySet<MvEffectStyle> = new Set<MvEffectStyle>([
-	"flash",
-	"strobe",
-	"vignette",
-	"tint",
-	"scanlines",
-	"letterbox",
-	"shockwave",
-]);
+export const MV_EFFECT_USES_COLOR: ReadonlySet<MvEffectStyle> =
+	new Set<MvEffectStyle>([
+		"flash",
+		"strobe",
+		"vignette",
+		"tint",
+		"scanlines",
+		"letterbox",
+		"shockwave",
+	]);
 
 /**
  * 描き終わった画を読み直して作る演出。
@@ -1650,6 +1733,7 @@ export function layerAppearBar(
 	sections: MvSection[],
 	sectionId: string | null,
 ): number {
+	if (layer.barRange) return layer.barRange[0];
 	if (!layer.sections || layer.sections.length === 0) return 0;
 	if (!sectionId) return 0;
 	const sorted = [...sections].sort((a, b) => a.startBar - b.startBar);
@@ -1657,6 +1741,31 @@ export function layerAppearBar(
 	if (idx < 0) return 0;
 	while (idx > 0 && layer.sections.includes(sorted[idx - 1].id)) idx--;
 	return sorted[idx].startBar;
+}
+
+/**
+ * そのレイヤーが「消える」小節。退場演出の終点に使う。
+ */
+export function layerDisappearBar(
+	layer: MvLayer,
+	sections: MvSection[],
+	sectionId: string | null,
+	totalBars: number,
+): number {
+	if (layer.barRange) return layer.barRange[1];
+	if (!layer.sections || layer.sections.length === 0) return totalBars;
+	if (!sectionId) return totalBars;
+	const sorted = [...sections].sort((a, b) => a.startBar - b.startBar);
+	let idx = sorted.findIndex((s) => s.id === sectionId);
+	if (idx < 0) return totalBars;
+	while (
+		idx < sorted.length - 1 &&
+		layer.sections.includes(sorted[idx + 1].id)
+	) {
+		idx++;
+	}
+	const nextSec = sorted[idx + 1];
+	return nextSec ? nextSec.startBar : totalBars;
 }
 
 export function mvAudioMode(manifest: MvManifest): MvAudioMode {

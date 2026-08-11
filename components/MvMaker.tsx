@@ -36,13 +36,13 @@ import {
 	saveHistory,
 } from "@/lib/history";
 import {
-	DEFAULT_MV_ENTRANCE,
 	DEFAULT_MV_NOTE_LIGHT,
 	DEFAULT_MV_NOTE_LIGHT_3D,
 	DEFAULT_MV_RING,
 	DEFAULT_MV_TRANSITION,
 	DEFAULT_MV_VIEW,
 	isMvEntranceInert,
+	isMvExitInert,
 	MV_AUDIO_MODE_HINTS,
 	MV_AUDIO_MODE_LABELS,
 	MV_BLEND_LABELS,
@@ -54,7 +54,6 @@ import {
 	MV_EFFECT_STYLE_DESCRIPTIONS,
 	MV_EFFECT_STYLE_LABELS,
 	MV_EFFECT_USES_COLOR,
-	MV_ENTER_FROM_LABELS,
 	MV_H,
 	MV_LYRIC_STACK_LABELS,
 	MV_MOD_OP_LABELS,
@@ -67,6 +66,7 @@ import {
 	MV_SHAPE_FORM_LABELS,
 	MV_STEPS_PER_BAR,
 	MV_TRANSITION_LABELS,
+	MV_TRANSITION_STYLE_LABELS,
 	MV_TRIGGER_LABELS,
 	MV_VISUALIZER_LABELS,
 	MV_W,
@@ -81,11 +81,10 @@ import {
 	type MvEffectLayer,
 	type MvEffectStyle,
 	type MvEnterFrom,
-	type MvEntrance,
 	type MvImageLayer,
 	type MvLayer,
-	type MvLyricsLayer,
 	type MvLyricStack,
+	type MvLyricsLayer,
 	type MvManifest,
 	type MvModOp,
 	type MvModSource,
@@ -107,7 +106,6 @@ import {
 	type MvVisualizerStyle,
 	type MvWalkSetting,
 	mvAudioMode,
-	mvEntranceDistance,
 	mvUid,
 	mvWalkSpeed,
 	parseLyricsBulkGroups,
@@ -136,6 +134,7 @@ import MvShapeFormPickerModal, {
 } from "./MvShapeFormPickerModal";
 import MvShapeMotionModal from "./MvShapeMotionModal";
 import MvTimeline from "./MvTimeline";
+import MvTransitionModal from "./MvTransitionModal";
 import { buildMvPreset, MV_PRESETS } from "./mv-presets";
 import VolumeControl from "./VolumeControl";
 
@@ -461,9 +460,6 @@ function Details({
 const MOTION_OPTIONS = (Object.keys(MV_MOTION_LABELS) as MvMotion[]).map(
 	(m) => ({ value: m, label: MV_MOTION_LABELS[m] }),
 );
-const ENTER_FROM_OPTIONS = (
-	Object.keys(MV_ENTER_FROM_LABELS) as MvEnterFrom[]
-).map((f) => ({ value: f, label: MV_ENTER_FROM_LABELS[f] }));
 const VISUALIZER_OPTIONS = (
 	Object.keys(MV_VISUALIZER_LABELS) as MvVisualizerStyle[]
 ).map((s) => ({ value: s, label: MV_VISUALIZER_LABELS[s] }));
@@ -739,6 +735,10 @@ export default function MvMaker({
 	const [motionTarget, setMotionTarget] = useState<{ layerId: string } | null>(
 		null,
 	);
+	const [transitionModalTarget, setTransitionModalTarget] = useState<{
+		layerId: string;
+		initialTab: "entrance" | "exit";
+	} | null>(null);
 	const [shapeFormPickerLayerId, setShapeFormPickerLayerId] = useState<
 		string | null
 	>(null);
@@ -1094,24 +1094,7 @@ export default function MvMaker({
 		setSelectedLayerId(layer.id);
 	};
 
-	/**
-	 * 登場演出の更新。向きも無し・フェードも無しに戻したら entrance ごと消して、
-	 * 「瞬時に出現」＝未設定、という素直な状態に畳む。
-	 */
-	const updateEntrance = (id: string, patch: Partial<MvEntrance>) => {
-		updateLayer(id, (l) => {
-			if (l.kind !== "image") return l;
-			const next: MvEntrance = {
-				...DEFAULT_MV_ENTRANCE,
-				...l.entrance,
-				...patch,
-			};
-			return {
-				...l,
-				entrance: next.from === "none" && !next.fade ? undefined : next,
-			};
-		});
-	};
+
 
 	const updateRepeat = (
 		id: string,
@@ -1825,44 +1808,64 @@ export default function MvMaker({
 						}
 					/>
 
-					<div className="space-y-2 rounded border border-gray-800 bg-gray-950/30 p-2">
-						<p className="text-[10px] font-bold text-gray-400">
-							✨ 登場のしかた
-						</p>
-						<Hint>
-							この絵が出てくる場面に入った瞬間の演出です。向きが「その場」でフェードインも無しなら、
-							いままでどおり瞬時に出ます。
-						</Hint>
-						<SelectField
-							label="出てくる向き"
-							value={layer.entrance?.from ?? "none"}
-							options={ENTER_FROM_OPTIONS}
-							onChange={(v) => updateEntrance(layer.id, { from: v })}
-						/>
-						<CheckField
-							label="透明から現れる（フェードイン）"
-							checked={!!layer.entrance?.fade}
-							onChange={(v) => updateEntrance(layer.id, { fade: v })}
-						/>
-						{!isMvEntranceInert(layer.entrance) && layer.entrance && (
-							<>
-								<NumField
-									label="かける長さ（拍）"
-									value={layer.entrance.beats}
-									min={0}
-									step={0.5}
-									onChange={(v) => updateEntrance(layer.id, { beats: v })}
-								/>
-								{layer.entrance.from !== "none" && (
-									<NumField
-										label="動く距離（px）"
-										value={mvEntranceDistance(layer.entrance)}
-										step={10}
-										onChange={(v) => updateEntrance(layer.id, { distance: v })}
-									/>
-								)}
-							</>
-						)}
+					<div className="space-y-2 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
+						<div className="flex items-center justify-between">
+							<span className="text-[11px] font-bold text-gray-200">
+								✨ 登場・退場の演出
+							</span>
+							<span className="text-[10px] text-gray-400">プレビューで確認</span>
+						</div>
+						<div className="grid grid-cols-2 gap-2 pt-1">
+							<button
+								type="button"
+								onClick={() =>
+									setTransitionModalTarget({
+										layerId: layer.id,
+										initialTab: "entrance",
+									})
+								}
+								className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${
+									layer.entrance && !isMvEntranceInert(layer.entrance)
+										? "border-blue-500/50 bg-blue-500/10 text-blue-200"
+										: "border-gray-800 bg-gray-900 text-gray-400 hover:bg-gray-800"
+								}`}
+							>
+								<div className="flex items-center justify-between w-full text-[10px] font-bold">
+									<span>登場 (イン)</span>
+									<Sparkles className="h-3 w-3 text-blue-400" />
+								</div>
+								<span className="text-[10px] text-gray-400 truncate w-full">
+									{layer.entrance && !isMvEntranceInert(layer.entrance)
+										? `${MV_TRANSITION_STYLE_LABELS[layer.entrance.style ?? "fade"]} (${layer.entrance.beats}拍)`
+										: "瞬時 (なし)"}
+								</span>
+							</button>
+
+							<button
+								type="button"
+								onClick={() =>
+									setTransitionModalTarget({
+										layerId: layer.id,
+										initialTab: "exit",
+									})
+								}
+								className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${
+									layer.exit && !isMvExitInert(layer.exit)
+										? "border-purple-500/50 bg-purple-500/10 text-purple-200"
+										: "border-gray-800 bg-gray-900 text-gray-400 hover:bg-gray-800"
+								}`}
+							>
+								<div className="flex items-center justify-between w-full text-[10px] font-bold">
+									<span>退場 (アウト)</span>
+									<Sparkles className="h-3 w-3 text-purple-400" />
+								</div>
+								<span className="text-[10px] text-gray-400 truncate w-full">
+									{layer.exit && !isMvExitInert(layer.exit)
+										? `${MV_TRANSITION_STYLE_LABELS[layer.exit.style ?? "fade"]} (${layer.exit.beats}拍)`
+										: "瞬時 (なし)"}
+								</span>
+							</button>
+						</div>
 					</div>
 
 					<CheckField
@@ -4567,6 +4570,24 @@ export default function MvMaker({
 		</div>
 	);
 
+	const baseShapeLayer = motionTarget
+		? manifest.layers.find(
+				(l): l is MvShapeLayer =>
+					l.kind === "shape" && l.id === motionTarget.layerId,
+			)
+		: null;
+
+	const transitionModalLayer = transitionModalTarget
+		? manifest.layers.find((l) => l.id === transitionModalTarget.layerId)
+		: null;
+
+	const shapeFormPickerLayer = shapeFormPickerLayerId
+		? manifest.layers.find(
+				(l): l is MvShapeLayer =>
+					l.kind === "shape" && l.id === shapeFormPickerLayerId,
+			)
+		: null;
+
 	return (
 		<div className="fixed inset-0 z-50 flex select-none flex-col bg-[#0b0e14]">
 			{/* ヘッダー
@@ -4724,61 +4745,61 @@ export default function MvMaker({
 				/>
 			)}
 
-			{motionTarget &&
-				(() => {
-					const baseLayer = manifest.layers.find(
-						(l): l is MvShapeLayer =>
-							l.kind === "shape" && l.id === motionTarget.layerId,
-					);
-					if (!baseLayer) return null;
-					return (
-						<MvShapeMotionModal
-							baseLayer={baseLayer}
-							bpm={song.bpm}
-							// 開き直したとき前回の選択（プリセット/速さ）を復元する。
-							// 場面別だった頃のデータしか無ければ、その最初の1つを引き継ぐ。
-							initial={
-								baseLayer.motionPreset ??
-								Object.values(baseLayer.motionPresetByScene ?? {})[0]
-							}
-							onApply={(cfg) => {
-								updateLayer(baseLayer.id, (l) => {
-									if (l.kind !== "shape") return l;
-									return {
-										...l,
-										modulators: resolveSceneModulators(cfg),
-										motionPreset: cfg,
-										// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
-										// engine 側の旧データ救済に拾われて上書きされてしまう。
-										modulatorsByScene: undefined,
-										motionPresetByScene: undefined,
-									};
-								});
-							}}
-							onClose={() => setMotionTarget(null)}
-						/>
-					);
-				})()}
+			{motionTarget && baseShapeLayer && (
+				<MvShapeMotionModal
+					baseLayer={baseShapeLayer}
+					bpm={song.bpm}
+					// 開き直したとき前回の選択（プリセット/速さ）を復元する。
+					// 場面別だった頃のデータしか無ければ、その最初の1つを引き継ぐ。
+					initial={
+						baseShapeLayer.motionPreset ??
+						Object.values(baseShapeLayer.motionPresetByScene ?? {})[0]
+					}
+					onApply={(cfg) => {
+						updateLayer(baseShapeLayer.id, (l) => {
+							if (l.kind !== "shape") return l;
+							return {
+								...l,
+								modulators: resolveSceneModulators(cfg),
+								motionPreset: cfg,
+								// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
+								// engine 側の旧データ救済に拾われて上書きされてしまう。
+								modulatorsByScene: undefined,
+								motionPresetByScene: undefined,
+							};
+						});
+					}}
+					onClose={() => setMotionTarget(null)}
+				/>
+			)}
 
-			{shapeFormPickerLayerId &&
-				(() => {
-					const targetLayer = manifest.layers.find(
-						(l): l is MvShapeLayer =>
-							l.kind === "shape" && l.id === shapeFormPickerLayerId,
-					);
-					if (!targetLayer) return null;
-					return (
-						<MvShapeFormPickerModal
-							value={targetLayer.form}
-							onSelect={(form) =>
-								updateLayer(targetLayer.id, (l) =>
-									l.kind === "shape" ? { ...l, form } : l,
-								)
-							}
-							onClose={() => setShapeFormPickerLayerId(null)}
-						/>
-					);
-				})()}
+			{transitionModalTarget && transitionModalLayer && (
+				<MvTransitionModal
+					layer={transitionModalLayer}
+					bpm={song.bpm}
+					initialTarget={transitionModalTarget.initialTab}
+					onApply={(entrance, exit) => {
+						updateLayer(transitionModalLayer.id, (l) => ({
+							...l,
+							entrance,
+							exit,
+						}));
+					}}
+					onClose={() => setTransitionModalTarget(null)}
+				/>
+			)}
+
+			{shapeFormPickerLayerId && shapeFormPickerLayer && (
+				<MvShapeFormPickerModal
+					value={shapeFormPickerLayer.form}
+					onSelect={(form) =>
+						updateLayer(shapeFormPickerLayer.id, (l) =>
+							l.kind === "shape" ? { ...l, form } : l,
+						)
+					}
+					onClose={() => setShapeFormPickerLayerId(null)}
+				/>
+			)}
 		</div>
 	);
 }
