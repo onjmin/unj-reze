@@ -59,14 +59,7 @@ const MELODY = [
 	...rep(2, N4, N1, N4, N2), // 0-7   静かな導入
 	...rep(2, N1, N2, N3, N6), // 8-15
 	...rep(2, N1, N2, N3, N6), // 16-23
-	N3,
-	N6,
-	N1_BURST,
-	N2,
-	N3,
-	N6,
-	N1,
-	N2, // 24-31 26小節目だけ密な連打
+	N3, N6, N1_BURST, N2, N3, N6, N1, N2, // 24-31 26小節目だけ密な連打
 	...rep(2, N3, N6, N3, N6), // 32-39 いちばん濃いところ
 	...rep(2, N4, N1, N4, N2), // 40-47
 	...rep(2, N1, N2, N3, N6), // 48-55
@@ -358,22 +351,48 @@ const LAYERS: MvLayer[] = [
 	},
 	// score帯(実データ連動)はそのまま活かしつつ、サビ直前だけ「点滅バー列」テンプレートを
 	// 薄く重ねて賑やかさを足す（テンプレートは装飾用途、実データはscoreのまま）。
-	...FIND("pulseBarRows")
-		.build({
-			...DEFAULT_TEMPLATE_PARAMS,
-			x: 320,
-			y: 300,
-			size: 90,
-			color: "#d4d4d8",
-			opacity: 0.35,
-			barsPerLoop: 1,
-			count: 4,
-		})
-		.map((l) => ({ ...l, sections: PRE_CHORUS, z: 3 })),
+	...FIND("pulseBarRows").build({
+		...DEFAULT_TEMPLATE_PARAMS,
+		x: 320,
+		y: 300,
+		size: 90,
+		color: "#d4d4d8",
+		opacity: 0.35,
+		barsPerLoop: 1,
+		count: 4,
+	}).map((l) => ({ ...l, sections: PRE_CHORUS, z: 3 })),
 
-	// ══ 中央 ══════════════════════
-	...FIND("sunburstSweep")
-		.build({
+	// ══ 中央。エフェクトテンプレートの組み合わせ ══════════════════════
+	...(() => {
+		const layers = [
+			...FIND("doubleFrame").build({
+				...DEFAULT_TEMPLATE_PARAMS,
+				x: 320,
+				y: 180,
+				size: 64,
+				color: "#f4f4f5",
+				barsPerLoop: MOTIF_BARS,
+			}),
+			...FIND("particleOrbit").build({
+				...DEFAULT_TEMPLATE_PARAMS,
+				x: 232,
+				y: 180,
+				size: 30,
+				color: "#e4e4e7",
+				barsPerLoop: MOTIF_BARS,
+				count: 8,
+			}),
+			...FIND("particleOrbit").build({
+				...DEFAULT_TEMPLATE_PARAMS,
+				x: 408,
+				y: 180,
+				size: 30,
+				color: "#e4e4e7",
+				barsPerLoop: MOTIF_BARS,
+				count: 8,
+			}),
+		].map((l, i) => ({ ...l, z: 19 + i }));
+		const burst = FIND("sunburstSweep").build({
 			...DEFAULT_TEMPLATE_PARAMS,
 			x: 320,
 			y: 180,
@@ -381,8 +400,11 @@ const LAYERS: MvLayer[] = [
 			color: "#f4f4f5",
 			barsPerLoop: SCENE_BARS,
 			count: 8,
-		})
-		.map((l) => ({ ...l, sections: PRE_CHORUS, z: 25 })),
+		}).map((l) => ({ ...l, sections: PRE_CHORUS, z: 25 }));
+		return [...layers, ...burst];
+	})(),
+
+
 
 	// ══ 左の提灯 ═══════════════════════════════════════════
 	// 提灯の下から伸びる細い柄。bar を傾けて1本の棒にする

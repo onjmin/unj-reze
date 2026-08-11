@@ -8,8 +8,6 @@ import {
 	Clapperboard,
 	Clipboard,
 	Copy,
-	Eye,
-	EyeOff,
 	Hash,
 	History,
 	Image as ImageIcon,
@@ -701,35 +699,6 @@ export default function MvMaker({
 	const [showHistory, setShowHistory] = useState(false);
 	const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
 	const [song, setSong] = useState<MvSong>(EMPTY_SONG);
-	/**
-	 * 編集中プレビューだけで隠すレイヤー（保存データには含めない）。
-	 * 他のレイヤーの下に隠れて選びづらい／重なって見づらいときに、一時的に
-	 * 引っ込めて作業しやすくするための編集補助。本編の見え方(sections/opacity)
-	 * とは無関係なので、書き出しや投稿には一切影響しない。
-	 */
-	const [editorHiddenLayerIds, setEditorHiddenLayerIds] = useState<
-		Set<string>
-	>(new Set());
-	const toggleEditorHidden = useCallback((id: string) => {
-		setEditorHiddenLayerIds((prev) => {
-			const next = new Set(prev);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			return next;
-		});
-	}, []);
-	const previewManifest = useMemo(
-		() =>
-			editorHiddenLayerIds.size === 0
-				? manifest
-				: {
-						...manifest,
-						layers: manifest.layers.filter(
-							(l) => !editorHiddenLayerIds.has(l.id),
-						),
-					},
-		[manifest, editorHiddenLayerIds],
-	);
 
 	const trackNoteCounts = useMemo(() => {
 		const map: Record<number, number> = {};
@@ -1293,12 +1262,6 @@ export default function MvMaker({
 	const removeLayer = (id: string) => {
 		update((m) => ({ ...m, layers: m.layers.filter((l) => l.id !== id) }));
 		if (selectedLayerId === id) setSelectedLayerId(null);
-		setEditorHiddenLayerIds((prev) => {
-			if (!prev.has(id)) return prev;
-			const next = new Set(prev);
-			next.delete(id);
-			return next;
-		});
 	};
 
 	/** 選択中レイヤーと同じ設定のまま、その直下（表示順で1つ後ろ）に複製する。 */
@@ -1744,31 +1707,29 @@ export default function MvMaker({
 							className="h-12 w-12 rounded border border-gray-700 object-contain"
 						/>
 					)}
-					<div className="grid grid-cols-2 gap-2">
-						<NumField
-							label="X"
-							value={layer.x}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="Y"
-							value={layer.y}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="拡大率"
-							value={layer.scale}
-							min={0.1}
-							step={0.5}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, scale: v }) as MvLayer)
-							}
-						/>
-					</div>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="拡大率"
+						value={layer.scale}
+						min={0.1}
+						step={0.5}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, scale: v }) as MvLayer)
+						}
+					/>
 					<NumField
 						label="🚶 歩行グラのコマ送り速度倍率"
 						value={mvWalkSpeed(manifest)}
@@ -1937,30 +1898,28 @@ export default function MvMaker({
 						}
 						className={`${INPUT_CLASS} h-16 resize-none`}
 					/>
-					<div className="grid grid-cols-2 gap-2">
-						<NumField
-							label="X"
-							value={layer.x}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="Y"
-							value={layer.y}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="文字サイズ"
-							value={layer.size}
-							min={6}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
-							}
-						/>
-					</div>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="文字サイズ"
+						value={layer.size}
+						min={6}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
+						}
+					/>
 					<ColorField
 						label="文字色"
 						value={layer.color}
@@ -1968,22 +1927,20 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
 						}
 					/>
-					<div className="grid grid-cols-2 gap-2">
-						<CheckField
-							label="縦書き"
-							checked={layer.vertical}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, vertical: v }) as MvLayer)
-							}
-						/>
-						<CheckField
-							label="太字"
-							checked={!!layer.bold}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, bold: v }) as MvLayer)
-							}
-						/>
-					</div>
+					<CheckField
+						label="縦書き"
+						checked={layer.vertical}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, vertical: v }) as MvLayer)
+						}
+					/>
+					<CheckField
+						label="太字"
+						checked={!!layer.bold}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, bold: v }) as MvLayer)
+						}
+					/>
 				</>
 			)}
 
@@ -2007,54 +1964,52 @@ export default function MvMaker({
 							})
 						}
 					/>
-					<div className="grid grid-cols-2 gap-2">
-						<NumField
-							label="X"
-							value={layer.rect.x}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "visualizer"
-										? { ...l, rect: { ...l.rect, x: v } }
-										: l,
-								)
-							}
-						/>
-						<NumField
-							label="Y"
-							value={layer.rect.y}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "visualizer"
-										? { ...l, rect: { ...l.rect, y: v } }
-										: l,
-								)
-							}
-						/>
-						<NumField
-							label="幅"
-							value={layer.rect.w}
-							min={8}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "visualizer"
-										? { ...l, rect: { ...l.rect, w: v } }
-										: l,
-								)
-							}
-						/>
-						<NumField
-							label="高さ"
-							value={layer.rect.h}
-							min={8}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "visualizer"
-										? { ...l, rect: { ...l.rect, h: v } }
-										: l,
-								)
-							}
-						/>
-					</div>
+					<NumField
+						label="X"
+						value={layer.rect.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "visualizer"
+									? { ...l, rect: { ...l.rect, x: v } }
+									: l,
+							)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.rect.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "visualizer"
+									? { ...l, rect: { ...l.rect, y: v } }
+									: l,
+							)
+						}
+					/>
+					<NumField
+						label="幅"
+						value={layer.rect.w}
+						min={8}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "visualizer"
+									? { ...l, rect: { ...l.rect, w: v } }
+									: l,
+							)
+						}
+					/>
+					<NumField
+						label="高さ"
+						value={layer.rect.h}
+						min={8}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "visualizer"
+									? { ...l, rect: { ...l.rect, h: v } }
+									: l,
+							)
+						}
+					/>
 					<NumField
 						label="細かさ"
 						value={layer.amount ?? 16}
@@ -2704,54 +2659,52 @@ export default function MvMaker({
 					/>
 					{(layer.count ?? 1) > 1 && (
 						<Details label="1個ごとのずらし方">
-							<div className="grid grid-cols-2 gap-2">
-								<NumField
-									label="大きさの差"
-									value={layer.spread ?? 0}
-									onChange={(v) =>
-										updateLayer(layer.id, (l) => ({ ...l, spread: v }) as MvLayer)
-									}
-								/>
-								<NumField
-									label="回転の差"
-									value={layer.spin ?? 0}
-									onChange={(v) =>
-										updateLayer(layer.id, (l) => ({ ...l, spin: v }) as MvLayer)
-									}
-								/>
-								<NumField
-									label="横のずれ"
-									value={layer.offsetX ?? 0}
-									onChange={(v) =>
-										updateLayer(
-											layer.id,
-											(l) => ({ ...l, offsetX: v }) as MvLayer,
-										)
-									}
-								/>
-								<NumField
-									label="縦のずれ"
-									value={layer.offsetY ?? 0}
-									onChange={(v) =>
-										updateLayer(
-											layer.id,
-											(l) => ({ ...l, offsetY: v }) as MvLayer,
-										)
-									}
-								/>
-								<NumField
-									label="反応の遅れ"
-									value={layer.stagger ?? 0}
-									min={0}
-									step={4}
-									onChange={(v) =>
-										updateLayer(
-											layer.id,
-											(l) => ({ ...l, stagger: v }) as MvLayer,
-										)
-									}
-								/>
-							</div>
+							<NumField
+								label="大きさの差"
+								value={layer.spread ?? 0}
+								onChange={(v) =>
+									updateLayer(layer.id, (l) => ({ ...l, spread: v }) as MvLayer)
+								}
+							/>
+							<NumField
+								label="回転の差"
+								value={layer.spin ?? 0}
+								onChange={(v) =>
+									updateLayer(layer.id, (l) => ({ ...l, spin: v }) as MvLayer)
+								}
+							/>
+							<NumField
+								label="横のずれ"
+								value={layer.offsetX ?? 0}
+								onChange={(v) =>
+									updateLayer(
+										layer.id,
+										(l) => ({ ...l, offsetX: v }) as MvLayer,
+									)
+								}
+							/>
+							<NumField
+								label="縦のずれ"
+								value={layer.offsetY ?? 0}
+								onChange={(v) =>
+									updateLayer(
+										layer.id,
+										(l) => ({ ...l, offsetY: v }) as MvLayer,
+									)
+								}
+							/>
+							<NumField
+								label="反応の遅れ"
+								value={layer.stagger ?? 0}
+								min={0}
+								step={4}
+								onChange={(v) =>
+									updateLayer(
+										layer.id,
+										(l) => ({ ...l, stagger: v }) as MvLayer,
+									)
+								}
+							/>
 							<Hint>
 								「反応の遅れ」を入れると、端から順に反応が伝わる波のような動きになります。
 							</Hint>
@@ -2856,27 +2809,25 @@ export default function MvMaker({
 							))}
 						</div>
 					)}
-					<div className="grid grid-cols-2 gap-2">
-						<NumField
-							label="強さ"
-							value={layer.amount}
-							min={0}
-							max={1}
-							step={0.05}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, amount: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="長さ（拍）"
-							value={layer.decayBeats ?? 1}
-							min={0.05}
-							step={0.05}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, decayBeats: v }) as MvLayer)
-							}
-						/>
-					</div>
+					<NumField
+						label="強さ"
+						value={layer.amount}
+						min={0}
+						max={1}
+						step={0.05}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, amount: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="長さ（拍）"
+						value={layer.decayBeats ?? 1}
+						min={0.05}
+						step={0.05}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, decayBeats: v }) as MvLayer)
+						}
+					/>
 					{layer.style !== "invert" && (
 						<ColorField
 							label="色"
@@ -2937,30 +2888,28 @@ export default function MvMaker({
 							)
 						}
 					/>
-					<div className="grid grid-cols-2 gap-2">
-						<NumField
-							label="X"
-							value={layer.x}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="Y"
-							value={layer.y}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
-							}
-						/>
-						<NumField
-							label="文字サイズ"
-							value={layer.size}
-							min={6}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
-							}
-						/>
-					</div>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="文字サイズ"
+						value={layer.size}
+						min={6}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
+						}
+					/>
 					<ColorField
 						label="文字色"
 						value={layer.color}
@@ -2982,46 +2931,44 @@ export default function MvMaker({
 
 			{layer.kind === "chordBar" && (
 				<>
-					<div className="grid grid-cols-2 gap-2">
-						<NumField
-							label="X"
-							value={layer.rect.x}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "chordBar" ? { ...l, rect: { ...l.rect, x: v } } : l,
-								)
-							}
-						/>
-						<NumField
-							label="Y"
-							value={layer.rect.y}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "chordBar" ? { ...l, rect: { ...l.rect, y: v } } : l,
-								)
-							}
-						/>
-						<NumField
-							label="幅"
-							value={layer.rect.w}
-							min={8}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "chordBar" ? { ...l, rect: { ...l.rect, w: v } } : l,
-								)
-							}
-						/>
-						<NumField
-							label="高さ"
-							value={layer.rect.h}
-							min={8}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) =>
-									l.kind === "chordBar" ? { ...l, rect: { ...l.rect, h: v } } : l,
-								)
-							}
-						/>
-					</div>
+					<NumField
+						label="X"
+						value={layer.rect.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "chordBar" ? { ...l, rect: { ...l.rect, x: v } } : l,
+							)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.rect.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "chordBar" ? { ...l, rect: { ...l.rect, y: v } } : l,
+							)
+						}
+					/>
+					<NumField
+						label="幅"
+						value={layer.rect.w}
+						min={8}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "chordBar" ? { ...l, rect: { ...l.rect, w: v } } : l,
+							)
+						}
+					/>
+					<NumField
+						label="高さ"
+						value={layer.rect.h}
+						min={8}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "chordBar" ? { ...l, rect: { ...l.rect, h: v } } : l,
+							)
+						}
+					/>
 					<NumField
 						label="文字サイズ"
 						value={layer.size}
@@ -3178,25 +3125,23 @@ export default function MvMaker({
 				</>
 			)}
 
-			<div className="grid grid-cols-2 gap-2">
-				<NumField
-					label="重なり順"
-					value={layer.z ?? 0}
-					onChange={(v) =>
-						updateLayer(layer.id, (l) => ({ ...l, z: v }) as MvLayer)
-					}
-				/>
-				<NumField
-					label="不透明度"
-					value={layer.opacity ?? 1}
-					min={0}
-					max={1}
-					step={0.05}
-					onChange={(v) =>
-						updateLayer(layer.id, (l) => ({ ...l, opacity: v }) as MvLayer)
-					}
-				/>
-			</div>
+			<NumField
+				label="重なり順"
+				value={layer.z ?? 0}
+				onChange={(v) =>
+					updateLayer(layer.id, (l) => ({ ...l, z: v }) as MvLayer)
+				}
+			/>
+			<NumField
+				label="不透明度"
+				value={layer.opacity ?? 1}
+				min={0}
+				max={1}
+				step={0.05}
+				onChange={(v) =>
+					updateLayer(layer.id, (l) => ({ ...l, opacity: v }) as MvLayer)
+				}
+			/>
 
 			<p className="pt-1 text-[10px] font-bold text-gray-400">出す場面</p>
 			<p className="text-[10px] text-gray-500">
@@ -3327,13 +3272,12 @@ export default function MvMaker({
 				{manifest.layers.map((layer, index) => {
 					const Icon = LAYER_ICON[layer.kind];
 					const active = layer.id === selectedLayerId;
-					const editorHidden = editorHiddenLayerIds.has(layer.id);
 					return (
 						<div
 							key={layer.id}
 							onMouseEnter={() => setHoveredLayerId(layer.id)}
 							onMouseLeave={() => setHoveredLayerId(null)}
-							className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"} ${editorHidden ? "opacity-50" : ""}`}
+							className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"}`}
 						>
 							<div className="flex items-center gap-2 px-2 py-1.5">
 								<Icon size={13} className="shrink-0 text-blue-400" />
@@ -3362,17 +3306,6 @@ export default function MvMaker({
 											のみ
 										</span>
 									)}
-								</button>
-								<button
-									onClick={() => toggleEditorHidden(layer.id)}
-									title={
-										editorHidden
-											? "編集プレビューに表示する（本編には影響しません）"
-											: "編集プレビューだけ一時的に隠す（本編には影響しません）"
-									}
-									className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors ${editorHidden ? "bg-gray-700/60 text-gray-500 hover:text-gray-300" : "bg-gray-700 text-gray-200 hover:bg-gray-600"}`}
-								>
-									{editorHidden ? <EyeOff size={16} /> : <Eye size={16} />}
 								</button>
 								<div className="flex flex-col gap-0.5">
 									<button
@@ -3849,39 +3782,37 @@ export default function MvMaker({
 								<p className="pt-1 text-[10px] font-bold text-gray-400">
 									見た目
 								</p>
-								<div className="grid grid-cols-2 gap-2">
-									<NumField
-										label="X"
-										value={lyricsLayer.x}
-										onChange={(v) =>
-											updateLayer(
-												lyricsLayer.id,
-												(l) => ({ ...l, x: v }) as MvLayer,
-											)
-										}
-									/>
-									<NumField
-										label="Y"
-										value={lyricsLayer.y}
-										onChange={(v) =>
-											updateLayer(
-												lyricsLayer.id,
-												(l) => ({ ...l, y: v }) as MvLayer,
-											)
-										}
-									/>
-									<NumField
-										label="文字サイズ"
-										value={lyricsLayer.size}
-										min={8}
-										onChange={(v) =>
-											updateLayer(
-												lyricsLayer.id,
-												(l) => ({ ...l, size: v }) as MvLayer,
-											)
-										}
-									/>
-								</div>
+								<NumField
+									label="X"
+									value={lyricsLayer.x}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, x: v }) as MvLayer,
+										)
+									}
+								/>
+								<NumField
+									label="Y"
+									value={lyricsLayer.y}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, y: v }) as MvLayer,
+										)
+									}
+								/>
+								<NumField
+									label="文字サイズ"
+									value={lyricsLayer.size}
+									min={8}
+									onChange={(v) =>
+										updateLayer(
+											lyricsLayer.id,
+											(l) => ({ ...l, size: v }) as MvLayer,
+										)
+									}
+								/>
 								<ColorField
 									label="文字色"
 									value={lyricsLayer.color}
@@ -4538,7 +4469,7 @@ export default function MvMaker({
 				<div className="mx-auto" style={{ maxWidth: MV_W }}>
 					<MvPlayer
 						ref={playerRef}
-						manifest={previewManifest}
+						manifest={manifest}
 						selectedLayerId={selectedLayerId}
 						hoveredLayerId={hoveredLayerId}
 					/>
