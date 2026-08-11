@@ -7,7 +7,6 @@ import {
 	MV_STEPS_PER_BEAT,
 	MV_W,
 	type MvManifest,
-	type MvSection,
 	type MvShapeLayer,
 } from "@/lib/mv-config";
 import { EMPTY_SONG, drawMvFrame, type MvFrameState } from "@/lib/mv-engine";
@@ -16,6 +15,7 @@ import {
 	type MvSceneMotionConfig,
 	DEFAULT_SCENE_MOTION,
 	MV_BEAT_SYNC_SPEED_OPTIONS,
+	MV_MOTION_PHRASE_BARS,
 	MV_MOTION_PRESETS,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
@@ -94,76 +94,36 @@ function MotionLivePreview({
 
 interface MvShapeMotionModalProps {
 	baseLayer: MvShapeLayer;
-	sections: MvSection[];
-	/** その場面が何小節あるか（`速さ`のフレーズ長をこの範囲内に収めるため）。 */
-	sceneBars: (sectionId: string) => number;
 	/** 実際の曲のBPM。プレビューの体感速度を本編と合わせるために使う。 */
 	bpm?: number;
-	initial?: Record<string, MvSceneMotionConfig>;
-	/** 開いた直後に選んでおく場面タブ。省略時は sections の先頭。 */
-	initialSceneId?: string;
-	onApply: (perScene: Record<string, MvSceneMotionConfig>) => void;
+	initial?: MvSceneMotionConfig;
+	onApply: (cfg: MvSceneMotionConfig) => void;
 	onClose: () => void;
 }
 
 /**
  * 「真ん中の図形の動き方設定」モーダル。
- * - 場面タブで切り替えながら、場面ごとに別々の動きを設定できる。
+ *
+ * 動きは**曲全体で1つ**。以前は場面タブで小節ごとに違う動きを付けられたが、
+ * 「設定したのに一部の小節でしか効かない」ようにしか見えず、作る側にも
+ * 見る側にも分かりにくかったのでやめた。
+ *
  * - プリセットはアイコングリッドから選ぶ（モバイルは2列）。
  * - 上部のライブプレビューが選んだ内容を即座に反映する。
  * - 「独自の動きを組み合わせる」でプリセットの上に移動/回転/拡大縮小を追加できる。
  */
 export default function MvShapeMotionModal({
 	baseLayer,
-	sections,
-	sceneBars,
 	bpm,
 	initial,
-	initialSceneId,
 	onApply,
 	onClose,
 }: MvShapeMotionModalProps) {
-	const sceneList = sections.length > 0 ? sections : [
-		{ id: "__all__", label: "全体", startBar: 0 } as MvSection,
-	];
-	const [activeSceneId, setActiveSceneId] = useState(
-		(initialSceneId && sceneList.some((s) => s.id === initialSceneId)
-			? initialSceneId
-			: sceneList[0]?.id) ?? "__all__",
-	);
-	const [perScene, setPerScene] = useState<Record<string, MvSceneMotionConfig>>(
-		() =>
-			Object.fromEntries(
-				sceneList.map((s) => [s.id, initial?.[s.id] ?? DEFAULT_SCENE_MOTION]),
-			),
+	const [cfg, setCfg] = useState<MvSceneMotionConfig>(
+		() => initial ?? DEFAULT_SCENE_MOTION,
 	);
 
-	// 実際に触った場面だけを保存対象にする。sceneList全件ぶんの既定値を
-	// 常に適用してしまうと、「この場面だけ変えたい」つもりで開いても、
-	// 一度もタブを開いていない他の場面まで DEFAULT_SCENE_MOTION（ビート同期）で
-	// 上書きしてしまい、既存の動きが消える事故になる。
-	const [touchedScenes, setTouchedScenes] = useState<Set<string>>(
-		() => new Set(Object.keys(initial ?? {})),
-	);
-
-	/**
-	 * 「触った場面だけ保存」だけだと、ふつうに動きを付けたいだけの人が
-	 * 開いた1場面ぶんしか設定できず、「特定の小節でしか動かない」状態になる。
-	 * 適用範囲を明示的に選ばせて、既定は状況で振り分ける:
-	 * - まだ場面ごとの動きを持っていない（初めて設定する）→ 全場面。ふつうはこれが期待される。
-	 * - すでに場面ごとに作り込んでいる → この場面だけ。作った動きを消さない。
-	 */
-	const [applyAll, setApplyAll] = useState(
-		() => Object.keys(initial ?? {}).length === 0,
-	);
-	const cfg = perScene[activeSceneId] ?? DEFAULT_SCENE_MOTION;
-	const setCfg = (next: MvSceneMotionConfig) => {
-		setPerScene((p) => ({ ...p, [activeSceneId]: next }));
-		setTouchedScenes((s) => new Set(s).add(activeSceneId));
-	};
-
-	const bars = sceneBars(activeSceneId);
-	const modulators = resolveSceneModulators(cfg, bars);
+	const modulators = resolveSceneModulators(cfg, MV_MOTION_PHRASE_BARS);
 
 	const setCustom = (patch: Partial<MvMotionCustomToggle>) =>
 		setCfg({ ...cfg, custom: { ...cfg.custom, ...patch } });
@@ -193,66 +153,13 @@ export default function MvShapeMotionModal({
 						bpm={bpm}
 					/>
 					<div className="rounded border border-blue-500/30 bg-blue-500/10 p-2 text-[10px] text-gray-300 leading-relaxed">
-						画面中央の図形（四角・円・十字など）が曲の拍や場面に合わせて動くアニメーション効果です。
-						上のプレビューで動きを確認しながら設定できます。
+						図形（四角・円・十字など）が曲の拍に合わせて動くアニメーション効果です。
+						ここで決めた動きは<b className="text-blue-200">曲の最初から最後まで</b>効きます。
+						どの小節に図形を出すかは「レイヤー」タブのタイムラインで決めてください。
 					</div>
 				</div>
 
 				<div className="flex-1 space-y-4 overflow-y-auto p-3">
-					{/* 適用範囲。ここを選ばせないと「開いた場面でしか動かない」事故になる */}
-					<div>
-						<p className="mb-1 text-[10px] font-bold text-gray-300">どこに適用するか</p>
-						<div className="grid grid-cols-2 gap-1.5">
-							<button
-								onClick={() => setApplyAll(true)}
-								className={`rounded-lg border px-2 py-2 text-[11px] ${
-									applyAll
-										? "border-blue-500 bg-blue-500/20 font-bold text-blue-200"
-										: "border-gray-700 bg-gray-800/60 text-gray-300 hover:bg-gray-800"
-								}`}
-							>
-								曲の最初から最後まで
-							</button>
-							<button
-								onClick={() => setApplyAll(false)}
-								className={`rounded-lg border px-2 py-2 text-[11px] ${
-									applyAll
-										? "border-gray-700 bg-gray-800/60 text-gray-300 hover:bg-gray-800"
-										: "border-blue-500 bg-blue-500/20 font-bold text-blue-200"
-								}`}
-							>
-								選んだ場面だけ
-							</button>
-						</div>
-						<p className="mt-1 text-[10px] leading-relaxed text-gray-500">
-							{applyAll
-								? "いま選んでいる動きを、この図形が出るすべての場面に同じように適用します。"
-								: "下のタブで選んだ場面だけに適用します。他の場面の動きはそのまま残ります。"}
-						</p>
-					</div>
-
-					{/* 場面選択タブ */}
-					<div>
-						<p className="mb-1 text-[10px] font-bold text-gray-300">
-							{applyAll ? "動きを確認する場面" : "設定対象の場面"}
-						</p>
-						<div className="flex gap-1.5 overflow-x-auto pb-1">
-							{sceneList.map((s) => (
-								<button
-									key={s.id}
-									onClick={() => setActiveSceneId(s.id)}
-									className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] whitespace-nowrap ${
-										activeSceneId === s.id
-											? "bg-blue-600 text-white font-bold"
-											: "bg-gray-800 text-gray-300 hover:bg-gray-700"
-									}`}
-								>
-									{s.label}
-								</button>
-							))}
-						</div>
-					</div>
-
 					{/* プリセットグリッド */}
 					<div>
 						<p className="mb-1 text-[10px] font-bold text-gray-300">動きのプリセットを選択</p>
@@ -402,17 +309,7 @@ export default function MvShapeMotionModal({
 					</button>
 					<button
 						onClick={() => {
-							// 全場面へ適用するときは、いま選んでいる場面の設定を全場面へ配る。
-							// 「触った場面だけ」を配ると他の場面は既定値のまま残り、
-							// 結局その場面でしか動かないという元のバグに戻ってしまう。
-							const next = applyAll
-								? Object.fromEntries(sceneList.map((s) => [s.id, cfg]))
-								: Object.fromEntries(
-										Object.entries(perScene).filter(([id]) =>
-											touchedScenes.has(id),
-										),
-									);
-							onApply(next);
+							onApply(cfg);
 							onClose();
 						}}
 						className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white"

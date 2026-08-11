@@ -770,11 +770,37 @@ export function parseLyricsBulkGroups(
 }
 
 /**
- * 縦書き歌詞の積み上がる向き。
- * - rightToLeft : 右端を固定して、新しい行が左へ足されていく（参考動画3本ともこれ）
- * - leftToRight : `x` に最新行を置き、古い行が右へ流れていく
+ * 歌詞の行が流れていく向き。1行目は必ず開始位置(x,y)に出て、
+ * 2行目以降がこの向きへ足されていく（＝開始位置から見てどちら側へ伸びるか）。
+ *
+ * 縦書きは left / right、横書きは up / down を使う。
+ * 旧データの 'rightToLeft' / 'leftToRight' も読めるようにしてある（resolveLyricStack）。
  */
-export type MvLyricStack = "rightToLeft" | "leftToRight";
+export type MvLyricStack = "left" | "right" | "up" | "down";
+
+/** 旧データに入っている値。読むときだけ受け付けて新しい向きへ寄せる。 */
+type LegacyLyricStack = "rightToLeft" | "leftToRight";
+
+export const MV_LYRIC_STACK_LABELS: Record<MvLyricStack, string> = {
+	left: "左へ流れる",
+	right: "右へ流れる",
+	up: "上へ積み上がる",
+	down: "下へ積み下がる",
+};
+
+/**
+ * 保存された向きを、そのレイヤーの書字方向で使える値へ正規化する。
+ *
+ * 縦書きに 'up' のような噛み合わない値が入っていても破綻させない。
+ * 既定は縦書き＝左（参考動画はどれも右端固定で左へ伸びる）、横書き＝上。
+ */
+export function resolveLyricStack(layer: MvLyricsLayer): MvLyricStack {
+	const raw = layer.stack as MvLyricStack | LegacyLyricStack | undefined;
+	const v =
+		raw === "rightToLeft" ? "left" : raw === "leftToRight" ? "right" : raw;
+	if (layer.vertical) return v === "right" ? "right" : "left";
+	return v === "down" ? "down" : "up";
+}
 
 export interface MvLyricsLayer extends MvLayerBase {
 	kind: "lyrics";
@@ -956,22 +982,43 @@ export interface MvShapeLayer extends MvLayerBase {
 		| { paths: string[]; beats: number; resetEveryBars?: number }
 		| { paths: string[]; advance: "onset"; track?: number };
 	/**
-	 * 場面ごとに動きだけを変えたいときの上書き（キーは MvSection.id）。
-	 * 図形そのもの(x/y/size/color/formなど)は場面をまたいでも常に同じ1つのレイヤーで、
-	 * 動き(modulators)だけを場面ごとに差し替える。
+	 * @deprecated 場面ごとに動きを変える仕組みは廃止した。
 	 *
-	 * 以前は「動き方設定」を適用するたびに場面ごと別レイヤーへ複製していたが、
-	 * そうすると x/y/color のような見た目の編集が複製後の片方にしか効かなくなり、
-	 * 「同じ図形のはずなのに一部の場面にだけ反映されない」バグになっていた。
-	 * ここに場面idキーで動きだけ持たせることで、レイヤー自体は複製しない。
-	 * 該当場面のキーが無ければ `modulators`（既定の動き）がそのまま使われる。
+	 * 「同じ図形なのに小節によって動きが違う」は作り手にも見る人にも分かりにくく、
+	 * 設定した動きが一部の小節でしか効かないように見える事故の温床だった。
+	 * 動きはレイヤーの持ち物＝曲全体で1つ（`modulators`）に統一している。
+	 *
+	 * 保存済みデータを読むためだけに残してある。書き込んではいけない。
+	 * 読むときは `resolveShapeModulators()` を通すこと。
 	 */
 	modulatorsByScene?: Record<string, MvModulator[]>;
-	/** motionByScene の"入力側"版（モーダル復元用）。キーは modulatorsByScene と同じ。 */
+	/** @deprecated modulatorsByScene と同じ理由で廃止。読み取り専用。 */
 	motionPresetByScene?: Record<string, MvShapeMotionPreset>;
+	/** 「図形の動き方設定」モーダルの選択内容（復元用）。曲全体で1つ。 */
+	motionPreset?: MvShapeMotionPreset;
 }
 
-/** 「図形の動き方設定」モーダルの選択内容そのもの（1場面ぶん）。 */
+/**
+ * 図形に効かせる動き。曲全体で1つ。
+ *
+ * `modulators` が空でも、廃止した場面別データ(modulatorsByScene)しか持たない
+ * 古い保存データがあるので、その場合は最初に見つかった場面ぶんを曲全体の動きとして拾う。
+ * こうしないと、以前に作ったMVの図形が読み込んだ瞬間に全部止まってしまう。
+ */
+export function resolveShapeModulators(
+	layer: MvShapeLayer,
+): MvModulator[] | undefined {
+	if (layer.modulators && layer.modulators.length > 0) return layer.modulators;
+	const legacy = layer.modulatorsByScene;
+	if (legacy) {
+		for (const mods of Object.values(legacy)) {
+			if (mods && mods.length > 0) return mods;
+		}
+	}
+	return layer.modulators;
+}
+
+/** 「図形の動き方設定」モーダルの選択内容そのもの。 */
 export interface MvShapeMotionPreset {
 	presetId: string;
 	/** presetId==='beatSync' のときの周期の速さ（拍数/周期）。既定1。0.5で2倍速、0.25で4倍速。 */

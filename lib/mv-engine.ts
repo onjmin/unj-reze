@@ -56,7 +56,9 @@ import {
 	type MvVisualizerLayer,
 	mvEntranceDistance,
 	mvWalkSpeed,
+	resolveLyricStack,
 	resolveSceneStage,
+	resolveShapeModulators,
 	sectionAtBar,
 } from "./mv-config";
 import {
@@ -2143,6 +2145,7 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 	if (activeIdx.length === 0) return;
 	const shown = activeIdx.reverse();
 	const size = layer.size;
+	const stack = resolveLyricStack(layer);
 
 	ctx.textBaseline = "middle";
 	ctx.font = `bold ${size}px ${getMvFontStack(d.manifest)}`;
@@ -2164,6 +2167,10 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 		ctx.shadowColor = "rgba(0,0,0,0.85)";
 		ctx.shadowBlur = size * 0.4;
 
+		// このサイクルの何行目か（0＝1行目）。行が増えても depth と shown.length が
+		// 一緒に増えるので、いちど置いた行はその場から動かない。
+		const order = shown.length - 1 - depth;
+
 		if (layer.vertical) {
 			const textToDraw =
 				layer.typing && depth === 0
@@ -2172,13 +2179,10 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 			const h = textToDraw.length * size * 1.08;
 			const [ax, ay] = anchorOffset(layer.anchor, size, h);
 			const step = size * 1.7;
-			// rightToLeft: 右端(layer.x)を固定して、新しい行ほど左へ置く。
-			// 参考動画（次日朝夢 / x0o0x_ / _）はどれもこの積み方で、
-			// 行が増えても既に出ている列は動かない。
-			const x =
-				(layer.stack ?? "rightToLeft") === "rightToLeft"
-					? layer.x + ax - (shown.length - 1 - depth) * step
-					: layer.x + ax + depth * step;
+			// 1行目を開始位置(layer.x)に置き、2行目以降を指定の向きへ足していく。
+			// 参考動画（次日朝夢 / x0o0x_ / _）はどれも左へ伸ばす積み方。
+			// 画面の左寄りに置くなら 'right' にしないと画面外へ出ていく。
+			const x = layer.x + ax + (stack === "left" ? -order : order) * step;
 			let y = layer.y + ay;
 			for (const ch of textToDraw) {
 				ctx.fillText(ch, x, y);
@@ -2191,8 +2195,11 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 					: line.text;
 			const w = ctx.measureText(textToDraw).width;
 			const [ax, ay] = anchorOffset(layer.anchor, w, size);
+			const lineH = size * 1.35;
 			const lx = layer.x + ax;
-			const ly = layer.y + ay - depth * size * 1.35;
+			// 横書きも同じ考え方。上へ積むと画面上端から出るので、
+			// 上寄りに置くなら 'down' を選べるようにしてある。
+			const ly = layer.y + ay + (stack === "up" ? -order : order) * lineH;
 			drawLyricMarks(d, line, textToDraw, lx, ly, size, alpha);
 			ctx.fillStyle = layer.color;
 			ctx.fillText(textToDraw, lx, ly);
@@ -2341,11 +2348,9 @@ function iconCycleIndex(
 
 function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 	const { ctx } = d;
-	// 場面ごとの動きの上書きがあればそちらを使う（見た目(x/y/color/formなど)は
-	// レイヤー本体を共有したまま、動きだけを場面ごとに差し替えられるようにするため）。
-	const mods =
-		(d.sectionId ? layer.modulatorsByScene?.[d.sectionId] : undefined) ??
-		layer.modulators;
+	// 動きはレイヤーの持ち物＝曲全体で1つ。場面ごとに差し替える仕組みは廃止した
+	// （古い保存データの救済だけ resolveShapeModulators が面倒を見る）。
+	const mods = resolveShapeModulators(layer);
 	const stagger = layer.stagger ?? 0;
 
 	// 個数だけは先に確定させる（1個ごとの遅延を掛ける前の値で数える）

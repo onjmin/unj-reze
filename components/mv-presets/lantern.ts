@@ -545,7 +545,7 @@ const LAYERS: MvLayer[] = [
 		trackId: 3,
 		x: 618,
 		y: 40,
-		stack: "rightToLeft",
+		stack: "left",
 		anchor: "topLeft",
 		size: 13,
 		color: "#e5e7eb",

@@ -56,6 +56,7 @@ import {
 	MV_EFFECT_USES_COLOR,
 	MV_ENTER_FROM_LABELS,
 	MV_H,
+	MV_LYRIC_STACK_LABELS,
 	MV_MOD_OP_LABELS,
 	MV_MOD_SOURCE_LABELS,
 	MV_MOD_TARGET_LABELS,
@@ -84,6 +85,7 @@ import {
 	type MvImageLayer,
 	type MvLayer,
 	type MvLyricsLayer,
+	type MvLyricStack,
 	type MvManifest,
 	type MvModOp,
 	type MvModSource,
@@ -109,6 +111,7 @@ import {
 	mvUid,
 	mvWalkSpeed,
 	parseLyricsBulkGroups,
+	resolveLyricStack,
 } from "@/lib/mv-config";
 import type {
 	MvEffectTemplateDef,
@@ -122,12 +125,14 @@ import {
 } from "@/lib/mv-engine";
 import {
 	DEFAULT_SCENE_MOTION,
+	MV_MOTION_PHRASE_BARS,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
 import MvPlayer, { type MvPlayerHandle } from "./MvPlayer";
+import MvTimeline from "./MvTimeline";
 import MvShapeFormPickerModal, {
 	ShapeFormPreview as ShapeFormThumb,
 } from "./MvShapeFormPickerModal";
@@ -732,9 +737,9 @@ export default function MvMaker({
 	const [presetName, setPresetName] = useState<string | null>(null);
 	const [lyricsBulkText, setLyricsBulkText] = useState("");
 	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
-	const [motionTarget, setMotionTarget] = useState<
-		{ layerId: string; sectionId: string } | null
-	>(null);
+	const [motionTarget, setMotionTarget] = useState<{ layerId: string } | null>(
+		null,
+	);
 	const [shapeFormPickerLayerId, setShapeFormPickerLayerId] = useState<
 		string | null
 	>(null);
@@ -2416,22 +2421,12 @@ export default function MvMaker({
 							🎬 図形の動き（アニメーション）設定
 						</p>
 						<p className="text-[10px] text-gray-300 leading-relaxed">
-							真ん中の図形が曲の拍やパートに合わせて回転・脈動拡大・左右移動する動きを設定します。
+							この図形が曲の拍に合わせて回転・脈動拡大・左右移動する動きを設定します。
+							動きは曲の最初から最後まで効きます（出す小節はタイムラインで決めます）。
 						</p>
 						<button
 							type="button"
-							onClick={() =>
-								setMotionTarget({
-									layerId: layer.id,
-									// この図形が実際に出ている場面を優先する。常に先頭の場面（sections[0]）
-									// を選ぶと、その図形がそこに出ていない場合は動きを設定しても
-									// 「表示されている場面」には反映されず、設定が効かないように見えるバグになる。
-									sectionId:
-										layer.sections?.[0] ??
-										manifest.sections[0]?.id ??
-										"__all__",
-								})
-							}
+							onClick={() => setMotionTarget({ layerId: layer.id })}
 							className="flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-500 shadow-sm transition-colors"
 						>
 							<Clapperboard size={14} />
@@ -3392,6 +3387,31 @@ export default function MvMaker({
 				{manifest.layers.length === 0 && (
 					<p className="text-[10px] text-gray-500">レイヤーがありません。</p>
 				)}
+			</div>
+
+			{manifest.layers.length > 0 && (
+				<div className={SECTION_CLASS}>
+					<SectionTitle>
+						<Clapperboard size={12} className="mr-1 inline" />
+						タイムライン（どの小節で出すか）
+					</SectionTitle>
+					<MvTimeline
+						layers={manifest.layers}
+						sections={manifest.sections}
+						totalBars={song.totalBars}
+						labelOf={layerLabel}
+						kindLabelOf={layerKindLabel}
+						selectedLayerId={selectedLayerId}
+						onSelectLayer={setSelectedLayerId}
+						onChangeRange={(id, range) =>
+							updateLayer(id, (l) => ({ ...l, barRange: range }))
+						}
+						onSeekBar={(bar) => playerRef.current?.seekToBar(bar)}
+					/>
+				</div>
+			)}
+
+			<div className={SECTION_CLASS}>
 				{manifest.layers.map((layer, index) => {
 					const Icon = LAYER_ICON[layer.kind];
 					const active = layer.id === selectedLayerId;
@@ -3931,7 +3951,7 @@ export default function MvMaker({
 									見た目
 								</p>
 								<NumField
-									label="X"
+									label={`開始位置X（1行目の位置。画面の幅は ${MV_W}）`}
 									value={lyricsLayer.x}
 									onChange={(v) =>
 										updateLayer(
@@ -3941,7 +3961,7 @@ export default function MvMaker({
 									}
 								/>
 								<NumField
-									label="Y"
+									label={`開始位置Y（1行目の位置。画面の高さは ${MV_H}）`}
 									value={lyricsLayer.y}
 									onChange={(v) =>
 										updateLayer(
@@ -3981,6 +4001,54 @@ export default function MvMaker({
 										)
 									}
 								/>
+								{/*
+									2行目以降がどちらへ伸びるか。開始位置を画面の端に寄せたとき、
+									向きが逆だと積み上がった行がそのまま画面外へ出ていってしまうので、
+									開始位置とセットで選べるようにしてある。
+								*/}
+								{(() => {
+									const stack = resolveLyricStack(lyricsLayer);
+									const options = lyricsLayer.vertical
+										? (["left", "right"] as MvLyricStack[])
+										: (["up", "down"] as MvLyricStack[]);
+									// はみ出しそうな組み合わせは先に知らせる（気付けるのは再生後だと遅い）
+									const span =
+										lyricsLayer.size *
+										(lyricsLayer.vertical ? 1.7 : 1.35) *
+										lyricsLayer.afterimage;
+									const overflow =
+										stack === "left"
+											? lyricsLayer.x - span < 0
+											: stack === "right"
+												? lyricsLayer.x + span > MV_W
+												: stack === "up"
+													? lyricsLayer.y - span < 0
+													: lyricsLayer.y + span > MV_H;
+									return (
+										<>
+											<SelectField
+												label="行が流れる向き（2行目以降が伸びる方向）"
+												value={stack}
+												options={options.map((s) => ({
+													value: s,
+													label: MV_LYRIC_STACK_LABELS[s],
+												}))}
+												onChange={(v) =>
+													updateLayer(
+														lyricsLayer.id,
+														(l) => ({ ...l, stack: v }) as MvLayer,
+													)
+												}
+											/>
+											{overflow && (
+												<p className="rounded border border-amber-500/40 bg-amber-950/30 px-2 py-1.5 text-[10px] leading-relaxed text-amber-200">
+													この開始位置とこの向きだと、行が増えたときに画面の外へはみ出します。
+													逆向きにするか、開始位置を反対側へ寄せてください。
+												</p>
+											)}
+										</>
+									);
+								})()}
 								<label className="flex items-center gap-1.5 py-1">
 									<input
 										type="checkbox"
@@ -4382,7 +4450,7 @@ export default function MvMaker({
 
 									<Details label={`🎭 この場面で表示するレイヤーと動き (${manifest.layers.length}枚)`}>
 										<Hint>
-											チェックを入れたレイヤーがこの場面で画面に表示されます。「動きを編集」で場面ごとの移動アニメーションを設定できます。
+											チェックを入れたレイヤーがこの場面で画面に表示されます。「動きを編集」の動きは曲全体に効きます（場面ごとには変わりません）。
 										</Hint>
 										<div className="space-y-1.5 pt-1">
 											{manifest.layers.map((l) => {
@@ -4431,7 +4499,7 @@ export default function MvMaker({
 														<div className="flex items-center gap-1 shrink-0">
 															{l.kind === "shape" && (
 																<button
-																	onClick={() => setMotionTarget({ layerId: l.id, sectionId: s.id })}
+																	onClick={() => setMotionTarget({ layerId: l.id })}
 																	className="rounded bg-blue-600/30 border border-blue-500/40 px-2 py-1 text-[10px] font-medium text-blue-200 hover:bg-blue-600/40"
 																>
 																	🎬 動きを編集
@@ -4664,59 +4732,31 @@ export default function MvMaker({
 							l.kind === "shape" && l.id === motionTarget.layerId,
 					);
 					if (!baseLayer) return null;
-					// 図形が実際に出ている場面ぜんぶ（未指定＝全場面）を対象にする。
-					// 以前は「今開いた1場面だけ」を別レイヤーへ複製する方式だったため、
-					// 複製後に見た目(x/y/color/formなど)を直しても片方の場面にしか
-					// 反映されなくなるバグがあった。図形そのものは1つのレイヤーのまま共有し、
-					// 動き(modulators)だけを場面ごとに持たせる。
-					const layerSections =
-						baseLayer.sections && baseLayer.sections.length > 0
-							? manifest.sections.filter((s) =>
-									baseLayer.sections?.includes(s.id),
-								)
-							: manifest.sections;
-					if (layerSections.length === 0) return null;
-					const sceneBarsFor = (sectionId: string) => {
-						const section = manifest.sections.find(
-							(s) => s.id === sectionId,
-						);
-						if (!section) return 4;
-						const next = manifest.sections.find(
-							(s) => s.startBar > section.startBar,
-						);
-						return Math.max(
-							1,
-							(next?.startBar ?? song.totalBars ?? section.startBar + 8) -
-								section.startBar,
-						);
-					};
 					return (
 						<MvShapeMotionModal
 							baseLayer={baseLayer}
-							sections={layerSections}
-							sceneBars={sceneBarsFor}
 							bpm={song.bpm}
-							// モーダルを開き直したとき前回の選択（プリセット/速さ/手動調整）を
-							// 場面ごとに復元する。
-							initial={baseLayer.motionPresetByScene}
-							initialSceneId={motionTarget.sectionId}
-							onApply={(perScene) => {
+							// 開き直したとき前回の選択（プリセット/速さ/手動調整）を復元する。
+							// 場面別だった頃のデータしか無ければ、その最初の1つを引き継ぐ。
+							initial={
+								baseLayer.motionPreset ??
+								Object.values(baseLayer.motionPresetByScene ?? {})[0]
+							}
+							onApply={(cfg) => {
 								updateLayer(baseLayer.id, (l) => {
 									if (l.kind !== "shape") return l;
-									const modulatorsByScene = {
-										...(l.modulatorsByScene ?? {}),
-									};
-									const motionPresetByScene = {
-										...(l.motionPresetByScene ?? {}),
-									};
-									for (const [sceneId, cfg] of Object.entries(perScene)) {
-										modulatorsByScene[sceneId] = resolveSceneModulators(
+									return {
+										...l,
+										modulators: resolveSceneModulators(
 											cfg,
-											sceneBarsFor(sceneId),
-										);
-										motionPresetByScene[sceneId] = cfg;
-									}
-									return { ...l, modulatorsByScene, motionPresetByScene };
+											MV_MOTION_PHRASE_BARS,
+										),
+										motionPreset: cfg,
+										// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
+										// engine 側の旧データ救済に拾われて上書きされてしまう。
+										modulatorsByScene: undefined,
+										motionPresetByScene: undefined,
+									};
 								});
 							}}
 							onClose={() => setMotionTarget(null)}
