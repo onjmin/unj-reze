@@ -104,7 +104,7 @@ export default function Mmo3dEditorPanel({
 									}}
 									className={`px-2 py-1 rounded text-[10px] border transition flex items-center justify-center gap-1 truncate ${
 										pmxUrl === m.url
-											? "bg-purple-600 border-purple-400 text-white"
+											? "bg-purple-600 border-purple-400 text-white font-bold"
 											: "bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-600"
 									}`}
 									title={m.label}
@@ -130,7 +130,7 @@ export default function Mmo3dEditorPanel({
 								onClick={() => onVmdUrlChange?.("")}
 								className={`px-2 py-1 rounded text-[10px] border transition ${
 									!vmdUrl
-										? "bg-purple-600 border-purple-400 text-white"
+										? "bg-purple-600 border-purple-400 text-white font-bold"
 										: "bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-600"
 								}`}
 							>
@@ -143,7 +143,7 @@ export default function Mmo3dEditorPanel({
 									onClick={() => onVmdUrlChange?.(m.url)}
 									className={`px-2 py-1 rounded text-[10px] border transition flex items-center justify-center gap-1 truncate ${
 										vmdUrl === m.url
-											? "bg-purple-600 border-purple-400 text-white"
+											? "bg-purple-600 border-purple-400 text-white font-bold"
 											: "bg-gray-900 border-gray-700 text-gray-300 hover:border-gray-600"
 									}`}
 									title={m.label}
