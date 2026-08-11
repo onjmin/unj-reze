@@ -9,7 +9,7 @@ import CollabSelector from "@/components/CollabSelector";
 import EditPostModal from "@/components/EditPostModal";
 import FAB from "@/components/FAB";
 import FeedList from "@/components/FeedList";
-import GameMaker, { type GameManifestDraft } from "@/components/GameMaker";
+import type { GameManifestDraft } from "@/components/GameMaker";
 import GameRankingView from "@/components/GameRankingView";
 import Header from "@/components/Header";
 import HeartBurst from "@/components/HeartBurst";
@@ -60,6 +60,7 @@ const MmlEditor = dynamic(() => import("@/components/MmlEditor"), {
 	ssr: false,
 });
 const MvMaker = dynamic(() => import("@/components/MvMaker"), { ssr: false });
+const GameMaker = dynamic(() => import("@/components/GameMaker"), { ssr: false });
 
 export default function App() {
 	const router = useRouter();

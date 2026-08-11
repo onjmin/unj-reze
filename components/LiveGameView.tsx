@@ -1,6 +1,7 @@
 "use client";
 
 import { Clock, Trophy, Users } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getAvatarInfo } from "@/lib/avatar";
 import {
@@ -12,7 +13,9 @@ import { getRealtimeClient } from "@/lib/realtime/client";
 import { decodeId } from "@/lib/sqids";
 import type { GameVoteCandidate, GhostPlayer } from "@/lib/types";
 import { useRemoteJson } from "@/lib/use-remote-payload";
-import GameMaker, { type GameManifestDraft } from "./GameMaker";
+import type { GameManifestDraft } from "./GameMaker";
+
+const GameMaker = dynamic(() => import("./GameMaker"), { ssr: false });
 
 interface LiveInfo {
 	gameId: string | null;
