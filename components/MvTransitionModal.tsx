@@ -11,7 +11,13 @@ import {
 	MV_EXIT_TO_LABELS,
 	MV_H,
 	MV_STEPS_PER_BEAT,
+	MV_TRANSITION_CATEGORY_LABELS,
+	MV_TRANSITION_STYLE_CATEGORY,
+	MV_TRANSITION_STYLE_DESCRIPTIONS,
+	MV_TRANSITION_STYLE_LABELS,
 	MV_W,
+	resolveEntranceStyle,
+	resolveExitStyle,
 	type MvEnterFrom,
 	type MvEntrance,
 	type MvEntranceStyle,
@@ -19,84 +25,19 @@ import {
 	type MvExitTo,
 	type MvLayer,
 	type MvManifest,
+	type MvTransitionCategory,
 } from "@/lib/mv-config";
 import { drawMvFrame, EMPTY_SONG, type MvFrameState } from "@/lib/mv-engine";
 
-interface TransitionPresetDef {
-	id: MvEntranceStyle;
-	name: string;
-	category: "basic" | "motion" | "special";
-	description: string;
-}
-
-const TRANSITION_PRESETS: TransitionPresetDef[] = [
-	{
-		id: "none",
-		name: "瞬時 (なし)",
-		category: "basic",
-		description: "演出なしでその場にパッと出入りします。",
-	},
-	{
-		id: "fade",
-		name: "フェード",
-		category: "basic",
-		description: "じわっと透明度が変化して滑らかに出入りします。",
-	},
-	{
-		id: "slide",
-		name: "スライド",
-		category: "motion",
-		description: "指定した方向からスライドイン・スライドアウトします。",
-	},
-	{
-		id: "zoom",
-		name: "ズーム",
-		category: "motion",
-		description: "拡大しながら出現、または小さくなりながら消えます。",
-	},
-	{
-		id: "zoomBounce",
-		name: "ポップ",
-		category: "motion",
-		description: "跳ねるように勢いよく出現・縮んで退場します。",
-	},
-	{
-		id: "particle",
-		name: "粒子 (ドット)",
-		category: "special",
-		description: "光るドット粒子が画面を覆う／分解して消えます。",
-	},
-	{
-		id: "afterimage",
-		name: "残像 (ゴースト)",
-		category: "special",
-		description: "軌跡の残像が集まって出現／散らばって消失します。",
-	},
-	{
-		id: "pixelate",
-		name: "ドット分解",
-		category: "special",
-		description: "大きなレトロモザイクからクッキリ現れる・分解します。",
-	},
-	{
-		id: "flash",
-		name: "フラッシュ",
-		category: "special",
-		description: "一瞬白く光りながら出現・消失します。",
-	},
-	{
-		id: "wipe",
-		name: "ワイプ",
-		category: "special",
-		description: "画面端からカーテンが開閉するようにカットイン・アウトします。",
-	},
-];
-
-const CATEGORY_LABELS: Record<string, string> = {
-	basic: "基本",
-	motion: "スライド・拡大縮小",
-	special: "特殊エフェクト",
-};
+/**
+ * プリセットの名前・説明・カテゴリ分けは `mv-config.ts` の
+ * `MV_TRANSITION_STYLE_LABELS` / `_DESCRIPTIONS` / `_CATEGORY` が正。
+ * 以前はここに同じ内容を別々に持っていて、エンジン側の型(`MvEntranceStyle`)に
+ * 新しいスタイルを増やしてもこちらを直し忘れると一覧に出てこない、という
+ * 二重管理の事故があった（"グリッチ"新設のタイミングで一本化した）。
+ */
+const CATEGORY_ORDER: MvTransitionCategory[] = ["basic", "movement", "decompose"];
+const STYLE_ORDER = Object.keys(MV_TRANSITION_STYLE_LABELS) as MvEntranceStyle[];
 
 /** ライブプレビュー用コンポーネント */
 function TransitionLivePreview({
@@ -220,25 +161,54 @@ export default function MvTransitionModal({
 	const [exit, setExit] = useState<MvExit>(
 		() => layer.exit ?? { ...DEFAULT_MV_EXIT, style: "fade" },
 	);
+	/**
+	 * 「触った側だけ保存」の判定用。
+	 *
+	 * 以前は登場タブだけ編集して適用しても、退場が `layer.exit` に無かったのに
+	 * 常に既定値（2拍フェード）が書き込まれていた——`exit` の初期stateが
+	 * `DEFAULT_MV_EXIT`(=非inert)から始まるため、触っていなくても
+	 * `onApply` はそれをそのまま渡してしまっていた。編集を始めた時点で真にする。
+	 */
+	const [touchedEntrance, setTouchedEntrance] = useState(!!layer.entrance);
+	const [touchedExit, setTouchedExit] = useState(!!layer.exit);
 
+	/** 触った印を付けながら更新する。以降の入力欄はすべてこれ経由にすること。 */
+	const updateEntrance = (patch: Partial<MvEntrance>) => {
+		setTouchedEntrance(true);
+		setEntrance((prev) => ({ ...prev, ...patch }));
+	};
+	const updateExit = (patch: Partial<MvExit>) => {
+		setTouchedExit(true);
+		setExit((prev) => ({ ...prev, ...patch }));
+	};
+
+	// プリセットのハイライトは `isMvEntranceInert`/`isMvExitInert` と同じ判定式を
+	// 使うこと。以前はここだけ `entrance.fade` の分岐を端折っていたため、
+	// 「真に瞬時(なし)」の設定を開いても一覧では"フェード"が選ばれて見える食い違いがあった。
 	const currentStyle =
-		target === "entrance"
-			? (entrance.style ?? (entrance.from !== "none" ? "slide" : "fade"))
-			: (exit.style ?? (exit.to !== "none" ? "slide" : "fade"));
+		target === "entrance" ? resolveEntranceStyle(entrance) : resolveExitStyle(exit);
 
 	const handleSelectStyle = (style: MvEntranceStyle) => {
 		if (target === "entrance") {
-			setEntrance((prev) => ({
-				...prev,
+			updateEntrance({
 				style,
-				from: style === "slide" || style === "wipe" ? (prev.from === "none" ? "left" : prev.from) : prev.from,
-			}));
+				from:
+					style === "slide" || style === "wipe"
+						? entrance.from === "none"
+							? "left"
+							: entrance.from
+						: entrance.from,
+			});
 		} else {
-			setExit((prev) => ({
-				...prev,
+			updateExit({
 				style,
-				to: style === "slide" || style === "wipe" ? (prev.to === "none" ? "right" : prev.to) : prev.to,
-			}));
+				to:
+					style === "slide" || style === "wipe"
+						? exit.to === "none"
+							? "right"
+							: exit.to
+						: exit.to,
+			});
 		}
 	};
 
@@ -315,8 +285,8 @@ export default function MvTransitionModal({
 											key={b}
 											onClick={() =>
 												target === "entrance"
-													? setEntrance({ ...entrance, beats: b })
-													: setExit({ ...exit, beats: b })
+													? updateEntrance({ beats: b })
+													: updateExit({ beats: b })
 											}
 											className={`rounded px-2 py-1 text-[10px] font-bold ${
 												val === b
@@ -342,9 +312,9 @@ export default function MvTransitionModal({
 									onChange={(e) => {
 										const v = e.target.value;
 										if (target === "entrance") {
-											setEntrance({ ...entrance, from: v as MvEnterFrom });
+											updateEntrance({ from: v as MvEnterFrom });
 										} else {
-											setExit({ ...exit, to: v as MvExitTo });
+											updateExit({ to: v as MvExitTo });
 										}
 									}}
 									className="rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-200"
@@ -370,8 +340,8 @@ export default function MvTransitionModal({
 								checked={target === "entrance" ? entrance.fade : exit.fade}
 								onChange={(e) =>
 									target === "entrance"
-										? setEntrance({ ...entrance, fade: e.target.checked })
-										: setExit({ ...exit, fade: e.target.checked })
+										? updateEntrance({ fade: e.target.checked })
+										: updateExit({ fade: e.target.checked })
 								}
 								className="h-4 w-4 rounded border-gray-700 bg-gray-800 accent-blue-600"
 							/>
@@ -379,20 +349,23 @@ export default function MvTransitionModal({
 					</div>
 
 					{/* プリセット選択グリッド */}
-					{(["basic", "motion", "special"] as const).map((cat) => {
-						const presets = TRANSITION_PRESETS.filter((p) => p.category === cat);
+					{CATEGORY_ORDER.map((cat) => {
+						const presets = STYLE_ORDER.filter(
+							(id) => MV_TRANSITION_STYLE_CATEGORY[id] === cat,
+						);
+						if (presets.length === 0) return null;
 						return (
 							<div key={cat} className="space-y-1.5">
 								<p className="text-[11px] font-bold text-gray-400">
-									{CATEGORY_LABELS[cat]}
+									{MV_TRANSITION_CATEGORY_LABELS[cat]}
 								</p>
 								<div className="grid grid-cols-2 gap-2">
-									{presets.map((p) => {
-										const isSelected = currentStyle === p.id;
+									{presets.map((id) => {
+										const isSelected = currentStyle === id;
 										return (
 											<button
-												key={p.id}
-												onClick={() => handleSelectStyle(p.id)}
+												key={id}
+												onClick={() => handleSelectStyle(id)}
 												className={`flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors ${
 													isSelected
 														? "border-blue-500 bg-blue-500/20 text-blue-200 font-bold"
@@ -400,10 +373,12 @@ export default function MvTransitionModal({
 												}`}
 											>
 												<div className="flex items-center gap-1.5">
-													<span className="text-[12px]">{p.name}</span>
+													<span className="text-[12px]">
+														{MV_TRANSITION_STYLE_LABELS[id]}
+													</span>
 												</div>
 												<p className="text-[10px] text-gray-400 leading-tight">
-													{p.description}
+													{MV_TRANSITION_STYLE_DESCRIPTIONS[id]}
 												</p>
 											</button>
 										);
@@ -424,9 +399,21 @@ export default function MvTransitionModal({
 					</button>
 					<button
 						onClick={() => {
+							// 触っていない側は既存の値をそのまま持ち回す（未編集なら undefined→undefined）。
+							// 以前はここで常に entrance/exit 両方をローカルstateの値で上書きしていたため、
+							// 「登場だけ設定したいのに適用したら退場にも既定のフェードが付いていた」
+							// という事故になっていた。
 							onApply(
-								isMvEntranceInert(entrance) ? undefined : entrance,
-								isMvExitInert(exit) ? undefined : exit,
+								touchedEntrance
+									? isMvEntranceInert(entrance)
+										? undefined
+										: entrance
+									: layer.entrance,
+								touchedExit
+									? isMvExitInert(exit)
+										? undefined
+										: exit
+									: layer.exit,
 							);
 							onClose();
 						}}

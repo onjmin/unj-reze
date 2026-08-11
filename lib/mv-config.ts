@@ -106,11 +106,12 @@ export type MvEntranceStyle =
 	| "slide"
 	| "zoom"
 	| "zoomBounce"
+	| "wipe"
 	| "particle"
 	| "afterimage"
 	| "pixelate"
-	| "flash"
-	| "wipe";
+	| "glitch"
+	| "flash";
 
 export type MvExitStyle = MvEntranceStyle;
 
@@ -120,11 +121,52 @@ export const MV_TRANSITION_STYLE_LABELS: Record<MvEntranceStyle, string> = {
 	slide: "スライド（移動）",
 	zoom: "ズーム（拡大・縮小）",
 	zoomBounce: "ポップ（バウンス）",
-	particle: "粒子 (ドット分解・カバー)",
-	afterimage: "残像 (軌跡・分散)",
-	pixelate: "ドット分解 (モザイク)",
-	flash: "フラッシュ (白発光)",
-	wipe: "ワイプ (画面端からカット)",
+	wipe: "ワイプ（画面端からカット）",
+	particle: "粒子（ドット分解・カバー）",
+	afterimage: "残像（軌跡・分散）",
+	pixelate: "モザイク（粗いドットへ分解）",
+	glitch: "グリッチ（走査線が乱れて分解）",
+	flash: "フラッシュ（白発光）",
+};
+
+/** プリセットグリッドの見出し分け。 */
+export type MvTransitionCategory = "basic" | "movement" | "decompose";
+
+export const MV_TRANSITION_CATEGORY_LABELS: Record<MvTransitionCategory, string> = {
+	basic: "基本",
+	movement: "移動",
+	decompose: "分解・エフェクト",
+};
+
+export const MV_TRANSITION_STYLE_CATEGORY: Record<
+	MvEntranceStyle,
+	MvTransitionCategory
+> = {
+	none: "basic",
+	fade: "basic",
+	slide: "movement",
+	zoom: "movement",
+	zoomBounce: "movement",
+	wipe: "movement",
+	particle: "decompose",
+	afterimage: "decompose",
+	pixelate: "decompose",
+	glitch: "decompose",
+	flash: "decompose",
+};
+
+export const MV_TRANSITION_STYLE_DESCRIPTIONS: Record<MvEntranceStyle, string> = {
+	none: "演出なしでその場にパッと出入りします。",
+	fade: "じわっと透明度が変化して滑らかに出入りします。",
+	slide: "指定した方向からスライドイン・スライドアウトします。",
+	zoom: "拡大しながら出現、または小さくなりながら消えます。",
+	zoomBounce: "跳ねるように勢いよく出現・縮んで退場します。",
+	wipe: "画面端からカーテンが開閉するようにカットイン・アウトします。",
+	particle: "光るドット粒子が画面を覆う／分解して消えます。",
+	afterimage: "軌跡の残像が集まって出現／散らばって消失します。",
+	pixelate: "細かい絵が大きなドットへ荒れていき、モザイクで隠れる・現れます。",
+	glitch: "横縞が乱れてズレ、コマ落ちしながらデジタル的に分解・復元します。",
+	flash: "一瞬白く光りながら出現・消失します。",
 };
 
 /**
@@ -185,23 +227,44 @@ export function mvExitDistance(exit: MvExit): number {
 	return exit.to === "top" || exit.to === "bottom" ? MV_H / 2 : MV_W / 2;
 }
 
+/**
+ * 実際に使うスタイルを決める（`style` 未指定の古いデータ向けの読み替え）。
+ *
+ * `isMvEntranceInert` とエディタの「いま選ばれているプリセット」表示は、必ずこの関数を
+ * 経由すること。別々にこの分岐を書くと片方だけ `fade` チェックを見落とすような食い違いが起き、
+ * 「本当は"瞬時"設定なのにプリセット一覧では"フェード"が選ばれて見える」といった表示バグになる
+ * （実際にエディタ側だけこの分岐を端折っていて起きていた）。
+ */
+export function resolveEntranceStyle(
+	entrance: Pick<MvEntrance, "style" | "from" | "fade">,
+): MvEntranceStyle {
+	return (
+		entrance.style ??
+		(entrance.from !== "none" ? "slide" : entrance.fade ? "fade" : "none")
+	);
+}
+
+/** 退場版。`resolveEntranceStyle` を参照。 */
+export function resolveExitStyle(
+	exit: Pick<MvExit, "style" | "to" | "fade">,
+): MvExitStyle {
+	return (
+		exit.style ?? (exit.to !== "none" ? "slide" : exit.fade ? "fade" : "none")
+	);
+}
+
 /** 何も起きない（＝瞬時に出現と同じ）登場演出か。 */
 export function isMvEntranceInert(entrance: MvEntrance | undefined): boolean {
 	if (!entrance) return true;
 	if (entrance.beats <= 0) return true;
-	const style =
-		entrance.style ??
-		(entrance.from !== "none" ? "slide" : entrance.fade ? "fade" : "none");
-	return style === "none";
+	return resolveEntranceStyle(entrance) === "none";
 }
 
 /** 何も起きない（＝瞬時に消えるのと同じ）退場演出か。 */
 export function isMvExitInert(exit: MvExit | undefined): boolean {
 	if (!exit) return true;
 	if (exit.beats <= 0) return true;
-	const style =
-		exit.style ?? (exit.to !== "none" ? "slide" : exit.fade ? "fade" : "none");
-	return style === "none";
+	return resolveExitStyle(exit) === "none";
 }
 
 export type MvAnchor =

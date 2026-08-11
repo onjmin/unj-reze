@@ -110,6 +110,8 @@ import {
 	mvUid,
 	mvWalkSpeed,
 	parseLyricsBulkGroups,
+	resolveEntranceStyle,
+	resolveExitStyle,
 	resolveLyricStack,
 } from "@/lib/mv-config";
 import type {
@@ -1836,7 +1838,7 @@ export default function MvMaker({
 								</div>
 								<span className="text-[10px] text-gray-400 truncate w-full">
 									{layer.entrance && !isMvEntranceInert(layer.entrance)
-										? `${MV_TRANSITION_STYLE_LABELS[layer.entrance.style ?? "fade"]} (${layer.entrance.beats}拍)`
+										? `${MV_TRANSITION_STYLE_LABELS[resolveEntranceStyle(layer.entrance)]} (${layer.entrance.beats}拍)`
 										: "瞬時 (なし)"}
 								</span>
 							</button>
@@ -1861,7 +1863,7 @@ export default function MvMaker({
 								</div>
 								<span className="text-[10px] text-gray-400 truncate w-full">
 									{layer.exit && !isMvExitInert(layer.exit)
-										? `${MV_TRANSITION_STYLE_LABELS[layer.exit.style ?? "fade"]} (${layer.exit.beats}拍)`
+										? `${MV_TRANSITION_STYLE_LABELS[resolveExitStyle(layer.exit)]} (${layer.exit.beats}拍)`
 										: "瞬時 (なし)"}
 								</span>
 							</button>

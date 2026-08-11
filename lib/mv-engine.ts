@@ -41,8 +41,6 @@ import {
 	type MvEffectStyle,
 	type MvEnterFrom,
 	type MvEntrance,
-	type MvEntranceStyle,
-	type MvExitStyle,
 	type MvExitTo,
 	type MvImageLayer,
 	type MvLayer,
@@ -65,6 +63,8 @@ import {
 	mvEntranceDistance,
 	mvExitDistance,
 	mvWalkSpeed,
+	resolveEntranceStyle,
+	resolveExitStyle,
 	resolveLyricStack,
 	resolveSceneStage,
 	resolveShapeModulators,
@@ -1757,6 +1757,8 @@ interface LayerTransitionResult {
 	};
 	afterimages?: Array<{ dx: number; dy: number; alpha: number }>;
 	pixelateSize?: number;
+	/** 0(乱れ無し)..1(完全に崩れる)。グリッチ演出の崩れ具合。 */
+	glitchAmount?: number;
 	flashAlpha?: number;
 	wipe?: {
 		from: MvEnterFrom | MvExitTo;
@@ -1787,6 +1789,7 @@ export function layerTransitionState(
 	let particle: LayerTransitionResult["particle"] = undefined;
 	let afterimages: LayerTransitionResult["afterimages"] = undefined;
 	let pixelateSize: number | undefined = undefined;
+	let glitchAmount: number | undefined = undefined;
 	let flashAlpha: number | undefined = undefined;
 	let wipe: LayerTransitionResult["wipe"] = undefined;
 
@@ -1799,13 +1802,7 @@ export function layerTransitionState(
 		const age = d.step - startStep;
 		if (age >= 0 && age < durSteps && durSteps > 0) {
 			const t = clamp01(age / durSteps);
-			const style: MvEntranceStyle =
-				layer.entrance.style ??
-				(layer.entrance.from !== "none"
-					? "slide"
-					: layer.entrance.fade
-						? "fade"
-						: "none");
+			const style = resolveEntranceStyle(layer.entrance);
 
 			const eased = 1 - Math.pow(1 - t, 3);
 
@@ -1845,7 +1842,13 @@ export function layerTransitionState(
 					break;
 				case "pixelate":
 					if (layer.entrance.fade) alpha *= eased;
-					pixelateSize = Math.round(1 + (1 - t) * 15);
+					// 大きなブロックから→小さく(=くっきり)なっていく。1-tで「粗さ」を表す。
+					pixelateSize = Math.max(1, Math.round(1 + (1 - t) * 22));
+					break;
+				case "glitch":
+					if (layer.entrance.fade) alpha *= eased;
+					// 崩れた状態(1)から静止画(0)へ収束する＝崩れ量は 1-t。
+					glitchAmount = clamp01(1 - t);
 					break;
 				case "flash":
 					if (layer.entrance.fade) alpha *= eased;
@@ -1876,13 +1879,7 @@ export function layerTransitionState(
 
 		if (remainingSteps >= 0 && remainingSteps < durSteps && durSteps > 0) {
 			const t = clamp01(1 - remainingSteps / durSteps);
-			const style: MvExitStyle =
-				layer.exit.style ??
-				(layer.exit.to !== "none"
-					? "slide"
-					: layer.exit.fade
-						? "fade"
-						: "none");
+			const style = resolveExitStyle(layer.exit);
 
 			const eased = Math.pow(t, 3);
 
@@ -1922,7 +1919,12 @@ export function layerTransitionState(
 					break;
 				case "pixelate":
 					if (layer.exit.fade) alpha *= 1 - eased;
-					pixelateSize = Math.round(1 + t * 15);
+					pixelateSize = Math.max(1, Math.round(1 + t * 22));
+					break;
+				case "glitch":
+					if (layer.exit.fade) alpha *= 1 - eased;
+					// 静止画(0)から崩れ切る(1)へ。tのままだと立ち上がりが遅いので3乗根で早めに崩し始める。
+					glitchAmount = clamp01(Math.cbrt(t));
 					break;
 				case "flash":
 					if (layer.exit.fade) alpha *= 1 - eased;
@@ -1946,6 +1948,7 @@ export function layerTransitionState(
 		particle,
 		afterimages,
 		pixelateSize,
+		glitchAmount,
 		flashAlpha,
 		wipe,
 	};
@@ -1968,6 +1971,85 @@ function drawParticleOverlay(
 	ctx.imageSmoothingEnabled = false;
 	ctx.drawImage(img, idx * cellH, 0, cellH, cellH, 0, 0, MV_W, MV_H);
 	ctx.restore();
+}
+
+/**
+ * レイヤー単体を粗いドット(モザイク)へ落として描く。
+ *
+ * 以前は `pixelateSize` を計算するだけで描画側が一切読んでおらず、"ドット分解"を選んでも
+ * 見た目は（fadeチェックがあれば）ただの不透明度フェードにしかならなかった
+ * （プリセット名と実際の効果が一致しない、実質未実装のバグ）。
+ * 画面全体に掛ける後処理の pixelate（drawPostEffects内）と同じ手法——
+ * 小さいキャンバスへ縮小してから最近傍補間で拡大——をレイヤー1枚だけに適用する。
+ */
+function drawLayerPixelated(d: DrawCtx, layer: MvLayer, blockSize: number): void {
+	const { ctx } = d;
+	const sctx = scratchCtx(scratchA, MV_W, MV_H);
+	if (!sctx || !scratchA.canvas) {
+		drawLayer(d, layer);
+		return;
+	}
+	drawLayer({ ...d, ctx: sctx }, layer);
+
+	const tw = Math.max(1, Math.round(MV_W / Math.max(1, blockSize)));
+	const th = Math.max(1, Math.round(MV_H / Math.max(1, blockSize)));
+	const bctx = scratchCtx(scratchB, tw, th);
+	if (!bctx || !scratchB.canvas) {
+		ctx.drawImage(scratchA.canvas, 0, 0);
+		return;
+	}
+	bctx.drawImage(scratchA.canvas, 0, 0, tw, th);
+	ctx.imageSmoothingEnabled = false;
+	ctx.drawImage(scratchB.canvas, 0, 0, MV_W, MV_H);
+	ctx.imageSmoothingEnabled = true;
+}
+
+/**
+ * レイヤー単体を、走査線がずれてコマ落ちするデジタル的な壊れ方で描く。
+ *
+ * 新設した「グリッチ」演出。横帯ごとに左右へランダムにずらし、崩れが強いときは
+ * 帯そのものを間引く（＝一瞬何も描かれない裂け目ができる）。`amount` は
+ * 0(乱れ無し=元の絵そのまま)〜1(ほぼ全帯が欠落・激しくずれる)。
+ * 毎フレーム `d.step` で乱数の種を変えるので、時間とともに裂け目の位置がちらつく
+ * ——本物の走査線ノイズのような不安定さになる（欠落確率は上限0.75に留め、全消しにはしない）。
+ */
+function drawLayerGlitch(d: DrawCtx, layer: MvLayer, amount: number): void {
+	const { ctx } = d;
+	if (amount <= 0.01) {
+		drawLayer(d, layer);
+		return;
+	}
+	const sctx = scratchCtx(scratchA, MV_W, MV_H);
+	if (!sctx || !scratchA.canvas) {
+		drawLayer(d, layer);
+		return;
+	}
+	drawLayer({ ...d, ctx: sctx }, layer);
+
+	const slices = 16;
+	const sliceH = MV_H / slices;
+	// レイヤーIDも種に混ぜて、同じフレームで複数レイヤーが同時にグリッチしても
+	// 全く同じ裂け方に揃ってしまわないようにする。
+	const idSeed = layer.id.length * 7 + layer.id.charCodeAt(0);
+	const seed = Math.floor(d.step) + idSeed;
+	for (let i = 0; i < slices; i++) {
+		const dropRoll = hash01(seed * 13 + i * 7.7);
+		if (dropRoll < amount * 0.75) continue;
+		const jitter = hash01(seed * 29 + i * 3.3) * 2 - 1;
+		const shift = jitter * amount * 50;
+		const y = i * sliceH;
+		ctx.drawImage(
+			scratchA.canvas,
+			0,
+			y,
+			MV_W,
+			sliceH,
+			shift,
+			y,
+			MV_W,
+			sliceH,
+		);
+	}
 }
 
 function drawLayerWithTransitions(d: DrawCtx, layer: MvLayer): void {
@@ -2017,7 +2099,11 @@ function drawLayerWithTransitions(d: DrawCtx, layer: MvLayer): void {
 		}
 	}
 
-	if (trans.flashAlpha && trans.flashAlpha > 0.01) {
+	if (trans.glitchAmount !== undefined) {
+		drawLayerGlitch(d, layer, trans.glitchAmount);
+	} else if (trans.pixelateSize !== undefined) {
+		drawLayerPixelated(d, layer, trans.pixelateSize);
+	} else if (trans.flashAlpha && trans.flashAlpha > 0.01) {
 		const sctx = scratchCtx(scratchA, MV_W, MV_H);
 		if (sctx && scratchA.canvas) {
 			const dScratch: DrawCtx = { ...d, ctx: sctx };

@@ -112,16 +112,40 @@ MVの時間はすべて `@onjmin/dtm` の再生ステップ（1小節=192ステ�
 - 廃止した「独自の動きを組み合わせる」(`MvShapeMotionPreset.custom`) も型は残してあり、
   過去の保存データに付いていれば `resolveSceneModulators` が読み続ける（新規UIからは作られない）。
 
-### 画像の登場のしかた（`MvEntrance`）と反転
+### レイヤーの登場・退場演出（`MvEntrance`/`MvExit`、`MvTransitionModal.tsx`）
 
-`image` レイヤーは既定では「セクションに入った瞬間パッと出る」。`MvImageLayer.entrance` を付けると、
-**上下左右からのスライドイン**と**フェードイン**を組み合わせられる（`from` と `fade` は独立なので、
-スライドのみ／フェードのみ／左からフェードイン、が全部作れる）。`beats` 拍かけて easeOutCubic で
-定位置・不透明へ寄る。`entrance` 未指定＝従来どおり瞬時に出現。
+どのレイヤーも既定では「表示範囲に入った瞬間パッと出る／範囲を出た瞬間パッと消える」。
+`layer.entrance`/`layer.exit` を付けると、`MvEntranceStyle`（=`MvExitStyle`と同じ型）から選んだ
+演出で `beats` 拍かけて出入りする。スタイルの一覧・カテゴリ分け・説明文は `mv-config.ts` の
+`MV_TRANSITION_STYLE_LABELS` / `MV_TRANSITION_STYLE_CATEGORY` / `MV_TRANSITION_STYLE_DESCRIPTIONS`
+が正——エディタ側で同じ内容を別に持たない（以前 `MvTransitionModal.tsx` に同じ一覧を複製していて、
+スタイルを1つ追加してもモーダル側の一覧に反映し忘れる事故があった）。
 
-演出の起点は `layerAppearBar()`——**そのレイヤーが出てきたセクションの頭**。
-連続するセクションにまたがって表示されるレイヤーは連続の先頭が起点になる。
-場面が変わるたびにやり直すと、出っぱなしの絵が何度も飛び込んでくるため。
+- `none`/`fade`（基本）、`slide`/`zoom`/`zoomBounce`/`wipe`（移動）、
+  `particle`/`afterimage`/`pixelate`/`glitch`/`flash`（分解・エフェクト）の10種。
+- `style` 未指定の古いデータは `resolveEntranceStyle()`/`resolveExitStyle()` で読み替える
+  （`from`/`to` が'none'以外なら'slide'、`fade`のみなら'fade'、どちらも無ければ'none'）。
+  **この判定式は1箇所だけに置き、`isMvEntranceInert`・プリセットの選択ハイライト・
+  レイヤー一覧の要約表示のすべてがここを経由する。** 別々に同じ分岐を書くと、
+  「`fade`チェックを見落として"瞬時"のはずが"フェード"と表示される」ような食い違いが起きる
+  （実際に起きていた）。
+- `pixelate`（モザイク）と `glitch`（走査線グリッチ）はレイヤー単体を裏キャンバスへ描いてから
+  加工する（`drawLayerPixelated`/`drawLayerGlitch`、screen全体に掛かる後処理pixelate/glitchと
+  同じ手法をレイヤー1枚に絞って適用）。**`pixelateSize`/`glitchAmount` を
+  `layerTransitionState()` で計算しても `drawLayerWithTransitions()` 側で読まなければ
+  何も起きない**——実際に `pixelateSize` が計算だけされて描画側で握り潰されている期間があり、
+  「モザイクを選んでも実質フェードにしかならない」バグになっていた。新しいスタイルを足すときは
+  両方（計算する側／消費する側）を必ず対で直す。
+- `glitch` は横スライスごとに `hash01(step, layerId, sliceIndex)` の乱数でズレ幅と欠落を決める。
+  種に `d.step` を混ぜてあるので毎フレーム結果が変わり、本物の走査線ノイズのようにちらつく。
+  欠落確率の上限は0.75（全帯が同時に消えて空白フレームになるのを防ぐ）。
+- 演出の起点/終点は `layerAppearBar()`/`layerDisappearBar()`——`barRange` があればそれを優先し、
+  無ければ「連続するセクションの先頭／末尾」。場面が変わるたびにやり直すと、出っぱなしの絵が
+  何度も飛び込んでくるため。
+- `MvTransitionModal` の適用は**触った側だけ**書き込む（`touchedEntrance`/`touchedExit`）。
+  登場タブだけ編集して適用しても退場は変更しない——ローカルstateの初期値は編集用に
+  常に具体的な値（`layer.entrance ?? DEFAULT_MV_ENTRANCE`）を持つが、それをそのまま両方
+  書き戻すと「片方しか触っていないのにもう片方にも既定のフェードが付く」事故になっていた。
 
 `flipH` / `flipV` は描画時だけの鏡像。占める矩形は変えたくないので描画矩形の中心で反転し、
 `frame` の枠は反転しない。歩行グラの向きを変えたり、同じ絵を左右で向かい合わせたりに使う。
