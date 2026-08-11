@@ -22,6 +22,7 @@ import {
 	Redo2,
 	Shapes,
 	Shuffle,
+	Settings,
 	Sparkles,
 	Trash2,
 	Type,
@@ -152,6 +153,8 @@ import {
 import {
 	buildSymmetricShapeGroupLayers,
 	generateSymmetricShapeGroup,
+	generateArrangementForGroup,
+	type SymmetricShapeGroupOptions,
 } from "@/lib/mv-shape-group-macro";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
@@ -993,17 +996,18 @@ export default function MvMaker({
 	const [groupSelectIds, setGroupSelectIds] = useState<Set<string>>(
 		() => new Set(),
 	);
-	// タイムラインは常時見る情報ではないので、レイヤータブに常駐させずモーダルへ切り出す。
+	const [groupMenuOpenId, setGroupMenuOpenId] = useState<string | null>(null);
 	const [timelineModalOpen, setTimelineModalOpen] = useState(false);
-	/**
-	 * 「対称図形グループ」ボタンが直前に作ったグループのid。次のクリックで作り直す対象。
-	 * ボタンの表示文言（作る／作り直す）がこの値に応じて変わるので、ここは ref ではなく
-	 * state にしてある——ref はレンダー中に読むとReactが変化を検知できず表示が古いまま
-	 * 固まりうるので（値そのものはレンダーに直接使わない、というのがrefの前提）。
-	 */
-	const [lastMacroGroupId, setLastMacroGroupId] = useState<string | null>(
-		null,
-	);
+
+	const [macroSettingsOpen, setMacroSettingsOpen] = useState(false);
+	const [macroSettings, setMacroSettings] =
+		useState<SymmetricShapeGroupOptions>({
+			clusterType: "centered",
+			shapeStyle: "sharp",
+			thickness: "thick",
+			monochrome: true,
+			symmetric: false,
+		});
 
 	const trackNoteCounts = useMemo(() => {
 		const map: Record<number, number> = {};
@@ -1506,14 +1510,10 @@ export default function MvMaker({
 	};
 
 	/**
-	 * 「対称図形グループ」ワンボタン生成・作り直し。
-	 * 直前にこのボタンで作ったグループがまだ残っていれば中身だけ作り直し、
-	 * 無ければ新しいグループを作る——同じボタンで「新規作成」と「設定変更（作り直し）」の
-	 * 両方をこなす。
+	 * 「対称図形グループ」を新規追加する。
+	 * 呼び出すたびに新しい対称図形グループを独立して生成する（複数グループ作成可能）。
 	 */
-	const generateSymmetricGroup = () => {
-		// getNextZ() は manifest（このレンダーのスナップショット）を見るだけなので、
-		// ループの中で複数回呼んでも同じ値しか返らない。ローカルにカウンタを持って進める。
+	const addSymmetricShapeGroup = () => {
 		let z = getNextZ();
 		const nextZ = () => {
 			const v = z;
@@ -1521,30 +1521,62 @@ export default function MvMaker({
 			return v;
 		};
 		const palette = manifest.stage.palette;
-
-		const existingGroupId = lastMacroGroupId;
-		const stillExists =
-			existingGroupId &&
-			manifest.groups?.some((g) => g.id === existingGroupId) &&
-			manifest.layers.some((l) => l.groupId === existingGroupId);
-
-		if (stillExists && existingGroupId) {
-			const newLayers = buildSymmetricShapeGroupLayers(
-				existingGroupId,
-				nextZ,
-				{ palette },
-			);
-			update((m) => replaceGroupMembers(m, existingGroupId, newLayers));
-			return;
-		}
-
-		const { group, layers } = generateSymmetricShapeGroup(nextZ, { palette });
-		setLastMacroGroupId(group.id);
+		const { group, layers } = generateSymmetricShapeGroup(nextZ, {
+			palette,
+			...macroSettings,
+		});
 		update((m) => ({
 			...m,
 			layers: [...m.layers, ...layers],
 			groups: [...(m.groups ?? []), group],
 		}));
+		if (layers[0]) setSelectedLayerId(layers[0].id);
+	};
+
+	/**
+	 * 指定したグループの中身を図形乱数で作り直す（リロール）。
+	 */
+	const rerollSymmetricShapeGroup = (groupId: string) => {
+		let z = getNextZ();
+		const nextZ = () => {
+			const v = z;
+			z += 10;
+			return v;
+		};
+		const palette = manifest.stage.palette;
+		const newLayers = buildSymmetricShapeGroupLayers(groupId, nextZ, {
+			palette,
+			...macroSettings,
+		});
+		update((m) => replaceGroupMembers(m, groupId, newLayers));
+	};
+
+	/**
+	 * 指定したグループを元にして「特殊アレンジ」の新規グループを作成する。
+	 */
+	const addArrangedGroup = (groupId: string) => {
+		const origLayers = manifest.layers.filter((l) => l.groupId === groupId);
+		if (origLayers.length === 0 || origLayers[0].kind !== "shape") return; // 対象が空または非図形
+
+		let z = getNextZ();
+		const nextZ = () => {
+			const v = z;
+			z += 10;
+			return v;
+		};
+		
+		const { group, layers } = generateArrangementForGroup(
+			origLayers as MvShapeLayer[],
+			nextZ,
+		);
+		
+		update((m) => ({
+			...m,
+			layers: [...m.layers, ...layers],
+			groups: [...(m.groups ?? []), group],
+		}));
+		setGroupMenuOpenId(null);
+		if (layers[0]) setSelectedLayerId(layers[0].id);
 	};
 
 	const addTemplateLayers = (
@@ -2002,6 +2034,23 @@ export default function MvMaker({
 
 	const renderLayerSettings = (layer: MvLayer) => (
 		<div className="space-y-4 pt-1">
+			{layer.groupId && (
+				<div className="flex items-center justify-between gap-2 rounded-lg border border-purple-500/30 bg-purple-950/30 px-3 py-2">
+					<span className="truncate text-[11px] font-medium text-purple-200">
+						所属:{" "}
+						{manifest.groups?.find((g) => g.id === layer.groupId)?.name ??
+							"グループ"}
+					</span>
+					<button
+						type="button"
+						onClick={() => rerollSymmetricShapeGroup(layer.groupId!)}
+						className="flex shrink-0 items-center gap-1 rounded bg-purple-600/30 px-2.5 py-1 text-[10px] font-bold text-purple-200 hover:bg-purple-600/50"
+					>
+						<Shuffle size={12} />
+						グループをリロール
+					</button>
+				</div>
+			)}
 			<label className="block space-y-0.5">
 				<span className={FIELD_LABEL_CLASS}>
 					名前（レイヤー一覧での見出し。空なら自動）
@@ -3803,20 +3852,114 @@ export default function MvMaker({
 						度数の数字
 					</button>
 				</div>
+				<div className="mb-2 overflow-hidden rounded-lg border border-purple-500/30 bg-purple-950/20">
+					<button
+						onClick={() => setMacroSettingsOpen(!macroSettingsOpen)}
+						className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-bold text-purple-200 hover:bg-purple-600/20"
+					>
+						<span className="flex items-center gap-1.5">
+							<Settings size={13} />
+							詳細設定（生成スタイル）
+						</span>
+						{macroSettingsOpen ? (
+							<ChevronUp size={14} />
+						) : (
+							<ChevronDown size={14} />
+						)}
+					</button>
+					{macroSettingsOpen && (
+						<div className="space-y-2 border-t border-purple-500/30 p-3 pt-2 text-[10px] text-purple-100">
+							<label className="flex items-center justify-between">
+								<span>配置</span>
+								<select
+									value={macroSettings.clusterType}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											clusterType: e.target.value as "centered" | "scattered",
+										}))
+									}
+									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
+								>
+									<option value="centered">中央集中</option>
+									<option value="scattered">画面全体に分散</option>
+								</select>
+							</label>
+							<label className="flex items-center justify-between">
+								<span>図形の傾向</span>
+								<select
+									value={macroSettings.shapeStyle}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											shapeStyle: e.target.value as "sharp" | "round" | "all",
+										}))
+									}
+									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
+								>
+									<option value="sharp">シャープ（四角や線など）</option>
+									<option value="round">ラウンド（円や波紋など）</option>
+									<option value="all">すべてランダム</option>
+								</select>
+							</label>
+							<label className="flex items-center justify-between">
+								<span>線の太さ</span>
+								<select
+									value={macroSettings.thickness}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											thickness: e.target.value as "thick" | "thin" | "random",
+										}))
+									}
+									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
+								>
+									<option value="thick">太め</option>
+									<option value="thin">細め</option>
+									<option value="random">ランダム</option>
+								</select>
+							</label>
+							<label className="flex items-center gap-2">
+								<input
+									type="checkbox"
+									checked={!!macroSettings.monochrome}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											monochrome: e.target.checked,
+										}))
+									}
+									className="h-3 w-3 accent-purple-500"
+								/>
+								モノクロ配色にする（白・グレー基調）
+							</label>
+							<label className="flex items-center gap-2">
+								<input
+									type="checkbox"
+									checked={!!macroSettings.symmetric}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											symmetric: e.target.checked,
+										}))
+									}
+									className="h-3 w-3 accent-purple-500"
+								/>
+								左右対称に配置する
+							</label>
+						</div>
+					)}
+				</div>
 				<button
-					onClick={generateSymmetricGroup}
-					className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-purple-500/50 bg-purple-600/20 px-3 py-2 text-[11px] font-bold text-purple-200 hover:bg-purple-600/30"
+					onClick={addSymmetricShapeGroup}
+					className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-purple-500/50 bg-purple-600/30 px-3 py-2 text-[11px] font-bold text-purple-200 hover:bg-purple-600/50"
 				>
-					<Shuffle size={13} />
-					{lastMacroGroupId &&
-					manifest.groups?.some((g) => g.id === lastMacroGroupId)
-						? "対称図形グループを作り直す"
-						: "対称図形グループを生成"}
+					<Plus size={13} />
+					自動図形グループを新規追加
 				</button>
 				<Hint>
-					図形の重ね方・大きさ・線の太さ・動き・座標をランダムに決めて、
-					画面中央を軸に左右対称な図形の集まりをグループごと作ります。
-					同じボタンをもう一度押すと、そのグループの中身だけ作り直します。
+					幾何学的な図形の集まりを新しいグループとして自動生成します（複数作成可能）。
+					グループ一覧や個々のレイヤー設定の「リロール」ボタンを押すと、そのグループの中身だけをランダムに作り直せます。
 				</Hint>
 				{manifest.layers.length === 0 && (
 					<p className="text-[10px] text-gray-500">レイヤーがありません。</p>
@@ -3942,6 +4085,44 @@ export default function MvMaker({
 									>
 										<ChevronDown size={12} />
 									</button>
+								</div>
+								<div className="relative">
+									<button
+										onClick={() =>
+											setGroupMenuOpenId(
+												groupMenuOpenId === group.id ? null : group.id,
+											)
+										}
+										title="グループの特殊操作"
+										className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors ${
+											groupMenuOpenId === group.id
+												? "bg-purple-600 text-purple-100"
+												: "bg-gray-700 text-gray-300 hover:bg-gray-600"
+										}`}
+									>
+										<Settings size={16} />
+									</button>
+									{groupMenuOpenId === group.id && (
+										<div className="absolute right-0 top-full z-10 mt-1 flex w-48 flex-col overflow-hidden rounded-lg border border-purple-500/30 bg-purple-950/90 shadow-xl backdrop-blur-sm">
+											<button
+												onClick={() => {
+													rerollSymmetricShapeGroup(group.id);
+													setGroupMenuOpenId(null);
+												}}
+												className="flex items-center gap-2 px-3 py-2 text-left text-[11px] text-purple-200 hover:bg-purple-600/30"
+											>
+												<Shuffle size={14} />
+												ランダムリロール
+											</button>
+											<button
+												onClick={() => addArrangedGroup(group.id)}
+												className="flex items-center gap-2 px-3 py-2 text-left text-[11px] text-purple-200 hover:bg-purple-600/30"
+											>
+												<Sparkles size={14} />
+												特殊アレンジを生成
+											</button>
+										</div>
+									)}
 								</div>
 								<button
 									onClick={() => update((m) => ungroupLayers(m, group.id))}

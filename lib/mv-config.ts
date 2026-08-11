@@ -1307,6 +1307,11 @@ export interface MvShapeMotionPreset {
 	 */
 	offbeat?: boolean;
 	/**
+	 * プリセットの動きの強さ（amount）を上書きする値。
+	 * （例：回転角を90度や180度など自由に設定するため）
+	 */
+	amountOverride?: number;
+	/**
 	 * @deprecated 「独自の動きを組み合わせる」パネル（拍に同期しない自由な移動/回転/拡縮）は
 	 * 廃止した。動きは拍周期のプリセットだけに統一している。
 	 * 保存済みデータを読むためだけに残してあり、新規には書き込まない。

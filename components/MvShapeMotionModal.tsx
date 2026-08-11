@@ -18,6 +18,7 @@ import {
 	type MvMotionCategory,
 	type MvSceneMotionConfig,
 	resolveSceneModulators,
+	findMvMotionPreset,
 } from "@/lib/mv-shape-motion";
 
 /** アイコン用の小さいSVGプレビュー（静止画。グリッド内で常時再生すると重いので線画だけ）。 */
@@ -200,6 +201,36 @@ export default function MvShapeMotionModal({
 							</span>
 						</label>
 					</div>
+
+					{/* 動きの強さ（回転角度など）の上書き */}
+					{findMvMotionPreset(cfg.presetId)?.category === "rotate" && (
+						<div className="mt-3 border-t border-gray-800 pt-3">
+							<p className="mb-1 text-[10px] font-bold text-gray-300">回転角度</p>
+							<label className="flex items-center gap-2">
+								<input
+									type="number"
+									value={
+										cfg.amountOverride ??
+										findMvMotionPreset(cfg.presetId)?.build().find(m => m.target === 'rotation')?.amount ??
+										90
+									}
+									onChange={(e) =>
+										setCfg({ ...cfg, amountOverride: Number(e.target.value) })
+									}
+									className="w-20 rounded bg-gray-800 px-2 py-1 text-xs text-white"
+								/>
+								<span className="text-[10px] text-gray-400">度</span>
+								{cfg.amountOverride !== undefined && (
+									<button
+										onClick={() => setCfg({ ...cfg, amountOverride: undefined })}
+										className="ml-2 text-[10px] text-blue-400 hover:underline"
+									>
+										デフォルトに戻す
+									</button>
+								)}
+							</label>
+						</div>
+					)}
 
 					{/* プリセットグリッド。カテゴリごとに見出しを分ける（種類が多いので平置きだと探しにくい）。 */}
 					{MOTION_CATEGORY_ORDER.map((cat) => {

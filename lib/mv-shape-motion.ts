@@ -77,11 +77,29 @@ export const MV_MOTION_PRESETS: MvMotionPreset[] = [
 	},
 	{
 		id: "beatSpinKick",
-		name: "拍ごとに回転がはねる",
+		name: "拍ごとに回転がはねる（90度）",
 		category: "rotate",
 		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12",
 		build: () => [
-			{ source: "beat", target: "rotation", op: "add", amount: 55, curve: 3 },
+			{ source: "beat", target: "rotation", op: "add", amount: 90, curve: 3 },
+		],
+	},
+	{
+		id: "beatSpinKick180",
+		name: "拍ごとに回転がはねる（180度）",
+		category: "rotate",
+		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12",
+		build: () => [
+			{ source: "beat", target: "rotation", op: "add", amount: 180, curve: 3 },
+		],
+	},
+	{
+		id: "beatSpinKick360",
+		name: "拍ごとに回転がはねる（360度）",
+		category: "rotate",
+		icon: "M12,3 A9,9 0 1 1 3,12 M3,12 L3,6 M3,12 L9,12",
+		build: () => [
+			{ source: "beat", target: "rotation", op: "add", amount: 360, curve: 3 },
 		],
 	},
 	{
@@ -100,13 +118,22 @@ export const MV_MOTION_PRESETS: MvMotionPreset[] = [
 		icon: "M12,3 L12,21 M7,8 L12,3 L17,8 M7,16 L12,21 L17,16",
 		// 上下反転：叩かれて上へ跳ねてから重力で戻る、というボールのバウンドに寄せる。
 		build: () => [
-			{ source: "beat", target: "y", op: "add", amount: -24, curve: 3 },
+			{ source: "beat", target: "y", op: "add", amount: -26, curve: 3 },
 		],
 	},
 	{
 		id: "beatCountPulse",
 		name: "拍ごとに個数が増減（複数表示のときだけ効果あり）",
 		category: "bounce",
+		icon: "M6,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M11,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M16,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0",
+		build: () => [
+			{ source: "beat", target: "count", op: "add", amount: 2, curve: 2 },
+		],
+	},
+	{
+		id: "beatPunch2",
+		name: "拍ごとに2回ポップ（タッタッ）",
+		category: "combo",
 		icon: "M6,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M11,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0 M16,12 a2,2 0 1,0 4,0 a2,2 0 1,0 -4,0",
 		build: () => [
 			{ source: "beat", target: "count", op: "add", amount: 2, curve: 2 },
@@ -140,8 +167,7 @@ export const MV_MOTION_PRESETS: MvMotionPreset[] = [
  * 「独自の動きを組み合わせる」廃止に合わせて、拍と無関係だった旧プリセット
  * （回転しっぱなし・往復移動・ランダム等）も削除した。過去に作られたMVがこれらの
  * presetIdを保存済みなので、読み込んだ瞬間に動きが消えて見えないよう、近い新プリセットへ
- * 固定的に読み替える（読み込むたびに変わると分かりにくいので "random" も1つに固定）。
- * 'static'（元から動きなし）は読み替え先が無いのが正しいので、undefined を返す。
+ * 丸め込む。
  */
 const LEGACY_PRESET_ALIAS: Record<string, string> = {
 	rotateOnly: "beatSpinKick",
@@ -171,31 +197,32 @@ function buildLegacyCustomModulators(c: MvMotionCustomToggle): MvModulator[] {
 	if (c.move) {
 		mods.push({
 			source: "phrase",
+			target: "y",
+			op: "add",
+			amount: 50,
 			bars: c.moveSpeedBars,
 			symmetric: true,
-			curve: 1,
-			target: "x",
-			op: "add",
-			amount: 30,
+			curve: 1.5,
 		});
 	}
 	if (c.rotate) {
 		mods.push({
-			source: "spin",
+			source: "phrase",
 			target: "rotation",
 			op: "add",
-			amount: c.rotateSpeed,
+			amount: 360,
+			bars: 8 / c.rotateSpeed,
 		});
 	}
 	if (c.scale) {
 		mods.push({
 			source: "phrase",
-			bars: c.scaleSpeedBars,
-			symmetric: true,
-			curve: 2,
 			target: "size",
 			op: "add",
-			amount: 10,
+			amount: 20,
+			bars: c.scaleSpeedBars,
+			symmetric: true,
+			curve: 1.5,
 		});
 	}
 	return mods;
