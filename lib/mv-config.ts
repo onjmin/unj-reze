@@ -988,25 +988,154 @@ export interface MvShapeMotionPreset {
 
 /** 画面全体にかかる演出。 */
 export type MvEffectStyle =
+	// 光・色
 	| "flash"
 	| "invert"
-	| "shake"
-	| "zoomPunch"
 	| "strobe"
 	| "vignette"
-	| "tint";
+	| "tint"
+	| "hueShift"
+	| "bloom"
+	// 揺らす・動かす
+	| "shake"
+	| "zoomPunch"
+	| "roll"
+	// 歪ませる・壊す
+	| "rgbShift"
+	| "glitch"
+	| "pixelate"
+	| "zoomBlur"
+	| "shockwave"
+	| "mirror"
+	| "trail"
+	// 画面の質感
+	| "scanlines"
+	| "filmGrain"
+	| "letterbox";
 
 export const MV_EFFECT_STYLE_LABELS: Record<MvEffectStyle, string> = {
 	flash: "フラッシュ（白く光る）",
 	invert: "色反転",
-	shake: "画面ゆれ",
-	zoomPunch: "ズームパンチ",
 	strobe: "ストロボ",
 	vignette: "周辺減光",
 	// 参考動画（運び屋さん）は終盤で画面全体が夕焼け色へ切り替わる。
 	// 明るさは残したまま色味だけ差し替えたいので、塗りつぶしではなく色の合成で作る。
 	tint: "色を染める（画面全体）",
+	hueShift: "色相をまわす",
+	bloom: "光をにじませる（ブルーム）",
+	shake: "画面ゆれ",
+	zoomPunch: "ズームパンチ",
+	roll: "画面を傾ける（ロール）",
+	rgbShift: "色ズレ（RGBずらし）",
+	glitch: "グリッチ（横に裂ける）",
+	pixelate: "モザイク（粗いドット）",
+	zoomBlur: "放射ブラー（ズーム流れ）",
+	shockwave: "衝撃波（輪が広がる）",
+	mirror: "ミラー（左右に折り返す）",
+	trail: "残像（尾を引く）",
+	scanlines: "走査線（ブラウン管）",
+	filmGrain: "フィルムノイズ（ざらつき）",
+	letterbox: "シネスコ帯（上下の黒帯）",
 };
+
+/** 演出ピッカーでの見出しカテゴリ。20種類あるので分類しないと選べない。 */
+export type MvEffectCategory = "light" | "move" | "distort" | "texture";
+
+export const MV_EFFECT_CATEGORY: Record<MvEffectStyle, MvEffectCategory> = {
+	flash: "light",
+	invert: "light",
+	strobe: "light",
+	vignette: "light",
+	tint: "light",
+	hueShift: "light",
+	bloom: "light",
+	shake: "move",
+	zoomPunch: "move",
+	roll: "move",
+	rgbShift: "distort",
+	glitch: "distort",
+	pixelate: "distort",
+	zoomBlur: "distort",
+	shockwave: "distort",
+	mirror: "distort",
+	trail: "distort",
+	scanlines: "texture",
+	filmGrain: "texture",
+	letterbox: "texture",
+};
+
+export const MV_EFFECT_CATEGORY_LABELS: Record<MvEffectCategory, string> = {
+	light: "光・色",
+	move: "揺らす・動かす",
+	distort: "歪ませる・壊す",
+	texture: "画面の質感",
+};
+
+export const MV_EFFECT_STYLE_DESCRIPTIONS: Record<MvEffectStyle, string> = {
+	flash: "画面いっぱいを一瞬だけ塗る。キメの1発に。",
+	invert: "色を反転させる。1拍だけ入れると強烈に効く。",
+	strobe: "点いたり消えたりを刻む。長さ（拍）が点滅の周期。",
+	vignette: "四隅を暗く落として真ん中へ視線を集める。",
+	tint: "明るさはそのままに色味だけ差し替える。夕焼け・夜への転換に。",
+	hueShift: "画面ぜんぶの色相をぐるっと回す。サビで一気に別の色へ。",
+	bloom: "明るいところが光って滲む。ネオンや逆光の質感に。",
+	shake: "画面全体を細かく揺らす。キックに合わせると重くなる。",
+	zoomPunch: "一瞬グッと寄る。拍の頭に入れると前へ出る。",
+	roll: "画面ごと左右に傾ける。揺れとは別方向の勢いが出る。",
+	rgbShift: "赤と青を左右にずらす。安っぽくならない王道の壊し方。",
+	glitch: "横に裂けてズレる。通信不良のような一瞬の破綻に。",
+	pixelate: "粗いドットへ潰す。チップチューンや回想の入りに。",
+	zoomBlur: "中心から外へ放射状に流れる。落ちる直前の一撃に。",
+	shockwave: "指定した点から輪が広がって画面を押しのける。",
+	mirror: "片側を反転して折り返す。万華鏡のような対称画になる。",
+	trail: "前のコマを薄く残して尾を引く。強いほど長く残る。",
+	scanlines: "横線を重ねてブラウン管っぽくする。ずっと点けっぱなしで使う。",
+	filmGrain: "ざらついたノイズを乗せる。フィルムや古い映像の質感に。",
+	letterbox: "上下に黒帯を出す。映画のワンシーンのように見せる。",
+};
+
+/**
+ * 発火してから消えるまでの形。
+ * 線形だけだと「鋭いキック」も「じわっと来るサビ」も同じ顔になるので、
+ * 減衰カーブを選べるようにしてある。
+ */
+export type MvEffectCurve = "linear" | "exp" | "soft" | "swell" | "hold";
+
+export const MV_EFFECT_CURVE_LABELS: Record<MvEffectCurve, string> = {
+	linear: "まっすぐ減る",
+	exp: "鋭く落ちる（打楽器向き）",
+	soft: "ゆっくり落ちる（余韻）",
+	swell: "ふくらんで消える",
+	hold: "出しっぱなし→最後に切る",
+};
+
+/** 色の指定が効く演出。効かない演出で色欄を出すと「変えたのに何も起きない」になる。 */
+export const MV_EFFECT_USES_COLOR: ReadonlySet<MvEffectStyle> = new Set<MvEffectStyle>([
+	"flash",
+	"strobe",
+	"vignette",
+	"tint",
+	"scanlines",
+	"letterbox",
+	"shockwave",
+]);
+
+/**
+ * 描き終わった画を読み直して作る演出。
+ * 1フレームに何度もキャンバスを読み戻すぶん重いので、editor側で枚数を注意できるようにしてある。
+ */
+export const MV_EFFECT_POST_STYLES: ReadonlySet<MvEffectStyle> =
+	new Set<MvEffectStyle>([
+		"rgbShift",
+		"glitch",
+		"pixelate",
+		"zoomBlur",
+		"shockwave",
+		"mirror",
+		"bloom",
+		"hueShift",
+		"trail",
+	]);
 
 /** 演出の発火タイミング。 */
 export type MvTrigger = "always" | "beat" | "bar" | "bars" | "note" | "section";
@@ -1037,6 +1166,25 @@ export interface MvEffectLayer extends MvLayerBase {
 	decayBeats?: number;
 	/** flash / strobe / vignette の色。 */
 	color?: string;
+	/**
+	 * 発火の間隔倍率。trigger==='beat'/'bar' のとき、2なら2拍（2小節）に1回になる。
+	 * ハーフタイムや「2小節に1回だけ」といった間引きを、小節を全部書き出さずに作るため。
+	 * 未指定は1（毎回）。
+	 */
+	every?: number;
+	/**
+	 * 発火位相のずらし（拍）。0.5で裏拍へ寄る。
+	 * 拍の頭に全部が揃うと平坦になるので、演出ごとにずらせるようにしてある。
+	 */
+	offsetBeats?: number;
+	/** 発火してから消えるまでの形。未指定は linear。 */
+	curve?: MvEffectCurve;
+	/**
+	 * shockwave の中心。未指定は画面中央。
+	 * 「キャラの立ち位置から波が出る」を作るために座標で持てるようにしてある。
+	 */
+	x?: number;
+	y?: number;
 }
 
 /** コード進行バーの1ブロック。 */

@@ -47,7 +47,13 @@ import {
 	MV_AUDIO_MODE_LABELS,
 	MV_BLEND_LABELS,
 	MV_CHORD_COLOR_MODE_LABELS,
+	MV_EFFECT_CATEGORY,
+	MV_EFFECT_CATEGORY_LABELS,
+	MV_EFFECT_CURVE_LABELS,
+	MV_EFFECT_POST_STYLES,
+	MV_EFFECT_STYLE_DESCRIPTIONS,
 	MV_EFFECT_STYLE_LABELS,
+	MV_EFFECT_USES_COLOR,
 	MV_ENTER_FROM_LABELS,
 	MV_H,
 	MV_MOD_OP_LABELS,
@@ -69,6 +75,8 @@ import {
 	type MvChordColorMode,
 	type MvChordStep,
 	type MvDegreeLayer,
+	type MvEffectCategory,
+	type MvEffectCurve,
 	type MvEffectLayer,
 	type MvEffectStyle,
 	type MvEnterFrom,
@@ -356,6 +364,43 @@ function SelectField<T extends string>({
 	);
 }
 
+/**
+ * 見出しでグループ分けした選択欄。
+ * 演出は20種類あり、平たい一覧だと目的のものを探せないので分類して出す。
+ */
+function GroupedSelectField<T extends string>({
+	label,
+	value,
+	groups,
+	onChange,
+}: {
+	label: string;
+	value: T;
+	groups: { label: string; options: { value: T; label: string }[] }[];
+	onChange: (v: T) => void;
+}) {
+	return (
+		<label className="block space-y-0.5">
+			<span className={FIELD_LABEL_CLASS}>{label}</span>
+			<select
+				value={value}
+				onChange={(e) => onChange(e.target.value as T)}
+				className={FIELD_INPUT_CLASS}
+			>
+				{groups.map((g) => (
+					<optgroup key={g.label} label={g.label}>
+						{g.options.map((o) => (
+							<option key={o.value} value={o.value}>
+								{o.label}
+							</option>
+						))}
+					</optgroup>
+				))}
+			</select>
+		</label>
+	);
+}
+
 function CheckField({
 	label,
 	checked,
@@ -456,9 +501,18 @@ const BLEND_OPTIONS = (Object.keys(MV_BLEND_LABELS) as MvBlend[]).map((b) => ({
 	value: b,
 	label: MV_BLEND_LABELS[b],
 }));
-const EFFECT_STYLE_OPTIONS = (
-	Object.keys(MV_EFFECT_STYLE_LABELS) as MvEffectStyle[]
-).map((s) => ({ value: s, label: MV_EFFECT_STYLE_LABELS[s] }));
+/** 演出は種類が多いのでカテゴリごとの見出し付きで出す。 */
+const EFFECT_STYLE_GROUPS = (
+	Object.keys(MV_EFFECT_CATEGORY_LABELS) as MvEffectCategory[]
+).map((cat) => ({
+	label: MV_EFFECT_CATEGORY_LABELS[cat],
+	options: (Object.keys(MV_EFFECT_STYLE_LABELS) as MvEffectStyle[])
+		.filter((s) => MV_EFFECT_CATEGORY[s] === cat)
+		.map((s) => ({ value: s, label: MV_EFFECT_STYLE_LABELS[s] })),
+}));
+const EFFECT_CURVE_OPTIONS = (
+	Object.keys(MV_EFFECT_CURVE_LABELS) as MvEffectCurve[]
+).map((c) => ({ value: c, label: MV_EFFECT_CURVE_LABELS[c] }));
 const TRIGGER_OPTIONS = (Object.keys(MV_TRIGGER_LABELS) as MvTrigger[]).map(
 	(t) => ({ value: t, label: MV_TRIGGER_LABELS[t] }),
 );
@@ -2744,20 +2798,56 @@ export default function MvMaker({
 
 			{layer.kind === "effect" && (
 				<>
-					<SelectField
+					<GroupedSelectField
 						label="演出"
 						value={layer.style}
-						options={EFFECT_STYLE_OPTIONS}
+						groups={EFFECT_STYLE_GROUPS}
 						onChange={(v) =>
 							updateLayer(layer.id, (l) => ({ ...l, style: v }) as MvLayer)
 						}
 					/>
+					<p className="rounded border border-blue-500/30 bg-blue-950/20 px-2 py-1.5 text-[10px] leading-relaxed text-blue-200">
+						{MV_EFFECT_STYLE_DESCRIPTIONS[layer.style]}
+					</p>
+					{MV_EFFECT_POST_STYLES.has(layer.style) && (
+						<Hint>
+							この演出は描き上がった画を読み直して作るため、他より重いです。
+							同時に何枚も重ねるとスマホでコマ落ちすることがあります。
+						</Hint>
+					)}
 					<SelectField
 						label="タイミング"
 						value={layer.trigger}
 						options={TRIGGER_OPTIONS}
 						onChange={(v) =>
 							updateLayer(layer.id, (l) => ({ ...l, trigger: v }) as MvLayer)
+						}
+					/>
+					{(layer.trigger === "beat" || layer.trigger === "bar") && (
+						<NumField
+							label={
+								layer.trigger === "beat"
+									? "何拍に1回か（1で毎拍、2で2拍に1回）"
+									: "何小節に1回か（1で毎小節、2で2小節に1回）"
+							}
+							value={layer.every ?? 1}
+							min={1}
+							step={1}
+							onChange={(v) =>
+								updateLayer(
+									layer.id,
+									(l) =>
+										({ ...l, every: Math.max(1, Math.round(v)) }) as MvLayer,
+								)
+							}
+						/>
+					)}
+					<NumField
+						label="タイミングをずらす（拍。0.5で裏拍へ）"
+						value={layer.offsetBeats ?? 0}
+						step={0.25}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, offsetBeats: v }) as MvLayer)
 						}
 					/>
 					{layer.trigger === "bars" && (
@@ -2828,7 +2918,40 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, decayBeats: v }) as MvLayer)
 						}
 					/>
-					{layer.style !== "invert" && (
+					{layer.trigger !== "always" && (
+						<SelectField
+							label="消え方"
+							value={layer.curve ?? "linear"}
+							options={EFFECT_CURVE_OPTIONS}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, curve: v }) as MvLayer)
+							}
+						/>
+					)}
+					{layer.style === "shockwave" && (
+						<div className="space-y-1 rounded border border-gray-700/70 bg-gray-900/60 p-2">
+							<p className="text-[10px] text-gray-400">
+								波の中心（未入力なら画面の真ん中）
+							</p>
+							<div className="flex gap-1.5">
+								<NumField
+									label="X"
+									value={layer.x ?? Math.round(MV_W / 2)}
+									onChange={(v) =>
+										updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+									}
+								/>
+								<NumField
+									label="Y"
+									value={layer.y ?? Math.round(MV_H / 2)}
+									onChange={(v) =>
+										updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+									}
+								/>
+							</div>
+						</div>
+					)}
+					{MV_EFFECT_USES_COLOR.has(layer.style) && (
 						<ColorField
 							label="色"
 							value={layer.color ?? "#ffffff"}

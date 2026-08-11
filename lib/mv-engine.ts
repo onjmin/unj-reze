@@ -20,6 +20,7 @@ import {
 	isMvTransitionInert,
 	layerAppearBar,
 	MV_BLEND_COMPOSITE,
+	MV_EFFECT_POST_STYLES,
 	MV_H,
 	MV_PARTICLE_REVEAL_FRAMES,
 	MV_PARTICLE_REVEAL_URL,
@@ -31,7 +32,9 @@ import {
 	type MvChordBarLayer,
 	type MvChordStep,
 	type MvDegreeLayer,
+	type MvEffectCurve,
 	type MvEffectLayer,
+	type MvEffectStyle,
 	type MvEntrance,
 	type MvImageLayer,
 	type MvLayer,
@@ -569,10 +572,11 @@ export function drawMvFrame(
 	ctx.save();
 	ctx.clearRect(0, 0, MV_W, MV_H);
 
-	// 画面ゆれ・ズームパンチは「フレーム全体の変形」なので、中身を描く前に掛ける
+	// 画面ゆれ・ズームパンチ・ロールは「フレーム全体の変形」なので、中身を描く前に掛ける
 	const transform = frameTransform(d, effects);
 	if (transform) {
 		ctx.translate(MV_W / 2 + transform.dx, MV_H / 2 + transform.dy);
+		ctx.rotate(transform.rot);
 		ctx.scale(transform.scale, transform.scale);
 		ctx.translate(-MV_W / 2, -MV_H / 2);
 	}
@@ -587,6 +591,10 @@ export function drawMvFrame(
 	}
 
 	ctx.restore();
+
+	// 色ズレ・グリッチ・残像などは「描き上がった画」を読み直して作るので、
+	// レイヤーを全部描き終えてから、被せるだけの演出より先に掛ける
+	drawPostEffects(d, effects);
 
 	// フラッシュ・色反転などは全部の上に重ねる（変形の影響を受けない）
 	drawOverlayEffects(d, effects);
@@ -693,26 +701,92 @@ function drawLayerHighlight(
 
 // ───────────────── 画面エフェクト ─────────────────
 
+/**
+ * 生の発火量（0..1、1が発火直後）にカーブを掛ける。
+ * 直線減衰だけだと鋭いキックもじわっと来るサビも同じ顔になるので形を選べるようにしてある。
+ */
+function applyEffectCurve(v: number, curve: MvEffectCurve | undefined): number {
+	if (v <= 0) return 0;
+	switch (curve) {
+		case "exp":
+			return v * v * v;
+		case "soft":
+			return Math.sqrt(v);
+		// ふくらんで消える：発火直後は0から立ち上がる。v は 1→0 なので山は v=0.5 のとき。
+		case "swell":
+			return Math.sin(Math.PI * (1 - v));
+		case "hold":
+			return 1;
+		default:
+			return v;
+	}
+}
+
+/**
+ * 周期発火（拍ごと／小節ごと）の生の量。
+ * `every` で間引き、`offsetBeats` で位相をずらす。拍の頭に全部の演出が揃うと
+ * 平坦になるので、演出ごとにタイミングをばらせるようにしてある。
+ */
+function periodicEnv(
+	step: number,
+	period: number,
+	decaySteps: number,
+	offsetSteps: number,
+): number {
+	if (period <= 0) return 0;
+	const phase = (((step - offsetSteps) % period) + period) % period;
+	if (phase >= decaySteps) return 0;
+	return clamp01(1 - phase / decaySteps);
+}
+
 /** エフェクトの発火量 0..1。 */
 function effectEnv(d: DrawCtx, fx: MvEffectLayer): number {
 	const decaySteps = Math.max(1, (fx.decayBeats ?? 1) * MV_STEPS_PER_BEAT);
+	const every = Math.max(1, Math.round(fx.every ?? 1));
+	const offsetSteps = (fx.offsetBeats ?? 0) * MV_STEPS_PER_BEAT;
+	const raw = ((): number => {
+		switch (fx.trigger) {
+			case "always":
+				return 1;
+			case "beat":
+				return periodicEnv(
+					d.step,
+					MV_STEPS_PER_BEAT * every,
+					decaySteps,
+					offsetSteps,
+				);
+			case "bar":
+				return periodicEnv(
+					d.step,
+					MV_STEPS_PER_BAR * every,
+					decaySteps,
+					offsetSteps,
+				);
+			default:
+				return rareEffectEnv(d, fx, decaySteps, offsetSteps);
+		}
+	})();
+	// 'always' はカーブを掛けても意味が無い（常に1）ので素通しする。
+	return fx.trigger === "always" ? raw : applyEffectCurve(raw, fx.curve);
+}
+
+/** 小節指定・ノート・場面。周期発火ほど毎フレーム通らないので分けてある。 */
+function rareEffectEnv(
+	d: DrawCtx,
+	fx: MvEffectLayer,
+	decaySteps: number,
+	offsetSteps: number,
+): number {
+	// offsetBeats は周期発火だけでなく「音より少し遅らせて効かせる」にも使いたいので、
+	// どのトリガーでも読む時刻そのものをずらす形で効かせる。
+	const step = d.step - offsetSteps;
 	switch (fx.trigger) {
-		case "always":
-			return 1;
-		case "beat":
-			return envelope(
-				d.step,
-				MV_STEPS_PER_BEAT,
-				MV_STEPS_PER_BEAT / decaySteps,
-			);
-		case "bar":
-			return envelope(d.step, MV_STEPS_PER_BAR, MV_STEPS_PER_BAR / decaySteps);
 		case "bars": {
 			// 指定した小節の頭だけで発火する。「毎回」ではなく狙った瞬間だけ光らせるためのトリガー。
 			if (!fx.bars || fx.bars.length === 0) return 0;
 			let best = 0;
 			for (const b of fx.bars) {
-				const age = d.step - b * MV_STEPS_PER_BAR;
+				const age = step - b * MV_STEPS_PER_BAR;
 				if (age < 0 || age >= decaySteps) continue;
 				const v = 1 - age / decaySteps;
 				if (v > best) best = v;
@@ -721,15 +795,15 @@ function effectEnv(d: DrawCtx, fx: MvEffectLayer): number {
 		}
 		case "note": {
 			if (!fx.tracks || fx.tracks.length === 0)
-				return trackOnsetEnv(d.song, d.step, undefined, decaySteps);
+				return trackOnsetEnv(d.song, step, undefined, decaySteps);
 			let best = 0;
 			for (const t of fx.tracks)
-				best = Math.max(best, trackOnsetEnv(d.song, d.step, t, decaySteps));
+				best = Math.max(best, trackOnsetEnv(d.song, step, t, decaySteps));
 			return best;
 		}
 		case "section": {
 			if (!d.section) return 0;
-			const age = (d.bar - d.section.startBar) * MV_STEPS_PER_BAR;
+			const age = step - d.section.startBar * MV_STEPS_PER_BAR;
 			if (age < 0 || age >= decaySteps) return 0;
 			return clamp01(1 - age / decaySteps);
 		}
@@ -738,17 +812,29 @@ function effectEnv(d: DrawCtx, fx: MvEffectLayer): number {
 	}
 }
 
-/** 画面ゆれ／ズームパンチをまとめて1つの変形にする。 */
+/** フレーム全体の変形になる演出（描く前に掛かるもの）。 */
+const FRAME_TRANSFORM_STYLES: ReadonlySet<MvEffectStyle> = new Set([
+	"shake",
+	"zoomPunch",
+	"roll",
+]);
+
+/** 描き終わった画をもう一度読んで作る演出（一覧は mv-config と共有する）。 */
+const POST_EFFECT_STYLES = MV_EFFECT_POST_STYLES;
+
+/** 画面ゆれ／ズームパンチ／ロールをまとめて1つの変形にする。 */
 function frameTransform(
 	d: DrawCtx,
 	effects: MvEffectLayer[],
-): { dx: number; dy: number; scale: number } | null {
+): { dx: number; dy: number; scale: number; rot: number } | null {
 	let dx = 0;
 	let dy = 0;
 	let scale = 1;
+	let rot = 0;
 	let any = false;
 
 	for (const fx of effects) {
+		if (!FRAME_TRANSFORM_STYLES.has(fx.style)) continue;
 		const env = effectEnv(d, fx) * clamp01(fx.amount);
 		if (env <= 0.001) continue;
 		if (fx.style === "shake") {
@@ -760,17 +846,406 @@ function frameTransform(
 		} else if (fx.style === "zoomPunch") {
 			scale *= 1 + env * 0.18;
 			any = true;
+		} else if (fx.style === "roll") {
+			// 揺れ(平行移動)とは違う軸の勢いが欲しいので、傾けるほうは回転で持つ。
+			// 拡大を少し足すのは、回した四隅から下地が見えてしまうのを防ぐため。
+			rot += Math.sin(d.timeSec * 6.1) * env * 0.11;
+			scale *= 1 + env * 0.06;
+			any = true;
 		}
 	}
 
-	return any ? { dx, dy, scale } : null;
+	return any ? { dx, dy, scale, rot } : null;
 }
 
-/** フラッシュ・反転・ストロボ・周辺減光を全レイヤーの上に重ねる。 */
+// ───────────────── 後処理（描いた画を読み直す演出） ─────────────────
+
+/**
+ * 後処理は「描き終わった画をもう一度読む」ので、取り込み用の裏キャンバスが要る。
+ * 毎フレーム作ると GC でカクつくため、モジュールに2枚だけ持って使い回す。
+ * A＝フレームの取り込み、B＝チャンネル抽出やモザイクなどの中間結果。
+ */
+const scratchA = { canvas: null as HTMLCanvasElement | null, ctx: null as CanvasRenderingContext2D | null };
+const scratchB = { canvas: null as HTMLCanvasElement | null, ctx: null as CanvasRenderingContext2D | null };
+
+function scratchCtx(
+	slot: typeof scratchA,
+	w: number,
+	h: number,
+): CanvasRenderingContext2D | null {
+	if (typeof document === "undefined") return null;
+	if (!slot.canvas) {
+		slot.canvas = document.createElement("canvas");
+		slot.ctx = slot.canvas.getContext("2d");
+	}
+	const ctx = slot.ctx;
+	const canvas = slot.canvas;
+	if (!ctx || !canvas) return null;
+	if (canvas.width !== w || canvas.height !== h) {
+		// サイズ代入は中身も消えるので、ここでは clearRect を重ねない
+		canvas.width = w;
+		canvas.height = h;
+	} else {
+		ctx.clearRect(0, 0, w, h);
+	}
+	ctx.setTransform(1, 0, 0, 1, 0, 0);
+	ctx.globalAlpha = 1;
+	ctx.globalCompositeOperation = "source-over";
+	ctx.filter = "none";
+	ctx.imageSmoothingEnabled = true;
+	return ctx;
+}
+
+/** 取り込んだ1フレーム。デバイスpxとMV論理pxの対応も持つ。 */
+interface FrameSnap {
+	src: HTMLCanvasElement;
+	/** デバイスpx */
+	dw: number;
+	dh: number;
+	/** 論理1pxあたりのデバイスpx */
+	sx: number;
+	sy: number;
+}
+
+/**
+ * いまの ctx に描かれている MV_W×MV_H の範囲を裏キャンバスへ取り込む。
+ * ctx には呼び出し側（MvPlayer）の dpr 拡大が掛かっているので、変換行列から
+ * デバイス座標を割り出す。キャンバス全体を前提にすると dpr 以外の使われ方で崩れる。
+ */
+function snapFrame(ctx: CanvasRenderingContext2D): FrameSnap | null {
+	const m = typeof ctx.getTransform === "function" ? ctx.getTransform() : null;
+	const sx = m && Math.abs(m.a) > 1e-6 ? Math.abs(m.a) : 1;
+	const sy = m && Math.abs(m.d) > 1e-6 ? Math.abs(m.d) : 1;
+	const ox = m ? m.e : 0;
+	const oy = m ? m.f : 0;
+	const dw = Math.max(1, Math.round(MV_W * sx));
+	const dh = Math.max(1, Math.round(MV_H * sy));
+	const sctx = scratchCtx(scratchA, dw, dh);
+	if (!sctx) return null;
+	try {
+		sctx.drawImage(
+			ctx.canvas,
+			Math.round(ox),
+			Math.round(oy),
+			dw,
+			dh,
+			0,
+			0,
+			dw,
+			dh,
+		);
+	} catch {
+		// 汚染キャンバス等。後処理を諦めるだけで、素の画はそのまま残る。
+		return null;
+	}
+	return { src: sctx.canvas, dw, dh, sx, sy };
+}
+
+/**
+ * 残像の履歴。キャンバスごとに1枚持つ（プレビューと書き出しで混ざらないように）。
+ * シークで時間が飛んだら古い尾が残ってしまうので step も覚えておいて捨てる。
+ */
+const trailBuffers = new WeakMap<
+	HTMLCanvasElement,
+	{ canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; step: number }
+>();
+
+/** step から決まる疑似乱数。同じ小節へシークしたら同じ画になるように時計は使わない。 */
+function hash01(n: number): number {
+	const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+	return s - Math.floor(s);
+}
+
+/**
+ * フィルムノイズ用のタイル。毎フレーム ImageData を作ると 23万画素を触ることになるので、
+ * 起動時に数枚だけ焼いておいて位置をずらして貼る。
+ */
+const GRAIN_TILE_SIZE = 128;
+const GRAIN_TILE_COUNT = 4;
+let grainTiles: HTMLCanvasElement[] | null = null;
+
+function getGrainTiles(): HTMLCanvasElement[] | null {
+	if (grainTiles) return grainTiles;
+	if (typeof document === "undefined") return null;
+	const tiles: HTMLCanvasElement[] = [];
+	for (let t = 0; t < GRAIN_TILE_COUNT; t++) {
+		const c = document.createElement("canvas");
+		c.width = GRAIN_TILE_SIZE;
+		c.height = GRAIN_TILE_SIZE;
+		const cx = c.getContext("2d");
+		if (!cx) return null;
+		const img = cx.createImageData(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
+		for (let i = 0; i < img.data.length; i += 4) {
+			const v = 90 + Math.floor(Math.random() * 76);
+			img.data[i] = v;
+			img.data[i + 1] = v;
+			img.data[i + 2] = v;
+			img.data[i + 3] = 255;
+		}
+		cx.putImageData(img, 0, 0);
+		tiles.push(c);
+	}
+	grainTiles = tiles;
+	return grainTiles;
+}
+
+/** 取り込んだ画から1チャンネルだけ抜いた版を作る（色ズレ用）。 */
+function channelCopy(
+	snap: FrameSnap,
+	rgb: string,
+): HTMLCanvasElement | null {
+	const b = scratchCtx(scratchB, snap.dw, snap.dh);
+	if (!b) return null;
+	b.drawImage(snap.src, 0, 0);
+	// multiply で純色を掛けると、その色の成分以外が0になる＝チャンネル抽出になる
+	b.globalCompositeOperation = "multiply";
+	b.fillStyle = rgb;
+	b.fillRect(0, 0, snap.dw, snap.dh);
+	b.globalCompositeOperation = "source-over";
+	return b.canvas;
+}
+
+/**
+ * 描き終わった画を読み直して掛ける演出。
+ * レイヤーの上・フラッシュ等のオーバーレイの下に入る（オーバーレイは"画"ではなく
+ * "画に被せる光"なので、歪みの対象にはしない）。
+ */
+function drawPostEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
+	const { ctx } = d;
+	for (const fx of effects) {
+		if (!POST_EFFECT_STYLES.has(fx.style)) continue;
+		const env = effectEnv(d, fx) * clamp01(fx.amount);
+		if (env <= 0.004) continue;
+		const snap = snapFrame(ctx);
+		if (!snap) return;
+
+		ctx.save();
+		switch (fx.style) {
+			case "rgbShift": {
+				const off = env * 7;
+				// 一度消してから R/G/B を別々の位置で足し戻す。ずれ幅0なら元通りになる。
+				ctx.clearRect(0, 0, MV_W, MV_H);
+				ctx.globalCompositeOperation = "lighter";
+				// ずらすと画面端にその色が届かない帯ができるので、ずれ幅ぶん広げて描く。
+				// 拡大率は 640px に対して数%——ズームとしては見えず、端の欠けだけが消える。
+				const grow = 1 + (2 * off) / MV_W;
+				const w = MV_W * grow;
+				const h = MV_H * grow;
+				const parts: [string, number][] = [
+					["#ff0000", -off],
+					["#00ff00", 0],
+					["#0000ff", off],
+				];
+				for (const [rgb, dx] of parts) {
+					const layerCanvas = channelCopy(snap, rgb);
+					if (!layerCanvas) break;
+					ctx.drawImage(
+						layerCanvas,
+						dx + (MV_W - w) / 2,
+						(MV_H - h) / 2,
+						w,
+						h,
+					);
+				}
+				break;
+			}
+			case "glitch": {
+				// 横に裂けてズレる。下地は消さない——ずれた隙間から元の画が覗くほうが
+				// 「破綻した」に見える（黒帯が出ると単に欠けたように見えてしまう）。
+				const slices = 6 + Math.round(env * 12);
+				const sliceH = MV_H / slices;
+				const seed = Math.floor(d.step);
+				for (let i = 0; i < slices; i++) {
+					const r = hash01(seed * 31 + i * 7.3);
+					if (r > 0.55) continue;
+					const shift = (hash01(seed * 17 + i * 3.1) * 2 - 1) * env * 46;
+					const y = i * sliceH;
+					ctx.drawImage(
+						snap.src,
+						0,
+						Math.round(y * snap.sy),
+						snap.dw,
+						Math.max(1, Math.round(sliceH * snap.sy)),
+						shift,
+						y,
+						MV_W,
+						sliceH,
+					);
+				}
+				break;
+			}
+			case "pixelate": {
+				const block = 1 + env * 24;
+				const tw = Math.max(1, Math.round(MV_W / block));
+				const th = Math.max(1, Math.round(MV_H / block));
+				const b = scratchCtx(scratchB, tw, th);
+				if (!b) break;
+				b.drawImage(snap.src, 0, 0, tw, th);
+				ctx.imageSmoothingEnabled = false;
+				ctx.clearRect(0, 0, MV_W, MV_H);
+				ctx.drawImage(b.canvas, 0, 0, MV_W, MV_H);
+				ctx.imageSmoothingEnabled = true;
+				break;
+			}
+			case "zoomBlur": {
+				// 中心から外へ広がるコピーを重ねて流れを作る。段数は6で足りる
+				// （増やしても見た目は変わらないのに読み戻しの回数だけ増える）。
+				const passes = 6;
+				const maxZoom = env * 0.18;
+				ctx.globalAlpha = 0.85 / passes;
+				for (let i = 1; i <= passes; i++) {
+					const s = 1 + (maxZoom * i) / passes;
+					const w = MV_W * s;
+					const h = MV_H * s;
+					ctx.drawImage(
+						snap.src,
+						(MV_W - w) / 2,
+						(MV_H - h) / 2,
+						w,
+						h,
+					);
+				}
+				break;
+			}
+			case "shockwave": {
+				// env は 1→0 と落ちるので、輪は (1-env) に比例して外へ広がる。
+				const cx = fx.x ?? MV_W / 2;
+				const cy = fx.y ?? MV_H / 2;
+				const maxR = Math.hypot(MV_W, MV_H) * 0.6;
+				const r = (1 - env) * maxR;
+				const thickness = 26 + env * 34;
+				ctx.beginPath();
+				ctx.arc(cx, cy, r + thickness / 2, 0, Math.PI * 2);
+				ctx.arc(cx, cy, Math.max(0, r - thickness / 2), 0, Math.PI * 2, true);
+				ctx.clip();
+				// 輪の内側だけ拡大して描き直す＝押しのけられたように見える
+				const s = 1 + env * 0.09;
+				ctx.drawImage(
+					snap.src,
+					cx - (cx - 0) * s,
+					cy - (cy - 0) * s,
+					MV_W * s,
+					MV_H * s,
+				);
+				ctx.globalCompositeOperation = "lighter";
+				ctx.globalAlpha = env * 0.35;
+				ctx.fillStyle = fx.color ?? "#ffffff";
+				ctx.fillRect(0, 0, MV_W, MV_H);
+				break;
+			}
+			case "mirror": {
+				// 左半分を反転して右半分へ折り返す。env で元の右半分とクロスフェードする。
+				ctx.globalAlpha = env;
+				ctx.translate(MV_W, 0);
+				ctx.scale(-1, 1);
+				ctx.drawImage(
+					snap.src,
+					0,
+					0,
+					Math.max(1, Math.floor(snap.dw / 2)),
+					snap.dh,
+					0,
+					0,
+					MV_W / 2,
+					MV_H,
+				);
+				break;
+			}
+			case "bloom": {
+				// 元の画を2回 multiply して明るいところだけを残し、ぼかして足す。
+				// 全体をぼかして足すと単に霞むので、光っている所だけが滲むようにしている。
+				const b = scratchCtx(scratchB, snap.dw, snap.dh);
+				if (!b) break;
+				b.drawImage(snap.src, 0, 0);
+				b.globalCompositeOperation = "multiply";
+				b.drawImage(snap.src, 0, 0);
+				b.globalCompositeOperation = "source-over";
+				ctx.filter = `blur(${(2 + env * 7).toFixed(1)}px)`;
+				ctx.globalCompositeOperation = "lighter";
+				ctx.globalAlpha = clamp01(env * 0.85);
+				ctx.drawImage(b.canvas, 0, 0, MV_W, MV_H);
+				ctx.filter = "none";
+				break;
+			}
+			case "hueShift": {
+				// 上限は180度。360度まで回せるようにすると強さ1が「一周して元通り＝無変化」に
+				// なってしまう。180度＝補色で、色相の振れ幅としてはここが最大。
+				ctx.filter = `hue-rotate(${Math.round(env * 180)}deg)`;
+				ctx.clearRect(0, 0, MV_W, MV_H);
+				ctx.drawImage(snap.src, 0, 0, MV_W, MV_H);
+				ctx.filter = "none";
+				break;
+			}
+			case "trail": {
+				drawTrail(d, fx, snap, env);
+				break;
+			}
+		}
+		ctx.restore();
+	}
+}
+
+/**
+ * 前のコマを足し戻して尾を引かせる。
+ *
+ * 加算合成なので、貯めこむ係数が1に近いと止まっている明るい所が白く飛ぶ。
+ * ゲインと保存時の減衰を掛けた値（＝1コマあたりの残り率）が必ず1未満になるよう抑え、
+ * さらに履歴をわずかに拡大して貯めることで、同じ画素に延々と足し続けないようにしてある。
+ */
+function drawTrail(
+	d: DrawCtx,
+	fx: MvEffectLayer,
+	snap: FrameSnap,
+	env: number,
+): void {
+	const { ctx } = d;
+	if (typeof document === "undefined") return;
+	const dest = ctx.canvas;
+	let rec = trailBuffers.get(dest);
+	if (!rec || rec.canvas.width !== snap.dw || rec.canvas.height !== snap.dh) {
+		const c = document.createElement("canvas");
+		c.width = snap.dw;
+		c.height = snap.dh;
+		const cx = c.getContext("2d");
+		if (!cx) return;
+		rec = { canvas: c, ctx: cx, step: Number.NEGATIVE_INFINITY };
+		trailBuffers.set(dest, rec);
+	}
+
+	// シーク・巻き戻し・停止からの再開で、無関係な時刻の尾が残らないようにする
+	const delta = d.step - rec.step;
+	const continuous = delta > 0 && delta <= 24;
+
+	if (continuous) {
+		ctx.globalCompositeOperation = "lighter";
+		ctx.globalAlpha = clamp01(env * 0.8);
+		ctx.drawImage(rec.canvas, 0, 0, MV_W, MV_H);
+		ctx.globalCompositeOperation = "source-over";
+		ctx.globalAlpha = 1;
+	}
+
+	// いま画面にある（＝尾を足した後の）画を、少し縮めて次コマ用に貯める
+	const after = snapFrame(ctx);
+	rec.ctx.setTransform(1, 0, 0, 1, 0, 0);
+	rec.ctx.globalCompositeOperation = "source-over";
+	rec.ctx.clearRect(0, 0, snap.dw, snap.dh);
+	if (after) {
+		const grow = 1.015;
+		const w = snap.dw * grow;
+		const h = snap.dh * grow;
+		rec.ctx.globalAlpha = 0.9;
+		rec.ctx.drawImage(after.src, (snap.dw - w) / 2, (snap.dh - h) / 2, w, h);
+		rec.ctx.globalAlpha = 1;
+	}
+	rec.step = d.step;
+}
+
+/** フラッシュ・反転・ストロボ・周辺減光など、画に被せるだけの演出を上へ重ねる。 */
 function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 	const { ctx } = d;
 	for (const fx of effects) {
-		if (fx.style === "shake" || fx.style === "zoomPunch") continue;
+		if (FRAME_TRANSFORM_STYLES.has(fx.style)) continue;
+		if (POST_EFFECT_STYLES.has(fx.style)) continue;
 		const env = effectEnv(d, fx) * clamp01(fx.amount);
 		if (env <= 0.004) continue;
 
@@ -818,6 +1293,44 @@ function drawOverlayEffects(d: DrawCtx, effects: MvEffectLayer[]): void {
 				g.addColorStop(1, withAlpha(fx.color ?? "#000000", env));
 				ctx.fillStyle = g;
 				ctx.fillRect(0, 0, MV_W, MV_H);
+				break;
+			}
+			case "scanlines": {
+				// 2pxおきに1px落とす。ブラウン管は「線が見える」ことが本体なので、
+				// 間隔は強さで変えず固定にして、濃さだけを env に任せる。
+				ctx.fillStyle = withAlpha(fx.color ?? "#000000", env * 0.55);
+				for (let y = 0; y < MV_H; y += 3) ctx.fillRect(0, y, MV_W, 1);
+				// ゆっくり降りてくる明るい帯。これが無いと「ただの縞」で止まってしまう。
+				const bandY = ((d.timeSec * 42) % (MV_H + 90)) - 90;
+				const band = ctx.createLinearGradient(0, bandY, 0, bandY + 90);
+				band.addColorStop(0, withAlpha("#ffffff", 0));
+				band.addColorStop(0.5, withAlpha("#ffffff", env * 0.07));
+				band.addColorStop(1, withAlpha("#ffffff", 0));
+				ctx.fillStyle = band;
+				ctx.fillRect(0, bandY, MV_W, 90);
+				break;
+			}
+			case "filmGrain": {
+				const tiles = getGrainTiles();
+				if (!tiles) break;
+				// overlay 合成なので、明るい所は明るいまま粒だけが乗る（全体が灰色に濁らない）
+				ctx.globalCompositeOperation = "overlay";
+				ctx.globalAlpha = clamp01(env * 0.5);
+				const t = Math.floor(d.step * 1.7) % tiles.length;
+				const tile = tiles[t];
+				// 貼り位置も毎コマずらさないと、粒が止まって「汚れ」に見えてしまう
+				const ox = -Math.floor(hash01(d.step) * GRAIN_TILE_SIZE);
+				const oy = -Math.floor(hash01(d.step + 99) * GRAIN_TILE_SIZE);
+				for (let x = ox; x < MV_W; x += GRAIN_TILE_SIZE)
+					for (let y = oy; y < MV_H; y += GRAIN_TILE_SIZE)
+						ctx.drawImage(tile, x, y);
+				break;
+			}
+			case "letterbox": {
+				const h = env * MV_H * 0.15;
+				ctx.fillStyle = fx.color ?? "#000000";
+				ctx.fillRect(0, 0, MV_W, h);
+				ctx.fillRect(0, MV_H - h, MV_W, h);
 				break;
 			}
 		}

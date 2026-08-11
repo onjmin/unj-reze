@@ -1002,6 +1002,7 @@ export const pgStore: DataStore = {
 	async getNotifications(userId?: string) {
 		if (!userId) return [];
 		const uid = Number(userId);
+		if (isNaN(uid)) return [];
 		const { rows } = await q(
 			`SELECT n.*, au.display_name AS actor_name, t.title AS thread_title
          FROM notifications n
