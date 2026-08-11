@@ -175,19 +175,19 @@ const cookie = (id: string, name: string, frames: number): LocalMvSprite => ({
 
 export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 	// 束音ロゼ（1コマ384px・拍に合わせるループ）
-	roze("beat-a", "ロゼ 拍A", 4, 384),
-	roze("beat-b", "ロゼ 拍B", 4, 384),
-	roze("beat-c", "ロゼ 拍C", 4, 384),
-	roze("beat-d", "ロゼ 拍D", 4, 384),
-	roze("beat-e", "ロゼ 拍E", 4, 384),
-	roze("beat-f", "ロゼ 長A", 14, 384, 8),
-	roze("beat-g", "ロゼ 長B", 14, 384, 8),
+	roze("beat-a", "目開口閉", 4, 384),
+	roze("beat-b", "目閉口開", 4, 384),
+	roze("beat-c", "目開口開", 4, 384),
+	roze("beat-d", "目開口開右腕", 4, 384),
+	roze("beat-e", "目閉口閉", 4, 384),
+	roze("beat-f", "目開ゆらゆら", 14, 384, 8),
+	roze("beat-g", "目閉ゆらゆら", 14, 384, 8),
 	// 束音ロゼ（1コマ320pxの立ち絵）
-	roze("pose-a", "ロゼ 立ちA", 6, 320, 8),
+	roze("pose-a", "枠付き", 6, 320, 8),
 	// 束音ロゼ（64pxセルのシート。行ごとに別のアニメーション）
 	{
 		id: "sheet-a",
-		name: "ロゼ シートA",
+		name: "シートA",
 		group: "束音ロゼ",
 		url: "/assets/mv/roze/sheet-a.png",
 		frames: 4,
@@ -198,7 +198,7 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 	},
 	{
 		id: "sheet-b",
-		name: "ロゼ シートB",
+		name: "シートB",
 		group: "束音ロゼ",
 		url: "/assets/mv/roze/sheet-b.png",
 		frames: 4,
@@ -208,16 +208,16 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 		loopBeats: 4,
 	},
 	// クッキー☆声優キャラ（1コマ160×240）
-	cookie("mgr-a", "MGR A", 4),
-	cookie("mgr-b", "MGR B", 2),
-	cookie("mgr-c", "MGR C", 2),
-	cookie("mot-a", "MOT A", 4),
-	cookie("mot-b", "MOT B", 4),
-	cookie("mot-c", "MOT C", 4),
-	cookie("nyn-a", "NYN A", 3),
-	cookie("nyn-b", "NYN B", 3),
-	cookie("nyn-c", "NYN C", 3),
-	cookie("nyn-d", "NYN D", 3),
+	cookie("mgr-a", "口開", 4),
+	cookie("mgr-b", "口パク", 2),
+	cookie("mgr-c", "口閉", 2),
+	cookie("mot-a", "目閉口開", 4),
+	cookie("mot-b", "目開口開", 4),
+	cookie("mot-c", "目開口閉", 4),
+	cookie("nyn-a", "目閉口開", 3),
+	cookie("nyn-b", "目閉口閉", 3),
+	cookie("nyn-c", "目開口閉", 3),
+	cookie("nyn-d", "目開口閉", 3),
 	// 背景・演出
 	{
 		id: "beach-night",
@@ -231,7 +231,7 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 	},
 	{
 		id: "particle-reveal",
-		name: "粒子（ほどける）",
+		name: "粒子fadeout",
 		group: "背景・演出",
 		url: "/assets/mv/particle-reveal.png",
 		frames: 14,
@@ -241,7 +241,7 @@ export const MV_LOCAL_SPRITES: LocalMvSprite[] = [
 	},
 	{
 		id: "particle-cover",
-		name: "粒子（覆う）",
+		name: "粒子fadein",
 		group: "背景・演出",
 		url: "/assets/mv/particle-cover.png",
 		frames: 15,
