@@ -8,6 +8,7 @@
 
 import type {
 	MvLayer,
+	MvLayerGroup,
 	MvManifest,
 	MvSection,
 	MvShapeLayer,
@@ -382,6 +383,9 @@ const LAYERS: MvLayer[] = [
 	}),
 
 	// ── 二重の輪＋ベースで灯る芯（的のかたち）────────────────────
+	// この2枚は「的」という1つのモチーフを成す組なので、レイヤーの
+	// 「グループ化」機能の実例として最初からグループにしてある（見た目は変わらない・
+	// 一覧でまとめて動かせるだけの整理）。
 	motif({
 		id: "ring-b",
 		size: 26,
@@ -389,6 +393,7 @@ const LAYERS: MvLayer[] = [
 		count: 2,
 		spread: 22,
 		sections: ["b"],
+		groupId: "grp-target-b",
 	}),
 	motif({
 		id: "core-b",
@@ -397,6 +402,7 @@ const LAYERS: MvLayer[] = [
 		filled: true,
 		z: 21,
 		sections: ["b"],
+		groupId: "grp-target-b",
 		modulators: [
 			{
 				source: "trackOnset",
@@ -411,12 +417,14 @@ const LAYERS: MvLayer[] = [
 	}),
 
 	// ── 細い四角の枠＋ベースで満ちるひし形 ─────────────────────
+	// こちらもグループ化の実例（枠＋中身のひし形で1つのモチーフ）。
 	motif({
 		id: "frame-c",
 		form: "square",
 		size: 34,
 		thickness: 1,
 		sections: ["c"],
+		groupId: "grp-frame-c",
 		modulators: [
 			{
 				source: "trackOnset",
@@ -435,6 +443,7 @@ const LAYERS: MvLayer[] = [
 		filled: true,
 		z: 21,
 		sections: ["c"],
+		groupId: "grp-frame-c",
 		modulators: [
 			{
 				source: "trackOnset",
@@ -527,12 +536,14 @@ const LAYERS: MvLayer[] = [
 	}),
 
 	// ── 三角。1つは上向き、もう1つは伏せて重ねる ─────────────────
+	// 上向き＋逆向きの三角で六芒星ふうに重なる組。これもグループ化の実例。
 	motif({
 		id: "tri-d",
 		form: "triangle",
 		size: 40,
 		thickness: 1.2,
 		sections: ["d"],
+		groupId: "grp-star-d",
 	}),
 	motif({
 		id: "tri-d2",
@@ -542,6 +553,7 @@ const LAYERS: MvLayer[] = [
 		thickness: 1,
 		z: 21,
 		sections: ["d"],
+		groupId: "grp-star-d",
 		modulators: [
 			{
 				source: "trackOnset",
@@ -574,6 +586,14 @@ const LAYERS: MvLayer[] = [
 	}),
 ];
 
+// 上の LAYERS に groupId で振り分けた3組。「グループ化」機能の実例として、
+// 初期データの時点でいくつかのレイヤーが最初からグループ化された状態にしてある。
+const GROUPS: MvLayerGroup[] = [
+	{ id: "grp-target-b", name: "的（二重丸）" },
+	{ id: "grp-frame-c", name: "四角とひし形" },
+	{ id: "grp-star-d", name: "三角の組" },
+];
+
 const MANIFEST: MvManifest = {
 	version: 1,
 	preset: "geometric",
@@ -591,6 +611,7 @@ const MANIFEST: MvManifest = {
 	},
 	sections: SECTIONS,
 	layers: LAYERS,
+	groups: GROUPS,
 };
 
 export const GEOMETRIC_PRESET: MvPresetEntry = {

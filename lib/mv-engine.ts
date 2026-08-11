@@ -430,12 +430,18 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 			// periodBeats未指定/1なら従来どおり1拍周期。指定時は周期を伸縮する
 			// （0.5で2倍速、2で半分の速さ、というように小さいほど速い）。
 			const beatPeriod = Math.max(1, MV_STEPS_PER_BEAT * (m.periodBeats ?? 1));
-			if (m.periodBeats === undefined || m.periodBeats === 1) {
-				return m.curve === undefined
-					? d.beatEnv
-					: envelope(d.step, beatPeriod, m.curve);
+			// 裏拍などの位相ずらし。0なら従来どおり d.beatEnv の速い経路をそのまま使う
+			// （毎フレーム envelope() を呼び直さずに済む——ほとんどの動きは位相ずらし無し）。
+			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BEAT;
+			if (offsetSteps === 0) {
+				if (m.periodBeats === undefined || m.periodBeats === 1) {
+					return m.curve === undefined
+						? d.beatEnv
+						: envelope(d.step, beatPeriod, m.curve);
+				}
+				return envelope(d.step, beatPeriod, m.curve ?? 2);
 			}
-			return envelope(d.step, beatPeriod, m.curve ?? 2);
+			return envelope(d.step - offsetSteps, beatPeriod, m.curve ?? 2);
 		}
 		case "bar":
 			return m.curve === undefined

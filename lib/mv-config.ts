@@ -549,6 +549,13 @@ export interface MvModulator {
 	 * 数値が小さいほど速くなる。
 	 */
 	periodBeats?: number;
+	/**
+	 * source==='beat' の発火位置を拍数ぶんずらす（既定0＝表拍のまま）。
+	 * 0.5を入れると「裏拍」——拍と拍のちょうど中間で発火するようになる。
+	 * `periodBeats` は周期の長さ、こちらは位相のずれで、意味が別物なので混同しないこと
+	 * （周期を2倍速にしても、ずらす量は常に絶対の拍数ぶん＝0.5拍のまま変わらない）。
+	 */
+	phaseOffset?: number;
 	target: MvModTarget;
 	op: MvModOp;
 	/** source(0..1) に掛けてから op を適用する係数。負の値も可。 */
@@ -680,6 +687,27 @@ interface MvLayerBase {
 	entrance?: MvEntrance;
 	/** 退場演出（スライドアウト／フェードアウト等）。未指定＝瞬時に消える。 */
 	exit?: MvExit;
+	/**
+	 * 所属するグループのID（`MvManifest.groups` のキー）。未指定＝どのグループにも属さない。
+	 * 同じ groupId を持つレイヤーは `manifest.layers` 配列中で必ず連続して並ぶこと
+	 * （グループの並び替え・追加・削除はこの連続性を前提にした操作なので、崩すと
+	 * 「グループの一部だけ離れた場所に取り残される」壊れ方をする）。
+	 * この不変条件は `lib/mv-layer-group.ts` のヘルパ経由でのみ操作すること。
+	 */
+	groupId?: string;
+}
+
+/**
+ * レイヤーの入れ子グループ。「複数のレイヤーを1つの塊として一括編集・並び替えしたい」ための
+ * 器——グループそのものは描画に一切関与しない（エンジンは `manifest.layers` を今までどおり
+ * フラットに読むだけで、groupId の有無を意識しない）。表示順・並び替えの単位としてだけ効く。
+ */
+export interface MvLayerGroup {
+	id: string;
+	/** レイヤー一覧での見出し。未指定なら「グループ」。 */
+	name?: string;
+	/** 折りたたみ状態（エディタの表示だけに使う。描画には影響しない）。 */
+	collapsed?: boolean;
 }
 
 /**
@@ -1177,6 +1205,12 @@ export interface MvShapeMotionPreset {
 	presetId: string;
 	/** 動きの周期の速さ（拍数/周期）。既定1。0.5で2倍速、0.25で4倍速。 */
 	beatSyncSpeed?: number;
+	/**
+	 * 裏拍で発火させるか（既定false＝表拍）。trueにすると発火タイミングを
+	 * 半拍(0.5拍)ぶんずらす——`beatSyncSpeed`で周期を変えても、ずらす量は常に
+	 * 絶対の半拍のまま（周期に比例してずれる方式だと「裏拍」の感覚とズレるため）。
+	 */
+	offbeat?: boolean;
 	/**
 	 * @deprecated 「独自の動きを組み合わせる」パネル（拍に同期しない自由な移動/回転/拡縮）は
 	 * 廃止した。動きは拍周期のプリセットだけに統一している。
@@ -1696,6 +1730,8 @@ export interface MvManifest {
 	stage: MvStage;
 	layers: MvLayer[];
 	sections: MvSection[];
+	/** レイヤーの入れ子グループ。未指定/空＝どのレイヤーもグループに属さない。 */
+	groups?: MvLayerGroup[];
 }
 
 // ───────────────── ラベル ─────────────────

@@ -232,9 +232,18 @@ export function resolveSceneModulators(cfg: MvSceneMotionConfig): MvModulator[] 
 					m.source === "beat" ? { ...m, periodBeats: speed } : m,
 				)
 			: base;
+	// 裏拍：発火位置を半拍ぶんずらす。speedで周期を伸縮していても「半拍」は絶対量のまま
+	// （既存の phaseOffset があれば足し込む——通常プリセットは未設定＝0なので影響しない）。
+	const withOffbeat = cfg.offbeat
+		? withSpeed.map((m) =>
+				m.source === "beat"
+					? { ...m, phaseOffset: (m.phaseOffset ?? 0) + 0.5 }
+					: m,
+			)
+		: withSpeed;
 	// 旧「独自の動きを組み合わせる」の名残。UIはもう無いが、過去の保存データに
 	// custom が付いていれば動きが消えないよう読み続ける。
 	return cfg.custom
-		? [...withSpeed, ...buildLegacyCustomModulators(cfg.custom)]
-		: withSpeed;
+		? [...withOffbeat, ...buildLegacyCustomModulators(cfg.custom)]
+		: withOffbeat;
 }

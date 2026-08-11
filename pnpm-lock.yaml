@@ -11,6 +11,15 @@ importers:
       '@aws-sdk/client-s3':
         specifier: 3.1067.0
         version: 3.1067.0
+      '@babylonjs/core':
+        specifier: 9.20.0
+        version: 9.20.0
+      '@babylonjs/havok':
+        specifier: 1.3.14
+        version: 1.3.14
+      '@babylonjs/materials':
+        specifier: 9.20.0
+        version: 9.20.0(@babylonjs/core@9.20.0)
       '@neondatabase/serverless':
         specifier: 1.1.0
         version: 1.1.0
@@ -26,6 +35,9 @@ importers:
       '@rpgja/rpgen-map':
         specifier: 1.1.7
         version: 1.1.7
+      babylonjs-inspector:
+        specifier: 9.20.0
+        version: 9.20.0
       encoding-japanese:
         specifier: 2.2.0
         version: 2.2.0
@@ -50,6 +62,9 @@ importers:
       three:
         specifier: 0.185.1
         version: 0.185.1
+      three-stdlib:
+        specifier: 2.36.1
+        version: 2.36.1(three@0.185.1)
       tiny-segmenter:
         specifier: 0.2.0
         version: 0.2.0
@@ -445,6 +460,17 @@ packages:
   '@babel/types@7.29.7':
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
+
+  '@babylonjs/core@9.20.0':
+    resolution: {integrity: sha512-iWM/Re+FnqTEOxkGxvjRjChcPZzydcb0OGtnVk5o0vDQizqwkcpWFlJzfIv1Ij7Li2edJJJDZd6jRzC8QSWuuw==}
+
+  '@babylonjs/havok@1.3.14':
+    resolution: {integrity: sha512-+j2FDwLtkh5Gb//KizE8Ks3GIB/3vH8Yx9cQsMvZQpsKkH5gn089wIlJ9Yt8dJxbwBmWKGpMTIXxZE7YdOHUnQ==}
+
+  '@babylonjs/materials@9.20.0':
+    resolution: {integrity: sha512-eHs6dn+kasWufTUC2EcrXaTTkWxbGDW0d7U1SyrsUc+ldYb4ktCb9taaoxooGhvLdmrCfd8GaqLvCSBf71Y0fw==}
+    peerDependencies:
+      '@babylonjs/core': ^9.0.0
 
   '@biomejs/biome@2.5.7':
     resolution: {integrity: sha512-zr8K/DcY5tYsQOQwqMJ0AWElo6QgmgNI7idXgXLhevVszlt8RGVpesEJPqx3ThazLaOwjJ5Y8fz3BtH5fGZNsw==}
@@ -1518,6 +1544,12 @@ packages:
   '@tybys/wasm-util@0.10.2':
     resolution: {integrity: sha512-RoBvJ2X0wuKlWFIjrwffGw1IqZHKQqzIchKaadZZfnNpsAYp2mM0h36JtPCjNDAHGgYez/15uMBpfGwchhiMgg==}
 
+  '@types/draco3d@1.4.10':
+    resolution: {integrity: sha512-AX22jp8Y7wwaBgAixaSvkoG4M/+PlAcm3Qs4OW8yT9DM4xUpWKeFhLueTAyZF39pviAdcDdeJoACapiAceqNcw==}
+
+  '@types/emscripten@1.41.5':
+    resolution: {integrity: sha512-cMQm7pxu6BxtHyqJ7mQZ2kXWV5SLmugybFdHCBbJ5eHzOo6VhBckEgAT3//rP5FwPHNPeEiq4SmQ5ucBwsOo4Q==}
+
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
@@ -1535,6 +1567,9 @@ packages:
 
   '@types/node@20.19.42':
     resolution: {integrity: sha512-5L7SUaFC1RyDraj2yRhyBzHTobyXHmohD100CChNtyPyleoq37Mqab5Gn8XEKI04dfN/oqPdpHk38MgcQWHbZg==}
+
+  '@types/offscreencanvas@2019.7.3':
+    resolution: {integrity: sha512-ieXiYmgSRXUDeOntE1InxjWyvEelZGP63M+cGuquuRLuIKKT1osnkXjxev9B7d1nXSug5vpunx+gNlbVxMlC9A==}
 
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
@@ -1840,6 +1875,33 @@ packages:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
     engines: {node: '>= 0.4'}
 
+  babylonjs-addons@9.20.0:
+    resolution: {integrity: sha512-/2txxbfBuPjt6dis9yzNHsYwVirFUXOqIHFgXMGmP3J55Qu/7DvuOBZdcNVktZhJpjTIr6kcaHk3isIR/ZB3Qg==}
+
+  babylonjs-gltf2interface@9.20.0:
+    resolution: {integrity: sha512-BxqokOP3obVy32CZ9ZV8VQqrVvodiBvk6e3T0Eg9PHM2i6rFXtpXeSEX3isNyPVotonLdBkpeTk2RvRqYIQMEg==}
+
+  babylonjs-gui-editor@9.20.0:
+    resolution: {integrity: sha512-ivGVrua+mrzF/tghCYbsVth72yzASxyQ/GkEbfp+sbNJ0eB2D3ucIPtJ4Ho5zO9IUbUlRzl2H49Xspl0v3Xp7w==}
+
+  babylonjs-gui@9.20.0:
+    resolution: {integrity: sha512-n2a3DQ89KLjWyrYBXuGm63pLy+dct0RTFh2fnqBfptOaPAemTWiuIUgdzan9eLuQHQXerdhOaA231GpzzIpFLw==}
+
+  babylonjs-inspector@9.20.0:
+    resolution: {integrity: sha512-A1XAQZOy6AJVs/0FpaNfe9W0bZmPv+CDbITlu2FFY4f7fSnnhb7SIfXImguWCqtYAKRyeiYjKWXu49H3L0Mxjg==}
+
+  babylonjs-loaders@9.20.0:
+    resolution: {integrity: sha512-Kt7jY/Dq0rm5cy/dG/vwbn90JHGtwHDRYPHlIDkbgp6uoeMnuN5I4SmWl+h9SPmzsrISmQjdcuonBS4+CYlQLA==}
+
+  babylonjs-materials@9.20.0:
+    resolution: {integrity: sha512-VTAP5DhuE4HI9eI94NXfjG/yqZeWAubjFNLDJYifx6ohh8i6GVsxNL2WJj/radzw9DRDDTtczvF5GficFU6ZTA==}
+
+  babylonjs-serializers@9.20.0:
+    resolution: {integrity: sha512-DdqR8JjXWZqSkh757tAJTbFJiMpn1vuwFncCYR7oiLG4OXqfz18ptDPBoCMn7wMLU7PuJlcXpjDk7EmmFZvJkA==}
+
+  babylonjs@9.20.0:
+    resolution: {integrity: sha512-dCxkIsCsGpO3Wj1qou6HmfqaQ6PVDUmhp8hne31xrAIEcsXhtajfIzHq8jCSmZpJJykC2AeWy7Tmo8VHEU5JQA==}
+
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
@@ -2053,6 +2115,9 @@ packages:
   dotenv@16.6.1:
     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
     engines: {node: '>=12'}
+
+  draco3d@1.5.7:
+    resolution: {integrity: sha512-m6WCKt/erDXcw+70IJXnG7M3awwQPAsZvJGX5zY7beBqpELw6RDGkYVU0W43AFxye4pDZ5i2Lbyc/NNGqwjUVQ==}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -2325,6 +2390,9 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
+
+  fflate@0.6.11:
+    resolution: {integrity: sha512-3JyEFWGjFn7zHmoa9+zG1BmW7X2okcmAB+0Cnu9UFbVs/jCBnl2A8o065ZlXiw145K3eBM3uLuzrYXC0RK7eDg==}
 
   fflate@0.8.3:
     resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
@@ -3176,6 +3244,9 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
+  potpack@1.0.2:
+    resolution: {integrity: sha512-choctRBIV9EMT9WGAZHn3V7t0Z2pMQyl0EZE6pFc/6ml3ssw7Dlf/oAOvFwjm1HVsqfQN8GfeFyJ+d8tRzqueQ==}
+
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
     engines: {node: '>= 0.8.0'}
@@ -3453,6 +3524,11 @@ packages:
     resolution: {integrity: sha512-HPa/FdTB9XGI2H1/keLFZHxl6WNvAI4YalHGtDQTlMnJcoqSab1UwL4l1hGEhs6/GmLHBZIg/YgB++jcbzoOEg==}
     engines: {node: '>=10'}
     hasBin: true
+
+  three-stdlib@2.36.1:
+    resolution: {integrity: sha512-XyGQrFmNQ5O/IoKm556ftwKsBg11TIb301MB5dWNicziQBEs2g3gtOYIf7pFiLa0zI2gUwhtCjv9fmjnxKZ1Cg==}
+    peerDependencies:
+      three: '>=0.128.0'
 
   three@0.185.1:
     resolution: {integrity: sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg==}
@@ -4441,6 +4517,16 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
+  '@babylonjs/core@9.20.0': {}
+
+  '@babylonjs/havok@1.3.14':
+    dependencies:
+      '@types/emscripten': 1.41.5
+
+  '@babylonjs/materials@9.20.0(@babylonjs/core@9.20.0)':
+    dependencies:
+      '@babylonjs/core': 9.20.0
+
   '@biomejs/biome@2.5.7':
     optionalDependencies:
       '@biomejs/cli-darwin-arm64': 2.5.7
@@ -5321,6 +5407,10 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
+  '@types/draco3d@1.4.10': {}
+
+  '@types/emscripten@1.41.5': {}
+
   '@types/estree@1.0.9': {}
 
   '@types/json-schema@7.0.15': {}
@@ -5339,6 +5429,8 @@ snapshots:
   '@types/node@20.19.42':
     dependencies:
       undici-types: 6.21.0
+
+  '@types/offscreencanvas@2019.7.3': {}
 
   '@types/pg@8.20.0':
     dependencies:
@@ -5657,6 +5749,47 @@ snapshots:
 
   axobject-query@4.1.0: {}
 
+  babylonjs-addons@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+
+  babylonjs-gltf2interface@9.20.0: {}
+
+  babylonjs-gui-editor@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+      babylonjs-gui: 9.20.0
+
+  babylonjs-gui@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+
+  babylonjs-inspector@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+      babylonjs-addons: 9.20.0
+      babylonjs-gui: 9.20.0
+      babylonjs-gui-editor: 9.20.0
+      babylonjs-loaders: 9.20.0
+      babylonjs-materials: 9.20.0
+      babylonjs-serializers: 9.20.0
+
+  babylonjs-loaders@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+      babylonjs-gltf2interface: 9.20.0
+
+  babylonjs-materials@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+
+  babylonjs-serializers@9.20.0:
+    dependencies:
+      babylonjs: 9.20.0
+      babylonjs-gltf2interface: 9.20.0
+
+  babylonjs@9.20.0: {}
+
   balanced-match@1.0.2: {}
 
   balanced-match@4.0.4: {}
@@ -5863,6 +5996,8 @@ snapshots:
       esutils: 2.0.3
 
   dotenv@16.6.1: {}
+
+  draco3d@1.5.7: {}
 
   dunder-proto@1.0.1:
     dependencies:
@@ -6361,6 +6496,8 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
       picomatch: 4.0.4
+
+  fflate@0.6.11: {}
 
   fflate@0.8.3: {}
 
@@ -7165,6 +7302,8 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
+  potpack@1.0.2: {}
+
   prelude-ls@1.2.1: {}
 
   prop-types@15.8.1:
@@ -7529,6 +7668,16 @@ snapshots:
       acorn: 8.16.0
       commander: 2.20.3
       source-map-support: 0.5.21
+
+  three-stdlib@2.36.1(three@0.185.1):
+    dependencies:
+      '@types/draco3d': 1.4.10
+      '@types/offscreencanvas': 2019.7.3
+      '@types/webxr': 0.5.24
+      draco3d: 1.5.7
+      fflate: 0.6.11
+      potpack: 1.0.2
+      three: 0.185.1
 
   three@0.185.1: {}
 

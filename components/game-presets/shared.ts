@@ -20,7 +20,13 @@ export type PresetId =
 	| "undertale"
 	| "deltarune"
 	| "yume";
-export type EngineKind = "action" | "rpg" | "touhou" | "onjReze" | "yume25d";
+export type EngineKind =
+	| "action"
+	| "rpg"
+	| "touhou"
+	| "onjReze"
+	| "yume25d"
+	| "mmo3d";
 export type NpcBehavior =
 	| "still"
 	| "random"

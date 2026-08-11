@@ -3006,8 +3006,17 @@ export class Yume25DEngine {
 		let p = this.modelCache.get(url);
 		if (!p) {
 			this.modelLoader ??= new GLTFLoader();
-			p = this.modelLoader
+			const loader = this.modelLoader;
+			p = loader
 				.loadAsync(url)
+				.catch((err) => {
+					const proxied = wrapCorsProxyUrl(url);
+					if (proxied !== url) {
+						notifyCorsProxyUsed();
+						return loader.loadAsync(proxied);
+					}
+					throw err;
+				})
 				.then((gltf) => {
 					const root = gltf.scene;
 					root.traverse((o) => {

@@ -4,10 +4,13 @@ import { detectProgression, parseChords } from "@onjmin/chord-parser";
 import {
 	BarChart3,
 	ChevronDown,
+	ChevronRight,
 	ChevronUp,
 	Clapperboard,
 	Clipboard,
 	Copy,
+	FolderPlus,
+	FolderX,
 	Hash,
 	History,
 	Image as ImageIcon,
@@ -18,6 +21,7 @@ import {
 	Plus,
 	Redo2,
 	Shapes,
+	Shuffle,
 	Sparkles,
 	Trash2,
 	Type,
@@ -67,6 +71,7 @@ import {
 	MV_ROOT_TO_PITCH,
 	MV_SHAPE_FORM_LABELS,
 	MV_STEPS_PER_BAR,
+	MV_STEPS_PER_BEAT,
 	MV_TRANSITION_LABELS,
 	MV_TRANSITION_STYLE_LABELS,
 	MV_TRIGGER_LABELS,
@@ -84,6 +89,7 @@ import {
 	type MvEffectStyle,
 	type MvImageLayer,
 	type MvLayer,
+	type MvLayerGroup,
 	type MvLyricStack,
 	type MvLyricsLayer,
 	type MvManifest,
@@ -119,15 +125,34 @@ import type {
 	MvEffectTemplateParams,
 } from "@/lib/mv-effect-templates";
 import {
+	drawMvFrame,
 	EMPTY_SONG,
+	type MvFrameState,
 	type MvSong,
 	parseMvSong,
 	resolveLyricLines,
 } from "@/lib/mv-engine";
 import {
+	addLayerToGroup,
+	buildLayerListRows,
+	deleteGroup,
+	groupSelectedLayers,
+	moveGroupBlock,
+	moveLayerWithinGroup,
+	moveTopLevelLayer,
+	renameGroup,
+	replaceGroupMembers,
+	toggleGroupCollapsed,
+	ungroupLayers,
+} from "@/lib/mv-layer-group";
+import {
 	DEFAULT_SCENE_MOTION,
 	resolveSceneModulators,
 } from "@/lib/mv-shape-motion";
+import {
+	buildSymmetricShapeGroupLayers,
+	generateSymmetricShapeGroup,
+} from "@/lib/mv-shape-group-macro";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
@@ -193,6 +218,207 @@ const FIELD_INPUT_CLASS =
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
 	return <p className="text-[12px] font-bold text-gray-200">{children}</p>;
+}
+
+/**
+ * 演出(effect)レイヤーのその場プレビュー。
+ *
+ * 演出は「拍ごとに光る」「〜小節おきに崩れる」のように時間で効くものばかりで、
+ * スライダーの数値だけを見ても実際どう動くか掴みにくい——本編の再生位置まで
+ * シークして待たないと確認できないのは不便なので、簡単な図形の上で
+ * ループ再生させて即座に見えるようにする（`MvShapeMotionModal` の
+ * `MotionLivePreview` と同じ考え方）。
+ */
+function EffectLivePreview({
+	layer,
+	bpm,
+}: {
+	layer: MvEffectLayer;
+	bpm?: number;
+}) {
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		const manifest: MvManifest = {
+			version: 1,
+			preset: "geometric",
+			title: "",
+			mml: "",
+			audio: { mode: "soundfontKoe" },
+			stage: {
+				bgColor: "#14161d",
+				bgFit: "cover",
+				pulse: "none",
+				fadeIn: false,
+				fadeOut: false,
+				palette: [],
+			},
+			sections: [],
+			layers: [
+				{
+					kind: "shape",
+					id: "preview-shape",
+					form: "square",
+					x: MV_W / 2,
+					y: MV_H / 2,
+					size: 70,
+					rotation: 20,
+					color: "#8fb8ff",
+					filled: true,
+					thickness: 3,
+					z: 10,
+					modulators: [],
+				},
+				{ ...layer, id: "preview-effect" },
+			],
+		};
+		const song = { ...EMPTY_SONG, bpm: bpm && bpm > 0 ? bpm : EMPTY_SONG.bpm };
+		const stepsPerSec = (song.bpm / 60) * MV_STEPS_PER_BEAT;
+		let raf = 0;
+		const start = performance.now();
+		const loop = () => {
+			const elapsed = (performance.now() - start) / 1000;
+			const frame: MvFrameState = { step: elapsed * stepsPerSec, timeSec: elapsed };
+			drawMvFrame(ctx, manifest, song, frame);
+			raf = requestAnimationFrame(loop);
+		};
+		raf = requestAnimationFrame(loop);
+		return () => cancelAnimationFrame(raf);
+	}, [layer, bpm]);
+
+	return (
+		<canvas
+			ref={canvasRef}
+			width={MV_W}
+			height={MV_H}
+			className="block h-auto w-full rounded bg-black"
+			style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
+		/>
+	);
+}
+
+/**
+ * レイヤー一覧の1行。トップレベルコンポーネントにしてあるのは行儀の問題だけでなく、
+ * 親のレンダー関数の中で「JSXを返すただの関数」として定義して呼び出すと、
+ * React Compiler の静的解析が内部のイベントハンドラのref参照を誤って
+ * "レンダー中のref読み取り"と判定することがあったため（呼び出し境界が曖昧になるほど
+ * 誤検知しやすい）。detail は呼び出し側の `renderLayerSettings(layer)` の結果を
+ * そのまま渡してもらう——このコンポーネント自身は MvMaker 内部のクロージャに触れない。
+ */
+function LayerRow({
+	layer,
+	sections,
+	active,
+	onSelect,
+	onHover,
+	onUnhover,
+	canMoveUp,
+	canMoveDown,
+	onMoveUp,
+	onMoveDown,
+	onDuplicate,
+	onRemove,
+	showGroupCheckbox,
+	checked,
+	onCheckedChange,
+	detail,
+}: {
+	layer: MvLayer;
+	sections: MvSection[];
+	active: boolean;
+	onSelect: () => void;
+	onHover: () => void;
+	onUnhover: () => void;
+	canMoveUp: boolean;
+	canMoveDown: boolean;
+	onMoveUp: () => void;
+	onMoveDown: () => void;
+	onDuplicate: () => void;
+	onRemove: () => void;
+	showGroupCheckbox: boolean;
+	checked: boolean;
+	onCheckedChange: (checked: boolean) => void;
+	detail: React.ReactNode;
+}) {
+	const Icon = LAYER_ICON[layer.kind];
+	return (
+		<div
+			onMouseEnter={onHover}
+			onMouseLeave={onUnhover}
+			className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"}`}
+		>
+			<div className="flex items-center gap-2 px-2 py-1.5">
+				{showGroupCheckbox && (
+					<input
+						type="checkbox"
+						checked={checked}
+						onChange={(e) => onCheckedChange(e.target.checked)}
+						className="h-4 w-4 shrink-0 accent-blue-500"
+					/>
+				)}
+				<Icon size={13} className="shrink-0 text-blue-400" />
+				<button
+					onClick={onSelect}
+					className="min-h-10 min-w-0 flex-1 py-1 text-left outline-none"
+				>
+					<span className="flex items-center gap-1.5 flex-wrap">
+						<span className="truncate text-[11px] font-medium text-gray-100">
+							{layerLabel(layer)}
+						</span>
+						<span className="shrink-0 rounded bg-gray-700/80 px-1 py-0.5 text-[9px] text-gray-300">
+							{layerKindLabel(layer)}
+						</span>
+					</span>
+					{layer.sections && layer.sections.length > 0 && (
+						<span className="block truncate text-[9px] text-blue-300">
+							場面:{" "}
+							{layer.sections
+								.map((id) => sections.find((s) => s.id === id)?.label ?? id)
+								.join(" / ")}{" "}
+							のみ
+						</span>
+					)}
+				</button>
+				<div className="flex flex-col gap-0.5">
+					<button
+						disabled={!canMoveUp}
+						onClick={onMoveUp}
+						className="grid h-4 w-6 place-items-center rounded bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"
+					>
+						<ChevronUp size={12} />
+					</button>
+					<button
+						disabled={!canMoveDown}
+						onClick={onMoveDown}
+						className="grid h-4 w-6 place-items-center rounded bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"
+					>
+						<ChevronDown size={12} />
+					</button>
+				</div>
+				<button
+					onClick={onDuplicate}
+					title="同じ設定で直下に複製"
+					className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gray-700 text-gray-300 transition-colors hover:bg-gray-600"
+				>
+					<Copy size={16} />
+				</button>
+				<button onClick={onRemove} className={DEL_BTN_CLASS}>
+					<Trash2 size={16} />
+				</button>
+			</div>
+
+			{active && (
+				<div className="border-t border-blue-500/30 bg-gray-900/60 p-3">
+					{detail}
+				</div>
+			)}
+		</div>
+	);
 }
 
 /** 補足説明。専門用語を避けて「何が起きるか」を書くための共通スタイル。 */
@@ -760,6 +986,24 @@ export default function MvMaker({
 	const [showHistory, setShowHistory] = useState(false);
 	const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
 	const [song, setSong] = useState<MvSong>(EMPTY_SONG);
+	// レイヤーの「グループ化」用：複数選択モードのON/OFFと選んだレイヤーID。
+	// グループ化できるのはまだどのグループにも属していないレイヤー同士だけ
+	// （グループの中にグループを作る、という2段構造は許していない）。
+	const [groupSelectMode, setGroupSelectMode] = useState(false);
+	const [groupSelectIds, setGroupSelectIds] = useState<Set<string>>(
+		() => new Set(),
+	);
+	// タイムラインは常時見る情報ではないので、レイヤータブに常駐させずモーダルへ切り出す。
+	const [timelineModalOpen, setTimelineModalOpen] = useState(false);
+	/**
+	 * 「対称図形グループ」ボタンが直前に作ったグループのid。次のクリックで作り直す対象。
+	 * ボタンの表示文言（作る／作り直す）がこの値に応じて変わるので、ここは ref ではなく
+	 * state にしてある——ref はレンダー中に読むとReactが変化を検知できず表示が古いまま
+	 * 固まりうるので（値そのものはレンダーに直接使わない、というのがrefの前提）。
+	 */
+	const [lastMacroGroupId, setLastMacroGroupId] = useState<string | null>(
+		null,
+	);
 
 	const trackNoteCounts = useMemo(() => {
 		const map: Record<number, number> = {};
@@ -1235,6 +1479,72 @@ export default function MvMaker({
 		setSelectedLayerId(layer.id);
 	};
 
+	/** グループ内へ図形レイヤーを1枚追加する（`addShapeLayer` と同じ既定値）。 */
+	const addShapeToGroup = (groupId: string) => {
+		const layer: MvShapeLayer = {
+			kind: "shape",
+			id: mvUid("shp"),
+			form: "ring",
+			x: MV_W / 2,
+			y: MV_H / 2,
+			size: 48,
+			rotation: 0,
+			color: manifest.stage.palette[0] ?? "#ffffff",
+			filled: false,
+			thickness: 2,
+			count: 1,
+			spread: 0,
+			spin: 0,
+			blend: "normal",
+			z: getNextZ(),
+			modulators: resolveSceneModulators(DEFAULT_SCENE_MOTION),
+		};
+		update((m) => addLayerToGroup(m, groupId, layer));
+		setSelectedLayerId(layer.id);
+	};
+
+	/**
+	 * 「対称図形グループ」ワンボタン生成・作り直し。
+	 * 直前にこのボタンで作ったグループがまだ残っていれば中身だけ作り直し、
+	 * 無ければ新しいグループを作る——同じボタンで「新規作成」と「設定変更（作り直し）」の
+	 * 両方をこなす。
+	 */
+	const generateSymmetricGroup = () => {
+		// getNextZ() は manifest（このレンダーのスナップショット）を見るだけなので、
+		// ループの中で複数回呼んでも同じ値しか返らない。ローカルにカウンタを持って進める。
+		let z = getNextZ();
+		const nextZ = () => {
+			const v = z;
+			z += 10;
+			return v;
+		};
+		const palette = manifest.stage.palette;
+
+		const existingGroupId = lastMacroGroupId;
+		const stillExists =
+			existingGroupId &&
+			manifest.groups?.some((g) => g.id === existingGroupId) &&
+			manifest.layers.some((l) => l.groupId === existingGroupId);
+
+		if (stillExists && existingGroupId) {
+			const newLayers = buildSymmetricShapeGroupLayers(
+				existingGroupId,
+				nextZ,
+				{ palette },
+			);
+			update((m) => replaceGroupMembers(m, existingGroupId, newLayers));
+			return;
+		}
+
+		const { group, layers } = generateSymmetricShapeGroup(nextZ, { palette });
+		setLastMacroGroupId(group.id);
+		update((m) => ({
+			...m,
+			layers: [...m.layers, ...layers],
+			groups: [...(m.groups ?? []), group],
+		}));
+	};
+
 	const addTemplateLayers = (
 		template: MvEffectTemplateDef,
 		params: MvEffectTemplateParams,
@@ -1333,39 +1643,6 @@ export default function MvMaker({
 			return { ...m, layers };
 		});
 		setSelectedLayerId(newId);
-	};
-
-	const swapLayers = (i: number, j: number) => {
-		update((m) => {
-			const layers = [...m.layers];
-			// Ensure all layers have a distinct z value before swapping
-			layers.forEach((l, idx) => {
-				if (l.z === undefined) l.z = (idx + 1) * 10;
-			});
-			const tempZ = layers[i].z;
-			layers[i].z = layers[j].z;
-			layers[j].z = tempZ;
-
-			if (layers[i].z === layers[j].z) {
-				layers[i].z = (i + 1) * 10;
-				layers[j].z = (j + 1) * 10;
-			}
-
-			const temp = layers[i];
-			layers[i] = layers[j];
-			layers[j] = temp;
-			return { ...m, layers };
-		});
-	};
-
-	const moveLayerUp = (index: number) => {
-		if (index === 0) return;
-		swapLayers(index, index - 1);
-	};
-
-	const moveLayerDown = (index: number) => {
-		if (index === manifest.layers.length - 1) return;
-		swapLayers(index, index + 1);
 	};
 
 	const imageLayers = manifest.layers.filter(
@@ -2868,6 +3145,7 @@ export default function MvMaker({
 
 			{layer.kind === "effect" && (
 				<>
+					<EffectLivePreview layer={layer} bpm={song.bpm} />
 					<GroupedSelectField
 						label="演出"
 						value={layer.style}
@@ -3413,6 +3691,55 @@ export default function MvMaker({
 		</div>
 	);
 
+	/**
+	 * レイヤー一覧の1行を組み立てる。グループの中身・グループに属さない単独レイヤーの
+	 * どちらからも呼ぶ——上下移動の可否と処理だけ呼び出し側から渡してもらう
+	 * （単独レイヤーは「一覧全体での前後」、グループ内メンバーは「そのグループ内での前後」で
+	 * 意味が違うので、ここでは判定しない）。実体は `LayerRow`（トップレベルコンポーネント）。
+	 */
+	const renderLayerRow = (
+		layer: MvLayer,
+		opts: {
+			canMoveUp: boolean;
+			canMoveDown: boolean;
+			onMoveUp: () => void;
+			onMoveDown: () => void;
+			showGroupCheckbox: boolean;
+		},
+	) => {
+		const active = layer.id === selectedLayerId;
+		return (
+			<LayerRow
+				key={layer.id}
+				layer={layer}
+				sections={manifest.sections}
+				active={active}
+				onSelect={() => setSelectedLayerId(active ? null : layer.id)}
+				onHover={() => setHoveredLayerId(layer.id)}
+				onUnhover={() => setHoveredLayerId(null)}
+				canMoveUp={opts.canMoveUp}
+				canMoveDown={opts.canMoveDown}
+				onMoveUp={opts.onMoveUp}
+				onMoveDown={opts.onMoveDown}
+				onDuplicate={() => duplicateLayer(layer.id)}
+				onRemove={() => removeLayer(layer.id)}
+				showGroupCheckbox={opts.showGroupCheckbox}
+				checked={groupSelectIds.has(layer.id)}
+				onCheckedChange={(checked) =>
+					setGroupSelectIds((prev) => {
+						const next = new Set(prev);
+						if (checked) next.add(layer.id);
+						else next.delete(layer.id);
+						return next;
+					})
+				}
+				detail={active ? renderLayerSettings(layer) : null}
+			/>
+		);
+	};
+
+	const layerRows = buildLayerListRows(manifest);
+
 	const layersTab = (
 		<div className="space-y-2">
 			<div className={SECTION_CLASS}>
@@ -3461,106 +3788,185 @@ export default function MvMaker({
 						度数の数字
 					</button>
 				</div>
+				<button
+					onClick={generateSymmetricGroup}
+					className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-purple-500/50 bg-purple-600/20 px-3 py-2 text-[11px] font-bold text-purple-200 hover:bg-purple-600/30"
+				>
+					<Shuffle size={13} />
+					{lastMacroGroupId &&
+					manifest.groups?.some((g) => g.id === lastMacroGroupId)
+						? "対称図形グループを作り直す"
+						: "対称図形グループを生成"}
+				</button>
+				<Hint>
+					図形の重ね方・大きさ・線の太さ・動き・座標をランダムに決めて、
+					画面中央を軸に左右対称な図形の集まりをグループごと作ります。
+					同じボタンをもう一度押すと、そのグループの中身だけ作り直します。
+				</Hint>
 				{manifest.layers.length === 0 && (
 					<p className="text-[10px] text-gray-500">レイヤーがありません。</p>
 				)}
 			</div>
 
 			{manifest.layers.length > 0 && (
-				<div className={SECTION_CLASS}>
-					<SectionTitle>
-						<Clapperboard size={12} className="mr-1 inline" />
-						タイムライン（どの小節で出すか）
-					</SectionTitle>
-					<MvTimeline
-						layers={manifest.layers}
-						sections={manifest.sections}
-						totalBars={song.totalBars}
-						labelOf={layerLabel}
-						kindLabelOf={layerKindLabel}
-						selectedLayerId={selectedLayerId}
-						onSelectLayer={setSelectedLayerId}
-						onChangeRange={(id, range) =>
-							updateLayer(id, (l) => ({ ...l, barRange: range }))
-						}
-						onSeekBar={(bar) => playerRef.current?.seekToBar(bar)}
-					/>
-				</div>
+				<button
+					type="button"
+					onClick={() => setTimelineModalOpen(true)}
+					className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800/60 px-3 py-2 text-[11px] font-medium text-gray-200 hover:bg-gray-800"
+				>
+					<Clapperboard size={13} />
+					タイムラインを開く（どの小節で出すか）
+				</button>
 			)}
 
 			<div className={SECTION_CLASS}>
-				{manifest.layers.map((layer, index) => {
-					const Icon = LAYER_ICON[layer.kind];
-					const active = layer.id === selectedLayerId;
+				<div className="flex items-center justify-between gap-2 pb-1">
+					<p className="text-[10px] leading-relaxed text-gray-400">
+						{groupSelectMode
+							? `${groupSelectIds.size}枚選択中（2枚以上でグループ化できます）`
+							: "複数のレイヤーをまとめて一括で並び替えたいときはグループ化します。"}
+					</p>
+					{!groupSelectMode ? (
+						<button
+							onClick={() => {
+								setGroupSelectMode(true);
+								setGroupSelectIds(new Set());
+							}}
+							className="flex shrink-0 items-center gap-1 rounded bg-gray-700 px-2 py-1.5 text-[10px] text-gray-200 hover:bg-gray-600"
+						>
+							<FolderPlus size={12} />
+							グループ化
+						</button>
+					) : (
+						<div className="flex shrink-0 gap-1">
+							<button
+								disabled={groupSelectIds.size < 2}
+								onClick={() => {
+									update((m) => groupSelectedLayers(m, [...groupSelectIds]));
+									setGroupSelectMode(false);
+									setGroupSelectIds(new Set());
+								}}
+								className="rounded bg-blue-600 px-2 py-1.5 text-[10px] font-bold text-white disabled:opacity-40"
+							>
+								選択をグループ化
+							</button>
+							<button
+								onClick={() => {
+									setGroupSelectMode(false);
+									setGroupSelectIds(new Set());
+								}}
+								className="rounded bg-gray-700 px-2 py-1.5 text-[10px] text-gray-300 hover:bg-gray-600"
+							>
+								やめる
+							</button>
+						</div>
+					)}
+				</div>
+
+				{layerRows.map((row, rowIndex) => {
+					if (row.kind === "single") {
+						const layer = row.layer as MvLayer;
+						return renderLayerRow(layer, {
+							canMoveUp: rowIndex > 0,
+							canMoveDown: rowIndex < layerRows.length - 1,
+							onMoveUp: () =>
+								update((m) => moveTopLevelLayer(m, layer.id, "up")),
+							onMoveDown: () =>
+								update((m) => moveTopLevelLayer(m, layer.id, "down")),
+							showGroupCheckbox: groupSelectMode,
+						});
+					}
+
+					const group = row.group as MvLayerGroup;
+					const members = row.members ?? [];
 					return (
 						<div
-							key={layer.id}
-							onMouseEnter={() => setHoveredLayerId(layer.id)}
-							onMouseLeave={() => setHoveredLayerId(null)}
-							className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"}`}
+							key={group.id}
+							className="overflow-hidden rounded border border-purple-600/40 bg-purple-950/10"
 						>
-							<div className="flex items-center gap-2 px-2 py-1.5">
-								<Icon size={13} className="shrink-0 text-blue-400" />
+							<div className="flex items-center gap-2 bg-purple-900/20 px-2 py-1.5">
 								<button
-									onClick={() => setSelectedLayerId(active ? null : layer.id)}
-									className="min-h-10 min-w-0 flex-1 py-1 text-left outline-none"
+									onClick={() =>
+										update((m) => toggleGroupCollapsed(m, group.id))
+									}
+									className="shrink-0 text-purple-300"
 								>
-									<span className="flex items-center gap-1.5 flex-wrap">
-										<span className="truncate text-[11px] font-medium text-gray-100">
-											{layerLabel(layer)}
-										</span>
-										<span className="shrink-0 rounded bg-gray-700/80 px-1 py-0.5 text-[9px] text-gray-300">
-											{layerKindLabel(layer)}
-										</span>
-									</span>
-									{layer.sections && layer.sections.length > 0 && (
-										<span className="block truncate text-[9px] text-blue-300">
-											場面:{" "}
-											{layer.sections
-												.map(
-													(id) =>
-														manifest.sections.find((s) => s.id === id)?.label ??
-														id,
-												)
-												.join(" / ")}{" "}
-											のみ
-										</span>
+									{group.collapsed ? (
+										<ChevronRight size={14} />
+									) : (
+										<ChevronDown size={14} />
 									)}
 								</button>
+								<FolderPlus size={13} className="shrink-0 text-purple-400" />
+								<input
+									value={group.name ?? "グループ"}
+									onChange={(e) =>
+										update((m) => renameGroup(m, group.id, e.target.value))
+									}
+									className="min-h-9 min-w-0 flex-1 rounded bg-transparent px-1 text-[11px] font-medium text-purple-100 outline-none focus:bg-purple-900/40"
+								/>
+								<span className="shrink-0 rounded bg-purple-700/50 px-1 py-0.5 text-[9px] text-purple-200">
+									{members.length}枚
+								</span>
 								<div className="flex flex-col gap-0.5">
 									<button
-										disabled={index === 0}
-										onClick={() => moveLayerUp(index)}
+										disabled={rowIndex === 0}
+										onClick={() =>
+											update((m) => moveGroupBlock(m, group.id, "up"))
+										}
 										className="grid h-4 w-6 place-items-center rounded bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"
 									>
 										<ChevronUp size={12} />
 									</button>
 									<button
-										disabled={index === manifest.layers.length - 1}
-										onClick={() => moveLayerDown(index)}
+										disabled={rowIndex === layerRows.length - 1}
+										onClick={() =>
+											update((m) => moveGroupBlock(m, group.id, "down"))
+										}
 										className="grid h-4 w-6 place-items-center rounded bg-gray-700 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-600"
 									>
 										<ChevronDown size={12} />
 									</button>
 								</div>
 								<button
-									onClick={() => duplicateLayer(layer.id)}
-									title="同じ設定で直下に複製"
+									onClick={() => update((m) => ungroupLayers(m, group.id))}
+									title="グループ解除（中身のレイヤーは残ります）"
 									className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gray-700 text-gray-300 transition-colors hover:bg-gray-600"
 								>
-									<Copy size={16} />
+									<FolderX size={16} />
 								</button>
 								<button
-									onClick={() => removeLayer(layer.id)}
+									onClick={() => update((m) => deleteGroup(m, group.id))}
+									title="グループごと削除"
 									className={DEL_BTN_CLASS}
 								>
 									<Trash2 size={16} />
 								</button>
 							</div>
-
-							{active && (
-								<div className="border-t border-blue-500/30 bg-gray-900/60 p-3">
-									{renderLayerSettings(layer)}
+							{!group.collapsed && (
+								<div className="space-y-1.5 border-t border-purple-700/30 bg-gray-900/40 p-1.5 pl-4">
+									{members.map((layer, mi) =>
+										renderLayerRow(layer, {
+											canMoveUp: mi > 0,
+											canMoveDown: mi < members.length - 1,
+											onMoveUp: () =>
+												update((m) =>
+													moveLayerWithinGroup(m, layer.id, "up"),
+												),
+											onMoveDown: () =>
+												update((m) =>
+													moveLayerWithinGroup(m, layer.id, "down"),
+												),
+											showGroupCheckbox: false,
+										}),
+									)}
+									<button
+										onClick={() => addShapeToGroup(group.id)}
+										className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-purple-600/50 py-1.5 text-[10px] text-purple-300 hover:bg-purple-900/20"
+									>
+										<Plus size={12} />
+										このグループに図形を追加
+									</button>
 								</div>
 							)}
 						</div>
@@ -4862,6 +5268,40 @@ export default function MvMaker({
 					}}
 					onClose={() => setTransitionModalTarget(null)}
 				/>
+			)}
+
+			{timelineModalOpen && (
+				<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+					<div className="flex h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-[80vh] sm:rounded-xl">
+						<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+							<span className="flex items-center gap-2 text-sm font-bold text-gray-100">
+								<Clapperboard size={15} className="text-blue-400" />
+								タイムライン（どの小節で出すか）
+							</span>
+							<button
+								onClick={() => setTimelineModalOpen(false)}
+								className="rounded p-1 text-gray-400 hover:bg-gray-800"
+							>
+								<X size={18} />
+							</button>
+						</div>
+						<div className="flex-1 overflow-y-auto p-3">
+							<MvTimeline
+								layers={manifest.layers}
+								sections={manifest.sections}
+								totalBars={song.totalBars}
+								labelOf={layerLabel}
+								kindLabelOf={layerKindLabel}
+								selectedLayerId={selectedLayerId}
+								onSelectLayer={setSelectedLayerId}
+								onChangeRange={(id, range) =>
+									updateLayer(id, (l) => ({ ...l, barRange: range }))
+								}
+								onSeekBar={(bar) => playerRef.current?.seekToBar(bar)}
+							/>
+						</div>
+					</div>
+				</div>
 			)}
 
 			{shapeFormPickerLayerId && shapeFormPickerLayer && (

@@ -188,6 +188,17 @@ export default function MvShapeMotionModal({
 								</button>
 							))}
 						</div>
+						<label className="mt-1.5 flex items-center gap-2 py-0.5 cursor-pointer">
+							<input
+								type="checkbox"
+								checked={!!cfg.offbeat}
+								onChange={(e) => setCfg({ ...cfg, offbeat: e.target.checked })}
+								className="h-4 w-4 accent-blue-500"
+							/>
+							<span className="text-[11px] text-gray-200">
+								裏拍で鳴らす（半拍分ずらす）
+							</span>
+						</label>
 					</div>
 
 					{/* プリセットグリッド。カテゴリごとに見出しを分ける（種類が多いので平置きだと探しにくい）。 */}
