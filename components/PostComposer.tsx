@@ -314,20 +314,20 @@ export default function PostComposer({
 				{md && <Music size={22} className="hidden md:block" />}
 			</ToolbarButton>
 			<ToolbarButton
-				onClick={onOpenGameMaker}
-				title="ゲーム作成"
-				hoverColor="hover:text-yellow-400"
-			>
-				<Gamepad2 size={18} className={md ? "md:hidden" : undefined} />
-				{md && <Gamepad2 size={22} className="hidden md:block" />}
-			</ToolbarButton>
-			<ToolbarButton
 				onClick={onOpenMvMaker}
 				title="MV作成"
 				hoverColor="hover:text-cyan-400"
 			>
 				<Clapperboard size={18} className={md ? "md:hidden" : undefined} />
 				{md && <Clapperboard size={22} className="hidden md:block" />}
+			</ToolbarButton>
+			<ToolbarButton
+				onClick={onOpenGameMaker}
+				title="ゲーム作成"
+				hoverColor="hover:text-yellow-400"
+			>
+				<Gamepad2 size={18} className={md ? "md:hidden" : undefined} />
+				{md && <Gamepad2 size={22} className="hidden md:block" />}
 			</ToolbarButton>
 			<input
 				ref={fileInputRef}
