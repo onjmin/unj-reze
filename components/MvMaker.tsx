@@ -1000,6 +1000,13 @@ export default function MvMaker({
 	const [timelineModalOpen, setTimelineModalOpen] = useState(false);
 
 	const [macroSettingsOpen, setMacroSettingsOpen] = useState(false);
+	/**
+	 * 直近に「自動図形グループを新規追加」で作ったグループのID。
+	 * 気に入るまで作り直す／やっぱり要らない、が一覧までスクロールせず
+	 * 追加ボタンのすぐ隣で完結するようにするためだけの覚え書き。
+	 * 消された後のIDが残っても困らないよう、使う直前に実在を確かめる。
+	 */
+	const [lastAutoGroupId, setLastAutoGroupId] = useState<string | null>(null);
 	const [macroSettings, setMacroSettings] =
 		useState<SymmetricShapeGroupOptions>({
 			clusterType: "centered",
@@ -1008,6 +1015,19 @@ export default function MvMaker({
 			monochrome: true,
 			symmetric: false,
 		});
+
+	/**
+	 * 「直近の自動図形グループ」の実体。一覧側やUndoで先に消えていることが
+	 * あるので、IDを覚えているだけでは足りず毎回引き直す（見つからなければ
+	 * リロール／削除ボタンごと出さない）。
+	 */
+	const lastAutoGroup = useMemo(
+		() =>
+			lastAutoGroupId
+				? (manifest.groups ?? []).find((g) => g.id === lastAutoGroupId)
+				: undefined,
+		[lastAutoGroupId, manifest.groups],
+	);
 
 	const trackNoteCounts = useMemo(() => {
 		const map: Record<number, number> = {};
@@ -1530,6 +1550,7 @@ export default function MvMaker({
 			layers: [...m.layers, ...layers],
 			groups: [...(m.groups ?? []), group],
 		}));
+		setLastAutoGroupId(group.id);
 		if (layers[0]) setSelectedLayerId(layers[0].id);
 	};
 
@@ -3881,8 +3902,8 @@ export default function MvMaker({
 									}
 									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
 								>
-									<option value="centered">中央集中</option>
-									<option value="scattered">画面全体に分散</option>
+									<option value="centered">中央に入れ子（エンブレム風）</option>
+									<option value="scattered">中央線上に横並び</option>
 								</select>
 							</label>
 							<label className="flex items-center justify-between">
@@ -3957,9 +3978,31 @@ export default function MvMaker({
 					<Plus size={13} />
 					自動図形グループを新規追加
 				</button>
+				{lastAutoGroup && (
+					<div className="mb-2 flex gap-1.5">
+						<button
+							onClick={() => rerollSymmetricShapeGroup(lastAutoGroup.id)}
+							className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800/60 px-3 py-2 text-[11px] font-medium text-gray-200 hover:bg-gray-800"
+						>
+							<Shuffle size={13} />
+							直近をリロール
+						</button>
+						<button
+							onClick={() => {
+								update((m) => deleteGroup(m, lastAutoGroup.id));
+								setLastAutoGroupId(null);
+							}}
+							className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 text-[11px] font-medium text-red-300 hover:bg-red-900/40"
+						>
+							<Trash2 size={13} />
+							直近を削除
+						</button>
+					</div>
+				)}
 				<Hint>
 					幾何学的な図形の集まりを新しいグループとして自動生成します（複数作成可能）。
-					グループ一覧や個々のレイヤー設定の「リロール」ボタンを押すと、そのグループの中身だけをランダムに作り直せます。
+					拍ごとに形そのものが切り替わり、打点で「小さく太く出て、膨らみながら細くなって消える」構図になります。
+					気に入らなければ上の「直近をリロール」で作り直し、「直近を削除」で丸ごと消せます（グループ一覧や個々のレイヤー設定の「リロール」からも同じことができます）。
 				</Hint>
 				{manifest.layers.length === 0 && (
 					<p className="text-[10px] text-gray-500">レイヤーがありません。</p>
