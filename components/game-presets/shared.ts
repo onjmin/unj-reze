@@ -27,6 +27,11 @@ export type EngineKind =
 	| "onjReze"
 	| "yume25d"
 	| "mmo3d";
+
+/** mmo3d専用: レンダラーバックエンド。three-stdlib（MMDLoader）と babylon-mmd は
+ *  同じ<canvas>上のWebGLコンテキストを共有できないため、ゲームごとに片方だけを選ぶ。
+ *  比較は docs/mmo3d-feature-design.md の表を参照。既定は 'three'。 */
+export type Mmo3dRenderer = "three" | "babylon";
 export type NpcBehavior =
 	| "still"
 	| "random"
