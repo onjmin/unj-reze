@@ -422,6 +422,10 @@ export interface TileDef {
 	warpEntryRow?: number;
 	/** special='damage'（どく沼/ダメージ床）の被ダメージ量。未指定時は3。 */
 	damageAmount?: number;
+	/** special='bbsBoard'（掲示板タイル）が参照する本SNSの投稿ID。未指定なら埋め込み先の
+	 *  投稿（postId）を使う。外部サイトへは繋がず、既存の投稿/返信APIのみ使う
+	 *  （docs/mmo3d-feature-design.md「ゲーム内BBS機能」参照）。 */
+	boardPostId?: string;
 	/** このタイルに乗っている接触イベントを「触れている間くり返し発動」させるかの明示指定。
 	 *  未指定（undefined）＝システム既定：当たり判定があれば連続発動、無ければ1回だけ。
 	 *  true＝常に連続発動 / false＝常に1回だけ。 */

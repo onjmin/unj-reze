@@ -4,24 +4,28 @@
 //
 // フェーズ2: 地面 + プレースホルダーキャラクター。
 // フェーズ7: babylon-mmd の PmxLoader を登録し、MMD(PMX)モデルをCORSプロキシ経由リトライ付きで
-// 読み込めるようにした（loadMmdModel）。既定カタログにはライセンス未確認の版元不明モデルを
-// 一切含めない（docs/mmo3d-feature-design.md参照）ため、呼び出し側がURLを渡す形のみ提供する。
-// VMDモーション再生（MmdRuntime経由）は今後の課題。
+// 読み込めるようにした（loadMmdModel）。
+// フェーズ13: MmdRuntime + VmdLoader を使ったVMDモーション再生（loadMmdModelAndPlay）を追加。
 // 参考: docs/mmo3d-feature-design.md
 
-import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
-import { Engine } from "@babylonjs/core/Engines/engine";
-import { Scene } from "@babylonjs/core/scene";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
+import { Engine } from "@babylonjs/core/Engines/engine";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Vector3 } from "@babylonjs/core/Maths/math";
+import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
+import { Scene } from "@babylonjs/core/scene";
 import "@babylonjs/core/Meshes/meshBuilder";
 import { ImportMeshAsync } from "@babylonjs/core/Loading/sceneLoader";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { RegisterPmxLoader } from "babylon-mmd/esm/Loader/pmxLoader";
+import { VmdLoader } from "babylon-mmd/esm/Loader/vmdLoader";
+import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation"; // MmdAnimationにcreateRuntimeModelAnimationを生やす副作用import
+import type { MmdSkinnedMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
+import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
+import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
 import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
 
 let pmxLoaderRegistered = false;
@@ -36,6 +40,7 @@ export class Mmo3dBabylonEngine {
 	private engine: Engine;
 	private scene: Scene;
 	private disposed = false;
+	private mmdRuntime: MmdRuntime | null = null;
 
 	constructor(canvas: HTMLCanvasElement) {
 		this.engine = new Engine(canvas, true, { stencil: true });
@@ -52,7 +57,11 @@ export class Mmo3dBabylonEngine {
 		camera.attachControl(canvas, true);
 
 		new HemisphericLight("hemi", new Vector3(0, 1, 0), this.scene);
-		const sun = new DirectionalLight("sun", new Vector3(-1, -2, -1), this.scene);
+		const sun = new DirectionalLight(
+			"sun",
+			new Vector3(-1, -2, -1),
+			this.scene,
+		);
 		sun.intensity = 0.8;
 
 		const ground = MeshBuilder.CreateGround(
@@ -85,9 +94,7 @@ export class Mmo3dBabylonEngine {
 		}
 	}
 
-	/** MMD(PMX)モデルをURLから読み込み、シーンへ追加する。ローダーは初回呼び出し時に1回だけ登録する。
-	 *  版元不明モデルの既定同梱はしない方針のため、URLは常に呼び出し側が渡す
-	 *  （docs/mmo3d-feature-design.md参照）。CORS失敗時は lib/cors-proxy.ts 経由で1回だけ再試行する。 */
+	/** MMD(PMX)モデルをURLから読み込み、シーンへ追加する。ローダーは初回呼び出し時に1回だけ登録する。CORS失敗時は lib/cors-proxy.ts 経由で1回だけ再試行する。 */
 	async loadMmdModel(url: string): Promise<AbstractMesh[]> {
 		ensurePmxLoaderRegistered();
 		try {
@@ -102,11 +109,49 @@ export class Mmo3dBabylonEngine {
 		}
 	}
 
+	/** MMD(PMX)モデルを読み込み、指定があればVMDモーションを再生する。
+	 *  MmdRuntimeはこのメソッドを初めて呼んだときに1回だけ生成・登録する。*/
+	async loadMmdModelAndPlay(
+		pmxUrl: string,
+		vmdUrl?: string,
+	): Promise<MmdModel> {
+		const meshes = await this.loadMmdModel(pmxUrl);
+		const root = meshes[0] as unknown as MmdSkinnedMesh;
+
+		if (!this.mmdRuntime) {
+			this.mmdRuntime = new MmdRuntime(this.scene);
+			this.mmdRuntime.register(this.scene);
+		}
+		const mmdModel = this.mmdRuntime.createMmdModel(root);
+
+		if (vmdUrl) {
+			const vmdLoader = new VmdLoader(this.scene);
+			const loadVmd = (url: string) => vmdLoader.loadAsync("motion", url);
+			let animation: Awaited<ReturnType<typeof loadVmd>>;
+			try {
+				animation = await loadVmd(vmdUrl);
+			} catch (err) {
+				const proxied = wrapCorsProxyUrl(vmdUrl);
+				if (proxied === vmdUrl) throw err;
+				notifyCorsProxyUsed();
+				animation = await loadVmd(proxied);
+			}
+			const handle = mmdModel.createRuntimeAnimation(animation);
+			mmdModel.setRuntimeAnimation(handle);
+			await this.mmdRuntime.playAnimation();
+		}
+
+		return mmdModel;
+	}
+
 	/** Havok物理はWASM初期化が非同期のため、必要になったフェーズで呼び出す。 */
 	async enablePhysics() {
 		const { default: HavokPhysics } = await import("@babylonjs/havok");
 		const havok = await HavokPhysics();
-		this.scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin(true, havok));
+		this.scene.enablePhysics(
+			new Vector3(0, -9.81, 0),
+			new HavokPlugin(true, havok),
+		);
 	}
 
 	resize() {
@@ -115,6 +160,7 @@ export class Mmo3dBabylonEngine {
 
 	dispose() {
 		this.disposed = true;
+		if (this.mmdRuntime) this.mmdRuntime.dispose(this.scene);
 		this.engine.dispose();
 	}
 }

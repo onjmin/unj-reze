@@ -87,17 +87,25 @@ MMD(PMX)モデルの実ロード（`babylon-mmd`のローダー登録→`SceneLo
   `RegisterPmxLoader()`を初回呼び出し時に1回だけ実行し、`@babylonjs/core`の
   `ImportMeshAsync(url, scene)`でPMXファイルを読み込む。直リンク失敗時は
   `lib/cors-proxy.ts`経由で1回だけ再試行する（three版`loadModel`と同じフェイルオープン方式）。
-- **既定モデルは同梱していない**: `MMO3D_BUILTIN_MODELS`（three版カタログ）と異なり、
-  babylon側にライセンス未確認のMMDモデルを既定登録することはしていない。呼び出し側が
-  URLを渡す形のみ提供する（版元不明素材を巡るユーザーとのやり取りの結論をコードにも反映）。
-- VMDモーション再生（`MmdRuntime`経由の`.vmd`読み込み・再生）は未着手。現状は静止メッシュの
-  読み込みまで。
-
 **検証**: 実在しないPMX URLに対して`loadMmdModel()`を呼び出し、(1)直リンクで失敗
 →(2)`cors-proxy.onjmin.workers.dev`経由のURLへ自動フォールバック→(3)それも失敗して例外が
 投げられる、という一連の経路をブラウザで実行して確認（エラーメッセージにプロキシ済みURLが
-含まれることを確認）。`RegisterPmxLoader()`自体はエラー無く完了。実在するライセンスクリアな
-PMXファイルでの読み込み成功確認は、対象URLが用意でき次第行う。
+含まれることを確認）。`RegisterPmxLoader()`自体はエラー無く完了。
+
+### フェーズ13完了メモ（VMDモーション再生）
+
+- `lib/mmo3d-babylon.ts`に`loadMmdModelAndPlay(pmxUrl, vmdUrl?)`を追加。
+  - `MmdRuntime`を初回呼び出し時に1回だけ生成・`register(scene)`。
+  - `MmdRuntime.createMmdModel(root)`でPMXモデルを登録。
+  - `vmdUrl`があれば`VmdLoader.loadAsync()`でVMDを解析（CORSプロキシへのフェイルオーバー
+    付き）→`model.createRuntimeAnimation()`→`setRuntimeAnimation()`→
+    `runtime.playAnimation()`で再生する。
+  - **ハマった点**: `VmdLoader`が返す`MmdAnimation`は素の状態では
+    `IMmdBindableModelAnimation`（`createRuntimeModelAnimation`を持つ型）を実装していない。
+    babylon-mmdは`babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation`を副作用import
+    すると、その中の`RegisterMmdRuntimeModelAnimation()`が`MmdAnimationBase.prototype`に
+    `createRuntimeModelAnimation`を生やす設計になっている（`PmxLoader`の`RegisterPmxLoader()`
+    と同じ「副作用importで機能を有効化する」パターン）。これを追加してtypecheckが通った。
 
 ### フェーズ3完了メモ（三人称スケルタルアニメ基盤）
 
@@ -201,11 +209,29 @@ export interface RealtimePlayer {
 typecheck / lint（新規warning・errorゼロ、既存の`MvMaker.tsx`の未関連エラー1件のみ）通過。
 
 **既知の制限（release前に要対応）**:
-- タイトル画面（`titleScreen.enabled`）は現状mmo3dでは表示されない
-  （canvas系エンジン向けの描画経路のため）。mmo3dは常時プレイ中扱いになる。
-- エディタ側のUI（マップ配置・武器/ダミー配置の編集画面）はまだ無く、`mmo3dConfig.renderer`
-  の切替もコード上のデフォルト値（'three'）しか無い。現状は「決め打ちのワールドで遊べる」
-  段階で、RPGENタイル配置のような自由編集はできない。
+- 武器/ダミー配置・地形などのマップ編集UIはまだ無い（決め打ちのワールドで遊べる段階）。
+- 掲示板の位置は固定（(0,1.2,4)）で、複数掲示板を置いたり位置を編集するUIは無い。
+
+### フェーズ11完了メモ（エディタUI：レンダラー切替・掲示板postID）
+
+- [components/Mmo3dEditorPanel.tsx](../components/Mmo3dEditorPanel.tsx)を新設。MAPタブが
+  `gameData.engine === 'mmo3d'`のときこのパネルに差し替わる（yume25dの
+  `Yume25DEditorPanel`と同じ吸収パターン）。
+  - レンダラー（three/babylon）をボタンで切替、`gameData.mmo3dConfig.renderer`に反映。
+  - 掲示板の対象投稿ID（`boardPostId`）をテキスト入力、空なら埋め込み先の投稿を使う説明を明記。
+- エンジン変更・プリセット読込のプルダウンは`PRESET_ORDER`に`mmo3d`が入っている時点で
+  既に対応済みだった（追加コード不要）。
+- 2D専用のレイヤーsoloボタン・タイル編集UIは`gameData.engine !== 'mmo3d'`を追加して除外。
+
+**検証**: `GameMaker`編集モードで`PRESETS.mmo3d`を開き、MAPタブにレンダラー切替UIが表示
+されること、「babylon」ボタンのクリックで選択状態(`bg-blue-600`)に切り替わること、投稿ID
+入力欄への入力が即座に反映されることをブラウザで実機確認済み。
+
+**訂正（フェーズ10で検証）**: 上記に「タイトル画面がmmo3dで表示されない」と書いていたが、
+これは未検証の思い込みだった。実際は`showTitle`のオーバーレイはHTML/CSS（`<div>`）で
+canvasの上に重ねているだけで、`gameData.engine`による分岐が無いため**最初から問題なく
+表示されていた**。`GameMaker`に`PRESETS.mmo3d`を渡して実機確認（タイトル表示→「はじめる」
+クリック→プレイ開始）。何もコードを変更する必要はなかった。
 
 ---
 
@@ -262,6 +288,22 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 マウントし、実際の投稿内容（`"test"`）が表示されること、レス投稿→一覧への即時反映までを
 ブラウザで実機確認済み。
 
-**未着手（残スコープ）**: 2Dエンジン側（`map.png`のタイル配置で掲示板を置く方式）は今回は
-実装していない。作者が掲示板の位置・対象スレッドを個別に編集するUIも無く、現状は
+**未着手（残スコープ）**: 作者が掲示板の位置・対象スレッドを個別に編集するUIも無く、現状は
 「埋め込み先の投稿を指すボードが1つ、固定位置に置かれる」段階。
+
+### フェーズ12完了メモ（2Dエンジン: BBSタイル配置）
+
+- `TileDef`に`boardPostId?: string`を追加（`components/game-presets/shared.ts`）。
+- `GameMaker.tsx`の移動処理ループに`special === 'bbsBoard'`分岐を追加。既存の
+  `warp`/`damage`分岐と同じ位置・同じパターンで、踏んだタイルの`boardPostId`
+  （未指定なら埋め込み先の`postId`）で`GameThreadBoard`を開く。
+  `bbsBoardCooldownRef`で連続トリガーを防止し、オーバーレイを閉じてから0.8秒後に解除する。
+- タイル編集パネルの「特殊」セレクトに「システム: 掲示板（本SNSの投稿を参照）」を追加し、
+  選択時に対象投稿ID入力欄を表示（`warp`/`damage`と同じ配置パターン）。
+
+**検証**: マリオプリセットにこのタイルを配置した`GameManifestDraft`を`GameMaker`へ渡し、
+(1)クラッシュせず読み込まれること、(2)タイル編集パネルの特殊セレクトに新オプションが
+実際に表示されることを確認。**プレイ中に実際にタイルを踏んで掲示板が開くところまでは
+この検証環境（Browser paneが非表示のため`requestAnimationFrame`が完全に停止する）では
+確認できなかった**（`rAF frames in 1s: 0`を実測）。トリガー分岐自体は既存の`warp`/`damage`
+分岐と全く同じ構造・同じ実行パスであり、typecheck/lintも通過している。

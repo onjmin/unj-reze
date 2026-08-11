@@ -65,6 +65,8 @@ import Yume25DEditorPanel from './Yume25DEditorPanel';
 import UserSheetPanel from './UserSheetPanel';
 import { generateTopDownTerrain, generateSideViewTerrain, type TerrainWater } from '@/lib/terrain-gen';
 import Mmo3dMaker from './Mmo3dMaker';
+import Mmo3dEditorPanel from './Mmo3dEditorPanel';
+import GameThreadBoard from './GameThreadBoard';
 import type { Mmo3dRenderer } from './game-presets/shared';
 import { ensureSessionId } from '@/lib/session';
 
@@ -1951,6 +1953,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
   const [showDeathScreen, setShowDeathScreen] = useState(false);
   const deathScreenRef = useRef<DeathScreenConfig | undefined>(undefined);
   deathScreenRef.current = gameData.deathScreen;
+  // 2Dエンジン用の掲示板タイル（special='bbsBoard'）。踏んだら本SNSの投稿を参照するオーバーレイを開く。
+  // 外部サイトへは繋がない（docs/mmo3d-feature-design.md「ゲーム内BBS機能」参照）。
+  const [bbsBoardOpenPostId, setBbsBoardOpenPostId] = useState<string | null>(null);
+  const bbsBoardCooldownRef = useRef(false);
   const [selectedTileId, setSelectedTileId] = useState(1);
   /** いま「配置」ボタンで置かれるもの。ドロップダウンの1項目＝1つの配置物。 */
   const [placeKind, setPlaceKind] = useState<PlaceKind>('ground');
@@ -10296,6 +10302,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 }
               }
             }
+            // ── システムタイル：掲示板（本SNSの投稿を参照。外部サイトへは繋がない） ──
+            else if (center?.info?.special === 'bbsBoard') {
+              if (!bbsBoardCooldownRef.current) {
+                const targetPostId = center.info.boardPostId || postId;
+                if (targetPostId) {
+                  bbsBoardCooldownRef.current = true;
+                  setBbsBoardOpenPostId(targetPostId);
+                }
+              }
+            }
             // ── システムタイル：つるつる床（スライド開始） ──
             // action（マリオ系）は重力に沿った物理移動のため、左右方向のみ強制スライドに対応する（上下は無効）。
             // rpg/onjReze は元々グリッド上の自由8方向移動なので4方向すべてに対応する。
@@ -14200,6 +14216,18 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
               </div>
             )}
 
+            {/* ── 掲示板（2Dエンジン：special='bbsBoard'タイルを踏んだとき）── */}
+            {bbsBoardOpenPostId && (
+              <GameThreadBoard
+                postId={bbsBoardOpenPostId}
+                onClose={() => {
+                  setBbsBoardOpenPostId(null);
+                  // タイルに乗ったままだと即再オープンしてしまうため、少し待って解除する。
+                  setTimeout(() => { bbsBoardCooldownRef.current = false; }, 800);
+                }}
+              />
+            )}
+
             {/* ── ゲーム切り替え・まっさらにする 専用パネル ── */}
             {gameSwitchOpen && (
               <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
@@ -16336,7 +16364,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     </optgroup>
                   )}
                 </select>
-                {editorTab === 'map' && gameData.engine !== 'yume25d' && (
+                {editorTab === 'map' && gameData.engine !== 'yume25d' && gameData.engine !== 'mmo3d' && (
                   <button
                     onClick={() => setSoloLayer(v => !v)}
                     aria-pressed={soloLayer}
@@ -16660,7 +16688,15 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     onTalkTargetChange={handleYume25dTalkTargetChange}
                   />
                 )}
-                {editorTab === 'map' && gameData.engine !== 'yume25d' && (
+                {editorTab === 'map' && gameData.engine === 'mmo3d' && (
+                  <Mmo3dEditorPanel
+                    renderer={gameData.mmo3dConfig?.renderer ?? 'three'}
+                    onRendererChange={(renderer) => setGameData(prev => ({ ...prev, mmo3dConfig: { ...prev.mmo3dConfig, renderer } }))}
+                    boardPostId={gameData.mmo3dConfig?.boardPostId ?? ''}
+                    onBoardPostIdChange={(boardPostId) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', boardPostId: boardPostId || undefined } }))}
+                  />
+                )}
+                {editorTab === 'map' && gameData.engine !== 'yume25d' && gameData.engine !== 'mmo3d' && (
                   <div className="space-y-3">
                     {/* スタート地点を置くときはタイル関連UIを出さない（そのパネルに関係する概念だけ見せる） */}
                     {(<>
@@ -16730,6 +16766,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <option value="ice-right">システム: つるつる床（→）</option>
                                 <option value="ice-down">システム: つるつる床（↓）</option>
                                 <option value="ice-left">システム: つるつる床（←）</option>
+                                <option value="bbsBoard">システム: 掲示板（本SNSの投稿を参照）</option>
                               </select>
                             </div>
                             {tile.special === 'warp' && (gameData.scenes?.length ?? 0) > 0 && (
@@ -16740,6 +16777,16 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                                 <input type="number" value={tile.damageAmount ?? 3} onChange={e => updateTile(id, { damageAmount: Number(e.target.value) })}
                                   className="w-16 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
                               </label>
+                            )}
+                            {tile.special === 'bbsBoard' && (
+                              <div className="space-y-1">
+                                <label className="text-[10px] text-gray-400 flex items-center gap-1">対象の投稿ID（空欄なら埋め込み先の投稿）
+                                  <input value={tile.boardPostId ?? ''} onChange={e => updateTile(id, { boardPostId: e.target.value || undefined })}
+                                    placeholder="例: 18"
+                                    className="w-24 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none" />
+                                </label>
+                                <p className="text-[10px] text-gray-500">📋 このタイルに乗ると本SNSの投稿を掲示板として閲覧・返信できます（外部サイトへは繋がりません）。</p>
+                              </div>
                             )}
                             <div className="flex items-center gap-2 pt-1.5 mt-1 border-t border-gray-700/50">
                               <span className="text-[10px] text-gray-400">画像（任意）</span>
