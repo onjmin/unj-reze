@@ -126,6 +126,25 @@ export interface RealtimePlayer {
 サーバー権威なし・クライアントが自分の状態を publish するだけ。攻撃判定はクライアント
 ローカルで完結させ、他プレイヤーへの影響は演出のみ（MVP)。
 
+### フェーズ4完了メモ（リアルタイム位置/アニメ同期）
+
+- `services/realtime/server.mjs`: `pos`メッセージで`rotY`/`anim`を受け取り、presenceに保持して
+  ブロードキャストに含める（値が無ければ省略、既存の2D勢は影響を受けない完全後方互換）。
+- `lib/realtime/client.ts`: `sendPosition()`に`{rotY, anim}`の任意第6引数を追加。
+- `lib/mmo3d.ts`: `getLocalState()`（送信用）と`setRemotePlayers()`（他プレイヤーを簡易カプセル
+  で表示、sessionId単位で生成/更新/消去）を追加。
+- `components/Mmo3dMaker.tsx`: `gameId`/`sessionId`を渡すとthree版のみ200ms間隔で送受信する
+  （既存2Dゲームの2000ms間隔より短い。移動が速いため）。babylon版は未対応（#7と合わせて
+  今後）。
+
+**検証**: 実際にハブ(`services/realtime/server.mjs`)をローカル起動し、2つのWebSocket接続で
+`pos`(rotY=1.23, anim='run')を送信→もう一方が`presence`イベントでその値をそのまま受信する
+ことを確認済み（テストスクリプトは検証後に削除）。
+
+**未着手**: `GameMaker.tsx`/`LiveGameView.tsx`への実配線（`gameId`/`sessionId`をmmo3dゲームに
+実際に流し込む部分）はフェーズ6で行う。ゴーストは現状カプセルのみで、他プレイヤーの
+`anim`値を見た目のアニメ切替には使っていない（実モデルを共有していないため）。
+
 ---
 
 ## フェーズ計画

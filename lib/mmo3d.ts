@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
 import { MMO3D_BUILTIN_MODELS } from "@/lib/mmo3d-asset-catalog";
+import type { RealtimePlayer } from "@/lib/realtime/channels";
 
 /** 移動キー入力の論理状態（GameMaker.tsx の virtualKeys 相当と将来揃える）。 */
 export interface Mmo3dInputState {
@@ -53,6 +54,11 @@ export class Mmo3dEngine {
 	private playerMat: THREE.MeshStandardMaterial;
 	private placeholderMesh: THREE.Mesh;
 
+	// ── 他プレイヤー（ゴースト）。実モデルは持たず、簡易カプセルで表示する。 ──
+	private ghostGeo: THREE.CapsuleGeometry;
+	private ghostMat: THREE.MeshStandardMaterial;
+	private ghosts = new Map<string, THREE.Mesh>();
+
 	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
 	private input: Mmo3dInputState = {
 		forward: false,
@@ -94,6 +100,13 @@ export class Mmo3dEngine {
 		this.player = this.placeholderMesh;
 		this.scene.add(this.player);
 
+		this.ghostGeo = new THREE.CapsuleGeometry(0.4, 1.0, 4, 8);
+		this.ghostMat = new THREE.MeshStandardMaterial({
+			color: 0x4488ff,
+			transparent: true,
+			opacity: 0.85,
+		});
+
 		this.clock = new THREE.Clock();
 
 		const sample = MMO3D_BUILTIN_MODELS.find((m) => m.hasAnimations);
@@ -103,6 +116,39 @@ export class Mmo3dEngine {
 	/** キーボード/仮想パッドから移動入力を渡す。呼び出し側（Mmo3dMaker）が随時更新する。 */
 	setInput(next: Partial<Mmo3dInputState>) {
 		Object.assign(this.input, next);
+	}
+
+	/** リアルタイムハブへ送る自分の位置/向き/アニメ状態。呼び出し側が定期的に読んで publish する。
+	 *  RealtimePlayer.x/y には world の x/z をそのまま使う（mmo3dルーム内で閉じた座標系）。 */
+	getLocalState(): { x: number; y: number; rotY: number; anim: AnimState } {
+		return {
+			x: this.player.position.x,
+			y: this.player.position.z,
+			rotY: this.facing,
+			anim: this.curAnim ?? "idle",
+		};
+	}
+
+	/** 他プレイヤーの最新一覧を反映する。存在しなくなったsessionIdのゴーストは消す。
+	 *  実モデルは持たないため、簡易カプセル＋向きのみで表現する（アニメ切替は今後）。 */
+	setRemotePlayers(players: RealtimePlayer[]) {
+		const seen = new Set<string>();
+		for (const p of players) {
+			seen.add(p.sessionId);
+			let mesh = this.ghosts.get(p.sessionId);
+			if (!mesh) {
+				mesh = new THREE.Mesh(this.ghostGeo, this.ghostMat);
+				this.ghosts.set(p.sessionId, mesh);
+				this.scene.add(mesh);
+			}
+			mesh.position.set(p.x, 0.9, p.y);
+			if (p.rotY !== undefined) mesh.rotation.y = p.rotY;
+		}
+		for (const [sessionId, mesh] of this.ghosts) {
+			if (seen.has(sessionId)) continue;
+			this.scene.remove(mesh);
+			this.ghosts.delete(sessionId);
+		}
 	}
 
 	private loadPlayerModel(url: string) {
@@ -241,6 +287,8 @@ export class Mmo3dEngine {
 		this.groundMat.dispose();
 		this.playerGeo.dispose();
 		this.playerMat.dispose();
+		this.ghostGeo.dispose();
+		this.ghostMat.dispose();
 		this.renderer.dispose();
 	}
 }

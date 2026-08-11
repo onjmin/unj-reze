@@ -124,10 +124,10 @@ function roomOf(gameId) {
   return room;
 }
 
-function updatePresence(gameId, sessionId, x, y, emoji) {
+function updatePresence(gameId, sessionId, x, y, emoji, rotY, anim) {
   const room = roomOf(gameId);
   if (!room.has(sessionId) && room.size >= MAX_PLAYERS_PER_ROOM) return;
-  room.set(sessionId, { x, y, emoji, ts: Date.now() });
+  room.set(sessionId, { x, y, emoji, rotY, anim, ts: Date.now() });
   dirtyRooms.add(gameId);
 }
 
@@ -156,7 +156,15 @@ function presenceTick() {
   for (const gameId of dirtyRooms) {
     const room = presence.get(gameId);
     const players = room
-      ? [...room].map(([sessionId, e]) => ({ sessionId, x: e.x, y: e.y, emoji: e.emoji }))
+      ? [...room].map(([sessionId, e]) => ({
+          sessionId,
+          x: e.x,
+          y: e.y,
+          emoji: e.emoji,
+          // mmo3d専用（任意）。無ければ受信側で単に undefined のまま無視される。
+          ...(e.rotY !== undefined ? { rotY: e.rotY } : {}),
+          ...(e.anim !== undefined ? { anim: e.anim } : {}),
+        }))
       : [];
     // 自分を含めた全員を配る。除外はクライアント側で行う
     // （1部屋につき直列化1回で済ませるため）。
@@ -315,8 +323,13 @@ wss.on('connection', (ws, req) => {
         const y = Number(msg.y);
         if (!Number.isFinite(x) || !Number.isFinite(y)) break;
         const emoji = typeof msg.emoji === 'string' ? msg.emoji.slice(0, 8) : '🎮';
+        const rotY = Number.isFinite(Number(msg.rotY)) ? Number(msg.rotY) : undefined;
+        const anim =
+          typeof msg.anim === 'string' && ['idle', 'walk', 'run'].includes(msg.anim)
+            ? msg.anim
+            : undefined;
         ws.games.set(gameId, sessionId);
-        updatePresence(gameId, sessionId, x, y, emoji);
+        updatePresence(gameId, sessionId, x, y, emoji, rotY, anim);
         break;
       }
       case 'leave': {

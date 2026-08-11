@@ -157,15 +157,26 @@ class RealtimeClient {
 		};
 	}
 
-	/** 自分の位置を送る。DBには一切書かれず、ハブのメモリ上だけで完結する。 */
+	/** 自分の位置を送る。DBには一切書かれず、ハブのメモリ上だけで完結する。
+	 *  rotY/anim は mmo3d専用（任意）。2Dゲームは渡さなくてよい。 */
 	sendPosition(
 		gameId: string,
 		sessionId: string,
 		x: number,
 		y: number,
 		emoji: string,
+		extra?: { rotY?: number; anim?: "idle" | "walk" | "run" },
 	) {
-		this.rawSend({ t: "pos", game: gameId, sessionId, x, y, emoji });
+		this.rawSend({
+			t: "pos",
+			game: gameId,
+			sessionId,
+			x,
+			y,
+			emoji,
+			...(extra?.rotY !== undefined ? { rotY: extra.rotY } : {}),
+			...(extra?.anim !== undefined ? { anim: extra.anim } : {}),
+		});
 	}
 
 	leaveGame(gameId: string) {

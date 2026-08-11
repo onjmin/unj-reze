@@ -42,4 +42,8 @@ export interface RealtimePlayer {
 	x: number;
 	y: number;
 	emoji: string;
+	/** mmo3d専用（任意・後方互換）。Y軸回転(ラジアン)。 */
+	rotY?: number;
+	/** mmo3d専用（任意・後方互換）。現在のアニメ状態。 */
+	anim?: "idle" | "walk" | "run";
 }
