@@ -345,6 +345,12 @@ export interface MvNoteLight {
 	fadeOut: boolean;
 	/** 音の頭から広がって消える輪郭。 */
 	echo?: MvNoteEcho;
+	/** まだ鳴っていない音を予告（グレーアウト表示）せず、鳴った瞬間にだけ出すか。 */
+	hideUnplayed?: boolean;
+	/** ノートの基本色（未指定ならトラックの色）。 */
+	color?: string;
+	/** 音が鳴った（発光した）ときの色（未指定なら基本色または白）。 */
+	activeColor?: string;
 }
 
 /** 平面ロールの既定。参考動画に寄せて「普段は薄く・鳴った瞬間だけ白く・余韻が広がる」。 */

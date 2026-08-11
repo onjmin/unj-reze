@@ -2017,14 +2017,23 @@ function drawLayerWithTransitions(d: DrawCtx, layer: MvLayer): void {
 		}
 	}
 
-	drawLayer(d, layer);
-
 	if (trans.flashAlpha && trans.flashAlpha > 0.01) {
-		ctx.save();
-		ctx.globalCompositeOperation = "lighter";
-		ctx.fillStyle = `rgba(255, 255, 255, ${trans.flashAlpha * 0.8})`;
-		ctx.fillRect(0, 0, MV_W, MV_H);
-		ctx.restore();
+		const sctx = scratchCtx(scratchA, MV_W, MV_H);
+		if (sctx && scratchA.canvas) {
+			const dScratch: DrawCtx = { ...d, ctx: sctx };
+			drawLayer(dScratch, layer);
+			sctx.save();
+			sctx.globalCompositeOperation = "source-atop";
+			sctx.fillStyle = `rgba(255, 255, 255, ${trans.flashAlpha * 0.95})`;
+			sctx.fillRect(0, 0, MV_W, MV_H);
+			sctx.restore();
+
+			ctx.drawImage(scratchA.canvas, 0, 0);
+		} else {
+			drawLayer(d, layer);
+		}
+	} else {
+		drawLayer(d, layer);
 	}
 
 	if (trans.particle) {
@@ -2839,7 +2848,8 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 		const ny = y + h - ((pitch - pitchLo) / pitchRange) * (h - noteH) - noteH;
 
 		const sounding = n.startStep <= d.step && end > d.step;
-		const color = trackColor(d, n.track);
+		const baseColor = light.color || trackColor(d, n.track);
+		const color = sounding && light.activeColor ? light.activeColor : baseColor;
 		const level = noteLevel(d, n, light);
 
 		if (level > 0.004) {
@@ -2876,7 +2886,7 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
  * まだ鳴っていない＝`dim` / 鳴っている＝1 / 鳴り終わった＝`fadeOut` なら消す、でなければ `dim`。
  */
 function noteLevel(d: DrawCtx, n: MvNote, light: MvNoteLight): number {
-	if (d.step < n.startStep) return light.dim;
+	if (d.step < n.startStep) return light.hideUnplayed ? 0 : light.dim;
 	if (d.step < n.startStep + n.durationSteps) return 1;
 	return light.fadeOut ? 0 : light.dim;
 }

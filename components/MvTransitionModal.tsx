@@ -27,7 +27,6 @@ interface TransitionPresetDef {
 	name: string;
 	category: "basic" | "motion" | "special";
 	description: string;
-	icon: string;
 }
 
 const TRANSITION_PRESETS: TransitionPresetDef[] = [
@@ -36,77 +35,67 @@ const TRANSITION_PRESETS: TransitionPresetDef[] = [
 		name: "瞬時 (なし)",
 		category: "basic",
 		description: "演出なしでその場にパッと出入りします。",
-		icon: "⚡",
 	},
 	{
 		id: "fade",
 		name: "フェード",
 		category: "basic",
 		description: "じわっと透明度が変化して滑らかに出入りします。",
-		icon: "🌫️",
 	},
 	{
 		id: "slide",
 		name: "スライド",
 		category: "motion",
 		description: "指定した方向からスライドイン・スライドアウトします。",
-		icon: "↔️",
 	},
 	{
 		id: "zoom",
 		name: "ズーム",
 		category: "motion",
 		description: "拡大しながら出現、または小さくなりながら消えます。",
-		icon: "🔍",
 	},
 	{
 		id: "zoomBounce",
 		name: "ポップ",
 		category: "motion",
 		description: "跳ねるように勢いよく出現・縮んで退場します。",
-		icon: "💥",
 	},
 	{
 		id: "particle",
 		name: "粒子 (ドット)",
 		category: "special",
 		description: "光るドット粒子が画面を覆う／分解して消えます。",
-		icon: "❄️",
 	},
 	{
 		id: "afterimage",
 		name: "残像 (ゴースト)",
 		category: "special",
 		description: "軌跡の残像が集まって出現／散らばって消失します。",
-		icon: "👻",
 	},
 	{
 		id: "pixelate",
 		name: "ドット分解",
 		category: "special",
 		description: "大きなレトロモザイクからクッキリ現れる・分解します。",
-		icon: "👾",
 	},
 	{
 		id: "flash",
 		name: "フラッシュ",
 		category: "special",
 		description: "一瞬白く光りながら出現・消失します。",
-		icon: "✨",
 	},
 	{
 		id: "wipe",
 		name: "ワイプ",
 		category: "special",
 		description: "画面端からカーテンが開閉するようにカットイン・アウトします。",
-		icon: "🔪",
 	},
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
-	basic: "🌟 基本",
-	motion: "↔️ スライド・拡大縮小",
-	special: "✨ 特殊エフェクト",
+	basic: "基本",
+	motion: "スライド・拡大縮小",
+	special: "特殊エフェクト",
 };
 
 /** ライブプレビュー用コンポーネント */
@@ -282,7 +271,7 @@ export default function MvTransitionModal({
 								: "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
 						}`}
 					>
-						✨ 登場 (フェードイン)
+						登場 (フェードイン)
 					</button>
 					<button
 						onClick={() => setTarget("exit")}
@@ -292,7 +281,7 @@ export default function MvTransitionModal({
 								: "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
 						}`}
 					>
-						✨ 退場 (フェードアウト)
+						退場 (フェードアウト)
 					</button>
 				</div>
 
@@ -411,7 +400,6 @@ export default function MvTransitionModal({
 												}`}
 											>
 												<div className="flex items-center gap-1.5">
-													<span className="text-sm">{p.icon}</span>
 													<span className="text-[12px]">{p.name}</span>
 												</div>
 												<p className="text-[10px] text-gray-400 leading-tight">

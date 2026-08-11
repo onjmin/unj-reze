@@ -56,6 +56,7 @@ import {
 	MV_EFFECT_STYLE_LABELS,
 	MV_EFFECT_USES_COLOR,
 	MV_H,
+	MV_LAYER_KIND_LABELS,
 	MV_LYRIC_STACK_LABELS,
 	MV_MOD_OP_LABELS,
 	MV_MOD_SOURCE_LABELS,
@@ -1319,10 +1320,11 @@ export default function MvMaker({
 			const index = m.layers.findIndex((l) => l.id === id);
 			if (index === -1) return m;
 			const src = m.layers[index];
+			const baseName = src.name || MV_LAYER_KIND_LABELS[src.kind] || src.kind;
 			const clone: MvLayer = {
 				...src,
 				id: newId,
-				name: src.name ? `${src.name}のコピー` : undefined,
+				name: `${baseName} - copy`,
 			};
 			const layers = [...m.layers];
 			layers.splice(index + 1, 0, clone);
@@ -1809,7 +1811,7 @@ export default function MvMaker({
 					<div className="space-y-2 rounded-lg border border-gray-800 bg-gray-950/40 p-2.5">
 						<div className="flex items-center justify-between">
 							<span className="text-[11px] font-bold text-gray-200">
-								✨ 登場・退場の演出
+								登場・退場の演出
 							</span>
 							<span className="text-[10px] text-gray-400">プレビューで確認</span>
 						</div>
@@ -2214,8 +2216,31 @@ export default function MvMaker({
 											)
 										}
 									/>
+									{layer.flow === "page" && (
+										<SelectField
+											label="切り替え間隔"
+											value={String(layer.amount ?? 4)}
+											options={[
+												{ value: "4", label: "4小節ごと" },
+												{ value: "2", label: "2小節ごと" },
+												{ value: "1", label: "1小節ごと" },
+												{ value: "0.5", label: "半小節ごと (2拍)" },
+												{ value: "0.25", label: "半々小節ごと (1拍)" },
+											]}
+											onChange={(v) =>
+												updateLayer(
+													layer.id,
+													(l) =>
+														({
+															...l,
+															amount: parseFloat(v),
+														}) as MvLayer,
+												)
+											}
+										/>
+									)}
 									<Hint>
-										「固定」は譜面が横に動かず、上の小節数ぶんを並べたまま、その小節が終わると
+										「固定」は譜面が横に動かず、指定した長さぶんを並べたまま、その期間が終わると
 										次の譜面へ丸ごと差し替わります。
 									</Hint>
 								</>
@@ -2233,6 +2258,25 @@ export default function MvMaker({
 									step={0.02}
 									onChange={(v) =>
 										updateLight(layer.id, { dim: Math.max(0, Math.min(1, v)) })
+									}
+								/>
+								<CheckField
+									label="鳴っていない音の予告（グレーアウト）を無効化"
+									checked={!!noteLight(layer).hideUnplayed}
+									onChange={(v) => updateLight(layer.id, { hideUnplayed: v })}
+								/>
+								<ColorField
+									label="ノート基本色（空欄でトラック色）"
+									value={noteLight(layer).color ?? ""}
+									onChange={(v) =>
+										updateLight(layer.id, { color: v || undefined })
+									}
+								/>
+								<ColorField
+									label="発光時の色（空欄で基本色/白）"
+									value={noteLight(layer).activeColor ?? ""}
+									onChange={(v) =>
+										updateLight(layer.id, { activeColor: v || undefined })
 									}
 								/>
 								<CheckField
