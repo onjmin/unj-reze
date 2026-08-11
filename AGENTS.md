@@ -66,6 +66,13 @@ external services. Do not hard-code a provider.
 Neon's free tier caps public network transfer at 5 GB/month, and this app once burned it with a
 single open tab. Rules and rationale: [docs/NEON_EGRESS.md](docs/NEON_EGRESS.md).
 
+- **User keys are always the integer `users.id` — never a text key.** `slug` is not a column, just
+  `String(users.id)` for display; don't add slug/displayName-keyed columns, indexes, or lookup
+  paths (text keys cost storage *and* transfer). UI must pass `AnonymousUser.id` as `userId` /
+  `viewerId` / `*Slug`; every numeric conversion in `lib/db/pg.ts` goes through `toUid()`, which
+  returns null (→ empty result) rather than feeding `NaN` to an integer column and 500'ing.
+  Passing `displayName` is what made the notifications page 500 — and mock tolerated it, so it
+  only broke in production. Keep `mock.ts` id-keyed too, or that asymmetry hides the next one.
 - Never `SELECT p.*` on `posts` — use `POST_COLUMNS` (`lib/db/pg.ts`), always paired with the
   `COALESCE(au.display_name, p.display_name)` alias or every author renders as 名無し.
 - Never select `games.manifest` in a list query; never reintroduce `COUNT(*) FROM post_hearts`

@@ -400,13 +400,35 @@ function clearHiddenCache() {
 	hiddenCache.clear();
 }
 
+/**
+ * **ユーザーのキーは常に `users.id`（整数）**。このストアの `userId` / `slug` /
+ * `viewerId` / `*Slug` 引数はすべてこれを指す。
+ *
+ * `slug` はDBカラムではなく `String(users.id)` の表示用エイリアスにすぎない。
+ * テキストキーの列やインデックスを持たせないのは意図的で、Neon 無料枠の
+ * ストレージ/転送量を食わないための設計方針（docs/NEON_EGRESS.md）。
+ * したがって slug や displayName で引く経路を新設してはいけない。
+ *
+ * **displayName（「名無しxxx」）を渡してはいけない**：ここで NaN になり、
+ * Postgres の integer 列に渡って `invalid input syntax for type integer` で
+ * 500 になる（通知ページがそれで落ちていた）。
+ *
+ * 呼び出し側が誤った値を渡しても API 全体が 500 にならないよう、数値化はすべて
+ * このヘルパを通し、不正なら null を返して各メソッドが空を返す（fail-open）。
+ */
+function toUid(userId: string | null | undefined): number | null {
+	if (userId == null || userId === "") return null;
+	const n = Number(userId);
+	return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 async function getHiddenUserIds(viewerId?: string): Promise<Set<number>> {
 	if (!viewerId) return new Set();
 	const now = Date.now();
 	const cached = hiddenCache.get(viewerId);
 	if (cached && cached.expiresAt > now) return cached.hidden;
-	const vid = Number(viewerId);
-	if (!Number.isFinite(vid)) return new Set();
+	const vid = toUid(viewerId);
+	if (vid === null) return new Set();
 	const { rows } = await q<{ other: number }>(
 		`SELECT blocker_user_id AS other FROM user_blocks WHERE blocked_user_id = $1
      UNION
@@ -1000,9 +1022,8 @@ export const pgStore: DataStore = {
 	},
 
 	async getNotifications(userId?: string) {
-		if (!userId) return [];
-		const uid = Number(userId);
-		if (isNaN(uid)) return [];
+		const uid = toUid(userId);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT n.*, au.display_name AS actor_name, t.title AS thread_title
          FROM notifications n
@@ -1039,31 +1060,31 @@ export const pgStore: DataStore = {
 	},
 
 	async markNotificationRead(id: number, userId: string) {
-		const uid = Number(userId);
-		if (isNaN(uid)) return;
+		const uid = toUid(userId);
+		if (uid === null) return;
 		await q(
 			`UPDATE notifications SET read = TRUE WHERE id = $1 AND target_user_id = $2`,
 			[id, uid],
 		);
 	},
 	async markAllNotificationsRead(userId: string) {
-		const uid = Number(userId);
-		if (isNaN(uid)) return;
+		const uid = toUid(userId);
+		if (uid === null) return;
 		await q(`UPDATE notifications SET read = TRUE WHERE target_user_id = $1`, [
 			uid,
 		]);
 	},
 	async deleteNotification(id: number, userId: string) {
-		const uid = Number(userId);
-		if (isNaN(uid)) return;
+		const uid = toUid(userId);
+		if (uid === null) return;
 		await q(`DELETE FROM notifications WHERE id = $1 AND target_user_id = $2`, [
 			id,
 			uid,
 		]);
 	},
 	async getUnreadCount(userId: string) {
-		const uid = Number(userId);
-		if (isNaN(uid)) return 0;
+		const uid = toUid(userId);
+		if (uid === null) return 0;
 		const { rows } = await q(
 			`SELECT COUNT(*) AS cnt FROM notifications WHERE target_user_id = $1 AND read = FALSE`,
 			[uid],
@@ -1072,9 +1093,8 @@ export const pgStore: DataStore = {
 	},
 
 	async getMessages(userId?: string) {
-		if (!userId) return [];
-		const uid = Number(userId);
-		if (isNaN(uid)) return [];
+		const uid = toUid(userId);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT * FROM messages WHERE sender_user_id = $1 OR recipient_user_id = $1 ORDER BY created_at DESC LIMIT 100`,
 			[uid],
@@ -1082,8 +1102,9 @@ export const pgStore: DataStore = {
 		return rows.map(rowToMessage);
 	},
 	async getConversation(userId: string, partnerId: string, limit = 100) {
-		const uid = Number(userId);
-		const pid = Number(partnerId);
+		const uid = toUid(userId);
+		const pid = toUid(partnerId);
+		if (uid === null || pid === null) return [];
 		const { rows } = await q(
 			`SELECT * FROM messages WHERE (sender_user_id=$1 AND recipient_user_id=$2) OR (sender_user_id=$2 AND recipient_user_id=$1)
        ORDER BY created_at DESC LIMIT $3`,
@@ -1092,8 +1113,9 @@ export const pgStore: DataStore = {
 		return rows.map(rowToMessage);
 	},
 	async getDmGate(userId: string, partnerId: string) {
-		const uid = Number(userId);
-		const pid = Number(partnerId);
+		const uid = toUid(userId);
+		const pid = toUid(partnerId);
+		if (uid === null || pid === null) return { sent: 0, received: 0 };
 		const { rows } = await q(
 			`SELECT COUNT(*) FILTER (WHERE sender_user_id=$1) AS sent,
               COUNT(*) FILTER (WHERE sender_user_id=$2) AS received
@@ -1106,8 +1128,13 @@ export const pgStore: DataStore = {
 		};
 	},
 	async addMessage(data: MessageParams) {
-		const senderId = Number(data.sender);
-		const recipientId = data.recipient ? Number(data.recipient) : null;
+		const senderId = toUid(data.sender);
+		if (senderId === null) throw new Error("invalid sender");
+		// recipient 未指定は公開メッセージ。指定があるのに users.id として読めない場合は
+		// null に落とすと DM が公開投稿に化けるので、ここは fail-open にしない。
+		const recipientId = data.recipient ? toUid(data.recipient) : null;
+		if (data.recipient && recipientId === null)
+			throw new Error("invalid recipient");
 		const { rows } = await q(
 			`INSERT INTO messages (sender_user_id, recipient_user_id, text) VALUES ($1,$2,$3) RETURNING *`,
 			[senderId, recipientId, data.text],
@@ -1323,7 +1350,8 @@ export const pgStore: DataStore = {
 		avatarUrl?: string,
 		bio?: string,
 	) {
-		const uid = Number(userId);
+		const uid = toUid(userId);
+		if (uid === null) return;
 		const sets: string[] = [];
 		const vals: any[] = [];
 		const push = (col: string, v: unknown) => {
@@ -1342,27 +1370,32 @@ export const pgStore: DataStore = {
 	},
 
 	async getUserAvatarUrl(slug: string) {
+		const uid = toUid(slug);
+		if (uid === null) return undefined;
 		const { rows } = await q(`SELECT avatar_url FROM users WHERE id = $1`, [
-			Number(slug),
+			uid,
 		]);
 		return rows[0]?.avatar_url ?? undefined;
 	},
 	async getUserBio(slug: string) {
-		const { rows } = await q(`SELECT bio FROM users WHERE id = $1`, [
-			Number(slug),
-		]);
+		const uid = toUid(slug);
+		if (uid === null) return undefined;
+		const { rows } = await q(`SELECT bio FROM users WHERE id = $1`, [uid]);
 		return rows[0]?.bio ?? undefined;
 	},
 
 	async listOshiItems(userSlug: string) {
+		const uid = toUid(userSlug);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT * FROM oshi_items WHERE owner_user_id = $1 ORDER BY position`,
-			[Number(userSlug)],
+			[uid],
 		);
 		return rows.map(rowToOshiItem);
 	},
 	async addOshiItem(userSlug: string, data: AddOshiItemParams) {
-		const uid = Number(userSlug);
+		const uid = toUid(userSlug);
+		if (uid === null) throw new Error("invalid userSlug");
 		const { rows: posRows } = await q(
 			`SELECT COALESCE(MAX(position),-1)+1 AS next_pos FROM oshi_items WHERE owner_user_id = $1`,
 			[uid],
@@ -1388,17 +1421,23 @@ export const pgStore: DataStore = {
 		return rowToOshiItem(rows[0]);
 	},
 	async removeOshiItem(userSlug: string, id: number) {
+		const uid = toUid(userSlug);
+		if (uid === null) return;
 		await q(`DELETE FROM oshi_items WHERE id = $1 AND owner_user_id = $2`, [
 			id,
-			Number(userSlug),
+			uid,
 		]);
 	},
 
 	async getUserSettings(slug: string) {
-		const { rows } = await q(
-			`SELECT is_private, hide_from_search, hide_reactions FROM users WHERE id = $1`,
-			[Number(slug)],
-		);
+		const uid = toUid(slug);
+		const { rows } =
+			uid === null
+				? { rows: [] as any[] }
+				: await q(
+						`SELECT is_private, hide_from_search, hide_reactions FROM users WHERE id = $1`,
+						[uid],
+					);
 		const row = rows[0];
 		return {
 			isPrivate: !!row?.is_private,
@@ -1407,6 +1446,8 @@ export const pgStore: DataStore = {
 		};
 	},
 	async updateUserSettings(slug: string, settings) {
+		const uid = toUid(slug);
+		if (uid === null) return;
 		const sets: string[] = [];
 		const vals: any[] = [];
 		const push = (col: string, v: unknown) => {
@@ -1420,7 +1461,7 @@ export const pgStore: DataStore = {
 		if (settings.hideReactions !== undefined)
 			push("hide_reactions", settings.hideReactions);
 		if (sets.length === 0) return;
-		vals.push(Number(slug));
+		vals.push(uid);
 		await q(
 			`UPDATE users SET ${sets.join(", ")} WHERE id = $${vals.length}`,
 			vals,
@@ -1428,10 +1469,12 @@ export const pgStore: DataStore = {
 	},
 
 	async issueMigrationToken(userId: string) {
+		const uid = toUid(userId);
+		if (uid === null) throw new Error("invalid userId");
 		const token = `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 		await q(`INSERT INTO migration_tokens (token, user_id) VALUES ($1,$2)`, [
 			token,
-			Number(userId),
+			uid,
 		]);
 		return token;
 	},
@@ -1459,30 +1502,40 @@ export const pgStore: DataStore = {
 	// ==========================================================================
 	async followUser(followerId: string, followedId: string) {
 		if (followerId === followedId) return;
+		const from = toUid(followerId);
+		const to = toUid(followedId);
+		if (from === null || to === null) return;
 		await q(
 			`INSERT INTO user_follows (follower_user_id, followed_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-			[Number(followerId), Number(followedId)],
+			[from, to],
 		);
 		await q(
 			`INSERT INTO notifications (type, actor_user_id, target_user_id) VALUES ('follow',$1,$2)`,
-			[Number(followerId), Number(followedId)],
+			[from, to],
 		);
 	},
 	async unfollowUser(followerId: string, followedId: string) {
+		const from = toUid(followerId);
+		const to = toUid(followedId);
+		if (from === null || to === null) return;
 		await q(
 			`DELETE FROM user_follows WHERE follower_user_id=$1 AND followed_user_id=$2`,
-			[Number(followerId), Number(followedId)],
+			[from, to],
 		);
 	},
 	async isFollowing(followerId: string, followedId: string) {
+		const from = toUid(followerId);
+		const to = toUid(followedId);
+		if (from === null || to === null) return false;
 		const { rows } = await q(
 			`SELECT 1 FROM user_follows WHERE follower_user_id=$1 AND followed_user_id=$2`,
-			[Number(followerId), Number(followedId)],
+			[from, to],
 		);
 		return rows.length > 0;
 	},
 	async getFollowCounts(userId: string) {
-		const uid = Number(userId);
+		const uid = toUid(userId);
+		if (uid === null) return { followers: 0, following: 0 };
 		const [{ rows: fr }, { rows: gr }] = await Promise.all([
 			q(`SELECT COUNT(*) AS c FROM user_follows WHERE followed_user_id=$1`, [
 				uid,
@@ -1497,7 +1550,8 @@ export const pgStore: DataStore = {
 		};
 	},
 	async getFollowers(userId: string, viewerId?: string, limit = 50) {
-		const uid = Number(userId);
+		const uid = toUid(userId);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT u.id, u.display_name, u.avatar_url FROM user_follows f JOIN users u ON u.id=f.follower_user_id
        WHERE f.followed_user_id=$1 ORDER BY f.created_at DESC LIMIT $2`,
@@ -1506,7 +1560,8 @@ export const pgStore: DataStore = {
 		return rowsToFollowUsers(rows, viewerId);
 	},
 	async getFollowing(userId: string, viewerId?: string, limit = 50) {
-		const uid = Number(userId);
+		const uid = toUid(userId);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT u.id, u.display_name, u.avatar_url FROM user_follows f JOIN users u ON u.id=f.followed_user_id
        WHERE f.follower_user_id=$1 ORDER BY f.created_at DESC LIMIT $2`,
@@ -1517,45 +1572,61 @@ export const pgStore: DataStore = {
 
 	async blockUser(blockerSlug: string, blockedSlug: string) {
 		if (blockerSlug === blockedSlug) return;
+		const from = toUid(blockerSlug);
+		const to = toUid(blockedSlug);
+		if (from === null || to === null) return;
 		clearHiddenCache();
 		await q(
 			`INSERT INTO user_blocks (blocker_user_id, blocked_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-			[Number(blockerSlug), Number(blockedSlug)],
+			[from, to],
 		);
 	},
 	async unblockUser(blockerSlug: string, blockedSlug: string) {
+		const from = toUid(blockerSlug);
+		const to = toUid(blockedSlug);
+		if (from === null || to === null) return;
 		clearHiddenCache();
 		await q(
 			`DELETE FROM user_blocks WHERE blocker_user_id=$1 AND blocked_user_id=$2`,
-			[Number(blockerSlug), Number(blockedSlug)],
+			[from, to],
 		);
 	},
 	async getBlockedSlugs(blockerSlug: string) {
+		const uid = toUid(blockerSlug);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT blocked_user_id FROM user_blocks WHERE blocker_user_id=$1`,
-			[Number(blockerSlug)],
+			[uid],
 		);
 		return rows.map((r) => String(r.blocked_user_id));
 	},
 	async muteUser(muterSlug: string, mutedSlug: string) {
 		if (muterSlug === mutedSlug) return;
+		const from = toUid(muterSlug);
+		const to = toUid(mutedSlug);
+		if (from === null || to === null) return;
 		clearHiddenCache();
 		await q(
 			`INSERT INTO user_mutes (muter_user_id, muted_user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-			[Number(muterSlug), Number(mutedSlug)],
+			[from, to],
 		);
 	},
 	async unmuteUser(muterSlug: string, mutedSlug: string) {
+		const from = toUid(muterSlug);
+		const to = toUid(mutedSlug);
+		if (from === null || to === null) return;
 		clearHiddenCache();
 		await q(
 			`DELETE FROM user_mutes WHERE muter_user_id=$1 AND muted_user_id=$2`,
-			[Number(muterSlug), Number(mutedSlug)],
+			[from, to],
 		);
 	},
 	async getMutedSlugs(muterSlug: string) {
+		const uid = toUid(muterSlug);
+		if (uid === null) return [];
 		const { rows } = await q(
 			`SELECT muted_user_id FROM user_mutes WHERE muter_user_id=$1`,
-			[Number(muterSlug)],
+			[uid],
 		);
 		return rows.map((r) => String(r.muted_user_id));
 	},
@@ -1928,7 +1999,7 @@ async function rowsToFollowUsers(
 	rows: any[],
 	viewerId?: string,
 ): Promise<FollowUser[]> {
-	const vid = viewerId ? Number(viewerId) : null;
+	const vid = toUid(viewerId);
 	let followingSet = new Set<number>();
 	if (vid != null && rows.length) {
 		const { rows: fr } = await q(

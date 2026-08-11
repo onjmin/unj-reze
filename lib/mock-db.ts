@@ -807,10 +807,33 @@ class MockDB {
 		return (post.replies ?? []).filter((r) => !hidden.has(r.slug ?? ""));
 	}
 
+	/**
+	 * 通知の宛先キーは **ユーザーの主キー(id)** で突き合わせる。slug を照合キーにしない
+	 * （pg 側で slug はカラムですらなく `String(users.id)` の別名にすぎず、テキストキーを
+	 * 持たせないのが本番Neonのストレージ/転送量方針。docs/NEON_EGRESS.md）。
+	 *
+	 * 例外は NOTIFICATION_INFOS の手書きデモ通知だけで、これは実ユーザーレコードを持たず
+	 * displayName しか持たないため、そのユーザーの displayName も併せて見る。
+	 * ここで slug 派生の緩い一致を許すと、mock では通って本番Neonで 500 になる差が
+	 * 生まれる（実際にそれで通知ページが落ちた）。
+	 */
+	private notificationKeysFor(userId: string): string[] {
+		const stored = this.anonUserData.get(userId);
+		return stored ? [stored.id, stored.displayName] : [userId];
+	}
+
+	private isNotificationFor(n: Notification, keys: string[]): boolean {
+		return (
+			(n.recipientId != null && keys.includes(n.recipientId)) ||
+			(n.targetUser != null && keys.includes(n.targetUser))
+		);
+	}
+
 	getNotifications(userId?: string): Notification[] {
 		if (!userId) return this.notifications;
+		const keys = this.notificationKeysFor(userId);
 		return this.notifications
-			.filter((n) => n.recipientId === userId || n.targetUser === userId)
+			.filter((n) => this.isNotificationFor(n, keys))
 			.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 	}
 
@@ -861,29 +884,31 @@ class MockDB {
 	}
 
 	markNotificationRead(id: number, userId: string): void {
+		const keys = this.notificationKeysFor(userId);
 		const n = this.notifications.find(
-			(n) =>
-				n.id === id && (n.recipientId === userId || n.targetUser === userId),
+			(n) => n.id === id && this.isNotificationFor(n, keys),
 		);
 		if (n) n.read = true;
 	}
 
 	markAllNotificationsRead(userId: string): void {
+		const keys = this.notificationKeysFor(userId);
 		for (const n of this.notifications) {
-			if (n.recipientId === userId || n.targetUser === userId) n.read = true;
+			if (this.isNotificationFor(n, keys)) n.read = true;
 		}
 	}
 
 	deleteNotification(id: number, userId: string): void {
+		const keys = this.notificationKeysFor(userId);
 		this.notifications = this.notifications.filter(
-			(n) =>
-				!(n.id === id && (n.recipientId === userId || n.targetUser === userId)),
+			(n) => !(n.id === id && this.isNotificationFor(n, keys)),
 		);
 	}
 
 	getUnreadCount(userId: string): number {
+		const keys = this.notificationKeysFor(userId);
 		return this.notifications.filter(
-			(n) => (n.recipientId === userId || n.targetUser === userId) && !n.read,
+			(n) => this.isNotificationFor(n, keys) && !n.read,
 		).length;
 	}
 

@@ -103,10 +103,10 @@ export default function App() {
 	const replySubmittingRef = useRef(false);
 	const [userId, setUserId] = useState("");
 	const [currentUser, setCurrentUser] = useState<AnonymousUser | null>(null);
-	// 通知/メッセージ/リアルタイムchannelなど「本人識別」用途は必ずこちら（users.id）を使う。
+	// 本人識別（通知/メッセージ/リアルタイムchannel/ブロック絞り込み）は必ずこちら＝users.id。
 	// userId state は displayName で、投稿作成の displayName フィールド用に別途残している
 	// （紛らわしいが、これを users.id に変えると自分の投稿の名乗りが変わってしまう）。
-	const viewerSlug = currentUser?.slug || currentUser?.id || "";
+	const viewerId = currentUser?.id || "";
 	const [server, setServer] = useState("/main");
 	const [bbsMode, setBbsModeRaw] = useState("SNSモード");
 
@@ -237,17 +237,17 @@ export default function App() {
 				// 通知/メッセージAPIは users.id(=slug) を要求する（pg.tsがNumber(userId)で
 				// 整数として使う）。displayNameを渡すと "invalid input syntax for type integer"
 				// で500になる。slug は AnonymousUser.id と同じ値なので常に入っている。
-				const viewerSlug = user.slug || user.id;
+				const viewerId = user.id;
 				api.notifications
-					.unreadCount(viewerSlug)
+					.unreadCount(viewerId)
 					.then(({ count }) => {
 						setNotifCount(count);
 					})
 					.catch(() => {});
 				api.messages
-					.list(viewerSlug)
+					.list(viewerId)
 					.then((msgs) => {
-						setMessageCount(countUnreadMessages(msgs, viewerSlug));
+						setMessageCount(countUnreadMessages(msgs, viewerId));
 					})
 					.catch(() => {});
 			})
@@ -330,7 +330,7 @@ export default function App() {
 
 	const fetchPosts = useCallback(async () => {
 		try {
-			const data = await api.posts.list(userId, { limit: FEED_PAGE_SIZE });
+			const data = await api.posts.list(viewerId, { limit: FEED_PAGE_SIZE });
 			setPosts(data);
 			postsRef.current = data;
 			// 満載で返ってきたなら、まだ先がある可能性が高い
@@ -338,7 +338,7 @@ export default function App() {
 		} finally {
 			setLoading(false);
 		}
-	}, [userId]);
+	}, [viewerId]);
 
 	/**
 	 * 続きを読み込む。表示中で最も古いスレッドのIDをカーソルにする（キーセットページング）。
@@ -363,7 +363,7 @@ export default function App() {
 				return;
 			}
 
-			const older = await api.posts.list(userId, {
+			const older = await api.posts.list(viewerId, {
 				beforeId: cursor.id,
 				limit: FEED_PAGE_SIZE,
 			});
@@ -383,7 +383,7 @@ export default function App() {
 			loadingMoreRef.current = false;
 			setLoadingMore(false);
 		}
-	}, [userId, hasMorePosts]);
+	}, [viewerId, hasMorePosts]);
 
 	useEffect(() => {
 		postsRef.current = posts;
@@ -420,12 +420,12 @@ export default function App() {
 	);
 
 	useEffect(() => {
-		if (!userId) return;
+		if (!viewerId) return;
 		// ハブ設定時は「接続が切れていた間の取りこぼし」を拾う保険だけ。
 		const intervalId = setInterval(
 			async () => {
 				try {
-					pushNewPosts(await api.posts.list(userId));
+					pushNewPosts(await api.posts.list(viewerId));
 				} catch {
 					// ignore errors
 				}
@@ -434,7 +434,7 @@ export default function App() {
 		);
 
 		return () => clearInterval(intervalId);
-	}, [userId, pushNewPosts]);
+	}, [viewerId, pushNewPosts]);
 
 	// 通知一覧の差分で「フォローされた」「いいね／ハートされた」を検知し、Snackbar と
 	// ハート受信演出を出す。初回は既存通知を seen に登録するだけでトーストは出さない
@@ -480,25 +480,25 @@ export default function App() {
 	}, []);
 
 	useRealtimeSubscription(
-		viewerSlug ? [chUser(viewerSlug)] : [],
+		viewerId ? [chUser(viewerId)] : [],
 		useCallback(
 			(msg) => {
 				if (msg.t !== "event" || msg.event !== "notify") return;
-				if (viewerSlug) void refreshNotifications(viewerSlug);
+				if (viewerId) void refreshNotifications(viewerId);
 			},
-			[viewerSlug, refreshNotifications],
+			[viewerId, refreshNotifications],
 		),
-		!!viewerSlug,
+		!!viewerId,
 	);
 
 	useEffect(() => {
-		if (!viewerSlug) return;
+		if (!viewerId) return;
 		notifCancelledRef.current = false;
-		Promise.resolve().then(() => refreshNotifications(viewerSlug));
+		Promise.resolve().then(() => refreshNotifications(viewerId));
 		// ハブ設定時は push が主。ここは取りこぼし用の保険。
 		const id = setInterval(
 			() => {
-				void refreshNotifications(viewerSlug);
+				void refreshNotifications(viewerId);
 			},
 			pollInterval(20000, 300000),
 		);
@@ -506,7 +506,7 @@ export default function App() {
 			notifCancelledRef.current = true;
 			clearInterval(id);
 		};
-	}, [viewerSlug, refreshNotifications]);
+	}, [viewerId, refreshNotifications]);
 
 	// メッセージ／通知が既読になったらバッジを即座に落とす。
 	useEffect(() => {
@@ -1023,7 +1023,7 @@ export default function App() {
 			let originType = known?.originType;
 			if (postId && !known) {
 				try {
-					originType = (await api.posts.get(postId, userId)).originType;
+					originType = (await api.posts.get(postId, viewerId)).originType;
 				} catch {
 					/* 取れなければ申告なし扱い */
 				}

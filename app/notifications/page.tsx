@@ -24,7 +24,9 @@ export default function NotificationsPage() {
 				</div>
 			</div>
 			<div className="flex-1">
-				<NotificationView userId={currentUser?.displayName} />
+				{/* 本人識別は必ず users.id。displayName や slug を渡さないこと
+				    （pg.ts は整数キーしか受け付けず、displayName だと 500 になる）。 */}
+				<NotificationView userId={currentUser?.id} />
 			</div>
 		</AppShell>
 	);

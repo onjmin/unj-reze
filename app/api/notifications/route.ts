@@ -29,13 +29,13 @@ export async function PATCH(request: NextRequest) {
 	if (!user)
 		return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 	if (all) {
-		await db.markAllNotificationsRead(user.displayName);
+		await db.markAllNotificationsRead(user.id);
 	} else if (id != null) {
 		const decodedId = decodeId(id);
 		if (decodedId === null) {
 			return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 		}
-		await db.markNotificationRead(decodedId, user.displayName);
+		await db.markNotificationRead(decodedId, user.id);
 	} else {
 		return NextResponse.json(
 			{ error: "id or all is required" },
@@ -56,6 +56,6 @@ export async function DELETE(request: NextRequest) {
 	if (decodedId === null) {
 		return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 	}
-	await db.deleteNotification(decodedId, user.displayName);
+	await db.deleteNotification(decodedId, user.id);
 	return NextResponse.json({ success: true });
 }

@@ -15,7 +15,9 @@ function SearchPageContent() {
 
 	return (
 		<SearchView
-			userId={currentUser?.displayName}
+			// 検索APIの userId は閲覧者identity（ブロック/ミュート絞り込み用）＝ users.id。
+			// displayName を渡すと pg 側で整数化できずブロックが素通りする。
+			userId={currentUser?.id}
 			currentUserSlug={currentUser?.slug}
 			currentUserDisplayName={currentUser?.displayName}
 			initialQuery={searchParams.get("q") || undefined}

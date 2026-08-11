@@ -2036,11 +2036,21 @@ export function resolveLyricLines(
 	song: MvSong,
 ): MvLyricLine[] {
 	const lines = ((): MvLyricLine[] => {
-		if (layer.source === "manual")
-			return [...(layer.lines ?? [])].sort((a, b) => a.bar - b.bar);
+		if (layer.source === "manual") {
+			const manual = [...(layer.lines ?? [])].sort((a, b) => a.bar - b.bar);
+			// 手入力に1行も無いのに曲へ歌詞が乗っているなら、曲の歌詞を出す。
+			// レイヤーを足した時点の曲に歌詞トラックが無いと source は 'manual' で
+			// 固定されるので、あとから歌詞つきの曲へ差し替えても永久に空のままだった。
+			// 消える手入力は無い（0行なので）ため、拾うほうが常に正しい。
+			if (manual.length > 0) return manual;
+			return song.lyricLines;
+		}
 		if (layer.trackId === "all") return song.lyricLines;
+		// 曲を差し替えると、前の曲のトラック番号が残って「どの行にも当たらない」状態になる。
+		// 指定が今の曲に無いなら指定が古いということなので、先頭の歌詞トラックへ寄せる。
 		const target =
-			typeof layer.trackId === "number"
+			typeof layer.trackId === "number" &&
+			song.lyricTrackIds.includes(layer.trackId)
 				? layer.trackId
 				: song.lyricTrackIds[0];
 		if (target === undefined) return [];

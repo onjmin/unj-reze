@@ -24,7 +24,8 @@ export default function MessagesPage() {
 				</div>
 			</div>
 			<div className="flex-1">
-				<MessageView userId={currentUser?.slug || currentUser?.displayName} />
+				{/* DM API も users.id 前提。slug/displayName にフォールバックしない。 */}
+				<MessageView userId={currentUser?.id} />
 			</div>
 		</AppShell>
 	);
