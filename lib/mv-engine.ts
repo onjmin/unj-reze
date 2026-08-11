@@ -1595,11 +1595,19 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 	const groupFadeOut = clamp01((groupEndBar - d.bar) / 0.5);
 	if (groupFadeOut <= 0.01) return;
 
-	// まとまりの中で今出ている行ぜんぶ。最新を先頭に、古いほど後ろ（残像段数の深さに使う）。
+	// 「同時に表示する行数」(afterimage+1) は積み上げの最大段数。まとまりがそれより長い
+	// ときにスライドさせる（古い行を1つずつ追い出す）と行の位置が毎行ずれてしまうので、
+	// 代わりにmaxLines行ごとにサイクルを区切り、区切りごとに位置をリセットして1行目から
+	// 出し直す（1→2→3→4→リセット→1→2→3→4…）。
+	const maxLines = layer.afterimage + 1;
+	const cycleStart =
+		groupStart + Math.floor((curIdx - groupStart) / maxLines) * maxLines;
+
+	// サイクルの中で今出ている行ぜんぶ。最新を先頭に、古いほど後ろ（残像段数の深さに使う）。
 	const activeIdx: number[] = [];
-	for (let i = groupStart; i <= curIdx; i++) activeIdx.push(i);
+	for (let i = cycleStart; i <= curIdx; i++) activeIdx.push(i);
 	if (activeIdx.length === 0) return;
-	const shown = activeIdx.slice(-(layer.afterimage + 1)).reverse();
+	const shown = activeIdx.reverse();
 	const size = layer.size;
 
 	ctx.textBaseline = "middle";

@@ -3444,6 +3444,31 @@ export default function MvMaker({
 										)
 									}
 								/>
+								{/*
+									内部値は「今の行を除いた残像の段数」(afterimage)だが、
+									ユーザーには「同時に何行まで見えるか」(afterimage+1)で見せたほうが
+									直感的（"1行だけ" "4行まで" のような指定がそのまま入力できる）。
+									下の歌詞一覧・編集リストが長くなると埋もれて見つからなくなるので、
+									あえてパネルの一番上（出どころの直後）に強調枠で置く。
+								*/}
+								<div className="rounded border border-blue-500/50 bg-blue-950/30 p-2">
+									<NumField
+										label="同時に表示する行数（1なら常に1行だけ、4なら4行まで積み上がる）"
+										value={lyricsLayer.afterimage + 1}
+										min={1}
+										max={13}
+										onChange={(v) =>
+											updateLayer(
+												lyricsLayer.id,
+												(l) =>
+													({
+														...l,
+														afterimage: Math.max(0, Math.round(v) - 1),
+													}) as MvLayer,
+											)
+										}
+									/>
+								</div>
 								{lyricsLayer.source === "mml" &&
 									(song.lyricTrackIds.length > 0 ? (
 										<>
@@ -3492,13 +3517,13 @@ export default function MvMaker({
 														return (
 															<li
 																key={i}
-																className="flex items-center justify-between gap-1.5 rounded border border-gray-700/60 bg-gray-900/80 p-1.5 text-gray-200"
+																className="flex flex-col items-start gap-1 rounded border border-gray-700/60 bg-gray-900/80 p-1.5 text-gray-200 sm:flex-row sm:items-center sm:justify-between sm:gap-1.5"
 															>
-																<div className="flex min-w-0 flex-1 items-center gap-1.5">
+																<div className="flex min-w-0 flex-1 flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-1.5">
 																	<span className="shrink-0 rounded bg-blue-950 px-1.5 py-0.5 font-mono text-[9px] text-blue-300 border border-blue-800/60">
 																		{line.bar.toFixed(1)}〜{(line.bar + hold).toFixed(1)}小節 [{formatMinSecMs(startSec)}〜{formatMinSecMs(endSec)}]
 																	</span>
-																	<span className="truncate text-[11px] font-medium">{line.text}</span>
+																	<span className="min-w-0 whitespace-normal break-words text-[11px] font-medium">{line.text}</span>
 																</div>
 																<label
 																	title="この行で一旦全部消してから出し直す"
@@ -3830,28 +3855,6 @@ export default function MvMaker({
 										updateLayer(
 											lyricsLayer.id,
 											(l) => ({ ...l, vertical: v }) as MvLayer,
-										)
-									}
-								/>
-								{/*
-									内部値は「今の行を除いた残像の段数」(afterimage)だが、
-									ユーザーには「同時に何行まで見えるか」(afterimage+1)で見せたほうが
-									直感的（"1行だけ" "4行まで" のような指定がそのまま入力できる）。
-									参考動画は10列ぶん積み上がるので、目安は1〜13。
-								*/}
-								<NumField
-									label="同時に表示する行数（1なら常に1行だけ、4なら4行まで積み上がる）"
-									value={lyricsLayer.afterimage + 1}
-									min={1}
-									max={13}
-									onChange={(v) =>
-										updateLayer(
-											lyricsLayer.id,
-											(l) =>
-												({
-													...l,
-													afterimage: Math.max(0, Math.round(v) - 1),
-												}) as MvLayer,
 										)
 									}
 								/>
