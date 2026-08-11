@@ -3,7 +3,10 @@
 //
 // フェーズ3: 三人称スケルタルアニメ基盤。WASD/矢印キーで移動、Shiftでダッシュ、
 // idle/walk/run をクロスフェードで切り替える。カメラはプレイヤーの背後を追従する。
-// attack/hit/death はフェーズ5（簡易戦闘）で追加する。
+// フェーズ5: 簡易近接戦闘。武器はボーンではなくプレイヤーOBject3Dの子として追従させる
+// （サンプルモデルのボーン名が不明でも動く簡易実装。専用リグ済みモデルに差し替える際は
+// ボーンソケットへの正式アタッチに切り替える）。攻撃はスイングのtweenと当たり判定のみで、
+// 攻撃モーション自体はサンプルモデルにクリップが無いため見た目のクロスフェードはしない。
 // 参考: docs/mmo3d-feature-design.md
 
 import * as THREE from "three";
@@ -27,6 +30,22 @@ const WALK_SPEED = 2.2; // m/s
 const RUN_SPEED = 5.5; // m/s
 const TURN_LERP = 10; // 1秒あたりの回転追従係数
 const CROSSFADE_SEC = 0.25;
+
+const ATTACK_COOLDOWN_SEC = 0.6;
+const ATTACK_SWING_SEC = 0.25;
+const ATTACK_RANGE = 2.2; // m
+const ATTACK_HALF_ANGLE = Math.PI / 3; // ±60°の扇状判定
+const ATTACK_DAMAGE = 20;
+const PLAYER_MAX_HP = 100;
+const DUMMY_MAX_HP = 60;
+const DUMMY_RESPAWN_SEC = 3;
+
+interface Dummy {
+	mesh: THREE.Mesh;
+	hp: number;
+	respawnAt: number | null;
+	basePos: THREE.Vector3;
+}
 
 /** サンプルモデル(Fox.glb)の実クリップ名。将来ユーザー差し替えモデルでは
  *  クリップ名マッピングをゲームデータ側に持たせる（フェーズ6）。 */
@@ -58,6 +77,19 @@ export class Mmo3dEngine {
 	private ghostGeo: THREE.CapsuleGeometry;
 	private ghostMat: THREE.MeshStandardMaterial;
 	private ghosts = new Map<string, THREE.Mesh>();
+
+	// ── 簡易近接戦闘（フェーズ5） ──
+	private weaponGeo: THREE.BoxGeometry;
+	private weaponMat: THREE.MeshStandardMaterial;
+	private weapon: THREE.Mesh;
+	private attackCooldown = 0;
+	private attackSwingT = -1; // -1=非攻撃中、0〜ATTACK_SWING_SECでスイング中
+	private playerHp = PLAYER_MAX_HP;
+	private dummyGeo: THREE.CapsuleGeometry;
+	private dummyMat: THREE.MeshStandardMaterial;
+	private dummies: Dummy[] = [];
+	private onPlayerDamaged: ((hp: number, max: number) => void) | null = null;
+	private onDummyDamaged: ((index: number, hp: number, max: number) => void) | null = null;
 
 	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
 	private input: Mmo3dInputState = {
@@ -107,6 +139,32 @@ export class Mmo3dEngine {
 			opacity: 0.85,
 		});
 
+		// 武器: ボーンアタッチではなくプレイヤーの子として追従させる簡易実装（クラス冒頭コメント参照）。
+		this.weaponGeo = new THREE.BoxGeometry(0.08, 0.08, 1.1);
+		this.weaponMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.6 });
+		this.weapon = new THREE.Mesh(this.weaponGeo, this.weaponMat);
+		this.weapon.position.set(0.5, 1.0, 0.3);
+		this.weapon.rotation.x = -Math.PI / 2.5;
+		this.player.add(this.weapon);
+
+		// 簡易ダミー敵を2体、原点付近に配置。
+		this.dummyGeo = new THREE.CapsuleGeometry(0.45, 1.1, 4, 8);
+		this.dummyMat = new THREE.MeshStandardMaterial({ color: 0xe53935 });
+		for (const [x, z] of [
+			[3, -3],
+			[-3, -4],
+		] as const) {
+			const mesh = new THREE.Mesh(this.dummyGeo, this.dummyMat.clone());
+			mesh.position.set(x, 0.95, z);
+			this.scene.add(mesh);
+			this.dummies.push({
+				mesh,
+				hp: DUMMY_MAX_HP,
+				respawnAt: null,
+				basePos: new THREE.Vector3(x, 0.95, z),
+			});
+		}
+
 		this.clock = new THREE.Clock();
 
 		const sample = MMO3D_BUILTIN_MODELS.find((m) => m.hasAnimations);
@@ -151,6 +209,99 @@ export class Mmo3dEngine {
 		}
 	}
 
+	/** 攻撃キー/クリックのエッジで呼ぶ。クールダウン中は無視する。 */
+	triggerAttack() {
+		if (this.attackCooldown > 0 || this.playerHp <= 0) return;
+		this.attackCooldown = ATTACK_COOLDOWN_SEC;
+		this.attackSwingT = 0;
+		this.resolveAttackHits();
+	}
+
+	/** 現在のプレイヤー座標・向きから扇状範囲内のダミーへダメージを与える。 */
+	private resolveAttackHits() {
+		const px = this.player.position.x;
+		const pz = this.player.position.z;
+		for (const d of this.dummies) {
+			if (d.respawnAt !== null) continue; // 撃破後リスポーン待ち
+			const dx = d.mesh.position.x - px;
+			const dz = d.mesh.position.z - pz;
+			const dist = Math.hypot(dx, dz);
+			if (dist > ATTACK_RANGE) continue;
+			const angleToTarget = Math.atan2(dx, dz);
+			let diff = angleToTarget - this.facing;
+			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+			if (Math.abs(diff) > ATTACK_HALF_ANGLE) continue;
+			this.damageDummy(d, ATTACK_DAMAGE);
+		}
+	}
+
+	private damageDummy(d: Dummy, amount: number) {
+		d.hp = Math.max(0, d.hp - amount);
+		const idx = this.dummies.indexOf(d);
+		this.onDummyDamaged?.(idx, d.hp, DUMMY_MAX_HP);
+		const mat = d.mesh.material as THREE.MeshStandardMaterial;
+		if (d.hp <= 0) {
+			d.respawnAt = this.clock.elapsedTime + DUMMY_RESPAWN_SEC;
+			d.mesh.visible = false;
+		} else {
+			// 被弾フィードバック: 一瞬明るくして戻す。
+			mat.emissive = new THREE.Color(0xffffff);
+			mat.emissiveIntensity = 0.6;
+			setTimeout(() => {
+				mat.emissiveIntensity = 0;
+			}, 100);
+		}
+	}
+
+	/** 自分がダメージを受けたときの経路（将来: 敵AI・他プレイヤーからの攻撃を受ける経路で呼ぶ）。 */
+	takeDamage(amount: number) {
+		if (this.playerHp <= 0) return;
+		this.playerHp = Math.max(0, this.playerHp - amount);
+		this.onPlayerDamaged?.(this.playerHp, PLAYER_MAX_HP);
+	}
+
+	getPlayerHp(): { hp: number; max: number } {
+		return { hp: this.playerHp, max: PLAYER_MAX_HP };
+	}
+
+	/** HP変化の通知先を登録する（UI表示用）。 */
+	setCombatCallbacks(handlers: {
+		onPlayerDamaged?: (hp: number, max: number) => void;
+		onDummyDamaged?: (index: number, hp: number, max: number) => void;
+	}) {
+		this.onPlayerDamaged = handlers.onPlayerDamaged ?? null;
+		this.onDummyDamaged = handlers.onDummyDamaged ?? null;
+	}
+
+	private updateCombat(dt: number) {
+		if (this.attackCooldown > 0) this.attackCooldown -= dt;
+
+		// 武器のスイング演出（アニメクリップが無いモデルでも見た目の反応を出す簡易tween）。
+		if (this.attackSwingT >= 0) {
+			this.attackSwingT += dt;
+			const t = Math.min(1, this.attackSwingT / ATTACK_SWING_SEC);
+			const swing = Math.sin(t * Math.PI) * (Math.PI / 2);
+			this.weapon.rotation.z = -swing;
+			if (this.attackSwingT >= ATTACK_SWING_SEC) {
+				this.attackSwingT = -1;
+				this.weapon.rotation.z = 0;
+			}
+		}
+
+		// リスポーン処理
+		const now = this.clock.elapsedTime;
+		for (const d of this.dummies) {
+			if (d.respawnAt !== null && now >= d.respawnAt) {
+				d.hp = DUMMY_MAX_HP;
+				d.mesh.position.copy(d.basePos);
+				d.mesh.visible = true;
+				d.respawnAt = null;
+				const idx = this.dummies.indexOf(d);
+				this.onDummyDamaged?.(idx, d.hp, DUMMY_MAX_HP);
+			}
+		}
+	}
+
 	private loadPlayerModel(url: string) {
 		const loader = new GLTFLoader();
 		loader
@@ -168,6 +319,7 @@ export class Mmo3dEngine {
 				this.scene.remove(this.placeholderMesh);
 				gltf.scene.position.set(0, 0, 0);
 				this.scene.add(gltf.scene);
+				gltf.scene.add(this.weapon); // プレイヤー差し替えに追従して武器も付け替える
 				this.player = gltf.scene;
 
 				this.mixer = new THREE.AnimationMixer(gltf.scene);
@@ -272,6 +424,7 @@ export class Mmo3dEngine {
 			if (this.disposed) return;
 			const dt = Math.min(this.clock.getDelta(), 0.1);
 			this.updateMovement(dt);
+			this.updateCombat(dt);
 			this.updateCamera();
 			this.mixer?.update(dt);
 			this.renderer.render(this.scene, this.camera);
@@ -289,6 +442,11 @@ export class Mmo3dEngine {
 		this.playerMat.dispose();
 		this.ghostGeo.dispose();
 		this.ghostMat.dispose();
+		this.weaponGeo.dispose();
+		this.weaponMat.dispose();
+		this.dummyGeo.dispose();
+		this.dummyMat.dispose();
+		for (const d of this.dummies) (d.mesh.material as THREE.Material).dispose();
 		this.renderer.dispose();
 	}
 }

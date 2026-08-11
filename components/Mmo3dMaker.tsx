@@ -4,6 +4,7 @@
 // フェーズ3: WASD/矢印キー移動 + Shiftダッシュ + idle/walk/run のスケルタルアニメ。
 // フェーズ4: gameId/sessionId が渡されればリアルタイムハブ経由で位置/向き/アニメ状態を
 // 同期する（DBには一切書かない、既存の chGame/LiveGameView と同じ経路の使い回し）。
+// フェーズ5: Space/クリックで近接攻撃。HPをHUDに表示する。
 // GameMaker.tsx への正式配線（virtualKeys等との統合）はデータ形状が固まるフェーズ6で行う。
 // 参考: docs/mmo3d-feature-design.md
 //
@@ -12,7 +13,7 @@
 // 共有できないため、ゲームごとに片方だけを選ぶ（Mmo3dRenderer, shared.ts）。
 // 比較は docs/mmo3d-feature-design.md の表を参照。
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { realtimeConfigured, useRealtimeSubscription } from "@/lib/hooks/useRealtime";
 import { Mmo3dEngine } from "@/lib/mmo3d";
 import { Mmo3dBabylonEngine } from "@/lib/mmo3d-babylon";
@@ -34,6 +35,8 @@ export default function Mmo3dMaker({
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const engineRef = useRef<Mmo3dEngine | null>(null);
+	const [hp, setHp] = useState({ hp: 100, max: 100 });
+	const [dummyHp, setDummyHp] = useState<Record<number, { hp: number; max: number }>>({});
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
@@ -52,6 +55,11 @@ export default function Mmo3dMaker({
 		const { clientWidth: w, clientHeight: h } = canvas;
 		const engine = new Mmo3dEngine(canvas, w || 640, h || 480);
 		engineRef.current = engine;
+		engine.setCombatCallbacks({
+			onPlayerDamaged: (hpVal, max) => setHp({ hp: hpVal, max }),
+			onDummyDamaged: (index, hpVal, max) =>
+				setDummyHp((prev) => ({ ...prev, [index]: { hp: hpVal, max } })),
+		});
 		engine.start();
 
 		const ro = new ResizeObserver(([entry]) => {
@@ -60,7 +68,7 @@ export default function Mmo3dMaker({
 		});
 		ro.observe(canvas);
 
-		// WASD/矢印キー + Shift。フェーズ6で仮想パッド（タッチ）にも対応する。
+		// WASD/矢印キー + Shift + Space(攻撃)。フェーズ6で仮想パッド（タッチ）にも対応する。
 		const keyToInput: Record<string, "forward" | "back" | "left" | "right"> = {
 			KeyW: "forward",
 			ArrowUp: "forward",
@@ -76,6 +84,10 @@ export default function Mmo3dMaker({
 			if (field) engine.setInput({ [field]: true });
 			if (e.code === "ShiftLeft" || e.code === "ShiftRight")
 				engine.setInput({ run: true });
+			if (e.code === "Space") {
+				e.preventDefault();
+				engine.triggerAttack();
+			}
 		};
 		const onKeyUp = (e: KeyboardEvent) => {
 			const field = keyToInput[e.code];
@@ -83,12 +95,15 @@ export default function Mmo3dMaker({
 			if (e.code === "ShiftLeft" || e.code === "ShiftRight")
 				engine.setInput({ run: false });
 		};
+		const onClick = () => engine.triggerAttack();
 		window.addEventListener("keydown", onKeyDown);
 		window.addEventListener("keyup", onKeyUp);
+		canvas.addEventListener("click", onClick);
 
 		return () => {
 			window.removeEventListener("keydown", onKeyDown);
 			window.removeEventListener("keyup", onKeyUp);
+			canvas.removeEventListener("click", onClick);
 			ro.disconnect();
 			engine.dispose();
 			engineRef.current = null;
@@ -127,11 +142,57 @@ export default function Mmo3dMaker({
 	);
 
 	return (
-		<canvas
-			ref={canvasRef}
-			className="block w-full h-full outline-none"
-			tabIndex={0}
-			aria-label="mmo3d プレイビュー"
-		/>
+		<div className="relative w-full h-full">
+			<canvas
+				ref={canvasRef}
+				className="block w-full h-full outline-none"
+				tabIndex={0}
+				aria-label="mmo3d プレイビュー"
+			/>
+			{renderer === "three" && (
+				<div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
+					<HpBar label="HP" hp={hp.hp} max={hp.max} color="#4ade80" />
+					{Object.entries(dummyHp).map(([idx, v]) => (
+						<HpBar
+							key={idx}
+							label={`敵${Number(idx) + 1}`}
+							hp={v.hp}
+							max={v.max}
+							color="#f87171"
+						/>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function HpBar({
+	label,
+	hp,
+	max,
+	color,
+}: {
+	label: string;
+	hp: number;
+	max: number;
+	color: string;
+}) {
+	const pct = max > 0 ? Math.max(0, Math.min(100, (hp / max) * 100)) : 0;
+	return (
+		<div className="w-32 text-[10px] text-white drop-shadow">
+			<div className="flex justify-between px-0.5">
+				<span>{label}</span>
+				<span>
+					{hp}/{max}
+				</span>
+			</div>
+			<div className="h-1.5 rounded bg-black/50 overflow-hidden">
+				<div
+					className="h-full transition-all"
+					style={{ width: `${pct}%`, background: color }}
+				/>
+			</div>
+		</div>
 	);
 }

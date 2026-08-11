@@ -4,9 +4,6 @@
 //
 // 直リンクが失敗した場合は lib/cors-proxy.ts の wrapCorsProxyUrl() 経由で自動リトライされる
 // （lib/yume25d.ts の loadModel() が既にこの方式）。
-//
-// MMD(PMX)素材は版元ごとに再配布条件が個別に定められていることが多く、確認なしに既定カタログ
-// へ追加するのは避けている。babylon版(#7)の検証にはユーザーが用意したPMXファイルを使うこと。
 
 export interface Mmo3dCatalogModel {
 	id: string;
