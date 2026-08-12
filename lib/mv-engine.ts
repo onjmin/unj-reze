@@ -23,6 +23,7 @@ import {
 	layerDisappearBar,
 	parseHighlightedText,
 	sliceSegments,
+	MV_BEATS_PER_BAR,
 	MV_BLEND_COMPOSITE,
 	MV_EFFECT_POST_STYLES,
 	MV_H,
@@ -35,6 +36,10 @@ import {
 	MV_STEPS_PER_BEAT,
 	MV_W,
 	type MvAnchor,
+	type MvBeatChordLabelLayer,
+	type MvBeatCounterLayer,
+	type MvBeatDigitLayer,
+	type MvBeatPipsLayer,
 	type MvChordBarLayer,
 	type MvChordStep,
 	type MvDegreeLayer,
@@ -62,6 +67,7 @@ import {
 	type MvTextLayer,
 	type MvView,
 	type MvVisualizerLayer,
+	type MvWidgetLayer,
 	mvEntranceDistance,
 	mvExitDistance,
 	mvWalkSpeed,
@@ -1578,6 +1584,21 @@ function drawLayer(d: DrawCtx, layer: MvLayer): void {
 		case "degree":
 			drawDegree(d, layer);
 			break;
+		case "widget":
+			drawWidget(d, layer);
+			break;
+		case "beatCounter":
+			drawBeatCounter(d, layer);
+			break;
+		case "beatPips":
+			drawBeatPips(d, layer);
+			break;
+		case "beatDigit":
+			drawBeatDigit(d, layer);
+			break;
+		case "beatChordLabel":
+			drawBeatChordLabel(d, layer);
+			break;
 		case "effect":
 			break; // エフェクトは drawMvFrame 側で別扱い
 	}
@@ -1673,6 +1694,299 @@ function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
 	ctx.restore();
 }
 
+// ───────────────── ウィジェット（アイコングリッド） ─────────────────
+
+/**
+ * 拍番号で順送りする固定グリフ語彙。参考動画（`_.mp4`）を見ると「枠→横線束→的→格子…」と
+ * 完成形が丸ごと切り替わるだけで、`mv-shape-group-macro.ts` のような核＋装飾の合成は無い。
+ */
+const MV_WIDGET_GLYPHS = [
+	"square",
+	"hbars",
+	"target",
+	"grid",
+	"filled",
+	"underline",
+] as const;
+type MvWidgetGlyph = (typeof MV_WIDGET_GLYPHS)[number];
+
+function drawWidgetGlyph(
+	ctx: CanvasRenderingContext2D,
+	glyph: MvWidgetGlyph,
+	x: number,
+	y: number,
+	size: number,
+	color: string,
+): void {
+	const p = size * 0.14;
+	const x0 = x + p;
+	const y0 = y + p;
+	const x1 = x + size - p;
+	const y1 = y + size - p;
+	ctx.strokeStyle = color;
+	ctx.fillStyle = color;
+	ctx.lineWidth = Math.max(1, size * 0.08);
+	switch (glyph) {
+		case "square":
+			ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+			break;
+		case "hbars": {
+			const rows = 3;
+			const gap = (y1 - y0) / rows;
+			for (let i = 0; i < rows; i++) {
+				const by = y0 + gap * i + gap * 0.2;
+				ctx.fillRect(x0, by, x1 - x0, gap * 0.6);
+			}
+			break;
+		}
+		case "target": {
+			const cx = x + size / 2;
+			const cy = y + size / 2;
+			ctx.beginPath();
+			ctx.arc(cx, cy, (x1 - x0) / 2, 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.fillRect(cx - size * 0.08, cy - size * 0.08, size * 0.16, size * 0.16);
+			break;
+		}
+		case "grid": {
+			const midX = x + size / 2;
+			const midY = y + size / 2;
+			ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+			ctx.beginPath();
+			ctx.moveTo(midX, y0);
+			ctx.lineTo(midX, y1);
+			ctx.moveTo(x0, midY);
+			ctx.lineTo(x1, midY);
+			ctx.stroke();
+			break;
+		}
+		case "filled":
+			ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+			break;
+		case "underline":
+			ctx.fillRect(x0, y1 - size * 0.12, x1 - x0, size * 0.12);
+			break;
+	}
+}
+
+/**
+ * 拍ごとにグリフが差し替わるウィジェット。上段は「いまの拍」の位置マーカー、
+ * 下段は `chords` から求めた色（コードの根音・度数）でグリフを塗る帯。
+ * 色の決め方は `drawChordBar` と共通（`getChordThemeColor` / `chordDegree`）。
+ */
+function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
+	const { ctx } = d;
+	const { x, y } = layer.rect;
+	const cell = layer.cellSize;
+	const cols = Math.max(1, layer.cols);
+	const chords = [...layer.chords].sort((a, b) => a.bar - b.bar);
+
+	const beatsPerBar = MV_BEATS_PER_BAR;
+	const currentBeat = Math.floor(d.bar * beatsPerBar);
+	const windowStart = Math.floor(currentBeat / cols) * cols;
+
+	const chordAtBeat = (beat: number): MvChordStep | undefined => {
+		if (chords.length === 0) return undefined;
+		const bar = beat / beatsPerBar;
+		let found = chords[0];
+		for (const c of chords) {
+			if (c.bar <= bar) found = c;
+			else break;
+		}
+		return found;
+	};
+
+	let lastThemeColor: string | undefined;
+	for (let i = 0; i < cols; i++) {
+		const beat = windowStart + i;
+		const cx = x + i * cell;
+		const glyph = MV_WIDGET_GLYPHS[((beat % MV_WIDGET_GLYPHS.length) + MV_WIDGET_GLYPHS.length) % MV_WIDGET_GLYPHS.length];
+		const active = beat === currentBeat;
+
+		// 上段：いまの拍のマーカー
+		drawWidgetGlyph(
+			ctx,
+			glyph,
+			cx,
+			y,
+			cell,
+			active ? layer.activeColor : "rgba(255,255,255,0.5)",
+		);
+		ctx.strokeStyle = "rgba(255,255,255,0.2)";
+		ctx.lineWidth = 1;
+		ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
+
+		// 下段：コードで色分けした帯
+		const chord = chordAtBeat(beat);
+		let fill: string;
+		if (layer.colorMode === "fixed" || !chord) {
+			fill = layer.color;
+		} else {
+			fill = getChordThemeColor(chord.label, layer.key, layer.colorMode, lastThemeColor);
+			lastThemeColor = fill;
+		}
+		ctx.fillStyle = "rgba(0,0,0,0.35)";
+		ctx.fillRect(cx, y + cell, cell, cell);
+		drawWidgetGlyph(ctx, glyph, cx, y + cell, cell, fill);
+		ctx.strokeStyle = "rgba(255,255,255,0.15)";
+		ctx.strokeRect(cx + 0.5, y + cell + 0.5, cell - 1, cell - 1);
+	}
+}
+
+// ───────────────── ドット絵数字カウンタ ─────────────────
+
+/** 3x5ドットの数字フォント（0-9）。1=点灯 / 0=消灯、上から1行ずつ。 */
+const MV_DOT_DIGITS: Record<string, number[]> = {
+	"0": [1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1],
+	"1": [0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1],
+	"2": [1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1],
+	"3": [1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1],
+	"4": [1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1],
+	"5": [1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1],
+	"6": [1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1],
+	"7": [1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0],
+	"8": [1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1],
+	"9": [1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1],
+	// 変化記号。数字ではないが3x5ドットの語彙に混ぜて度数表記(♭7 / ♯11 等)をそのまま出す。
+	"♭": [1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0],
+	"♯": [1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1],
+};
+
+/** 3x5ドットの数字を、`cell`ドットぶんの正方形を並べて描く。原点(x,y)は左上。 */
+function drawDotDigit(
+	ctx: CanvasRenderingContext2D,
+	digit: string,
+	x: number,
+	y: number,
+	cell: number,
+	color: string,
+): void {
+	const bits = MV_DOT_DIGITS[digit];
+	if (!bits) return;
+	ctx.fillStyle = color;
+	for (let row = 0; row < 5; row++) {
+		for (let col = 0; col < 3; col++) {
+			if (bits[row * 3 + col]) {
+				ctx.fillRect(x + col * cell, y + row * cell, cell, cell);
+			}
+		}
+	}
+}
+
+/**
+ * 拍ごとに 1→2→3→…→beatsPerCycle→1→… と刻むだけの、コード進行と無関係な単純なカウンタ。
+ */
+function drawBeatCounter(d: DrawCtx, layer: MvBeatCounterLayer): void {
+	const { ctx } = d;
+	const cycle = Math.max(1, Math.round(layer.beatsPerCycle));
+	const currentBeat = Math.floor(d.bar * MV_BEATS_PER_BAR);
+	const n = (((currentBeat % cycle) + cycle) % cycle) + 1;
+	const label = String(n);
+	const cell = layer.cellSize;
+	const w = label.length * 3 * cell + (label.length - 1) * cell;
+	const h = 5 * cell;
+	const [ax, ay] = anchorOffset(layer.anchor, w, h);
+	const originX = layer.x + ax;
+	const originY = layer.y + ay;
+	const color = layer.activeColor ?? layer.color;
+	let cx = originX;
+	for (const ch of label) {
+		drawDotDigit(ctx, ch, cx, originY, cell, color);
+		cx += 4 * cell;
+	}
+}
+
+// ───────────────── 拍ごとに増える図形 ─────────────────
+
+/**
+ * 拍が進むごとに図形が1個ずつ増えていき、`beatsPerCycle` 拍で満タンになったら
+ * 次の周でまた1個から数え直す（例: ●○○○ → ●●○○ → ●●●○ → ●●●● → ●○○○…）。
+ */
+function drawBeatPips(d: DrawCtx, layer: MvBeatPipsLayer): void {
+	const { ctx } = d;
+	const cycle = Math.max(1, Math.round(layer.beatsPerCycle));
+	const currentBeat = Math.floor(d.bar * MV_BEATS_PER_BAR);
+	const filled = (((currentBeat % cycle) + cycle) % cycle) + 1;
+	const size = layer.size;
+	const gap = layer.gap;
+	const w = cycle * size + (cycle - 1) * gap;
+	const [ax, ay] = anchorOffset(layer.anchor, w, size);
+	const originX = layer.x + ax;
+	const originY = layer.y + ay;
+
+	for (let i = 0; i < cycle; i++) {
+		const cx = originX + i * (size + gap);
+		const isLast = i === filled - 1;
+		ctx.fillStyle =
+			i < filled ? (isLast ? (layer.activeColor ?? layer.color) : layer.color) : "rgba(255,255,255,0.15)";
+		if (layer.shape === "circle") {
+			ctx.beginPath();
+			ctx.arc(cx + size / 2, originY + size / 2, size / 2, 0, Math.PI * 2);
+			ctx.fill();
+		} else {
+			ctx.fillRect(cx, originY, size, size);
+		}
+	}
+}
+
+/** 値が切り替わった瞬間から `phase` 小節ぶん、1ドット分だけ跳ねる縦オフセット（0以下）。 */
+function bounceOffset(phase: number, amount: number, duration = 0.15): number {
+	const t = Math.min(1, Math.max(0, phase) / duration);
+	return -amount * (1 - t) * (1 - t);
+}
+
+/**
+ * 特定トラックの「いま鳴っている音」を度数のドット絵数字で出す。
+ * `drawDegree` の数字部分をドット絵化した版——値そのものではなく「音が鳴り始めた瞬間」を
+ * 跳ねのトリガーにする（同じ数字が続いても拍が見えたほうがリズムが伝わる）。
+ */
+function drawBeatDigit(d: DrawCtx, layer: MvBeatDigitLayer): void {
+	const { ctx } = d;
+	const list = trackNotes(d.song, layer.track);
+	const idx = lastIndexAtOrBefore(list, d.step);
+	if (idx < 0) return;
+	const note = list[idx];
+	const sounding = note.startStep + note.durationSteps > d.step;
+	if (!sounding && !layer.hold) return;
+
+	const rootPitch = degreeRootPitch(d, layer);
+	if (rootPitch === null) return;
+	const label = chordToneLabel(note.pitch - rootPitch);
+
+	const cell = layer.cellSize;
+	const onsetBar = note.startStep / MV_STEPS_PER_BAR;
+	const bounce = bounceOffset(d.bar - onsetBar, cell);
+
+	const chars = [...label];
+	const w = chars.length * 3 * cell + (chars.length - 1) * cell;
+	const h = 5 * cell;
+	const [ax, ay] = anchorOffset(layer.anchor, w, h);
+	let cx = layer.x + ax;
+	const originY = layer.y + ay + bounce;
+	for (const ch of chars) {
+		drawDotDigit(ctx, ch, cx, originY, cell, layer.color);
+		cx += 4 * cell;
+	}
+}
+
+/**
+ * いま鳴っているコード名だけを出す読み札。`chordBar` の帯を出さずに文字だけ欲しいとき用。
+ * コードが切り替わった瞬間（`chord.bar`）から1ドット分跳ねる。
+ */
+function drawBeatChordLabel(d: DrawCtx, layer: MvBeatChordLabelLayer): void {
+	const { ctx } = d;
+	const chord = resolveActiveChord(d, layer);
+	if (!chord) return;
+
+	const bounce = bounceOffset(d.bar - chord.bar, layer.size * 0.3);
+	ctx.font = `bold ${layer.size}px ${getMvFontStack(d.manifest)}`;
+	ctx.textBaseline = "alphabetic";
+	const w = ctx.measureText(chord.label).width;
+	const [ax, ay] = anchorOffset(layer.anchor, w, layer.size);
+	ctx.fillStyle = layer.color;
+	ctx.fillText(chord.label, layer.x + ax, layer.y + ay + layer.size + bounce);
+}
+
 // ───────────────── 度数（頭の上の数字） ─────────────────
 
 /**
@@ -1709,22 +2023,38 @@ function drawDegree(d: DrawCtx, layer: MvDegreeLayer): void {
 	ctx.shadowBlur = 0;
 }
 
-/** 度数を数える基準の音（0-11）。コード基準なら進行から、調基準なら主音から。 */
-function degreeRootPitch(d: DrawCtx, layer: MvDegreeLayer): number | null {
-	if (layer.basis === "key") return MV_ROOT_TO_PITCH[layer.key] ?? 0;
-
-	// 自前の進行があればそれを使う（コード進行バーを画面に出さない作りのため）
-	if (layer.chords && layer.chords.length > 0) {
-		const own = chordAtBar(layer.chords, d.bar);
-		if (own) return MV_ROOT_TO_PITCH[chordRootName(own.label)] ?? 0;
+/**
+ * `chords` を自前で持たないレイヤーが参照する進行を探す共通ロジック。
+ * 自前の `chords` があればそれを優先し、無ければ `chordLayerId`（未指定なら最初に
+ * 見つかった）`chordBar` を見る。
+ */
+function resolveActiveChord(
+	d: DrawCtx,
+	params: { chords?: MvChordStep[]; chordLayerId?: string },
+): MvChordStep | null {
+	if (params.chords && params.chords.length > 0) {
+		return chordAtBar(params.chords, d.bar);
 	}
-
 	const bar = d.manifest.layers.find(
 		(l): l is MvChordBarLayer =>
 			l.kind === "chordBar" &&
-			(!layer.chordLayerId || l.id === layer.chordLayerId),
+			(!params.chordLayerId || l.id === params.chordLayerId),
 	);
-	const chord = bar ? chordAtBar(bar.chords, d.bar) : null;
+	return bar ? chordAtBar(bar.chords, d.bar) : null;
+}
+
+/** 度数を数える基準の音（0-11）。コード基準なら進行から、調基準なら主音から。 */
+function degreeRootPitch(
+	d: DrawCtx,
+	layer: {
+		basis: "chord" | "key";
+		key: string;
+		chords?: MvChordStep[];
+		chordLayerId?: string;
+	},
+): number | null {
+	if (layer.basis === "key") return MV_ROOT_TO_PITCH[layer.key] ?? 0;
+	const chord = resolveActiveChord(d, layer);
 	// コードが置かれていない区間は調の主音へ落とす（数字が消えるより読める）
 	if (!chord) return MV_ROOT_TO_PITCH[layer.key] ?? 0;
 	return MV_ROOT_TO_PITCH[chordRootName(chord.label)] ?? 0;

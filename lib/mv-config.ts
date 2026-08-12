@@ -1637,6 +1637,109 @@ export interface MvDegreeLayer extends MvLayerBase {
 	hold?: boolean;
 }
 
+/**
+ * アイコンが拍ごとに切り替わる「ウィジェット」（参考動画: `_.mp4` / `次日朝夢(再現).mp4`）。
+ *
+ * 画面下に2段のセルが並び、1セル＝1拍。上段は「いま鳴っている拍」を白い枠で示す
+ * 位置マーカー、下段は `chords` から `getChordThemeColor` で求めた色（コードの根音・度数）
+ * でグリフを塗る帯——`chordBar` と全く同じ色決定ロジックを共有する。
+ * グリフ自体は固定の小さな語彙（□/横線/的/格子…）を拍番号で順送りするだけで、
+ * `mv-shape-group-macro.ts` のような核＋装飾の合成はしない（そこまでの複雑さは無い絵）。
+ */
+export interface MvWidgetLayer extends MvLayerBase {
+	kind: "widget";
+	rect: MvRect;
+	/** 1セルのサイズ（正方形の一辺）。 */
+	cellSize: number;
+	/** 画面に並べるセル数（＝表示する拍数）。 */
+	cols: number;
+	/** 自前のコード進行。`chordBar` と同じ形式で、色分けの根拠にする。 */
+	chords: MvChordStep[];
+	/** 度数の基準キー。 */
+	key: string;
+	colorMode: MvChordColorMode;
+	/** colorMode==='fixed' のときの下段の色。 */
+	color: string;
+	/** 上段の「いま」マーカーの色。 */
+	activeColor: string;
+}
+
+/**
+ * ドット絵数字が拍ごとに刻まれるウィジェット（例: 1→2→3→4→1→2→3→4…）。
+ * コード進行とは無関係に、純粋に拍番号だけで動く単純なメトロノーム表示。
+ */
+export interface MvBeatCounterLayer extends MvLayerBase {
+	kind: "beatCounter";
+	x: number;
+	y: number;
+	anchor: MvAnchor;
+	/** 1セット何拍で1周するか（既定4＝4拍子の1小節）。 */
+	beatsPerCycle: number;
+	/** ドット絵数字の1マスのサイズ。 */
+	cellSize: number;
+	color: string;
+	/** いま鳴っている拍だけ別色にする。未指定なら常に `color`。 */
+	activeColor?: string;
+}
+
+/**
+ * 拍が進むごとに図形が1つずつ増えていくウィジェット（`beatsPerCycle` 拍で満タン→次の周でリセット）。
+ */
+export interface MvBeatPipsLayer extends MvLayerBase {
+	kind: "beatPips";
+	x: number;
+	y: number;
+	anchor: MvAnchor;
+	/** 何拍で満タンになるか（既定4）。 */
+	beatsPerCycle: number;
+	shape: "square" | "circle";
+	size: number;
+	gap: number;
+	color: string;
+	/** いまの周で最後に増えた1個だけ別色にする。未指定なら常に `color`。 */
+	activeColor?: string;
+}
+
+/**
+ * 特定トラックの「いま鳴っている音」を度数のドット絵数字で出すウィジェット
+ * （`MvDegreeLayer` の数字部分をドット絵化した版）。値が切り替わる瞬間（音の鳴り始め）に
+ * 1ドット分だけ跳ねる——`chordToneLabel` の結果が変わったかどうかではなく、
+ * 単純に「音が鳴り始めた瞬間」で跳ねる（同じ数字が続いても拍が来れば跳ねたほうが
+ * リズムが見えるため）。
+ */
+export interface MvBeatDigitLayer extends MvLayerBase {
+	kind: "beatDigit";
+	/** 数字の元になるトラック(@n)。 */
+	track: number;
+	x: number;
+	y: number;
+	anchor: MvAnchor;
+	cellSize: number;
+	color: string;
+	basis: "chord" | "key";
+	key: string;
+	chords?: MvChordStep[];
+	chordLayerId?: string;
+	/** 音が切れても直前の数字を出し続ける。 */
+	hold?: boolean;
+}
+
+/**
+ * いま鳴っているコード名だけを出すウィジェット（`chordBar` の帯を出さずに
+ * 読み札だけ欲しいとき用）。コードが切り替わった瞬間に1ドット分跳ねる。
+ */
+export interface MvBeatChordLabelLayer extends MvLayerBase {
+	kind: "beatChordLabel";
+	x: number;
+	y: number;
+	anchor: MvAnchor;
+	size: number;
+	color: string;
+	/** 自前の進行。未指定なら `chordLayerId`（無ければ最初の chordBar）を参照する。 */
+	chords?: MvChordStep[];
+	chordLayerId?: string;
+}
+
 export type MvLayer =
 	| MvImageLayer
 	| MvTextLayer
@@ -1645,7 +1748,12 @@ export type MvLayer =
 	| MvShapeLayer
 	| MvEffectLayer
 	| MvChordBarLayer
-	| MvDegreeLayer;
+	| MvDegreeLayer
+	| MvWidgetLayer
+	| MvBeatCounterLayer
+	| MvBeatPipsLayer
+	| MvBeatDigitLayer
+	| MvBeatChordLabelLayer;
 
 /**
  * 根音からの半音差 → コードトーン名。
@@ -1889,6 +1997,11 @@ export const MV_LAYER_KIND_LABELS: Record<MvLayer["kind"], string> = {
 	effect: "演出",
 	chordBar: "コード進行バー",
 	degree: "度数（頭の上の数字）",
+	widget: "ウィジェット（アイコングリッド）",
+	beatCounter: "ウィジェット（ドット絵数字カウンタ）",
+	beatPips: "ウィジェット（図形が増える）",
+	beatDigit: "ウィジェット（トラック連動ドット数字）",
+	beatChordLabel: "ウィジェット（コード名の読み札）",
 };
 
 // ───────────────── ヘルパ ─────────────────

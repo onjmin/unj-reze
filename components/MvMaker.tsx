@@ -11,7 +11,10 @@ import {
 	Copy,
 	FolderPlus,
 	FolderX,
+	Grid3x3,
 	Hash,
+	SquareStack,
+	Timer,
 	History,
 	Image as ImageIcon,
 	Layers,
@@ -80,6 +83,10 @@ import {
 	MV_VISUALIZER_LABELS,
 	MV_W,
 	type MvAudioMode,
+	type MvBeatChordLabelLayer,
+	type MvBeatCounterLayer,
+	type MvBeatDigitLayer,
+	type MvBeatPipsLayer,
 	type MvBlend,
 	type MvChordBarLayer,
 	type MvChordColorMode,
@@ -114,6 +121,7 @@ import {
 	type MvVisualizerLayer,
 	type MvVisualizerStyle,
 	type MvWalkSetting,
+	type MvWidgetLayer,
 	mvAudioMode,
 	mvUid,
 	mvWalkSpeed,
@@ -772,6 +780,11 @@ const LAYER_ICON = {
 	effect: Sparkles,
 	chordBar: ListMusic,
 	degree: Hash,
+	widget: Grid3x3,
+	beatCounter: Timer,
+	beatPips: SquareStack,
+	beatDigit: Hash,
+	beatChordLabel: ListMusic,
 } as const;
 
 /** 図形の「音との連動」1行ぶんの編集UI。 */
@@ -920,6 +933,16 @@ function layerKindLabel(layer: MvLayer): string {
 			return "コード進行バー";
 		case "degree":
 			return `度数 @${layer.track}`;
+		case "widget":
+			return "ウィジェット";
+		case "beatCounter":
+			return "ドット絵数字カウンタ";
+		case "beatPips":
+			return "拍で増える図形";
+		case "beatDigit":
+			return `ドット数字 @${layer.track}`;
+		case "beatChordLabel":
+			return "コード名の読み札";
 	}
 }
 
@@ -1715,6 +1738,110 @@ export default function MvMaker({
 			activeColor: "#3f6212",
 			textColor: "#e5e7eb",
 			size: 9,
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		setSelectedLayerId(layer.id);
+	};
+
+	/** アイコンが拍ごとに切り替わるウィジェット（`_.mp4` / `次日朝夢(再現).mp4` 参照）。 */
+	const addWidgetLayer = () => {
+		const layer: MvWidgetLayer = {
+			kind: "widget",
+			id: mvUid("wgt"),
+			rect: { x: 40, y: MV_H - 100, w: 40 * 8, h: 80 },
+			cellSize: 40,
+			cols: 8,
+			chords: [
+				{ bar: 0, label: "C" },
+				{ bar: 1, label: "Am7" },
+				{ bar: 2, label: "F" },
+				{ bar: 3, label: "G7" },
+			],
+			key: "C",
+			colorMode: "degree",
+			color: "#1f2937",
+			activeColor: "#f8fafc",
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		setSelectedLayerId(layer.id);
+	};
+
+	/** ドット絵数字が拍ごとに刻まれるだけの単純なカウンタ（コード進行とは無関係）。 */
+	const addBeatCounterLayer = () => {
+		const layer: MvBeatCounterLayer = {
+			kind: "beatCounter",
+			id: mvUid("bct"),
+			x: MV_W / 2,
+			y: MV_H - 60,
+			anchor: "center",
+			beatsPerCycle: 4,
+			cellSize: 8,
+			color: "#f8fafc",
+			activeColor: "#facc15",
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		setSelectedLayerId(layer.id);
+	};
+
+	/** 拍が進むごとに図形が1個ずつ増えるだけの単純なウィジェット。 */
+	const addBeatPipsLayer = () => {
+		const layer: MvBeatPipsLayer = {
+			kind: "beatPips",
+			id: mvUid("bpp"),
+			x: MV_W / 2,
+			y: MV_H - 40,
+			anchor: "center",
+			beatsPerCycle: 4,
+			shape: "square",
+			size: 16,
+			gap: 6,
+			color: "#f8fafc",
+			activeColor: "#facc15",
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		setSelectedLayerId(layer.id);
+	};
+
+	/** 特定トラックの音を度数のドット絵数字で出す。切り替わる瞬間に1ドット跳ねる。 */
+	const addBeatDigitLayer = () => {
+		const layer: MvBeatDigitLayer = {
+			kind: "beatDigit",
+			id: mvUid("bdg"),
+			track: song.tracks[0] ?? 0,
+			x: MV_W / 2,
+			y: MV_H / 2 - 40,
+			anchor: "top",
+			cellSize: 6,
+			color: "#f8fafc",
+			basis: "chord",
+			key: "C",
+			hold: true,
+			z: getNextZ(),
+		};
+		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		setSelectedLayerId(layer.id);
+	};
+
+	/** いま鳴っているコード名だけを出す読み札。切り替わる瞬間に1ドット跳ねる。 */
+	const addBeatChordLabelLayer = () => {
+		const layer: MvBeatChordLabelLayer = {
+			kind: "beatChordLabel",
+			id: mvUid("bcl"),
+			x: MV_W / 2,
+			y: MV_H / 2 + 20,
+			anchor: "top",
+			size: 20,
+			color: "#f8fafc",
+			chords: [
+				{ bar: 0, label: "C" },
+				{ bar: 1, label: "Am7" },
+				{ bar: 2, label: "F" },
+				{ bar: 3, label: "G7" },
+			],
 			z: getNextZ(),
 		};
 		update((m) => ({ ...m, layers: [...m.layers, layer] }));
@@ -3770,6 +3897,493 @@ export default function MvMaker({
 				</>
 			)}
 
+			{layer.kind === "beatCounter" && (
+				<>
+					<Hint>
+						コード進行とは無関係に、拍番号だけで 1→2→3→…→{layer.beatsPerCycle}
+						→1→… と刻むだけのドット絵数字です。
+					</Hint>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="何拍で1周するか"
+						value={layer.beatsPerCycle}
+						min={1}
+						max={16}
+						onChange={(v) =>
+							updateLayer(
+								layer.id,
+								(l) => ({ ...l, beatsPerCycle: v }) as MvLayer,
+							)
+						}
+					/>
+					<NumField
+						label="ドットの1マスのサイズ"
+						value={layer.cellSize}
+						min={2}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, cellSize: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="色"
+						value={layer.color}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="いまの拍の色（任意）"
+						value={layer.activeColor ?? layer.color}
+						onChange={(v) =>
+							updateLayer(
+								layer.id,
+								(l) => ({ ...l, activeColor: v }) as MvLayer,
+							)
+						}
+					/>
+				</>
+			)}
+
+			{layer.kind === "beatPips" && (
+				<>
+					<Hint>
+						拍が進むごとに図形が1個ずつ増え、{layer.beatsPerCycle}
+						拍で満タンになったら次の周でまた1個から数え直します。
+					</Hint>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="何拍で満タンか"
+						value={layer.beatsPerCycle}
+						min={1}
+						max={16}
+						onChange={(v) =>
+							updateLayer(
+								layer.id,
+								(l) => ({ ...l, beatsPerCycle: v }) as MvLayer,
+							)
+						}
+					/>
+					<SelectField
+						label="図形"
+						value={layer.shape}
+						options={[
+							{ value: "square" as const, label: "四角" },
+							{ value: "circle" as const, label: "丸" },
+						]}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, shape: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="大きさ"
+						value={layer.size}
+						min={2}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="間隔"
+						value={layer.gap}
+						min={0}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, gap: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="色"
+						value={layer.color}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="いま増えた1個の色（任意）"
+						value={layer.activeColor ?? layer.color}
+						onChange={(v) =>
+							updateLayer(
+								layer.id,
+								(l) => ({ ...l, activeColor: v }) as MvLayer,
+							)
+						}
+					/>
+				</>
+			)}
+
+			{layer.kind === "beatDigit" && (
+				<>
+					<Hint>
+						そのトラックでいま鳴っている音を度数のドット絵数字で出します。「度数」の
+						ドット絵版——音が鳴り始めた瞬間に1ドット分跳ねます。
+					</Hint>
+					<SelectField
+						label="どのトラックの音か"
+						value={String(layer.track)}
+						options={(song.tracks.length > 0 ? song.tracks : [0]).map((t) => ({
+							value: String(t),
+							label: `@${t}`,
+						}))}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "beatDigit" ? { ...l, track: Number(v) } : l,
+							)
+						}
+					/>
+					<SelectField
+						label="何から数えるか"
+						value={layer.basis}
+						options={[
+							{ value: "chord" as const, label: "いまのコードの根音" },
+							{ value: "key" as const, label: "曲のキーの主音" },
+						]}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "beatDigit" ? { ...l, basis: v } : l,
+							)
+						}
+					/>
+					<SelectField
+						label="キー"
+						value={layer.key}
+						options={Object.keys(MV_ROOT_TO_PITCH).map((k) => ({
+							value: k,
+							label: k,
+						}))}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "beatDigit" ? { ...l, key: v } : l,
+							)
+						}
+					/>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="ドットの1マスのサイズ"
+						value={layer.cellSize}
+						min={2}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, cellSize: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="色"
+						value={layer.color}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
+						}
+					/>
+					<CheckField
+						label="音が切れても数字を残す"
+						checked={!!layer.hold}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "beatDigit" ? { ...l, hold: v } : l,
+							)
+						}
+					/>
+				</>
+			)}
+
+			{layer.kind === "beatChordLabel" && (
+				<>
+					<Hint>
+						いま鳴っているコード名だけを出す読み札です。コード進行バーを画面に出さずに
+						文字だけ欲しいときに使います。切り替わる瞬間に1ドット分跳ねます。
+					</Hint>
+					<NumField
+						label="X"
+						value={layer.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, x: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, y: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="文字サイズ"
+						value={layer.size}
+						min={6}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, size: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="文字色"
+						value={layer.color}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
+						}
+					/>
+					<p className="pt-1 text-[10px] font-bold text-gray-400">コード進行</p>
+					{(layer.chords ?? []).map((c, i) => (
+						<div key={i} className="flex items-center gap-1.5">
+							<StringNumInput
+								value={c.bar}
+								onChange={(n) =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "beatChordLabel"
+											? {
+													...l,
+													chords: (l.chords ?? []).map((x, j) =>
+														j === i ? { ...x, bar: n } : x,
+													),
+												}
+											: l,
+									)
+								}
+								className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+							/>
+							<input
+								value={c.label}
+								placeholder="F#m7"
+								onChange={(e) =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "beatChordLabel"
+											? {
+													...l,
+													chords: (l.chords ?? []).map((x, j) =>
+														j === i ? { ...x, label: e.target.value } : x,
+													),
+												}
+											: l,
+									)
+								}
+								className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+							/>
+							<button
+								onClick={() =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "beatChordLabel"
+											? {
+													...l,
+													chords: (l.chords ?? []).filter((_, j) => j !== i),
+												}
+											: l,
+									)
+								}
+								className={DEL_BTN_CLASS}
+							>
+								<Trash2 size={16} />
+							</button>
+						</div>
+					))}
+					<button
+						onClick={() =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "beatChordLabel"
+									? {
+											...l,
+											chords: [
+												...(l.chords ?? []),
+												{ bar: (l.chords ?? []).length, label: "C" },
+											],
+										}
+									: l,
+							)
+						}
+						className={ADD_BTN_CLASS}
+					>
+						<Plus size={13} />
+						コードを追加
+					</button>
+				</>
+			)}
+
+			{layer.kind === "widget" && (
+				<>
+					<NumField
+						label="X"
+						value={layer.rect.x}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "widget" ? { ...l, rect: { ...l.rect, x: v } } : l,
+							)
+						}
+					/>
+					<NumField
+						label="Y"
+						value={layer.rect.y}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "widget" ? { ...l, rect: { ...l.rect, y: v } } : l,
+							)
+						}
+					/>
+					<NumField
+						label="セルサイズ"
+						value={layer.cellSize}
+						min={8}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, cellSize: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="表示コマ数"
+						value={layer.cols}
+						min={1}
+						max={16}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, cols: v }) as MvLayer)
+						}
+					/>
+					<SelectField
+						label="キー"
+						value={layer.key}
+						options={Object.keys(MV_ROOT_TO_PITCH).map((k) => ({
+							value: k,
+							label: k,
+						}))}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, key: v }) as MvLayer)
+						}
+					/>
+					<SelectField
+						label="色分け"
+						value={layer.colorMode}
+						options={(
+							Object.keys(MV_CHORD_COLOR_MODE_LABELS) as MvChordColorMode[]
+						).map((k) => ({ value: k, label: MV_CHORD_COLOR_MODE_LABELS[k] }))}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, colorMode: v }) as MvLayer)
+						}
+					/>
+					{layer.colorMode === "fixed" && (
+						<ColorField
+							label="下段の色"
+							value={layer.color}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
+							}
+						/>
+					)}
+					<ColorField
+						label="いまの拍の色"
+						value={layer.activeColor}
+						onChange={(v) =>
+							updateLayer(
+								layer.id,
+								(l) => ({ ...l, activeColor: v }) as MvLayer,
+							)
+						}
+					/>
+
+					<p className="pt-1 text-[10px] font-bold text-gray-400">
+						コード進行（色分けの根拠）
+					</p>
+					{layer.chords.map((c, i) => (
+						<div key={i} className="flex items-center gap-1.5">
+							<StringNumInput
+								value={c.bar}
+								onChange={(n) =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "widget"
+											? {
+													...l,
+													chords: l.chords.map((x, j) =>
+														j === i ? { ...x, bar: n } : x,
+													),
+												}
+											: l,
+									)
+								}
+								className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+							/>
+							<input
+								value={c.label}
+								placeholder="F#m7"
+								onChange={(e) =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "widget"
+											? {
+													...l,
+													chords: l.chords.map((x, j) =>
+														j === i ? { ...x, label: e.target.value } : x,
+													),
+												}
+											: l,
+									)
+								}
+								className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
+							/>
+							<button
+								onClick={() =>
+									updateLayer(layer.id, (l) =>
+										l.kind === "widget"
+											? { ...l, chords: l.chords.filter((_, j) => j !== i) }
+											: l,
+									)
+								}
+								className={DEL_BTN_CLASS}
+							>
+								<Trash2 size={16} />
+							</button>
+						</div>
+					))}
+					<button
+						onClick={() =>
+							updateLayer(layer.id, (l) =>
+								l.kind === "widget"
+									? {
+											...l,
+											chords: [
+												...l.chords,
+												{ bar: l.chords.length, label: "C" },
+											],
+										}
+									: l,
+							)
+						}
+						className={ADD_BTN_CLASS}
+					>
+						<Plus size={13} />
+						コードを追加
+					</button>
+				</>
+			)}
+
 			{(layer.kind === "image" || layer.kind === "text") && (
 				<Details label="常時の動きを調整する (上下ゆれ・drift等)">
 					<SelectField
@@ -3969,6 +4583,11 @@ export default function MvMaker({
 						<Plus size={12} />
 						演出
 					</button>
+				</div>
+				<p className="pb-1 text-[10px] font-bold text-gray-400">
+					ウィジェット（拍・コード進行に連動）
+				</p>
+				<div className="grid grid-cols-3 gap-1.5 pb-2">
 					<button onClick={addChordBarLayer} className={ADD_BTN_CLASS}>
 						<Plus size={12} />
 						コード進行
@@ -3976,6 +4595,26 @@ export default function MvMaker({
 					<button onClick={addDegreeLayer} className={ADD_BTN_CLASS}>
 						<Plus size={12} />
 						度数の数字
+					</button>
+					<button onClick={addWidgetLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						アイコングリッド
+					</button>
+					<button onClick={addBeatCounterLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						数字カウンタ
+					</button>
+					<button onClick={addBeatPipsLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						増える図形
+					</button>
+					<button onClick={addBeatDigitLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						トラック連動ドット数字
+					</button>
+					<button onClick={addBeatChordLabelLayer} className={ADD_BTN_CLASS}>
+						<Plus size={12} />
+						コード名の読み札
 					</button>
 				</div>
 				<div className="mb-2 overflow-hidden rounded-lg border border-purple-500/30 bg-purple-950/20">

@@ -467,8 +467,15 @@ interface GroupPlan {
  * **整数倍だけにしてあるので、何倍速が混ざっても小節の頭で必ず全部が揃う**
  * （3倍のような値を混ぜると何小節も揃わず、拍から浮いて聞こえる）。
  * 1倍を多めにして、拍を踏む要素が常に主役になるようにしてある。
+ *
+ * 以前はここから確率で1枚ずつ抽選していたが、1倍の当選比率を高くしてある
+ * せいで要素数が少ないグループ（同心の2段目、帯の最初のペア等）では
+ * 「ベースの拍」が1拍のとき2拍・4拍がほぼ出ない、という運任せの偏りが出ていた。
+ * 内側（＝呼び出し順が早い要素）から外側へ向けて 1→2→4 の順に確実に割り当て、
+ * 4枚目以降は最も遅い4のまま据え置く方式にして、要素が2つ以上あれば
+ * 2拍・4拍が確実に構成要素として混ざるようにしてある。
  */
-const RATE_MULTIPLIERS = [1, 1, 1, 1, 1, 2, 2, 4];
+const RATE_LADDER = [1, 2, 4];
 
 /** コマ列を k コマぶん回す。脇役を主役と違うコマから始めるのに使う。 */
 function rotateCycle(paths: string[], k: number): string[] {
@@ -648,16 +655,12 @@ export function buildSymmetricShapeGroupLayers(
 	let slot = 0;
 	const nextSlot = () => slot++;
 
-	// 速さの倍率。1枚目だけは必ず等倍にして、拍を踏む要素が確実に1つ居るようにする
-	// （全部が遅い側に振れると、拍に乗っていないグループができてしまう）。
-	let firstRate = true;
-	const nextRate = () => {
-		if (firstRate) {
-			firstRate = false;
-			return 1;
-		}
-		return pick(RATE_MULTIPLIERS);
-	};
+	// 速さの倍率。内側（＝呼び出し順が早い要素）から 1→2→4 の順で確実に割り当てる。
+	// 1枚目は必ず等倍にして拍を踏む要素を確保しつつ（全部が遅い側に振れると拍に
+	// 乗っていないグループになる）、2枚目以降は確率任せにせず ladder を回して
+	// 2拍・4拍が実際に構成要素として混ざることを保証する。
+	let rateIdx = 0;
+	const nextRate = () => RATE_LADDER[Math.min(rateIdx++, RATE_LADDER.length - 1)];
 
 	if (isCentered) {
 		// ── 同心に積むエンブレム構図 ──
