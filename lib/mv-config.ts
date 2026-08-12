@@ -988,6 +988,32 @@ export function sliceSegments(
 	return result;
 }
 
+/**
+ * 縦書き描画用コードポイント変換マップ（Unicode Vertical Forms）
+ * 元の入力文字列は変更せず、縦書き描画処理でのみ置き換えて描画する。
+ */
+export const VERTICAL_FORM_MAP: Record<string, string> = {
+	"\u300C": "\uFE41", // 「 (U+300C) -> ﹁ (U+FE41)
+	"\u300D": "\uFE42", // 」 (U+300D) -> ﹂ (U+FE42)
+	"\uFF08": "\uFE35", // （ (U+FF08) -> ︵ (U+FE35)
+	"\u0028": "\uFE35", // ( (U+0028) -> ︵ (U+FE35)
+	"\uFF09": "\uFE36", // ） (U+FF09) -> ︶ (U+FE36)
+	"\u0029": "\uFE36", // ) (U+0029) -> ︶ (U+FE36)
+	"\u3014": "\uFE3B", // 〔 (U+3014) -> ︻ (U+FE3B)
+	"\u3015": "\uFE3C", // 〕 (U+3015) -> ︼ (U+FE3C)
+};
+
+export function toVerticalFormChar(ch: string): string {
+	return VERTICAL_FORM_MAP[ch] ?? ch;
+}
+
+export function toVerticalFormText(text: string): string {
+	return text.replace(
+		/[\u300C\u300D\uFF08\u0028\uFF09\u0029\u3014\u3015]/g,
+		(ch) => VERTICAL_FORM_MAP[ch] ?? ch,
+	);
+}
+
 export const MV_LYRIC_TAG_COLORS: Record<string, string> = {
 	// E: デジタル・バグ・ノイズ（ドット/バグ質感）
 	E: "#4ade80",

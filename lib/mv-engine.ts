@@ -24,6 +24,7 @@ import {
 	layerDisappearBar,
 	parseHighlightedText,
 	sliceSegments,
+	toVerticalFormChar,
 	MV_BEATS_PER_BAR,
 	MV_BLEND_COMPOSITE,
 	MV_EFFECT_POST_STYLES,
@@ -2909,7 +2910,7 @@ function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
 			for (const seg of segments) {
 				ctx.fillStyle = seg.isHighlight ? highlightColor : mainColor;
 				for (const ch of seg.text) {
-					ctx.fillText(ch, x, y);
+					ctx.fillText(toVerticalFormChar(ch), x, y);
 					y += size * 1.05;
 				}
 			}
@@ -3146,7 +3147,7 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 			for (const seg of activeSegments) {
 				ctx.fillStyle = seg.isHighlight ? lyricHighlightColor : lyricMainColor;
 				for (const ch of seg.text) {
-					ctx.fillText(ch, x, y);
+					ctx.fillText(toVerticalFormChar(ch), x, y);
 					y += size * 1.08;
 				}
 			}

@@ -1398,6 +1398,9 @@ export default function MvMaker({
 		target: "stageBg" | { layerId: string } | { sectionId: string };
 	} | null>(null);
 	const playerRef = useRef<MvPlayerHandle>(null);
+	const [lyricTimingIndexMap, setLyricTimingIndexMap] = useState<
+		Record<string, number>
+	>({});
 	const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
 	const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 	const [copiedSectionData, setCopiedSectionData] = useState<{
@@ -5460,15 +5463,176 @@ export default function MvMaker({
 									))}
 								{lyricsLayer.source === "manual" && (
 									<>
+										{(() => {
+											const lines = lyricsLayer.lines ?? [];
+											const timingIndex = lyricTimingIndexMap[lyricsLayer.id] ?? 0;
+											const currentLine = lines[timingIndex];
+											const isCompleted = lines.length > 0 && timingIndex >= lines.length;
+
+											const handleTimingTap = () => {
+												if (lines.length === 0 || timingIndex >= lines.length) return;
+												const currentBar = playerRef.current?.getCurrentBar() ?? 0;
+												const bar = Math.max(0, Math.round(currentBar * 100) / 100);
+												updateLayer(lyricsLayer.id, (l) =>
+													l.kind === "lyrics"
+														? {
+																...l,
+																lines: (l.lines ?? []).map((x, j) =>
+																	j === timingIndex ? { ...x, bar } : x,
+																),
+															}
+														: l,
+												);
+												setLyricTimingIndexMap((prev) => ({
+													...prev,
+													[lyricsLayer.id]: timingIndex + 1,
+												}));
+											};
+
+											return (
+												<div className="mb-3 rounded-lg border border-purple-500/40 bg-purple-950/30 p-3 space-y-2">
+													<div className="flex items-center justify-between">
+														<div className="flex items-center gap-1.5 font-bold text-purple-200 text-xs">
+															<Timer size={14} className="text-purple-400" />
+															字幕タイミング設定ツール
+														</div>
+														{lines.length > 0 && (
+															<span className="text-[10px] font-mono text-purple-300 bg-purple-900/60 px-2 py-0.5 rounded border border-purple-700/50">
+																{timingIndex < lines.length
+																	? `${timingIndex + 1} / ${lines.length} 行目`
+																	: `完了 (${lines.length}/${lines.length})`}
+															</span>
+														)}
+													</div>
+
+													{lines.length === 0 ? (
+														<p className="text-[10px] text-gray-400">
+															歌詞行がありません。下の「一括貼り付け」または「行を追加」で歌詞を登録してください。
+														</p>
+													) : (
+														<>
+															<p className="text-[10px] text-purple-300/80 leading-relaxed">
+																動画を再生しながらタイミングよく下のボタンを押すと、再生中の現在位置（小節）を表示タイミングとして順次セットします。
+															</p>
+
+															{/* 次にセットする字幕表示＆タップボタン */}
+															<button
+																type="button"
+																onClick={handleTimingTap}
+																disabled={isCompleted}
+																className={`w-full min-h-[54px] rounded-lg border p-2 flex flex-col items-center justify-center gap-1 transition-all shadow-md active:scale-98 text-left ${
+																	!isCompleted
+																		? "border-purple-500/80 bg-purple-600 hover:bg-purple-500 text-white cursor-pointer shadow-purple-900/40"
+																		: "border-gray-700 bg-gray-800/80 text-gray-400 cursor-not-allowed"
+																}`}
+															>
+																{!isCompleted ? (
+																	<>
+																		<div className="flex items-center gap-1.5 text-[10px] font-bold opacity-90">
+																			<Sparkles size={12} className="text-yellow-300 shrink-0" />
+																			<span>
+																				ここを押すとこの字幕のタイミングを決定（現在 {currentLine?.bar?.toFixed(2) ?? 0} 小節 ➔ 再生位置へ上書き）
+																			</span>
+																		</div>
+																		<div className="text-sm font-bold truncate max-w-full text-center px-2">
+																			「{currentLine?.text || "（空の歌詞行）"}」
+																		</div>
+																	</>
+																) : (
+																	<div className="text-xs font-bold text-center text-purple-200">
+																		🎉 すべての字幕タイミングの設定が完了しました
+																	</div>
+																)}
+															</button>
+
+															{/* コントロールボタン群（待った / インデックス直接入力 / 最初から） */}
+															<div className="flex flex-wrap items-center gap-2 pt-1">
+																<button
+																	type="button"
+																	onClick={() =>
+																		setLyricTimingIndexMap((prev) => ({
+																			...prev,
+																			[lyricsLayer.id]: Math.max(
+																				0,
+																				(prev[lyricsLayer.id] ?? 0) - 1,
+																			),
+																		}))
+																	}
+																	disabled={timingIndex <= 0}
+																	className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-amber-600/30 border border-amber-500/50 text-amber-200 text-[11px] font-bold hover:bg-amber-600/50 active:scale-95 disabled:opacity-40 transition-colors"
+																	title="セット中の字幕を1つインデックス戻します"
+																>
+																	<Undo2 size={12} />
+																	「待った」（1つ戻る）
+																</button>
+
+																<div className="flex items-center gap-1 bg-purple-900/50 border border-purple-700/60 px-2 py-1 rounded">
+																	<span className="text-[10px] text-purple-300 shrink-0 font-medium">対象行:</span>
+																	<StringNumInput
+																		value={timingIndex + 1}
+																		onChange={(n) =>
+																			setLyricTimingIndexMap((prev) => ({
+																				...prev,
+																				[lyricsLayer.id]: Math.max(
+																					0,
+																					Math.min(
+																						lines.length,
+																						Math.round(n) - 1,
+																					),
+																				),
+																			}))
+																		}
+																		className="h-6 w-12 rounded border border-purple-600/60 bg-purple-950/80 px-1 text-[11px] font-bold text-purple-100 outline-none text-center font-mono"
+																	/>
+																	<span className="text-[10px] text-purple-300/70 shrink-0 font-mono">
+																		/ {lines.length}
+																	</span>
+																</div>
+
+																<button
+																	type="button"
+																	onClick={() =>
+																		setLyricTimingIndexMap((prev) => ({
+																			...prev,
+																			[lyricsLayer.id]: 0,
+																		}))
+																	}
+																	disabled={timingIndex === 0}
+																	className="flex items-center gap-1 px-2 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-300 text-[10px] hover:bg-gray-700 disabled:opacity-40 transition-colors ml-auto"
+																>
+																	最初から合わせる
+																</button>
+															</div>
+														</>
+													)}
+												</div>
+											);
+										})()}
+
 										{(lyricsLayer.lines ?? []).map((line, i) => {
 											const hold = lyricsLayer.holdBars ?? 2;
 											const bpm = song.bpm || 120;
 											const secPerBar = (60 / bpm) * 4;
 											const startSec = line.bar * secPerBar;
 											const endSec = (line.bar + hold) * secPerBar;
+											const timingIndex = lyricTimingIndexMap[lyricsLayer.id] ?? 0;
+											const isCurrentTimingTarget = i === timingIndex;
 											return (
-												<div key={i} className="flex flex-col gap-1.5 rounded border border-gray-700/80 bg-gray-800/60 p-2">
+												<div
+													key={i}
+													className={`flex flex-col gap-1.5 rounded border p-2 transition-all ${
+														isCurrentTimingTarget
+															? "border-purple-500/80 bg-purple-950/40 ring-2 ring-purple-500/50"
+															: "border-gray-700/80 bg-gray-800/60"
+													}`}
+												>
 													<div className="flex items-center gap-1.5">
+														<span
+															className="shrink-0 font-mono font-bold text-[11px] text-purple-300 bg-purple-950/90 border border-purple-700/60 px-1.5 py-1 rounded min-w-[32px] text-center"
+															title={`歌詞行インデックス #${i + 1}`}
+														>
+															#{i + 1}
+														</span>
 														<StringNumInput
 															value={line.bar}
 															onChange={(n) =>
@@ -5504,6 +5668,23 @@ export default function MvMaker({
 															}
 															className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
 														/>
+														<button
+															type="button"
+															onClick={() =>
+																setLyricTimingIndexMap((prev) => ({
+																	...prev,
+																	[lyricsLayer.id]: i,
+																}))
+															}
+															title="タイミング設定対象をこの行に指定"
+															className={`flex h-9 shrink-0 items-center gap-1 rounded px-2 text-[10px] font-bold border transition-colors ${
+																isCurrentTimingTarget
+																	? "bg-purple-600 border-purple-400 text-white"
+																	: "bg-purple-950/40 border-purple-700/50 text-purple-200 hover:bg-purple-900/60"
+															}`}
+														>
+															{isCurrentTimingTarget ? "⏱ 次セット対象" : "ここからセット"}
+														</button>
 														<button
 															onClick={() => playerRef.current?.seekToBar(line.bar)}
 															title="この位置へ再生をシーク"
