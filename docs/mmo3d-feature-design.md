@@ -307,3 +307,48 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 この検証環境（Browser paneが非表示のため`requestAnimationFrame`が完全に停止する）では
 確認できなかった**（`rAF frames in 1s: 0`を実測）。トリガー分岐自体は既存の`warp`/`damage`
 分岐と全く同じ構造・同じ実行パスであり、typecheck/lintも通過している。
+
+### フェーズ14完了メモ（移動ロジック修正・掲示板複数設置・babylon版移動/同期）
+
+- **移動キーの操作性バグ修正**（`lib/mmo3d.ts` `updateMovement`）: キー入力をワールド座標に
+  直結していたため、カメラが移動方向を追いかけて回るたびに「前」の意味がブレて操作感が
+  滅茶苦茶になっていた。キー入力を現在の向き(`facing`)基準のローカル方向として扱い、毎フレーム
+  回転してからワールド座標に変換するよう修正（カメラ相対操作）。
+- **掲示板の複数設置・位置編集UI**: `enableBoard()`/`nearBoard()`を複数掲示板対応に変更
+  （`isNearBoard()`は後方互換で残置）。`mmo3dConfig.boards[]`（x/z/threadPostId）を追加し、
+  `Mmo3dEditorPanel`にリスト編集UI（追加/削除）を実装。`boards`が空なら`boardPostId`1枚を
+  既定位置(0,1.2,4)に置くフォールバックを維持。
+- **ダミー敵の配置編集UI**: `mmo3dConfig.dummies[]`（x/z）を追加、`Mmo3dEditorPanel`で編集可能に。
+  空なら既定の2体（(3,-3)/(-3,-4)）。
+- **babylon版のWASD移動＋リアルタイム位置同期**: それまで`ArcRotateCamera`の自由視点のみで
+  移動手段が無かったbabylon版に、three版と同じキー配線＋カメラ相対移動を実装
+  （`lib/mmo3d-babylon.ts` `updateMovement`。`camera.target`/`camera.position`から求めた
+  カメラ前方ベクトルを基準に回転）。`getLocalState()`/`setRemotePlayers()`を追加し、
+  `chGame`経由のリアルタイム同期をthree/babylon共通化（`Mmo3dMaker.tsx`の`renderer==='three'`
+  ガードを撤廃）。**副次的なバグ修正**: `loadMmdModelAndPlay()`で読み込んだMMDモデルの
+  ルートが`playerRoot`の子になっておらず、常にワールド原点に固定されたままだった
+  （移動しても付いてこない）のを修正。
+
+### フェーズ15完了メモ（babylon版の戦闘/掲示板・簡易地形障害物）
+
+- **babylon版に近接戦闘を移植**: three版と同じ定数（クールダウン0.6秒、扇状判定±60°・射程
+  2.2m、ダメージ20、ダミーHP60・3秒リスポーン）で`triggerAttack()`/`resolveAttackHits()`/
+  `damageDummy()`/`takeDamage()`/`setCombatCallbacks()`を実装。武器は`playerRoot`の子として
+  追従する簡易ボックス。
+- **babylon版に掲示板を移植**: `enableBoard()`/`nearBoard()`をthree版と同じ形で実装。
+- **`Mmo3dMaker.tsx`をthree/babylon共通の1本のrefに統合**: 両エンジンが同じメソッド一式
+  （`setInput`/`triggerAttack`/`nearBoard`/`enableBoard`/`setCombatCallbacks`/`getLocalState`/
+  `setRemotePlayers`/`dispose`）を持つようになったため、`engineRef`を`Mmo3dEngine |
+  Mmo3dBabylonEngine`の union 型1本にまとめ、HP HUD・掲示板ヒント・Space攻撃・Eキー掲示板
+  操作をレンダラー問わず共通化した。
+- **簡易地形障害物（直方体）**: `mmo3dConfig.obstacles[]`（中心x/z・幅w・奥行きd・高さh・
+  任意色）を追加。three版はプレイヤー移動に対して軸分離スライド式のAABB当たり判定あり
+  （`resolveObstacleCollision`）、babylon版は見た目のみ（既知の制限、下記参照）。
+  `Mmo3dEditorPanel`にリスト編集UIを実装。
+
+**既知の制限（release前に要検討）**:
+- babylon版の地形障害物は当たり判定が無い（見た目だけ）。ArcRotateCameraの自由視点と
+  組み合わせた当たり判定ロジックの設計は今後の課題。
+- babylon版はアニメ状態（idle/walk/run等）を持たないため、`getLocalState().anim`は常に
+  `"idle"`を返す。他プレイヤーのゴースト表示にアニメ切替が反映されない。
+- 地形は直方体障害物のみ（高低差・スロープ・凹凸のある地形は未対応）。

@@ -99,6 +99,17 @@ export class Mmo3dEngine {
 	private boardMat: THREE.MeshStandardMaterial | null = null;
 	private boards: { mesh: THREE.Mesh; threadPostId: string }[] = [];
 
+	// ── 簡易地形（フェーズ15: 直方体障害物）。プレイヤー/ダミーとの軸分離当たり判定つき。 ──
+	private obstacles: {
+		minX: number;
+		maxX: number;
+		minZ: number;
+		maxZ: number;
+	}[] = [];
+	private obstacleGeos: THREE.BoxGeometry[] = [];
+	private obstacleMats: THREE.MeshStandardMaterial[] = [];
+	private readonly PLAYER_RADIUS = 0.4;
+
 	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
 	private input: Mmo3dInputState = {
 		forward: false,
@@ -114,6 +125,7 @@ export class Mmo3dEngine {
 		width: number,
 		height: number,
 		dummyPositions?: { x: number; z: number }[],
+		obstacleSpecs?: { x: number; z: number; w: number; d: number; h: number; color?: string }[],
 	) {
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 		this.renderer.setSize(width, height, false);
@@ -178,6 +190,23 @@ export class Mmo3dEngine {
 				hp: DUMMY_MAX_HP,
 				respawnAt: null,
 				basePos: new THREE.Vector3(x, 0.95, z),
+			});
+		}
+
+		// 簡易地形障害物（直方体）。当たり判定はAABB（軸分離スライド、updateMovement側で使用）。
+		for (const spec of obstacleSpecs ?? []) {
+			const geo = new THREE.BoxGeometry(spec.w, spec.h, spec.d);
+			const mat = new THREE.MeshStandardMaterial({ color: spec.color ?? 0x795548 });
+			const mesh = new THREE.Mesh(geo, mat);
+			mesh.position.set(spec.x, spec.h / 2, spec.z);
+			this.scene.add(mesh);
+			this.obstacleGeos.push(geo);
+			this.obstacleMats.push(mat);
+			this.obstacles.push({
+				minX: spec.x - spec.w / 2,
+				maxX: spec.x + spec.w / 2,
+				minZ: spec.z - spec.d / 2,
+				maxZ: spec.z + spec.d / 2,
 			});
 		}
 
@@ -447,8 +476,14 @@ export class Mmo3dEngine {
 			this.facing += diff * Math.min(1, TURN_LERP * dt);
 
 			const speed = run ? RUN_SPEED : WALK_SPEED;
-			this.player.position.x += mx * speed * dt;
-			this.player.position.z += mz * speed * dt;
+			const [nx, nz] = this.resolveObstacleCollision(
+				this.player.position.x,
+				this.player.position.z,
+				mx * speed * dt,
+				mz * speed * dt,
+			);
+			this.player.position.x = nx;
+			this.player.position.z = nz;
 		}
 		this.player.rotation.y = this.facing;
 
@@ -458,6 +493,26 @@ export class Mmo3dEngine {
 			// モデル未ロード時（プレースホルダーカプセル）だけの仮アイドルモーション。
 			this.player.position.y = 0.9 + Math.sin(this.clock.elapsedTime * 2) * 0.05;
 		}
+	}
+
+	/** 障害物との軸分離スライド判定。x/zを別々に試し、衝突する軸だけ移動をキャンセルする
+	 *  （壁沿いに滑るような自然な挙動になる。斜め移動時に片方だけブロックされても止まらない）。 */
+	private resolveObstacleCollision(
+		x: number,
+		z: number,
+		dx: number,
+		dz: number,
+	): [number, number] {
+		const r = this.PLAYER_RADIUS;
+		let nx = x + dx;
+		if (this.obstacles.some((o) => nx > o.minX - r && nx < o.maxX + r && z > o.minZ - r && z < o.maxZ + r)) {
+			nx = x;
+		}
+		let nz = z + dz;
+		if (this.obstacles.some((o) => nx > o.minX - r && nx < o.maxX + r && nz > o.minZ - r && nz < o.maxZ + r)) {
+			nz = z;
+		}
+		return [nx, nz];
 	}
 
 	private updateCamera() {
@@ -510,6 +565,8 @@ export class Mmo3dEngine {
 		for (const d of this.dummies) (d.mesh.material as THREE.Material).dispose();
 		this.boardGeo?.dispose();
 		this.boardMat?.dispose();
+		for (const geo of this.obstacleGeos) geo.dispose();
+		for (const mat of this.obstacleMats) mat.dispose();
 		this.renderer.dispose();
 	}
 }

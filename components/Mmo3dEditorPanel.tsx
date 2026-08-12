@@ -1,7 +1,7 @@
 "use client";
 
-// mmo3d専用の編集パネル（MAPタブに吸収）。レンダラー切替と掲示板の対象スレッドIDだけを持つ、
-// 最小限のUI。マップ配置編集（武器/ダミー配置・地形）はまだ無い（docs/mmo3d-feature-design.md参照）。
+// mmo3d専用の編集パネル（MAPタブに吸収）。レンダラー切替・掲示板・ダミー敵・地形障害物の
+// 配置編集を持つ（docs/mmo3d-feature-design.md参照）。
 
 import {
 	MMD_MODEL_CATALOG,
@@ -11,6 +11,7 @@ import type { Mmo3dRenderer } from "./game-presets/shared";
 
 type BoardSpot = { x: number; z: number; threadPostId: string };
 type DummySpot = { x: number; z: number };
+type ObstacleSpot = { x: number; z: number; w: number; d: number; h: number; color?: string };
 
 export default function Mmo3dEditorPanel({
 	renderer,
@@ -21,6 +22,8 @@ export default function Mmo3dEditorPanel({
 	onBoardsChange,
 	dummies = [],
 	onDummiesChange,
+	obstacles = [],
+	onObstaclesChange,
 	pmxUrl = "",
 	onPmxUrlChange,
 	vmdUrl = "",
@@ -36,6 +39,9 @@ export default function Mmo3dEditorPanel({
 	/** ダミー敵の配置座標一覧。空なら既定の2体を使う。 */
 	dummies?: DummySpot[];
 	onDummiesChange?: (dummies: DummySpot[]) => void;
+	/** 簡易地形の障害物（直方体）一覧。three版は当たり判定あり、babylon版は見た目のみ。 */
+	obstacles?: ObstacleSpot[];
+	onObstaclesChange?: (obstacles: ObstacleSpot[]) => void;
 	pmxUrl?: string;
 	onPmxUrlChange?: (url: string) => void;
 	vmdUrl?: string;
@@ -178,7 +184,7 @@ export default function Mmo3dEditorPanel({
 			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
 				<p className="text-[11px] font-bold text-gray-300">掲示板（本SNSの投稿を参照）</p>
 				<p className="text-[10px] text-gray-500 leading-tight">
-					下の「複数の掲示板」が空のときだけ使う既定1枚分の投稿ID（three版のみ）。空欄なら埋め込み先の投稿を自動で使います。
+					下の「複数の掲示板」が空のときだけ使う既定1枚分の投稿ID。空欄なら埋め込み先の投稿を自動で使います。
 				</p>
 				<input
 					value={boardPostId}
@@ -188,9 +194,8 @@ export default function Mmo3dEditorPanel({
 				/>
 			</div>
 
-			{renderer === "three" && (
-				<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
-					<p className="text-[11px] font-bold text-gray-300">複数の掲示板（任意位置）</p>
+			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
+				<p className="text-[11px] font-bold text-gray-300">複数の掲示板（任意位置）</p>
 					<p className="text-[10px] text-gray-500 leading-tight">
 						ワールド座標(x, z)と対象投稿IDを指定して、複数の掲示板を好きな場所に置けます。1つ以上あれば上の既定1枚には代わりに使われます。
 					</p>
@@ -249,15 +254,13 @@ export default function Mmo3dEditorPanel({
 					>
 						+ 掲示板を追加
 					</button>
-				</div>
-			)}
+			</div>
 
-			{renderer === "three" && (
-				<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
-					<p className="text-[11px] font-bold text-gray-300">ダミー敵の配置</p>
-					<p className="text-[10px] text-gray-500 leading-tight">
-						ワールド座標(x, z)を指定します。0体なら既定の2体（(3,-3) と (-3,-4)）が使われます。
-					</p>
+			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
+				<p className="text-[11px] font-bold text-gray-300">ダミー敵の配置</p>
+				<p className="text-[10px] text-gray-500 leading-tight">
+					ワールド座標(x, z)を指定します。0体なら既定の2体（(3,-3) と (-3,-4)）が使われます。
+				</p>
 					{dummies.map((d, i) => (
 						<div
 							key={`dummy-${i}`}
@@ -301,8 +304,94 @@ export default function Mmo3dEditorPanel({
 					>
 						+ ダミー敵を追加
 					</button>
-				</div>
-			)}
+			</div>
+
+			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
+				<p className="text-[11px] font-bold text-gray-300">地形の障害物（直方体）</p>
+				<p className="text-[10px] text-gray-500 leading-tight">
+					中心座標(x, z)・幅(w)・奥行き(d)・高さ(h)を指定した直方体を配置します。three版はプレイヤー/ダミーとの当たり判定あり、babylon版は見た目のみです（既知の制限）。
+				</p>
+				{obstacles.map((o, i) => (
+					<div key={`obstacle-${i}`} className="space-y-1 border-b border-gray-700/60 pb-1.5 last:border-0 last:pb-0">
+						<div className="flex items-center gap-1">
+							<input
+								type="number"
+								value={o.x}
+								onChange={(e) => {
+									const next = [...obstacles];
+									next[i] = { ...o, x: Number(e.target.value) || 0 };
+									onObstaclesChange?.(next);
+								}}
+								placeholder="x"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={o.z}
+								onChange={(e) => {
+									const next = [...obstacles];
+									next[i] = { ...o, z: Number(e.target.value) || 0 };
+									onObstaclesChange?.(next);
+								}}
+								placeholder="z"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={o.w}
+								min={0.1}
+								onChange={(e) => {
+									const next = [...obstacles];
+									next[i] = { ...o, w: Math.max(0.1, Number(e.target.value) || 1) };
+									onObstaclesChange?.(next);
+								}}
+								placeholder="幅w"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={o.d}
+								min={0.1}
+								onChange={(e) => {
+									const next = [...obstacles];
+									next[i] = { ...o, d: Math.max(0.1, Number(e.target.value) || 1) };
+									onObstaclesChange?.(next);
+								}}
+								placeholder="奥行d"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={o.h}
+								min={0.1}
+								onChange={(e) => {
+									const next = [...obstacles];
+									next[i] = { ...o, h: Math.max(0.1, Number(e.target.value) || 1) };
+									onObstaclesChange?.(next);
+								}}
+								placeholder="高さh"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<button
+								type="button"
+								onClick={() => onObstaclesChange?.(obstacles.filter((_, j) => j !== i))}
+								className="flex-1 px-2 py-1 rounded text-[10px] bg-red-900/60 text-red-200 border border-red-800 hover:bg-red-900"
+							>
+								削除
+							</button>
+						</div>
+					</div>
+				))}
+				<button
+					type="button"
+					onClick={() =>
+						onObstaclesChange?.([...obstacles, { x: 0, z: 0, w: 2, d: 2, h: 1.5 }])
+					}
+					className="w-full px-2 py-1.5 rounded text-[10px] border border-dashed border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition"
+				>
+					+ 障害物を追加
+				</button>
+			</div>
 		</div>
 	);
 }

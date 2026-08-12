@@ -222,6 +222,7 @@ export interface GameManifestDraft {
     boardPostId?: string;
     boards?: { x: number; z: number; threadPostId: string }[];
     dummies?: { x: number; z: number }[];
+    obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string }[];
     pmxUrl?: string;
     vmdUrl?: string;
   };
@@ -14065,6 +14066,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 boardPostId={gameData.mmo3dConfig?.boardPostId ?? postId}
                 boards={gameData.mmo3dConfig?.boards}
                 dummies={gameData.mmo3dConfig?.dummies}
+                obstacles={gameData.mmo3dConfig?.obstacles}
                 pmxUrl={gameData.mmo3dConfig?.pmxUrl}
                 vmdUrl={gameData.mmo3dConfig?.vmdUrl}
               />
@@ -16708,6 +16710,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     onBoardsChange={(boards) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boards } }))}
                     dummies={gameData.mmo3dConfig?.dummies ?? []}
                     onDummiesChange={(dummies) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, dummies } }))}
+                    obstacles={gameData.mmo3dConfig?.obstacles ?? []}
+                    onObstaclesChange={(obstacles) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, obstacles } }))}
                     pmxUrl={gameData.mmo3dConfig?.pmxUrl ?? ''}
                     onPmxUrlChange={(pmxUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, pmxUrl: pmxUrl || undefined } }))}
                     vmdUrl={gameData.mmo3dConfig?.vmdUrl ?? ''}

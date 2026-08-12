@@ -35,6 +35,27 @@ const WALK_SPEED = 2.2; // m/s（three版 lib/mmo3d.ts と揃える）
 const RUN_SPEED = 5.5; // m/s
 const TURN_LERP = 10; // 1秒あたりの回転追従係数
 
+// ── 簡易近接戦闘（three版 lib/mmo3d.ts と同じ数値。フェーズ15でbabylon版にも移植）。 ──
+const ATTACK_COOLDOWN_SEC = 0.6;
+const ATTACK_SWING_SEC = 0.25;
+const ATTACK_RANGE = 2.2; // m
+const ATTACK_HALF_ANGLE = Math.PI / 3; // ±60°の扇状判定
+const ATTACK_DAMAGE = 20;
+const PLAYER_MAX_HP = 100;
+const DUMMY_MAX_HP = 60;
+const DUMMY_RESPAWN_SEC = 3;
+const BOARD_INTERACT_RANGE = 2.5; // m
+const BOARD_DEFAULT_Y = 1.2;
+
+interface BabylonDummy {
+	mesh: AbstractMesh;
+	mat: StandardMaterial;
+	hp: number;
+	respawnAt: number | null;
+	baseX: number;
+	baseZ: number;
+}
+
 let pmxLoaderRegistered = false;
 /** 副作用importは呼ぶたびに再登録されないよう1回だけ実行する。 */
 function ensurePmxLoaderRegistered() {
@@ -68,7 +89,26 @@ export class Mmo3dBabylonEngine {
 	private ghostMat: StandardMaterial;
 	private ghosts = new Map<string, AbstractMesh>();
 
-	constructor(canvas: HTMLCanvasElement, pmxUrl?: string, vmdUrl?: string) {
+	// ── 簡易近接戦闘（フェーズ15: three版からの移植）。 ──
+	private weapon: AbstractMesh | null = null;
+	private attackCooldown = 0;
+	private attackSwingT = -1; // -1=非攻撃中、0〜ATTACK_SWING_SECでスイング中
+	private playerHp = PLAYER_MAX_HP;
+	private dummies: BabylonDummy[] = [];
+	private elapsedSec = 0;
+	private onPlayerDamaged: ((hp: number, max: number) => void) | null = null;
+	private onDummyDamaged: ((index: number, hp: number, max: number) => void) | null = null;
+
+	// ── ゲーム内掲示板（フェーズ15: three版からの移植）。 ──
+	private boards: { mesh: AbstractMesh; threadPostId: string }[] = [];
+
+	constructor(
+		canvas: HTMLCanvasElement,
+		pmxUrl?: string,
+		vmdUrl?: string,
+		dummyPositions?: { x: number; z: number }[],
+		obstacleSpecs?: { x: number; z: number; w: number; d: number; h: number; color?: string }[],
+	) {
 		this.engine = new Engine(canvas, true, { stencil: true });
 		this.scene = new Scene(this.engine);
 
@@ -118,6 +158,53 @@ export class Mmo3dBabylonEngine {
 		this.ghostMat.diffuseColor = new Color3(0.27, 0.53, 1);
 		this.ghostMat.alpha = 0.85;
 
+		// 武器: ボーンアタッチではなくplayerRootの子として追従させる簡易実装（three版と同じ方針）。
+		const weapon = MeshBuilder.CreateBox(
+			"weapon",
+			{ width: 0.08, height: 0.08, depth: 1.1 },
+			this.scene,
+		);
+		weapon.position.set(0.5, 1.0, 0.3);
+		weapon.rotation.x = -Math.PI / 2.5;
+		weapon.parent = this.playerRoot;
+		const weaponMat = new StandardMaterial("weaponMat", this.scene);
+		weaponMat.diffuseColor = new Color3(0.8, 0.8, 0.8);
+		weapon.material = weaponMat;
+		this.weapon = weapon;
+
+		// 簡易ダミー敵。指定が無ければthree版と同じ既定2体を配置。
+		const dummySpots = dummyPositions?.length
+			? dummyPositions.map(({ x, z }) => [x, z] as const)
+			: ([
+					[3, -3],
+					[-3, -4],
+				] as const);
+		for (const [x, z] of dummySpots) {
+			const mesh = MeshBuilder.CreateCapsule(
+				`dummy-${this.dummies.length}`,
+				{ height: 1.1, radius: 0.45 },
+				this.scene,
+			);
+			mesh.position.set(x, 0.95, z);
+			const mat = new StandardMaterial(`dummyMat-${this.dummies.length}`, this.scene);
+			mat.diffuseColor = new Color3(0.9, 0.22, 0.21);
+			mesh.material = mat;
+			this.dummies.push({ mesh, mat, hp: DUMMY_MAX_HP, respawnAt: null, baseX: x, baseZ: z });
+		}
+
+		// 簡易地形障害物（見た目のみ。当たり判定はthree版のみ対応 — 既知の制限）。
+		for (const spec of obstacleSpecs ?? []) {
+			const box = MeshBuilder.CreateBox(
+				`obstacle-${this.scene.meshes.length}`,
+				{ width: spec.w, height: spec.h, depth: spec.d },
+				this.scene,
+			);
+			box.position.set(spec.x, spec.h / 2, spec.z);
+			const mat = new StandardMaterial(`obstacleMat-${this.scene.meshes.length}`, this.scene);
+			mat.diffuseColor = spec.color ? Color3.FromHexString(spec.color) : new Color3(0.47, 0.33, 0.28);
+			box.material = mat;
+		}
+
 		if (pmxUrl) {
 			player.isVisible = false;
 			this.loadMmdModelAndPlay(pmxUrl, vmdUrl).catch((err) => {
@@ -127,8 +214,9 @@ export class Mmo3dBabylonEngine {
 		}
 
 		this.scene.onBeforeRenderObservable.add(() => {
-			const dt = this.engine.getDeltaTime() / 1000;
-			this.updateMovement(Math.min(dt, 0.1));
+			const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
+			this.updateMovement(dt);
+			this.updateCombat(dt);
 		});
 
 		this.engine.runRenderLoop(() => {
@@ -186,6 +274,123 @@ export class Mmo3dBabylonEngine {
 		// カメラは向きを強制せず、狙点だけプレイヤーに追従させる（ユーザーのドラッグ操作を尊重）。
 		this.camera.target.x = this.playerRoot.position.x;
 		this.camera.target.z = this.playerRoot.position.z;
+	}
+
+	/** 掲示板の目印（看板）をワールドに設置する。1つ以上、任意位置に配置できる（three版と同じ形）。 */
+	enableBoard(boards?: { x: number; z: number; threadPostId: string }[]) {
+		if (this.boards.length) return;
+		const spots = boards?.length ? boards : [{ x: 0, z: 4, threadPostId: "" }];
+		const mat = new StandardMaterial("boardMat", this.scene);
+		mat.diffuseColor = new Color3(0.55, 0.43, 0.39);
+		for (const spot of spots) {
+			const mesh = MeshBuilder.CreateBox(
+				`board-${this.boards.length}`,
+				{ width: 1, height: 1.4, depth: 0.1 },
+				this.scene,
+			);
+			mesh.position.set(spot.x, BOARD_DEFAULT_Y, spot.z);
+			mesh.material = mat;
+			this.boards.push({ mesh, threadPostId: spot.threadPostId });
+		}
+	}
+
+	/** プレイヤーが掲示板の対話範囲内にいれば、その掲示板のthreadPostIdを返す（three版と同じ）。 */
+	nearBoard(): string | null {
+		let best: { threadPostId: string; dist: number } | null = null;
+		const p = this.playerRoot.position;
+		for (const b of this.boards) {
+			const dist = Vector3.Distance(p, b.mesh.position);
+			if (dist > BOARD_INTERACT_RANGE) continue;
+			if (!best || dist < best.dist) best = { threadPostId: b.threadPostId, dist };
+		}
+		return best ? best.threadPostId : null;
+	}
+
+	/** 攻撃キー/クリックのエッジで呼ぶ。クールダウン中は無視する（three版と同じ数値仕様）。 */
+	triggerAttack() {
+		if (this.attackCooldown > 0 || this.playerHp <= 0) return;
+		this.attackCooldown = ATTACK_COOLDOWN_SEC;
+		this.attackSwingT = 0;
+		this.resolveAttackHits();
+	}
+
+	private resolveAttackHits() {
+		const px = this.playerRoot.position.x;
+		const pz = this.playerRoot.position.z;
+		for (const d of this.dummies) {
+			if (d.respawnAt !== null) continue;
+			const dx = d.mesh.position.x - px;
+			const dz = d.mesh.position.z - pz;
+			const dist = Math.hypot(dx, dz);
+			if (dist > ATTACK_RANGE) continue;
+			const angleToTarget = Math.atan2(dx, dz);
+			let diff = angleToTarget - this.facing;
+			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+			if (Math.abs(diff) > ATTACK_HALF_ANGLE) continue;
+			this.damageDummy(d, ATTACK_DAMAGE);
+		}
+	}
+
+	private damageDummy(d: BabylonDummy, amount: number) {
+		d.hp = Math.max(0, d.hp - amount);
+		const idx = this.dummies.indexOf(d);
+		this.onDummyDamaged?.(idx, d.hp, DUMMY_MAX_HP);
+		if (d.hp <= 0) {
+			d.respawnAt = this.elapsedSec + DUMMY_RESPAWN_SEC;
+			d.mesh.isVisible = false;
+		} else {
+			d.mat.emissiveColor = new Color3(1, 1, 1);
+			setTimeout(() => {
+				d.mat.emissiveColor = new Color3(0, 0, 0);
+			}, 100);
+		}
+	}
+
+	/** 自分がダメージを受けたときの経路（three版と同じ）。 */
+	takeDamage(amount: number) {
+		if (this.playerHp <= 0) return;
+		this.playerHp = Math.max(0, this.playerHp - amount);
+		this.onPlayerDamaged?.(this.playerHp, PLAYER_MAX_HP);
+	}
+
+	getPlayerHp(): { hp: number; max: number } {
+		return { hp: this.playerHp, max: PLAYER_MAX_HP };
+	}
+
+	/** HP変化の通知先を登録する（UI表示用、three版と同じ）。 */
+	setCombatCallbacks(handlers: {
+		onPlayerDamaged?: (hp: number, max: number) => void;
+		onDummyDamaged?: (index: number, hp: number, max: number) => void;
+	}) {
+		this.onPlayerDamaged = handlers.onPlayerDamaged ?? null;
+		this.onDummyDamaged = handlers.onDummyDamaged ?? null;
+	}
+
+	private updateCombat(dt: number) {
+		this.elapsedSec += dt;
+		if (this.attackCooldown > 0) this.attackCooldown -= dt;
+
+		if (this.weapon && this.attackSwingT >= 0) {
+			this.attackSwingT += dt;
+			const t = Math.min(1, this.attackSwingT / ATTACK_SWING_SEC);
+			const swing = Math.sin(t * Math.PI) * (Math.PI / 2);
+			this.weapon.rotation.z = -swing;
+			if (this.attackSwingT >= ATTACK_SWING_SEC) {
+				this.attackSwingT = -1;
+				this.weapon.rotation.z = 0;
+			}
+		}
+
+		for (const d of this.dummies) {
+			if (d.respawnAt !== null && this.elapsedSec >= d.respawnAt) {
+				d.hp = DUMMY_MAX_HP;
+				d.mesh.position.set(d.baseX, 0.95, d.baseZ);
+				d.mesh.isVisible = true;
+				d.respawnAt = null;
+				const idx = this.dummies.indexOf(d);
+				this.onDummyDamaged?.(idx, d.hp, DUMMY_MAX_HP);
+			}
+		}
 	}
 
 	/** リアルタイムハブへ送る自分の位置/向き。three版 getLocalState と同じ形（x/y=world x/z）。
@@ -247,6 +452,8 @@ export class Mmo3dBabylonEngine {
 	): Promise<MmdModel> {
 		const meshes = await this.loadMmdModel(pmxUrl);
 		const root = meshes[0] as unknown as MmdSkinnedMesh;
+		// playerRootの子にして移動/向きに追従させる（外していると常にワールド原点に固定されたままになる）。
+		root.parent = this.playerRoot;
 
 		if (!this.mmdRuntime) {
 			this.mmdRuntime = new MmdRuntime(this.scene);

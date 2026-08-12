@@ -20,7 +20,6 @@ import { realtimeConfigured, useRealtimeSubscription } from "@/lib/hooks/useReal
 import { Mmo3dEngine } from "@/lib/mmo3d";
 import { Mmo3dBabylonEngine } from "@/lib/mmo3d-babylon";
 import { chGame } from "@/lib/realtime/channels";
-import type { RealtimePlayer } from "@/lib/realtime/channels";
 import { getRealtimeClient } from "@/lib/realtime/client";
 import GameThreadBoard from "./GameThreadBoard";
 import type { Mmo3dRenderer } from "./game-presets/shared";
@@ -35,31 +34,31 @@ export default function Mmo3dMaker({
 	boardPostId,
 	boards,
 	dummies,
+	obstacles,
 	pmxUrl,
 	vmdUrl,
 }: {
 	renderer?: Mmo3dRenderer;
-	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three版のみ対応）。 */
+	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three/babylon共通対応）。 */
 	gameId?: string;
 	sessionId?: string;
-	/** 掲示板1枚のフォールバック（boardsが空のとき既定位置に置く）。近づいてEキーで開ける（three版のみ）。 */
+	/** 掲示板1枚のフォールバック（boardsが空のとき既定位置に置く）。近づいてEキーで開ける（three/babylon共通対応）。 */
 	boardPostId?: string;
-	/** ワールド上の任意位置に複数の掲示板を配置する（three版のみ）。空ならboardPostId 1枚にフォールバック。 */
+	/** ワールド上の任意位置に複数の掲示板を配置する。空ならboardPostId 1枚にフォールバック。 */
 	boards?: { x: number; z: number; threadPostId: string }[];
-	/** ダミー敵の配置座標（three版のみ）。空なら既定の2体を使う。 */
+	/** ダミー敵の配置座標。空なら既定の2体を使う。 */
 	dummies?: { x: number; z: number }[];
+	/** 簡易地形の障害物。three版は当たり判定あり、babylon版は見た目のみ（既知の制限）。 */
+	obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string }[];
 	/** MMD(PMX/PMD)モデルURL（babylon版のみ） */
 	pmxUrl?: string;
 	/** MMD(VMD)モーションURL（babylon版のみ） */
 	vmdUrl?: string;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
-	const engineRef = useRef<Mmo3dEngine | null>(null);
-	/** three/babylon 共通で使うインターフェース（位置同期・ゴースト表示のみ）。 */
-	const syncEngineRef = useRef<{
-		getLocalState: () => { x: number; y: number; rotY: number; anim: string };
-		setRemotePlayers: (players: RealtimePlayer[]) => void;
-	} | null>(null);
+	/** three/babylon 共通API（移動・戦闘・掲示板・位置同期）。フェーズ15でbabylon版もthree版と
+	 *  同じメソッド一式を持つようになったため、レンダラーを問わず1本のrefで扱える。 */
+	const engineRef = useRef<Mmo3dEngine | Mmo3dBabylonEngine | null>(null);
 	const [hp, setHp] = useState({ hp: 100, max: 100 });
 	const [dummyHp, setDummyHp] = useState<Record<number, { hp: number; max: number }>>({});
 	const [nearBoardId, setNearBoardId] = useState<string | null>(null);
@@ -71,6 +70,7 @@ export default function Mmo3dMaker({
 	// 値が実質同じなら参照を安定させ、依存するuseEffectの無駄な再マウントを防ぐ。
 	const boardsKey = JSON.stringify(boards ?? []);
 	const dummiesKey = JSON.stringify(dummies ?? []);
+	const obstaclesKey = JSON.stringify(obstacles ?? []);
 	const effectiveBoards = useMemo(
 		() =>
 			boards && boards.length > 0
@@ -87,68 +87,45 @@ export default function Mmo3dMaker({
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 
-		if (renderer === "babylon") {
-			const engine = new Mmo3dBabylonEngine(canvas, pmxUrl, vmdUrl);
-			syncEngineRef.current = engine;
-
-			// WASD/矢印キー + Shift。babylon版はカメラ相対移動（ArcRotateCameraをユーザーが
-			// ドラッグで自由に回せる、その向きを基準に前後左右を解決する）。攻撃/掲示板は
-			// three版のみの機能で、babylon版はまだ未対応（既知の制限）。
-			const keyToInput: Record<string, "forward" | "back" | "left" | "right"> = {
-				KeyW: "forward",
-				ArrowUp: "forward",
-				KeyS: "back",
-				ArrowDown: "back",
-				KeyA: "left",
-				ArrowLeft: "left",
-				KeyD: "right",
-				ArrowRight: "right",
-			};
-			const onKeyDown = (e: KeyboardEvent) => {
-				const field = keyToInput[e.code];
-				if (field) engine.setInput({ [field]: true });
-				if (e.code === "ShiftLeft" || e.code === "ShiftRight")
-					engine.setInput({ run: true });
-			};
-			const onKeyUp = (e: KeyboardEvent) => {
-				const field = keyToInput[e.code];
-				if (field) engine.setInput({ [field]: false });
-				if (e.code === "ShiftLeft" || e.code === "ShiftRight")
-					engine.setInput({ run: false });
-			};
-			window.addEventListener("keydown", onKeyDown);
-			window.addEventListener("keyup", onKeyUp);
-
-			const ro = new ResizeObserver(() => engine.resize());
-			ro.observe(canvas);
-			return () => {
-				window.removeEventListener("keydown", onKeyDown);
-				window.removeEventListener("keyup", onKeyUp);
-				ro.disconnect();
-				engine.dispose();
-				syncEngineRef.current = null;
-			};
-		}
-
-		const { clientWidth: w, clientHeight: h } = canvas;
-		const engine = new Mmo3dEngine(canvas, w || 640, h || 480, dummies);
+		const isBabylon = renderer === "babylon";
+		const engine = isBabylon
+			? new Mmo3dBabylonEngine(canvas, pmxUrl, vmdUrl, dummies, obstacles)
+			: new Mmo3dEngine(
+					canvas,
+					canvas.clientWidth || 640,
+					canvas.clientHeight || 480,
+					dummies,
+					obstacles,
+				);
 		engineRef.current = engine;
-		syncEngineRef.current = engine;
 		engine.setCombatCallbacks({
 			onPlayerDamaged: (hpVal, max) => setHp({ hp: hpVal, max }),
 			onDummyDamaged: (index, hpVal, max) =>
 				setDummyHp((prev) => ({ ...prev, [index]: { hp: hpVal, max } })),
 		});
 		if (effectiveBoards.length) engine.enableBoard(effectiveBoards);
-		engine.start();
+		if (engine instanceof Mmo3dEngine) engine.start();
 
-		const ro = new ResizeObserver(([entry]) => {
-			const { width, height } = entry.contentRect;
-			if (width > 0 && height > 0) engine.resize(width, height);
-		});
-		ro.observe(canvas);
+		const ro = engine instanceof Mmo3dBabylonEngine
+			? (() => {
+					const babylonEngine = engine;
+					const observer = new ResizeObserver(() => babylonEngine.resize());
+					observer.observe(canvas);
+					return observer;
+				})()
+			: (() => {
+					const observer = new ResizeObserver(([entry]) => {
+						const { width, height } = entry.contentRect;
+						if (width > 0 && height > 0)
+							(engine as Mmo3dEngine).resize(width, height);
+					});
+					observer.observe(canvas);
+					return observer;
+				})();
 
-		// WASD/矢印キー + Shift + Space(攻撃)。フェーズ6で仮想パッド（タッチ）にも対応する。
+		// WASD/矢印キー + Shift + Space(攻撃) + Eキー(掲示板)。three/babylon共通。
+		// babylon版は移動がカメラ相対（ArcRotateCameraをユーザーがドラッグで自由に回せる、
+		// その向きを基準に前後左右を解決する）。
 		const keyToInput: Record<string, "forward" | "back" | "left" | "right"> = {
 			KeyW: "forward",
 			ArrowUp: "forward",
@@ -194,19 +171,18 @@ export default function Mmo3dMaker({
 			ro.disconnect();
 			engine.dispose();
 			engineRef.current = null;
-			syncEngineRef.current = null;
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBoardsはboardsKey/boardPostId由来、dummiesKeyで内容が変わった時だけ再マウントする
-	}, [renderer, pmxUrl, vmdUrl, effectiveBoards, dummiesKey]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBoardsはboardsKey/boardPostId由来、dummiesKey/obstaclesKeyで内容が変わった時だけ再マウントする
+	}, [renderer, pmxUrl, vmdUrl, effectiveBoards, dummiesKey, obstaclesKey]);
 
-	// ── 掲示板への近接検知（three版のみ）。開いている間はEでの再トグルより閉じるボタン優先。 ──
+	// ── 掲示板への近接検知。開いている間はEでの再トグルより閉じるボタン優先。 ──
 	useEffect(() => {
-		if (renderer !== "three" || effectiveBoards.length === 0) return;
+		if (effectiveBoards.length === 0) return;
 		const id = setInterval(() => {
 			setNearBoardId(engineRef.current?.nearBoard() ?? null);
 		}, BOARD_PROXIMITY_POLL_MS);
 		return () => clearInterval(id);
-	}, [renderer, effectiveBoards]);
+	}, [effectiveBoards]);
 
 	// ── リアルタイム同期（three/babylon共通、gameId/sessionIdがある時だけ）。DBには書かない。 ──
 	useEffect(() => {
@@ -214,7 +190,7 @@ export default function Mmo3dMaker({
 		const client = getRealtimeClient();
 		if (!client) return;
 		const send = () => {
-			const engine = syncEngineRef.current;
+			const engine = engineRef.current;
 			if (!engine) return;
 			const { x, y, rotY, anim } = engine.getLocalState();
 			// babylon版はアニメ状態を持たないため常に"idle"を返す（既知の制限）。
@@ -235,7 +211,7 @@ export default function Mmo3dMaker({
 			(msg) => {
 				if (msg.t !== "presence") return;
 				const others = msg.players.filter((p) => p.sessionId !== sessionId);
-				syncEngineRef.current?.setRemotePlayers(others);
+				engineRef.current?.setRemotePlayers(others);
 			},
 			[sessionId],
 		),
@@ -250,21 +226,19 @@ export default function Mmo3dMaker({
 				tabIndex={0}
 				aria-label="mmo3d プレイビュー"
 			/>
-			{renderer === "three" && (
-				<div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
-					<HpBar label="HP" hp={hp.hp} max={hp.max} color="#4ade80" />
-					{Object.entries(dummyHp).map(([idx, v]) => (
-						<HpBar
-							key={idx}
-							label={`敵${Number(idx) + 1}`}
-							hp={v.hp}
-							max={v.max}
-							color="#f87171"
-						/>
-					))}
-				</div>
-			)}
-			{renderer === "three" && nearBoardId && !boardOpen && (
+			<div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
+				<HpBar label="HP" hp={hp.hp} max={hp.max} color="#4ade80" />
+				{Object.entries(dummyHp).map(([idx, v]) => (
+					<HpBar
+						key={idx}
+						label={`敵${Number(idx) + 1}`}
+						hp={v.hp}
+						max={v.max}
+						color="#f87171"
+					/>
+				))}
+			</div>
+			{nearBoardId && !boardOpen && (
 				<div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded bg-black/70 text-white text-xs pointer-events-none">
 					Eキーで掲示板を開く
 				</div>

@@ -1267,6 +1267,9 @@ export interface PresetData {
 		boards?: { x: number; z: number; threadPostId: string }[];
 		/** ダミー敵の配置座標。空/未指定なら既定の2体(x=±2, z=-3)を使う。 */
 		dummies?: { x: number; z: number }[];
+		/** 簡易地形オブジェクト（直方体の障害物）。x/zが中心、w=X幅、d=Z奥行き、h=高さ。
+		 *  three版のみプレイヤー/ダミーとの当たり判定あり（軸分離スライド）。babylon版は見た目のみ。 */
+		obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string }[];
 		/** MMD(PMX/PMD)モデルのURL（renderer==='babylon'で使用）。未指定時は標準カプセル。 */
 		pmxUrl?: string;
 		/** MMD(VMD)モーションのURL（renderer==='babylon'で使用）。未指定時はモーションなし。 */
