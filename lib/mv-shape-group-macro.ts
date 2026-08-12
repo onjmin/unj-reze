@@ -37,66 +37,100 @@ import {
  * 中心の段だけは自分自身が鏡像なので相方が要らない。
  */
 
-// ───────────────── グリフ（形の語彙） ─────────────────
+// ───────────────── モチーフ（線の積み重ね） ─────────────────
 
 /**
- * 参考動画から起こした矩形基調のグリフ集。設計座標系は 0..100 の正方形
- * （`pathBox` の既定と同じ）で、中心は 50,50。
+ * 図形の語彙。設計座標系は 0..100 の正方形（`pathBox` の既定と同じ）で中心は 50,50。
  *
- * 同じ「族」の中だけでコマ送りさせると、形が変わっても絵の調子が揃う。
- * 族をまたいでシャッフルすると（枠→縞→破線→塊…）参考動画には無い
- * 散らかった印象になるので、1つのグループは1族に閉じる。
+ * **1つのモチーフは「完成した絵」ではなく、線を重ねる順番**で持つ。
+ * 先頭ほど核で最後まで残り、後ろほど装飾で真っ先に消える。
+ * コマ送りはこの配列を後ろから削って作るので、**隣り合うコマは必ず
+ * 「線1組ぶんの差」しかない**。
  *
- * **各族は「濃い順（線の本数が多い順）」に並べてあり、この順序に意味がある。**
- * 参考動画の1拍の中の濃さの推移（実測: 17768→8536→8108→5772 画素）は、
- * 同じ絵が薄くなっているのではなく**濃い絵から薄い絵へコマが並んでいる**ことで
- * 起きていた。だからコマ列はこの順序を保ったまま選ぶこと（シャッフルすると
- * 隣り合うコマが無関係になり、展開ではなくランダムな明滅に見える）。
+ * これが肝で、以前のように出来上がった絵を並べていると、繋ぎ目の重ね合わせが
+ * 無関係な2枚の二重写しにしかならず、いくら滑らかに混ぜても「パラパラ漫画」に
+ * 見えていた。差分が線1組なら、重ね合わせはそのまま**その線だけがフェードアウト
+ * する**動きになり、拍で切り替わっているのに繋がって見える。
+ *
+ * 参考動画の1拍の中の濃さの推移（実測: 17768→8536→8108→5772 画素）も、
+ * 別の絵に差し替わっているのではなく要素が減っていく形だった。
  */
-const GLYPH_FAMILIES = {
-	/** 枠・かぎ括弧。参考動画1の主役の register。 */
-	frame: [
-		"M4 4H96V96H4Z M20 20H80V80H20Z M36 36H64V64H36Z",
-		"M6 6H94V94H6Z M28 28H72V72H28Z",
-		"M20 6H80V94H20Z M6 20H94 M6 80H94",
-		"M8 22H92V78H8Z M26 40H42V60H26Z M58 40H74V60H58Z",
-		"M14 14H86V86H14Z M14 50H86",
+const MOTIFS: Record<string, string[]> = {
+	/** 枠の入れ子。参考動画1の主役。 */
+	frameStack: [
 		"M10 10H90V90H10Z",
-		"M12 34V12H88V34 M12 66V88H88V66",
-		"M34 10H10V90H34 M66 10H90V90H66",
+		"M28 28H72V72H28Z",
+		"M44 44H56V56H44Z",
+		"M10 50H28 M72 50H90",
+		"M50 10V28 M50 72V90",
+	],
+	/** かぎ括弧が閉じて枠になる。 */
+	corner: [
+		"M10 30V10H30 M70 10H90V30 M90 70V90H70 M30 90H10V70",
+		"M38 10H62 M38 90H62",
+		"M10 38V62 M90 38V62",
+		"M40 40H60V60H40Z",
+	],
+	/** 縦棒が増えていく。参考動画2の register。 */
+	pillar: [
+		"M34 14V86 M66 14V86",
+		"M50 26V74",
+		"M14 34V66 M86 34V66",
+		"M4 44V56 M96 44V56",
+	],
+	/** 横罫と目盛。参考動画1の破線2段。 */
+	rule: [
+		"M6 50H94",
+		"M6 34H94 M6 66H94",
+		"M22 26V74 M50 26V74 M78 26V74",
+		"M6 20H94 M6 80H94",
+	],
+	/** 中央の塊＋左右の塊。参考動画1の「▫▪▫」。 */
+	triad: [
+		"M38 30H62V70H38Z",
+		"M4 36H26V64H4Z M74 36H96V64H74Z",
+		"M44 42H56V58H44Z",
+		"M30 14H70V22H30Z M30 78H70V86H30Z",
+	],
+	/** 縞箱。 */
+	stripe: [
+		"M8 26H92V74H8Z",
+		"M29 26V74 M50 26V74 M71 26V74",
+		"M8 50H92",
+		"M18 26V74 M40 26V74 M60 26V74 M82 26V74",
+	],
+	/** 十字から四隅へ。 */
+	cross: [
+		"M50 8V92 M8 50H92",
 		"M24 24H76V76H24Z",
-		"M10 32V10H32 M68 10H90V32 M90 68V90H68 M32 90H10V68",
+		"M40 40H60V60H40Z",
+		"M8 8H24V24H8Z M76 8H92V24H76Z M8 76H24V92H8Z M76 76H92V92H76Z",
 	],
-	/** 棒・破線・目盛。参考動画2の縦棒ペアと、参考動画1の破線2段。 */
-	bar: [
-		"M8 30V70 M22 38V62 M36 30V70 M50 38V62 M64 30V70 M78 38V62 M92 30V70",
-		"M20 6V94 M50 20V80 M80 6V94",
-		"M6 50H94 M20 36V64 M50 30V70 M80 36V64",
-		"M12 40V60 M31 40V60 M50 40V60 M69 40V60 M88 40V60",
-		"M4 38H20 M28 38H48 M56 38H72 M80 38H96 M4 62H16 M24 62H44 M52 62H68 M76 62H96",
-		"M34 10V90 M66 10V90",
-		"M34 12V28 M34 38V56 M34 66V88 M66 12V34 M66 44V62 M66 72V88",
-		"M4 42H96 M4 58H96",
-		"M10 46H34 M66 46H90 M10 54H34 M66 54H90",
-		"M34 30V70 M66 30V70",
-	],
-	/** 塊・縞箱。参考動画1の「▫▪▫」、参考動画2の「四角＋下の帯」。 */
-	block: [
-		"M8 26H92V74H8Z M29 26V74 M50 26V74 M71 26V74",
-		"M2 34H26V66H2Z M38 28H62V72H38Z M74 34H98V66H74Z",
-		"M28 8H72V56H28Z M14 66H86V92H14Z",
-		"M20 14H40V86H20Z M60 14H80V86H60Z",
-		"M12 12H46V46H12Z M54 54H88V88H54Z",
-		"M30 30H70V70H30Z M6 46H24 M76 46H94",
-		"M6 44H38V56H6Z M62 44H94V56H62Z",
-		"M4 36H96V64H4Z",
-		"M36 36H64V64H36Z",
-	],
-} satisfies Record<string, string[]>;
+};
 
-type GlyphFamily = keyof typeof GLYPH_FAMILIES;
+const MOTIF_IDS = Object.keys(MOTIFS);
 
-const GLYPH_FAMILY_IDS = Object.keys(GLYPH_FAMILIES) as GlyphFamily[];
+/**
+ * モチーフをコマ列へ展開する。線を後ろから1組ずつ削っていくので、
+ * 隣り合うコマの差は必ず線1組ぶん＝重ね合わせがフェードアウトとして読める。
+ *
+ * **必ず折り返す（減らしきったら増やして戻る）**。減らすだけで終わらせると
+ * 最後のコマ(線1組)から先頭のコマ(全部)へ戻るところで一気に線が4〜5組ぶん復活し、
+ * そこだけ重ね合わせが「線のフェード」ではなく無関係な2枚の二重写しになる
+ * ——1周のうち1回だけカクッとする原因になっていた。折り返せば巡回のどの位置でも
+ * 差は必ず1組ぶんに保たれる。
+ *
+ * 副産物として1拍あたりのコマ数が倍近く（線5本なら8コマ）になり、
+ * 参考動画の実測（1拍に8前後の状態）ともちょうど合う。
+ */
+function motifFrames(strokes: string[]): string[] {
+	const down: string[] = [];
+	for (let keep = strokes.length; keep >= 1; keep--) {
+		down.push(strokes.slice(0, keep).join(" "));
+	}
+	// 両端は折り返しで重複させない（同じ絵が2コマ続くと、そこだけ間延びする）。
+	return [...down, ...down.slice(1, -1).reverse()];
+}
 
 /** `shapeStyle:'round'` 用。矩形グリフの代わりに使う丸い原始図形。 */
 const ROUND_FORMS: MvShapeForm[] = ["ring", "circle", "ripple"];
@@ -105,21 +139,21 @@ const FALLBACK_PALETTE = ["#ffffff", "#a3e635", "#38bdf8", "#fbbf24", "#f472b6"]
 const MONOCHROME_PALETTE = ["#ffffff", "#e5e5e5", "#bdbdbd"];
 
 /**
- * グリフの差し替え間隔（拍）。
+ * ひと巡りの既定の長さ（拍）。
  *
- * 参考動画を60fpsのまま1コマずつ白画素で測った結果、**どちらも1つの状態が
- * ちょうど3〜4コマ（0.05〜0.067秒）で入れ替わっていた**。1周期は
- * チョウチン少女=26コマ(0.433秒/138BPM)、2026-08-09=30コマ(0.5秒/120BPM)で、
- * どちらも「1拍でひと巡り・その中に8前後の状態」になる＝**1/8拍ごとの差し替え**。
- * 目視で 1/2拍くらいに見えていたのは、隣り合う状態が似ていて数えきれていなかっただけ。
+ * 参考動画を60fpsのまま1コマずつ白画素で測ると、1周期は
+ * チョウチン少女=26コマ(0.433秒/138BPM)、2026-08-09=30コマ(0.5秒/120BPM)で
+ * **どちらもちょうど1拍**。その中に8前後の状態が入っていた。だから既定は1拍。
  */
-const SWAP_BEATS_OPTIONS = [0.125, 0.125, 0.25, 0.25, 0.5];
+const DEFAULT_BASE_BEATS = 1;
 
-/**
- * 1発ぶんのゲートの周期（拍）。
- * 参考動画はどちらもぴったり1拍でひと巡りしていたので1拍を厚めに取る。
- */
-const GATE_PERIOD_OPTIONS = [1, 1, 1, 1, 2];
+/** 「ベースの拍」に選べる値。半拍〜1小節。 */
+export const MV_SHAPE_BASE_BEATS_OPTIONS: { value: number; label: string }[] = [
+	{ value: 0.5, label: "半拍（倍速）" },
+	{ value: 1, label: "1拍（既定）" },
+	{ value: 2, label: "2拍" },
+	{ value: 4, label: "1小節（4拍）" },
+];
 
 function pick<T>(arr: readonly T[]): T {
 	return arr[Math.floor(Math.random() * arr.length)];
@@ -131,23 +165,6 @@ function randRange(min: number, max: number): number {
 
 function chance(p: number): boolean {
 	return Math.random() < p;
-}
-
-/**
- * 配列から重複なく n 個取り出す。**元の並び順は保つ**。
- *
- * 族は濃い順に並べてあるので、順序を保って選べばそのまま
- * 「濃い→薄い」の展開になる。シャッフルしてはいけない。
- */
-function sampleOrdered<T>(arr: readonly T[], n: number): T[] {
-	const idx = new Set<number>();
-	// 端（いちばん濃い絵・いちばん薄い絵）は展開の起点と終点なので必ず入れる。
-	idx.add(0);
-	if (n > 1) idx.add(arr.length - 1);
-	while (idx.size < Math.min(n, arr.length)) {
-		idx.add(Math.floor(Math.random() * arr.length));
-	}
-	return [...idx].sort((a, b) => a - b).map((i) => arr[i]);
 }
 
 export interface SymmetricShapeGroupOptions {
@@ -183,6 +200,15 @@ export interface SymmetricShapeGroupOptions {
 	 * smooth は長く(ほぼ溶け合う)取る。
 	 */
 	motionFeel?: "crisp" | "smooth";
+	/**
+	 * ひと巡りの長さ＝この動きが乗る拍（既定1拍）。
+	 *
+	 * コマ数はモチーフの線の本数で決まるので、1コマの長さは `これ ÷ コマ数` として
+	 * 自動で割り出す。**「1コマ何拍」を先に決めてはいけない**——5コマ×0.125拍=0.625拍
+	 * のように半端になり、何周かするうちに拍からずれていく。ここを基準にすれば
+	 * コマ数が何枚でも必ず拍に乗る。拍の踏み込みの周期も同じ値に揃える。
+	 */
+	baseBeats?: number;
 }
 
 // ───────────────── 動き ─────────────────
@@ -299,14 +325,12 @@ function smoothModulators(o: MotionOptions): MvModulator[] {
 /** 1要素を作るのに必要な、グループ全体で共有する決めごと。 */
 interface GroupPlan {
 	feel: "crisp" | "smooth";
-	family: GlyphFamily;
-	/** iconCycle に入れるグリフ列。族の並び（濃い順）を保ったまま抜き出したもの。 */
+	/** iconCycle に入れるコマ列。モチーフから線を1組ずつ削って作ったもの。 */
 	cyclePaths: string[];
-	/** 全コマを1周するのに何拍かけるか。 */
-	cycleBeats: number;
+	/** ひと巡りの基準の長さ（拍）。要素ごとの実際の周期はこれの整数倍。 */
+	baseBeats: number;
 	/** コマの終わり何割を次のコマとの重ね合わせに使うか（0..1）。 */
 	crossfade: number;
-	gatePeriod: number;
 	phraseBars: number;
 	swell: number;
 	baseThickness: number;
@@ -316,6 +340,17 @@ interface GroupPlan {
 	/** スロット数。要素はこの数で割った位相を受け持つ。 */
 	slots: number;
 }
+
+/**
+ * 要素ごとの速さの倍率。ベースの拍に対して 1倍・1/2倍速・1/4倍速を織り交ぜる。
+ *
+ * 全部が同じ速さだと、いくら要素を増やしても1枚の絵が明滅しているだけに見える。
+ * 遅い要素が混ざると、速い要素の裏でゆっくり形が変わっていく層ができて厚みが出る。
+ * **整数倍だけにしてあるので、何倍速が混ざっても小節の頭で必ず全部が揃う**
+ * （3倍のような値を混ぜると何小節も揃わず、拍から浮いて聞こえる）。
+ * 1倍を多めにして、拍を踏む要素が常に主役になるようにしてある。
+ */
+const RATE_MULTIPLIERS = [1, 1, 1, 1, 1, 2, 2, 4];
 
 /** コマ列を k コマぶん回す。脇役を主役と違うコマから始めるのに使う。 */
 function rotateCycle(paths: string[], k: number): string[] {
@@ -336,15 +371,26 @@ function buildElement(
 		filled: boolean;
 		/** コマ列の開始位置をずらす（脇役を主役と別の絵にする）。 */
 		cycleShift: number;
+		/** ベースの拍に対する周期の倍率（1 / 2 / 4）。 */
+		rateMul: number;
 		z: number;
 	},
 ): MvShapeLayer {
-	const thickness = plan.baseThickness * randRange(0.85, 1.15);
+	// 太さは図形の大きさに対して頭打ちにする。グループ内で太さを共通にすると、
+	// 大きい段はちょうど良くても小さい脇役が塗り潰れて「点」になってしまう
+	// （太くする指定ほどここが効く）。
+	const thickness = Math.min(
+		plan.baseThickness * randRange(0.85, 1.15),
+		opts.size * 0.3,
+	);
+	// 形のひと巡りと拍の踏み込みは同じ周期にする。片方だけ別の速さにすると、
+	// 形が一巡する頭と踏み込む頭がずれて拍に乗っていないように見える。
+	const periodBeats = plan.baseBeats * opts.rateMul;
 	const motion: MotionOptions = {
 		size: opts.size,
 		thickness,
-		periodBeats: plan.gatePeriod,
-		phaseOffset: (opts.slot % plan.slots) * (plan.gatePeriod / plan.slots),
+		periodBeats,
+		phaseOffset: (opts.slot % plan.slots) * (periodBeats / plan.slots),
 		phraseBars: plan.phraseBars,
 		swell: plan.swell,
 	};
@@ -391,7 +437,7 @@ function buildElement(
 		pathBox: [0, 0, 100, 100],
 		iconCycle: {
 			paths,
-			beats: plan.cycleBeats,
+			beats: periodBeats,
 			crossfade: plan.crossfade,
 		},
 	};
@@ -411,45 +457,38 @@ function makePlan(options: SymmetricShapeGroupOptions): GroupPlan {
 
 	const feel = options.motionFeel ?? "crisp";
 
-	const family = pick(GLYPH_FAMILY_IDS);
-	const pool = GLYPH_FAMILIES[family];
-	// crisp は参考動画どおり1拍のあいだに8前後の状態を通す。
-	// smooth はコマ替えを主役にしないので、少ない枚数をゆっくり回す。
-	const cyclePaths = sampleOrdered(
-		pool,
-		feel === "smooth"
-			? 2 + Math.floor(Math.random() * 2)
-			: Math.min(pool.length, 4 + Math.floor(Math.random() * 5)),
-	);
-	const swapBeats =
-		feel === "smooth" ? pick([2, 4, 4]) : pick(SWAP_BEATS_OPTIONS);
+	const motif = MOTIFS[pick(MOTIF_IDS)];
+	const cyclePaths = motifFrames(motif);
 
 	const thicknessMode = options.thickness ?? "random";
 	let baseThickness: number;
-	if (thicknessMode === "thick") baseThickness = randRange(2.5, 5);
-	else if (thicknessMode === "thin") baseThickness = randRange(0.8, 1.6);
-	else baseThickness = randRange(1.2, 3.2);
+	if (thicknessMode === "thick") baseThickness = randRange(5, 9);
+	else if (thicknessMode === "thin") baseThickness = randRange(1.8, 3.2);
+	else baseThickness = randRange(3, 6);
 
 	const mainColor = pick(palette);
 	const others = palette.filter((c) => c !== mainColor);
 	const accentColor =
 		others.length > 0 && chance(0.45) ? pick(others) : mainColor;
 
+	// ひと巡りも拍の踏み込みも同じ「ベースの拍」に揃える。片方だけ別の周期に
+	// すると、形が一巡する頭と踏み込む頭がずれて、拍に乗っていないように見える。
+	const baseBeats = options.baseBeats ?? DEFAULT_BASE_BEATS;
+
 	return {
 		feel,
-		family,
 		cyclePaths,
-		// `beats` は全コマを1周する長さ。1コマあたりの滞在時間が swapBeats になる。
-		cycleBeats: cyclePaths.length * swapBeats,
-		// コマの繋ぎ。crisp でも 0 にはしない——0 だと形が飛ぶだけで間を埋めるものが
-		// 無く、変化の大きさに関係なく「パラパラ漫画」に見えてしまう。
-		// crisp は決まる瞬間を残すため短め、smooth はほぼ溶け合うまで長く取る。
-		crossfade: feel === "smooth" ? randRange(0.7, 0.95) : randRange(0.3, 0.5),
-		gatePeriod: pick(GATE_PERIOD_OPTIONS),
+		baseBeats,
+		// コマの繋ぎ。**0 にしてはいけない**——隣り合うコマは線1組ぶんしか違わないので、
+		// ここを効かせるとその線が消える／現れる動きになる。0 だと一瞬で消えるだけの
+		// 点滅になり、差分が小さいぶん逆に「カクついた」印象が強く出る。
+		// crisp でも長めに取ってよい（形は1組ぶんしか変わらないので鈍らない）。
+		crossfade: feel === "smooth" ? randRange(0.75, 1) : randRange(0.5, 0.8),
 		phraseBars: pick([2, 2, 4]),
 		// 太さは実測で1拍のあいだに 3.5〜5倍動く。輪郭の位置を変えずに濃さだけ
 		// 変わるので、拍を効かせても「ぬるぬる動く」ようには見えない。
-		swell: randRange(3, 6),
+		// ただし基準そのものを太くしたぶん、倍率は控えめにしないと潰れる。
+		swell: randRange(1.8, 3),
 		baseThickness,
 		mainColor,
 		accentColor,
@@ -482,12 +521,26 @@ export function buildSymmetricShapeGroupLayers(
 	let slot = 0;
 	const nextSlot = () => slot++;
 
+	// 速さの倍率。1枚目だけは必ず等倍にして、拍を踏む要素が確実に1つ居るようにする
+	// （全部が遅い側に振れると、拍に乗っていないグループができてしまう）。
+	let firstRate = true;
+	const nextRate = () => {
+		if (firstRate) {
+			firstRate = false;
+			return 1;
+		}
+		return pick(RATE_MULTIPLIERS);
+	};
+
 	if (isCentered) {
 		// ── 同心に積むエンブレム構図 ──
-		// 外→内へ入れ子。段ごとにスロットをずらして、外から内へ順に発火させる。
-		const outer = randRange(70, 115);
-		const tierCount = options.pairCount ?? 2 + (chance(0.55) ? 1 : 0);
-		const ratios = [1, 0.56, 0.3, 0.16];
+		// **段は1〜2枚まで**。モチーフ自体が既に「枠の中に枠、その中に芯」という
+		// 入れ子を持っているので、そこへ同心の段を3枚重ねると入れ子が二重にかかり、
+		// 画面の真ん中に細かい模様が固まっただけの絵になる（実際そうなっていた）。
+		// 参考動画も主役は大きなモチーフ1つ＋小さな脇役、という構成。
+		const outer = randRange(95, 140);
+		const tierCount = options.pairCount ?? (chance(0.4) ? 2 : 1);
+		const ratios = [1, 0.42];
 
 		for (let i = 0; i < Math.min(tierCount, ratios.length); i++) {
 			layers.push(
@@ -502,6 +555,9 @@ export function buildSymmetricShapeGroupLayers(
 					// 段ごとにコマをずらす。同じ絵が入れ子になるだけだと、
 					// せっかく段を重ねても1枚の図形にしか見えない。
 					cycleShift: i,
+					// 段ごとに速さも変える。内側が拍を刻み、外側がゆっくり形を
+					// 変えていく層になると、同心の入れ子に厚みが出る。
+					rateMul: nextRate(),
 					z: nextZ(),
 				}),
 			);
@@ -510,11 +566,14 @@ export function buildSymmetricShapeGroupLayers(
 		// 中央線上の左右対称な脇役。同心の塊の外側へ、間隔を揃えて置く。
 		const flankPairs = options.includeCenter === false ? 0 : chance(0.6) ? 1 : 0;
 		for (let p = 0; p < flankPairs; p++) {
-			const size = outer * randRange(0.22, 0.34);
-			const dx = outer * randRange(1.5, 2.1);
+			const size = outer * randRange(0.2, 0.3);
+			// 主役の外へ確実に出す。近すぎると主役の入れ子の一部に見えてしまう。
+			const dx = Math.min(outer * randRange(1.15, 1.5), MV_W / 2 - size - 10);
 			const s = nextSlot();
 			// 脇役は主役より先のコマを出す＝主役が薄いときに脇が濃い、と噛み合う。
 			const shift = 1 + Math.floor(Math.random() * 3);
+			// ペアは左右で速さを揃える。片方だけ遅いと左右対称に見えない。
+			const flankRate = nextRate();
 			layers.push(
 				buildElement(plan, groupId, {
 					x: axisX - dx,
@@ -524,6 +583,7 @@ export function buildSymmetricShapeGroupLayers(
 					accent: false,
 					filled: false,
 					cycleShift: shift,
+					rateMul: flankRate,
 					z: nextZ(),
 				}),
 			);
@@ -538,6 +598,7 @@ export function buildSymmetricShapeGroupLayers(
 					filled: false,
 					// 対称なら相方と同じ絵。非対称ならさらにずらす。
 					cycleShift: isSymmetric ? shift : shift + 1,
+					rateMul: flankRate,
 					z: nextZ(),
 				}),
 			);
@@ -561,6 +622,7 @@ export function buildSymmetricShapeGroupLayers(
 					accent: chance(0.4),
 					filled: chance(0.25),
 					cycleShift: 0,
+					rateMul: nextRate(),
 					z: nextZ(),
 				}),
 			);
@@ -572,6 +634,8 @@ export function buildSymmetricShapeGroupLayers(
 			if (axisX + dx - size > MV_W) break;
 			const s = nextSlot();
 			const pairSize = size * randRange(0.85, 1.05);
+			// ペアは左右で速さを揃える。片方だけ遅いと左右対称に見えない。
+			const pairRate = nextRate();
 			// 中央から外へ1コマずつずらす＝波が外向きに伝わって見える。
 			layers.push(
 				buildElement(plan, groupId, {
@@ -582,6 +646,7 @@ export function buildSymmetricShapeGroupLayers(
 					accent: false,
 					filled: false,
 					cycleShift: i,
+					rateMul: pairRate,
 					z: nextZ(),
 				}),
 			);
@@ -594,6 +659,7 @@ export function buildSymmetricShapeGroupLayers(
 					accent: false,
 					filled: false,
 					cycleShift: isSymmetric ? i : i + 1,
+					rateMul: pairRate,
 					z: nextZ(),
 				}),
 			);

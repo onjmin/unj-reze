@@ -154,6 +154,7 @@ import {
 	buildSymmetricShapeGroupLayers,
 	generateSymmetricShapeGroup,
 	generateArrangementForGroup,
+	MV_SHAPE_BASE_BEATS_OPTIONS,
 	type SymmetricShapeGroupOptions,
 } from "@/lib/mv-shape-group-macro";
 import ContentPicker, { type PickResult } from "./ContentPicker";
@@ -3948,6 +3949,29 @@ export default function MvMaker({
 									<option value="smooth">なめらか（連続して揺れる）</option>
 								</select>
 							</label>
+							<label className="flex items-center justify-between">
+								<span>ベースの拍</span>
+								<select
+									value={String(macroSettings.baseBeats ?? 1)}
+									onChange={(e) =>
+										setMacroSettings((s) => ({
+											...s,
+											baseBeats: Number(e.target.value),
+										}))
+									}
+									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
+								>
+									{MV_SHAPE_BASE_BEATS_OPTIONS.map((o) => (
+										<option key={o.value} value={String(o.value)}>
+											{o.label}
+										</option>
+									))}
+								</select>
+							</label>
+							<Hint>
+								ベースの拍でひと巡りします。図形ごとに等倍・1/2倍速・1/4倍速を織り交ぜるので、
+								速い図形が拍を刻む裏でゆっくり形が変わる層ができます（すべて整数倍なので小節の頭で必ず揃います）。
+							</Hint>
 							<label className="flex items-center justify-between">
 								<span>図形の傾向</span>
 								<select
