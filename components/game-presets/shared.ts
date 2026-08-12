@@ -1259,9 +1259,14 @@ export interface PresetData {
 	/** 3D MMOエンジン（mmo3d）の設定。engine==='mmo3d' のとき使用（renderer未指定時は'three'）。 */
 	mmo3dConfig?: {
 		renderer: Mmo3dRenderer;
-		/** 掲示板として参照する本SNSの投稿ID。ゲーム作者が編集画面で個別指定する将来のUIまでは
-		 *  未指定時に埋め込み先の投稿(postId)を暫定で使う（GameMaker.tsx参照）。 */
+		/** 掲示板として参照する本SNSの投稿ID。boardsが空のときの後方互換用フォールバック。
+		 *  未指定時は埋め込み先の投稿(postId)を暫定で使う（GameMaker.tsx参照）。 */
 		boardPostId?: string;
+		/** 複数の掲示板をワールド上の任意位置に配置する（editor: Mmo3dEditorPanel）。
+		 *  空/未指定なら boardPostId 1枚を既定位置(0,1.2,4)に置く挙動にフォールバックする。 */
+		boards?: { x: number; z: number; threadPostId: string }[];
+		/** ダミー敵の配置座標。空/未指定なら既定の2体(x=±2, z=-3)を使う。 */
+		dummies?: { x: number; z: number }[];
 		/** MMD(PMX/PMD)モデルのURL（renderer==='babylon'で使用）。未指定時は標準カプセル。 */
 		pmxUrl?: string;
 		/** MMD(VMD)モーションのURL（renderer==='babylon'で使用）。未指定時はモーションなし。 */

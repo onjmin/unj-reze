@@ -217,7 +217,14 @@ export interface GameManifestDraft {
   /** 2.5Dエンジン（yume25d）のレイアウト。 */
   layout25d?: Layout25D;
   /** 3D MMOエンジン（mmo3d）の設定。renderer未指定時は'three'。 */
-  mmo3dConfig?: { renderer: Mmo3dRenderer };
+  mmo3dConfig?: {
+    renderer: Mmo3dRenderer;
+    boardPostId?: string;
+    boards?: { x: number; z: number; threadPostId: string }[];
+    dummies?: { x: number; z: number }[];
+    pmxUrl?: string;
+    vmdUrl?: string;
+  };
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
   scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
   battle?: BattleConfig;
@@ -14056,6 +14063,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 gameId={gameId}
                 sessionId={mmo3dSessionIdRef.current}
                 boardPostId={gameData.mmo3dConfig?.boardPostId ?? postId}
+                boards={gameData.mmo3dConfig?.boards}
+                dummies={gameData.mmo3dConfig?.dummies}
                 pmxUrl={gameData.mmo3dConfig?.pmxUrl}
                 vmdUrl={gameData.mmo3dConfig?.vmdUrl}
               />
@@ -16695,6 +16704,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     onRendererChange={(renderer) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer, boardPostId: prev.mmo3dConfig?.boardPostId, pmxUrl: prev.mmo3dConfig?.pmxUrl, vmdUrl: prev.mmo3dConfig?.vmdUrl } }))}
                     boardPostId={gameData.mmo3dConfig?.boardPostId ?? ''}
                     onBoardPostIdChange={(boardPostId) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boardPostId: boardPostId || undefined } }))}
+                    boards={gameData.mmo3dConfig?.boards ?? []}
+                    onBoardsChange={(boards) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boards } }))}
+                    dummies={gameData.mmo3dConfig?.dummies ?? []}
+                    onDummiesChange={(dummies) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, dummies } }))}
                     pmxUrl={gameData.mmo3dConfig?.pmxUrl ?? ''}
                     onPmxUrlChange={(pmxUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, pmxUrl: pmxUrl || undefined } }))}
                     vmdUrl={gameData.mmo3dConfig?.vmdUrl ?? ''}

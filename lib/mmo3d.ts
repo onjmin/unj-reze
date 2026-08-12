@@ -93,10 +93,11 @@ export class Mmo3dEngine {
 	private onPlayerDamaged: ((hp: number, max: number) => void) | null = null;
 	private onDummyDamaged: ((index: number, hp: number, max: number) => void) | null = null;
 
-	// ── ゲーム内掲示板（フェーズ8）。本SNSの投稿を参照するだけで、外部サイトへは繋がない。 ──
+	// ── ゲーム内掲示板（フェーズ8→フェーズ14で複数設置対応）。本SNSの投稿を参照するだけで、
+	// 外部サイトへは繋がない。 ──
 	private boardGeo: THREE.BoxGeometry | null = null;
 	private boardMat: THREE.MeshStandardMaterial | null = null;
-	private boardMesh: THREE.Mesh | null = null;
+	private boards: { mesh: THREE.Mesh; threadPostId: string }[] = [];
 
 	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
 	private input: Mmo3dInputState = {
@@ -108,7 +109,12 @@ export class Mmo3dEngine {
 	};
 	private facing = 0; // ラジアン、+Zを0とする
 
-	constructor(canvas: HTMLCanvasElement, width: number, height: number) {
+	constructor(
+		canvas: HTMLCanvasElement,
+		width: number,
+		height: number,
+		dummyPositions?: { x: number; z: number }[],
+	) {
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 		this.renderer.setSize(width, height, false);
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -157,10 +163,13 @@ export class Mmo3dEngine {
 		// 簡易ダミー敵を2体、原点付近に配置。
 		this.dummyGeo = new THREE.CapsuleGeometry(0.45, 1.1, 4, 8);
 		this.dummyMat = new THREE.MeshStandardMaterial({ color: 0xe53935 });
-		for (const [x, z] of [
-			[3, -3],
-			[-3, -4],
-		] as const) {
+		const dummySpots = dummyPositions?.length
+			? dummyPositions.map(({ x, z }) => [x, z] as const)
+			: ([
+					[3, -3],
+					[-3, -4],
+				] as const);
+		for (const [x, z] of dummySpots) {
 			const mesh = new THREE.Mesh(this.dummyGeo, this.dummyMat.clone());
 			mesh.position.set(x, 0.95, z);
 			this.scene.add(mesh);
@@ -183,21 +192,38 @@ export class Mmo3dEngine {
 		Object.assign(this.input, next);
 	}
 
-	/** 掲示板の目印（📋の看板）をワールドに設置する。postIdそのものは持たない
-	 *  （本SNSのデータ参照はMmo3dMaker側の責務。エンジンは「近づいたら教える」だけ）。 */
-	enableBoard() {
-		if (this.boardMesh) return;
+	/** 掲示板の目印（📋の看板）をワールドに設置する。1つ以上、任意位置に配置できる。
+	 *  postIdはそれぞれ個別に持つ（本SNSのデータ取得自体はMmo3dMaker側の責務）。 */
+	enableBoard(boards?: { x: number; z: number; threadPostId: string }[]) {
+		if (this.boards.length) return;
 		this.boardGeo = new THREE.BoxGeometry(1, 1.4, 0.1);
 		this.boardMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63 });
-		this.boardMesh = new THREE.Mesh(this.boardGeo, this.boardMat);
-		this.boardMesh.position.copy(BOARD_POS);
-		this.scene.add(this.boardMesh);
+		const spots = boards?.length
+			? boards
+			: [{ x: BOARD_POS.x, z: BOARD_POS.z, threadPostId: "" }];
+		for (const spot of spots) {
+			const mesh = new THREE.Mesh(this.boardGeo, this.boardMat);
+			mesh.position.set(spot.x, BOARD_POS.y, spot.z);
+			this.scene.add(mesh);
+			this.boards.push({ mesh, threadPostId: spot.threadPostId });
+		}
 	}
 
-	/** プレイヤーが掲示板の対話範囲内にいるか。掲示板が無ければ常にfalse。 */
+	/** プレイヤーが掲示板の対話範囲内にいれば、その掲示板のthreadPostId（空文字なら
+	 *  呼び出し側フォールバック分）を返す。範囲内に無ければnull。複数近接時は最短距離を優先。 */
+	nearBoard(): string | null {
+		let best: { threadPostId: string; dist: number } | null = null;
+		for (const b of this.boards) {
+			const dist = this.player.position.distanceTo(b.mesh.position);
+			if (dist > BOARD_INTERACT_RANGE) continue;
+			if (!best || dist < best.dist) best = { threadPostId: b.threadPostId, dist };
+		}
+		return best ? best.threadPostId : null;
+	}
+
+	/** @deprecated nearBoard() を使う。後方互換のため残す。 */
 	isNearBoard(): boolean {
-		if (!this.boardMesh) return false;
-		return this.player.position.distanceTo(this.boardMesh.position) <= BOARD_INTERACT_RANGE;
+		return this.nearBoard() !== null;
 	}
 
 	/** リアルタイムハブへ送る自分の位置/向き/アニメ状態。呼び出し側が定期的に読んで publish する。
@@ -391,18 +417,29 @@ export class Mmo3dEngine {
 
 	private updateMovement(dt: number) {
 		const { forward, back, left, right, run } = this.input;
-		let mx = 0;
-		let mz = 0;
-		if (forward) mz -= 1;
-		if (back) mz += 1;
-		if (left) mx -= 1;
-		if (right) mx += 1;
-		const moving = mx !== 0 || mz !== 0;
+		// キー入力はプレイヤーの現在の向き（this.facing）を基準にしたローカル方向。
+		// これをワールド座標へ回転してから移動・目標向きを決める（カメラ相対操作）。
+		// ワールド直交で扱うと、直前の移動で向きが変わるたびに「前」の意味がブレて
+		// 操作感が滅茶苦茶になる（例: 右に動いてカメラが追従した後だと、次の「前」が
+		// 画面上は右や斜めに見える）。
+		let localX = 0;
+		let localZ = 0;
+		if (forward) localZ -= 1;
+		if (back) localZ += 1;
+		if (left) localX -= 1;
+		if (right) localX += 1;
+		const moving = localX !== 0 || localZ !== 0;
 
 		if (moving) {
-			const len = Math.hypot(mx, mz);
-			mx /= len;
-			mz /= len;
+			const len = Math.hypot(localX, localZ);
+			localX /= len;
+			localZ /= len;
+			const theta = this.facing;
+			const cos = Math.cos(theta);
+			const sin = Math.sin(theta);
+			// facing=0 のとき恒等変換になる回転（updateCamera の (sinθ, cosθ) 前方定義と整合）。
+			const mx = localX * cos + localZ * sin;
+			const mz = -localX * sin + localZ * cos;
 			const targetFacing = Math.atan2(mx, mz);
 			// 最短角度差でラープ（±πをまたぐ跳躍を防ぐ）。
 			let diff = targetFacing - this.facing;

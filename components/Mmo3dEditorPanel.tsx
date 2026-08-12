@@ -9,11 +9,18 @@ import {
 } from "./game-presets/model-catalog";
 import type { Mmo3dRenderer } from "./game-presets/shared";
 
+type BoardSpot = { x: number; z: number; threadPostId: string };
+type DummySpot = { x: number; z: number };
+
 export default function Mmo3dEditorPanel({
 	renderer,
 	onRendererChange,
 	boardPostId,
 	onBoardPostIdChange,
+	boards = [],
+	onBoardsChange,
+	dummies = [],
+	onDummiesChange,
 	pmxUrl = "",
 	onPmxUrlChange,
 	vmdUrl = "",
@@ -23,6 +30,12 @@ export default function Mmo3dEditorPanel({
 	onRendererChange: (renderer: Mmo3dRenderer) => void;
 	boardPostId: string;
 	onBoardPostIdChange: (postId: string) => void;
+	/** ワールド上の任意位置に置く掲示板一覧。空ならboardPostId 1枚を既定位置に置く。 */
+	boards?: BoardSpot[];
+	onBoardsChange?: (boards: BoardSpot[]) => void;
+	/** ダミー敵の配置座標一覧。空なら既定の2体を使う。 */
+	dummies?: DummySpot[];
+	onDummiesChange?: (dummies: DummySpot[]) => void;
 	pmxUrl?: string;
 	onPmxUrlChange?: (url: string) => void;
 	vmdUrl?: string;
@@ -165,7 +178,7 @@ export default function Mmo3dEditorPanel({
 			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
 				<p className="text-[11px] font-bold text-gray-300">掲示板（本SNSの投稿を参照）</p>
 				<p className="text-[10px] text-gray-500 leading-tight">
-					指定した投稿IDのスレッドを、ワールド上の掲示板から閲覧・返信できるようにします（three版のみ）。空欄なら埋め込み先の投稿を自動で使います。
+					下の「複数の掲示板」が空のときだけ使う既定1枚分の投稿ID（three版のみ）。空欄なら埋め込み先の投稿を自動で使います。
 				</p>
 				<input
 					value={boardPostId}
@@ -174,6 +187,122 @@ export default function Mmo3dEditorPanel({
 					className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-[11px] text-gray-200 outline-none focus:border-blue-500"
 				/>
 			</div>
+
+			{renderer === "three" && (
+				<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
+					<p className="text-[11px] font-bold text-gray-300">複数の掲示板（任意位置）</p>
+					<p className="text-[10px] text-gray-500 leading-tight">
+						ワールド座標(x, z)と対象投稿IDを指定して、複数の掲示板を好きな場所に置けます。1つ以上あれば上の既定1枚には代わりに使われます。
+					</p>
+					{boards.map((b, i) => (
+						<div
+							key={`board-${i}`}
+							className="flex items-center gap-1"
+						>
+							<input
+								type="number"
+								value={b.x}
+								onChange={(e) => {
+									const next = [...boards];
+									next[i] = { ...b, x: Number(e.target.value) || 0 };
+									onBoardsChange?.(next);
+								}}
+								placeholder="x"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={b.z}
+								onChange={(e) => {
+									const next = [...boards];
+									next[i] = { ...b, z: Number(e.target.value) || 0 };
+									onBoardsChange?.(next);
+								}}
+								placeholder="z"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								value={b.threadPostId}
+								onChange={(e) => {
+									const next = [...boards];
+									next[i] = { ...b, threadPostId: e.target.value };
+									onBoardsChange?.(next);
+								}}
+								placeholder="投稿ID"
+								className="flex-1 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<button
+								type="button"
+								onClick={() => onBoardsChange?.(boards.filter((_, j) => j !== i))}
+								className="px-2 py-1 rounded text-[10px] bg-red-900/60 text-red-200 border border-red-800 hover:bg-red-900"
+							>
+								削除
+							</button>
+						</div>
+					))}
+					<button
+						type="button"
+						onClick={() =>
+							onBoardsChange?.([...boards, { x: 0, z: 0, threadPostId: "" }])
+						}
+						className="w-full px-2 py-1.5 rounded text-[10px] border border-dashed border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition"
+					>
+						+ 掲示板を追加
+					</button>
+				</div>
+			)}
+
+			{renderer === "three" && (
+				<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
+					<p className="text-[11px] font-bold text-gray-300">ダミー敵の配置</p>
+					<p className="text-[10px] text-gray-500 leading-tight">
+						ワールド座標(x, z)を指定します。0体なら既定の2体（(3,-3) と (-3,-4)）が使われます。
+					</p>
+					{dummies.map((d, i) => (
+						<div
+							key={`dummy-${i}`}
+							className="flex items-center gap-1"
+						>
+							<input
+								type="number"
+								value={d.x}
+								onChange={(e) => {
+									const next = [...dummies];
+									next[i] = { ...d, x: Number(e.target.value) || 0 };
+									onDummiesChange?.(next);
+								}}
+								placeholder="x"
+								className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={d.z}
+								onChange={(e) => {
+									const next = [...dummies];
+									next[i] = { ...d, z: Number(e.target.value) || 0 };
+									onDummiesChange?.(next);
+								}}
+								placeholder="z"
+								className="w-16 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<button
+								type="button"
+								onClick={() => onDummiesChange?.(dummies.filter((_, j) => j !== i))}
+								className="flex-1 px-2 py-1 rounded text-[10px] bg-red-900/60 text-red-200 border border-red-800 hover:bg-red-900"
+							>
+								削除
+							</button>
+						</div>
+					))}
+					<button
+						type="button"
+						onClick={() => onDummiesChange?.([...dummies, { x: 0, z: -3 }])}
+						className="w-full px-2 py-1.5 rounded text-[10px] border border-dashed border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition"
+					>
+						+ ダミー敵を追加
+					</button>
+				</div>
+			)}
 		</div>
 	);
 }
