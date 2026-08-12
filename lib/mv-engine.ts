@@ -283,8 +283,13 @@ function detectChordProgression(notes: MvNote[], bpm: number): MvChordStep[] {
  * `lyricLinesFromTrack`（行の切り出し）と `applyLyricGapResets`（行間の間奏検出）の
  * 両方が同じ値を見る。切り出し側だけ別の基準にすると「行としては割れているのに
  * 間奏扱いされない/されすぎる」というズレが起きるので、必ず1箇所にまとめておくこと。
+ *
+ * 1.5小節にしていたところ、フレーズの合間の長めの息継ぎ・伸ばし音（実測でも2小節弱
+ * 空くことがある）まで間奏として拾ってしまい、本物の間奏（8小節）の2行くらい手前で
+ * 誤って歌詞が消えるバグが出た。息継ぎでは開かない・本物の間奏（数小節〜）は
+ * 確実に拾える値として3小節へ引き上げてある。
  */
-const INTERLUDE_GAP_BARS = 1.5;
+const INTERLUDE_GAP_BARS = 3;
 
 /**
  * 歌詞トラックの音節列を「行」へまとめ、各行の開始小節を演奏ノートから求める。
@@ -3563,12 +3568,16 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 			2,
 			((Math.min(end, to) - n.startStep) / windowSteps) * w,
 		);
-		// 音域の外に出た音は、オクターブぶん寄せて折り返さない——それをやると
-		// 低い音がオクターブ上げされて「高い音」として描かれてしまい、実際の
-		// ピッチと違う位置に出るバグになる（ユーザー指摘）。素直に音域の端へ
-		// クランプする（描画位置は端に張り付くが、音の高低の向きは絶対に崩れない）。
-		const pitch = Math.min(pitchHi, Math.max(pitchLo, n.pitch));
-		const ny = y + h - ((pitch - pitchLo) / pitchRange) * (h - noteH) - noteH;
+		// 音域を折り返す（オクターブ寄せ）のはもちろん、端へクランプするのもやめる——
+		// クランプすると音域の外に出た音がすべて上端/下端の同じ位置に重なって描かれ、
+		// 「違う高さの音なのに同じ場所に描かれる」という別のバグになる（ユーザー指摘）。
+		// pitchLo/pitchHi・1音あたりの高さ(noteH)は既にループの前で算出済みなので、
+		// ここでは生のピッチをそのまま同じ式に通すだけでいい。音域の外に出た分は
+		// 矩形の外（y..y+h の外）に描かれることになるが、そこは呼び出し側の
+		// ctx.clip() が同じ矩形で切ってくれるので、画面上は単に「見えなくなる」
+		// だけで済み、値を書き換えて位置を誤魔化す必要が無い。
+		const ny =
+			y + h - ((n.pitch - pitchLo) / pitchRange) * (h - noteH) - noteH;
 
 		const sounding = n.startStep <= d.step && end > d.step;
 		const baseColor = light.color || trackColor(d, n.track);
