@@ -3007,12 +3007,15 @@ function applyLyricGapResets(
 }
 
 /**
- * 間奏で自動的に区切られたまとまりを消すまでの時間。holdBars（＝積み上げの表示保持
- * 時間）をそのまま使うと「間奏だと分かっているのに holdBars ぶん律儀に居座ってから
- * 消える」という冗長な待ちが生まれる（holdBars を長めにした曲ほど間奏中ずっと歌詞が
- * 残って見える）ため、読み終わる分だけの短い固定値で切り離す。
+ * まとまり全体が消えるまでのフェードアウト時間（小節単位）。
+ * フェードアウト開始を直前まで遅らせ、消え始める時はサッと素早く消える調整。
  */
-const AUTO_RESET_FADE_BARS = 0.5;
+const LYRIC_FADE_OUT_BARS = 0.15;
+
+/**
+ * 間奏で自動的に区切られたまとまりを消すまでの時間。
+ */
+const AUTO_RESET_FADE_BARS = 0.3;
 
 /**
  * `layer.resetBars` に挙げた小節「以降で最初に出る行」へ resetBefore を立てる。
@@ -3081,7 +3084,7 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 		groupEnd < lines.length
 			? Math.min(lines[groupEnd].bar, lastBarInGroup)
 			: lastBarInGroup;
-	const groupFadeOut = clamp01((groupEndBar - d.bar) / 0.5);
+	const groupFadeOut = clamp01((groupEndBar - d.bar) / LYRIC_FADE_OUT_BARS);
 	if (groupFadeOut <= 0.01) return;
 
 	// 「同時に表示する行数」(afterimage+1) は積み上げの最大段数。まとまりがそれより長い
