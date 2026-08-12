@@ -1610,8 +1610,9 @@ export default function MvMaker({
 		});
 		update((m) => ({
 			...m,
-			layers: [...m.layers, ...layers],
-			groups: [...(m.groups ?? []), group],
+			// 一覧はレイヤー配列の並び順で決まるため、先頭に差し込んで一覧の最上部に出す。
+			layers: [...layers, ...m.layers],
+			groups: [group, ...(m.groups ?? [])],
 		}));
 		setAutoGroupIds((ids) => [...ids, group.id]);
 		if (layers[0]) setSelectedLayerId(layers[0].id);
@@ -3979,13 +3980,17 @@ export default function MvMaker({
 									onChange={(e) =>
 										setMacroSettings((s) => ({
 											...s,
-											clusterType: e.target.value as "centered" | "scattered",
+											clusterType: e.target.value as
+												| "centered"
+												| "scattered"
+												| "bars",
 										}))
 									}
 									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
 								>
 									<option value="centered">中央に入れ子（エンブレム風）</option>
 									<option value="scattered">中央線上に横並び</option>
+									<option value="bars">棒の列（イコライザー風）</option>
 								</select>
 							</label>
 							<label className="flex items-center justify-between">
@@ -4181,9 +4186,9 @@ export default function MvMaker({
 					return (
 						<div
 							key={group.id}
-							className="overflow-hidden rounded border border-purple-600/40 bg-purple-950/10"
+							className="rounded border border-purple-600/40 bg-purple-950/10"
 						>
-							<div className="flex items-center gap-2 bg-purple-900/20 px-2 py-1.5">
+							<div className="flex items-center gap-2 rounded-t bg-purple-900/20 px-2 py-1.5">
 								<button
 									onClick={() =>
 										update((m) => toggleGroupCollapsed(m, group.id))
@@ -4297,7 +4302,7 @@ export default function MvMaker({
 								</button>
 							</div>
 							{!group.collapsed && (
-								<div className="space-y-1.5 border-t border-purple-700/30 bg-gray-900/40 p-1.5 pl-4">
+								<div className="space-y-1.5 rounded-b border-t border-purple-700/30 bg-gray-900/40 p-1.5 pl-4">
 									{members.map((layer, mi) =>
 										renderLayerRow(layer, {
 											canMoveUp: mi > 0,

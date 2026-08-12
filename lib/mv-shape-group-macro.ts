@@ -1,5 +1,6 @@
 import {
 	MV_H,
+	MV_STEPS_PER_BEAT,
 	MV_W,
 	mvUid,
 	type MvLayerGroup,
@@ -106,6 +107,20 @@ const MOTIFS: Record<string, string[]> = {
 		"M40 40H60V60H40Z",
 		"M8 8H24V24H8Z M76 8H92V24H76Z M8 76H24V92H8Z M76 76H92V92H76Z",
 	],
+	/** 破線＋ドットのアクセント。参考動画2の目盛り表現。 */
+	dashDot: [
+		"M4 46H14 M22 46H32 M40 46H46 M54 46H60 M68 46H78 M86 46H96",
+		"M4 54H14 M22 54H32 M40 54H46 M54 54H60 M68 54H78 M86 54H96",
+		"M46 30V70",
+		"M46 42V58",
+	],
+	/** 枠のかぎ括弧＋中程に垂れる小さな四角ふたつ。参考動画2の終端に近い形。 */
+	bracketNotch: [
+		"M10 24V10H30 M70 10H90V24 M90 76V90H70 M30 90H10V76",
+		"M40 10H60 M40 90H60",
+		"M10 42V58 M90 42V58",
+		"M40 42H58V58H40Z",
+	],
 };
 
 const MOTIF_IDS = Object.keys(MOTIFS);
@@ -184,9 +199,13 @@ export interface SymmetricShapeGroupOptions {
 	 * 配置の傾向。
 	 * "centered" = 画面中央に同心で積む（エンブレム風）。
 	 * "scattered" = 中央線上へ左右対称に散らす（帯状に並ぶ）。
-	 * どちらも**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
+	 * "bars" = 本数も高さも1本ずつ独立に振れる棒の列（イコライザー風）。
+	 *   参考動画1はこれで、"scattered" の「大＋対称な小ペア1組」という
+	 *   決まった3枚構成とは別の方向のバリエーションとして用意した
+	 *   （対称ペアは結局「左右の小さいほうは不要」で削られがちなため）。
+	 * いずれも**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
 	 */
-	clusterType?: "centered" | "scattered";
+	clusterType?: "centered" | "scattered" | "bars";
 	/** 図形の種類の傾向。"sharp" (矩形グリフ) / "round" (丸い原始図形) / "all" (混在) */
 	shapeStyle?: "sharp" | "round" | "all";
 	/** 線の太さ。"thick" (太め) / "thin" (細め) / "random" (ランダム) */
@@ -527,7 +546,9 @@ export function buildSymmetricShapeGroupLayers(
 	const baseY = MV_H / 2;
 
 	const plan = makePlan(options);
-	const isCentered = (options.clusterType ?? "centered") === "centered";
+	const clusterType = options.clusterType ?? "centered";
+	const isCentered = clusterType === "centered";
+	const isBars = clusterType === "bars";
 	const isSymmetric = options.symmetric ?? true;
 
 	const layers: MvShapeLayer[] = [];
@@ -616,13 +637,113 @@ export function buildSymmetricShapeGroupLayers(
 				}),
 			);
 		}
+	} else if (isBars) {
+		// ── イコライザー風の棒の列 ──
+		// 参考動画1はこれで、"scattered" のような「大＋対称な小ペア」構図とは違い、
+		// 本数も1本ずつの高さも独立にばらけるのが持ち味。エンジン組み込みの
+		// count/offsetX/stagger（同一レイヤーの複製をずらして反応させる仕組み）に
+		// そのまま乗るので、モチーフのコマ送りは使わない専用の組み立てにしてある。
+		const barCount = options.pairCount
+			? options.pairCount * 2 + 1
+			: 7 + Math.floor(Math.random() * 7); // 7〜13本
+		const rowWidth = MV_W * randRange(0.72, 0.92);
+		const startX = axisX - rowWidth / 2;
+		const offsetX = barCount > 1 ? rowWidth / (barCount - 1) : 0;
+		const barAspect =
+			plan.baseThickness > 6
+				? randRange(0.22, 0.32)
+				: randRange(0.12, 0.2, 2);
+		const baseSize = randRange(14, 26);
+		// stagger は「何ステップぶん過去の反応で描くか」。1本ごとに少しずつ
+		// ずらすことで、同じ揺れが端から端へ伝わる波ではなく、隣同士が食い違う
+		// 「本数も高さもバラバラ」なイコライザーらしい見た目になる。
+		const stagger = Math.round(MV_STEPS_PER_BEAT * randRange(0.05, 0.16, 2));
+
+		layers.push({
+			kind: "shape",
+			form: "bar",
+			id: mvUid("shp"),
+			groupId,
+			x: startX,
+			y: baseY,
+			z: nextZ(),
+			rotation: 90,
+			color: plan.mainColor,
+			filled: true,
+			thickness: 0,
+			size: baseSize,
+			barAspect,
+			count: barCount,
+			offsetX,
+			offsetY: 0,
+			stagger,
+			spread: 0,
+			spin: 0,
+			blend: "normal",
+			modulators: [
+				{
+					source: "beat",
+					target: "size",
+					op: "add",
+					amount: roundTo(baseSize * randRange(1.8, 3.2), 1),
+					periodBeats: roundTo(plan.baseBeats, 2),
+					curve: 2,
+				},
+			],
+		});
+
+		// 数本だけ明るい色でひときわ高く突き抜けさせる「差し色の棒」。
+		// 参考動画も全部が同じ高さではなく、数本だけ白く飛び抜けている。
+		const accentCount = 2 + Math.floor(Math.random() * 2); // 2〜3本
+		const usedIdx = new Set<number>();
+		for (let n = 0; n < accentCount; n++) {
+			const idx = Math.floor(Math.random() * barCount);
+			if (usedIdx.has(idx)) continue;
+			usedIdx.add(idx);
+			layers.push({
+				kind: "shape",
+				form: "bar",
+				id: mvUid("shp"),
+				groupId,
+				x: startX + offsetX * idx,
+				y: baseY,
+				z: nextZ(),
+				rotation: 90,
+				color: plan.accentColor,
+				filled: true,
+				thickness: 0,
+				size: baseSize * randRange(1.3, 1.7),
+				barAspect: barAspect * randRange(0.8, 1),
+				count: 1,
+				spread: 0,
+				spin: 0,
+				blend: "normal",
+				modulators: [
+					{
+						source: "beat",
+						target: "size",
+						op: "add",
+						amount: roundTo(baseSize * randRange(2.4, 4), 1),
+						periodBeats: roundTo(plan.baseBeats, 2),
+						phaseOffset: roundTo(randRange(0, plan.baseBeats, 2), 2),
+						curve: 2,
+					},
+				],
+			});
+		}
 	} else {
 		// ── 中央線上に並ぶ帯状の構図 ──
-		// 中央に1枚、その左右へ等間隔でペアを足していく。上下には広げない。
-		const pairCount = options.pairCount ?? 1 + Math.floor(Math.random() * 3);
-		const size = randRange(30, 58);
+		// 中央に1枚、その左右へペアを足していく。上下には広げない。
+		//
+		// 「大＋対称な小ペア1組」だけが既定で出ると、結局どれも同じ3枚構成の
+		// 判子絵になり、しかも対称な小さいほうは装飾として削られがちだった。
+		// そこで、①ペア数を1に寄せず複数を出しやすくし ②ペアごとにサイズを
+		// 独立にばらけさせる（間隔だけ揃った棒グラフに近い密度感にする）ことで、
+		// 「同じ形が2つ並んだだけ」に見えない構図の幅を広げてある。
+		const pairCount = options.pairCount ?? pick([1, 2, 2, 3, 3, 4]);
+		const size = randRange(26, 52);
 		// 隣とぶつからない最小の間隔を確保したうえで、余白ぶんだけ広げる。
-		const gap = size * randRange(2.3, 3.2);
+		const gap = size * randRange(1.9, 2.6);
 		const includeCenter = options.includeCenter ?? chance(0.65);
 
 		if (includeCenter) {
@@ -642,11 +763,15 @@ export function buildSymmetricShapeGroupLayers(
 		}
 
 		for (let i = 1; i <= pairCount; i++) {
-			const dx = gap * i;
+			// 累積間隔も1組ごとに軽くばらけさせる。等間隔だと本数を増やしても
+			// 結局「同じ間隔で並んだ判子」に見えてしまう。
+			const dx = gap * i * randRange(0.85, 1.15);
 			// 画面外へ出るぶんは作らない（見えないレイヤーだけが増えるのを防ぐ）。
 			if (axisX + dx - size > MV_W) break;
 			const s = nextSlot();
-			const pairSize = size * randRange(0.85, 1.05);
+			// サイズはペアごとに独立にばらけさせる（外側ほど揃って小さくなる、
+			// のような単調さを避けるため範囲を広めに取る）。
+			const pairSize = size * randRange(0.55, 1.15);
 			// ペアは左右で速さを揃える。片方だけ遅いと左右対称に見えない。
 			const pairRate = nextRate();
 			// 中央から外へ1コマずつずらす＝波が外向きに伝わって見える。
@@ -656,7 +781,7 @@ export function buildSymmetricShapeGroupLayers(
 					y: baseY,
 					size: pairSize,
 					slot: s,
-					accent: false,
+					accent: chance(0.2),
 					filled: false,
 					cycleShift: i,
 					rateMul: pairRate,
@@ -669,7 +794,7 @@ export function buildSymmetricShapeGroupLayers(
 					y: baseY,
 					size: isSymmetric ? pairSize : pairSize * randRange(0.75, 1.25),
 					slot: isSymmetric ? s : nextSlot(),
-					accent: false,
+					accent: isSymmetric ? false : chance(0.2),
 					filled: false,
 					cycleShift: isSymmetric ? i : i + 1,
 					rateMul: pairRate,

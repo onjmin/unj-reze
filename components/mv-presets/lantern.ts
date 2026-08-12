@@ -361,11 +361,11 @@ const LAYERS: MvLayer[] = [
 	{
 		kind: "image",
 		id: "visitor",
-		ref: rozeRef("beat-a"),
-		url: rozeUrl("beat-a"),
+		ref: rozeRef("beat-c"),
+		url: rozeUrl("beat-c"),
 		// 4コマを1小節で1周。テンポを変えても拍に乗ったまま。
 		// 実測: 足先が画面の97%あたり。縦0.5倍換算でy≈349、ほぼ最下段。
-		walk: rozeBeat("a", 4),
+		walk: rozeBeat("c", 4),
 		x: 320,
 		y: 349,
 		scale: 0.42,
@@ -376,7 +376,7 @@ const LAYERS: MvLayer[] = [
 		// 何度も出し入れすると「常連の小道具」に見えてしまい、一瞬すれ違う影の感じが消える。
 		sections: [scene(2)],
 		entrance: { from: "bottom", fade: true, beats: 2, distance: 30 },
-		z: 26,
+		z: 999,
 	},
 
 	// ══ 歌詞。表(右)＝メインの歌詞、裏(左)＝残像多めのエコー的な添え書きとして同時表示 ══
