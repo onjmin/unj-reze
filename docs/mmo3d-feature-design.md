@@ -452,3 +452,49 @@ true/falseを正しく切り替えることを確認。(2)`GameThreadBoard`単�
 - **実機検証**: three版でSキー（後退）を1.5秒ホールドし、キャラクターの向きが一切変わらず
   まっすぐ後退することを画面キャプチャで確認。ArrowLeft（旋回）を1秒ホールドし、単発の
   安定した旋回で収束し、それ以上回転し続けないことも確認。
+
+### フェーズ21完了メモ（babylon版: MMDモデルのidle/walk/run自動切替）
+
+- **VMDモーションのstate別自動切替を実装**（`lib/mmo3d-babylon.ts`）: `loadMmdModelAndPlay()`
+  を`{ idle?, walk?, run? }`の3state対応に拡張。各stateのVMDをそれぞれ`MmdModel.
+  createRuntimeAnimation()`でハンドル化して保持し（`mmdAnimHandles`）、`updateMovement()`で
+  求めた`curAnim`（idle/walk/run）が変化した時だけ`MmdModel.setRuntimeAnimation()`で
+  切り替える（`syncMmdAnimation()`）。読み込みに失敗したstateは警告ログのみでスキップし、
+  1つも読み込めなければ静止ポーズのまま動作を継続する（フェイルオープン、既存のCORS
+  プロキシ再試行パターンを踏襲）。
+- `mmo3dConfig`に`vmdWalkUrl`/`vmdRunUrl`を追加（既存`vmdUrl`はidle用として扱う）。
+  `Mmo3dEditorPanel.tsx`に「3. 歩行・走行モーション（任意、自動切替）」セクションを追加。
+  ウォークサイクル用VMDはビルトインカタログの`MMD_MOTION_CATALOG`に無かったため
+  （ダンス/カメラモーションのみ）、URL直接入力のみのシンプルなUIにした。
+- **実機検証の制約**: `lib/cors-proxy.ts`のプロキシ（`cors-proxy.onjmin.workers.dev`）は
+  Access-Control-Allow-Originを`https://onjmin.github.io`（本番オリジン）のみに絞っており、
+  ローカル検証環境（`localhost`）からはPMX/VMDの取得がCORSでブロックされる（既存の制約で
+  今回のフェーズにより新たに生じたものではない）。そのためBrowser paneでは実際のMMD
+  モデル・アニメーション切替を目視確認できなかったが、(1)ロード失敗時のフェイルオープン
+  経路（プレースホルダーのカプセルへ自動フォールバック）が例外を出さず正しく動作すること、
+  (2)UIの新規入力欄（歩行/走行VMD URL）が正しく表示・入力できること、(3)コンソールに
+  この変更由来の新規エラーが出ていないこと、は確認済み。実際のアニメーション切替そのものは
+  `typecheck`が通る型安全なコードパスとして実装されている（babylon-mmdの型定義
+  `MmdModel.createRuntimeAnimation()`/`setRuntimeAnimation()`のシグネチャに準拠）。
+  本番オリジンでの実際の目視確認は今後の課題。
+
+### フェーズ22完了メモ（右方向ベクトルの符号バグ修正・ストレイフ廃止でA/D=旋回に統一）
+
+- **A/Dキーの左右移動が逆になるバグを発見・修正**（ユーザー報告）: `updateMovement`の
+  右方ベクトルの式`rx = cosθ, rz = -sinθ`が、実際のカメラの画面右方向と符号が逆だった。
+  `updateCamera`のカメラ配置（前方=(sinθ,0,cosθ)、up=(0,1,0)）から`cross(forward, up)`で
+  画面右方向を正しく導出すると`(-cosθ, 0, sinθ)`になる。旧式はこれの符号違いになっており、
+  ストレイフ移動が画面上で左右反転していた（three/babylon両方）。
+- ユーザーから続けて「A/Dキーはそもそもカメラ旋回の方が妥当では」という指摘があり、
+  ストレイフ自体を廃止してA/Dを旋回に統合する方針に変更した（AskUserQuestionでストレイフの
+  扱いを確認し「廃止する」を選択）。
+  - `Mmo3dInputState`から`strafeL`/`strafeR`を削除し、`{ forward, back, turnL, turnR, run }`
+    のみに簡略化。`STRAFE_SPEED`定数・右方ベクトルの計算も削除（前方ベクトルのみで完結）。
+  - [Mmo3dMaker.tsx](../components/Mmo3dMaker.tsx)のキー配列を変更: `KeyA`/`ArrowLeft`→
+    `turnL`、`KeyD`/`ArrowRight`→`turnR`（W/S・矢印上下は前後移動のまま）。lib/yume25d.ts
+    とは異なる配列になった（yume25dはA/D=ストレイフ、矢印=旋回）が、mmo3dは三人称視点で
+    ストレイフの必要性が薄く、A/D=旋回の方が直感的という判断。
+- **実機検証**: three版でDキーを1秒ホールドし、カメラ/キャラクターが右方向へ旋回する
+  （ダミーが画面左から右へ移っていく）ことを確認。続けてAキーを2秒ホールドし、逆方向
+  （右から左）へ旋回して戻ることも確認。ストレイフ（真横移動）が発生しないことも
+  画面上の動き方から確認済み。

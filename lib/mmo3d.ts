@@ -16,16 +16,14 @@ import { MMO3D_BUILTIN_MODELS } from "@/lib/mmo3d-asset-catalog";
 import type { RealtimePlayer } from "@/lib/realtime/channels";
 
 /** 移動キー入力の論理状態。lib/yume25d.ts の操作感（前後移動と旋回を別キーに分離した
- *  「タンク操作」）に統一している（フェーズ20）。forward/back/strafeL/strafeRは現在の
- *  facingを一切変更せず、その向きに対して平行/垂直に移動するだけ。旋回はturnL/turnRの
- *  専用キーでしか起きない。これにより「後退キーで向きが変わる」ような直感に反する挙動を
- *  構造的に防ぐ（moveキーがfacingの計算に一切関与しないため、自己参照バグも原理的に
- *  起こりえない）。 */
+ *  「タンク操作」）をベースに、フェーズ22でストレイフを廃止しシンプル化した
+ *  （W/S=前後移動、A/D=旋回。矢印キーも同じ役割の別バインドとして残す）。forwardは
+ *  facingを一切変更せず、その向きに前進/後退するだけ。旋回はturnL/turnRの専用入力でしか
+ *  起きない。これにより「後退キーで向きが変わる」ような直感に反する挙動を構造的に防ぐ
+ *  （moveキーがfacingの計算に一切関与しないため、自己参照バグも原理的に起こりえない）。 */
 export interface Mmo3dInputState {
 	forward: boolean;
 	back: boolean;
-	strafeL: boolean;
-	strafeR: boolean;
 	turnL: boolean;
 	turnR: boolean;
 	run: boolean;
@@ -35,7 +33,6 @@ type AnimState = "idle" | "walk" | "run";
 
 const WALK_SPEED = 2.2; // m/s
 const RUN_SPEED = 5.5; // m/s
-const STRAFE_SPEED = 2.0; // m/s（lib/yume25d.ts のSTRAFE_SPEEDと同じ比率感覚）
 const TURN_SPEED = 2.4; // ラジアン/秒（lib/yume25d.ts のTURN_SPEEDと同値）
 const CROSSFADE_SEC = 0.25;
 
@@ -133,8 +130,6 @@ export class Mmo3dEngine {
 	private input: Mmo3dInputState = {
 		forward: false,
 		back: false,
-		strafeL: false,
-		strafeR: false,
 		turnL: false,
 		turnR: false,
 		run: false,
@@ -482,36 +477,33 @@ export class Mmo3dEngine {
 	}
 
 	private updateMovement(dt: number) {
-		const { forward, back, strafeL, strafeR, turnL, turnR, run } = this.input;
-		// lib/yume25d.ts と同じ「タンク操作」: 前後移動・ストレイフはfacingを一切変更せず、
-		// 旋回は専用キー(turnL/turnR)でしか起きない。以前は移動キーの入力からfacingの目標角度
-		// を毎フレーム逆算していたが、後退キー単体でも「後ろを向く」ような目標角度が出てしまい
-		// （直感に反する回転）、さらにfacing自身を参照して目標を再計算する構造だったため
-		// 自己参照ループによる無限回転バグ（Wキー押しっぱなしで回り続ける）も引き起こしていた。
-		// 移動とfacingの計算を完全に分離することで、両方の問題を構造的に防ぐ。
+		const { forward, back, turnL, turnR, run } = this.input;
+		// lib/yume25d.ts をベースにした「タンク操作」: 前後移動はfacingを一切変更せず、
+		// 旋回は専用入力(turnL/turnR、A/Dと矢印キー左右の両方をこれにバインドする)でしか
+		// 起きない。以前は移動キーの入力からfacingの目標角度を毎フレーム逆算していたが、
+		// 後退キー単体でも「後ろを向く」ような目標角度が出てしまい（直感に反する回転）、
+		// さらにfacing自身を参照して目標を再計算する構造だったため自己参照ループによる
+		// 無限回転バグ（Wキー押しっぱなしで回り続ける）も引き起こしていた。移動とfacingの
+		// 計算を完全に分離することで、両方の問題を構造的に防ぐ。フェーズ22でストレイフは
+		// 廃止し、A/Dキーは旋回専用にした（ユーザー指摘: A/D=旋回の方が直感的）。
 		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
 		this.facing += turn * TURN_SPEED * dt;
 
 		const move = (forward ? 1 : 0) - (back ? 1 : 0);
-		const strafe = (strafeR ? 1 : 0) - (strafeL ? 1 : 0);
-		const moving = move !== 0 || strafe !== 0;
+		const moving = move !== 0;
 
 		if (moving) {
-			// 前方 = (sin facing, cos facing)、右方 = (cos facing, -sin facing)。
 			const fx = Math.sin(this.facing);
 			const fz = Math.cos(this.facing);
-			const rx = Math.cos(this.facing);
-			const rz = -Math.sin(this.facing);
 
 			const runMult = run ? RUN_SPEED / WALK_SPEED : 1;
 			const ms = move * WALK_SPEED * runMult * dt;
-			const ss = strafe * STRAFE_SPEED * runMult * dt;
 
 			const [nx, nz] = this.resolveObstacleCollision(
 				this.player.position.x,
 				this.player.position.z,
-				fx * ms + rx * ss,
-				fz * ms + rz * ss,
+				fx * ms,
+				fz * ms,
 			);
 			this.player.position.x = nx;
 			this.player.position.z = nz;

@@ -146,19 +146,16 @@ export default function Mmo3dMaker({
 					return observer;
 				})();
 
-		// lib/yume25d.ts と同じ配列（Minecraft創造モード風）: 矢印=前後+旋回、WASD=前後+
-		// 左右ストレイフ。Shift=ダッシュ、Space=攻撃、E=掲示板。three/babylon共通。
-		const keyToInput: Record<
-			string,
-			"forward" | "back" | "strafeL" | "strafeR" | "turnL" | "turnR"
-		> = {
+		// タンク操作（フェーズ22でストレイフ廃止）: W/S・矢印上下=前後移動、A/D・矢印左右=旋回。
+		// Shift=ダッシュ、Space=攻撃、E=掲示板。three/babylon共通。
+		const keyToInput: Record<string, "forward" | "back" | "turnL" | "turnR"> = {
 			KeyW: "forward",
 			ArrowUp: "forward",
 			KeyS: "back",
 			ArrowDown: "back",
-			KeyA: "strafeL",
-			KeyD: "strafeR",
+			KeyA: "turnL",
 			ArrowLeft: "turnL",
+			KeyD: "turnR",
 			ArrowRight: "turnR",
 		};
 		const onKeyDown = (e: KeyboardEvent) => {

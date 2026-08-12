@@ -34,7 +34,6 @@ import type { RealtimePlayer } from "@/lib/realtime/channels";
 
 const WALK_SPEED = 2.2; // m/s（three版 lib/mmo3d.ts と揃える）
 const RUN_SPEED = 5.5; // m/s
-const STRAFE_SPEED = 2.0; // m/s（three版・lib/yume25d.ts と同じ比率感覚）
 const TURN_SPEED = 2.4; // ラジアン/秒（three版・lib/yume25d.ts と同値）
 
 // ── 簡易近接戦闘（three版 lib/mmo3d.ts と同じ数値。フェーズ15でbabylon版にも移植）。 ──
@@ -78,12 +77,10 @@ export class Mmo3dBabylonEngine {
 	private playerRoot: TransformNode;
 	private facing = 0; // ラジアン、three版 lib/mmo3d.ts の facing と同じ定義（+Zを0とする）
 
-	// ── 移動入力（フェーズ20: lib/yume25d.ts と同じタンク操作。three版と共有の型）。 ──
+	// ── 移動入力（フェーズ22: ストレイフ廃止のタンク操作。three版と共有の型）。 ──
 	private input: Mmo3dInputState = {
 		forward: false,
 		back: false,
-		strafeL: false,
-		strafeR: false,
 		turnL: false,
 		turnR: false,
 		run: false,
@@ -292,38 +289,35 @@ export class Mmo3dBabylonEngine {
 		Object.assign(this.input, next);
 	}
 
-	/** lib/yume25d.ts と同じ「タンク操作」（three版 lib/mmo3d.ts と共通のロジック）。
-	 *  前後移動・ストレイフはfacingを変更せず、旋回は専用キー(turnL/turnR)でしか起きない。
-	 *  以前はArcRotateCameraの向きを毎フレーム参照する「カメラ相対」実装だったが、後退キーで
-	 *  向きが変わって見える・facingを自己参照して回転先を決めるため無限回転するリスクがある、
-	 *  という構造的な問題があった（three版で実際にこのバグが発生した。フェーズ19参照）。
-	 *  ArcRotateCameraのドラッグ操作自体は引き続きでき、視点を自由に見回せる（移動には影響しない）。 */
+	/** タンク操作（three版 lib/mmo3d.ts と共通のロジック、フェーズ22でストレイフ廃止）。
+	 *  前後移動はfacingを変更せず、旋回は専用入力(turnL/turnR、A/Dと矢印キー左右の両方)
+	 *  でしか起きない。以前はArcRotateCameraの向きを毎フレーム参照する「カメラ相対」実装
+	 *  だったが、後退キーで向きが変わって見える・facingを自己参照して回転先を決めるため
+	 *  無限回転するリスクがある、という構造的な問題があった（three版で実際にこのバグが
+	 *  発生した。フェーズ19参照）。ArcRotateCameraのドラッグ操作自体は引き続きでき、
+	 *  視点を自由に見回せる（移動には影響しない）。 */
 	private updateMovement(dt: number) {
-		const { forward, back, strafeL, strafeR, turnL, turnR, run } = this.input;
+		const { forward, back, turnL, turnR, run } = this.input;
 
 		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
 		this.facing += turn * TURN_SPEED * dt;
 		this.playerRoot.rotation.y = this.facing;
 
 		const move = (forward ? 1 : 0) - (back ? 1 : 0);
-		const strafe = (strafeR ? 1 : 0) - (strafeL ? 1 : 0);
-		const moving = move !== 0 || strafe !== 0;
+		const moving = move !== 0;
 
 		if (moving) {
 			const fx = Math.sin(this.facing);
 			const fz = Math.cos(this.facing);
-			const rx = Math.cos(this.facing);
-			const rz = -Math.sin(this.facing);
 
 			const runMult = run ? RUN_SPEED / WALK_SPEED : 1;
 			const ms = move * WALK_SPEED * runMult * dt;
-			const ss = strafe * STRAFE_SPEED * runMult * dt;
 
 			const [nx, nz] = this.resolveObstacleCollision(
 				this.playerRoot.position.x,
 				this.playerRoot.position.z,
-				fx * ms + rx * ss,
-				fz * ms + rz * ss,
+				fx * ms,
+				fz * ms,
 			);
 			this.playerRoot.position.x = nx;
 			this.playerRoot.position.z = nz;

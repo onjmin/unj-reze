@@ -1144,8 +1144,10 @@ function ReplyPreview({
 		>
 			<div className="flex items-center gap-1.5 py-1">
 				<div className="flex items-center shrink-0 -space-x-1.5">
-					{replies.slice(0, maxAvatars).map((r, i) => {
-						const isActive = r.id === reply?.id;
+					{uniqueReplies.slice(0, maxAvatars).map((r, i) => {
+						const isActive =
+							(r.slug || r.displayName) ===
+							(reply?.slug || reply?.displayName);
 						const rAvatarInfo = getAvatarInfo(r.displayName);
 						return (
 							<div
