@@ -6,6 +6,7 @@
 // 画像の読み込み・コマ送りは lib/walk-sprite.ts の基盤をそのまま使う（2Dゲームエンジン側と
 // 実装を二重化しない）。
 
+import { detectProgression } from "@onjmin/chord-parser";
 import { imageRefToUrl } from "./asset-ref";
 import {
 	chordRootName,
@@ -118,6 +119,13 @@ export interface MvSong {
 	lyricLines: MvLyricLine[];
 	/** 歌詞が乗っていたトラックID（昇順） */
 	lyricTrackIds: number[];
+	/**
+	 * MMLから `@onjmin/chord-parser` の `detectProgression` で自動検出したコード進行
+	 * （bar昇順）。手入力・レイヤーごとの個別指定は無い——`parseMvSong` は mml文字列を
+	 * キーにキャッシュされるので、MMLが変わらない限り再計算されない
+	 * （MML編集時のみ計算し直し、それ以外はキャッシュを使う、という要求はここで満たす）。
+	 */
+	chords: MvChordStep[];
 }
 
 export const EMPTY_SONG: MvSong = {
@@ -131,6 +139,7 @@ export const EMPTY_SONG: MvSong = {
 	pitchMax: 72,
 	lyricLines: [],
 	lyricTrackIds: [],
+	chords: [],
 };
 
 const songCache = new Map<string, MvSong>();
@@ -213,8 +222,11 @@ export async function parseMvSong(mml: string): Promise<MvSong> {
 		lyricTrackIds.sort((a, b) => a - b);
 		lyricLines.sort((a, b) => a.bar - b.bar);
 
+		const bpm = parsed.bpm ?? 120;
+		const chords = detectChordProgression(notes, bpm);
+
 		song = {
-			bpm: parsed.bpm ?? 120,
+			bpm,
 			totalSteps,
 			totalBars: Math.ceil(totalSteps / MV_STEPS_PER_BAR),
 			notes,
@@ -224,6 +236,7 @@ export async function parseMvSong(mml: string): Promise<MvSong> {
 			pitchMax,
 			lyricLines,
 			lyricTrackIds,
+			chords,
 		};
 	} catch (e) {
 		console.error("[mv-engine] failed to parse mml", e);
@@ -231,6 +244,34 @@ export async function parseMvSong(mml: string): Promise<MvSong> {
 
 	songCache.set(key, song);
 	return song;
+}
+
+/**
+ * ノート列から `@onjmin/chord-parser` の `detectProgression` でコード進行を自動検出する。
+ * 手入力欄は無い——`parseMvSong` の中でだけ呼ばれ、その結果は `songCache` に乗るので、
+ * MMLが変わらない限り計算し直さない。
+ */
+function detectChordProgression(notes: MvNote[], bpm: number): MvChordStep[] {
+	if (notes.length === 0) return [];
+	try {
+		const secPerBar = (4 * 60) / bpm;
+		const timedNotes = notes.map((n) => ({
+			pitch: n.pitch,
+			when: (n.startStep / MV_STEPS_PER_BAR) * secPerBar,
+			duration: (n.durationSteps / MV_STEPS_PER_BAR) * secPerBar,
+		}));
+		const analysis = detectProgression(timedNotes, { bpm });
+		if (!analysis || analysis.chords.length === 0) return [];
+		return analysis.chords
+			.map((c) => ({
+				bar: Math.round((c.when / secPerBar) * 100) / 100,
+				label: c.symbol,
+			}))
+			.sort((a, b) => a.bar - b.bar);
+	} catch (e) {
+		console.error("[mv-engine] failed to detect chord progression", e);
+		return [];
+	}
 }
 
 /**
@@ -1613,7 +1654,7 @@ function drawLayer(d: DrawCtx, layer: MvLayer): void {
 function drawChordBar(d: DrawCtx, layer: MvChordBarLayer): void {
 	const { ctx } = d;
 	const { x, y, w, h } = layer.rect;
-	const chords = [...layer.chords].sort((a, b) => a.bar - b.bar);
+	const chords = d.song.chords;
 	if (chords.length === 0) return;
 
 	const endBar = Math.max(d.song.totalBars, chords[chords.length - 1].bar + 1);
@@ -1779,7 +1820,7 @@ function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 	const { x, y } = layer.rect;
 	const cell = layer.cellSize;
 	const cols = Math.max(1, layer.cols);
-	const chords = [...layer.chords].sort((a, b) => a.bar - b.bar);
+	const chords = d.song.chords;
 
 	const beatsPerBar = MV_BEATS_PER_BAR;
 	const currentBeat = Math.floor(d.bar * beatsPerBar);
@@ -1975,7 +2016,7 @@ function drawBeatDigit(d: DrawCtx, layer: MvBeatDigitLayer): void {
  */
 function drawBeatChordLabel(d: DrawCtx, layer: MvBeatChordLabelLayer): void {
 	const { ctx } = d;
-	const chord = resolveActiveChord(d, layer);
+	const chord = resolveActiveChord(d);
 	if (!chord) return;
 
 	const bounce = bounceOffset(d.bar - chord.bar, layer.size * 0.3);
@@ -2028,33 +2069,18 @@ function drawDegree(d: DrawCtx, layer: MvDegreeLayer): void {
  * 自前の `chords` があればそれを優先し、無ければ `chordLayerId`（未指定なら最初に
  * 見つかった）`chordBar` を見る。
  */
-function resolveActiveChord(
-	d: DrawCtx,
-	params: { chords?: MvChordStep[]; chordLayerId?: string },
-): MvChordStep | null {
-	if (params.chords && params.chords.length > 0) {
-		return chordAtBar(params.chords, d.bar);
-	}
-	const bar = d.manifest.layers.find(
-		(l): l is MvChordBarLayer =>
-			l.kind === "chordBar" &&
-			(!params.chordLayerId || l.id === params.chordLayerId),
-	);
-	return bar ? chordAtBar(bar.chords, d.bar) : null;
+/** いま鳴っているコード。進行は常に `MvSong.chords`（MMLからの自動検出）を見る。 */
+function resolveActiveChord(d: DrawCtx): MvChordStep | null {
+	return chordAtBar(d.song.chords, d.bar);
 }
 
 /** 度数を数える基準の音（0-11）。コード基準なら進行から、調基準なら主音から。 */
 function degreeRootPitch(
 	d: DrawCtx,
-	layer: {
-		basis: "chord" | "key";
-		key: string;
-		chords?: MvChordStep[];
-		chordLayerId?: string;
-	},
+	layer: { basis: "chord" | "key"; key: string },
 ): number | null {
 	if (layer.basis === "key") return MV_ROOT_TO_PITCH[layer.key] ?? 0;
-	const chord = resolveActiveChord(d, layer);
+	const chord = resolveActiveChord(d);
 	// コードが置かれていない区間は調の主音へ落とす（数字が消えるより読める）
 	if (!chord) return MV_ROOT_TO_PITCH[layer.key] ?? 0;
 	return MV_ROOT_TO_PITCH[chordRootName(chord.label)] ?? 0;
@@ -2718,16 +2744,10 @@ function drawImageLayer(d: DrawCtx, layer: MvImageLayer): void {
 
 // ───────────────── テキストレイヤー ─────────────────
 
+/** 動画全体の既定フォント。未指定時は美咲ゴシック（'misaki_gothic'、app/globals.css の @font-face）。 */
 export function getMvFontStack(manifest?: MvManifest): string {
 	if (manifest?.stage?.fontFamily) return manifest.stage.fontFamily;
-	if (typeof document !== "undefined") {
-		const raw = getComputedStyle(document.documentElement)
-			.getPropertyValue("--font-pixel")
-			.trim();
-		if (raw)
-			return `${raw}, "DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif`;
-	}
-	return '"DotGothic16", "美咲ゴシック", "Misaki Gothic", monospace, sans-serif';
+	return '"misaki_gothic", "DotGothic16", monospace, sans-serif';
 }
 
 function drawTextLayer(d: DrawCtx, layer: MvTextLayer): void {
@@ -2822,36 +2842,42 @@ export function resolveLyricLines(
 		if (target === undefined) return [];
 		return song.lyricLines.filter((l) => l.trackId === target);
 	})();
-	const withGapResets = applyLyricGapResets(lines, layer.holdBars ?? 2);
+	const withGapResets = applyLyricGapResets(lines);
 	return applyLyricResetBars(withGapResets, layer.resetBars);
 }
 
 /**
- * 手入力の resetBars/resetBefore とは別に、行と行のあいだが hold より大きく開く
- * （＝間奏などで次の歌詞まで間が空く）箇所を自動でリセット扱いにする。
+ * 間奏かどうかの判定に使う「行間の空き」しきい値（小節）。`holdBars`（積み上げの
+ * 表示保持時間）とは別物として固定値で持つ。同じ値を使い回すと、holdBars を長めに
+ * 設定した曲では実際の間奏（数小節の空き）を検出できずに歌詞が消えず、逆に holdBars
+ * を短くした曲では普通の息継ぎの間まで間奏扱いされてしまう——という事故が起きる。
+ */
+const INTERLUDE_GAP_BARS = 1.5;
+
+/**
+ * 手入力の resetBars/resetBefore とは別に、行と行のあいだが INTERLUDE_GAP_BARS より
+ * 大きく開く（＝間奏などで次の歌詞まで間が空く）箇所を自動でリセット扱いにする。
  * これが無いと、間奏で次の行が遠いとき groupEndBar が次行の小節まで伸びきってしまい、
  * 積み上げた歌詞が間奏中ずっと画面に残り続けてしまう。
  */
-function applyLyricGapResets(
-	lines: MvLyricLine[],
-	hold: number,
-): MvLyricLine[] {
+function applyLyricGapResets(lines: MvLyricLine[]): MvLyricLine[] {
 	if (lines.length === 0) return lines;
 	return lines.map((l, i) => {
 		if (i === 0) return l;
 		const prev = lines[i - 1];
 		const prevEnd = prev.endBar ?? prev.bar;
 		const gap = l.bar - prevEnd;
-		return gap > hold && !l.resetBefore
+		return gap > INTERLUDE_GAP_BARS && !l.resetBefore
 			? { ...l, resetBefore: true, autoReset: true }
 			: l;
 	});
 }
 
 /**
- * 間奏で自動的に区切られたまとまりを消すまでの時間。holdBars（＝間奏の判定閾値）を
- * そのまま使うと「間奏だと分かっているのに閾値ぶん律儀に居座ってから消える」という
- * 冗長な待ちが生まれるため、読み終わる分だけの短い固定値で切り離す。
+ * 間奏で自動的に区切られたまとまりを消すまでの時間。holdBars（＝積み上げの表示保持
+ * 時間）をそのまま使うと「間奏だと分かっているのに holdBars ぶん律儀に居座ってから
+ * 消える」という冗長な待ちが生まれる（holdBars を長めにした曲ほど間奏中ずっと歌詞が
+ * 残って見える）ため、読み終わる分だけの短い固定値で切り離す。
  */
 const AUTO_RESET_FADE_BARS = 0.5;
 

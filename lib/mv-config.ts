@@ -1583,7 +1583,11 @@ export const MV_CHORD_COLOR_MODE_LABELS: Record<MvChordColorMode, string> = {
 export interface MvChordBarLayer extends MvLayerBase {
 	kind: "chordBar";
 	rect: MvRect;
-	chords: MvChordStep[];
+	/**
+	 * コード進行は手入力しない。MMLから `@onjmin/chord-parser` で自動検出した
+	 * `MvSong.chords` を毎フレーム参照する——MMLが変わっていなければ `parseMvSong` の
+	 * キャッシュがそのまま使われ、変わっていれば再計算される（`lib/mv-engine.ts`）。
+	 */
 	/** 度数の基準キー（"C" / "F#" など）。色分けに使う。 */
 	key: string;
 	/** カラーテーマまたは色分けモード */
@@ -1623,16 +1627,8 @@ export interface MvDegreeLayer extends MvLayerBase {
 	 * - key   : `key` で指定した調の主音から数える
 	 */
 	basis: "chord" | "key";
-	/** basis==='key' のとき、および参照先にコードが無い区間の基準。 */
+	/** basis==='key' のとき、および進行にコードが無い区間の基準。 */
 	key: string;
-	/** 参照するコード進行バーのレイヤーID。未指定なら最初に見つかった chordBar。 */
-	chordLayerId?: string;
-	/**
-	 * 自前のコード進行。バーを画面に出さずに数字だけ出したいときに使う
-	 * （参考動画にはコード進行バーが無く、頭の上の数字だけがある）。
-	 * 指定するとこちらが優先される。
-	 */
-	chords?: MvChordStep[];
 	/** 音が切れても直前の数字を出し続ける。false なら鳴っている間だけ出る。 */
 	hold?: boolean;
 }
@@ -1641,8 +1637,8 @@ export interface MvDegreeLayer extends MvLayerBase {
  * アイコンが拍ごとに切り替わる「ウィジェット」（参考動画: `_.mp4` / `次日朝夢(再現).mp4`）。
  *
  * 画面下に2段のセルが並び、1セル＝1拍。上段は「いま鳴っている拍」を白い枠で示す
- * 位置マーカー、下段は `chords` から `getChordThemeColor` で求めた色（コードの根音・度数）
- * でグリフを塗る帯——`chordBar` と全く同じ色決定ロジックを共有する。
+ * 位置マーカー、下段は MMLから自動検出した `MvSong.chords` を `getChordThemeColor` で
+ * 色に変換（コードの根音・度数）して塗る帯——`chordBar` と全く同じ色決定ロジックを共有する。
  * グリフ自体は固定の小さな語彙（□/横線/的/格子…）を拍番号で順送りするだけで、
  * `mv-shape-group-macro.ts` のような核＋装飾の合成はしない（そこまでの複雑さは無い絵）。
  */
@@ -1653,8 +1649,6 @@ export interface MvWidgetLayer extends MvLayerBase {
 	cellSize: number;
 	/** 画面に並べるセル数（＝表示する拍数）。 */
 	cols: number;
-	/** 自前のコード進行。`chordBar` と同じ形式で、色分けの根拠にする。 */
-	chords: MvChordStep[];
 	/** 度数の基準キー。 */
 	key: string;
 	colorMode: MvChordColorMode;
@@ -1718,8 +1712,6 @@ export interface MvBeatDigitLayer extends MvLayerBase {
 	color: string;
 	basis: "chord" | "key";
 	key: string;
-	chords?: MvChordStep[];
-	chordLayerId?: string;
 	/** 音が切れても直前の数字を出し続ける。 */
 	hold?: boolean;
 }
@@ -1727,6 +1719,7 @@ export interface MvBeatDigitLayer extends MvLayerBase {
 /**
  * いま鳴っているコード名だけを出すウィジェット（`chordBar` の帯を出さずに
  * 読み札だけ欲しいとき用）。コードが切り替わった瞬間に1ドット分跳ねる。
+ * コード進行はMMLから自動検出した `MvSong.chords` をそのまま読む（手入力欄は無い）。
  */
 export interface MvBeatChordLabelLayer extends MvLayerBase {
 	kind: "beatChordLabel";
@@ -1735,9 +1728,6 @@ export interface MvBeatChordLabelLayer extends MvLayerBase {
 	anchor: MvAnchor;
 	size: number;
 	color: string;
-	/** 自前の進行。未指定なら `chordLayerId`（無ければ最初の chordBar）を参照する。 */
-	chords?: MvChordStep[];
-	chordLayerId?: string;
 }
 
 export type MvLayer =

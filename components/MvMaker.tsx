@@ -1,6 +1,5 @@
 "use client";
 
-import { detectProgression, parseChords } from "@onjmin/chord-parser";
 import {
 	BarChart3,
 	ChevronDown,
@@ -75,7 +74,6 @@ import {
 	MV_ROLL_FLOW_LABELS,
 	MV_ROOT_TO_PITCH,
 	MV_SHAPE_FORM_LABELS,
-	MV_STEPS_PER_BAR,
 	MV_STEPS_PER_BEAT,
 	MV_TRANSITION_LABELS,
 	MV_TRANSITION_STYLE_LABELS,
@@ -90,7 +88,6 @@ import {
 	type MvBlend,
 	type MvChordBarLayer,
 	type MvChordColorMode,
-	type MvChordStep,
 	type MvDegreeLayer,
 	type MvEffectCategory,
 	type MvEffectCurve,
@@ -256,9 +253,16 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function EffectLivePreview({
 	layer,
 	bpm,
+	compact,
 }: {
 	layer: MvEffectLayer;
 	bpm?: number;
+	/**
+	 * 設定パネルにその場で出す用の小さいサイズ。全幅で出すと縦に場所を食いすぎる
+	 * （特にスマホ）ので、確認用途としては親指の爪くらいの大きさで十分。
+	 * モーダルの選択肢グリッド（行の横幅いっぱいに出したい）では false のまま使う。
+	 */
+	compact?: boolean;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -320,9 +324,88 @@ function EffectLivePreview({
 			ref={canvasRef}
 			width={MV_W}
 			height={MV_H}
-			className="block h-auto w-full rounded bg-black"
+			className={
+				compact
+					? "block h-auto w-32 mx-auto rounded bg-black sm:w-40"
+					: "block h-auto w-full rounded bg-black"
+			}
 			style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
 		/>
+	);
+}
+
+/**
+ * 「演出を選ぶ」モーダル。`MvShapeMotionModal`（図形の動き方設定）と同じ考え方——
+ * プルダウンの文字列だけでは何が起きるかイメージしにくいので、カテゴリ見出し付きの
+ * 縦一覧で、各行に常時再生のライブプレビューを添えて選ばせる（`MvEffectTemplatePicker`
+ * の一覧画面と同じ並べ方）。タップした瞬間に確定して閉じる——トリガーや色などの
+ * 細かいパラメータは選択後も設定パネル側に残ったままなので、ここでは種類だけ選べれば良い。
+ */
+function EffectStylePickerModal({
+	layer,
+	bpm,
+	onPick,
+	onClose,
+}: {
+	layer: MvEffectLayer;
+	bpm?: number;
+	onPick: (style: MvEffectStyle) => void;
+	onClose: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+			<div className="flex h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-[85vh] sm:rounded-xl">
+				<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+					<span className="text-sm font-bold text-gray-100">演出を選ぶ</span>
+					<button
+						onClick={onClose}
+						className="rounded p-1 text-gray-400 hover:bg-gray-800"
+					>
+						<X size={18} />
+					</button>
+				</div>
+				<div className="flex-1 space-y-4 overflow-y-auto p-3">
+					{EFFECT_STYLE_GROUPS.map((g) => (
+						<div key={g.label}>
+							<p className="mb-1.5 text-[10px] font-bold text-gray-400">
+								{g.label}
+							</p>
+							<div className="space-y-2">
+								{g.options.map((o) => (
+									<button
+										key={o.value}
+										onClick={() => {
+											onPick(o.value);
+											onClose();
+										}}
+										className={`block w-full rounded-lg border p-2 text-left active:scale-[0.99] ${
+											layer.style === o.value
+												? "border-blue-500 bg-blue-500/10"
+												: "border-gray-700 bg-gray-800/60"
+										}`}
+									>
+										<EffectLivePreview layer={{ ...layer, style: o.value }} bpm={bpm} />
+										<div className="mt-2 flex items-center gap-2">
+											<span className="text-[13px] font-bold text-gray-100">
+												{o.label}
+											</span>
+											{layer.style === o.value && (
+												<span className="rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+													選択中
+												</span>
+											)}
+										</div>
+										<p className="mt-1 text-[11px] leading-relaxed text-gray-400">
+											{MV_EFFECT_STYLE_DESCRIPTIONS[o.value]}
+										</p>
+									</button>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
 	);
 }
 
@@ -580,6 +663,41 @@ function ColorField({
 	);
 }
 
+/**
+ * 「レイヤーを追加」系のドロップダウン。選ぶと即座に追加して選択状態をプレースホルダへ
+ * 戻す（ボタンを並べると種類が増えるたびに上部が煩雑になるため、一覧はプルダウンに畳む）。
+ */
+function AddLayerSelect({
+	placeholder,
+	options,
+	onPick,
+}: {
+	placeholder: string;
+	options: { value: string; label: string }[];
+	onPick: (value: string) => void;
+}) {
+	return (
+		<select
+			value=""
+			onChange={(e) => {
+				const v = e.target.value;
+				if (v) onPick(v);
+				e.target.value = "";
+			}}
+			className={`${FIELD_INPUT_CLASS} mb-2`}
+		>
+			<option value="" disabled>
+				{placeholder}
+			</option>
+			{options.map((o) => (
+				<option key={o.value} value={o.value}>
+					{o.label}
+				</option>
+			))}
+		</select>
+	);
+}
+
 function SelectField<T extends string>({
 	label,
 	value,
@@ -613,39 +731,6 @@ function SelectField<T extends string>({
  * 見出しでグループ分けした選択欄。
  * 演出は20種類あり、平たい一覧だと目的のものを探せないので分類して出す。
  */
-function GroupedSelectField<T extends string>({
-	label,
-	value,
-	groups,
-	onChange,
-}: {
-	label: string;
-	value: T;
-	groups: { label: string; options: { value: T; label: string }[] }[];
-	onChange: (v: T) => void;
-}) {
-	return (
-		<label className="block space-y-0.5">
-			<span className={FIELD_LABEL_CLASS}>{label}</span>
-			<select
-				value={value}
-				onChange={(e) => onChange(e.target.value as T)}
-				className={FIELD_INPUT_CLASS}
-			>
-				{groups.map((g) => (
-					<optgroup key={g.label} label={g.label}>
-						{g.options.map((o) => (
-							<option key={o.value} value={o.value}>
-								{o.label}
-							</option>
-						))}
-					</optgroup>
-				))}
-			</select>
-		</label>
-	);
-}
-
 function CheckField({
 	label,
 	checked,
@@ -989,6 +1074,9 @@ export default function MvMaker({
 	const [presetName, setPresetName] = useState<string | null>(null);
 	const [lyricsBulkText, setLyricsBulkText] = useState("");
 	const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+	const [effectStylePickerLayerId, setEffectStylePickerLayerId] = useState<
+		string | null
+	>(null);
 	const [motionTarget, setMotionTarget] = useState<{ layerId: string } | null>(
 		null,
 	);
@@ -1098,7 +1186,6 @@ export default function MvMaker({
 		return map;
 	}, [song.notes]);
 	const [hasAutosave, setHasAutosave] = useState(false);
-	const [bulkChordInput, setBulkChordInput] = useState("");
 	const autosaveDataRef = useRef<MvManifest | null>(null);
 
 	const storageKey = getStorageKey("mv");
@@ -1254,58 +1341,6 @@ export default function MvMaker({
 		[updateSection],
 	);
 
-	const handleParseBulkChords = useCallback(
-		(rawText: string, layerId: string) => {
-			if (!rawText.trim()) return;
-			try {
-				const events = parseChords(rawText, 120);
-				if (events.length > 0) {
-					const secPerBar = 2; // 120bpm -> 4 beats = 2sec per bar
-					const newChords: MvChordStep[] = events.map((e) => ({
-						bar: Math.round((e.when / secPerBar) * 100) / 100,
-						label: e.key + e.chord || "C",
-					}));
-					updateLayer(layerId, (l) =>
-						l.kind === "chordBar" ? { ...l, chords: newChords } : l,
-					);
-				}
-			} catch (e) {
-				console.warn("Failed to parse bulk chords:", e);
-			}
-		},
-		[updateLayer],
-	);
-
-	const handleAutoDetectFromMml = useCallback(
-		async (layerId: string) => {
-			if (!manifestRef.current.mml) return;
-			try {
-				const parsedSong = await parseMvSong(manifestRef.current.mml);
-				if (!parsedSong || parsedSong.notes.length === 0) return;
-				const bpm = parsedSong.bpm || 120;
-				const secPerBar = (4 * 60) / bpm;
-				const timedNotes = parsedSong.notes.map((n) => ({
-					pitch: n.pitch,
-					when: (n.startStep / MV_STEPS_PER_BAR) * secPerBar,
-					duration: (n.durationSteps / MV_STEPS_PER_BAR) * secPerBar,
-				}));
-				const analysis = detectProgression(timedNotes, { bpm });
-				if (analysis && analysis.chords.length > 0) {
-					const newChords: MvChordStep[] = analysis.chords.map((c) => ({
-						bar: Math.round((c.when / secPerBar) * 100) / 100,
-						label: c.symbol,
-					}));
-					updateLayer(layerId, (l) =>
-						l.kind === "chordBar" ? { ...l, chords: newChords } : l,
-					);
-				}
-			} catch (e) {
-				console.warn("Failed to auto detect chords from MML:", e);
-			}
-		},
-		[updateLayer],
-	);
-
 	// ── 楽曲情報（表示用） ─────────────────────────────────
 	useEffect(() => {
 		let disposed = false;
@@ -1412,7 +1447,7 @@ export default function MvMaker({
 			pixelated: true,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 		setPicker({ mode: "image", target: { layerId: layer.id } });
 	};
@@ -1433,7 +1468,7 @@ export default function MvMaker({
 			shadow: true,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1454,7 +1489,7 @@ export default function MvMaker({
 			holdBars: 2,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1468,7 +1503,7 @@ export default function MvMaker({
 			thickness: 2,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1599,7 +1634,7 @@ export default function MvMaker({
 			// 選ばれている」のに実際の動きは別物、という食い違いが起きる。
 			modulators: resolveSceneModulators(DEFAULT_SCENE_MOTION),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1726,12 +1761,6 @@ export default function MvMaker({
 			kind: "chordBar",
 			id: mvUid("chd"),
 			rect: { x: 0, y: MV_H - 22, w: MV_W, h: 22 },
-			chords: [
-				{ bar: 0, label: "C" },
-				{ bar: 1, label: "Am7" },
-				{ bar: 2, label: "F" },
-				{ bar: 3, label: "G7" },
-			],
 			key: "C",
 			colorMode: "degree",
 			color: "#1f2937",
@@ -1740,7 +1769,7 @@ export default function MvMaker({
 			size: 9,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1752,19 +1781,13 @@ export default function MvMaker({
 			rect: { x: 40, y: MV_H - 100, w: 40 * 8, h: 80 },
 			cellSize: 40,
 			cols: 8,
-			chords: [
-				{ bar: 0, label: "C" },
-				{ bar: 1, label: "Am7" },
-				{ bar: 2, label: "F" },
-				{ bar: 3, label: "G7" },
-			],
 			key: "C",
 			colorMode: "degree",
 			color: "#1f2937",
 			activeColor: "#f8fafc",
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1782,7 +1805,7 @@ export default function MvMaker({
 			activeColor: "#facc15",
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1802,7 +1825,7 @@ export default function MvMaker({
 			activeColor: "#facc15",
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1822,7 +1845,7 @@ export default function MvMaker({
 			hold: true,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1836,15 +1859,9 @@ export default function MvMaker({
 			anchor: "top",
 			size: 20,
 			color: "#f8fafc",
-			chords: [
-				{ bar: 0, label: "C" },
-				{ bar: 1, label: "Am7" },
-				{ bar: 2, label: "F" },
-				{ bar: 3, label: "G7" },
-			],
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1870,7 +1887,7 @@ export default function MvMaker({
 			hold: true,
 			z: getNextZ(),
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -1885,7 +1902,7 @@ export default function MvMaker({
 			color: "#ffffff",
 			z: 100,
 		};
-		update((m) => ({ ...m, layers: [...m.layers, layer] }));
+		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 		setSelectedLayerId(layer.id);
 	};
 
@@ -2236,7 +2253,7 @@ export default function MvMaker({
 					label="フォント"
 					value={manifest.stage.fontFamily ?? '""'}
 					options={[
-						{ value: '""', label: "標準（ドット字）" },
+						{ value: '""', label: "標準（美咲ゴシック）" },
 						{
 							value: '"Hiragino Sans", "Yu Gothic", "MS PGothic", sans-serif',
 							label: "ゴシック",
@@ -2245,7 +2262,7 @@ export default function MvMaker({
 							value: '"Hiragino Mincho ProN", "Yu Mincho", "MS PMincho", serif',
 							label: "明朝",
 						},
-						{ value: '"美咲ゴシック", monospace', label: "美咲ゴシック" },
+						{ value: '"misaki_gothic", monospace', label: "美咲ゴシック" },
 						{ value: "'Noto Sans JP', sans-serif", label: "Noto Sans JP" },
 						{ value: "'Kaisei Decol', serif", label: "Kaisei Decol" },
 						{ value: "'DotGothic16', sans-serif", label: "DotGothic16" },
@@ -3470,15 +3487,17 @@ export default function MvMaker({
 
 			{layer.kind === "effect" && (
 				<>
-					<EffectLivePreview layer={layer} bpm={song.bpm} />
-					<GroupedSelectField
-						label="演出"
-						value={layer.style}
-						groups={EFFECT_STYLE_GROUPS}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, style: v }) as MvLayer)
-						}
-					/>
+					<EffectLivePreview layer={layer} bpm={song.bpm} compact />
+					<label className="block space-y-0.5">
+						<span className={FIELD_LABEL_CLASS}>演出</span>
+						<button
+							onClick={() => setEffectStylePickerLayerId(layer.id)}
+							className="flex min-h-9 w-full items-center justify-between rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-left text-[12px] text-gray-100"
+						>
+							<span>{MV_EFFECT_STYLE_LABELS[layer.style]}</span>
+							<span className="text-[10px] text-blue-400">選び直す</span>
+						</button>
+					</label>
 					<p className="rounded border border-blue-500/30 bg-blue-950/20 px-2 py-1.5 text-[10px] leading-relaxed text-blue-200">
 						{MV_EFFECT_STYLE_DESCRIPTIONS[layer.style]}
 					</p>
@@ -3822,78 +3841,10 @@ export default function MvMaker({
 						}
 					/>
 
-					<p className="pt-1 text-[10px] font-bold text-gray-400">コード進行</p>
-					<p className="text-[10px] leading-relaxed text-gray-500">
-						小節番号とコード名を並べます。次のコードが始まるまでが1ブロックの長さです。
-					</p>
-					{layer.chords.map((c, i) => (
-						<div key={i} className="flex items-center gap-1.5">
-							<StringNumInput
-								value={c.bar}
-								onChange={(n) =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "chordBar"
-											? {
-													...l,
-													chords: l.chords.map((x, j) =>
-														j === i ? { ...x, bar: n } : x,
-													),
-												}
-											: l,
-									)
-								}
-								className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<input
-								value={c.label}
-								placeholder="F#m7"
-								onChange={(e) =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "chordBar"
-											? {
-													...l,
-													chords: l.chords.map((x, j) =>
-														j === i ? { ...x, label: e.target.value } : x,
-													),
-												}
-											: l,
-									)
-								}
-								className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<button
-								onClick={() =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "chordBar"
-											? { ...l, chords: l.chords.filter((_, j) => j !== i) }
-											: l,
-									)
-								}
-								className={DEL_BTN_CLASS}
-							>
-								<Trash2 size={16} />
-							</button>
-						</div>
-					))}
-					<button
-						onClick={() =>
-							updateLayer(layer.id, (l) =>
-								l.kind === "chordBar"
-									? {
-											...l,
-											chords: [
-												...l.chords,
-												{ bar: l.chords.length, label: "C" },
-											],
-										}
-									: l,
-							)
-						}
-						className={ADD_BTN_CLASS}
-					>
-						<Plus size={13} />
-						コードを追加
-					</button>
+					<Hint>
+						コード進行は手入力しません。MMLから自動検出します——再生・プレビュー時に
+						MMLが変わっていれば計算し直し、変わっていなければ前回の結果をそのまま使います。
+					</Hint>
 				</>
 			)}
 
@@ -4157,78 +4108,9 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
 						}
 					/>
-					<p className="pt-1 text-[10px] font-bold text-gray-400">コード進行</p>
-					{(layer.chords ?? []).map((c, i) => (
-						<div key={i} className="flex items-center gap-1.5">
-							<StringNumInput
-								value={c.bar}
-								onChange={(n) =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "beatChordLabel"
-											? {
-													...l,
-													chords: (l.chords ?? []).map((x, j) =>
-														j === i ? { ...x, bar: n } : x,
-													),
-												}
-											: l,
-									)
-								}
-								className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<input
-								value={c.label}
-								placeholder="F#m7"
-								onChange={(e) =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "beatChordLabel"
-											? {
-													...l,
-													chords: (l.chords ?? []).map((x, j) =>
-														j === i ? { ...x, label: e.target.value } : x,
-													),
-												}
-											: l,
-									)
-								}
-								className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<button
-								onClick={() =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "beatChordLabel"
-											? {
-													...l,
-													chords: (l.chords ?? []).filter((_, j) => j !== i),
-												}
-											: l,
-									)
-								}
-								className={DEL_BTN_CLASS}
-							>
-								<Trash2 size={16} />
-							</button>
-						</div>
-					))}
-					<button
-						onClick={() =>
-							updateLayer(layer.id, (l) =>
-								l.kind === "beatChordLabel"
-									? {
-											...l,
-											chords: [
-												...(l.chords ?? []),
-												{ bar: (l.chords ?? []).length, label: "C" },
-											],
-										}
-									: l,
-							)
-						}
-						className={ADD_BTN_CLASS}
-					>
-						<Plus size={13} />
-						コードを追加
-					</button>
+					<Hint>
+						コード進行は手入力しません。MMLから自動検出したものを表示します。
+					</Hint>
 				</>
 			)}
 
@@ -4310,77 +4192,10 @@ export default function MvMaker({
 						}
 					/>
 
-					<p className="pt-1 text-[10px] font-bold text-gray-400">
-						コード進行（色分けの根拠）
-					</p>
-					{layer.chords.map((c, i) => (
-						<div key={i} className="flex items-center gap-1.5">
-							<StringNumInput
-								value={c.bar}
-								onChange={(n) =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "widget"
-											? {
-													...l,
-													chords: l.chords.map((x, j) =>
-														j === i ? { ...x, bar: n } : x,
-													),
-												}
-											: l,
-									)
-								}
-								className="min-h-9 w-16 shrink-0 rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<input
-								value={c.label}
-								placeholder="F#m7"
-								onChange={(e) =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "widget"
-											? {
-													...l,
-													chords: l.chords.map((x, j) =>
-														j === i ? { ...x, label: e.target.value } : x,
-													),
-												}
-											: l,
-									)
-								}
-								className="min-h-9 min-w-0 flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-[11px] text-gray-100 outline-none"
-							/>
-							<button
-								onClick={() =>
-									updateLayer(layer.id, (l) =>
-										l.kind === "widget"
-											? { ...l, chords: l.chords.filter((_, j) => j !== i) }
-											: l,
-									)
-								}
-								className={DEL_BTN_CLASS}
-							>
-								<Trash2 size={16} />
-							</button>
-						</div>
-					))}
-					<button
-						onClick={() =>
-							updateLayer(layer.id, (l) =>
-								l.kind === "widget"
-									? {
-											...l,
-											chords: [
-												...l.chords,
-												{ bar: l.chords.length, label: "C" },
-											],
-										}
-									: l,
-							)
-						}
-						className={ADD_BTN_CLASS}
-					>
-						<Plus size={13} />
-						コードを追加
-					</button>
+					<Hint>
+						色分けの根拠になるコード進行は手入力しません。MMLから自動検出したものを
+						使います。
+					</Hint>
 				</>
 			)}
 
@@ -4551,72 +4366,51 @@ export default function MvMaker({
 					<Layers size={12} className="mr-1 inline" />
 					レイヤー
 				</SectionTitle>
-				<div className="grid grid-cols-3 gap-1.5 pb-2">
-					<button onClick={addImageLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						画像
-					</button>
-					<button onClick={addTextLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						文字
-					</button>
-					<button onClick={addVisualizerLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						ビジュアライザ
-					</button>
-					<button onClick={addShapeLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						図形
-					</button>
-					<button
-						onClick={() => setTemplatePickerOpen(true)}
-						className={ADD_BTN_CLASS}
-					>
-						<Plus size={12} />
-						エフェクト定型
-					</button>
-					<button onClick={addLyricsLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						歌詞
-					</button>
-					<button onClick={addEffectLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						演出
-					</button>
-				</div>
-				<p className="pb-1 text-[10px] font-bold text-gray-400">
+				<AddLayerSelect
+					placeholder="+ レイヤーを追加"
+					options={[
+						{ value: "image", label: "画像" },
+						{ value: "text", label: "文字" },
+						{ value: "visualizer", label: "ビジュアライザ" },
+						{ value: "shape", label: "図形" },
+						{ value: "template", label: "エフェクト定型" },
+						{ value: "lyrics", label: "歌詞" },
+						{ value: "effect", label: "演出" },
+					]}
+					onPick={(v) => {
+						if (v === "template") setTemplatePickerOpen(true);
+						else if (v === "image") addImageLayer();
+						else if (v === "text") addTextLayer();
+						else if (v === "visualizer") addVisualizerLayer();
+						else if (v === "shape") addShapeLayer();
+						else if (v === "lyrics") addLyricsLayer();
+						else if (v === "effect") addEffectLayer();
+					}}
+				/>
+				<p className="pb-1 pt-1 text-[10px] font-bold text-gray-400">
 					ウィジェット（拍・コード進行に連動）
 				</p>
-				<div className="grid grid-cols-3 gap-1.5 pb-2">
-					<button onClick={addChordBarLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						コード進行
-					</button>
-					<button onClick={addDegreeLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						度数の数字
-					</button>
-					<button onClick={addWidgetLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						アイコングリッド
-					</button>
-					<button onClick={addBeatCounterLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						数字カウンタ
-					</button>
-					<button onClick={addBeatPipsLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						増える図形
-					</button>
-					<button onClick={addBeatDigitLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						トラック連動ドット数字
-					</button>
-					<button onClick={addBeatChordLabelLayer} className={ADD_BTN_CLASS}>
-						<Plus size={12} />
-						コード名の読み札
-					</button>
-				</div>
+				<AddLayerSelect
+					placeholder="+ ウィジェットを追加"
+					options={[
+						{ value: "chordBar", label: "コード進行" },
+						{ value: "degree", label: "度数の数字" },
+						{ value: "widget", label: "アイコングリッド" },
+						{ value: "beatCounter", label: "数字カウンタ" },
+						{ value: "beatPips", label: "増える図形" },
+						{ value: "beatDigit", label: "トラック連動ドット数字" },
+						{ value: "beatChordLabel", label: "コード名の読み札" },
+					]}
+					onPick={(v) => {
+						if (v === "chordBar") addChordBarLayer();
+						else if (v === "degree") addDegreeLayer();
+						else if (v === "widget") addWidgetLayer();
+						else if (v === "beatCounter") addBeatCounterLayer();
+						else if (v === "beatPips") addBeatPipsLayer();
+						else if (v === "beatDigit") addBeatDigitLayer();
+						else if (v === "beatChordLabel") addBeatChordLabelLayer();
+					}}
+				/>
 				<div className="mb-2 overflow-hidden rounded-lg border border-purple-500/30 bg-purple-950/20">
 					<button
 						onClick={() => setMacroSettingsOpen(!macroSettingsOpen)}
@@ -5023,7 +4817,7 @@ export default function MvMaker({
 										holdBars: 2,
 										z: 40,
 									};
-									update((m) => ({ ...m, layers: [...m.layers, layer] }));
+									update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 								}}
 								className={ADD_BTN_CLASS}
 							>
@@ -5061,7 +4855,7 @@ export default function MvMaker({
 											holdBars: 2,
 											z: 40,
 										};
-										update((m) => ({ ...m, layers: [...m.layers, layer] }));
+										update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 									}}
 									className={ADD_BTN_CLASS}
 								>
@@ -6047,7 +5841,7 @@ export default function MvMaker({
 													sections: [s.id],
 													z: getNextZ(),
 												};
-												update((m) => ({ ...m, layers: [...m.layers, layer] }));
+												update((m) => ({ ...m, layers: [layer, ...m.layers] }));
 												setSelectedLayerId(layer.id);
 												setTab("layers");
 											}}
@@ -6257,6 +6051,28 @@ export default function MvMaker({
 					onClose={() => setTemplatePickerOpen(false)}
 				/>
 			)}
+
+			{effectStylePickerLayerId &&
+				(() => {
+					const target = manifest.layers.find(
+						(l): l is MvEffectLayer =>
+							l.kind === "effect" && l.id === effectStylePickerLayerId,
+					);
+					if (!target) return null;
+					return (
+						<EffectStylePickerModal
+							layer={target}
+							bpm={song.bpm}
+							onPick={(style) =>
+								updateLayer(
+									target.id,
+									(l) => ({ ...l, style }) as MvLayer,
+								)
+							}
+							onClose={() => setEffectStylePickerLayerId(null)}
+						/>
+					);
+				})()}
 
 			{motionTarget && baseShapeLayer && (
 				<MvShapeMotionModal
