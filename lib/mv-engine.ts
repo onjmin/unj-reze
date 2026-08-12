@@ -1811,66 +1811,89 @@ function drawWidgetGlyph(
 }
 
 /**
- * 拍ごとにグリフが差し替わるウィジェット。上段は「いまの拍」の位置マーカー、
- * 下段は `chords` から求めた色（コードの根音・度数）でグリフを塗る帯。
- * 色の決め方は `drawChordBar` と共通（`getChordThemeColor` / `chordDegree`）。
+ * 確定後のグリフが辿る順番。参考動画をコマ送りすると、上段の「もう確定したセル」は
+ * 必ずこの4つを先頭から繰り返す（アンカーの`filled`を除くと、2枚目=hbars、3枚目=target、
+ * 4枚目=grid、5枚目=filled…と周期4で一致し、下段の並びとも同じ周期）。
+ */
+const MV_WIDGET_GLYPH_CYCLE: MvWidgetGlyph[] = ["hbars", "target", "grid", "filled"];
+
+/** 確定するまでの「高速でグリフが入れ替わる」演出が読む語彙（全部）。 */
+const MV_WIDGET_SCRAMBLE_POOL = MV_WIDGET_GLYPHS;
+
+/**
+ * 拍ごとにセルが1つずつ埋まっていくウィジェット（参考動画: `_.mp4` / `次日朝夢(再現).mp4`）。
+ *
+ * コマ送りで確認した実際の構造（以前の実装はここを丸ごと勘違いしていた——コードとは無関係）:
+ * - 上段: セル0は常に確定済みの白いベタ塗り正方形（アンカー、点滅しない）。
+ *   セル1以降は「窓の先頭から数えて何拍目か」で1拍に1個ずつ埋まる。
+ *   埋まる瞬間はグリフが高速で入れ替わる「スクランブル」を見せてから、
+ *   `MV_WIDGET_GLYPH_CYCLE` の周期4パターンに確定して止まる。
+ * - 窓（`cols`拍）を埋め切ると境界で一瞬フラッシュしたあと、上段だけが
+ *   セル0だけの状態へ戻って次の窓が始まる。
+ * - 下段は上段と無関係に常時表示の固定パターン（同じ周期4を下段の色でループ）で、
+ *   フラッシュにもリセットにも影響されない――コード進行を参照しない。
  */
 function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 	const { ctx } = d;
 	const { x, y } = layer.rect;
 	const cell = layer.cellSize;
 	const cols = Math.max(1, layer.cols);
-	const chords = d.song.chords;
-
 	const beatsPerBar = MV_BEATS_PER_BAR;
-	const currentBeat = Math.floor(d.bar * beatsPerBar);
-	const windowStart = Math.floor(currentBeat / cols) * cols;
 
-	const chordAtBeat = (beat: number): MvChordStep | undefined => {
-		if (chords.length === 0) return undefined;
-		const bar = beat / beatsPerBar;
-		let found = chords[0];
-		for (const c of chords) {
-			if (c.bar <= bar) found = c;
-			else break;
-		}
-		return found;
-	};
+	const beatPos = d.bar * beatsPerBar;
+	const totalBeat = Math.floor(beatPos);
+	const beatPhase = beatPos - totalBeat;
+	const cyclePos = ((totalBeat % cols) + cols) % cols;
 
-	let lastThemeColor: string | undefined;
+	const SCRAMBLE_SETTLE = 0.6; // このフェーズまではグリフが高速で入れ替わる
+	const SCRAMBLE_RATE = 16; // 1拍あたりのグリフ切り替え回数
+
 	for (let i = 0; i < cols; i++) {
-		const beat = windowStart + i;
 		const cx = x + i * cell;
-		const glyph = MV_WIDGET_GLYPHS[((beat % MV_WIDGET_GLYPHS.length) + MV_WIDGET_GLYPHS.length) % MV_WIDGET_GLYPHS.length];
-		const active = beat === currentBeat;
 
-		// 上段：いまの拍のマーカー
-		drawWidgetGlyph(
-			ctx,
-			glyph,
-			cx,
-			y,
-			cell,
-			active ? layer.activeColor : "rgba(255,255,255,0.5)",
-		);
-		ctx.strokeStyle = "rgba(255,255,255,0.2)";
-		ctx.lineWidth = 1;
-		ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
-
-		// 下段：コードで色分けした帯
-		const chord = chordAtBeat(beat);
-		let fill: string;
-		if (layer.colorMode === "fixed" || !chord) {
-			fill = layer.color;
-		} else {
-			fill = getChordThemeColor(chord.label, layer.key, layer.colorMode, lastThemeColor);
-			lastThemeColor = fill;
-		}
-		ctx.fillStyle = "rgba(0,0,0,0.35)";
+		// ── 下段：固定パターン。上段の状態やフラッシュとは無関係に常時描く ──
+		const bottomGlyph = MV_WIDGET_GLYPH_CYCLE[i % MV_WIDGET_GLYPH_CYCLE.length];
+		ctx.fillStyle = "rgba(20,40,70,0.5)";
 		ctx.fillRect(cx, y + cell, cell, cell);
-		drawWidgetGlyph(ctx, glyph, cx, y + cell, cell, fill);
+		drawWidgetGlyph(ctx, bottomGlyph, cx, y + cell, cell, layer.bottomColor);
 		ctx.strokeStyle = "rgba(255,255,255,0.15)";
+		ctx.lineWidth = 1;
 		ctx.strokeRect(cx + 0.5, y + cell + 0.5, cell - 1, cell - 1);
+
+		// ── 上段：まだ窓に到達していないセルは枠だけ ──
+		if (i > cyclePos) {
+			ctx.strokeStyle = "rgba(255,255,255,0.15)";
+			ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
+			continue;
+		}
+
+		let glyph: MvWidgetGlyph;
+		if (i === 0) {
+			glyph = "filled"; // アンカー。常に確定・点滅しない
+		} else if (i < cyclePos) {
+			glyph = MV_WIDGET_GLYPH_CYCLE[(i - 1) % MV_WIDGET_GLYPH_CYCLE.length];
+		} else if (beatPhase < SCRAMBLE_SETTLE) {
+			const idx = Math.floor(beatPhase * SCRAMBLE_RATE) % MV_WIDGET_SCRAMBLE_POOL.length;
+			glyph = MV_WIDGET_SCRAMBLE_POOL[idx];
+		} else {
+			glyph = MV_WIDGET_GLYPH_CYCLE[(i - 1) % MV_WIDGET_GLYPH_CYCLE.length];
+		}
+
+		drawWidgetGlyph(ctx, glyph, cx, y, cell, layer.color);
+		ctx.strokeStyle = "rgba(255,255,255,0.25)";
+		ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
+	}
+
+	// ── 窓の境界（`cols`拍ごと）をまたぐ一瞬だけ、全面を白く光らせる ──
+	const FLASH_HALF_WIDTH = 0.12; // 拍単位。境界の前後この幅だけ光る
+	const boundaryBeat = Math.round(beatPos / cols) * cols;
+	if (boundaryBeat > 0) {
+		const dist = Math.abs(beatPos - boundaryBeat);
+		if (dist < FLASH_HALF_WIDTH) {
+			const flashAlpha = (1 - dist / FLASH_HALF_WIDTH) * 0.7;
+			ctx.fillStyle = withAlpha(layer.flashColor, flashAlpha);
+			ctx.fillRect(x, y, cell * cols, cell * 2);
+		}
 	}
 }
 

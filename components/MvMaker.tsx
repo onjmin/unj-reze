@@ -55,7 +55,6 @@ import {
 	MV_AUDIO_MODE_HINTS,
 	MV_AUDIO_MODE_LABELS,
 	MV_BLEND_LABELS,
-	MV_CHORD_COLOR_MODE_LABELS,
 	MV_EFFECT_CATEGORY,
 	MV_EFFECT_CATEGORY_LABELS,
 	MV_EFFECT_CURVE_LABELS,
@@ -88,7 +87,6 @@ import {
 	type MvBeatPipsLayer,
 	type MvBlend,
 	type MvChordBarLayer,
-	type MvChordColorMode,
 	type MvDegreeLayer,
 	type MvEffectCategory,
 	type MvEffectCurve,
@@ -2087,10 +2085,9 @@ export default function MvMaker({
 			rect: { x: 40, y: MV_H - 100, w: 40 * 8, h: 80 },
 			cellSize: 40,
 			cols: 8,
-			key: "C",
-			colorMode: "degree",
-			color: "#1f2937",
-			activeColor: "#f8fafc",
+			color: "#f8fafc",
+			bottomColor: "#5b9bd5",
+			flashColor: "#ffffff",
 			z: getNextZ(),
 		};
 		update((m) => ({ ...m, layers: [layer, ...m.layers] }));
@@ -4449,50 +4446,32 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, cols: v }) as MvLayer)
 						}
 					/>
-					<SelectField
-						label="キー"
-						value={layer.key}
-						options={Object.keys(MV_ROOT_TO_PITCH).map((k) => ({
-							value: k,
-							label: k,
-						}))}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, key: v }) as MvLayer)
-						}
-					/>
-					<SelectField
-						label="色分け"
-						value={layer.colorMode}
-						options={(
-							Object.keys(MV_CHORD_COLOR_MODE_LABELS) as MvChordColorMode[]
-						).map((k) => ({ value: k, label: MV_CHORD_COLOR_MODE_LABELS[k] }))}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, colorMode: v }) as MvLayer)
-						}
-					/>
-					{layer.colorMode === "fixed" && (
-						<ColorField
-							label="下段の色"
-							value={layer.color}
-							onChange={(v) =>
-								updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
-							}
-						/>
-					)}
 					<ColorField
-						label="いまの拍の色"
-						value={layer.activeColor}
+						label="上段の色（確定・スクランブル中のグリフ）"
+						value={layer.color}
 						onChange={(v) =>
-							updateLayer(
-								layer.id,
-								(l) => ({ ...l, activeColor: v }) as MvLayer,
-							)
+							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="下段の色（常時表示の固定パターン）"
+						value={layer.bottomColor}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, bottomColor: v }) as MvLayer)
+						}
+					/>
+					<ColorField
+						label="境界フラッシュの色"
+						value={layer.flashColor}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, flashColor: v }) as MvLayer)
 						}
 					/>
 
 					<Hint>
-						色分けの根拠になるコード進行は手入力しません。MMLから自動検出したものを
-						使います。
+						拍だけで動く飾りです。コード進行やトラックとは連動しません
+						（参考動画をコマ送りして確認したところ、下段は常時同じ固定パターンで、
+						上段だけが1拍ごとに1マスずつ埋まり、窓を埋め切ると一瞬光ってリセットします）。
 					</Hint>
 				</>
 			)}
