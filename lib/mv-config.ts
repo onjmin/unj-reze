@@ -844,6 +844,8 @@ export interface MvLyricMark {
 export interface MvLyricLine {
 	/** 表示を始める小節（0始まり、小数可） */
 	bar: number;
+	/** 歌い終わる小節（あれば。小数可） */
+	endBar?: number;
 	text: string;
 	/** どの歌詞トラック(@@n)由来か。手入力なら undefined。 */
 	trackId?: number;

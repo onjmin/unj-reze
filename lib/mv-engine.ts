@@ -249,19 +249,27 @@ function lyricLinesFromTrack(
 	const lines: MvLyricLine[] = [];
 	let text = "";
 	let startStep: number | null = null;
+	let endStep: number | null = null;
 
 	const flush = () => {
 		if (text && startStep !== null)
-			lines.push({ bar: startStep / MV_STEPS_PER_BAR, text, trackId });
+			lines.push({
+				bar: startStep / MV_STEPS_PER_BAR,
+				endBar: (endStep ?? startStep) / MV_STEPS_PER_BAR,
+				text,
+				trackId,
+			});
 		text = "";
 		startStep = null;
+		endStep = null;
 	};
 
 	syllables.forEach((syl, i) => {
 		if (i > 0 && (breaks.has(i) || (useSoftWrap && i % SOFT_WRAP === 0)))
 			flush();
-		if (startStep === null)
-			startStep = trackNotes[Math.min(i, trackNotes.length - 1)].startStep;
+		const note = trackNotes[Math.min(i, trackNotes.length - 1)];
+		if (startStep === null) startStep = note.startStep;
+		endStep = note.startStep + note.length;
 		text += syl.kana;
 	});
 	flush();
@@ -2501,7 +2509,9 @@ function applyLyricGapResets(
 	if (lines.length === 0) return lines;
 	return lines.map((l, i) => {
 		if (i === 0) return l;
-		const gap = l.bar - lines[i - 1].bar;
+		const prev = lines[i - 1];
+		const prevEnd = prev.endBar ?? prev.bar;
+		const gap = l.bar - prevEnd;
 		return gap > hold && !l.resetBefore
 			? { ...l, resetBefore: true, autoReset: true }
 			: l;
@@ -2574,8 +2584,10 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 	// 次の区切りが間奏の自動検出（autoReset）由来なら、閾値(hold)は「間奏と判定する条件」
 	// でしかないので使い回さず、歌いきったらすぐ消える短い固定時間にする。
 	const nextIsAutoReset = groupEnd < lines.length && !!lines[groupEnd].autoReset;
+	const lastLine = lines[groupEnd - 1];
+	const lastLineEnd = lastLine.endBar ?? lastLine.bar;
 	const lastBarInGroup =
-		lines[groupEnd - 1].bar + (nextIsAutoReset ? AUTO_RESET_FADE_BARS : hold);
+		lastLineEnd + (nextIsAutoReset ? AUTO_RESET_FADE_BARS : hold);
 	const groupEndBar =
 		groupEnd < lines.length
 			? Math.min(lines[groupEnd].bar, lastBarInGroup)
