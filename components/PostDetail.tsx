@@ -1461,24 +1461,31 @@ export default function PostDetail({ post: initial }: PostDetailProps) {
 					return (
 						<div className="border-t border-gray-800 px-3 py-3 space-y-2">
 							<span className="text-[11px] text-gray-500 font-bold">返信</span>
-							{roots.map((reply) => (
-								<ReplyTreeItem
-									key={reply.id}
-									post={reply}
-									replies={post.replies}
-									depth={0}
-									onReply={openComposer}
-									userId={userId}
-									userSlug={userSlug}
-									onEdit={handleEditReply}
-									onDelete={handleDeleteReply}
-									onAvatarClick={handleAvatarClick}
-									onPreviewImage={(src, alt) => setPreviewImage({ src, alt })}
-									onOpenCollab={handleOpenCollab}
-									onEditMv={handleEditMvFor}
-									onEditMml={handleEditMusicFor}
-								/>
-							))}
+							{roots.map((reply, i) => {
+								const prevAuthorKey =
+									i > 0
+										? roots[i - 1].slug || roots[i - 1].displayName
+										: undefined;
+								return (
+									<ReplyTreeItem
+										key={reply.id}
+										post={reply}
+										replies={post.replies}
+										depth={0}
+										prevAuthorKey={prevAuthorKey}
+										onReply={openComposer}
+										userId={userId}
+										userSlug={userSlug}
+										onEdit={handleEditReply}
+										onDelete={handleDeleteReply}
+										onAvatarClick={handleAvatarClick}
+										onPreviewImage={(src, alt) => setPreviewImage({ src, alt })}
+										onOpenCollab={handleOpenCollab}
+										onEditMv={handleEditMvFor}
+										onEditMml={handleEditMusicFor}
+									/>
+								);
+							})}
 						</div>
 					);
 				})()}
@@ -1701,6 +1708,7 @@ function ReplyTreeItem({
 	post,
 	replies,
 	depth,
+	prevAuthorKey,
 	onReply,
 	userId,
 	userSlug,
@@ -1715,6 +1723,7 @@ function ReplyTreeItem({
 	post: Post;
 	replies: Post[];
 	depth: number;
+	prevAuthorKey?: string;
 	onReply: (post: Post) => void;
 	userId: string;
 	userSlug?: string;
@@ -1930,46 +1939,54 @@ function ReplyTreeItem({
 	const isSelf =
 		!!userSlug && (localPost.slug || localPost.displayName) === userSlug;
 
+	const currentAuthorKey = localPost.slug || localPost.displayName;
+	const isSameAuthorAsPrev =
+		!!prevAuthorKey && prevAuthorKey === currentAuthorKey;
+
 	return (
 		<div
 			style={{ marginLeft: depth * 12 }}
 			className={depth > 0 ? "pl-3 border-l-2 border-gray-800/40" : ""}
 		>
 			<div className="flex p-3 space-x-2.5">
-				<div
-					onClick={(e) => {
-						e.stopPropagation();
-						if (isSelf) {
-							router.push(`/user/${localPost.slug || localPost.displayName}`);
-						} else {
-							const rect = e.currentTarget.getBoundingClientRect();
-							onAvatarClick(
-								{
-									displayName: localPost.displayName,
-									slug: localPost.slug || undefined,
-								},
-								{ x: rect.left, y: rect.bottom },
-							);
-						}
-					}}
-					className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
-					style={localPost.avatarUrl ? undefined : avatarInfo.style}
-				>
-					{localPost.avatarUrl ? (
-						<img
-							src={localPost.avatarUrl}
-							alt={avatarInfo.username}
-							className="w-full h-full object-cover rounded-full"
-						/>
-					) : (
-						(() => {
-							const AvatarIcon = avatarInfo.Icon;
-							return (
-								<AvatarIcon className="w-5 h-5 text-white/40 leading-none" />
-							);
-						})()
-					)}
-				</div>
+				{isSameAuthorAsPrev ? (
+					<div className="w-9 h-9 shrink-0" />
+				) : (
+					<div
+						onClick={(e) => {
+							e.stopPropagation();
+							if (isSelf) {
+								router.push(`/user/${localPost.slug || localPost.displayName}`);
+							} else {
+								const rect = e.currentTarget.getBoundingClientRect();
+								onAvatarClick(
+									{
+										displayName: localPost.displayName,
+										slug: localPost.slug || undefined,
+									},
+									{ x: rect.left, y: rect.bottom },
+								);
+							}
+						}}
+						className="w-9 h-9 rounded-full shrink-0 border border-gray-700/50 flex items-center justify-center text-xs font-bold text-white hover:opacity-80 transition-opacity relative overflow-hidden cursor-pointer"
+						style={localPost.avatarUrl ? undefined : avatarInfo.style}
+					>
+						{localPost.avatarUrl ? (
+							<img
+								src={localPost.avatarUrl}
+								alt={avatarInfo.username}
+								className="w-full h-full object-cover rounded-full"
+							/>
+						) : (
+							(() => {
+								const AvatarIcon = avatarInfo.Icon;
+								return (
+									<AvatarIcon className="w-5 h-5 text-white/40 leading-none" />
+								);
+							})()
+						)}
+					</div>
+				)}
 				<div className="flex-1 min-w-0">
 					<div className="flex justify-between items-baseline mb-0.5">
 						<div className="flex items-baseline space-x-1.5">
@@ -2340,24 +2357,31 @@ function ReplyTreeItem({
 					}`}
 				>
 					<div className="overflow-hidden">
-						{children.map((child) => (
-							<ReplyTreeItem
-								key={child.id}
-								post={child}
-								replies={replies}
-								depth={depth + 1}
-								onReply={onReply}
-								userId={userId}
-								userSlug={userSlug}
-								onEdit={onEdit}
-								onDelete={onDelete}
-								onAvatarClick={onAvatarClick}
-								onPreviewImage={onPreviewImage}
-								onOpenCollab={onOpenCollab}
-								onEditMv={onEditMv}
-								onEditMml={onEditMml}
-							/>
-						))}
+						{children.map((child, i) => {
+							const childPrevAuthorKey =
+								i > 0
+									? children[i - 1].slug || children[i - 1].displayName
+									: localPost.slug || localPost.displayName;
+							return (
+								<ReplyTreeItem
+									key={child.id}
+									post={child}
+									replies={replies}
+									depth={depth + 1}
+									prevAuthorKey={childPrevAuthorKey}
+									onReply={onReply}
+									userId={userId}
+									userSlug={userSlug}
+									onEdit={onEdit}
+									onDelete={onDelete}
+									onAvatarClick={onAvatarClick}
+									onPreviewImage={onPreviewImage}
+									onOpenCollab={onOpenCollab}
+									onEditMv={onEditMv}
+									onEditMml={onEditMml}
+								/>
+							);
+						})}
 					</div>
 				</div>
 			)}
