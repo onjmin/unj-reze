@@ -177,6 +177,7 @@ import {
 } from "@/lib/mv-shape-group-macro";
 import ContentPicker, { type PickResult } from "./ContentPicker";
 import HistoryModal from "./HistoryModal";
+import MvArrangementModal from "./MvArrangementModal";
 import MvEffectTemplatePicker from "./MvEffectTemplatePicker";
 import MvPlayer, { type MvPlayerHandle } from "./MvPlayer";
 import MvShapeFormPickerModal, {
@@ -1422,6 +1423,10 @@ export default function MvMaker({
 	const [timelineModalOpen, setTimelineModalOpen] = useState(false);
 	/** グループ一括編集モーダルの対象グループID（開いていなければnull）。 */
 	const [bulkEditGroupId, setBulkEditGroupId] = useState<string | null>(null);
+	/** 特殊アレンジ生成モーダルの対象（アレンジ元）グループID（開いていなければnull）。 */
+	const [arrangementModalGroupId, setArrangementModalGroupId] = useState<
+		string | null
+	>(null);
 	const [bulkField, setBulkField] = useState<
 		| "z"
 		| "position"
@@ -2026,35 +2031,67 @@ export default function MvMaker({
 	};
 
 	/**
-	 * 指定したグループを元にして「特殊アレンジ」の新規グループを作成する。
+	 * 特殊アレンジグループのリロール。通常のリロール（`rerollSymmetricShapeGroup`）を
+	 * そのまま使うと「アレンジ後の姿」を乱数の起点にしてしまい、型を重ねるたびに
+	 * 元の図形からどんどん離れていく（＝リロールするほど崩れて見える）。
+	 * 特殊アレンジは常に「アレンジ元グループの“今の”中身」を起点に生成し直す。
 	 */
-	const addArrangedGroup = (groupId: string) => {
-		const origLayers = manifest.layers.filter((l) => l.groupId === groupId);
-		if (origLayers.length === 0 || origLayers[0].kind !== "shape") return; // 対象が空または非図形
+	const rerollArrangedGroup = (groupId: string) => {
+		const group = manifest.groups?.find((g) => g.id === groupId);
+		const arr = group?.arrangement;
+		if (!arr) return;
+		const sourceLayers = manifest.layers.filter(
+			(l) => l.groupId === arr.sourceGroupId,
+		);
+		if (sourceLayers.length === 0 || sourceLayers[0].kind !== "shape") return;
 
-		let z = getNextZ();
+		// 既存メンバーのzをそのまま使い回す（`rerollSymmetricShapeGroup` と同じ理由）。
+		const existingZs = manifest.layers
+			.filter((l) => l.groupId === groupId)
+			.map((l) => l.z ?? 0)
+			.sort((a, b) => a - b);
+		let i = 0;
+		let overflowZ = getNextZ();
 		const nextZ = () => {
-			const v = z;
-			z += 10;
+			if (i < existingZs.length) return existingZs[i++];
+			const v = overflowZ;
+			overflowZ += 10;
 			return v;
 		};
-		
-		const { group, layers } = generateArrangementForGroup(
-			origLayers as MvShapeLayer[],
+
+		const { layers: newLayers } = generateArrangementForGroup(
+			sourceLayers as MvShapeLayer[],
 			nextZ,
-			groupId,
+			arr.sourceGroupId,
+			{ triggerBar: arr.triggerBar, endBar: arr.endBar },
 		);
+		// グループの実体（id・トリガー位置）は維持し、中身だけ差し替える。
+		const retagged = newLayers.map((l) => ({ ...l, groupId }));
+		update((m) => replaceGroupMembers(m, groupId, retagged));
+	};
+
+	/**
+	 * 特殊アレンジモーダルで確定した中身をレイヤーとして挿入する。
+	 * z はモーダル内のプレビュー用の仮採番のままなので、ここで実際の重なり順として
+	 * 振り直す（プレビュー時点の相対順序は配列の並びに保たれているので、
+	 * 順に `getNextZ()` を振るだけで壊れない）。
+	 */
+	const insertArrangedGroup = (
+		groupId: string,
+		result: { group: MvLayerGroup; layers: MvShapeLayer[] },
+	) => {
+		const layers = result.layers.map((l) => ({ ...l, z: getNextZ() }));
 
 		update((m) => {
 			const insertIndex = m.layers.findIndex((l) => l.groupId === groupId);
 			const safeIndex = insertIndex >= 0 ? insertIndex : 0;
 			const newLayersList = [...m.layers];
 			newLayersList.splice(safeIndex, 0, ...layers);
-			
+
 			const newGroupsList = [...(m.groups ?? [])];
 			const groupInsertIndex = m.groups?.findIndex((g) => g.id === groupId) ?? -1;
 			const safeGroupIndex = groupInsertIndex >= 0 ? groupInsertIndex : 0;
-			newGroupsList.splice(safeGroupIndex, 0, group);
+			newGroupsList.splice(safeGroupIndex, 0, result.group);
 
 			return {
 				...m,
@@ -2062,7 +2099,7 @@ export default function MvMaker({
 				groups: newGroupsList,
 			};
 		});
-		setAutoGroupIds((ids) => [...ids, group.id]);
+		setAutoGroupIds((ids) => [...ids, result.group.id]);
 		setGroupMenuOpenId(null);
 		if (layers[0]) setSelectedLayerId(layers[0].id);
 	};
@@ -2621,7 +2658,14 @@ export default function MvMaker({
 					</span>
 					<button
 						type="button"
-						onClick={() => rerollSymmetricShapeGroup(layer.groupId!)}
+						onClick={() => {
+							const g = manifest.groups?.find((gg) => gg.id === layer.groupId);
+							if (g?.arrangement) {
+								rerollArrangedGroup(layer.groupId!);
+							} else {
+								rerollSymmetricShapeGroup(layer.groupId!);
+							}
+						}}
 						className="flex shrink-0 items-center gap-1 rounded bg-purple-600/30 px-2.5 py-1 text-[10px] font-bold text-purple-200 hover:bg-purple-600/50"
 					>
 						<Shuffle size={12} />
@@ -5077,7 +5121,11 @@ export default function MvMaker({
 										>
 											<button
 												onClick={() => {
-													rerollSymmetricShapeGroup(group.id);
+													if (group.arrangement) {
+														rerollArrangedGroup(group.id);
+													} else {
+														rerollSymmetricShapeGroup(group.id);
+													}
 													setGroupMenuOpenId(null);
 												}}
 												className="flex items-center gap-2 px-3 py-2 text-left text-[11px] text-purple-200 hover:bg-purple-600/30"
@@ -5085,13 +5133,18 @@ export default function MvMaker({
 												<Shuffle size={14} />
 												ランダムリロール
 											</button>
-											<button
-												onClick={() => addArrangedGroup(group.id)}
-												className="flex items-center gap-2 px-3 py-2 text-left text-[11px] text-purple-200 hover:bg-purple-600/30"
-											>
-												<Sparkles size={14} />
-												特殊アレンジを生成
-											</button>
+											{!group.arrangement && (
+												<button
+													onClick={() => {
+														setArrangementModalGroupId(group.id);
+														setGroupMenuOpenId(null);
+													}}
+													className="flex items-center gap-2 px-3 py-2 text-left text-[11px] text-purple-200 hover:bg-purple-600/30"
+												>
+													<Sparkles size={14} />
+													特殊アレンジを生成
+												</button>
+											)}
 											<button
 												onClick={() => {
 													setBulkEditGroupId(group.id);
@@ -5130,7 +5183,7 @@ export default function MvMaker({
 										)?.name ?? "（見つかりません）"}
 									</span>
 									<label className="flex items-center gap-1">
-										割り込む小節
+										割り込み開始（小節）
 										<input
 											key={`arr-trigger-${group.arrangement.triggerBar}`}
 											type="text"
@@ -5146,7 +5199,12 @@ export default function MvMaker({
 																	...g,
 																	arrangement: {
 																		...g.arrangement,
-																		triggerBar: Number.isFinite(v) ? v - 1 : group.arrangement!.triggerBar,
+																		triggerBar: Number.isFinite(v)
+																			? Math.min(
+																					v - 1,
+																					g.arrangement.endBar - 1,
+																				)
+																			: group.arrangement!.triggerBar,
 																	},
 																}
 															: g,
@@ -5160,14 +5218,14 @@ export default function MvMaker({
 										/>
 									</label>
 									<label className="flex items-center gap-1">
-										長さ(拍)
+										割り込み終了（小節）
 										<input
-											type="number"
-											step={0.5}
-											min={0.5}
-											value={group.arrangement.beats}
-											onChange={(e) => {
-												const v = Number(e.target.value);
+											key={`arr-end-${group.arrangement.endBar}`}
+											type="text"
+											defaultValue={group.arrangement.endBar}
+											onBlur={(e) => {
+												const txt = e.target.value.trim();
+												const v = txt === "" ? group.arrangement!.endBar : Number(txt);
 												update((m) => ({
 													...m,
 													groups: (m.groups ?? []).map((g) =>
@@ -5176,18 +5234,23 @@ export default function MvMaker({
 																	...g,
 																	arrangement: {
 																		...g.arrangement,
-																		beats: Number.isFinite(v) && v > 0 ? v : 1,
+																		endBar: Number.isFinite(v)
+																			? Math.max(v, g.arrangement.triggerBar + 1)
+																			: group.arrangement!.endBar,
 																	},
 																}
 															: g,
 													),
 												}));
 											}}
-											className="w-14 rounded bg-gray-800 px-1 py-0.5 text-gray-100"
+											onKeyDown={(e) => {
+												if (e.key === "Enter") e.currentTarget.blur();
+											}}
+											className="w-16 rounded bg-gray-800 px-1 py-0.5 text-gray-100"
 										/>
 									</label>
 									<span className="text-purple-400">
-										この間だけアレンジ元を隠して再生
+										開始小節の頭〜終了小節の頭の直前まで、アレンジ元を隠して再生
 									</span>
 								</div>
 							)}
@@ -6803,6 +6866,26 @@ export default function MvMaker({
 					onClose={() => setTransitionModalTarget(null)}
 				/>
 			)}
+
+			{arrangementModalGroupId &&
+				(() => {
+					const sourceLayers = manifest.layers.filter(
+						(l): l is MvShapeLayer =>
+							l.groupId === arrangementModalGroupId && l.kind === "shape",
+					);
+					if (sourceLayers.length === 0) return null;
+					return (
+						<MvArrangementModal
+							sourceGroupId={arrangementModalGroupId}
+							sourceLayers={sourceLayers}
+							bpm={song.bpm}
+							onApply={(result) =>
+								insertArrangedGroup(arrangementModalGroupId, result)
+							}
+							onClose={() => setArrangementModalGroupId(null)}
+						/>
+					);
+				})()}
 
 			{timelineModalOpen && (
 				<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">

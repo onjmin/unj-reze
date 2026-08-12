@@ -1509,8 +1509,9 @@ function drawTransition(d: DrawCtx): void {
 	ctx.save();
 	switch (t.style) {
 		case "flash":
-			// 光は一瞬で落ちるほうが「切り替わった」に見える
-			ctx.fillStyle = withAlpha(t.color ?? "#ffffff", rest * rest);
+			// 光は一瞬で落ちるほうが「切り替わった」に見える。
+			// 不透明度1.0まで振り切ると眩しすぎるので、既定の強さは0.3止まりにする。
+			ctx.fillStyle = withAlpha(t.color ?? "#ffffff", rest * rest * 0.3);
 			ctx.fillRect(0, 0, MV_W, MV_H);
 			break;
 		case "wipeLeft":
@@ -3483,6 +3484,36 @@ function notesForLayer(d: DrawCtx, layer: MvVisualizerLayer): MvNote[] {
 	return d.song.notes.filter((n) => set.has(n.track));
 }
 
+/**
+ * `getLayerPitchRange` の結果のキャッシュ。トラックの音高の上下限（＝真ん中に寄せる基準）は
+ * 曲が変わらない限り毎フレーム同じ結果になるので、フレームごとに全ノートを舐めて
+ * min/max を取り直すのは無駄——`page` フローは「切り替え間隔（ページ）」ごとに対象ノートが
+ * 変わるので、そのページ番号が変わったときだけ計算し直せば十分（scroll/3D/円形/バーは
+ * 対象ノート自体が曲の間ずっと同じなので "all" の1回で足りる）。
+ */
+const pitchRangeCache = new WeakMap<
+	MvVisualizerLayer,
+	{ songRef: MvSong; key: string; range: [number, number] }
+>();
+
+/** `getLayerPitchRange` のキャッシュ付き版。`pageKey` が変わったときだけ計算し直す。 */
+function getLayerPitchRangeCached(
+	song: MvSong,
+	layer: MvVisualizerLayer,
+	notes: MvNote[],
+	pageKey: string | number = "all",
+): [number, number] {
+	if (layer.pitchRange) return [layer.pitchRange[0], layer.pitchRange[1]];
+	const key = String(pageKey);
+	const cached = pitchRangeCache.get(layer);
+	if (cached && cached.songRef === song && cached.key === key) {
+		return cached.range;
+	}
+	const range = getLayerPitchRange(song, layer, notes);
+	pitchRangeCache.set(layer, { songRef: song, key, range });
+	return range;
+}
+
 function getLayerPitchRange(song: MvSong, layer: MvVisualizerLayer, notes: MvNote[]): [number, number] {
 	if (layer.pitchRange) return [layer.pitchRange[0], layer.pitchRange[1]];
 	if (notes.length === 0) return [song.pitchMin, song.pitchMax];
@@ -3556,7 +3587,12 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const targetNotes = paged
 		? notes.filter((n) => n.startStep >= from && n.startStep < to)
 		: notes;
-	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, targetNotes);
+	// page は切り替え間隔（ページ）ごとに音域が変わりうるので、そのページ番号をキーにして
+	// ページが進んだときだけ min/max を計算し直す。scroll はページの概念が無いので "all" 固定。
+	const pageKey = paged
+		? Math.round((from - pageOffsetSteps) / windowSteps)
+		: "all";
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, targetNotes, pageKey);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const noteH = Math.max(1.5, h / (pitchRange + 1));
 	const echo = light.echo && light.echo.beats > 0 ? light.echo : null;
@@ -3726,7 +3762,7 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const to = d.step + windowSteps * 0.85;
 
 	const notes = notesForLayer(d, layer);
-	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, notes);
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, notes);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const rollH = rect.h * 1.1;
 	const noteH = Math.max(2.5, (rollH / (pitchRange + 1)) * 0.85);
@@ -3883,7 +3919,7 @@ function drawPianoRollCircular(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const span = Math.max(4, maxR - innerR);
 
 	const rawNotes = notesForLayer(d, layer);
-	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, rawNotes);
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, rawNotes);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const sweep = ring.sweep * DEG;
 	const rot = ring.rotate * DEG;
@@ -4106,7 +4142,7 @@ function drawBars(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const { x, y, w, h } = layer.rect;
 	const count = layer.amount ?? 16;
 	const notes = notesForLayer(d, layer);
-	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, notes);
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, notes);
 	const levels = new Array<number>(count).fill(0);
 	const range = Math.max(1, pitchHi - pitchLo);
 

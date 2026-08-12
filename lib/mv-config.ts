@@ -709,9 +709,9 @@ export interface MvLayerGroup {
 	/** 折りたたみ状態（エディタの表示だけに使う。描画には影響しない）。 */
 	collapsed?: boolean;
 	/**
-	 * このグループが「特殊アレンジ」として、別グループ（アレンジ元）の特定の拍に
+	 * このグループが「特殊アレンジ」として、別グループ（アレンジ元）の特定の小節に
 	 * 割り込むための設定。指定すると `isLayerVisible` が2つのグループを連動させる：
-	 * `triggerBar`〜`triggerBar + beats/MV_BEATS_PER_BAR` の間だけ、アレンジ元
+	 * `triggerBar`〜`endBar`（どちらも小節単位）の間だけ、アレンジ元
 	 * （`sourceGroupId`）のレイヤーを止めて隠し、このグループのレイヤーを表示する。
 	 * その区間を抜けたらアレンジ元は自動的に再開する（両者とも `barRange` を
 	 * 手動で設定する必要は無い——手で設定した `barRange` があればさらにANDで効く）。
@@ -719,14 +719,14 @@ export interface MvLayerGroup {
 	arrangement?: MvArrangementTrigger;
 }
 
-/** `MvLayerGroup.arrangement` の中身。アレンジ元への割り込み位置と長さ。 */
+/** `MvLayerGroup.arrangement` の中身。アレンジ元への割り込み開始・終了小節。 */
 export interface MvArrangementTrigger {
 	/** 介入対象（アレンジ元）グループのID。 */
 	sourceGroupId: string;
-	/** アレンジ元を止めて表示を切り替える位置（小節、小数可＝拍単位で指定できる）。 */
+	/** アレンジ元を止めて表示を切り替える開始小節（0始まり）。 */
 	triggerBar: number;
-	/** このアレンジ自身を再生する長さ（拍）。この間だけ表示し、終われば元に戻す。 */
-	beats: number;
+	/** アレンジ元へ戻す終了小節（0始まり、この小節の頭で元に戻る＝排他的）。 */
+	endBar: number;
 }
 
 /**
@@ -2127,7 +2127,7 @@ export function isLayerVisible(
 			if (!arr) continue;
 			if (g.id !== layer.groupId && arr.sourceGroupId !== layer.groupId) continue;
 			const from = arr.triggerBar;
-			const to = arr.triggerBar + arr.beats / MV_BEATS_PER_BAR;
+			const to = arr.endBar;
 			const inWindow = bar >= from && bar < to;
 			if (g.id === layer.groupId && !inWindow) return false;
 			if (arr.sourceGroupId === layer.groupId && inWindow) return false;

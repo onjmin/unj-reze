@@ -1,4 +1,5 @@
 import {
+	MV_BEATS_PER_BAR,
 	MV_H,
 	MV_STEPS_PER_BEAT,
 	MV_W,
@@ -911,10 +912,10 @@ export function generateSymmetricShapeGroup(
 }
 
 /**
- * 「特殊アレンジ」1回ぶんの既定の長さ（拍）。トリガー窓（`MvArrangementTrigger.beats`）
- * の既定値としても使う。
+ * 「特殊アレンジ」1回ぶんの既定の長さ（拍）。トリガー窓（小節に換算して
+ * `MvArrangementTrigger.endBar` を決める）の既定値としても使う。
  */
-const DEFAULT_ARRANGEMENT_BEATS = 4;
+export const DEFAULT_ARRANGEMENT_BEATS = 4;
 
 /**
  * 特殊アレンジの「型」。以前は常に「倍速化＋90度キック＋白十字フラッシュ2本」の
@@ -935,12 +936,46 @@ const ARRANGE_STYLES: ArrangeStyle[] = [
 
 const FLASH_PALETTE = ["#ffffff", "#fde68a", "#fca5a5", "#93c5fd", "#5eead4"];
 
-/** 元のモジュレータ配列から `beat` 系だけ周期を `mul` 倍する（他はそのまま）。 */
-function scaleBeatPeriods(mods: MvModulator[] | undefined, mul: number): MvModulator[] {
+/**
+ * 拍モジュレータの位相を「割り込み開始小節の頭で必ず envelope=0（＝静止した基準の姿）」
+ * になるよう揃える。
+ *
+ * `isLayerVisible` は割り込み区間の境目でアレンジ側の表示をパッと切り替えるハードカット
+ * なので、切り替わった瞬間の絵が中途半端な位相（envelope が谷の途中など）だと
+ * アレンジ元から一段ずれた絵がいきなり出て「継ぎ目」に見える。位相をトリガー小節の頭に
+ * 揃えれば、切り替わった瞬間は必ず envelope=0＝アレンジ元と同じ静止形から動き出すので、
+ * 「アレンジ元→変化→アレンジ元に戻る」の入りがブツ切れにならない。
+ * `orig` の位相差（スロットのずらし）はそのまま保つため、揃えるのは基準点だけ
+ * （= トリガー小節ぶんだけ全体を押し出す）にしてある。
+ */
+function alignPhaseToTriggerBar(
+	periodBeats: number,
+	origPhaseOffset: number | undefined,
+	triggerBar: number,
+): number {
+	const shift = triggerBar * MV_BEATS_PER_BAR + (origPhaseOffset ?? 0);
+	return roundTo(((shift % periodBeats) + periodBeats) % periodBeats, 2);
+}
+
+/**
+ * 元のモジュレータ配列から `beat` 系だけ周期を `mul` 倍し、位相をトリガー小節の頭へ
+ * 揃える（他はそのまま）。
+ */
+function scaleBeatPeriods(
+	mods: MvModulator[] | undefined,
+	mul: number,
+	triggerBar: number,
+): MvModulator[] {
 	return (
-		mods?.map((m) =>
-			m.source === "beat" ? { ...m, periodBeats: (m.periodBeats ?? 1) * mul } : m,
-		) ?? []
+		mods?.map((m) => {
+			if (m.source !== "beat") return m;
+			const periodBeats = roundTo((m.periodBeats ?? 1) * mul, 2);
+			return {
+				...m,
+				periodBeats,
+				phaseOffset: alignPhaseToTriggerBar(periodBeats, m.phaseOffset, triggerBar),
+			};
+		}) ?? []
 	);
 }
 
@@ -950,23 +985,25 @@ function scaleBeatPeriods(mods: MvModulator[] | undefined, mul: number): MvModul
  *
  * `sourceGroupId` は割り込み対象（アレンジ元）のグループID。返す `group.arrangement`
  * にそのまま埋め込むので、エンジン側 (`isLayerVisible`) が「アレンジ元を止めて隠す
- * ／アレンジ側を表示する」を自動で連動させられる。トリガー位置・長さは
- * `trigger` で指定し、省略時は次の拍区切りから既定の長さぶん。
+ * ／アレンジ側を表示する」を自動で連動させられる。開始・終了小節は
+ * `trigger` で指定し（どちらも小節単位）、省略時は0小節目から既定の長さぶん。
  */
 export function generateArrangementForGroup(
 	existingLayers: MvShapeLayer[],
 	nextZ: () => number,
 	sourceGroupId: string,
-	trigger?: { triggerBar?: number; beats?: number },
+	trigger?: { triggerBar?: number; endBar?: number },
 ): { group: MvLayerGroup; layers: MvShapeLayer[] } {
 	const newGroupId = mvUid("grp");
-	const beats = trigger?.beats ?? DEFAULT_ARRANGEMENT_BEATS;
 	const triggerBar = trigger?.triggerBar ?? 0;
+	const endBar =
+		trigger?.endBar ??
+		triggerBar + Math.max(1, Math.ceil(DEFAULT_ARRANGEMENT_BEATS / 4));
 	const group: MvLayerGroup = {
 		id: newGroupId,
 		name: "特殊アレンジ",
 		collapsed: true,
-		arrangement: { sourceGroupId, triggerBar, beats },
+		arrangement: { sourceGroupId, triggerBar, endBar },
 	};
 	const layers: MvShapeLayer[] = [];
 
@@ -978,6 +1015,14 @@ export function generateArrangementForGroup(
 	const kickCurve = pick([2, 3, 4]);
 	const recolorPalette = FLASH_PALETTE.filter((_, i) => chance(0.6) || i === 0);
 	const flashColor = pick(FLASH_PALETTE);
+	// これから足す拍モジュレータの周期。style ごとに固定値だったところを、
+	// トリガー小節の頭で必ず envelope=0 になるよう位相を揃えてから足す
+	// （揃えないと切り替わった瞬間の絵がアレンジ元とズレて継ぎ目が見える）。
+	const kickPeriod = roundTo(0.5 * (speedMul / 2), 2);
+	const shatterSizePeriod = 0.25;
+	const shatterRotPeriod = 1;
+	const monoFlashPeriod = 0.5;
+	const recolorPeriod = roundTo(1 / speedMul, 2);
 
 	for (const orig of existingLayers) {
 		const newLayer: MvShapeLayer = {
@@ -985,7 +1030,7 @@ export function generateArrangementForGroup(
 			id: mvUid("shp"),
 			groupId: newGroupId,
 			z: nextZ(),
-			modulators: scaleBeatPeriods(orig.modulators, 1 / speedMul),
+			modulators: scaleBeatPeriods(orig.modulators, 1 / speedMul, triggerBar),
 		};
 
 		// コマ送りも同じ倍率で速める（形の切り替わりだけ元の速さのまま取り残されないように）。
@@ -1005,7 +1050,8 @@ export function generateArrangementForGroup(
 					target: "rotation",
 					op: "add",
 					amount: orig.x < MV_W / 2 ? kickAngle : -kickAngle,
-					periodBeats: roundTo(0.5 * (speedMul / 2), 2),
+					periodBeats: kickPeriod,
+					phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
 					curve: kickCurve,
 				});
 				break;
@@ -1018,7 +1064,8 @@ export function generateArrangementForGroup(
 						target: "size",
 						op: "add",
 						amount: roundTo((orig.size ?? 20) * randRange(0.6, 1.1), 1),
-						periodBeats: 0.25,
+						periodBeats: shatterSizePeriod,
+						phaseOffset: alignPhaseToTriggerBar(shatterSizePeriod, 0, triggerBar),
 						curve: 4,
 					},
 					{
@@ -1026,7 +1073,8 @@ export function generateArrangementForGroup(
 						target: "rotation",
 						op: "add",
 						amount: chance(0.5) ? 180 : -180,
-						periodBeats: 1,
+						periodBeats: shatterRotPeriod,
+						phaseOffset: alignPhaseToTriggerBar(shatterRotPeriod, 0, triggerBar),
 						curve: 2,
 					},
 				);
@@ -1039,7 +1087,8 @@ export function generateArrangementForGroup(
 					target: "opacity",
 					op: "mul",
 					amount: 0.85,
-					periodBeats: 0.5,
+					periodBeats: monoFlashPeriod,
+					phaseOffset: alignPhaseToTriggerBar(monoFlashPeriod, 0, triggerBar),
 					curve: 5,
 				});
 				break;
@@ -1053,7 +1102,8 @@ export function generateArrangementForGroup(
 					target: "thickness",
 					op: "add",
 					amount: roundTo((orig.thickness ?? 3) * randRange(1.2, 2.2), 1),
-					periodBeats: roundTo(1 / speedMul, 2),
+					periodBeats: recolorPeriod,
+					phaseOffset: alignPhaseToTriggerBar(recolorPeriod, 0, triggerBar),
 					curve: 3,
 				});
 				break;
@@ -1092,14 +1142,16 @@ export function generateArrangementForGroup(
 						target: "size",
 						op: "add",
 						amount: MV_W,
-						periodBeats: roundTo(0.5 * (speedMul / 2), 2),
+						periodBeats: kickPeriod,
+						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
 					},
 					{
 						source: "beat",
 						target: "thickness",
 						op: "add",
 						amount: randRange(6, 14),
-						periodBeats: roundTo(0.5 * (speedMul / 2), 2),
+						periodBeats: kickPeriod,
+						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
 					},
 				],
 			});
