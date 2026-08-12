@@ -137,8 +137,13 @@ import {
 } from "@/lib/mv-engine";
 import {
 	addLayerToGroup,
+	applyGroupBlend,
+	applyGroupColor,
 	applyGroupOpacity,
 	applyGroupPosition,
+	applyGroupRotation,
+	applyGroupSize,
+	applyGroupThickness,
 	buildLayerListRows,
 	deleteGroup,
 	groupSelectedLayers,
@@ -996,13 +1001,22 @@ export default function MvMaker({
 	const [timelineModalOpen, setTimelineModalOpen] = useState(false);
 	/** グループ一括編集モーダルの対象グループID（開いていなければnull）。 */
 	const [bulkEditGroupId, setBulkEditGroupId] = useState<string | null>(null);
-	const [bulkField, setBulkField] = useState<"z" | "position" | "opacity">(
-		"position",
-	);
+	const [bulkField, setBulkField] = useState<
+		| "z"
+		| "position"
+		| "size"
+		| "opacity"
+		| "rotation"
+		| "thickness"
+		| "color"
+		| "blend"
+	>("position");
 	const [bulkMode, setBulkMode] = useState<MvGroupEditMode>("relative");
 	const [bulkValue, setBulkValue] = useState(0);
 	const [bulkX, setBulkX] = useState(0);
 	const [bulkY, setBulkY] = useState(0);
+	const [bulkColor, setBulkColor] = useState("#ffffff");
+	const [bulkBlend, setBulkBlend] = useState<MvBlend>("normal");
 
 	/** レイヤー一覧の各行のDOM。プレビューをクリックして選んだレイヤーへ自動スクロールするために使う。 */
 	const layerRowElsRef = useRef<Record<string, HTMLDivElement | null>>({});
@@ -5746,39 +5760,51 @@ export default function MvMaker({
 							</button>
 						</div>
 						<div className="space-y-3 p-3">
-							<div className="flex gap-1.5">
-								{(
-									[
-										{ v: "z", label: "重なり順" },
-										{ v: "position", label: "座標" },
-										{ v: "opacity", label: "不透明度" },
-									] as const
-								).map((opt) => (
-									<button
-										key={opt.v}
-										onClick={() => setBulkField(opt.v)}
-										className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium ${bulkField === opt.v ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
-									>
-										{opt.label}
-									</button>
-								))}
+							<div>
+								<label className="mb-1 block text-[11px] font-medium text-gray-400">
+									編集項目を選択
+								</label>
+								<select
+									value={bulkField}
+									onChange={(e) => {
+										const nextField = e.target.value as typeof bulkField;
+										setBulkField(nextField);
+										if (nextField === "z") setBulkValue(bulkMode === "relative" ? 0 : 10);
+										else if (nextField === "size") setBulkValue(bulkMode === "relative" ? 0 : 40);
+										else if (nextField === "opacity") setBulkValue(bulkMode === "relative" ? 0 : 1);
+										else if (nextField === "rotation") setBulkValue(0);
+										else if (nextField === "thickness") setBulkValue(bulkMode === "relative" ? 0 : 2);
+									}}
+									className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-purple-500"
+								>
+									<option value="z">重なり順 (z)</option>
+									<option value="position">座標 (X, Y)</option>
+									<option value="size">サイズ (拡大率/px)</option>
+									<option value="opacity">不透明度 (0.0〜1.0)</option>
+									<option value="rotation">回転 (度)</option>
+									<option value="thickness">線の太さ (px)</option>
+									<option value="color">色 (カラー)</option>
+									<option value="blend">描画モード (ブレンド)</option>
+								</select>
 							</div>
-							<div className="flex gap-1.5">
-								{(
-									[
-										{ v: "relative", label: "相対増減" },
-										{ v: "absolute", label: "絶対指定" },
-									] as const
-								).map((opt) => (
-									<button
-										key={opt.v}
-										onClick={() => setBulkMode(opt.v)}
-										className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium ${bulkMode === opt.v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
-									>
-										{opt.label}
-									</button>
-								))}
-							</div>
+							{bulkField !== "color" && bulkField !== "blend" && (
+								<div className="flex gap-1.5">
+									{(
+										[
+											{ v: "relative", label: "相対増減" },
+											{ v: "absolute", label: "絶対指定" },
+										] as const
+									).map((opt) => (
+										<button
+											key={opt.v}
+											onClick={() => setBulkMode(opt.v)}
+											className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium ${bulkMode === opt.v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
+										>
+											{opt.label}
+										</button>
+									))}
+								</div>
+							)}
 							{bulkField === "position" ? (
 								<div className="flex items-center gap-2">
 									<span className="w-6 shrink-0 text-[10px] text-gray-400">
@@ -5787,7 +5813,7 @@ export default function MvMaker({
 									<StringNumInput
 										value={bulkX}
 										onChange={setBulkX}
-										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none focus:border-purple-500"
 									/>
 									<span className="w-6 shrink-0 text-[10px] text-gray-400">
 										Y
@@ -5795,20 +5821,50 @@ export default function MvMaker({
 									<StringNumInput
 										value={bulkY}
 										onChange={setBulkY}
-										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none focus:border-purple-500"
 									/>
 								</div>
+							) : bulkField === "color" ? (
+								<div className="flex items-center gap-2">
+									<input
+										type="color"
+										value={bulkColor.startsWith("#") && bulkColor.length === 7 ? bulkColor : "#ffffff"}
+										onChange={(e) => setBulkColor(e.target.value)}
+										className="h-9 w-9 shrink-0 cursor-pointer rounded border border-gray-700 bg-gray-800 p-0.5"
+									/>
+									<input
+										type="text"
+										value={bulkColor}
+										onChange={(e) => setBulkColor(e.target.value)}
+										placeholder="#ffffff"
+										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-100 outline-none focus:border-purple-500"
+									/>
+								</div>
+							) : bulkField === "blend" ? (
+								<select
+									value={bulkBlend}
+									onChange={(e) => setBulkBlend(e.target.value as MvBlend)}
+									className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-purple-500"
+								>
+									{Object.entries(MV_BLEND_LABELS).map(([k, label]) => (
+										<option key={k} value={k}>
+											{label}
+										</option>
+									))}
+								</select>
 							) : (
 								<StringNumInput
 									value={bulkValue}
 									onChange={setBulkValue}
-									className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+									className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none focus:border-purple-500"
 								/>
 							)}
 							<p className="text-[10px] leading-relaxed text-gray-500">
-								{bulkMode === "relative"
-									? "グループ内の各レイヤーの現在値へこの数値を足します（レイヤーごとの差はそのまま）。"
-									: "グループ内の全レイヤーをこの値へ揃えます（重なり順だけは並び順に沿って自動で間隔を空けます）。"}
+								{bulkField === "color" || bulkField === "blend"
+									? "グループ内の該当する全レイヤーを指定した設定で上書きします。"
+									: bulkMode === "relative"
+										? "グループ内の各レイヤーの現在値へこの数値を足します（レイヤーごとの差はそのまま）。"
+										: "グループ内の全レイヤーをこの値へ揃えます（重なり順だけは並び順に沿って自動で間隔を空けます）。"}
 							</p>
 						</div>
 						<div className="flex shrink-0 gap-2 border-t border-gray-800 p-3">
@@ -5824,9 +5880,21 @@ export default function MvMaker({
 									update((m) => {
 										if (bulkField === "z")
 											return shiftGroupZ(m, groupId, bulkMode, bulkValue);
+										if (bulkField === "position")
+											return applyGroupPosition(m, groupId, bulkMode, bulkX, bulkY);
+										if (bulkField === "size")
+											return applyGroupSize(m, groupId, bulkMode, bulkValue);
 										if (bulkField === "opacity")
 											return applyGroupOpacity(m, groupId, bulkMode, bulkValue);
-										return applyGroupPosition(m, groupId, bulkMode, bulkX, bulkY);
+										if (bulkField === "rotation")
+											return applyGroupRotation(m, groupId, bulkMode, bulkValue);
+										if (bulkField === "thickness")
+											return applyGroupThickness(m, groupId, bulkMode, bulkValue);
+										if (bulkField === "color")
+											return applyGroupColor(m, groupId, bulkColor);
+										if (bulkField === "blend")
+											return applyGroupBlend(m, groupId, bulkBlend);
+										return m;
 									});
 									setBulkEditGroupId(null);
 								}}

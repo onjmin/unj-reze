@@ -159,8 +159,13 @@ function pick<T>(arr: readonly T[]): T {
 	return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function randRange(min: number, max: number): number {
-	return min + Math.random() * (max - min);
+function roundTo(val: number, decimals = 1): number {
+	const factor = Math.pow(10, decimals);
+	return Math.round(val * factor) / factor;
+}
+
+function randRange(min: number, max: number, decimals = 1): number {
+	return roundTo(min + Math.random() * (max - min), decimals);
 }
 
 function chance(p: number): boolean {
@@ -245,12 +250,12 @@ function flooredOpacity(
 			source: "beat",
 			target: "opacity",
 			op: "mul",
-			amount: 1 - floor,
-			periodBeats,
-			phaseOffset,
+			amount: roundTo(1 - floor, 2),
+			periodBeats: roundTo(periodBeats, 2),
+			phaseOffset: roundTo(phaseOffset, 2),
 			curve,
 		},
-		{ source: "constant", target: "opacity", op: "add", amount: floor },
+		{ source: "constant", target: "opacity", op: "add", amount: roundTo(floor, 2) },
 	];
 }
 
@@ -272,9 +277,9 @@ function crispModulators(o: MotionOptions): MvModulator[] {
 			source: "beat",
 			target: "thickness",
 			op: "add",
-			amount: o.thickness * (o.swell - 1),
-			periodBeats: o.periodBeats,
-			phaseOffset: o.phaseOffset,
+			amount: roundTo(o.thickness * (o.swell - 1), 1),
+			periodBeats: roundTo(o.periodBeats, 2),
+			phaseOffset: roundTo(o.phaseOffset, 2),
 			curve: 3,
 		},
 	];
@@ -293,7 +298,7 @@ function smoothModulators(o: MotionOptions): MvModulator[] {
 			source: "phrase",
 			target: "size",
 			op: "add",
-			amount: o.size * 0.22,
+			amount: roundTo(o.size * 0.22, 1),
 			bars: o.phraseBars,
 			symmetric: true,
 			curve: 1.5,
@@ -312,9 +317,9 @@ function smoothModulators(o: MotionOptions): MvModulator[] {
 			source: "beat",
 			target: "thickness",
 			op: "add",
-			amount: o.thickness * (o.swell - 1) * 0.4,
-			periodBeats: o.periodBeats,
-			phaseOffset: o.phaseOffset,
+			amount: roundTo(o.thickness * (o.swell - 1) * 0.4, 1),
+			periodBeats: roundTo(o.periodBeats, 2),
+			phaseOffset: roundTo(o.phaseOffset, 2),
 			curve: 2,
 		},
 	];
@@ -379,18 +384,26 @@ function buildElement(
 	// 太さは図形の大きさに対して頭打ちにする。グループ内で太さを共通にすると、
 	// 大きい段はちょうど良くても小さい脇役が塗り潰れて「点」になってしまう
 	// （太くする指定ほどここが効く）。
-	const thickness = Math.min(
-		plan.baseThickness * randRange(0.85, 1.15),
+	const rawThickness = Math.min(
+		plan.baseThickness * randRange(0.85, 1.15, 2),
 		opts.size * 0.3,
 	);
+	const thickness = roundTo(rawThickness, 1);
 	// 形のひと巡りと拍の踏み込みは同じ周期にする。片方だけ別の速さにすると、
 	// 形が一巡する頭と踏み込む頭がずれて拍に乗っていないように見える。
-	const periodBeats = plan.baseBeats * opts.rateMul;
+	const periodBeats = roundTo(plan.baseBeats * opts.rateMul, 2);
+	const phaseOffset = roundTo(
+		(opts.slot % plan.slots) * (periodBeats / plan.slots),
+		2,
+	);
+	const size = roundTo(opts.size, 1);
+	const x = roundTo(opts.x, 1);
+	const y = roundTo(opts.y, 1);
 	const motion: MotionOptions = {
-		size: opts.size,
+		size,
 		thickness,
 		periodBeats,
-		phaseOffset: (opts.slot % plan.slots) * (periodBeats / plan.slots),
+		phaseOffset,
 		phraseBars: plan.phraseBars,
 		swell: plan.swell,
 	};
@@ -400,10 +413,10 @@ function buildElement(
 	const base = {
 		kind: "shape" as const,
 		id: mvUid("shp"),
-		x: opts.x,
-		y: opts.y,
+		x,
+		y,
 		z: opts.z,
-		size: opts.size,
+		size,
 		// 参考動画に斜めの図形は1つも無い。ここを乱数にすると
 		// 何を作っても「散らかった図形の寄せ集め」になる。
 		rotation: 0,

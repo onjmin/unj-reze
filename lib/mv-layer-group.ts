@@ -1,4 +1,10 @@
-import { mvUid, type MvLayer, type MvLayerGroup, type MvManifest } from "./mv-config";
+import {
+	mvUid,
+	type MvBlend,
+	type MvLayer,
+	type MvLayerGroup,
+	type MvManifest,
+} from "./mv-config";
 
 /**
  * レイヤーの入れ子グループを操作するヘルパ一式。
@@ -397,6 +403,154 @@ export function applyGroupOpacity(
 			const cur = l.opacity ?? 1;
 			const next = mode === "relative" ? cur + value : value;
 			return { ...l, opacity: Math.min(1, Math.max(0, next)) };
+		}),
+	};
+}
+
+/**
+ * グループのサイズ（拡大率/px）を一括変更する。
+ */
+export function applyGroupSize(
+	manifest: MvManifest,
+	groupId: string,
+	mode: MvGroupEditMode,
+	value: number,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			if ("size" in l && typeof l.size === "number") {
+				const cur = l.size;
+				const next = mode === "relative" ? cur + value : value;
+				return { ...l, size: Math.max(1, Math.round(next * 10) / 10) };
+			}
+			if (
+				"scale" in l &&
+				typeof (l as unknown as Record<string, unknown>).scale === "number"
+			) {
+				const cur =
+					((l as unknown as Record<string, unknown>).scale as number) ?? 1;
+				const next = mode === "relative" ? cur + value : value;
+				return { ...l, scale: Math.max(0.01, Math.round(next * 100) / 100) };
+			}
+			if (l.kind === "visualizer") {
+				const rect = l.rect;
+				if (mode === "relative") {
+					return {
+						...l,
+						rect: {
+							...rect,
+							w: Math.max(10, Math.round((rect.w + value) * 10) / 10),
+							h: Math.max(10, Math.round((rect.h + value) * 10) / 10),
+						},
+					};
+				} else {
+					return {
+						...l,
+						rect: {
+							...rect,
+							w: Math.max(10, Math.round(value * 10) / 10),
+							h: Math.max(10, Math.round(value * 10) / 10),
+						},
+					};
+				}
+			}
+			return l;
+		}),
+	};
+}
+
+/**
+ * グループの回転角を一括変更する。
+ */
+export function applyGroupRotation(
+	manifest: MvManifest,
+	groupId: string,
+	mode: MvGroupEditMode,
+	value: number,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			if (
+				"rotation" in l &&
+				typeof (l as unknown as Record<string, unknown>).rotation === "number"
+			) {
+				const cur =
+					((l as unknown as Record<string, unknown>).rotation as number) ?? 0;
+				const next = mode === "relative" ? cur + value : value;
+				return { ...l, rotation: Math.round(next * 10) / 10 };
+			}
+			return l;
+		}),
+	};
+}
+
+/**
+ * グループの線の太さを一括変更する。
+ */
+export function applyGroupThickness(
+	manifest: MvManifest,
+	groupId: string,
+	mode: MvGroupEditMode,
+	value: number,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			if (
+				"thickness" in l &&
+				typeof (l as unknown as Record<string, unknown>).thickness === "number"
+			) {
+				const cur =
+					((l as unknown as Record<string, unknown>).thickness as number) ?? 2;
+				const next = mode === "relative" ? cur + value : value;
+				return { ...l, thickness: Math.max(0.1, Math.round(next * 10) / 10) };
+			}
+			return l;
+		}),
+	};
+}
+
+/**
+ * グループの色を一括変更する。
+ */
+export function applyGroupColor(
+	manifest: MvManifest,
+	groupId: string,
+	color: string,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			if (
+				"color" in l &&
+				typeof (l as unknown as Record<string, unknown>).color === "string"
+			) {
+				return { ...l, color };
+			}
+			return l;
+		}),
+	};
+}
+
+/**
+ * グループの描画モード（ブレンド）を一括変更する。
+ */
+export function applyGroupBlend(
+	manifest: MvManifest,
+	groupId: string,
+	blend: MvBlend,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			return { ...l, blend };
 		}),
 	};
 }
