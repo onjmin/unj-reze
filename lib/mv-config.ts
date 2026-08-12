@@ -855,6 +855,13 @@ export interface MvLyricLine {
 	 * ケースバイケースなので、行ごとにUIで切り替えられるようにしている。
 	 */
 	resetBefore?: boolean;
+	/**
+	 * `resetBefore` が間奏検出（gap > holdBars）で自動的に付いたものかどうか。
+	 * 手入力/曲構成由来の resetBefore と区別するための実行時専用フラグ
+	 * （`resolveLyricLines` が毎回付け直すので保存はされない）。
+	 * 立っているときは、直前のまとまりの消去に holdBars を使わず短い固定時間で消す。
+	 */
+	autoReset?: boolean;
 }
 
 /**

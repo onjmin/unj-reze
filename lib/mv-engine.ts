@@ -2502,9 +2502,18 @@ function applyLyricGapResets(
 	return lines.map((l, i) => {
 		if (i === 0) return l;
 		const gap = l.bar - lines[i - 1].bar;
-		return gap > hold && !l.resetBefore ? { ...l, resetBefore: true } : l;
+		return gap > hold && !l.resetBefore
+			? { ...l, resetBefore: true, autoReset: true }
+			: l;
 	});
 }
+
+/**
+ * 間奏で自動的に区切られたまとまりを消すまでの時間。holdBars（＝間奏の判定閾値）を
+ * そのまま使うと「間奏だと分かっているのに閾値ぶん律儀に居座ってから消える」という
+ * 冗長な待ちが生まれるため、読み終わる分だけの短い固定値で切り離す。
+ */
+const AUTO_RESET_FADE_BARS = 0.5;
 
 /**
  * `layer.resetBars` に挙げた小節「以降で最初に出る行」へ resetBefore を立てる。
@@ -2559,10 +2568,14 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 		}
 	}
 
-	// まとまり全体が消えるタイミング＝「まとまり最後の行のhold明け」と「次の区切りの開始小節」の早い方。
-	// 次の区切りだけを見ると、間奏で次行が遠いときにhold明け後もずっと居座ってしまう
-	// （歌いきったのに閾値ぶん待たされる）ので、必ずhold明けも上限として効かせる。
-	const lastBarInGroup = lines[groupEnd - 1].bar + hold;
+	// まとまり全体が消えるタイミング＝「まとまり最後の行の保持明け」と「次の区切りの開始小節」の早い方。
+	// 次の区切りだけを見ると、間奏で次行が遠いときに保持明け後もずっと居座ってしまう
+	// （歌いきったのに閾値ぶん待たされる）ので、必ず保持明けも上限として効かせる。
+	// 次の区切りが間奏の自動検出（autoReset）由来なら、閾値(hold)は「間奏と判定する条件」
+	// でしかないので使い回さず、歌いきったらすぐ消える短い固定時間にする。
+	const nextIsAutoReset = groupEnd < lines.length && !!lines[groupEnd].autoReset;
+	const lastBarInGroup =
+		lines[groupEnd - 1].bar + (nextIsAutoReset ? AUTO_RESET_FADE_BARS : hold);
 	const groupEndBar =
 		groupEnd < lines.length
 			? Math.min(lines[groupEnd].bar, lastBarInGroup)
