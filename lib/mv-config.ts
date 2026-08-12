@@ -814,6 +814,11 @@ export interface MvVisualizerLayer extends MvLayerBase {
 	projection?: MvProjection;
 	/** pianoRoll(flat) のみ。流れるか、位置を固定してページで差し替えるか。未指定は scroll。 */
 	flow?: MvRollFlow;
+	/**
+	 * flow==='page' のみ。ページ切り替え位置の位相ずらし（拍単位）。未指定/0＝小節頭で揃えて切り替え。
+	 * 例: 1で1拍ぶん、2で半小節（4拍子換算）ぶん遅らせて切り替える。
+	 */
+	pageOffsetBeats?: number;
 	/** ノートの明暗と余韻。未指定は projection ごとの既定（平面は薄め、立体は濃いまま）。 */
 	light?: MvNoteLight;
 	/**

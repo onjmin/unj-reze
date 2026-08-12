@@ -1828,10 +1828,13 @@ const MV_WIDGET_SCRAMBLE_POOL = MV_WIDGET_GLYPHS;
  *   セル1以降は「窓の先頭から数えて何拍目か」で1拍に1個ずつ埋まる。
  *   埋まる瞬間はグリフが高速で入れ替わる「スクランブル」を見せてから、
  *   `MV_WIDGET_GLYPH_CYCLE` の周期4パターンに確定して止まる。
- * - 窓（`cols`拍）を埋め切ると境界で一瞬フラッシュしたあと、上段だけが
- *   セル0だけの状態へ戻って次の窓が始まる。
- * - 下段は上段と無関係に常時表示の固定パターン（同じ周期4を下段の色でループ）で、
- *   フラッシュにもリセットにも影響されない――コード進行を参照しない。
+ * - 窓（`cols`拍）を埋め切ると境界で、上段・下段が**同時に**下向きへ一瞬しぼんで
+ *   跳ね返る（スカッシュ）動きとともに白く光り、その直後に上段だけが
+ *   セル0だけの状態へ戻って次の窓が始まる（`n_026`〜`n_028`のコマ送りで、
+ *   フラッシュの瞬間に上下段そろって縦につぶれてから復元するのを確認した——
+ *   フラッシュだけでスライドが無いと解釈していた前回の実装は誤り）。
+ * - 下段のグリフ内容そのものは、このしぼみ跳ね返りの間もリセットの前後も変わらない
+ *   固定パターンのまま――コード進行を参照しない。
  */
 function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 	const { ctx } = d;
@@ -1847,6 +1850,22 @@ function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 
 	const SCRAMBLE_SETTLE = 0.6; // このフェーズまではグリフが高速で入れ替わる
 	const SCRAMBLE_RATE = 16; // 1拍あたりのグリフ切り替え回数
+
+	// ── 窓の境界（`cols`拍ごと）をまたぐ一瞬だけ、上下段そろって縦につぶれて跳ね返る ──
+	const SQUASH_HALF_WIDTH = 0.15; // 拍単位。境界の前後この幅だけ動く
+	const boundaryBeat = Math.round(beatPos / cols) * cols;
+	const distBeats = boundaryBeat > 0 ? Math.abs(beatPos - boundaryBeat) : Infinity;
+	const inSquash = distBeats < SQUASH_HALF_WIDTH;
+	const squashT = inSquash ? 1 - distBeats / SQUASH_HALF_WIDTH : 0; // 0..1、境界でピーク
+
+	ctx.save();
+	if (inSquash) {
+		const scaleY = 1 - squashT * 0.45; // ピークで縦55%までしぼむ
+		const anchorY = y + cell * 2; // 2段ぶんの下端を基準に潰す（下段側は動かない）
+		ctx.translate(x, anchorY);
+		ctx.scale(1, scaleY);
+		ctx.translate(-x, -anchorY);
+	}
 
 	for (let i = 0; i < cols; i++) {
 		const cx = x + i * cell;
@@ -1884,17 +1903,13 @@ function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 		ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
 	}
 
-	// ── 窓の境界（`cols`拍ごと）をまたぐ一瞬だけ、全面を白く光らせる ──
-	const FLASH_HALF_WIDTH = 0.12; // 拍単位。境界の前後この幅だけ光る
-	const boundaryBeat = Math.round(beatPos / cols) * cols;
-	if (boundaryBeat > 0) {
-		const dist = Math.abs(beatPos - boundaryBeat);
-		if (dist < FLASH_HALF_WIDTH) {
-			const flashAlpha = (1 - dist / FLASH_HALF_WIDTH) * 0.7;
-			ctx.fillStyle = withAlpha(layer.flashColor, flashAlpha);
-			ctx.fillRect(x, y, cell * cols, cell * 2);
-		}
+	// しぼみと同時に全面を白く光らせる（スカッシュと同じ変換の中で描くので、光もつぶれて見える）
+	if (inSquash) {
+		ctx.fillStyle = withAlpha(layer.flashColor, squashT * 0.7);
+		ctx.fillRect(x, y, cell * cols, cell * 2);
 	}
+
+	ctx.restore();
 }
 
 // ───────────────── ドット絵数字カウンタ ─────────────────
@@ -3395,7 +3410,8 @@ function drawVisualizer(d: DrawCtx, layer: MvVisualizerLayer): void {
  * 平面のピアノロール。`flow` で2通り。
  *
  * - scroll : 再生位置を帯の左から25%に固定し、譜面が右から左へ流れる
- * - page   : 譜面は動かず、`amount` 小節ぶんを固定位置に並べる。小節窓が進むとページごと差し替わる
+ * - page   : 譜面は動かず、`amount` 小節ぶんを固定位置に並べる。小節窓が進むとページごと差し替わる。
+ *   `pageOffsetBeats` で切り替えタイミングを小節頭から拍単位でずらせる（既定0＝ずらさない）。
  *
  * ノートの見え方は `MvNoteLight`:
  *   まだ鳴っていない音は `dim` の薄さ → 音の頭で満点の白 → `echo` の輪郭が外へ広がって消える。
@@ -3408,10 +3424,13 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const paged = (layer.flow ?? "scroll") === "page";
 	const windowBars = Math.max(0.25, layer.amount ?? 4);
 	const windowSteps = windowBars * MV_STEPS_PER_BAR;
+	// ページの切り替え位置を小節頭から拍単位でずらす（既定0＝ずらさない）。
+	const pageOffsetSteps = (layer.pageOffsetBeats ?? 0) * MV_STEPS_PER_BEAT;
 
 	// page はいま居るページの頭を原点にする。scroll は再生位置基準で毎フレーム動く。
 	const from = paged
-		? Math.floor(d.step / windowSteps) * windowSteps
+		? Math.floor((d.step - pageOffsetSteps) / windowSteps) * windowSteps +
+			pageOffsetSteps
 		: d.step - windowSteps * 0.25;
 	const to = from + windowSteps;
 

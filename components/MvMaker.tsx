@@ -2041,8 +2041,9 @@ export default function MvMaker({
 		
 		update((m) => ({
 			...m,
-			layers: [...m.layers, ...layers],
-			groups: [...(m.groups ?? []), group],
+			// 一覧はレイヤー配列の並び順で決まるため、先頭に差し込んで一覧の最上部に出す。
+			layers: [...layers, ...m.layers],
+			groups: [group, ...(m.groups ?? [])],
 		}));
 		setAutoGroupIds((ids) => [...ids, group.id]);
 		setGroupMenuOpenId(null);
@@ -2056,7 +2057,8 @@ export default function MvMaker({
 		const newLayers = template.build(params);
 		const baseZ = getNextZ();
 		const zed = newLayers.map((l, i) => ({ ...l, z: baseZ + i }));
-		update((m) => ({ ...m, layers: [...m.layers, ...zed] }));
+		// 一覧はレイヤー配列の並び順で決まるため、先頭に差し込んで一覧の最上部に出す。
+		update((m) => ({ ...m, layers: [...zed, ...m.layers] }));
 		if (zed[0]) setSelectedLayerId(zed[0].id);
 	};
 
@@ -3129,9 +3131,29 @@ export default function MvMaker({
 											}
 										/>
 									)}
+									{layer.flow === "page" && (
+										<NumField
+											label="切り替え位置のずらし（拍・0で小節頭に揃える）"
+											value={layer.pageOffsetBeats ?? 0}
+											min={0}
+											max={8}
+											step={0.5}
+											onChange={(v) =>
+												updateLayer(
+													layer.id,
+													(l) =>
+														({
+															...l,
+															pageOffsetBeats: v || undefined,
+														}) as MvLayer,
+												)
+											}
+										/>
+									)}
 									<Hint>
 										「固定」は譜面が横に動かず、指定した長さぶんを並べたまま、その期間が終わると
-										次の譜面へ丸ごと差し替わります。
+										次の譜面へ丸ごと差し替わります。ずらしを指定すると、切り替わるタイミングを
+										小節頭から指定した拍数だけ後ろへずらせます（既定は0＝ずらさない）。
 									</Hint>
 								</>
 							)}
