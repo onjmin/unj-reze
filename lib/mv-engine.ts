@@ -269,7 +269,7 @@ function lyricLinesFromTrack(
 			flush();
 		const note = trackNotes[Math.min(i, trackNotes.length - 1)];
 		if (startStep === null) startStep = note.startStep;
-		endStep = note.startStep + note.length;
+		endStep = note.startStep + note.durationSteps;
 		text += syl.kana;
 	});
 	flush();
