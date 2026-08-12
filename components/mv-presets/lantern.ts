@@ -413,6 +413,16 @@ const LAYERS: MvLayer[] = [
 		holdBars: 4,
 		z: 40,
 	},
+
+	// ══ 全編: わずかな周辺減光 ═══════════════════════════════
+	{
+		kind: "effect",
+		id: "vignette",
+		style: "vignette",
+		trigger: "always",
+		amount: 0.4,
+		color: "#000000",
+	},
 ];
 
 const MANIFEST: MvManifest = {
