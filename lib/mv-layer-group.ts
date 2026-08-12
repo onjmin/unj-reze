@@ -251,17 +251,20 @@ export function addLayerToGroup(
 	layer: MvLayer,
 ): MvManifest {
 	const layers = manifest.layers;
-	let lastIdx = -1;
-	layers.forEach((l, i) => {
-		if (l.groupId === groupId) lastIdx = i;
-	});
+	let firstIdx = -1;
+	for (let i = 0; i < layers.length; i++) {
+		if (layers[i].groupId === groupId) {
+			firstIdx = i;
+			break;
+		}
+	}
 	const tagged: MvLayer = { ...layer, groupId };
-	if (lastIdx < 0) {
+	if (firstIdx < 0) {
 		// グループが空（起こらないはずだが保険）：末尾に足す
 		return { ...manifest, layers: [...layers, tagged] };
 	}
 	const nextLayers = [...layers];
-	nextLayers.splice(lastIdx + 1, 0, tagged);
+	nextLayers.splice(firstIdx, 0, tagged);
 	return { ...manifest, layers: nextLayers };
 }
 

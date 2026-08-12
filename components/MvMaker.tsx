@@ -4244,7 +4244,13 @@ export default function MvMaker({
 										<Settings size={16} />
 									</button>
 									{groupMenuOpenId === group.id && (
-										<div className="absolute right-0 top-full z-10 mt-1 flex w-48 flex-col overflow-hidden rounded-lg border border-purple-500/30 bg-purple-950/90 shadow-xl backdrop-blur-sm">
+										<div
+											className={`absolute right-0 z-50 flex w-48 flex-col overflow-hidden rounded-lg border border-purple-500/30 bg-purple-950/90 shadow-xl backdrop-blur-sm ${
+												rowIndex >= layerRows.length - 2 && layerRows.length > 2
+													? "bottom-full mb-1"
+													: "top-full mt-1"
+											}`}
+										>
 											<button
 												onClick={() => {
 													rerollSymmetricShapeGroup(group.id);
