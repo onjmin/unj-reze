@@ -3483,6 +3483,26 @@ function notesForLayer(d: DrawCtx, layer: MvVisualizerLayer): MvNote[] {
 	return d.song.notes.filter((n) => set.has(n.track));
 }
 
+function getLayerPitchRange(song: MvSong, layer: MvVisualizerLayer, notes: MvNote[]): [number, number] {
+	if (layer.pitchRange) return [layer.pitchRange[0], layer.pitchRange[1]];
+	if (notes.length === 0) return [song.pitchMin, song.pitchMax];
+
+	let min = Infinity;
+	let max = -Infinity;
+	for (const n of notes) {
+		if (n.pitch < min) min = n.pitch;
+		if (n.pitch > max) max = n.pitch;
+	}
+	
+	if (max - min < 12) {
+		const mid = (min + max) / 2;
+		min = Math.round(mid - 6);
+		max = Math.round(mid + 6);
+	}
+	
+	return [min, max];
+}
+
 function drawVisualizer(d: DrawCtx, layer: MvVisualizerLayer): void {
 	switch (layer.style) {
 		case "pianoRoll": {
@@ -3532,13 +3552,10 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 		: d.step - windowSteps * 0.25;
 	const to = from + windowSteps;
 
-	// 音域はレイヤー指定があればそれを使う。曲全体を1枚に収めるとノートが数pxに潰れるので、
-	// 拡大したいレイヤーは狭い窓を持たせる。
-	const pitchLo = layer.pitchRange ? layer.pitchRange[0] : song.pitchMin;
-	const pitchHi = layer.pitchRange ? layer.pitchRange[1] : song.pitchMax;
+	const notes = notesForLayer(d, layer);
+	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, notes);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const noteH = Math.max(1.5, h / (pitchRange + 1));
-	const notes = notesForLayer(d, layer);
 	const echo = light.echo && light.echo.beats > 0 ? light.echo : null;
 	const echoSteps = echo ? echo.beats * MV_STEPS_PER_BEAT : 0;
 	// echo は音符の外へ echo.spread ぶん輪郭が広がる。クリップをノート矩形ぴったりにすると
@@ -3705,11 +3722,13 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const from = d.step - windowSteps * 0.35;
 	const to = d.step + windowSteps * 0.85;
 
-	const pitchRange = Math.max(1, song.pitchMax - song.pitchMin);
+	const notes = notesForLayer(d, layer);
+	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, notes);
+	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const rollH = rect.h * 1.1;
 	const noteH = Math.max(2.5, (rollH / (pitchRange + 1)) * 0.85);
 	const pitchToY = (pitch: number) =>
-		((pitch - song.pitchMin) / pitchRange - 0.5) * rollH;
+		((pitch - pitchLo) / pitchRange - 0.5) * rollH;
 
 	// トラック → 奥行きレーン。手前(負z)ほどパレット先頭のトラック
 	const laneTracks =
@@ -3729,13 +3748,14 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
 		view.depth * 0.6 +
 		spanX * 0.35 * Math.abs(Math.sin(view.yaw * DEG));
 
-	const notes = notesForLayer(d, layer).filter((n) => {
+	// 既に notesForLayer(d, layer) は上で計算済みなので流用
+	const filteredNotes = notes.filter((n) => {
 		const end = n.startStep + n.durationSteps;
 		return end >= from && n.startStep <= to;
 	});
 
 	// 画家のアルゴリズム: 奥のレーンから描く
-	notes.sort(
+	filteredNotes.sort(
 		(a, b) => laneZ(b.track) - laneZ(a.track) || a.startStep - b.startStep,
 	);
 
@@ -3767,7 +3787,7 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
 		ctx.stroke();
 	}
 
-	for (const n of notes) {
+	for (const n of filteredNotes) {
 		const x0 = stepToX(Math.max(n.startStep, from));
 		const x1 = stepToX(Math.min(n.startStep + n.durationSteps, to));
 		if (x1 - x0 < 1) continue;
@@ -3859,19 +3879,21 @@ function drawPianoRollCircular(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const innerR = Math.min(ring.innerRadius, maxR - 4);
 	const span = Math.max(4, maxR - innerR);
 
-	const pitchRange = Math.max(1, song.pitchMax - song.pitchMin);
+	const rawNotes = notesForLayer(d, layer);
+	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, rawNotes);
+	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const sweep = ring.sweep * DEG;
 	const rot = ring.rotate * DEG;
 	const laneAngle = sweep / (pitchRange + 1);
 
-	const notes = notesForLayer(d, layer).filter((n) => {
+	const notes = rawNotes.filter((n) => {
 		const end = n.startStep + n.durationSteps;
 		return end >= from && n.startStep <= to;
 	});
 
 	ctx.save();
 	for (const n of notes) {
-		const a0 = rot + (n.pitch - song.pitchMin) * laneAngle;
+		const a0 = rot + (n.pitch - pitchLo) * laneAngle;
 		const a1 = a0 + laneAngle * 0.88;
 		const r0 =
 			innerR + ((Math.max(from, n.startStep) - d.step) / windowSteps) * span;
@@ -4081,15 +4103,16 @@ function drawBars(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const { x, y, w, h } = layer.rect;
 	const count = layer.amount ?? 16;
 	const notes = notesForLayer(d, layer);
+	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, notes);
 	const levels = new Array<number>(count).fill(0);
-	const range = Math.max(1, song.pitchMax - song.pitchMin);
+	const range = Math.max(1, pitchHi - pitchLo);
 
 	for (const n of notes) {
 		if (n.startStep > d.step || n.startStep + n.durationSteps <= d.step)
 			continue;
 		const band = Math.min(
 			count - 1,
-			Math.max(0, Math.floor(((n.pitch - song.pitchMin) / range) * count)),
+			Math.max(0, Math.floor(((n.pitch - pitchLo) / range) * count)),
 		);
 		const decay = clamp01(
 			1 - (d.step - n.startStep) / Math.max(1, n.durationSteps),

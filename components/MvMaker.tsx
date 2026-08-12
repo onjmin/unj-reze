@@ -2045,12 +2045,23 @@ export default function MvMaker({
 			groupId,
 		);
 
-		update((m) => ({
-			...m,
-			// 一覧はレイヤー配列の並び順で決まるため、先頭に差し込んで一覧の最上部に出す。
-			layers: [...layers, ...m.layers],
-			groups: [group, ...(m.groups ?? [])],
-		}));
+		update((m) => {
+			const insertIndex = m.layers.findIndex((l) => l.groupId === groupId);
+			const safeIndex = insertIndex >= 0 ? insertIndex : 0;
+			const newLayersList = [...m.layers];
+			newLayersList.splice(safeIndex, 0, ...layers);
+			
+			const newGroupsList = [...(m.groups ?? [])];
+			const groupInsertIndex = m.groups?.findIndex((g) => g.id === groupId) ?? -1;
+			const safeGroupIndex = groupInsertIndex >= 0 ? groupInsertIndex : 0;
+			newGroupsList.splice(safeGroupIndex, 0, group);
+
+			return {
+				...m,
+				layers: newLayersList,
+				groups: newGroupsList,
+			};
+		});
 		setAutoGroupIds((ids) => [...ids, group.id]);
 		setGroupMenuOpenId(null);
 		if (layers[0]) setSelectedLayerId(layers[0].id);
