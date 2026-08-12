@@ -145,6 +145,7 @@ import {
 	applyGroupSize,
 	applyGroupThickness,
 	buildLayerListRows,
+	compactZ,
 	deleteGroup,
 	groupSelectedLayers,
 	type MvGroupEditMode,
@@ -1156,7 +1157,11 @@ export default function MvMaker({
 	const update = useCallback(
 		(patch: (m: MvManifest) => MvManifest) => {
 			pushUndo();
-			setManifest((prev) => patch(prev));
+			// z は「相対的な前後関係」だけが意味を持つ値。詰め直さずに使い続けると
+			// 追加・削除のたびに際限なく大きく・疎になり、数値から重なり順の見当が
+			// つかなくなる（エントロピーが増え続ける）ので、更新のたびに10刻みへ
+			// 詰め直す（相対順序は保つので見た目の重なりは変わらない）。
+			setManifest((prev) => compactZ(patch(prev)));
 		},
 		[pushUndo],
 	);
@@ -1361,8 +1366,15 @@ export default function MvMaker({
 	const canSave = !!manifest.mml.trim();
 
 	// ── レイヤー追加 ───────────────────────────────────────
-	const getNextZ = () =>
-		Math.max(10, ...manifest.layers.map((l) => l.z ?? 0)) + 10;
+	// 何かを選択して編集している最中に新規追加すると、常に画面の一番手前へ
+	// 割り込むのは違和感が大きい（今見ている場所と無関係に前へ出てしまう）。
+	// 選択中のレイヤーがあればそのすぐ上に差し込み、無ければ従来どおり最前面にする。
+	// 値そのものは `update` 内の compactZ が詰め直すので、ここでの増分の大きさに意味は無い。
+	const getNextZ = () => {
+		const selected = manifest.layers.find((l) => l.id === selectedLayerId);
+		if (selected) return (selected.z ?? 0) + 1;
+		return Math.max(10, ...manifest.layers.map((l) => l.z ?? 0)) + 10;
+	};
 
 	const addImageLayer = () => {
 		const layer: MvImageLayer = {

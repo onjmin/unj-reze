@@ -304,6 +304,25 @@ export function replaceGroupMembers(
 }
 
 /**
+ * 現在のz順（同値は配列順でタイブレーク）を保ったまま、zを10刻みの連番へ詰め直す。
+ * `getNextZ` 相当の採番を「その場の最大値+10」のまま使い続けると、追加や削除を
+ * 繰り返すうちにzがどんどん大きく・疎になり、数値だけ見ても重なり順の見当がつかなく
+ * なる（エントロピーが増え続ける）。相対的な前後関係だけが意味を持つ値なので、
+ * レイヤーを追加するたびにこれを通して詰め直す。
+ */
+export function compactZ(manifest: MvManifest): MvManifest {
+	const order = manifest.layers
+		.map((l, i) => ({ l, i }))
+		.sort((a, b) => (a.l.z ?? a.i * 10) - (b.l.z ?? b.i * 10) || a.i - b.i);
+	const zById = new Map<string, number>();
+	order.forEach(({ l }, rank) => zById.set(l.id, (rank + 1) * 10));
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => ({ ...l, z: zById.get(l.id) ?? l.z })),
+	};
+}
+
+/**
  * レイヤー一覧を「先頭に来た順」でグループ／単独レイヤーへ振り分ける。
  * エディタの一覧描画で、グループはヘッダー1つ＋中身をまとめて出すために使う。
  */
