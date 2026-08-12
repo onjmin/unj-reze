@@ -186,7 +186,7 @@ export default function MvBox({
 					}}
 				>
 					{manifest ? (
-						<MvPlayer manifest={manifest} autoPlay />
+						<MvPlayer manifest={manifest} autoPlay tapToToggle />
 					) : (
 						<div className="flex flex-1 items-center justify-center gap-2 text-[11px] text-gray-500">
 							{loading && <Loader2 size={14} className="animate-spin" />}

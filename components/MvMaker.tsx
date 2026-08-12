@@ -129,6 +129,7 @@ import type {
 import {
 	drawMvFrame,
 	EMPTY_SONG,
+	findLayerAtPoint,
 	type MvFrameState,
 	type MvSong,
 	parseMvSong,
@@ -333,6 +334,7 @@ function LayerRow({
 	onDuplicate,
 	onRemove,
 	detail,
+	rowRef,
 }: {
 	layer: MvLayer;
 	sections: MvSection[];
@@ -347,10 +349,12 @@ function LayerRow({
 	onDuplicate: () => void;
 	onRemove: () => void;
 	detail: React.ReactNode;
+	rowRef?: (el: HTMLDivElement | null) => void;
 }) {
 	const Icon = LAYER_ICON[layer.kind];
 	return (
 		<div
+			ref={rowRef}
 			onMouseEnter={onHover}
 			onMouseLeave={onUnhover}
 			className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"}`}
@@ -1000,6 +1004,22 @@ export default function MvMaker({
 	const [bulkX, setBulkX] = useState(0);
 	const [bulkY, setBulkY] = useState(0);
 
+	/** レイヤー一覧の各行のDOM。プレビューをクリックして選んだレイヤーへ自動スクロールするために使う。 */
+	const layerRowElsRef = useRef<Record<string, HTMLDivElement | null>>({});
+	/** クリックで選んだ直後、一覧側の折りたたみ更新（再描画）を待ってからスクロールするための予約。 */
+	const [pendingScrollLayerId, setPendingScrollLayerId] = useState<
+		string | null
+	>(null);
+
+	useEffect(() => {
+		if (!pendingScrollLayerId) return;
+		const el = layerRowElsRef.current[pendingScrollLayerId];
+		if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+		setPendingScrollLayerId(null);
+		// 折りたたみ更新で行がunmount/remountされた後の実DOMを掴みたいので、
+		// manifest.groups（折りたたみ状態の変化）も依存に入れて再実行させる。
+	}, [pendingScrollLayerId, manifest.groups]);
+
 	const [macroSettingsOpen, setMacroSettingsOpen] = useState(false);
 	/**
 	 * 「自動図形グループを新規追加」「特殊アレンジを生成」で作ったグループIDのスタック（古い→新しい順）。
@@ -1125,6 +1145,32 @@ export default function MvMaker({
 			setManifest((prev) => patch(prev));
 		},
 		[pushUndo],
+	);
+
+	/**
+	 * プレビューのキャンバスをクリックしたときのレイヤー選択。
+	 * レイヤータブが開いていれば、選んだレイヤーの所属グループだけ展開し他は畳んで、
+	 * 一覧内のその行までスクロールする（グループを跨いだ大量表示の中から掘り出す動線）。
+	 */
+	const handleCanvasSelect = useCallback(
+		(x: number, y: number) => {
+			const layer = findLayerAtPoint(manifest, x, y);
+			if (!layer) return;
+			setSelectedLayerId(layer.id);
+			if (tab === "layers") {
+				// すべて畳んだ上で、選んだレイヤーが属すグループだけ展開する
+				// （非グループのレイヤーを選んだ場合は、単に全グループが畳まれるだけでよい）。
+				update((m) => ({
+					...m,
+					groups: (m.groups ?? []).map((g) => ({
+						...g,
+						collapsed: g.id !== layer.groupId,
+					})),
+				}));
+				setPendingScrollLayerId(layer.id);
+			}
+		},
+		[manifest, tab, update],
 	);
 
 	const updateLayer = useCallback(
@@ -3838,6 +3884,9 @@ export default function MvMaker({
 				onDuplicate={() => duplicateLayer(layer.id)}
 				onRemove={() => removeLayer(layer.id)}
 				detail={active ? renderLayerSettings(layer) : null}
+				rowRef={(el) => {
+					layerRowElsRef.current[layer.id] = el;
+				}}
 			/>
 		);
 	};
@@ -5463,6 +5512,7 @@ export default function MvMaker({
 						manifest={manifest}
 						selectedLayerId={selectedLayerId}
 						hoveredLayerId={hoveredLayerId}
+						onCanvasClick={handleCanvasSelect}
 					/>
 				</div>
 			</div>

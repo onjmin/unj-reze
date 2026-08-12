@@ -88,38 +88,72 @@ export default function ConsecutivePostGroup({
 		);
 	}
 
-	const visiblePosts = expanded ? posts : [posts[0]];
+	const restPosts = posts.slice(1);
 
 	return (
 		<div className="border border-blue-600/60 bg-[#070c18]/80 rounded-xl my-2.5 overflow-hidden shadow-lg shadow-blue-500/5 divide-y divide-gray-800/80">
-			{visiblePosts.map((post, idx) => (
-				<PostContainer
-					key={post.id}
-					post={post}
-					isRankingMode={isRankingMode}
-					rankIndex={startIndex + idx + 1}
-					rankCategory={rankCategory}
-					onLike={onLike}
-					onDislike={onDislike}
-					onRepost={onRepost}
-					onHeart={onHeart}
-					onAddReply={onAddReply}
-					onQuickPost={onQuickPost}
-					openGame={openGame}
-					openCollab={openCollab}
-					openMml={openMml}
-					currentUserSlug={currentUserSlug}
-					currentUserDisplayName={currentUserDisplayName}
-					onModerationChange={onModerationChange}
-					onReplyClick={onReplyClick}
-					onEditImage={onEditImage}
-					onEditMml={onEditMml}
-					onEditMv={onEditMv}
-					onEditPost={onEditPost}
-					onPostUpdated={onPostUpdated}
-					userId={userId}
-				/>
-			))}
+			<PostContainer
+				key={posts[0].id}
+				post={posts[0]}
+				isRankingMode={isRankingMode}
+				rankIndex={startIndex + 1}
+				rankCategory={rankCategory}
+				onLike={onLike}
+				onDislike={onDislike}
+				onRepost={onRepost}
+				onHeart={onHeart}
+				onAddReply={onAddReply}
+				onQuickPost={onQuickPost}
+				openGame={openGame}
+				openCollab={openCollab}
+				openMml={openMml}
+				currentUserSlug={currentUserSlug}
+				currentUserDisplayName={currentUserDisplayName}
+				onModerationChange={onModerationChange}
+				onReplyClick={onReplyClick}
+				onEditImage={onEditImage}
+				onEditMml={onEditMml}
+				onEditMv={onEditMv}
+				onEditPost={onEditPost}
+				onPostUpdated={onPostUpdated}
+				userId={userId}
+			/>
+			<div
+				className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+					expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+				}`}
+			>
+				<div className="overflow-hidden divide-y divide-gray-800/80">
+					{restPosts.map((post, idx) => (
+						<PostContainer
+							key={post.id}
+							post={post}
+							isRankingMode={isRankingMode}
+							rankIndex={startIndex + idx + 2}
+							rankCategory={rankCategory}
+							onLike={onLike}
+							onDislike={onDislike}
+							onRepost={onRepost}
+							onHeart={onHeart}
+							onAddReply={onAddReply}
+							onQuickPost={onQuickPost}
+							openGame={openGame}
+							openCollab={openCollab}
+							openMml={openMml}
+							currentUserSlug={currentUserSlug}
+							currentUserDisplayName={currentUserDisplayName}
+							onModerationChange={onModerationChange}
+							onReplyClick={onReplyClick}
+							onEditImage={onEditImage}
+							onEditMml={onEditMml}
+							onEditMv={onEditMv}
+							onEditPost={onEditPost}
+							onPostUpdated={onPostUpdated}
+							userId={userId}
+						/>
+					))}
+				</div>
+			</div>
 			<button
 				onClick={() => setExpanded((v) => !v)}
 				className="w-full py-2.5 flex items-center justify-center gap-1.5 text-xs font-bold text-blue-400 bg-blue-950/40 hover:bg-blue-900/50 transition-colors border-t border-blue-600/60 cursor-pointer"

@@ -2333,26 +2333,32 @@ function ReplyTreeItem({
 					</div>
 				</div>
 			</div>
-			{!collapsed && children.length > 0 && (
-				<div>
-					{children.map((child) => (
-						<ReplyTreeItem
-							key={child.id}
-							post={child}
-							replies={replies}
-							depth={depth + 1}
-							onReply={onReply}
-							userId={userId}
-							userSlug={userSlug}
-							onEdit={onEdit}
-							onDelete={onDelete}
-							onAvatarClick={onAvatarClick}
-							onPreviewImage={onPreviewImage}
-							onOpenCollab={onOpenCollab}
-							onEditMv={onEditMv}
-							onEditMml={onEditMml}
-						/>
-					))}
+			{children.length > 0 && (
+				<div
+					className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+						collapsed ? "grid-rows-[0fr]" : "grid-rows-[1fr]"
+					}`}
+				>
+					<div className="overflow-hidden">
+						{children.map((child) => (
+							<ReplyTreeItem
+								key={child.id}
+								post={child}
+								replies={replies}
+								depth={depth + 1}
+								onReply={onReply}
+								userId={userId}
+								userSlug={userSlug}
+								onEdit={onEdit}
+								onDelete={onDelete}
+								onAvatarClick={onAvatarClick}
+								onPreviewImage={onPreviewImage}
+								onOpenCollab={onOpenCollab}
+								onEditMv={onEditMv}
+								onEditMml={onEditMml}
+							/>
+						))}
+					</div>
 				</div>
 			)}
 

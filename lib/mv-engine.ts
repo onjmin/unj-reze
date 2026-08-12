@@ -690,49 +690,68 @@ export function drawMvFrame(
 	}
 }
 
+/**
+ * レイヤーの画面上の「担当領域」矩形。ガイド枠の描画と、キャンバスクリックでの
+ * レイヤー選択（当たり判定）の両方がこれを共有する——別々に計算式を持つと、
+ * 枠は出るのにクリックでは拾えない（またはその逆）というズレが起きる。
+ */
+export function layerHitRect(
+	layer: MvLayer,
+): { x: number; y: number; w: number; h: number } {
+	if (layer.kind === "visualizer") {
+		return { x: layer.rect.x, y: layer.rect.y, w: layer.rect.w, h: layer.rect.h };
+	}
+	if (layer.kind === "image") {
+		const s = (layer.scale ?? 1) * 80;
+		return { x: layer.x - s / 2, y: layer.y - s / 2, w: s, h: s };
+	}
+	if (layer.kind === "text" || layer.kind === "lyrics") {
+		const sz = layer.size ?? 16;
+		return { x: layer.x - 10, y: layer.y - sz / 2 - 4, w: 160, h: sz + 12 };
+	}
+	if (layer.kind === "shape") {
+		// layer.size は倍率ではなく実ピクセルサイズ（addShapeLayer等の初期値48がそのまま描画に使われる）。
+		// ここを倍率式にすると、size=48だけで2880pxの箱になり、640x360キャンバスの外に
+		// 四辺とも出てしまってガイドが一切見えなくなる（グループ化対象は大半がshapeなので
+		// 「グループ内のレイヤーだけガイドが出ない」ように見えていた）。
+		const sz = layer.size ?? 60;
+		return { x: layer.x - sz / 2, y: layer.y - sz / 2, w: sz, h: sz };
+	}
+	return { x: 10, y: 10, w: MV_W - 20, h: MV_H - 20 };
+}
+
+/**
+ * 論理座標(x, y)をクリック/タップしたときに選ぶべきレイヤーを返す。
+ * z が大きい（手前）ものを優先し、同じzなら配列の後ろ（=描画が後＝手前）を優先する。
+ * エフェクトレイヤーは画面上の矩形を持たないので対象外。
+ */
+export function findLayerAtPoint(
+	manifest: MvManifest,
+	x: number,
+	y: number,
+): MvLayer | null {
+	const candidates = manifest.layers
+		.map((l, idx) => ({ l, idx }))
+		.filter(({ l }) => l.kind !== "effect")
+		.sort(
+			(a, b) =>
+				(a.l.z ?? a.idx * 10) - (b.l.z ?? b.idx * 10) || a.idx - b.idx,
+		);
+	for (let i = candidates.length - 1; i >= 0; i--) {
+		const { l } = candidates[i];
+		const r = layerHitRect(l);
+		if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return l;
+	}
+	return null;
+}
+
 function drawLayerHighlight(
 	ctx: CanvasRenderingContext2D,
 	layer: MvLayer,
 	color: string,
 	label: string,
 ): void {
-	let x = 0,
-		y = 0,
-		w = 60,
-		h = 60;
-	if (layer.kind === "visualizer") {
-		x = layer.rect.x;
-		y = layer.rect.y;
-		w = layer.rect.w;
-		h = layer.rect.h;
-	} else if (layer.kind === "image") {
-		const s = (layer.scale ?? 1) * 80;
-		x = layer.x - s / 2;
-		y = layer.y - s / 2;
-		w = s;
-		h = s;
-	} else if (layer.kind === "text" || layer.kind === "lyrics") {
-		const sz = layer.size ?? 16;
-		x = layer.x - 10;
-		y = layer.y - sz / 2 - 4;
-		w = 160;
-		h = sz + 12;
-	} else if (layer.kind === "shape") {
-		// layer.size は倍率ではなく実ピクセルサイズ（addShapeLayer等の初期値48がそのまま描画に使われる）。
-		// ここを*60の倍率式にすると、size=48だけで2880pxの箱になり、640x360キャンバスの外に
-		// 四辺とも出てしまってガイドが一切見えなくなる（グループ化対象は大半がshapeなので
-		// 「グループ内のレイヤーだけガイドが出ない」ように見えていた）。
-		const sz = layer.size ?? 60;
-		x = layer.x - sz / 2;
-		y = layer.y - sz / 2;
-		w = sz;
-		h = sz;
-	} else {
-		x = 10;
-		y = 10;
-		w = MV_W - 20;
-		h = MV_H - 20;
-	}
+	const { x, y, w, h } = layerHitRect(layer);
 
 	ctx.save();
 	ctx.strokeStyle = color;

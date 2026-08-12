@@ -939,34 +939,40 @@ export default function PostContainer({
 						<ReplyPreview replies={post.replies} post={post} />
 					)}
 
-					{showReplyInput && (
-						<div className="mt-2.5 flex items-center space-x-2 bg-gray-100/5 rounded-lg px-2.5 py-1.5 border border-gray-800">
-							<input
-								type="text"
-								placeholder="返信を書き込む..."
-								value={replyText}
-								onChange={(e) => setReplyText(e.target.value)}
-								className="bg-transparent flex-1 text-xs outline-none text-gray-100 placeholder:text-gray-600"
-								onKeyDown={(e) => {
-									if (e.key === "Enter") {
+					<div
+						className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${
+							showReplyInput ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+						}`}
+					>
+						<div className="overflow-hidden">
+							<div className="mt-2.5 flex items-center space-x-2 bg-gray-100/5 rounded-lg px-2.5 py-1.5 border border-gray-800">
+								<input
+									type="text"
+									placeholder="返信を書き込む..."
+									value={replyText}
+									onChange={(e) => setReplyText(e.target.value)}
+									className="bg-transparent flex-1 text-xs outline-none text-gray-100 placeholder:text-gray-600"
+									onKeyDown={(e) => {
+										if (e.key === "Enter") {
+											onAddReply(post.id, replyText);
+											setReplyText("");
+											setShowReplyInput(false);
+										}
+									}}
+								/>
+								<button
+									onClick={() => {
 										onAddReply(post.id, replyText);
 										setReplyText("");
 										setShowReplyInput(false);
-									}
-								}}
-							/>
-							<button
-								onClick={() => {
-									onAddReply(post.id, replyText);
-									setReplyText("");
-									setShowReplyInput(false);
-								}}
-								className="text-blue-500 hover:text-blue-400 text-xs font-bold px-1"
-							>
-								送信
-							</button>
+									}}
+									className="text-blue-500 hover:text-blue-400 text-xs font-bold px-1"
+								>
+									送信
+								</button>
+							</div>
 						</div>
-					)}
+					</div>
 				</div>
 			</div>
 
