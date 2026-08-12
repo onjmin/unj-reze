@@ -74,6 +74,7 @@ import {
 	MV_ROLL_FLOW_LABELS,
 	MV_ROOT_TO_PITCH,
 	MV_SHAPE_FORM_LABELS,
+	MV_STEPS_PER_BAR,
 	MV_STEPS_PER_BEAT,
 	MV_TRANSITION_LABELS,
 	MV_TRANSITION_STYLE_LABELS,
@@ -403,6 +404,310 @@ function EffectStylePickerModal({
 							</div>
 						</div>
 					))}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/**
+ * 場面の切り替え方1種類ぶんのライブプレビュー。「青い丸の場面」→「切り替え」→「橙の四角の場面」
+ * を繰り返しループさせ、`drawTransition`（`lib/mv-engine.ts`）を実際に走らせて見せる——
+ * ワイプの向きや暗転の濃さは文字の説明より一目見たほうが早い。
+ */
+function TransitionPreview({ style }: { style: MvTransitionStyle }) {
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		const CYCLE_BARS = 4;
+		const SWITCH_BAR = 2;
+		const manifest: MvManifest = {
+			version: 1,
+			preset: "geometric",
+			title: "",
+			mml: "",
+			audio: { mode: "soundfontKoe" },
+			stage: {
+				bgColor: "#14161d",
+				bgFit: "cover",
+				pulse: "none",
+				fadeIn: false,
+				fadeOut: false,
+				palette: [],
+			},
+			sections: [
+				{ id: "a", label: "", startBar: 0, stage: { bgColor: "#213a67" } },
+				{
+					id: "b",
+					label: "",
+					startBar: SWITCH_BAR,
+					stage: { bgColor: "#6a2a4f" },
+					transition:
+						style === "cut"
+							? undefined
+							: {
+									style,
+									beats: 2,
+									color: style === "flash" ? "#ffffff" : "#000000",
+								},
+				},
+			],
+			layers: [
+				{
+					kind: "shape",
+					id: "prev-a",
+					form: "circle",
+					x: MV_W / 2,
+					y: MV_H / 2,
+					size: 60,
+					rotation: 0,
+					color: "#8fb8ff",
+					filled: true,
+					thickness: 3,
+					z: 10,
+					modulators: [],
+					sections: ["a"],
+				},
+				{
+					kind: "shape",
+					id: "prev-b",
+					form: "square",
+					x: MV_W / 2,
+					y: MV_H / 2,
+					size: 60,
+					rotation: 20,
+					color: "#ffb37a",
+					filled: true,
+					thickness: 3,
+					z: 10,
+					modulators: [],
+					sections: ["b"],
+				},
+			],
+		};
+		const song = { ...EMPTY_SONG, bpm: 120 };
+		const stepsPerSec = (song.bpm / 60) * MV_STEPS_PER_BEAT;
+		const cycleSteps = CYCLE_BARS * MV_STEPS_PER_BAR;
+		let raf = 0;
+		const start = performance.now();
+		const loop = () => {
+			const elapsed = (performance.now() - start) / 1000;
+			const stepInCycle = (elapsed * stepsPerSec) % cycleSteps;
+			const frame: MvFrameState = { step: stepInCycle, timeSec: elapsed };
+			drawMvFrame(ctx, manifest, song, frame);
+			raf = requestAnimationFrame(loop);
+		};
+		raf = requestAnimationFrame(loop);
+		return () => cancelAnimationFrame(raf);
+	}, [style]);
+
+	return (
+		<canvas
+			ref={canvasRef}
+			width={MV_W}
+			height={MV_H}
+			className="block h-auto w-full rounded bg-black"
+			style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
+		/>
+	);
+}
+
+/** 切り替え方の並べ方。ワイプ4方向は見た目が似ているのでひとまとめにする（8個は一覧でも見渡せる数）。 */
+const TRANSITION_STYLE_GROUPS: { label: string; styles: MvTransitionStyle[] }[] = [
+	{ label: "基本", styles: ["cut", "fade", "flash", "dissolve"] },
+	{ label: "払う（ワイプ）", styles: ["wipeLeft", "wipeRight", "wipeUp", "wipeDown"] },
+];
+
+/** 「場面の切り替え方を選ぶ」モーダル。`EffectStylePickerModal` と同じ、タップ即確定の一覧。 */
+function TransitionStylePickerModal({
+	value,
+	onPick,
+	onClose,
+}: {
+	value: MvTransitionStyle;
+	onPick: (style: MvTransitionStyle) => void;
+	onClose: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+			<div className="flex h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-[85vh] sm:rounded-xl">
+				<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+					<span className="text-sm font-bold text-gray-100">
+						場面の切り替え方を選ぶ
+					</span>
+					<button
+						onClick={onClose}
+						className="rounded p-1 text-gray-400 hover:bg-gray-800"
+					>
+						<X size={18} />
+					</button>
+				</div>
+				<div className="flex-1 space-y-4 overflow-y-auto p-3">
+					{TRANSITION_STYLE_GROUPS.map((g) => (
+						<div key={g.label}>
+							<p className="mb-1.5 text-[10px] font-bold text-gray-400">
+								{g.label}
+							</p>
+							<div className="grid grid-cols-2 gap-2">
+								{g.styles.map((s) => (
+									<button
+										key={s}
+										onClick={() => {
+											onPick(s);
+											onClose();
+										}}
+										className={`block rounded-lg border p-2 text-left active:scale-[0.99] ${
+											value === s
+												? "border-blue-500 bg-blue-500/10"
+												: "border-gray-700 bg-gray-800/60"
+										}`}
+									>
+										<TransitionPreview style={s} />
+										<div className="mt-1.5 flex items-center gap-1.5">
+											<span className="text-[11px] font-bold text-gray-100">
+												{MV_TRANSITION_LABELS[s]}
+											</span>
+											{value === s && (
+												<span className="rounded bg-blue-600 px-1 py-0.5 text-[8px] font-bold text-white">
+													選択中
+												</span>
+											)}
+										</div>
+									</button>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/**
+ * ビジュアライザ1種類ぶんのライブプレビュー。実際の曲データで再生することで
+ * 「ピアノロール」「ステップ格子」「波紋」「スペアナ」の見た目の違いを比較できる。
+ */
+function VisualizerStylePreview({
+	style,
+	layer,
+	song,
+}: {
+	style: MvVisualizerStyle;
+	layer: MvVisualizerLayer;
+	song: MvSong;
+}) {
+	const canvasRef = useRef<HTMLCanvasElement>(null);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+		const ctx = canvas.getContext("2d");
+		if (!ctx) return;
+
+		const manifest: MvManifest = {
+			version: 1,
+			preset: "geometric",
+			title: "",
+			mml: "",
+			audio: { mode: "soundfontKoe" },
+			stage: {
+				bgColor: "#111113",
+				bgFit: "cover",
+				pulse: "none",
+				fadeIn: false,
+				fadeOut: false,
+				palette: [],
+			},
+			sections: [],
+			layers: [{ ...layer, id: "preview", style }],
+		};
+		const stepsPerSec = (song.bpm / 60) * MV_STEPS_PER_BEAT;
+		const totalSteps = Math.max(song.totalSteps, MV_STEPS_PER_BAR * 4);
+		let raf = 0;
+		const start = performance.now();
+		const loop = () => {
+			const elapsed = (performance.now() - start) / 1000;
+			const stepInLoop = (elapsed * stepsPerSec) % totalSteps;
+			const frame: MvFrameState = { step: stepInLoop, timeSec: elapsed };
+			drawMvFrame(ctx, manifest, song, frame);
+			raf = requestAnimationFrame(loop);
+		};
+		raf = requestAnimationFrame(loop);
+		return () => cancelAnimationFrame(raf);
+	}, [style, layer, song]);
+
+	return (
+		<canvas
+			ref={canvasRef}
+			width={MV_W}
+			height={MV_H}
+			className="block h-auto w-full rounded bg-black"
+			style={{ aspectRatio: `${MV_W} / ${MV_H}` }}
+		/>
+	);
+}
+
+/** 「ビジュアライザの種類を選ぶ」モーダル。4種類だけなのでカテゴリ分けはしない。 */
+function VisualizerStylePickerModal({
+	layer,
+	song,
+	onPick,
+	onClose,
+}: {
+	layer: MvVisualizerLayer;
+	song: MvSong;
+	onPick: (style: MvVisualizerStyle) => void;
+	onClose: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+			<div className="flex h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-[85vh] sm:rounded-xl">
+				<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+					<span className="text-sm font-bold text-gray-100">
+						ビジュアライザの種類を選ぶ
+					</span>
+					<button
+						onClick={onClose}
+						className="rounded p-1 text-gray-400 hover:bg-gray-800"
+					>
+						<X size={18} />
+					</button>
+				</div>
+				<div className="flex-1 space-y-2 overflow-y-auto p-3">
+					{(Object.keys(MV_VISUALIZER_LABELS) as MvVisualizerStyle[]).map(
+						(s) => (
+							<button
+								key={s}
+								onClick={() => {
+									onPick(s);
+									onClose();
+								}}
+								className={`block w-full rounded-lg border p-2 text-left active:scale-[0.99] ${
+									layer.style === s
+										? "border-blue-500 bg-blue-500/10"
+										: "border-gray-700 bg-gray-800/60"
+								}`}
+							>
+								<VisualizerStylePreview style={s} layer={layer} song={song} />
+								<div className="mt-1.5 flex items-center gap-1.5">
+									<span className="text-[13px] font-bold text-gray-100">
+										{MV_VISUALIZER_LABELS[s]}
+									</span>
+									{layer.style === s && (
+										<span className="rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white">
+											選択中
+										</span>
+									)}
+								</div>
+							</button>
+						),
+					)}
 				</div>
 			</div>
 		</div>
@@ -787,9 +1092,6 @@ function Details({
 const MOTION_OPTIONS = (Object.keys(MV_MOTION_LABELS) as MvMotion[]).map(
 	(m) => ({ value: m, label: MV_MOTION_LABELS[m] }),
 );
-const VISUALIZER_OPTIONS = (
-	Object.keys(MV_VISUALIZER_LABELS) as MvVisualizerStyle[]
-).map((s) => ({ value: s, label: MV_VISUALIZER_LABELS[s] }));
 
 const PROJECTION_OPTIONS = (
 	Object.keys(MV_PROJECTION_LABELS) as MvProjection[]
@@ -1077,6 +1379,10 @@ export default function MvMaker({
 	const [effectStylePickerLayerId, setEffectStylePickerLayerId] = useState<
 		string | null
 	>(null);
+	const [transitionStylePickerSectionId, setTransitionStylePickerSectionId] =
+		useState<string | null>(null);
+	const [visualizerStylePickerLayerId, setVisualizerStylePickerLayerId] =
+		useState<string | null>(null);
 	const [motionTarget, setMotionTarget] = useState<{ layerId: string } | null>(
 		null,
 	);
@@ -2631,24 +2937,16 @@ export default function MvMaker({
 
 			{layer.kind === "visualizer" && (
 				<>
-					<SelectField
-						label="種類"
-						value={layer.style}
-						options={VISUALIZER_OPTIONS}
-						onChange={(v) =>
-							updateLayer(layer.id, (l) => {
-								// ピアノロールは3D表示が既定（見せ方が未設定のときだけ立体を入れる）
-								const next = { ...l, style: v } as MvLayer;
-								if (
-									v === "pianoRoll" &&
-									next.kind === "visualizer" &&
-									!next.projection
-								)
-									next.projection = "perspective";
-								return next;
-							})
-						}
-					/>
+					<label className="block space-y-0.5">
+						<span className={FIELD_LABEL_CLASS}>種類</span>
+						<button
+							onClick={() => setVisualizerStylePickerLayerId(layer.id)}
+							className="flex min-h-9 w-full items-center justify-between rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-left text-[12px] text-gray-100"
+						>
+							<span>{MV_VISUALIZER_LABELS[layer.style]}</span>
+							<span className="text-[10px] text-blue-400">選び直す</span>
+						</button>
+					</label>
 					<NumField
 						label="X"
 						value={layer.rect.x}
@@ -5621,25 +5919,18 @@ export default function MvMaker({
 								{/* 場面設定本体 */}
 								<div className="p-3 space-y-3">
 									<Details label="背景と画面切替の設定">
-										<SelectField
-											label="切り替え方"
-											value={s.transition?.style ?? "cut"}
-											options={(
-												Object.keys(MV_TRANSITION_LABELS) as MvTransitionStyle[]
-											).map((v) => ({ value: v, label: MV_TRANSITION_LABELS[v] }))}
-											onChange={(v) =>
-												updateSection(s.id, (x) => ({
-													...x,
-													transition:
-														v === "cut"
-															? undefined
-															: {
-																	...(x.transition ?? DEFAULT_MV_TRANSITION),
-																	style: v,
-																},
-												}))
-											}
-										/>
+										<label className="block space-y-0.5">
+											<span className={FIELD_LABEL_CLASS}>切り替え方</span>
+											<button
+												onClick={() => setTransitionStylePickerSectionId(s.id)}
+												className="flex min-h-9 w-full items-center justify-between rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-left text-[12px] text-gray-100"
+											>
+												<span>
+													{MV_TRANSITION_LABELS[s.transition?.style ?? "cut"]}
+												</span>
+												<span className="text-[10px] text-blue-400">選び直す</span>
+											</button>
+										</label>
 										{s.transition && (
 											<>
 												<NumField
@@ -6070,6 +6361,61 @@ export default function MvMaker({
 								)
 							}
 							onClose={() => setEffectStylePickerLayerId(null)}
+						/>
+					);
+				})()}
+
+			{transitionStylePickerSectionId &&
+				(() => {
+					const target = manifest.sections.find(
+						(s) => s.id === transitionStylePickerSectionId,
+					);
+					if (!target) return null;
+					return (
+						<TransitionStylePickerModal
+							value={target.transition?.style ?? "cut"}
+							onPick={(style) =>
+								updateSection(target.id, (x) => ({
+									...x,
+									transition:
+										style === "cut"
+											? undefined
+											: {
+													...(x.transition ?? DEFAULT_MV_TRANSITION),
+													style,
+												},
+								}))
+							}
+							onClose={() => setTransitionStylePickerSectionId(null)}
+						/>
+					);
+				})()}
+
+			{visualizerStylePickerLayerId &&
+				(() => {
+					const target = manifest.layers.find(
+						(l): l is MvVisualizerLayer =>
+							l.kind === "visualizer" && l.id === visualizerStylePickerLayerId,
+					);
+					if (!target) return null;
+					return (
+						<VisualizerStylePickerModal
+							layer={target}
+							song={song}
+							onPick={(style) =>
+								updateLayer(target.id, (l) => {
+									// ピアノロールは3D表示が既定(見せ方が未設定のときだけ立体を入れる)
+									const next = { ...l, style } as MvLayer;
+									if (
+										style === "pianoRoll" &&
+										next.kind === "visualizer" &&
+										!next.projection
+									)
+										next.projection = "perspective";
+									return next;
+								})
+							}
+							onClose={() => setVisualizerStylePickerLayerId(null)}
 						/>
 					);
 				})()}
