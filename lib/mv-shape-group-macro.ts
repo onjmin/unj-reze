@@ -926,12 +926,20 @@ export const DEFAULT_ARRANGEMENT_BEATS = 4;
  * ある）」の2段構えは共通だが、加工の中身・飾りの有無/形/色/本数は型ごと・
  * 呼び出しごとに独立して振れる。
  */
-type ArrangeStyle = "speedKick" | "shatter" | "monoFlash" | "recolorPulse";
+type ArrangeStyle =
+	| "speedKick"
+	| "shatter"
+	| "monoFlash"
+	| "recolorPulse"
+	| "barStretch"
+	| "squareBurst";
 const ARRANGE_STYLES: ArrangeStyle[] = [
 	"speedKick",
 	"shatter",
 	"monoFlash",
 	"recolorPulse",
+	"barStretch",
+	"squareBurst",
 ];
 
 const FLASH_PALETTE = ["#ffffff", "#fde68a", "#fca5a5", "#93c5fd", "#5eead4"];
@@ -1107,6 +1115,92 @@ export function generateArrangementForGroup(
 					curve: 3,
 				});
 				break;
+			case "barStretch": {
+				// 一瞬だけ大きく伸びて元のサイズへ戻る「ストレッチ」。
+				// 伸びる瞬間は太さを細くして引き伸ばされた質感を足す（サイズだけだと
+				// ただの拡大にしか見えないため）。
+				const stretchAmount = roundTo((orig.size ?? 20) * randRange(1.4, 2.2), 1);
+				const thinAmount = roundTo(
+					(orig.thickness ?? 3) * randRange(0.3, 0.6),
+					1,
+				);
+				newLayer.modulators.push(
+					{
+						source: "beat",
+						target: "size",
+						op: "add",
+						amount: stretchAmount,
+						periodBeats: kickPeriod,
+						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
+						curve: 5,
+					},
+					{
+						source: "beat",
+						target: "thickness",
+						op: "sub",
+						amount: thinAmount,
+						periodBeats: kickPeriod,
+						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
+						curve: 5,
+					},
+				);
+				break;
+			}
+			case "squareBurst": {
+				// 元の図形は淡く息づかせるだけにして、主役は各図形の位置から
+				// 広がって消える四角形のバースト（枠線のみ）にする。
+				newLayer.modulators.push(
+					...flooredOpacity(
+						0.7,
+						monoFlashPeriod,
+						alignPhaseToTriggerBar(monoFlashPeriod, 0, triggerBar),
+						2,
+					),
+				);
+				const burstPeriod = kickPeriod;
+				const burstPhase = alignPhaseToTriggerBar(burstPeriod, 0, triggerBar);
+				layers.push({
+					kind: "shape",
+					form: "path",
+					id: mvUid("shp"),
+					groupId: newGroupId,
+					x: orig.x,
+					y: orig.y,
+					z: nextZ(),
+					rotation: 0,
+					color: chance(0.5) ? flashColor : (orig.color ?? "#ffffff"),
+					filled: false,
+					thickness: randRange(2, 4),
+					size: (orig.size ?? 20) * 0.7,
+					count: 1,
+					spread: 0,
+					spin: 0,
+					blend: "normal",
+					path: rectPath(15, 15, 85, 85),
+					pathBox: [0, 0, 100, 100],
+					modulators: [
+						{
+							source: "beat",
+							target: "size",
+							op: "add",
+							amount: roundTo((orig.size ?? 20) * randRange(1.6, 2.4), 1),
+							periodBeats: burstPeriod,
+							phaseOffset: burstPhase,
+							curve: 2,
+						},
+						{
+							source: "beat",
+							target: "opacity",
+							op: "mul",
+							amount: 1,
+							periodBeats: burstPeriod,
+							phaseOffset: burstPhase,
+							curve: 3,
+						},
+					],
+				});
+				break;
+			}
 		}
 
 		layers.push(newLayer);

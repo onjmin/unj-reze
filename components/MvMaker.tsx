@@ -5183,7 +5183,7 @@ export default function MvMaker({
 										)?.name ?? "（見つかりません）"}
 									</span>
 									<label className="flex items-center gap-1">
-										割り込み開始（小節）
+										割り込む小節
 										<input
 											key={`arr-trigger-${group.arrangement.triggerBar}`}
 											type="text"
@@ -5193,54 +5193,25 @@ export default function MvMaker({
 												const v = txt === "" ? 1 : Number(txt);
 												update((m) => ({
 													...m,
-													groups: (m.groups ?? []).map((g) =>
-														g.id === group.id && g.arrangement
-															? {
-																	...g,
-																	arrangement: {
-																		...g.arrangement,
-																		triggerBar: Number.isFinite(v)
-																			? Math.min(
-																					v - 1,
-																					g.arrangement.endBar - 1,
-																				)
-																			: group.arrangement!.triggerBar,
-																	},
-																}
-															: g,
-													),
-												}));
-											}}
-											onKeyDown={(e) => {
-												if (e.key === "Enter") e.currentTarget.blur();
-											}}
-											className="w-16 rounded bg-gray-800 px-1 py-0.5 text-gray-100"
-										/>
-									</label>
-									<label className="flex items-center gap-1">
-										割り込み終了（小節）
-										<input
-											key={`arr-end-${group.arrangement.endBar}`}
-											type="text"
-											defaultValue={group.arrangement.endBar}
-											onBlur={(e) => {
-												const txt = e.target.value.trim();
-												const v = txt === "" ? group.arrangement!.endBar : Number(txt);
-												update((m) => ({
-													...m,
-													groups: (m.groups ?? []).map((g) =>
-														g.id === group.id && g.arrangement
-															? {
-																	...g,
-																	arrangement: {
-																		...g.arrangement,
-																		endBar: Number.isFinite(v)
-																			? Math.max(v, g.arrangement.triggerBar + 1)
-																			: group.arrangement!.endBar,
-																	},
-																}
-															: g,
-													),
+													groups: (m.groups ?? []).map((g) => {
+														if (g.id !== group.id || !g.arrangement) return g;
+														// 長さ（終了小節-開始小節）は生成時に決めた尺のまま動かさない。
+														// 「どこに割り込むか」だけを動かせば、再生が終われば自動で
+														// アレンジ元へ戻る（＝終了位置を別途指定する必要が無い）。
+														const duration =
+															g.arrangement.endBar - g.arrangement.triggerBar;
+														const triggerBar = Number.isFinite(v)
+															? Math.max(0, v - 1)
+															: g.arrangement.triggerBar;
+														return {
+															...g,
+															arrangement: {
+																...g.arrangement,
+																triggerBar,
+																endBar: triggerBar + duration,
+															},
+														};
+													}),
 												}));
 											}}
 											onKeyDown={(e) => {
@@ -5250,7 +5221,8 @@ export default function MvMaker({
 										/>
 									</label>
 									<span className="text-purple-400">
-										開始小節の頭〜終了小節の頭の直前まで、アレンジ元を隠して再生
+										（{group.arrangement.endBar - group.arrangement.triggerBar}
+										小節ぶん再生したらアレンジ元へ自動で戻ります）
 									</span>
 								</div>
 							)}

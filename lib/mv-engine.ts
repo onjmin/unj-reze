@@ -3485,11 +3485,33 @@ function notesForLayer(d: DrawCtx, layer: MvVisualizerLayer): MvNote[] {
 }
 
 /**
- * `getLayerPitchRange` の結果のキャッシュ。トラックの音高の上下限（＝真ん中に寄せる基準）は
- * 曲が変わらない限り毎フレーム同じ結果になるので、フレームごとに全ノートを舐めて
- * min/max を取り直すのは無駄——`page` フローは「切り替え間隔（ページ）」ごとに対象ノートが
- * 変わるので、そのページ番号が変わったときだけ計算し直せば十分（scroll/3D/円形/バーは
- * 対象ノート自体が曲の間ずっと同じなので "all" の1回で足りる）。
+ * トラック全体（ページ分割前）の音域から決める、表示に使う縦幅（span）。
+ *
+ * 以前は `page` フローでもページ（切り替え間隔）ごとの音符だけから min/max を取り直して
+ * いたため、ページによって音域の「広さ」そのものが変わり、切り替わるたびに1音あたりの
+ * 高さ（noteH）や間隔の縮尺までガクッと変わっていた。どのページも同じメロディの一部分
+ * （＝同じトラック）を映しているのに縮尺だけ毎回変わるので、実際には音の高さが正しく
+ * ページごとに動いているのに「全部同じ量だけ位相がズレて見える」という錯視の原因に
+ * なっていた（ユーザー指摘）。
+ *
+ * 縦幅はトラック全体から一度だけ決め、ページ間で変えない。ページごとに変えるのは
+ * `getLayerPitchRange` 側の「窓の中心（どの音域を真ん中に映すか）」だけにする。
+ */
+function getLayerPitchSpan(allNotes: MvNote[]): number {
+	if (allNotes.length === 0) return 12;
+	let min = Infinity;
+	let max = -Infinity;
+	for (const n of allNotes) {
+		if (n.pitch < min) min = n.pitch;
+		if (n.pitch > max) max = n.pitch;
+	}
+	return Math.max(12, max - min);
+}
+
+/**
+ * `getLayerPitchRange` の結果のキャッシュ。span はトラック全体から決まるので曲が変わらない
+ * 限り一定、中心もページ番号が変わったときだけ動く。フレームごとに全ノートを舐めて
+ * 取り直すのは無駄なので、`songRef` と `pageKey` が変わらない間はキャッシュを再利用する。
  */
 const pitchRangeCache = new WeakMap<
 	MvVisualizerLayer,
@@ -3502,6 +3524,7 @@ function getLayerPitchRangeCached(
 	layer: MvVisualizerLayer,
 	notes: MvNote[],
 	pageKey: string | number = "all",
+	allNotes: MvNote[] = notes,
 ): [number, number] {
 	if (layer.pitchRange) return [layer.pitchRange[0], layer.pitchRange[1]];
 	const key = String(pageKey);
@@ -3509,29 +3532,38 @@ function getLayerPitchRangeCached(
 	if (cached && cached.songRef === song && cached.key === key) {
 		return cached.range;
 	}
-	const range = getLayerPitchRange(song, layer, notes);
+	const range = getLayerPitchRange(song, layer, notes, allNotes);
 	pitchRangeCache.set(layer, { songRef: song, key, range });
 	return range;
 }
 
-function getLayerPitchRange(song: MvSong, layer: MvVisualizerLayer, notes: MvNote[]): [number, number] {
+/**
+ * `notes`（いま映す音符=ページ内など）を縦の中心に据えつつ、縦幅は `allNotes`
+ * （トラック全体）から決めた固定の span を使う。`allNotes` を省略した呼び出し
+ * （page フローの無いビジュアライザ）では `notes` 自身が「トラック全体」になるので、
+ * 従来どおり全体の音域からそのまま span も中心も決まる。
+ */
+function getLayerPitchRange(
+	song: MvSong,
+	layer: MvVisualizerLayer,
+	notes: MvNote[],
+	allNotes: MvNote[] = notes,
+): [number, number] {
 	if (layer.pitchRange) return [layer.pitchRange[0], layer.pitchRange[1]];
-	if (notes.length === 0) return [song.pitchMin, song.pitchMax];
+
+	const span = getLayerPitchSpan(allNotes);
+	// このページに音が無ければトラック全体を中心に据える（真ん中がまるごと空くのを防ぐ）。
+	const centerNotes = notes.length > 0 ? notes : allNotes;
+	if (centerNotes.length === 0) return [song.pitchMin, song.pitchMax];
 
 	let min = Infinity;
 	let max = -Infinity;
-	for (const n of notes) {
+	for (const n of centerNotes) {
 		if (n.pitch < min) min = n.pitch;
 		if (n.pitch > max) max = n.pitch;
 	}
-	
-	if (max - min < 12) {
-		const mid = (min + max) / 2;
-		min = Math.round(mid - 6);
-		max = Math.round(mid + 6);
-	}
-	
-	return [min, max];
+	const mid = (min + max) / 2;
+	return [Math.round(mid - span / 2), Math.round(mid + span / 2)];
 }
 
 function drawVisualizer(d: DrawCtx, layer: MvVisualizerLayer): void {
@@ -3592,7 +3624,13 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const pageKey = paged
 		? Math.round((from - pageOffsetSteps) / windowSteps)
 		: "all";
-	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, targetNotes, pageKey);
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(
+		song,
+		layer,
+		targetNotes,
+		pageKey,
+		notes,
+	);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const noteH = Math.max(1.5, h / (pitchRange + 1));
 	const echo = light.echo && light.echo.beats > 0 ? light.echo : null;
