@@ -33,7 +33,7 @@ import type { RealtimePlayer } from "@/lib/realtime/channels";
 
 const WALK_SPEED = 2.2; // m/s（three版 lib/mmo3d.ts と揃える）
 const RUN_SPEED = 5.5; // m/s
-const TURN_LERP = 10; // 1秒あたりの回転追従係数
+const TURN_LERP = 10; // 回転の追従係数（three版と同じ、指数減衰の時定数の逆数）
 
 // ── 簡易近接戦闘（three版 lib/mmo3d.ts と同じ数値。フェーズ15でbabylon版にも移植）。 ──
 const ATTACK_COOLDOWN_SEC = 0.6;
@@ -101,6 +101,14 @@ export class Mmo3dBabylonEngine {
 
 	// ── ゲーム内掲示板（フェーズ15: three版からの移植）。 ──
 	private boards: { mesh: AbstractMesh; threadPostId: string }[] = [];
+
+	// ── 簡易地形障害物（フェーズ16: three版と同じ軸分離AABB当たり判定をbabylon版にも移植）。 ──
+	private obstacles: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
+	private readonly PLAYER_RADIUS = 0.4;
+
+	// ── アニメ状態（フェーズ16: idle/walk/run。実モデルのクリップ切替は無いが、リアルタイム
+	// 同期やHUD向けに移動状態だけは他プレイヤー/呼び出し側へ伝える）。 ──
+	private curAnim: "idle" | "walk" | "run" = "idle";
 
 	constructor(
 		canvas: HTMLCanvasElement,
@@ -192,7 +200,7 @@ export class Mmo3dBabylonEngine {
 			this.dummies.push({ mesh, mat, hp: DUMMY_MAX_HP, respawnAt: null, baseX: x, baseZ: z });
 		}
 
-		// 簡易地形障害物（見た目のみ。当たり判定はthree版のみ対応 — 既知の制限）。
+		// 簡易地形障害物。当たり判定はAABB（軸分離スライド、updateMovement側で使用、three版と同じ方式）。
 		for (const spec of obstacleSpecs ?? []) {
 			const box = MeshBuilder.CreateBox(
 				`obstacle-${this.scene.meshes.length}`,
@@ -203,6 +211,12 @@ export class Mmo3dBabylonEngine {
 			const mat = new StandardMaterial(`obstacleMat-${this.scene.meshes.length}`, this.scene);
 			mat.diffuseColor = spec.color ? Color3.FromHexString(spec.color) : new Color3(0.47, 0.33, 0.28);
 			box.material = mat;
+			this.obstacles.push({
+				minX: spec.x - spec.w / 2,
+				maxX: spec.x + spec.w / 2,
+				minZ: spec.z - spec.d / 2,
+				maxZ: spec.z + spec.d / 2,
+			});
 		}
 
 		if (pmxUrl) {
@@ -246,7 +260,10 @@ export class Mmo3dBabylonEngine {
 		if (back) lz -= 1;
 		if (left) lx -= 1;
 		if (right) lx += 1;
-		if (lx === 0 && lz === 0) return;
+		if (lx === 0 && lz === 0) {
+			this.curAnim = "idle";
+			return;
+		}
 		const len = Math.hypot(lx, lz);
 		lx /= len;
 		lz /= len;
@@ -258,22 +275,61 @@ export class Mmo3dBabylonEngine {
 		const camRight = Vector3.Cross(Vector3.Up(), camForward).normalize();
 
 		const moveDir = camForward.scale(lz).add(camRight.scale(lx));
-		if (moveDir.lengthSquared() < 1e-6) return;
+		if (moveDir.lengthSquared() < 1e-6) {
+			this.curAnim = "idle";
+			return;
+		}
 		moveDir.normalize();
 
 		const targetFacing = Math.atan2(moveDir.x, moveDir.z);
 		let diff = targetFacing - this.facing;
 		diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-		this.facing += diff * Math.min(1, TURN_LERP * dt);
+		// 指数減衰（three版 lib/mmo3d.ts と同じ修正）。線形のMath.min(1, TURN_LERP*dt)だと
+		// dtが跳ねた瞬間に係数が1.0に張り付いて旋回が瞬間スナップして見えるバグがあった。
+		this.facing += diff * (1 - Math.exp(-TURN_LERP * dt));
 		this.playerRoot.rotation.y = this.facing;
 
 		const speed = run ? RUN_SPEED : WALK_SPEED;
-		this.playerRoot.position.x += moveDir.x * speed * dt;
-		this.playerRoot.position.z += moveDir.z * speed * dt;
+		const [nx, nz] = this.resolveObstacleCollision(
+			this.playerRoot.position.x,
+			this.playerRoot.position.z,
+			moveDir.x * speed * dt,
+			moveDir.z * speed * dt,
+		);
+		this.playerRoot.position.x = nx;
+		this.playerRoot.position.z = nz;
+		this.curAnim = run ? "run" : "walk";
 
 		// カメラは向きを強制せず、狙点だけプレイヤーに追従させる（ユーザーのドラッグ操作を尊重）。
 		this.camera.target.x = this.playerRoot.position.x;
 		this.camera.target.z = this.playerRoot.position.z;
+	}
+
+	/** 障害物との軸分離スライド判定（three版 resolveObstacleCollision と同じロジック）。 */
+	private resolveObstacleCollision(
+		x: number,
+		z: number,
+		dx: number,
+		dz: number,
+	): [number, number] {
+		const r = this.PLAYER_RADIUS;
+		let nx = x + dx;
+		if (
+			this.obstacles.some(
+				(o) => nx > o.minX - r && nx < o.maxX + r && z > o.minZ - r && z < o.maxZ + r,
+			)
+		) {
+			nx = x;
+		}
+		let nz = z + dz;
+		if (
+			this.obstacles.some(
+				(o) => nx > o.minX - r && nx < o.maxX + r && nz > o.minZ - r && nz < o.maxZ + r,
+			)
+		) {
+			nz = z;
+		}
+		return [nx, nz];
 	}
 
 	/** 掲示板の目印（看板）をワールドに設置する。1つ以上、任意位置に配置できる（three版と同じ形）。 */
@@ -393,14 +449,15 @@ export class Mmo3dBabylonEngine {
 		}
 	}
 
-	/** リアルタイムハブへ送る自分の位置/向き。three版 getLocalState と同じ形（x/y=world x/z）。
-	 *  babylon版はアニメ状態を持たないため anim は常に "idle" を返す（既知の制限）。 */
-	getLocalState(): { x: number; y: number; rotY: number; anim: "idle" } {
+	/** リアルタイムハブへ送る自分の位置/向き/移動状態。three版 getLocalState と同じ形
+	 *  （x/y=world x/z）。実モデルのクリップ切替は無いが、移動状態(idle/walk/run)自体は
+	 *  入力から判定して返す（フェーズ16でthree版と揃えた）。 */
+	getLocalState(): { x: number; y: number; rotY: number; anim: "idle" | "walk" | "run" } {
 		return {
 			x: this.playerRoot.position.x,
 			y: this.playerRoot.position.z,
 			rotY: this.facing,
-			anim: "idle",
+			anim: this.curAnim,
 		};
 	}
 
@@ -421,6 +478,9 @@ export class Mmo3dBabylonEngine {
 			}
 			mesh.position.set(p.x, 0.9, p.y);
 			if (p.rotY !== undefined) mesh.rotation.y = p.rotY;
+			// 実モデルもクリップも持たないため、移動状態はカプセルの高さで簡易的に見分ける
+			// （idle=等倍、walk/run=わずかに縦伸縮させる）。three版のアニメ切替の代替表現。
+			mesh.scaling.y = p.anim === "run" ? 1.08 : p.anim === "walk" ? 1.04 : 1;
 		}
 		for (const [sessionId, mesh] of this.ghosts) {
 			if (seen.has(sessionId)) continue;

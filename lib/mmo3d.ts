@@ -28,7 +28,7 @@ type AnimState = "idle" | "walk" | "run";
 
 const WALK_SPEED = 2.2; // m/s
 const RUN_SPEED = 5.5; // m/s
-const TURN_LERP = 10; // 1秒あたりの回転追従係数
+const TURN_LERP = 10; // 回転の追従係数（大きいほど速く追従する。指数減衰の時定数の逆数）
 const CROSSFADE_SEC = 0.25;
 
 const ATTACK_COOLDOWN_SEC = 0.6;
@@ -471,9 +471,13 @@ export class Mmo3dEngine {
 			const mz = -localX * sin + localZ * cos;
 			const targetFacing = Math.atan2(mx, mz);
 			// 最短角度差でラープ（±πをまたぐ跳躍を防ぐ）。
+			// Math.min(1, TURN_LERP*dt)の線形版だとdtが0.1s近くまで跳ねた瞬間に係数がちょうど
+			// 1.0になり、その1フレームで向きが完全にスナップして「旋回が異常に高速」に見える
+			// バグがあった（フレームレートが落ちるほど酷くなる）。指数減衰（1-e^-kt）なら
+			// dtが多少跳ねても係数が1.0に張り付かず、常に滑らかに追従する。
 			let diff = targetFacing - this.facing;
 			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-			this.facing += diff * Math.min(1, TURN_LERP * dt);
+			this.facing += diff * (1 - Math.exp(-TURN_LERP * dt));
 
 			const speed = run ? RUN_SPEED : WALK_SPEED;
 			const [nx, nz] = this.resolveObstacleCollision(
