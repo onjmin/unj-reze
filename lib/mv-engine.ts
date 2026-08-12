@@ -2633,7 +2633,7 @@ function drawLayerWithTransitions(d: DrawCtx, layer: MvLayer): void {
 			drawLayer(dScratch, layer);
 			sctx.save();
 			sctx.globalCompositeOperation = "source-atop";
-			sctx.fillStyle = `rgba(255, 255, 255, ${trans.flashAlpha * 0.95})`;
+			sctx.fillStyle = `rgba(255, 255, 255, ${trans.flashAlpha * 0.3})`;
 			sctx.fillRect(0, 0, MV_W, MV_H);
 			sctx.restore();
 

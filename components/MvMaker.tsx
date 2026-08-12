@@ -5132,12 +5132,12 @@ export default function MvMaker({
 									<label className="flex items-center gap-1">
 										割り込む小節
 										<input
-											type="number"
-											step={0.25}
-											min={0}
-											value={group.arrangement.triggerBar}
-											onChange={(e) => {
-												const v = Number(e.target.value);
+											key={`arr-trigger-${group.arrangement.triggerBar}`}
+											type="text"
+											defaultValue={group.arrangement.triggerBar + 1}
+											onBlur={(e) => {
+												const txt = e.target.value.trim();
+												const v = txt === "" ? 1 : Number(txt);
 												update((m) => ({
 													...m,
 													groups: (m.groups ?? []).map((g) =>
@@ -5146,12 +5146,15 @@ export default function MvMaker({
 																	...g,
 																	arrangement: {
 																		...g.arrangement,
-																		triggerBar: Number.isFinite(v) ? v : 0,
+																		triggerBar: Number.isFinite(v) ? v - 1 : group.arrangement!.triggerBar,
 																	},
 																}
 															: g,
 													),
 												}));
+											}}
+											onKeyDown={(e) => {
+												if (e.key === "Enter") e.currentTarget.blur();
 											}}
 											className="w-16 rounded bg-gray-800 px-1 py-0.5 text-gray-100"
 										/>
