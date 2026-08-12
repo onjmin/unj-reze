@@ -676,7 +676,13 @@ export function generateSymmetricShapeGroup(
 ): { group: MvLayerGroup; layers: MvShapeLayer[] } {
 	const groupId = mvUid("grp");
 	const layers = buildSymmetricShapeGroupLayers(groupId, nextZ, options);
-	const group: MvLayerGroup = { id: groupId, name: "自動生成図形" };
+	// 自動生成は一度にたくさんのレイヤーを作るので、展開したままだと一覧がその枚数分
+	// 一気に伸びて煩雑になる。畳んだ状態で出す。
+	const group: MvLayerGroup = {
+		id: groupId,
+		name: "自動生成図形",
+		collapsed: true,
+	};
 	return { group, layers };
 }
 
@@ -689,7 +695,11 @@ export function generateArrangementForGroup(
 	nextZ: () => number,
 ): { group: MvLayerGroup; layers: MvShapeLayer[] } {
 	const newGroupId = mvUid("grp");
-	const group: MvLayerGroup = { id: newGroupId, name: "特殊アレンジ" };
+	const group: MvLayerGroup = {
+		id: newGroupId,
+		name: "特殊アレンジ",
+		collapsed: true,
+	};
 	const layers: MvShapeLayer[] = [];
 
 	// 元のレイヤーをベースに、動きを倍速にした複製を作る

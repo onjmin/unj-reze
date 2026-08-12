@@ -23,6 +23,7 @@ import {
 	Shapes,
 	Shuffle,
 	Settings,
+	SlidersHorizontal,
 	Sparkles,
 	Trash2,
 	Type,
@@ -135,14 +136,18 @@ import {
 } from "@/lib/mv-engine";
 import {
 	addLayerToGroup,
+	applyGroupOpacity,
+	applyGroupPosition,
 	buildLayerListRows,
 	deleteGroup,
 	groupSelectedLayers,
+	type MvGroupEditMode,
 	moveGroupBlock,
 	moveLayerWithinGroup,
 	moveTopLevelLayer,
 	renameGroup,
 	replaceGroupMembers,
+	shiftGroupZ,
 	toggleGroupCollapsed,
 	ungroupLayers,
 } from "@/lib/mv-layer-group";
@@ -327,9 +332,6 @@ function LayerRow({
 	onMoveDown,
 	onDuplicate,
 	onRemove,
-	showGroupCheckbox,
-	checked,
-	onCheckedChange,
 	detail,
 }: {
 	layer: MvLayer;
@@ -344,9 +346,6 @@ function LayerRow({
 	onMoveDown: () => void;
 	onDuplicate: () => void;
 	onRemove: () => void;
-	showGroupCheckbox: boolean;
-	checked: boolean;
-	onCheckedChange: (checked: boolean) => void;
 	detail: React.ReactNode;
 }) {
 	const Icon = LAYER_ICON[layer.kind];
@@ -357,14 +356,6 @@ function LayerRow({
 			className={`rounded border overflow-hidden transition-colors ${active ? "border-blue-500 bg-blue-500/10 shadow-sm" : "border-gray-700 bg-gray-800 hover:border-gray-600"}`}
 		>
 			<div className="flex items-center gap-2 px-2 py-1.5">
-				{showGroupCheckbox && (
-					<input
-						type="checkbox"
-						checked={checked}
-						onChange={(e) => onCheckedChange(e.target.checked)}
-						className="h-4 w-4 shrink-0 accent-blue-500"
-					/>
-				)}
 				<Icon size={13} className="shrink-0 text-blue-400" />
 				<button
 					onClick={onSelect}
@@ -990,24 +981,34 @@ export default function MvMaker({
 	const [showHistory, setShowHistory] = useState(false);
 	const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
 	const [song, setSong] = useState<MvSong>(EMPTY_SONG);
-	// レイヤーの「グループ化」用：複数選択モードのON/OFFと選んだレイヤーID。
-	// グループ化できるのはまだどのグループにも属していないレイヤー同士だけ
+	// レイヤーの「グループ化」用：専用モーダルの開閉と、モーダル内でチェックした
+	// レイヤーID。グループ化できるのはまだどのグループにも属していないレイヤー同士だけ
 	// （グループの中にグループを作る、という2段構造は許していない）。
-	const [groupSelectMode, setGroupSelectMode] = useState(false);
+	const [groupModalOpen, setGroupModalOpen] = useState(false);
 	const [groupSelectIds, setGroupSelectIds] = useState<Set<string>>(
 		() => new Set(),
 	);
 	const [groupMenuOpenId, setGroupMenuOpenId] = useState<string | null>(null);
 	const [timelineModalOpen, setTimelineModalOpen] = useState(false);
+	/** グループ一括編集モーダルの対象グループID（開いていなければnull）。 */
+	const [bulkEditGroupId, setBulkEditGroupId] = useState<string | null>(null);
+	const [bulkField, setBulkField] = useState<"z" | "position" | "opacity">(
+		"position",
+	);
+	const [bulkMode, setBulkMode] = useState<MvGroupEditMode>("relative");
+	const [bulkValue, setBulkValue] = useState(0);
+	const [bulkX, setBulkX] = useState(0);
+	const [bulkY, setBulkY] = useState(0);
 
 	const [macroSettingsOpen, setMacroSettingsOpen] = useState(false);
 	/**
-	 * 直近に「自動図形グループを新規追加」で作ったグループのID。
-	 * 気に入るまで作り直す／やっぱり要らない、が一覧までスクロールせず
-	 * 追加ボタンのすぐ隣で完結するようにするためだけの覚え書き。
-	 * 消された後のIDが残っても困らないよう、使う直前に実在を確かめる。
+	 * 「自動図形グループを新規追加」「特殊アレンジを生成」で作ったグループIDのスタック（古い→新しい順）。
+	 * 「直近を削除」を連打すると1つずつ遡って消せる。気に入るまで作り直す／やっぱり要らない、が
+	 * 一覧までスクロールせず追加ボタンのすぐ隣で完結するようにするためだけの覚え書き。
+	 * 一覧側やUndoで先に消えていることがあるので、実在するIDだけに絞ってから末尾を使う
+	 * （消えた後のIDへ多重に削除操作を投げないよう、毎回 manifest.groups と突き合わせる）。
 	 */
-	const [lastAutoGroupId, setLastAutoGroupId] = useState<string | null>(null);
+	const [autoGroupIds, setAutoGroupIds] = useState<string[]>([]);
 	const [macroSettings, setMacroSettings] =
 		useState<SymmetricShapeGroupOptions>({
 			clusterType: "centered",
@@ -1017,18 +1018,19 @@ export default function MvMaker({
 			symmetric: false,
 		});
 
-	/**
-	 * 「直近の自動図形グループ」の実体。一覧側やUndoで先に消えていることが
-	 * あるので、IDを覚えているだけでは足りず毎回引き直す（見つからなければ
-	 * リロール／削除ボタンごと出さない）。
-	 */
-	const lastAutoGroup = useMemo(
+	/** autoGroupIds のうち、まだ実在するものだけ（古い→新しい順）。 */
+	const liveAutoGroupIds = useMemo(
 		() =>
-			lastAutoGroupId
-				? (manifest.groups ?? []).find((g) => g.id === lastAutoGroupId)
-				: undefined,
-		[lastAutoGroupId, manifest.groups],
+			autoGroupIds.filter((id) =>
+				(manifest.groups ?? []).some((g) => g.id === id),
+			),
+		[autoGroupIds, manifest.groups],
 	);
+	/** 「直近の自動図形グループ」の実体。見つからなければリロール／削除ボタンごと出さない。 */
+	const lastAutoGroup = useMemo(() => {
+		const id = liveAutoGroupIds[liveAutoGroupIds.length - 1];
+		return id ? (manifest.groups ?? []).find((g) => g.id === id) : undefined;
+	}, [liveAutoGroupIds, manifest.groups]);
 
 	const trackNoteCounts = useMemo(() => {
 		const map: Record<number, number> = {};
@@ -1551,7 +1553,7 @@ export default function MvMaker({
 			layers: [...m.layers, ...layers],
 			groups: [...(m.groups ?? []), group],
 		}));
-		setLastAutoGroupId(group.id);
+		setAutoGroupIds((ids) => [...ids, group.id]);
 		if (layers[0]) setSelectedLayerId(layers[0].id);
 	};
 
@@ -1597,6 +1599,7 @@ export default function MvMaker({
 			layers: [...m.layers, ...layers],
 			groups: [...(m.groups ?? []), group],
 		}));
+		setAutoGroupIds((ids) => [...ids, group.id]);
 		setGroupMenuOpenId(null);
 		if (layers[0]) setSelectedLayerId(layers[0].id);
 	};
@@ -3816,7 +3819,6 @@ export default function MvMaker({
 			canMoveDown: boolean;
 			onMoveUp: () => void;
 			onMoveDown: () => void;
-			showGroupCheckbox: boolean;
 		},
 	) => {
 		const active = layer.id === selectedLayerId;
@@ -3835,16 +3837,6 @@ export default function MvMaker({
 				onMoveDown={opts.onMoveDown}
 				onDuplicate={() => duplicateLayer(layer.id)}
 				onRemove={() => removeLayer(layer.id)}
-				showGroupCheckbox={opts.showGroupCheckbox}
-				checked={groupSelectIds.has(layer.id)}
-				onCheckedChange={(checked) =>
-					setGroupSelectIds((prev) => {
-						const next = new Set(prev);
-						if (checked) next.add(layer.id);
-						else next.delete(layer.id);
-						return next;
-					})
-				}
 				detail={active ? renderLayerSettings(layer) : null}
 			/>
 		);
@@ -4055,8 +4047,13 @@ export default function MvMaker({
 						</button>
 						<button
 							onClick={() => {
-								update((m) => deleteGroup(m, lastAutoGroup.id));
-								setLastAutoGroupId(null);
+								// liveAutoGroupIds は実在するものだけに絞ってあるので、末尾は必ず
+								// まだ消えていないグループ。連打すれば1つずつ古い方へ遡って消せる。
+								const targetId =
+									liveAutoGroupIds[liveAutoGroupIds.length - 1];
+								if (!targetId) return;
+								update((m) => deleteGroup(m, targetId));
+								setAutoGroupIds((ids) => ids.filter((id) => id !== targetId));
 							}}
 							className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2 text-[11px] font-medium text-red-300 hover:bg-red-900/40"
 						>
@@ -4068,7 +4065,7 @@ export default function MvMaker({
 				<Hint>
 					幾何学的な図形の集まりを新しいグループとして自動生成します（複数作成可能）。
 					拍ごとに形そのものが切り替わり、打点で「小さく太く出て、膨らみながら細くなって消える」構図になります。
-					気に入らなければ上の「直近をリロール」で作り直し、「直近を削除」で丸ごと消せます（グループ一覧や個々のレイヤー設定の「リロール」からも同じことができます）。
+					気に入らなければ上の「直近をリロール」で作り直し、「直近を削除」で丸ごと消せます（連打すると新しい方から順に1つずつ遡って消えます。グループ一覧や個々のレイヤー設定の「リロール」からも同じことができます）。
 				</Hint>
 				{manifest.layers.length === 0 && (
 					<p className="text-[10px] text-gray-500">レイヤーがありません。</p>
@@ -4089,45 +4086,18 @@ export default function MvMaker({
 			<div className={SECTION_CLASS}>
 				<div className="flex items-center justify-between gap-2 pb-1">
 					<p className="text-[10px] leading-relaxed text-gray-400">
-						{groupSelectMode
-							? `${groupSelectIds.size}枚選択中（2枚以上でグループ化できます）`
-							: "複数のレイヤーをまとめて一括で並び替えたいときはグループ化します。"}
+						複数のレイヤーをまとめて一括で並び替え・編集したいときはグループ化します。
 					</p>
-					{!groupSelectMode ? (
-						<button
-							onClick={() => {
-								setGroupSelectMode(true);
-								setGroupSelectIds(new Set());
-							}}
-							className="flex shrink-0 items-center gap-1 rounded bg-gray-700 px-2 py-1.5 text-[10px] text-gray-200 hover:bg-gray-600"
-						>
-							<FolderPlus size={12} />
-							グループ化
-						</button>
-					) : (
-						<div className="flex shrink-0 gap-1">
-							<button
-								disabled={groupSelectIds.size < 2}
-								onClick={() => {
-									update((m) => groupSelectedLayers(m, [...groupSelectIds]));
-									setGroupSelectMode(false);
-									setGroupSelectIds(new Set());
-								}}
-								className="rounded bg-blue-600 px-2 py-1.5 text-[10px] font-bold text-white disabled:opacity-40"
-							>
-								選択をグループ化
-							</button>
-							<button
-								onClick={() => {
-									setGroupSelectMode(false);
-									setGroupSelectIds(new Set());
-								}}
-								className="rounded bg-gray-700 px-2 py-1.5 text-[10px] text-gray-300 hover:bg-gray-600"
-							>
-								やめる
-							</button>
-						</div>
-					)}
+					<button
+						onClick={() => {
+							setGroupSelectIds(new Set());
+							setGroupModalOpen(true);
+						}}
+						className="flex shrink-0 items-center gap-1 rounded bg-gray-700 px-2 py-1.5 text-[10px] text-gray-200 hover:bg-gray-600"
+					>
+						<FolderPlus size={12} />
+						グループ化
+					</button>
 				</div>
 
 				{layerRows.map((row, rowIndex) => {
@@ -4140,7 +4110,6 @@ export default function MvMaker({
 								update((m) => moveTopLevelLayer(m, layer.id, "up")),
 							onMoveDown: () =>
 								update((m) => moveTopLevelLayer(m, layer.id, "down")),
-							showGroupCheckbox: groupSelectMode,
 						});
 					}
 
@@ -4230,6 +4199,16 @@ export default function MvMaker({
 												<Sparkles size={14} />
 												特殊アレンジを生成
 											</button>
+											<button
+												onClick={() => {
+													setBulkEditGroupId(group.id);
+													setGroupMenuOpenId(null);
+												}}
+												className="flex items-center gap-2 px-3 py-2 text-left text-[11px] text-purple-200 hover:bg-purple-600/30"
+											>
+												<SlidersHorizontal size={14} />
+												一括編集（重なり順/座標/不透明度）
+											</button>
 										</div>
 									)}
 								</div>
@@ -4262,7 +4241,6 @@ export default function MvMaker({
 												update((m) =>
 													moveLayerWithinGroup(m, layer.id, "down"),
 												),
-											showGroupCheckbox: false,
 										}),
 									)}
 									<button
@@ -5617,6 +5595,195 @@ export default function MvMaker({
 								}
 								onSeekBar={(bar) => playerRef.current?.seekToBar(bar)}
 							/>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{groupModalOpen && (
+				<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+					<div className="flex h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:h-auto sm:max-h-[80vh] sm:rounded-xl">
+						<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+							<span className="flex items-center gap-2 text-sm font-bold text-gray-100">
+								<FolderPlus size={15} className="text-purple-400" />
+								既存レイヤーをグループ化
+							</span>
+							<button
+								onClick={() => setGroupModalOpen(false)}
+								className="rounded p-1 text-gray-400 hover:bg-gray-800"
+							>
+								<X size={18} />
+							</button>
+						</div>
+						<div className="flex-1 space-y-1.5 overflow-y-auto p-3">
+							<p className="pb-1 text-[10px] leading-relaxed text-gray-400">
+								まとめたいレイヤーを2枚以上チェックしてください（まだどのグループにも属していないレイヤーだけが対象です）。
+							</p>
+							{manifest.layers.filter((l) => !l.groupId).length === 0 && (
+								<p className="text-[10px] text-gray-500">
+									グループ化できるレイヤーがありません。
+								</p>
+							)}
+							{manifest.layers
+								.filter((l) => !l.groupId)
+								.map((layer) => {
+									const checked = groupSelectIds.has(layer.id);
+									return (
+										<label
+											key={layer.id}
+											className={`flex items-center gap-2 rounded border px-2 py-1.5 text-[11px] ${checked ? "border-blue-500 bg-blue-500/10 text-gray-100" : "border-gray-700 bg-gray-800 text-gray-300"}`}
+										>
+											<input
+												type="checkbox"
+												checked={checked}
+												onChange={(e) =>
+													setGroupSelectIds((prev) => {
+														const next = new Set(prev);
+														if (e.target.checked) next.add(layer.id);
+														else next.delete(layer.id);
+														return next;
+													})
+												}
+												className="h-4 w-4 shrink-0 accent-blue-500"
+											/>
+											<span className="truncate">{layerLabel(layer)}</span>
+											<span className="ml-auto shrink-0 rounded bg-gray-700/80 px-1 py-0.5 text-[9px] text-gray-400">
+												{layerKindLabel(layer)}
+											</span>
+										</label>
+									);
+								})}
+						</div>
+						<div className="flex shrink-0 gap-2 border-t border-gray-800 p-3">
+							<button
+								onClick={() => {
+									setGroupModalOpen(false);
+									setGroupSelectIds(new Set());
+								}}
+								className="flex-1 rounded bg-gray-700 px-3 py-2 text-[11px] text-gray-300 hover:bg-gray-600"
+							>
+								キャンセル
+							</button>
+							<button
+								disabled={groupSelectIds.size < 2}
+								onClick={() => {
+									update((m) => groupSelectedLayers(m, [...groupSelectIds]));
+									setGroupModalOpen(false);
+									setGroupSelectIds(new Set());
+								}}
+								className="flex-1 rounded bg-blue-600 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40"
+							>
+								確定してグループ化
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{bulkEditGroupId && (
+				<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">
+					<div className="flex w-full max-w-md flex-col overflow-hidden rounded-t-xl bg-gray-900 sm:rounded-xl">
+						<div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-4 py-3">
+							<span className="flex items-center gap-2 text-sm font-bold text-gray-100">
+								<SlidersHorizontal size={15} className="text-purple-400" />
+								グループ一括編集
+							</span>
+							<button
+								onClick={() => setBulkEditGroupId(null)}
+								className="rounded p-1 text-gray-400 hover:bg-gray-800"
+							>
+								<X size={18} />
+							</button>
+						</div>
+						<div className="space-y-3 p-3">
+							<div className="flex gap-1.5">
+								{(
+									[
+										{ v: "z", label: "重なり順" },
+										{ v: "position", label: "座標" },
+										{ v: "opacity", label: "不透明度" },
+									] as const
+								).map((opt) => (
+									<button
+										key={opt.v}
+										onClick={() => setBulkField(opt.v)}
+										className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium ${bulkField === opt.v ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
+									>
+										{opt.label}
+									</button>
+								))}
+							</div>
+							<div className="flex gap-1.5">
+								{(
+									[
+										{ v: "relative", label: "相対増減" },
+										{ v: "absolute", label: "絶対指定" },
+									] as const
+								).map((opt) => (
+									<button
+										key={opt.v}
+										onClick={() => setBulkMode(opt.v)}
+										className={`flex-1 rounded px-2 py-1.5 text-[11px] font-medium ${bulkMode === opt.v ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
+									>
+										{opt.label}
+									</button>
+								))}
+							</div>
+							{bulkField === "position" ? (
+								<div className="flex items-center gap-2">
+									<span className="w-6 shrink-0 text-[10px] text-gray-400">
+										X
+									</span>
+									<StringNumInput
+										value={bulkX}
+										onChange={setBulkX}
+										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+									/>
+									<span className="w-6 shrink-0 text-[10px] text-gray-400">
+										Y
+									</span>
+									<StringNumInput
+										value={bulkY}
+										onChange={setBulkY}
+										className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+									/>
+								</div>
+							) : (
+								<StringNumInput
+									value={bulkValue}
+									onChange={setBulkValue}
+									className="min-h-9 w-full rounded border border-gray-700 bg-gray-800 px-1.5 py-1 text-[11px] text-gray-100 outline-none"
+								/>
+							)}
+							<p className="text-[10px] leading-relaxed text-gray-500">
+								{bulkMode === "relative"
+									? "グループ内の各レイヤーの現在値へこの数値を足します（レイヤーごとの差はそのまま）。"
+									: "グループ内の全レイヤーをこの値へ揃えます（重なり順だけは並び順に沿って自動で間隔を空けます）。"}
+							</p>
+						</div>
+						<div className="flex shrink-0 gap-2 border-t border-gray-800 p-3">
+							<button
+								onClick={() => setBulkEditGroupId(null)}
+								className="flex-1 rounded bg-gray-700 px-3 py-2 text-[11px] text-gray-300 hover:bg-gray-600"
+							>
+								キャンセル
+							</button>
+							<button
+								onClick={() => {
+									const groupId = bulkEditGroupId;
+									update((m) => {
+										if (bulkField === "z")
+											return shiftGroupZ(m, groupId, bulkMode, bulkValue);
+										if (bulkField === "opacity")
+											return applyGroupOpacity(m, groupId, bulkMode, bulkValue);
+										return applyGroupPosition(m, groupId, bulkMode, bulkX, bulkY);
+									});
+									setBulkEditGroupId(null);
+								}}
+								className="flex-1 rounded bg-purple-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-purple-500"
+							>
+								適用
+							</button>
 						</div>
 					</div>
 				</div>

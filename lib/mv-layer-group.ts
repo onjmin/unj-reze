@@ -64,7 +64,12 @@ export function groupSelectedLayers(
 	);
 	const at = restInsertIdx < 0 ? rest.length : restInsertIdx;
 	const nextLayers = [...rest.slice(0, at), ...grouped, ...rest.slice(at)];
-	const group: MvLayerGroup = { id: groupId, name: name ?? "グループ" };
+	// 作った直後は畳んでおく。展開したままだと一覧がグループの枚数分だけ一気に伸びて煩雑になる。
+	const group: MvLayerGroup = {
+		id: groupId,
+		name: name ?? "グループ",
+		collapsed: true,
+	};
 	return {
 		...manifest,
 		layers: nextLayers,
@@ -298,6 +303,102 @@ export interface LayerListRow {
 	layer?: MvLayer;
 	group?: MvLayerGroup;
 	members?: MvLayer[];
+}
+
+// ───────────────── グループ一括編集 ─────────────────
+// 「相対」＝各レイヤーの現在値へ value を加算（レイヤーごとの元の差は保ったまま動かす）。
+// 「絶対」＝グループ全員を value（またはそこから敷き直した値）へ揃える。
+
+export type MvGroupEditMode = "relative" | "absolute";
+
+/**
+ * グループの重なり順(z)を一括変更する。
+ * 相対：全員の z へ value を加算。絶対：一覧の並び順に沿って value, value+10, value+20... と
+ * 敷き直す（絶対値をそのまま全員に入れると同順位になり、重なり順のタイブレークが並び順頼みの
+ * 別の場所（moveTopLevelLayer 等）と食い違う——常に間隔を空けて割り当てる）。
+ */
+export function shiftGroupZ(
+	manifest: MvManifest,
+	groupId: string,
+	mode: MvGroupEditMode,
+	value: number,
+): MvManifest {
+	let i = 0;
+	return {
+		...manifest,
+		layers: manifest.layers.map((l, idx) => {
+			if (l.groupId !== groupId) return l;
+			const z =
+				mode === "relative"
+					? (l.z ?? (idx + 1) * 10) + value
+					: value + i * 10;
+			i++;
+			return { ...l, z };
+		}),
+	};
+}
+
+/**
+ * グループの座標を一括変更する。visualizer は rect.x/rect.y、それ以外は x/y を持つ
+ * レイヤーだけが対象（effect 等、位置を持たない kind は素通り）。
+ * 相対：dx/dy を加算。絶対：全員を同じ座標 (x, y) へ上書き。
+ */
+export function applyGroupPosition(
+	manifest: MvManifest,
+	groupId: string,
+	mode: MvGroupEditMode,
+	x: number,
+	y: number,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			if (l.kind === "visualizer") {
+				const rect = l.rect;
+				return {
+					...l,
+					rect: {
+						...rect,
+						x: mode === "relative" ? rect.x + x : x,
+						y: mode === "relative" ? rect.y + y : y,
+					},
+				};
+			}
+			if ("x" in l && "y" in l) {
+				const curX = l.x ?? 0;
+				const curY = l.y ?? 0;
+				return {
+					...l,
+					x: mode === "relative" ? curX + x : x,
+					y: mode === "relative" ? curY + y : y,
+				};
+			}
+			return l;
+		}),
+	};
+}
+
+/**
+ * グループの不透明度を一括変更する。相対：現在値へ value を加算。絶対：全員 value に上書き。
+ * どちらも 0..1 にクランプする（レイヤーの opacity は「掛け算の1要素」ではなくそのまま
+ * globalAlpha に使われるので、範囲外の値は描画側で不定な見え方になる）。
+ */
+export function applyGroupOpacity(
+	manifest: MvManifest,
+	groupId: string,
+	mode: MvGroupEditMode,
+	value: number,
+): MvManifest {
+	return {
+		...manifest,
+		layers: manifest.layers.map((l) => {
+			if (l.groupId !== groupId) return l;
+			const cur = l.opacity ?? 1;
+			const next = mode === "relative" ? cur + value : value;
+			return { ...l, opacity: Math.min(1, Math.max(0, next)) };
+		}),
+	};
 }
 
 export function buildLayerListRows(manifest: MvManifest): LayerListRow[] {

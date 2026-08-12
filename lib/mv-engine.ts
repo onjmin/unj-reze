@@ -718,7 +718,11 @@ function drawLayerHighlight(
 		w = 160;
 		h = sz + 12;
 	} else if (layer.kind === "shape") {
-		const sz = (layer.size ?? 1) * 60;
+		// layer.size は倍率ではなく実ピクセルサイズ（addShapeLayer等の初期値48がそのまま描画に使われる）。
+		// ここを*60の倍率式にすると、size=48だけで2880pxの箱になり、640x360キャンバスの外に
+		// 四辺とも出てしまってガイドが一切見えなくなる（グループ化対象は大半がshapeなので
+		// 「グループ内のレイヤーだけガイドが出ない」ように見えていた）。
+		const sz = layer.size ?? 60;
 		x = layer.x - sz / 2;
 		y = layer.y - sz / 2;
 		w = sz;
@@ -2536,11 +2540,14 @@ function drawLyrics(d: DrawCtx, layer: MvLyricsLayer): void {
 		}
 	}
 
-	// まとまり全体が消えるタイミング＝次の区切りの開始小節（次が無ければ最後の行のhold明け）。
+	// まとまり全体が消えるタイミング＝「まとまり最後の行のhold明け」と「次の区切りの開始小節」の早い方。
+	// 次の区切りだけを見ると、間奏で次行が遠いときにhold明け後もずっと居座ってしまう
+	// （歌いきったのに閾値ぶん待たされる）ので、必ずhold明けも上限として効かせる。
+	const lastBarInGroup = lines[groupEnd - 1].bar + hold;
 	const groupEndBar =
 		groupEnd < lines.length
-			? lines[groupEnd].bar
-			: lines[groupEnd - 1].bar + hold;
+			? Math.min(lines[groupEnd].bar, lastBarInGroup)
+			: lastBarInGroup;
 	const groupFadeOut = clamp01((groupEndBar - d.bar) / 0.5);
 	if (groupFadeOut <= 0.01) return;
 
