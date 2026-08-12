@@ -1622,10 +1622,20 @@ export default function MvMaker({
 	 * 指定したグループの中身を図形乱数で作り直す（リロール）。
 	 */
 	const rerollSymmetricShapeGroup = (groupId: string) => {
-		let z = getNextZ();
+		// 既存メンバーのzをそのまま使い回す。ここで getNextZ() を呼んでしまうと
+		// リロールのたびに「その時点でいちばん大きいz」が新規採番され、ユーザーが
+		// 一括編集や並び替えで下げた重なり順がリロール1回で毎回いちばん手前へ
+		// 戻ってしまう（＝重なり順が意図せず常に大きい値になるバグ）。
+		const existingZs = manifest.layers
+			.filter((l) => l.groupId === groupId)
+			.map((l) => l.z ?? 0)
+			.sort((a, b) => a - b);
+		let i = 0;
+		let overflowZ = getNextZ();
 		const nextZ = () => {
-			const v = z;
-			z += 10;
+			if (i < existingZs.length) return existingZs[i++];
+			const v = overflowZ;
+			overflowZ += 10;
 			return v;
 		};
 		const palette = manifest.stage.palette;

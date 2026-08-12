@@ -29,24 +29,41 @@ import {
  * 4. **同心 + 画面中央の横一線**。図形は中心を共有して入れ子になるか、
  *    中央線上に左右対称で並ぶかのどちらかで、上下左右にばら撒かれることは無い。
  *
- * そのため生成は「1枚ずつ乱数で置く」のをやめ、**中心に積む同心の段（tier）＋
- * 中央線上の左右対称な脇役（flanker）**という構図テンプレートから組み立てる。
- * 各要素は拍のスロットを1つ受け持ち、順番に発火して1周期を埋める（カスケード）。
+ * そのため生成は「1枚ずつ乱数で置く」のをやめ、**中心に積む同心の段（tier）**
+ * （`clusterType:"centered"`）、**中央線上に散らばる列**（`"scattered"`）、
+ * **本数も高さも独立にばらける棒の列**（`"bars"`）という3種の構図テンプレートから
+ * 組み立てる。各要素は拍のスロットを1つ受け持ち、順番に発火して1周期を埋める
+ * （カスケード）。
  *
- * 左右対称は生成してから判定するのではなく、ペア単位で最初から保証する
- * （バラバラに置いてから対称に "見える" ことはまず無いため）。軸の真上に来る
- * 中心の段だけは自分自身が鏡像なので相方が要らない。
+ * 左右対称にする場合は生成してから判定するのではなく、片側だけ組み立ててから
+ * 鏡写しで複製することで最初から保証する（バラバラに置いてから対称に "見える"
+ * ことはまず無いし、左右をそれぞれ乱数で振ると "対称のつもりが微妙にずれる"
+ * という中途半端な仕上がりになる）。
+ *
+ * **図形そのものの語彙**（枠・かぎ括弧・棒列・十字…）も固定の完成形リストから
+ * 選ぶのではなく、核（core）1つ＋装飾（deco）2〜4つをその場で組み合わせて
+ * 毎回新しく作る（詳細は `buildRandomMotifStrokes` を参照）。完成形を並べるだけ
+ * だと選択肢を増やしても既存の絵の延長線上にしかならないため。
  */
 
 // ───────────────── モチーフ（線の積み重ね） ─────────────────
 
 /**
- * 図形の語彙。設計座標系は 0..100 の正方形（`pathBox` の既定と同じ）で中心は 50,50。
+ * 図形の語彙は固定の完成形リストではなく、**核（core）1つ＋装飾（deco）2〜4つを
+ * その場で組み合わせて毎回新しく作る**。設計座標系は 0..100 の正方形
+ * （`pathBox` の既定と同じ）で中心は 50,50。
  *
- * **1つのモチーフは「完成した絵」ではなく、線を重ねる順番**で持つ。
- * 先頭ほど核で最後まで残り、後ろほど装飾で真っ先に消える。
- * コマ送りはこの配列を後ろから削って作るので、**隣り合うコマは必ず
- * 「線1組ぶんの差」しかない**。
+ * 以前は「枠」「かぎ括弧」「縦棒」…と完成済みの絵を9パターン用意して1つ選ぶ方式
+ * だったが、これだと選択肢を増やすだけ増やしても「どの完成形を引くか」の
+ * バリエーションにしかならず、既存の絵の延長線上を出なかった。核と装飾を
+ * 別の語彙として持ち、生成のたびに独立に組み合わせることで、
+ * 「かぎ括弧＋棒の列」「十字＋四隅の切り欠き」のような、あらかじめ
+ * 用意していない掛け合わせが毎回できる（核4種×装飾6種から2〜4個の組み合わせ
+ * ＝場合の数は数百通りになり、9個の完成形を1つ選ぶより桁違いに広い）。
+ *
+ * **積み重ねの順番は「核が先・装飾が後」を必ず守る**。先頭ほど核で最後まで残り、
+ * 後ろほど装飾で真っ先に消える。コマ送りはこの配列を後ろから削って作るので、
+ * 隣り合うコマは必ず「線1組ぶんの差」しかない。
  *
  * これが肝で、以前のように出来上がった絵を並べていると、繋ぎ目の重ね合わせが
  * 無関係な2枚の二重写しにしかならず、いくら滑らかに混ぜても「パラパラ漫画」に
@@ -56,74 +73,151 @@ import {
  * 参考動画の1拍の中の濃さの推移（実測: 17768→8536→8108→5772 画素）も、
  * 別の絵に差し替わっているのではなく要素が減っていく形だった。
  */
-const MOTIFS: Record<string, string[]> = {
-	/** 枠の入れ子。参考動画1の主役。 */
-	frameStack: [
-		"M10 10H90V90H10Z",
-		"M28 28H72V72H28Z",
-		"M44 44H56V56H44Z",
-		"M10 50H28 M72 50H90",
-		"M50 10V28 M50 72V90",
-	],
-	/** かぎ括弧が閉じて枠になる。 */
-	corner: [
-		"M10 30V10H30 M70 10H90V30 M90 70V90H70 M30 90H10V70",
-		"M38 10H62 M38 90H62",
-		"M10 38V62 M90 38V62",
-		"M40 40H60V60H40Z",
-	],
-	/** 縦棒が増えていく。参考動画2の register。 */
-	pillar: [
-		"M34 14V86 M66 14V86",
-		"M50 26V74",
-		"M14 34V66 M86 34V66",
-		"M4 44V56 M96 44V56",
-	],
-	/** 横罫と目盛。参考動画1の破線2段。 */
-	rule: [
-		"M6 50H94",
-		"M6 34H94 M6 66H94",
-		"M22 26V74 M50 26V74 M78 26V74",
-		"M6 20H94 M6 80H94",
-	],
-	/** 中央の塊＋左右の塊。参考動画1の「▫▪▫」。 */
-	triad: [
-		"M38 30H62V70H38Z",
-		"M4 36H26V64H4Z M74 36H96V64H74Z",
-		"M44 42H56V58H44Z",
-		"M30 14H70V22H30Z M30 78H70V86H30Z",
-	],
-	/** 縞箱。 */
-	stripe: [
-		"M8 26H92V74H8Z",
-		"M29 26V74 M50 26V74 M71 26V74",
-		"M8 50H92",
-		"M18 26V74 M40 26V74 M60 26V74 M82 26V74",
-	],
-	/** 十字から四隅へ。 */
-	cross: [
-		"M50 8V92 M8 50H92",
-		"M24 24H76V76H24Z",
-		"M40 40H60V60H40Z",
-		"M8 8H24V24H8Z M76 8H92V24H76Z M8 76H24V92H8Z M76 76H92V92H76Z",
-	],
-	/** 破線＋ドットのアクセント。参考動画2の目盛り表現。 */
-	dashDot: [
-		"M4 46H14 M22 46H32 M40 46H46 M54 46H60 M68 46H78 M86 46H96",
-		"M4 54H14 M22 54H32 M40 54H46 M54 54H60 M68 54H78 M86 54H96",
-		"M46 30V70",
-		"M46 42V58",
-	],
-	/** 枠のかぎ括弧＋中程に垂れる小さな四角ふたつ。参考動画2の終端に近い形。 */
-	bracketNotch: [
-		"M10 24V10H30 M70 10H90V24 M90 76V90H70 M30 90H10V76",
-		"M40 10H60 M40 90H60",
-		"M10 42V58 M90 42V58",
-		"M40 42H58V58H40Z",
-	],
-};
 
-const MOTIF_IDS = Object.keys(MOTIFS);
+/** 矩形の枠。`(x0,y0)`〜`(x1,y1)` を対角に持つ正方形/長方形のアウトライン。 */
+function rectPath(x0: number, y0: number, x1: number, y1: number): string {
+	return `M${roundTo(x0, 1)} ${roundTo(y0, 1)}H${roundTo(x1, 1)}V${roundTo(y1, 1)}H${roundTo(x0, 1)}Z`;
+}
+function lineH(x0: number, x1: number, y: number): string {
+	return `M${roundTo(x0, 1)} ${roundTo(y, 1)}H${roundTo(x1, 1)}`;
+}
+function lineV(x: number, y0: number, y1: number): string {
+	return `M${roundTo(x, 1)} ${roundTo(y0, 1)}V${roundTo(y1, 1)}`;
+}
+
+/**
+ * 核（core）の生成器。モチーフの中で最後まで残る主役。
+ * どれも軸に揃った矩形ベースの線画で、パラメータは呼ぶたびに振れる。
+ */
+const CORE_GENERATORS: (() => string[])[] = [
+	// 枠の入れ子（1〜3段）。参考動画1の主役だった構図を、段数・間隔ごと乱数にした。
+	() => {
+		const tiers = pick([1, 1, 2, 2, 3]);
+		const strokes: string[] = [];
+		let inset = randRange(6, 14);
+		for (let t = 0; t < tiers && inset < 44; t++) {
+			strokes.push(rectPath(inset, inset, 100 - inset, 100 - inset));
+			inset += randRange(15, 26);
+		}
+		return strokes;
+	},
+	// かぎ括弧が四隅に開いた枠。
+	() => {
+		const inset = randRange(6, 14);
+		const arm = randRange(14, 28);
+		const o = inset;
+		const f = 100 - inset;
+		return [
+			`M${roundTo(o, 1)} ${roundTo(o + arm, 1)}V${roundTo(o, 1)}H${roundTo(o + arm, 1)} M${roundTo(f - arm, 1)} ${roundTo(o, 1)}H${roundTo(f, 1)}V${roundTo(o + arm, 1)} M${roundTo(f, 1)} ${roundTo(f - arm, 1)}V${roundTo(f, 1)}H${roundTo(f - arm, 1)} M${roundTo(o + arm, 1)} ${roundTo(f, 1)}H${roundTo(o, 1)}V${roundTo(f - arm, 1)}`,
+		];
+	},
+	// 縦棒の列（3〜7本）。参考動画2のような「本数がバラける」棒の語彙。
+	() => {
+		const n = 3 + Math.floor(Math.random() * 5);
+		const margin = randRange(6, 14);
+		const span = 100 - margin * 2;
+		const gap = n > 1 ? span / (n - 1) : 0;
+		let d = "";
+		for (let i = 0; i < n; i++) {
+			const x = margin + gap * i;
+			const h = randRange(20, 40);
+			d += ` ${lineV(x, 50 - h, 50 + h)}`;
+		}
+		return [d.trim()];
+	},
+	// 十字。
+	() => {
+		const inset = randRange(6, 14);
+		return [`${lineV(50, inset, 100 - inset)} ${lineH(inset, 100 - inset, 50)}`];
+	},
+	// 横罫（1〜2段）と目盛。
+	() => {
+		const rows = pick([1, 1, 2]);
+		const margin = randRange(4, 10);
+		if (rows === 1) return [lineH(margin, 100 - margin, 50)];
+		const dy = randRange(14, 22);
+		return [
+			`${lineH(margin, 100 - margin, 50 - dy)} ${lineH(margin, 100 - margin, 50 + dy)}`,
+		];
+	},
+];
+
+/**
+ * 装飾（deco）の生成器。核の上に1〜数個だけ乗る脇役。核より小さく・後から
+ * 削られる前提なので、核を覆い隠すほど大きくはしない。
+ */
+const DECO_GENERATORS: (() => string)[] = [
+	// 中央の小さな四角。
+	() => {
+		const h = randRange(4, 10);
+		return rectPath(50 - h, 50 - h, 50 + h, 50 + h);
+	},
+	// 中心から左右対称に離れた小さな四角ペア。
+	() => {
+		const h = randRange(3, 7);
+		const dx = randRange(20, 40);
+		return `${rectPath(50 - dx - h, 50 - h, 50 - dx + h, 50 + h)} ${rectPath(50 + dx - h, 50 - h, 50 + dx + h, 50 + h)}`;
+	},
+	// 端に伸びる短い目盛りの対（上下 or 左右）。
+	() => {
+		const len = randRange(10, 20);
+		if (chance(0.5)) {
+			return `${lineH(4, 4 + len, 50)} ${lineH(96 - len, 96, 50)}`;
+		}
+		return `${lineV(50, 4, 4 + len)} ${lineV(50, 96 - len, 96)}`;
+	},
+	// 中心の十字ドット（アクセント）。
+	() => {
+		const y = chance(0.6) ? 50 : randRange(30, 70);
+		const r = randRange(1.5, 3);
+		return `${lineH(50 - r, 50 + r, y)} ${lineV(50, y - r, y + r)}`;
+	},
+	// 内側だけの小さな棒列。核が枠系のときに重なると「枠＋棒」という核単体には
+	// 無い組み合わせが生まれる。
+	() => {
+		const n = 3 + Math.floor(Math.random() * 3);
+		const margin = randRange(22, 32);
+		const span = 100 - margin * 2;
+		const gap = n > 1 ? span / (n - 1) : 0;
+		let d = "";
+		for (let i = 0; i < n; i++) {
+			const x = margin + gap * i;
+			const h = randRange(6, 16);
+			d += ` ${lineV(x, 50 - h, 50 + h)}`;
+		}
+		return d.trim();
+	},
+	// 四隅の切り欠き四角。
+	() => {
+		const s = randRange(6, 12);
+		const inset = randRange(4, 10);
+		return [
+			rectPath(inset, inset, inset + s, inset + s),
+			rectPath(100 - inset - s, inset, 100 - inset, inset + s),
+			rectPath(inset, 100 - inset - s, inset + s, 100 - inset),
+			rectPath(100 - inset - s, 100 - inset - s, 100 - inset, 100 - inset),
+		].join(" ");
+	},
+];
+
+/**
+ * 核1つ＋装飾2〜4つをその場で組み合わせて、新しいモチーフの線の積み重ねを作る。
+ * 直前と同じ装飾器を連続で選ばないようにして、少ない個数でも絵の変化が偏らない
+ * ようにしてある。
+ */
+function buildRandomMotifStrokes(): string[] {
+	const core = pick(CORE_GENERATORS)();
+	const decoCount = 2 + Math.floor(Math.random() * 3); // 2〜4個
+	const decos: string[] = [];
+	let lastIdx = -1;
+	for (let i = 0; i < decoCount; i++) {
+		let idx = Math.floor(Math.random() * DECO_GENERATORS.length);
+		if (idx === lastIdx) idx = (idx + 1) % DECO_GENERATORS.length;
+		lastIdx = idx;
+		decos.push(DECO_GENERATORS[idx]());
+	}
+	return [...core, ...decos];
+}
 
 /**
  * モチーフをコマ列へ展開する。線を後ろから1組ずつ削っていくので、
@@ -188,21 +282,21 @@ function chance(p: number): boolean {
 }
 
 export interface SymmetricShapeGroupOptions {
-	/** 何組（ペア）作るか。未指定はランダム。 */
+	/** 要素の本数の目安（"scattered"/"bars" では奇数寄せに換算、"centered" は段数）。未指定はランダム。 */
 	pairCount?: number;
-	/** 軸の真上に相方無しの1枚を足すか。未指定は確率で決める。 */
-	includeCenter?: boolean;
 	/** 色の候補。未指定は既定パレット。空配列は既定パレットへフォールバック。 */
 	palette?: string[];
 
 	/**
 	 * 配置の傾向。
-	 * "centered" = 画面中央に同心で積む（エンブレム風）。
-	 * "scattered" = 中央線上へ左右対称に散らす（帯状に並ぶ）。
-	 * "bars" = 本数も高さも1本ずつ独立に振れる棒の列（イコライザー風）。
-	 *   参考動画1はこれで、"scattered" の「大＋対称な小ペア1組」という
-	 *   決まった3枚構成とは別の方向のバリエーションとして用意した
-	 *   （対称ペアは結局「左右の小さいほうは不要」で削られがちなため）。
+	 * "centered" = 画面中央に同心で積む（エンブレム風）。主役1つで完結させる
+	 *   （以前は外側に対称な小さいペアを足していたが、「小・大・小」の判子絵に
+	 *   なりがちだったので廃止した）。
+	 * "scattered" = 中央線上に複数の要素が散らばる列。本数（3〜6）もサイズも
+	 *   要素ごとに独立にばらつかせてあり、「大きい1枚を小さいのが両脇から挟む」
+	 *   という階層は作らない。対称オンなら片側だけ組んで厳密に鏡写しする。
+	 * "bars" = 本数も高さも1本ずつ独立に振れる棒の列（イコライザー風）。参考動画1
+	 *   はこれ。
 	 * いずれも**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
 	 */
 	clusterType?: "centered" | "scattered" | "bars";
@@ -489,8 +583,7 @@ function makePlan(options: SymmetricShapeGroupOptions): GroupPlan {
 
 	const feel = options.motionFeel ?? "crisp";
 
-	const motif = MOTIFS[pick(MOTIF_IDS)];
-	const cyclePaths = motifFrames(motif);
+	const cyclePaths = motifFrames(buildRandomMotifStrokes());
 
 	const thicknessMode = options.thickness ?? "random";
 	let baseThickness: number;
@@ -597,46 +690,10 @@ export function buildSymmetricShapeGroupLayers(
 			);
 		}
 
-		// 中央線上の左右対称な脇役。同心の塊の外側へ、間隔を揃えて置く。
-		const flankPairs = options.includeCenter === false ? 0 : chance(0.6) ? 1 : 0;
-		for (let p = 0; p < flankPairs; p++) {
-			const size = outer * randRange(0.2, 0.3);
-			// 主役の外へ確実に出す。近すぎると主役の入れ子の一部に見えてしまう。
-			const dx = Math.min(outer * randRange(1.15, 1.5), MV_W / 2 - size - 10);
-			const s = nextSlot();
-			// 脇役は主役より先のコマを出す＝主役が薄いときに脇が濃い、と噛み合う。
-			const shift = 1 + Math.floor(Math.random() * 3);
-			// ペアは左右で速さを揃える。片方だけ遅いと左右対称に見えない。
-			const flankRate = nextRate();
-			layers.push(
-				buildElement(plan, groupId, {
-					x: axisX - dx,
-					y: baseY,
-					size,
-					slot: s,
-					accent: false,
-					filled: false,
-					cycleShift: shift,
-					rateMul: flankRate,
-					z: nextZ(),
-				}),
-			);
-			layers.push(
-				buildElement(plan, groupId, {
-					x: isSymmetric ? axisX + dx : axisX + dx * randRange(0.7, 1.3),
-					y: baseY,
-					size,
-					// 対称なら相方と同時に、非対称なら1スロット遅らせて撃つ。
-					slot: isSymmetric ? s : nextSlot(),
-					accent: false,
-					filled: false,
-					// 対称なら相方と同じ絵。非対称ならさらにずらす。
-					cycleShift: isSymmetric ? shift : shift + 1,
-					rateMul: flankRate,
-					z: nextZ(),
-				}),
-			);
-		}
+		// 同心の主役だけで完結させる。以前はここへ「主役の外に対称な小さいペア」を
+		// 足していたが、これは形を変えただけの「小・大・小」で、結局は装飾側が
+		// 削られがちな上に手数のわりに構図の幅が広がらなかった（ユーザー指摘により削除）。
+		// バリエーションが欲しいときは "bars" か "scattered" を使う。
 	} else if (isBars) {
 		// ── イコライザー風の棒の列 ──
 		// 参考動画1はこれで、"scattered" のような「大＋対称な小ペア」構図とは違い、
@@ -733,74 +790,100 @@ export function buildSymmetricShapeGroupLayers(
 		}
 	} else {
 		// ── 中央線上に並ぶ帯状の構図 ──
-		// 中央に1枚、その左右へペアを足していく。上下には広げない。
 		//
-		// 「大＋対称な小ペア1組」だけが既定で出ると、結局どれも同じ3枚構成の
-		// 判子絵になり、しかも対称な小さいほうは装飾として削られがちだった。
-		// そこで、①ペア数を1に寄せず複数を出しやすくし ②ペアごとにサイズを
-		// 独立にばらけさせる（間隔だけ揃った棒グラフに近い密度感にする）ことで、
-		// 「同じ形が2つ並んだだけ」に見えない構図の幅を広げてある。
-		const pairCount = options.pairCount ?? pick([1, 2, 2, 3, 3, 4]);
-		const size = randRange(26, 52);
-		// 隣とぶつからない最小の間隔を確保したうえで、余白ぶんだけ広げる。
-		const gap = size * randRange(1.9, 2.6);
-		const includeCenter = options.includeCenter ?? chance(0.65);
+		// 以前は「中央に大きい1枚＋対称な小さいペア1組」を既定にしていたが、
+		// これは指摘の通り毎回同じ「小・大・小」の3枚構成にしかならず、しかも
+		// 対称ペアなのに間隔・サイズの乱数幅が狭くて「対称のつもりが微妙にずれた」
+		// 半端な仕上がりになりやすかった。そこで構造ごと作り直し、
+		// 中心に大小の階層を持たせず、要素どうしのサイズ・間隔・モチーフを
+		// 独立にばらけさせた「本数の多い列」に寄せてある（対称にするときは
+		// 半分だけ作って厳密に鏡写しする＝「対称のつもりが微妙にずれる」を無くす）。
+		const count = options.pairCount ? options.pairCount * 2 + 1 : pick([3, 4, 4, 5, 5, 6]);
 
-		if (includeCenter) {
-			layers.push(
-				buildElement(plan, groupId, {
-					x: axisX,
-					y: baseY,
-					size: size * randRange(1.1, 1.5),
-					slot: nextSlot(),
-					accent: chance(0.4),
-					filled: chance(0.25),
-					cycleShift: 0,
-					rateMul: nextRate(),
-					z: nextZ(),
-				}),
-			);
-		}
-
-		for (let i = 1; i <= pairCount; i++) {
-			// 累積間隔も1組ごとに軽くばらけさせる。等間隔だと本数を増やしても
-			// 結局「同じ間隔で並んだ判子」に見えてしまう。
-			const dx = gap * i * randRange(0.85, 1.15);
-			// 画面外へ出るぶんは作らない（見えないレイヤーだけが増えるのを防ぐ）。
-			if (axisX + dx - size > MV_W) break;
-			const s = nextSlot();
-			// サイズはペアごとに独立にばらけさせる（外側ほど揃って小さくなる、
-			// のような単調さを避けるため範囲を広めに取る）。
-			const pairSize = size * randRange(0.55, 1.15);
-			// ペアは左右で速さを揃える。片方だけ遅いと左右対称に見えない。
-			const pairRate = nextRate();
-			// 中央から外へ1コマずつずらす＝波が外向きに伝わって見える。
-			layers.push(
-				buildElement(plan, groupId, {
-					x: axisX - dx,
-					y: baseY,
-					size: pairSize,
-					slot: s,
-					accent: chance(0.2),
-					filled: false,
-					cycleShift: i,
-					rateMul: pairRate,
-					z: nextZ(),
-				}),
-			);
-			layers.push(
-				buildElement(plan, groupId, {
-					x: axisX + dx,
-					y: baseY,
-					size: isSymmetric ? pairSize : pairSize * randRange(0.75, 1.25),
-					slot: isSymmetric ? s : nextSlot(),
-					accent: isSymmetric ? false : chance(0.2),
-					filled: false,
-					cycleShift: isSymmetric ? i : i + 1,
-					rateMul: pairRate,
-					z: nextZ(),
-				}),
-			);
+		if (isSymmetric) {
+			// 軸の右半分だけ組み立てて、そのまま鏡写しで左へ複製する。
+			// 生成後に対称判定するのではなく最初から鏡写しなので、必ずぴったり揃う。
+			const hasCenter = count % 2 === 1;
+			const sideCount = Math.floor(count / 2);
+			if (hasCenter) {
+				layers.push(
+					buildElement(plan, groupId, {
+						x: axisX,
+						y: baseY,
+						size: randRange(24, 56),
+						slot: nextSlot(),
+						accent: chance(0.35),
+						filled: chance(0.25),
+						cycleShift: 0,
+						rateMul: nextRate(),
+						z: nextZ(),
+					}),
+				);
+			}
+			let cursor = randRange(30, 55);
+			for (let i = 0; i < sideCount; i++) {
+				if (cursor > MV_W / 2 - 16) break;
+				const size = randRange(18, 54);
+				const s = nextSlot();
+				const rate = nextRate();
+				const shift = 1 + i;
+				layers.push(
+					buildElement(plan, groupId, {
+						x: axisX - cursor,
+						y: baseY,
+						size,
+						slot: s,
+						accent: chance(0.2),
+						filled: false,
+						cycleShift: shift,
+						rateMul: rate,
+						z: nextZ(),
+					}),
+				);
+				layers.push(
+					buildElement(plan, groupId, {
+						x: axisX + cursor,
+						y: baseY,
+						size,
+						slot: s,
+						accent: chance(0.2),
+						filled: false,
+						cycleShift: shift,
+						rateMul: rate,
+						z: nextZ(),
+					}),
+				);
+				// 次の間隔も独立にばらつかせる。等間隔だと本数を増やしても
+				// 結局「同じ間隔で並んだ判子」に見えてしまう。
+				cursor += size * randRange(1.1, 2.2) + randRange(10, 30);
+			}
+		} else {
+			// 非対称: 軸の左右に要素を独立にばらまく。サイズ・間隔・モチーフの
+			// どれも他の要素と無関係に決めるので、「大きい1枚を小さいのが
+			// 両脇から挟む」ような階層は生まれない。
+			let cursor = randRange(-40, 40);
+			for (let i = 0; i < count; i++) {
+				const x = axisX + cursor;
+				if (x < 24 || x > MV_W - 24) break;
+				const size = randRange(16, 56);
+				layers.push(
+					buildElement(plan, groupId, {
+						x,
+						y: baseY,
+						size,
+						slot: nextSlot(),
+						accent: chance(0.25),
+						filled: chance(0.15),
+						cycleShift: i,
+						rateMul: nextRate(),
+						z: nextZ(),
+					}),
+				);
+				// 左右どちらへ伸びるかも要素ごとに決め直す（一方向だけに並ぶと
+				// 結局また「帯」の単調な列に戻ってしまう）。
+				const dir = chance(0.5) ? 1 : -1;
+				cursor += dir * (size * randRange(0.9, 1.8) + randRange(12, 34));
+			}
 		}
 	}
 
