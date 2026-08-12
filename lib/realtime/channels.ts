@@ -30,12 +30,18 @@ export interface RealtimeEvent {
 	data?: unknown;
 }
 
-/** サーバー→クライアントのメッセージ。 */
+/** サーバー→クライアントのメッセージ。
+ *  chat/partyInvite/partyUpdate はフェーズ25で追加（mmo3dのソーシャル機能）。
+ *  完全にインメモリのハブ内で完結し、DBには一切書かない。
+ *  TODO(persist): チャット履歴・パーティー状態を残したいなら別途保存経路の設計が要る。 */
 export type RealtimeMessage =
 	| { t: "welcome"; presenceTtlMs: number }
 	| { t: "pong" }
 	| { t: "event"; channel: string; event: RealtimeEventName; data: unknown }
-	| { t: "presence"; game: string; players: RealtimePlayer[] };
+	| { t: "presence"; game: string; players: RealtimePlayer[] }
+	| { t: "chat"; game: string; sessionId: string; name: string; text: string; ts: number }
+	| { t: "partyInvite"; game: string; fromSessionId: string; fromName: string }
+	| { t: "partyUpdate"; game: string; members: { sessionId: string; name?: string }[] };
 
 export interface RealtimePlayer {
 	sessionId: string;
@@ -46,4 +52,9 @@ export interface RealtimePlayer {
 	rotY?: number;
 	/** mmo3d専用（任意・後方互換）。現在のアニメ状態。 */
 	anim?: "idle" | "walk" | "run";
+	/** mmo3d専用（任意、フェーズ25）。現在のレベル。育成データ本体はエンジン内のみに
+	 *  持ち、ここでは他プレイヤーへ見せるための表示用の値だけを流す。 */
+	level?: number;
+	/** 表示名（任意、フェーズ25）。パーティー招待UI等で使う。 */
+	name?: string;
 }

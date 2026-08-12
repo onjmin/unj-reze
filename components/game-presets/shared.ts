@@ -1290,6 +1290,9 @@ export interface PresetData {
 		vmdWalkUrl?: string;
 		/** 走行時（Shift+移動）に切り替えるVMDモーション（renderer==='babylon'のみ）。 */
 		vmdRunUrl?: string;
+		/** NPC（フェーズ26）。近づいてEキーで一方向のメッセージだけ表示する簡易会話。
+		 *  本SNSへの投稿等は一切行わない。 */
+		npcs?: { x: number; z: number; name: string; message: string }[];
 	};
 	/** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
 	titleScreen?: TitleScreenConfig;

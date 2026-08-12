@@ -48,6 +48,46 @@ const DUMMY_RESPAWN_SEC = 3;
 const BOARD_INTERACT_RANGE = 2.5; // m
 const BOARD_DEFAULT_Y = 1.2;
 
+// ── フェーズ25: キャラ育成（three版と同じ数値）。TODO(persist): 永続化未着手。 ──
+const XP_PER_DUMMY_KILL = 25;
+const XP_TO_NEXT_BASE = 50;
+const HP_GROWTH_PER_LEVEL = 15;
+const ATTACK_GROWTH_PER_LEVEL = 4;
+
+// ── フェーズ26: 装備（武器種）・複数スキル選択（three版 lib/mmo3d.ts と同じ定義）。
+// TODO(persist): エンジン内メモリのみ。 ──
+interface WeaponDef {
+	id: string;
+	label: string;
+	dmgMult: number;
+	rangeMult: number;
+	cooldownMult: number;
+}
+const WEAPON_TYPES: readonly WeaponDef[] = [
+	{ id: "sword", label: "剣", dmgMult: 1.0, rangeMult: 1.0, cooldownMult: 1.0 },
+	{ id: "spear", label: "槍", dmgMult: 0.8, rangeMult: 1.4, cooldownMult: 1.05 },
+	{ id: "axe", label: "斧", dmgMult: 1.45, rangeMult: 0.8, cooldownMult: 1.35 },
+];
+const DEFAULT_WEAPON_ID = WEAPON_TYPES[0].id;
+
+interface SkillDef {
+	id: string;
+	label: string;
+	dmgMult: number;
+	range: number;
+	cooldownSec: number;
+	aoe: boolean;
+	swingSec: number;
+}
+const SKILL_TYPES: readonly SkillDef[] = [
+	{ id: "burst", label: "回転斬り", dmgMult: 2.4, range: 3.4, cooldownSec: 3.0, aoe: true, swingSec: 0.4 },
+	{ id: "pierce", label: "貫き突き", dmgMult: 3.6, range: 4.2, cooldownSec: 4.5, aoe: false, swingSec: 0.3 },
+];
+const DEFAULT_SKILL_ID = SKILL_TYPES[0].id;
+const PIERCE_HALF_ANGLE = Math.PI / 10;
+
+const NPC_INTERACT_RANGE = 2.5; // m
+
 interface BabylonDummy {
 	mesh: AbstractMesh;
 	mat: StandardMaterial;
@@ -90,15 +130,33 @@ export class Mmo3dBabylonEngine {
 	private ghostMat: StandardMaterial;
 	private ghosts = new Map<string, AbstractMesh>();
 
-	// ── 簡易近接戦闘（フェーズ15: three版からの移植）。 ──
+	// ── 簡易近接戦闘（フェーズ15: three版からの移植→フェーズ25でスキル攻撃追加）。 ──
 	private weapon: AbstractMesh | null = null;
+	private weaponMat: StandardMaterial | null = null;
 	private attackCooldown = 0;
 	private attackSwingT = -1; // -1=非攻撃中、0〜ATTACK_SWING_SECでスイング中
+	private skillCooldown = 0;
+	private skillSwingT = -1;
+	private activeSkillSwingSec = 0.4;
 	private playerHp = PLAYER_MAX_HP;
 	private dummies: BabylonDummy[] = [];
 	private elapsedSec = 0;
 	private onPlayerDamaged: ((hp: number, max: number) => void) | null = null;
 	private onDummyDamaged: ((index: number, hp: number, max: number) => void) | null = null;
+
+	// ── フェーズ25: キャラ育成。TODO(persist): 永続化未着手（three版と同じ方針）。 ──
+	private level = 1;
+	private xp = 0;
+	private onLevelChanged:
+		| ((level: number, xp: number, xpToNext: number) => void)
+		| null = null;
+
+	// ── フェーズ26: 装備（武器種）・スキル選択。TODO(persist): エンジン内メモリのみ。 ──
+	private weaponId: string = DEFAULT_WEAPON_ID;
+	private skillId: string = DEFAULT_SKILL_ID;
+
+	// ── フェーズ26: NPC会話（three版と同じ、投稿等は行わない一方向メッセージ）。 ──
+	private npcs: { mesh: AbstractMesh; name: string; message: string }[] = [];
 
 	// ── ゲーム内掲示板（フェーズ15: three版からの移植）。 ──
 	private boards: { mesh: AbstractMesh; threadPostId: string }[] = [];
@@ -143,6 +201,8 @@ export class Mmo3dBabylonEngine {
 		 *  （1つも指定が無ければvmdUrlの静止ポーズ/ループのまま）。 */
 		vmdWalkUrl?: string,
 		vmdRunUrl?: string,
+		/** NPC（フェーズ26、three版と同じ一方向メッセージのみの簡易会話）。 */
+		npcSpecs?: { x: number; z: number; name: string; message: string }[],
 	) {
 		this.engine = new Engine(canvas, true, { stencil: true });
 		this.scene = new Scene(this.engine);
@@ -206,6 +266,7 @@ export class Mmo3dBabylonEngine {
 		weaponMat.diffuseColor = new Color3(0.8, 0.8, 0.8);
 		weapon.material = weaponMat;
 		this.weapon = weapon;
+		this.weaponMat = weaponMat;
 
 		// 簡易ダミー敵。指定が無ければthree版と同じ既定2体を配置。
 		const dummySpots = dummyPositions?.length
@@ -225,6 +286,22 @@ export class Mmo3dBabylonEngine {
 			mat.diffuseColor = new Color3(0.9, 0.22, 0.21);
 			mesh.material = mat;
 			this.dummies.push({ mesh, mat, hp: DUMMY_MAX_HP, respawnAt: null, baseX: x, baseZ: z });
+		}
+
+		// NPC（フェーズ26、three版と同じ一方向メッセージのみの簡易会話）。攻撃対象にはしない。
+		if (npcSpecs?.length) {
+			const npcMat = new StandardMaterial("npcMat", this.scene);
+			npcMat.diffuseColor = new Color3(0.15, 0.65, 0.6);
+			for (const spec of npcSpecs) {
+				const mesh = MeshBuilder.CreateCapsule(
+					`npc-${this.npcs.length}`,
+					{ height: 1.1, radius: 0.42 },
+					this.scene,
+				);
+				mesh.position.set(spec.x, 0.95, spec.z);
+				mesh.material = npcMat;
+				this.npcs.push({ mesh, name: spec.name, message: spec.message });
+			}
 		}
 
 		// 簡易地形障害物。walkable指定は「壁」ではなく「足場」になる（three版と同じ方式）。
@@ -267,15 +344,32 @@ export class Mmo3dBabylonEngine {
 			});
 		}
 
+		// フェーズ27: three版と同じ理由（フリーズ不具合の対策）でtry/catchを追加。
+		// onBeforeRenderObservableのハンドラ内で例外が起きるとBabylonの内部レンダーループ自体に
+		// 影響しうるため、フレーム単位の例外がループを止めないようにする。
 		this.scene.onBeforeRenderObservable.add(() => {
-			const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
-			this.updateMovement(dt);
-			this.updateCombat(dt);
+			try {
+				const dt = Math.min(this.engine.getDeltaTime() / 1000, 0.1);
+				this.updateMovement(dt);
+				this.updateCombat(dt);
+			} catch (err) {
+				console.error(
+					"mmo3d(babylon): 描画ループ中に例外が発生しました（次フレームも継続します）:",
+					err,
+				);
+			}
 		});
 
 		this.engine.runRenderLoop(() => {
 			if (this.disposed) return;
-			this.scene.render();
+			try {
+				this.scene.render();
+			} catch (err) {
+				console.error(
+					"mmo3d(babylon): scene.render()中に例外が発生しました（次フレームも継続します）:",
+					err,
+				);
+			}
 		});
 
 		// デバッグ用インスペクタは開発環境でのみ動的import（本番バンドルに含めない）。
@@ -402,15 +496,122 @@ export class Mmo3dBabylonEngine {
 		return best ? best.threadPostId : null;
 	}
 
-	/** 攻撃キー/クリックのエッジで呼ぶ。クールダウン中は無視する（three版と同じ数値仕様）。 */
-	triggerAttack() {
-		if (this.attackCooldown > 0 || this.playerHp <= 0) return;
-		this.attackCooldown = ATTACK_COOLDOWN_SEC;
-		this.attackSwingT = 0;
-		this.resolveAttackHits();
+	/** レベルNをN+1にするのに必要な経験値。 */
+	private xpToNext(): number {
+		return XP_TO_NEXT_BASE * this.level;
 	}
 
-	private resolveAttackHits() {
+	private getPlayerMaxHp(): number {
+		return PLAYER_MAX_HP + (this.level - 1) * HP_GROWTH_PER_LEVEL;
+	}
+
+	private getAttackDamage(): number {
+		return ATTACK_DAMAGE + (this.level - 1) * ATTACK_GROWTH_PER_LEVEL;
+	}
+
+	private addXp(amount: number) {
+		this.xp += amount;
+		let leveledUp = false;
+		while (this.xp >= this.xpToNext()) {
+			this.xp -= this.xpToNext();
+			this.level++;
+			leveledUp = true;
+		}
+		if (leveledUp) {
+			this.playerHp = this.getPlayerMaxHp();
+			this.onPlayerDamaged?.(this.playerHp, this.getPlayerMaxHp());
+		}
+		this.onLevelChanged?.(this.level, this.xp, this.xpToNext());
+	}
+
+	getPlayerLevel(): number {
+		return this.level;
+	}
+
+	/** 出席ボーナス等、キル以外の経路でXPを付与する（フェーズ26）。TODO(persist): 未永続化。 */
+	grantXp(amount: number) {
+		this.addXp(amount);
+	}
+
+	/** 近くにいるNPCの{name, message}を返す（フェーズ26、three版と同じ）。 */
+	nearNpc(): { name: string; message: string } | null {
+		let best: { name: string; message: string; dist: number } | null = null;
+		const p = this.playerRoot.position;
+		for (const n of this.npcs) {
+			const dist = Vector3.Distance(p, n.mesh.position);
+			if (dist > NPC_INTERACT_RANGE) continue;
+			if (!best || dist < best.dist) best = { name: n.name, message: n.message, dist };
+		}
+		return best ? { name: best.name, message: best.message } : null;
+	}
+
+	/** 装備中の武器/スキルID一覧と選択状態（フェーズ26）。 */
+	getEquipment(): { weaponId: string; skillId: string } {
+		return { weaponId: this.weaponId, skillId: this.skillId };
+	}
+
+	setWeapon(id: string) {
+		if (!WEAPON_TYPES.some((w) => w.id === id)) return;
+		this.weaponId = id;
+	}
+
+	setSkill(id: string) {
+		if (!SKILL_TYPES.some((s) => s.id === id)) return;
+		this.skillId = id;
+	}
+
+	/** ミニマップ描画用のエンティティ位置一覧（フェーズ26、three版と同じ形）。 */
+	getMinimapData(): {
+		player: { x: number; z: number; facing: number };
+		dummies: { x: number; z: number; alive: boolean }[];
+		boards: { x: number; z: number }[];
+		npcs: { x: number; z: number }[];
+	} {
+		return {
+			player: {
+				x: this.playerRoot.position.x,
+				z: this.playerRoot.position.z,
+				facing: this.facing,
+			},
+			dummies: this.dummies.map((d) => ({
+				x: d.mesh.position.x,
+				z: d.mesh.position.z,
+				alive: d.respawnAt === null,
+			})),
+			boards: this.boards.map((b) => ({ x: b.mesh.position.x, z: b.mesh.position.z })),
+			npcs: this.npcs.map((n) => ({ x: n.mesh.position.x, z: n.mesh.position.z })),
+		};
+	}
+
+	/** 攻撃キー/クリックのエッジで呼ぶ。クールダウン中は無視する。
+	 *  フェーズ26: 装備中の武器種でダメージ/範囲/クールダウンが変わる（three版と同じ）。 */
+	triggerAttack() {
+		if (this.attackCooldown > 0 || this.playerHp <= 0) return;
+		const weapon = WEAPON_TYPES.find((w) => w.id === this.weaponId) ?? WEAPON_TYPES[0];
+		this.attackCooldown = ATTACK_COOLDOWN_SEC * weapon.cooldownMult;
+		this.attackSwingT = 0;
+		this.resolveAttackHits(
+			ATTACK_RANGE * weapon.rangeMult,
+			ATTACK_HALF_ANGLE,
+			Math.round(this.getAttackDamage() * weapon.dmgMult),
+		);
+	}
+
+	/** スキル攻撃。フェーズ26で選択制になった（three版と同じSKILL_TYPES）。 */
+	triggerSkill() {
+		if (this.skillCooldown > 0 || this.playerHp <= 0) return;
+		const skill = SKILL_TYPES.find((s) => s.id === this.skillId) ?? SKILL_TYPES[0];
+		this.skillCooldown = skill.cooldownSec;
+		this.skillSwingT = 0;
+		this.activeSkillSwingSec = skill.swingSec;
+		this.resolveAttackHits(
+			skill.range,
+			skill.aoe ? Math.PI : PIERCE_HALF_ANGLE,
+			Math.round(this.getAttackDamage() * skill.dmgMult),
+		);
+	}
+
+	private resolveAttackHits(range: number, halfAngle: number, damage: number) {
 		const px = this.playerRoot.position.x;
 		const pz = this.playerRoot.position.z;
 		for (const d of this.dummies) {
@@ -418,12 +619,14 @@ export class Mmo3dBabylonEngine {
 			const dx = d.mesh.position.x - px;
 			const dz = d.mesh.position.z - pz;
 			const dist = Math.hypot(dx, dz);
-			if (dist > ATTACK_RANGE) continue;
-			const angleToTarget = Math.atan2(dx, dz);
-			let diff = angleToTarget - this.facing;
-			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-			if (Math.abs(diff) > ATTACK_HALF_ANGLE) continue;
-			this.damageDummy(d, ATTACK_DAMAGE);
+			if (dist > range) continue;
+			if (halfAngle < Math.PI) {
+				const angleToTarget = Math.atan2(dx, dz);
+				let diff = angleToTarget - this.facing;
+				diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+				if (Math.abs(diff) > halfAngle) continue;
+			}
+			this.damageDummy(d, damage);
 		}
 	}
 
@@ -434,6 +637,7 @@ export class Mmo3dBabylonEngine {
 		if (d.hp <= 0) {
 			d.respawnAt = this.elapsedSec + DUMMY_RESPAWN_SEC;
 			d.mesh.isVisible = false;
+			this.addXp(XP_PER_DUMMY_KILL);
 		} else {
 			d.mat.emissiveColor = new Color3(1, 1, 1);
 			setTimeout(() => {
@@ -446,27 +650,39 @@ export class Mmo3dBabylonEngine {
 	takeDamage(amount: number) {
 		if (this.playerHp <= 0) return;
 		this.playerHp = Math.max(0, this.playerHp - amount);
-		this.onPlayerDamaged?.(this.playerHp, PLAYER_MAX_HP);
+		this.onPlayerDamaged?.(this.playerHp, this.getPlayerMaxHp());
 	}
 
 	getPlayerHp(): { hp: number; max: number } {
-		return { hp: this.playerHp, max: PLAYER_MAX_HP };
+		return { hp: this.playerHp, max: this.getPlayerMaxHp() };
 	}
 
-	/** HP変化の通知先を登録する（UI表示用、three版と同じ）。 */
+	/** HP/レベル変化の通知先を登録する（UI表示用、three版と同じ）。 */
 	setCombatCallbacks(handlers: {
 		onPlayerDamaged?: (hp: number, max: number) => void;
 		onDummyDamaged?: (index: number, hp: number, max: number) => void;
+		onLevelChanged?: (level: number, xp: number, xpToNext: number) => void;
 	}) {
 		this.onPlayerDamaged = handlers.onPlayerDamaged ?? null;
 		this.onDummyDamaged = handlers.onDummyDamaged ?? null;
+		this.onLevelChanged = handlers.onLevelChanged ?? null;
 	}
 
 	private updateCombat(dt: number) {
 		this.elapsedSec += dt;
 		if (this.attackCooldown > 0) this.attackCooldown -= dt;
+		if (this.skillCooldown > 0) this.skillCooldown -= dt;
 
-		if (this.weapon && this.attackSwingT >= 0) {
+		if (this.weapon && this.skillSwingT >= 0) {
+			this.skillSwingT += dt;
+			const t = Math.min(1, this.skillSwingT / this.activeSkillSwingSec);
+			const swing = Math.sin(t * Math.PI) * Math.PI;
+			this.weapon.rotation.z = -swing;
+			if (this.skillSwingT >= this.activeSkillSwingSec) {
+				this.skillSwingT = -1;
+				this.weapon.rotation.z = 0;
+			}
+		} else if (this.weapon && this.attackSwingT >= 0) {
 			this.attackSwingT += dt;
 			const t = Math.min(1, this.attackSwingT / ATTACK_SWING_SEC);
 			const swing = Math.sin(t * Math.PI) * (Math.PI / 2);

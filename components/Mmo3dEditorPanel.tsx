@@ -11,6 +11,7 @@ import type { Mmo3dRenderer } from "./game-presets/shared";
 
 type BoardSpot = { x: number; z: number; threadPostId: string };
 type DummySpot = { x: number; z: number };
+type NpcSpot = { x: number; z: number; name: string; message: string };
 type ObstacleSpot = {
 	x: number;
 	z: number;
@@ -30,6 +31,8 @@ export default function Mmo3dEditorPanel({
 	onBoardsChange,
 	dummies = [],
 	onDummiesChange,
+	npcs = [],
+	onNpcsChange,
 	obstacles = [],
 	onObstaclesChange,
 	pmxUrl = "",
@@ -51,6 +54,9 @@ export default function Mmo3dEditorPanel({
 	/** ダミー敵の配置座標一覧。空なら既定の2体を使う。 */
 	dummies?: DummySpot[];
 	onDummiesChange?: (dummies: DummySpot[]) => void;
+	/** NPC一覧（フェーズ26）。近づいてEキーで一方向のメッセージだけ表示する。 */
+	npcs?: NpcSpot[];
+	onNpcsChange?: (npcs: NpcSpot[]) => void;
 	/** 簡易地形の障害物（直方体）一覧。three/babylon両対応で当たり判定あり。 */
 	obstacles?: ObstacleSpot[];
 	onObstaclesChange?: (obstacles: ObstacleSpot[]) => void;
@@ -347,6 +353,83 @@ export default function Mmo3dEditorPanel({
 					>
 						+ ダミー敵を追加
 					</button>
+			</div>
+
+			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
+				<p className="text-[11px] font-bold text-gray-300">NPC（一方向の会話）</p>
+				<p className="text-[10px] text-gray-500 leading-tight">
+					座標(x, z)・名前・メッセージを指定します。近づいてEキーを押すと吹き出しでメッセージだけ表示します（本SNSへの投稿等は一切行いません、選択肢や分岐も無い簡易会話です）。
+				</p>
+				{npcs.map((n, i) => (
+					<div
+						key={`npc-${i}`}
+						className="space-y-1 border-b border-gray-700/60 pb-1.5 last:border-0 last:pb-0"
+					>
+						<div className="flex items-center gap-1">
+							<input
+								type="number"
+								value={n.x}
+								onChange={(e) => {
+									const next = [...npcs];
+									next[i] = { ...n, x: Number(e.target.value) || 0 };
+									onNpcsChange?.(next);
+								}}
+								placeholder="x"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								type="number"
+								value={n.z}
+								onChange={(e) => {
+									const next = [...npcs];
+									next[i] = { ...n, z: Number(e.target.value) || 0 };
+									onNpcsChange?.(next);
+								}}
+								placeholder="z"
+								className="w-14 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<input
+								value={n.name}
+								onChange={(e) => {
+									const next = [...npcs];
+									next[i] = { ...n, name: e.target.value };
+									onNpcsChange?.(next);
+								}}
+								placeholder="名前"
+								className="w-20 bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+							/>
+							<button
+								type="button"
+								onClick={() => onNpcsChange?.(npcs.filter((_, j) => j !== i))}
+								className="flex-1 px-2 py-1 rounded text-[10px] bg-red-900/60 text-red-200 border border-red-800 hover:bg-red-900"
+							>
+								削除
+							</button>
+						</div>
+						<input
+							value={n.message}
+							onChange={(e) => {
+								const next = [...npcs];
+								next[i] = { ...n, message: e.target.value };
+								onNpcsChange?.(next);
+							}}
+							placeholder="メッセージ"
+							className="w-full bg-gray-900 border border-gray-700 rounded px-1.5 py-1 text-[10px] text-gray-200 outline-none focus:border-blue-500"
+						/>
+					</div>
+				))}
+				<button
+					type="button"
+					onClick={() =>
+						onNpcsChange?.([
+							...npcs,
+							{ x: 0, z: 2, name: "村人", message: "こんにちは！" },
+						])
+					}
+					className="w-full px-2 py-1.5 rounded text-[10px] border border-dashed border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition"
+				>
+					+ NPCを追加
+				</button>
 			</div>
 
 			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">

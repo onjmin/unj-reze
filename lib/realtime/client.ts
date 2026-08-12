@@ -158,14 +158,19 @@ class RealtimeClient {
 	}
 
 	/** 自分の位置を送る。DBには一切書かれず、ハブのメモリ上だけで完結する。
-	 *  rotY/anim は mmo3d専用（任意）。2Dゲームは渡さなくてよい。 */
+	 *  rotY/anim/level/name は mmo3d専用（任意）。2Dゲームは渡さなくてよい。 */
 	sendPosition(
 		gameId: string,
 		sessionId: string,
 		x: number,
 		y: number,
 		emoji: string,
-		extra?: { rotY?: number; anim?: "idle" | "walk" | "run" },
+		extra?: {
+			rotY?: number;
+			anim?: "idle" | "walk" | "run";
+			level?: number;
+			name?: string;
+		},
 	) {
 		this.rawSend({
 			t: "pos",
@@ -176,11 +181,34 @@ class RealtimeClient {
 			emoji,
 			...(extra?.rotY !== undefined ? { rotY: extra.rotY } : {}),
 			...(extra?.anim !== undefined ? { anim: extra.anim } : {}),
+			...(extra?.level !== undefined ? { level: extra.level } : {}),
+			...(extra?.name !== undefined ? { name: extra.name } : {}),
 		});
 	}
 
 	leaveGame(gameId: string) {
 		this.rawSend({ t: "leave", game: gameId });
+	}
+
+	/** チャット送信（フェーズ25）。ハブが同じゲームルームの購読者全員へそのまま中継する。
+	 *  DBには一切書かない（TODO(persist): 履歴を残すなら別途設計）。 */
+	sendChat(gameId: string, sessionId: string, name: string, text: string) {
+		this.rawSend({ t: "chat", game: gameId, sessionId, name, text });
+	}
+
+	/** 他プレイヤーをパーティーに誘う（フェーズ25）。招待された側にだけ届く。 */
+	sendPartyInvite(gameId: string, sessionId: string, targetSessionId: string) {
+		this.rawSend({ t: "partyInvite", game: gameId, sessionId, targetSessionId });
+	}
+
+	/** 招待を承諾する（送り主のsessionIdをtargetSessionIdとして渡す）。 */
+	sendPartyAccept(gameId: string, sessionId: string, targetSessionId: string) {
+		this.rawSend({ t: "partyAccept", game: gameId, sessionId, targetSessionId });
+	}
+
+	/** パーティーから抜ける。 */
+	sendPartyLeave(gameId: string, sessionId: string) {
+		this.rawSend({ t: "partyLeave", game: gameId, sessionId });
 	}
 }
 

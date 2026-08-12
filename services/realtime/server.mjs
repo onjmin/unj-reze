@@ -37,10 +37,18 @@ const MAX_PLAYERS_PER_ROOM = 200;
 
 /** channel -> Set<ws> */
 const channels = new Map();
-/** gameId -> Map<sessionId, {x, y, emoji, ts}> */
+/** gameId -> Map<sessionId, {x, y, emoji, ts, ws, name}> */
 const presence = new Map();
 /** 直近の tick 以降に変化のあったゲームID */
 const dirtyRooms = new Set();
+
+// ── パーティー（フェーズ25: mmo3dのソーシャル機能。完全にインメモリ、DBには一切書かない。
+// TODO(persist): 現状パーティーは切断・再起動で消える。永続化するならgames.manifestか
+// 専用テーブルの設計が必要（このハブは単一インスタンス前提のため、複数台に増やす場合は
+// README記載の通りRedis等の共有バスが要る）。 ──
+/** gameId -> Map<sessionId, Set<sessionId>>（同じSetオブジェクトを共有するのが「同じパーティー」） */
+const partyOf = new Map();
+const MAX_PARTY_SIZE = 4;
 
 const stats = { connections: 0, published: 0, delivered: 0, startedAt: Date.now() };
 
@@ -124,10 +132,21 @@ function roomOf(gameId) {
   return room;
 }
 
-function updatePresence(gameId, sessionId, x, y, emoji, rotY, anim) {
+function updatePresence(gameId, sessionId, x, y, emoji, rotY, anim, ws, name, level) {
   const room = roomOf(gameId);
   if (!room.has(sessionId) && room.size >= MAX_PLAYERS_PER_ROOM) return;
-  room.set(sessionId, { x, y, emoji, rotY, anim, ts: Date.now() });
+  const prev = room.get(sessionId);
+  room.set(sessionId, {
+    x,
+    y,
+    emoji,
+    rotY,
+    anim,
+    level: level ?? prev?.level,
+    ts: Date.now(),
+    ws: ws ?? prev?.ws,
+    name: name ?? prev?.name,
+  });
   dirtyRooms.add(gameId);
 }
 
@@ -135,6 +154,74 @@ function dropPresence(gameId, sessionId) {
   const room = presence.get(gameId);
   if (!room) return;
   if (room.delete(sessionId)) dirtyRooms.add(gameId);
+  leaveParty(gameId, sessionId);
+}
+
+// ── パーティー ─────────────────────────────────────────────────
+
+function partyRoomOf(gameId) {
+  let m = partyOf.get(gameId);
+  if (!m) {
+    m = new Map();
+    partyOf.set(gameId, m);
+  }
+  return m;
+}
+
+function partyMembersOf(gameId, sessionId) {
+  return partyOf.get(gameId)?.get(sessionId) ?? null;
+}
+
+/** パーティーの全メンバーへ直接送信する（チャンネル経由ではなく、各メンバーのws宛）。 */
+function sendToParty(gameId, party, payloadString) {
+  const room = presence.get(gameId);
+  if (!room) return;
+  for (const sid of party) {
+    const entry = room.get(sid);
+    if (entry?.ws && entry.ws.readyState === entry.ws.OPEN) {
+      try {
+        entry.ws.send(payloadString);
+      } catch {
+        /* close ハンドラ側で片付く */
+      }
+    }
+  }
+}
+
+function broadcastPartyUpdate(gameId, party) {
+  const room = presence.get(gameId);
+  const members = [...party].map((sid) => ({
+    sessionId: sid,
+    name: room?.get(sid)?.name,
+  }));
+  sendToParty(gameId, party, JSON.stringify({ t: 'partyUpdate', game: gameId, members }));
+}
+
+/** targetSessionIdの現在のパーティーにsessionIdを合流させる（上限MAX_PARTY_SIZE）。 */
+function joinParty(gameId, sessionId, targetSessionId) {
+  const map = partyRoomOf(gameId);
+  const mine = map.get(sessionId) ?? new Set([sessionId]);
+  const theirs = map.get(targetSessionId) ?? new Set([targetSessionId]);
+  if (mine === theirs) return theirs; // 既に同じパーティー
+  const merged = new Set([...mine, ...theirs]);
+  if (merged.size > MAX_PARTY_SIZE) return null; // 定員オーバー
+  for (const sid of merged) map.set(sid, merged);
+  return merged;
+}
+
+function leaveParty(gameId, sessionId) {
+  const map = partyOf.get(gameId);
+  const party = map?.get(sessionId);
+  if (!party) return;
+  party.delete(sessionId);
+  map.delete(sessionId);
+  if (party.size <= 1) {
+    // 1人だけ残ったパーティーは解散扱い（自分自身のSetも消す）
+    for (const sid of party) map.delete(sid);
+    if (party.size === 1) broadcastPartyUpdate(gameId, party);
+  } else {
+    broadcastPartyUpdate(gameId, party);
+  }
 }
 
 /** TTL 切れを掃除して、変化のあった部屋だけ配信する。 */
@@ -164,6 +251,8 @@ function presenceTick() {
           // mmo3d専用（任意）。無ければ受信側で単に undefined のまま無視される。
           ...(e.rotY !== undefined ? { rotY: e.rotY } : {}),
           ...(e.anim !== undefined ? { anim: e.anim } : {}),
+          ...(e.level !== undefined ? { level: e.level } : {}),
+          ...(e.name !== undefined ? { name: e.name } : {}),
         }))
       : [];
     // 自分を含めた全員を配る。除外はクライアント側で行う
@@ -328,8 +417,10 @@ wss.on('connection', (ws, req) => {
           typeof msg.anim === 'string' && ['idle', 'walk', 'run'].includes(msg.anim)
             ? msg.anim
             : undefined;
+        const name = typeof msg.name === 'string' ? msg.name.slice(0, 24) : undefined;
+        const level = Number.isFinite(Number(msg.level)) ? Number(msg.level) : undefined;
         ws.games.set(gameId, sessionId);
-        updatePresence(gameId, sessionId, x, y, emoji, rotY, anim);
+        updatePresence(gameId, sessionId, x, y, emoji, rotY, anim, ws, name, level);
         break;
       }
       case 'leave': {
@@ -340,6 +431,55 @@ wss.on('connection', (ws, req) => {
           dropPresence(gameId, sessionId);
           ws.games.delete(gameId);
         }
+        break;
+      }
+      // ── チャット（フェーズ25）。DBには一切書かない、その場で通り過ぎるだけの中継。
+      // TODO(persist): 履歴を残したいなら別途保存経路の設計が要る。 ──
+      case 'chat': {
+        const gameId = typeof msg.game === 'string' ? msg.game : null;
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : null;
+        const text = typeof msg.text === 'string' ? msg.text.slice(0, 200).trim() : '';
+        if (!gameId || !sessionId || !text) break;
+        const name = typeof msg.name === 'string' ? msg.name.slice(0, 24) : '名無し';
+        broadcast(
+          `game:${gameId}`,
+          JSON.stringify({ t: 'chat', game: gameId, sessionId, name, text, ts: Date.now() }),
+        );
+        break;
+      }
+      // ── パーティー招待/承認/離脱（フェーズ25、インメモリのみ）。 ──
+      case 'partyInvite': {
+        const gameId = typeof msg.game === 'string' ? msg.game : null;
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : null;
+        const targetSessionId = typeof msg.targetSessionId === 'string' ? msg.targetSessionId : null;
+        if (!gameId || !sessionId || !targetSessionId || sessionId === targetSessionId) break;
+        const room = presence.get(gameId);
+        const targetEntry = room?.get(targetSessionId);
+        if (!targetEntry?.ws || targetEntry.ws.readyState !== targetEntry.ws.OPEN) break;
+        const fromName = room?.get(sessionId)?.name ?? '名無し';
+        try {
+          targetEntry.ws.send(
+            JSON.stringify({ t: 'partyInvite', game: gameId, fromSessionId: sessionId, fromName }),
+          );
+        } catch {
+          /* noop */
+        }
+        break;
+      }
+      case 'partyAccept': {
+        const gameId = typeof msg.game === 'string' ? msg.game : null;
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : null;
+        const targetSessionId = typeof msg.targetSessionId === 'string' ? msg.targetSessionId : null;
+        if (!gameId || !sessionId || !targetSessionId) break;
+        const merged = joinParty(gameId, sessionId, targetSessionId);
+        if (merged) broadcastPartyUpdate(gameId, merged);
+        break;
+      }
+      case 'partyLeave': {
+        const gameId = typeof msg.game === 'string' ? msg.game : null;
+        const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : null;
+        if (!gameId || !sessionId) break;
+        leaveParty(gameId, sessionId);
         break;
       }
       case 'ping':
@@ -353,7 +493,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     stats.connections--;
     unsubscribeAll(ws);
-    for (const [gameId, sessionId] of ws.games) dropPresence(gameId, sessionId);
+    for (const [gameId, sessionId] of ws.games) dropPresence(gameId, sessionId); // dropPresence内でleavePartyも行う
     ws.games.clear();
   });
 

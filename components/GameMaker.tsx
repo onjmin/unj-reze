@@ -227,6 +227,7 @@ export interface GameManifestDraft {
     vmdUrl?: string;
     vmdWalkUrl?: string;
     vmdRunUrl?: string;
+    npcs?: { x: number; z: number; name: string; message: string }[];
   };
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
   scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
@@ -14073,6 +14074,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 vmdUrl={gameData.mmo3dConfig?.vmdUrl}
                 vmdWalkUrl={gameData.mmo3dConfig?.vmdWalkUrl}
                 vmdRunUrl={gameData.mmo3dConfig?.vmdRunUrl}
+                npcs={gameData.mmo3dConfig?.npcs}
               />
             ) : gameData.engine === 'yume25d' ? (
               <Yume25DMaker
@@ -16714,6 +16716,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     onBoardsChange={(boards) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, boards } }))}
                     dummies={gameData.mmo3dConfig?.dummies ?? []}
                     onDummiesChange={(dummies) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, dummies } }))}
+                    npcs={gameData.mmo3dConfig?.npcs ?? []}
+                    onNpcsChange={(npcs) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, npcs } }))}
                     obstacles={gameData.mmo3dConfig?.obstacles ?? []}
                     onObstaclesChange={(obstacles) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, obstacles } }))}
                     pmxUrl={gameData.mmo3dConfig?.pmxUrl ?? ''}
