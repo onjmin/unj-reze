@@ -1001,6 +1001,9 @@ export const VERTICAL_FORM_MAP: Record<string, string> = {
 	"\u0029": "\uFE36", // ) (U+0029) -> ︶ (U+FE36)
 	"\u3014": "\uFE3B", // 〔 (U+3014) -> ︻ (U+FE3B)
 	"\u3015": "\uFE3C", // 〕 (U+3015) -> ︼ (U+FE3C)
+	"\u30FC": "\uFE31", // ー (U+30FC) -> ︱ (U+FE31)
+	"\u301C": "\u2240", // 〜 (U+301C) -> ≀ (U+2240)
+	"\uFF5E": "\u2240", // ～ (U+FF5E) -> ≀ (U+2240)
 };
 
 export function toVerticalFormChar(ch: string): string {
@@ -1009,7 +1012,7 @@ export function toVerticalFormChar(ch: string): string {
 
 export function toVerticalFormText(text: string): string {
 	return text.replace(
-		/[\u300C\u300D\uFF08\u0028\uFF09\u0029\u3014\u3015]/g,
+		/[\u300C\u300D\uFF08\u0028\uFF09\u0029\u3014\u3015\u30FC\u301C\uFF5E]/g,
 		(ch) => VERTICAL_FORM_MAP[ch] ?? ch,
 	);
 }
