@@ -59,7 +59,14 @@ const MELODY = [
 	...rep(2, N4, N1, N4, N2), // 0-7   静かな導入
 	...rep(2, N1, N2, N3, N6), // 8-15
 	...rep(2, N1, N2, N3, N6), // 16-23
-	N3, N6, N1_BURST, N2, N3, N6, N1, N2, // 24-31 26小節目だけ密な連打
+	N3,
+	N6,
+	N1_BURST,
+	N2,
+	N3,
+	N6,
+	N1,
+	N2, // 24-31 26小節目だけ密な連打
 	...rep(2, N3, N6, N3, N6), // 32-39 いちばん濃いところ
 	...rep(2, N4, N1, N4, N2), // 40-47
 	...rep(2, N1, N2, N3, N6), // 48-55
@@ -349,169 +356,6 @@ const LAYERS: MvLayer[] = [
 		sections: SECTIONS.slice(2).map((s) => s.id),
 		z: 4,
 	},
-	// score帯(実データ連動)はそのまま活かしつつ、サビ直前だけ「点滅バー列」テンプレートを
-	// 薄く重ねて賑やかさを足す（テンプレートは装飾用途、実データはscoreのまま）。
-	...FIND("pulseBarRows").build({
-		...DEFAULT_TEMPLATE_PARAMS,
-		x: 320,
-		y: 300,
-		size: 90,
-		color: "#d4d4d8",
-		opacity: 0.35,
-		barsPerLoop: 1,
-		count: 4,
-	}).map((l) => ({ ...l, sections: PRE_CHORUS, z: 3 })),
-
-	// ══ 中央。エフェクトテンプレートの組み合わせ ══════════════════════
-	...(() => {
-		const layers = [
-			...FIND("doubleFrame").build({
-				...DEFAULT_TEMPLATE_PARAMS,
-				x: 320,
-				y: 180,
-				size: 64,
-				color: "#f4f4f5",
-				barsPerLoop: MOTIF_BARS,
-			}),
-			...FIND("particleOrbit").build({
-				...DEFAULT_TEMPLATE_PARAMS,
-				x: 232,
-				y: 180,
-				size: 30,
-				color: "#e4e4e7",
-				barsPerLoop: MOTIF_BARS,
-				count: 8,
-			}),
-			...FIND("particleOrbit").build({
-				...DEFAULT_TEMPLATE_PARAMS,
-				x: 408,
-				y: 180,
-				size: 30,
-				color: "#e4e4e7",
-				barsPerLoop: MOTIF_BARS,
-				count: 8,
-			}),
-		].map((l, i) => ({ ...l, z: 19 + i }));
-		const burst = FIND("sunburstSweep").build({
-			...DEFAULT_TEMPLATE_PARAMS,
-			x: 320,
-			y: 180,
-			size: 70,
-			color: "#f4f4f5",
-			barsPerLoop: SCENE_BARS,
-			count: 8,
-		}).map((l) => ({ ...l, sections: PRE_CHORUS, z: 25 }));
-		return [...layers, ...burst];
-	})(),
-
-
-
-	// ══ 左の提灯 ═══════════════════════════════════════════
-	// 提灯の下から伸びる細い柄。bar を傾けて1本の棒にする
-	// （path で線を描いても filled では塗られないので、棒は bar で作る）。
-	{
-		kind: "shape",
-		id: "pole",
-		form: "bar",
-		// 実測: 縦は0.5倍換算。提灯本体の下端〜柄の先の長さに合わせて短縮。
-		x: 145,
-		y: 223,
-		size: 29,
-		barAspect: 0.024,
-		rotation: 100,
-		color: "#6b7280",
-		filled: true,
-		thickness: 1,
-		z: 8,
-		modulators: [],
-	},
-	{
-		kind: "shape",
-		id: "lantern",
-		form: "path",
-		path: LANTERN_BODY,
-		pathBox: [0, 0, 100, 100],
-		// 実測: 中心は画面の22%×44%。横0.667/縦0.5倍換算で142,161。
-		x: 142,
-		y: 161,
-		size: 49,
-		rotation: 0,
-		color: "#c0392b",
-		filled: true,
-		thickness: 1,
-		z: 10,
-		// 「低音の打点でわずかに膨らむ」という以前のmodulatorはpx単位の計測で裏取りしていなかった。
-		// 8秒480フレームぶんの実測で提灯の幅は42pxで一切変化しなかった（分散ゼロ）ため撤回した。
-		modulators: [],
-	},
-	{
-		kind: "shape",
-		id: "lantern-cap",
-		form: "path",
-		path: LANTERN_CAP,
-		pathBox: [0, 0, 100, 100],
-		x: 142,
-		y: 161,
-		size: 49,
-		rotation: 0,
-		color: "#4c0d0d",
-		filled: true,
-		thickness: 1,
-		z: 11,
-		modulators: [],
-	},
-	{
-		kind: "shape",
-		id: "lantern-ribs",
-		form: "path",
-		path: LANTERN_RIBS,
-		pathBox: [0, 0, 100, 100],
-		x: 142,
-		y: 161,
-		size: 49,
-		rotation: 0,
-		color: "#7f1d1d",
-		filled: false,
-		thickness: 1.6,
-		z: 12,
-		modulators: [],
-	},
-
-	// ══ 右の立て看板 ═══════════════════════════════════════
-	{
-		kind: "shape",
-		id: "sign",
-		form: "path",
-		path: SIGN,
-		pathBox: [0, 0, 100, 100],
-		// 実測: 中心は画面の76%×58%。横0.667/縦0.5倍換算で486,208。
-		// 旧位置は上すぎ＆右に寄りすぎていた。
-		x: 486,
-		y: 208,
-		size: 36,
-		rotation: 0,
-		color: "#eab308",
-		filled: true,
-		thickness: 1,
-		z: 10,
-		modulators: [],
-	},
-	{
-		kind: "shape",
-		id: "sign-mark",
-		form: "path",
-		path: SIGN_MARK,
-		pathBox: [0, 0, 100, 100],
-		x: 486,
-		y: 214,
-		size: 36,
-		rotation: 0,
-		color: "#1c1917",
-		filled: true,
-		thickness: 1,
-		z: 11,
-		modulators: [],
-	},
 
 	// ══ 下に現れる小さな影 ══════════════════════════════════
 	{
@@ -568,16 +412,6 @@ const LAYERS: MvLayer[] = [
 		afterimage: 1,
 		holdBars: 4,
 		z: 40,
-	},
-
-	// ══ 全編: わずかな周辺減光 ═══════════════════════════════
-	{
-		kind: "effect",
-		id: "vignette",
-		style: "vignette",
-		trigger: "always",
-		amount: 0.4,
-		color: "#000000",
 	},
 ];
 
