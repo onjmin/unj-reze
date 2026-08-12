@@ -2461,7 +2461,26 @@ export function resolveLyricLines(
 		if (target === undefined) return [];
 		return song.lyricLines.filter((l) => l.trackId === target);
 	})();
-	return applyLyricResetBars(lines, layer.resetBars);
+	const withGapResets = applyLyricGapResets(lines, layer.holdBars ?? 2);
+	return applyLyricResetBars(withGapResets, layer.resetBars);
+}
+
+/**
+ * 手入力の resetBars/resetBefore とは別に、行と行のあいだが hold より大きく開く
+ * （＝間奏などで次の歌詞まで間が空く）箇所を自動でリセット扱いにする。
+ * これが無いと、間奏で次の行が遠いとき groupEndBar が次行の小節まで伸びきってしまい、
+ * 積み上げた歌詞が間奏中ずっと画面に残り続けてしまう。
+ */
+function applyLyricGapResets(
+	lines: MvLyricLine[],
+	hold: number,
+): MvLyricLine[] {
+	if (lines.length === 0) return lines;
+	return lines.map((l, i) => {
+		if (i === 0) return l;
+		const gap = l.bar - lines[i - 1].bar;
+		return gap > hold && !l.resetBefore ? { ...l, resetBefore: true } : l;
+	});
 }
 
 /**
