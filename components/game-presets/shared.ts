@@ -1268,12 +1268,28 @@ export interface PresetData {
 		/** ダミー敵の配置座標。空/未指定なら既定の2体(x=±2, z=-3)を使う。 */
 		dummies?: { x: number; z: number }[];
 		/** 簡易地形オブジェクト（直方体の障害物）。x/zが中心、w=X幅、d=Z奥行き、h=高さ。
-		 *  three版のみプレイヤー/ダミーとの当たり判定あり（軸分離スライド）。babylon版は見た目のみ。 */
-		obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string }[];
+		 *  プレイヤー/ダミーとの当たり判定あり（軸分離スライド、three/babylon両対応）。
+		 *  walkable=trueにすると「壁」ではなく「足場」になる（水平ブロックなし、上に乗ると
+		 *  Y座標がその高さに上がる。高低差のある簡易地形）。 */
+		obstacles?: {
+			x: number;
+			z: number;
+			w: number;
+			d: number;
+			h: number;
+			color?: string;
+			walkable?: boolean;
+		}[];
 		/** MMD(PMX/PMD)モデルのURL（renderer==='babylon'で使用）。未指定時は標準カプセル。 */
 		pmxUrl?: string;
-		/** MMD(VMD)モーションのURL（renderer==='babylon'で使用）。未指定時はモーションなし。 */
+		/** MMD(VMD)モーションのURL（renderer==='babylon'で使用）。idle（静止/未移動時）用。
+		 *  walk/run用を指定しなければ全ての移動状態でこのモーションが再生され続ける。 */
 		vmdUrl?: string;
+		/** 歩行時に切り替えるVMDモーション（renderer==='babylon'のみ、フェーズ21）。未指定時は
+		 *  vmdUrl（idle用）のまま。 */
+		vmdWalkUrl?: string;
+		/** 走行時（Shift+移動）に切り替えるVMDモーション（renderer==='babylon'のみ）。 */
+		vmdRunUrl?: string;
 	};
 	/** タイトル画面（東方以外）。enabled=true でプレイ開始前に表示。 */
 	titleScreen?: TitleScreenConfig;

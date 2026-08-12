@@ -37,6 +37,8 @@ export default function Mmo3dMaker({
 	obstacles,
 	pmxUrl,
 	vmdUrl,
+	vmdWalkUrl,
+	vmdRunUrl,
 }: {
 	renderer?: Mmo3dRenderer;
 	/** 指定するとリアルタイムハブ経由で他プレイヤーと位置/アニメ状態を同期する（three/babylon共通対応）。 */
@@ -48,12 +50,25 @@ export default function Mmo3dMaker({
 	boards?: { x: number; z: number; threadPostId: string }[];
 	/** ダミー敵の配置座標。空なら既定の2体を使う。 */
 	dummies?: { x: number; z: number }[];
-	/** 簡易地形の障害物。three版は当たり判定あり、babylon版は見た目のみ（既知の制限）。 */
-	obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string }[];
+	/** 簡易地形の障害物。walkable=trueで「足場」（乗ると高さが上がる）になる。
+	 *  three/babylon両対応で当たり判定あり。 */
+	obstacles?: {
+		x: number;
+		z: number;
+		w: number;
+		d: number;
+		h: number;
+		color?: string;
+		walkable?: boolean;
+	}[];
 	/** MMD(PMX/PMD)モデルURL（babylon版のみ） */
 	pmxUrl?: string;
-	/** MMD(VMD)モーションURL（babylon版のみ） */
+	/** MMD(VMD)モーションURL（babylon版のみ）。idle（静止/未移動時）用。 */
 	vmdUrl?: string;
+	/** 歩行時に切り替えるVMDモーション（babylon版のみ）。未指定ならvmdUrlのまま。 */
+	vmdWalkUrl?: string;
+	/** 走行時（Shift+移動）に切り替えるVMDモーション（babylon版のみ）。 */
+	vmdRunUrl?: string;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	/** three/babylon 共通API（移動・戦闘・掲示板・位置同期）。フェーズ15でbabylon版もthree版と
@@ -89,7 +104,15 @@ export default function Mmo3dMaker({
 
 		const isBabylon = renderer === "babylon";
 		const engine = isBabylon
-			? new Mmo3dBabylonEngine(canvas, pmxUrl, vmdUrl, dummies, obstacles)
+			? new Mmo3dBabylonEngine(
+					canvas,
+					pmxUrl,
+					vmdUrl,
+					dummies,
+					obstacles,
+					vmdWalkUrl,
+					vmdRunUrl,
+				)
 			: new Mmo3dEngine(
 					canvas,
 					canvas.clientWidth || 640,
@@ -123,18 +146,20 @@ export default function Mmo3dMaker({
 					return observer;
 				})();
 
-		// WASD/矢印キー + Shift + Space(攻撃) + Eキー(掲示板)。three/babylon共通。
-		// babylon版は移動がカメラ相対（ArcRotateCameraをユーザーがドラッグで自由に回せる、
-		// その向きを基準に前後左右を解決する）。
-		const keyToInput: Record<string, "forward" | "back" | "left" | "right"> = {
+		// lib/yume25d.ts と同じ配列（Minecraft創造モード風）: 矢印=前後+旋回、WASD=前後+
+		// 左右ストレイフ。Shift=ダッシュ、Space=攻撃、E=掲示板。three/babylon共通。
+		const keyToInput: Record<
+			string,
+			"forward" | "back" | "strafeL" | "strafeR" | "turnL" | "turnR"
+		> = {
 			KeyW: "forward",
 			ArrowUp: "forward",
 			KeyS: "back",
 			ArrowDown: "back",
-			KeyA: "left",
-			ArrowLeft: "left",
-			KeyD: "right",
-			ArrowRight: "right",
+			KeyA: "strafeL",
+			KeyD: "strafeR",
+			ArrowLeft: "turnL",
+			ArrowRight: "turnR",
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
 			const field = keyToInput[e.code];
@@ -173,7 +198,16 @@ export default function Mmo3dMaker({
 			engineRef.current = null;
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBoardsはboardsKey/boardPostId由来、dummiesKey/obstaclesKeyで内容が変わった時だけ再マウントする
-	}, [renderer, pmxUrl, vmdUrl, effectiveBoards, dummiesKey, obstaclesKey]);
+	}, [
+		renderer,
+		pmxUrl,
+		vmdUrl,
+		vmdWalkUrl,
+		vmdRunUrl,
+		effectiveBoards,
+		dummiesKey,
+		obstaclesKey,
+	]);
 
 	// ── 掲示板への近接検知。開いている間はEでの再トグルより閉じるボタン優先。 ──
 	useEffect(() => {

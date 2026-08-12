@@ -11,7 +11,15 @@ import type { Mmo3dRenderer } from "./game-presets/shared";
 
 type BoardSpot = { x: number; z: number; threadPostId: string };
 type DummySpot = { x: number; z: number };
-type ObstacleSpot = { x: number; z: number; w: number; d: number; h: number; color?: string };
+type ObstacleSpot = {
+	x: number;
+	z: number;
+	w: number;
+	d: number;
+	h: number;
+	color?: string;
+	walkable?: boolean;
+};
 
 export default function Mmo3dEditorPanel({
 	renderer,
@@ -28,6 +36,10 @@ export default function Mmo3dEditorPanel({
 	onPmxUrlChange,
 	vmdUrl = "",
 	onVmdUrlChange,
+	vmdWalkUrl = "",
+	onVmdWalkUrlChange,
+	vmdRunUrl = "",
+	onVmdRunUrlChange,
 }: {
 	renderer: Mmo3dRenderer;
 	onRendererChange: (renderer: Mmo3dRenderer) => void;
@@ -39,13 +51,20 @@ export default function Mmo3dEditorPanel({
 	/** ダミー敵の配置座標一覧。空なら既定の2体を使う。 */
 	dummies?: DummySpot[];
 	onDummiesChange?: (dummies: DummySpot[]) => void;
-	/** 簡易地形の障害物（直方体）一覧。three版は当たり判定あり、babylon版は見た目のみ。 */
+	/** 簡易地形の障害物（直方体）一覧。three/babylon両対応で当たり判定あり。 */
 	obstacles?: ObstacleSpot[];
 	onObstaclesChange?: (obstacles: ObstacleSpot[]) => void;
 	pmxUrl?: string;
 	onPmxUrlChange?: (url: string) => void;
+	/** idle（静止/未移動時）用VMD。 */
 	vmdUrl?: string;
 	onVmdUrlChange?: (url: string) => void;
+	/** 歩行時に切り替えるVMD。未指定ならvmdUrlのまま。 */
+	vmdWalkUrl?: string;
+	onVmdWalkUrlChange?: (url: string) => void;
+	/** 走行時（Shift+移動）に切り替えるVMD。 */
+	vmdRunUrl?: string;
+	onVmdRunUrlChange?: (url: string) => void;
 }) {
 	return (
 		<div className="space-y-3">
@@ -140,9 +159,11 @@ export default function Mmo3dEditorPanel({
 						/>
 					</div>
 
-					{/* VMD モーションプリセット */}
+					{/* VMD モーションプリセット（idle用） */}
 					<div className="space-y-1.5">
-						<p className="text-[10px] text-gray-400 font-bold">2. MMD モーション (.vmd)</p>
+						<p className="text-[10px] text-gray-400 font-bold">
+							2. MMD モーション (.vmd) — 静止時（idle）用
+						</p>
 						<div className="grid grid-cols-2 gap-1">
 							<button
 								type="button"
@@ -175,6 +196,28 @@ export default function Mmo3dEditorPanel({
 							value={vmdUrl}
 							onChange={(e) => onVmdUrlChange?.(e.target.value)}
 							placeholder="カスタム VMD URL (https://...)"
+							className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500"
+						/>
+					</div>
+
+					{/* 歩行/走行モーション（自動切替、任意） */}
+					<div className="space-y-1.5">
+						<p className="text-[10px] text-gray-400 font-bold">
+							3. 歩行・走行モーション（任意、自動切替）
+						</p>
+						<p className="text-[9px] text-gray-500 leading-tight">
+							指定すると移動状態（歩行/Shift+移動でダッシュ）に応じてVMDを自動で切り替えます。空欄なら上のidle用モーションのまま変わりません。ウォークサイクル用のVMDはビルトインカタログに無いため、URLを直接入力してください。
+						</p>
+						<input
+							value={vmdWalkUrl}
+							onChange={(e) => onVmdWalkUrlChange?.(e.target.value)}
+							placeholder="歩行モーション VMD URL（任意, https://...）"
+							className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500"
+						/>
+						<input
+							value={vmdRunUrl}
+							onChange={(e) => onVmdRunUrlChange?.(e.target.value)}
+							placeholder="走行モーション VMD URL（任意, https://...）"
 							className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-[10px] text-gray-200 outline-none focus:border-purple-500"
 						/>
 					</div>
@@ -309,7 +352,7 @@ export default function Mmo3dEditorPanel({
 			<div className="bg-gray-800/60 rounded-lg p-2.5 space-y-2">
 				<p className="text-[11px] font-bold text-gray-300">地形の障害物（直方体）</p>
 				<p className="text-[10px] text-gray-500 leading-tight">
-					中心座標(x, z)・幅(w)・奥行き(d)・高さ(h)を指定した直方体を配置します。three版はプレイヤー/ダミーとの当たり判定あり、babylon版は見た目のみです（既知の制限）。
+					中心座標(x, z)・幅(w)・奥行き(d)・高さ(h)を指定した直方体を配置します。「足場」にチェックすると壁ではなく段差になり、上に乗るとその高さまで登れます（プラットフォーム的な高低差地形）。three/babylon版とも当たり判定・足場ともに対応済みです。
 				</p>
 				{obstacles.map((o, i) => (
 					<div key={`obstacle-${i}`} className="space-y-1 border-b border-gray-700/60 pb-1.5 last:border-0 last:pb-0">
@@ -380,6 +423,19 @@ export default function Mmo3dEditorPanel({
 								削除
 							</button>
 						</div>
+						<label className="flex items-center gap-1.5 text-[10px] text-gray-400">
+							<input
+								type="checkbox"
+								checked={!!o.walkable}
+								onChange={(e) => {
+									const next = [...obstacles];
+									next[i] = { ...o, walkable: e.target.checked };
+									onObstaclesChange?.(next);
+								}}
+								className="accent-blue-500"
+							/>
+							足場にする（壁ではなく段差・上に乗れる）
+						</label>
 					</div>
 				))}
 				<button

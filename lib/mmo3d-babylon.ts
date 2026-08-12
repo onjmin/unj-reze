@@ -27,13 +27,15 @@ import "babylon-mmd/esm/Runtime/Animation/mmdRuntimeModelAnimation"; // MmdAnima
 import type { MmdSkinnedMesh } from "babylon-mmd/esm/Runtime/mmdMesh";
 import type { MmdModel } from "babylon-mmd/esm/Runtime/mmdModel";
 import { MmdRuntime } from "babylon-mmd/esm/Runtime/mmdRuntime";
+import type { MmdRuntimeAnimationHandle } from "babylon-mmd/esm/Runtime/mmdRuntimeAnimationHandle";
 import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
 import type { Mmo3dInputState } from "@/lib/mmo3d";
 import type { RealtimePlayer } from "@/lib/realtime/channels";
 
 const WALK_SPEED = 2.2; // m/s（three版 lib/mmo3d.ts と揃える）
 const RUN_SPEED = 5.5; // m/s
-const TURN_LERP = 10; // 回転の追従係数（three版と同じ、指数減衰の時定数の逆数）
+const STRAFE_SPEED = 2.0; // m/s（three版・lib/yume25d.ts と同じ比率感覚）
+const TURN_SPEED = 2.4; // ラジアン/秒（three版・lib/yume25d.ts と同値）
 
 // ── 簡易近接戦闘（three版 lib/mmo3d.ts と同じ数値。フェーズ15でbabylon版にも移植）。 ──
 const ATTACK_COOLDOWN_SEC = 0.6;
@@ -76,12 +78,14 @@ export class Mmo3dBabylonEngine {
 	private playerRoot: TransformNode;
 	private facing = 0; // ラジアン、three版 lib/mmo3d.ts の facing と同じ定義（+Zを0とする）
 
-	// ── 移動入力（フェーズ14: babylon版にもthree版と同じWASD/矢印+Shiftを配線）。 ──
+	// ── 移動入力（フェーズ20: lib/yume25d.ts と同じタンク操作。three版と共有の型）。 ──
 	private input: Mmo3dInputState = {
 		forward: false,
 		back: false,
-		left: false,
-		right: false,
+		strafeL: false,
+		strafeR: false,
+		turnL: false,
+		turnR: false,
 		run: false,
 	};
 
@@ -106,16 +110,42 @@ export class Mmo3dBabylonEngine {
 	private obstacles: { minX: number; maxX: number; minZ: number; maxZ: number }[] = [];
 	private readonly PLAYER_RADIUS = 0.4;
 
-	// ── アニメ状態（フェーズ16: idle/walk/run。実モデルのクリップ切替は無いが、リアルタイム
-	// 同期やHUD向けに移動状態だけは他プレイヤー/呼び出し側へ伝える）。 ──
+	// ── フェーズ18: walkable指定の障害物は「足場」になる（three版と同じ仕様をbabylon版にも移植）。 ──
+	private platforms: {
+		minX: number;
+		maxX: number;
+		minZ: number;
+		maxZ: number;
+		height: number;
+	}[] = [];
+
+	// ── アニメ状態（フェーズ16: idle/walk/run。フェーズ21でMMDモデルのVMDクリップ自動切替に対応）。 ──
 	private curAnim: "idle" | "walk" | "run" = "idle";
+	/** MMD用: state別のVMDランタイムアニメーションハンドル。読み込めなかったstateは未登録のまま
+	 *  （その場合は直前のアニメーションを維持する。1つも読み込めなければ静止ポーズのまま）。 */
+	private mmdModel: MmdModel | null = null;
+	private mmdAnimHandles: Partial<Record<"idle" | "walk" | "run", MmdRuntimeAnimationHandle>> =
+		{};
+	private mmdCurAnimKey: "idle" | "walk" | "run" | null = null;
 
 	constructor(
 		canvas: HTMLCanvasElement,
 		pmxUrl?: string,
 		vmdUrl?: string,
 		dummyPositions?: { x: number; z: number }[],
-		obstacleSpecs?: { x: number; z: number; w: number; d: number; h: number; color?: string }[],
+		obstacleSpecs?: {
+			x: number;
+			z: number;
+			w: number;
+			d: number;
+			h: number;
+			color?: string;
+			walkable?: boolean;
+		}[],
+		/** 歩行/走行時に切り替えるVMD（フェーズ21）。未指定のstateは直前のアニメを維持する
+		 *  （1つも指定が無ければvmdUrlの静止ポーズ/ループのまま）。 */
+		vmdWalkUrl?: string,
+		vmdRunUrl?: string,
 	) {
 		this.engine = new Engine(canvas, true, { stencil: true });
 		this.scene = new Scene(this.engine);
@@ -200,7 +230,7 @@ export class Mmo3dBabylonEngine {
 			this.dummies.push({ mesh, mat, hp: DUMMY_MAX_HP, respawnAt: null, baseX: x, baseZ: z });
 		}
 
-		// 簡易地形障害物。当たり判定はAABB（軸分離スライド、updateMovement側で使用、three版と同じ方式）。
+		// 簡易地形障害物。walkable指定は「壁」ではなく「足場」になる（three版と同じ方式）。
 		for (const spec of obstacleSpecs ?? []) {
 			const box = MeshBuilder.CreateBox(
 				`obstacle-${this.scene.meshes.length}`,
@@ -209,19 +239,32 @@ export class Mmo3dBabylonEngine {
 			);
 			box.position.set(spec.x, spec.h / 2, spec.z);
 			const mat = new StandardMaterial(`obstacleMat-${this.scene.meshes.length}`, this.scene);
-			mat.diffuseColor = spec.color ? Color3.FromHexString(spec.color) : new Color3(0.47, 0.33, 0.28);
+			mat.diffuseColor = spec.color
+				? Color3.FromHexString(spec.color)
+				: spec.walkable
+					? new Color3(0.62, 0.62, 0.36)
+					: new Color3(0.47, 0.33, 0.28);
 			box.material = mat;
-			this.obstacles.push({
+			const bounds = {
 				minX: spec.x - spec.w / 2,
 				maxX: spec.x + spec.w / 2,
 				minZ: spec.z - spec.d / 2,
 				maxZ: spec.z + spec.d / 2,
-			});
+			};
+			if (spec.walkable) {
+				this.platforms.push({ ...bounds, height: spec.h });
+			} else {
+				this.obstacles.push(bounds);
+			}
 		}
 
 		if (pmxUrl) {
 			player.isVisible = false;
-			this.loadMmdModelAndPlay(pmxUrl, vmdUrl).catch((err) => {
+			this.loadMmdModelAndPlay(pmxUrl, {
+				idle: vmdUrl,
+				walk: vmdWalkUrl,
+				run: vmdRunUrl,
+			}).catch((err) => {
 				console.warn("Failed to load initial MMD model, falling back to placeholder:", err);
 				player.isVisible = true;
 			});
@@ -249,60 +292,63 @@ export class Mmo3dBabylonEngine {
 		Object.assign(this.input, next);
 	}
 
-	/** カメラ相対で移動する。ArcRotateCameraの現在の向き（ユーザーがドラッグで自由に回せる）
-	 *  を基準に前後左右を解決するため、three版のような「移動方向にカメラが強制的に振られる」
-	 *  違和感が出ない（このプリセットの主な不具合修正の方針を踏襲）。 */
+	/** lib/yume25d.ts と同じ「タンク操作」（three版 lib/mmo3d.ts と共通のロジック）。
+	 *  前後移動・ストレイフはfacingを変更せず、旋回は専用キー(turnL/turnR)でしか起きない。
+	 *  以前はArcRotateCameraの向きを毎フレーム参照する「カメラ相対」実装だったが、後退キーで
+	 *  向きが変わって見える・facingを自己参照して回転先を決めるため無限回転するリスクがある、
+	 *  という構造的な問題があった（three版で実際にこのバグが発生した。フェーズ19参照）。
+	 *  ArcRotateCameraのドラッグ操作自体は引き続きでき、視点を自由に見回せる（移動には影響しない）。 */
 	private updateMovement(dt: number) {
-		const { forward, back, left, right, run } = this.input;
-		let lz = 0; // 前(+1)/後(-1) ローカル
-		let lx = 0; // 右(+1)/左(-1) ローカル
-		if (forward) lz += 1;
-		if (back) lz -= 1;
-		if (left) lx -= 1;
-		if (right) lx += 1;
-		if (lx === 0 && lz === 0) {
-			this.curAnim = "idle";
-			return;
-		}
-		const len = Math.hypot(lx, lz);
-		lx /= len;
-		lz /= len;
+		const { forward, back, strafeL, strafeR, turnL, turnR, run } = this.input;
 
-		const camForward = this.camera.target.subtract(this.camera.position);
-		camForward.y = 0;
-		if (camForward.lengthSquared() < 1e-6) camForward.set(0, 0, 1);
-		camForward.normalize();
-		const camRight = Vector3.Cross(Vector3.Up(), camForward).normalize();
-
-		const moveDir = camForward.scale(lz).add(camRight.scale(lx));
-		if (moveDir.lengthSquared() < 1e-6) {
-			this.curAnim = "idle";
-			return;
-		}
-		moveDir.normalize();
-
-		const targetFacing = Math.atan2(moveDir.x, moveDir.z);
-		let diff = targetFacing - this.facing;
-		diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-		// 指数減衰（three版 lib/mmo3d.ts と同じ修正）。線形のMath.min(1, TURN_LERP*dt)だと
-		// dtが跳ねた瞬間に係数が1.0に張り付いて旋回が瞬間スナップして見えるバグがあった。
-		this.facing += diff * (1 - Math.exp(-TURN_LERP * dt));
+		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
+		this.facing += turn * TURN_SPEED * dt;
 		this.playerRoot.rotation.y = this.facing;
 
-		const speed = run ? RUN_SPEED : WALK_SPEED;
-		const [nx, nz] = this.resolveObstacleCollision(
-			this.playerRoot.position.x,
-			this.playerRoot.position.z,
-			moveDir.x * speed * dt,
-			moveDir.z * speed * dt,
-		);
-		this.playerRoot.position.x = nx;
-		this.playerRoot.position.z = nz;
-		this.curAnim = run ? "run" : "walk";
+		const move = (forward ? 1 : 0) - (back ? 1 : 0);
+		const strafe = (strafeR ? 1 : 0) - (strafeL ? 1 : 0);
+		const moving = move !== 0 || strafe !== 0;
 
-		// カメラは向きを強制せず、狙点だけプレイヤーに追従させる（ユーザーのドラッグ操作を尊重）。
+		if (moving) {
+			const fx = Math.sin(this.facing);
+			const fz = Math.cos(this.facing);
+			const rx = Math.cos(this.facing);
+			const rz = -Math.sin(this.facing);
+
+			const runMult = run ? RUN_SPEED / WALK_SPEED : 1;
+			const ms = move * WALK_SPEED * runMult * dt;
+			const ss = strafe * STRAFE_SPEED * runMult * dt;
+
+			const [nx, nz] = this.resolveObstacleCollision(
+				this.playerRoot.position.x,
+				this.playerRoot.position.z,
+				fx * ms + rx * ss,
+				fz * ms + rz * ss,
+			);
+			this.playerRoot.position.x = nx;
+			this.playerRoot.position.z = nz;
+			this.curAnim = run ? "run" : "walk";
+		} else {
+			this.curAnim = "idle";
+		}
+		this.applyStandHeight();
+		this.syncMmdAnimation();
+
+		// カメラの狙点だけプレイヤーに追従させる（alpha/beta/radiusはユーザーのドラッグ操作のまま）。
 		this.camera.target.x = this.playerRoot.position.x;
 		this.camera.target.z = this.playerRoot.position.z;
+	}
+
+	/** walkable障害物（足場）に乗っていれば、その高さをplayerRootのYに反映する
+	 *  （フェーズ18: three版と同じ仕様）。 */
+	private applyStandHeight() {
+		const { x, z } = this.playerRoot.position;
+		let best = 0;
+		for (const p of this.platforms) {
+			if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+			if (p.height > best) best = p.height;
+		}
+		this.playerRoot.position.y = best;
 	}
 
 	/** 障害物との軸分離スライド判定（three版 resolveObstacleCollision と同じロジック）。 */
@@ -504,11 +550,13 @@ export class Mmo3dBabylonEngine {
 		}
 	}
 
-	/** MMD(PMX)モデルを読み込み、指定があればVMDモーションを再生する。
-	 *  MmdRuntimeはこのメソッドを初めて呼んだときに1回だけ生成・登録する。*/
+	/** MMD(PMX)モデルを読み込み、指定があればstate別（idle/walk/run）のVMDモーションを
+	 *  読み込んで自動切替できるようにする（フェーズ21）。MmdRuntimeはこのメソッドを初めて
+	 *  呼んだときに1回だけ生成・登録する。読み込みに失敗したstateは警告のみでスキップする
+	 *  （1つでも読み込めれば動作は継続する）。 */
 	async loadMmdModelAndPlay(
 		pmxUrl: string,
-		vmdUrl?: string,
+		vmdUrls?: { idle?: string; walk?: string; run?: string },
 	): Promise<MmdModel> {
 		const meshes = await this.loadMmdModel(pmxUrl);
 		const root = meshes[0] as unknown as MmdSkinnedMesh;
@@ -520,25 +568,60 @@ export class Mmo3dBabylonEngine {
 			this.mmdRuntime.register(this.scene);
 		}
 		const mmdModel = this.mmdRuntime.createMmdModel(root);
+		this.mmdModel = mmdModel;
+		this.mmdAnimHandles = {};
+		this.mmdCurAnimKey = null;
 
-		if (vmdUrl) {
-			const vmdLoader = new VmdLoader(this.scene);
-			const loadVmd = (url: string) => vmdLoader.loadAsync("motion", url);
-			let animation: Awaited<ReturnType<typeof loadVmd>>;
+		const vmdLoader = new VmdLoader(this.scene);
+		const loadVmd = (name: string, url: string) => vmdLoader.loadAsync(name, url);
+		const entries: ["idle" | "walk" | "run", string | undefined][] = [
+			["idle", vmdUrls?.idle],
+			["walk", vmdUrls?.walk],
+			["run", vmdUrls?.run],
+		];
+		for (const [key, url] of entries) {
+			if (!url) continue;
 			try {
-				animation = await loadVmd(vmdUrl);
+				let animation: Awaited<ReturnType<typeof loadVmd>>;
+				try {
+					animation = await loadVmd(key, url);
+				} catch (err) {
+					const proxied = wrapCorsProxyUrl(url);
+					if (proxied === url) throw err;
+					notifyCorsProxyUsed();
+					animation = await loadVmd(key, proxied);
+				}
+				this.mmdAnimHandles[key] = mmdModel.createRuntimeAnimation(animation);
 			} catch (err) {
-				const proxied = wrapCorsProxyUrl(vmdUrl);
-				if (proxied === vmdUrl) throw err;
-				notifyCorsProxyUsed();
-				animation = await loadVmd(proxied);
+				console.warn(`mmo3d(babylon): VMDモーション"${key}"の読み込みに失敗:`, err);
 			}
-			const handle = mmdModel.createRuntimeAnimation(animation);
-			mmdModel.setRuntimeAnimation(handle);
-			await this.mmdRuntime.playAnimation();
+		}
+
+		// 初期状態はidle（無ければ読み込めた中から適当な1つ）で開始する。
+		const initialKey =
+			this.mmdAnimHandles.idle !== undefined
+				? "idle"
+				: (Object.keys(this.mmdAnimHandles)[0] as "idle" | "walk" | "run" | undefined);
+		if (initialKey !== undefined) {
+			const handle = this.mmdAnimHandles[initialKey];
+			if (handle !== undefined) {
+				mmdModel.setRuntimeAnimation(handle);
+				this.mmdCurAnimKey = initialKey;
+				await this.mmdRuntime.playAnimation();
+			}
 		}
 
 		return mmdModel;
+	}
+
+	/** curAnim（idle/walk/run）の変化に応じて、読み込み済みのVMDハンドルへ切り替える。
+	 *  該当stateのVMDが無ければ何もしない（直前のアニメーションを維持する）。 */
+	private syncMmdAnimation() {
+		if (!this.mmdModel || this.mmdCurAnimKey === this.curAnim) return;
+		const handle = this.mmdAnimHandles[this.curAnim];
+		if (handle === undefined) return;
+		this.mmdModel.setRuntimeAnimation(handle);
+		this.mmdCurAnimKey = this.curAnim;
 	}
 
 	/** Havok物理はWASM初期化が非同期のため、必要になったフェーズで呼び出す。 */

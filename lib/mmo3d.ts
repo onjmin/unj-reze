@@ -15,12 +15,19 @@ import { notifyCorsProxyUsed, wrapCorsProxyUrl } from "@/lib/cors-proxy";
 import { MMO3D_BUILTIN_MODELS } from "@/lib/mmo3d-asset-catalog";
 import type { RealtimePlayer } from "@/lib/realtime/channels";
 
-/** 移動キー入力の論理状態（GameMaker.tsx の virtualKeys 相当と将来揃える）。 */
+/** 移動キー入力の論理状態。lib/yume25d.ts の操作感（前後移動と旋回を別キーに分離した
+ *  「タンク操作」）に統一している（フェーズ20）。forward/back/strafeL/strafeRは現在の
+ *  facingを一切変更せず、その向きに対して平行/垂直に移動するだけ。旋回はturnL/turnRの
+ *  専用キーでしか起きない。これにより「後退キーで向きが変わる」ような直感に反する挙動を
+ *  構造的に防ぐ（moveキーがfacingの計算に一切関与しないため、自己参照バグも原理的に
+ *  起こりえない）。 */
 export interface Mmo3dInputState {
 	forward: boolean;
 	back: boolean;
-	left: boolean;
-	right: boolean;
+	strafeL: boolean;
+	strafeR: boolean;
+	turnL: boolean;
+	turnR: boolean;
 	run: boolean;
 }
 
@@ -28,7 +35,8 @@ type AnimState = "idle" | "walk" | "run";
 
 const WALK_SPEED = 2.2; // m/s
 const RUN_SPEED = 5.5; // m/s
-const TURN_LERP = 10; // 回転の追従係数（大きいほど速く追従する。指数減衰の時定数の逆数）
+const STRAFE_SPEED = 2.0; // m/s（lib/yume25d.ts のSTRAFE_SPEEDと同じ比率感覚）
+const TURN_SPEED = 2.4; // ラジアン/秒（lib/yume25d.ts のTURN_SPEEDと同値）
 const CROSSFADE_SEC = 0.25;
 
 const ATTACK_COOLDOWN_SEC = 0.6;
@@ -110,12 +118,25 @@ export class Mmo3dEngine {
 	private obstacleMats: THREE.MeshStandardMaterial[] = [];
 	private readonly PLAYER_RADIUS = 0.4;
 
+	// ── フェーズ18: walkable指定の障害物は「壁」ではなく「足場（プラットフォーム）」になる。
+	// 水平方向はブロックせず、その上に乗っている間だけプレイヤーのY座標をその高さに引き上げる
+	// （高低差のある簡易地形。傾斜/凹凸までは対応しない — 既知の制限）。 ──
+	private platforms: {
+		minX: number;
+		maxX: number;
+		minZ: number;
+		maxZ: number;
+		height: number;
+	}[] = [];
+
 	/** 現在の入力状態。setInput() で外部（キーボード/仮想パッド）から更新する。 */
 	private input: Mmo3dInputState = {
 		forward: false,
 		back: false,
-		left: false,
-		right: false,
+		strafeL: false,
+		strafeR: false,
+		turnL: false,
+		turnR: false,
 		run: false,
 	};
 	private facing = 0; // ラジアン、+Zを0とする
@@ -125,7 +146,15 @@ export class Mmo3dEngine {
 		width: number,
 		height: number,
 		dummyPositions?: { x: number; z: number }[],
-		obstacleSpecs?: { x: number; z: number; w: number; d: number; h: number; color?: string }[],
+		obstacleSpecs?: {
+			x: number;
+			z: number;
+			w: number;
+			d: number;
+			h: number;
+			color?: string;
+			walkable?: boolean;
+		}[],
 	) {
 		this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 		this.renderer.setSize(width, height, false);
@@ -193,21 +222,29 @@ export class Mmo3dEngine {
 			});
 		}
 
-		// 簡易地形障害物（直方体）。当たり判定はAABB（軸分離スライド、updateMovement側で使用）。
+		// 簡易地形障害物（直方体）。walkable指定は「壁」ではなく「足場」になる
+		// （水平ブロックなし、上に乗るとY座標がその高さに上がる）。
 		for (const spec of obstacleSpecs ?? []) {
 			const geo = new THREE.BoxGeometry(spec.w, spec.h, spec.d);
-			const mat = new THREE.MeshStandardMaterial({ color: spec.color ?? 0x795548 });
+			const mat = new THREE.MeshStandardMaterial({
+				color: spec.color ?? (spec.walkable ? 0x9e9e5c : 0x795548),
+			});
 			const mesh = new THREE.Mesh(geo, mat);
 			mesh.position.set(spec.x, spec.h / 2, spec.z);
 			this.scene.add(mesh);
 			this.obstacleGeos.push(geo);
 			this.obstacleMats.push(mat);
-			this.obstacles.push({
+			const bounds = {
 				minX: spec.x - spec.w / 2,
 				maxX: spec.x + spec.w / 2,
 				minZ: spec.z - spec.d / 2,
 				maxZ: spec.z + spec.d / 2,
-			});
+			};
+			if (spec.walkable) {
+				this.platforms.push({ ...bounds, height: spec.h });
+			} else {
+				this.obstacles.push(bounds);
+			}
 		}
 
 		this.clock = new THREE.Clock();
@@ -445,58 +482,64 @@ export class Mmo3dEngine {
 	}
 
 	private updateMovement(dt: number) {
-		const { forward, back, left, right, run } = this.input;
-		// キー入力はプレイヤーの現在の向き（this.facing）を基準にしたローカル方向。
-		// これをワールド座標へ回転してから移動・目標向きを決める（カメラ相対操作）。
-		// ワールド直交で扱うと、直前の移動で向きが変わるたびに「前」の意味がブレて
-		// 操作感が滅茶苦茶になる（例: 右に動いてカメラが追従した後だと、次の「前」が
-		// 画面上は右や斜めに見える）。
-		let localX = 0;
-		let localZ = 0;
-		if (forward) localZ -= 1;
-		if (back) localZ += 1;
-		if (left) localX -= 1;
-		if (right) localX += 1;
-		const moving = localX !== 0 || localZ !== 0;
+		const { forward, back, strafeL, strafeR, turnL, turnR, run } = this.input;
+		// lib/yume25d.ts と同じ「タンク操作」: 前後移動・ストレイフはfacingを一切変更せず、
+		// 旋回は専用キー(turnL/turnR)でしか起きない。以前は移動キーの入力からfacingの目標角度
+		// を毎フレーム逆算していたが、後退キー単体でも「後ろを向く」ような目標角度が出てしまい
+		// （直感に反する回転）、さらにfacing自身を参照して目標を再計算する構造だったため
+		// 自己参照ループによる無限回転バグ（Wキー押しっぱなしで回り続ける）も引き起こしていた。
+		// 移動とfacingの計算を完全に分離することで、両方の問題を構造的に防ぐ。
+		const turn = (turnL ? 1 : 0) - (turnR ? 1 : 0);
+		this.facing += turn * TURN_SPEED * dt;
+
+		const move = (forward ? 1 : 0) - (back ? 1 : 0);
+		const strafe = (strafeR ? 1 : 0) - (strafeL ? 1 : 0);
+		const moving = move !== 0 || strafe !== 0;
 
 		if (moving) {
-			const len = Math.hypot(localX, localZ);
-			localX /= len;
-			localZ /= len;
-			const theta = this.facing;
-			const cos = Math.cos(theta);
-			const sin = Math.sin(theta);
-			// facing=0 のとき恒等変換になる回転（updateCamera の (sinθ, cosθ) 前方定義と整合）。
-			const mx = localX * cos + localZ * sin;
-			const mz = -localX * sin + localZ * cos;
-			const targetFacing = Math.atan2(mx, mz);
-			// 最短角度差でラープ（±πをまたぐ跳躍を防ぐ）。
-			// Math.min(1, TURN_LERP*dt)の線形版だとdtが0.1s近くまで跳ねた瞬間に係数がちょうど
-			// 1.0になり、その1フレームで向きが完全にスナップして「旋回が異常に高速」に見える
-			// バグがあった（フレームレートが落ちるほど酷くなる）。指数減衰（1-e^-kt）なら
-			// dtが多少跳ねても係数が1.0に張り付かず、常に滑らかに追従する。
-			let diff = targetFacing - this.facing;
-			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-			this.facing += diff * (1 - Math.exp(-TURN_LERP * dt));
+			// 前方 = (sin facing, cos facing)、右方 = (cos facing, -sin facing)。
+			const fx = Math.sin(this.facing);
+			const fz = Math.cos(this.facing);
+			const rx = Math.cos(this.facing);
+			const rz = -Math.sin(this.facing);
 
-			const speed = run ? RUN_SPEED : WALK_SPEED;
+			const runMult = run ? RUN_SPEED / WALK_SPEED : 1;
+			const ms = move * WALK_SPEED * runMult * dt;
+			const ss = strafe * STRAFE_SPEED * runMult * dt;
+
 			const [nx, nz] = this.resolveObstacleCollision(
 				this.player.position.x,
 				this.player.position.z,
-				mx * speed * dt,
-				mz * speed * dt,
+				fx * ms + rx * ss,
+				fz * ms + rz * ss,
 			);
 			this.player.position.x = nx;
 			this.player.position.z = nz;
 		}
 		this.player.rotation.y = this.facing;
 
+		// walkable障害物（足場）の上に乗っていれば、その高さをY座標のベースにする
+		// （フェーズ18: 高低差のある簡易地形）。
+		const groundY = this.standHeightAt(this.player.position.x, this.player.position.z);
+
 		if (this.mixer) {
 			this.setAnim(moving ? (run ? "run" : "walk") : "idle");
+			this.player.position.y = groundY;
 		} else {
 			// モデル未ロード時（プレースホルダーカプセル）だけの仮アイドルモーション。
-			this.player.position.y = 0.9 + Math.sin(this.clock.elapsedTime * 2) * 0.05;
+			this.player.position.y = groundY + 0.9 + Math.sin(this.clock.elapsedTime * 2) * 0.05;
 		}
+	}
+
+	/** その地点で足場（walkable障害物）に乗っているなら最も高いものの高さを、無ければ0（地面）
+	 *  を返す。重なった足場があれば高い方を優先する。 */
+	private standHeightAt(x: number, z: number): number {
+		let best = 0;
+		for (const p of this.platforms) {
+			if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+			if (p.height > best) best = p.height;
+		}
+		return best;
 	}
 
 	/** 障害物との軸分離スライド判定。x/zを別々に試し、衝突する軸だけ移動をキャンセルする

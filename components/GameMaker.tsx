@@ -222,9 +222,11 @@ export interface GameManifestDraft {
     boardPostId?: string;
     boards?: { x: number; z: number; threadPostId: string }[];
     dummies?: { x: number; z: number }[];
-    obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string }[];
+    obstacles?: { x: number; z: number; w: number; d: number; h: number; color?: string; walkable?: boolean }[];
     pmxUrl?: string;
     vmdUrl?: string;
+    vmdWalkUrl?: string;
+    vmdRunUrl?: string;
   };
   /** シーン切り替えモード。各シーンのオブジェクトは spriteUrl を除く。 */
   scenes?: Array<Omit<SceneDef, 'objects' | 'bgm'> & { objects: Array<Omit<ObjectDef, 'spriteUrl'>>; bgm?: string }>;
@@ -14069,6 +14071,8 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                 obstacles={gameData.mmo3dConfig?.obstacles}
                 pmxUrl={gameData.mmo3dConfig?.pmxUrl}
                 vmdUrl={gameData.mmo3dConfig?.vmdUrl}
+                vmdWalkUrl={gameData.mmo3dConfig?.vmdWalkUrl}
+                vmdRunUrl={gameData.mmo3dConfig?.vmdRunUrl}
               />
             ) : gameData.engine === 'yume25d' ? (
               <Yume25DMaker
@@ -16716,6 +16720,10 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
                     onPmxUrlChange={(pmxUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, pmxUrl: pmxUrl || undefined } }))}
                     vmdUrl={gameData.mmo3dConfig?.vmdUrl ?? ''}
                     onVmdUrlChange={(vmdUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdUrl: vmdUrl || undefined } }))}
+                    vmdWalkUrl={gameData.mmo3dConfig?.vmdWalkUrl ?? ''}
+                    onVmdWalkUrlChange={(vmdWalkUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdWalkUrl: vmdWalkUrl || undefined } }))}
+                    vmdRunUrl={gameData.mmo3dConfig?.vmdRunUrl ?? ''}
+                    onVmdRunUrlChange={(vmdRunUrl) => setGameData(prev => ({ ...prev, mmo3dConfig: { renderer: prev.mmo3dConfig?.renderer ?? 'three', ...prev.mmo3dConfig, vmdRunUrl: vmdRunUrl || undefined } }))}
                   />
                 )}
                 {editorTab === 'map' && gameData.engine !== 'yume25d' && gameData.engine !== 'mmo3d' && (
