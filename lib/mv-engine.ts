@@ -3547,11 +3547,13 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 
 	ctx.save();
 	ctx.beginPath();
+	// 高さは便宜上の値（表示領域の目安）として扱い、上下にはみ出した音階もクリップせず描画する。
+	// ただし横幅（時間軸）はクリップしないと横にはみ出してしまうため X 軸だけ制限する。
 	ctx.rect(
 		x - clipMargin,
-		y - clipMargin,
+		-MV_H * 10,
 		w + clipMargin * 2,
-		h + clipMargin * 2,
+		MV_H * 20,
 	);
 	ctx.clip();
 
