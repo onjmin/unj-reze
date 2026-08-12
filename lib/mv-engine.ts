@@ -275,10 +275,30 @@ function detectChordProgression(notes: MvNote[], bpm: number): MvChordStep[] {
 }
 
 /**
+ * 間奏かどうかの判定に使う「行と行の間の空き」しきい値（小節）。`holdBars`（積み上げの
+ * 表示保持時間）とは別物として固定値で持つ。同じ値を使い回すと、holdBars を長めに
+ * 設定した曲では実際の間奏（数小節の空き）を検出できずに歌詞が消えず、逆に holdBars
+ * を短くした曲では普通の息継ぎの間まで間奏扱いされてしまう——という事故が起きる。
+ *
+ * `lyricLinesFromTrack`（行の切り出し）と `applyLyricGapResets`（行間の間奏検出）の
+ * 両方が同じ値を見る。切り出し側だけ別の基準にすると「行としては割れているのに
+ * 間奏扱いされない/されすぎる」というズレが起きるので、必ず1箇所にまとめておくこと。
+ */
+const INTERLUDE_GAP_BARS = 1.5;
+
+/**
  * 歌詞トラックの音節列を「行」へまとめ、各行の開始小節を演奏ノートから求める。
  *
  * 音節と演奏ノートは同じトラックIDで1:1に対応する前提（@onjmin/dtm の歌唱合成と同じ割り当て）。
  * lineBreaks が無い＝1行で書かれた歌詞は、長いと画面に収まらないので一定文字数で折る。
+ *
+ * **明示的な改行が無くても、音符どうしの間が `INTERLUDE_GAP_BARS` より大きく空いたら
+ * 強制的に行を割る。** これが無いと、間奏をまたいで書かれた歌詞（間奏の前後にわざわざ
+ * 改行を入れていない、よくある書き方）が「間奏をまたいだ1本の長い行」になってしまい、
+ * その1行の中では `bar`〜`endBar` が間奏の前後をまるごと覆ってしまう。行と行の間の
+ * 空きを見て間奏を検出する `applyLyricGapResets` は行がそもそも2本に割れていないと
+ * 判定のしようが無いので、間奏中も歌詞が表示され続けるバグになっていた
+ * （ユーザー指摘: 8小節の間奏をまたいでも歌詞が消えなかった）。
  */
 function lyricLinesFromTrack(
 	trackId: number,
@@ -292,6 +312,7 @@ function lyricLinesFromTrack(
 	const breaks = new Set(lineBreaks ?? []);
 	const SOFT_WRAP = 12;
 	const useSoftWrap = breaks.size === 0 && syllables.length > SOFT_WRAP * 1.5;
+	const gapSplitSteps = INTERLUDE_GAP_BARS * MV_STEPS_PER_BAR;
 
 	const lines: MvLyricLine[] = [];
 	let text = "";
@@ -312,9 +333,14 @@ function lyricLinesFromTrack(
 	};
 
 	syllables.forEach((syl, i) => {
-		if (i > 0 && (breaks.has(i) || (useSoftWrap && i % SOFT_WRAP === 0)))
-			flush();
 		const note = trackNotes[Math.min(i, trackNotes.length - 1)];
+		const bigTimeGap =
+			i > 0 && endStep !== null && note.startStep - endStep > gapSplitSteps;
+		if (
+			i > 0 &&
+			(bigTimeGap || breaks.has(i) || (useSoftWrap && i % SOFT_WRAP === 0))
+		)
+			flush();
 		if (startStep === null) startStep = note.startStep;
 		endStep = note.startStep + note.durationSteps;
 		text += syl.kana;
@@ -2941,14 +2967,6 @@ export function resolveLyricLines(
 	const withGapResets = applyLyricGapResets(lines, layer.holdBars ?? 2);
 	return applyLyricResetBars(withGapResets, layer.resetBars);
 }
-
-/**
- * 間奏かどうかの判定に使う「行間の空き」しきい値（小節）。`holdBars`（積み上げの
- * 表示保持時間）とは別物として固定値で持つ。同じ値を使い回すと、holdBars を長めに
- * 設定した曲では実際の間奏（数小節の空き）を検出できずに歌詞が消えず、逆に holdBars
- * を短くした曲では普通の息継ぎの間まで間奏扱いされてしまう——という事故が起きる。
- */
-const INTERLUDE_GAP_BARS = 1.5;
 
 /**
  * 手入力の resetBars/resetBefore とは別に、行と行のあいだが INTERLUDE_GAP_BARS より
