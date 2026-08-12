@@ -3553,7 +3553,10 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const to = from + windowSteps;
 
 	const notes = notesForLayer(d, layer);
-	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, notes);
+	const targetNotes = paged
+		? notes.filter((n) => n.startStep >= from && n.startStep < to)
+		: notes;
+	const [pitchLo, pitchHi] = getLayerPitchRange(song, layer, targetNotes);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const noteH = Math.max(1.5, h / (pitchRange + 1));
 	const echo = light.echo && light.echo.beats > 0 ? light.echo : null;
