@@ -2729,32 +2729,66 @@ function getPath2D(dstr: string): Path2D {
 }
 
 /**
- * `iconCycle` の今フレームでのコマ番号。
+ * `iconCycle` の今フレームでのコマ番号と、そのコマの中での進み具合 (0..1)。
+ *
  * `advance:"onset"` は指定トラックの発音回数ぶん進む。
  * `beats` は拍ロック(一定間隔)。`resetEveryBars` があれば、その小節数の境目で
  * 1コマ目(小節の頭)に戻り、残りの小節でコマ2以降を順にめぐる
  * （目視確認: 8小節ごとに単純な形へ戻り、残りの小節でループする構造だったため）。
+ *
+ * 進み具合は `crossfade` 専用——次のコマと重ねるには切り替わりまでの残りが要る。
+ * `advance:"onset"` は次の発音がいつ来るか分からず進捗を出しようがないので常に 0
+ * （＝重ね合わせ無しで従来どおり瞬時に切り替わる）。
  */
-function iconCycleIndex(
+function iconCyclePosition(
 	d: DrawCtx,
 	cycle: NonNullable<MvShapeLayer["iconCycle"]>,
-): number {
+): { index: number; t: number } {
 	const n = cycle.paths.length;
 	if ("advance" in cycle) {
 		const list = trackNotes(d.song, cycle.track);
 		const idx = lastIndexAtOrBefore(list, d.step);
-		return (((idx + 1) % n) + n) % n;
+		return { index: (((idx + 1) % n) + n) % n, t: 0 };
 	}
-	if (cycle.resetEveryBars) {
-		const windowSteps = cycle.resetEveryBars * MV_STEPS_PER_BAR;
-		const windowStart = Math.floor(d.step / windowSteps) * windowSteps;
-		const localStep = d.step - windowStart;
-		return Math.min(n - 1, Math.floor((localStep / windowSteps) * n));
+	const pos = cycle.resetEveryBars
+		? (() => {
+				const windowSteps = cycle.resetEveryBars * MV_STEPS_PER_BAR;
+				const windowStart = Math.floor(d.step / windowSteps) * windowSteps;
+				return ((d.step - windowStart) / windowSteps) * n;
+			})()
+		: ((d.step / (cycle.beats * MV_STEPS_PER_BEAT)) % 1) * n;
+	const index = Math.min(n - 1, Math.floor(pos));
+	return { index, t: clamp01(pos - index) };
+}
+
+/** 重ね合わせの効き方。線形だと入れ替わりの瞬間が平坦に見えるので S字にする。 */
+function smoothstep(x: number): number {
+	const u = clamp01(x);
+	return u * u * (3 - 2 * u);
+}
+
+/**
+ * 今フレームで描くコマ（1枚、または重ね合わせ中の2枚）を返す。
+ * 重ね合わせ中は前後のコマの濃さを足して1になるようにしてあるので、
+ * 全体の明るさが繋ぎ目で膨らんだり凹んだりしない。
+ */
+function iconCycleFrames(
+	d: DrawCtx,
+	cycle: NonNullable<MvShapeLayer["iconCycle"]>,
+): { path: string; alpha: number }[] {
+	const { index, t } = iconCyclePosition(d, cycle);
+	const n = cycle.paths.length;
+	const xf = "advance" in cycle ? 0 : clamp01(cycle.crossfade ?? 0);
+	// コマの終わり xf ぶんに入るまでは今のコマだけ。手前で混ぜ始めると
+	// 「ずっと二重に見えている」だけになり、決まるべき瞬間が消える。
+	if (xf <= 0 || n < 2 || t < 1 - xf) {
+		return [{ path: cycle.paths[index], alpha: 1 }];
 	}
-	return Math.min(
-		n - 1,
-		Math.floor(((d.step / (cycle.beats * MV_STEPS_PER_BEAT)) % 1) * n),
-	);
+	const u = smoothstep((t - (1 - xf)) / xf);
+	return [
+		{ path: cycle.paths[index], alpha: 1 - u },
+		{ path: cycle.paths[(index + 1) % n], alpha: u },
+	];
 }
 
 function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
@@ -2806,10 +2840,11 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 		ctx.rotate((rotation + spin * i) * DEG);
 		const aspect = layer.aspect ?? 1;
 		if (aspect !== 1) ctx.scale(1, aspect);
-		const cyclePath = layer.iconCycle
-			? layer.iconCycle.paths[iconCycleIndex(d, layer.iconCycle)]
+		// コマ送り中は、切り替わり際に前後2枚が重なって返ってくる（crossfade）。
+		const cycleFrames = layer.iconCycle
+			? iconCycleFrames(d, layer.iconCycle)
 			: undefined;
-		const activePath = cyclePath ?? layer.path;
+		const activePath = cycleFrames ? cycleFrames[0].path : layer.path;
 		if (layer.form === "path" && activePath) {
 			// 設計座標系（pathBox）の中心を原点に、長辺が size×2 になるよう拡縮して描く
 			const box = layer.pathBox ?? [0, 0, 100, 100];
@@ -2818,17 +2853,23 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 			const s = (radius * 2) / Math.max(bw, bh);
 			ctx.scale(s, s);
 			ctx.translate(-(box[0] + bw / 2), -(box[1] + bh / 2));
-			try {
-				const p = getPath2D(activePath);
-				// evenodd にしておくと、重なったサブパスが穴として抜ける（ドーナツ形などが作れる）
-				if (layer.filled) ctx.fill(p, "evenodd");
-				else {
-					ctx.lineWidth = thickness / s;
-					ctx.stroke(p);
+			const frames = cycleFrames ?? [{ path: activePath, alpha: 1 }];
+			for (const fr of frames) {
+				if (fr.alpha <= 0.004 || !fr.path) continue;
+				ctx.globalAlpha = baseAlpha * opacity * fr.alpha;
+				try {
+					const p = getPath2D(fr.path);
+					// evenodd にしておくと、重なったサブパスが穴として抜ける（ドーナツ形などが作れる）
+					if (layer.filled) ctx.fill(p, "evenodd");
+					else {
+						ctx.lineWidth = thickness / s;
+						ctx.stroke(p);
+					}
+				} catch {
+					// 入力途中の壊れたパスは黙って飛ばす
 				}
-			} catch {
-				// 入力途中の壊れたパスは黙って飛ばす
 			}
+			ctx.globalAlpha = baseAlpha * opacity;
 		} else if (layer.form === "doubleFrame") {
 			// 内外2本の正方形の枠が小節ごとに軽く息をする（0〜1周期でふわっと拡がって戻る）
 			const barPhase = d.bar - Math.floor(d.bar);

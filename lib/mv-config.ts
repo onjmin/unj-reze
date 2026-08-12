@@ -1253,9 +1253,22 @@ export interface MvShapeLayer extends MvLayerBase {
 	 * - `{ advance: "onset", track }` : 指定トラックの**発音のたびに**1コマ進む。
 	 *   音のある場所と図形の切り替わりが一致しないケースが目視で確認されたため、
 	 *   中央モチーフには不採用——発音回数に律速したい別の演出向けの選択肢として残す。
+	 *
+	 * `crossfade` は「1コマの終わり何割を、次のコマとの重ね合わせに使うか」(0..1)。
+	 * 未指定/0 なら従来どおりパツンと切り替わる。コマ送りは動きが劇的になる反面、
+	 * 繋ぎが無いと「パラパラ漫画」に見える——形が飛ぶこと自体ではなく、**間を埋める
+	 * ものが何も無いこと**がぎこちなさの正体だった。ここを 0.2〜0.6 にすると
+	 * 前後のコマが重なって溶けるので、変化の劇的さを保ったまま繋がって見える。
+	 * `advance:"onset"` は次の発音がいつ来るか事前に分からず残り時間を割り出せないので、
+	 * 重ね合わせは効かない（指定しても無視する）。
 	 */
 	iconCycle?:
-		| { paths: string[]; beats: number; resetEveryBars?: number }
+		| {
+				paths: string[];
+				beats: number;
+				resetEveryBars?: number;
+				crossfade?: number;
+		  }
 		| { paths: string[]; advance: "onset"; track?: number };
 	/**
 	 * @deprecated 場面ごとに動きを変える仕組みは廃止した。
