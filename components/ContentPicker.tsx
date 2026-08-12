@@ -25,6 +25,7 @@ import {
 	ORIGIN_TYPE_OPTIONS,
 } from "@/lib/types";
 import { fetchSize, fetchText } from "@/lib/uploader";
+import { loadImage } from "@/lib/walk-sprite";
 import AssetThumb from "./AssetThumb";
 import BuiltinGameSoundPanel from "./BuiltinGameSoundPanel";
 import LocalAssetPanel from "./LocalAssetPanel";
@@ -67,6 +68,7 @@ type ImageTab =
 	| "history"
 	| "walk"
 	| "url"
+	| "urlDirect"
 	| "rpgenSprite"
 	| "rpgenWalk"
 	| "smc"
@@ -150,6 +152,11 @@ export default function ContentPicker({
 	const [query, setQuery] = useState("");
 	const [selectedColor, setSelectedColor] = useState("#000000");
 	const [mcSkinUrlInput, setMcSkinUrlInput] = useState("");
+	// 「画像URL」タブ用。直リンクURLを画像素材として使う（CORS失敗時は lib/cors-proxy 経由で自動リトライ）。
+	const [imageUrlInput, setImageUrlInput] = useState("");
+	const [imageUrlBusy, setImageUrlBusy] = useState(false);
+	const [imageUrlError, setImageUrlError] = useState<string | null>(null);
+	const [imageUrlPreview, setImageUrlPreview] = useState<string | null>(null);
 	// 旧「URL」タブは廃止し、画像URL/アップロードは「マイシート」に集約した。
 	// 前回選択が 'url' のまま復元されると空白になるので mySheet へ振り替える。
 	const [imageTab, setImageTab] = useState<ImageTab>(
@@ -682,6 +689,12 @@ export default function ContentPicker({
 								マイシート
 							</button>
 							<button
+								className={tabBtn(imageTab === "urlDirect")}
+								onClick={() => changeImageTab("urlDirect")}
+							>
+								画像URL
+							</button>
+							<button
 								className={tabBtn(imageTab === "posts")}
 								onClick={() => changeImageTab("posts")}
 							>
@@ -849,6 +862,78 @@ export default function ContentPicker({
 					)}
 					{mode === "image" && imageTab === "mySheet" && (
 						<UserSheetPanel onPick={onPick} userId={userId} />
+					)}
+					{mode === "image" && imageTab === "urlDirect" && (
+						<div className="space-y-2">
+							<p className="text-[10px] text-gray-500">
+								画像の直リンクURLを指定して、そのまま素材として使えます。
+								CORSで読み込めない画像は自動でプロキシ経由の再取得を試みます。
+							</p>
+							<div className="flex items-center gap-1.5">
+								<input
+									value={imageUrlInput}
+									onChange={(e) => {
+										setImageUrlInput(e.target.value);
+										setImageUrlError(null);
+										setImageUrlPreview(null);
+									}}
+									placeholder="https://example.com/image.png"
+									className="flex-1 min-w-0 bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-blue-500"
+								/>
+							</div>
+							{imageUrlInput.trim() && (
+								<div className="flex items-center justify-center rounded-lg border border-gray-800 bg-[#11131a] gimp-checkered-background p-2 min-h-[96px]">
+									{imageUrlPreview ? (
+										// eslint-disable-next-line @next/next/no-img-element
+										<img
+											src={imageUrlPreview}
+											alt=""
+											className="max-w-full max-h-32 object-contain"
+											style={{ imageRendering: "pixelated" }}
+										/>
+									) : imageUrlBusy ? (
+										<Loader2 size={20} className="animate-spin text-gray-500" />
+									) : (
+										<span className="text-[10px] text-gray-600">
+											「確認して使う」で読み込みを試します
+										</span>
+									)}
+								</div>
+							)}
+							{imageUrlError && (
+								<p className="text-[10px] text-red-400">{imageUrlError}</p>
+							)}
+							<button
+								onClick={async () => {
+									const v = imageUrlInput.trim();
+									if (!v) return;
+									setImageUrlError(null);
+									setImageUrlBusy(true);
+									try {
+										const img = await loadImage(v);
+										setImageUrlPreview(img.src);
+										onPick({
+											ref: `url:${v}`,
+											url: v,
+											label: v.length > 28 ? v.slice(0, 26) + "…" : v,
+										});
+									} catch {
+										setImageUrlError(
+											"画像を読み込めませんでした（URLとCORSを確認してください）",
+										);
+									} finally {
+										setImageUrlBusy(false);
+									}
+								}}
+								disabled={!imageUrlInput.trim() || imageUrlBusy}
+								className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+							>
+								{imageUrlBusy && (
+									<Loader2 size={13} className="animate-spin" />
+								)}
+								確認してこの画像を使う
+							</button>
+						</div>
 					)}
 					{mode === "image" && imageTab === "mcSkin" && (
 						<div className="space-y-3">
