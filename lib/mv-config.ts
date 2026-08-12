@@ -708,6 +708,25 @@ export interface MvLayerGroup {
 	name?: string;
 	/** 折りたたみ状態（エディタの表示だけに使う。描画には影響しない）。 */
 	collapsed?: boolean;
+	/**
+	 * このグループが「特殊アレンジ」として、別グループ（アレンジ元）の特定の拍に
+	 * 割り込むための設定。指定すると `isLayerVisible` が2つのグループを連動させる：
+	 * `triggerBar`〜`triggerBar + beats/MV_BEATS_PER_BAR` の間だけ、アレンジ元
+	 * （`sourceGroupId`）のレイヤーを止めて隠し、このグループのレイヤーを表示する。
+	 * その区間を抜けたらアレンジ元は自動的に再開する（両者とも `barRange` を
+	 * 手動で設定する必要は無い——手で設定した `barRange` があればさらにANDで効く）。
+	 */
+	arrangement?: MvArrangementTrigger;
+}
+
+/** `MvLayerGroup.arrangement` の中身。アレンジ元への割り込み位置と長さ。 */
+export interface MvArrangementTrigger {
+	/** 介入対象（アレンジ元）グループのID。 */
+	sourceGroupId: string;
+	/** アレンジ元を止めて表示を切り替える位置（小節、小数可＝拍単位で指定できる）。 */
+	triggerBar: number;
+	/** このアレンジ自身を再生する長さ（拍）。この間だけ表示し、終われば元に戻す。 */
+	beats: number;
 }
 
 /**
@@ -1640,14 +1659,20 @@ export interface MvDegreeLayer extends MvLayerBase {
 
 /**
  * セルが拍ごとに1つずつ埋まっていく「ウィジェット」（参考動画: `_.mp4` / `次日朝夢(再現).mp4`
- * をコマ送りして解析——コードやトラックとは一切連動しない、純粋に拍だけで動く飾り）。
+ * をコマ送りして解析）。
  *
- * 画面下に2段のセルが並び、1セル＝1拍。
- * - 上段: セル0は常に確定済みのベタ塗り正方形（アンカー、動かない）。以降は窓の先頭
- *   （`cols`拍で1周）から数えて何拍目かで1拍に1個ずつ埋まる。埋まる瞬間はグリフが
- *   高速で入れ替わってから確定パターンに止まる。窓を埋め切ると境界で一瞬フラッシュし、
- *   上段だけがセル0の状態へ戻って次の窓が始まる。
- * - 下段: 上段と無関係に常時表示の固定パターン。フラッシュにもリセットにも影響されない。
+ * 模倣元はドラムのヒットで駆動されていたが、MMLにドラムという概念が無いため、
+ * 「1拍に1ヒット」の骨格はそのままに、ヒットの色をコード進行（MMLから自動検出した
+ * `MvSong.chords`）へ置き換えている——ドラムの代わりにコード進行を形にする、という指示。
+ *
+ * 画面に2段のセルが並び、1セル＝1拍。
+ * - 現在の段（進行方向でいう手前側）: セル0は窓の先頭で即座に確定するアンカー。
+ *   以降は窓（`cols`拍で1周）の何拍目かで1拍に1個ずつ埋まる。埋まる瞬間はグリフが
+ *   高速で入れ替わってから確定パターンに止まる。中立色（`color`）。
+ * - 履歴の段: 1つ前の窓が確定した内容がそのまま来る。各セルは「そのセルが表していた拍」
+ *   に鳴っていたコードの色（`colorMode`/`key`、`chordBar` と同じ決定ロジック）で塗る。
+ * - 窓を埋め切る境界では、**枠は動かさず中身だけ**を1セルぶん奥へスライドさせて
+ *   現在の段→履歴の段へ渡す（伸縮は使わない）。同時に一瞬フラッシュする。
  */
 export interface MvWidgetLayer extends MvLayerBase {
 	kind: "widget";
@@ -1656,10 +1681,18 @@ export interface MvWidgetLayer extends MvLayerBase {
 	cellSize: number;
 	/** 画面に並べるセル数（＝何拍で1周するか）。 */
 	cols: number;
-	/** 上段（確定・スクランブル中のグリフ）の色。 */
+	/** 並べる向き。horizontal＝横一列（2段は縦に重ねる）、vertical＝縦一列（2段は横に並べる）。 */
+	orientation: "horizontal" | "vertical";
+	/** 全体を追加で回す角度（度）。 */
+	angle: number;
+	/** 現在の段（確定・スクランブル中のグリフ）の色。 */
 	color: string;
-	/** 下段（常時表示の固定パターン）の色。 */
+	/** 履歴の段の色分けモード。 */
+	colorMode: MvChordColorMode;
+	/** colorMode==='fixed' のとき、およびその拍にコードが無いときの履歴の段の色。 */
 	bottomColor: string;
+	/** 度数の基準キー（色分けに使う）。 */
+	key: string;
 	/** 窓の境界で一瞬光るフラッシュの色。 */
 	flashColor: string;
 }
@@ -2049,6 +2082,7 @@ export function isLayerVisible(
 	layer: MvLayer,
 	sectionId: string | null,
 	bar?: number,
+	groups?: MvLayerGroup[],
 ): boolean {
 	if (layer.sections && layer.sections.length > 0 && sectionId) {
 		if (!layer.sections.includes(sectionId)) return false;
@@ -2056,6 +2090,19 @@ export function isLayerVisible(
 	if (layer.barRange && bar !== undefined) {
 		const [from, to] = layer.barRange;
 		if (bar < from || bar >= to) return false;
+	}
+	// 特殊アレンジの連動: アレンジ元は割り込み区間だけ隠し、アレンジ側はその区間だけ出す。
+	if (bar !== undefined && layer.groupId && groups && groups.length > 0) {
+		for (const g of groups) {
+			const arr = g.arrangement;
+			if (!arr) continue;
+			if (g.id !== layer.groupId && arr.sourceGroupId !== layer.groupId) continue;
+			const from = arr.triggerBar;
+			const to = arr.triggerBar + arr.beats / MV_BEATS_PER_BAR;
+			const inWindow = bar >= from && bar < to;
+			if (g.id === layer.groupId && !inWindow) return false;
+			if (arr.sourceGroupId === layer.groupId && inWindow) return false;
+		}
 	}
 	return true;
 }

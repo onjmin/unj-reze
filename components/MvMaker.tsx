@@ -55,6 +55,7 @@ import {
 	MV_AUDIO_MODE_HINTS,
 	MV_AUDIO_MODE_LABELS,
 	MV_BLEND_LABELS,
+	MV_CHORD_COLOR_MODE_LABELS,
 	MV_EFFECT_CATEGORY,
 	MV_EFFECT_CATEGORY_LABELS,
 	MV_EFFECT_CURVE_LABELS,
@@ -87,6 +88,7 @@ import {
 	type MvBeatPipsLayer,
 	type MvBlend,
 	type MvChordBarLayer,
+	type MvChordColorMode,
 	type MvDegreeLayer,
 	type MvEffectCategory,
 	type MvEffectCurve,
@@ -2037,8 +2039,9 @@ export default function MvMaker({
 		const { group, layers } = generateArrangementForGroup(
 			origLayers as MvShapeLayer[],
 			nextZ,
+			groupId,
 		);
-		
+
 		update((m) => ({
 			...m,
 			// 一覧はレイヤー配列の並び順で決まるため、先頭に差し込んで一覧の最上部に出す。
@@ -2087,8 +2090,12 @@ export default function MvMaker({
 			rect: { x: 40, y: MV_H - 100, w: 40 * 8, h: 80 },
 			cellSize: 40,
 			cols: 8,
+			orientation: "horizontal",
+			angle: 0,
 			color: "#f8fafc",
+			colorMode: "degree",
 			bottomColor: "#5b9bd5",
+			key: "C",
 			flashColor: "#ffffff",
 			z: getNextZ(),
 		};
@@ -4460,7 +4467,7 @@ export default function MvMaker({
 						}
 					/>
 					<NumField
-						label="表示コマ数"
+						label="表示コマ数（＝何拍で1周するか）"
 						value={layer.cols}
 						min={1}
 						max={16}
@@ -4468,20 +4475,62 @@ export default function MvMaker({
 							updateLayer(layer.id, (l) => ({ ...l, cols: v }) as MvLayer)
 						}
 					/>
+					<SelectField
+						label="向き"
+						value={layer.orientation}
+						options={[
+							{ value: "horizontal" as const, label: "横置き（2段は縦に重ねる）" },
+							{ value: "vertical" as const, label: "縦置き（2段は横に並べる）" },
+						]}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, orientation: v }) as MvLayer)
+						}
+					/>
+					<NumField
+						label="角度（度）"
+						value={layer.angle}
+						step={1}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, angle: v }) as MvLayer)
+						}
+					/>
 					<ColorField
-						label="上段の色（確定・スクランブル中のグリフ）"
+						label="現在の段の色（確定・スクランブル中のグリフ）"
 						value={layer.color}
 						onChange={(v) =>
 							updateLayer(layer.id, (l) => ({ ...l, color: v }) as MvLayer)
 						}
 					/>
-					<ColorField
-						label="下段の色（常時表示の固定パターン）"
-						value={layer.bottomColor}
+					<SelectField
+						label="履歴の段の色分け"
+						value={layer.colorMode}
+						options={(
+							Object.keys(MV_CHORD_COLOR_MODE_LABELS) as MvChordColorMode[]
+						).map((k) => ({ value: k, label: MV_CHORD_COLOR_MODE_LABELS[k] }))}
 						onChange={(v) =>
-							updateLayer(layer.id, (l) => ({ ...l, bottomColor: v }) as MvLayer)
+							updateLayer(layer.id, (l) => ({ ...l, colorMode: v }) as MvLayer)
 						}
 					/>
+					<SelectField
+						label="キー"
+						value={layer.key}
+						options={Object.keys(MV_ROOT_TO_PITCH).map((k) => ({
+							value: k,
+							label: k,
+						}))}
+						onChange={(v) =>
+							updateLayer(layer.id, (l) => ({ ...l, key: v }) as MvLayer)
+						}
+					/>
+					{layer.colorMode === "fixed" && (
+						<ColorField
+							label="履歴の段の色"
+							value={layer.bottomColor}
+							onChange={(v) =>
+								updateLayer(layer.id, (l) => ({ ...l, bottomColor: v }) as MvLayer)
+							}
+						/>
+					)}
 					<ColorField
 						label="境界フラッシュの色"
 						value={layer.flashColor}
@@ -4491,9 +4540,11 @@ export default function MvMaker({
 					/>
 
 					<Hint>
-						拍だけで動く飾りです。コード進行やトラックとは連動しません
-						（参考動画をコマ送りして確認したところ、下段は常時同じ固定パターンで、
-						上段だけが1拍ごとに1マスずつ埋まり、窓を埋め切ると一瞬光ってリセットします）。
+						模倣元はドラムのヒットで駆動されていますが、MMLにドラムは無いため、
+						「1拍1ヒット」の骨格はそのままにヒットの色をコード進行（MMLから自動検出）へ
+						置き換えています。現在の段は1拍に1マスずつ埋まり、窓を埋め切ると
+						枠は動かさず中身だけが1マスぶんスライドして履歴の段（そのコードの色）へ
+						渡り、同時に一瞬光ります。
 					</Hint>
 				</>
 			)}
@@ -5055,6 +5106,74 @@ export default function MvMaker({
 									<Trash2 size={16} />
 								</button>
 							</div>
+							{group.arrangement && (
+								<div className="flex flex-wrap items-center gap-2 border-t border-purple-700/30 bg-purple-950/30 px-2 py-1.5 text-[10px] text-purple-200">
+									<Sparkles size={12} className="shrink-0 text-purple-300" />
+									<span className="shrink-0">
+										アレンジ元:{" "}
+										{manifest.groups?.find(
+											(g) => g.id === group.arrangement?.sourceGroupId,
+										)?.name ?? "（見つかりません）"}
+									</span>
+									<label className="flex items-center gap-1">
+										割り込む小節
+										<input
+											type="number"
+											step={0.25}
+											min={0}
+											value={group.arrangement.triggerBar}
+											onChange={(e) => {
+												const v = Number(e.target.value);
+												update((m) => ({
+													...m,
+													groups: (m.groups ?? []).map((g) =>
+														g.id === group.id && g.arrangement
+															? {
+																	...g,
+																	arrangement: {
+																		...g.arrangement,
+																		triggerBar: Number.isFinite(v) ? v : 0,
+																	},
+																}
+															: g,
+													),
+												}));
+											}}
+											className="w-16 rounded bg-gray-800 px-1 py-0.5 text-gray-100"
+										/>
+									</label>
+									<label className="flex items-center gap-1">
+										長さ(拍)
+										<input
+											type="number"
+											step={0.5}
+											min={0.5}
+											value={group.arrangement.beats}
+											onChange={(e) => {
+												const v = Number(e.target.value);
+												update((m) => ({
+													...m,
+													groups: (m.groups ?? []).map((g) =>
+														g.id === group.id && g.arrangement
+															? {
+																	...g,
+																	arrangement: {
+																		...g.arrangement,
+																		beats: Number.isFinite(v) && v > 0 ? v : 1,
+																	},
+																}
+															: g,
+													),
+												}));
+											}}
+											className="w-14 rounded bg-gray-800 px-1 py-0.5 text-gray-100"
+										/>
+									</label>
+									<span className="text-purple-400">
+										この間だけアレンジ元を隠して再生
+									</span>
+								</div>
+							)}
 							{!group.collapsed && (
 								<div className="space-y-1.5 rounded-b border-t border-purple-700/30 bg-gray-900/40 p-1.5 pl-4">
 									{members.map((layer, mi) =>
@@ -5415,6 +5534,31 @@ export default function MvMaker({
 														<span className="font-mono text-blue-300">
 															⏱ 表示レンジ: {line.bar.toFixed(1)}〜{(line.bar + hold).toFixed(1)}小節 [{formatMinSecMs(startSec)} 〜 {formatMinSecMs(endSec)}]
 														</span>
+														<button
+															onClick={() =>
+																updateLayer(lyricsLayer.id, (l) => {
+																	if (l.kind !== "lyrics") return l;
+																	const cur = l.lines ?? [];
+																	const next = cur[i + 1];
+																	// 次の行との間に挟む。次が無ければ保持時間ぶん先。
+																	// 直後(同小節)に挟むと表示レンジが0になってしまうので、
+																	// 間が holdBars 未満のときは素直に真ん中を取る。
+																	const gapMid = next
+																		? (line.bar + next.bar) / 2
+																		: line.bar + hold;
+																	const bar =
+																		Math.round(gapMid * 100) / 100;
+																	const inserted = [...cur];
+																	inserted.splice(i + 1, 0, { bar, text: "" });
+																	return { ...l, lines: inserted };
+																})
+															}
+															title="この行の下に空の歌詞行を挿入"
+															className="ml-auto flex shrink-0 items-center gap-1 rounded bg-blue-600/30 border border-blue-500/40 px-1.5 py-0.5 text-[10px] font-bold text-blue-200 hover:bg-blue-600/40"
+														>
+															<Plus size={11} />
+															下に1行挿入
+														</button>
 													</div>
 													<label className="flex items-center gap-1.5 px-1">
 														<input

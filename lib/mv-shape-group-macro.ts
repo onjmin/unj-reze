@@ -911,94 +911,199 @@ export function generateSymmetricShapeGroup(
 }
 
 /**
+ * 「特殊アレンジ」1回ぶんの既定の長さ（拍）。トリガー窓（`MvArrangementTrigger.beats`）
+ * の既定値としても使う。
+ */
+const DEFAULT_ARRANGEMENT_BEATS = 4;
+
+/**
+ * 特殊アレンジの「型」。以前は常に「倍速化＋90度キック＋白十字フラッシュ2本」の
+ * 1パターンだけだったため、何度生成しても同じ絵にしかならなかった
+ * （ユーザー指摘: 「特殊アレンジがワンパターンすぎる」）。ここを固定処理ではなく
+ * 複数の変換候補からランダムに1つ選ぶ方式にして、呼ぶたびに違う結果を返す。
+ * どの型も「元のレイヤーを加工する」＋「画面全体に効く飾りを足す（足さないことも
+ * ある）」の2段構えは共通だが、加工の中身・飾りの有無/形/色/本数は型ごと・
+ * 呼び出しごとに独立して振れる。
+ */
+type ArrangeStyle = "speedKick" | "shatter" | "monoFlash" | "recolorPulse";
+const ARRANGE_STYLES: ArrangeStyle[] = [
+	"speedKick",
+	"shatter",
+	"monoFlash",
+	"recolorPulse",
+];
+
+const FLASH_PALETTE = ["#ffffff", "#fde68a", "#fca5a5", "#93c5fd", "#5eead4"];
+
+/** 元のモジュレータ配列から `beat` 系だけ周期を `mul` 倍する（他はそのまま）。 */
+function scaleBeatPeriods(mods: MvModulator[] | undefined, mul: number): MvModulator[] {
+	return (
+		mods?.map((m) =>
+			m.source === "beat" ? { ...m, periodBeats: (m.periodBeats ?? 1) * mul } : m,
+		) ?? []
+	);
+}
+
+/**
  * 既存の図形グループのレイヤー配列を元にして、展開の変化に使える
  * 「特殊アレンジ」のレイヤー配列を生成する。
+ *
+ * `sourceGroupId` は割り込み対象（アレンジ元）のグループID。返す `group.arrangement`
+ * にそのまま埋め込むので、エンジン側 (`isLayerVisible`) が「アレンジ元を止めて隠す
+ * ／アレンジ側を表示する」を自動で連動させられる。トリガー位置・長さは
+ * `trigger` で指定し、省略時は次の拍区切りから既定の長さぶん。
  */
 export function generateArrangementForGroup(
 	existingLayers: MvShapeLayer[],
 	nextZ: () => number,
+	sourceGroupId: string,
+	trigger?: { triggerBar?: number; beats?: number },
 ): { group: MvLayerGroup; layers: MvShapeLayer[] } {
 	const newGroupId = mvUid("grp");
+	const beats = trigger?.beats ?? DEFAULT_ARRANGEMENT_BEATS;
+	const triggerBar = trigger?.triggerBar ?? 0;
 	const group: MvLayerGroup = {
 		id: newGroupId,
 		name: "特殊アレンジ",
 		collapsed: true,
+		arrangement: { sourceGroupId, triggerBar, beats },
 	};
 	const layers: MvShapeLayer[] = [];
 
-	// 元のレイヤーをベースに、動きを倍速にした複製を作る
+	const style = pick(ARRANGE_STYLES);
+	// 速さの倍率・回転キックの角度・弧のカーブも毎回振れる。固定値を1つだけ
+	// 持っていると「型」を4つに増やしてもそれぞれが結局1パターンにしかならない。
+	const speedMul = pick([2, 2, 3, 4]);
+	const kickAngle = pick([45, 90, 120, 180]);
+	const kickCurve = pick([2, 3, 4]);
+	const recolorPalette = FLASH_PALETTE.filter((_, i) => chance(0.6) || i === 0);
+	const flashColor = pick(FLASH_PALETTE);
+
 	for (const orig of existingLayers) {
 		const newLayer: MvShapeLayer = {
 			...orig,
 			id: mvUid("shp"),
 			groupId: newGroupId,
 			z: nextZ(),
-			modulators:
-				orig.modulators?.map((m) =>
-					m.source === "beat"
-						? { ...m, periodBeats: (m.periodBeats ?? 1) / 2 }
-						: m,
-				) ?? [],
+			modulators: scaleBeatPeriods(orig.modulators, 1 / speedMul),
 		};
 
-		// コマ送りも倍速にする（形の切り替わりだけ元の速さのまま取り残されないように）。
+		// コマ送りも同じ倍率で速める（形の切り替わりだけ元の速さのまま取り残されないように）。
 		if (newLayer.iconCycle && !("advance" in newLayer.iconCycle)) {
 			newLayer.iconCycle = {
 				...newLayer.iconCycle,
-				beats: newLayer.iconCycle.beats / 2,
+				beats: newLayer.iconCycle.beats / speedMul,
 			};
 		}
 
-		// 回転のキックを足す。角度は90度刻みに揃える——中途半端な角度で回すと
-		// 矩形基調のグリフが軸から外れて、元のグループと絵の調子が繋がらなくなる。
-		newLayer.modulators.push({
-			source: "beat",
-			target: "rotation",
-			op: "add",
-			amount: orig.x < MV_W / 2 ? 90 : -90,
-			periodBeats: 0.5,
-			curve: 3,
-		});
+		switch (style) {
+			case "speedKick":
+				// 回転のキック。角度・カーブを毎回振ることで「同じ90度キック」の
+				// 繰り返しにならないようにする。
+				newLayer.modulators.push({
+					source: "beat",
+					target: "rotation",
+					op: "add",
+					amount: orig.x < MV_W / 2 ? kickAngle : -kickAngle,
+					periodBeats: roundTo(0.5 * (speedMul / 2), 2),
+					curve: kickCurve,
+				});
+				break;
+			case "shatter":
+				// 拍ごとに弾けて縮む「破裂」。size を強く振って、通常のアレンジより
+				// 動きの振れ幅そのものを大きくする。
+				newLayer.modulators.push(
+					{
+						source: "beat",
+						target: "size",
+						op: "add",
+						amount: roundTo((orig.size ?? 20) * randRange(0.6, 1.1), 1),
+						periodBeats: 0.25,
+						curve: 4,
+					},
+					{
+						source: "beat",
+						target: "rotation",
+						op: "add",
+						amount: chance(0.5) ? 180 : -180,
+						periodBeats: 1,
+						curve: 2,
+					},
+				);
+				break;
+			case "monoFlash":
+				// 白黒の明滅に染める。色そのものを差し替えるので元の配色は完全に消える。
+				newLayer.color = chance(0.5) ? "#ffffff" : "#111111";
+				newLayer.modulators.push({
+					source: "beat",
+					target: "opacity",
+					op: "mul",
+					amount: 0.85,
+					periodBeats: 0.5,
+					curve: 5,
+				});
+				break;
+			case "recolorPulse":
+				// 元の配色を無視して差し色パレットへ丸ごと塗り替え、拍ごとに脈打たせる。
+				newLayer.color = pick(
+					recolorPalette.length > 0 ? recolorPalette : FLASH_PALETTE,
+				);
+				newLayer.modulators.push({
+					source: "beat",
+					target: "thickness",
+					op: "add",
+					amount: roundTo((orig.thickness ?? 3) * randRange(1.2, 2.2), 1),
+					periodBeats: roundTo(1 / speedMul, 2),
+					curve: 3,
+				});
+				break;
+		}
 
 		layers.push(newLayer);
 	}
 
-	// 画面いっぱいに広がる閃光用のバー（十字）を追加
-	for (let i = 0; i < 2; i++) {
-		layers.push({
-			kind: "shape",
-			form: "bar",
-			id: mvUid("shp"),
-			groupId: newGroupId,
-			x: MV_W / 2,
-			y: MV_H / 2,
-			z: nextZ(),
-			rotation: i === 0 ? 0 : 90,
-			color: "#ffffff",
-			size: MV_W,
-			thickness: 4,
-			filled: false,
-			count: 1,
-			spread: 0,
-			spin: 0,
-			blend: "normal",
-			modulators: [
-				{
-					source: "beat",
-					target: "size",
-					op: "add",
-					amount: MV_W,
-					periodBeats: 0.5,
-				},
-				{
-					source: "beat",
-					target: "thickness",
-					op: "add",
-					amount: 10,
-					periodBeats: 0.5,
-				},
-			],
-		});
+	// 画面いっぱいに広がる閃光用の飾り。本数・向き・色・入れるかどうか自体も
+	// 毎回振る（以前は常に白十字2本固定だった）。
+	if (chance(0.75)) {
+		const flashCount = pick([1, 2, 2, 3]);
+		for (let i = 0; i < flashCount; i++) {
+			const angle =
+				flashCount === 1 ? pick([0, 45, 90]) : (180 / flashCount) * i;
+			layers.push({
+				kind: "shape",
+				form: "bar",
+				id: mvUid("shp"),
+				groupId: newGroupId,
+				x: MV_W / 2,
+				y: MV_H / 2,
+				z: nextZ(),
+				rotation: angle,
+				color: style === "monoFlash" ? "#ffffff" : flashColor,
+				size: MV_W,
+				thickness: randRange(2, 6),
+				filled: false,
+				count: 1,
+				spread: 0,
+				spin: 0,
+				blend: "normal",
+				modulators: [
+					{
+						source: "beat",
+						target: "size",
+						op: "add",
+						amount: MV_W,
+						periodBeats: roundTo(0.5 * (speedMul / 2), 2),
+					},
+					{
+						source: "beat",
+						target: "thickness",
+						op: "add",
+						amount: randRange(6, 14),
+						periodBeats: roundTo(0.5 * (speedMul / 2), 2),
+					},
+				],
+			});
+		}
 	}
 
 	return { group, layers };

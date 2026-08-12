@@ -645,7 +645,7 @@ export function drawMvFrame(
 	};
 
 	const visible = manifest.layers.filter((l) =>
-		isLayerVisible(l, d.sectionId, d.bar),
+		isLayerVisible(l, d.sectionId, d.bar, manifest.groups),
 	);
 	const effects = visible.filter(
 		(l): l is MvEffectLayer => l.kind === "effect",
@@ -1820,21 +1820,23 @@ const MV_WIDGET_GLYPH_CYCLE: MvWidgetGlyph[] = ["hbars", "target", "grid", "fill
 /** 確定するまでの「高速でグリフが入れ替わる」演出が読む語彙（全部）。 */
 const MV_WIDGET_SCRAMBLE_POOL = MV_WIDGET_GLYPHS;
 
+/** インデックスから確定グリフを返す（セル0は常にアンカーの `filled`、以降は周期4）。 */
+function widgetSettledGlyph(i: number): MvWidgetGlyph {
+	return i === 0 ? "filled" : MV_WIDGET_GLYPH_CYCLE[(i - 1) % MV_WIDGET_GLYPH_CYCLE.length];
+}
+
 /**
- * 拍ごとにセルが1つずつ埋まっていくウィジェット（参考動画: `_.mp4` / `次日朝夢(再現).mp4`）。
+ * 拍ごとにセルが1つずつ埋まっていくウィジェット（参考動画: `_.mp4` / `次日朝夢(再現).mp4`
+ * をコマ送りして解析）。模倣元はドラムのヒット駆動だが、MMLにドラムの概念が無いため
+ * 「1拍1ヒット」の骨格を保ったまま、ヒットの色をコード進行に置き換えている。
  *
- * コマ送りで確認した実際の構造（以前の実装はここを丸ごと勘違いしていた——コードとは無関係）:
- * - 上段: セル0は常に確定済みの白いベタ塗り正方形（アンカー、点滅しない）。
- *   セル1以降は「窓の先頭から数えて何拍目か」で1拍に1個ずつ埋まる。
- *   埋まる瞬間はグリフが高速で入れ替わる「スクランブル」を見せてから、
- *   `MV_WIDGET_GLYPH_CYCLE` の周期4パターンに確定して止まる。
- * - 窓（`cols`拍）を埋め切ると境界で、上段・下段が**同時に**下向きへ一瞬しぼんで
- *   跳ね返る（スカッシュ）動きとともに白く光り、その直後に上段だけが
- *   セル0だけの状態へ戻って次の窓が始まる（`n_026`〜`n_028`のコマ送りで、
- *   フラッシュの瞬間に上下段そろって縦につぶれてから復元するのを確認した——
- *   フラッシュだけでスライドが無いと解釈していた前回の実装は誤り）。
- * - 下段のグリフ内容そのものは、このしぼみ跳ね返りの間もリセットの前後も変わらない
- *   固定パターンのまま――コード進行を参照しない。
+ * - 現在の段: セル0は窓の先頭で即座に確定するアンカー。以降は窓（`cols`拍）の
+ *   何拍目かで1拍に1個ずつ埋まり、埋まる瞬間はグリフが高速スクランブルしてから
+ *   周期4パターンへ確定する。中立色（`layer.color`）。
+ * - 履歴の段: 1つ前の窓がそのまま来る。各セルは「そのセルが表していた拍」に
+ *   鳴っていたコードの色（`chordBar` と同じ決定ロジック）で塗る。
+ * - 窓の境界では**枠は動かさず中身だけ**を1セルぶん奥へスライドさせて現在の段→
+ *   履歴の段へ渡す（伸縮は使わない）。同時に一瞬フラッシュする。
  */
 function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 	const { ctx } = d;
@@ -1842,71 +1844,127 @@ function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 	const cell = layer.cellSize;
 	const cols = Math.max(1, layer.cols);
 	const beatsPerBar = MV_BEATS_PER_BAR;
+	const orientation = layer.orientation ?? "horizontal";
 
 	const beatPos = d.bar * beatsPerBar;
 	const totalBeat = Math.floor(beatPos);
 	const beatPhase = beatPos - totalBeat;
-	const cyclePos = ((totalBeat % cols) + cols) % cols;
+	const windowIndex = Math.floor(totalBeat / cols);
+	const cyclePos = totalBeat - windowIndex * cols; // 0..cols-1、現在の窓での確定済みセル数-1
 
 	const SCRAMBLE_SETTLE = 0.6; // このフェーズまではグリフが高速で入れ替わる
 	const SCRAMBLE_RATE = 16; // 1拍あたりのグリフ切り替え回数
 
-	// ── 窓の境界（`cols`拍ごと）をまたぐ一瞬だけ、上下段そろって縦につぶれて跳ね返る ──
-	const SQUASH_HALF_WIDTH = 0.15; // 拍単位。境界の前後この幅だけ動く
-	const boundaryBeat = Math.round(beatPos / cols) * cols;
-	const distBeats = boundaryBeat > 0 ? Math.abs(beatPos - boundaryBeat) : Infinity;
-	const inSquash = distBeats < SQUASH_HALF_WIDTH;
-	const squashT = inSquash ? 1 - distBeats / SQUASH_HALF_WIDTH : 0; // 0..1、境界でピーク
+	// ── 窓の境界（`cols`拍ごと）をまたぐ一瞬だけ、枠は動かさず中身だけスライドさせる ──
+	const SLIDE_HALF_WIDTH = 0.15; // 拍単位。境界の前後この幅だけ動く
+	const boundaryBeat = windowIndex * cols; // 直前に越えた境界（＝現在の窓の開始）
+	const distToStart = beatPos - boundaryBeat; // 0以上。窓の開始からの経過
+	const inSlide = boundaryBeat > 0 && distToStart < SLIDE_HALF_WIDTH;
+	const slideT = inSlide ? 1 - distToStart / SLIDE_HALF_WIDTH : 0; // 1→0、境界直後がピーク
+
+	// 現在の段(row0)→履歴の段(row1)への「1セルぶん奥」の向き。横置きなら下、縦置きなら右。
+	const rowStepX = orientation === "vertical" ? cell : 0;
+	const rowStepY = orientation === "horizontal" ? cell : 0;
+	/** セル(i,row) の左上座標（回転前のローカル座標。枠はここに固定で描く）。 */
+	const cellPos = (i: number, row: 0 | 1): [number, number] => {
+		if (orientation === "vertical") return [x + row * cell, y + i * cell];
+		return [x + i * cell, y + row * cell];
+	};
+	const blockW = orientation === "vertical" ? cell * 2 : cell * cols;
+	const blockH = orientation === "vertical" ? cell * cols : cell * 2;
 
 	ctx.save();
-	if (inSquash) {
-		const scaleY = 1 - squashT * 0.45; // ピークで縦55%までしぼむ
-		const anchorY = y + cell * 2; // 2段ぶんの下端を基準に潰す（下段側は動かない）
-		ctx.translate(x, anchorY);
-		ctx.scale(1, scaleY);
-		ctx.translate(-x, -anchorY);
+	const angle = ((layer.angle ?? 0) * Math.PI) / 180;
+	if (angle !== 0) {
+		const centerX = x + blockW / 2;
+		const centerY = y + blockH / 2;
+		ctx.translate(centerX, centerY);
+		ctx.rotate(angle);
+		ctx.translate(-centerX, -centerY);
 	}
+
+	let lastHistoryColor: string | undefined;
 
 	for (let i = 0; i < cols; i++) {
-		const cx = x + i * cell;
-
-		// ── 下段：固定パターン。上段の状態やフラッシュとは無関係に常時描く ──
-		const bottomGlyph = MV_WIDGET_GLYPH_CYCLE[i % MV_WIDGET_GLYPH_CYCLE.length];
-		ctx.fillStyle = "rgba(20,40,70,0.5)";
-		ctx.fillRect(cx, y + cell, cell, cell);
-		drawWidgetGlyph(ctx, bottomGlyph, cx, y + cell, cell, layer.bottomColor);
-		ctx.strokeStyle = "rgba(255,255,255,0.15)";
-		ctx.lineWidth = 1;
-		ctx.strokeRect(cx + 0.5, y + cell + 0.5, cell - 1, cell - 1);
-
-		// ── 上段：まだ窓に到達していないセルは枠だけ ──
-		if (i > cyclePos) {
+		// ── 枠は常に固定位置で描く（伸縮させない） ──
+		for (const row of [0, 1] as const) {
+			const [cx, cyy] = cellPos(i, row);
 			ctx.strokeStyle = "rgba(255,255,255,0.15)";
-			ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
-			continue;
+			ctx.lineWidth = 1;
+			ctx.strokeRect(cx + 0.5, cyy + 0.5, cell - 1, cell - 1);
 		}
 
-		let glyph: MvWidgetGlyph;
-		if (i === 0) {
-			glyph = "filled"; // アンカー。常に確定・点滅しない
-		} else if (i < cyclePos) {
-			glyph = MV_WIDGET_GLYPH_CYCLE[(i - 1) % MV_WIDGET_GLYPH_CYCLE.length];
-		} else if (beatPhase < SCRAMBLE_SETTLE) {
-			const idx = Math.floor(beatPhase * SCRAMBLE_RATE) % MV_WIDGET_SCRAMBLE_POOL.length;
-			glyph = MV_WIDGET_SCRAMBLE_POOL[idx];
+		// ── 履歴の段（1つ前の窓）の色。そのセルが表していた拍のコードで決める ──
+		const historyBeat = boundaryBeat - cols + i;
+		const historyBar = historyBeat / beatsPerBar;
+		const historyChord = historyBeat >= 0 ? chordAtBar(d.song.chords, historyBar) : null;
+		let historyColor: string;
+		if (layer.colorMode === "fixed" || !historyChord) {
+			historyColor = layer.bottomColor;
 		} else {
-			glyph = MV_WIDGET_GLYPH_CYCLE[(i - 1) % MV_WIDGET_GLYPH_CYCLE.length];
+			historyColor = getChordThemeColor(
+				historyChord.label,
+				layer.key,
+				layer.colorMode,
+				lastHistoryColor,
+			);
+			lastHistoryColor = historyColor;
 		}
 
-		drawWidgetGlyph(ctx, glyph, cx, y, cell, layer.color);
-		ctx.strokeStyle = "rgba(255,255,255,0.25)";
-		ctx.strokeRect(cx + 0.5, y + 0.5, cell - 1, cell - 1);
+		// ── 現在の段のグリフ（まだ窓に到達していなければ何も描かない） ──
+		let curGlyph: MvWidgetGlyph | null = null;
+		if (i <= cyclePos) {
+			if (i === 0 || i < cyclePos) {
+				curGlyph = widgetSettledGlyph(i);
+			} else if (beatPhase < SCRAMBLE_SETTLE) {
+				const idx = Math.floor(beatPhase * SCRAMBLE_RATE) % MV_WIDGET_SCRAMBLE_POOL.length;
+				curGlyph = MV_WIDGET_SCRAMBLE_POOL[idx];
+			} else {
+				curGlyph = widgetSettledGlyph(i);
+			}
+		}
+
+		const [curX, curY] = cellPos(i, 0);
+		const [histX, histY] = cellPos(i, 1);
+		const hadPrevWindow = boundaryBeat - cols + i >= 0;
+
+		if (!inSlide || !hadPrevWindow) {
+			if (curGlyph) drawWidgetGlyph(ctx, curGlyph, curX, curY, cell, layer.color);
+			if (hadPrevWindow) {
+				drawWidgetGlyph(ctx, widgetSettledGlyph(i), histX, histY, cell, historyColor);
+			}
+		} else {
+			// 直前の窓で確定していたグリフが、現在の段の位置から履歴の段の位置へ
+			// 「枠は動かさず中身だけ」1セルぶんスライドする。中立色→コード色へ切り替わる。
+			const progress = 1 - slideT; // 0(境界直後、現在の段の位置)→1(履歴の段へ到着)
+			const px = curX + rowStepX * progress;
+			const py = curY + rowStepY * progress;
+			const movingColor = progress < 0.5 ? layer.color : historyColor;
+
+			ctx.save();
+			ctx.beginPath();
+			ctx.rect(
+				Math.min(curX, histX),
+				Math.min(curY, histY),
+				cell + Math.abs(histX - curX),
+				cell + Math.abs(histY - curY),
+			);
+			ctx.clip();
+			drawWidgetGlyph(ctx, widgetSettledGlyph(i), px, py, cell, movingColor);
+			ctx.restore();
+
+			// セル0は窓の先頭で即座に確定するアンカー。スライド中も新しい窓の分を
+			// 現在の段の定位置に別途出す（スライドしているのは「直前の窓」の残像）。
+			if (curGlyph && i === 0) {
+				drawWidgetGlyph(ctx, curGlyph, curX, curY, cell, layer.color);
+			}
+		}
 	}
 
-	// しぼみと同時に全面を白く光らせる（スカッシュと同じ変換の中で描くので、光もつぶれて見える）
-	if (inSquash) {
-		ctx.fillStyle = withAlpha(layer.flashColor, squashT * 0.7);
-		ctx.fillRect(x, y, cell * cols, cell * 2);
+	// 境界の一瞬だけ全面を光らせる（フラッシュは形を伸縮させない、色の演出だけ）
+	if (inSlide) {
+		ctx.fillStyle = withAlpha(layer.flashColor, slideT * 0.6);
+		ctx.fillRect(x, y, blockW, blockH);
 	}
 
 	ctx.restore();
@@ -2880,7 +2938,7 @@ export function resolveLyricLines(
 		if (target === undefined) return [];
 		return song.lyricLines.filter((l) => l.trackId === target);
 	})();
-	const withGapResets = applyLyricGapResets(lines);
+	const withGapResets = applyLyricGapResets(lines, layer.holdBars ?? 2);
 	return applyLyricResetBars(withGapResets, layer.resetBars);
 }
 
@@ -2897,13 +2955,26 @@ const INTERLUDE_GAP_BARS = 1.5;
  * 大きく開く（＝間奏などで次の歌詞まで間が空く）箇所を自動でリセット扱いにする。
  * これが無いと、間奏で次の行が遠いとき groupEndBar が次行の小節まで伸びきってしまい、
  * 積み上げた歌詞が間奏中ずっと画面に残り続けてしまう。
+ *
+ * `holdBars` は手入力（`source==='manual'`）の行のように `endBar`（実際に歌っている
+ * 長さ）が分からない行の代わりの目安として使う。以前は `endBar ?? prev.bar` としていて、
+ * これは「歌っている時間0」と同じ意味になり、手入力の行は普通の間隔（例:2小節おき）
+ * で置いただけで毎回 `gap > INTERLUDE_GAP_BARS` を満たしてしまい、**手入力の行が
+ * ほぼ全部「間奏」判定される**バグになっていた（同時表示行数の設定に関わらず常に
+ * 1行しか積み上がらない／間奏でもないのに歌詞が消える、の両方の原因）。
+ * `endBar` が無い行は「保持時間ぶんは歌っている」とみなして `prev.bar + holdBars` を
+ * 使うことで、通常の行間隔では引っかからず、実際に holdBars を超えて空く箇所だけを
+ * 間奏として検出する。
  */
-function applyLyricGapResets(lines: MvLyricLine[]): MvLyricLine[] {
+function applyLyricGapResets(
+	lines: MvLyricLine[],
+	holdBars: number,
+): MvLyricLine[] {
 	if (lines.length === 0) return lines;
 	return lines.map((l, i) => {
 		if (i === 0) return l;
 		const prev = lines[i - 1];
-		const prevEnd = prev.endBar ?? prev.bar;
+		const prevEnd = prev.endBar ?? prev.bar + holdBars;
 		const gap = l.bar - prevEnd;
 		return gap > INTERLUDE_GAP_BARS && !l.resetBefore
 			? { ...l, resetBefore: true, autoReset: true }
@@ -3474,11 +3545,11 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 			2,
 			((Math.min(end, to) - n.startStep) / windowSteps) * w,
 		);
-		// 窓の外の音は折り返さず、そのオクターブぶんだけ寄せて窓の中に入れる
-		// （切り捨てると、狭い窓では画面がほとんど空になる）
-		let pitch = n.pitch;
-		while (pitch < pitchLo) pitch += 12;
-		while (pitch > pitchHi) pitch -= 12;
+		// 音域の外に出た音は、オクターブぶん寄せて折り返さない——それをやると
+		// 低い音がオクターブ上げされて「高い音」として描かれてしまい、実際の
+		// ピッチと違う位置に出るバグになる（ユーザー指摘）。素直に音域の端へ
+		// クランプする（描画位置は端に張り付くが、音の高低の向きは絶対に崩れない）。
+		const pitch = Math.min(pitchHi, Math.max(pitchLo, n.pitch));
 		const ny = y + h - ((pitch - pitchLo) / pitchRange) * (h - noteH) - noteH;
 
 		const sounding = n.startStep <= d.step && end > d.step;
