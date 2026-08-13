@@ -3298,6 +3298,58 @@ export default function MvMaker({
 									</Hint>
 								</>
 							)}
+							<Details label="音域（縦に映す高さの範囲）">
+								<Hint>
+									未指定＝自動（今映っている窓の音符から中心を決め、トラック全体の音域ぶんの幅で映す）。
+									ここで固定すると、トラックや切り替え窓が変わっても音域は動かなくなります。
+								</Hint>
+								<CheckField
+									label="音域を固定する"
+									checked={!!layer.pitchRange}
+									onChange={(v) =>
+										updateLayer(
+											layer.id,
+											(l) =>
+												({
+													...l,
+													pitchRange: v ? [62, 74] : undefined,
+												}) as MvLayer,
+										)
+									}
+								/>
+								{layer.pitchRange && (
+									<>
+										<NumField
+											label="下限（MIDIノート番号）"
+											value={layer.pitchRange[0]}
+											onChange={(v) =>
+												updateLayer(layer.id, (l) =>
+													l.kind === "visualizer" && l.pitchRange
+														? {
+																...l,
+																pitchRange: [v, l.pitchRange[1]],
+															}
+														: l,
+												)
+											}
+										/>
+										<NumField
+											label="上限（MIDIノート番号）"
+											value={layer.pitchRange[1]}
+											onChange={(v) =>
+												updateLayer(layer.id, (l) =>
+													l.kind === "visualizer" && l.pitchRange
+														? {
+																...l,
+																pitchRange: [l.pitchRange[0], v],
+															}
+														: l,
+												)
+											}
+										/>
+									</>
+								)}
+							</Details>
 							<Details label="音の光り方と余韻">
 								<Hint>
 									まだ鳴っていない音をどれくらい薄く置いておくかと、鳴った音がどう消えるかです。
