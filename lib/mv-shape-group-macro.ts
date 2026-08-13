@@ -919,8 +919,6 @@ export function generateSymmetricShapeGroup(
 export const DEFAULT_ARRANGEMENT_BEATS = 4;
 
 
-const FLASH_PALETTE = ["#ffffff", "#fde68a", "#fca5a5", "#93c5fd", "#5eead4"];
-
 /**
  * ある区間（`phaseOffsetBar` 小節目〜 `+bars` 小節ぶん）の中だけで
  * 「基準値→山→基準値」と単発で盛り上がって収まる山形を作る。
@@ -940,6 +938,7 @@ function oneShotHump(
 	bars: number,
 	phaseOffsetBar: number,
 	curve: number,
+	shape?: "decay" | "bounce",
 ): MvModulator[] {
 	return [
 		{ source: "constant", target, op: "add", amount },
@@ -952,6 +951,7 @@ function oneShotHump(
 			phaseOffset: phaseOffsetBar,
 			symmetric: true,
 			curve,
+			shape,
 		},
 	];
 }
@@ -974,18 +974,18 @@ function oneShotHump(
  */
 type MicroEvent =
 	| "blink"
-	| "colorFlash"
 	| "kick"
 	| "stretch"
 	| "shapeSwap"
-	| "squareBurst";
+	| "squareBurst"
+	| "multiply";
 const MICRO_EVENTS: MicroEvent[] = [
 	"blink",
-	"colorFlash",
 	"kick",
 	"stretch",
 	"shapeSwap",
 	"squareBurst",
+	"multiply",
 ];
 
 /** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
@@ -1038,9 +1038,6 @@ export function generateArrangementForGroup(
 	);
 	const slotBars = durationBars / slotCount;
 
-	const recolorPalette = FLASH_PALETTE.filter((_, i) => chance(0.6) || i === 0);
-	const flashColor = pick(FLASH_PALETTE);
-
 	for (const orig of existingLayers) {
 		let lastEvent: MicroEvent | null = null;
 		for (let i = 0; i < slotCount; i++) {
@@ -1074,22 +1071,11 @@ export function generateArrangementForGroup(
 						},
 					];
 					break;
-				case "colorFlash":
-					// 差し色パレットへ丸ごと塗り替え、太さも一発盛り上げる。
-					newLayer.color = pick(
-						recolorPalette.length > 0 ? recolorPalette : FLASH_PALETTE,
-					);
-					newLayer.modulators = oneShotHump(
-						"thickness",
-						roundTo((orig.thickness ?? 3) * randRange(1.5, 3), 1),
-						slotBars,
-						slotFrom,
-						3,
-					);
-					break;
-				case "kick":
+				case "kick": {
 					// 回転のキック。毎スロット角度・カーブを振り直すことで
-					// 「同じキックの繰り返し」に見えないようにする。
+					// 「同じキックの繰り返し」に見えないようにする。3回に1回くらいは
+					// `bounce`（弾んで止まる振動）にして、単調な減衰だけにならないようにする。
+					const kickShape = chance(0.35) ? "bounce" : "decay";
 					newLayer.modulators = oneShotHump(
 						"rotation",
 						chance(0.5)
@@ -1098,8 +1084,10 @@ export function generateArrangementForGroup(
 						slotBars,
 						slotFrom,
 						pick([2, 3, 4]),
+						kickShape,
 					);
 					break;
+				}
 				case "stretch": {
 					// 一瞬だけ大きく伸びて元のサイズへ戻る「ストレッチ」。
 					// 伸びる瞬間は太さを細くして引き伸ばされた質感を足す。
@@ -1111,9 +1099,10 @@ export function generateArrangementForGroup(
 						(orig.thickness ?? 3) * randRange(0.4, 0.7),
 						1,
 					);
+					const stretchShape = chance(0.35) ? "bounce" : "decay";
 					newLayer.modulators = [
-						...oneShotHump("size", stretchAmount, slotBars, slotFrom, 5),
-						...oneShotHump("thickness", -thinAmount, slotBars, slotFrom, 5),
+						...oneShotHump("size", stretchAmount, slotBars, slotFrom, 5, stretchShape),
+						...oneShotHump("thickness", -thinAmount, slotBars, slotFrom, 5, stretchShape),
 					];
 					break;
 				}
@@ -1144,7 +1133,7 @@ export function generateArrangementForGroup(
 				}
 				case "squareBurst": {
 					// 元の図形は少し暗く沈めておいて、主役は図形の位置から
-					// 広がって消える四角形のバースト（枠線のみ）にする。
+					// 広がって消える四角形のバースト（枠線のみ、色は元の図形と同じ）にする。
 					newLayer.modulators = [
 						{ source: "constant", target: "opacity", op: "mul", amount: 0.55 },
 					];
@@ -1158,7 +1147,7 @@ export function generateArrangementForGroup(
 						z: nextZ(),
 						rotation: 0,
 						barRange: [slotFrom, slotTo],
-						color: chance(0.5) ? flashColor : (orig.color ?? "#ffffff"),
+						color: orig.color ?? "#ffffff",
 						filled: false,
 						thickness: randRange(2, 4),
 						size: (orig.size ?? 20) * 0.5,
@@ -1180,6 +1169,54 @@ export function generateArrangementForGroup(
 							...oneShotHump("opacity", 1, slotBars, slotFrom, 2),
 						],
 					});
+					break;
+				}
+				case "multiply": {
+					// 分身が湧いて弾けるように飛び散り、また1個へ戻る。
+					// `offsetX`/`offsetY`/`spread`（複製の間隔・広がり半径）は
+					// モジュレータで直接動かせる対象になったので、間隔を固定値のまま
+					// 個数だけ増やす「静止した配置」ではなく、間隔そのものを
+					// 0→最大→0と一発で振る——湧いた瞬間に画面へ飛び散り、
+					// 区間の終わりには間隔も0に戻って重なった1個に見える。
+					const dirX = pick([-1, 1]) * randRange(0.6, 1);
+					const dirY = pick([-1, 1]) * randRange(0.6, 1);
+					const spacing = randRange(30, 60);
+					const copies = pick([3, 4, 5, 6]);
+					newLayer.count = 1;
+					newLayer.spread = 0;
+					newLayer.offsetX = 0;
+					newLayer.offsetY = 0;
+					newLayer.spin = pick([0, 0, 20, -20]);
+					// bounce にすると「湧いて弾んで散らばる」勢いが出る。decay だと
+					// スッと広がって収まる落ち着いた散り方になる——どちらも混ぜて使う。
+					const multiplyShape = chance(0.5) ? "bounce" : "decay";
+					newLayer.modulators = [
+						...oneShotHump("count", copies - 1, slotBars, slotFrom, 3, multiplyShape),
+						...oneShotHump(
+							"offsetX",
+							roundTo(spacing * dirX, 1),
+							slotBars,
+							slotFrom,
+							3,
+							multiplyShape,
+						),
+						...oneShotHump(
+							"offsetY",
+							roundTo(spacing * dirY, 1),
+							slotBars,
+							slotFrom,
+							3,
+							multiplyShape,
+						),
+						...oneShotHump(
+							"rotation",
+							chance(0.5) ? pick([90, 180, 270]) : -pick([90, 180, 270]),
+							slotBars,
+							slotFrom,
+							3,
+							multiplyShape,
+						),
+					];
 					break;
 				}
 			}

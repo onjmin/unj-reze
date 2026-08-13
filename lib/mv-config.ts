@@ -480,7 +480,10 @@ export type MvModTarget =
 	| "y"
 	| "thickness"
 	| "sides"
-	| "count";
+	| "count"
+	| "spread"
+	| "offsetX"
+	| "offsetY";
 
 /** 四則演算。基準値に対してどう混ぜるか。 */
 export type MvModOp = "add" | "sub" | "mul" | "div";
@@ -511,6 +514,9 @@ export const MV_MOD_TARGET_LABELS: Record<MvModTarget, string> = {
 	thickness: "線の太さ",
 	sides: "角の数",
 	count: "個数",
+	spread: "複製の広がり幅（半径）",
+	offsetX: "複製の横間隔",
+	offsetY: "複製の縦間隔",
 };
 
 export const MV_MOD_OP_LABELS: Record<MvModOp, string> = {
@@ -556,6 +562,14 @@ export interface MvModulator {
 	 * （周期を2倍速にしても、ずらす量は常に絶対の拍数ぶん＝0.5拍のまま変わらない）。
 	 */
 	phaseOffset?: number;
+	/**
+	 * beat/bar/phrase の減衰カーブの波形。既定は `"decay"`（単調に減衰する滑らかな
+	 * カーブ、`curve` は鋭さ）。`"bounce"` は同じ減衰の内側で数回はねる減衰振動
+	 * （ボールが弾んで止まるような動き）——`curve` は同じく減衰の鋭さ、はねる回数は
+	 * 固定3回。単調カーブだけでは「効いて→収まる」の起伏しか作れず、キック系の
+	 * 演出がどれも同じ質感になりがちだったため追加した。
+	 */
+	shape?: "decay" | "bounce";
 	target: MvModTarget;
 	op: MvModOp;
 	/** source(0..1) に掛けてから op を適用する係数。負の値も可。 */

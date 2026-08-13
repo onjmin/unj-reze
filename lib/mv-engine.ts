@@ -437,6 +437,29 @@ function envelope(step: number, period: number, curve = 2): number {
 	return clamp01(Math.pow(1 - phase / period, curve));
 }
 
+/** `envelope` の内側で数回はねる減衰振動版。ボールが弾んで止まる質感を作る。 */
+function bounceEnvelope(step: number, period: number, curve = 2): number {
+	if (period <= 0) return 0;
+	const phase = ((step % period) + period) % period;
+	const t = phase / period;
+	const decay = Math.pow(1 - t, curve);
+	const bounces = 3;
+	const osc = Math.abs(Math.cos(t * Math.PI * bounces));
+	return clamp01(decay * osc);
+}
+
+/** `shape` に応じて `envelope`/`bounceEnvelope` を切り替える。 */
+function shapedEnvelope(
+	step: number,
+	period: number,
+	curve: number,
+	shape: "decay" | "bounce" | undefined,
+): number {
+	return shape === "bounce"
+		? bounceEnvelope(step, period, curve)
+		: envelope(step, period, curve);
+}
+
 // ───────────────── トラックの鳴りを読む ─────────────────
 
 /** 昇順配列で startStep <= step を満たす最後の要素の添字。無ければ -1。 */
@@ -519,10 +542,10 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 			// periodBeats未指定/1なら従来どおり1拍周期。指定時は周期を伸縮する
 			// （0.5で2倍速、2で半分の速さ、というように小さいほど速い）。
 			const beatPeriod = Math.max(1, MV_STEPS_PER_BEAT * (m.periodBeats ?? 1));
-			// 裏拍などの位相ずらし。0なら従来どおり d.beatEnv の速い経路をそのまま使う
-			// （毎フレーム envelope() を呼び直さずに済む——ほとんどの動きは位相ずらし無し）。
+			// 裏拍などの位相ずらし。0かつ既定波形なら従来どおり d.beatEnv の速い経路を
+			// そのまま使う（毎フレーム envelope() を呼び直さずに済む）。
 			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BEAT;
-			if (offsetSteps === 0) {
+			if (offsetSteps === 0 && m.shape === undefined) {
 				if (m.periodBeats === undefined || m.periodBeats === 1) {
 					return m.curve === undefined
 						? d.beatEnv
@@ -530,12 +553,12 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 				}
 				return envelope(d.step, beatPeriod, m.curve ?? 2);
 			}
-			return envelope(d.step - offsetSteps, beatPeriod, m.curve ?? 2);
+			return shapedEnvelope(d.step - offsetSteps, beatPeriod, m.curve ?? 2, m.shape);
 		}
 		case "bar":
-			return m.curve === undefined
+			return m.curve === undefined && m.shape === undefined
 				? d.barEnv
-				: envelope(d.step, MV_STEPS_PER_BAR, m.curve);
+				: shapedEnvelope(d.step, MV_STEPS_PER_BAR, m.curve ?? 2, m.shape);
 		case "phrase": {
 			// フレーズ(既定8小節)の頭で1、終わりへ向かってなめらかに0へ。
 			// op:"sub" で使うと逆向き＝終わりに向かって育つカーブになる。
@@ -546,13 +569,18 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BAR;
 			const stepAdj = d.step - offsetSteps;
 			const curve = m.curve ?? 2;
-			if (!m.symmetric) return envelope(stepAdj, period, curve);
+			if (!m.symmetric) return shapedEnvelope(stepAdj, period, curve, m.shape);
 			// symmetric: いちばん近い境目からの距離で山を作る（境目=1、中央=0）。
 			// 減衰のみだと境目の手前で0のままになり、実測にある「境目へ向かう
 			// 立ち上がり」が出せずカクッと不連続になる。
 			const phase = ((stepAdj % period) + period) % period;
 			const dist = Math.min(phase, period - phase) / (period / 2);
-			return clamp01(Math.pow(1 - dist, curve));
+			const hump = Math.pow(1 - dist, curve);
+			if (m.shape !== "bounce") return clamp01(hump);
+			// bounce: 山の中に数回はねる振動を重ねる。境目・中央はどちらも寄与ゼロの
+			// ままなので単発の山という性質は保ったまま、途中の質感だけ弾む。
+			const osc = Math.abs(Math.cos(dist * Math.PI * 3));
+			return clamp01(hump * osc);
 		}
 		case "time":
 			return d.timeSec % 1;
@@ -3378,10 +3406,7 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 	ctx.strokeStyle = layer.color;
 	ctx.fillStyle = layer.color;
 
-	const spread = layer.spread ?? 0;
 	const spin = layer.spin ?? 0;
-	const offsetX = layer.offsetX ?? 0;
-	const offsetY = layer.offsetY ?? 0;
 
 	for (let i = 0; i < count; i++) {
 		// stagger>0 のとき、i個目は i*stagger ステップぶん過去の音で反応する
@@ -3396,6 +3421,12 @@ function drawShapeLayer(d: DrawCtx, layer: MvShapeLayer): void {
 			modulate(d, mods, "thickness", layer.thickness, delay),
 		);
 		const sides = modulate(d, mods, "sides", layer.sides ?? 6, delay);
+		// spread/offsetX/offsetY も動かせるようにしてある（複製が「並ぶ」だけでなく
+		// 「散らばる／集まる」動きそのものを作れるように——固定間隔のまま個数だけ
+		// 増やす複製は安っぽく見える、というユーザー指摘への対応）。
+		const spread = modulate(d, mods, "spread", layer.spread ?? 0, delay);
+		const offsetX = modulate(d, mods, "offsetX", layer.offsetX ?? 0, delay);
+		const offsetY = modulate(d, mods, "offsetY", layer.offsetY ?? 0, delay);
 
 		// 連動を重ねすぎても画面を覆い尽くさないよう、描画半径は画面サイズの2倍で頭打ちにする
 		const radius = Math.min(size + spread * i, MV_W * 2);
@@ -3621,14 +3652,21 @@ function drawPianoRoll(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const to = from + windowSteps;
 
 	const notes = notesForLayer(d, layer);
-	const targetNotes = paged
-		? notes.filter((n) => n.startStep >= from && n.startStep < to)
-		: notes;
-	// page は切り替え間隔（ページ）ごとに音域が変わりうるので、そのページ番号をキーにして
-	// ページが進んだときだけ min/max を計算し直す。scroll はページの概念が無いので "all" 固定。
+	// 中心合わせに使う「いま画面に映っている音符」。page はページ窓、scroll は
+	// 再生位置まわりの表示窓——どちらも実際に描画される音符と同じ条件で絞る
+	// （以前は scroll がここだけ曲全体の音符を使っていて、いま流れている場所と
+	// 無関係な位置に中心が固定されるズレになっていた＝ユーザー指摘）。
+	const targetNotes = notes.filter((n) => {
+		const end = n.startStep + n.durationSteps;
+		return paged
+			? n.startStep >= from && n.startStep < to
+			: end >= from && n.startStep <= to;
+	});
+	// page は切り替え間隔（ページ）ごと、scroll は表示窓ぶん進むごとに音域が変わりうる
+	// ので、その区切り番号をキーにして区切りが変わったときだけ min/max を計算し直す。
 	const pageKey = paged
 		? Math.round((from - pageOffsetSteps) / windowSteps)
-		: "all";
+		: Math.floor(d.step / windowSteps);
 	const [pitchLo, pitchHi] = getLayerPitchRangeCached(
 		song,
 		layer,
@@ -3805,7 +3843,19 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const to = d.step + windowSteps * 0.85;
 
 	const notes = notesForLayer(d, layer);
-	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, notes);
+	// 中心合わせは「いま流れているレーンの窓」に映る音符から。曲全体の音符を使うと、
+	// いま流れている場所と無関係な位置に中心が固定されるズレになる（ユーザー指摘）。
+	const windowNotes = notes.filter((n) => {
+		const end = n.startStep + n.durationSteps;
+		return end >= from && n.startStep <= to;
+	});
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(
+		song,
+		layer,
+		windowNotes,
+		Math.floor(d.step / windowSteps),
+		notes,
+	);
 	const pitchRange = Math.max(1, pitchHi - pitchLo);
 	const rollH = rect.h * 1.1;
 	const noteH = Math.max(2.5, (rollH / (pitchRange + 1)) * 0.85);
@@ -3830,11 +3880,8 @@ function drawPianoRoll3D(d: DrawCtx, layer: MvVisualizerLayer): void {
 		view.depth * 0.6 +
 		spanX * 0.35 * Math.abs(Math.sin(view.yaw * DEG));
 
-	// 既に notesForLayer(d, layer) は上で計算済みなので流用
-	const filteredNotes = notes.filter((n) => {
-		const end = n.startStep + n.durationSteps;
-		return end >= from && n.startStep <= to;
-	});
+	// 中心合わせで絞ったのと同じ窓なので、そのまま流用する（sortで書き換わるため複製する）。
+	const filteredNotes = [...windowNotes];
 
 	// 画家のアルゴリズム: 奥のレーンから描く
 	filteredNotes.sort(
@@ -3962,16 +4009,23 @@ function drawPianoRollCircular(d: DrawCtx, layer: MvVisualizerLayer): void {
 	const span = Math.max(4, maxR - innerR);
 
 	const rawNotes = notesForLayer(d, layer);
-	const [pitchLo, pitchHi] = getLayerPitchRangeCached(song, layer, rawNotes);
-	const pitchRange = Math.max(1, pitchHi - pitchLo);
-	const sweep = ring.sweep * DEG;
-	const rot = ring.rotate * DEG;
-	const laneAngle = sweep / (pitchRange + 1);
-
+	// 中心合わせは「いま輪に映っている窓」の音符から（曲全体だと、いま鳴っている
+	// 場所と無関係な位置に中心が固定されるズレになる）。
 	const notes = rawNotes.filter((n) => {
 		const end = n.startStep + n.durationSteps;
 		return end >= from && n.startStep <= to;
 	});
+	const [pitchLo, pitchHi] = getLayerPitchRangeCached(
+		song,
+		layer,
+		notes,
+		Math.floor(d.step / windowSteps),
+		rawNotes,
+	);
+	const pitchRange = Math.max(1, pitchHi - pitchLo);
+	const sweep = ring.sweep * DEG;
+	const rot = ring.rotate * DEG;
+	const laneAngle = sweep / (pitchRange + 1);
 
 	ctx.save();
 	for (const n of notes) {
