@@ -983,8 +983,14 @@ function oneShotHump(
  * 切り替えてくれる——ループを新設する必要が無く、`oneShotHump` の山も
  * そのスロットの中で頭0→中央ピーク→終わり0ときっちり収まる。
  */
-type MicroEvent = "blink" | "kick" | "stretch" | "shapeSwap";
-const MICRO_EVENTS: MicroEvent[] = ["blink", "kick", "stretch", "shapeSwap"];
+type MicroEvent = "blink" | "kick" | "stretch" | "shapeSwap" | "scatter";
+const MICRO_EVENTS: MicroEvent[] = [
+	"blink",
+	"kick",
+	"stretch",
+	"shapeSwap",
+	"scatter",
+];
 
 /** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
 function pickMicroEvent(lastEvent: MicroEvent | null, pool: MicroEvent[]): MicroEvent {
@@ -1172,6 +1178,26 @@ export function generateArrangementForGroup(
 						slotFrom,
 						4,
 					);
+					break;
+				}
+				case "scatter": {
+					// 元のレイヤーを、いま居る位置から一時的に隅（斜め・上下左右）へ
+					// 動かして、区間の終わりにはまた元の位置へ戻す。
+					//
+					// 自動図形グループ側の配置ロジックは clusterType を問わず
+					// Y座標が常に画面中央固定（`baseY`）で、要素は横一直線にしか
+					// 並ばない——斜めや上下の配置は、乱数がどれだけ噛み合っても
+					// 構造的に出ない（ユーザー指摘で確認済み）。ここは配置ロジックを
+					// 変えるのではなく、`x`/`y` も他のパラメータと同じくモジュレータで
+					// 動かせる対象であることを使い、既存レイヤー自身を一発だけ隅へ
+					// 移動させる——複製は増やさない。
+					const targetDx = pick([-1, 1]) * randRange(MV_W * 0.18, MV_W * 0.3);
+					const targetDy = pick([-1, 1]) * randRange(MV_H * 0.2, MV_H * 0.32);
+					const scatterShape = chance(0.5) ? "bounce" : "decay";
+					newLayer.modulators = [
+						...oneShotHump("x", targetDx, slotBars, slotFrom, 3, scatterShape),
+						...oneShotHump("y", targetDy, slotBars, slotFrom, 3, scatterShape),
+					];
 					break;
 				}
 			}
