@@ -671,10 +671,10 @@ export function buildSymmetricShapeGroupLayers(
 		// 画面の真ん中に細かい模様が固まっただけの絵になる（実際そうなっていた）。
 		// 参考動画も主役は大きなモチーフ1つ＋小さな脇役、という構成。
 		const outer = randRange(95, 140);
-		// コメント通り「主役1つ＋小さな脇役」が基本形なので2段を多数派にする
-		// （以前は `chance(0.4)?2:1` で単段が60%と逆転しており、画面に図形が
-		// 1個だけの寂しい結果が多発していた——実際に生成されたデータで確認済み）。
-		const tierCount = options.pairCount ?? (chance(0.75) ? 2 : 1);
+		// コメント通り「主役1つ＋小さな脇役」が基本形なので、常に2段にする
+		// （以前は `chance(0.4)?2:1` で単段が60%、直近の修正でも25%残っていた——
+		// 「1個だけの寂しい絵」になる理由が無いので、抽選自体をやめて固定した）。
+		const tierCount = options.pairCount ?? 2;
 		const ratios = [1, 0.42];
 
 		for (let i = 0; i < Math.min(tierCount, ratios.length); i++) {
@@ -991,11 +991,36 @@ const MICRO_EVENTS: MicroEvent[] = [
 	"multiply",
 ];
 
+/**
+ * イベントの抽選プール。`sourceCount`（アレンジ元のレイヤー枚数）が少ないときは
+ * `squareBurst`/`multiply`（＝画面に新しい要素を足す・散らす、密度そのものを作る
+ * イベント）の当選確率を上げる。
+ *
+ * 「元の絵がアイコン1個しか無ければ、アレンジをどう工夫しても参考動画のような
+ * 密度にはならない」——以前はそう考えて元の自動生成側を直したが、それは
+ * アレンジ側の力不足を元絵の枚数のせいにしていただけで、本質的な解決ではない
+ * という指摘の通りだった。アレンジは「元のレイヤー1枚につき1系統の変化」しか
+ * 作れない構造だと、元が少ない限り密度も頭打ちになる。ここを直すには、
+ * 元の枚数に関係なく「新しい要素を足す」イベントの比率そのものを上げ、
+ * 枚数が少ないほど積極的に画面を埋めるようにする。
+ */
+function buildMicroEventPool(sourceCount: number): MicroEvent[] {
+	if (sourceCount >= 3) return MICRO_EVENTS;
+	// 元が1〜2枚のときは、要素を増やす2種を重複エントリで重み付けする。
+	return [
+		...MICRO_EVENTS,
+		"squareBurst",
+		"squareBurst",
+		"multiply",
+		"multiply",
+	];
+}
+
 /** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
-function pickMicroEvent(lastEvent: MicroEvent | null): MicroEvent {
-	const ev = pick(MICRO_EVENTS);
+function pickMicroEvent(lastEvent: MicroEvent | null, pool: MicroEvent[]): MicroEvent {
+	const ev = pick(pool);
 	if (ev !== lastEvent) return ev;
-	return MICRO_EVENTS[(MICRO_EVENTS.indexOf(ev) + 1) % MICRO_EVENTS.length];
+	return pool[(pool.indexOf(ev) + 1) % pool.length];
 }
 
 /**
@@ -1047,12 +1072,23 @@ export function generateArrangementForGroup(
 	// 画面全体が一斉に別の表情へ切り替わる」というまとまりが出せなかった
 	// ——ユーザー指摘。イベントの中身（角度・コマの選び方など）はレイヤーごとに
 	// 振るが、"何をするか" と "いつ" は画面全体で揃える）。
+	const eventPool = buildMicroEventPool(existingLayers.length);
 	let lastEvent: MicroEvent | null = null;
 	const slotEvents: MicroEvent[] = [];
 	for (let i = 0; i < slotCount; i++) {
-		const ev = pickMicroEvent(lastEvent);
+		const ev = pickMicroEvent(lastEvent, eventPool);
 		slotEvents.push(ev);
 		lastEvent = ev;
+	}
+	// 元のレイヤーが少ないときは、重み付けだけだと抽選運で一度も
+	// "画面に散らす" イベントが選ばれない回もありうる（実測: 200回中18回）。
+	// 密度を確率任せにしないため、その場合は1スロットを強制的に multiply に
+	// 差し替える——「元が少なければ密度も運任せ」を無くす。
+	if (existingLayers.length <= 2 && !slotEvents.includes("multiply")) {
+		// squareBurst は要素を増やしはするが orig の位置に留まったまま広がって
+		// 消えるだけ（画面上の空間的な散らばりは作らない）ので、ここでの
+		// 「散らす」判定には数えない——multiply の有無だけを見る。
+		slotEvents[Math.floor(slotEvents.length / 2)] = "multiply";
 	}
 
 	for (const orig of existingLayers) {
@@ -1200,7 +1236,14 @@ export function generateArrangementForGroup(
 					pushNewLayer = false;
 					const dirX = pick([-1, 1]) * randRange(0.6, 1);
 					const dirY = pick([-1, 1]) * randRange(0.6, 1);
-					const spacing = randRange(30, 60);
+					// 元のレイヤーが少ないほど間隔を画面幅基準の大きめにする——
+					// 元絵の枚数が少なくても、この一発で画面の左右に要素が
+					// 分かれて見えるだけの広がりを確保する（元の位置1点に
+					// 固まったままでは参考動画のような密度は作れないため）。
+					const spacing =
+						existingLayers.length <= 2
+							? randRange(MV_W * 0.12, MV_W * 0.26)
+							: randRange(30, 60);
 					const sideCopies = pick([2, 2, 3]); // 片側あたりの追加複製数
 					// bounce にすると「湧いて弾んで散らばる」勢いが出る。decay だと
 					// スッと広がって収まる落ち着いた散り方になる——どちらも混ぜて使う。
