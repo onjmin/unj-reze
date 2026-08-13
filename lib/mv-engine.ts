@@ -3563,7 +3563,14 @@ function getLayerPitchRangeCached(
 	allNotes: MvNote[] = notes,
 ): [number, number] {
 	if (layer.pitchRange) return [layer.pitchRange[0], layer.pitchRange[1]];
-	const key = String(pageKey);
+	// pageKey だけをキーにすると、ページ番号が変わらないままトラック選択(layer.tracks)
+	// だけを変えたときに古いトラックの中心がキャッシュに残り続けて再計算されない
+	// （ユーザー指摘：トラック選択を変えても位相が自動で変わらない）。トラック選択も
+	// キーに含めて、選択が変わったら必ず取り直す。
+	const tracksKey = layer.tracks && layer.tracks.length > 0
+		? layer.tracks.join(",")
+		: "all";
+	const key = `${tracksKey}|${pageKey}`;
 	const cached = pitchRangeCache.get(layer);
 	if (cached && cached.songRef === song && cached.key === key) {
 		return cached.range;

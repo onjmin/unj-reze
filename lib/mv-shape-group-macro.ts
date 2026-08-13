@@ -1038,13 +1038,25 @@ export function generateArrangementForGroup(
 	);
 	const slotBars = durationBars / slotCount;
 
+	// イベントはスロットごとに1つだけ選び、グループ内の全レイヤーで共有する
+	// （レイヤーごとに別々のイベントを独立に選んでいた以前の実装は、同じ瞬間に
+	// 図形ごとバラバラの変化が起きる寄せ集めになり、参考動画にある「その瞬間
+	// 画面全体が一斉に別の表情へ切り替わる」というまとまりが出せなかった
+	// ——ユーザー指摘。イベントの中身（角度・コマの選び方など）はレイヤーごとに
+	// 振るが、"何をするか" と "いつ" は画面全体で揃える）。
+	let lastEvent: MicroEvent | null = null;
+	const slotEvents: MicroEvent[] = [];
+	for (let i = 0; i < slotCount; i++) {
+		const ev = pickMicroEvent(lastEvent);
+		slotEvents.push(ev);
+		lastEvent = ev;
+	}
+
 	for (const orig of existingLayers) {
-		let lastEvent: MicroEvent | null = null;
 		for (let i = 0; i < slotCount; i++) {
 			const slotFrom = triggerBar + i * slotBars;
 			const slotTo = slotFrom + slotBars;
-			const ev = pickMicroEvent(lastEvent);
-			lastEvent = ev;
+			const ev = slotEvents[i];
 
 			const newLayer: MvShapeLayer = {
 				...orig,
