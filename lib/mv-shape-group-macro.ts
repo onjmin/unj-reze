@@ -962,6 +962,14 @@ function oneShotHump(
 /**
  * 特殊アレンジの中身を作る「単発イベント」の種類。
  *
+ * **「アレンジ」＝元の図形を複製・増殖させて新しい要素を足すことではなく、
+ * 元の図形そのものにエフェクトをかけて変形させること**（ユーザーによる定義の
+ * 明確化）。以前はここに「周りにバーストを出す」「鏡像を分身させる」といった
+ * “新しい図形を足す” 系のイベントを混ぜていたが、参考動画のどこにも無い絵に
+ * なる一方だった——複製は「アレンジ」の範囲外だったので、全部撤去した。
+ * 残っているのは、どれも既存の1枚のレイヤー自身のプロパティ（濃さ・回転・
+ * 大きさ・太さ・表示中のコマ）を変形させるだけのイベントのみ。
+ *
  * 以前は区間全体に1つの型（回転キック／破裂／…）を引き伸ばして適用していたが、
  * これだと型を何種類増やしても「1つの動きが速いか遅いか」の違いにしかならず、
  * 参考にした絵にある「点滅→点滅→形状変換1→形状変換2」のような、短い区間の
@@ -975,52 +983,38 @@ function oneShotHump(
  * 切り替えてくれる——ループを新設する必要が無く、`oneShotHump` の山も
  * そのスロットの中で頭0→中央ピーク→終わり0ときっちり収まる。
  */
-type MicroEvent =
-	| "blink"
-	| "kick"
-	| "stretch"
-	| "shapeSwap"
-	| "squareBurst"
-	| "multiply";
-const MICRO_EVENTS: MicroEvent[] = [
-	"blink",
-	"kick",
-	"stretch",
-	"shapeSwap",
-	"squareBurst",
-	"multiply",
-];
-
-/**
- * イベントの抽選プール。`sourceCount`（アレンジ元のレイヤー枚数）が少ないときは
- * `squareBurst`/`multiply`（＝画面に新しい要素を足す・散らす、密度そのものを作る
- * イベント）の当選確率を上げる。
- *
- * 「元の絵がアイコン1個しか無ければ、アレンジをどう工夫しても参考動画のような
- * 密度にはならない」——以前はそう考えて元の自動生成側を直したが、それは
- * アレンジ側の力不足を元絵の枚数のせいにしていただけで、本質的な解決ではない
- * という指摘の通りだった。アレンジは「元のレイヤー1枚につき1系統の変化」しか
- * 作れない構造だと、元が少ない限り密度も頭打ちになる。ここを直すには、
- * 元の枚数に関係なく「新しい要素を足す」イベントの比率そのものを上げ、
- * 枚数が少ないほど積極的に画面を埋めるようにする。
- */
-function buildMicroEventPool(sourceCount: number): MicroEvent[] {
-	if (sourceCount >= 3) return MICRO_EVENTS;
-	// 元が1〜2枚のときは、要素を増やす2種を重複エントリで重み付けする。
-	return [
-		...MICRO_EVENTS,
-		"squareBurst",
-		"squareBurst",
-		"multiply",
-		"multiply",
-	];
-}
+type MicroEvent = "blink" | "kick" | "stretch" | "shapeSwap";
+const MICRO_EVENTS: MicroEvent[] = ["blink", "kick", "stretch", "shapeSwap"];
 
 /** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
 function pickMicroEvent(lastEvent: MicroEvent | null, pool: MicroEvent[]): MicroEvent {
 	const ev = pick(pool);
 	if (ev !== lastEvent) return ev;
 	return pool[(pool.indexOf(ev) + 1) % pool.length];
+}
+
+/**
+ * スロットの並び順（何個目のスロットか）に応じてイベントの当選重みを変える。
+ *
+ * 参考動画（チョウチン少女）を1フレームずつ解析すると、割り込み区間は
+ * 「頭で暗転(blink)→太さが跳ねて戻る(kick)→…→終盤でいちばん要素数の多い
+ * コマへ一斉切り替え(shapeSwap)」という並びだった。以前はスロットごとに
+ * 完全ランダムで選んでいたため、この並びは運任せでしか出なかった
+ * （10回サンプリングで先頭がblinkになったのは数回のみ）。ここでは
+ * 先頭寄りはblink/kickを、終盤はshapeSwapを重み付けし、それ以外は
+ * 通常のランダム抽選のままにする——完全固定の台本にはしない（ランダム
+ * 生成としての多様性は残す）が、観測された骨格には寄せる。
+ */
+function weightedPoolForSlot(index: number, slotCount: number): MicroEvent[] {
+	const isFirst = index === 0;
+	const isSecond = index === 1 && slotCount >= 3;
+	const isLast = index === slotCount - 1;
+	const isNearEnd = index >= slotCount - 2 && slotCount >= 4;
+	if (isFirst) return ["blink", "blink", "blink", "kick", "stretch", "shapeSwap"];
+	if (isSecond) return ["kick", "kick", "kick", "blink", "stretch", "shapeSwap"];
+	if (isLast) return ["shapeSwap", "shapeSwap", "shapeSwap", "kick", "blink", "stretch"];
+	if (isNearEnd) return ["shapeSwap", "shapeSwap", "kick", "blink", "stretch"];
+	return MICRO_EVENTS;
 }
 
 /**
@@ -1072,23 +1066,12 @@ export function generateArrangementForGroup(
 	// 画面全体が一斉に別の表情へ切り替わる」というまとまりが出せなかった
 	// ——ユーザー指摘。イベントの中身（角度・コマの選び方など）はレイヤーごとに
 	// 振るが、"何をするか" と "いつ" は画面全体で揃える）。
-	const eventPool = buildMicroEventPool(existingLayers.length);
 	let lastEvent: MicroEvent | null = null;
 	const slotEvents: MicroEvent[] = [];
 	for (let i = 0; i < slotCount; i++) {
-		const ev = pickMicroEvent(lastEvent, eventPool);
+		const ev = pickMicroEvent(lastEvent, weightedPoolForSlot(i, slotCount));
 		slotEvents.push(ev);
 		lastEvent = ev;
-	}
-	// 元のレイヤーが少ないときは、重み付けだけだと抽選運で一度も
-	// "画面に散らす" イベントが選ばれない回もありうる（実測: 200回中18回）。
-	// 密度を確率任せにしないため、その場合は1スロットを強制的に multiply に
-	// 差し替える——「元が少なければ密度も運任せ」を無くす。
-	if (existingLayers.length <= 2 && !slotEvents.includes("multiply")) {
-		// squareBurst は要素を増やしはするが orig の位置に留まったまま広がって
-		// 消えるだけ（画面上の空間的な散らばりは作らない）ので、ここでの
-		// 「散らす」判定には数えない——multiply の有無だけを見る。
-		slotEvents[Math.floor(slotEvents.length / 2)] = "multiply";
 	}
 
 	for (const orig of existingLayers) {
@@ -1105,9 +1088,6 @@ export function generateArrangementForGroup(
 				barRange: [slotFrom, slotTo],
 				modulators: [],
 			};
-			// "multiply" は newLayer の代わりに鏡写しの2枚を自分で積むので、
-			// 末尾の push をスキップする（他のイベントは true のまま素通り）。
-			let pushNewLayer = true;
 
 			switch (ev) {
 				case "blink":
@@ -1164,6 +1144,13 @@ export function generateArrangementForGroup(
 					// コマ送り用のコマの中から、いま出ているのとは別の1コマへ
 					// パッと静止的に切り替える。コマ送りをそのまま流すより
 					// 「別の形へ変換した」感が強く出る。
+					//
+					// 参考動画を1フレームずつ解析すると、2.8〜3.1秒の一発は
+					// 「あちこちの図形が同時にいちばん情報量の多いコマへ切り替わる」
+					// という構図だった（核＋装飾ぜんぶ乗った状態＝`iconCycle.paths[0]`）。
+					// 単純にランダムなコマへ飛ぶだけだと、たまたま線の少ないコマに
+					// 当たることも多く、この「密度が上がる」瞬間が再現できない。
+					// 7割は最密のコマ（[0]）を狙い、残りはランダムに振れさせる。
 					if (
 						orig.form === "path" &&
 						orig.iconCycle &&
@@ -1171,7 +1158,9 @@ export function generateArrangementForGroup(
 					) {
 						const paths = orig.iconCycle.paths;
 						const curIdx = orig.path ? paths.indexOf(orig.path) : 0;
-						let idx = Math.floor(Math.random() * paths.length);
+						let idx = chance(0.7)
+							? 0
+							: Math.floor(Math.random() * paths.length);
 						if (idx === curIdx) idx = (idx + 1) % paths.length;
 						newLayer.path = paths[idx];
 						newLayer.iconCycle = undefined;
@@ -1185,123 +1174,9 @@ export function generateArrangementForGroup(
 					);
 					break;
 				}
-				case "squareBurst": {
-					// 元の図形は少し暗く沈めておいて、主役は図形の位置から
-					// 広がって消える四角形のバースト（枠線のみ、色は元の図形と同じ）にする。
-					newLayer.modulators = [
-						{ source: "constant", target: "opacity", op: "mul", amount: 0.55 },
-					];
-					layers.push({
-						kind: "shape",
-						form: "path",
-						id: mvUid("shp"),
-						groupId: newGroupId,
-						x: orig.x,
-						y: orig.y,
-						z: nextZ(),
-						rotation: 0,
-						barRange: [slotFrom, slotTo],
-						color: orig.color ?? "#ffffff",
-						filled: false,
-						thickness: randRange(2, 4),
-						size: (orig.size ?? 20) * 0.5,
-						count: 1,
-						spread: 0,
-						spin: 0,
-						blend: "normal",
-						path: rectPath(15, 15, 85, 85),
-						pathBox: [0, 0, 100, 100],
-						modulators: [
-							...oneShotHump(
-								"size",
-								roundTo((orig.size ?? 20) * randRange(1.8, 3), 1),
-								slotBars,
-								slotFrom,
-								2,
-							),
-							{ source: "constant", target: "opacity", op: "mul", amount: 0 },
-							...oneShotHump("opacity", 1, slotBars, slotFrom, 2),
-						],
-					});
-					break;
-				}
-				case "multiply": {
-					// 分身が湧いて弾けるように飛び散り、また1個へ戻る。
-					// `offsetX`/`offsetY` は複製をi番目ごとに一方向へ進めるだけの仕組みなので、
-					// 1枚のレイヤーだけで組むと必ず片側だけに伸びる非対称な見た目になる
-					// （ユーザー指摘：「一方向にのびていく特殊アレンジは使いようがない。
-					// 対称的にのばすアレンジだったらまだ使いようがあった」）。
-					// 正負2方向ぶんのレイヤーを鏡写しに用意し、原点を中心に左右対称へ
-					// 広がるようにする——本体の newLayer は使わず、この2枚だけを積む。
-					pushNewLayer = false;
-					const dirX = pick([-1, 1]) * randRange(0.6, 1);
-					const dirY = pick([-1, 1]) * randRange(0.6, 1);
-					// 元のレイヤーが少ないほど間隔を画面幅基準の大きめにする——
-					// 元絵の枚数が少なくても、この一発で画面の左右に要素が
-					// 分かれて見えるだけの広がりを確保する（元の位置1点に
-					// 固まったままでは参考動画のような密度は作れないため）。
-					const spacing =
-						existingLayers.length <= 2
-							? randRange(MV_W * 0.12, MV_W * 0.26)
-							: randRange(30, 60);
-					const sideCopies = pick([2, 2, 3]); // 片側あたりの追加複製数
-					// bounce にすると「湧いて弾んで散らばる」勢いが出る。decay だと
-					// スッと広がって収まる落ち着いた散り方になる——どちらも混ぜて使う。
-					const multiplyShape = chance(0.5) ? "bounce" : "decay";
-					const kickAngle = chance(0.5) ? pick([90, 180, 270]) : -pick([90, 180, 270]);
-					for (const sign of [1, -1] as const) {
-						layers.push({
-							...orig,
-							id: mvUid("shp"),
-							groupId: newGroupId,
-							z: nextZ(),
-							barRange: [slotFrom, slotTo],
-							count: 1,
-							spread: 0,
-							offsetX: 0,
-							offsetY: 0,
-							spin: pick([0, 0, 20, -20]) * sign,
-							modulators: [
-								...oneShotHump(
-									"count",
-									sideCopies,
-									slotBars,
-									slotFrom,
-									3,
-									multiplyShape,
-								),
-								...oneShotHump(
-									"offsetX",
-									roundTo(spacing * dirX * sign, 1),
-									slotBars,
-									slotFrom,
-									3,
-									multiplyShape,
-								),
-								...oneShotHump(
-									"offsetY",
-									roundTo(spacing * dirY * sign, 1),
-									slotBars,
-									slotFrom,
-									3,
-									multiplyShape,
-								),
-								...oneShotHump(
-									"rotation",
-									kickAngle * sign,
-									slotBars,
-									slotFrom,
-									3,
-									multiplyShape,
-								),
-							],
-						});
-					}
-					break;
-				}
 			}
 
-			if (pushNewLayer) layers.push(newLayer);
+			layers.push(newLayer);
 		}
 	}
 
