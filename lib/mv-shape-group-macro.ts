@@ -1307,6 +1307,86 @@ export function generateArrangementForGroup(
 		],
 	});
 
+	// ── 幕と幕の境目をつなぐクロスフェード ──
+	// 幕はそれぞれ別形状のレイヤーを barRange で頭出しするだけなので、境目では
+	// 前の幕のレイヤーが barRange 終了で消えると同時に次の幕のレイヤーが
+	// barRange 開始で現れる、という完全なハードカットになる（暗転を挟む
+	// 第1幕→第2幕の境目は元々そういう仕様で問題ないが、第2幕→第3幕・
+	// 第3幕→第4幕は参考動画のような滑らかな繋がりが無く、コマが連続していない
+	// という指摘の通りだった）。ここは各幕の中身を直接ブレンドするのではなく、
+	// 境目をまたぐ短い「フェード専用のレイヤー」を追加で足す——出ていく幕の
+	// 代表図形を1枚だけ、境目のちょうど前後で不透明度0↔1に単発で振ることで
+	// ブリッジする。フェード用モジュレータの周期＝そのレイヤー自身の
+	// barRange の長さぴったりに揃えてあるので、ループして点滅する心配は無い
+	// （barRange が切れた瞬間にちょうど減衰しきる／育ちきる）。
+	const fadeBridge = (
+		boundary: number,
+		outPath: string,
+		outSize: number,
+		inPath: string,
+		inSize: number,
+	) => {
+		const xfade = 0.025;
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: cx,
+			y: cy,
+			z: nextZ(),
+			filled: false,
+			thickness: roundTo(baseThickness * 0.7, 1),
+			size: outSize,
+			path: outPath,
+			barRange: [at(boundary), at(boundary + xfade)],
+			modulators: [
+				{
+					source: "phrase",
+					target: "opacity",
+					op: "mul",
+					amount: 1,
+					bars: Math.max(0.01, durationBars * xfade),
+					phaseOffset: at(boundary),
+					symmetric: false,
+					curve: 1,
+				},
+			],
+		});
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: cx,
+			y: cy,
+			z: nextZ(),
+			filled: false,
+			thickness: roundTo(baseThickness * 0.7, 1),
+			size: inSize,
+			path: inPath,
+			barRange: [at(boundary - xfade), at(boundary)],
+			modulators: [
+				{
+					source: "phrase",
+					target: "opacity",
+					op: "sub",
+					amount: 1,
+					bars: Math.max(0.01, durationBars * xfade),
+					phaseOffset: at(boundary - xfade),
+					symmetric: false,
+					curve: 1,
+				},
+			],
+		});
+	};
+	fadeBridge(
+		0.5,
+		emblemPath,
+		roundTo(baseSize * randRange(0.95, 1.1), 1),
+		cornerBracketGlyph(false),
+		randRange(50, 70),
+	);
+	fadeBridge(0.75, cornerBracketGlyph(true), randRange(50, 70), barChartGlyph(), randRange(38, 52));
+
 	// ── 第4幕: 画面のあちこちに塗りグリフが同時多発 ──
 	// スロット（画面をほぼ端まで使う配置候補）から4〜6箇所選ぶ。左右の中段は
 	// 大きめの縞箱、上下はバーチャート、それ以外は目盛り、という参考動画の
