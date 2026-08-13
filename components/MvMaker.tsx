@@ -8,6 +8,7 @@ import {
 	Clapperboard,
 	Clipboard,
 	Copy,
+	Download,
 	FolderPlus,
 	FolderX,
 	Grid3x3,
@@ -30,6 +31,7 @@ import {
 	Trash2,
 	Type,
 	Undo2,
+	Upload,
 	X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -70,6 +72,7 @@ import {
 	MV_MOD_SOURCE_LABELS,
 	MV_MOD_TARGET_LABELS,
 	MV_MOTION_LABELS,
+	MV_PRESET_LABELS,
 	MV_PROJECTION_LABELS,
 	MV_ROLL_FLOW_LABELS,
 	MV_ROOT_TO_PITCH,
@@ -1736,6 +1739,79 @@ export default function MvMaker({
 	};
 
 	const canSave = !!manifest.mml.trim();
+
+	// ── 設定メニュー（歯車）：エクスポート／インポート／MV切り替え・まっさら ──
+	const [settingsOpen, setSettingsOpen] = useState(false);
+	const settingsRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!settingsOpen) return;
+		const onDown = (e: MouseEvent) => {
+			if (settingsRef.current && !settingsRef.current.contains(e.target as Node))
+				setSettingsOpen(false);
+		};
+		document.addEventListener("mousedown", onDown);
+		return () => document.removeEventListener("mousedown", onDown);
+	}, [settingsOpen]);
+	const [switchOpen, setSwitchOpen] = useState(false);
+	const importFileRef = useRef<HTMLInputElement>(null);
+
+	const handleExport = () => {
+		const json = JSON.stringify(manifest, null, 2);
+		const blob = new Blob([json], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement("a");
+		a.href = url;
+		a.download = `${(manifest.title.trim() || "MV").replace(/\s+/g, "_")}.json`;
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+
+	const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = (ev) => {
+			try {
+				const raw = JSON.parse(ev.target?.result as string);
+				// DBレコードやAPIレスポンス（{ title, manifest: {...} }）で包まれていても中身を取り出す
+				const parsed = (
+					raw && typeof raw === "object" && raw.manifest && typeof raw.manifest === "object"
+						? raw.manifest
+						: raw
+				) as MvManifest;
+				if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.layers) || !Array.isArray(parsed.sections)) {
+					alert("MVのJSONではないようです（layers / sections が見つかりません）");
+					return;
+				}
+				resetEditHistory();
+				setManifest(parsed);
+				setPresetName(null);
+				setSelectedLayerId(null);
+				setSettingsOpen(false);
+			} catch (err) {
+				console.error("mv JSON import failed", err);
+				alert(`JSONの読み込みに失敗しました: ${err instanceof Error ? err.message : String(err)}`);
+			}
+		};
+		reader.readAsText(file);
+		e.target.value = "";
+	};
+
+	/** 「まっさらにする」：見た目のプリセット種別は維持したまま、曲・レイヤー・場面を空にする。 */
+	const buildBlankMvManifest = (preset: MvPresetKind): MvManifest => ({
+		version: 1,
+		preset,
+		title: "",
+		mml: "",
+		stage: {
+			bgColor: "#0b0e14",
+			bgFit: "cover",
+			pulse: "none",
+			palette: ["#a3e635", "#38bdf8", "#fbbf24", "#f472b6", "#c4b5fd"],
+		},
+		layers: [],
+		sections: [{ id: mvUid("sec"), label: "はじめ", startBar: 0 }],
+	});
 
 	// ── レイヤー追加 ───────────────────────────────────────
 	// 何かを選択して編集している最中に新規追加すると、常に画面の一番手前へ
@@ -6601,14 +6677,70 @@ export default function MvMaker({
 				<div className="shrink-0">
 					<VolumeControl />
 				</div>
-				<button
-					onClick={() => setShowHistory(true)}
-					aria-label="履歴"
-					title="履歴・スナップショット"
-					className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-gray-800 text-gray-300 transition-colors hover:bg-gray-700"
-				>
-					<History size={14} />
-				</button>
+				{/* 設定（歯車）：履歴・スナップショット／エクスポート・インポート／MV切り替え・まっさら */}
+				<div className="relative shrink-0" ref={settingsRef}>
+					<button
+						onClick={() => setSettingsOpen((v) => !v)}
+						aria-label="設定"
+						title="設定"
+						className={`grid h-8 w-8 place-items-center rounded-lg transition-colors ${settingsOpen ? "bg-gray-600 text-white" : "bg-gray-800 text-gray-300 hover:bg-gray-700"}`}
+					>
+						<Settings size={14} />
+					</button>
+					<input
+						ref={importFileRef}
+						type="file"
+						accept=".json"
+						className="hidden"
+						onChange={handleImport}
+					/>
+					{settingsOpen && (
+						<div className="absolute right-0 top-full z-[100] mt-1 w-52 space-y-1 border border-gray-700 bg-[#1a1a2e] p-2 shadow-2xl">
+							<button
+								onClick={() => {
+									setShowHistory(true);
+									setSettingsOpen(false);
+								}}
+								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+							>
+								<History size={13} />
+								履歴・スナップショット
+							</button>
+							<div className="my-1 border-t border-gray-700" />
+							<button
+								onClick={() => {
+									handleExport();
+									setSettingsOpen(false);
+								}}
+								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+							>
+								<Download size={13} />
+								データをエクスポート (.json)
+							</button>
+							<button
+								onClick={() => {
+									importFileRef.current?.click();
+									setSettingsOpen(false);
+								}}
+								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+							>
+								<Upload size={13} />
+								データをインポート (.json)
+							</button>
+							<div className="my-1 border-t border-gray-700" />
+							<button
+								onClick={() => {
+									setSwitchOpen(true);
+									setSettingsOpen(false);
+								}}
+								className="flex w-full items-center gap-2 px-3 py-2 text-xs text-gray-400 transition hover:bg-gray-700 hover:text-white"
+							>
+								<Clapperboard size={13} />
+								MVを切り替え・まっさらにする
+							</button>
+						</div>
+					)}
+				</div>
 				<button
 					onClick={handleSave}
 					disabled={!canSave}
@@ -6710,6 +6842,97 @@ export default function MvMaker({
 				}}
 				getCurrentData={() => manifestRef.current}
 			/>
+
+			{/* ── MVを切り替え・まっさらにする 専用パネル ── */}
+			{switchOpen && (
+				<div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+					<div className="flex w-full max-w-md flex-col rounded border border-gray-700 bg-gray-900 p-4 shadow-2xl">
+						<div className="mb-3 flex items-center justify-between">
+							<h3 className="flex items-center gap-1.5 text-sm font-bold text-gray-200">
+								<Clapperboard size={15} />
+								MVを切り替え・まっさらにする
+							</h3>
+							<button
+								onClick={() => setSwitchOpen(false)}
+								className="p-1 text-gray-400 hover:text-white"
+								title="とじる"
+							>
+								<X size={14} />
+							</button>
+						</div>
+
+						<div className="space-y-4 text-xs">
+							{/* まっさらにする */}
+							<div className="space-y-2 rounded border border-red-800/60 bg-red-950/40 p-3">
+								<div className="flex items-center gap-1.5 font-bold text-red-300">
+									<Trash2 size={13} />
+									まっさらにする（見た目：{MV_PRESET_LABELS[manifest.preset]}）
+								</div>
+								<p className="text-[10px] leading-relaxed text-gray-400">
+									見た目のプリセット種別はそのまま、曲・レイヤー・場面をすべて消して空の状態から作り直します。
+								</p>
+								<button
+									onClick={() => {
+										if (
+											!confirm(
+												"編集中の内容（曲・レイヤー・場面）をすべて消して、まっさらにしますか？\n\n元に戻す（Ctrl+Z）で直前の状態へ戻せますが、確実に戻せる保証はないため、大切なデータは先にエクスポートしてください。",
+											)
+										)
+											return;
+										pushUndo();
+										setManifest(buildBlankMvManifest(manifest.preset));
+										setSelectedLayerId(null);
+										setSwitchOpen(false);
+									}}
+									className="w-full rounded bg-red-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-red-500"
+								>
+									編集内容をすべて消してまっさらにする
+								</button>
+							</div>
+
+							{/* 見本（プリセット）を初期ロード */}
+							<div className="space-y-1.5">
+								<div className="flex items-center gap-1.5 font-bold text-gray-300">
+									<Sparkles size={13} />
+									見本を初期ロードして切り替える
+								</div>
+								<select
+									value=""
+									onChange={(e) => {
+										const p = MV_PRESETS.find((pp) => pp.name === e.target.value);
+										if (!p) return;
+										if (
+											!confirm(
+												`「${p.name}」に作り替えます。いまの編集内容は失われますが、よろしいですか？`,
+											)
+										)
+											return;
+										resetEditHistory();
+										setManifest(p.build());
+										setPresetName(p.name);
+										setSelectedLayerId(null);
+										setSwitchOpen(false);
+									}}
+									className="w-full rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-[11px] text-gray-200 outline-none"
+								>
+									<option value="" disabled>
+										見本を選ぶ…
+									</option>
+									{MV_PRESETS.map((p) => (
+										<option key={p.name} value={p.name}>
+											{p.name}
+											{presetName === p.name ? "（現在選択中）" : ""}
+										</option>
+									))}
+								</select>
+								<p className="text-[10px] leading-tight text-gray-500">
+									選んだ見本の初期状態に丸ごと置き換えます
+								</p>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
 
 			{templatePickerOpen && (
 				<MvEffectTemplatePicker
