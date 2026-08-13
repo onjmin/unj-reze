@@ -983,14 +983,8 @@ function oneShotHump(
  * 切り替えてくれる——ループを新設する必要が無く、`oneShotHump` の山も
  * そのスロットの中で頭0→中央ピーク→終わり0ときっちり収まる。
  */
-type MicroEvent = "blink" | "kick" | "stretch" | "shapeSwap" | "scatter";
-const MICRO_EVENTS: MicroEvent[] = [
-	"blink",
-	"kick",
-	"stretch",
-	"shapeSwap",
-	"scatter",
-];
+type MicroEvent = "blink" | "kick" | "shapeSwap";
+const MICRO_EVENTS: MicroEvent[] = ["blink", "kick", "shapeSwap"];
 
 /** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
 function pickMicroEvent(lastEvent: MicroEvent | null, pool: MicroEvent[]): MicroEvent {
@@ -1016,10 +1010,10 @@ function weightedPoolForSlot(index: number, slotCount: number): MicroEvent[] {
 	const isSecond = index === 1 && slotCount >= 3;
 	const isLast = index === slotCount - 1;
 	const isNearEnd = index >= slotCount - 2 && slotCount >= 4;
-	if (isFirst) return ["blink", "blink", "blink", "kick", "stretch", "shapeSwap"];
-	if (isSecond) return ["kick", "kick", "kick", "blink", "stretch", "shapeSwap"];
-	if (isLast) return ["shapeSwap", "shapeSwap", "shapeSwap", "kick", "blink", "stretch"];
-	if (isNearEnd) return ["shapeSwap", "shapeSwap", "kick", "blink", "stretch"];
+	if (isFirst) return ["blink", "blink", "blink", "kick", "shapeSwap"];
+	if (isSecond) return ["kick", "kick", "kick", "blink", "shapeSwap"];
+	if (isLast) return ["shapeSwap", "shapeSwap", "shapeSwap", "kick", "blink"];
+	if (isNearEnd) return ["shapeSwap", "shapeSwap", "kick", "blink"];
 	return MICRO_EVENTS;
 }
 
@@ -1095,6 +1089,14 @@ export function generateArrangementForGroup(
 				modulators: [],
 			};
 
+			// 回転・ズーム・移動は使わない。参考動画（チョウチン少女）を解析した結果、
+			// この作風は「軸に揃った図形が同じ場所・同じ大きさ・回転0のまま」で、
+			// 変化するのは太さ・不透明度・コマの密度（線の本数）の3つだけだった
+			// （コード冒頭のコメントにも当初から明記されていた：「回転は常に0度」
+			// 「斜めの図形が1つも無い」）。以前はここに回転キック・拡大縮小の
+			// ストレッチ・画面の隅への移動を足していたが、これは動画に無い変化を
+			// 足していただけで、近づくどころか離れる原因になっていた
+			// （ユーザー指摘）。残すのは動画が実際にやっている3つの変化だけ。
 			switch (ev) {
 				case "blink":
 					// 一瞬だけ暗く落ちて戻る単発の点滅。
@@ -1112,44 +1114,24 @@ export function generateArrangementForGroup(
 					];
 					break;
 				case "kick": {
-					// 回転のキック。毎スロット角度・カーブを振り直すことで
-					// 「同じキックの繰り返し」に見えないようにする。3回に1回くらいは
-					// `bounce`（弾んで止まる振動）にして、単調な減衰だけにならないようにする。
+					// 太さのキック。参考動画の暗転明けが「通常の2〜3倍太い線幅で
+					// 出現し、すぐ通常の太さへ収縮する」動きだったのに合わせている
+					// （回転は付けない）。
 					const kickShape = chance(0.35) ? "bounce" : "decay";
 					newLayer.modulators = oneShotHump(
-						"rotation",
-						chance(0.5)
-							? pick([90, 120, 180, 270, 360])
-							: -pick([90, 120, 180, 270, 360]),
+						"thickness",
+						roundTo((orig.thickness ?? 3) * randRange(1.5, 3), 1),
 						slotBars,
 						slotFrom,
-						pick([2, 3, 4]),
+						pick([3, 4, 5]),
 						kickShape,
 					);
-					break;
-				}
-				case "stretch": {
-					// 一瞬だけ大きく伸びて元のサイズへ戻る「ストレッチ」。
-					// 伸びる瞬間は太さを細くして引き伸ばされた質感を足す。
-					const stretchAmount = roundTo(
-						(orig.size ?? 20) * randRange(1.4, 2.6),
-						1,
-					);
-					const thinAmount = roundTo(
-						(orig.thickness ?? 3) * randRange(0.4, 0.7),
-						1,
-					);
-					const stretchShape = chance(0.35) ? "bounce" : "decay";
-					newLayer.modulators = [
-						...oneShotHump("size", stretchAmount, slotBars, slotFrom, 5, stretchShape),
-						...oneShotHump("thickness", -thinAmount, slotBars, slotFrom, 5, stretchShape),
-					];
 					break;
 				}
 				case "shapeSwap": {
 					// コマ送り用のコマの中から、いま出ているのとは別の1コマへ
 					// パッと静止的に切り替える。コマ送りをそのまま流すより
-					// 「別の形へ変換した」感が強く出る。
+					// 「別の形へ変換した」感が強く出る（大きさは変えない）。
 					//
 					// 参考動画を1フレームずつ解析すると、2.8〜3.1秒の一発は
 					// 「あちこちの図形が同時にいちばん情報量の多いコマへ切り替わる」
@@ -1171,33 +1153,6 @@ export function generateArrangementForGroup(
 						newLayer.path = paths[idx];
 						newLayer.iconCycle = undefined;
 					}
-					newLayer.modulators = oneShotHump(
-						"size",
-						roundTo((orig.size ?? 20) * randRange(0.3, 0.6), 1),
-						slotBars,
-						slotFrom,
-						4,
-					);
-					break;
-				}
-				case "scatter": {
-					// 元のレイヤーを、いま居る位置から一時的に隅（斜め・上下左右）へ
-					// 動かして、区間の終わりにはまた元の位置へ戻す。
-					//
-					// 自動図形グループ側の配置ロジックは clusterType を問わず
-					// Y座標が常に画面中央固定（`baseY`）で、要素は横一直線にしか
-					// 並ばない——斜めや上下の配置は、乱数がどれだけ噛み合っても
-					// 構造的に出ない（ユーザー指摘で確認済み）。ここは配置ロジックを
-					// 変えるのではなく、`x`/`y` も他のパラメータと同じくモジュレータで
-					// 動かせる対象であることを使い、既存レイヤー自身を一発だけ隅へ
-					// 移動させる——複製は増やさない。
-					const targetDx = pick([-1, 1]) * randRange(MV_W * 0.18, MV_W * 0.3);
-					const targetDy = pick([-1, 1]) * randRange(MV_H * 0.2, MV_H * 0.32);
-					const scatterShape = chance(0.5) ? "bounce" : "decay";
-					newLayer.modulators = [
-						...oneShotHump("x", targetDx, slotBars, slotFrom, 3, scatterShape),
-						...oneShotHump("y", targetDy, slotBars, slotFrom, 3, scatterShape),
-					];
 					break;
 				}
 			}
