@@ -671,7 +671,10 @@ export function buildSymmetricShapeGroupLayers(
 		// 画面の真ん中に細かい模様が固まっただけの絵になる（実際そうなっていた）。
 		// 参考動画も主役は大きなモチーフ1つ＋小さな脇役、という構成。
 		const outer = randRange(95, 140);
-		const tierCount = options.pairCount ?? (chance(0.4) ? 2 : 1);
+		// コメント通り「主役1つ＋小さな脇役」が基本形なので2段を多数派にする
+		// （以前は `chance(0.4)?2:1` で単段が60%と逆転しており、画面に図形が
+		// 1個だけの寂しい結果が多発していた——実際に生成されたデータで確認済み）。
+		const tierCount = options.pairCount ?? (chance(0.75) ? 2 : 1);
 		const ratios = [1, 0.42];
 
 		for (let i = 0; i < Math.min(tierCount, ratios.length); i++) {

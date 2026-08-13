@@ -1472,13 +1472,20 @@ export default function MvMaker({
 	 * （消えた後のIDへ多重に削除操作を投げないよう、毎回 manifest.groups と突き合わせる）。
 	 */
 	const [autoGroupIds, setAutoGroupIds] = useState<string[]>([]);
+	// 既定値は参考動画（チョウチン少女）の構図——中央の四角＋左右対称のペア——を
+	// 再現できる組み合わせにしてある。以前の既定は clusterType:"centered" だったが、
+	// これは軸上に同心の段を積むだけで左右に要素が散らばらず、しかも段数が
+	// 60%の確率で1枚（＝画面に図形が1個だけ）になる抽選だったため、参考動画のような
+	// 密度のある構図がほぼ作れなかった（実際に生成されたデータで確認済み——
+	// レイヤー1枚だけの自動図形グループがユーザーの投稿から見つかった）。
+	// clusterType:"scattered" + symmetric:true が実際に参考動画を再現した構図。
 	const [macroSettings, setMacroSettings] =
 		useState<SymmetricShapeGroupOptions>({
-			clusterType: "centered",
+			clusterType: "scattered",
 			shapeStyle: "sharp",
 			thickness: "thick",
 			monochrome: true,
-			symmetric: false,
+			symmetric: true,
 		});
 
 	/** autoGroupIds のうち、まだ実在するものだけ（古い→新しい順）。 */
