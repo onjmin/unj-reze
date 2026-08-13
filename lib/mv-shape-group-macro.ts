@@ -1066,6 +1066,9 @@ export function generateArrangementForGroup(
 				barRange: [slotFrom, slotTo],
 				modulators: [],
 			};
+			// "multiply" は newLayer の代わりに鏡写しの2枚を自分で積むので、
+			// 末尾の push をスキップする（他のイベントは true のまま素通り）。
+			let pushNewLayer = true;
 
 			switch (ev) {
 				case "blink":
@@ -1185,55 +1188,74 @@ export function generateArrangementForGroup(
 				}
 				case "multiply": {
 					// 分身が湧いて弾けるように飛び散り、また1個へ戻る。
-					// `offsetX`/`offsetY`/`spread`（複製の間隔・広がり半径）は
-					// モジュレータで直接動かせる対象になったので、間隔を固定値のまま
-					// 個数だけ増やす「静止した配置」ではなく、間隔そのものを
-					// 0→最大→0と一発で振る——湧いた瞬間に画面へ飛び散り、
-					// 区間の終わりには間隔も0に戻って重なった1個に見える。
+					// `offsetX`/`offsetY` は複製をi番目ごとに一方向へ進めるだけの仕組みなので、
+					// 1枚のレイヤーだけで組むと必ず片側だけに伸びる非対称な見た目になる
+					// （ユーザー指摘：「一方向にのびていく特殊アレンジは使いようがない。
+					// 対称的にのばすアレンジだったらまだ使いようがあった」）。
+					// 正負2方向ぶんのレイヤーを鏡写しに用意し、原点を中心に左右対称へ
+					// 広がるようにする——本体の newLayer は使わず、この2枚だけを積む。
+					pushNewLayer = false;
 					const dirX = pick([-1, 1]) * randRange(0.6, 1);
 					const dirY = pick([-1, 1]) * randRange(0.6, 1);
 					const spacing = randRange(30, 60);
-					const copies = pick([3, 4, 5, 6]);
-					newLayer.count = 1;
-					newLayer.spread = 0;
-					newLayer.offsetX = 0;
-					newLayer.offsetY = 0;
-					newLayer.spin = pick([0, 0, 20, -20]);
+					const sideCopies = pick([2, 2, 3]); // 片側あたりの追加複製数
 					// bounce にすると「湧いて弾んで散らばる」勢いが出る。decay だと
 					// スッと広がって収まる落ち着いた散り方になる——どちらも混ぜて使う。
 					const multiplyShape = chance(0.5) ? "bounce" : "decay";
-					newLayer.modulators = [
-						...oneShotHump("count", copies - 1, slotBars, slotFrom, 3, multiplyShape),
-						...oneShotHump(
-							"offsetX",
-							roundTo(spacing * dirX, 1),
-							slotBars,
-							slotFrom,
-							3,
-							multiplyShape,
-						),
-						...oneShotHump(
-							"offsetY",
-							roundTo(spacing * dirY, 1),
-							slotBars,
-							slotFrom,
-							3,
-							multiplyShape,
-						),
-						...oneShotHump(
-							"rotation",
-							chance(0.5) ? pick([90, 180, 270]) : -pick([90, 180, 270]),
-							slotBars,
-							slotFrom,
-							3,
-							multiplyShape,
-						),
-					];
+					const kickAngle = chance(0.5) ? pick([90, 180, 270]) : -pick([90, 180, 270]);
+					for (const sign of [1, -1] as const) {
+						layers.push({
+							...orig,
+							id: mvUid("shp"),
+							groupId: newGroupId,
+							z: nextZ(),
+							barRange: [slotFrom, slotTo],
+							count: 1,
+							spread: 0,
+							offsetX: 0,
+							offsetY: 0,
+							spin: pick([0, 0, 20, -20]) * sign,
+							modulators: [
+								...oneShotHump(
+									"count",
+									sideCopies,
+									slotBars,
+									slotFrom,
+									3,
+									multiplyShape,
+								),
+								...oneShotHump(
+									"offsetX",
+									roundTo(spacing * dirX * sign, 1),
+									slotBars,
+									slotFrom,
+									3,
+									multiplyShape,
+								),
+								...oneShotHump(
+									"offsetY",
+									roundTo(spacing * dirY * sign, 1),
+									slotBars,
+									slotFrom,
+									3,
+									multiplyShape,
+								),
+								...oneShotHump(
+									"rotation",
+									kickAngle * sign,
+									slotBars,
+									slotFrom,
+									3,
+									multiplyShape,
+								),
+							],
+						});
+					}
 					break;
 				}
 			}
 
-			layers.push(newLayer);
+			if (pushNewLayer) layers.push(newLayer);
 		}
 	}
 

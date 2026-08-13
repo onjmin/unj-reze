@@ -5319,6 +5319,12 @@ export default function MvMaker({
 											onBlur={(e) => {
 												const txt = e.target.value.trim();
 												const v = txt === "" ? 1 : Number(txt);
+												const prevTriggerBar = group.arrangement!.triggerBar;
+												const nextTriggerBar = Number.isFinite(v)
+													? Math.max(0, v - 1)
+													: prevTriggerBar;
+												const shift = nextTriggerBar - prevTriggerBar;
+												if (shift === 0) return;
 												update((m) => ({
 													...m,
 													groups: (m.groups ?? []).map((g) => {
@@ -5328,18 +5334,35 @@ export default function MvMaker({
 														// アレンジ元へ戻る（＝終了位置を別途指定する必要が無い）。
 														const duration =
 															g.arrangement.endBar - g.arrangement.triggerBar;
-														const triggerBar = Number.isFinite(v)
-															? Math.max(0, v - 1)
-															: g.arrangement.triggerBar;
 														return {
 															...g,
 															arrangement: {
 																...g.arrangement,
-																triggerBar,
-																endBar: triggerBar + duration,
+																triggerBar: nextTriggerBar,
+																endBar: nextTriggerBar + duration,
 															},
 														};
 													}),
+													// 中身のレイヤー（スロットごとの barRange）は生成時点の
+													// トリガー小節を基準に作ってあるので、グループ側の
+													// triggerBar だけ動かしても中身は元の位置に取り残される
+													// ——`isLayerVisible` はグループの区間と各レイヤーの
+													// barRange を AND で見るため、両者がズレると「区間には
+													// 入っているのに個々のレイヤーは範囲外」で何も表示され
+													// なくなる（実際の動画で特殊アレンジが表示されないバグの
+													// 原因だった）。ここで中身の barRange も同じ量だけ
+													// 平行移動させて揃える。
+													layers: m.layers.map((l) =>
+														l.groupId === group.id && l.barRange
+															? {
+																	...l,
+																	barRange: [
+																		l.barRange[0] + shift,
+																		l.barRange[1] + shift,
+																	] as [number, number],
+																}
+															: l,
+													),
 												}));
 											}}
 											onKeyDown={(e) => {
