@@ -127,10 +127,12 @@ export default function MvArrangementModal({
 	onClose,
 }: MvArrangementModalProps) {
 	const [beats, setBeats] = useState(DEFAULT_ARRANGEMENT_BEATS);
+	// endBar は指定した拍数どおり（小節へ切り上げない）。切り上げると
+	// 「2拍と指定したのに1小節ぶん再生される」というズレになる。
 	const [result, setResult] = useState(() =>
 		generateArrangementForGroup(sourceLayers, makePreviewNextZ(), sourceGroupId, {
 			triggerBar: 0,
-			endBar: Math.max(1, Math.ceil(DEFAULT_ARRANGEMENT_BEATS / MV_BEATS_PER_BAR)),
+			endBar: DEFAULT_ARRANGEMENT_BEATS / MV_BEATS_PER_BAR,
 		}),
 	);
 
@@ -138,7 +140,7 @@ export default function MvArrangementModal({
 		setResult(
 			generateArrangementForGroup(sourceLayers, makePreviewNextZ(), sourceGroupId, {
 				triggerBar: 0,
-				endBar: Math.max(1, Math.ceil(nextBeats / MV_BEATS_PER_BAR)),
+				endBar: nextBeats / MV_BEATS_PER_BAR,
 			}),
 		);
 	};

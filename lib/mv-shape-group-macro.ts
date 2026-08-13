@@ -5,6 +5,7 @@ import {
 	MV_W,
 	mvUid,
 	type MvLayerGroup,
+	type MvModTarget,
 	type MvModulator,
 	type MvShapeForm,
 	type MvShapeLayer,
@@ -917,74 +918,81 @@ export function generateSymmetricShapeGroup(
  */
 export const DEFAULT_ARRANGEMENT_BEATS = 4;
 
-/**
- * 特殊アレンジの「型」。以前は常に「倍速化＋90度キック＋白十字フラッシュ2本」の
- * 1パターンだけだったため、何度生成しても同じ絵にしかならなかった
- * （ユーザー指摘: 「特殊アレンジがワンパターンすぎる」）。ここを固定処理ではなく
- * 複数の変換候補からランダムに1つ選ぶ方式にして、呼ぶたびに違う結果を返す。
- * どの型も「元のレイヤーを加工する」＋「画面全体に効く飾りを足す（足さないことも
- * ある）」の2段構えは共通だが、加工の中身・飾りの有無/形/色/本数は型ごと・
- * 呼び出しごとに独立して振れる。
- */
-type ArrangeStyle =
-	| "speedKick"
-	| "shatter"
-	| "monoFlash"
-	| "recolorPulse"
-	| "barStretch"
-	| "squareBurst";
-const ARRANGE_STYLES: ArrangeStyle[] = [
-	"speedKick",
-	"shatter",
-	"monoFlash",
-	"recolorPulse",
-	"barStretch",
-	"squareBurst",
-];
 
 const FLASH_PALETTE = ["#ffffff", "#fde68a", "#fca5a5", "#93c5fd", "#5eead4"];
 
 /**
- * 拍モジュレータの位相を「割り込み開始小節の頭で必ず envelope=0（＝静止した基準の姿）」
- * になるよう揃える。
+ * ある区間（`phaseOffsetBar` 小節目〜 `+bars` 小節ぶん）の中だけで
+ * 「基準値→山→基準値」と単発で盛り上がって収まる山形を作る。
  *
- * `isLayerVisible` は割り込み区間の境目でアレンジ側の表示をパッと切り替えるハードカット
- * なので、切り替わった瞬間の絵が中途半端な位相（envelope が谷の途中など）だと
- * アレンジ元から一段ずれた絵がいきなり出て「継ぎ目」に見える。位相をトリガー小節の頭に
- * 揃えれば、切り替わった瞬間は必ず envelope=0＝アレンジ元と同じ静止形から動き出すので、
- * 「アレンジ元→変化→アレンジ元に戻る」の入りがブツ切れにならない。
- * `orig` の位相差（スロットのずらし）はそのまま保つため、揃えるのは基準点だけ
- * （= トリガー小節ぶんだけ全体を押し出す）にしてある。
+ * エンジンが持つ一次波形は減衰カーブ（`beat`/`bar`）か、フレーズ境界で
+ * 山になる `phrase(symmetric)`（境目=1・中央=0）の2つしか無い。後者を
+ * 「1(=基準)を足してから境目=1の波形を引く」と、逆に「中央=amount・境目=0」
+ * という単発の盛り上がり山になる——これを利用して `bars` に区間の長さその
+ * ものを渡せば、区間の頭と終わりでは効果0（＝アレンジ元と同じ見た目）、
+ * 区間の真ん中でだけ最大効果、というちょうど1回ぶんの山になる。
+ * `phrase` はループする波形だが、この山を使うレイヤー自身を `barRange` で
+ * その区間だけに限定しているので、区間の外で山が繰り返し鳴る心配は無い。
  */
-function alignPhaseToTriggerBar(
-	periodBeats: number,
-	origPhaseOffset: number | undefined,
-	triggerBar: number,
-): number {
-	const shift = triggerBar * MV_BEATS_PER_BAR + (origPhaseOffset ?? 0);
-	return roundTo(((shift % periodBeats) + periodBeats) % periodBeats, 2);
+function oneShotHump(
+	target: MvModTarget,
+	amount: number,
+	bars: number,
+	phaseOffsetBar: number,
+	curve: number,
+): MvModulator[] {
+	return [
+		{ source: "constant", target, op: "add", amount },
+		{
+			source: "phrase",
+			target,
+			op: "sub",
+			amount,
+			bars: Math.max(0.05, bars),
+			phaseOffset: phaseOffsetBar,
+			symmetric: true,
+			curve,
+		},
+	];
 }
 
 /**
- * 元のモジュレータ配列から `beat` 系だけ周期を `mul` 倍し、位相をトリガー小節の頭へ
- * 揃える（他はそのまま）。
+ * 特殊アレンジの中身を作る「単発イベント」の種類。
+ *
+ * 以前は区間全体に1つの型（回転キック／破裂／…）を引き伸ばして適用していたが、
+ * これだと型を何種類増やしても「1つの動きが速いか遅いか」の違いにしかならず、
+ * 参考にした絵にある「点滅→点滅→形状変換1→形状変換2」のような、短い区間の
+ * 中で何度も表情が変わる密度のアニメーションは原理的に作れなかった
+ * （ユーザー指摘：「ランダム生成ロジックに根本的な欠陥がある」）。
+ *
+ * ここでは区間を半拍〜1拍の短いスロットに分割し、スロットごとに独立して
+ * イベントを1つ選ぶ「シーケンサ」方式に作り替えてある。各スロットは
+ * `MvShapeLayer.barRange` で区切った専用のレイヤーとして持ち、スロットが
+ * 終われば次のスロットのレイヤーへエンジンの `isLayerVisible` がそのまま
+ * 切り替えてくれる——ループを新設する必要が無く、`oneShotHump` の山も
+ * そのスロットの中で頭0→中央ピーク→終わり0ときっちり収まる。
  */
-function scaleBeatPeriods(
-	mods: MvModulator[] | undefined,
-	mul: number,
-	triggerBar: number,
-): MvModulator[] {
-	return (
-		mods?.map((m) => {
-			if (m.source !== "beat") return m;
-			const periodBeats = roundTo((m.periodBeats ?? 1) * mul, 2);
-			return {
-				...m,
-				periodBeats,
-				phaseOffset: alignPhaseToTriggerBar(periodBeats, m.phaseOffset, triggerBar),
-			};
-		}) ?? []
-	);
+type MicroEvent =
+	| "blink"
+	| "colorFlash"
+	| "kick"
+	| "stretch"
+	| "shapeSwap"
+	| "squareBurst";
+const MICRO_EVENTS: MicroEvent[] = [
+	"blink",
+	"colorFlash",
+	"kick",
+	"stretch",
+	"shapeSwap",
+	"squareBurst",
+];
+
+/** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
+function pickMicroEvent(lastEvent: MicroEvent | null): MicroEvent {
+	const ev = pick(MICRO_EVENTS);
+	if (ev !== lastEvent) return ev;
+	return MICRO_EVENTS[(MICRO_EVENTS.indexOf(ev) + 1) % MICRO_EVENTS.length];
 }
 
 /**
@@ -993,8 +1001,11 @@ function scaleBeatPeriods(
  *
  * `sourceGroupId` は割り込み対象（アレンジ元）のグループID。返す `group.arrangement`
  * にそのまま埋め込むので、エンジン側 (`isLayerVisible`) が「アレンジ元を止めて隠す
- * ／アレンジ側を表示する」を自動で連動させられる。開始・終了小節は
- * `trigger` で指定し（どちらも小節単位）、省略時は0小節目から既定の長さぶん。
+ * ／アレンジ側を表示する」を自動で連動させられる。割り込み位置は `trigger.triggerBar`
+ * （小節、小数可）で指定する。長さは呼び出し側が `trigger.endBar` で渡した拍数を
+ * そのまま使う（小節へ切り上げない——切り上げると「2拍と指定したのに1小節ぶん
+ * 再生される」というズレになる）。再生し終えれば `isLayerVisible` が自動でアレンジ元
+ * へ戻すので、終了位置を別途指定する必要は無い。
  */
 export function generateArrangementForGroup(
 	existingLayers: MvShapeLayer[],
@@ -1004,9 +1015,11 @@ export function generateArrangementForGroup(
 ): { group: MvLayerGroup; layers: MvShapeLayer[] } {
 	const newGroupId = mvUid("grp");
 	const triggerBar = trigger?.triggerBar ?? 0;
-	const endBar =
-		trigger?.endBar ??
-		triggerBar + Math.max(1, Math.ceil(DEFAULT_ARRANGEMENT_BEATS / 4));
+	const durationBars =
+		trigger?.endBar !== undefined
+			? Math.max(0.05, trigger.endBar - triggerBar)
+			: DEFAULT_ARRANGEMENT_BEATS / MV_BEATS_PER_BAR;
+	const endBar = triggerBar + durationBars;
 	const group: MvLayerGroup = {
 		id: newGroupId,
 		name: "特殊アレンジ",
@@ -1015,240 +1028,163 @@ export function generateArrangementForGroup(
 	};
 	const layers: MvShapeLayer[] = [];
 
-	const style = pick(ARRANGE_STYLES);
-	// 速さの倍率・回転キックの角度・弧のカーブも毎回振れる。固定値を1つだけ
-	// 持っていると「型」を4つに増やしてもそれぞれが結局1パターンにしかならない。
-	const speedMul = pick([2, 2, 3, 4]);
-	const kickAngle = pick([45, 90, 120, 180]);
-	const kickCurve = pick([2, 3, 4]);
+	const durationBeats = durationBars * MV_BEATS_PER_BAR;
+	// スロット幅は半拍〜1拍。短いほどイベント数が増えて密度の高い動きになる
+	// （8スロット/区間を上限にして、長い区間でレイヤー数が際限なく増えないようにする）。
+	const slotBeats = pick([0.5, 0.5, 0.75, 1]);
+	const slotCount = Math.min(
+		8,
+		Math.max(2, Math.round(durationBeats / slotBeats)),
+	);
+	const slotBars = durationBars / slotCount;
+
 	const recolorPalette = FLASH_PALETTE.filter((_, i) => chance(0.6) || i === 0);
 	const flashColor = pick(FLASH_PALETTE);
-	// これから足す拍モジュレータの周期。style ごとに固定値だったところを、
-	// トリガー小節の頭で必ず envelope=0 になるよう位相を揃えてから足す
-	// （揃えないと切り替わった瞬間の絵がアレンジ元とズレて継ぎ目が見える）。
-	const kickPeriod = roundTo(0.5 * (speedMul / 2), 2);
-	const shatterSizePeriod = 0.25;
-	const shatterRotPeriod = 1;
-	const monoFlashPeriod = 0.5;
-	const recolorPeriod = roundTo(1 / speedMul, 2);
 
 	for (const orig of existingLayers) {
-		const newLayer: MvShapeLayer = {
-			...orig,
-			id: mvUid("shp"),
-			groupId: newGroupId,
-			z: nextZ(),
-			modulators: scaleBeatPeriods(orig.modulators, 1 / speedMul, triggerBar),
-		};
+		let lastEvent: MicroEvent | null = null;
+		for (let i = 0; i < slotCount; i++) {
+			const slotFrom = triggerBar + i * slotBars;
+			const slotTo = slotFrom + slotBars;
+			const ev = pickMicroEvent(lastEvent);
+			lastEvent = ev;
 
-		// コマ送りも同じ倍率で速める（形の切り替わりだけ元の速さのまま取り残されないように）。
-		if (newLayer.iconCycle && !("advance" in newLayer.iconCycle)) {
-			newLayer.iconCycle = {
-				...newLayer.iconCycle,
-				beats: newLayer.iconCycle.beats / speedMul,
+			const newLayer: MvShapeLayer = {
+				...orig,
+				id: mvUid("shp"),
+				groupId: newGroupId,
+				z: nextZ(),
+				barRange: [slotFrom, slotTo],
+				modulators: [],
 			};
-		}
 
-		switch (style) {
-			case "speedKick":
-				// 回転のキック。角度・カーブを毎回振ることで「同じ90度キック」の
-				// 繰り返しにならないようにする。
-				newLayer.modulators.push({
-					source: "beat",
-					target: "rotation",
-					op: "add",
-					amount: orig.x < MV_W / 2 ? kickAngle : -kickAngle,
-					periodBeats: kickPeriod,
-					phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
-					curve: kickCurve,
-				});
-				break;
-			case "shatter":
-				// 拍ごとに弾けて縮む「破裂」。size を強く振って、通常のアレンジより
-				// 動きの振れ幅そのものを大きくする。
-				newLayer.modulators.push(
-					{
-						source: "beat",
-						target: "size",
-						op: "add",
-						amount: roundTo((orig.size ?? 20) * randRange(0.6, 1.1), 1),
-						periodBeats: shatterSizePeriod,
-						phaseOffset: alignPhaseToTriggerBar(shatterSizePeriod, 0, triggerBar),
-						curve: 4,
-					},
-					{
-						source: "beat",
-						target: "rotation",
-						op: "add",
-						amount: chance(0.5) ? 180 : -180,
-						periodBeats: shatterRotPeriod,
-						phaseOffset: alignPhaseToTriggerBar(shatterRotPeriod, 0, triggerBar),
-						curve: 2,
-					},
-				);
-				break;
-			case "monoFlash":
-				// 白黒の明滅に染める。色そのものを差し替えるので元の配色は完全に消える。
-				newLayer.color = chance(0.5) ? "#ffffff" : "#111111";
-				newLayer.modulators.push({
-					source: "beat",
-					target: "opacity",
-					op: "mul",
-					amount: 0.85,
-					periodBeats: monoFlashPeriod,
-					phaseOffset: alignPhaseToTriggerBar(monoFlashPeriod, 0, triggerBar),
-					curve: 5,
-				});
-				break;
-			case "recolorPulse":
-				// 元の配色を無視して差し色パレットへ丸ごと塗り替え、拍ごとに脈打たせる。
-				newLayer.color = pick(
-					recolorPalette.length > 0 ? recolorPalette : FLASH_PALETTE,
-				);
-				newLayer.modulators.push({
-					source: "beat",
-					target: "thickness",
-					op: "add",
-					amount: roundTo((orig.thickness ?? 3) * randRange(1.2, 2.2), 1),
-					periodBeats: recolorPeriod,
-					phaseOffset: alignPhaseToTriggerBar(recolorPeriod, 0, triggerBar),
-					curve: 3,
-				});
-				break;
-			case "barStretch": {
-				// 一瞬だけ大きく伸びて元のサイズへ戻る「ストレッチ」。
-				// 伸びる瞬間は太さを細くして引き伸ばされた質感を足す（サイズだけだと
-				// ただの拡大にしか見えないため）。
-				const stretchAmount = roundTo((orig.size ?? 20) * randRange(1.4, 2.2), 1);
-				const thinAmount = roundTo(
-					(orig.thickness ?? 3) * randRange(0.3, 0.6),
-					1,
-				);
-				newLayer.modulators.push(
-					{
-						source: "beat",
-						target: "size",
-						op: "add",
-						amount: stretchAmount,
-						periodBeats: kickPeriod,
-						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
-						curve: 5,
-					},
-					{
-						source: "beat",
-						target: "thickness",
-						op: "sub",
-						amount: thinAmount,
-						periodBeats: kickPeriod,
-						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
-						curve: 5,
-					},
-				);
-				break;
-			}
-			case "squareBurst": {
-				// 元の図形は淡く息づかせるだけにして、主役は各図形の位置から
-				// 広がって消える四角形のバースト（枠線のみ）にする。
-				newLayer.modulators.push(
-					...flooredOpacity(
-						0.7,
-						monoFlashPeriod,
-						alignPhaseToTriggerBar(monoFlashPeriod, 0, triggerBar),
-						2,
-					),
-				);
-				const burstPeriod = kickPeriod;
-				const burstPhase = alignPhaseToTriggerBar(burstPeriod, 0, triggerBar);
-				layers.push({
-					kind: "shape",
-					form: "path",
-					id: mvUid("shp"),
-					groupId: newGroupId,
-					x: orig.x,
-					y: orig.y,
-					z: nextZ(),
-					rotation: 0,
-					color: chance(0.5) ? flashColor : (orig.color ?? "#ffffff"),
-					filled: false,
-					thickness: randRange(2, 4),
-					size: (orig.size ?? 20) * 0.7,
-					count: 1,
-					spread: 0,
-					spin: 0,
-					blend: "normal",
-					path: rectPath(15, 15, 85, 85),
-					pathBox: [0, 0, 100, 100],
-					modulators: [
+			switch (ev) {
+				case "blink":
+					// 一瞬だけ暗く落ちて戻る単発の点滅。
+					newLayer.modulators = [
 						{
-							source: "beat",
-							target: "size",
-							op: "add",
-							amount: roundTo((orig.size ?? 20) * randRange(1.6, 2.4), 1),
-							periodBeats: burstPeriod,
-							phaseOffset: burstPhase,
-							curve: 2,
-						},
-						{
-							source: "beat",
+							source: "phrase",
 							target: "opacity",
 							op: "mul",
 							amount: 1,
-							periodBeats: burstPeriod,
-							phaseOffset: burstPhase,
-							curve: 3,
+							bars: slotBars,
+							phaseOffset: slotFrom,
+							symmetric: true,
+							curve: pick([4, 6, 8]),
 						},
-					],
-				});
-				break;
+					];
+					break;
+				case "colorFlash":
+					// 差し色パレットへ丸ごと塗り替え、太さも一発盛り上げる。
+					newLayer.color = pick(
+						recolorPalette.length > 0 ? recolorPalette : FLASH_PALETTE,
+					);
+					newLayer.modulators = oneShotHump(
+						"thickness",
+						roundTo((orig.thickness ?? 3) * randRange(1.5, 3), 1),
+						slotBars,
+						slotFrom,
+						3,
+					);
+					break;
+				case "kick":
+					// 回転のキック。毎スロット角度・カーブを振り直すことで
+					// 「同じキックの繰り返し」に見えないようにする。
+					newLayer.modulators = oneShotHump(
+						"rotation",
+						chance(0.5)
+							? pick([90, 120, 180, 270, 360])
+							: -pick([90, 120, 180, 270, 360]),
+						slotBars,
+						slotFrom,
+						pick([2, 3, 4]),
+					);
+					break;
+				case "stretch": {
+					// 一瞬だけ大きく伸びて元のサイズへ戻る「ストレッチ」。
+					// 伸びる瞬間は太さを細くして引き伸ばされた質感を足す。
+					const stretchAmount = roundTo(
+						(orig.size ?? 20) * randRange(1.4, 2.6),
+						1,
+					);
+					const thinAmount = roundTo(
+						(orig.thickness ?? 3) * randRange(0.4, 0.7),
+						1,
+					);
+					newLayer.modulators = [
+						...oneShotHump("size", stretchAmount, slotBars, slotFrom, 5),
+						...oneShotHump("thickness", -thinAmount, slotBars, slotFrom, 5),
+					];
+					break;
+				}
+				case "shapeSwap": {
+					// コマ送り用のコマの中から、いま出ているのとは別の1コマへ
+					// パッと静止的に切り替える。コマ送りをそのまま流すより
+					// 「別の形へ変換した」感が強く出る。
+					if (
+						orig.form === "path" &&
+						orig.iconCycle &&
+						orig.iconCycle.paths.length > 1
+					) {
+						const paths = orig.iconCycle.paths;
+						const curIdx = orig.path ? paths.indexOf(orig.path) : 0;
+						let idx = Math.floor(Math.random() * paths.length);
+						if (idx === curIdx) idx = (idx + 1) % paths.length;
+						newLayer.path = paths[idx];
+						newLayer.iconCycle = undefined;
+					}
+					newLayer.modulators = oneShotHump(
+						"size",
+						roundTo((orig.size ?? 20) * randRange(0.3, 0.6), 1),
+						slotBars,
+						slotFrom,
+						4,
+					);
+					break;
+				}
+				case "squareBurst": {
+					// 元の図形は少し暗く沈めておいて、主役は図形の位置から
+					// 広がって消える四角形のバースト（枠線のみ）にする。
+					newLayer.modulators = [
+						{ source: "constant", target: "opacity", op: "mul", amount: 0.55 },
+					];
+					layers.push({
+						kind: "shape",
+						form: "path",
+						id: mvUid("shp"),
+						groupId: newGroupId,
+						x: orig.x,
+						y: orig.y,
+						z: nextZ(),
+						rotation: 0,
+						barRange: [slotFrom, slotTo],
+						color: chance(0.5) ? flashColor : (orig.color ?? "#ffffff"),
+						filled: false,
+						thickness: randRange(2, 4),
+						size: (orig.size ?? 20) * 0.5,
+						count: 1,
+						spread: 0,
+						spin: 0,
+						blend: "normal",
+						path: rectPath(15, 15, 85, 85),
+						pathBox: [0, 0, 100, 100],
+						modulators: [
+							...oneShotHump(
+								"size",
+								roundTo((orig.size ?? 20) * randRange(1.8, 3), 1),
+								slotBars,
+								slotFrom,
+								2,
+							),
+							{ source: "constant", target: "opacity", op: "mul", amount: 0 },
+							...oneShotHump("opacity", 1, slotBars, slotFrom, 2),
+						],
+					});
+					break;
+				}
 			}
-		}
 
-		layers.push(newLayer);
-	}
-
-	// 画面いっぱいに広がる閃光用の飾り。本数・向き・色・入れるかどうか自体も
-	// 毎回振る（以前は常に白十字2本固定だった）。
-	if (chance(0.75)) {
-		const flashCount = pick([1, 2, 2, 3]);
-		for (let i = 0; i < flashCount; i++) {
-			const angle =
-				flashCount === 1 ? pick([0, 45, 90]) : (180 / flashCount) * i;
-			layers.push({
-				kind: "shape",
-				form: "bar",
-				id: mvUid("shp"),
-				groupId: newGroupId,
-				x: MV_W / 2,
-				y: MV_H / 2,
-				z: nextZ(),
-				rotation: angle,
-				color: style === "monoFlash" ? "#ffffff" : flashColor,
-				size: MV_W,
-				thickness: randRange(2, 6),
-				filled: false,
-				count: 1,
-				spread: 0,
-				spin: 0,
-				blend: "normal",
-				modulators: [
-					{
-						source: "beat",
-						target: "size",
-						op: "add",
-						amount: MV_W,
-						periodBeats: kickPeriod,
-						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
-					},
-					{
-						source: "beat",
-						target: "thickness",
-						op: "add",
-						amount: randRange(6, 14),
-						periodBeats: kickPeriod,
-						phaseOffset: alignPhaseToTriggerBar(kickPeriod, 0, triggerBar),
-					},
-				],
-			});
+			layers.push(newLayer);
 		}
 	}
 

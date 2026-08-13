@@ -540,12 +540,17 @@ function modSourceValue(d: DrawCtx, m: MvModulator): number {
 			// フレーズ(既定8小節)の頭で1、終わりへ向かってなめらかに0へ。
 			// op:"sub" で使うと逆向き＝終わりに向かって育つカーブになる。
 			const period = Math.max(1, m.bars ?? 8) * MV_STEPS_PER_BAR;
+			// beat と同じ考え方の位相ずらし。ただし単位は「小節」
+			// （`bars` と同じ単位に揃えてある）。特殊アレンジの割り込み小節のような
+			// 曲頭からの絶対位置に山（またはその頂点）を正確に合わせたいときに使う。
+			const offsetSteps = (m.phaseOffset ?? 0) * MV_STEPS_PER_BAR;
+			const stepAdj = d.step - offsetSteps;
 			const curve = m.curve ?? 2;
-			if (!m.symmetric) return envelope(d.step, period, curve);
+			if (!m.symmetric) return envelope(stepAdj, period, curve);
 			// symmetric: いちばん近い境目からの距離で山を作る（境目=1、中央=0）。
 			// 減衰のみだと境目の手前で0のままになり、実測にある「境目へ向かう
 			// 立ち上がり」が出せずカクッと不連続になる。
-			const phase = ((d.step % period) + period) % period;
+			const phase = ((stepAdj % period) + period) % period;
 			const dist = Math.min(phase, period - phase) / (period / 2);
 			return clamp01(Math.pow(1 - dist, curve));
 		}
