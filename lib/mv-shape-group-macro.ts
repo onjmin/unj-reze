@@ -5,7 +5,6 @@ import {
 	MV_W,
 	mvUid,
 	type MvLayerGroup,
-	type MvModTarget,
 	type MvModulator,
 	type MvShapeForm,
 	type MvShapeLayer,
@@ -243,6 +242,19 @@ function motifFrames(strokes: string[]): string[] {
 	return [...down, ...down.slice(1, -1).reverse()];
 }
 
+/**
+ * コマ列を `total` コマの枠の `offset` 位置から置き、残りは空白（""）で埋める。
+ * 空白コマはエンジン側（`drawShapeLayer` の `!fr.path` スキップ）で何も描かれない。
+ * "duet" 構図の「1拍の中で別々の構図が交互に出る」を作る要。
+ */
+function placeFrames(frames: string[], offset: number, total: number): string[] {
+	const out: string[] = new Array(total).fill("");
+	for (let i = 0; i < frames.length && offset + i < total; i++) {
+		out[offset + i] = frames[i];
+	}
+	return out;
+}
+
 /** `shapeStyle:'round'` 用。矩形グリフの代わりに使う丸い原始図形。 */
 const ROUND_FORMS: MvShapeForm[] = ["ring", "circle", "ripple"];
 
@@ -299,9 +311,16 @@ export interface SymmetricShapeGroupOptions {
 	 *   という階層は作らない。対称オンなら片側だけ組んで厳密に鏡写しする。
 	 * "bars" = 本数も高さも1本ずつ独立に振れる棒の列（イコライザー風）。参考動画1
 	 *   はこれ。
-	 * いずれも**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
+	 * "duet" = **1拍の中で「横並びの列」と「中央の大きなエンブレム」が交互に出る**。
+	 *   参考動画（チョウチン少女）を30fpsで全249フレーム定量解析した結果、通常ループの
+	 *   正体は「複数レイヤーが同時に見えている」のではなく、1拍(約0.43秒)を8コマに割り、
+	 *   前半4コマ=横並びの小さな図形列 / 後半3コマ=中央の大きなエンブレム / 最後1コマ=無
+	 *   という**画面まるごとの構図の交互切り替え**だった（バウンディングボックスが
+	 *   269x67〜345x105（横長）と165x165（正方形）を毎拍往復し、両方が同時に出る
+	 *   フレームは通常ループ中に1枚も無い）。これを iconCycle の空白コマで実装する。
+	 * duet 以外は**中央の横一線から外れない**——参考動画に上下バラバラの配置は無い。
 	 */
-	clusterType?: "centered" | "scattered" | "bars";
+	clusterType?: "centered" | "scattered" | "bars" | "duet";
 	/** 図形の種類の傾向。"sharp" (矩形グリフ) / "round" (丸い原始図形) / "all" (混在) */
 	shapeStyle?: "sharp" | "round" | "all";
 	/** 線の太さ。"thick" (太め) / "thin" (細め) / "random" (ランダム) */
@@ -664,6 +683,122 @@ export function buildSymmetricShapeGroupLayers(
 	let rateIdx = 0;
 	const nextRate = () => RATE_LADDER[Math.min(rateIdx++, RATE_LADDER.length - 1)];
 
+	if (clusterType === "duet") {
+		// ── 1拍の中で「横並びの列」と「中央エンブレム」が交互に出る構図 ──
+		// 参考動画の通常ループの実測構造そのもの（clusterType の doc コメント参照）。
+		// 1拍を8コマに割り、前半4コマ＝横並びの小さな図形列、後半3コマ＝中央の
+		// 大きなエンブレム、最後の1コマ＝空白。両者は同時には絶対に出ない。
+		const FRAMES = 8;
+		const baseBeats = plan.baseBeats;
+
+		// 中央エンブレム（大）。モチーフのコマ送りを後半3コマに置く。
+		const emblemFrames = motifFrames(buildRandomMotifStrokes()).slice(0, 3);
+		const emblemSize = randRange(85, 120);
+		layers.push({
+			kind: "shape",
+			form: "path",
+			id: mvUid("shp"),
+			groupId,
+			x: axisX,
+			y: baseY,
+			z: nextZ(),
+			rotation: 0,
+			color: plan.mainColor,
+			filled: false,
+			thickness: roundTo(plan.baseThickness, 1),
+			size: emblemSize,
+			count: 1,
+			spread: 0,
+			spin: 0,
+			blend: "normal",
+			path: emblemFrames[0],
+			pathBox: [0, 0, 100, 100],
+			iconCycle: {
+				paths: placeFrames(emblemFrames, 4, FRAMES),
+				beats: baseBeats,
+				crossfade: 0.35,
+			},
+			modulators: crispModulators({
+				size: emblemSize,
+				thickness: plan.baseThickness,
+				periodBeats: baseBeats,
+				phaseOffset: 0,
+				phraseBars: plan.phraseBars,
+				swell: plan.swell,
+			}),
+		});
+		// 芯の塗り四角。エンブレムと同じ後半コマだけ出る。
+		layers.push({
+			kind: "shape",
+			form: "path",
+			id: mvUid("shp"),
+			groupId,
+			x: axisX,
+			y: baseY,
+			z: nextZ(),
+			rotation: 0,
+			color: plan.mainColor,
+			filled: true,
+			thickness: 2,
+			size: roundTo(emblemSize * randRange(0.32, 0.45), 1),
+			count: 1,
+			spread: 0,
+			spin: 0,
+			blend: "normal",
+			path: rectPath(20, 20, 80, 80),
+			pathBox: [0, 0, 100, 100],
+			iconCycle: {
+				paths: placeFrames(
+					[rectPath(20, 20, 80, 80), rectPath(24, 24, 76, 76), rectPath(28, 28, 72, 72)],
+					4,
+					FRAMES,
+				),
+				beats: baseBeats,
+				crossfade: 0.35,
+			},
+			modulators: [],
+		});
+
+		// 横並びの列（小）。左右対称ペア×2〜3組。前半4コマだけ出る。
+		const pairCount = options.pairCount ?? pick([2, 2, 3]);
+		let cursor = randRange(60, 95);
+		for (let i = 0; i < pairCount; i++) {
+			if (cursor > MV_W / 2 - 24) break;
+			const size = randRange(16, 32);
+			const rowFrames = motifFrames(buildRandomMotifStrokes()).slice(0, 4);
+			for (const sign of [-1, 1]) {
+				layers.push({
+					kind: "shape",
+					form: "path",
+					id: mvUid("shp"),
+					groupId,
+					x: roundTo(axisX + cursor * sign, 1),
+					y: baseY,
+					z: nextZ(),
+					rotation: 0,
+					color: plan.mainColor,
+					filled: false,
+					thickness: roundTo(Math.min(plan.baseThickness, size * 0.25), 1),
+					size,
+					count: 1,
+					spread: 0,
+					spin: 0,
+					blend: "normal",
+					path: rowFrames[0],
+					pathBox: [0, 0, 100, 100],
+					iconCycle: {
+						paths: placeFrames(rowFrames, 0, FRAMES),
+						beats: baseBeats,
+						crossfade: 0.35,
+					},
+					modulators: [],
+				});
+			}
+			cursor += size * randRange(1.4, 2.2) + randRange(16, 40);
+		}
+		return layers;
+	}
+
 	if (isCentered) {
 		// ── 同心に積むエンブレム構図 ──
 		// **段は1〜2枚まで**。モチーフ自体が既に「枠の中に枠、その中に芯」という
@@ -922,112 +1057,105 @@ export function generateSymmetricShapeGroup(
 export const DEFAULT_ARRANGEMENT_BEATS = 4;
 
 
-/**
- * ある区間（`phaseOffsetBar` 小節目〜 `+bars` 小節ぶん）の中だけで
- * 「基準値→山→基準値」と単発で盛り上がって収まる山形を作る。
- *
- * エンジンが持つ一次波形は減衰カーブ（`beat`/`bar`）か、フレーズ境界で
- * 山になる `phrase(symmetric)`（境目=1・中央=0）の2つしか無い。後者を
- * 「1(=基準)を足してから境目=1の波形を引く」と、逆に「中央=amount・境目=0」
- * という単発の盛り上がり山になる——これを利用して `bars` に区間の長さその
- * ものを渡せば、区間の頭と終わりでは効果0（＝アレンジ元と同じ見た目）、
- * 区間の真ん中でだけ最大効果、というちょうど1回ぶんの山になる。
- * `phrase` はループする波形だが、この山を使うレイヤー自身を `barRange` で
- * その区間だけに限定しているので、区間の外で山が繰り返し鳴る心配は無い。
- */
-function oneShotHump(
-	target: MvModTarget,
-	amount: number,
-	bars: number,
-	phaseOffsetBar: number,
-	curve: number,
-	shape?: "decay" | "bounce",
-): MvModulator[] {
-	return [
-		{ source: "constant", target, op: "add", amount },
-		{
-			source: "phrase",
-			target,
-			op: "sub",
-			amount,
-			bars: Math.max(0.05, bars),
-			phaseOffset: phaseOffsetBar,
-			symmetric: true,
-			curve,
-			shape,
-		},
+// ───────────────── 特殊アレンジ用のグリフ（塗り主体） ─────────────────
+//
+// 参考動画の割り込み区間（実測1.93〜3.63秒）の終盤に出る「画面のあちこちに
+// 散らばる要素」は、通常ループの線画モチーフとは別種の**塗りつぶし主体の
+// グリフ**（バーチャート・縞の入った箱・目盛りの列）だった。ここはその語彙を
+// 新しく起こす——元レイヤーの変形では作れない絵なので、アレンジが自前で
+// グリフを発明する（「無から参考エフェクトを生み出す」ためのパーツ）。
+
+/** イコライザー風の縦棒列。高さは1本ずつ独立に振れる。 */
+function barChartGlyph(): string {
+	const n = 4 + Math.floor(Math.random() * 4); // 4〜7本
+	const gap = randRange(3, 6);
+	const w = randRange(6, 11);
+	let x = 50 - ((w + gap) * n - gap) / 2;
+	const parts: string[] = [];
+	for (let i = 0; i < n; i++) {
+		const h = randRange(15, 60);
+		parts.push(rectPath(x, 80 - h, x + w, 80));
+		x += w + gap;
+	}
+	return parts.join(" ");
+}
+
+/** 上下に細いラインを持つ、縦縞の入った箱（参考動画の左右の主役）。 */
+function canisterGlyph(): string {
+	const parts: string[] = [
+		rectPath(10, 10, 90, 16),
+		rectPath(10, 84, 90, 90),
 	];
+	const stripes = 3 + Math.floor(Math.random() * 2); // 3〜4本
+	const gap = randRange(2.5, 5);
+	const span = 70;
+	const w = (span - gap * (stripes - 1)) / stripes;
+	let x = 15;
+	for (let i = 0; i < stripes; i++) {
+		parts.push(rectPath(x, 24, x + w, 76));
+		x += w + gap;
+	}
+	return parts.join(" ");
 }
 
-/**
- * 特殊アレンジの中身を作る「単発イベント」の種類。
- *
- * **「アレンジ」＝元の図形を複製・増殖させて新しい要素を足すことではなく、
- * 元の図形そのものにエフェクトをかけて変形させること**（ユーザーによる定義の
- * 明確化）。以前はここに「周りにバーストを出す」「鏡像を分身させる」といった
- * “新しい図形を足す” 系のイベントを混ぜていたが、参考動画のどこにも無い絵に
- * なる一方だった——複製は「アレンジ」の範囲外だったので、全部撤去した。
- * 残っているのは、どれも既存の1枚のレイヤー自身のプロパティ（濃さ・回転・
- * 大きさ・太さ・表示中のコマ）を変形させるだけのイベントのみ。
- *
- * 以前は区間全体に1つの型（回転キック／破裂／…）を引き伸ばして適用していたが、
- * これだと型を何種類増やしても「1つの動きが速いか遅いか」の違いにしかならず、
- * 参考にした絵にある「点滅→点滅→形状変換1→形状変換2」のような、短い区間の
- * 中で何度も表情が変わる密度のアニメーションは原理的に作れなかった
- * （ユーザー指摘：「ランダム生成ロジックに根本的な欠陥がある」）。
- *
- * ここでは区間を半拍〜1拍の短いスロットに分割し、スロットごとに独立して
- * イベントを1つ選ぶ「シーケンサ」方式に作り替えてある。各スロットは
- * `MvShapeLayer.barRange` で区切った専用のレイヤーとして持ち、スロットが
- * 終われば次のスロットのレイヤーへエンジンの `isLayerVisible` がそのまま
- * 切り替えてくれる——ループを新設する必要が無く、`oneShotHump` の山も
- * そのスロットの中で頭0→中央ピーク→終わり0ときっちり収まる。
- */
-type MicroEvent = "blink" | "kick" | "shapeSwap";
-const MICRO_EVENTS: MicroEvent[] = ["blink", "kick", "shapeSwap"];
-
-/** 直前と同じイベントを連続で選ばない（`buildRandomMotifStrokes` と同じ考え方）。 */
-function pickMicroEvent(lastEvent: MicroEvent | null, pool: MicroEvent[]): MicroEvent {
-	const ev = pick(pool);
-	if (ev !== lastEvent) return ev;
-	return pool[(pool.indexOf(ev) + 1) % pool.length];
+/** 目盛りのような小さな短冊の列。 */
+function ticksGlyph(): string {
+	const n = 3 + Math.floor(Math.random() * 4); // 3〜6個
+	const parts: string[] = [];
+	let x = 10;
+	for (let i = 0; i < n; i++) {
+		const w = randRange(4, 14);
+		const h = randRange(6, 14);
+		parts.push(rectPath(x, 50 - h / 2, x + w, 50 + h / 2));
+		x += w + randRange(4, 10);
+		if (x > 92) break;
+	}
+	return parts.join(" ");
 }
 
-/**
- * スロットの並び順（何個目のスロットか）に応じてイベントの当選重みを変える。
- *
- * 参考動画（チョウチン少女）を1フレームずつ解析すると、割り込み区間は
- * 「頭で暗転(blink)→太さが跳ねて戻る(kick)→…→終盤でいちばん要素数の多い
- * コマへ一斉切り替え(shapeSwap)」という並びだった。以前はスロットごとに
- * 完全ランダムで選んでいたため、この並びは運任せでしか出なかった
- * （10回サンプリングで先頭がblinkになったのは数回のみ）。ここでは
- * 先頭寄りはblink/kickを、終盤はshapeSwapを重み付けし、それ以外は
- * 通常のランダム抽選のままにする——完全固定の台本にはしない（ランダム
- * 生成としての多様性は残す）が、観測された骨格には寄せる。
- */
-function weightedPoolForSlot(index: number, slotCount: number): MicroEvent[] {
-	const isFirst = index === 0;
-	const isSecond = index === 1 && slotCount >= 3;
-	const isLast = index === slotCount - 1;
-	const isNearEnd = index >= slotCount - 2 && slotCount >= 4;
-	if (isFirst) return ["blink", "blink", "blink", "kick", "shapeSwap"];
-	if (isSecond) return ["kick", "kick", "kick", "blink", "shapeSwap"];
-	if (isLast) return ["shapeSwap", "shapeSwap", "shapeSwap", "kick", "blink"];
-	if (isNearEnd) return ["shapeSwap", "shapeSwap", "kick", "blink"];
-	return MICRO_EVENTS;
+/** かぎ括弧（コーナーブラケット）。`flip` で対角側の向きになる。破線混じり。 */
+function cornerBracketGlyph(flip: boolean): string {
+	const arm = randRange(55, 75);
+	const parts: string[] = [];
+	if (!flip) {
+		// 左上向き: 縦線(左)＋横線(上)。破線のダッシュを数個添える。
+		parts.push(`M10 ${roundTo(10 + arm, 1)}V10H${roundTo(10 + arm, 1)}`);
+		parts.push(rectPath(10 + arm + 8, 8, 10 + arm + 18, 12));
+		parts.push(rectPath(6, 10 + arm + 8, 10, 10 + arm + 16));
+	} else {
+		// 右下向き。
+		parts.push(`M90 ${roundTo(90 - arm, 1)}V90H${roundTo(90 - arm, 1)}`);
+		parts.push(rectPath(90 - arm - 18, 88, 90 - arm - 8, 92));
+		parts.push(rectPath(90, 90 - arm - 16, 94, 90 - arm - 8));
+	}
+	return parts.join(" ");
 }
 
 /**
  * 既存の図形グループのレイヤー配列を元にして、展開の変化に使える
  * 「特殊アレンジ」のレイヤー配列を生成する。
  *
+ * ── 設計は参考動画（チョウチン少女）の割り込み区間（実測1.93〜3.63秒≒4拍）を
+ * 30fpsで1フレームずつ定量解析した結果に基づく。観測された台本は4幕構成：
+ *
+ *   第1幕 [0〜25%]   小さな塗り四角だけが中央に静止（長めのタメ）→ 末尾で完全暗転
+ *                    （実測: 73x73の塗り四角が約0.15秒静止 → 白画素0が約0.1秒）
+ *   第2幕 [25〜50%]  太い線幅の中央エンブレムが点滅的に2回フラッシュして減衰
+ *                    （実測: 白画素17.6k→19.4kと通常最大14.8kを大きく超える太さ）
+ *   第3幕 [50〜75%]  対角のかぎ括弧＋中央の塗り四角（バウンディングボックスが
+ *                    195x179→247x201と、初めて縦方向へはみ出し始める）
+ *   第4幕 [75〜100%] 画面のあちこち（上下左右、bbox 345x261≒画面の9割）に
+ *                    塗り主体の別語彙グリフ（バーチャート・縞箱・目盛り）が
+ *                    同時多発的に出る → 窓が終わると通常ループへ自動復帰
+ *
+ * 幕の骨格は固定（毎回この順で流れる）だが、各幕の中身——グリフの形・本数・
+ * 配置・サイズ——は呼ぶたびに乱数で振れる。以前のランダムなイベント抽選では
+ * この台本が運任せでしか出なかったため、構成そのものを台本化した。
+ *
  * `sourceGroupId` は割り込み対象（アレンジ元）のグループID。返す `group.arrangement`
  * にそのまま埋め込むので、エンジン側 (`isLayerVisible`) が「アレンジ元を止めて隠す
- * ／アレンジ側を表示する」を自動で連動させられる。割り込み位置は `trigger.triggerBar`
- * （小節、小数可）で指定する。長さは呼び出し側が `trigger.endBar` で渡した拍数を
- * そのまま使う（小節へ切り上げない——切り上げると「2拍と指定したのに1小節ぶん
- * 再生される」というズレになる）。再生し終えれば `isLayerVisible` が自動でアレンジ元
- * へ戻すので、終了位置を別途指定する必要は無い。
+ * ／アレンジ側を表示する」を自動で連動させられる。第1幕末尾の暗転は「その区間に
+ * レイヤーを1枚も置かない」だけで実現している（アレンジ元は窓の間ずっと隠れている）。
  */
 export function generateArrangementForGroup(
 	existingLayers: MvShapeLayer[],
@@ -1050,115 +1178,169 @@ export function generateArrangementForGroup(
 	};
 	const layers: MvShapeLayer[] = [];
 
-	const durationBeats = durationBars * MV_BEATS_PER_BAR;
-	// スロット幅は半拍〜1拍。短いほどイベント数が増えて密度の高い動きになる
-	// （8スロット/区間を上限にして、長い区間でレイヤー数が際限なく増えないようにする）。
-	const slotBeats = pick([0.5, 0.5, 0.75, 1]);
-	const slotCount = Math.min(
-		8,
-		Math.max(2, Math.round(durationBeats / slotBeats)),
-	);
-	const slotBars = durationBars / slotCount;
+	// 窓の中の位置(0..1)を絶対小節へ。
+	const at = (f: number) => roundTo(triggerBar + durationBars * f, 4);
 
-	// イベントはスロットごとに1つだけ選び、グループ内の全レイヤーで共有する
-	// （レイヤーごとに別々のイベントを独立に選んでいた以前の実装は、同じ瞬間に
-	// 図形ごとバラバラの変化が起きる寄せ集めになり、参考動画にある「その瞬間
-	// 画面全体が一斉に別の表情へ切り替わる」というまとまりが出せなかった
-	// ——ユーザー指摘。イベントの中身（角度・コマの選び方など）はレイヤーごとに
-	// 振るが、"何をするか" と "いつ" は画面全体で揃える）。
-	let lastEvent: MicroEvent | null = null;
-	const slotEvents: MicroEvent[] = [];
-	for (let i = 0; i < slotCount; i++) {
-		const ev = pickMicroEvent(lastEvent, weightedPoolForSlot(i, slotCount));
-		slotEvents.push(ev);
-		lastEvent = ev;
+	// 中心・色・太さ・基準サイズはアレンジ元から引き継ぐ。
+	const shapeSources = existingLayers.filter((l) => l.kind === "shape");
+	const cx = shapeSources.length
+		? shapeSources.reduce((s, l) => s + l.x, 0) / shapeSources.length
+		: MV_W / 2;
+	const cy = shapeSources.length
+		? shapeSources.reduce((s, l) => s + l.y, 0) / shapeSources.length
+		: MV_H / 2;
+	const color = shapeSources[0]?.color ?? "#e5e5e5";
+	const baseThickness = shapeSources[0]?.thickness ?? 5;
+	const baseSize = Math.max(60, ...shapeSources.map((l) => l.size ?? 0));
+
+	const common = {
+		kind: "shape" as const,
+		groupId: newGroupId,
+		rotation: 0,
+		count: 1,
+		spread: 0,
+		spin: 0,
+		blend: "normal" as const,
+		pathBox: [0, 0, 100, 100] as [number, number, number, number],
+		color,
+	};
+
+	// ── 第1幕: 小さな塗り四角のタメ → 完全暗転 ──
+	// [0, 0.19] だけレイヤーを置き、[0.19, 0.25] は何も置かない＝暗転。
+	layers.push({
+		...common,
+		form: "path",
+		id: mvUid("shp"),
+		x: cx,
+		y: cy,
+		z: nextZ(),
+		filled: true,
+		thickness: 2,
+		size: roundTo(baseSize * randRange(0.32, 0.42), 1),
+		path: rectPath(25, 25, 75, 75),
+		barRange: [at(0), at(0.19)],
+		modulators: [],
+	});
+
+	// ── 第2幕: 太い中央エンブレムの2連フラッシュ ──
+	// アレンジ元がコマ送りを持っていれば、そのいちばん密なコマ（paths[0]）を使う。
+	const emblemPath =
+		shapeSources.find((l) => l.iconCycle && l.iconCycle.paths.length > 0)
+			?.iconCycle?.paths[0] ??
+		shapeSources.find((l) => l.path)?.path ??
+		`${rectPath(12, 12, 88, 88)} ${rectPath(34, 34, 66, 66)}`;
+	const pulseCount = pick([2, 2, 3]);
+	const pulseSpan = 0.25 / pulseCount;
+	for (let i = 0; i < pulseCount; i++) {
+		const from = 0.25 + pulseSpan * i;
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: cx,
+			y: cy,
+			z: nextZ(),
+			filled: false,
+			thickness: roundTo(baseThickness, 1),
+			size: roundTo(baseSize * randRange(0.95, 1.1), 1),
+			path: emblemPath,
+			barRange: [at(from), at(from + pulseSpan)],
+			// 幕の頭で太さが最大（通常の2.5〜3.5倍）→減衰。実測の「白画素が通常最大を
+			// 大きく超えて出現し、すぐ収縮する」に対応する。phrase の位相は
+			// 絶対小節で指定するので、この幕の開始小節をそのまま渡す。
+			modulators: [
+				{
+					source: "phrase",
+					target: "thickness",
+					op: "add",
+					amount: roundTo(baseThickness * randRange(1.5, 2.5), 1),
+					bars: Math.max(0.05, durationBars * pulseSpan),
+					phaseOffset: at(from),
+					curve: pick([3, 4]),
+				},
+			],
+		});
 	}
 
-	for (const orig of existingLayers) {
-		for (let i = 0; i < slotCount; i++) {
-			const slotFrom = triggerBar + i * slotBars;
-			const slotTo = slotFrom + slotBars;
-			const ev = slotEvents[i];
+	// ── 第3幕: 対角のかぎ括弧＋中央の塗り四角 ──
+	const diagDx = randRange(70, 100);
+	const diagDy = randRange(45, 70);
+	for (const flip of [false, true]) {
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: roundTo(cx + (flip ? diagDx : -diagDx), 1),
+			y: roundTo(cy + (flip ? diagDy : -diagDy), 1),
+			z: nextZ(),
+			filled: false,
+			thickness: roundTo(baseThickness * randRange(0.5, 0.8), 1),
+			size: randRange(50, 70),
+			path: cornerBracketGlyph(flip),
+			barRange: [at(0.5), at(0.75)],
+			modulators: [],
+		});
+	}
+	layers.push({
+		...common,
+		form: "path",
+		id: mvUid("shp"),
+		x: cx,
+		y: cy,
+		z: nextZ(),
+		filled: true,
+		thickness: 2,
+		size: roundTo(baseSize * randRange(0.3, 0.4), 1),
+		path: rectPath(25, 25, 75, 75),
+		barRange: [at(0.5), at(0.75)],
+		// ゆっくり暗く沈む（実測: 明灰→暗灰→黒と段階的に落ちる塗り四角）。
+		modulators: [
+			{
+				source: "phrase",
+				target: "opacity",
+				op: "mul",
+				amount: 1,
+				bars: Math.max(0.05, durationBars * 0.25),
+				phaseOffset: at(0.5),
+				curve: 1.2,
+			},
+		],
+	});
 
-			const newLayer: MvShapeLayer = {
-				...orig,
-				id: mvUid("shp"),
-				groupId: newGroupId,
-				z: nextZ(),
-				barRange: [slotFrom, slotTo],
-				modulators: [],
-			};
-
-			// 回転・ズーム・移動は使わない。参考動画（チョウチン少女）を解析した結果、
-			// この作風は「軸に揃った図形が同じ場所・同じ大きさ・回転0のまま」で、
-			// 変化するのは太さ・不透明度・コマの密度（線の本数）の3つだけだった
-			// （コード冒頭のコメントにも当初から明記されていた：「回転は常に0度」
-			// 「斜めの図形が1つも無い」）。以前はここに回転キック・拡大縮小の
-			// ストレッチ・画面の隅への移動を足していたが、これは動画に無い変化を
-			// 足していただけで、近づくどころか離れる原因になっていた
-			// （ユーザー指摘）。残すのは動画が実際にやっている3つの変化だけ。
-			switch (ev) {
-				case "blink":
-					// 一瞬だけ暗く落ちて戻る単発の点滅。
-					newLayer.modulators = [
-						{
-							source: "phrase",
-							target: "opacity",
-							op: "mul",
-							amount: 1,
-							bars: slotBars,
-							phaseOffset: slotFrom,
-							symmetric: true,
-							curve: pick([4, 6, 8]),
-						},
-					];
-					break;
-				case "kick": {
-					// 太さのキック。参考動画の暗転明けが「通常の2〜3倍太い線幅で
-					// 出現し、すぐ通常の太さへ収縮する」動きだったのに合わせている
-					// （回転は付けない）。
-					const kickShape = chance(0.35) ? "bounce" : "decay";
-					newLayer.modulators = oneShotHump(
-						"thickness",
-						roundTo((orig.thickness ?? 3) * randRange(1.5, 3), 1),
-						slotBars,
-						slotFrom,
-						pick([3, 4, 5]),
-						kickShape,
-					);
-					break;
-				}
-				case "shapeSwap": {
-					// コマ送り用のコマの中から、いま出ているのとは別の1コマへ
-					// パッと静止的に切り替える。コマ送りをそのまま流すより
-					// 「別の形へ変換した」感が強く出る（大きさは変えない）。
-					//
-					// 参考動画を1フレームずつ解析すると、2.8〜3.1秒の一発は
-					// 「あちこちの図形が同時にいちばん情報量の多いコマへ切り替わる」
-					// という構図だった（核＋装飾ぜんぶ乗った状態＝`iconCycle.paths[0]`）。
-					// 単純にランダムなコマへ飛ぶだけだと、たまたま線の少ないコマに
-					// 当たることも多く、この「密度が上がる」瞬間が再現できない。
-					// 7割は最密のコマ（[0]）を狙い、残りはランダムに振れさせる。
-					if (
-						orig.form === "path" &&
-						orig.iconCycle &&
-						orig.iconCycle.paths.length > 1
-					) {
-						const paths = orig.iconCycle.paths;
-						const curIdx = orig.path ? paths.indexOf(orig.path) : 0;
-						let idx = chance(0.7)
-							? 0
-							: Math.floor(Math.random() * paths.length);
-						if (idx === curIdx) idx = (idx + 1) % paths.length;
-						newLayer.path = paths[idx];
-						newLayer.iconCycle = undefined;
-					}
-					break;
-				}
-			}
-
-			layers.push(newLayer);
-		}
+	// ── 第4幕: 画面のあちこちに塗りグリフが同時多発 ──
+	// スロット（画面をほぼ端まで使う配置候補）から4〜6箇所選ぶ。左右の中段は
+	// 大きめの縞箱、上下はバーチャート、それ以外は目盛り、という参考動画の
+	// 役割分担に寄せつつ、形の中身は毎回乱数で起こす。
+	const slots: { x: number; y: number; kind: "bar" | "can" | "tick"; size: number }[] = [
+		{ x: MV_W * 0.42, y: MV_H * 0.16, kind: "bar", size: randRange(38, 52) },
+		{ x: MV_W * 0.87, y: MV_H * 0.32, kind: "tick", size: randRange(24, 34) },
+		{ x: MV_W * 0.16, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
+		{ x: MV_W * 0.84, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
+		{ x: MV_W * 0.1, y: MV_H * 0.78, kind: "tick", size: randRange(22, 32) },
+		{ x: MV_W * 0.56, y: MV_H * 0.85, kind: "bar", size: randRange(36, 50) },
+	];
+	const useCount = pick([4, 5, 6, 6]);
+	// 左右の縞箱（主役）は必ず残し、他をシャッフルして間引く。
+	const mains = slots.filter((s) => s.kind === "can");
+	const rest = slots.filter((s) => s.kind !== "can").sort(() => Math.random() - 0.5);
+	const chosen = [...mains, ...rest].slice(0, useCount);
+	for (const s of chosen) {
+		const glyph =
+			s.kind === "bar" ? barChartGlyph() : s.kind === "can" ? canisterGlyph() : ticksGlyph();
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: roundTo(s.x, 1),
+			y: roundTo(s.y, 1),
+			z: nextZ(),
+			filled: true,
+			thickness: 2,
+			size: roundTo(s.size, 1),
+			path: glyph,
+			barRange: [at(0.75), at(1)],
+			modulators: [],
+		});
 	}
 
 	return { group, layers };

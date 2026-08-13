@@ -1472,16 +1472,14 @@ export default function MvMaker({
 	 * （消えた後のIDへ多重に削除操作を投げないよう、毎回 manifest.groups と突き合わせる）。
 	 */
 	const [autoGroupIds, setAutoGroupIds] = useState<string[]>([]);
-	// 既定値は参考動画（チョウチン少女）の構図——中央の四角＋左右対称のペア——を
-	// 再現できる組み合わせにしてある。以前の既定は clusterType:"centered" だったが、
-	// これは軸上に同心の段を積むだけで左右に要素が散らばらず、しかも段数が
-	// 60%の確率で1枚（＝画面に図形が1個だけ）になる抽選だったため、参考動画のような
-	// 密度のある構図がほぼ作れなかった（実際に生成されたデータで確認済み——
-	// レイヤー1枚だけの自動図形グループがユーザーの投稿から見つかった）。
-	// clusterType:"scattered" + symmetric:true が実際に参考動画を再現した構図。
+	// 既定値は参考動画（チョウチン少女）の実測構造そのもの——1拍の中で
+	// 「横並びの列」と「中央エンブレム」が交互に出る "duet" 構図。
+	// （全249フレームの定量解析で、通常ループは複数レイヤーの同時表示ではなく
+	// 画面まるごとの構図の交互切り替えだと確認したため。詳細は
+	// lib/mv-shape-group-macro.ts の clusterType ドキュメント参照。）
 	const [macroSettings, setMacroSettings] =
 		useState<SymmetricShapeGroupOptions>({
-			clusterType: "scattered",
+			clusterType: "duet",
 			shapeStyle: "sharp",
 			thickness: "thick",
 			monochrome: true,
@@ -4981,11 +4979,13 @@ export default function MvMaker({
 											clusterType: e.target.value as
 												| "centered"
 												| "scattered"
-												| "bars",
+												| "bars"
+												| "duet",
 										}))
 									}
 									className="rounded bg-purple-900 px-1 py-0.5 text-purple-100 outline-none"
 								>
+									<option value="duet">列とエンブレムが交互（参考動画準拠）</option>
 									<option value="centered">中央に入れ子（エンブレム風）</option>
 									<option value="scattered">中央線上に横並び</option>
 									<option value="bars">棒の列（イコライザー風）</option>
