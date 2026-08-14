@@ -141,11 +141,20 @@ export default function MvShapeMotionModal({
 	onApply,
 	onClose,
 }: MvShapeMotionModalProps) {
-	const [cfg, setCfg] = useState<MvSceneMotionConfig>(
-		() => initial ?? DEFAULT_SCENE_MOTION,
-	);
+	const [cfg, setCfg] = useState<
+		MvSceneMotionConfig & { initialSpeed?: number }
+	>(() => {
+		if (initial) return initial;
+		const beatMod = baseLayer.modulators?.find((m) => m.source === "beat");
+		const detectedSpeed = beatMod?.periodBeats ?? 1;
+		return {
+			presetId: "custom_existing",
+			beatSyncSpeed: detectedSpeed,
+			initialSpeed: detectedSpeed,
+		};
+	});
 
-	const modulators = resolveSceneModulators(cfg);
+	const modulators = resolveSceneModulators(cfg, baseLayer.modulators);
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center">

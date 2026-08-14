@@ -247,9 +247,68 @@ export const MV_MOTION_SPEED_OPTIONS: { value: number; label: string }[] = [
 	{ value: 0.25, label: "4倍速（1/4拍ごと）" },
 ];
 
-export function resolveSceneModulators(cfg: MvSceneMotionConfig): MvModulator[] {
+/**
+ * 既存のモジュレータ配列に対して、速さ倍率（speedRatio）を適用して周期(periodBeats/attackBeats/phaseOffset)を伸縮する。
+ * プリセットを置き換えるのではなく、レイヤーが元々持っている複雑なアニメーション構造（マクログループ等）を保持したまま
+ * 全体を2倍速・1/2倍速等にするために使う。
+ */
+export function applySpeedToModulators(
+	mods: MvModulator[],
+	speedRatio: number,
+	baseSpeed = 1,
+): MvModulator[] {
+	if (!mods || mods.length === 0) return mods;
+	const factor = speedRatio / (baseSpeed || 1);
+	if (Math.abs(factor - 1) < 1e-5) return mods;
+
+	return mods.map((m) => {
+		if (m.source !== "beat") return m;
+		const origPeriod = m.periodBeats ?? 1;
+		const newPeriod = Math.max(0.05, origPeriod * factor);
+		const updated: MvModulator = { ...m, periodBeats: newPeriod };
+		if (m.attackBeats !== undefined) {
+			updated.attackBeats = Math.max(
+				0.05,
+				Math.min(m.attackBeats * factor, newPeriod),
+			);
+		}
+		if (m.phaseOffset !== undefined && m.phaseOffset > 0) {
+			updated.phaseOffset = m.phaseOffset * factor;
+		}
+		return updated;
+	});
+}
+
+export function resolveSceneModulators(
+	cfg: MvSceneMotionConfig & { initialSpeed?: number },
+	existingMods?: MvModulator[],
+): MvModulator[] {
+	// もし presetId が "custom_existing" の場合、既存モジュレータのアンサンブル構造を維持してスケールする
+	if (
+		existingMods &&
+		existingMods.length > 0 &&
+		cfg.presetId === "custom_existing"
+	) {
+		const speed = cfg.beatSyncSpeed ?? 1;
+		const baseSpeed = cfg.initialSpeed ?? 1;
+		let scaled = applySpeedToModulators(existingMods, speed, baseSpeed);
+		if (cfg.amountOverride !== undefined) {
+			scaled = scaled.map((m) =>
+				m.target === "rotation" ? { ...m, amount: cfg.amountOverride! } : m,
+			);
+		}
+		if (cfg.offbeat) {
+			scaled = scaled.map((m) =>
+				m.source === "beat"
+					? { ...m, phaseOffset: (m.phaseOffset ?? 0) + 0.5 * speed }
+					: m,
+			);
+		}
+		return scaled;
+	}
+
 	const preset = findMvMotionPreset(cfg.presetId);
-	const base = preset ? preset.build() : [];
+	const base = preset ? preset.build() : existingMods ?? [];
 	// amountOverride（回転角度の上書きなど）が設定されている場合は反映する
 	const withOverride =
 		cfg.amountOverride !== undefined

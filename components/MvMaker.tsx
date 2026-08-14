@@ -8184,7 +8184,6 @@ export default function MvMaker({
 					}
 					onApply={(cfg) => {
 						const targetGroupId = baseShapeLayer.groupId;
-						const newMods = resolveSceneModulators(cfg);
 						update((m) => ({
 							...m,
 							layers: m.layers.map((l) => {
@@ -8193,9 +8192,10 @@ export default function MvMaker({
 									? l.groupId === targetGroupId
 									: l.id === baseShapeLayer.id;
 								if (!isTarget) return l;
+								const layerMods = resolveSceneModulators(cfg, l.modulators);
 								return {
 									...l,
-									modulators: newMods,
+									modulators: layerMods,
 									motionPreset: cfg,
 									// 動きは曲全体で1つ。場面別の残骸を消しておかないと、
 									// engine 側の旧データ救済に拾われて上書きされてしまう。
