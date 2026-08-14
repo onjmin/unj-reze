@@ -1203,6 +1203,53 @@ function cornerBracketGlyph(flip: boolean): string {
 }
 
 /**
+ * 「フレーム間で突拍子もなく出現する」レイヤー（ハードカットで急に現れる幕頭の
+ * 塗り四角・エンブレム・角括弧・幕またぎのfadeBridgeなど）に足す、size の
+ * ポップイン成長。part単位のアンカー成長（第4幕の `renderBarChart` 等）と違い、
+ * これらは単発の単純図形（矩形1枚・パス1本）なので中心スケールでも
+ * 「部品がバラバラに寄る」違和感が出ない——むしろ「中心から湧き出す」勢いが
+ * 参考動画の急な出現に合う。既存のopacity/thicknessモジュレータと**併用**する
+ * 前提（置き換えではない）。
+ */
+function sizePopModulator(fullSize: number, phaseOffset: number, bars: number, curve = 2): MvModulator {
+	return {
+		source: "phrase",
+		target: "size",
+		op: "sub",
+		amount: roundTo(fullSize * 0.45, 1),
+		bars: Math.max(0.01, bars),
+		phaseOffset,
+		symmetric: false,
+		curve,
+	};
+}
+
+/** 特殊アレンジ生成の見た目パラメータ。未指定分はこれまでどおりの既定挙動。 */
+export interface ArrangementGenOptions {
+	/** 第4幕（画面各所にグリフが同時多発）で使う個数。未指定は4〜6を乱数で。 */
+	act4Count?: 4 | 5 | 6;
+	/** 第4幕で許可するグリフ種。未指定は全種類（bar/can/tick）から選ぶ。 */
+	act4Kinds?: ("bar" | "can" | "tick")[];
+	/**
+	 * 第4幕のグリフが種から本来の形へ育つ速さ。fast: 幕頭の15%で育ちきる／
+	 * normal(既定): 30%／slow: 45%。長いほど「育っている最中」がよく見える。
+	 */
+	growthSpeed?: "fast" | "normal" | "slow";
+	/**
+	 * 突拍子もなく出現するレイヤー（幕頭の四角・エンブレム・角括弧・
+	 * fadeBridge・第4幕の1コマ目）に、中心からのsizeポップインを併用するか。
+	 * 既定 true。
+	 */
+	centerPop?: boolean;
+}
+
+const GROWTH_SPEED_FRACTION: Record<NonNullable<ArrangementGenOptions["growthSpeed"]>, number> = {
+	fast: 0.15,
+	normal: 0.3,
+	slow: 0.45,
+};
+
+/**
  * 既存の図形グループのレイヤー配列を元にして、展開の変化に使える
  * 「特殊アレンジ」のレイヤー配列を生成する。
  *
@@ -1233,7 +1280,10 @@ export function generateArrangementForGroup(
 	nextZ: () => number,
 	sourceGroupId: string,
 	trigger?: { triggerBar?: number; endBar?: number },
+	genOptions?: ArrangementGenOptions,
 ): { group: MvLayerGroup; layers: MvShapeLayer[] } {
+	const centerPop = genOptions?.centerPop ?? true;
+	const growthFraction = GROWTH_SPEED_FRACTION[genOptions?.growthSpeed ?? "normal"];
 	const newGroupId = mvUid("grp");
 	const triggerBar = trigger?.triggerBar ?? 0;
 	const durationBars =
@@ -1282,31 +1332,36 @@ export function generateArrangementForGroup(
 	// 頭の一瞬（この幕の最初の15%）だけ不透明度0→1のフェードインを掛ける
 	// （減衰の周期をこの幕の最初の15%ぶんに揃えてあるので、幕の外へループして
 	// 点滅する心配は無い）。
-	layers.push({
-		...common,
-		form: "path",
-		id: mvUid("shp"),
-		x: cx,
-		y: cy,
-		z: nextZ(),
-		filled: true,
-		thickness: 2,
-		size: roundTo(baseSize * randRange(0.32, 0.42), 1),
-		path: rectPath(25, 25, 75, 75),
-		barRange: [at(0), at(0.19)],
-		modulators: [
-			{
-				source: "phrase",
-				target: "opacity",
-				op: "sub",
-				amount: 1,
-				bars: Math.max(0.01, durationBars * 0.15),
-				phaseOffset: at(0),
-				symmetric: false,
-				curve: 1,
-			},
-		],
-	});
+	{
+		const act1Size = roundTo(baseSize * randRange(0.32, 0.42), 1);
+		const act1Bars = Math.max(0.01, durationBars * 0.15);
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: cx,
+			y: cy,
+			z: nextZ(),
+			filled: true,
+			thickness: 2,
+			size: act1Size,
+			path: rectPath(25, 25, 75, 75),
+			barRange: [at(0), at(0.19)],
+			modulators: [
+				{
+					source: "phrase",
+					target: "opacity",
+					op: "sub",
+					amount: 1,
+					bars: act1Bars,
+					phaseOffset: at(0),
+					symmetric: false,
+					curve: 1,
+				},
+				...(centerPop ? [sizePopModulator(act1Size, at(0), act1Bars)] : []),
+			],
+		});
+	}
 
 	// ── 第2幕: 太い中央エンブレムの2連フラッシュ ──
 	// アレンジ元がコマ送りを持っていれば、そのいちばん密なコマ（paths[0]）を使う。
@@ -1319,6 +1374,8 @@ export function generateArrangementForGroup(
 	const pulseSpan = 0.25 / pulseCount;
 	for (let i = 0; i < pulseCount; i++) {
 		const from = 0.25 + pulseSpan * i;
+		const pulseSize = roundTo(baseSize * randRange(0.95, 1.1), 1);
+		const pulseBars = Math.max(0.05, durationBars * pulseSpan);
 		layers.push({
 			...common,
 			form: "path",
@@ -1328,7 +1385,7 @@ export function generateArrangementForGroup(
 			z: nextZ(),
 			filled: false,
 			thickness: roundTo(baseThickness, 1),
-			size: roundTo(baseSize * randRange(0.95, 1.1), 1),
+			size: pulseSize,
 			path: emblemPath,
 			barRange: [at(from), at(from + pulseSpan)],
 			// 幕の頭で太さが最大（通常の2.5〜3.5倍）→減衰。実測の「白画素が通常最大を
@@ -1340,10 +1397,13 @@ export function generateArrangementForGroup(
 					target: "thickness",
 					op: "add",
 					amount: roundTo(baseThickness * randRange(1.5, 2.5), 1),
-					bars: Math.max(0.05, durationBars * pulseSpan),
+					bars: pulseBars,
 					phaseOffset: at(from),
 					curve: pick([3, 4]),
 				},
+				// 各フラッシュも「中心から湧く」ポップインを併用（各パルスは短命な
+				// 単発図形なので、部品アンカー成長ではなく中心スケールで問題ない）。
+				...(centerPop ? [sizePopModulator(pulseSize, at(from), pulseBars)] : []),
 			],
 		});
 	}
@@ -1351,7 +1411,9 @@ export function generateArrangementForGroup(
 	// ── 第3幕: 対角のかぎ括弧＋中央の塗り四角 ──
 	const diagDx = randRange(70, 100);
 	const diagDy = randRange(45, 70);
+	const act3BracketBars = Math.max(0.05, durationBars * 0.15);
 	for (const flip of [false, true]) {
+		const bracketSize = randRange(50, 70);
 		layers.push({
 			...common,
 			form: "path",
@@ -1361,37 +1423,45 @@ export function generateArrangementForGroup(
 			z: nextZ(),
 			filled: false,
 			thickness: roundTo(baseThickness * randRange(0.5, 0.8), 1),
-			size: randRange(50, 70),
+			size: roundTo(bracketSize, 1),
 			path: cornerBracketGlyph(flip),
 			barRange: [at(0.5), at(0.75)],
-			modulators: [],
+			modulators: centerPop
+				? [sizePopModulator(bracketSize, at(0.5), act3BracketBars)]
+				: [],
 		});
 	}
-	layers.push({
-		...common,
-		form: "path",
-		id: mvUid("shp"),
-		x: cx,
-		y: cy,
-		z: nextZ(),
-		filled: true,
-		thickness: 2,
-		size: roundTo(baseSize * randRange(0.3, 0.4), 1),
-		path: rectPath(25, 25, 75, 75),
-		barRange: [at(0.5), at(0.75)],
-		// ゆっくり暗く沈む（実測: 明灰→暗灰→黒と段階的に落ちる塗り四角）。
-		modulators: [
-			{
-				source: "phrase",
-				target: "opacity",
-				op: "mul",
-				amount: 1,
-				bars: Math.max(0.05, durationBars * 0.25),
-				phaseOffset: at(0.5),
-				curve: 1.2,
-			},
-		],
-	});
+	{
+		const act3SquareSize = roundTo(baseSize * randRange(0.3, 0.4), 1);
+		layers.push({
+			...common,
+			form: "path",
+			id: mvUid("shp"),
+			x: cx,
+			y: cy,
+			z: nextZ(),
+			filled: true,
+			thickness: 2,
+			size: act3SquareSize,
+			path: rectPath(25, 25, 75, 75),
+			barRange: [at(0.5), at(0.75)],
+			// ゆっくり暗く沈む（実測: 明灰→暗灰→黒と段階的に落ちる塗り四角）。
+			modulators: [
+				{
+					source: "phrase",
+					target: "opacity",
+					op: "mul",
+					amount: 1,
+					bars: Math.max(0.05, durationBars * 0.25),
+					phaseOffset: at(0.5),
+					curve: 1.2,
+				},
+				...(centerPop
+					? [sizePopModulator(act3SquareSize, at(0.5), act3BracketBars)]
+					: []),
+			],
+		});
+	}
 
 	// ── 幕と幕の境目をつなぐクロスフェード ──
 	// 幕はそれぞれ別形状のレイヤーを barRange で頭出しするだけなので、境目では
@@ -1438,6 +1508,7 @@ export function generateArrangementForGroup(
 				},
 			],
 		});
+		const inBars = Math.max(0.01, durationBars * xfade);
 		layers.push({
 			...common,
 			form: "path",
@@ -1456,11 +1527,14 @@ export function generateArrangementForGroup(
 					target: "opacity",
 					op: "sub",
 					amount: 1,
-					bars: Math.max(0.01, durationBars * xfade),
+					bars: inBars,
 					phaseOffset: at(boundary - xfade),
 					symmetric: false,
 					curve: 1,
 				},
+				// 出ていく側(outPath)は既存図形の残像なのでポップは付けない。入ってくる
+				// 側だけ「中心から湧く」ポップインを併用する。
+				...(centerPop ? [sizePopModulator(inSize, at(boundary - xfade), inBars)] : []),
 			],
 		});
 	};
@@ -1483,7 +1557,7 @@ export function generateArrangementForGroup(
 	// スロット（画面をほぼ端まで使う配置候補）から4〜6箇所選ぶ。左右の中段は
 	// 大きめの縞箱、上下はバーチャート、それ以外は目盛り、という参考動画の
 	// 役割分担に寄せつつ、形の中身は毎回乱数で起こす。
-	const slots: { x: number; y: number; kind: "bar" | "can" | "tick"; size: number }[] = [
+	const allSlots: { x: number; y: number; kind: "bar" | "can" | "tick"; size: number }[] = [
 		{ x: MV_W * 0.42, y: MV_H * 0.16, kind: "bar", size: randRange(38, 52) },
 		{ x: MV_W * 0.87, y: MV_H * 0.32, kind: "tick", size: randRange(24, 34) },
 		{ x: MV_W * 0.16, y: MV_H * 0.5, kind: "can", size: randRange(52, 70) },
@@ -1491,7 +1565,10 @@ export function generateArrangementForGroup(
 		{ x: MV_W * 0.1, y: MV_H * 0.78, kind: "tick", size: randRange(22, 32) },
 		{ x: MV_W * 0.56, y: MV_H * 0.85, kind: "bar", size: randRange(36, 50) },
 	];
-	const useCount = pick([4, 5, 6, 6]);
+	const slots = allSlots.filter(
+		(s) => !genOptions?.act4Kinds || genOptions.act4Kinds.includes(s.kind),
+	);
+	const useCount = genOptions?.act4Count ?? pick([4, 5, 6, 6]);
 	// 左右の縞箱（主役）は必ず残し、他をシャッフルして間引く。
 	const mains = slots.filter((s) => s.kind === "can");
 	const rest = slots.filter((s) => s.kind !== "can").sort(() => Math.random() - 0.5);
@@ -1500,11 +1577,16 @@ export function generateArrangementForGroup(
 	// アンカーされた辺から線が伸びて」最終形へ到達する）。size を一様スケール
 	// すると全部品が中心へ向かって縮む＝ズームにしか見えないので、部品分解した
 	// 形状（renderBarChart/renderCanister/renderTicks）を成長進度tで静的パスに
-	// 焼き、幕の頭の3割ぶんを数コマの離散フレームとして barRange を刻んで
-	// 積み重ねる（=== 第2/3幕境目の `fadeBridge` と同じ「離散フレーム」路線。
-	// iconCycle は絶対タイムラインの拍位相でコマが進むため、トリガー位置に
+	// 焼き、幕の頭ぶん（`growthFraction`）を数コマの離散フレームとして barRange
+	// を刻んで積み重ねる（=== 第2/3幕境目の `fadeBridge` と同じ「離散フレーム」
+	// 路線。iconCycle は絶対タイムラインの拍位相でコマが進むため、トリガー位置に
 	// 依存せず「出現の瞬間に必ず種から始まる」保証ができず不採用）。
-	const growthBars = Math.max(0.02, durationBars * 0.25 * 0.3);
+	// さらに `centerPop` が有効なら、部品アンカー成長と**併用**で size のポップ
+	// インも重ねる——1コマ目だけの単発ではなく、成長ウィンドウ全体に渡って
+	// 同じ phaseOffset/bars のenvelopeを共有する連続的なポップとして掛ける
+	// （フレームがレイヤーとして切り替わっても、envelope自体は絶対小節基準の
+	// 連続関数なので、コマをまたいでも滑らかにサイズが乗ってくる）。
+	const growthBars = Math.max(0.02, durationBars * 0.25 * growthFraction);
 	const growthFrameCount = 5;
 	const growthProgress = [0.12, 0.32, 0.54, 0.78, 1];
 	for (const s of chosen) {
@@ -1531,23 +1613,27 @@ export function generateArrangementForGroup(
 				size: roundTo(s.size, 1),
 				path: render(growthProgress[i]),
 				barRange: [roundTo(frameStart, 4), roundTo(frameEnd, 4)],
-				// 種の1コマ目だけ不透明度0→1のフェードインを掛け、成長開始が
-				// ハードカットでパッと現れないようにする（成長コマ同士は
-				// 「離散的に差し替わる」参考動画の質感どおりハードカットのまま）。
-				modulators: isFirst
-					? [
-							{
-								source: "phrase",
-								target: "opacity",
-								op: "sub",
-								amount: 1,
-								bars: Math.max(0.01, frameEnd - frameStart),
-								phaseOffset: roundTo(frameStart, 4),
-								symmetric: false,
-								curve: 1,
-							},
-						]
-					: [],
+				modulators: [
+					// 種の1コマ目だけ不透明度0→1のフェードインを掛け、成長開始が
+					// ハードカットでパッと現れないようにする（成長コマ同士は
+					// 「離散的に差し替わる」参考動画の質感どおりハードカットのまま）。
+					...(isFirst
+						? [
+								{
+									source: "phrase" as const,
+									target: "opacity" as const,
+									op: "sub" as const,
+									amount: 1,
+									bars: Math.max(0.01, frameEnd - frameStart),
+									phaseOffset: roundTo(frameStart, 4),
+									symmetric: false,
+									curve: 1,
+								},
+							]
+						: []),
+					// 部品アンカー成長に、中心からのsizeポップインを併用する。
+					...(centerPop ? [sizePopModulator(s.size, at(0.75), growthBars)] : []),
+				],
 			});
 		}
 		// 成長が終わった残り（最後のコマ〜幕の終わり）は完成形を維持し、区間の

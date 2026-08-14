@@ -1880,6 +1880,14 @@ const MV_WIDGET_GLYPHS = [
 ] as const;
 type MvWidgetGlyph = (typeof MV_WIDGET_GLYPHS)[number];
 
+/**
+ * `mv-shape-group-macro.ts` の「部品分解＋アンカー付き成長」と同じ考え方を、
+ * こちらは静的パス文字列を焼いて barRange で積む必要がない——`drawWidget` が
+ * 毎フレーム連続時間で呼ばれる命令的Canvas描画なので、部品ごとの固定辺
+ * （アンカー）から growT(0..1) を直接掛けて描けば済む。全体を一様スケール
+ * すると中心へ向かって縮む「ズーム」にしか見えないため、必ず各部品の
+ * アンカー辺は動かさず、反対側の辺だけ growT ぶん伸ばす。
+ */
 function drawWidgetGlyph(
 	ctx: CanvasRenderingContext2D,
 	glyph: MvWidgetGlyph,
@@ -1887,7 +1895,9 @@ function drawWidgetGlyph(
 	y: number,
 	size: number,
 	color: string,
+	growT = 1,
 ): void {
+	const t = Math.min(1, Math.max(0, growT));
 	const p = size * 0.14;
 	const x0 = x + p;
 	const y0 = y + p;
@@ -1898,43 +1908,60 @@ function drawWidgetGlyph(
 	ctx.lineWidth = Math.max(1, size * 0.08);
 	switch (glyph) {
 		case "square":
-			ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+			// 左上角をアンカーに、右辺・下辺だけ伸ばす（中心スケールにしない）。
+			ctx.strokeRect(x0, y0, (x1 - x0) * t, (y1 - y0) * t);
 			break;
 		case "hbars": {
+			// 各段は左辺をアンカーに右へ伸びる（バーチャートの棒と同じ発想）。
 			const rows = 3;
 			const gap = (y1 - y0) / rows;
 			for (let i = 0; i < rows; i++) {
 				const by = y0 + gap * i + gap * 0.2;
-				ctx.fillRect(x0, by, x1 - x0, gap * 0.6);
+				ctx.fillRect(x0, by, (x1 - x0) * t, gap * 0.6);
 			}
 			break;
 		}
 		case "target": {
+			// 円は中心点がそもそものアンカーなので、半径をそのままgrowTで伸ばせる
+			// （これは「中心スケール」でも見え方に違和感が出ない唯一の形）。
 			const cx = x + size / 2;
 			const cy = y + size / 2;
 			ctx.beginPath();
-			ctx.arc(cx, cy, (x1 - x0) / 2, 0, Math.PI * 2);
+			ctx.arc(cx, cy, ((x1 - x0) / 2) * t, 0, Math.PI * 2);
 			ctx.stroke();
-			ctx.fillRect(cx - size * 0.08, cy - size * 0.08, size * 0.16, size * 0.16);
+			if (t > 0.6) {
+				const dotT = (t - 0.6) / 0.4;
+				ctx.fillRect(
+					cx - size * 0.08 * dotT,
+					cy - size * 0.08 * dotT,
+					size * 0.16 * dotT,
+					size * 0.16 * dotT,
+				);
+			}
 			break;
 		}
 		case "grid": {
+			// 外枠は square と同じ左上アンカー。十字は中心点アンカーで左右/上下に伸ばす。
 			const midX = x + size / 2;
 			const midY = y + size / 2;
-			ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+			ctx.strokeRect(x0, y0, (x1 - x0) * t, (y1 - y0) * t);
+			const halfW = ((x1 - x0) / 2) * t;
+			const halfH = ((y1 - y0) / 2) * t;
 			ctx.beginPath();
-			ctx.moveTo(midX, y0);
-			ctx.lineTo(midX, y1);
-			ctx.moveTo(x0, midY);
-			ctx.lineTo(x1, midY);
+			ctx.moveTo(midX, midY - halfH);
+			ctx.lineTo(midX, midY + halfH);
+			ctx.moveTo(midX - halfW, midY);
+			ctx.lineTo(midX + halfW, midY);
 			ctx.stroke();
 			break;
 		}
 		case "filled":
-			ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+			// 左上角をアンカーに右下へ塗り広がる。
+			ctx.fillRect(x0, y0, (x1 - x0) * t, (y1 - y0) * t);
 			break;
 		case "underline":
-			ctx.fillRect(x0, y1 - size * 0.12, x1 - x0, size * 0.12);
+			// 左辺をアンカーに右へ伸びる。
+			ctx.fillRect(x0, y1 - size * 0.12, (x1 - x0) * t, size * 0.12);
 			break;
 	}
 }
@@ -2053,12 +2080,25 @@ function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 			}
 		}
 
+		// ── 確定した瞬間、そのグリフが小さな種から本来の形へイージング成長する ──
+		// セル0（アンカー）は窓の頭で即座に確定＝スクランブルを経ないので、その瞬間
+		// (beatPhase=0)から。他のセルはスクランブルが終わって確定した瞬間
+		// (beatPhase=SCRAMBLE_SETTLE)から。どちらも確定した「今回のセル」だけが
+		// 対象——1つ前の窓から来た既確定セル(i<cyclePos)は毎フレーム t=1 で描く
+		// （確定するたびに毎フレーム縮んで伸び直すのはおかしいため）。
+		const GROW_WINDOW = 0.15; // 拍単位。確定からこの幅ぶんでt:0→1
+		const isSettlingNow = i === cyclePos && (i === 0 || beatPhase >= SCRAMBLE_SETTLE);
+		const growStart = i === 0 ? 0 : SCRAMBLE_SETTLE;
+		const curGrowT = isSettlingNow
+			? Math.min(1, Math.max(0, (beatPhase - growStart) / GROW_WINDOW))
+			: 1;
+
 		const [curX, curY] = cellPos(i, 0);
 		const [histX, histY] = cellPos(i, 1);
 		const hadPrevWindow = boundaryBeat - cols + i >= 0;
 
 		if (!inSlide || !hadPrevWindow) {
-			if (curGlyph) drawWidgetGlyph(ctx, curGlyph, curX, curY, cell, layer.color);
+			if (curGlyph) drawWidgetGlyph(ctx, curGlyph, curX, curY, cell, layer.color, curGrowT);
 			if (hadPrevWindow) {
 				drawWidgetGlyph(ctx, widgetSettledGlyph(i), histX, histY, cell, historyColor);
 			}
@@ -2085,7 +2125,7 @@ function drawWidget(d: DrawCtx, layer: MvWidgetLayer): void {
 			// セル0は窓の先頭で即座に確定するアンカー。スライド中も新しい窓の分を
 			// 現在の段の定位置に別途出す（スライドしているのは「直前の窓」の残像）。
 			if (curGlyph && i === 0) {
-				drawWidgetGlyph(ctx, curGlyph, curX, curY, cell, layer.color);
+				drawWidgetGlyph(ctx, curGlyph, curX, curY, cell, layer.color, curGrowT);
 			}
 		}
 	}

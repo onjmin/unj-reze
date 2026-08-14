@@ -13,12 +13,29 @@ import {
 } from "@/lib/mv-config";
 import { drawMvFrame, EMPTY_SONG, type MvFrameState } from "@/lib/mv-engine";
 import {
+	type ArrangementGenOptions,
 	DEFAULT_ARRANGEMENT_BEATS,
 	generateArrangementForGroup,
 } from "@/lib/mv-shape-group-macro";
 
 /** 何拍を1周に選べるか。 */
 const BEATS_OPTIONS = [2, 4, 8, 16];
+
+/** 第4幕のグリフ数として選べる値。「自動」は従来どおり4〜6を乱数で。 */
+const ACT4_COUNT_OPTIONS: (4 | 5 | 6 | "auto")[] = ["auto", 4, 5, 6];
+
+/** 第4幕に出すグリフ種のトグル候補。 */
+const ACT4_KIND_OPTIONS: { value: "bar" | "can" | "tick"; label: string }[] = [
+	{ value: "bar", label: "バーチャート" },
+	{ value: "can", label: "縞箱" },
+	{ value: "tick", label: "目盛り" },
+];
+
+const GROWTH_SPEED_OPTIONS: { value: NonNullable<ArrangementGenOptions["growthSpeed"]>; label: string }[] = [
+	{ value: "fast", label: "速い" },
+	{ value: "normal", label: "普通" },
+	{ value: "slow", label: "ゆっくり" },
+];
 
 /**
  * いま生成している特殊アレンジをループ再生するライブプレビュー。
@@ -127,22 +144,54 @@ export default function MvArrangementModal({
 	onClose,
 }: MvArrangementModalProps) {
 	const [beats, setBeats] = useState(DEFAULT_ARRANGEMENT_BEATS);
+	// 要件が「毎回すべて乱数まかせ」では狙った絵に当てにくくなってきたため、
+	// 主要パラメータだけモーダルで固定できるようにしてある。指定していない
+	// 部分（グリフの配置・色味の細部など）は引き続き乱数で振れる。
+	const [act4Count, setAct4Count] = useState<4 | 5 | 6 | "auto">("auto");
+	const [act4Kinds, setAct4Kinds] = useState<("bar" | "can" | "tick")[]>(["bar", "can", "tick"]);
+	const [growthSpeed, setGrowthSpeed] =
+		useState<NonNullable<ArrangementGenOptions["growthSpeed"]>>("normal");
+	const [centerPop, setCenterPop] = useState(true);
+
+	const buildGenOptions = (): ArrangementGenOptions => ({
+		act4Count: act4Count === "auto" ? undefined : act4Count,
+		act4Kinds,
+		growthSpeed,
+		centerPop,
+	});
+
 	// endBar は指定した拍数どおり（小節へ切り上げない）。切り上げると
 	// 「2拍と指定したのに1小節ぶん再生される」というズレになる。
 	const [result, setResult] = useState(() =>
-		generateArrangementForGroup(sourceLayers, makePreviewNextZ(), sourceGroupId, {
-			triggerBar: 0,
-			endBar: DEFAULT_ARRANGEMENT_BEATS / MV_BEATS_PER_BAR,
-		}),
+		generateArrangementForGroup(
+			sourceLayers,
+			makePreviewNextZ(),
+			sourceGroupId,
+			{ triggerBar: 0, endBar: DEFAULT_ARRANGEMENT_BEATS / MV_BEATS_PER_BAR },
+			buildGenOptions(),
+		),
 	);
 
-	const regenerate = (nextBeats: number) => {
+	const regenerate = (nextBeats: number, overrides?: Partial<ArrangementGenOptions>) => {
 		setResult(
-			generateArrangementForGroup(sourceLayers, makePreviewNextZ(), sourceGroupId, {
-				triggerBar: 0,
-				endBar: nextBeats / MV_BEATS_PER_BAR,
-			}),
+			generateArrangementForGroup(
+				sourceLayers,
+				makePreviewNextZ(),
+				sourceGroupId,
+				{ triggerBar: 0, endBar: nextBeats / MV_BEATS_PER_BAR },
+				{ ...buildGenOptions(), ...overrides },
+			),
 		);
+	};
+
+	const toggleAct4Kind = (kind: "bar" | "can" | "tick") => {
+		setAct4Kinds((prev) => {
+			// 最後の1つは外させない（全種類ゼロだと第4幕に何も出なくなり分かりにくい）。
+			if (prev.includes(kind) && prev.length === 1) return prev;
+			const next = prev.includes(kind) ? prev.filter((k) => k !== kind) : [...prev, kind];
+			regenerate(beats, { act4Kinds: next });
+			return next;
+		});
 	};
 
 	return (
@@ -191,6 +240,84 @@ export default function MvArrangementModal({
 							))}
 						</div>
 					</div>
+
+					<div>
+						<p className="mb-1 text-[10px] font-bold text-gray-300">第4幕のグリフ数</p>
+						<div className="flex flex-wrap gap-1.5">
+							{ACT4_COUNT_OPTIONS.map((opt) => (
+								<button
+									key={opt}
+									onClick={() => {
+										setAct4Count(opt);
+										regenerate(beats, { act4Count: opt === "auto" ? undefined : opt });
+									}}
+									className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
+										act4Count === opt
+											? "bg-blue-600 text-white font-bold"
+											: "bg-gray-800 text-gray-300 hover:bg-gray-700"
+									}`}
+								>
+									{opt === "auto" ? "自動" : `${opt}個`}
+								</button>
+							))}
+						</div>
+					</div>
+
+					<div>
+						<p className="mb-1 text-[10px] font-bold text-gray-300">第4幕に出すグリフ種</p>
+						<div className="flex flex-wrap gap-1.5">
+							{ACT4_KIND_OPTIONS.map((opt) => (
+								<button
+									key={opt.value}
+									onClick={() => toggleAct4Kind(opt.value)}
+									className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
+										act4Kinds.includes(opt.value)
+											? "bg-blue-600 text-white font-bold"
+											: "bg-gray-800 text-gray-300 hover:bg-gray-700"
+									}`}
+								>
+									{opt.label}
+								</button>
+							))}
+						</div>
+					</div>
+
+					<div>
+						<p className="mb-1 text-[10px] font-bold text-gray-300">
+							種から本来の形へ育つ速さ
+						</p>
+						<div className="flex flex-wrap gap-1.5">
+							{GROWTH_SPEED_OPTIONS.map((opt) => (
+								<button
+									key={opt.value}
+									onClick={() => {
+										setGrowthSpeed(opt.value);
+										regenerate(beats, { growthSpeed: opt.value });
+									}}
+									className={`rounded-full px-2.5 py-1 text-[10px] whitespace-nowrap ${
+										growthSpeed === opt.value
+											? "bg-blue-600 text-white font-bold"
+											: "bg-gray-800 text-gray-300 hover:bg-gray-700"
+									}`}
+								>
+									{opt.label}
+								</button>
+							))}
+						</div>
+					</div>
+
+					<label className="flex items-center gap-2 text-[10px] text-gray-300">
+						<input
+							type="checkbox"
+							checked={centerPop}
+							onChange={(e) => {
+								setCenterPop(e.target.checked);
+								regenerate(beats, { centerPop: e.target.checked });
+							}}
+							className="h-3.5 w-3.5"
+						/>
+						突拍子もなく出現する図形に、中心から湧き出すポップインを併用する
+					</label>
 
 					<button
 						onClick={() => regenerate(beats)}
