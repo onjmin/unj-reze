@@ -6013,7 +6013,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
           const bgmAsset = cmd.bgmRef ? bgmRefToAsset(cmd.bgmRef) : null;
           if (bgmAsset?.src) {
             bgmManager.play({
-              bgm: { type: bgmAsset.type, src: bgmAsset.src, loop: bgmAsset.loop, volume: applyMasterVolume(bgmAsset.volume ?? 50), start: bgmAsset.start },
+              bgm: { type: bgmAsset.type, src: bgmAsset.src, loop: bgmAsset.loop, volume: bgmAsset.volume ?? 50, start: bgmAsset.start },
               tileset: {},
             } as never);
           } else {
@@ -6422,7 +6422,7 @@ export default function GameMaker({ onClose, userId, onSave, initialManifest, pl
     if (asset.type === 'youtube') {
       // YouTube BGM は再生手段が bgmManager 経由の iframe 埋め込みしかないため、
       // 他タイプ同様ここで直接再生できるようにする（従来 mml/direct 以外は無反応で「試聴」が効かなかった）。
-      bgmManager.play({ bgm: { type: 'youtube', src: asset.src, volume: applyMasterVolume(70) }, tileset: {} });
+      bgmManager.play({ bgm: { type: 'youtube', src: asset.src, volume: 70 }, tileset: {} });
       previewStopRef.current = () => { bgmManager.stop(); };
       return;
     }

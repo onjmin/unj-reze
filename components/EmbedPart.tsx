@@ -6,7 +6,6 @@ import { useAudioFocus } from "@/lib/audio-focus-context";
 import { EmbeddedMedia } from "@/lib/embed";
 import {
 	applyMasterVolume,
-	getMasterVolume,
 	subscribeMasterVolume,
 } from "@/lib/master-volume";
 
@@ -78,9 +77,9 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
 	}, [releaseFocus]);
 
 	useEffect(() => {
-		return subscribeMasterVolume((v) => {
+		return subscribeMasterVolume(() => {
 			if (playing && iframeRef.current && isYt)
-				sendYtVolume(iframeRef.current, applyMasterVolume(v));
+				sendYtVolume(iframeRef.current, applyMasterVolume(100));
 		});
 	}, [playing, isYt]);
 
@@ -145,7 +144,7 @@ export default function EmbedPart({ embed }: EmbedPartProps) {
 			"allow-forms allow-modals allow-popups allow-scripts allow-same-origin allow-presentation";
 		iframe.onload = () => {
 			setReady(true);
-			if (isYt) sendYtVolume(iframe, applyMasterVolume(getMasterVolume()));
+			if (isYt) sendYtVolume(iframe, applyMasterVolume(100));
 		};
 		iframe.className = "w-full h-full rounded-b-xl";
 		iframe.style.border = "none";
