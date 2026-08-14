@@ -6404,27 +6404,42 @@ export default function MvMaker({
 													// なくなる（実際の動画で特殊アレンジが表示されないバグの
 													// 原因だった）。ここで中身の barRange も同じ量だけ
 													// 平行移動させて揃える。
-													layers: m.layers.map((l) =>
-														l.groupId === group.id && l.barRange
-															? {
-																	...l,
-																	barRange: [
-																		l.barRange[0] + shift,
-																		l.barRange[1] + shift,
-																	] as [number, number],
-																	modulators: l.modulators?.map((mod) => {
-																		if (mod.source === "phrase") {
-																			return { ...mod, phaseOffset: (mod.phaseOffset ?? 0) + shift };
-																		}
-																		if (mod.source === "beat") {
-																			return { ...mod, phaseOffset: (mod.phaseOffset ?? 0) + shift * 4 };
-																		}
-																		return mod;
-																	}),
-																	ripplePhaseOffset: l.ripplePhaseOffset !== undefined ? l.ripplePhaseOffset + shift * 4 : undefined,
-																}
-															: l,
-													),
+													layers: m.layers.map((l) => {
+														if (l.groupId !== group.id || !l.barRange) return l;
+														const nextBarRange: [number, number] = [
+															l.barRange[0] + shift,
+															l.barRange[1] + shift,
+														];
+														if (l.kind === "shape") {
+															return {
+																...l,
+																barRange: nextBarRange,
+																modulators: l.modulators?.map((mod) => {
+																	if (mod.source === "phrase") {
+																		return {
+																			...mod,
+																			phaseOffset: (mod.phaseOffset ?? 0) + shift,
+																		};
+																	}
+																	if (mod.source === "beat") {
+																		return {
+																			...mod,
+																			phaseOffset: (mod.phaseOffset ?? 0) + shift * 4,
+																		};
+																	}
+																	return mod;
+																}),
+																ripplePhaseOffset:
+																	l.ripplePhaseOffset !== undefined
+																		? l.ripplePhaseOffset + shift * 4
+																		: undefined,
+															};
+														}
+														return {
+															...l,
+															barRange: nextBarRange,
+														};
+													}),
 												}));
 											}}
 											onKeyDown={(e) => {

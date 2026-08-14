@@ -1537,7 +1537,7 @@ function buildRandomMathExpr(depth: number, requireT: boolean): MathExpr {
 	const leftRequiresT = requireT ? chance(0.5) : false;
 	const rightRequiresT = requireT && !leftRequiresT;
 	return {
-		t: type as any,
+		t: type as "add" | "mul" | "noise",
 		l: buildRandomMathExpr(depth - 1, leftRequiresT),
 		r: buildRandomMathExpr(depth - 1, rightRequiresT),
 	};
